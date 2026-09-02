@@ -131,42 +131,44 @@
 (define (t--preview-link-target)
   (string-append (compos-priv-dir) "/packages/preview.scm"))
 
+;; a Markdown document standing in the tests directory
 (define (t--preview-link-buffer name text)
   (let ((buf (test-buffer! name text)))
     (buffer-set-local! buf 'default-directory
                        (string-append (compos-priv-dir) "/tests/"))
+    (with-current-buffer buf (lambda () (set-mode! "morg-mode")))
     buf))
 
 (define (t--preview-link-confirm! text)
   (minibuffer-change! text)
   (run-command "minibuffer-confirm-input"))
 
-(deftest 'insert-document-link-uses-the-selected-text
-  "the command replaces selected text with a relative Markdown link"
+(deftest 'insert-file-link-uses-the-selected-text
+  "in a Markdown document the command replaces selected text with a relative Markdown link"
   (lambda ()
     (let ((buf (t--preview-link-buffer "zz-preview-selected.md" "Read this")))
       (with-current-buffer buf
         (lambda ()
           (goto-char! 4)
           (set-mark! 0)
-          (run-command "insert-document-link")
+          (run-command "insert-file-link")
           (t--preview-link-confirm! (t--preview-link-target))))
       (check-equal! (buffer-text buf) "[Read](../packages/preview.scm) this"
                     "the selection becomes the label")
       (buffer-kill! buf))))
 
-(deftest 'insert-document-link-prompts-for-text-without-a-selection
-  "the command asks for link text when no text is selected"
+(deftest 'insert-file-link-prompts-for-text-without-a-selection
+  "the command asks for link text when no text is selected; the file name is the default"
   (lambda ()
     (let ((buf (t--preview-link-buffer "zz-preview-point.md" "Start here")))
       (with-current-buffer buf
         (lambda ()
           (goto-char! 6)
           (set-mark! #f)
-          (run-command "insert-document-link")
+          (run-command "insert-file-link")
           (t--preview-link-confirm! (t--preview-link-target))))
-      (check-contains! (plist-get (minibuffer-state) 'prompt) "Link text:"
-                       "the second prompt asks for the label")
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "Link text (default preview.scm):"
+                       "the second prompt asks for the label and offers the file name")
       (t--preview-link-confirm! "Preview package")
       (check-equal! (buffer-text buf)
                     "Start [Preview package](../packages/preview.scm)here"

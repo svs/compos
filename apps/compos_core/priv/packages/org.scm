@@ -604,6 +604,12 @@
 
 (mode-icon! "org-mode" "")
 
+;; an Org document writes [[file:PATH][LABEL]] (insert-file-link asks the mode)
+(define (org-link-text path label)
+  (string-append "[[file:" path "][" label "]]"))
+
+(mode-link-syntax! "org-mode" org-link-text)
+
 (define-mode "org-mode"
   (lambda ()
     (org-install-keys)

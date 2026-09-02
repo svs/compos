@@ -148,6 +148,96 @@
                   "the buffer's definition finder took point to the define")
     (t--ga-done!)))
 
+(deftest 'an-org-file-link-is-the-file-it-names
+  "file:PATH with no host, the Org spelling, resolves as a path beside the buffer's file"
+  (lambda ()
+    (let ((name (string-append (compos-priv-dir) "/tests/zz-ga-org.org")))
+      (test-buffer! name "see [[file:../editor/blocks/block.scm][the block]] and [[file:../zz-nope.scm][x]]\n")
+      (goto-address-paint! name)
+      (check-equal! (goto-address-href-at name 8)
+                    (string-append (compos-priv-dir) "/editor/blocks/block.scm")
+                    "the target is the file, not a file: URL")
+      (check-false! (goto-address-href-at name 60) "a file: link to no file paints nothing")
+      (buffer-kill! name))))
+
+;;; --- inserting ---------------------------------------------------------------
+
+(define (t--ga-confirm! text)
+  (minibuffer-change! text)
+  (run-command "minibuffer-confirm-input"))
+
+;; a buffer of MODE (or none) standing in the tests directory
+(define (t--ga-insert-buffer! name text mode)
+  (let ((buf (test-buffer! name text)))
+    (buffer-set-local! buf 'default-directory (string-append (compos-priv-dir) "/tests/"))
+    (when mode (with-current-buffer buf (lambda () (set-mode! mode))))
+    buf))
+
+(define t--ga-insert-target (string-append (compos-priv-dir) "/packages/preview.scm"))
+
+(deftest 'file-relative-name-walks-up-then-down
+  "the path from DIR to TARGET, and . for the directory itself"
+  (lambda ()
+    (check-equal! (file-relative-name "/a/b/c/d.md" "/a/b/x/") "../c/d.md" "one up, then down")
+    (check-equal! (file-relative-name "/a/b/c/d.md" "/a/b/c/") "d.md" "beside: the name alone")
+    (check-equal! (file-relative-name "/a/b/c/d.md" "/a/b/c/e/f/") "../../d.md" "two up")
+    (check-equal! (file-relative-name "/a/b/c/" "/a/b/c/") "." "the directory itself")))
+
+(deftest 'insert-file-link-writes-the-path-alone-in-a-plain-buffer
+  "a mode with no link syntax gets the relative path at point and no label prompt"
+  (lambda ()
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert-plain.txt" "see  here" #f)))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! 4)
+          (set-mark! #f)
+          (run-command "insert-file-link")
+          (t--ga-confirm! t--ga-insert-target)))
+      (check-false! (minibuffer-active?) "no second prompt")
+      (check-equal! (buffer-text buf) "see ../packages/preview.scm here"
+                    "the relative path stands at point")
+      (buffer-kill! buf))))
+
+(deftest 'insert-file-link-writes-the-modes-syntax
+  "an Org buffer gets [[file:PATH][LABEL]], the selection as the label"
+  (lambda ()
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert.org" "Read this" "org-mode")))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! 4)
+          (set-mark! 0)
+          (run-command "insert-file-link")
+          (t--ga-confirm! t--ga-insert-target)))
+      (check-equal! (buffer-text buf) "[[file:../packages/preview.scm][Read]] this"
+                    "the selection became the label")
+      (buffer-kill! buf))))
+
+(deftest 'insert-file-link-offers-the-file-name-as-the-label
+  "with no selection an empty answer to the label prompt takes the file's name"
+  (lambda ()
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert-default.org" "" "org-mode")))
+      (with-current-buffer buf
+        (lambda ()
+          (set-mark! #f)
+          (run-command "insert-file-link")
+          (t--ga-confirm! t--ga-insert-target)))
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "(default preview.scm)"
+                       "the prompt names the default")
+      (t--ga-confirm! "")
+      (check-equal! (buffer-text buf) "[[file:../packages/preview.scm][preview.scm]]"
+                    "the file name is the label")
+      (buffer-kill! buf))))
+
+(deftest 'insert-document-link-is-the-older-name
+  "the old command opens the same file prompt"
+  (lambda ()
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert-old.txt" "" #f)))
+      (with-current-buffer buf (lambda () (run-command "insert-document-link")))
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "Insert link to file:"
+                       "the file prompt is up")
+      (minibuffer-cancel!)
+      (buffer-kill! buf))))
+
 (deftest 'a-listing-takes-no-links
   "a buffer that becomes a list mode loses its links; the row is the action"
   (lambda ()

@@ -378,67 +378,21 @@
 (domain! 'documents)
 (effects! '(write display))
 
-(define (document-link--parts path)
-  (filter (lambda (part) (not (equal? part ""))) (string-split path "/")))
-
-(define (document-link--drop-common left right)
-  (if (and (pair? left) (pair? right) (equal? (car left) (car right)))
-      (document-link--drop-common (cdr left) (cdr right))
-      (list left right)))
-
-(define (document-link--absolute-target base input)
-  (let ((target (normalize-file-input input)))
-    (cond ((remote-path? target) target)
-          ((or (string-prefix? "/" target) (string-prefix? "~" target))
-           (expand-path target))
-          (else (expand-path (string-append base target))))))
-
-(define (document-link--relative-target base target)
-  (if (or (remote-path? base) (remote-path? target))
-      target
-      (let* ((rest (document-link--drop-common
-                     (document-link--parts (expand-path base))
-                     (document-link--parts (expand-path target))))
-             (up (string-repeat "../" (length (car rest))))
-             (down (string-join (cadr rest) "/"))
-             (relative (string-append up down)))
-        (if (equal? relative "") "." relative))))
-
 (define (document-link--encode-target target)
   (re-replace-all "%2F" (url-encode target) "/"))
 
-(define (document-link--insert! buf start end label target)
-  (if (not (buffer-known? buf))
-      (message "The source document is gone")
-      (with-current-buffer buf
-        (lambda ()
-          (when (> end start) (buffer-delete-range! buf start (- end start)))
-          (goto-char! start)
-          (insert! (string-append "[" label "](" target ")"))
-          (set-mark! #f)))))
+;; a Markdown document writes [LABEL](PATH), the path percent-encoded
+;; with its separators kept. insert-file-link (goto-address.scm) asks
+;; the mode for this.
+(define (markdown-link-text path label)
+  (string-append "[" label "](" (document-link--encode-target path) ")"))
 
+(mode-link-syntax! "morg-mode" markdown-link-text)
+
+;; the older name
 (define-command "insert-document-link"
-  "Choose a document and insert its Markdown link at point"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (selected? (and (mark) (< (region-beginning) (region-end))))
-           (start (if selected? (region-beginning) (point)))
-           (end (if selected? (region-end) (point)))
-           (label (and selected? (region-text)))
-           (path (buffer-path buf))
-           (base (if path (car (path-split path)) (default-directory))))
-      (read-file-name-initial "Link target: " base
-        (lambda (input)
-          (let* ((absolute (document-link--absolute-target base input))
-                 (relative (document-link--relative-target base absolute))
-                 (target (document-link--encode-target relative)))
-            (if label
-                (document-link--insert! buf start end label target)
-                (minibuffer-read "Link text: " '()
-                  (lambda (text)
-                    (if (equal? (string-trim text) "")
-                        (message "Link text is required")
-                        (document-link--insert! buf start end text target)))))))))))
+  "Choose a file and insert a link to it at point (the older name of insert-file-link)"
+  (lambda () (run-command "insert-file-link")))
 
 (domain! 'interaction)
 (effects! '(write))

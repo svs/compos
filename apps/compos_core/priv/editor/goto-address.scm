@@ -97,6 +97,14 @@
              (string-append full "?line=" (number->string (cadr parts)))
              full))))
 
+;; the target of a URL: itself, except that "file:PATH" with no host (the
+;; Org spelling, [[file:../a.md][label]]) is the path PATH, read the way
+;; a bare path is, and is a link only when that file is on disk
+(define (goto-address--url-target buf text)
+  (if (and (string-prefix? "file:" text) (not (string-prefix? "file://" text)))
+      (goto-address--path-target buf (substring text 5 (string-length text)))
+      text))
+
 ;; the class names the face, this painter, and the target. The painter's
 ;; own token tells its overlays from a Markdown link's on repaint.
 (define (goto-address--class target)
@@ -116,11 +124,14 @@
                       (list (car r) (goto-address--trim line (car r) (cadr r))))
                     (re-find* goto-address--url-pattern line)))
          (url-spans
-           (map (lambda (r)
-                  (list (+ start (car r)) (+ start (cadr r))
-                        (goto-address--class
-                          (substring-bytes line (car r) (cadr r)))))
-                urls))
+           (filter (lambda (x) x)
+             (map (lambda (r)
+                    (let ((target (goto-address--url-target
+                                    buf (substring-bytes line (car r) (cadr r)))))
+                      (and target
+                           (list (+ start (car r)) (+ start (cadr r))
+                                 (goto-address--class target)))))
+                  urls)))
          (paths (if (string-index line "/")
                     (re-find* goto-address--path-pattern line)
                     '()))
@@ -334,6 +345,92 @@
 (global-set-key "C-c RET" "goto-address-at-point")
 
 (catalog-meta! 'command "goto-address-at-point" 'domain "interaction" 'effects '("display"))
+
+;;; --- inserting ---------------------------------------------------------------
+;;; The inverse of following: a command chooses a file and writes a link
+;;; to it. The path is relative to the buffer's directory, the place a
+;;; relative link is read from (goto-address--resolve), so the text it
+;;; writes is the text it paints. The mode says the syntax around the
+;;; path (mode-link-syntax!); a mode without one writes the path alone.
+
+(define (file-relative--parts path)
+  (filter (lambda (part) (not (equal? part ""))) (string-split path "/")))
+
+(define (file-relative--drop-common left right)
+  (if (and (pair? left) (pair? right) (equal? (car left) (car right)))
+      (file-relative--drop-common (cdr left) (cdr right))
+      (list left right)))
+
+;; TARGET as a path read from the directory DIR: "../packages/preview.scm".
+;; A remote path stays as it is. (Emacs: file-relative-name)
+(define (file-relative-name target dir)
+  (if (or (remote-path? dir) (remote-path? target))
+      target
+      (let* ((rest (file-relative--drop-common
+                     (file-relative--parts (expand-path dir))
+                     (file-relative--parts (expand-path target))))
+             (up (string-repeat "../" (length (car rest))))
+             (down (string-join (cadr rest) "/"))
+             (relative (string-append up down)))
+        (if (equal? relative "") "." relative))))
+
+;; the absolute path INPUT names when typed at a file prompt over DIR
+(define (file-link--absolute dir input)
+  (let ((target (normalize-file-input input)))
+    (cond ((remote-path? target) target)
+          ((or (string-prefix? "/" target) (string-prefix? "~" target))
+           (expand-path target))
+          (else (expand-path (string-append dir target))))))
+
+;; the link text for TARGET in BUF's mode: the mode's syntax around the
+;; relative path, or the relative path alone
+(define (file-link-text buf target label)
+  (let ((relative (file-relative-name target (buffer-directory buf)))
+        (syntax (mode-link-syntax (buffer-local buf 'mode-name))))
+    (if syntax (syntax relative label) relative)))
+
+(define (insert-file-link--write! buf start end text)
+  (if (not (buffer-known? buf))
+      (message "The buffer is gone")
+      (with-current-buffer buf
+        (lambda ()
+          (when (> end start) (buffer-delete-range! buf start (- end start)))
+          (goto-char! start)
+          (insert! text)
+          (set-mark! #f)))))
+
+;; In a mode with a link syntax the selection is the label, and without a
+;; selection the prompt asks for one, the file's name as the default. A
+;; mode without a syntax writes the path at point and asks nothing.
+(define-command "insert-file-link"
+  "Choose a file and insert a link to it at point, relative to this buffer's directory, in the mode's link syntax"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (dir (buffer-directory buf))
+           (syntax (mode-link-syntax (buffer-local buf 'mode-name)))
+           (selected? (and syntax (mark) (< (region-beginning) (region-end))))
+           (start (if selected? (region-beginning) (point)))
+           (end (if selected? (region-end) (point)))
+           (label (and selected? (region-text))))
+      (read-file-name-initial "Insert link to file: " dir
+        (lambda (input)
+          (let* ((target (file-link--absolute dir input))
+                 (write! (lambda (label)
+                           (insert-file-link--write! buf start end
+                             (file-link-text buf target label)))))
+            (cond ((not syntax) (write! #f))
+                  (label (write! label))
+                  (else
+                    (let ((name (cadr (path-split target))))
+                      (read-string (string-append "Link text (default " name "): ")
+                        write! 'default name))))))))))
+
+(catalog-meta! 'command "insert-file-link" 'domain "interaction" 'effects '("write"))
+
+(public! 'file-relative-name
+  "(file-relative-name TARGET DIR) — TARGET as a path read from the directory DIR, such as ../a/b.md")
+(public! 'file-link-text
+  "(file-link-text BUF TARGET LABEL) — a link to TARGET as BUF's mode writes it, over the path relative to BUF's directory")
 
 (public! 'goto-address-paint!
   "(goto-address-paint! BUF) — paint every URL and existing file path in BUF as a link overlay")

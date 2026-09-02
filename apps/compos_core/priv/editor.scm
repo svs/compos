@@ -3121,6 +3121,27 @@
 (mode-icon! "collect-mode" "")
 
 
+;;; --- mode link syntax ---------------------------------------------------------
+;;; How a mode writes a link to a file: Markdown writes [LABEL](PATH), Org
+;;; writes [[file:PATH][LABEL]]. A mode declares its own syntax, and a child
+;;; mode inherits its parent's. A mode that declares none writes the path
+;;; alone, which is a link in every buffer (goto-address.scm).
+
+(define *mode-link-syntaxes* '())
+
+(define (mode-link-syntax! name fn)
+  (set! *mode-link-syntaxes*
+    (cons (list name fn)
+          (remove (lambda (e) (equal? (car e) name)) *mode-link-syntaxes*))))
+
+;; the syntax of MODE or of its nearest ancestor: (lambda (PATH LABEL) TEXT),
+;; or #f when the mode writes the path alone
+(define (mode-link-syntax mode)
+  (let loop ((m mode) (seen '()))
+    (cond ((or (not m) (member m seen)) #f)
+          ((assoc m *mode-link-syntaxes*) (cadr (assoc m *mode-link-syntaxes*)))
+          (else (loop (mode-parent m) (cons m seen))))))
+
 (define (set-mode! name)
   (let* ((buf (current-buffer))
          (old (buffer-local buf 'mode-name))
@@ -11022,6 +11043,8 @@
 (public! 'set-mode! "(set-mode! NAME) on the current buffer")
 (public! 'mode-icon! "(mode-icon! MODE ICON) — the one wide glyph that names MODE in every list")
 (public! 'mode-icon "(mode-icon MODE) — MODE's icon, or the plain document icon")
+(public! 'mode-link-syntax! "(mode-link-syntax! MODE FN) — FN of (PATH LABEL) writes a file link in MODE's syntax; a child mode inherits it")
+(public! 'mode-link-syntax "(mode-link-syntax MODE) — the link syntax fn of MODE or its nearest ancestor; #f when the path alone is the link")
 (public! 'mode-label "(mode-label MODE) — MODE's icon and name, for a column that shows the mode")
 (public! 'buffer-icon "(buffer-icon NAME) — the icon of the mode NAME is in")
 (public! 'file-icon "(file-icon NAME) — the icon of the mode the file NAME would open in; a name ending in / is a directory")

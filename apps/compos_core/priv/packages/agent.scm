@@ -99,6 +99,10 @@
          (code-agent-note-tool! buf (agent-tool-title e)
                                 (or (plist-get e 'kind) "")
                                 (agent-tool-input-text e)))
+       ;; chat.scm listens too: every tool call nudges the running summary
+       ;; (debounced, so a burst becomes one cheap-model completion)
+       (when (boundp (quote chat-summary-note-tool!))
+         (chat-summary-note-tool! buf))
        (let ((title (agent-tool-title e)))
          (let ((start (agent-render! slug
                         (string-append "\n▸ " (plist-get e 'kind) " · " title "\n")

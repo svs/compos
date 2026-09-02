@@ -993,3 +993,67 @@
           (list 'slug slug
                 'prompts prompts
                 'turns (plist-get plan 'turns)))))))
+
+;; ---------------------------------------------------------------------------
+;; The running summary: one paragraph that says what this chat is doing.
+;; agent.scm nudges chat-summary-note-tool! on every tool call; the debounce
+;; folds a burst into one cheap-model completion, in the background and in
+;; silence -- the paragraph only lands in the chat-summary buffer-local. It
+;; rides the .chat header line into the archive, and chat-file-init! seeds it
+;; back on restore, so a chats list can say what an archived chat was doing
+;; from its first line alone.
+
+(domain! 'chat)
+(effects! '(write external spend))
+
+(defcustom 'chat-summary-model "claude-haiku-4-5"
+  "The cheap model that keeps each chat's one-paragraph running summary."
+  'group 'chat 'type 'string)
+
+(define *chat-summary-debounce-ms* 10000)
+(define *chat-summary-tail-lines* 60)
+
+;; one line, because the .chat header is one line
+(define (chat-summary--flatten s)
+  (let loop ((cur s))
+    (let ((next (re-replace "[\\s][\\s]+|[\\n\\t\\r]" cur " ")))
+      (if (equal? next cur)
+          (string-trim cur)
+          (loop next)))))
+
+;; the tail of the rendered transcript, cut on line boundaries so a
+;; multibyte character never splits
+(define (chat-summary--tail buf)
+  (let* ((lines (string-split (buffer-text buf) "\n"))
+         (n (length lines)))
+    (let loop ((ls lines) (extra (- n *chat-summary-tail-lines*)))
+      (if (and (pair? ls) (> extra 0))
+          (loop (cdr ls) (- extra 1))
+          (string-join ls "\n")))))
+
+(define (chat-summary-refresh! buf)
+  (when (buffer-known? buf)
+    (llm-with-model
+      (string-append
+        "You maintain a one-paragraph running summary of a work chat between"
+        " a person and a coding agent. Rewrite it so a reader who opens the"
+        " chat later knows what it is doing and where it stands. One"
+        " paragraph, plain text, no markdown, under 80 words. Answer with"
+        " the paragraph only.\n\nCurrent summary:\n"
+        (or (buffer-local buf 'chat-summary) "(none yet)")
+        "\n\nLatest transcript:\n"
+        (chat-summary--tail buf))
+      chat-summary-model
+      (lambda (text)
+        (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
+          (buffer-set-local! buf 'chat-summary (chat-summary--flatten text))
+          ;; between turns no save is coming -- the archive takes the fresh
+          ;; paragraph now; mid-turn the turn-end save carries it
+          (unless (buffer-local buf 'chat-turn-active)
+            (chat-log-save! buf)))))))
+
+(public! 'chat-summary-note-tool!
+  "(chat-summary-note-tool! BUF) -- refresh the chat's running summary once the tool-call burst settles")
+(define (chat-summary-note-tool! buf)
+  (debounce! (string-append "chat-summary:" buf) *chat-summary-debounce-ms*
+             chat-summary-refresh! buf))

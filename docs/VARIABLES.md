@@ -1,8 +1,7 @@
 # Variables
 
 A global is a Scheme binding. A buffer-local is a key in the buffer.
-These forms tie the two together the way Emacs does: a variable has one
-default and, in a buffer that set it, a local value.
+These forms tie the two together the way Emacs does: a variable has one default and, in a buffer that set it, a local value.
 
 ```scheme
 (defvar 'fill-column 70 "The column past which lines wrap.")
@@ -17,9 +16,7 @@ default and, in a buffer that set it, a local value.
 (kill-local-variable! 'indent-width)
 ```
 
-`defvar` sets the default only when the name is unbound, so a reload
-keeps a value the session set. `defcustom` in custom.scm is a `defvar`
-with a saved value and a customize entry.
+`defvar` sets the default only when the name is unbound, so a reload keeps a value the session set. `defcustom` in custom.scm is a `defvar` with a saved value and a customize entry.
 
 A local set to `#f` reads as absent. `buffer-local` answers `#f` for
 both, and so does `local-variable-p`.

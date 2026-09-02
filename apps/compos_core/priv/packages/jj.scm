@@ -14,11 +14,13 @@
 ;;; debounce. buffer-edit-log then answers who wrote a buffer last, so
 ;;; nothing here keeps state the weave already holds.
 ;;;
-;;; That identity is worth nothing after the session, and it does not need
-;;; to be: agent changes live between @- and @ and collapse into your own
-;;; commit when you squash before a push. jj-agent-changes is what makes that
-;;; a rule instead of a habit. A directory lock under .jj serializes every
-;;; flush across processes, so two authors' snapshots cannot interleave.
+;;; Identity is something a change says, not something it is: every change
+;;; carries the jj config author, and a run's session rides in an Agent:
+;;; line in the description, written when the run's change opens and kept
+;;; when jj-describe! labels it. Nothing synthetic reaches public history,
+;;; so a push needs no guard and no squash ceremony. Byte-level attribution
+;;; stays in the weave. A directory lock under .jj serializes every flush
+;;; across processes, so two runs' snapshots cannot interleave.
 
 (domain! 'files)
 (effects! '(write external execute))
@@ -26,10 +28,6 @@
 (defcustom 'jj-autosave #f
   "Save a file buffer when its author stops writing, and snapshot it into jj."
   'group 'buffers 'type 'boolean)
-
-(defcustom 'jj-agent-domain "agents.compos.local"
-  "The email domain that marks a jj change as an agent's. jj-push reads it."
-  'group 'buffers 'type 'string)
 
 ;;; --- the repo -----------------------------------------------------------
 
@@ -85,55 +83,45 @@
        (string-prefix? "agent:" author)
        (substring author 6 (string-length author))))
 
-;; A name that cannot survive a shell word is not worth escaping: the slug is
-;; machine-made and always safe, so an odd chat name falls back to it.
-(define (jj-plain-word name fallback)
-  (if (and (string? name)
-           (not (string-index name "'"))
-           (not (string-index name "\\")))
-      name
-      fallback))
-
-;; The chat's display name reads better in jj log than the slug does.
-(define (jj-chat-name slug)
-  (let ((buf (and (boundp 'agent-buf) (agent-buf slug))))
-    (if (and (string? buf) (string-prefix? "*chat:" buf))
-        (jj-plain-word (substring buf 6 (- (string-length buf) 1)) slug)
-        slug)))
-
-;; (NAME EMAIL) for an agent, #f for you: you keep the jj config identity.
-(define (jj-identity author)
-  (let ((slug (jj-author-slug author)))
-    (and slug
-         (list (jj-chat-name slug)
-               (string-append slug "@" jj-agent-domain)))))
+;; A description travels through one shell single-quoted word: close it,
+;; escape the quote, and reopen.
+(define (jj-quote s)
+  (string-join (string-split s "'") "'\\''"))
 
 ;;; --- the snapshot -------------------------------------------------------
 
-(define (jj-env id)
-  (if id
-      (string-append "JJ_USER='" (car id) "' JJ_EMAIL='" (cadr id) "' ")
-      ""))
+;; The run's tag is the Agent: line in @'s description; #f means yours.
+(define (jj-tag root)
+  (let loop ((ls (string-split (jj-at root "description") "\n")))
+    (cond ((null? ls) #f)
+          ((string-prefix? "Agent: " (car ls))
+           (substring (car ls) 7 (string-length (car ls))))
+          (else (loop (cdr ls))))))
 
-;; Open the change this author's writes belong in. This has to happen BEFORE
+;; Open the change this run's writes belong in. This has to happen BEFORE
 ;; the write, never after: jj folds the working copy into @ at the start of
-;; almost every command, so a change opened afterwards leaves the work sitting
-;; in the previous author's change and attributes it to them.
+;; almost every command, so a change opened afterwards leaves the work
+;; sitting in the previous run's change.
 ;;
-;; A new change opens only on a handover, so one author's whole run stays one
-;; change however many times it reached disk. An untouched @ takes the new
-;; author instead of forking, so a quiet handover leaves no empty change.
+;; A new change opens only on a handover, so one run stays one change
+;; however many times it reached disk. An untouched @ with nothing to say
+;; takes the new tag instead of forking, so a quiet handover leaves no
+;; empty change behind.
 (define (jj-open! root author)
-  (let* ((id (jj-identity author))
-         (want (if id
-                   (cadr id)
-                   (string-trim (jj-sh root "jj config get user.email 2>/dev/null")))))
-    (unless (equal? (jj-at root "author.email()") want)
-      (jj-sh root (string-append (jj-env id)
-                                 (if (equal? (jj-at root "empty") "true")
-                                     "jj metaedit --update-author"
-                                     "jj new")
-                                 " 2>&1")))))
+  (let ((want (jj-author-slug author))
+        (have (jj-tag root)))
+    (unless (equal? want have)
+      (let* ((d (string-trim (jj-at root "description")))
+             (retag (and (equal? (jj-at root "empty") "true")
+                         (or (equal? d "") (string-prefix? "Agent: " d)))))
+        (if retag
+            (jj-sh root (string-append "jj describe -m '"
+                                       (if want (string-append "Agent: " want) "")
+                                       "' 2>&1"))
+            (begin
+              (jj-sh root "jj new 2>&1")
+              (when want
+                (jj-sh root (string-append "jj describe -m 'Agent: " want "' 2>&1")))))))))
 
 (define (jj-snapshot! root)
   (jj-sh root "jj util snapshot 2>&1"))
@@ -238,40 +226,32 @@
 (add-hook! 'before-save-hook 'jj-before-save! #t)
 (add-hook! 'after-save-hook 'jj-after-save!)
 
-;;; --- the guard ----------------------------------------------------------
+;;; --- the label ----------------------------------------------------------
 
-;; What a push would add, narrowed to what an agent authored. A revset asks
-;; this without a template, so nothing here has to escape a shell word twice.
-(define (jj-agent-changes root)
-  (string-trim
-    (jj-sh root (string-append
-                  "jj log -r 'remote_bookmarks()..@ & author_email(substring:\"@"
-                  jj-agent-domain
-                  "\")' --no-graph --color never 2>&1"))))
+;; A run can say what it was. This describes the open change, keeps the
+;; Agent: line under the message, and so makes the label and the identity
+;; one description. An untagged open change is adopted; another run's
+;; change is declined, because a label must not cross a handover.
+(define (jj-describe! text)
+  (let ((root (jj-here)))
+    (if (not root)
+        #f
+        (let ((slug (jj-author-slug (or (current-edit-author) "")))
+              (have (jj-tag root)))
+          (if (and have (not (equal? have slug)))
+              (begin (message "jj: the open change is not this run's to describe") #f)
+              (let ((msg (if slug (string-append text "\n\nAgent: " slug) text)))
+                (jj-sh root (string-append "jj describe -m '" (jj-quote msg) "' 2>&1"))
+                text))))))
 
-;; Agent identity is worth nothing outside the session and must not reach a
-;; remote. Squash first; this is the check that says when you have not.
-(define-command "jj-agent-changes" "List agent-authored changes not yet pushed"
+;;; --- the push -----------------------------------------------------------
+
+;; Identity rides in descriptions, so there is nothing to leak and nothing
+;; to squash: a push is a push. jj still refuses an undescribed change, and
+;; that is the only gate left.
+(define-command "jj-push" "Push to git"
   (lambda ()
     (let ((root (jj-here)))
       (if (not root)
           (message "jj: not in a jj repo")
-          (let ((agents (jj-agent-changes root)))
-            (message (if (equal? agents "")
-                         "jj: no agent-authored changes in the stack"
-                         agents)))))))
-
-;; Push is the boundary where agent identity would leak into public history.
-;; A synthetic agents.compos.local address must never reach the remote, so
-;; the push refuses while any change in the stack carries one; squash those
-;; into your own change first.
-(define-command "jj-push" "Push to git; refuse while agent-authored changes remain"
-  (lambda ()
-    (let ((root (jj-here)))
-      (if (not root)
-          (message "jj: not in a jj repo")
-          (let ((agents (jj-agent-changes root)))
-            (if (equal? agents "")
-                (message (string-trim (jj-sh root "jj git push 2>&1")))
-                (message (string-append "jj: not pushing; agent-authored changes in the stack:\n"
-                                        agents))))))))
+          (message (string-trim (jj-sh root "jj git push 2>&1")))))))

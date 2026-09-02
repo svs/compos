@@ -2228,7 +2228,7 @@ defmodule Compos.Ui.EditorLive do
     ~H|<span class={blk_class(@b, @line)}><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %></span>|
   end
 
-  defp blk(assigns) do
+  defp blk(%{b: %{tag: "div"}} = assigns) do
     ~H"""
     <div
       class={blk_class(@b, @line)}
@@ -2237,7 +2237,23 @@ defmodule Compos.Ui.EditorLive do
       phx-click={@b.click && "block_click"}
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
+      {@b.attrs}
     ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></div>
+    """
+  end
+
+  # any other tag: an SVG chart, a table, a label. The attributes are the
+  # mode's, filtered by the allowlist below; a click still routes by id.
+  defp blk(assigns) do
+    ~H"""
+    <.dynamic_tag
+      tag_name={@b.tag}
+      class={blk_class(@b, @line)}
+      phx-click={@b.click && "block_click"}
+      phx-value-win={@b.click && @win}
+      phx-value-id={@b.click}
+      {@b.attrs}
+    ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></.dynamic_tag>
     """
   end
 
@@ -2249,9 +2265,23 @@ defmodule Compos.Ui.EditorLive do
 
   defp blk_current?(_, _), do: false
 
+  # The tags and attributes a block may carry beyond the structural keys.
+  # Presentation only: style, and the SVG geometry and paint attributes.
+  # Nothing that loads a resource, runs a script, or submits a form. A tag
+  # outside the list draws as a div, an attribute outside it is dropped.
+  @block_tags ~w(div span pre p h1 h2 h3 h4 table thead tbody tr th td ul ol li
+                 svg g path rect circle ellipse line polyline polygon text tspan title)
+  @block_attrs ~w(style d viewBox preserveAspectRatio fill stroke stroke-width
+                  stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
+                  stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
+                  width height points transform vector-effect text-anchor font-size
+                  dominant-baseline shape-rendering title colspan rowspan)
+
   defp block_view(pl) do
+    tag = pget(pl, "tag") || "div"
+
     %{
-      tag: pget(pl, "tag") || "div",
+      tag: if(tag in @block_tags, do: tag, else: "div"),
       class: pget(pl, "class") || "",
       anchor: falsy(pget(pl, "anchor")),
       lines: falsy(pget(pl, "lines")),
@@ -2259,9 +2289,19 @@ defmodule Compos.Ui.EditorLive do
       click: falsy(pget(pl, "click")),
       text: falsy(pget(pl, "text")),
       segs: for([c, t] <- pget(pl, "segs") || [], do: {c, t}),
+      attrs: block_attrs(pget(pl, "attrs") || []),
       children: Enum.map(pget(pl, "children") || [], &block_view/1)
     }
   end
+
+  defp block_attrs(attrs) when is_list(attrs) do
+    for [name, value] <- attrs,
+        is_binary(name) and name in @block_attrs,
+        is_binary(value) or is_number(value),
+        do: {name, to_string(value)}
+  end
+
+  defp block_attrs(_), do: []
 
   defp pget([{:sym, k}, v | _], k), do: v
   defp pget([_, _ | rest], k), do: pget(rest, k)

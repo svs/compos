@@ -80,6 +80,7 @@
 (load-bundled-package "spotify.scm")
 (load-bundled-package "switch.scm")
 (load-bundled-package "telemetry.scm")
+(load-bundled-package "perf.scm")
 (load-bundled-package "test.scm")
 (load-bundled-package "training.scm")
 (load-bundled-package "treesit.scm")

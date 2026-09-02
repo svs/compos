@@ -25,6 +25,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(git_primitives())
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
+    |> Map.merge(sysmon_primitives())
     |> Map.merge(discovery_primitives())
     |> Map.merge(irc_primitives())
   end
@@ -138,6 +139,14 @@ defmodule Compos.Core.SchemeAPI do
       "telemetry-snapshot" =>
         "(telemetry-snapshot [LIMIT]) — return recent telemetry events of every layer, newest first.",
       "telemetry-clear!" => "(telemetry-clear!) — discard retained telemetry events.",
+      "vm-sample" =>
+        "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks.",
+      "vm-processes" =>
+        "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\".",
+      "vm-process-info" =>
+        "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone.",
+      "vm-process-kill!" =>
+        "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive.",
       "embedding-search" =>
         "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY with OpenAI and return eligible cosine scores from the synchronized text vectors.",
       "embedding-sync!" =>
@@ -275,7 +284,8 @@ defmodule Compos.Core.SchemeAPI do
         "(break-undo-chain!) — end a run of undos, so the next undo reverses them (redo). It is not a boundary: see undo-boundary!.",
       "undo-boundary!" =>
         "(undo-boundary!) — Emacs undo-boundary: the edits so far are one undo step, the edits after this are the next, even inside one command.",
-      "this-command" => "(this-command) — the name of the command now running; \"\" outside a command.",
+      "this-command" =>
+        "(this-command) — the name of the command now running; \"\" outside a command.",
       "set-this-command!" =>
         "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\".",
       "kill-append!" =>
@@ -413,30 +423,43 @@ defmodule Compos.Core.SchemeAPI do
         "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f.",
       "define-keymap!" =>
         "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer.",
-      "keymap-set!" => "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap.",
-      "keymap-unset!" => "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.",
-      "define-key" => "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.",
-      "keymap-parent!" => "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.",
+      "keymap-set!" =>
+        "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap.",
+      "keymap-unset!" =>
+        "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.",
+      "define-key" =>
+        "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.",
+      "keymap-parent!" =>
+        "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.",
       "keymap-parent" => "(keymap-parent KEYMAP) — the parent's name, or #f.",
-      "keymap-bindings" => "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings.",
-      "keymap-lookup" => "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f.",
+      "keymap-bindings" =>
+        "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings.",
+      "keymap-lookup" =>
+        "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f.",
       "keymap-names" => "(keymap-names) — every keymap the editor holds.",
-      "use-local-map!" => "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map.",
+      "use-local-map!" =>
+        "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map.",
       "buffer-local-map" => "(buffer-local-map BUF) — the parent of BUF's own map, or #f.",
-      "clear-local-map!" => "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps.",
-      "buffer-minor-maps!" => "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map.",
+      "clear-local-map!" =>
+        "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps.",
+      "buffer-minor-maps!" =>
+        "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map.",
       "buffer-minor-maps" => "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF.",
-      "global-minor-maps!" => "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.",
+      "global-minor-maps!" =>
+        "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.",
       "global-minor-maps" => "(global-minor-maps) — the keymaps in force in every buffer.",
-      "buffer-keymaps" => "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.",
-      "where-is-internal" => "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
+      "buffer-keymaps" =>
+        "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.",
+      "where-is-internal" =>
+        "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
       "overriding-map!" =>
         "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument).",
       "overriding-map" => "(overriding-map) — the frame's overriding keymap, or #f.",
       "buffer-at-point-map!" =>
         "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap.",
       "buffer-at-point-map" => "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f.",
-      "completion-requery!" => "(completion-requery!) — narrow the popup to the text between its start and point.",
+      "completion-requery!" =>
+        "(completion-requery!) — narrow the popup to the text between its start and point.",
       "ignore-errors" => "(ignore-errors THUNK) — THUNK's value, or #f when it raises.",
       "capture-key!" =>
         "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
@@ -519,6 +542,31 @@ defmodule Compos.Core.SchemeAPI do
       end
     }
   end
+
+  defp sysmon_primitives do
+    alias Compos.Core.SysMon
+
+    %{
+      "vm-sample" => fn [] -> SysMon.sample() end,
+      "vm-processes" => fn
+        [limit, sort, filter] ->
+          SysMon.processes(trunc(limit), sysmon_text(sort), sysmon_text(filter))
+
+        [limit, sort] ->
+          SysMon.processes(trunc(limit), sysmon_text(sort), "")
+
+        [limit] ->
+          SysMon.processes(trunc(limit), "reds", "")
+      end,
+      "vm-process-info" => fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,
+      "vm-process-kill!" => fn [pid] -> SysMon.kill(sysmon_text(pid)) end
+    }
+  end
+
+  defp sysmon_text(v) when is_binary(v), do: v
+  defp sysmon_text({:sym, v}), do: v
+  defp sysmon_text(false), do: ""
+  defp sysmon_text(v), do: to_string(v)
 
   defp telemetry_events(limit) do
     limit = max(0, min(limit, 1_000))
@@ -1950,8 +1998,11 @@ defmodule Compos.Core.SchemeAPI do
       end,
       # the one matcher every surface narrows with; STYLE as in completion-style
       "completion-match?" => fn
-        [label, query] -> Compos.Core.Candidates.matches?(label, query, [], :flex)
-        [label, query, style] -> Compos.Core.Candidates.matches?(label, query, [], Compos.Core.Candidates.style(style))
+        [label, query] ->
+          Compos.Core.Candidates.matches?(label, query, [], :flex)
+
+        [label, query, style] ->
+          Compos.Core.Candidates.matches?(label, query, [], Compos.Core.Candidates.style(style))
       end,
       "regexp-quote" => fn [text] -> Regex.escape(text) end,
       "completion-dismiss!" => fn [] ->

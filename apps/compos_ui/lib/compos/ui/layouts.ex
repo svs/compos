@@ -59,6 +59,7 @@ defmodule Compos.Ui.Layouts do
             -webkit-font-smoothing: antialiased;
           }
           .editor-root {
+            /* the frame echo area is configurable: top = -1, bottom = 10 */
             display: flex; flex-direction: column; position: relative;
             overflow: hidden;
             /* the application text scale (appearance.scm ui-scale): the
@@ -122,6 +123,7 @@ defmodule Compos.Ui.Layouts do
              float in the middle of the layout — the frame edge is the
              only anchor that puts it in the same place every time. */
           .windows {
+            order: 0;
             flex: 1; display: flex; position: relative; min-height: 0;
             background: var(--default-bg, #d5cdb9);
             padding: var(--chrome-gap, 0);
@@ -567,7 +569,7 @@ defmodule Compos.Ui.Layouts do
              `break-word` still breaks a long URL, and it leaves the
              minimum width alone. */
           .ag-prose {
-            font-family: var(--font-serif); font-size: calc(15px * var(--text-scale-factor, 1)); line-height: 1.6;
+            font-family: var(--font-serif); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1)); line-height: 1.6;
             margin: 8px 0; overflow-wrap: break-word;
           }
           .ag-prose > * { max-width: 62ch; }
@@ -602,7 +604,7 @@ defmodule Compos.Ui.Layouts do
           .ag-table { overflow-x: auto; margin: 10px 0; }
           .ag-prose table {
             width: auto; max-width: 100%; border-collapse: collapse;
-            font-family: var(--font-sans); font-size: calc(13px * var(--text-scale-factor, 1));
+            font-family: var(--font-sans); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
             font-variant-numeric: tabular-nums;
           }
           .ag-prose th, .ag-prose td {
@@ -832,6 +834,7 @@ defmodule Compos.Ui.Layouts do
             max-width: 16ch; flex: 0 1 auto;
           }
           .echo-bar {
+            order: var(--ui-echo-order, -1);
             display: flex; align-items: baseline; gap: 14px;
             min-height: 30px; padding: 7px 14px 8px;
             flex-shrink: 0;

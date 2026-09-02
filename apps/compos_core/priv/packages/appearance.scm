@@ -59,11 +59,24 @@
 ;; after a restart
 (set-face-attribute! 'ui 'zoom (scale-factor ui-scale))
 
+;; The frame echo area can sit at the top or bottom of the frame.
+;; The CSS order is a face variable, so the choice persists with custom.scm.
+(defcustom 'echo-area-position 'top
+  "Position of the frame echo area: 'top or 'bottom."
+  'group 'appearance
+  'type 'choice
+  'set (lambda (position)
+         (set-face-attribute! 'ui 'echo-order
+           (if (equal? position 'bottom) "10" "-1"))))
+
+(set-face-attribute! 'ui 'echo-order
+  (if (equal? echo-area-position 'bottom) "10" "-1"))
+
 ;; The size of buffer text is the default face's size. 13px was the
 ;; design size; the reading size stands two steps up the same 1.2 ladder
 ;; (13 x 1.44). A defface! default survives a theme load, because no
 ;; theme names a size on the default face.
-(defcustom 'default-font-size "18.7px"
+(defcustom 'default-font-size "20.8px"
   "The size of buffer text: the default face's size, as CSS. Two steps up the 1.2 ladder from 13px."
   'group 'appearance
   'set (lambda (size) (defface! 'default 'size size)))

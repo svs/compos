@@ -10086,19 +10086,17 @@
                         (dash--seg "lane"
                           (list (list "f-ok dseg-strong" (dash--lane buf)))
                           'right "dseg-inline"))))
-      ;; a chat says what it is doing: the running summary, wrapping to
-      ;; two lines with the key inline
-      (if summary
-          (list (dash--seg-rule)
-                (dash--seg "summary" (list (list "f-dim" summary))
-                           'left "dseg-inline dseg-wide"))
-          '())
-      ;; the repo rides along at the end, wide as it needs: the open jj
-      ;; change, kept fresh by jj.scm as commits go by
-      (if vcs
-          (list (dash--seg-rule)
-                (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-wide"))
-          '()))))
+      ;; one wide segment at the end, wrapping to two lines with the key
+      ;; inline: a chat says what it is doing, and every other buffer of
+      ;; the repo names the open jj change, kept fresh by jj.scm
+      (cond (summary
+             (list (dash--seg-rule)
+                   (dash--seg "summary" (list (list "f-dim" summary))
+                              'left "dseg-inline dseg-wide")))
+            (vcs
+             (list (dash--seg-rule)
+                   (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-wide")))
+            (else '())))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps

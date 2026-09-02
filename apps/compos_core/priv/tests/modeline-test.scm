@@ -60,6 +60,16 @@
       (check-equal! (t--dseg-value (dashboard-line-blocks buf) "summary")
                     "The user is testing the bar."
                     "the segment shows the paragraph")
+      ;; the summary takes the one wide slot; the jj line steps back
+      (let ((dir "/zz-modeline-sum-repo/") (root "/zz-modeline-sum-repo")
+            (lines *jj-lines*) (roots *jj-dir-roots*))
+        (buffer-set-local! buf 'default-directory dir)
+        (set! *jj-dir-roots* (cons (list dir root) *jj-dir-roots*))
+        (set! *jj-lines* (cons (list root "jj: open") *jj-lines*))
+        (check-equal! (t--dseg-value (dashboard-line-blocks buf) "jj") #f
+                      "no jj segment beside a summary")
+        (set! *jj-lines* lines)
+        (set! *jj-dir-roots* roots))
       (buffer-kill! buf))))
 
 (deftest 'a-buffer-without-a-file-shows-the-jj-line-of-its-directory

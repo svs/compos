@@ -115,6 +115,34 @@
     ;; leave no global binding behind for the next test
     (global-unset-key "<f9> b")))
 
+;;; --- a list buffer wears its mode's map ---------------------------------------
+;;; A list opened by list-mode-show! enters its mode, so the keys the mode
+;;; declares answer in its buffer. The mode here is a dummy with one dummy
+;;; key; no production list and no production binding is named.
+
+(define-list-mode! "keymap-test-list-mode"
+  (list 'buffer "*keymap-test-list*"
+        'rows (lambda (buf) (list "one" "two"))
+        'render (lambda (buf e) e)
+        'keys '(("<f9> a" "keymap-test-dummy-two"))))
+
+(deftest 'a-list-opened-by-list-mode-show-answers-its-mode-keys
+  "the key a list mode declares runs its command in the list's buffer"
+  (lambda ()
+    (global-set-key "<f9> a" "keymap-test-dummy-one")
+    (delete-other-windows!)
+    (list-mode-show! "keymap-test-list-mode")
+    (check-equal! (current-buffer) "*keymap-test-list*" "the list is current")
+    (check-equal! (buffer-local-map "*keymap-test-list*") "keymap-test-list-mode-map"
+                  "the buffer wears the mode's map")
+    (check-equal! (key-binding *keymap-test-key*) "keymap-test-dummy-two"
+                  "the mode's key shadows the global one")
+    (keymap-test-press! *keymap-test-key*)
+    (check-true! (wait-until (lambda () (keymap-test-fired? 'two)) 3000 20)
+                 "and pressing it ran the mode's command")
+    (buffer-kill! "*keymap-test-list*")
+    (global-unset-key "<f9> a")))
+
 ;;; --- the map's own integrity --------------------------------------------------
 ;;;
 ;;; This one names no binding, so no rebinding can break it. It fails only

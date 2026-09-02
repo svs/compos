@@ -33,6 +33,10 @@
        ;; the adapter says which model the session ACTUALLY runs — the
        ;; modeline shows that truth, and C-c m picks from this list
        (buffer-set-local! buf 'agent-models (plist-get e 'available))
+       ;; and the connector keeps it: the picker offers this list again for
+       ;; a chat that has not attached yet, and after a restart
+       (llm-models-seen! (buffer-local buf 'agent-connector)
+                         (plist-get e 'available))
        (let ((cur (plist-get e 'current)))
          (when cur (buffer-set-local! buf 'agent-model cur)))
        (agent-update-modeline! buf))

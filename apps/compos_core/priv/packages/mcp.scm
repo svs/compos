@@ -169,6 +169,33 @@
           ((buffer-group cur) (group-chat (buffer-group cur)))
           (else #f))))
 
+;; Is there a running ACP session here, whose tool list is pinned until it
+;; restarts? The api lane answers #f: it reads its specs fresh every send.
+(define (chat-presets-live-session? buf)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (and slug
+         (not (connector-can? (or (buffer-local buf 'agent-connector)
+                                  *default-connector*)
+                              'stateless))
+         (not (equal? (agent-status slug) 'dead))
+         #t)))
+
+;; What a preset change means where no ACP session pins the tool list.
+(define (chat-presets-settled! buf)
+  ;; Direct API chats freeze their tool specs for prompt-cache stability.
+  ;; Selecting a preset is the user's explicit request to change that
+  ;; surface, so make it effective on the very next turn. Plain llm-mode
+  ;; buffers have no frozen list and already read live.
+  (when (and (boundp (quote chat-adopt-live-tools!))
+             (buffer-local buf 'chat-tool-specs))
+    (chat-adopt-live-tools! buf))
+  ;; A stateful llm-mode runtime mounted its MCP servers when the native
+  ;; thread attached. Drop only the process; the next M-o resumes the same
+  ;; Codex thread with the changed preset surface.
+  (when (and (minor-mode-on? buf "llm-mode")
+             (boundp (quote llm-mode-reset-runtime!)))
+    (llm-mode-reset-runtime! buf #t)))
+
 ;; An ACP session's mcpServers are fixed at session/new, so changing a
 ;; preset under a live agent changes NOTHING until the session restarts —
 ;; a silent no-op reads as a broken feature. Mark the chat dirty, say so,
@@ -176,40 +203,43 @@
 ;; connector and model, transcript seeded, new server list). The api lane
 ;; needs none of this: its specs are read fresh at every send.
 (define (chat-presets-changed! buf what)
-  (let ((slug (buffer-local buf 'agent-slug)))
-    (if (and slug
-             (not (connector-can? (or (buffer-local buf 'agent-connector)
-                                      *default-connector*)
-                                  'stateless))
-             (not (equal? (agent-status slug) 'dead)))
+  (if (chat-presets-live-session? buf)
+      (begin
+        (buffer-set-local! buf 'chat-mcp-dirty #t)
+        (minibuffer-read
+          (string-append what " — the agent's tools are fixed for this "
+                         "session. Reconnect now? ")
+          '("yes" "no")
+          (lambda (answer)
+            (if (equal? answer "yes")
+                (begin
+                  (chat-reattach-for-presets! buf)
+                  (message (string-append what " — reconnected with the new tools")))
+                (message (string-append
+                           what " — takes effect on the next send"))))))
+      (begin
+        (chat-presets-settled! buf)
+        (message (string-append what " for " buf)))))
+
+;; The loaded presets set to exactly NAMES, as one change. A bundle names a
+;; whole tool surface, so it lands whole — not as a run of toggles that each
+;; stop to ask whether to reconnect. Answers #t when something changed; the
+;; caller reconnects once, when the rest of the setup has landed too.
+(define (chat-presets-set! buf names)
+  (let ((wanted (if (member 'compos names) names (cons 'compos names)))
+        (now (chat-presets-of buf)))
+    (if (and (= (length wanted) (length now))
+             (null? (filter (lambda (p) (not (member p now))) wanted)))
+        #f
         (begin
-          (buffer-set-local! buf 'chat-mcp-dirty #t)
-          (minibuffer-read
-            (string-append what " — the agent's tools are fixed for this "
-                           "session. Reconnect now? ")
-            '("yes" "no")
-            (lambda (answer)
-              (if (equal? answer "yes")
-                  (begin
-                    (chat-reattach-for-presets! buf)
-                    (message (string-append what " — reconnected with the new tools")))
-                  (message (string-append
-                             what " — takes effect on the next send"))))))
-        (begin
-          ;; Direct API chats freeze their tool specs for prompt-cache
-          ;; stability. Selecting a preset is the user's explicit request to
-          ;; change that surface, so make it effective on the very next turn.
-          ;; Plain llm-mode buffers have no frozen list and already read live.
-          (when (and (boundp (quote chat-adopt-live-tools!))
-                     (buffer-local buf 'chat-tool-specs))
-            (chat-adopt-live-tools! buf))
-          ;; A stateful llm-mode runtime mounted its MCP servers when the
-          ;; native thread attached. Drop only the process; the next M-o
-          ;; resumes the same Codex thread with the changed preset surface.
-          (when (and (minor-mode-on? buf "llm-mode")
-                     (boundp (quote llm-mode-reset-runtime!)))
-            (llm-mode-reset-runtime! buf #t))
-          (message (string-append what " for " buf))))))
+          (buffer-set-local! buf 'chat-presets wanted)
+          (for-each mcp-ensure! (chat-active-servers buf))
+          (if (chat-presets-live-session? buf)
+              (buffer-set-local! buf 'chat-mcp-dirty #t)
+              (chat-presets-settled! buf))
+          (when (boundp (quote workspace-llm-defaults-note!))
+            (workspace-llm-defaults-note! buf))
+          #t))))
 
 ;; kill + attach the same connector/model: a fresh session with the new
 ;; server list, seeded from the transcript so the conversation continues
@@ -434,6 +464,7 @@
 (public! 'define-preset! "(define-preset! 'name DESC SERVERS) — name a loadable tool collection")
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
+(public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")
 (public! 'mcp-connections "(mcp-connections) — (name status tool-count) per live MCP connection")
 (public! 'mcp-call! "(mcp-call! 'name TOOL ARGS [CB]) — call one tool; ARGS is JSON text or a plist")
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")

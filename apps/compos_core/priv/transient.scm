@@ -475,13 +475,13 @@
 ;;; --- the editor's LLM configuration menu ----------------------------------
 
 (define (llm-config--connector buf)
-  (car (llm-config-combination buf)))
+  (llm-bundle-connector (llm-config-core buf)))
 
 (define (llm-config--model buf)
-  (cadr (llm-config-combination buf)))
+  (llm-bundle-model (llm-config-core buf)))
 
 (define (llm-config--effort buf)
-  (caddr (llm-config-combination buf)))
+  (llm-bundle-effort (llm-config-core buf)))
 
 (define (llm-config--refresh!)
   (when (transient--active) (transient--render!)))
@@ -501,17 +501,9 @@
 ;;; servers serve the tools. So the menu picks presets and reports what
 ;;; they serve; it never offers a tool list of its own.
 
-;; The buffer whose LLM session the presets belong to. A chat or an
-;; llm-mode buffer is its own session; a grouped work buffer shares its
-;; group chat's session. This never CREATES a chat: the menu redraws on
-;; every keystroke.
-(define (llm-config--session buf)
-  (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
-        ((buffer-group buf)
-         (let ((chats (filter chat-buffer?
-                              (group-buffers-mru (buffer-group buf)))))
-           (if (pair? chats) (car chats) buf)))
-        (else buf)))
+;; The session buffer a bundle's presets and stance belong to. editor.scm
+;; resolves it, because a bundle is written and applied there too.
+(define (llm-config--session buf) (llm-config-session buf))
 
 (define (llm-config--presets buf)
   (if (boundp (quote chat-presets-of)) (chat-presets-of buf) '()))
@@ -585,6 +577,11 @@
     (let* ((buf (transient-scope))
            (connector (llm-config--connector buf))
            (current (llm-config--model buf)))
+      ;; the direct lane offers every model a provider lists, so a day-old
+      ;; catalog refreshes behind this list for the next time
+      (when (and (equal? connector "api")
+                 (boundp (quote llm-catalog-maybe-refresh!)))
+        (llm-catalog-maybe-refresh!))
       (llm-config-read! "Model: "
         (llm-config-current-first
           (cons (list "default" "connector default")
@@ -620,8 +617,124 @@
             (llm-config--refresh!)))
         (lambda () #f)))))
 
-(define (llm-config--history-label combination)
-  (string-join combination " · "))
+;; Applying a bundle ends the menu: it just set everything the menu sets.
+(define (llm-config--apply-bundle! buf bundle)
+  (llm-bundle-apply! buf bundle)
+  (llm-config-remember! bundle)
+  (set-frame-local! 'llm-config-selected #f)
+  (run-command "transient-quit-all"))
+
+;;; --- what stops to ask ----------------------------------------------------
+;;; Permissions are part of the setup, not a separate subject: the same
+;;; menu that chooses the model chooses what that model may do without
+;;; asking. Three controls, and they are not the same control: the stance
+;;; is compos's own policy, the agent mode is the backend's (ACP names it,
+;;; and plan mode changes what a turn DOES), and the file switch says
+;;; whether the agent may go around buffers to the filesystem.
+
+(define (llm-config--permission-label buf)
+  (symbol->string (llm-config-permission (llm-config--session buf))))
+
+(define (llm-config--agent-mode-label buf)
+  (let ((m (buffer-local (llm-config--session buf) 'agent-mode)))
+    (if (or (not m) (equal? m "")) "none" m)))
+
+(define (llm-config--filesystem)
+  (if (boundp (quote agent-filesystem-tools)) agent-filesystem-tools "deny"))
+
+(define-command "llm-config-pick-permission" "Choose when this session stops to ask"
+  (lambda ()
+    (let ((buf (llm-config--session (transient-scope))))
+      (if (not (boundp (quote chat-permission-mode-set!)))
+          (message "No permission policy — packages/agent-permissions.scm is not loaded")
+          (llm-config-read! "Asks: "
+            (llm-config-current-first
+              (map (lambda (m) (list (symbol->string m)
+                                     (chat-permission-mode-note m)))
+                   *permission-modes*)
+              (symbol->string (llm-config-permission buf)))
+            (lambda (choice)
+              (unless (equal? choice "")
+                (chat-permission-mode-set! buf (string->symbol choice))
+                (llm-config--mark-selected!)
+                (llm-config--refresh!)))
+            (lambda () #f))))))
+
+(define-command "llm-config-pick-agent-mode" "Choose the agent session's own mode"
+  (lambda ()
+    (let* ((buf (llm-config--session (transient-scope)))
+           (modes (if (boundp (quote agent-mode-options))
+                      (agent-mode-options buf)
+                      '())))
+      (if (null? modes)
+          (message "no backend modes here — this session is not running one")
+          (llm-config-read! "Agent mode: "
+            (llm-config-current-first
+              modes (or (buffer-local buf 'agent-mode) ""))
+            (lambda (choice)
+              (unless (equal? choice "")
+                (if (agent-mode-set! buf choice)
+                    (begin (llm-config--mark-selected!)
+                           (llm-config--refresh!))
+                    (message "the agent refused that mode"))))
+            (lambda () #f))))))
+
+(define-command "llm-config-pick-filesystem" "Choose what the agent's own file tools may do"
+  (lambda ()
+    (llm-config-read! "Agent file tools: "
+      (llm-config-current-first
+        (list (list "deny" "the agent edits buffers, and saves them")
+              (list "ask" "each direct write asks first")
+              (list "allow" "the agent writes files itself"))
+        (llm-config--filesystem))
+      (lambda (choice)
+        (unless (equal? choice "")
+          (customize-save! 'agent-filesystem-tools choice)
+          (llm-config--refresh!)))
+      (lambda () #f))))
+
+;;; --- bundles --------------------------------------------------------------
+
+(define (llm-config--bundle-candidates)
+  (map (lambda (b) (list (or (llm-bundle-name b) "?") (llm-bundle-label b)))
+       *llm-bundles*))
+
+(define-command "llm-config-save-bundle" "Save this whole setup under a name"
+  (lambda ()
+    (let ((buf (transient-scope)))
+      ;; a free-text prompt, not a palette: the point is to type a NEW name,
+      ;; and the saved ones complete so that saving over one is easy
+      (minibuffer-read "Bundle name: " (llm-config--bundle-candidates)
+        (lambda (name)
+          (let ((n (string-trim name)))
+            (unless (equal? n "")
+              (llm-bundle-save! n (llm-config-combination buf))
+              (llm-config--refresh!)
+              (message (string-append "bundle " n ": "
+                         (llm-bundle-label (llm-bundle-named n)))))))))))
+
+(define-command "llm-config-use-bundle" "Apply a saved bundle"
+  (lambda ()
+    (let ((buf (transient-scope)))
+      (if (null? *llm-bundles*)
+          (message "no saved bundles — s saves this setup as one")
+          (llm-config-read! "Bundle: " (llm-config--bundle-candidates)
+            (lambda (name)
+              (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
+                (when b (llm-config--apply-bundle! buf b))))
+            (lambda () #f))))))
+
+(define-command "llm-config-forget-bundle" "Forget a saved bundle"
+  (lambda ()
+    (if (null? *llm-bundles*)
+        (message "no saved bundles")
+        (llm-config-read! "Forget bundle: " (llm-config--bundle-candidates)
+          (lambda (name)
+            (unless (equal? name "")
+              (llm-bundle-forget! name)
+              (llm-config--refresh!)
+              (message (string-append "bundle " name " forgotten"))))
+          (lambda () #f)))))
 
 (define (llm-config--history-key index)
   (if (= index 10) "0" (number->string index)))
@@ -630,36 +743,70 @@
   (let loop ((choices *llm-config-history*) (index 1) (items '()))
     (if (null? choices)
         (reverse items)
-        (let ((choice (car choices)))
+        (let ((choice (llm-bundle-normalize (car choices))))
           (loop (cdr choices) (+ index 1)
             (cons
               (transient-suffix
                 (llm-config--history-key index)
-                (llm-config--history-label choice)
-                (lambda ()
-                  (llm-config-apply! buf (car choice) (cadr choice) (caddr choice))
-                  (llm-config-remember! choice)
-                  (set-frame-local! 'llm-config-selected #f)
-                  (run-command "transient-quit-all"))
+                (llm-bundle-label choice)
+                (lambda () (llm-config--apply-bundle! buf choice))
+                'transient 'stay)
+              items))))))
+
+;; Ten named bundles reach the menu by one key. The rest are not lost: u
+;; asks for a bundle by name, over every one there is.
+(define *llm-config-bundle-keys* '("A" "S" "D" "F" "G" "H" "J" "K" "L" "Z"))
+
+(define (llm-config--bundle-items buf)
+  (let loop ((bs *llm-bundles*) (keys *llm-config-bundle-keys*) (items '()))
+    (if (or (null? bs) (null? keys))
+        (reverse items)
+        (let ((b (car bs)))
+          (loop (cdr bs) (cdr keys)
+            (cons
+              (transient-suffix (car keys)
+                (string-append (or (llm-bundle-name b) "?") " — "
+                               (llm-bundle-label b))
+                (lambda () (llm-config--apply-bundle! buf b))
                 'transient 'stay)
               items))))))
 
 (define (llm-config--groups buf)
-  (let ((history (llm-config--history-items buf)))
+  (let ((history (llm-config--history-items buf))
+        (bundles (llm-config--bundle-items buf)))
     (append
       (list
-        (list "Arguments"
+        (list "Model"
           (transient-infix "b" "Backend" "llm-config-pick-backend"
             (lambda (scope) (llm-config--connector scope)))
           (transient-infix "m" "Model" "llm-config-pick-model"
             (lambda (scope) (llm-config--model scope)))
           (transient-infix "e" "Effort" "llm-config-pick-effort"
-            (lambda (scope) (llm-config--effort scope)))
+            (lambda (scope) (llm-config--effort scope))))
+        (list "Tools"
           (transient-infix "p" "Presets" "llm-config-pick-preset"
             (lambda (scope) (llm-config--presets-label scope)))
           (transient-suffix "t" "Tools" "chat-tool-list"
-            'value-fn (lambda (scope) (llm-config--tools-label scope)))))
-      (if (null? history) '() (list (cons "Recent combinations" history))))))
+            'value-fn (lambda (scope) (llm-config--tools-label scope))))
+        (list "Permissions"
+          (transient-infix "k" "Asks" "llm-config-pick-permission"
+            (lambda (scope) (llm-config--permission-label scope)))
+          (transient-infix "a" "Agent mode" "llm-config-pick-agent-mode"
+            (lambda (scope) (llm-config--agent-mode-label scope)))
+          (transient-infix "f" "Files" "llm-config-pick-filesystem"
+            (lambda (_scope) (llm-config--filesystem))))
+        (append
+          (list "Bundles"
+            (transient-suffix "s" "Save this setup as a bundle"
+              "llm-config-save-bundle" 'transient 'stay))
+          bundles
+          (if (null? *llm-bundles*)
+              '()
+              (list (transient-suffix "u" "Use a bundle by name"
+                      "llm-config-use-bundle" 'transient 'stay)
+                    (transient-suffix "x" "Forget a bundle"
+                      "llm-config-forget-bundle" 'transient 'stay)))))
+      (if (null? history) '() (list (cons "Recent" history))))))
 
 (transient-define-prefix "llm-configure"
   "Configure this buffer's language model"

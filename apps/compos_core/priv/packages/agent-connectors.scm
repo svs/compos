@@ -32,7 +32,9 @@
   ;; ~/src/claude-code-acp, `npm run build` with node >=22.
   '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/claude-code-acp/dist/index.js"
     meta (claudeCode (options (settingSources () strictMcpConfig #t)))
-    models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
+    ;; the seed only has to hold until a session reports its own list;
+    ;; llm-models-seen! keeps that answer for the connector
+    models ("default" "opus[1m]" "claude-fable-5[1m]" "sonnet" "haiku")))
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"
@@ -58,14 +60,128 @@
 (define-connector! "api"
   (list 'backend "req-llm"
         ;; User choices stay first as favorites; ReqLLM contributes every
-        ;; chat model whose provider is actually configured on this machine.
-        'models (lambda ()
-                  (fold (lambda (acc m)
-                          (if (member m acc) acc (append acc (list m))))
-                        *llm-models* (llm-available-models)))))
+        ;; chat model whose provider is configured on this machine, and the
+        ;; live catalog contributes what the providers shipped since the
+        ;; snapshot was cut.
+        'models (lambda () (llm-catalogued-models))))
 
 (define-connector! "gemini-nano"
   '(backend "chrome-gemini-nano" models ("gemini-nano")))
+
+;;; --- the live model catalog ---------------------------------------------------
+;;; LLMDB ships a snapshot of what each provider offers, and a snapshot
+;;; ages: the day a provider ships a model, nothing in the picker can name
+;;; it. So ask the provider. OpenRouter publishes its whole catalog with no
+;;; key, and it is the provider with the most to miss — hundreds of models,
+;;; new ones most weeks. The answer is cached in compos-home, so the list
+;;; survives a restart and no menu ever waits on the network.
+
+(define llm-catalog-file (string-append (compos-home) "/model-catalog.scm"))
+
+;; PROVIDER -> ((ID NAME) ...), as the provider itself reports it
+(define *llm-catalog* '())
+;; when a provider last answered, and when one was last asked. The first
+;; is cached with the catalog; the second only holds off a retry storm
+;; while the network is down, so it starts fresh every session.
+(define *llm-catalog-fetched* 0)
+(define *llm-catalog-tried* 0)
+(define llm-catalog-max-age 86400)
+(define llm-catalog-retry-after 300)
+
+(define *llm-catalog-sources*
+  '(("openrouter" "https://openrouter.ai/api/v1/models")))
+
+(define (llm-catalog-models)
+  (fold (lambda (acc entry)
+          (append acc
+            (map (lambda (m) (string-append (car entry) ":" (car m)))
+                 (cadr entry))))
+        '() *llm-catalog*))
+
+;; A provider answers {"data": [{"id": ..., "name": ...}, ...]}. An id with
+;; a colon in it is a billing variant (":batch", ":free"), and one that
+;; begins with ~ is the provider's alias marker: neither is a model you
+;; would choose by name, and a colon would break "provider:model" routing.
+(define (llm-catalog-parse text)
+  (let* ((doc (and text (not (equal? (string-trim text) "")) (json-parse text)))
+         (data (and (pair? doc) (plist-get doc 'data))))
+    (if (not (pair? data))
+        '()
+        (fold (lambda (acc m)
+                (let ((id (and (pair? m) (plist-get m 'id))))
+                  (if (and (string? id)
+                           (not (string-contains? id ":"))
+                           (not (string-prefix? "~" id)))
+                      (append acc (list (list id (or (plist-get m 'name) ""))))
+                      acc)))
+              '() data))))
+
+(define (llm-catalog-put! provider models)
+  (set! *llm-catalog*
+    (cons (list provider models)
+          (remove (lambda (e) (equal? (car e) provider)) *llm-catalog*))))
+
+(define (llm-catalog-save!)
+  (write-file! llm-catalog-file
+    (string-append "(set! *llm-catalog* '" (value->string *llm-catalog*) ")\n"
+                   "(set! *llm-catalog-fetched* "
+                   (number->string *llm-catalog-fetched*) ")\n")))
+
+;; K hears how many models the provider named, or #f when it said nothing.
+(define (llm-catalog-fetch! provider url k)
+  (shell-command->string
+    (string-append "curl -s --max-time 20 '" url "'")
+    (lambda (out)
+      (let ((models (llm-catalog-parse out)))
+        (if (null? models)
+            (k #f)
+            (begin
+              (llm-catalog-put! provider models)
+              (set! *llm-catalog-fetched* (current-time))
+              (llm-catalog-save!)
+              (k (length models))))))))
+
+(define (llm-catalog-refresh! k)
+  (for-each (lambda (src) (llm-catalog-fetch! (car src) (cadr src) k))
+            *llm-catalog-sources*))
+
+;; Opening the model picker on a day-old catalog refreshes it behind the
+;; picker: this list is what it knows now, and the next one is longer.
+(define (llm-catalog-maybe-refresh!)
+  (when (and (> (- (current-time) *llm-catalog-fetched*) llm-catalog-max-age)
+             (> (- (current-time) *llm-catalog-tried*) llm-catalog-retry-after))
+    (set! *llm-catalog-tried* (current-time))
+    (llm-catalog-refresh!
+      (lambda (n)
+        (when n (message (string-append "model catalog: "
+                                        (number->string n) " models")))))))
+
+(define-command "llm-models-refresh" "Ask every provider for its own model list"
+  (lambda ()
+    (message "asking the providers for their models...")
+    (llm-catalog-refresh!
+      (lambda (n)
+        (message (if n
+                     (string-append "model catalog: " (number->string n)
+                                    " models")
+                     "model catalog: no answer"))))))
+
+;; Every model the direct lane can be asked for: the favorites first, then
+;; one of everything the snapshot and the providers know. sort is a
+;; builtin, so uniqueness over ~800 ids costs n log n rather than the n^2 a
+;; member-scan would cost, and the rest read in provider order because the
+;; id starts with the provider.
+(define (llm-models-unique lst)
+  (let loop ((xs (sort lst)) (acc '()))
+    (cond ((null? xs) (reverse acc))
+          ((and (pair? acc) (equal? (car xs) (car acc))) (loop (cdr xs) acc))
+          (else (loop (cdr xs) (cons (car xs) acc))))))
+
+(define (llm-catalogued-models)
+  (append *llm-models*
+    (remove (lambda (m) (member m *llm-models*))
+            (llm-models-unique (append (llm-available-models)
+                                       (llm-catalog-models))))))
 
 (define (connector-capabilities name)
   (backend-capabilities (or (plist-get (connector-config name) 'backend) "acp")))
@@ -276,3 +392,7 @@
             "")))
     ;; the segment is clickable: ui-command! runs this on a click
     (buffer-set-local! buf 'modeline-info-command "agent-switch")))
+
+;; the catalog the providers last reported, so a fresh session offers the
+;; long list before anything is fetched
+(when (file-exists? llm-catalog-file) (load llm-catalog-file))

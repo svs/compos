@@ -139,6 +139,11 @@
             ((equal? (chat-permission-mode buf) 'ask) 'ask)
             (else 'allow-always)))))
 
+(public! 'chat-permission-mode-set!
+  "(chat-permission-mode-set! BUF 'approve|'auto|'ask) — set a session's permission stance, and tell a live agent")
+(public! 'agent-mode-set!
+  "(agent-mode-set! BUF MODE) — put the running ACP session in one of its own modes; #f when it refuses")
+
 (public! 'allow-command-when!
   "(allow-command-when! NAME PREDICATE) — register a permission predicate that can allow one M-x command for a chat buffer")
 
@@ -183,6 +188,22 @@
       (when (llm-session-set-mode! slug want)
         (buffer-set-local! buf 'agent-mode want)))))
 
+;; The ACP session's OWN mode. The backend owns the list and the answer:
+;; it can refuse, and a refusal must not leave the local claiming it took.
+(define (agent-mode-set! buf mode)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (cond ((not slug) #f)
+          ((llm-session-set-mode! slug mode)
+           (buffer-set-local! buf 'agent-mode mode)
+           (agent-update-modeline! buf)
+           mode)
+          (else #f))))
+
+;; (NAME DESCRIPTION) per mode the running session offers.
+(define (agent-mode-options buf)
+  (map (lambda (m) (list (car m) (or (nth 2 m) "")))
+       (or (buffer-local buf 'agent-modes) '())))
+
 (define-command "agent-set-mode" "Switch the agent session's mode (plan, acceptEdits, ...)"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -193,14 +214,34 @@
             (else
               (minibuffer-read
                 (string-append "Mode (now " (or (buffer-local buf 'agent-mode) "?") "): ")
-                (map (lambda (m) (list (car m) (or (nth 2 m) ""))) modes)
+                (agent-mode-options buf)
                 (lambda (m)
                   (unless (equal? (string-trim m) "")
-                    (if (llm-session-set-mode! slug m)
-                        (begin (buffer-set-local! buf 'agent-mode m)
-                               (agent-update-modeline! buf)
-                               (message (string-append "agent mode: " m)))
+                    (if (agent-mode-set! buf m)
+                        (message (string-append "agent mode: " m))
                         (message "the agent refused that mode"))))))))))
+
+;; What each stance means, in one place: the message after a change and
+;; the annotation beside a choice say the same thing.
+(define (chat-permission-mode-note mode)
+  (cond ((equal? mode 'ask) "every tool call asks")
+        ((equal? mode 'approve) "only irreversible acts ask")
+        (else "the agent stops asking too; the deny-list still holds")))
+
+(define *permission-modes* '(approve auto ask))
+
+;; The stance, set outright. Cycling it and applying a bundle take the same
+;; road: the local, then the live agent, then the modeline.
+(define (chat-permission-mode-set! buf mode)
+  (buffer-set-local! buf 'chat-permission-mode mode)
+  (when (boundp (quote workspace-llm-defaults-note!))
+    (workspace-llm-defaults-note! buf))
+  ;; a live agent hears about it immediately, not at the next reconnect
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (when (and slug (not (equal? (agent-status slug) 'dead)))
+      (agent-sync-permission-mode! slug)))
+  (agent-update-modeline! buf)
+  mode)
 
 (define-command "chat-set-permission-mode" "Cycle this chat's permission mode"
   (lambda ()
@@ -209,19 +250,10 @@
            (next (cond ((equal? m 'approve) 'auto)
                        ((equal? m 'auto) 'ask)
                        (else 'approve))))
-      (buffer-set-local! buf 'chat-permission-mode next)
-      (when (boundp (quote workspace-llm-defaults-note!))
-        (workspace-llm-defaults-note! buf))
-      ;; a live agent hears about it immediately, not at the next reconnect
-      (let ((slug (buffer-local buf 'agent-slug)))
-        (when (and slug (not (equal? (agent-status slug) 'dead)))
-          (agent-sync-permission-mode! slug)))
-      (agent-update-modeline! buf)
+      (chat-permission-mode-set! buf next)
       (message
         (string-append "permissions: " (symbol->string next)
-          (cond ((equal? next 'ask) " — every tool call asks")
-                ((equal? next 'approve) " — only irreversible acts ask")
-                (else " — the agent stops asking too; the deny-list still holds")))))))
+                       " — " (chat-permission-mode-note next))))))
 
 (define (agent-perm-option options exact prefix)
   (let loop ((os options) (by-prefix #f))

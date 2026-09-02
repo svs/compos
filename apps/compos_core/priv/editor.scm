@@ -8986,10 +8986,13 @@
       (list (llm-bundle-connector b))
       (let ((m (llm-bundle-model b))) (if (equal? m "default") '() (list m)))
       (let ((e (llm-bundle-effort b))) (if (equal? e "default") '() (list e)))
-      (let ((p (llm-bundle-presets b)))
+      (let* ((p (llm-bundle-presets b))
+             (extra (and p (remove (lambda (x) (equal? x 'compos)) p))))
         (cond ((not p) '())
               ((null? p) (list "no tools"))
-              (else (list (string-join (map symbol->string p) "+")))))
+              ;; the compos bridge is on in every session; naming it says nothing
+              ((null? extra) '())
+              (else (list (string-join (map symbol->string extra) "+")))))
       (let ((k (llm-bundle-permission b)))
         (if (or (not k) (equal? k "approve")) '() (list k)))
       (let ((a (llm-bundle-agent-mode b)))
@@ -9029,9 +9032,11 @@
   (lambda () *llm-bundles*)
   (lambda (v) (set! *llm-bundles* (map llm-bundle-normalize (or v '())))))
 
-(define (llm-config-combination buf)
-  (let* ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
-         (session (llm-config-session buf)))
+;; The three parts that are always cheap to read: buffer-locals, and no
+;; walk to find the session. The menu redraws on every keystroke, so what
+;; the menu shows comes from here.
+(define (llm-config-core buf)
+  (let ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode")))
     (list
       'connector
       (or (buffer-local buf (if chat? 'agent-connector 'llm-connector))
@@ -9039,21 +9044,51 @@
       'model
       (or (buffer-local buf (if chat? 'agent-model 'llm-model)) "default")
       'effort
-      (or (buffer-local buf (if chat? 'agent-effort 'llm-effort)) "default")
-      'presets
-      (if (boundp (quote chat-presets-of)) (chat-presets-of session) '())
-      'permission
-      (symbol->string (llm-config-permission session))
-      'agent-mode
-      (or (buffer-local session 'agent-mode) ""))))
+      (or (buffer-local buf (if chat? 'agent-effort 'llm-effort)) "default"))))
 
-(define (llm-config-remember! combination)
-  (set! *llm-config-history*
-    (take-n
-      (cons combination
-        (remove (lambda (old) (equal? old combination)) *llm-config-history*))
-      llm-config-history-limit))
-  combination)
+;; The whole setup, including the parts that belong to the session rather
+;; than to this buffer. This is what gets remembered and what gets saved.
+(define (llm-config-combination buf)
+  (let ((session (llm-config-session buf)))
+    (append (llm-config-core buf)
+      (list
+        'presets
+        (if (boundp (quote chat-presets-of)) (chat-presets-of session) '())
+        'permission
+        (symbol->string (llm-config-permission session))
+        'agent-mode
+        (or (buffer-local session 'agent-mode) "")))))
+
+(define (llm-config-remember! bundle)
+  (let ((b (llm-bundle-normalize bundle)))
+    (set! *llm-config-history*
+      (take-n
+        (cons b
+          (remove (lambda (old)
+                    (equal? (llm-bundle-setup (llm-bundle-normalize old))
+                            (llm-bundle-setup b)))
+                  *llm-config-history*))
+        llm-config-history-limit))
+    b))
+
+(define (llm-bundle-named name)
+  (let loop ((bs *llm-bundles*))
+    (cond ((null? bs) #f)
+          ((equal? (llm-bundle-name (car bs)) name) (car bs))
+          (else (loop (cdr bs))))))
+
+;; The name is the identity: saving over one replaces it, newest first.
+(define (llm-bundle-save! name bundle)
+  (let ((b (llm-bundle-put (llm-bundle-normalize bundle) 'name name)))
+    (set! *llm-bundles*
+      (cons b (remove (lambda (old) (equal? (llm-bundle-name old) name))
+                      *llm-bundles*)))
+    b))
+
+(define (llm-bundle-forget! name)
+  (set! *llm-bundles*
+    (remove (lambda (old) (equal? (llm-bundle-name old) name)) *llm-bundles*))
+  name)
 
 ;; One configuration surface for every LLM frontend. Chat buffers apply the
 ;; choice to their durable session; ordinary buffers persist it as llm-mode
@@ -9080,6 +9115,29 @@
             (if (equal? effort "default") "" (string-append " · " effort))))))
   (when (boundp (quote workspace-llm-defaults-note!))
     (workspace-llm-defaults-note! buf)))
+
+;; Applying a bundle applies ALL of it, in one pass: the stance and the
+;; presets go in first so the reattach that a connector or model change
+;; already performs carries the new tool surface too. A preset change on an
+;; otherwise unchanged session reconnects at the end, without asking —
+;; naming a whole setup IS the answer to that question.
+(define (llm-bundle-apply! buf bundle)
+  (let* ((b (llm-bundle-normalize bundle))
+         (session (llm-config-session buf))
+         (presets (llm-bundle-presets b))
+         (permission (llm-bundle-permission b))
+         (mode (llm-bundle-agent-mode b)))
+    (when (and permission (boundp (quote chat-permission-mode-set!)))
+      (chat-permission-mode-set! session (string->symbol permission)))
+    (when (and presets (boundp (quote chat-presets-set!)))
+      (chat-presets-set! session presets))
+    (llm-config-apply! buf (llm-bundle-connector b) (llm-bundle-model b)
+                       (llm-bundle-effort b))
+    (when (boundp (quote chat-apply-pending-presets!))
+      (chat-apply-pending-presets! session))
+    (when (and mode (not (equal? mode "")) (boundp (quote agent-mode-set!)))
+      (agent-mode-set! session mode))
+    b))
 
 ;; Transient uses these catalog helpers to show the live model choices.
 (define (chat-live-model-entry buf connector model)
@@ -9112,12 +9170,45 @@
           (list (or (and effort (plist-get effort 'values)) '())
                 (or (and effort (plist-get effort 'default)) ""))))))
 
+;; A live backend tells its session which models it serves. That answer is
+;; the truth about the CONNECTOR, not about one session, so keep it: the
+;; next chat on that connector — and the picker aimed at a connector nothing
+;; is attached to — offers the same list, instead of a hand-written seed
+;; that ages the day the provider ships a model.
+(define *llm-connector-models* '())
+
+(persist-global! 'llm-connector-models
+  (lambda () *llm-connector-models*)
+  (lambda (v) (set! *llm-connector-models* (or v '()))))
+
+(define (llm-models-remembered connector)
+  (let ((e (assoc connector *llm-connector-models*)))
+    (if e (cadr e) '())))
+
+(define (llm-models-seen! connector entries)
+  (when (and connector (pair? entries))
+    (set! *llm-connector-models*
+      (cons (list connector entries)
+            (remove (lambda (e) (equal? (car e) connector))
+                    *llm-connector-models*))))
+  entries)
+
+;; Known models keep their order and their display names; a declared model
+;; the live list never mentioned still shows, at the end. A catalog that
+;; drops what it cannot confirm is how a working model left the menu.
+(define (llm-model-options-merge known extra)
+  (append known
+    (filter (lambda (o) (not (assoc (car o) known))) extra)))
+
 (define (chat-model-options buf connector)
-  (let ((live (and (equal? connector (buffer-local buf 'agent-connector))
-                   (buffer-local buf 'agent-models))))
-    (if (pair? live)
-        (map (lambda (entry) (list (car entry) (cadr entry))) live)
-        (map (lambda (m) (list m "")) (connector-models connector)))))
+  (let* ((live (and (equal? connector (buffer-local buf 'agent-connector))
+                    (buffer-local buf 'agent-models)))
+         (entries (if (pair? live) live (llm-models-remembered connector))))
+    (llm-model-options-merge
+      (map (lambda (e)
+             (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
+           entries)
+      (map (lambda (m) (list m "")) (connector-models connector)))))
 
 (define (llm-config-read! prompt candidates confirm cancel)
   (minibuffer-read* prompt candidates

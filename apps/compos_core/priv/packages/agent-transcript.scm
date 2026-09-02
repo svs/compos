@@ -333,12 +333,29 @@
                   (not (string-index head "\""))
                   (list head rest)))))))
 
+;; A full path in a card title is mostly noise: show it relative to its
+;; repository root, or with ~ for home, and leave every non-path alone.
+(define (agent--dir-of p)
+  (let loop ((parts (string-split p "/")) (acc '()))
+    (if (or (null? parts) (null? (cdr parts)))
+        (string-join (reverse acc) "/")
+        (loop (cdr parts) (cons (car parts) acc)))))
+
+(define (agent-path-abbrev p)
+  (if (and (string? p) (string-prefix? "/" p))
+      (let ((root (git-root (agent--dir-of p))))
+        (if (and (string? root)
+                 (string-prefix? (string-append root "/") p))
+            (substring p (+ (string-length root) 1) (string-length p))
+            (abbreviate-file-name p)))
+      p))
+
 (define (agent-tool-title e)
   (let ((name (plist-get e 'name))
         (args (agent-tool-args e)))
     (if (not name)
         (or (plist-get e 'title) "tool")     ; an adapter's own title
-        (let ((v (and args (agent-tool-primary args)))
+        (let ((v (agent-path-abbrev (and args (agent-tool-primary args))))
               (shown (agent-tool-name-display name)))
           (if (and v (string? v) (not (equal? (string-trim v) "")))
               (let ((sx (and (agent-eval-tool? name) (agent-sexp-head-split v))))

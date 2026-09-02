@@ -233,3 +233,18 @@
             (message (if (equal? agents "")
                          "jj: no agent-authored changes in the stack"
                          agents)))))))
+
+;; Push is the boundary where agent identity would leak into public history.
+;; A synthetic agents.compos.local address must never reach the remote, so
+;; the push refuses while any change in the stack carries one; squash those
+;; into your own change first.
+(define-command "jj-push" "Push to git; refuse while agent-authored changes remain"
+  (lambda ()
+    (let ((root (jj-here)))
+      (if (not root)
+          (message "jj: not in a jj repo")
+          (let ((agents (jj-agent-changes root)))
+            (if (equal? agents "")
+                (message (string-trim (jj-sh root "jj git push 2>&1")))
+                (message (string-append "jj: not pushing; agent-authored changes in the stack:\n"
+                                        agents))))))))

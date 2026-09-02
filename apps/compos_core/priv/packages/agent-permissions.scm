@@ -25,7 +25,10 @@
         "send[-_ ]*(message|email|sms|text)"
         "(permanently|forever)[-_ ]*delete" "delete[-_ ]*(permanently|forever)"
         "empty[-_ ]*trash" "trash[-_ ]*empty" "expunge"
-        "rm[-_ ]+-[a-z]*[rf]" "git[-_ ]+push" "force[-_ ]*push"
+        "rm[-_ ]+-[a-z]*[rf]"
+        ;; user ruling 2026-09-02: a push through jj is always allowed; the
+        ;; jj-push command carries its own agent-author guard.
+        "(?<!jj[-_ ])git[-_ ]+push" "force[-_ ]*push"
         "\\bpublish\\b" "\\bdeploy\\b"))
 
 (define (permission-denied-verb? text)

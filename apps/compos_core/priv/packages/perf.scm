@@ -692,7 +692,7 @@
   (perf--div "perf-bar perf-bottom"
     (perf--txt "perf-strong" *perf-buffer*)
     (perf--txt "" "g refresh") (perf--txt "" "/ filter") (perf--txt "" "s sort")
-    (perf--txt "" "RET info") (perf--txt "" "k kill") (perf--txt "" "SPC pause")
+    (perf--txt "" "RET info") (perf--txt "" "k kill") (perf--txt "" "SPC pause") (perf--txt "" "t text")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local buf 'perf-paused) "perf-warm" "perf-dim")
                (if (buffer-local buf 'perf-paused) "paused" (string-append "tick " (number->string (or (buffer-local buf 'perf-tick) 0)))))
@@ -778,6 +778,7 @@
     ("RET" "perf-process-info")
     ("k" "perf-process-kill")
     ("SPC" "perf-pause")
+    ("t" "perf-toggle-text")
     ("n" "next-line")
     ("p" "previous-line")
     ("q" "quit-window")))
@@ -837,6 +838,13 @@
       (buffer-set-local! buf 'perf-sort next)
       (perf--refresh! buf)
       (message (string-append "sorted by " next)))))
+
+(define-command "perf-toggle-text" "Show the monitor as its plain text table, or as the panels again"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (text? (equal? (buffer-local buf 'render-mode) "text")))
+      (buffer-set-local! buf 'render-mode (if text? "blocks" "text"))
+      (message (if text? "perf panels" "perf text")))))
 
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
@@ -1056,5 +1064,28 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-log-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ")
 
-(public! 'perf-refresh! "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (define (perf-refresh! buf) (perf--refresh! buf))
+
+;;; --- the public API -------------------------------------------------------------------
+;;; The vm-* primitives come from Elixir; this is where the catalog learns
+;;; their domain and effects. public! takes the domain from the category.
+
+(category! 'diagnostics)
+(effects! '(read))
+(public! 'vm-sample
+  "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks")
+(public! 'vm-processes
+  "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\"")
+(public! 'vm-process-info
+  "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone")
+(public! 'perf-refresh!
+  "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'diagnostics 'effects '(read)))
+  '("vm-sample" "vm-processes" "vm-process-info" "perf-refresh!"))
+
+(effects! '(destroy))
+(public! 'vm-process-kill!
+  "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive")
+(catalog-meta! 'function "vm-process-kill!" 'domain 'diagnostics 'effects '(destroy))
+(effects! '(read))

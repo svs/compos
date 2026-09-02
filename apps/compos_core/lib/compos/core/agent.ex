@@ -639,7 +639,10 @@ defmodule Compos.Core.Agent do
     {:noreply, state}
   end
 
-  def handle_info({:steering_settle_timeout, _stale_epoch}, state), do: {:noreply, state}
+  # a stale-epoch timeout still spent its timer: clear the ref, or the
+  # dead reference blocks re-arming and parks every later turn-end
+  def handle_info({:steering_settle_timeout, _stale_epoch}, state),
+    do: {:noreply, %{state | steering_settle_timer: nil}}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -757,10 +760,12 @@ defmodule Compos.Core.Agent do
         if state.pending_steer_order == [] do
           finish_turn(state, event)
         else
-          timer =
-            state.steering_settle_timer ||
-              Process.send_after(self(), {:steering_settle_timeout, state.epoch}, 2_000)
-
+          # always a FRESH timer, stamped with the current epoch: a ref left
+          # over from a fired-and-ignored timeout would otherwise satisfy the
+          # arming check forever, and every later turn-end would park with
+          # no recovery
+          state = cancel_steering_settle_timer(state)
+          timer = Process.send_after(self(), {:steering_settle_timeout, state.epoch}, 2_000)
           %{state | pending_turn_end: event, steering_settle_timer: timer}
         end
 

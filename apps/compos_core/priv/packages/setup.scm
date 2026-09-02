@@ -132,7 +132,7 @@
   (lambda ()
     (read-file-name "Find file in other window: " find-file-other-window!)))
 
-(global-set-key "C-x 4 f" "find-file-other-window")
+(define-key "ctl-x-4-map" "f" "find-file-other-window")
 
 ;;; --- guided setup -------------------------------------------------------------
 

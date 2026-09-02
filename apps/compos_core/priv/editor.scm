@@ -7448,7 +7448,6 @@
 (load (string-append (compos-priv-dir) "/editor/blocks/block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/diff-block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/llm-rewrite.scm"))
-(load (string-append (compos-priv-dir) "/editor/goto-address.scm"))
 (global-set-key "M-|" "llm-pipe-region")
 
 ;; gptel's most Emacs-shaped operation: the buffer is both the prompt and
@@ -10107,6 +10106,38 @@
           '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
 (global-set-key "M--" "negative-argument")
 
+;;; --- the prefix keymaps -------------------------------------------------------
+;;; A prefix key leads to a keymap, as C-x leads to ctl-x-map in Emacs: the
+;;; binding's value is (keymap NAME), and the rest of the sequence resolves
+;;; in that keymap. A package binds into the map its keys belong to and
+;;; never writes the global map; the global map belongs to the user's
+;;; init. The names are Emacs's where Emacs has them.
+
+(define (define-prefix-command name)
+  (define-keymap! name)
+  name)
+
+;; (bind-prefix! MAP KEYS NAME): in MAP, KEYS leads to the keymap NAME
+(define (bind-prefix! map keys name)
+  (define-prefix-command name)
+  (if (equal? map "global")
+      (global-set-key keys (list 'keymap name))
+      (define-key map keys (list 'keymap name))))
+
+(bind-prefix! "global" "C-x" "ctl-x-map")
+(bind-prefix! "global" "C-c" "mode-specific-map")
+(bind-prefix! "global" "C-h" "help-map")
+(bind-prefix! "global" "M-g" "goto-map")
+(bind-prefix! "global" "M-s" "search-map")
+(bind-prefix! "ctl-x-map" "r" "ctl-x-r-map")
+(bind-prefix! "ctl-x-map" "4" "ctl-x-4-map")
+(bind-prefix! "ctl-x-map" "p" "project-prefix-map")
+(bind-prefix! "ctl-x-map" "v" "vc-prefix-map")
+(bind-prefix! "ctl-x-map" "C-g" "group-map")
+(bind-prefix! "mode-specific-map" "a" "agent-map")
+(bind-prefix! "mode-specific-map" "S" "spotify-map")
+(bind-prefix! "mode-specific-map" "!" "annotate-map")
+
 ;;; --- self-insert-command --------------------------------------------------------
 ;;; Every printable key and SPC are bound to self-insert-command in the
 ;;; global map, as in Emacs, so a key that inserts itself reaches that
@@ -10924,6 +10955,8 @@
 (public! 'define-globalized-minor-mode! "(define-globalized-minor-mode! GLOBAL LOCAL ELIGIBLE? [DOC]) — the command GLOBAL turns LOCAL on in every buffer ELIGIBLE? accepts, now and as buffers appear")
 (public! 'globalized-minor-mode-on? "(globalized-minor-mode-on? GLOBAL) — #t while the globalized mode is on")
 (public! 'auto-mode-for-buffer "(auto-mode-for-buffer BUF [NAME]) — the mode BUF would open in: magic-mode-alist, then the interpreter line, then the name")
+(public! 'define-prefix-command "(define-prefix-command NAME) — a keymap a prefix key leads to")
+(public! 'bind-prefix! "(bind-prefix! MAP KEYS NAME) — in MAP (\"global\" for the global map), KEYS leads to the keymap NAME")
 (public! 'mode-keys! "(mode-keys! MODE ((KEYS COMMAND) ...)) — bind once on MODE's map; every buffer in the mode answers")
 (public! 'minor-mode-keys! "(minor-mode-keys! NAME ((KEYS COMMAND) ...)) — the minor mode's map, in force while the mode is on")
 (public! 'minor-mode-keymap! "(minor-mode-keymap! NAME KEYMAP) — give a registered minor mode its keymap")

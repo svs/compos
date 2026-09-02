@@ -623,7 +623,7 @@
 (define-command "switch-groups" "Switch group or project, then pick a buffer or file in it"
   (lambda () (switch-open! 'groups)))
 
-(global-set-key "C-x G" "switch-groups")
+(define-key "ctl-x-map" "G" "switch-groups")
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

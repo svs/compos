@@ -7,8 +7,13 @@
 (effects! '(write))
 
 ;; the table is read at check time: a list mode defines its flag
-;; commands as it installs them
-(define (sweep--live? cmd names) (and (member cmd (command-names)) #t))
+;; commands as it installs them. keymap:NAME is a prefix key that leads
+;; to a keymap, live when the keymap exists.
+(define (sweep--live? cmd names)
+  (or (and (member cmd (command-names)) #t)
+      (and (string-prefix? "keymap:" cmd)
+           (member (substring cmd 7 (string-length cmd)) (keymap-names))
+           #t)))
 
 ;; the keys a buffer answers that are not the global map's, resolved
 (define (sweep--check-buffer buf names)

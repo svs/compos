@@ -411,7 +411,7 @@
 (define-command "mcp-hub" "List every MCP server: status, tools, presets"
   (lambda () (list-mode-show! "mcp-hub-mode")))
 
-(global-set-key "C-c a m" "mcp-hub")
+(define-key "agent-map" "m" "mcp-hub")
 
 (category! 'mcp)
 (public! 'mcp-hub-refresh! "(mcp-hub-refresh!) — redraw *mcp-hub* if it exists")

@@ -95,8 +95,12 @@
                 (loop (cdr ss))))))))
 
 (define-command "scheme-goto-definition"
-  "Go to the definition of the scheme name at point"
+  "Go to the definition of the scheme name at point, or follow the link there"
   (lambda ()
+    (unless (goto-address-follow-at-point!)
+      (scheme-ide--goto-definition!))))
+
+(define (scheme-ide--goto-definition!)
     (let ((sym (scheme-ide--symbol-at)))
       (if (not sym)
           (message "No name at point")
@@ -111,7 +115,7 @@
                (message (string-append "Definition of " sym)))
               ((primitive-doc sym)
                (message (string-append sym " is a primitive — " (primitive-doc sym))))
-              (else (message (string-append "No definition of " sym)))))))))
+              (else (message (string-append "No definition of " sym))))))))
 
 ;;; --- one-line docs -----------------------------------------------------------
 

@@ -2973,23 +2973,21 @@
 ;; The verbs of docs/groups.md under one prefix. C-x G is the switcher's
 ;; groups view (switch.scm); the board is C-x C-g l.
 (define (group-keymap-install!)
-  (global-set-key "C-c g" "group-add")
-  (global-set-key "C-c d" "group-describe")
-  (global-set-key "C-x b" "group-switch-buffer")
-  (global-set-key "C-x g" "group-switch")
+  (define-key "mode-specific-map" "g" "group-add")
+  (define-key "mode-specific-map" "d" "group-describe")
+  (define-key "ctl-x-map" "b" "group-switch-buffer")
+  (define-key "ctl-x-map" "g" "group-switch")
 
-  ;; A previous release bound the prefix itself. Remove it during hot reload.
-  (global-unset-key "C-x C-g")
-  (global-set-key "C-x C-g g" "group-switch")
-  (global-set-key "C-x C-g C-g" "group-switch-last")
-  (global-set-key "C-x C-g a" "group-add")
-  (global-set-key "C-x C-g m" "group-move")
-  (global-set-key "C-x C-g r" "remove-group-from-buffer")
-  (global-set-key "C-x C-g n" "group-new")
-  (global-set-key "C-x C-g b" "group-members")
-  (global-set-key "C-x C-g l" "groups")
-  (global-set-key "C-x C-g s" "tile-all")
-  (global-set-key "C-x C-g p" "group-pin"))
+  (define-key "group-map" "g" "group-switch")
+  (define-key "group-map" "C-g" "group-switch-last")
+  (define-key "group-map" "a" "group-add")
+  (define-key "group-map" "m" "group-move")
+  (define-key "group-map" "r" "remove-group-from-buffer")
+  (define-key "group-map" "n" "group-new")
+  (define-key "group-map" "b" "group-members")
+  (define-key "group-map" "l" "groups")
+  (define-key "group-map" "s" "tile-all")
+  (define-key "group-map" "p" "group-pin"))
 
 (group-keymap-install!)
 
@@ -3006,8 +3004,7 @@
     "group-list" "group-show-all" "group-chat-new"
     "switch-group" "ibuffer-group" "find-file-in-group"
     "opencode-in-group"))
-(global-set-key "C-x C-g v" "group-new-from-visible")
-(global-unset-key "C-x C-g o")
+(define-key "group-map" "v" "group-new-from-visible")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")

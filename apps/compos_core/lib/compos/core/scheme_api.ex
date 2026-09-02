@@ -94,7 +94,7 @@ defmodule Compos.Core.SchemeAPI do
       "overlay-clear!" =>
         "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
       "buffer-overlays" =>
-        "(buffer-overlays BUF) — return all overlays as (START END FACE) byte ranges.",
+        "(buffer-overlays BUF [TAG]) — return all overlays, or TAG's alone, as (START END FACE) byte ranges.",
       "buffer-set-hidden!" =>
         "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges.",
       "fold-set!" =>
@@ -411,7 +411,7 @@ defmodule Compos.Core.SchemeAPI do
         "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer.",
       "keymap-set!" => "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap.",
       "keymap-unset!" => "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.",
-      "define-key" => "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!.",
+      "define-key" => "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.",
       "keymap-parent!" => "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.",
       "keymap-parent" => "(keymap-parent KEYMAP) — the parent's name, or #f.",
       "keymap-bindings" => "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings.",
@@ -724,8 +724,9 @@ defmodule Compos.Core.SchemeAPI do
         :ok = Buffer.clear_overlays(name, if(plain(tag) == "all", do: :all, else: plain(tag)))
         :void
       end,
-      "buffer-overlays" => fn [name] ->
-        Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
+      "buffer-overlays" => fn
+        [name] -> Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
+        [name, tag] -> Enum.map(Buffer.overlays(name, plain(tag)), fn {s, e, f} -> [s, e, f] end)
       end,
       # folding: ranges is a list of (start end) byte ranges to hide.
       # A buffer has several fold owners, so ranges are tagged and each
@@ -1672,7 +1673,7 @@ defmodule Compos.Core.SchemeAPI do
         :void
       end,
       "global-set-key" => fn [seq, command] ->
-        Editor.bind_key(String.split(seq, " "), command)
+        Editor.bind_key(String.split(seq, " "), key_binding_value(command))
         :void
       end,
       "global-unset-key" => fn [seq] ->
@@ -1764,11 +1765,11 @@ defmodule Compos.Core.SchemeAPI do
         [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
       end,
       "keymap-set!" => fn [name, seq, command] ->
-        Editor.keymap_set(plain(name), key_seq(seq), command)
+        Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
         :void
       end,
       "define-key" => fn [name, seq, command] ->
-        Editor.keymap_set(plain(name), key_seq(seq), command)
+        Editor.keymap_set(plain(name), key_seq(seq), key_binding_value(command))
         :void
       end,
       "keymap-unset!" => fn [name, seq] ->
@@ -2527,6 +2528,11 @@ defmodule Compos.Core.SchemeAPI do
   # says it — "C-x b" — and the keymaps hold ["C-x", "b"]. Take either.
   # A bare string reaching the keymap walk raises inside the Editor call,
   # and an Editor that dies loses every buffer's local keymap.
+  # a binding is a command name, or (keymap NAME): a prefix key that leads
+  # to another keymap
+  defp key_binding_value([{:sym, "keymap"}, name]), do: {:keymap, plain(name)}
+  defp key_binding_value(command), do: command
+
   defp key_seq(seq) when is_list(seq), do: Enum.map(seq, &plain/1)
   defp key_seq(seq) when is_binary(seq), do: String.split(seq, " ", trim: true)
   defp key_seq(seq), do: [plain(seq)]

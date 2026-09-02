@@ -329,7 +329,7 @@
             ("G" "group-add") ("g" "ibuffer-refresh")
             ("q" "quit-window"))))
 
-(global-set-key "C-x C-b" "ibuffer")
+(define-key "ctl-x-map" "C-b" "ibuffer")
 
 (category! 'buffers)
 (catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))

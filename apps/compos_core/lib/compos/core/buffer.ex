@@ -286,6 +286,9 @@ defmodule Compos.Core.Buffer do
     end
   end
 
+  @doc "One tag's overlay ranges, unmerged: a painter reads back only its own."
+  def overlays(name, tag), do: GenServer.call(via(name), {:overlays, tag})
+
   def overlay_gen(name),
     do: viewed(name, :overlay_gen, fn -> GenServer.call(via(name), :overlay_gen) end)
 
@@ -1052,6 +1055,9 @@ defmodule Compos.Core.Buffer do
 
   defp on_call(:overlays, _from, state),
     do: {:reply, state.overlays |> Map.values() |> Enum.concat(), state}
+
+  defp on_call({:overlays, tag}, _from, state),
+    do: {:reply, Map.get(state.overlays, tag, []), state}
 
   defp on_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
 

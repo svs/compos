@@ -69,6 +69,26 @@ ladder, so a dead key fails the sweep.
 (register-minor-mode! "evil-local-mode" evil--setup! evil--teardown! "evil-local-mode-map")
 ```
 
+## Prefix keys
+
+A prefix key leads to a keymap: the binding's value is `(keymap NAME)`,
+and the rest of the sequence resolves in that keymap. editor.scm binds
+the Emacs prefix maps in the global map: `ctl-x-map` on `C-x`,
+`mode-specific-map` on `C-c`, `help-map` on `C-h`, `goto-map` on `M-g`,
+`search-map` on `M-s`, and under `C-x`: `ctl-x-r-map`, `ctl-x-4-map`,
+`project-prefix-map`, `vc-prefix-map`, `group-map` on `C-x C-g`. Under
+`C-c`: `agent-map` on `a`, `spotify-map` on `S`, `annotate-map` on `!`.
+
+A package binds into the map its keys belong to and never writes the
+global map. `bind-prefix!` makes a new prefix. The listings, `where-is`
+and `describe-key` walk through prefix maps, so `C-x r j` still reads
+as one key.
+
+```scheme
+(define-key "ctl-x-r-map" "j" "jump-to-register")
+(bind-prefix! "mode-specific-map" "S" "spotify-map")
+```
+
 ## The API
 
 | form | meaning |

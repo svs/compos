@@ -489,7 +489,7 @@
       (buffer-set-local! *doppler-buffer* 'doppler-config key-doppler-config))
     (list-mode-show! "doppler-mode")))
 
-(global-set-key "C-c a d" "doppler")
+(define-key "agent-map" "d" "doppler")
 
 (define-style! 'doppler "
 .doppler-title { font-family: var(--font-serif); font-size: 21px; padding: 6px 2px 10px; }

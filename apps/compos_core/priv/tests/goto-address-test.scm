@@ -114,3 +114,24 @@
       (check-equal! (line-number-at-pos (point)) 4 "point stands on line 4")
       (unless known (buffer-kill! t--ga-file))
       (t--ga-done!))))
+
+(deftest 'm-dot-follows-the-link-at-point-before-it-looks-for-a-definition
+  "code-goto-definition on a painted path visits the file"
+  (lambda ()
+    (let* ((name (string-append (compos-priv-dir) "/editor/zz-ga-mdot.txt"))
+           (target (string-append (compos-priv-dir) "/init.scm"))
+           (known (buffer-known? target)))
+      (test-buffer! name "see init.scm:2 here\n")
+      (goto-address-paint! name)
+      (buffer-goto! name 6)
+      ;; read where the command left point inside its own buffer context:
+      ;; with-current-buffer restores the caller's buffer on the way out
+      (let ((landed #f))
+        (with-current-buffer name
+          (lambda ()
+            (run-command "code-goto-definition")
+            (set! landed (list (current-buffer) (line-number-at-pos (point))))))
+        (check-equal! (car landed) target "M-. followed the path link")
+        (check-equal! (cadr landed) 2 "and landed on its line"))
+      (unless known (buffer-kill! target))
+      (buffer-kill! name))))

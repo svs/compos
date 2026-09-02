@@ -316,7 +316,7 @@
             (list-mode-show! "buffer-log-mode")
             (list-preview! *buffer-log-buffer*))))))
 
-(global-set-key "C-x v l" "buffer-log")
+(define-key "vc-prefix-map" "l" "buffer-log")
 
 (category! 'buffers)
 ;;; --- who owns a line ----------------------------------------------------------

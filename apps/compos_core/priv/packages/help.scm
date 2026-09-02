@@ -529,9 +529,9 @@
       (buffer-set-local! *help-buffer* 'help-from buf))))
 
 (global-set-key "M-?" "contextual-help")
-(global-set-key "C-h m" "describe-mode")
-(global-set-key "C-h b" "describe-bindings")
-(global-set-key "C-h a" "apropos")
+(define-key "help-map" "m" "describe-mode")
+(define-key "help-map" "b" "describe-bindings")
+(define-key "help-map" "a" "apropos")
 
 (category! 'help)
 (public! 'help-doc!
@@ -601,7 +601,7 @@
     (message "Describe key: ")
     (capture-key! "describe-key--page")))
 
-(global-set-key "C-h k" "describe-key")
+(define-key "help-map" "k" "describe-key")
 
 ;;; --- the source behind the name ------------------------------------------------
 ;;; Emacs makes every name in a help page a button and sends the click to
@@ -633,12 +633,13 @@
 (on-preview-link! "mode" (lambda (name) (help--goto-source name 'mode)))
 
 (define-command "help-goto-source"
-  "Open the source of the name at point, in the file that defines it"
+  "Open the source of the name at point, in the file that defines it, or follow the link there"
   (lambda ()
-    (let ((name (help--symbol-at)))
-      (if name
+    (unless (goto-address-follow-at-point!)
+      (let ((name (help--symbol-at)))
+        (if name
           (help--goto-source name)
-          (message "No name at point")))))
+          (message "No name at point"))))))
 
 (public! 'help--goto-source
   "(help--goto-source NAME) — open the file that defines NAME, at the definition")

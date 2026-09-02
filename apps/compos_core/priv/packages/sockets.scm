@@ -215,7 +215,7 @@
   "List every socket the daemon holds. To open a client connection to another program, use endpoint-register!"
   (lambda () (list-mode-show! "sockets-mode")))
 
-(global-set-key "C-c a s" "sockets")
+(define-key "agent-map" "s" "sockets")
 
 (category! 'system)
 (public! 'sockets-refresh! "(sockets-refresh!) — redraw *sockets* if it exists")

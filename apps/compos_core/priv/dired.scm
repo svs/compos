@@ -870,8 +870,8 @@
         (dired-refresh-buffer! (current-buffer))
         (message "Created")))))
 
-(global-set-key "C-x d" "dired")
-(global-set-key "C-x C-d" "dired")
+(define-key "ctl-x-map" "d" "dired")
+(define-key "ctl-x-map" "C-d" "dired")
 
 ;;; --- the public surface -------------------------------------------------------
 ;;; Dired's callable surface is mostly its M-x commands, which apropos

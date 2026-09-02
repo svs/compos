@@ -778,7 +778,7 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:lookup_keymap, name, seq}, _from, state) do
     reply =
-      case resolve(chain(state, name), seq) do
+      case resolve(state, chain(state, name), seq) do
         {:command, {_map, cmd}} -> {:command, cmd}
         other -> other
       end
@@ -826,6 +826,7 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:keymap_bindings, name}, _from, state),
     do: {:reply, keymap(state, keymap_key(name)).bindings |> key_rows(), state}
+
 
   def handle_call(:keymap_names, _from, state), do: {:reply, Map.keys(state.keymaps), state}
 
@@ -911,7 +912,7 @@ defmodule Compos.Core.Editor do
 
     keys =
       ladder
-      |> Enum.flat_map(fn {_name, b} -> Enum.filter(b, fn {_seq, cmd} -> cmd == command end) end)
+      |> Enum.flat_map(fn {_name, b} -> Enum.filter(flatten(state, b), fn {_seq, cmd} -> cmd == command end) end)
       |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
       |> Enum.uniq()
       |> Enum.sort_by(&{String.length(&1), &1})
@@ -1681,7 +1682,7 @@ defmodule Compos.Core.Editor do
   # every global binding, as {"C-x C-f", "find-file"} — apropos searches
   # keys, and 249 bindings existed with nothing that could look one up
   def handle_call(:global_keys, _from, state) do
-    {:reply, Enum.map(state.keymap, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end), state}
+    {:reply, state |> flatten(state.keymap) |> key_rows(), state}
   end
 
   # every binding that answers in BUFFER besides the global ones, as
@@ -1694,7 +1695,7 @@ defmodule Compos.Core.Editor do
       |> ladder(buffer, read_only_buffer?(buffer))
       |> Enum.reject(fn {name, _} -> name == "global" end)
       |> Enum.reverse()
-      |> Enum.reduce(%{}, fn {_name, b}, acc -> Map.merge(acc, b) end)
+      |> Enum.reduce(%{}, fn {_name, b}, acc -> Map.merge(acc, Map.new(flatten(state, b))) end)
       |> key_rows()
 
     {:reply, keys, state}
@@ -1711,7 +1712,7 @@ defmodule Compos.Core.Editor do
 
     reply =
       ladder
-      |> Enum.flat_map(fn {_name, b} -> Enum.filter(b, fn {_seq, cmd} -> cmd == command end) end)
+      |> Enum.flat_map(fn {_name, b} -> Enum.filter(flatten(state, b), fn {_seq, cmd} -> cmd == command end) end)
       |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
       |> Enum.min_by(&{String.length(&1), &1}, fn -> "" end)
 
@@ -2215,7 +2216,10 @@ defmodule Compos.Core.Editor do
 
   defp prefix?(bindings, seq), do: Enum.any?(Map.keys(bindings), &List.starts_with?(&1, seq))
 
-  defp resolve(ladder, seq) do
+  # A binding is a command name, or {:keymap, name}: a prefix key that
+  # leads to another keymap, as C-x leads to ctl-x-map in Emacs. A
+  # sequence that passes through such a key continues in that keymap.
+  defp resolve(state, ladder, seq) do
     exact =
       Enum.find_value(ladder, fn {name, b} ->
         case Map.fetch(b, seq) do
@@ -2225,10 +2229,51 @@ defmodule Compos.Core.Editor do
       end)
 
     cond do
+      match?({_, {:keymap, _}}, exact) -> :prefix
       exact -> {:command, exact}
+      true -> resolve_through(state, ladder, seq)
+    end
+  end
+
+  # the keymap-valued bindings whose key is a proper prefix of SEQ, nearest
+  # map first, longest key first; the rest of SEQ resolves in that keymap
+  defp resolve_through(state, ladder, seq) do
+    hit =
+      Enum.find_value(ladder, fn {_name, b} ->
+        b
+        |> Enum.filter(fn {k, v} ->
+          match?({:keymap, _}, v) and length(k) < length(seq) and List.starts_with?(seq, k)
+        end)
+        |> Enum.sort_by(fn {k, _} -> -length(k) end)
+        |> Enum.find_value(fn {k, {:keymap, m}} ->
+          case resolve(state, chain(state, m), Enum.drop(seq, length(k))) do
+            :none -> nil
+            other -> other
+          end
+        end)
+      end)
+
+    cond do
+      hit -> hit
       Enum.any?(ladder, fn {_, b} -> prefix?(b, seq) end) -> :prefix
       true -> :none
     end
+  end
+
+  # every binding reachable from BINDINGS, the keys of a prefix keymap
+  # joined under their prefix: what describe-bindings and where-is see
+  defp flatten(state, bindings, prefix \\ [], seen \\ []) do
+    Enum.flat_map(bindings, fn
+      {k, {:keymap, m}} ->
+        if m in seen,
+          do: [],
+          else:
+            [{prefix ++ k, "keymap:" <> m}] ++
+              Enum.flat_map(chain(state, m), fn {_n, b} -> flatten(state, b, prefix ++ k, [m | seen]) end)
+
+      {k, cmd} ->
+        [{prefix ++ k, cmd}]
+    end)
   end
 
   defp lookup(state, seq, fid, with_source?) do
@@ -2245,7 +2290,7 @@ defmodule Compos.Core.Editor do
     # Emacs command remapping: the buffer substitutes its own command for
     # a resolved one — every key bound to the original follows, arrows and
     # C-n alike, including user rebindings
-    case resolve(ladder, seq) do
+    case resolve(state, ladder, seq) do
       {:command, {map, name}} ->
         name = state.remaps |> Map.get(buffer, %{}) |> Map.get(name, name)
         if with_source?, do: {:command, name, map}, else: {:command, name}
@@ -2255,7 +2300,12 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  defp key_rows(bindings), do: Enum.map(bindings, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end)
+  defp key_rows(bindings) do
+    Enum.map(bindings, fn
+      {seq, {:keymap, m}} -> {Enum.join(seq, " "), "keymap:" <> m}
+      {seq, cmd} -> {Enum.join(seq, " "), cmd}
+    end)
+  end
 
   defp read_only_buffer?(buffer), do: Buffer.exists?(buffer) and Buffer.read_only?(buffer)
 
@@ -2350,7 +2400,7 @@ defmodule Compos.Core.Editor do
 
     state
     |> ladder(buffer, read_only_buffer?(buffer))
-    |> Enum.flat_map(fn {_name, b} -> Map.to_list(b) end)
+    |> Enum.flat_map(fn {_name, b} -> flatten(state, b) end)
     |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, f.pending) and seq != f.pending end)
     |> Enum.map(fn {seq, cmd} ->
       keys = Enum.drop(seq, length(f.pending))

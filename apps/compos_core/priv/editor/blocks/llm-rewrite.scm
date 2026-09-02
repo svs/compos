@@ -167,7 +167,7 @@
            (p (diff-block-pending buf)))
       (if p (llm-rewrite--again! buf p) (llm-rewrite--start! buf)))))
 
-(global-set-key "C-c e" "llm-rewrite")
+(define-key "mode-specific-map" "e" "llm-rewrite")
 (catalog-meta! 'command "llm-rewrite"
   'domain "llm" 'effects '("write" "external" "spend"))
 

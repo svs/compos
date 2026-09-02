@@ -650,7 +650,7 @@
     (set-mode! "morg-todos-mode")
     *morg-todos-buffer*))
 
-(global-set-key "C-c a" "morg-agenda")
+(define-key "mode-specific-map" "A" "morg-agenda")   ; C-c a is the agent prefix
 
 ;; a stale agenda catches up when the switcher shows it again; the mtime
 ;; cache keeps the catch-up cheap

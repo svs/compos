@@ -190,7 +190,7 @@
       buf)))
 
 ;; Emacs: C-h e is view-echo-area-messages
-(global-set-key "C-h e" "view-messages")
+(define-key "help-map" "e" "view-messages")
 
 ;; The mode is defined above, so the adoption can run: on the buffer boot
 ;; made, and on every later creation of the name.

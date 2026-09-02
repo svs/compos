@@ -955,7 +955,7 @@
                                  'title text 'who "you" 'when "now"))
             (message (string-append "Annotated L" (number->string line)))))))))
 
-(global-set-key "C-c ! a" "annotate-add")
+(define-key "annotate-map" "a" "annotate-add")
 
 (mode-doc! "annotate-mode"
   (string-append

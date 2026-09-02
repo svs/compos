@@ -359,12 +359,36 @@
   "Previews the first body lines as a result-csv fence. :lines N sets the count."
   'run morg-babel--csv-run)
 
+;;; --- runners by argument -----------------------------------------------------
+;;; An argument on the fence can own the run before the language does. A
+;;; block marked `:show-source` fetches its body instead of running it,
+;;; whatever language paints it. (fence-arg-run! ARG FN): FN takes
+;;; (BUF BLOCK LANG BODY) and answers like a kind's runner.
+
+(define *fence-arg-runners* '())
+
+(define (fence-arg-run! arg fn)
+  (set! *fence-arg-runners*
+    (cons (list arg fn)
+          (remove (lambda (e) (equal? (car e) arg)) *fence-arg-runners*))))
+
+;; the runner of the first registered argument that INFO carries as a
+;; word, or #f
+(define (fence-arg-runner info)
+  (let ((words (string-split info " ")))
+    (let loop ((rs *fence-arg-runners*))
+      (cond ((null? rs) #f)
+            ((member (car (car rs)) words) (cadr (car rs)))
+            (else (loop (cdr rs)))))))
+
 (define (morg-babel-execute buf pos)
   (let ((b (block-at buf pos)))
     (if (not b)
         (list 'error "Point is not in a code block")
-        (let ((lang (block-lang b)))
+        (let ((lang (block-lang b))
+              (by-arg (fence-arg-runner (nth 2 b))))
           (cond
+            (by-arg (by-arg buf b lang (or (block-text-at buf (nth 3 b) (nth 4 b)) "")))
             ((equal? lang "") (list 'error "The block names no language"))
             ((not (fence-kind-runnable? lang))
              (list 'error (string-append "A " lang " block does not run")))
@@ -391,6 +415,8 @@
 
 (public! 'morg-babel-execute
   "(morg-babel-execute BUF POS) — run the Morg block at POS and update its result fence; an asynchronous block returns (pending LANG)")
+(public! 'fence-arg-run!
+  "(fence-arg-run! ARG FN) — FN (BUF BLOCK LANG BODY) runs a block whose fence carries the word ARG, ahead of the language's runner")
 
 ;; Do not leak this extension's catalog context into the next package.
 (package! morg-babel-parent-package morg-babel-parent-namespace)

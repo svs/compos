@@ -905,10 +905,10 @@
 
 ;;; --- Emacs-compatible global keys -------------------------------------------
 
-(global-set-key "C-x r m" "bookmark-set")
-(global-set-key "C-x r M" "bookmark-set-no-overwrite")
-(global-set-key "C-x r b" "bookmark-jump")
-(global-set-key "C-x r l" "list-bookmarks")
+(define-key "ctl-x-r-map" "m" "bookmark-set")
+(define-key "ctl-x-r-map" "M" "bookmark-set-no-overwrite")
+(define-key "ctl-x-r-map" "b" "bookmark-jump")
+(define-key "ctl-x-r-map" "l" "list-bookmarks")
 
 (catalog-meta! 'command "bookmark-delete" 'domain 'navigation 'effects '(destroy))
 (catalog-meta! 'command "bookmark-delete-all" 'domain 'navigation 'effects '(destroy))

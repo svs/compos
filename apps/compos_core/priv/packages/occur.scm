@@ -163,7 +163,7 @@
                   (message "occur-ts needs a grammar")
                   (occur-ts--read-query source lang))))))))
 
-(global-set-key "M-s t" "occur-ts")
+(define-key "search-map" "t" "occur-ts")
 
 (public! 'occur-ts-open
   "(occur-ts-open SOURCE LANGUAGE QUERY) -> show a selectable structural-search result list")

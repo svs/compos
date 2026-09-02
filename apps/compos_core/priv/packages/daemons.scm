@@ -386,8 +386,8 @@
     'keys '(("RET" "workspace-open-tab") ("g" "workspaces-refresh")
             ("q" "quit-window"))))
 
-(global-set-key "C-x d" "daemons")
-(global-set-key "C-x w" "workspaces")
+(define-key "ctl-x-map" "d" "daemons")
+(define-key "ctl-x-map" "w" "workspaces")
 
 (category! 'sessions)
 (effects! '(write external))

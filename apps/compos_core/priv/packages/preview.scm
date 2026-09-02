@@ -589,6 +589,6 @@
         (message "whitespace-mode enabled")
         (message "whitespace-mode disabled"))))
 
-(global-set-key "C-c C-v" "preview-mode")
-(global-set-key "C-c C-a" "app-preview")
-(global-set-key "C-c C-r" "app-reload")
+(define-key "mode-specific-map" "C-v" "preview-mode")
+(define-key "mode-specific-map" "C-a" "app-preview")
+(define-key "mode-specific-map" "C-r" "app-reload")

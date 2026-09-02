@@ -176,7 +176,7 @@
                 (scratch--focus! scratch)
                 (end-of-buffer!)))))))
 
-(global-set-key "C-c s" "scratch-buffer")
+(define-key "mode-specific-map" "s" "scratch-buffer")
 
 ;;; --- the project's scratch ----------------------------------------------------
 ;;; A file has a scratch; so does the project around it. Notes about one file
@@ -256,7 +256,7 @@
                   (scratch--focus! scratch)
                   (end-of-buffer!)))))))))
 
-(global-set-key "C-x p s" "project-scratch")
+(define-key "project-prefix-map" "s" "project-scratch")
 
 ;; A renamed group scratch keeps its role. Move each work-buffer pointer and
 ;; return pointer so `C-c s` keeps toggling. The same applies to the way back

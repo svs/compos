@@ -123,6 +123,10 @@
 ;; a buffer past this size paints no links: a dump is read, not clicked
 (define goto-address-max-bytes 8000000)
 
+;; a buffer past this size is not read whole when it is first watched
+;; (about 140 ms per 500 KB); its lines paint as they change
+(define goto-address-first-paint-bytes 1000000)
+
 ;; the spans of TEXT, whose first byte stands at AT in the buffer
 (define (goto-address--text-spans buf at text)
   (let loop ((lines (split-lines text)) (at at) (acc '()))
@@ -169,11 +173,12 @@
                (to (min size (+ from (string-byte-length inserted))))
                (ls (line-start-position (line-number-at-pos from)))
                (le (goto-address--line-end buf to))
+               ;; this painter's own ranges alone, rope-adjusted: a
+               ;; keystroke never reads the syntax highlight's thousands
                (kept (filter (lambda (o)
-                               (and (goto-address--mine? o)
-                                    (< (car o) (cadr o))
+                               (and (< (car o) (cadr o))
                                     (or (<= (cadr o) ls) (>= (car o) le))))
-                             (buffer-overlays buf)))
+                             (buffer-overlays buf 'goto-address)))
                (fresh (goto-address--text-spans buf ls (buffer-substring ls le))))
           (overlay-set! buf 'goto-address (append kept fresh)))))))
 
@@ -204,7 +209,12 @@
                       (unless (equal? source "locals")
                         (goto-address-repaint! buf pos inserted)))))
             (remove (lambda (e) (equal? (car e) buf)) *goto-address-hooks*)))
-    (goto-address-paint! buf)))
+    ;; the first paint reads the whole buffer, once, on the caller's lane:
+    ;; a task here would call the Session back, and at boot the Session is
+    ;; the caller (the await_boot self-call). A buffer past the first-paint
+    ;; size gets its links as its lines change instead.
+    (when (<= (buffer-size buf) goto-address-first-paint-bytes)
+      (goto-address-paint! buf))))
 
 (define (goto-address-unwatch! buf)
   (let ((old (assoc buf *goto-address-hooks*)))
@@ -245,13 +255,18 @@
              (url-decode (substring cls at (string-length cls)))))
           (else (loop (cdr ovs))))))
 
+;; follow the link under point; #t when there was one. M-. asks this
+;; first in every mode: a link is the definition of what it names.
+(define (goto-address-follow-at-point!)
+  (let ((href (goto-address-href-at (current-buffer) (point))))
+    (and href
+         (begin (preview-follow-link! (active-window) href) #t))))
+
 (define-command "goto-address-at-point"
   "Follow the URL or file path at point"
   (lambda ()
-    (let ((href (goto-address-href-at (current-buffer) (point))))
-      (if href
-          (preview-follow-link! (active-window) href)
-          (message "No URL or file path at point")))))
+    (unless (goto-address-follow-at-point!)
+      (message "No URL or file path at point"))))
 
 (global-set-key "C-c RET" "goto-address-at-point")
 
@@ -263,6 +278,8 @@
   "(goto-address-repaint! BUF POS INSERTED) — repaint the lines a change at POS touched, and no other")
 (public! 'goto-address-path-parts
   "(goto-address-path-parts TEXT) — split \"path:LINE[:COL]\" into (PATH LINE), LINE #f when absent")
+(public! 'goto-address-follow-at-point!
+  "(goto-address-follow-at-point!) — follow the URL or file path under point; #t when there was one")
 (public! 'goto-address-href-at
   "(goto-address-href-at BUF POS) — the link target under byte POS, or #f")
 

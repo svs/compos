@@ -471,8 +471,10 @@
   (lambda () (code--move! 'prev)))
 (define-command "code-browse-toggle-fold" "Fold or unfold the node at point"
   (lambda () (code--toggle-fold!)))
-(define-command "code-goto-definition" "Go to the definition of the symbol at point"
-  (lambda () (code--goto-definition)))
+(define-command "code-goto-definition" "Go to the definition of the symbol at point, or follow the link there"
+  (lambda ()
+    (unless (goto-address-follow-at-point!)
+      (code--goto-definition))))
 
 (for-each (lambda (name) (undo-exempt! name))
           '("code-browse-parent" "code-browse-child" "code-browse-next"
@@ -1474,4 +1476,4 @@
               (lambda () (goto-char! orig))
               #t))))))
 
-(global-set-key "M-g i" "imenu")
+(define-key "goto-map" "i" "imenu")

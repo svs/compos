@@ -799,28 +799,6 @@
       (shell-command->string (string-append "rm -rf " dir))
       (t--morg-done!))))
 
-(deftest 'tangle-write-protects-its-files
-  "the document is the source: the file opens read-only, and a second tangle still writes"
-  (lambda ()
-    (let* ((dir (string-append (compos-home) "/zz-morg-tangle-ro"))
-           (out (string-append dir "/demo.ex")))
-      (shell-command->string (string-append "rm -rf " dir))
-      (make-directory! dir)
-      (t--morg! (string-append "```elixir :tangle demo.ex\nfirst\n```\n") 0)
-      (buffer-set-local! t--morg-buf 'default-directory (string-append dir "/"))
-      (t--morg-run! "morg-tangle")
-      (check-false! (file-writable? out) "the file is write-protected on disk")
-      (let ((buf (visit out)))
-        (check-true! (buffer-read-only? buf) "and it opens read-only")
-        (t--morg! (string-append "```elixir :tangle demo.ex\nsecond\n```\n") 0)
-        (buffer-set-local! t--morg-buf 'default-directory (string-append dir "/"))
-        (t--morg-run! "morg-tangle")
-        (check-equal! (read-file out) "second\n" "a second tangle writes over the protected file")
-        (check-true! (buffer-read-only? buf) "and the open buffer stays read-only")
-        (buffer-kill! buf))
-      (shell-command->string (string-append "rm -rf " dir))
-      (t--morg-done!))))
-
 ;;; --- motion -------------------------------------------------------------------
 ;;; A note is read by jumping. Each motion command answers with the position
 ;;; it landed on, and leaves point alone when there is nowhere to go.

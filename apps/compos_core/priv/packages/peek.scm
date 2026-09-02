@@ -122,8 +122,12 @@
 
 
 (define-command "definition-peek"
-  "Show the definition of the name at point in the other window; run again to go there"
+  "Show the definition of the name at point in the other window; run again to go there; a link there is followed"
   (lambda ()
+    (unless (goto-address-follow-at-point!)
+      (definition-peek!))))
+
+(define (definition-peek!)
     (let ((name (peek--name)))
       (cond
         ((not name) (message "No name at point"))
@@ -138,7 +142,7 @@
                 (message (string-append "Definition of " name " in the other window; press again to go there, any other key closes it")))
               ((and (boundp 'primitive-doc) (primitive-doc name))
                (message (string-append name " is a primitive: " (primitive-doc name))))
-              (else (message (string-append "No definition of " name))))))))))
+              (else (message (string-append "No definition of " name)))))))))
 
 (define-command "definition-peek-go"
   "Go to the definition the peek window shows"

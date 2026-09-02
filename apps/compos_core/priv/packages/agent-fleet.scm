@@ -331,8 +331,8 @@
           (begin (switch-to-buffer! (agent-buf (car att)))
                  (end-of-buffer!))))))
 
-(global-set-key "C-c a n" "agent-open")
+(define-key "agent-map" "n" "agent-open")
 
-(global-set-key "C-c a l" "chat-list")
+(define-key "agent-map" "l" "chat-list")
 
-(global-set-key "C-c a a" "agent-goto-attention")
+(define-key "agent-map" "a" "agent-goto-attention")

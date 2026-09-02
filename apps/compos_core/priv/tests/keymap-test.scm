@@ -124,11 +124,14 @@
 (deftest 'every-global-binding-names-a-live-command
   "a key bound to a command that does not exist is a dead key"
   (lambda ()
-    (let ((names (command-names)))
+    (let ((names (command-names)) (maps (keymap-names)))
       (for-each
         (lambda (row)
           (let ((keys (car row)) (cmd (nth 1 row)))
-            (check-true! (member cmd names)
+            ;; a prefix key leads to a keymap: keymap:NAME names one that exists
+            (check-true! (or (member cmd names)
+                             (and (string-prefix? "keymap:" cmd)
+                                  (member (substring cmd 7 (string-length cmd)) maps)))
                          (string-append keys " runs \"" cmd "\", which no package defines"))))
         (global-keys)))))
 
@@ -261,3 +264,18 @@
     (check-equal! (where-is-internal "keymap-test-dummy-one") '("<f9> a" "<f9> x y")
                   "both keys, shortest first")
     (global-unset-key "<f9> x y")))
+
+;;; --- a prefix key leads to a keymap ---------------------------------------------
+
+(deftest 'a-prefix-key-leads-to-a-keymap-and-the-rest-resolves-there
+  "bind <f9> to a keymap of its own; a key in that map answers under <f9>"
+  (lambda ()
+    (bind-prefix! "global" "<f9>" "zz-keymap-test-prefix-map")
+    (define-key "zz-keymap-test-prefix-map" "z" "keymap-test-dummy-one")
+    (check-equal! (key-binding "<f9>") 'prefix "the prefix key alone is a prefix")
+    (check-equal! (key-binding "<f9> z") "keymap-test-dummy-one" "the key in the prefix map answers")
+    (check-true! (member "<f9> z" (where-is-internal "keymap-test-dummy-one")) "where-is walks through the prefix")
+    (keymap-test-press! (list "<f9>" "z"))
+    (check-true! (wait-until (lambda () (keymap-test-fired? 'one)) 3000 20) "and pressing it runs the command")
+    (check-true! (member '("<f9> z" "keymap-test-dummy-one") (global-keys)) "global-keys lists it under its prefix")
+    (global-unset-key "<f9>")))

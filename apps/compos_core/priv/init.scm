@@ -102,3 +102,11 @@
   (package! 'csv-block)
   (load (string-append (compos-priv-dir) "/editor/blocks/csv-block.scm")))
 (load-bundled-package "morg/morg-tangle.scm")
+(load-bundled-package "morg/morg-show-source.scm")
+;; core editor behaviour, not a package: every URL and file path is a
+;; link. It reads a buffer's directory (dired.scm), so it loads once the
+;; stdlib is in, and it sweeps the buffers that exist by then.
+(begin
+  (origin! 'bundled)
+  (package! 'goto-address)
+  (load (string-append (compos-priv-dir) "/editor/goto-address.scm")))

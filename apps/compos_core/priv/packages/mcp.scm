@@ -203,6 +203,8 @@
 ;; connector and model, transcript seeded, new server list). The api lane
 ;; needs none of this: its specs are read fresh at every send.
 (define (chat-presets-changed! buf what)
+  ;; the modeline names the tool surface — it follows every preset change
+  (when (boundp (quote agent-update-modeline!)) (agent-update-modeline! buf))
   (if (chat-presets-live-session? buf)
       (begin
         (buffer-set-local! buf 'chat-mcp-dirty #t)
@@ -233,6 +235,7 @@
         #f
         (begin
           (buffer-set-local! buf 'chat-presets wanted)
+          (when (boundp (quote agent-update-modeline!)) (agent-update-modeline! buf))
           (for-each mcp-ensure! (chat-active-servers buf))
           (if (chat-presets-live-session? buf)
               (buffer-set-local! buf 'chat-mcp-dirty #t)
@@ -574,6 +577,10 @@
 (define (chat-tool-line spec)
   (string-append "  " (string-pad-right (car spec) 34) "  "
                  (chat-tool-summary (car (cdr spec))) "\n"))
+
+;; a report is context, not a destination: it must never cover the chat
+;; that asked for it (display-buffer honors this rule)
+(add-display-rule! "*chat tools*" 'popup)
 
 (define-command "chat-tool-list" "List the tools this chat's model holds"
   (lambda ()

@@ -693,6 +693,23 @@
           (llm-config--refresh!)))
       (lambda () #f))))
 
+;; the report never covers the chat that asked for it
+(add-display-rule! "*permissions*" 'popup)
+
+(define-command "llm-config-permission-report"
+  "Show everything this session's permission policy does"
+  (lambda ()
+    (let ((buf (llm-config--session (transient-scope))))
+      (if (not (boundp (quote permission-policy-report)))
+          (message "No permission policy — packages/agent-permissions.scm is not loaded")
+          (let ((out "*permissions*"))
+            (buffer-create out)
+            (buffer-set-read-only! out #f)
+            (buffer-delete-range! out 0 (buffer-size out))
+            (buffer-append! out (permission-policy-report buf))
+            (buffer-set-read-only! out #t)
+            (display-buffer out))))))
+
 ;;; --- bundles --------------------------------------------------------------
 
 (define (llm-config--bundle-candidates)
@@ -794,7 +811,14 @@
           (transient-infix "a" "Agent mode" "llm-config-pick-agent-mode"
             (lambda (scope) (llm-config--agent-mode-label scope)))
           (transient-infix "f" "Files" "llm-config-pick-filesystem"
-            (lambda (_scope) (llm-config--filesystem))))
+            (lambda (_scope) (llm-config--filesystem)))
+          (transient-suffix "d" "The whole policy" "llm-config-permission-report"
+            'value-fn (lambda (_scope)
+                        (if (boundp (quote *permission-deny-patterns*))
+                            (string-append (number->string
+                                             (length *permission-deny-patterns*))
+                                           " deny patterns")
+                            ""))))
         (append
           (list "Bundles"
             (transient-suffix "s" "Save this setup as a bundle"

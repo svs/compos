@@ -131,10 +131,15 @@
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
                          (buffer-local buf 'agent-permission-profile))))
-      (cond ((equal? kind "execute") 'reject)  ; no shell — compos is the only sandbox
-            ((filesystem-tool-verdict title kind))  ; no files either — buffers are
-            ((permission-denied-verb? text) 'ask)
+      (cond ((permission-denied-verb? text) 'ask)
             ((profile-denies? profile text) 'reject)
+            ((filesystem-tool-verdict title kind))  ; files go through buffers
+            ;; a shell command is exactly the irreversible act the approve
+            ;; stance promises to surface: the popup decides, not a silent
+            ;; veto. Only auto runs it unasked — and the deny-list verbs
+            ;; above still stop to ask even then.
+            ((equal? kind "execute")
+             (if (equal? (chat-permission-mode buf) 'auto) 'allow-always 'ask))
             ((and (equal? kind "command")
                   (command-permitted? buf title)) 'allow-always)
             ((equal? kind "command") 'ask)
@@ -144,6 +149,8 @@
 
 (public! 'chat-permission-mode-set!
   "(chat-permission-mode-set! BUF 'approve|'auto|'ask) — set a session's permission stance, and tell a live agent")
+(public! 'permission-policy-report
+  "(permission-policy-report BUF) — the whole permission policy for one session as readable text")
 (public! 'agent-mode-set!
   "(agent-mode-set! BUF MODE) — put the running ACP session in one of its own modes; #f when it refuses")
 
@@ -232,6 +239,30 @@
         (else "the agent stops asking too; the deny-list still holds")))
 
 (define *permission-modes* '(approve auto ask))
+
+;; The whole policy on one page: what asks, what runs, what is refused,
+;; and which C-c b key moves each part. The dialog can only hold three
+;; labels; this is the rest of the answer to "am I seeing everything?"
+(define (permission-policy-report buf)
+  (let ((stance (chat-permission-mode buf)))
+    (string-append
+      "Permissions — " buf "\n\n"
+      "asks (C-c b k): " (symbol->string stance)
+      " — " (chat-permission-mode-note stance) "\n"
+      "agent mode (C-c b a): "
+      (let ((m (buffer-local buf 'agent-mode)))
+        (if (or (not m) (equal? m "")) "none" m))
+      " — the backend's own mode, read live from the session\n"
+      "file tools (C-c b f): " agent-filesystem-tools
+      " — deny routes the agent's edits through buffers instead\n"
+      "shell (execute): "
+      (if (equal? stance 'auto) "runs without asking" "asks first") "\n"
+      "editor commands: catalogued effects decide — pure and read run, "
+      "destroy and spend ask\n"
+      "\nalways stops to ask, whatever the stance:\n"
+      (apply string-append
+        (map (lambda (p) (string-append "  " p "\n"))
+             *permission-deny-patterns*)))))
 
 ;; The stance, set outright. Cycling it and applying a bundle take the same
 ;; road: the local, then the live agent, then the modeline.

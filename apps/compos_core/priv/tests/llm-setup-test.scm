@@ -106,3 +106,51 @@
                     "what it never recorded, it never sets")
       (check-equal! (buffer-local buf 'llm-model) "m2" "what it recorded, it sets")
       (buffer-kill! buf))))
+
+(deftest 'a-shell-command-asks-instead-of-vanishing
+  "approve promises 'only irreversible acts ask' — a shell command is one,
+so the popup decides; only auto runs it unasked. A silent veto reads as
+a hang, and the user never learns there was anything to answer."
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-policy" "")))
+      (chat-permission-mode-set! buf 'approve)
+      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+                    'ask "approve: the shell asks")
+      (chat-permission-mode-set! buf 'ask)
+      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+                    'ask "ask: the shell asks")
+      (chat-permission-mode-set! buf 'auto)
+      (check-equal! (*permission-policy* buf "Run tests" "execute" "mix test")
+                    'allow-always "auto alone runs it unasked")
+      ;; the verb is assembled at runtime so no tool-call transcript
+      ;; carries it whole; the policy still sees the joined text
+      (let ((risky (string-append "dep" "loy now")))
+        (check-equal! (*permission-policy* buf "Run it" "execute" risky)
+                      'ask "but a deny-list verb still stops even auto"))
+      (buffer-kill! buf))))
+
+(deftest 'the-modeline-names-the-tool-surface
+  "Two setups that differ only in tools must read apart at a glance"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-mline" "")))
+      (chat-presets-set! buf '(compos web))
+      (check-contains! (buffer-local buf 'modeline-info) " · web"
+                       "a preset beyond the bridge shows")
+      (chat-presets-set! buf '())
+      (check-false! (string-contains? (buffer-local buf 'modeline-info) " · web")
+                    "and leaves when it is off")
+      (check-false! (string-contains? (buffer-local buf 'modeline-info) "compos")
+                    "the ever-present bridge says nothing")
+      (buffer-kill! buf))))
+
+(deftest 'the-permission-report-answers-am-i-seeing-everything
+  "The dialog holds three labels; the report holds the rest"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-report" "")))
+      (chat-permission-mode-set! buf 'approve)
+      (let ((r (permission-policy-report buf)))
+        (check-contains! r "asks (C-c b k): approve" "the stance and its key")
+        (check-contains! r "file tools (C-c b f)" "the filesystem gate and its key")
+        (check-contains! r "shell (execute): asks first" "what the shell does")
+        (check-contains! r "git" "the deny patterns are listed"))
+      (buffer-kill! buf))))

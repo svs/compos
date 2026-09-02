@@ -167,7 +167,6 @@
       ;; the policy decides, not the backend: approvals are invisible
       ;; (the tool just runs), denials and asks are recorded
       ((equal? type 'permission)
-       (chat-activity! buf "waiting for you")
        (let* ((title (plist-get e 'title))
               (kind (or (plist-get e 'kind) ""))
               (verdict (*permission-policy* buf title kind (or (plist-get e 'raw) ""))))
@@ -177,8 +176,18 @@
            ((equal? verdict 'allow-always)
             (agent-answer-permission! slug "allow_always" "allow"))
            ((equal? verdict 'reject)
-            (agent-answer-permission! slug "reject_once" "reject"))
+            (agent-answer-permission! slug "reject_once" "reject")
+            ;; a silent veto reads as a hang — name the door that reopens it
+            (when (and (boundp (quote filesystem-tool?))
+                       (filesystem-tool? title kind))
+              (let ((start (agent-render! slug
+                             "  (file tools are set to deny — C-c b f changes this)\n"
+                             "agent-meta")))
+                (agent-block-push! buf start (agent-mark slug) "meta" '()))))
            (else
+             ;; only a real ask waits on the user — an auto-answered
+             ;; request must never claim it
+             (chat-activity! buf "needs permission")
              (let ((start (agent-render! slug
                             (string-append "\n── needs permission: " title
                                            " ── C-c C-y allow · C-c C-n deny\n")

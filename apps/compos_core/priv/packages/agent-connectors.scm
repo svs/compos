@@ -375,6 +375,14 @@
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
         (let ((effort (buffer-local buf 'agent-effort)))
           (if effort (string-append " · " effort) ""))
+        ;; the tool surface: the presets beyond the ever-present editor
+        ;; bridge, so two setups that differ only in tools read apart
+        (let ((ps (and (boundp (quote chat-presets-of))
+                       (remove (lambda (p) (equal? p (quote compos)))
+                               (chat-presets-of buf)))))
+          (if (pair? ps)
+              (string-append " · " (string-join (map symbol->string ps) "+"))
+              ""))
         (if cost (string-append " · " (format-usd cost)) "")
         ;; how full the conversation is, when the backend counts it for us
         (let ((ctx (and (boundp (quote chat-context-label)) (chat-context-label buf))))

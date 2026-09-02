@@ -223,11 +223,11 @@ defmodule Compos.Scheme.Env do
   never after it, or a sweep could run between the eval and its escape
   becoming visible.
   """
-  def flush(%__MODULE__{tid: tid, local: local} = store, roots) do
+  def flush(%__MODULE__{tid: tid, local: local} = store, roots, seeds \\ []) do
     if map_size(local) == 0 do
       store
     else
-      work = Enum.reduce(roots, [], &closure_refs/2)
+      work = Enum.reduce(roots, seeds, &closure_refs/2)
       seen = flush_mark(local, work, MapSet.new())
 
       rows =
@@ -252,7 +252,7 @@ defmodule Compos.Scheme.Env do
   Other local frames stay private and keep the hot path unchanged.
   """
   def promote(%__MODULE__{local: local} = store, roots) when is_list(roots) do
-    if map_size(local) == 0 do
+    if map_size(local) == 0 or Process.get(:scheme_unpublished) do
       store
     else
       work = Enum.reduce(roots, [], &closure_refs/2)
@@ -295,6 +295,23 @@ defmodule Compos.Scheme.Env do
         work = if parent == nil, do: rest, else: [parent | rest]
         work = Enum.reduce(vars, work, fn {_n, v}, a -> closure_refs(v, a) end)
         flush_mark(local, work, MapSet.put(seen, ref))
+    end
+  end
+
+  @doc """
+  Run FUN with promotion off. One process owns the store while FUN runs,
+  and no other process can evaluate against it, so nothing needs
+  publishing before the flush that ends the load. Boot uses this: with
+  the global frame still in the local tier, every promotion re-walked
+  every global binding, and the corpus load spent most of its time there.
+  """
+  def unpublished(fun) do
+    Process.put(:scheme_unpublished, true)
+
+    try do
+      fun.()
+    after
+      Process.delete(:scheme_unpublished)
     end
   end
 

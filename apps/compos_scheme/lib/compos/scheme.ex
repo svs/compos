@@ -16,27 +16,14 @@ defmodule Compos.Scheme do
 
   defstruct [:store, :global]
 
+  # map, filter, remove, for-each, fold and assoc are builtins: an
+  # interpreted loop paid one frame and a dozen evals per element
   @prelude """
-  (define (map f lst)
-    (if (null? lst) '() (cons (f (car lst)) (map f (cdr lst)))))
-  (define (filter pred lst)
-    (if (null? lst) '()
-        (if (pred (car lst))
-            (cons (car lst) (filter pred (cdr lst)))
-            (filter pred (cdr lst)))))
-  (define (for-each f lst)
-    (if (null? lst) #t (begin (f (car lst)) (for-each f (cdr lst)))))
-  (define (fold f acc lst)
-    (if (null? lst) acc (fold f (f acc (car lst)) (cdr lst))))
-  (define (assoc key lst)
-    (if (null? lst) #f
-        (if (equal? key (car (car lst))) (car lst) (assoc key (cdr lst)))))
   (define (cadr l) (car (cdr l)))
   (define (cddr l) (cdr (cdr l)))
   (define (caddr l) (car (cdr (cdr l))))
   (define (split-lines s) (string-split s "\\n"))
   (define (assq key lst) (assoc key lst))
-  (define (remove pred lst) (filter (lambda (x) (not (pred x))) lst))
   (define (list-ref lst i) (if (= i 0) (car lst) (list-ref (cdr lst) (- i 1))))
   (define (iota n)
     (let loop ((i 0) (acc '()))
@@ -207,9 +194,9 @@ defmodule Compos.Scheme do
   @doc "Publish the whole local frame tier to the shared table (boot)."
   def flush(%__MODULE__{store: store} = interp), do: %{interp | store: Env.flush(store)}
 
-  @doc "Publish only the local frames reachable from ROOTS."
-  def flush(%__MODULE__{store: store} = interp, roots),
-    do: %{interp | store: Env.flush(store, roots)}
+  @doc "Publish only the local frames reachable from ROOTS or from the global frame."
+  def flush(%__MODULE__{store: store, global: global} = interp, roots),
+    do: %{interp | store: Env.flush(store, roots, [global])}
 
   defdelegate print(value), to: Printer
 end

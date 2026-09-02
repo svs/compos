@@ -50,11 +50,7 @@
 (define (catalog--key k n qualified)
   (string-append k ":" (if (equal? k "component") qualified n)))
 
-(define (catalog--get pl key)
-  (cond ((null? pl) #f)
-        ((null? (cdr pl)) #f)
-        ((equal? (car pl) key) (cadr pl))
-        (else (catalog--get (cdr (cdr pl)) key))))
+(define catalog--get plist-get)
 
 (define (catalog--put pl key value)
   (append (list key value)
@@ -234,6 +230,11 @@
 (define (call-interactively--spec spec fn)
   (interactive--collect (cdr spec) '() fn))
 
+;; One name per live command, for the registration fast path: a fresh
+;; definition asks the `member` builtin and conses; only a redefinition
+;; pays the walk that drops the old entry.
+(define *command-names* '())
+
 ;; (define-command NAME [DOC] [SPEC] FN)
 (define (define-command name &rest args)
   (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
@@ -242,8 +243,12 @@
          (fn (if spec (cadr rest) (car rest)))
          (thunk (if spec (lambda () (call-interactively--spec spec fn)) fn)))
     (set! *command-fns*
-      (cons (list name spec fn)
-            (remove (lambda (e) (equal? (car e) name)) *command-fns*)))
+      (if (member name *command-names*)
+          (cons (list name spec fn)
+                (remove (lambda (e) (equal? (car e) name)) *command-fns*))
+          (begin
+            (set! *command-names* (cons name *command-names*))
+            (cons (list name spec fn) *command-fns*))))
     (if (> (string-length doc) 0)
         (define-command--raw name doc thunk)
         (define-command--raw name thunk))
@@ -272,14 +277,21 @@
 (define undefine-command--raw undefine-command)
 (define (undefine-command name)
   (undefine-command--raw name)
-  (set! *catalog*
-    (remove (lambda (entry)
-              (and (equal? (catalog--get entry 'kind) "command")
-                   (equal? (catalog--get entry 'name) name)))
-            *catalog*))
-  (catalog--touch!)
-  (when (boundp (quote apropos-catalog-changed!))
-    (apropos-catalog-changed! #f))
+  (when (member name *command-names*)
+    (set! *command-names* (remove (lambda (n) (equal? n name)) *command-names*))
+    (set! *command-fns* (remove (lambda (e) (equal? (car e) name)) *command-fns*)))
+  ;; a name the catalog does not hold needs no walk over it
+  (let ((key (catalog--key "command" name name)))
+    (when (member key *catalog-keys*)
+      (set! *catalog-keys* (remove (lambda (k) (equal? k key)) *catalog-keys*))
+      (set! *catalog*
+        (remove (lambda (entry)
+                  (and (equal? (catalog--get entry 'kind) "command")
+                       (equal? (catalog--get entry 'name) name)))
+                *catalog*))
+      (catalog--touch!)
+      (when (boundp (quote apropos-catalog-changed!))
+        (apropos-catalog-changed! #f))))
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -1969,12 +1981,7 @@
 ;;; record shape: events, configs, conversation turns. This dialect has no
 ;;; dotted pairs, so there are no alists to confuse them with.
 
-(define (plist-get pl key)
-  (let loop ((pl pl))
-    (cond ((null? pl) #f)
-          ((null? (cdr pl)) #f)
-          ((equal? (car pl) key) (car (cdr pl)))
-          (else (loop (cdr (cdr pl)))))))
+;; plist-get is a builtin: the flat plist read is the hottest list read.
 
 ;; list-ref by its Emacs name — this dialect has no builtin for it, and it
 ;; was living as a private helper inside packages/agent.scm

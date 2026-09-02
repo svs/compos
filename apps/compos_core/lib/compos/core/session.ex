@@ -361,18 +361,32 @@ defmodule Compos.Core.Session do
         :ok
     end
 
-    interp = Scheme.new(primitives: Compos.Core.SchemeAPI.primitives())
-    # this process created the environment table, so a crash here would
-    # destroy it; hand it to the table owner instead
-    Compos.Core.SchemeTables.adopt(interp.store.tid)
-    interp = Scheme.register(interp, session_primitives(interp.global))
-    interp = load_stdlib!(interp)
+    # This process alone evaluates until the interp is published below, so
+    # the load runs with promotion off: with the global frame still in the
+    # local tier, every promotion re-walked every global binding.
+    t0 = System.monotonic_time(:millisecond)
 
-    # loading leaves a pile of dead frames behind — sweep once so the
-    # doubling threshold starts from a live baseline, then publish the
-    # survivors to the shared tier: lanes resolve every rooted closure
-    interp = Scheme.gc(interp, external_roots())
-    interp = Scheme.flush(interp)
+    interp =
+      Compos.Scheme.Env.unpublished(fn ->
+        interp = Scheme.new(primitives: Compos.Core.SchemeAPI.primitives())
+        # this process created the environment table, so a crash here would
+        # destroy it; hand it to the table owner instead
+        Compos.Core.SchemeTables.adopt(interp.store.tid)
+        interp = Scheme.register(interp, session_primitives(interp.global))
+        load_stdlib!(interp)
+      end)
+
+    # Loading leaves millions of dead frames behind. Publish only the
+    # frames a root or the global frame can reach and drop the rest in one
+    # pass: a sweep that snapshotted every dead frame first took seconds.
+    # The doubling threshold then starts from a live baseline.
+    loaded = Scheme.frame_count(interp)
+    interp = Scheme.flush(interp, external_roots())
+
+    Logger.info(
+      "scheme boot: #{loaded} frames loaded, #{Scheme.frame_count(interp)} kept, " <>
+        "#{System.monotonic_time(:millisecond) - t0}ms"
+    )
 
     :persistent_term.put(@pt, interp)
     :persistent_term.put(@pt_stamp, primitive_stamp())

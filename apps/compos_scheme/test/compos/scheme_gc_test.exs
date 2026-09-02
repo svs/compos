@@ -151,4 +151,35 @@ defmodule Compos.Scheme.GCTest do
     assert {:ok, 2, _} = Task.await(actor)
     assert {:ok, 1, _} = Scheme.exec(interp, &Scheme.eval_string(&1, "isolated-value"))
   end
+
+  test "an unpublished load flushes only what a root or the global frame reaches" do
+    interp =
+      Compos.Scheme.Env.unpublished(fn ->
+        interp = Scheme.new()
+
+        {:ok, _, interp} =
+          Scheme.eval_string(interp, """
+          (define make-counter (lambda () (let ((n 0)) (lambda () (set! n (+ n 1)) n))))
+          (define c (make-counter))
+          (c)
+          (define (burn n) (if (= n 0) 0 (burn (- n 1))))
+          (burn 500)
+          """)
+
+        interp
+      end)
+
+    # nothing was promoted during the load: every frame is still local
+    assert map_size(interp.store.local) > 500
+
+    {:ok, escaped, interp} = Scheme.eval_string(interp, "(let ((x 42)) (lambda () x))")
+
+    flushed = Scheme.flush(interp, [%{handler: escaped}])
+    assert map_size(flushed.store.local) == 0
+    # the global frame, the counter's frame, and the rooted let survive
+    assert Scheme.frame_count(flushed) < 10
+
+    assert {:ok, 2, flushed} = Scheme.eval_string(flushed, "(c)")
+    assert {:ok, 42, _} = Scheme.call(flushed, escaped, [])
+  end
 end

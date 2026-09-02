@@ -214,6 +214,34 @@ defmodule Compos.Scheme.Builtins do
       "symbol->string" => fn [{:sym, s}] -> s end,
       "string->symbol" => fn [s] -> {:sym, s} end,
       "apply" => fn [f, args], store -> Eval.apply_fn(f, args, store) end,
+      # List traversal applies a Scheme callable per element and threads the
+      # store through. The interpreted loops these replace paid one frame
+      # and a dozen evals per element, and a catalog walk at load time ran
+      # into the millions of frames.
+      "map" => fn [f, l], store when is_list(l) ->
+        Enum.map_reduce(l, store, fn x, store -> Eval.apply_fn(f, [x], store) end)
+      end,
+      "for-each" => fn [f, l], store when is_list(l) ->
+        store =
+          Enum.reduce(l, store, fn x, store ->
+            {_, store} = Eval.apply_fn(f, [x], store)
+            store
+          end)
+
+        {true, store}
+      end,
+      "filter" => fn [pred, l], store when is_list(l) -> select(pred, l, store, true) end,
+      "remove" => fn [pred, l], store when is_list(l) -> select(pred, l, store, false) end,
+      "fold" => fn [f, acc, l], store when is_list(l) ->
+        Enum.reduce(l, {acc, store}, fn x, {acc, store} -> Eval.apply_fn(f, [acc, x], store) end)
+      end,
+      "assoc" => fn [key, l] when is_list(l) ->
+        Enum.find(l, false, fn
+          [k | _] -> k == key
+          _ -> false
+        end)
+      end,
+      "plist-get" => fn [pl, key] when is_list(pl) -> plist_get(pl, key) end,
       "display" => fn [x] ->
         IO.write(Printer.display(x))
         :void
@@ -352,6 +380,15 @@ defmodule Compos.Scheme.Builtins do
       "symbol->string" => "(symbol->string SYM) — return the name of SYM as a string.",
       "string->symbol" => "(string->symbol S) — return the symbol with the name S.",
       "apply" => "(apply F ARGS) — call F with the elements of the list ARGS as arguments.",
+      "map" => "(map F LST) — return the list of F applied to each element of LST.",
+      "for-each" => "(for-each F LST) — call F on each element of LST in order; return true.",
+      "filter" => "(filter PRED LST) — return the elements of LST for which PRED is true.",
+      "remove" => "(remove PRED LST) — return the elements of LST for which PRED is false.",
+      "fold" => "(fold F ACC LST) — reduce LST from the left with (F ACC X), starting from ACC.",
+      "assoc" =>
+        "(assoc KEY ALIST) — return the first element of ALIST whose car equals KEY, or false.",
+      "plist-get" =>
+        "(plist-get PLIST KEY) — return the value after KEY in the flat PLIST, or false.",
       "display" => "(display X) — write X to standard output without quotes.",
       "newline" => "(newline) — write a newline to standard output.",
       "error" => "(error X ...) — raise an error; the message joins the displayed arguments with spaces.",
@@ -437,4 +474,18 @@ defmodule Compos.Scheme.Builtins do
     end
   end
 
+  # keep the elements whose PRED answer is truthy (KEEP true) or false
+  defp select(pred, l, store, keep) do
+    {kept, store} =
+      Enum.reduce(l, {[], store}, fn x, {acc, store} ->
+        {answer, store} = Eval.apply_fn(pred, [x], store)
+        {if((answer != false) == keep, do: [x | acc], else: acc), store}
+      end)
+
+    {Enum.reverse(kept), store}
+  end
+
+  defp plist_get([k, v | _], key) when k == key, do: v
+  defp plist_get([_, _ | rest], key), do: plist_get(rest, key)
+  defp plist_get(_, _key), do: false
 end

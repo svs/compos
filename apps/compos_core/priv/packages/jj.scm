@@ -16,8 +16,8 @@
 ;;;
 ;;; That identity is worth nothing after the session, and it does not need
 ;;; to be: agent changes live between @- and @ and collapse into your own
-;;; commit when you squash before a push. jj-push is what makes that a rule
-;;; instead of a habit.
+;;; commit when you squash before a push. jj-agent-changes is what makes that
+;;; a rule instead of a habit.
 
 (domain! 'files)
 (effects! '(write external execute))
@@ -32,9 +32,31 @@
 
 ;;; --- the repo -----------------------------------------------------------
 
+;; Two ordinary absences. jj may not be installed, and this checkout may never
+;; have been jj-initialised. The binary is asked for once a session and says so
+;; once, because otherwise every save would fail four shell calls in silence.
+;; The checkout is the .jj test below and stays quiet: most repos are not jj
+;; repos, and that is not a thing to be told about.
+(define *jj-available* (quote unknown))
+
+(define (jj-available?)
+  (when (equal? *jj-available* (quote unknown))
+    (set! *jj-available*
+          (not (equal? (string-trim (shell-command->string "command -v jj 2>/dev/null" "/"))
+                       "")))
+    (unless *jj-available*
+      (message "jj: not installed, so jj-autosave is doing nothing")))
+  *jj-available*)
+
+(define-command "jj-recheck" "Look for the jj binary again"
+  (lambda ()
+    (set! *jj-available* (quote unknown))
+    (message (if (jj-available?) "jj: found" "jj: still not installed"))))
+
 ;; git-root answers (error MSG) rather than raising, so string? is the test.
 (define (jj-root-of-dir dir)
-  (and (string? dir)
+  (and (jj-available?)
+       (string? dir)
        (let ((root (git-root dir)))
          (and (string? root)
               (file-exists? (string-append root "/.jj"))
@@ -92,10 +114,7 @@
       (string-append "JJ_USER='" (car id) "' JJ_EMAIL='" (cadr id) "' ")
       ""))
 
-;; A new change opens only on a handover, so one author's whole run stays one
-;; change however many times it reached disk. An untouched @ takes the new
-;; author instead of forking, so a quiet handover leaves no empty change.
-; Open the change this author's writes belong in. This has to happen BEFORE
+;; Open the change this author's writes belong in. This has to happen BEFORE
 ;; the write, never after: jj folds the working copy into @ at the start of
 ;; almost every command, so a change opened afterwards leaves the work sitting
 ;; in the previous author's change and attributes it to them.
@@ -139,6 +158,8 @@
   (if (jj-savable? buf)
       (with-current-buffer buf
         (lambda ()
+          ;; open the change before the bytes land, not after
+          (jj-before-save!)
           (let ((path (buffer-save!)))
             (when path (run-hooks 'after-save-hook))
             path)))
@@ -168,14 +189,26 @@
 
 ;; Every save arrives here, yours and an agent's alike. The bytes belong to
 ;; whoever last wrote the buffer, which is not always whoever pressed C-x C-s.
-(define (jj-after-save!)
+;; The change opens before the write and the snapshot closes after it, because
+;; jj reads only what is on disk when a command runs.
+(define (jj-before-save!)
   (when jj-autosave
     (let* ((buf (current-buffer))
            (path (buffer-path buf))
            (root (and path (jj-root path))))
       (when root
-        (jj-snapshot! root (or (jj-last-author buf) (current-edit-author)))))))
+        (jj-open! root (or (jj-last-author buf) (current-edit-author)))))))
 
+(define (jj-after-save!)
+  (when jj-autosave
+    (let* ((buf (current-buffer))
+           (path (buffer-path buf))
+           (root (and path (jj-root path))))
+      (when root (jj-snapshot! root)))))
+
+;; Appended, so auto-revert's guard runs first: a save it refuses must not
+;; leave an opened change behind.
+(add-hook! 'before-save-hook 'jj-before-save! #t)
 (add-hook! 'after-save-hook 'jj-after-save!)
 
 ;;; --- the guard ----------------------------------------------------------

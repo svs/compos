@@ -119,9 +119,24 @@ real home. Always probe a copy.
 
 Two known costs live on the boot path:
 
-- **The Scheme corpus.** `Session.init/1` evaluates about 32k lines of Scheme
-  synchronously. There is no cache and no mtime check. It costs ~1.5s and every
-  boot pays it. This is the largest remaining item.
+- **The Scheme corpus.** `Session.init/1` evaluates about 72k lines of Scheme
+  synchronously. There is no cache and no mtime check. It costs ~2s and every
+  boot pays it. The log line `scheme boot: N frames loaded, M kept, Xms`
+  reports it. The load runs under `Env.unpublished/1`, so no promotion walks
+  the global frame, and it ends with one `Scheme.flush/2` that keeps only the
+  frames a root or the global frame reaches. Before this (2026-09-02) the
+  load took 15s and a sweep over 4.3M dead frames took 6s more. Two
+  load-time patterns caused the frames: an interpreted `remove` over a
+  registry per definition (`define-command`, `undefine-command`,
+  `catalog-meta!`), and the prelude list loops. `map`, `filter`, `remove`,
+  `for-each`, `fold`, `assoc` and `plist-get` are builtins now. A new
+  registry needs a key list and the `member` builtin on the fresh path, as
+  `*catalog-keys*` and `*command-names*` do.
+- **A stock package that shells out at load.** `setup.scm` calls `key-get`
+  for the OpenRouter key when it loads, and the key chain runs one
+  `doppler secrets download` for its default config (`key-doppler-config`,
+  "dev"). A user `secrets.scm` that reads another config pays a second
+  download. That is ~0.5s per process.
 - **User config shell-outs.** `load_init/1` evaluates `ai-config.scm` and
   `init.scm` from the config home. Top-level forms there can spawn processes,
   and each `shell-command->string` blocks for up to 15s. `doppler.scm` answers

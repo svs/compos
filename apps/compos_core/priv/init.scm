@@ -48,6 +48,7 @@
 (load-bundled-package "groups.scm")
 (load-bundled-package "help.scm")
 (load-bundled-package "ibuffer.scm")
+(load-bundled-package "jj.scm")
 (load-bundled-package "keys.scm")
 (load-bundled-package "layouts.scm")
 (load-bundled-package "lsp.scm")

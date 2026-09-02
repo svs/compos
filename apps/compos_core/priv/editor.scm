@@ -8269,21 +8269,9 @@
         ;; the view is identity: default it only when never chosen (S11)
         (unless (buffer-local buf 'render-mode)
           (buffer-set-local! buf 'render-mode "agent"))
-        (buffer-set-local! buf 'agent-marker-bytes
-          (string-byte-length *chat-input-marker*))
-        ;; self-heal a mangled marker: edits from before the DEL guard
-        ;; existed could eat marker bytes, and the display clamp hid the
-        ;; damage. A tail that does not start with the marker is rewritten
-        ;; (any draft in a corrupt input region is not recoverable).
-        (let* ((size (buffer-size buf))
-               (m (min (chat-mark buf) size))
-               (mb (string-byte-length *chat-input-marker*))
-               (tail-end (min size (+ m mb))))
-          (unless (equal? (substring-bytes (buffer-text buf) m tail-end)
-                          *chat-input-marker*)
-            (buffer-delete-range! buf m (- size m))
-            (buffer-append! buf *chat-input-marker*)
-            (buffer-set-local! buf 'agent-saved-mark m)))
+        ;; the live input carries no marker bytes; a chat from before
+        ;; that change still has them at the mark, and loses them here
+        (chat-input-migrate! buf)
         ;; Rebuild presentation from the CONVERSATION locals — overlays and
         ;; folds come back, and chrome belonging to a runtime that didn't
         ;; survive the restart is dropped. None of this depends on there
@@ -8455,9 +8443,7 @@
     (let ((mark (or (buffer-local buf 'agent-saved-mark)
                     ;; plain chat: give it the marker structure threads use
                     (let ((m (buffer-size buf)))
-                      (buffer-append! buf *chat-input-marker*)
-                      (buffer-set-local! buf 'agent-marker-bytes
-                        (string-byte-length *chat-input-marker*))
+                      (buffer-set-local! buf 'agent-marker-bytes 0)
                       (buffer-set-local! buf 'render-mode "agent")
                       m))))
       (buffer-set-local! buf 'agent-saved-mark mark)
@@ -8497,9 +8483,7 @@
     (buffer-append! buf help)
     (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
     (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
-    (buffer-set-local! buf 'agent-marker-bytes
-      (string-byte-length *chat-input-marker*))
-    (buffer-append! buf *chat-input-marker*)
+    (buffer-set-local! buf 'agent-marker-bytes 0)
     buf))
 
 ;; a task chat's surface, used by (execute ...)
@@ -8664,9 +8648,7 @@
                 (if (equal? (car t) "user") "user" "prose")
                 (if (equal? (car t) "user") (list (cadr t)) '()))))
           turns)
-        (buffer-append! buf *chat-input-marker*)
-        (buffer-set-local! buf 'agent-marker-bytes
-          (string-byte-length *chat-input-marker*))
+        (buffer-set-local! buf 'agent-marker-bytes 0)
         (buffer-set-local! buf 'render-mode "agent")
         ;; a fresh ACP session has to be told what was already said; the
         ;; api lane replays the record on every request anyway
@@ -8855,6 +8837,7 @@
          (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
+    (chat-input-migrate! buf)
     ;; a fresh ACP session starts empty and has to be seeded; the api lane
     ;; replays the record on every request anyway
     (buffer-set-local! buf 'agent-seed-context
@@ -9234,14 +9217,28 @@
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
 ;;; reads — render-mode "agent", 'agent-blocks byte ranges, 'agent-saved-mark
-;;; + 'agent-marker-bytes for the >>> you: input region — so it inherits the
-;;; serif prose, user cards, and tool cards wholesale. No runtime behind it:
-;;; the mark lives in 'agent-saved-mark, the conversation in 'chat-wire-turns.
-;;; Buffer layout: [help][transcript … mark][>>> you: ][input].
+;;; — so it inherits the serif prose, user cards, and tool cards wholesale.
+;;; No runtime behind it: the mark lives in 'agent-saved-mark, the
+;;; conversation in 'chat-wire-turns.
+;;; Buffer layout: [help][transcript … mark][input].
 
+;; the prefix of a user line in the transcript. RET writes it in front of
+;; the sent message; the live input carries no marker bytes at all, so no
+;; edit can damage the input boundary. A chat saved before this change
+;; still holds the marker at its mark; chat-input-migrate! removes it.
 (define *chat-input-marker* "\n>>> you: ")
 
-(define (chat-mark buf) (or (buffer-local buf 'agent-saved-mark) 0))
+;; the mark never points past the end: an edit the local did not see
+;; (undo, a whole-region replace from the client) could leave it there.
+;; A stranded local is written back to the end, so the next keystroke
+;; lands in the input instead of behind a mark nobody can reach. A whole
+;; local is not written: a read must not dirty the buffer.
+(define (chat-mark buf)
+  (let ((saved (or (buffer-local buf 'agent-saved-mark) 0))
+        (size (buffer-size buf)))
+    (if (> saved size)
+        (begin (buffer-set-local! buf 'agent-saved-mark size) size)
+        saved)))
 
 (define (chat-blocks-push! buf start end kind meta)
   (buffer-set-local! buf 'agent-blocks
@@ -9260,24 +9257,43 @@
      (string-byte-length text)))
 
 ;;; --- the input region ------------------------------------------------------------
-;;; Layout: [transcript … mark][marker][live input]
+;;; Layout: [transcript … mark][live input]
 ;;;
 ;;; ONE function says where it starts. "Where does the input begin" used to
 ;;; be computed five ways — twice in Scheme off the runtime mark, once off
 ;;; the buffer-local, once in the payload builder, once in the renderer —
 ;;; and only one of them knew about 'agent-marker-bytes. Every reader takes
 ;;; it from here now, and the payload ships the same number to the client.
+;;; 'agent-marker-bytes is 0 for every chat made after the marker left the
+;;; live input; a restored chat keeps its old value until it migrates.
 ;;;
 ;;; It reads buffer-locals, never a runtime: a restored chat has no thread
 ;;; until its first send, and up-arrow has to work before then.
 
-;; just past the marker: where the live input begins. A message queued
-;; mid-turn does not live here — RET echoes it into the transcript as a
-;; muted "queued" block (agent-echo-queued!), and the input clears.
+;; where the live input begins, never past the end of the buffer. A
+;; message queued mid-turn does not live here — RET echoes it into the
+;; transcript as a muted "queued" block (agent-echo-queued!), and the
+;; input clears.
 (define (chat-input-start buf)
-  (+ (chat-mark buf)
-     (or (buffer-local buf 'agent-marker-bytes)
-         (string-byte-length *chat-input-marker*))))
+  (min (+ (chat-mark buf) (or (buffer-local buf 'agent-marker-bytes) 0))
+       (buffer-size buf)))
+
+;; a chat from before the marker left the live input still carries the
+;; marker bytes at its mark: remove them, keep the draft after them, and
+;; record that the input starts at the mark. Runs on mode setup and on
+;; attach, and does nothing to a chat that is already in the new layout.
+(define (chat-input-migrate! buf)
+  (when (buffer-local buf 'agent-saved-mark)
+    (let* ((size (buffer-size buf))
+           (m (chat-mark buf))
+           (mb (string-byte-length *chat-input-marker*)))
+      (when (and (<= (+ m mb) size)
+                 (equal? (substring-bytes (buffer-text buf) m (+ m mb))
+                         *chat-input-marker*))
+        (buffer-delete-range! buf m mb))
+      ;; the local cannot sit past the end after the delete
+      (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
+      (buffer-set-local! buf 'agent-marker-bytes 0))))
 
 ;; (START END) of the LIVE input — what RET sends
 (define (chat-input-region buf)

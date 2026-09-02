@@ -2487,10 +2487,10 @@ defmodule Compos.EditorTest do
     assert buffer_group(companion) == buffer_group(buf)
     assert Buffer.get_local(companion, "mode-name") == "chat-mode"
 
-    # rich surface from birth: agent renderer + help meta card + input marker
+    # rich surface from birth: agent renderer + help meta card + an input at the mark
     assert Buffer.get_local(companion, "render-mode") == "agent"
     assert Buffer.text(companion) =~ "companion · #{buf}"
-    assert Buffer.text(companion) =~ ">>> you:"
+    assert Buffer.get_local(companion, "agent-saved-mark") == Buffer.byte_size(companion)
 
     type("make it rhyme")
     press(["RET"])

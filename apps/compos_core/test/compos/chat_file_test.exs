@@ -129,14 +129,13 @@ defmodule Compos.ChatFileTest do
     assert {:ok, ~s{(("user" "what shipped?") ("assistant" "the mail client"))}} =
              Session.eval(~s{(reverse (chat-turns "#{buf}"))})
 
-    # and as a live surface: rendered cards, an input marker, RET sends
+    # and as a live surface: rendered cards, an empty input, RET sends
     text = Buffer.text(buf)
     assert text =~ ">>> you: what shipped?"
     assert text =~ "the mail client"
     refute text =~ "#+chat:"
     refute text =~ "### You"
-    assert String.ends_with?(text, ">>> you: ")
-    assert Buffer.get_local(buf, "agent-saved-mark")
+    assert Buffer.get_local(buf, "agent-saved-mark") == byte_size(text)
     assert Editor.lookup_key(["RET"]) == {:command, "agent-send"}
   end
 

@@ -317,12 +317,11 @@
 
 (define (chat-marker-guard? buf p)
   (and (buffer-local buf 'agent-saved-mark)
-       (> p (chat-mark buf))
        (<= p (chat-input-start buf))))
 
 (effects! '(write))
 
-(define-command "chat-delete-backward" "Delete backward, but never into the input marker"
+(define-command "chat-delete-backward" "Delete backward, but never into the transcript"
   (lambda ()
     (if (chat-marker-guard? (current-buffer) (point))
         (message "beginning of input")
@@ -348,7 +347,10 @@
   ;; the mark is a marker: the buffer keeps the position current through
   ;; every edit. Declared here because every chat passes through this fn,
   ;; on setup, attach, and restore alike.
-  (buffer-marker-local! buf 'agent-saved-mark)
+  ;; 'stay: the input starts AT the mark, so a keystroke there must land
+  ;; after it, in the input. The agent's own appends go through
+  ;; buffer-insert-at-local!, which advances a stay marker itself.
+  (buffer-marker-local! buf 'agent-saved-mark 'stay)
   
   
   

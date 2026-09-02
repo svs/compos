@@ -34,6 +34,14 @@ defmodule Compos.AgentTest do
   alias Compos.Core.Agent.Backend
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+
+  # the live input: everything past the mark. The input carries no marker
+  # bytes, so an empty input means the buffer ends at the mark.
+  defp input_text(buf) do
+    text = Buffer.text(buf)
+    mark = min(Buffer.get_local(buf, "agent-saved-mark") || byte_size(text), byte_size(text))
+    binary_part(text, mark, byte_size(text) - mark)
+  end
   defp type(str), do: str |> String.graphemes() |> press()
 
   defp evict(name) do
@@ -660,7 +668,7 @@ defmodule Compos.AgentTest do
     assert p["sessionId"] == "sess-1"
 
     assert Buffer.text(buf) =~ "chat · a1"
-    assert Buffer.text(buf) =~ ">>> you:"
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: fix the bug" end)
     assert %{status: :running} = Agent.info("a1")
     _ = agent
   end
@@ -716,10 +724,10 @@ defmodule Compos.AgentTest do
     assert hello < tool and tool < body and body < done
     assert text =~ "foo.ex\n\ndefmodule Foo"
 
-    # tool body hidden; marker still at the very end
+    # tool body hidden; the input past the mark is empty
     assert [{s, e} | _] = Buffer.hidden(buf)
     assert s <= body and body < e
-    assert Buffer.text(buf) =~ ">>> you:"
+    assert input_text(buf) == ""
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
 
     # the block model mapped every span: user turn, merged prose, closed tool
@@ -832,8 +840,8 @@ defmodule Compos.AgentTest do
 
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid, "params" => p}}, 1_000
     assert [%{"text" => "first message"}] = p["prompt"]
-    # input region cleared back to the marker; message echoed into the transcript
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+    # input region cleared back to the mark; message echoed into the transcript
+    assert eventually(fn -> input_text(buf) == "" end)
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: first message\n" end)
 
     # second message while running -> queued: it sits in 'chat-queued
@@ -2045,7 +2053,7 @@ defmodule Compos.AgentTest do
   # grows the transcript ABOVE that mark, so both have to land in one
   # buffer message. While Scheme set the local in a second call, every
   # streamed chunk painted a frame in which the mark was stale, and the
-  # input row rendered the new text and the ">>> you: " marker with it.
+  # input row rendered the new text as if it were typed.
   test "an append moves the saved mark in the same buffer message" do
     {slug, buf, agent} = boot("")
 
@@ -2059,15 +2067,13 @@ defmodule Compos.AgentTest do
 
     assert eventually(fn -> Buffer.text(buf) =~ "streamed reply" end)
 
-    # the mark advanced past the appended text, and the marker still sits
-    # after it — the input region holds no transcript and no marker
+    # the mark advanced past the appended text — the input region past
+    # it holds no transcript
     mark = Buffer.get_local(buf, "agent-saved-mark")
     assert mark > before_mark
     assert Agent.mark(slug) == mark
 
-    input = binary_part(Buffer.text(buf), mark, byte_size(Buffer.text(buf)) - mark)
-    assert String.starts_with?(input, "\n>>> you: ")
-    refute String.contains?(binary_part(input, 10, byte_size(input) - 10), ">>> you:")
+    assert input_text(buf) == ""
   end
 
   # Up and down walk what you sent, like a shell. The draft you were
@@ -2084,7 +2090,7 @@ defmodule Compos.AgentTest do
       assert_receive {:frame, %{"method" => "session/prompt", "id" => id}}, 1_000
       inject(agent, %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn"}})
       assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
-      assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+      assert eventually(fn -> input_text(buf) == "" end)
     end
 
     send_turn.("first message")
@@ -2094,21 +2100,21 @@ defmodule Compos.AgentTest do
     focus(buf)
     type("draft")
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: second message") end)
+    assert eventually(fn -> input_text(buf) == "second message" end)
 
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: first message") end)
+    assert eventually(fn -> input_text(buf) == "first message" end)
 
     # nothing older: the input holds still rather than emptying
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: first message") end)
+    assert eventually(fn -> input_text(buf) == "first message" end)
 
     press(["<down>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: second message") end)
+    assert eventually(fn -> input_text(buf) == "second message" end)
 
     # ...and back to what was typed before the walk started
     press(["<down>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: draft") end)
+    assert eventually(fn -> input_text(buf) == "draft" end)
 
     # the walk reads the conversation of record — there is no second copy
     # of the messages
@@ -2133,10 +2139,10 @@ defmodule Compos.AgentTest do
 
     focus(buf)
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: newer question") end)
+    assert eventually(fn -> input_text(buf) == "newer question" end)
 
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: older question") end)
+    assert eventually(fn -> input_text(buf) == "older question" end)
   end
 
   # The case that matters most: reopen the editor and press up. A restored
@@ -2151,8 +2157,7 @@ defmodule Compos.AgentTest do
       (begin
         (buffer-append! "#{buf}" "chat\\n")
         (buffer-set-local! "#{buf}" 'agent-saved-mark (buffer-size "#{buf}"))
-        (buffer-append! "#{buf}" "\\n>>> you: ")
-        (buffer-set-local! "#{buf}" 'agent-marker-bytes 10)
+        (buffer-set-local! "#{buf}" 'agent-marker-bytes 0)
         (buffer-set-local! "#{buf}" 'chat-turns '(("user" "what I asked before")))
         (switch-to-buffer! "#{buf}")
         ;; the mode setup is what a desktop restore runs — it binds the keys
@@ -2165,11 +2170,11 @@ defmodule Compos.AgentTest do
     press(["<up>"])
 
     assert eventually(fn ->
-             String.ends_with?(Buffer.text(buf), ">>> you: what I asked before")
+             input_text(buf) == "what I asked before"
            end)
 
     press(["<down>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+    assert eventually(fn -> input_text(buf) == "" end)
 
     Compos.Core.kill_buffer(buf)
   end
@@ -2183,7 +2188,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/prompt", "id" => id}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn"}})
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+    assert eventually(fn -> input_text(buf) == "" end)
 
     # RET sends, so build a two-line input without sending
     focus(buf)
@@ -2195,7 +2200,7 @@ defmodule Compos.AgentTest do
 
     # now on the first line, so up recalls the newest sent message
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: line one") end)
+    assert eventually(fn -> input_text(buf) == "line one" end)
   end
 
   test "adapter exit renders a death notice and marks the thread dead" do

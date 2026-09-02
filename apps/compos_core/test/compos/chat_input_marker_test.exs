@@ -1,6 +1,7 @@
 defmodule Compos.ChatInputMarkerTest do
   @moduledoc """
-  The chat layout invariant: [transcript ... mark][">>> you: "][input].
+  The chat layout invariant: [transcript ... mark][input]. The live input
+  holds no marker bytes; ">>> you: " is the prefix of a sent user line.
   The buffer-local 'agent-saved-mark is the one truth for the mark, and
   every transcript insert goes through Buffer.insert_at_mark, which moves
   text and local in one message. These tests transmit through the real
@@ -33,13 +34,10 @@ defmodule Compos.ChatInputMarkerTest do
     :ok
   end
 
-  defp marker_at_mark?(buf) do
-    text = Buffer.text(buf)
-    mark = Buffer.get_local(buf, "agent-saved-mark")
-    mb = Buffer.get_local(buf, "agent-marker-bytes")
-
-    mark + mb <= byte_size(text) and
-      binary_part(text, mark, mb) == @marker
+  # the input is empty: the buffer ends at the mark
+  defp input_empty?(buf) do
+    Buffer.get_local(buf, "agent-marker-bytes") == 0 and
+      Buffer.get_local(buf, "agent-saved-mark") == Buffer.byte_size(buf)
   end
 
   test "insert_at_local moves the text and the named local in one message" do
@@ -92,42 +90,45 @@ defmodule Compos.ChatInputMarkerTest do
     assert Buffer.get_local(name, "m2") == 9
   end
 
-  test "the marker stays at the mark across transmits, and typed input survives" do
-    eval!("""
-    (execute* "first" '(backend "stub" script
-      (((type user-msg text "first") (type chunk text "First reply.\\n"))
-       ((type user-msg text "hello") (type chunk text "Second reply.\\n"))
-       ((type user-msg text "again") (type chunk text "Third reply.\\n")))))
-    """)
+  test "the input starts at the mark across transmits, and typed input survives" do
+    slug =
+      eval!("""
+      (execute* "first" '(backend "stub" script
+        (((type user-msg text "first") (type chunk text "First reply.\\n"))
+         ((type user-msg text "hello") (type chunk text "Second reply.\\n"))
+         ((type user-msg text "again") (type chunk text "Third reply.\\n")))))
+      """)
+      |> String.trim("\"")
 
-    buf = "*chat:a1*"
+    buf = eval!(~s[(agent-buf "#{slug}")]) |> String.trim("\"")
     assert eventually(fn -> Buffer.text(buf) =~ "First reply." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
-    assert marker_at_mark?(buf)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert input_empty?(buf)
 
     eval!(~s{(begin (switch-to-buffer! "#{buf}") (end-of-buffer!) #t)})
     press(~w(h e l l o))
-    assert String.ends_with?(Buffer.text(buf), ">>> you: hello")
+    assert String.ends_with?(Buffer.text(buf), "hello")
+    refute input_empty?(buf)
     press("RET")
 
     assert eventually(fn -> Buffer.text(buf) =~ "Second reply." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
-    assert marker_at_mark?(buf)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert input_empty?(buf)
 
     eval!(~s{(begin (switch-to-buffer! "#{buf}") (end-of-buffer!) #t)})
     press(~w(a g a i n))
-    assert String.ends_with?(Buffer.text(buf), ">>> you: again")
+    assert String.ends_with?(Buffer.text(buf), "again")
     press("RET")
 
     assert eventually(fn -> Buffer.text(buf) =~ "Third reply." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
-    assert marker_at_mark?(buf)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert input_empty?(buf)
 
     # the transcript holds every user line; the input region is empty
     text = Buffer.text(buf)
     assert text =~ ">>> you: hello"
     assert text =~ ">>> you: again"
-    assert String.ends_with?(text, @marker)
+    refute String.ends_with?(text, @marker)
   end
 
   defp eventually(fun, tries \\ 60) do

@@ -561,13 +561,18 @@
        (set! *apropos--embedding-sync-pending* #t)
        #f)
       (else
-        (let* ((gen (catalog-generation))
-               (both (apropos--sources-cached (apropos--rows-cached)))
-               (texts (nth 1 both)))
+        (let ((gen (catalog-generation)))
           (set! *apropos--embedding-sync-running* #t)
           (set! *apropos--embedding-sync-pending* #f)
+          ;; the rows, the sources, and their texts are built INSIDE the
+          ;; task: rebuilding them for the whole catalog costs seconds,
+          ;; and on the UI lane that was a stall after every reload. The
+          ;; vectors themselves are incremental already: the index keeps
+          ;; them by content hash and embeds only the texts it lacks.
           (task-run!
-            (lambda () (*apropos--embedding-sync* texts key))
+            (lambda ()
+              (let ((both (apropos--sources-cached (apropos--rows-cached))))
+                (*apropos--embedding-sync* (nth 1 both) key)))
             (lambda (ok value)
               (set! *apropos--embedding-sync-running* #f)
               (when (and ok value)

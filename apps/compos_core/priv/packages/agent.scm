@@ -315,7 +315,17 @@
   (lambda (slug events)
     ;; batches race buffer kills — a dead thread's events just drop
     (when (buffer-exists? (agent-buf slug))
-      (for-each (lambda (e) (agent-handle-event slug e)) events)
+      ;; one bad event must not kill the batch behind it: a turn-end that
+      ;; dies silently leaves the activity line lying ("streaming" forever)
+      ;; and the record unwritten. Isolate each event, and say what broke.
+      (for-each
+        (lambda (e)
+          (unless (ignore-errors (lambda () (agent-handle-event slug e) #t))
+            (message (string-append "agent " slug ": event "
+                       (let ((t (plist-get e 'type)))
+                         (if t (symbol->string t) "?"))
+                       " failed — transcript may be missing a piece"))))
+        events)
       ;; fleet surfaces track every batch: the erc-track segment + *chats*
       (agents-modeline-refresh!)
       (agents-refresh!))))

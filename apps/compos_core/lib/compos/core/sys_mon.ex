@@ -133,19 +133,21 @@ defmodule Compos.Core.SysMon do
   end
 
   # os_mon: each reader is guarded, because the application can be down
-  # in a test or a release without it. A missing value reads as 0.
+  # in a test or a release without it. A missing value reads as 0. The
+  # calls go through apply: os_mon belongs to compos_ui, so this app
+  # cannot name its modules at compile time.
   defp os_sample do
     %{
-      cpu_util: guard(fn -> :cpu_sup.util() |> round() |> clamp() end, 0),
-      load1: guard(fn -> load(:cpu_sup.avg1()) end, "0.00"),
-      load5: guard(fn -> load(:cpu_sup.avg5()) end, "0.00"),
-      load15: guard(fn -> load(:cpu_sup.avg15()) end, "0.00"),
+      cpu_util: guard(fn -> os(:cpu_sup, :util) |> round() |> clamp() end, 0),
+      load1: guard(fn -> load(os(:cpu_sup, :avg1)) end, "0.00"),
+      load5: guard(fn -> load(os(:cpu_sup, :avg5)) end, "0.00"),
+      load15: guard(fn -> load(os(:cpu_sup, :avg15)) end, "0.00"),
       mem_total: guard(fn -> os_mem(:total) end, 0),
       mem_free: guard(fn -> os_mem(:free) end, 0),
       disks:
         guard(
           fn ->
-            for {id, kb, pct} <- :disksup.get_disk_data() do
+            for {id, kb, pct} <- os(:disksup, :get_disk_data) do
               %{id: to_string(id), kbytes: kb, pct: clamp(pct)}
             end
           end,
@@ -154,12 +156,14 @@ defmodule Compos.Core.SysMon do
     }
   end
 
+  defp os(module, fun), do: apply(module, fun, [])
+
   defp load(avg) when is_integer(avg) do
     :erlang.float_to_binary(avg / 256, decimals: 2)
   end
 
   defp os_mem(which) do
-    data = :memsup.get_system_memory_data()
+    data = os(:memsup, :get_system_memory_data)
 
     case which do
       :total -> data[:system_total_memory] || data[:total_memory] || 0

@@ -763,9 +763,12 @@ defmodule Compos.Ui.Layouts do
           .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
           .ag-hint { font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
+            display: flex; align-items: center; gap: 12px;
             font-family: var(--font-mono); font-size: 11px; padding: 0 8px;
-            color: var(--agent-permission-fg, #a8741a); font-weight: 600;
+            white-space: nowrap;
           }
+          .ml-extra .ml-segment { color: var(--dim-fg, #8a857a); }
+          .ml-extra .ml-attention { color: var(--agent-permission-fg, #a8741a); font-weight: 600; }
           /* font-lock scopes (tree-sitter): the .ts-SCOPE rules come from the
              ts-SCOPE faces, see Compos.Ui.FaceCSS. A theme or a defface! owns
              every syntax colour, weight and slant. */

@@ -1291,7 +1291,7 @@ defmodule Compos.Ui.EditorLive do
       <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
       <span class="mb-spacer"></span>
       <span :if={@state.minibuffer == nil && @state.transient == nil && @state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
-      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
+      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><span class="ml-attention">{@state.modeline_extra}</span><% else %><span :for={{c, t} <- @state.modeline_extra} class={c}>{t}</span><% end %></span>
       <span class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
     </div>
     """

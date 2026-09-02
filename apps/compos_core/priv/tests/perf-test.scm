@@ -112,3 +112,46 @@
       (check-equal! (perf--last (perf--get ser 'host '())) 7 "the host series reads os cpu")
       (check-equal! (length (perf--get ser 'cores '())) 3 "one core series per scheduler, dirty cpu included")
       (check-equal! (length (car (perf--get ser 'cores '()))) *perf-core-width* "a core series is bounded"))))
+
+(deftest 'display-memory-text-expands-every-token
+  "the format names the numbers; unknown text stays"
+  (lambda ()
+    (let ((sample (list 'process-count 42
+                        'memory (list 'total 3221225472 'processes 1073741824 'binary 2048 'ets 1024)
+                        'os (list 'mem-total 1000 'mem-free 250 'cpu-util 7))))
+      (check-equal! (display-memory-text "%t vm · %h host" sample) "3.0 GiB vm · 75% host" "the default format")
+      (check-equal! (display-memory-text "%p %b %e %n %c" sample) "1.0 GiB 2 KiB 1 KiB 42 7%" "every token")
+      (check-equal! (display-memory-text "plain" sample) "plain" "no token, no change"))))
+
+(deftest 'global-mode-string-composes-segments-by-key
+  "a package owns one segment; strings, pairs, and thunks compose; #f removes"
+  (lambda ()
+    (let ((saved *global-mode-string*))
+      (set! *global-mode-string* '())
+      (global-mode-string-set! 'test-a "alpha")
+      (global-mode-string-set! 'test-b (list "ml-attention" "! beta"))
+      (global-mode-string-set! 'test-c (lambda () "gamma"))
+      (global-mode-string-set! 'test-d "")
+      (check-equal! (global-mode-string-segments)
+                    '(("ml-segment" "alpha") ("ml-attention" "! beta") ("ml-segment" "gamma"))
+                    "three segments in insertion order, the empty one dropped")
+      (global-mode-string-set! 'test-a "alpha 2")
+      (check-equal! (car (reverse (global-mode-string-segments))) '("ml-segment" "alpha 2")
+                    "a reset segment moves to the end with its new text")
+      (global-mode-string-remove! 'test-b)
+      (check-equal! (length (global-mode-string-segments)) 2 "a removed segment is gone")
+      (set! *global-mode-string* saved)
+      (global-mode-string-refresh!))))
+
+(deftest 'display-memory-mode-owns-one-segment
+  "on, the mode keeps a display-memory segment; off, it drops it"
+  (lambda ()
+    (let ((was display-memory-mode))
+      (customize-set! 'display-memory-mode #t)
+      (display-memory--tick #f)
+      (check-true! (assoc 'display-memory *global-mode-string*) "the segment exists while on")
+      (customize-set! 'display-memory-mode #f)
+      (display-memory--tick #f)
+      (check-equal! (assoc 'display-memory *global-mode-string*) #f "the segment is gone when off")
+      (customize-set! 'display-memory-mode was)
+      (display-memory--tick #f))))

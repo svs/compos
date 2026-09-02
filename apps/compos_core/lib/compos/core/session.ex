@@ -1101,7 +1101,7 @@ defmodule Compos.Core.Session do
       "agent-permission-deadline!" =>
         "(agent-permission-deadline! SLUG MS) — arm an auto-deny deadline on the permission.",
       "set-modeline-extra!" =>
-        "(set-modeline-extra! TEXT) — set the extra text that the modeline shows.",
+        "(set-modeline-extra! TEXT) — set the extra text at the right of the frame modeline: a string, or a list of (CLASS TEXT) segments.",
       "llm-model" => "(llm-model) — return the active LLM model id.",
       "llm-context-limit" =>
         "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown.",
@@ -2177,7 +2177,7 @@ defmodule Compos.Core.Session do
         :void
       end,
       "set-modeline-extra!" => fn [s] ->
-        Editor.set_modeline_extra(to_string(s))
+        Editor.set_modeline_extra(modeline_extra(s))
         :void
       end,
       "llm-model" => fn [] -> Compos.Core.LLM.model() end,
@@ -2668,6 +2668,13 @@ defmodule Compos.Core.Session do
   defp command_name(s) when is_binary(s), do: s
 
   # --- agent primitive helpers -------------------------------------------------
+
+  # the modeline extra: one string, or one (class text) pair per segment
+  defp modeline_extra(segments) when is_list(segments) do
+    for [class, text] <- segments, do: {to_string(class), to_string(text)}
+  end
+
+  defp modeline_extra(text), do: to_string(text)
 
   defp s({:sym, str}), do: str
   defp s(str) when is_binary(str), do: str

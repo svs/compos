@@ -320,8 +320,10 @@
 
 (define (agents-modeline-refresh!)
   (let ((att (agents-attention)))
-    (set-modeline-extra!
-      (if (null? att) "" (string-append "! " (string-join att " "))))))
+    (global-mode-string-set! 'agents-attention
+      (if (null? att)
+          #f
+          (list "ml-attention" (string-append "! " (string-join att " ")))))))
 
 (define-command "agent-goto-attention" "Jump to the first thread needing attention"
   (lambda ()

@@ -934,6 +934,59 @@
 
 (effects! '(read))
 
+;;; --- the memory in the frame modeline ---------------------------------------------------
+;;; display-memory-mode, after display-time-mode: one segment in the
+;;; global-mode-string, refreshed every display-memory-interval seconds.
+;;; The format names what the segment says.
+
+(defcustom 'display-memory-mode #t
+  "Show the VM memory at the right of the frame modeline."
+  'group 'perf 'type 'boolean)
+
+(defcustom 'display-memory-interval 5
+  "Seconds between two memory readings in the frame modeline."
+  'group 'perf 'type 'number)
+
+(defcustom 'display-memory-format "%t vm · %h host"
+  "The memory segment. %t total VM memory, %p processes, %b binaries, %e ets, %n process count, %h host memory in use as a percent, %c host cpu percent."
+  'group 'perf 'type 'string)
+
+;; the format with every token replaced from SAMPLE
+(define (display-memory-text format sample)
+  (let* ((mem (perf--get sample 'memory '()))
+         (os (perf--get sample 'os '()))
+         (host-total (perf--get os 'mem-total 0))
+         (host-used (max 0 (- host-total (perf--get os 'mem-free 0))))
+         (pairs (list (list "%t" (perf--bytes (perf--get mem 'total 0)))
+                      (list "%p" (perf--bytes (perf--get mem 'processes 0)))
+                      (list "%b" (perf--bytes (perf--get mem 'binary 0)))
+                      (list "%e" (perf--bytes (perf--get mem 'ets 0)))
+                      (list "%n" (number->string (perf--get sample 'process-count 0)))
+                      (list "%h" (string-append (number->string (perf--pct host-used (max 1 host-total))) "%"))
+                      (list "%c" (string-append (number->string (perf--get os 'cpu-util 0)) "%")))))
+    (fold (lambda (text pair) (string-join (string-split text (car pair)) (cadr pair)))
+          format pairs)))
+
+(define (display-memory--arm! ms)
+  (debounce! "display-memory" ms display-memory--tick #f))
+
+(define (display-memory--tick _)
+  (if display-memory-mode
+      (begin
+        (global-mode-string-set! 'display-memory
+          (display-memory-text display-memory-format (vm-sample)))
+        (display-memory--arm! (* 1000 (max 1 display-memory-interval))))
+      (global-mode-string-remove! 'display-memory)))
+
+(define-command "display-memory-mode" "Toggle the VM memory in the frame modeline"
+  (lambda ()
+    (customize-set! 'display-memory-mode (not display-memory-mode))
+    (display-memory--tick #f)
+    (message (if display-memory-mode "display-memory-mode on" "display-memory-mode off"))))
+
+;; the first reading waits a moment: at boot the frame is not up yet
+(display-memory--arm! 1000)
+
 ;;; --- the look ---------------------------------------------------------------------------
 ;;; The palette is four faces a theme can rename. Every colour in the CSS
 ;;; reads a face variable with a fallback, so a theme that says nothing

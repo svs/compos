@@ -3489,6 +3489,39 @@
           (begin (set-mode! m) (message (string-append m " on")))
           (message "no mode for this buffer")))))
 
+;;; --- global-mode-string ------------------------------------------------------
+;;; The segments at the right edge of the frame modeline, as Emacs's
+;;; global-mode-string. A package owns one segment by key. A segment is a
+;;; string, a (FACE-CLASS TEXT) pair, or a thunk that returns one of those;
+;;; #f or "" removes it. The registry composes every segment into the
+;;; frame's extra text; the client draws one span per segment.
+
+(define *global-mode-string* '()) ; ((key value) ...) in insertion order
+
+(define (global-mode-string--segment value)
+  (let ((v (if (procedure? value) (value) value)))
+    (cond ((and (string? v) (not (equal? v ""))) (list "ml-segment" v))
+          ((and (pair? v) (string? (cadr v)) (not (equal? (cadr v) ""))) (list (car v) (cadr v)))
+          (else #f))))
+
+(define (global-mode-string-segments)
+  (filter (lambda (x) x)
+          (map (lambda (e) (global-mode-string--segment (cadr e))) *global-mode-string*)))
+
+(define (global-mode-string-refresh!)
+  (set-modeline-extra! (global-mode-string-segments)))
+
+(define (global-mode-string-set! key value)
+  (let ((rest (remove (lambda (e) (equal? (car e) key)) *global-mode-string*)))
+    (set! *global-mode-string*
+      (if (or (not value) (equal? value ""))
+          rest
+          (append rest (list (list key value)))))
+    (global-mode-string-refresh!)))
+
+(define (global-mode-string-remove! key)
+  (global-mode-string-set! key #f))
+
 (define (modeline-toggle-mode! name)
   (let* ((buf (current-buffer))
          (major (or (buffer-local buf 'mode-name) "Fundamental")))
@@ -11206,5 +11239,13 @@
 (catalog-meta! 'function "buffer-widen!"
   'namespace 'core 'qualified-name "core/buffer-widen!"
   'domain 'buffers 'effects '(write display))
+
+(category! 'interaction)
+(effects! '(write display))
+(public! 'global-mode-string-set! "(global-mode-string-set! KEY VALUE) — own one segment at the right of the frame modeline; VALUE is a string, a (CLASS TEXT) pair, or a thunk; #f removes it")
+(public! 'global-mode-string-remove! "(global-mode-string-remove! KEY) — drop a package's segment")
+(public! 'global-mode-string-refresh! "(global-mode-string-refresh!) — recompose the segments; call after a thunk's answer changed")
+(effects! '(read))
+(public! 'global-mode-string-segments "(global-mode-string-segments) -> ((CLASS TEXT) ...) the frame modeline shows now")
 
 (message "editor.scm loaded")

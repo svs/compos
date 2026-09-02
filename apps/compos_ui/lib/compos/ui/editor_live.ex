@@ -1284,7 +1284,7 @@ defmodule Compos.Ui.EditorLive do
   defp frame_modeline(assigns) do
     ~H"""
     <div
-      :if={@state.minibuffer == nil || Map.get(@state.minibuffer, :style) == "palette"}
+      :if={true}
       class="echo-bar"
     >
       <span class="echo">{@state.echo}</span>

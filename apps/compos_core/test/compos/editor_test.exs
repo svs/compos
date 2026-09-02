@@ -1329,6 +1329,12 @@ defmodule Compos.EditorTest do
     press(["C-g"])
   end
 
+  test "M-x twice cancels the active minibuffer" do
+    press(["M-x", "M-x"])
+    assert Editor.snapshot().minibuffer == nil
+    assert echo() == "Quit"
+  end
+
   test "M-x runs a command by name", %{buf: buf} do
     press(["M-x"])
     assert %{prompt: "M-x "} = Editor.render_state().minibuffer

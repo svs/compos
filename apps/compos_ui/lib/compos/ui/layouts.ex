@@ -156,7 +156,7 @@ defmodule Compos.Ui.Layouts do
             box-shadow: 0 0 30px rgba(0, 0, 0, 0.30);
             border: var(--chrome-border, none);
             border-radius: var(--chrome-radius, 0);
-            animation: popup-rise var(--chrome-anim, 140ms) ease-out;
+
           }
           .window.popup-right,
           .window.popup-left {
@@ -183,7 +183,7 @@ defmodule Compos.Ui.Layouts do
           /* Window content persists across keyboard-panel patches. Keep it
              visually stable; only newly opened popups use an entry animation. */
           .editor-root:has(.mb-panel, .which-key, .transient-panel) .window {
-            animation: none;
+            animation: none; none;
           }
           .window {
             display: flex; flex-direction: column;
@@ -193,7 +193,7 @@ defmodule Compos.Ui.Layouts do
             box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border-bg, #d5cdb9));
             overflow: hidden;
             min-width: 0; min-height: 0;
-            animation: win-in var(--chrome-anim, 140ms) ease-out;
+            animation: none; none;
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
           .window.workspace-pending {
@@ -301,7 +301,7 @@ defmodule Compos.Ui.Layouts do
              so a reader still sees where point stands. */
           .buf[contenteditable]:focus { caret-color: var(--cursor-bg, #26356b); }
           .buf[contenteditable]:focus .cursor {
-            background: transparent; color: inherit; animation: none;
+            background: transparent; color: inherit;
           }
           .buf[contenteditable]:focus .region { background: transparent; }
           .buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
@@ -437,7 +437,7 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
             border: 1px solid var(--default-fg, #1b1a17);
             box-shadow: 3px 3px 0 rgba(27, 26, 23, 0.18);
-            animation: rise 90ms ease-out;
+
             white-space: nowrap;
           }
           .cap-title {
@@ -471,12 +471,12 @@ defmodule Compos.Ui.Layouts do
             color: var(--window-bg, #fdfcf8);
             border-radius: 1px;
           }
-          .window.active .cursor { animation: blink 1.1s steps(1) infinite; }
+          .window.active .cursor { }
           .window.inactive .cursor {
             background: transparent;
             color: inherit;
             box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
-            animation: none;
+            animation: none; none;
           }
           /* The frame does not own the keyboard, so the cursor stops
              blinking and goes hollow. It does NOT go away: a reader who
@@ -486,7 +486,7 @@ defmodule Compos.Ui.Layouts do
             background: transparent !important;
             color: inherit !important;
             box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
-            animation: none !important;
+            animation: none; none !important;
           }
           .no-nums .linenum { display: none; }
           /* an img-embed seg: the picture, in the text's place */
@@ -637,7 +637,7 @@ defmodule Compos.Ui.Layouts do
               color-mix(in srgb, var(--agent-tool-fg, #26356b) 13%, transparent) 46%,
               transparent 72%
             );
-            transform: translateX(-120%); animation: ag-shimmer 1.8s ease-in-out infinite;
+            transform: translateX(-120%);
           }
           .ag-tool[open] {
             margin: 8px 0;
@@ -650,7 +650,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
-          .ag-dot.running { background: var(--warn-fg, #e0af68); animation: ag-pulse 1.2s ease-in-out infinite; }
+          .ag-dot.running { background: var(--warn-fg, #e0af68); }
           .ag-dot.done { background: var(--ok-fg, #4a7a4a); }
           .ag-dot.failed { background: var(--alert-fg, #a8342a); }
           .ag-kind {
@@ -743,7 +743,7 @@ defmodule Compos.Ui.Layouts do
           .ag-btn.deny { border-color: transparent; color: var(--alert-fg, #a8342a); opacity: 0.8; }
           .ag-wait {
             font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
-            color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
+            color: var(--agent-thought-fg, #8a8577);
           }
           /* the turn pulse under the transcript: outside .ag-scroll, so it
              aligns with the input row, not the padded scroll area */
@@ -871,7 +871,7 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
             box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
-            animation: rise 110ms ease-out;
+
           }
           /* palette style: the prompt floats centered over the windows,
              input on top, candidates below — the buffer switcher asks
@@ -891,8 +891,9 @@ defmodule Compos.Ui.Layouts do
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             overflow: hidden;
             z-index: 40;
-            animation: none;
-            /* NO entry animation: a patched node's animation can stall
+            animation: none; none;
+            /* A patched node stays visible without an entry animation. It does not
+               fade or scale while the prompt is open.
                at its first frame and leave the palette painted at
                opacity 0 — an open, working, invisible prompt */
           }
@@ -1093,7 +1094,7 @@ defmodule Compos.Ui.Layouts do
             max-height: 44vh;
             overflow-y: auto;
             box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
-            animation: rise 120ms ease-out;
+
           }
           .wk-title {
             display: flex; justify-content: space-between; gap: 18px;

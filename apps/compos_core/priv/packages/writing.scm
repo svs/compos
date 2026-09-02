@@ -31,8 +31,8 @@
   "Font family for writing-mode buffer text."
   'group 'writing 'type 'string 'set writing--refresh!)
 
-(defcustom 'writing-font-size "17px"
-  "Font size for writing-mode buffer text (any CSS size)."
+(defcustom 'writing-font-size ""
+  "Font size for writing-mode buffer text (any CSS size). Empty means the default face's size."
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-line-height "1.9"

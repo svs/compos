@@ -21,15 +21,25 @@
 (define *preview-serif* "Spectral,Georgia,serif")
 (define *preview-mono* "'IBM Plex Mono',ui-monospace,Menlo,monospace")
 
+;; Rows draw on the text surface, so they read the settings themselves.
+(define (preview--repaint-rows!)
+  (for-each
+    (lambda (buf)
+      (when (buffer-local buf 'preview-rows)
+        (preview--rows-look! buf)))
+    (buffer-list)))
+
 (defcustom 'preview-font-family *preview-serif*
   "Font family for rendered preview pages."
   'group 'preview
   'set (lambda (v) (set-face-attribute! 'preview 'family v)))
 
-(defcustom 'preview-font-size "16.5px"
-  "Font size for rendered preview pages."
+(defcustom 'preview-font-size ""
+  "Font size for rendered preview pages. Empty means the default face's size."
   'group 'preview
-  'set (lambda (v) (set-face-attribute! 'preview 'size v)))
+  'set (lambda (v)
+         (set-face-attribute! 'preview 'size v)
+         (preview--repaint-rows!)))
 
 (defcustom 'preview-measure "33em"
   "Maximum line length for rendered preview pages."
@@ -43,23 +53,17 @@
 
 ;; The type of a rendered page is one choice, "mono" or "serif", and every
 ;; rendered page takes it: the renderer bakes the preview face into the page,
-;; so a buffer cannot hold a type of its own. Each choice carries its own size
-;; and measure, because a monospace character is wider and the same character
-;; count needs more em.
+;; so a buffer cannot hold a type of its own. Each choice carries its own
+;; measure, because a monospace character is wider and the same character
+;; count needs more em. Both read at the default face's size.
 (define (preview-typography)
   (if (string-contains? preview-font-family "Mono") "mono" "serif"))
 
 (define (preview-typography! view)
   (let ((mono? (equal? view "mono")))
     (customize-set! 'preview-font-family (if mono? *preview-mono* *preview-serif*))
-    (customize-set! 'preview-font-size (if mono? "14.5px" "16.5px"))
     (customize-set! 'preview-measure (if mono? "42em" "33em"))
-    ;; Rows draw on the text surface, so they read the setting themselves.
-    (for-each
-      (lambda (buf)
-        (when (buffer-local buf 'preview-rows)
-          (preview--rows-look! buf)))
-      (buffer-list))
+    (preview--repaint-rows!)
     view))
 
 (define-command "preview-font-toggle"

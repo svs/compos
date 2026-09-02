@@ -160,7 +160,9 @@ defmodule Compos.CustomizeTest do
       eval!(~s{(customize-set! 'org-font-size "19px")})
       assert Buffer.get_local(buf, "style") =~ "--default-size:19px;"
 
-      eval!(~s{(customize-set! 'org-font-size "14.5px")})
+      eval!(~s{(customize-set! 'org-font-size "")})
+      refute Buffer.get_local(buf, "style") =~ "--default-size:",
+             "an empty size means the default face's size"
     end
   end
 end

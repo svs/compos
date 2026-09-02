@@ -598,8 +598,8 @@
   "Font family for org-mode buffer text."
   'group 'org 'type 'string 'set org--apply-fonts!)
 
-(defcustom 'org-font-size "14.5px"
-  "Font size for org-mode buffer text (any CSS size)."
+(defcustom 'org-font-size ""
+  "Font size for org-mode buffer text (any CSS size). Empty means the default face's size."
   'group 'org 'type 'string 'set org--apply-fonts!)
 
 (mode-doc! "org-mode"

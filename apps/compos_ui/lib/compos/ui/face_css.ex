@@ -70,9 +70,11 @@ defmodule Compos.Ui.FaceCSS do
         Map.merge(acc, sources(faces, parent, [parent | seen]))
       end)
 
+    # an empty value is no value: the attribute inherits, or stays unset
     own_sources =
       own
       |> Map.drop(@meta)
+      |> Map.reject(fn {_, v} -> v == "" end)
       |> Map.new(fn {k, v} -> {k, {name, v}} end)
 
     Map.merge(inherited, own_sources)

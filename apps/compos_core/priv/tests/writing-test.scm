@@ -196,7 +196,9 @@
     (let ((buf (test-buffer! "zz-writing.org" "* head\nbody\n")))
       (with-current-buffer buf (lambda () (set-mode! "org-mode")))
       (let ((org-style (buffer-local buf 'style)))
-        (check-contains! org-style "--default-size:14.5px;" "org's own size")
+        (check-contains! org-style "--default-family:Spectral" "org's own family")
+        (check-false! (string-contains? org-style "--default-size")
+                      "org names no size: it reads at the default face's")
 
         ;; writing-mode toggles the look; write only ever enters the workspace
         (with-current-buffer buf (lambda () (run-command "writing-mode")))

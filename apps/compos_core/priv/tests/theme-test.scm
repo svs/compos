@@ -48,6 +48,20 @@
                   "the stock size is two steps up the 1.2 ladder from 13px")
     (theme-test-restore!)))
 
+(deftest 'an-empty-size-remap-reads-at-the-default-face
+  "a prose mode that sets 'size \"\" emits no --default-size: the text inherits default-font-size"
+  (lambda ()
+    (let ((buf "*tt-empty-size*"))
+      (buffer-create buf)
+      (face-remap-in! buf 'default (list 'family "Spectral" 'size "" 'line-height "1.7"))
+      (let ((style (buffer-local buf 'style)))
+        (check-contains! style "--default-family:Spectral;" "the family still emits")
+        (check-contains! style "--default-line-height:1.7;" "the line height still emits")
+        (check-false! (string-contains? style "--default-size") "the empty size emits nothing"))
+      (face-remap-in! buf 'default (list 'size "20px"))
+      (check-contains! (buffer-local buf 'style) "--default-size:20px;" "a named size emits")
+      (buffer-kill! buf))))
+
 (deftest 'every-bundled-theme-colours-the-headings
   "a heading is never paper's navy on a dark ground: each theme names its own"
   (lambda ()

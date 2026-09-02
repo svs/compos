@@ -135,16 +135,21 @@
 ;;; remap alist persists in a buffer local; the derived CSS rides the
 ;;; existing 'style local the renderer already applies.
 
+;; An empty value ("" or #f) names no CSS: the emitter skips it, so the
+;; attribute comes from the face below the remap. A mode that sets 'size ""
+;; reads at the default face's size.
 (define (face-remap--css remap)
   (fold (lambda (acc e)
           (let ((face (symbol->string (car e))))
             (let loop ((kvs (cadr e)) (s acc))
               (if (null? kvs) s
                   (loop (cdr (cdr kvs))
-                        (string-append s "--" face "-" (symbol->string (car kvs)) ":"
-                                       (let ((v (cadr kvs)))
-                                         (if (string? v) v (value->string v)))
-                                       ";"))))))
+                        (let ((v (cadr kvs)))
+                          (if (or (not v) (equal? v ""))
+                              s
+                              (string-append s "--" face "-" (symbol->string (car kvs)) ":"
+                                             (if (string? v) v (value->string v))
+                                             ";"))))))))
         "" remap))
 
 (define (face-remap-in! buf face attrs)

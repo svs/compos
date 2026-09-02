@@ -2967,7 +2967,13 @@ defmodule Compos.Ui.EditorLive do
     # typography is policy: the 'preview face carries it (appearance.scm
     # defcustoms; themes and init.scm may set it like any face)
     family = face(faces, "preview", "family", "Spectral,Georgia,serif")
-    size = face(faces, "preview", "size", "16.5px")
+    # an empty preview size means the default face's size, as in a buffer
+    size =
+      case face(faces, "preview", "size", "") do
+        "" -> face(faces, "default", "size", "18.7px")
+        s -> s
+      end
+
     # the measure is the readability lever. 44em of Spectral ran to 94
     # characters a line; prose reads fastest between 65 and 75.
     measure = face(faces, "preview", "measure", "33em")
@@ -2982,20 +2988,22 @@ defmodule Compos.Ui.EditorLive do
     /* a heading must separate the sections, so its space above is much
        larger than the space below it */
     h1,h2,h3,h4{font-family:#{family};line-height:1.2;font-weight:700;letter-spacing:-0.012em}
-    h1{font-size:30px;margin:0}
+    /* every size on the page is an em of the body, so the page keeps its
+       proportions at any default face size */
+    h1{font-size:1.82em;margin:0}
     /* one scale, no rules: a section heading is bigger and sits higher
        above its text than a paragraph; the renderer's gap does the rest */
-    h2{font-size:23px;margin:0;padding-top:.45em}
-    h3{font-size:18.5px;margin:0;padding-top:.3em;color:#{accent}}
-    h4{font-size:15.5px;margin:0;padding-top:.2em;color:#{dim};font-weight:600;
-       text-transform:uppercase;letter-spacing:.06em;font-size:12.5px}
+    h2{font-size:1.39em;margin:0;padding-top:.45em}
+    h3{font-size:1.12em;margin:0;padding-top:.3em;color:#{accent}}
+    h4{font-size:.76em;margin:0;padding-top:.2em;color:#{dim};font-weight:600;
+       text-transform:uppercase;letter-spacing:.06em}
     /* the browser default indents a list 40px and puts no space between
        the items: a list of requirements then reads as one block */
     ul,ol{margin:0;padding-left:1.35em}
     li{margin:0}
     li>ul,li>ol{margin:0}
     li::marker{color:#{dim}}
-    code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
+    code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.82em}
     code{background:#{inset};padding:1px 4px;border-radius:2px}
     /* a name in a heading is still the heading: the code span must not
        shrink it to body size, nor box it */
@@ -3007,7 +3015,7 @@ defmodule Compos.Ui.EditorLive do
     pre:has(> code.text){white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}
     .code-block{margin:0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
     .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
-      border-bottom:1px solid #{border};color:#{dim};font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
+      border-bottom:1px solid #{border};color:#{dim};font:.73em/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
     .code-lang{margin-right:auto;color:#{accent};font-weight:700;text-transform:uppercase;letter-spacing:.06em}
     .code-action{white-space:nowrap}
     .code-action kbd{padding:1px 4px;border:1px solid #{border};border-radius:3px;color:#{fg};background:#{bg}}
@@ -3022,13 +3030,13 @@ defmodule Compos.Ui.EditorLive do
          border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
     blockquote.llm-response>:first-child{margin-top:0}
     blockquote.llm-response>:last-child{margin-bottom:0}
-    table{border-collapse:collapse;font-size:14px;display:block;overflow-x:auto;
+    table{border-collapse:collapse;font-size:.85em;display:block;overflow-x:auto;
           max-width:100%;margin:0}
     /* rules between rows, none around them: a reference table reads as
        columns, not as a grid of boxes */
     th,td{border:0;border-bottom:1px solid #{border};padding:6px 14px 6px 0;
           vertical-align:top}
-    th{background:none;text-align:left;color:#{dim};font:600 11px/1.7 "IBM Plex Mono",ui-monospace,Menlo,monospace;
+    th{background:none;text-align:left;color:#{dim};font:600 .79em/1.7 "IBM Plex Mono",ui-monospace,Menlo,monospace;
        letter-spacing:.09em;text-transform:uppercase}
     tr:last-child td{border-bottom:0}
     img{max-width:100%;height:auto;border-radius:3px}
@@ -3037,17 +3045,17 @@ defmodule Compos.Ui.EditorLive do
     figcaption{margin-top:.55em;text-align:center;font-size:.9em;font-style:italic;color:var(--dim-fg,#8a857a)}
     hr{border:0;border-top:1px solid #{border};margin:0}
     .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
-           max-width:32em;background:#{inset};font-size:14.5px}
+           max-width:32em;background:#{inset};font-size:.88em}
     .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
     .tweet blockquote p{margin:0 0 8px}
     .tweet-pending{color:#{dim}}
     .tw-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
     .tw-avatar{width:38px;height:38px;border-radius:50%}
     .tw-name{font-weight:600;display:block;line-height:1.2}
-    .tw-handle{color:#{dim};text-decoration:none;font-size:13px}
+    .tw-handle{color:#{dim};text-decoration:none;font-size:.9em}
     .tw-text{margin:0 0 10px}
     .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
-    .tw-date{color:#{dim};font-size:13px;text-decoration:none}
+    .tw-date{color:#{dim};font-size:.9em;text-decoration:none}
     .youtube-card{position:relative;display:block;max-width:40em;margin:12px 0;
       color:white;text-decoration:none;border-radius:8px;overflow:hidden;background:#111}
     .youtube-card img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:0}

@@ -1046,13 +1046,75 @@
       chat-summary-model
       (lambda (text)
         (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
-          (buffer-set-local! buf 'chat-summary (chat-summary--flatten text))
-          ;; the bar shows the paragraph now, not after the next command
-          (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
-          ;; between turns no save is coming -- the archive takes the fresh
-          ;; paragraph now; mid-turn the turn-end save carries it
-          (unless (buffer-local buf 'chat-turn-active)
-            (chat-log-save! buf)))))))
+          (chat-summary-land! buf (chat-summary--flatten text)))))))
+
+(define *chat-summary-log-max* 200)
+
+;; a fresh paragraph: the bar shows it, the log keeps it, the archive
+;; takes it
+(define (chat-summary-land! buf text)
+  (buffer-set-local! buf 'chat-summary text)
+  (let ((log (or (buffer-local buf 'chat-summary-log) '())))
+    (buffer-set-local! buf 'chat-summary-log
+      (chat-summary--take (cons (list (current-time) text) log) *chat-summary-log-max*)))
+  ;; the bar shows the paragraph now, not after the next command
+  (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
+  ;; between turns no save is coming -- the archive takes the fresh
+  ;; paragraph now; mid-turn the turn-end save carries it
+  (unless (buffer-local buf 'chat-turn-active)
+    (chat-log-save! buf)))
+
+(define (chat-summary--take l n)
+  (if (or (null? l) (<= n 0)) '() (cons (car l) (chat-summary--take (cdr l) (- n 1)))))
+
+;; The bar shows the latest line. The log shows every line, the chat's
+;; summaries and the repo's open changes in one order of time.
+(public! 'buffer-summary-log-entries
+  "(buffer-summary-log-entries BUF) -- ((SECS KIND TEXT) ...) oldest first; KIND is summary or jj")
+(define (buffer-summary-log-entries buf)
+  (let ((summaries (map (lambda (e) (list (car e) 'summary (cadr e)))
+                        (let ((log (buffer-local buf 'chat-summary-log))
+                              (now (buffer-local buf 'chat-summary)))
+                          ;; a chat from before the log has one undated
+                          ;; paragraph: the one the bar shows
+                          (cond ((pair? log) log)
+                                ((and (string? now) (not (equal? now ""))) (list (list 0 now)))
+                                (else '())))))
+        (changes (if (boundp 'jj-line-history)
+                     (map (lambda (e) (list (car e) 'jj (cadr e)))
+                          (jj-line-history buf))
+                     '())))
+    (sort (append summaries changes))))
+
+(define (buffer-summary-log--markdown buf)
+  (string-append
+    "# Summary log: " buf "\n\n"
+    (let ((entries (buffer-summary-log-entries buf)))
+      (if (null? entries)
+          "_No summary and no jj change yet._\n"
+          (string-join
+            (map (lambda (e)
+                   (string-append
+                     "**" (if (> (car e) 0) (format-time (car e) "%H:%M") "--:--") "** "
+                     (symbol->string (cadr e)) "  \n" (caddr e) "\n"))
+                 entries)
+            "\n")))))
+
+(define (buffer-summary-log! buf)
+  (if (boundp 'help-doc!)
+      (help-doc! (string-append "Summary log: " buf) (buffer-summary-log--markdown buf))
+      (message (buffer-summary-log--markdown buf))))
+
+(define-command "buffer-summary-log"
+  "Show this buffer's summaries and jj changes, interleaved by time"
+  (lambda () (buffer-summary-log! (current-buffer))))
+
+;; the wide segment of the bar opens the log for the window's buffer
+(when (boundp 'on-block-click!)
+  (on-block-click! 'summary-log
+    (lambda (buf id)
+      (and (equal? id "summary-log")
+           (begin (buffer-summary-log! buf) #t)))))
 
 (public! 'chat-summary-note-tool!
   "(chat-summary-note-tool! BUF) -- refresh the chat's running summary once the tool-call burst settles")

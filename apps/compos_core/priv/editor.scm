@@ -8888,6 +8888,9 @@
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
     chat-log-id
+    ;; the running summary and every paragraph before it: a reset starts
+    ;; a new conversation with nothing to say yet
+    chat-summary chat-summary-log
     agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
@@ -9668,23 +9671,24 @@
 .dash-bar.h4 { height: 19px; } .dash-bar.h5 { height: 24px; } .dash-bar.h6 { height: 29px; }
 .dash-bar.h7 { height: 34px; } .dash-bar.h8 { height: 39px; } .dash-bar.h9 { height: 44px; }
 .dash-persistent { display: flex; align-items: center; gap: 20px; min-width: 0;
+                   overflow: hidden;
                    padding: 7px 18px 8px; border-bottom: 2px solid var(--buffer-group-color, var(--accent-fg, #26356b));
                    background: var(--window-bg, #fdfcf8); cursor: pointer; }
-.dseg { display: flex; flex-direction: column; gap: 1px; min-width: 0;
+/* every keyed segment shows its whole value; only the wide one gives way */
+.dseg { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto;
         font-family: var(--font-mono); }
 .dseg-r { align-items: flex-end; }
 .dseg-inline { flex-direction: row; align-items: baseline; gap: 7px; }
 .dseg-k { font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
-.dseg-v { font-size: 12.5px; color: var(--default-fg, #1b1a17);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dseg-v { font-size: 12.5px; color: var(--default-fg, #1b1a17); white-space: nowrap; }
 .dseg-strong { font-weight: 600; }
 .dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 .dseg-gap { flex: 1 1 auto; }
-.dseg-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.dseg-wide { flex: 1 1 auto; }
+.dseg-stack { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
+.dseg-wide { flex: 1 1 0; min-width: 0; }
 .dseg-wide .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
                      display: -webkit-box; -webkit-box-orient: vertical;
                      -webkit-line-clamp: 2; }
@@ -10089,14 +10093,19 @@
       ;; one wide segment at the end, wrapping to two lines with the key
       ;; inline: a chat says what it is doing, and every other buffer of
       ;; the repo names the open jj change, kept fresh by jj.scm
+      ;; A click on it opens the log of every line it showed.
       (cond (summary
              (list (dash--seg-rule)
-                   (dash--seg "summary" (list (list "f-dim" summary))
-                              'left "dseg-inline dseg-wide")))
+                   (dash--wide-seg "summary" summary)))
             (vcs
              (list (dash--seg-rule)
-                   (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-wide")))
+                   (dash--wide-seg "jj" vcs)))
             (else '())))))
+
+(define (dash--wide-seg key text)
+  (append (dash--seg key (list (list "f-dim" text)) 'left "dseg-inline dseg-wide")
+          (list 'click "summary-log"
+                'attrs (list (list "title" "open the summary log")))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps

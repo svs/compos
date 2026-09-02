@@ -207,6 +207,7 @@
 ;; An unlabeled run shows its Agent: line, which is exactly the nudge to
 ;; call jj-describe!.
 (define *jj-lines* '())       ; ((ROOT LINE) ...)
+(define *jj-history* '())     ; ((ROOT SECS LINE) ...), newest first
 (define *jj-dir-roots* '())   ; ((DIR ROOT) ...); ROOT is #f outside a repo
 
 ;; the repo root of DIR, remembered per directory: a redraw asks for it
@@ -226,11 +227,25 @@
 
 (define (jj-read-line! root)
   (let* ((raw (jj-at root "description.first_line()"))
-         (line (if (equal? raw "") "jj: undescribed" raw)))
+         (line (if (equal? raw "") "jj: undescribed" raw))
+         (hit (assoc root *jj-lines*)))
+    ;; the history keeps every line the root showed, once per change
+    (unless (and hit (equal? (cadr hit) line))
+      (set! *jj-history* (cons (list root (current-time) line) *jj-history*)))
     (set! *jj-lines*
           (cons (list root line)
                 (filter (lambda (e) (not (equal? (car e) root))) *jj-lines*)))
     line))
+
+(public! 'jj-line-history
+  "(jj-line-history BUF) -- the lines the repo of BUF showed in the bar, as ((SECS LINE) ...) newest first")
+(define (jj-line-history buf)
+  (let ((root (jj-buffer-root buf)))
+    (if root
+        (begin
+          (unless (assoc root *jj-lines*) (jj-read-line! root))
+          (map cdr (filter (lambda (e) (equal? (car e) root)) *jj-history*)))
+        '())))
 
 (public! 'jj-modeline-line
   "(jj-modeline-line BUF) -- the first line of the open jj change of BUF's repo, or #f outside one")

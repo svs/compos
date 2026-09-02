@@ -1912,14 +1912,6 @@
   (filter (lambda (b) (not (buffer-context-only? b)))
           (group-buffers-mru g)))
 
-;; A grouped frame never falls through to the global MRU when a visible
-;; buffer dies. Capture each affected frame before the core removes the
-;; buffer. Afterward, fill its windows from that frame's current group only.
-(define (group-kill-visible-in-frame frame)
-  (map cadr
-    (filter (lambda (row) (equal? (caddr row) frame))
-            (window-list-all))))
-
 (define *group-dying* #f)
 
 ;; The pool (editor.scm window-fill-buffers): in a group, the group's
@@ -1941,23 +1933,57 @@
           ((and (not (equal? (car bs) name)) (buffer-exists? (car bs))) (car bs))
           (else (loop (cdr bs))))))
 
-(define (group-kill-replacement group frame)
-  (let* ((visible (group-kill-visible-in-frame frame))
-         (members (filter fill-candidate? (group-buffers-mru group)))
-         (hidden (filter (lambda (buf) (not (member buf visible))) members)))
-    (cond ((pair? hidden) (car hidden))
-          ((pair? members) (car members))
-          ;; no chat for a group that is being killed: the window falls
-          ;; to the next buffer instead
-          ((equal? (group-resolve-id group) *group-dying*) #f)
-          (else (group-chat group)))))
+;; the group's most recent chat other than NAME, still alive
+(define (group-kill-last-chat group name)
+  (let ((id (group-resolve-id group)))
+    (and id
+         (let loop ((bs (buffer-list-mru)))
+           (cond ((null? bs) #f)
+                 ((and (not (equal? (car bs) name))
+                       (buffer-exists? (car bs))
+                       (chat-buffer? (car bs))
+                       (equal? (chat-group-id (car bs)) id))
+                  (car bs))
+                 (else (loop (cdr bs))))))))
 
-;; A window in a group fills from the group. A window in no group keeps
-;; the core's own fallback (the window's history), unless that fallback
-;; is a peek: a peek is a look, not a place to fall to, and the peek in
-;; the popup was the most recent buffer. The selection stays in the
-;; window that was selected: the core hands it to another window while
-;; the buffer dies, and that window was the popup.
+;; the scratch the group already has, other than NAME
+(define (group-kill-existing-scratch group name)
+  (let ((s (group-buffer-as group 'scratch)))
+    (and s (not (equal? s name)) (buffer-known? s) s)))
+
+;; what a killed buffer's window may show in its group: one of the
+;; group's chats, or the group's scratch — nothing else, not even a
+;; member the window showed before
+(define (group-kill-keeper? shown group)
+  (let ((id (group-resolve-id group)))
+    (and id shown (buffer-known? shown)
+         (or (and (chat-buffer? shown) (equal? (chat-group-id shown) id))
+             (equal? shown (group-buffer-as group 'scratch))))))
+
+(define (group-dying? group)
+  (and *group-dying* (equal? (group-resolve-id group) *group-dying*)))
+
+;; how many windows FRAME has
+(define (group-kill-frame-window-count frame)
+  (length (filter (lambda (row) (equal? (caddr row) frame)) (window-list-all))))
+
+;; The window of a killed buffer stays in its group (user ruling,
+;; 2026-09-03): it shows the group's last chat, else the group's
+;; scratch, and it closes only when the group has neither — a group
+;; that is dying. A buffer from another group never comes in.
+;;
+;; Before the kill, a window in a group moves to the chat or the scratch
+;; the group already has, so the core needs no stand-in. After the kill,
+;; a window the core had to fill on its own is checked: a chat of the
+;; group or its scratch may stay; anything else gives way to the group's
+;; scratch (made now, from a member that survived), else the window
+;; closes. The last window
+;; of a frame cannot close: it shows *scratch*. A window in no group
+;; keeps the core's fallback, unless that fallback is a peek.
+;;
+;; The selection stays in the window that was selected: the core hands
+;; it to another window while the buffer dies, and that window was the
+;; popup.
 (define (group-buffer-kill-repair name)
   (let ((places
           (fold
@@ -1971,19 +1997,37 @@
             '()
             (window-list-all)))
         (active (active-window)))
+    (for-each
+      (lambda (place)
+        (let ((win (car place))
+              (group (caddr place)))
+          (when (and group (not (group-dying? group)))
+            (let ((next (or (group-kill-last-chat group name)
+                            (group-kill-existing-scratch group name))))
+              (when next (window-set-buffer! win next))))))
+      places)
     (lambda ()
       (for-each
         (lambda (place)
           (let ((win (car place))
                 (frame (cadr place))
                 (group (caddr place)))
-            (when (frame-of-window win)
-              (cond (group
-                     (let ((replacement (group-kill-replacement group frame)))
-                       (when replacement (window-set-buffer! win replacement))))
-                    ((not (fill-candidate? (window-buffer win)))
-                     (let ((replacement (group-kill-plain-replacement name)))
-                       (when replacement (window-set-buffer! win replacement))))))))
+            (when (and (frame-of-window win) (window-exists? win))
+              (let ((shown (window-buffer win)))
+                (cond ((not group)
+                       (unless (fill-candidate? shown)
+                         (let ((replacement (group-kill-plain-replacement name)))
+                           (when replacement (window-set-buffer! win replacement)))))
+                      ((group-kill-keeper? shown group) #t)
+                      (else
+                        (let ((blank (and (not (group-dying? group))
+                                          (group-blank-buffer group))))
+                          (cond (blank (window-set-buffer! win blank))
+                                ((> (group-kill-frame-window-count frame) 1)
+                                 (delete-window-id! win))
+                                (else
+                                  (unless (buffer-exists? "*scratch*") (buffer-create "*scratch*"))
+                                  (window-set-buffer! win "*scratch*"))))))))))
         places)
       (when (and (assoc active places) (window-exists? active)
                  (not (equal? (active-window) active)))

@@ -294,6 +294,70 @@
       (check-false! (frame-group) "with no grouped buffer left, the frame stands in none"))
     (t--sw-done!)))
 
+;;; --- the window of a killed buffer stays in its group ----------------------------
+
+(define (t--sw-kill-frame! name)
+  ;; one group, two windows: first on the left, second on the right,
+  ;; the frame standing in the group
+  (let ((id (group-record-create! name)))
+    (buffer-add-group! t--sw-first id)
+    (buffer-add-group! t--sw-second id)
+    (set-frame-local! 'current-group id)
+    (delete-other-windows!)
+    (switch-to-buffer! t--sw-first)
+    (split-window! 'h 0.5)
+    (other-window!)
+    (switch-to-buffer! t--sw-second)
+    id))
+
+(deftest 'a-killed-buffers-window-shows-the-groups-last-chat
+  "the window stays, and the group's chat takes its place"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (t--sw-kill-frame! "zzsw-kill-chat"))
+           (chat (group-chat id))
+           (win (active-window)))
+      (check-equal! (window-buffer win) t--sw-second "the window shows the victim")
+      (buffer-kill! t--sw-second)
+      (check-equal! (length (window-list)) 2 "the window stays")
+      (check-true! (window-exists? win) "the same window")
+      (check-equal! (window-buffer win) chat "and shows the group's chat")
+      (check-equal! (active-window) win "the selection stays in it")
+      (when (buffer-known? chat) (buffer-kill! chat)))
+    (t--sw-done!)))
+
+(deftest 'a-killed-buffers-window-shows-the-group-scratch-without-a-chat
+  "no chat: the group's scratch takes the place, never a foreign buffer"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((foreign "zz-sw-foreign"))
+      (test-buffer! foreign "")
+      (let* ((id (t--sw-kill-frame! "zzsw-kill-scratch"))
+             (win (active-window)))
+        (buffer-kill! t--sw-second)
+        (check-equal! (length (window-list)) 2 "the window stays")
+        (let ((shown (window-buffer win)))
+          (check-true! (group-scratch-buffer? shown) "and shows the group's scratch")
+          (check-true! (buffer-in-group? shown id) "which is a member")
+          (check-false! (equal? shown foreign) "not the foreign buffer")
+          (when (buffer-known? shown) (buffer-kill! shown))))
+      (buffer-kill! foreign))
+    (t--sw-done!)))
+
+(deftest 'a-killed-buffer-in-a-dying-group-closes-its-window
+  "a group with no chat and no scratch left gives the window up"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (t--sw-kill-frame! "zzsw-kill-dying"))
+           (win (active-window)))
+      (set! *group-dying* id)
+      (buffer-kill! t--sw-second)
+      (set! *group-dying* #f)
+      (check-equal! (length (window-list)) 1 "the window closed")
+      (check-false! (window-exists? win) "that window")
+      (check-equal! (current-buffer) t--sw-first "the other window remains"))
+    (t--sw-done!)))
+
 (deftest 'a-killed-group-revives-with-the-members-that-still-exist
   "revive makes the record again; a member whose buffer and file are gone is missing"
   (lambda ()

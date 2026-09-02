@@ -29,6 +29,19 @@
   "A window with this many columns splits beside for a pop-up window (Emacs split-width-threshold)."
   'group 'windows 'type 'number)
 
+;; The main layouts (editor.scm layout--main-stack!) read these two.
+(defcustom 'window-layout-main-ratio 0.62
+  "The main pane's share of the frame in the main layouts: a fraction between 0.3 and 0.9."
+  'group 'windows 'type 'number)
+
+(defcustom 'window-layout-stack 'column
+  "How the other panes arrange beside the main pane: 'column stacks them, 'grid tiles them."
+  'group 'windows 'type 'choice)
+
+(defcustom 'window-layout-main-side 'left
+  "Where the auto layout puts the main pane: 'left or 'right."
+  'group 'windows 'type 'choice)
+
 (defcustom '*display-buffer-base-action* '()
   "Display actions tried after the rule for a buffer and before the fallback: a list of popup, pop-up-window, reuse-window, use-some-window, same-window."
   'group 'windows 'type 'list)
@@ -230,6 +243,130 @@
   "Tile visible buffers for the selected frame's usable width"
   (lambda () (tile-visible-adaptive!)))
 
+;;; --- autolayout: one main pane, the rest beside it ---------------------------
+;;; The StumpWM shape. The selected window's buffer is the main pane on
+;;; window-layout-main-side, with window-layout-main-ratio of the frame.
+;;; The other visible buffers share the rest, as a column or as tiles
+;;; (window-layout-stack). autolayout-mode keeps the frame in this shape:
+;;; when a window comes or goes, the frame re-arranges, the main pane
+;;; stays main while its buffer is visible, and a new buffer joins the
+;;; stack. A popup and the minibuffer are not panes.
+
+(define *autolayout-mode* #f)
+
+;; main pane on the left = the stack on the right, in the tiler's names
+(define (autolayout--algorithm)
+  (if (equal? window-layout-main-side 'right) 'main-left 'main-right))
+
+;; the panes, main first: MAIN while it is visible, else the selected
+;; window's buffer. Duplicates stay: two windows on one buffer are two panes.
+(define (autolayout--panes main)
+  (let ((visible (layout-visible-buffers)))
+    (cond ((null? visible) '())
+          ((and main (member main visible))
+           (cons main (let loop ((rest visible) (dropped #f))
+                        (cond ((null? rest) '())
+                              ((and (not dropped) (equal? (car rest) main)) (loop (cdr rest) #t))
+                              (else (cons (car rest) (loop (cdr rest) dropped)))))))
+          (else visible))))
+
+(define (autolayout--same-panes? a b)
+  (and (= (length a) (length b))
+       (let loop ((xs a) (ys b))
+         (or (null? xs)
+             (and (member (car xs) ys)
+                  (loop (cdr xs) (let drop ((rest ys))
+                                   (cond ((null? rest) '())
+                                         ((equal? (car rest) (car xs)) (cdr rest))
+                                         (else (cons (car rest) (drop (cdr rest))))))))))))
+
+;; arrange the frame with MAIN as the main pane. One pane: one window.
+(define (autolayout-apply! main)
+  (let ((panes (autolayout--panes main)))
+    (cond ((null? panes) #f)
+          (else
+            (set-frame-local! 'autolayout-main (car panes))
+            (set-frame-local! 'autolayout-panes panes)
+            (if (null? (cdr panes))
+                (begin (delete-other-windows!) panes)
+                (tile-windows! (autolayout--algorithm) panes))))))
+
+;; the hook: the frame's panes changed, so the shape is re-made. Nothing
+;; runs while a tiler runs, or while a prompt is open.
+(define (autolayout--on-change!)
+  (when (and *autolayout-mode* (not *layout-busy*) (not (minibuffer-state)))
+    (let ((panes (autolayout--panes (frame-local 'autolayout-main))))
+      (when (and (pair? panes)
+                 (not (autolayout--same-panes? panes (or (frame-local 'autolayout-panes) '()))))
+        (autolayout-apply! (car panes))))))
+
+(add-hook! 'window-configuration-change-hook 'autolayout--on-change!)
+
+;; "62", not "62.0": the dialect has no round
+(define (autolayout--percent ratio)
+  (car (string-split (number->string (* 100 ratio)) ".")))
+
+(define (autolayout--ratio-from-input text)
+  (let ((n (string->number text)))
+    (cond ((not (number? n)) #f)
+          ((> n 1) (/ n 100))
+          (else n))))
+
+(define-command "autolayout"
+  "Make the selected window's buffer the main pane; the other buffers stack beside it"
+  (lambda () (autolayout-apply! (window-buffer (active-window)))))
+
+(define-command "autolayout-main-left"
+  "Put the main pane on the left and arrange the frame"
+  (lambda ()
+    (customize-set! 'window-layout-main-side 'left)
+    (autolayout-apply! (window-buffer (active-window)))))
+
+(define-command "autolayout-main-right"
+  "Put the main pane on the right and arrange the frame"
+  (lambda ()
+    (customize-set! 'window-layout-main-side 'right)
+    (autolayout-apply! (window-buffer (active-window)))))
+
+(define-command "autolayout-set-main-width"
+  "Set the main pane's share of the frame, as a fraction or a percent, and arrange the frame"
+  (lambda ()
+    (minibuffer-read
+      (string-append "Main pane width (now "
+                     (autolayout--percent window-layout-main-ratio) "%): ")
+      '()
+      (lambda (text)
+        (let ((ratio (autolayout--ratio-from-input text)))
+          (if (and ratio (>= ratio 0.3) (<= ratio 0.9))
+              (begin
+                (customize-set! 'window-layout-main-ratio ratio)
+                (autolayout-apply! (or (frame-local 'autolayout-main)
+                                       (window-buffer (active-window)))))
+              (message "The main pane takes between 30% and 90% of the frame")))))))
+
+(define-command "autolayout-toggle-stack"
+  "Arrange the other panes as a column, or as tiles; again goes back"
+  (lambda ()
+    (customize-set! 'window-layout-stack
+                    (if (equal? window-layout-stack 'grid) 'column 'grid))
+    (message (if (equal? window-layout-stack 'grid) "Tiles beside the main pane" "A column beside the main pane"))
+    (autolayout-apply! (or (frame-local 'autolayout-main) (window-buffer (active-window))))))
+
+(define-command "autolayout-mode"
+  "Keep the frame in the main-and-stack layout as windows come and go; again turns it off"
+  (lambda ()
+    (set! *autolayout-mode* (not *autolayout-mode*))
+    (if *autolayout-mode*
+        (begin
+          (autolayout-apply! (window-buffer (active-window)))
+          (message "Autolayout on: the selected buffer is the main pane"))
+        (message "Autolayout off"))))
+
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("autolayout" "autolayout-main-left" "autolayout-main-right"
+    "autolayout-set-main-width" "autolayout-toggle-stack" "autolayout-mode"))
+
 ;; The popup's default side is the right edge, on every frame: a compact
 ;; frame once got the bottom edge, and the estimate of the frame's width
 ;; read narrow after a stale window measurement, so the popup wandered.
@@ -252,6 +389,8 @@
   "(tile-adaptive-windows! BUFFERS) — tile named buffers for the selected frame width")
 (public! 'tile-visible-adaptive!
   "(tile-visible-adaptive!) — tile visible work windows for the selected frame width")
+(public! 'autolayout-apply!
+  "(autolayout-apply! MAIN) — arrange the frame with MAIN as the main pane and the other visible buffers beside it")
 (effects! '(read))
 (public! 'overview-buffers
   "(overview-buffers) — current group members, else current project buffers")

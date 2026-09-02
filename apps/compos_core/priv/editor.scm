@@ -736,7 +736,7 @@
     ("n" "list-next") ("p" "list-prev")
     ("SPC" "list-mark") ("m" "list-mark")
     ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
-    ("x" "list-execute")))
+    ("x" "list-execute") ("g" "list-revert")))
 
 ;; the flag keys of one list: (KEY FLAG-CHAR ...) rows become bindings
 ;; on MAP, buffer or mode
@@ -1800,6 +1800,15 @@
 ;; redraws, and a 'local-filter list then reuses its cached source.
 (define (list-refresh! buf) (list-render! buf #t))
 (define (list-redraw! buf) (list-render! buf #f))
+
+;; the `g` every list answers: a cached list fetches its source again,
+;; a plain one re-reads its rows; a mode's own `g` shadows this one
+(define-command "list-revert" "Fetch this list's rows again and redraw"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (buffer-local buf 'cache-spec)
+          (cache-refresh! buf)
+          (list-refresh! buf)))))
 
 ;;; --- the buffer cache: content fetched from a slow source ---------------------
 ;;; A buffer that shows external data (an HTTP API, a slow command) keeps
@@ -5768,6 +5777,13 @@
 
 (define *window-third* (/ 1 3))
 
+;; The main layouts read these. They are plain defines here, because
+;; editor.scm loads before custom.scm; layouts.scm makes them customs.
+;; The main pane's share of the frame, and how the other panes arrange
+;; beside it: 'column stacks them, 'grid tiles them.
+(define window-layout-main-ratio (- 1 *window-third*))
+(define window-layout-stack 'column)
+
 (define *display-buffer-defaults* (list 'side 'right 'size *window-third*))
 
 ;; Packages can make the default responsive without changing explicit display
@@ -7039,8 +7055,14 @@
           (select-window! right-window)
           (layout--grid! right next-dir)))))
 
-;; Build a two-zone layout. The main pane takes two thirds. The other buffers
-;; share a one-third stack on SIDE.
+;; Build a two-zone layout. The main pane takes window-layout-main-ratio
+;; of the frame. The other buffers share the rest on SIDE: a column when
+;; window-layout-stack is 'column, a grid of tiles when it is 'grid.
+(define (layout--stack-zone! stack stack-dir)
+  (if (and (equal? window-layout-stack 'grid) (pair? (cdr stack)))
+      (layout--grid! stack (if (equal? stack-dir 'v) 'h 'v))
+      (layout--fill-line! stack stack-dir (/ 1 (length stack)))))
+
 (define (layout--main-stack! buffers side)
   (let* ((main (car buffers))
          (stack (cdr buffers))
@@ -7048,20 +7070,21 @@
          (split-dir (if horizontal? 'h 'v))
          (stack-dir (if horizontal? 'v 'h))
          (stack-first? (or (equal? side 'left) (equal? side 'top)))
+         (ratio (layout--valid-ratio window-layout-main-ratio (- 1 *window-third*)))
          (before (map car (window-list)))
          (first-window (active-window)))
     (switch-to-buffer! (if stack-first? (car stack) main))
-    (split-window! split-dir (if stack-first? *window-third* (- 1 *window-third*)))
+    (split-window! split-dir (if stack-first? (- 1 ratio) ratio))
     (let ((second-window (layout--new-window before)))
       (if stack-first?
           (begin
             (select-window! first-window)
-            (layout--fill-line! stack stack-dir (/ 1 (length stack)))
+            (layout--stack-zone! stack stack-dir)
             (select-window! second-window)
             (switch-to-buffer! main))
           (begin
             (select-window! second-window)
-            (layout--fill-line! stack stack-dir (/ 1 (length stack))))))))
+            (layout--stack-zone! stack stack-dir))))))
 
 (define *window-layout-algorithms*
   '(columns rows grid main-right main-left main-bottom main-top))
@@ -7141,9 +7164,9 @@
   (window-layout-command 'rows))
 (define-command "window-layout-grid" "Tile visible buffers in a balanced grid"
   (window-layout-command 'grid))
-(define-command "window-layout-main-right" "Show a two-thirds main pane and a companion on the right"
+(define-command "window-layout-main-right" "Show a main pane and the other buffers on the right"
   (window-layout-command 'main-right))
-(define-command "window-layout-main-bottom" "Show a two-thirds main pane and a one-third bottom pane"
+(define-command "window-layout-main-bottom" "Show a main pane and the other buffers below"
   (window-layout-command 'main-bottom))
 
 (define-command "window-layout" "Choose a tiling layout for visible buffers"

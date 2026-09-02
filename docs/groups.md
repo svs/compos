@@ -427,6 +427,10 @@ A group is sealed: a restored pane shows a member of G, or G's scratch as a blan
 
 ### The overview
 
+When a member is killed, its window stays in the group. The window shows the group's last chat, else the group's scratch. The window closes only when the group has neither, which is a group that is dying. A buffer from another group never comes in, and the buffer the window showed before does not come back.
+
+`autolayout` is the one-main-pane layout. The selected window's buffer becomes the main pane on `window-layout-main-side` (`'left` or `'right`) with `window-layout-main-ratio` of the frame. The other visible buffers share the rest: a column, or tiles when `window-layout-stack` is `'grid`. `autolayout-set-main-width` sets the share as a fraction or a percent. `autolayout-mode` keeps the frame in this shape: when a window comes or goes, the frame re-arranges, the main pane stays main while its buffer is visible, and a new buffer joins the stack. `autolayout-main-left`, `autolayout-main-right` and `autolayout-toggle-stack` change one custom and arrange the frame.
+
 `tile-all` opens the context overview. It is available only in a group or project. A group takes priority and supplies all its buffers, including chats. Otherwise, the current project supplies all its open buffers. The overview locks the frame: keys select a tile and do not edit. It saves no group layout and changes no membership by itself.
 
 - Arrow keys select a tile. `m` marks a tile. `q`, `C-g`, and `ESC` quit.

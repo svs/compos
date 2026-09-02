@@ -158,10 +158,13 @@
 
 ;;; --- fontification -----------------------------------------------------------
 
-(defface! 'org-level-1 'fg "#26356b" 'weight "700")
-(defface! 'org-level-2 'fg "#7a5a1a" 'weight "600")
-(defface! 'org-level-3 'fg "#3d6b4f" 'weight "600")
-(defface! 'org-level-4 'fg "#6b3d5b" 'weight "600")
+;; the weights are the package's; the colours are every theme's own. A
+;; default colour here was paper's navy, and it stood on every dark theme
+;; that named no heading colour, unreadable.
+(defface! 'org-level-1 'weight "700")
+(defface! 'org-level-2 'weight "600")
+(defface! 'org-level-3 'weight "600")
+(defface! 'org-level-4 'weight "600")
 (defface! 'org-todo 'fg "#a03020" 'weight "700")
 (defface! 'org-done 'fg "#3d6b4f" 'decoration "line-through")
 (defface! 'org-priority 'fg "#7a5a1a" 'weight "600")

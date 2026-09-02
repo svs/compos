@@ -48,6 +48,24 @@
                   "the stock size is two steps up the 1.2 ladder from 13px")
     (theme-test-restore!)))
 
+(deftest 'every-bundled-theme-colours-the-headings
+  "a heading is never paper's navy on a dark ground: each theme names its own"
+  (lambda ()
+    (for-each
+      (lambda (theme)
+        (load-theme theme)
+        (for-each
+          (lambda (face)
+            (let ((fg (theme-test-face-attr face 'fg)))
+              (check-true! (string? fg)
+                           (string-append theme " colours " (symbol->string face)))
+              (unless (equal? theme "paper")
+                (check-false! (equal? fg "#26356b")
+                              (string-append theme " does not wear paper's navy on " (symbol->string face))))))
+          '(org-level-1 org-level-2 org-level-3 org-level-4)))
+      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"))
+    (theme-test-restore!)))
+
 (deftest 'inherit-and-priority-reach-the-face-table
   "a default may name a parent face and a priority"
   (lambda ()

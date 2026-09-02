@@ -147,3 +147,13 @@
     (check-equal! (buffer-point t--ga-buf) 0
                   "the buffer's definition finder took point to the define")
     (t--ga-done!)))
+
+(deftest 'a-listing-takes-no-links
+  "a buffer that becomes a list mode loses its links; the row is the action"
+  (lambda ()
+    (t--ga! "https://example.com\n")
+    (check-equal! (length (t--ga-links)) 1 "plain text: one link")
+    (with-current-buffer t--ga-buf (lambda () (set-mode! "messages-mode")))
+    (check-false! (assoc t--ga-buf *goto-address-hooks*) "a list mode is not watched")
+    (check-equal! (length (t--ga-links)) 0 "and wears no link")
+    (t--ga-done!)))

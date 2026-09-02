@@ -219,10 +219,21 @@
 ;; the same name replaces the first, as font-lock does
 (define *goto-address-hooks* '())
 
-;; text a reader sees: not a hidden buffer, not a process transcript
+;; a listing draws rows, and the row is the action: Dired and every
+;; list mode take no link paint (docs/LISTS.md, quiet popups)
+(define (goto-address--listing? buf)
+  (let ((mode (buffer-local buf 'mode-name)))
+    (and (string? mode)
+         (or (equal? mode "Dired")
+             (equal? mode "dired-mode")
+             (and (boundp '*list-modes*) (assoc mode *list-modes*) #t)))))
+
+;; text a reader sees: not a hidden buffer, not a process transcript,
+;; not a listing
 (define (goto-address--eligible? buf)
   (and (not (string-prefix? " " buf))
-       (not (process-running? buf))))
+       (not (process-running? buf))
+       (not (goto-address--listing? buf))))
 
 ;; a rule whose buffer died removes with an error; the entry is stale
 ;; either way, so the error says nothing a caller can use
@@ -271,8 +282,13 @@
              (buffer-exists? buf))
     (goto-address-watch! buf)))
 
+;; a buffer that takes a mode is judged again: a plain buffer that
+;; becomes a listing loses its links, a listing that becomes text gains them
 (define (goto-address--mode-hook!)
-  (goto-address--new-buffer! (current-buffer)))
+  (let ((buf (current-buffer)))
+    (if (and (assoc buf *goto-address-hooks*) (not (goto-address--eligible? buf)))
+        (goto-address-unwatch! buf)
+        (goto-address--new-buffer! buf))))
 
 (add-hook! 'buffer-created-hook 'goto-address--new-buffer!)
 (add-hook! 'buffer-shown-hook 'goto-address--new-buffer!)

@@ -8923,22 +8923,129 @@
       (if (equal? effort "default") "" (string-append " · " effort))
       " — the conversation carries over")))
 
+;;; --- one LLM setup, whole -------------------------------------------------
+;;; A bundle is the ENTIRE choice behind C-c b: the backend, the model, the
+;;; reasoning effort, the tool presets that session loads, and the permission
+;;; stance it runs under. Remembering three of those five and dropping the
+;;; rest is how a recalled combination came back with the wrong tools. A
+;;; bundle that carries a name is one you keep.
+;;;
+;;; The representation is a plist, so a new field costs nothing that is
+;;; already on disk:
+;;;   (name "review" connector "claude-code" model "opus[1m]" effort "high"
+;;;    presets (compos web) permission "ask" agent-mode "plan")
+
+(define (llm-bundle-get bundle key fallback)
+  (let loop ((xs bundle))
+    (cond ((or (not (pair? xs)) (not (pair? (cdr xs)))) fallback)
+          ((equal? (car xs) key) (cadr xs))
+          (else (loop (cdr (cdr xs)))))))
+
+(define (llm-bundle-put bundle key value)
+  (append (list key value)
+    (let loop ((xs bundle))
+      (cond ((or (not (pair? xs)) (not (pair? (cdr xs)))) '())
+            ((equal? (car xs) key) (loop (cdr (cdr xs))))
+            (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
+
+;; The persisted history predates presets: an old entry is a bare
+;; (CONNECTOR MODEL EFFORT) list. It reads as a bundle that names no presets
+;; and takes no stance, so recalling it changes only what it knew.
+(define (llm-bundle-normalize b)
+  (if (and (pair? b) (string? (car b)))
+      (list 'connector (car b)
+            'model (if (pair? (cdr b)) (cadr b) "default")
+            'effort (if (and (pair? (cdr b)) (pair? (cdr (cdr b))))
+                        (caddr b)
+                        "default"))
+      b))
+
+(define (llm-bundle-name b) (llm-bundle-get b 'name #f))
+(define (llm-bundle-connector b) (llm-bundle-get b 'connector *default-connector*))
+(define (llm-bundle-model b) (llm-bundle-get b 'model "default"))
+(define (llm-bundle-effort b) (llm-bundle-get b 'effort "default"))
+
+;; #f is "this bundle recorded no presets", and applying it keeps the ones
+;; already loaded. The empty list is "exactly none", which is a choice.
+(define (llm-bundle-presets b) (llm-bundle-get b 'presets #f))
+(define (llm-bundle-permission b) (llm-bundle-get b 'permission #f))
+(define (llm-bundle-agent-mode b) (llm-bundle-get b 'agent-mode #f))
+
+;; What a bundle SETS, without its name: two bundles that configure the
+;; same session are one recent choice, however each was reached.
+(define (llm-bundle-setup b)
+  (list (llm-bundle-connector b) (llm-bundle-model b) (llm-bundle-effort b)
+        (llm-bundle-presets b) (llm-bundle-permission b)
+        (llm-bundle-agent-mode b)))
+
+;; The whole setup on one line, with every part that is already the default
+;; left out: a label says what is unusual about this bundle.
+(define (llm-bundle-label b)
+  (string-join
+    (append
+      (list (llm-bundle-connector b))
+      (let ((m (llm-bundle-model b))) (if (equal? m "default") '() (list m)))
+      (let ((e (llm-bundle-effort b))) (if (equal? e "default") '() (list e)))
+      (let ((p (llm-bundle-presets b)))
+        (cond ((not p) '())
+              ((null? p) (list "no tools"))
+              (else (list (string-join (map symbol->string p) "+")))))
+      (let ((k (llm-bundle-permission b)))
+        (if (or (not k) (equal? k "approve")) '() (list k)))
+      (let ((a (llm-bundle-agent-mode b)))
+        (if (or (not a) (equal? a "") (equal? a "default")) '() (list a))))
+    " · "))
+
+;; The buffer whose LLM session the presets and the stance belong to. A chat
+;; or an llm-mode buffer is its own session; a grouped work buffer shares its
+;; group chat's session. This never CREATES a chat: the menu redraws on every
+;; keystroke.
+(define (llm-config-session buf)
+  (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
+        ((and (boundp (quote buffer-group)) (boundp (quote group-buffers-mru))
+              (buffer-group buf))
+         (let ((chats (filter chat-buffer?
+                              (group-buffers-mru (buffer-group buf)))))
+           (if (pair? chats) (car chats) buf)))
+        (else buf)))
+
+(define (llm-config-permission buf)
+  (if (boundp (quote chat-permission-mode)) (chat-permission-mode buf) 'approve))
+
 ;; The configuration menu keeps recent complete choices, not three unrelated
 ;; input histories. The transient records one final choice when it closes.
 (define *llm-config-history* '())
 (define llm-config-history-limit 10)
 
+;; Named bundles, newest first. These outlive the history: the history
+;; forgets at ten, a named bundle is kept until it is forgotten by name.
+(define *llm-bundles* '())
+
 (persist-global! 'llm-config-history
   (lambda () *llm-config-history*)
-  (lambda (v) (set! *llm-config-history* v)))
+  (lambda (v) (set! *llm-config-history* (map llm-bundle-normalize (or v '())))))
+
+(persist-global! 'llm-bundles
+  (lambda () *llm-bundles*)
+  (lambda (v) (set! *llm-bundles* (map llm-bundle-normalize (or v '())))))
 
 (define (llm-config-combination buf)
-  (let ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode")))
+  (let* ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
+         (session (llm-config-session buf)))
     (list
+      'connector
       (or (buffer-local buf (if chat? 'agent-connector 'llm-connector))
           (if chat? *default-connector* "codex-app-server"))
+      'model
       (or (buffer-local buf (if chat? 'agent-model 'llm-model)) "default")
-      (or (buffer-local buf (if chat? 'agent-effort 'llm-effort)) "default"))))
+      'effort
+      (or (buffer-local buf (if chat? 'agent-effort 'llm-effort)) "default")
+      'presets
+      (if (boundp (quote chat-presets-of)) (chat-presets-of session) '())
+      'permission
+      (symbol->string (llm-config-permission session))
+      'agent-mode
+      (or (buffer-local session 'agent-mode) ""))))
 
 (define (llm-config-remember! combination)
   (set! *llm-config-history*

@@ -196,6 +196,21 @@
     (jj-flush-author! author)
     r))
 
+;;; --- the modeline -------------------------------------------------------
+
+;; The modeline says which change a save would amend: the open change's
+;; first line, re-read once after each flush and each label, never during
+;; a redraw. An unlabeled run shows its Agent: line, which is exactly the
+;; nudge to call jj-describe!.
+(define (jj-modeline-update! root)
+  (when (boundp 'global-mode-string-set!)
+    (let ((line (jj-at root "description.first_line()")))
+      (global-mode-string-set! 'jj
+        (cond ((equal? line "") "jj: undescribed")
+              ((> (string-length line) 48)
+               (string-append (substring line 0 47) "..."))
+              (else line))))))
+
 ;;; --- the hook -----------------------------------------------------------
 
 ;; Every save arrives here, yours and an agent's alike. The bytes belong to
@@ -219,7 +234,8 @@
            (root (and path (jj-root path))))
       (when root
         (jj-snapshot! root)
-        (jj-unlock! root)))))
+        (jj-unlock! root)
+        (jj-modeline-update! root)))))
 
 ;; Appended, so auto-revert's guard runs first: a save it refuses must not
 ;; leave an opened change behind.
@@ -242,6 +258,7 @@
               (begin (message "jj: the open change is not this run's to describe") #f)
               (let ((msg (if slug (string-append text "\n\nAgent: " slug) text)))
                 (jj-sh root (string-append "jj describe -m '" (jj-quote msg) "' 2>&1"))
+                (jj-modeline-update! root)
                 text))))))
 
 ;;; --- the push -----------------------------------------------------------

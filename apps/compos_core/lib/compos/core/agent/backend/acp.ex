@@ -261,6 +261,10 @@ defmodule Compos.Core.Agent.Backend.ACP do
     {method, pending} = Map.pop(state.pending_rpc, id)
     state = %{state | pending_rpc: pending}
 
+    if method == nil do
+      IO.puts("[acp-debug] response for unknown rpc id #{inspect(id)}: #{inspect(frame, limit: 8)}")
+    end
+
     case {method, frame} do
       {"initialize", %{"result" => result}} ->
         state =
@@ -334,6 +338,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
         ingest_config_options(state, Map.get(result, "configOptions"))
 
       {"session/prompt", %{"result" => result}} ->
+        IO.puts("[acp-debug] prompt result stop=#{inspect(Map.get(result, "stopReason"))}")
+
         state
         |> emit_usage(Map.get(result, "usage"))
         |> emit(type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))

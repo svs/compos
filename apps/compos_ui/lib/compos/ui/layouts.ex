@@ -3343,14 +3343,37 @@ defmodule Compos.Ui.Layouts do
                 document.querySelectorAll(".buf.client-scroll").forEach((el) => {
                   if (el._composCtop) return;
                   el._composCtop = true;
+                  // the first sight of an element records the server's
+                  // scroll request without applying it: a reload must
+                  // not replay a scroll from before
+                  el._composScrollSeen = el.dataset.scroll || "";
                   if (el.dataset.manual !== "true") return;
                   const want = parseInt(el.dataset.ctop || "0", 10);
                   if (want > 0) el.scrollTop = want;
                 });
               },
+              // The server scrolls a client-scrolled window in lines
+              // (scroll-other-window, scroll-window!): the leaf carries
+              // data-scroll="GEN:LINES", and a new generation moves the
+              // container by that many of its own line heights. The scroll
+              // event then mirrors the pixel offset back (cscroll).
+              applyScrollRequests() {
+                document.querySelectorAll(".buf.client-scroll[data-scroll]").forEach((el) => {
+                  const req = el.dataset.scroll;
+                  if (el._composScrollSeen === undefined) { el._composScrollSeen = req; return; }
+                  if (req === el._composScrollSeen) return;
+                  el._composScrollSeen = req;
+                  const lines = parseInt(req.split(":")[1] || "0", 10);
+                  if (!lines) return;
+                  const line = el.querySelector(".line");
+                  const h = line ? line.getBoundingClientRect().height : 18;
+                  el.scrollTop = Math.max(0, el.scrollTop + lines * h);
+                });
+              },
               afterPatch() {
                 this.applyWhichKeyFilter();
                 this.restoreClientScroll();
+                this.applyScrollRequests();
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
                 this.syncEditable();

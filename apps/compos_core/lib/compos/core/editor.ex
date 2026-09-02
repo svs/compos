@@ -1123,12 +1123,21 @@ defmodule Compos.Core.Editor do
         # as one rendered document. Move its pixel offset instead, and the
         # browser scrolls the frame. The caller still speaks in lines, so
         # `C-v` and `M-<down>` mean the same thing in every window.
+        # A client-scrolled text window (every buffer under the ship-all
+        # threshold) ignores `top`: the browser owns its offset. So the
+        # leaf also carries a scroll request, a generation and the lines,
+        # and the client scrolls by that many of its own line heights.
         leaf =
           if preview?(leaf.buffer) do
             top = max(Map.get(leaf, :ctop, 0) + delta * @preview_line_px, 0)
             leaf |> Map.put(:ctop, top) |> Map.put(:manual, true)
           else
-            %{leaf | top: max(leaf.top + delta, 0), manual: true}
+            Map.merge(leaf, %{
+              top: max(leaf.top + delta, 0),
+              manual: true,
+              scroll_gen: System.unique_integer([:positive, :monotonic]),
+              scroll_lines: delta
+            })
           end
 
         changed(:ok, put_frame(state, %{f | tree: replace_leaf(f.tree, id, leaf)}), f.id)
@@ -2905,6 +2914,10 @@ defmodule Compos.Core.Editor do
       # offset, applied by the client on mount
       manual: leaf.manual,
       ctop: Map.get(leaf, :ctop, 0),
+      # the last server-driven scroll of a client-scrolled window, in
+      # lines: the client applies a generation it has not seen
+      scroll_gen: Map.get(leaf, :scroll_gen),
+      scroll_lines: Map.get(leaf, :scroll_lines, 0),
       rows: rows,
       total_lines: total_lines,
       line_numbers: Map.get(locals, "line-numbers") != "off",

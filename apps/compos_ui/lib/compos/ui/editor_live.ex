@@ -1675,6 +1675,7 @@ defmodule Compos.Ui.EditorLive do
         style={@node.style}
         data-ctop={@node.ctop}
         data-manual={to_string(@node.manual)}
+        data-scroll={scroll_request(@node)}
         data-visual-lines={to_string(@node.visual_line_mode)}
         data-hl-line={to_string(Map.get(@node, :hl_line, true))}
         data-ws={to_string(whitespace?(@node))}
@@ -2256,6 +2257,13 @@ defmodule Compos.Ui.EditorLive do
     ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></.dynamic_tag>
     """
   end
+
+  # the server's last scroll of a client-scrolled window: "GEN:LINES". The
+  # client applies a request once, when the generation is new to it.
+  defp scroll_request(%{scroll_gen: gen, scroll_lines: lines}) when is_integer(gen),
+    do: "#{gen}:#{lines}"
+
+  defp scroll_request(_node), do: nil
 
   defp blk_class(b, line),
     do: if(blk_current?(b, line), do: "#{b.class} #{b.mark}", else: b.class)

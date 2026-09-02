@@ -119,9 +119,10 @@
   "code-goto-definition on a painted path visits the file"
   (lambda ()
     (let* ((name (string-append (compos-priv-dir) "/editor/zz-ga-mdot.txt"))
-           (target (string-append (compos-priv-dir) "/init.scm"))
+           (target (string-append (compos-priv-dir) "/editor/blocks/block.scm"))
            (known (buffer-known? target)))
-      (test-buffer! name "see init.scm:2 here\n")
+      ;; a relative path beside the buffer's file, with its line
+      (test-buffer! name "see blocks/block.scm:2 here\n")
       (goto-address-paint! name)
       (buffer-goto! name 6)
       ;; read where the command left point inside its own buffer context:
@@ -135,3 +136,14 @@
         (check-equal! (cadr landed) 2 "and landed on its line"))
       (unless known (buffer-kill! target))
       (buffer-kill! name))))
+
+(deftest 'c-c-ret-falls-through-to-the-buffers-finder
+  "with no link at point, goto-address-at-point runs what M-. runs here"
+  (lambda ()
+    ;; the global finder reads "define NAME" by words
+    (t--ga! "define zz-thing 1\n\nzz-thing\n")
+    (buffer-goto! t--ga-buf 19)
+    (with-current-buffer t--ga-buf (lambda () (run-command "goto-address-at-point")))
+    (check-equal! (buffer-point t--ga-buf) 0
+                  "the buffer's definition finder took point to the define")
+    (t--ga-done!)))

@@ -22,6 +22,14 @@
 (define goto-address--path-pattern
   "(?<![A-Za-z0-9_/.:-])(?:~|\\.\\.?)?/?[A-Za-z0-9_.@%+-]+(?:/[A-Za-z0-9_.@%+-]+)+/?(?::[0-9]+(?::[0-9]+)?)?")
 
+;; a bare file name: a word with an extension and no slash, such as
+;; init.scm or README.md, with the same optional :LINE. It is a link only
+;; when a file by that name stands beside the buffer's file or at the
+;; project root, so a method name like String.split costs one stat and
+;; paints nothing.
+(define goto-address--file-pattern
+  "(?<![A-Za-z0-9_/.:@-])[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.[A-Za-z0-9]{1,6}(?::[0-9]+(?::[0-9]+)?)?(?![A-Za-z0-9_/.@-])")
+
 (define goto-address--trailing-prose ".,;:!?")
 
 ;; a byte range shrunk past trailing punctuation
@@ -68,9 +76,22 @@
               ((and at-root (goto-address--on-disk? at-root)) at-root)
               (else #f)))))
 
+;; the names one paint has already asked the disk about: a source file
+;; names the same few files many times, and a stat per mention adds up
+(define *goto-address--memo* '())
+
+(define (goto-address--resolve-memo buf path)
+  ;; rows are two-element lists: a value here is a BEAM list, not a pair
+  (let ((hit (assoc path *goto-address--memo*)))
+    (if hit
+        (cadr hit)
+        (let ((full (goto-address--resolve buf path)))
+          (set! *goto-address--memo* (cons (list path full) *goto-address--memo*))
+          full))))
+
 (define (goto-address--path-target buf text)
   (let* ((parts (goto-address-path-parts text))
-         (full (goto-address--resolve buf (car parts))))
+         (full (goto-address--resolve-memo buf (car parts))))
     (and full
          (if (cadr parts)
              (string-append full "?line=" (number->string (cadr parts)))
@@ -81,8 +102,6 @@
 (define (goto-address--class target)
   (string-append "link goto-address link-to:" (url-encode target)))
 
-(define (goto-address--mine? o)
-  (string-prefix? "link goto-address " (caddr o)))
 
 ;; a range inside one of RANGES
 (define (goto-address--covered? ranges s e)
@@ -102,33 +121,45 @@
                         (goto-address--class
                           (substring-bytes line (car r) (cadr r)))))
                 urls))
+         (paths (if (string-index line "/")
+                    (re-find* goto-address--path-pattern line)
+                    '()))
+         (files (if (string-index line ".")
+                    (re-find* goto-address--file-pattern line)
+                    '()))
+         ;; a bare file name inside a path or a URL is that path's word
+         (own-files (filter (lambda (r)
+                              (not (goto-address--covered? paths (car r) (cadr r))))
+                            files))
          (path-spans
-           (if (not (string-index line "/"))
-               '()
-               (fold (lambda (acc r)
-                       (let* ((s (car r))
-                              (e (goto-address--trim line s (cadr r)))
-                              (target (and (not (goto-address--covered? urls s e))
-                                           (goto-address--path-target
-                                             buf (substring-bytes line s e)))))
-                         (if target
-                             (cons (list (+ start s) (+ start e)
-                                         (goto-address--class target))
-                                   acc)
-                             acc)))
-                     '()
-                     (re-find* goto-address--path-pattern line)))))
+           (fold (lambda (acc r)
+                   (let* ((s (car r))
+                          (e (goto-address--trim line s (cadr r)))
+                          (target (and (not (goto-address--covered? urls s e))
+                                       (goto-address--path-target
+                                         buf (substring-bytes line s e)))))
+                     (if target
+                         (cons (list (+ start s) (+ start e)
+                                     (goto-address--class target))
+                               acc)
+                         acc)))
+                 '()
+                 (append paths own-files))))
     (append url-spans (reverse path-spans))))
 
 ;; a buffer past this size paints no links: a dump is read, not clicked
 (define goto-address-max-bytes 8000000)
 
-;; a buffer past this size is not read whole when it is first watched
-;; (about 140 ms per 500 KB); its lines paint as they change
+;; a buffer up to this size paints on the spot when it is first watched;
+;; a larger one paints a moment later, off the caller's call, up to the
+;; first-paint size (about half a second per 500 KB); past that its lines
+;; paint as they change
+(define goto-address-small-bytes 65536)
 (define goto-address-first-paint-bytes 1000000)
 
 ;; the spans of TEXT, whose first byte stands at AT in the buffer
 (define (goto-address--text-spans buf at text)
+  (set! *goto-address--memo* '())
   (let loop ((lines (split-lines text)) (at at) (acc '()))
     (if (null? lines)
         acc
@@ -209,12 +240,18 @@
                       (unless (equal? source "locals")
                         (goto-address-repaint! buf pos inserted)))))
             (remove (lambda (e) (equal? (car e) buf)) *goto-address-hooks*)))
-    ;; the first paint reads the whole buffer, once, on the caller's lane:
-    ;; a task here would call the Session back, and at boot the Session is
-    ;; the caller (the await_boot self-call). A buffer past the first-paint
-    ;; size gets its links as its lines change instead.
-    (when (<= (buffer-size buf) goto-address-first-paint-bytes)
-      (goto-address-paint! buf))))
+    ;; the first paint reads the whole buffer once. A small buffer paints
+    ;; now. A large one paints a moment later through debounce!, a timer
+    ;; that lands on the UI lane after this call returns: a task here
+    ;; would call the Session back, and at boot the Session is the caller
+    ;; (the await_boot self-call). A buffer past the first-paint size gets
+    ;; its links as its lines change instead.
+    (let ((size (buffer-size buf)))
+      (cond ((<= size goto-address-small-bytes) (goto-address-paint! buf))
+            ((<= size goto-address-first-paint-bytes)
+             (debounce! (string-append "goto-address:" buf) 50
+                        (lambda (b) (goto-address-paint! b)) buf))
+            (else #f)))))
 
 (define (goto-address-unwatch! buf)
   (let ((old (assoc buf *goto-address-hooks*)))
@@ -262,11 +299,21 @@
     (and href
          (begin (preview-follow-link! (active-window) href) #t))))
 
+;; One verb: go to what point names. A link is followed. Anything else
+;; goes to the finder this buffer binds on M-. (a mode's definition
+;; command), so C-c RET and M-. answer the same way everywhere.
+(define (goto-address--finder)
+  (let ((cmd (key-binding (list "M-."))))
+    (and (string? cmd) (not (equal? cmd "goto-address-at-point")) cmd)))
+
 (define-command "goto-address-at-point"
-  "Follow the URL or file path at point"
+  "Follow the URL or file path at point, else find the definition of the name there"
   (lambda ()
     (unless (goto-address-follow-at-point!)
-      (message "No URL or file path at point"))))
+      (let ((finder (goto-address--finder)))
+        (if finder
+            (run-command finder)
+            (message "No URL or file path at point"))))))
 
 (global-set-key "C-c RET" "goto-address-at-point")
 

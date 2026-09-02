@@ -98,24 +98,28 @@ defmodule Compos.Core.Reactor do
         {:reply, :ok, state}
 
       rule ->
-        if rule.timer, do: Process.cancel_timer(rule.timer)
-        if rule.in_flight, do: Process.demonitor(rule.in_flight.monitor, [:flush])
-
-        ids = state.by_buffer |> Map.fetch!(rule.buffer_ref) |> MapSet.delete(id)
-
-        by_buffer =
-          if MapSet.size(ids) == 0 do
-            Events.unsubscribe(rule.buffer_ref)
-            Map.delete(state.by_buffer, rule.buffer_ref)
-          else
-            Map.put(state.by_buffer, rule.buffer_ref, ids)
-          end
-
-        {:reply, :ok, %{state | rules: Map.delete(state.rules, id), by_buffer: by_buffer}}
+        {:reply, :ok, drop_rule(state, id, rule)}
     end
   end
 
   def handle_call(:rules, _from, state), do: {:reply, Map.values(state.rules), state}
+
+  defp drop_rule(state, id, rule) do
+    if rule.timer, do: Process.cancel_timer(rule.timer)
+    if rule.in_flight, do: Process.demonitor(rule.in_flight.monitor, [:flush])
+
+    ids = state.by_buffer |> Map.get(rule.buffer_ref, MapSet.new()) |> MapSet.delete(id)
+
+    by_buffer =
+      if MapSet.size(ids) == 0 do
+        Events.unsubscribe(rule.buffer_ref)
+        Map.delete(state.by_buffer, rule.buffer_ref)
+      else
+        Map.put(state.by_buffer, rule.buffer_ref, ids)
+      end
+
+    %{state | rules: Map.delete(state.rules, id), by_buffer: by_buffer}
+  end
 
   @impl true
   def handle_info({:buffer_change, buffer, change}, state) do
@@ -141,30 +145,42 @@ defmodule Compos.Core.Reactor do
         {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
 
       rule ->
-        if rule.eager or in_scope?(rule.buffer_ref, screen()) do
-          changes = Enum.reverse(rule.pending)
-          handler = rule.handler
-          reactor = self()
+        cond do
+          # the buffer died with a change still pending (a kill inside the
+          # debounce): its rule ends here. Reading its name would exit, and
+          # that exit took the Reactor down with every rule in the editor.
+          buffer_name(rule.buffer_ref) == nil ->
+            {:noreply, drop_rule(state, id, rule)}
 
-          case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-                 result = run_handler(handler, changes)
-                 send(reactor, {:handler_done, id, changes, result})
-               end) do
-            {:ok, pid} ->
-              monitor = Process.monitor(pid)
-              in_flight = %{monitor: monitor, changes: changes}
-              rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
-              {:noreply, put_in(state.rules[id], rule)}
+          rule.eager or in_scope?(rule.buffer_ref, screen()) ->
+            fire_rule(state, id, rule)
 
-            {:error, reason} ->
-              Logger.error("reactor rule #{id} could not start: #{inspect(reason)}")
-              {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
-          end
-        else
-          # park: keep the redo, drop the timer. The :changed subscription
-          # below re-arms it when the buffer reaches a window.
-          {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
+          true ->
+            # park: keep the redo, drop the timer. The :changed subscription
+            # below re-arms it when the buffer reaches a window.
+            {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
         end
+    end
+  end
+
+  defp fire_rule(state, id, rule) do
+    changes = Enum.reverse(rule.pending)
+    handler = rule.handler
+    reactor = self()
+
+    case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+           result = run_handler(handler, changes)
+           send(reactor, {:handler_done, id, changes, result})
+         end) do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+        in_flight = %{monitor: monitor, changes: changes}
+        rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
+        {:noreply, put_in(state.rules[id], rule)}
+
+      {:error, reason} ->
+        Logger.error("reactor rule #{id} could not start: #{inspect(reason)}")
+        {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
     end
   end
 
@@ -292,11 +308,24 @@ defmodule Compos.Core.Reactor do
   defp in_scope?(_b, :all), do: true
 
   defp in_scope?(ref, %{visible: visible, current: current}) do
-    Buffer.name(ref) in visible or
-      case group_of(ref) do
-        nil -> false
-        g -> g in Enum.map(current, &group_of/1)
-      end
+    case buffer_name(ref) do
+      nil ->
+        false
+
+      name ->
+        name in visible or
+          case group_of(ref) do
+            nil -> false
+            g -> g in Enum.map(current, &group_of/1)
+          end
+    end
+  end
+
+  # a buffer's name, or nil when its process is gone
+  defp buffer_name(ref) do
+    Buffer.name(ref)
+  catch
+    :exit, _ -> nil
   end
 
   # the group tag is the 'group buffer-local; 'companion-of is the
@@ -306,5 +335,7 @@ defmodule Compos.Core.Reactor do
       Compos.Core.Buffer.get_local(b, "companion-of")
   rescue
     _ -> nil
+  catch
+    :exit, _ -> nil
   end
 end

@@ -825,9 +825,9 @@
     (t--show-source-make!)
     (t--show-source-doc! "# Doc\n")
     (check-equal! (show-source-snippet t--morg-buf "lib.scm::beta")
-                  "(define (beta y)\n  (* y 2))" "a definition by name")
+                  "(define (beta y)\n  (* y 2))\n" "a definition by name")
     (check-equal! (show-source-snippet t--morg-buf "lib.scm::5")
-                  "(define (beta y)\n  (* y 2))" "the definition that holds a line")
+                  "(define (beta y)\n  (* y 2))\n" "the definition that holds a line")
     (check-equal! (show-source-snippet t--morg-buf "lib.scm::2-3")
                   "(define (alpha x)\n  (+ x 1))\n" "a line range")
     (check-equal! (car (show-source-snippet t--morg-buf "nope.scm::beta")) 'error
@@ -836,6 +836,28 @@
                   "and so does a missing definition")
     (check-false! (buffer-known? t--show-source-lib)
                   "the read leaves no buffer behind")
+    (t--show-source-remove!)
+    (t--morg-done!)))
+
+(deftest 'show-source-takes-many-definitions-from-one-file-or-several
+  "a comma list names definitions in order; a second target adds another file"
+  (lambda ()
+    (t--show-source-make!)
+    ;; two definitions: the outline reads a file with one as that one's parts
+    (write-file! (string-append t--show-source-dir "/other.scm")
+                 "(define (gamma z)\n  z)\n\n(define (delta w)\n  w)\n")
+    (t--show-source-doc! "# Doc\n")
+    (check-equal! (show-source-snippet t--morg-buf "lib.scm::beta,alpha")
+                  "(define (beta y)\n  (* y 2))\n\n(define (alpha x)\n  (+ x 1))\n"
+                  "two definitions, in the order named, a blank line between")
+    (check-equal! (show-source-text t--morg-buf '("lib.scm::alpha" "other.scm::gamma"))
+                  "(define (alpha x)\n  (+ x 1))\n\n(define (gamma z)\n  z)\n"
+                  "two files, one body")
+    (check-equal! (car (show-source-snippet t--morg-buf "lib.scm::alpha,nope")) 'error
+                  "one missing name fails the whole list")
+    (check-equal! (morg-show-source-targets "scheme :show-source a.scm::x b.scm::y :tangle out")
+                  '("a.scm::x" "b.scm::y")
+                  "targets stop at the next argument")
     (t--show-source-remove!)
     (t--morg-done!)))
 

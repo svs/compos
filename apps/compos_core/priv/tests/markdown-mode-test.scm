@@ -83,6 +83,13 @@
     (check-true! (t--md-has? '(0 35 "x-embed")) "the URL is the card")
     (t--md-done!)))
 
+(deftest 'an-x-post-url-with-a-share-suffix-still-draws-as-the-card
+  "the share sheet's ?s=20 names the same post"
+  (lambda ()
+    (t--md-fresh! "https://x.com/svs/status/1234567890?s=20\n")
+    (check-true! (t--md-has? '(0 40 "x-embed")) "the URL is the card")
+    (t--md-done!)))
+
 (deftest 'a-youtube-embed-directive-draws-as-the-card
   "the directive steps back and its URL wears youtube-embed"
   (lambda ()

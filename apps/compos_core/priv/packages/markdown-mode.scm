@@ -47,7 +47,10 @@
 ;; a line that is one picture, and a line that is one run of emphasis
 (define md--image-line-pattern "^!\\[[^\\]\n]*\\]\\([^)\n]+\\)[ \t]*$")
 (define md--caption-line-pattern "^\\*([^*\n]+)\\*[ \t]*$")
-(define md--x-pattern "^https://(x|twitter)\\.com/[A-Za-z0-9_]+/status/[0-9]+/?$")
+;; the share sheet appends ?s=20 and friends; a query or fragment after
+;; the status id still names the same post
+(define md--x-pattern
+  "^https?://(mobile\\.)?(x|twitter)\\.com/[A-Za-z0-9_]+/status(es)?/[0-9]+/?([?#][^ \t]*)?$")
 (define md--youtube-url-pattern
   "https://((www|m)\\.)?(youtube\\.com/(watch\\?[^ \\t]*v=[A-Za-z0-9_-]{11}[^ \\t]*|(shorts|live|embed)/[A-Za-z0-9_-]{11}[^ \\t]*)|youtu\\.be/[A-Za-z0-9_-]{11}[^ \\t]*)")
 (define md--embed-pattern

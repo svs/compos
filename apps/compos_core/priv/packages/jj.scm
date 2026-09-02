@@ -282,11 +282,24 @@
 ;;; --- the push -----------------------------------------------------------
 
 ;; Identity rides in descriptions, so there is nothing to leak and nothing
-;; to squash: a push is a push. jj still refuses an undescribed change, and
+;; to squash. A push moves the tracked bookmark to the newest change that
+;; holds work, then pushes it; jj still refuses an undescribed change, and
 ;; that is the only gate left.
-(define-command "jj-push" "Push to git"
+(define (jj-tracked-bookmark root)
+  (let ((b (string-trim (jj-sh root
+             "jj bookmark list --tracked --color never -T 'name ++ \"\\n\"' 2>/dev/null | sort -u | head -1"))))
+    (and (not (equal? b "")) b)))
+
+(define-command "jj-push" "Advance the tracked bookmark to the tip and push to git"
   (lambda ()
     (let ((root (jj-here)))
       (if (not root)
           (message "jj: not in a jj repo")
-          (message (string-trim (jj-sh root "jj git push 2>&1")))))))
+          (let ((bm (jj-tracked-bookmark root))
+                (tip (string-trim (jj-sh root
+                       "jj log --no-graph --color never -T 'change_id.short()' -r 'latest((remote_bookmarks()..@) ~ empty())' 2>/dev/null"))))
+            (cond ((not bm) (message "jj: no bookmark tracks a remote"))
+                  ((equal? tip "") (message "jj: nothing to push"))
+                  (else
+                    (jj-sh root (string-append "jj bookmark set " bm " -r " tip " 2>&1"))
+                    (message (string-trim (jj-sh root "jj git push 2>&1"))))))))))

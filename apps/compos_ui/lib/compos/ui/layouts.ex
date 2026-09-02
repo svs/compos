@@ -558,7 +558,7 @@ defmodule Compos.Ui.Layouts do
             border-radius: 8px; padding: 8px 12px;
           }
           .ag-user-text {
-            min-width: 0; font-family: var(--font-mono); font-size: calc(12.5px * var(--text-scale-factor, 1));
+            min-width: 0; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           /* The measure belongs to the text, not to the block: five table
@@ -576,7 +576,7 @@ defmodule Compos.Ui.Layouts do
           .ag-prose > pre, .ag-prose > .ag-table, .ag-prose > .code-block { max-width: 100%; }
           .ag-prose .code-block pre { margin: 6px 0; }
           .ag-prose code, .ag-prose pre {
-            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
+            font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
             background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
           }
           .ag-prose code { padding: 1px 4px; }
@@ -615,7 +615,7 @@ defmodule Compos.Ui.Layouts do
           .ag-prose th { font-weight: 600; white-space: nowrap; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
-            border-radius: 7px; font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
+            border-radius: 7px; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
             background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
           }
           .ag-tool summary, .ag-thought summary {
@@ -756,7 +756,7 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, rgba(255,255,255,0.5));
           }
           .ag-input {
-            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(12.5px * var(--text-scale-factor, 1));
+            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(var(--default-size, 24px) * var(--text-scale-factor, 1));
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }

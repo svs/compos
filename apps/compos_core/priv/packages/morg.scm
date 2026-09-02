@@ -957,7 +957,7 @@
                     *morg-hooks*)))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
 
 (mode-icon! "morg-mode" "")
 

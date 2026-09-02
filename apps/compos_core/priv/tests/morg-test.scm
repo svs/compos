@@ -799,6 +799,93 @@
       (shell-command->string (string-append "rm -rf " dir))
       (t--morg-done!))))
 
+;;; --- show-source ----------------------------------------------------------------
+;;; A :show-source block is a view of a snippet. The fill reads the file;
+;;; the file is never written.
+
+(define t--show-source-dir (string-append (compos-home) "/zz-morg-show-source"))
+(define t--show-source-lib (string-append t--show-source-dir "/lib.scm"))
+
+(define (t--show-source-make!)
+  (shell-command->string (string-append "rm -rf " (sh-quote t--show-source-dir)))
+  (make-directory! t--show-source-dir)
+  (write-file! t--show-source-lib
+    ";; lib\n(define (alpha x)\n  (+ x 1))\n\n(define (beta y)\n  (* y 2))\n"))
+
+(define (t--show-source-remove!)
+  (shell-command->string (string-append "rm -rf " (sh-quote t--show-source-dir))))
+
+(define (t--show-source-doc! text)
+  (t--morg! text 0)
+  (buffer-set-local! t--morg-buf 'default-directory (string-append t--show-source-dir "/")))
+
+(deftest 'show-source-snippet-names-a-definition-a-line-or-a-range
+  "WHAT after :: picks the snippet; a missing file is an error, not text"
+  (lambda ()
+    (t--show-source-make!)
+    (t--show-source-doc! "# Doc\n")
+    (check-equal! (show-source-snippet t--morg-buf "lib.scm::beta")
+                  "(define (beta y)\n  (* y 2))" "a definition by name")
+    (check-equal! (show-source-snippet t--morg-buf "lib.scm::5")
+                  "(define (beta y)\n  (* y 2))" "the definition that holds a line")
+    (check-equal! (show-source-snippet t--morg-buf "lib.scm::2-3")
+                  "(define (alpha x)\n  (+ x 1))\n" "a line range")
+    (check-equal! (car (show-source-snippet t--morg-buf "nope.scm::beta")) 'error
+                  "a missing file answers an error")
+    (check-equal! (car (show-source-snippet t--morg-buf "lib.scm::gamma")) 'error
+                  "and so does a missing definition")
+    (check-false! (buffer-known? t--show-source-lib)
+                  "the read leaves no buffer behind")
+    (t--show-source-remove!)
+    (t--morg-done!)))
+
+(deftest 'show-source-fill-replaces-the-body-and-runs-from-babel
+  "C-c C-c on the block fills it; a stale body is replaced, the file is untouched"
+  (lambda ()
+    (t--show-source-make!)
+    (t--show-source-doc!
+      (string-append "# Doc\n"
+                     "```scheme :show-source lib.scm::beta\n"
+                     "stale\n"
+                     "```\n"))
+    (buffer-goto! t--morg-buf 12)
+    (check-equal! (morg-babel-execute t--morg-buf 12) '(ok "scheme")
+                  "the argument owns the run")
+    (check-equal! (buffer-text t--morg-buf)
+                  (string-append "# Doc\n"
+                                 "```scheme :show-source lib.scm::beta\n"
+                                 "(define (beta y)\n  (* y 2))\n"
+                                 "```\n")
+                  "the body is the snippet")
+    (check-equal! (read-file t--show-source-lib)
+                  ";; lib\n(define (alpha x)\n  (+ x 1))\n\n(define (beta y)\n  (* y 2))\n"
+                  "the file is untouched")
+    (t--show-source-remove!)
+    (t--morg-done!)))
+
+(deftest 'morg-show-source-fills-every-block-and-an-empty-one
+  "the command fills all blocks, last first, so earlier fills move nothing"
+  (lambda ()
+    (t--show-source-make!)
+    (t--show-source-doc!
+      (string-append "```scheme :show-source lib.scm::beta\n"
+                     "```\n\n"
+                     "```scheme :show-source lib.scm::2-3\n"
+                     "old\n"
+                     "```\n"))
+    (t--morg-run! "morg-show-source")
+    (let ((filled (string-append "```scheme :show-source lib.scm::beta\n"
+                                 "(define (beta y)\n  (* y 2))\n"
+                                 "```\n\n"
+                                 "```scheme :show-source lib.scm::2-3\n"
+                                 "(define (alpha x)\n  (+ x 1))\n"
+                                 "```\n")))
+      (check-equal! (buffer-text t--morg-buf) filled "both bodies are their snippets")
+      (t--morg-run! "morg-show-source")
+      (check-equal! (buffer-text t--morg-buf) filled "a second fill changes nothing"))
+    (t--show-source-remove!)
+    (t--morg-done!)))
+
 ;;; --- motion -------------------------------------------------------------------
 ;;; A note is read by jumping. Each motion command answers with the position
 ;;; it landed on, and leaves point alone when there is nowhere to go.

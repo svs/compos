@@ -1736,9 +1736,6 @@ defmodule Compos.Ui.EditorLive do
           · {@node.modeline_project}
         </span>
         <span :if={@node.group} class="ml-group">· {@node.group}</span>
-        <span :if={@node.modeline_vcs && @node.modeline_vcs != ""} class="ml-mode ml-vcs" title="the jj change a save amends">
-          · {@node.modeline_vcs}
-        </span>
         <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span

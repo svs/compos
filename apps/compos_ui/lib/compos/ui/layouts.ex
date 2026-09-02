@@ -2124,6 +2124,10 @@ defmodule Compos.Ui.Layouts do
                 this.el.addEventListener("click", this.linkH);
                 this.scrollH = () => {
                   const s = this.scroller;
+                  // hiding the window forces scrollTop to 0 and fires this
+                  // event; only a scroll the reader can see may move the
+                  // saved place, or a long chat comes back at the top
+                  if (!s.isConnected || s.clientHeight === 0) return;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
                   clearTimeout(this.report);
                   this.report = setTimeout(() => {
@@ -3206,6 +3210,9 @@ defmodule Compos.Ui.Layouts do
                 this.cscrollH = (e) => {
                   const el = e.target;
                   if (!(el instanceof Element) || !el.matches(".buf.client-scroll")) return;
+                  // a window being hidden scrolls itself to 0; that is not
+                  // the reader (see AgentScroll.scrollH)
+                  if (!el.isConnected || el.clientHeight === 0) return;
                   const winEl = el.closest(".window[data-win-id]");
                   if (!winEl) return;
                   const win = parseInt(winEl.dataset.winId, 10);

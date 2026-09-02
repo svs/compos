@@ -9500,6 +9500,10 @@
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dseg-jj { flex: 1 1 auto; }
+.dseg-jj .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
+                   display: -webkit-box; -webkit-box-orient: vertical;
+                   -webkit-line-clamp: 2; }
 ")
 
 (define (dash--row k v &optional cls)
@@ -9874,16 +9878,25 @@
         (list (list "dseg-strong" model)))))
 
 (define (dashboard-line-blocks buf)
-  (list (dash--seg "mode" (dash--mode-segs buf) 'left)
-        (dash--seg-rule)
-        (dash--seg "group" (dash--group-segs buf) 'left)
-        (dash--seg-rule)
-        (list 'tag "div" 'class "dseg-stack"
-              'children
-              (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
-                    (dash--seg "lane"
-                      (list (list "f-ok dseg-strong" (dash--lane buf)))
-                      'right "dseg-inline")))))
+  (let ((vcs (buffer-local buf 'modeline-vcs)))
+    (append
+      (list (dash--seg "mode" (dash--mode-segs buf) 'left)
+            (dash--seg-rule)
+            (dash--seg "group" (dash--group-segs buf) 'left)
+            (dash--seg-rule)
+            (list 'tag "div" 'class "dseg-stack"
+                  'children
+                  (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
+                        (dash--seg "lane"
+                          (list (list "f-ok dseg-strong" (dash--lane buf)))
+                          'right "dseg-inline"))))
+      ;; the repo rides along at the end, wide as it needs: the open jj
+      ;; change, kept fresh by jj.scm as commits go by, wrapping to two
+      ;; lines with the key inline
+      (if vcs
+          (list (dash--seg-rule)
+                (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-jj"))
+          '()))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps

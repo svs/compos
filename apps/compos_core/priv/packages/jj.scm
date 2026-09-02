@@ -204,19 +204,20 @@
 ;; buffer whose line is already right is left alone so a redraw costs
 ;; nothing. An unlabeled run shows its Agent: line, which is exactly the
 ;; nudge to call jj-describe!.
-(define (jj-modeline-update! root)
+(define (jj-modeline-update! root &optional slug)
   (let* ((raw (jj-at root "description.first_line()"))
-         (line (cond ((equal? raw "") "jj: undescribed")
-                     ((> (string-length raw) 48)
-                      (string-append (substring raw 0 47) "..."))
-                     (else raw)))
-         (prefix (string-append root "/")))
+         (line (if (equal? raw "") "jj: undescribed" raw))
+         (prefix (string-append root "/"))
+         ;; the chat that caused the commit watches it go by too
+         (chat (and slug (boundp 'agent-buf) (agent-buf slug))))
     (for-each
       (lambda (b)
         (let ((p (buffer-path b)))
-          (when (and p (string-prefix? prefix p)
+          (when (and (or (and p (string-prefix? prefix p))
+                         (and chat (equal? b chat)))
                      (not (equal? (buffer-local b 'modeline-vcs) line)))
-            (buffer-set-local! b 'modeline-vcs line))))
+            (buffer-set-local! b 'modeline-vcs line)
+            (when (boundp 'dashboard--sync!) (dashboard--sync! b)))))
       (buffer-list))))
 
 ;;; --- the hook -----------------------------------------------------------
@@ -243,7 +244,8 @@
       (when root
         (jj-snapshot! root)
         (jj-unlock! root)
-        (jj-modeline-update! root)))))
+        (jj-modeline-update! root
+          (jj-author-slug (or (jj-last-author buf) (current-edit-author))))))))
 
 ;; Appended, so auto-revert's guard runs first: a save it refuses must not
 ;; leave an opened change behind.
@@ -252,21 +254,29 @@
 
 ;;; --- the label ----------------------------------------------------------
 
-;; A run can say what it was. This describes the open change, keeps the
-;; Agent: line under the message, and so makes the label and the identity
-;; one description. An untagged open change is adopted; another run's
-;; change is declined, because a label must not cross a handover.
+;; A run can say what it was. The message lands on the caller's own run:
+;; the newest unpushed change carrying its Agent: line, found by trailer,
+;; so a label survives other sessions flushing past it. You describe @;
+;; an untagged @ is adopted by an agent with no change of its own yet.
+;; The Agent: line stays under the message: label and identity are one
+;; description.
 (define (jj-describe! text)
   (let ((root (jj-here)))
     (if (not root)
         #f
-        (let ((slug (jj-author-slug (or (current-edit-author) "")))
-              (have (jj-tag root)))
-          (if (and have (not (equal? have slug)))
-              (begin (message "jj: the open change is not this run's to describe") #f)
+        (let* ((slug (jj-author-slug (or (current-edit-author) "")))
+               (mine (and slug
+                          (let ((r (string-trim (jj-sh root (string-append
+                                     "jj log --no-graph --color never -T 'change_id.short()' "
+                                     "-r 'latest(remote_bookmarks()..@ & description(substring:\"Agent: "
+                                     slug "\"))' 2>/dev/null")))))
+                            (and (not (equal? r "")) r))))
+               (rev (or mine (and (not (jj-tag root)) "@"))))
+          (if (not rev)
+              (begin (message "jj: no change of this run's to describe") #f)
               (let ((msg (if slug (string-append text "\n\nAgent: " slug) text)))
-                (jj-sh root (string-append "jj describe -m '" (jj-quote msg) "' 2>&1"))
-                (jj-modeline-update! root)
+                (jj-sh root (string-append "jj describe -r " rev " -m '" (jj-quote msg) "' 2>&1"))
+                (jj-modeline-update! root slug)
                 text))))))
 
 ;;; --- the push -----------------------------------------------------------

@@ -109,25 +109,33 @@
 (define (theme--union a b)
   (append a (filter (lambda (x) (not (member x a))) b)))
 
-(define (load-theme name)
+;; put NAME's faces on screen, and nothing else: no file, no message. The
+;; theme prompt previews through this as the highlight moves. -> #t, or
+;; #f for a name that is no theme
+(define (theme-apply! name)
   (let ((t (assoc name *themes*)))
-    (if t
-        (begin
-          ;; a face starts empty: an attribute the last theme set and this
-          ;; one does not must not survive. set-face-attribute! merges, so
-          ;; every face either theme or a default names is cleared first,
-          ;; then the package defaults apply, then the theme on top.
-          (for-each face-clear!
-            (theme--union (map car *face-defaults*)
-                          (theme--union (map car (theme-faces *current-theme*))
-                                        (map car (cadr t)))))
-          (set! *current-theme* name)
-          (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
-          (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
-          (persist-theme! name)
-          (run-hooks 'theme-change-hook)
-          (message (string-append "Loaded theme " name)))
-        (message (string-append "No such theme: " name)))))
+    (and t
+         (begin
+           ;; a face starts empty: an attribute the last theme set and this
+           ;; one does not must not survive. set-face-attribute! merges, so
+           ;; every face either theme or a default names is cleared first,
+           ;; then the package defaults apply, then the theme on top.
+           (for-each face-clear!
+             (theme--union (map car *face-defaults*)
+                           (theme--union (map car (theme-faces *current-theme*))
+                                         (map car (cadr t)))))
+           (set! *current-theme* name)
+           (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
+           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
+           (run-hooks 'theme-change-hook)
+           #t))))
+
+(define (load-theme name)
+  (if (theme-apply! name)
+      (begin
+        (persist-theme! name)
+        (message (string-append "Loaded theme " name)))
+      (message (string-append "No such theme: " name))))
 
 ;;; --- palettes ---------------------------------------------------------------
 
@@ -508,18 +516,36 @@
 (defface! 'agent-tool 'inherit 'accent)
 (defface! 'agent-permission 'inherit 'warn)
 
-(define-command "load-theme" "Prompt for a color theme and apply it"
+;; the prompt previews: the theme under the highlight goes on screen as
+;; you move, a rest at a time; RET keeps it and writes it, C-g puts the
+;; theme you had back
+(define theme-preview-ms 80)
+
+(define (theme--preview! name)
+  (let ((n (string-trim name)))
+    (when (assoc n *themes*) (theme-apply! n))))
+
+(define-command "load-theme" "Choose a color theme, previewing each as you move; RET keeps it"
   (lambda ()
-    (minibuffer-read "Load theme: " (history-order 'theme (theme-names))
-      (lambda (name)
-        (history-push! 'theme name)
-        (load-theme name)))))
+    (let ((before *current-theme*))
+      (minibuffer-read-preview "Load theme: " (history-order 'theme (theme-names))
+        (lambda (name)
+          (debounce! "theme-preview" theme-preview-ms theme--preview! name))
+        (lambda (name)
+          (let ((n (string-trim name)))
+            (history-push! 'theme n)
+            (load-theme n)))
+        (lambda ()
+          (when (and before (not (equal? before *current-theme*)))
+            (theme-apply! before))
+          (message (string-append "Kept theme " (or before ""))))))))
 
 ;;; boot: reapply the persisted theme choice (written by load-theme)
 (if (file-exists? (theme-file)) (load (theme-file)))
 
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
+(public! 'theme-apply! "(theme-apply! NAME) — put NAME's faces on screen without persisting; #t, or #f for no such theme")
 (public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face, attribute by attribute; an attribute the theme names wins. 'inherit names a face or a list of faces; 'priority orders overlapping overlays")
 (public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")

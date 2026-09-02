@@ -66,6 +66,20 @@
       '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"))
     (theme-test-restore!)))
 
+(deftest 'a-theme-preview-shows-faces-and-writes-nothing
+  "theme-apply! changes the faces on screen; only load-theme writes the theme file"
+  (lambda ()
+    (let ((saved (and (file-exists? (theme-file)) (read-file (theme-file)))))
+      (check-true! (theme-apply! "tt-theme-a") "a theme applies")
+      (check-equal! (theme-test-face-attr 'tt-face 'bg) "#eeeeee" "its faces are on screen")
+      (check-equal! *current-theme* "tt-theme-a" "and it is current")
+      (check-equal! (and (file-exists? (theme-file)) (read-file (theme-file))) saved
+                    "the theme file is as it was: a preview persists nothing")
+      (check-false! (theme-apply! "tt-no-such-theme") "no such theme: #f, faces untouched")
+      (check-equal! *current-theme* "tt-theme-a" "the current theme stands")
+      (theme-test-restore!)
+      (check-contains! (read-file (theme-file)) "compos-dark" "load-theme wrote its choice"))))
+
 (deftest 'inherit-and-priority-reach-the-face-table
   "a default may name a parent face and a priority"
   (lambda ()

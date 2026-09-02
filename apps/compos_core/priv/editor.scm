@@ -5000,6 +5000,49 @@
                         (write-file-mode-extension mode))))
           (string-append (default-directory) stem ext)))))
 
+;;; --- delete-file ---------------------------------------------------------------
+;;; Emacs delete-file, as a command. The prompt starts on this buffer's
+;;; file, and a yes-or-no question stands between RET and the disk. The
+;;; file goes to the trash (Emacs delete-by-moving-to-trash); a prefix
+;;; argument deletes it for good. A buffer that visits the file stays:
+;;; its text is still yours, as in Emacs.
+
+;; what the prompt offers first: this buffer's file, else the directory
+(define (delete-file-default buf)
+  (or (buffer-path buf) (default-directory)))
+
+;; trash or delete PATH. -> the path acted on, or #f when nothing is there
+(define (delete-file-path! path permanent?)
+  (let ((full (expand-path (normalize-file-input path))))
+    (cond ((not (or (file-exists? full) (file-directory? full))) #f)
+          (permanent? (delete-file! full) full)
+          (else (trash-file! full) full))))
+
+(define (delete-file--ask! path permanent?)
+  (let ((full (expand-path (normalize-file-input path))))
+    (if (not (or (file-exists? full) (file-directory? full)))
+        (message (string-append "No such file: " (abbreviate-file-name full)))
+        (yes-or-no-p
+          (string-append (if permanent? "Delete permanently " "Move to trash ")
+                         (abbreviate-file-name full) "?")
+          (lambda (yes)
+            (if (not yes)
+                (message "Cancelled")
+                (begin
+                  (delete-file-path! full permanent?)
+                  (message (string-append (if permanent? "Deleted " "Trashed ")
+                                          (abbreviate-file-name full))))))))))
+
+(define-command "delete-file"
+  "Delete a file, this buffer's by default: to the trash, or for good with a prefix argument"
+  (interactive 'P)
+  (lambda (arg)
+    (read-file-name-initial "Delete file: " (delete-file-default (current-buffer))
+      (lambda (input) (delete-file--ask! input (and arg #t))))))
+
+(public! 'delete-file-path!
+  "(delete-file-path! PATH PERMANENT?) — move PATH to the trash, or delete it when PERMANENT?; the path, or #f when nothing is there")
+
 (define-command "write-file" "Write the buffer to a file; the buffer becomes that file's buffer"
   (lambda ()
     (let ((old (current-buffer)))

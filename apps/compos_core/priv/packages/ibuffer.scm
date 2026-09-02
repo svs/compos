@@ -185,11 +185,11 @@
                    " · grouped by group · name order")))
 
 (define (ibuffer-compact-footer buf)
-  '(("RET" "visit") ("m" "mark") ("k" "kill") ("G" "group")
+  '(("RET" "visit") ("SPC" "mark") ("k" "kill") ("G" "group")
     ("d" "flag") ("x" "execute") ("/" "filter") ("q" "quit")))
 
 (define (ibuffer-wide-footer buf)
-  '(("RET" "visit") ("m" "mark") ("*" "all") ("k" "kill")
+  '(("RET" "visit") ("SPC" "mark") ("*" "all") ("k" "kill")
     ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
     ("\\" "widen") ("g" "refresh") ("q" "quit")))
 

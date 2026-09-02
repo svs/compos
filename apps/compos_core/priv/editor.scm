@@ -525,7 +525,7 @@
 ;;; through (ACTION LIST-BUFFER KEY) — the entry's 'key identity, which IS
 ;;; the entry for a list without a 'key fn. The action answers #t when it
 ;;; acted and #f when it found nothing to do; `x` reports "VERB N NOUN". CONFIRM?
-;;; asks first. The mechanism supplies the rest: `m` marks, `u` unmarks,
+;;; asks first. The mechanism supplies the rest: SPC marks, `u` unmarks,
 ;;; `U` drops every mark, and the mark column goes in front of every row.
 ;;;
 ;;; Three lists had written their own copy of this and the copies had
@@ -708,7 +708,7 @@
             (else (list-plan-run! buf plan))))))
 
 ;; the marking keys. Every list that shows a mark column marks the same
-;; way — `m`, `u`, `U` and `*` — and a list that declares flags also gets
+;; way — SPC marks (m as well), `u`, `U` and `*` — and a list that declares flags also gets
 ;; the flag chars and `x`. They go in before the list's own keys, so a
 ;; list can still claim any of them for something else.
 ;; Every list answers the same keys, from one map every list mode's map
@@ -722,7 +722,8 @@
   '(("?" "describe-mode")
     ("/" "list-filter") ("\\" "list-filter-pop")
     ("n" "list-next") ("p" "list-prev")
-    ("m" "list-mark") ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
+    ("SPC" "list-mark") ("m" "list-mark")
+    ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
     ("x" "list-execute")))
 
 ;; the flag keys of one list: (KEY FLAG-CHAR ...) rows become bindings

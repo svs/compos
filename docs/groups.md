@@ -351,7 +351,7 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `revive` | `group-revive` | `M-x` |
 | `groups` | `groups` | `C-x C-g l` |
 | `members` | `group-members` | `C-x C-g b`; `b` in the board |
-| `buffer-select` | `buffer-select`; `C-SPC` marks in the switcher, `m` in a list | |
+| `buffer-select` | `buffer-select`; `C-SPC` marks in the switcher, `SPC` in a list | |
 
 The `group-add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.
 

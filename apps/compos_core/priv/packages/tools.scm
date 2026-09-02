@@ -1144,14 +1144,18 @@
   (if author
       (let* ((slug (and (string-prefix? "agent:" author)
                         (substring author 6 (string-length author))))
-             (buf (and slug (agent-buf slug))))
+             (buf (and slug (agent-buf slug)))
+             ;; same burst boundary as a chat tool call: the proxy call ends,
+             ;; what it wrote is on disk
+             (call (lambda ()
+                     (if (boundp (quote jj-with-burst))
+                         (jj-with-burst author
+                           (lambda () (mcp-proxy-dispatch name args-json)))
+                         (mcp-proxy-dispatch name args-json)))))
         (if (and buf (buffer-exists? buf))
             (with-current-buffer buf
-              (lambda ()
-                (with-edit-author author
-                  (lambda () (mcp-proxy-dispatch name args-json)))))
-            (with-edit-author author
-              (lambda () (mcp-proxy-dispatch name args-json)))))
+              (lambda () (with-edit-author author call)))
+            (with-edit-author author call)))
       (mcp-proxy-dispatch name args-json)))
 
 ;; (mcp-proxy--shell-code ARGS-JSON) -> (CMD DIR|#f) | #f

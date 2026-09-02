@@ -1,5 +1,5 @@
 ;;; diff-block.scm --- a live diff block: two texts, three states, one fence.
-;;;
+;;; docs/editor/blocks/diff-block.md
 ;;; A diff block holds ours and theirs and waits in the document for a
 ;;; decision. It is indicated by text alone:
 ;;;

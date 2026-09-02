@@ -553,14 +553,19 @@
     (if e
         (car (cdr e))
         (let ((d (lambda (name args)
-                   (let ((buf (agent-buf slug)))
+                   (let* ((buf (agent-buf slug))
+                          (author (string-append "agent:" slug))
+                          ;; the tool call IS this author's burst, so its end
+                          ;; is where what it wrote reaches disk, and jj
+                          (call (lambda ()
+                                  (if (boundp (quote jj-with-burst))
+                                      (jj-with-burst author
+                                        (lambda () (llm-tool-call name args)))
+                                      (llm-tool-call name args)))))
                      (if (and buf (buffer-exists? buf))
                          (with-current-buffer buf
-                           (lambda ()
-                             (with-edit-author (string-append "agent:" slug)
-                               (lambda () (llm-tool-call name args)))))
-                         (with-edit-author (string-append "agent:" slug)
-                           (lambda () (llm-tool-call name args))))))))
+                           (lambda () (with-edit-author author call)))
+                         (with-edit-author author call))))))
           (set! *chat-dispatchers* (cons (list slug d) *chat-dispatchers*))
           d))))
 

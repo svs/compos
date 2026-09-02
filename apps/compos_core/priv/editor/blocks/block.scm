@@ -1,5 +1,5 @@
 ;;; block.scm --- what every waiting block shares.
-;;;
+;;; ./docs/editor/blocks/diff-block.md
 ;;; A block is a fenced span of text that an action lands in a document
 ;;; and a person decides. This file holds the mechanics every such block
 ;;; uses: reading and replacing its text, landing it below a passage,

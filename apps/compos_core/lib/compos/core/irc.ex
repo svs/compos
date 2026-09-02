@@ -3,7 +3,8 @@ defmodule Compos.Core.IRC do
 
   @doc "Parse one IRC line into prefix, command, params, and trailing text."
   def parse(line) when is_binary(line) do
-    line = String.trim_trailing(line, "\r\n")
+    # the line framing splits on "\n", so a frame keeps its "\r"
+    line = String.replace(line, ~r/[\r\n]+$/, "")
 
     {prefix, rest} =
       case line do

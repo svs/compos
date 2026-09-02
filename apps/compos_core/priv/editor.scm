@@ -7122,15 +7122,12 @@
           (if (and (buffer-path cur) (buffer-modified? cur))
               (message "Buffer is modified — save it, or C-x k to kill it")
               (begin
-                ;; put the window on a LIVE buffer before the kill. The
-                ;; kill-side fallback can land on a dormant checkpoint
-                ;; that has no process, and the next write is a noproc.
-                (let loop ((bs (window-fill-buffers)))
-                  (cond ((null? bs) #t)
-                        ((and (not (equal? (car bs) cur))
-                              (buffer-exists? (car bs)))
-                         (switch-to-buffer! (car bs)))
-                        (else (loop (cdr bs)))))
+                ;; Let the core release the killed buffer's leaves first.
+                ;; Pre-switching here makes the victim disappear from the
+                ;; tree before release_buffer! sees it, which preserves the
+                ;; wrong split and leaves an empty layout slot behind. The
+                ;; kill path already chooses a live, scoped fallback after
+                ;; collapsing any branches that contained the victim.
                 ;; a live process (tail, shell) dies with its buffer
                 (if (process-running? cur) (process-kill! cur))
                 (buffer-kill! cur))))))))

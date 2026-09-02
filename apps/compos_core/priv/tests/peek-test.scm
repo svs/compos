@@ -191,12 +191,11 @@
           (let ((row (car (filter switch-recent-row? (switch-buffer-rows "*switch*")))))
             (check-contains! (nth 1 row) "recent" "and says so"))
           (buffer-kill! "*switch*")
-          ;; C-x b is group-switch-buffer: the same two rules there
-          (when (boundp 'group-buffer-switch-candidates)
-            (let ((names (map car (group-buffer-switch-candidates #f "*scratch*"))))
-              (check-false! (member b names) "the live peek is not a candidate")
-              (check-true! (and (member a names) #t) "the replaced one is")
-              (check-true! (and (member "recent" names) #t) "under a recent heading"))))))))
+          ;; the prompt form reads the same rows: the same two rules there
+          (let ((names (map car (switch-sectioned-rows "*scratch*" #f))))
+            (check-false! (member b names) "the live peek is not a candidate")
+            (check-true! (and (member a names) #t) "the replaced one is")
+            (check-true! (and (member "recent" names) #t) "under a recent heading")))))))
 
 (deftest 'dired-ret-peeks-a-file-and-ret-again-keeps-it
   "the listing is yours; the file is a look until you say so"

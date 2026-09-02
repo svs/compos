@@ -87,7 +87,7 @@ defmodule Compos.GroupSwitchCommandTest do
       (set-frame-local! 'current-group "#{here}")
       (frame-group-label-refresh!)
       (switch-to-buffer! "#{first}")
-      (run-command "group-switch-buffer"))
+      (run-command "switch-to-buffer-prompt"))
     """)
 
     expected = eval!(~s[(group-color-face "#{here}")]) |> Jason.decode!()

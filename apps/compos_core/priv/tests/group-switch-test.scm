@@ -1,10 +1,11 @@
 ;;; group-switch-test.scm --- the switcher, by the commands it runs.
 ;;;
-;;; The switcher is a prompt. Typing is (minibuffer-change! TEXT), and
-;;; every key it answers to is a command: minibuffer-confirm for RET,
-;;; minibuffer-confirm-adopt for S-RET, minibuffer-confirm-context for
-;;; C-RET, minibuffer-collect for C-SPC, minibuffer-next-candidate for
-;;; C-n. Nothing here presses a key.
+;;; The switcher's prompt form (switch-to-buffer-prompt) reads the same
+;;; rows as the modal. Typing is (minibuffer-change! TEXT), and every
+;;; key it answers to is a command: minibuffer-confirm for RET,
+;;; minibuffer-confirm-context for C-RET, minibuffer-collect for
+;;; C-c C-o, minibuffer-next-candidate for C-n. Nothing here presses a
+;;; key.
 
 (domain! 'testing)
 (effects! '(write))
@@ -68,13 +69,15 @@
           ((equal? (car ls) label) i)
           (else (loop (cdr ls) (+ i 1))))))
 
-(define (t--sw-open-switcher!) (run-command "group-switch-buffer"))
-(define (t--sw-open-all!)
-  (set-prefix-arg! 4)
-  (run-command "group-switch-buffer"))
+(define (t--sw-open-switcher!) (run-command "switch-to-buffer-prompt"))
+(define (t--sw-open-all!) (run-command "switch-to-buffer-prompt"))
 
-(deftest 'group-switch-buffer-opens-its-candidate-prompt
-  "the buffer helper has its own arity and opens the prompt"
+;; every heading the rows can carry; none of them is a choice
+(define t--sw-headings
+  '("in this group" "other groups" "groups" "other buffers" "all buffers" "recent"))
+
+(deftest 'switch-to-buffer-prompt-opens-its-candidate-prompt
+  "the prompt form opens the prompt under the switcher's name"
   (lambda ()
     (t--sw-setup!)
     (t--sw-open-switcher!)
@@ -82,27 +85,6 @@
     (check-equal! (plist-get (minibuffer-state) 'prompt)
                   "Switch buffer: "
                   "the buffer switcher owns the prompt")
-    (t--sw-done!)))
-
-(deftest 'group-switch-buffer-pool-follows-the-invoking-window-history
-  "another window cannot reorder this window's previous buffers"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((noise "zz-sw-noise"))
-      (test-buffer! noise "")
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-first)
-      (let ((window (active-window)))
-        (split-window! 'h 0.5)
-        (other-window!)
-        (switch-to-buffer! t--sw-second)
-        (switch-to-buffer! noise)
-        (select-window! window)
-        (let ((pool (group-switch-all-buffers-but t--sw-first)))
-          (check-equal! (car pool) t--sw-third "the last buffer in this window leads")
-          (check-equal! (cadr pool) t--sw-second "the older buffer follows it")))
-      (buffer-kill! noise))
     (t--sw-done!)))
 
 (deftest 'the-group-switcher-indexes-memberships-in-one-pass
@@ -924,13 +906,50 @@
 
     (t--sw-key! "next-candidate")
     (check-true! (t--sw-selected) "the next row is a row")
-    (check-false! (member (t--sw-selected) '("in this group" "other buffers"))
+    (check-false! (member (t--sw-selected) t--sw-headings)
                   "and not a heading")
 
     (let loop ((n 8))
       (when (> n 0) (t--sw-key! "next-candidate") (loop (- n 1))))
-    (check-false! (member (t--sw-selected) '("in this group" "other buffers"))
+    (check-false! (member (t--sw-selected) t--sw-headings)
                   "nor after eight more steps")
+    (t--sw-done!)))
+
+;;; --- the modal reads the same rows ---------------------------------------------
+
+(define (t--sw-modal-at label)
+  (let loop ((es (map car (list-entries "*switch*"))) (i 0))
+    (cond ((null? es) -1)
+          ((equal? (car es) label) i)
+          (else (loop (cdr es) (+ i 1))))))
+
+(deftest 'the-modal-switcher-lists-the-same-sections-as-the-prompt
+  "C-x b in the editor: this group first, then the rest, and a heading is never the row at point"
+  (lambda ()
+    (t--sw-setup!)
+    (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
+    (t--sw-three-groups!)
+    (run-command "switch-to-buffer")
+    (check-equal! (current-buffer) "*switch*" "the modal opened")
+    (let ((names (map car (list-entries "*switch*"))))
+      (check-true! (and (member "in this group" names) #t) "the first heading")
+      (check-true! (and (member "other buffers" names) #t) "the second")
+      (check-false! (member t--sw-first names) "the buffer we came from is not a row")
+      (check-true! (< (t--sw-modal-at "in this group") (t--sw-modal-at t--sw-second))
+                   "the heading comes before its member")
+      (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "other buffers"))
+                   "and the member before the next heading")
+      (check-true! (< (t--sw-modal-at "other buffers") (t--sw-modal-at t--sw-third))
+                   "the stranger sits under it"))
+    (let ((row (list-current "*switch*")))
+      (check-equal! (and row (car row)) t--sw-second "point rests on the first real row"))
+    ;; narrowing to the stranger empties this group's section: its heading goes
+    (list-set-query! "*switch*" t--sw-third)
+    (let ((names (map car (list-keep "*switch*" (list-entries "*switch*")))))
+      (check-true! (and (member t--sw-third names) #t) "the stranger survives the filter")
+      (check-false! (member "in this group" names) "the empty heading is gone"))
+    (run-command "switch-quit")
+    (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
     (t--sw-done!)))
 
 (deftest 'a-heading-drops-when-the-filter-empties-its-section

@@ -258,7 +258,7 @@
                    "an agent-created file stays context-only")
       (check-false! (member path (group-user-buffers-mru agent-group))
                     "the group user pool hides agent context")
-      (check-false! (member path (group-switch-all-buffers-but user))
+      (check-false! (member path (map car (switch-sectioned-rows user #f)))
                     "the buffer switcher hides agent context")
       (check-false! (ibuffer-row? path)
                     "ibuffer hides agent context")

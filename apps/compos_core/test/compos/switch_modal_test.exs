@@ -349,7 +349,7 @@ defmodule Compos.SwitchModalTest do
     keys = claimed |> String.split(" ", trim: true) |> Enum.map_join(" ", &~s{"#{&1}"})
 
     # the command must open a prompt, not the modal *switch* buffer:
-    # group-switch-buffer calls minibuffer-read-preview
-    assert eval!(~s{(chrome--chord-command (list #{keys}))}) == ~s{"group-switch-buffer"}
+    # switch-to-buffer-prompt calls minibuffer-read-preview
+    assert eval!(~s{(chrome--chord-command (list #{keys}))}) == ~s{"switch-to-buffer-prompt"}
   end
 end

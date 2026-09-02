@@ -6,11 +6,20 @@
 ;;; C-t sets the group, C-o shows groups and projects, TAB locks to a
 ;;; group, C-g and ESC quit. DEL widens the narrowing by one character.
 ;;;
-;;; The rows are the C-x b pool: buffers and group cards woven by
-;;; recency, plus whatever the switch-buffer-source seam adds (chrome
-;;; adds browser tabs). Moving the highlight previews the row in the
-;;; window you came from. A preview can wake a dormant buffer; closing
-;;; the switcher puts every buffer nobody picked back to sleep.
+;;; The rows are the C-x b pool in four sections: the current group's
+;;; buffers, the other groups' cards, every other buffer (and whatever
+;;; the switch-buffer-source seam adds — chrome adds browser tabs), then
+;;; what peeks let go. Inside a section the order is recency. A heading
+;;; is not a choice: the highlight steps over it, and a filter that
+;;; empties a section drops its heading too.
+;;;
+;;; Moving the highlight previews the row in the window you came from.
+;;; A preview can wake a dormant buffer; closing the switcher puts every
+;;; buffer nobody picked back to sleep.
+;;;
+;;; The same rows serve as a minibuffer prompt (switch-to-buffer-prompt)
+;;; for the surfaces that draw only a prompt: a browser page under the
+;;; chrome extension. One rows fn, one act fn, two surfaces.
 
 (define *switch-buffer* "*switch*")
 ;; a modal in the center of the screen — the palette's geometry, as a window
@@ -61,22 +70,57 @@
   (append (map group-container-candidate (switch-groups buf))
           (map switch-project-candidate (switch-project-roots))))
 
-;; the buffers view: the C-x b pool — MRU-woven buffers and group cards,
-;; plus the seam's rows (chrome tabs). The place you stand is not an
-;; offer, and neither is this list itself.
-(define (switch-buffer-rows buf)
-  (let* ((here (buffer-local buf 'switch-here))
-         (source (switch-buffer-source
-                   (switch-history-pool (buffer-local buf 'switch-group))))
-         (pool (car source)))
+;; a heading row: kind "separator". list-mode steps over it and drops
+;; it when its section empties; the minibuffer does the same.
+(define (switch-separator label) (list label "" "separator"))
+
+(define (switch-separator? buf e)
+  (and (> (length e) 2) (equal? (nth 2 e) "separator")))
+
+(define (switch-section label rows)
+  (if (pair? rows) (cons (switch-separator label) rows) '()))
+
+;; the C-x b pool: MRU-woven buffers and group cards, plus the seam's
+;; rows (chrome tabs). The place you stand is not an offer — HERE, and
+;; the seam's own standing (from a page, the tab you pressed the key
+;; in) — and neither is this list itself. A peek is a look, not a
+;; buffer of yours.
+(define (switch-pool here my-group)
+  (let* ((source (switch-buffer-source (switch-history-pool my-group)))
+         (standing (nth 1 source)))
     (set! *switch-pick* (nth 2 source))
+    (filter (lambda (c) (and (not (equal? (car c) here))
+                             (not (equal? (car c) standing))
+                             (not (equal? (car c) *switch-buffer*))
+                             (not (peek-buffer? (car c)))))
+            (car source))))
+
+;; the pool in sections: this group's buffers, the other groups' cards,
+;; every other buffer and tab, then what peeks let go. Without a current
+;; group the first section is absent and the third lists all buffers.
+(define (switch-sectioned-rows here my-group)
+  (let* ((pool (switch-pool here my-group))
+         (id (and my-group (group-resolve-id my-group)))
+         (mine (filter (lambda (c)
+                         (and id
+                              (not (switch-container? c))
+                              (buffer-in-group? (car c) id)))
+                       pool))
+         (cards (filter switch-container? pool))
+         (others (filter (lambda (c)
+                           (and (not (switch-container? c))
+                                (not (member c mine))))
+                         pool)))
     (append
-      ;; a peek is a look, not a buffer of yours: the list skips it
-      (filter (lambda (c) (and (not (equal? (car c) here))
-                               (not (equal? (car c) *switch-buffer*))
-                               (not (peek-buffer? (car c)))))
-              pool)
-      (switch-recent-rows))))
+      (switch-section "in this group" mine)
+      (switch-section (if id "other groups" "groups") cards)
+      (switch-section (if (pair? mine) "other buffers" "all buffers") others)
+      (switch-section "recent" (switch-recent-rows)))))
+
+;; the buffers view of the modal
+(define (switch-buffer-rows buf)
+  (switch-sectioned-rows (buffer-local buf 'switch-here)
+                         (buffer-local buf 'switch-group)))
 
 ;; what peeks showed and let go, below the live buffers. RET peeks it
 ;; again; a row that is live again is not repeated.
@@ -190,6 +234,8 @@
   (let ((name (car e))
         (ann (switch-ann e)))
     (cond
+      ((switch-separator? buf e)
+       (list "" (list (string-append "── " name " ") "accent") ""))
       ((switch-container? e)
        (list ""
              (list name "accent")
@@ -228,7 +274,7 @@
 
 (define (switch-meta buf)
   (let* ((view (or (buffer-local buf 'switch-view) 'buffers))
-         (n (length (list-entries buf))))
+         (n (list-count buf)))
     (cond ((equal? view 'groups)
            (string-append (number->string n) " contexts · RET switches"))
           ((pair? view)
@@ -330,22 +376,28 @@
 (define (switch-found-project! root)
   (project-enter-group! root))
 
-(define (switch-pick! buf e context?)
-  (let ((name (car e))
-        (view (buffer-local buf 'switch-view)))
+(define (switch-locked-view? view)
+  (and (pair? view) (equal? (car view) 'locked)))
+
+;; What a pick means — ONE answer for the modal and the prompt. E is the
+;; row, VIEW the view it came from, CONTEXT? the C-RET verb. CLOSE! takes
+;; the surface down first and takes the buffer to keep awake (#f keeps
+;; none); the prompt is already down, so it passes a no-op.
+(define (switch-act! e view context? close!)
+  (let ((name (car e)))
     (cond
       ;; the locked view's own card is the DEFAULT: RET keeps the group
       ;; as it stands, or opens dired on a project root
-      ((and (switch-container? e) (pair? view) (equal? (car view) 'locked))
+      ((and (switch-container? e) (switch-locked-view? view))
        (let ((g (nth 1 view)))
-         (switch-close! buf #f)
+         (close! #f)
          (when (file-directory? g) (dired-open g))))
       ((switch-container? e)
        (let ((target (if (> (length e) 4)
                          (list 'project (nth 4 e))
                          (switch-card-target name)))
              (groups-view? (equal? view 'groups)))
-         (switch-close! buf #f)
+         (close! #f)
          (if (equal? (car target) 'group)
              (switch-to-group! (nth 1 target))
              (switch-found-project! (nth 1 target)))
@@ -358,7 +410,7 @@
       ;; home window's frame, beside where you were
       ((switch-recent-row? e)
        (let ((entry (peek-recent-find (nth 3 e))))
-         (switch-close! buf #f)
+         (close! #f)
          (when entry (peek-revive! entry))))
       ;; a project file nobody has open: visit it — it joins the group
       ((switch-file-row? e)
@@ -369,10 +421,10 @@
               ;; does not exist. The file joins that project's group, so
               ;; found it here.
               (id (and g (or (group-resolve-id g) (group-ensure-record! g)))))
-         (switch-close! buf #f)
+         (close! #f)
          (visit-in-group path id)))
       ((buffer-known? name)
-       (switch-close! buf name)
+       (close! name)
        (if context?
            (buffer-context-switch! name)
            (begin
@@ -382,8 +434,12 @@
              (group-current-recalculate!)
              (windows-shown-catchup!))))
       ((*switch-pick* name)
-       (switch-close! buf #f))
+       (close! #f))
       (else (message "no buffer here")))))
+
+(define (switch-pick! buf e context?)
+  (switch-act! e (buffer-local buf 'switch-view) context?
+               (lambda (keep) (switch-close! buf keep))))
 
 (define-command "switch-visit"
   "Visit the selected row; with no match, found a group named the narrowing"
@@ -538,8 +594,10 @@
   (list
     'doc (string-append
            "The buffer switcher. Type to narrow; DEL widens by one "
-           "character. The rows are buffers, group cards and browser tabs "
-           "in most-recently-used order, and the highlight previews its row "
+           "character. The rows are this group's buffers, the other groups' "
+           "cards, every other buffer and browser tab, then recent peeks, "
+           "each section in most-recently-used order. The highlight "
+           "previews its row "
            "in the window you came from. RET visits the row; with no match, "
            "RET founds a group named what you typed. C-RET enters the "
            "row's group or project. C-SPC marks; C-a marks every shown "
@@ -568,6 +626,7 @@
                      ((pair? view) (group-label (nth 1 view)))
                      (else "Switch to"))))
     'meta switch-meta
+    'separator? switch-separator?
     'markable? (lambda (buf e)
                  (and (not (switch-container? e)) (buffer-known? (car e))))
     'noun "buffer"
@@ -624,6 +683,93 @@
   (lambda () (switch-open! 'groups)))
 
 (define-key "ctl-x-map" "G" "switch-groups")
+
+;;; --- the prompt form -------------------------------------------------------------
+;;; The same rows as a minibuffer prompt, for the surfaces that draw only
+;;; a prompt: a browser page under the chrome extension. RET, C-RET and
+;;; C-c C-o mean what they mean in the modal.
+
+;; a recent row carries its peek entry in the 4th slot; the prompt's
+;; candidate encoder reads a 4th slot as chips, so the prompt gets the
+;; row without it and the confirm looks the full row up by name
+(define (switch-prompt-row e)
+  (if (switch-recent-row? e) (list (car e) (nth 1 e) "recent") e))
+
+(define-command "switch-to-buffer-prompt"
+  "Switch to a buffer from a prompt; C-RET enters the buffer's group"
+  (lambda ()
+    (set! *mb-confirm-context* #f)
+    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (my-group (or (buffer-group here) (frame-local 'current-group)))
+           ;; opening the switcher snapshots this group's arrangement:
+           ;; wherever you go next, the way back is exact
+           (_ (group-layout-save-if-shown! my-group))
+           (rows (switch-sectioned-rows here my-group))
+           (row-of (lambda (name) (or (assoc name rows) (list name))))
+           (restore-here! (lambda ()
+                            (when (buffer-known? here) (window-preview-buffer! here))))
+           ;; buffers the preview wakes; the close puts every one nobody
+           ;; picked back to sleep (the consult contract)
+           (woken '())
+           (sleep-woken! (lambda (keep)
+                           (for-each (lambda (b)
+                                       (unless (equal? b keep) (buffer-sleep! b)))
+                                     woken)
+                           (set! woken '()))))
+      (if (null? rows)
+          (message "No other buffer available")
+          (minibuffer-read-preview "Switch buffer: " (map switch-prompt-row rows)
+            ;; the invoking window live-previews the highlighted buffer; a
+            ;; card or a tab leaves the window alone. The primitive wakes a
+            ;; sleeper; the mode setup must follow, or switch-to-buffer!
+            ;; later sees the buffer live and skips its own restore
+            (lambda (b)
+              (when (buffer-known? b)
+                (let ((sleeping (not (buffer-exists? b))))
+                  (window-preview-buffer! b)
+                  (when (and sleeping (buffer-exists? b))
+                    (restore-buffer-runtime! b)
+                    (set! woken (cons b woken))))))
+            (lambda (name)
+              (let ((context? (let ((x *mb-confirm-context*))
+                                (set! *mb-confirm-context* #f)
+                                x))
+                    (e (row-of name)))
+                (cond
+                  ((buffer-known? name)
+                   (switch-act! e 'buffers context? (lambda (keep) #f)))
+                  ((assoc name rows)
+                   ;; a card, a tab, or a recent row had no preview: put
+                   ;; back what the window showed, then act
+                   (restore-here!)
+                   (switch-act! e 'buffers context? (lambda (keep) #f)))
+                  ((equal? name "") #f)
+                  (else
+                   ;; nothing matches: RET founds a group named NAME from
+                   ;; the current windows, the real ones
+                   (restore-here!)
+                   (group-found-from-windows! name)))
+                ;; the pick is on screen now; the sleep guard keeps awake
+                ;; anything a group restore also put on screen
+                (sleep-woken! name)))
+            ;; C-g: put back what you were looking at; sleep the rest
+            (lambda ()
+              (set! *mb-confirm-context* #f)
+              (restore-here!)
+              (sleep-woken! #f))
+            ;; you also know a buffer by its mode, its group, or its
+            ;; project: those three fields match what you type. The icon
+            ;; leads them, so the count is four.
+            4 #f #f
+            ;; C-c C-o collects the narrowed rows into ibuffer; headings
+            ;; and cards are not buffers
+            (lambda (picked)
+              (restore-here!)
+              (sleep-woken! #f)
+              (let ((buffers (filter buffer-known? (map car picked))))
+                (if (null? buffers)
+                    (message "No buffer candidates to collect")
+                    (ibuffer-open-buffers! buffers)))))))))
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

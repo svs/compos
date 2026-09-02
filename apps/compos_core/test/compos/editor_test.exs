@@ -101,10 +101,6 @@ defmodule Compos.EditorTest do
     {:ok, _} = Compos.Core.Session.eval(~s[(run-command "switch-to-buffer")])
   end
 
-  defp open_group_switcher do
-    {:ok, _} = Compos.Core.Session.eval(~s[(run-command "group-switch-buffer")])
-  end
-
   defp clear_minibuffer do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
   end

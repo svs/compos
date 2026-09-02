@@ -272,7 +272,7 @@ defmodule Compos.IbufferTest do
       (group-record-create! "#{group}")
       (local-set-key* (minibuffer-buffer) "<f9>" "minibuffer-collect")
       (local-set-key* (minibuffer-buffer) "<f6>" "minibuffer-confirm")
-      (run-command "group-switch-buffer"))})
+      (run-command "switch-to-buffer-prompt"))})
 
     type("zz-collected")
     press("<f9>")

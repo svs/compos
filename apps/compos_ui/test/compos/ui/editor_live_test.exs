@@ -167,23 +167,31 @@ defmodule Compos.Ui.EditorLiveTest do
     assert Compos.Core.Buffer.text(buf) == "rails transcript stays readable"
   end
 
-  test "an editor chord from a terminal completes through the minibuffer", %{conn: conn} do
+  # The chord reaches the editor, not the PTY: the switcher opens, and
+  # typing narrows it. The switcher is opened by its own command, never
+  # by a key — a binding is a preference and it moves.
+  test "an editor chord from a terminal completes through the switcher", %{conn: conn} do
     terminal = Compos.Core.Editor.current_buffer()
     target = "terminal-switch-target-#{System.unique_integer([:positive])}"
     Compos.Core.Buffer.set_local(terminal, "render-mode", "terminal")
     Compos.Core.create_buffer(target)
+    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f8>" "switch-to-buffer")})
 
-    on_exit(fn -> Compos.Core.kill_buffer(target) end)
+    on_exit(fn ->
+      Compos.Core.Session.eval(~s{(global-unset-key "<f8>")})
+      Compos.Core.kill_buffer(target)
+    end)
 
     {:ok, view, _html} = live(conn, "/")
-    html = keys(view, ["C-x", "b"])
-    assert html =~ "mb-panel"
+    # the switcher's key bar names it
+    html = keys(view, ["<f8>"])
+    assert html =~ "type to narrow"
 
     html = type(view, target)
     assert html =~ target
 
     html = keys(view, ["RET"])
-    refute html =~ "mb-panel"
+    refute html =~ "type to narrow"
     assert Compos.Core.Editor.current_buffer() == target
   end
 
@@ -478,7 +486,7 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["C-x"])
     assert html =~ "which-key"
-    assert html =~ "group-switch-buffer"
+    assert html =~ "switch-to-buffer"
     keys(view, ["C-g"])
   end
 

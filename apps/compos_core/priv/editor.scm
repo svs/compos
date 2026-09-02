@@ -2234,22 +2234,15 @@
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
   (lambda () (minibuffer-confirm!)))
-;; RET takes the candidate. C-RET and S-RET take the same candidate with
-;; a different verb, and the prompt that cares (the buffer switcher)
+;; RET takes the candidate. C-RET takes the same candidate with a
+;; different verb, and the prompt that cares (the buffer switcher)
 ;; reads and resets the flag:
 ;;   RET    go there, move nothing else
 ;;   C-RET  enter the candidate's context, layout and all
-;;   S-RET  bring the candidate HERE, into the current context
 (define *mb-confirm-context* #f)
-(define *mb-confirm-adopt* #f)
 (define-command "minibuffer-confirm-context"
   "Accept the selected candidate as a context (group) switch"
   (lambda () (set! *mb-confirm-context* #t) (minibuffer-confirm!)))
-(define-command "minibuffer-confirm-adopt"
-  "Accept the selected candidate into the current context"
-  (lambda () (set! *mb-confirm-adopt* #t) (minibuffer-confirm!)))
-(catalog-meta! 'command "minibuffer-confirm-adopt"
-               'domain 'interaction 'effects '(write))
 (define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
@@ -2535,7 +2528,6 @@
   (local-set-key* mb "RET" "minibuffer-confirm")
   (local-set-key* mb "M-RET" "minibuffer-confirm-input")
   (local-set-key* mb "C-RET" "minibuffer-confirm-context")
-  (local-set-key* mb "S-RET" "minibuffer-confirm-adopt")
   (local-set-key* mb "C-g" "minibuffer-cancel")
   (local-set-key* mb "TAB" "minibuffer-complete")
   (local-set-key* mb "C-n" "minibuffer-next-candidate")
@@ -5640,13 +5632,6 @@
         "container"
         (map buffer-short-label (take-n (group-buffers-mru g) 4))))
 
-;; the pool locked to one group: its container row, then its buffers
-(define (group-locked-pool g)
-  (cons (group-container-candidate g)
-        (annotate 'buffer
-          (filter (lambda (b) (not (string-prefix? " " b)))
-                  (group-user-buffers-mru g)))))
-
 ;; C-RET: the picked buffer's CONTEXT comes up — its group, or its
 ;; project materialized as one. A project is also a group: the first
 ;; context switch tags the project's open buffers and founds it.
@@ -5704,121 +5689,6 @@
                (let ((c (assoc name annotated)))
                  (loop (cdr rows) (if c (cons c out) out))))
               (else (loop (cdr rows) out))))))))
-
-;; The minibuffer switcher. The editor's C-x b opens the modal switcher
-;; (switch.scm); this prompt serves the surfaces that can only draw a
-;; minibuffer — a browser page under the chrome extension.
-(define-command "switch-to-buffer-prompt"
-  "Switch to a buffer from a prompt; C-RET enters the buffer's group instead"
-  (lambda ()
-    (set! *mb-confirm-context* #f)
-    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (my-group (or (buffer-group here) (frame-local 'current-group)))
-           ;; opening the switcher snapshots this group's arrangement:
-           ;; wherever you go next, the way back is exact
-           (_ (group-layout-save-if-shown! my-group))
-           (groups (filter (lambda (g) (not (equal? g my-group))) (group-names)))
-           (container-of (lambda (label)
-                           (let loop ((gs groups))
-                             (cond ((null? gs) #f)
-                                   ((equal? (group-container-label (car gs)) label)
-                                    (car gs))
-                                   (else (loop (cdr gs)))))))
-           (source (switch-buffer-source (switch-history-pool my-group)))
-           (pool (car source))
-           (standing (car (cdr source)))
-           (pick (car (cdr (cdr source))))
-           ;; history first: the pool is the one MRU stream — buffers
-           ;; and group cards woven by recency. RET on a buffer row
-           ;; switches the buffer; RET on a group card switches the
-           ;; context. TAB still locks; C-x G still lists.
-           (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
-           (fallback (if (null? all) here (car (car all))))
-           ;; buffers the preview wakes. The prompt's close puts every one
-           ;; nobody picked back to sleep — scrolling the list must not
-           ;; leave forty live processes behind (the consult contract).
-           (woken '())
-           (sleep-woken! (lambda (keep)
-                           (for-each (lambda (b)
-                                       (unless (equal? b keep)
-                                         (buffer-sleep! b)))
-                                     woken)
-                           (set! woken '()))))
-      (minibuffer-read-preview
-        (string-append "Switch to (default " fallback "): ")
-        all
-        ;; the invoking window live-previews the highlighted buffer; a
-        ;; container or a tab leaves the window alone. known?, not exists?:
-        ;; most of the pool is dormant — the primitive wakes a sleeper, and
-        ;; the mode setup must follow here, because switch-to-buffer! later
-        ;; sees the buffer live and skips its own restore
-        (lambda (b)
-          (when (buffer-known? b)
-            (let ((sleeping (not (buffer-exists? b))))
-              (window-preview-buffer! b)
-              (when (and sleeping (buffer-exists? b))
-                (restore-buffer-runtime! b)
-                (set! woken (cons b woken))))))
-        (lambda (name)
-          (let* ((picked (if (equal? name "") fallback name))
-                 (explicit (let ((x *mb-confirm-context*))
-                             (set! *mb-confirm-context* #f)
-                             x))
-                 (g (container-of picked)))
-            (cond (g (switch-to-group! g))
-                  ((pick picked) #t)
-                  ;; known?, not exists?: the pool is buffer-list-mru,
-                  ;; and most of that list is dormant. exists? here sent
-                  ;; every dormant pick to the found-a-group branch.
-                  ((buffer-known? picked)
-                   ;; RET is a BUFFER switch: one window changes and
-                   ;; nothing else moves. The context switch — layout
-                   ;; and all — is C-RET's job, and only C-RET's.
-                   (if explicit
-                       (buffer-context-switch! picked)
-                       (switch-to-buffer! picked)))
-                  (else
-                   ;; nothing matches: RET founds a group named PICKED
-                   ;; from the current windows. The preview may still
-                   ;; occupy the invoking window — put back what stood
-                   ;; there, so the group forms from the real windows.
-                   (when (buffer-exists? here) (window-preview-buffer! here))
-                   (group-found-from-windows! picked)))
-            ;; the pick is on screen now; the sleep guard keeps awake
-            ;; anything a group restore also put on screen
-            (sleep-woken! picked)))
-        ;; C-g: put back what you were looking at; sleep the rest
-        (lambda ()
-          (when (buffer-exists? here) (window-preview-buffer! here))
-          (sleep-woken! #f))
-        ;; you also know a buffer by its mode, its group, or its project:
-        ;; those three fields all match what you type. The icon leads them,
-        ;; so the count is four.
-        4
-        ;; the switcher is the power organiser: it opens as a centered
-        ;; palette, not the bottom minibuffer line
-        "palette"
-        ;; this handler serves TAB and RET both (the complete contract):
-        ;; RET hands it the highlighted candidate — answer it back as the
-        ;; confirm value. TAB with no selection and an input that names
-        ;; exactly one group locks the pool to that group's buffers.
-        (lambda (input selected)
-          (let ((lock (and (not (equal? input ""))
-                           (let ((hits (filter (lambda (x)
-                                                 (string-contains? (group-label x)
-                                                                   input))
-                                               groups)))
-                             (and (pair? hits) (null? (cdr hits)) (car hits))))))
-            (cond
-              (selected (list selected all))
-              ;; an input that names ONE group locks to it — the more
-              ;; deliberate act wins over plain completion
-              (lock (list "" (group-locked-pool lock)))
-              ;; one candidate left: TAB takes it (Emacs completion)
-              ((let ((st (minibuffer-state)))
-                 (and st (= 1 (plist-get st 'total)) (minibuffer-selected)))
-               (list (minibuffer-selected) all))
-              (else #f))))))))
 
 ;; Packages can repair windows after the core releases a killed buffer.
 ;; The callback returns a thunk because its policy must inspect the old buffer

@@ -19,6 +19,25 @@
   "At this usable frame width, three panes become columns and four become a grid."
   'group 'windows 'type 'number)
 
+;; The display-buffer chain (editor.scm) reads these. They are plain
+;; defines there, because editor.scm loads before custom.scm.
+(defcustom 'split-height-threshold 80
+  "A window with this many rows splits below for a pop-up window (Emacs split-height-threshold)."
+  'group 'windows 'type 'number)
+
+(defcustom 'split-width-threshold 160
+  "A window with this many columns splits beside for a pop-up window (Emacs split-width-threshold)."
+  'group 'windows 'type 'number)
+
+(defcustom '*display-buffer-base-action* '()
+  "Display actions tried after the rule for a buffer and before the fallback: a list of popup, pop-up-window, reuse-window, use-some-window, same-window."
+  'group 'windows 'type 'list)
+
+(defcustom '*display-buffer-fallback-action*
+  '(reuse-window pop-up-window use-some-window same-window)
+  "Display actions tried last for a buffer with no rule."
+  'group 'windows 'type 'list)
+
 ;; Deliberately pure: agents can inspect the choice before they change a frame.
 (define (window-layout-for-width width pane-count)
   (cond

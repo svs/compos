@@ -413,7 +413,7 @@
                   (or (plist-get opts 'connector) *default-connector*)
                   (plist-get opts 'model)
                   opts)))
-      (display-buffer buf)
+      (pop-to-buffer buf)
       (when (equal? (current-buffer) buf)
         (set-mode! "chat-mode")
         (end-of-buffer!))

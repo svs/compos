@@ -1973,7 +1973,8 @@
       ;; belongs to the reader, and the draw restores the row by its key.
       (when cached?
         (list-refresh! buf)))
-    (display-buffer buf)
+    ;; a listing is opened to work in: the window it takes is selected
+    (pop-to-buffer buf)
     buf))
 
 ;;; --- plists ------------------------------------------------------------------
@@ -5741,11 +5742,17 @@
 ;;;   (PATTERN ACTION PARAMS)
 ;;;
 ;;; read in order, first match wins. PATTERN is a substring of the buffer
-;;; name. ACTION is one of
+;;; name, or (category KIND) for a kind of display the caller names
+;;; ((category preview) is a peek). ACTION is one action name or a list
+;;; of them, tried in order; the display-buffer section below lists them.
+;;; The two this editor started with:
 ;;;
-;;;   'same    show it in the selected window
+;;;   'same    show it in the selected window (same-window)
 ;;;   'popup   a side window: one per frame, reused, and it floats
 ;;;
+;;; A buffer with no rule takes *display-buffer-base-action* and then
+;;; *display-buffer-fallback-action*: reuse a window that shows it, split
+;;; a window big enough, use another window, else this one.
 ;;; PARAMS is a plist, and every key has a default, so a rule says only
 ;;; what it wants to change:
 ;;;
@@ -5770,7 +5777,10 @@
   (list (list "*shell*" 'popup '())
         (list "*opencode" 'popup '())
         (list "*Messages*" 'popup '())
-        (list "*llm*" 'popup '())))
+        (list "*llm*" 'popup '())
+        ;; a peek goes to the popup. Last, so a rule for a name wins, and
+        ;; a rule of your own (add-display-rule! conses in front) wins too
+        (list '(category preview) 'popup '())))
 
 ;; PARAMS is optional, so every rule written before the params existed
 ;; still reads the same and takes the defaults
@@ -5779,13 +5789,28 @@
     (cons (list pattern action (if params params '()))
           *display-buffer-alist*)))
 
-(define (display-rule-for name)
-  (let loop ((rules *display-buffer-alist*))
-    (cond ((null? rules) (list name 'same '()))
-          ((string-contains? name (car (car rules))) (car rules))
-          (else (loop (cdr rules))))))
+;; a rule matches a name by substring, or a category the caller passed in
+;; ALIST as 'category; a rule written (category . KIND) reads the same
+(define (display-rule-match? condition name alist)
+  (cond ((string? condition) (string-contains? name condition))
+        ((and (pair? condition) (equal? (car condition) 'category))
+         (let ((kind (cdr condition)))
+           (equal? (if (pair? kind) (car kind) kind)
+                   (plist-get alist 'category))))
+        (else #f)))
 
-(define (display-action-for name) (cadr (display-rule-for name)))
+;; the rule for NAME, or a rule with no action: the chain then starts
+;; at the base action
+(define (display-rule-for name &optional alist)
+  (let ((a (or alist '())))
+    (let loop ((rules *display-buffer-alist*))
+      (cond ((null? rules) (list name '() '()))
+            ((display-rule-match? (car (car rules)) name a) (car rules))
+            (else (loop (cdr rules)))))))
+
+(define (display-action-for name &optional alist)
+  (let ((actions (display-buffer-actions-for name alist)))
+    (if (null? actions) #f (car actions))))
 
 ;; a rule's own value, else the default for that key
 (define (display-rule-param name key)
@@ -6156,38 +6181,247 @@
     (or side (popup-default-side))
     (or size (plist-get *display-buffer-defaults* 'size))))
 
-(define (display-buffer name)
-  ;; a board, a listing, any surface from outside the group takes its
-  ;; pane through here. Record the group's arrangement BEFORE the
-  ;; cover, or a switch made FROM the board has no way back — the
-  ;; capture rule below only fires from a member buffer, and the board
-  ;; is not one.
-  (group-layout-save-before-cover! name)
-  (if (equal? (display-action-for name) 'popup)
-      (popup-show name)
-      (switch-to-buffer! name)))
+;;; --- display-buffer actions (Emacs window.el) ---------------------------------
+;;; display-buffer shows NAME somewhere and returns the window. It selects
+;;; nothing. pop-to-buffer shows and selects. switch-to-buffer! shows in
+;;; the selected window. Where "somewhere" is comes from a chain of
+;;; actions, tried in order until one answers with a window:
+;;;
+;;;   the rule for NAME in *display-buffer-alist*
+;;;   *display-buffer-base-action*       the user's, empty by default
+;;;   *display-buffer-fallback-action*   reuse-window pop-up-window
+;;;                                      use-some-window same-window
+;;;
+;;; The actions, each a function of NAME and ALIST on *display-buffer-actions*:
+;;;
+;;;   reuse-window     a window that shows NAME already
+;;;   pop-up-window    split the largest work window when it is big
+;;;                    enough (split-window-sensibly), else the selected one
+;;;   use-some-window  another work window; the popup and a peek are not one
+;;;   same-window      the selected window (also 'same)
+;;;   popup            the side window (popup-show)
+;;;
+;;; ALIST is a plist the caller passes. 'category names the kind of display,
+;;; and a rule (category KIND) matches it. 'inhibit-same-window #t keeps
+;;; the selected window out of the chain. A window the chain made or took
+;;; is noted for quit-window: q deletes the window the display made, or
+;;; puts back the buffer the display replaced.
+;;;
+;;; The thresholds are Emacs' own: a window splits below when it has
+;;; split-height-threshold rows, beside when it has split-width-threshold
+;;; columns, and the sole work window splits below whatever its size.
+;;; layouts.scm makes the four variables customizable.
+
+(define split-height-threshold 80)
+(define split-width-threshold 160)
+(define window-min-height 4)
+(define window-min-width 10)
+(define *display-buffer-base-action* '())
+(define *display-buffer-fallback-action*
+  '(reuse-window pop-up-window use-some-window same-window))
+(define *display-buffer-actions* '())
+
+(define (define-display-action! name fn)
+  (set! *display-buffer-actions*
+    (cons (list name fn)
+          (filter (lambda (e) (not (equal? (car e) name))) *display-buffer-actions*))))
+
+(define (display-action-fn name)
+  (let ((e (assoc name *display-buffer-actions*)))
+    (and e (cadr e))))
+
+;; the chain for NAME: the rule's actions, then the base, then the fallback
+(define (display-buffer-actions-for name &optional alist)
+  (let* ((rule (cadr (display-rule-for name (or alist '()))))
+         (own (cond ((null? rule) '())
+                    ((pair? rule) rule)
+                    (else (list rule)))))
+    (append own *display-buffer-base-action* *display-buffer-fallback-action*)))
+
+;;; what a display did to a window, for quit-window: (WIN KIND PREV).
+;;; KIND 'window: the display made the window, and quit deletes it.
+;;; KIND 'other: the display took a window that showed PREV, and quit
+;;; puts PREV back.
+(define *window-quit-restore* '())
+
+(define (window-quit-restore-note! win kind prev)
+  (set! *window-quit-restore*
+    (cons (list win kind prev)
+          (filter (lambda (e) (and (not (equal? (car e) win))
+                                   (window-exists? (car e))))
+                  *window-quit-restore*))))
+
+(define (window-quit-restore win) (assoc win *window-quit-restore*))
+
+(define (window-quit-restore-forget! win)
+  (set! *window-quit-restore*
+    (filter (lambda (e) (not (equal? (car e) win))) *window-quit-restore*)))
+
+;; undo what a display did to WIN: delete it, or put back what it
+;; showed. #t when something was undone. The last window is never deleted.
+(define (window-quit-restore! win)
+  (let ((rec (window-quit-restore win)))
+    (window-quit-restore-forget! win)
+    (cond ((not rec) #f)
+          ((not (window-exists? win)) #f)
+          ((and (equal? (cadr rec) 'window) (pair? (cdr (window-list))))
+           (if (equal? win (active-window))
+               (delete-window!)
+               (delete-window-id! win))
+           #t)
+          ((and (equal? (cadr rec) 'other) (caddr rec) (buffer-known? (caddr rec)))
+           (window-set-buffer! win (caddr rec))
+           (window-state-changed!)
+           #t)
+          (else #f))))
+
+;;; geometry, from the selected window's measure and the fractional rects
+
+;; the work windows: not the popup, not a peek
+(define (display--work-windows)
+  (let ((popup (and (popup-open?) (popup-window))))
+    (filter (lambda (w) (and (not (equal? w popup))
+                             (not (and (boundp 'peek-buffer?) (peek-buffer? (window-buffer w))))))
+            (map car (window-list)))))
+
+;; (ROWS COLS) of WIN, as the frame measures them
+(define (window-size-of win)
+  (let* ((rs (window-rects))
+         (me (assoc (active-window) rs))
+         (r (assoc win rs)))
+    (if (and me r (> (nth 5 me) 0))
+        (list (* (nth 5 r) (/ (window-rows) (nth 5 me)))
+              (* (nth 4 r) (frame-cols)))
+        (list (window-rows) (window-cols)))))
+
+;; the largest work window by area, else the selected one
+(define (display--largest-work-window)
+  (let ((rs (window-rects)))
+    (let loop ((ws (display--work-windows)) (best #f) (area 0))
+      (cond ((null? ws) (or best (active-window)))
+            (else
+              (let* ((r (assoc (car ws) rs))
+                     (a (if r (* (nth 4 r) (nth 5 r)) 0)))
+                (if (> a area)
+                    (loop (cdr ws) (car ws) a)
+                    (loop (cdr ws) best area))))))))
+
+;; Emacs window-splittable-p: 'v is one above the other, 'h side by side
+(define (window-splittable? win dir)
+  (let* ((size (window-size-of win))
+         (rows (car size))
+         (cols (cadr size)))
+    (if (equal? dir 'v)
+        (and (>= rows split-height-threshold) (>= rows (* 2 window-min-height)))
+        (and (>= cols split-width-threshold) (>= cols (* 2 window-min-width))))))
+
+;; split WIN, which need not be the selected window, and answer the new
+;; window. The selection is where it was.
+(define (split-window-in! win dir)
+  (let ((me (active-window))
+        (before (map car (window-list))))
+    (unless (equal? win me) (select-window! win))
+    (split-window! dir 0.5)
+    (let ((new (let loop ((ws (window-list)))
+                 (cond ((null? ws) #f)
+                       ((member (car (car ws)) before) (loop (cdr ws)))
+                       (else (car (car ws)))))))
+      (unless (equal? (active-window) me) (select-window! me))
+      new)))
+
+;; Emacs split-window-sensibly: below when WIN is tall enough, else
+;; beside when it is wide enough, else below anyway when WIN is the only
+;; work window and can hold two. The new window, or #f.
+(define (split-window-sensibly win)
+  (let ((dir (cond ((window-splittable? win 'v) 'v)
+                   ((window-splittable? win 'h) 'h)
+                   ((and (null? (cdr (display--work-windows)))
+                         (>= (car (window-size-of win)) (* 2 window-min-height)))
+                    'v)
+                   (else #f))))
+    (and dir (split-window-in! win dir))))
+
+;; show NAME in window WIN, selecting nothing. A buffer the user can see
+;; is a buffer the user can switch to; a floating buffer shown anywhere
+;; but the popup stops floating.
+(define (display-buffer-in-window! win name)
+  (when (boundp 'buffer-promote!) (buffer-promote! name))
+  (window-set-buffer! win name)
+  (when (and (popup--class? name) (not (equal? win (frame-local 'popup-window))))
+    (popup-float! name #f))
+  (window-state-changed!)
+  win)
+
+(define-display-action! 'popup
+  (lambda (name alist) (popup-show name)))
+
+(define-display-action! 'same-window
+  (lambda (name alist)
+    (if (plist-get alist 'inhibit-same-window)
+        #f
+        (begin (switch-to-buffer! name) (active-window)))))
+
+(define-display-action! 'same (display-action-fn 'same-window))
+
+(define-display-action! 'reuse-window
+  (lambda (name alist)
+    (if (plist-get alist 'inhibit-same-window)
+        (window-showing-other name (active-window))
+        (window-showing name))))
+
+(define-display-action! 'pop-up-window
+  (lambda (name alist)
+    (let* ((me (active-window))
+           (largest (display--largest-work-window))
+           (win (or (split-window-sensibly largest)
+                    (and (not (equal? largest me)) (split-window-sensibly me)))))
+      (and win
+           (begin
+             (display-buffer-in-window! win name)
+             (window-quit-restore-note! win 'window #f)
+             win)))))
+
+(define-display-action! 'use-some-window
+  (lambda (name alist)
+    (let ((win (other-work-window-id (active-window))))
+      (and win
+           (let ((prev (window-buffer win)))
+             (display-buffer-in-window! win name)
+             (window-quit-restore-note! win 'other prev)
+             win)))))
+
+;; show NAME where the chain says, selecting nothing; the window, or #f
+(define (display-buffer name &optional alist)
+  (let ((a (or alist '())))
+    ;; a board, a listing, any surface from outside the group takes its
+    ;; pane through here. Record the group's arrangement BEFORE the
+    ;; cover, or a switch made FROM the board has no way back — the
+    ;; capture rule below only fires from a member buffer, and the board
+    ;; is not one.
+    (group-layout-save-before-cover! name)
+    (let loop ((actions (display-buffer-actions-for name a)))
+      (if (null? actions)
+          #f
+          (let* ((fn (display-action-fn (car actions)))
+                 (win (and fn (fn name a))))
+            (or win (loop (cdr actions))))))))
+
+;; show NAME and select its window (Emacs pop-to-buffer)
+(define (pop-to-buffer name &optional alist)
+  (let ((win (display-buffer name alist)))
+    (when (and win (window-exists? win) (not (equal? win (active-window))))
+      (select-window! win))
+    win))
 
 ;; show NAME in a window other than the selected one, point staying put —
 ;; the display-buffer contract behind Emacs previews (occur/grep/consult):
-;; windows are never remembered, they are chosen HERE, at display time —
-;; reuse a window already showing NAME, else the first other window, else
-;; split. Returns the window used.
+;; windows are never remembered, they are chosen HERE, at display time.
+;; window-set-buffer! takes a window id. switch-to-buffer! cannot do this
+;; job: it answers a frame buffer-context before it looks at a window, so
+;; an agent asked to show a file moved only its own context and the window
+;; never changed. Nothing here selects a window, so point stays put.
 (define (display-buffer-other-window! name)
-  ;; window-set-buffer! takes a window id. switch-to-buffer! cannot do this
-  ;; job: it answers a frame buffer-context before it looks at a window, so
-  ;; an agent asked to show a file moved only its own context and the window
-  ;; never changed. Nothing here selects a window, so point stays put.
-  (let* ((me (active-window))
-         (showing (window-showing name))
-         (reuse (if (and showing (not (equal? showing me))) showing #f))
-         (target (or reuse
-                     (other-window-id me)
-                     (begin (split-window! 'h 0.5) (other-window-id me)))))
-    (when target
-      ;; a buffer the user can see must be a buffer the user can switch to
-      (when (boundp 'buffer-promote!) (buffer-promote! name))
-      (window-set-buffer! target name))
-    target))
+  (display-buffer name '(inhibit-same-window #t)))
 
 ;;; --- peek -----------------------------------------------------------------------
 ;;; A peek shows a buffer to look at it, without adopting it into the
@@ -6325,16 +6559,43 @@
 ;; another keeps the side the popup has, so the popup never flips
 ;; A peek is a preview: it takes no focus. The popup shows it without
 ;; a selection change, and the focus commands pass it by.
+;; A peek is a display of category preview. The stock rule sends it to the
+;; popup; a rule of your own ((add-display-rule! '(category preview)
+;; 'pop-up-window)) sends it through the window chain instead, and the
+;; next peek takes the window the last one had.
 (define (peek-show! name)
   (let* ((me (active-window))
-         (old (and (popup-open?) (popup-buffer)))
-         (side (or (and old (popup-side-of old)) (peek-side-away-from me)))
-         (win (popup-show-quietly name side (plist-get *display-buffer-defaults* 'size))))
+         (actions (display-buffer-actions-for name '(category preview)))
+         (win (if (equal? (car actions) 'popup)
+                  (peek-show-in-popup! name me)
+                  (peek-show-in-window! name me))))
     (set-frame-local! 'peek-window win)
     ;; what the look put in the popup, by name: a buffer that existed
     ;; before wears no mode, and q must still take it away
     (set-frame-local! 'peek-shown name)
     (peek-drop-others! name)
+    win))
+
+(define (peek-show-in-popup! name me)
+  (let* ((old (and (popup-open?) (popup-buffer)))
+         (side (or (and old (popup-side-of old)) (peek-side-away-from me))))
+    (popup-show-quietly name side (plist-get *display-buffer-defaults* 'size))))
+
+;; the window the last peek used, while it still shows that peek
+(define (peek--window-to-reuse me)
+  (let ((pw (frame-local 'peek-window))
+        (shown (frame-local 'peek-shown)))
+    (and pw shown (window-exists? pw) (not (equal? pw me))
+         (not (and (popup-open?) (equal? pw (popup-window))))
+         (equal? (window-buffer pw) shown)
+         pw)))
+
+(define (peek-show-in-window! name me)
+  (let* ((reuse (peek--window-to-reuse me))
+         (win (if reuse
+                  (display-buffer-in-window! reuse name)
+                  (display-buffer name '(category preview inhibit-same-window #t)))))
+    (unless (equal? (active-window) me) (select-window! me))
     win))
 
 ;; a window the focus commands may land on: not a peek's
@@ -6385,8 +6646,12 @@
 ;; the buffer the last look put in the popup, while the popup still
 ;; shows it: a peek, or a buffer that existed before and only shows
 (define (peek-shown)
-  (let ((b (frame-local 'peek-shown)))
-    (and b (popup-open?) (equal? (popup-buffer) b) b)))
+  (let ((b (frame-local 'peek-shown))
+        (w (frame-local 'peek-window)))
+    (and b
+         (or (and (popup-open?) (equal? (popup-buffer) b))
+             (and w (window-exists? w) (equal? (window-buffer w) b)))
+         b)))
 
 ;; dismiss the look on screen: the popup gives the buffer up, and a
 ;; buffer the peek made goes to recent. #t when there was one.
@@ -6395,8 +6660,12 @@
                  (append (let ((b (peek-shown))) (if b (list b) '()))
                          (filter window-showing (peek-buffers))))))
     (for-each (lambda (p)
-                (when (and (popup-open?) (equal? (popup-buffer) p))
-                  (popup-dismiss!))
+                (if (and (popup-open?) (equal? (popup-buffer) p))
+                    (popup-dismiss!)
+                    ;; a peek the window chain placed: the window it made
+                    ;; goes, or the buffer it replaced comes back
+                    (let ((w (window-showing p)))
+                      (when w (window-quit-restore! w))))
                 (when (peek-buffer? p) (peek-drop! p)))
               shown)
     (set-frame-local! 'peek-shown #f)
@@ -6971,6 +7240,7 @@
         (let ((cur (current-buffer)))
           (cond ((and (popup-open?) (equal? (active-window) (popup-window)))
                  (popup-dismiss!))
+                ((window-quit-restore! (active-window)) #t)
                 ((other-window-id (active-window))
                  (delete-window!))
                 (else
@@ -6998,6 +7268,9 @@
                 ;; wrong split and leaves an empty layout slot behind. The
                 ;; kill path already chooses a live, scoped fallback after
                 ;; collapsing any branches that contained the victim.
+                ;; the window a display made goes with the listing; a
+                ;; window the display took shows again what it showed
+                (window-quit-restore! (active-window))
                 ;; a live process (tail, shell) dies with its buffer
                 (if (process-running? cur) (process-kill! cur))
                 (buffer-kill! cur))))))))
@@ -7371,7 +7644,7 @@
   (lambda ()
     (if (not (process-running? "*comint-shell*"))
         (start-process! "*comint-shell*" *shell-command*))
-    (display-buffer "*comint-shell*")
+    (pop-to-buffer "*comint-shell*")
     (buffer-set-local! "*comint-shell*" 'mode-name "comint-shell-mode")
     (end-of-buffer!)))
 
@@ -11136,10 +11409,21 @@
 (public! 'delete-window-id! "(delete-window-id! ID)")
 (public! 'delete-other-windows! "Make the active window the only one")
 (public! 'other-window! "Select the next window")
-(public! 'display-buffer "(display-buffer NAME) — honors display rules (popups)")
+(public! 'display-buffer
+  "(display-buffer NAME [ALIST]) — show NAME where the display rules and the action chain say, selecting nothing; returns the window. ALIST is a plist: 'category KIND, 'inhibit-same-window #t")
+(public! 'pop-to-buffer
+  "(pop-to-buffer NAME [ALIST]) — display-buffer, then select the window it used")
+(public! 'display-buffer-actions-for
+  "(display-buffer-actions-for NAME [ALIST]) — the action chain a display of NAME would try, in order")
+(public! 'define-display-action!
+  "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
+(public! 'split-window-sensibly
+  "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
+(public! 'window-quit-restore!
+  "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
 (public! 'display-buffer-popup!
   "(display-buffer-popup! NAME [SIDE SIZE]) — force NAME into a temporary one-third popup; compact frames use the bottom")
-(public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
+(public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
   "(tile-windows! ALGORITHM BUFFERS) — arrange names with columns, rows, grid, main-right, main-left, main-bottom, or main-top")
@@ -11148,12 +11432,13 @@
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'windows 'effects '(write display)))
   '("select-window!" "split-window!" "delete-window-id!"
-    "delete-other-windows!" "other-window!" "display-buffer"
+    "delete-other-windows!" "other-window!" "display-buffer" "pop-to-buffer"
+    "define-display-action!" "split-window-sensibly" "window-quit-restore!"
     "display-buffer-popup!" "display-buffer-other-window!" "apply-layout!"
     "tile-windows!" "tile-visible-windows!"))
 (effects! '(write))
 (public! 'add-display-rule!
-  "(add-display-rule! SUBSTRING 'popup|'same) — set display policy without showing a buffer")
+  "(add-display-rule! PATTERN ACTION [PARAMS]) — set display policy without showing a buffer. PATTERN is a name substring or (category KIND); ACTION is one action name or a list: popup, pop-up-window, reuse-window, use-some-window, same-window")
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — set a mode layout without applying it")
 (effects! '(read))

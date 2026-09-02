@@ -2,6 +2,8 @@
 
 A popup is one window that floats over the frame: a listing, the messages, the telemetry, a shell. It stays an ordinary window in the tree, so every window command reaches it; its class takes its split out of the flow.
 
+In Emacs terms the popup is a side window. A buffer reaches it by a display rule that names `popup`; a buffer with no rule takes the window chain in docs/DISPLAY-BUFFER.md, which splits a real window instead.
+
 ## Rules
 
 1. The default side is the right edge, on every frame. A display rule can name another side (`(add-display-rule! NAME 'popup '(side bottom size 0.4))`).

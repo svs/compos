@@ -98,6 +98,20 @@ defmodule Compos.Core.Editor do
   def select_frame(id), do: GenServer.call(__MODULE__, {:select_frame, id})
   def frame_of_window(win_id), do: GenServer.call(__MODULE__, {:frame_of_window, win_id})
 
+  @doc """
+  A window's point (Emacs window-point): the buffer's own point for the
+  window whose point is swapped in, the stored one for every other window.
+  """
+  def window_point(win_id), do: GenServer.call(__MODULE__, {:window_point, win_id})
+
+  @doc """
+  Place a window's point (Emacs set-window-point). A redraw that rewrote a
+  buffer's text puts every window showing it back on its row through this;
+  a buffer point alone reaches only the selected window.
+  """
+  def set_window_point(win_id, pos),
+    do: GenServer.call(__MODULE__, {:set_window_point, win_id, pos})
+
   @doc "Bump a frame in the MRU without broadcasting — the top of every input dispatch."
   def touch_frame(id), do: GenServer.call(__MODULE__, {:touch_frame, id})
 
@@ -682,6 +696,35 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:frame_of_window, win_id}, _from, state),
     do: {:reply, (f = find_window_frame(state, win_id)) && f.id, state}
+
+  def handle_call({:window_point, win_id}, _from, state) do
+    case window_leaf(state, win_id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      {f, leaf} ->
+        point =
+          if state.swapped == {f.id, win_id, leaf.buffer},
+            do: Buffer.point(leaf.buffer),
+            else: Buffer.win_point(leaf.buffer, win_id)
+
+        {:reply, {:ok, point}, state}
+    end
+  end
+
+  def handle_call({:set_window_point, win_id, pos}, _from, state) do
+    case window_leaf(state, win_id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      {f, leaf} ->
+        if state.swapped == {f.id, win_id, leaf.buffer},
+          do: Buffer.goto(leaf.buffer, pos),
+          else: Buffer.set_win_point(leaf.buffer, win_id, pos)
+
+        changed(:ok, state, f.id)
+    end
+  end
 
   def handle_call({:touch_frame, id}, _from, state) do
     if state.frames[id],
@@ -2094,6 +2137,17 @@ defmodule Compos.Core.Editor do
     Enum.find_value(state.frames, fn {_fid, f} ->
       if find_leaf(f.tree, win_id), do: f
     end)
+  end
+
+  # the frame and the leaf of one window, when its buffer is alive
+  defp window_leaf(state, win_id) do
+    with %{} = f <- find_window_frame(state, win_id),
+         %{} = leaf <- find_leaf(f.tree, win_id),
+         true <- Buffer.exists?(leaf.buffer) do
+      {f, leaf}
+    else
+      _ -> nil
+    end
   end
 
   defp valid_frame_id?(id),

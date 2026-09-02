@@ -1674,6 +1674,46 @@
 (define (list-more! buf)
   (list-ensure-shown! buf (list-shown-count buf)))
 
+;; the row index at byte POS: the last row whose start is at or before it
+(define (list-index-at-pos buf pos)
+  (let loop ((offs (list-offsets buf)) (i 0) (best #f))
+    (cond ((null? offs) best)
+          ((<= (car offs) pos) (loop (cdr offs) (+ i 1) i))
+          (else best))))
+
+;; the row key at byte POS, or #f in the header
+(define (list-key-at-pos buf pos)
+  (let ((i (list-index-at-pos buf pos))
+        (es (list-entries buf)))
+    (and i (< i (length es)) (list-key buf (nth i es)))))
+
+;; Every window showing BUF and the row its own point is on (Emacs
+;; dired-save-positions). A window keeps its own point; the buffer's
+;; point is only the selected window's. -> ((WIN KEY) ...)
+(define (list-window-places buf)
+  (fold (lambda (acc w)
+          (if (equal? (cadr w) buf)
+              (let ((p (window-point (car w))))
+                (cons (list (car w) (and (number? p) (list-key-at-pos buf p))) acc))
+              acc))
+        '()
+        (window-list)))
+
+;; put each window back on its row after a rewrite (Emacs
+;; dired-restore-positions). The rewrite clamped every stored window
+;; point to 0; the buffer point alone reaches only the selected window.
+(define (list-restore-window-places! buf places rows)
+  (let ((offs (list-offsets buf))
+        (last (- (list-shown-count buf) 1)))
+    (for-each
+      (lambda (place)
+        (let ((i (and (cadr place) (list-index-of buf rows (cadr place)))))
+          (when (and i (>= last 0))
+            (let ((at (min i last)))
+              (when (< at (length offs))
+                (window-set-point! (car place) (nth at offs)))))))
+      places)))
+
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
     ;; the layout cache needs no reset here: it names the width it was
@@ -1686,6 +1726,8 @@
            (selected-key (or (and here (list-key buf here))
                              (buffer-local buf 'list-selection-key)))
            (was (list-index buf))
+           ;; each window's own row, before the rows move under it
+           (places (list-window-places buf))
            (rows (list-render-rows! buf fetch))
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
@@ -1737,7 +1779,9 @@
                (let ((q (min p (buffer-size buf))))
                  (if cur? (goto-char! q) (buffer-goto! buf q))))))
       (list-snap-point! buf)
-      (list-update-selection! buf))))
+      (list-update-selection! buf)
+      ;; the windows that show this list, each on its own row again
+      (list-restore-window-places! buf places rows))))
 
 ;; `g` and every source change fetch again; a filter keystroke only
 ;; redraws, and a 'local-filter list then reuses its cached source.

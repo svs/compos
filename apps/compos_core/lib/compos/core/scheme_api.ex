@@ -365,6 +365,10 @@ defmodule Compos.Core.SchemeAPI do
       "select-window!" =>
         "(select-window! WIN) — make WIN and its frame active; return #t on success.",
       "active-window" => "(active-window) — return the active window's id.",
+      "window-point" =>
+        "(window-point WIN) — WIN's own point (Emacs window-point): the buffer's for the selected window, the stored one for any other; #f for no window.",
+      "window-set-point!" =>
+        "(window-set-point! WIN POS) — put WIN's point at byte POS (Emacs set-window-point); #t when WIN exists.",
       "scroll-window!" =>
         "(scroll-window! WIN LINES) — scroll window WIN by LINES; return #t on success.",
       "delete-other-windows!" =>
@@ -1551,6 +1555,13 @@ defmodule Compos.Core.SchemeAPI do
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
       "active-window" => fn [] -> Editor.active_window() end,
+      "window-point" => fn [id] ->
+        case Editor.window_point(id) do
+          {:ok, p} -> p
+          _ -> false
+        end
+      end,
+      "window-set-point!" => fn [id, pos] -> Editor.set_window_point(id, pos) == :ok end,
       "scroll-window!" => fn [id, lines] ->
         Editor.scroll_window(id, lines) == :ok
       end,

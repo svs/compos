@@ -384,10 +384,6 @@
     ("C-S-<end>" "cua-select-buffer-end")
     ("s-a" "cua-select-all")))
 
-(minor-mode-keys! "writing-mode"
-  '(
-))
-
 ;;; --- writing-layout ---------------------------------------------------------
 ;;; `write` presents the document, its writing scratch, and the group chat
 ;;; as three panes: left, middle, and right.

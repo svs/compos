@@ -180,6 +180,11 @@ defmodule Compos.Ui.Layouts do
           }
           @keyframes popup-rise { from { opacity: 0; } to { opacity: 1; } }
           @keyframes win-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+          /* Window content persists across keyboard-panel patches. Keep it
+             visually stable; only newly opened popups use an entry animation. */
+          .editor-root:has(.mb-panel, .which-key, .transient-panel) .window {
+            animation: none;
+          }
           .window {
             display: flex; flex-direction: column;
             background: var(--window-inactive-bg, #f4f0e6);
@@ -859,14 +864,13 @@ defmodule Compos.Ui.Layouts do
           .prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
           .mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
           .mb-input .cursor { background: var(--cursor-bg, #26356b); }
-          /* vertico-style minibuffer: transient, keyboard-only. A plain
-             prompt is a BOTTOM bar, like Emacs: the candidates sit above
-             the input, the input sits on the last row, and the eye goes
-             to one place for every prompt. Only the palette floats. */
+          /* the minibuffer blocks keyboard input, so it overlays the buffers
+             without changing their geometry while it is open. */
           .mb-panel {
-            flex-shrink: 0;
+            position: absolute; left: 0; right: 0; bottom: 0; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
+            box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
             animation: rise 110ms ease-out;
           }
           /* palette style: the prompt floats centered over the windows,
@@ -1079,14 +1083,16 @@ defmodule Compos.Ui.Layouts do
           /* the prompt line holds the selection: the input names a directory */
           .mb-input-row.selected { background: var(--select-bg, #e7e9f1); }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 10.5px; }
-          /* which-key: transient prefix panel */
+          /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
+             unchanged while the prefix panel explains the pending keys. */
           .which-key {
-            flex-shrink: 0;
+            position: absolute; left: 0; right: 0; bottom: 0; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
             padding: 10px 14px 12px;
             max-height: 44vh;
             overflow-y: auto;
+            box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
             animation: rise 120ms ease-out;
           }
           .wk-title {

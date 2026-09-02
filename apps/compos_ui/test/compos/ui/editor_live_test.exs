@@ -487,6 +487,7 @@ defmodule Compos.Ui.EditorLiveTest do
     html = keys(view, ["C-x"])
     assert html =~ "which-key"
     assert html =~ "switch-to-buffer"
+
     keys(view, ["C-g"])
   end
 

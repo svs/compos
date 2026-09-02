@@ -192,6 +192,12 @@ defmodule Compos.Core.KeyDispatch do
   # just the global editing commands acting on the *minibuf* buffer, which
   # Editor.current_buffer/lookup_key route to while a prompt is active.
 
+    defp minibuffer_key("M-x", _mb, _pending) do
+    # M-x is the command prompt's escape hatch: a second M-x cancels the
+    # active prompt instead of inserting another command prefix.
+    Session.run_command("minibuffer-cancel")
+  end
+
   defp minibuffer_key(key, mb, pending) do
     # unresolved chords stay silent here: the echo area is the prompt
     resolve_and_run(key, pending, fn _seq -> :ok end)

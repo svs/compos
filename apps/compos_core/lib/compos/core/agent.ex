@@ -757,10 +757,6 @@ defmodule Compos.Core.Agent do
         # A transport may report completion before its steering RPC reply.
         # Keep the turn open until every committed steer is accepted or put
         # back; otherwise a younger queued prompt can overtake or erase it.
-        IO.puts(
-          "[agent-debug] #{state.slug} turn-end steer_order=#{inspect(state.pending_steer_order)}"
-        )
-
         if state.pending_steer_order == [] do
           finish_turn(state, event)
         else
@@ -886,7 +882,6 @@ defmodule Compos.Core.Agent do
   defp maybe_finish_deferred_turn(state), do: state
 
   defp finish_turn(state, event) do
-    IO.puts("[agent-debug] #{state.slug} finish_turn")
     # a turn that ends with a request still open (the agent gave up,
     # the wire died) resolves it cancelled — never a stuck banner
     state

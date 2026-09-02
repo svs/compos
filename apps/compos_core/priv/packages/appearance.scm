@@ -59,6 +59,17 @@
 ;; after a restart
 (set-face-attribute! 'ui 'zoom (scale-factor ui-scale))
 
+;; The size of buffer text is the default face's size. 13px was the
+;; design size; the reading size stands two steps up the same 1.2 ladder
+;; (13 x 1.44). A defface! default survives a theme load, because no
+;; theme names a size on the default face.
+(defcustom 'default-font-size "18.7px"
+  "The size of buffer text: the default face's size, as CSS. Two steps up the 1.2 ladder from 13px."
+  'group 'appearance
+  'set (lambda (size) (defface! 'default 'size size)))
+
+(defface! 'default 'size default-font-size)
+
 (define (ui-scale-apply! n0)
   (let ((n (scale-clamp n0)))
     (customize-save! 'ui-scale n)

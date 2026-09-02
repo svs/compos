@@ -1966,11 +1966,9 @@
     ;; below redraws cached entries when there are any, so fetch here in
     ;; that case — the one place the user chose to look.
     (let ((cached? (pair? (buffer-local buf 'list-entries))))
-      ;; enter the mode the way every buffer does: set-mode! records the
-      ;; mode name for a desktop restore, attaches the mode's keymap to the
-      ;; buffer, and runs the setup above. A list that only set 'mode-name
-      ;; and ran the setup had no keymap, and RET on a row ran the global
-      ;; binding.
+      ;; enter the mode through set-mode!: it attaches the mode's keymap
+      ;; (use-local-map!) and runs the setup above. A bare mode-name
+      ;; local leaves the list's keys unreachable (S8).
       (with-current-buffer buf (lambda () (set-mode! name)))
       ;; current rows; the row stays where the reader left it. The point
       ;; belongs to the reader, and the draw restores the row by its key.

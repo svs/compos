@@ -17,7 +17,8 @@
 ;;; That identity is worth nothing after the session, and it does not need
 ;;; to be: agent changes live between @- and @ and collapse into your own
 ;;; commit when you squash before a push. jj-agent-changes is what makes that
-;;; a rule instead of a habit.
+;;; a rule instead of a habit. A directory lock under .jj serializes every
+;;; flush across processes, so two authors' snapshots cannot interleave.
 
 (domain! 'files)
 (effects! '(write external execute))
@@ -137,6 +138,28 @@
 (define (jj-snapshot! root)
   (jj-sh root "jj util snapshot 2>&1"))
 
+;;; --- the lock -----------------------------------------------------------
+
+;; Two authors' flushes must not interleave: A opens its change, B runs
+;; jj new before A's snapshot, and A's bytes land in B's change. One mkdir
+;; is atomic for every process on this machine, another daemon included,
+;; so the lock is a directory beside the repo's own store, held from open
+;; to snapshot and never across user time. A holder that died leaves the
+;; directory behind, so a waiter steals it after eight quiet seconds: a
+;; flush is sub-second, and nothing alive holds the lock that long.
+(define (jj-lock-dir root) (string-append root "/.jj/compos-flush-lock"))
+
+(define (jj-lock! root)
+  (equal? "ok"
+    (string-trim
+      (jj-sh root (string-append
+        "i=0; until mkdir '" (jj-lock-dir root) "' 2>/dev/null; do "
+        "i=$((i+1)); [ $i -ge 160 ] && rmdir '" (jj-lock-dir root) "' 2>/dev/null; "
+        "[ $i -ge 200 ] && { echo stuck; exit 0; }; sleep 0.05; done; echo ok")))))
+
+(define (jj-unlock! root)
+  (jj-sh root (string-append "rmdir '" (jj-lock-dir root) "' 2>/dev/null; true")))
+
 ;;; --- the flush ----------------------------------------------------------
 
 ;; The weave already records who touched a buffer last.
@@ -197,6 +220,8 @@
            (path (buffer-path buf))
            (root (and path (jj-root path))))
       (when root
+        (unless (jj-lock! root)
+          (message "jj: flush lock stuck; continuing unlocked"))
         (jj-open! root (or (jj-last-author buf) (current-edit-author)))))))
 
 (define (jj-after-save!)
@@ -204,7 +229,9 @@
     (let* ((buf (current-buffer))
            (path (buffer-path buf))
            (root (and path (jj-root path))))
-      (when root (jj-snapshot! root)))))
+      (when root
+        (jj-snapshot! root)
+        (jj-unlock! root)))))
 
 ;; Appended, so auto-revert's guard runs first: a save it refuses must not
 ;; leave an opened change behind.

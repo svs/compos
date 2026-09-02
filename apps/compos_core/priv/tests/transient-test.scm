@@ -125,3 +125,38 @@
                      "and the menu can save one and forget one"))
       (set! *llm-bundles* saved)
       (buffer-kill! buf))))
+
+(deftest 'the-tools-key-opens-a-menu-not-a-buffer
+  "t stays in the transient world: a child prefix over the same scope.
+The full text list is still one key deeper (l), for actual reading."
+  (lambda ()
+    (let ((buf (test-buffer! "zz-llm-tools-menu" "")))
+      ;; the t row names a PREFIX — transient--invoke-command opens a
+      ;; child menu for a prefix name, and runs a command otherwise
+      (let* ((groups (llm-config--groups buf))
+             (tools (assoc "Tools" groups))
+             (t-row (let loop ((is (cdr tools)))
+                      (cond ((null? is) #f)
+                            ((equal? (plist-get (car is) 'key) "t") (car is))
+                            (else (loop (cdr is)))))))
+        (check-equal! (plist-get t-row 'command) "chat-tools"
+                      "t names the child prefix")
+        (check-true! (and (transient-prefix "chat-tools") #t)
+                     "and that prefix is defined"))
+      ;; the child builds real rows: a frozen chat shows its servers
+      (buffer-set-local! buf 'chat-presets '(compos))
+      (buffer-set-local! buf 'chat-tool-specs
+        '(("eval-scheme" "Run Scheme." ())
+          ("mcp__zzt__echo" "Echo." "{}")))
+      (let* ((groups (llm-config--tools-groups buf))
+             (servers (car groups))
+             (change (assoc "Change" groups)))
+        (check-contains! (car servers) "Servers" "the server group heads the menu")
+        (check-equal! (length (cdr servers)) 2 "one row per server")
+        (check-equal! (plist-get (car (cdr servers)) 'description) "compos"
+                      "named after the server")
+        (check-true! (and change #t) "and the actions keep their group")
+        (let ((keys (map (lambda (i) (plist-get i 'key)) (cdr change))))
+          (check-true! (and (member "p" keys) (member "r" keys) (member "l" keys) #t)
+                       "presets, adopt, and the full list stay reachable")))
+      (buffer-kill! buf))))

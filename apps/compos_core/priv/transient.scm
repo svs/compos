@@ -712,6 +712,83 @@
 
 ;;; --- bundles --------------------------------------------------------------
 
+;; `t` opens this child menu: the tool surface as menu rows over the
+;; same scope, not a buffer covering the chat. A digit echoes one
+;; server's tools; l is the full text list for actual reading.
+(define (llm-config--chat-servers session)
+  (let ((frozen (buffer-local session 'chat-tool-specs)))
+    (if (pair? frozen)
+        (let loop ((specs frozen) (acc '()))
+          (if (null? specs) (reverse acc)
+              (loop (cdr specs)
+                    (let ((s (chat-tool-server (car (car specs)))))
+                      (if (member s acc) acc (cons s acc))))))
+        (map symbol->string (chat-active-servers session)))))
+
+(define (llm-config--server-row-count session server)
+  ;; never connects: the frozen list counts itself, a live server is
+  ;; only read through the registry's detail
+  (let ((frozen (buffer-local session 'chat-tool-specs)))
+    (if (pair? frozen)
+        (length (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
+                        frozen))
+        (llm-config--server-tools (string->symbol server)))))
+
+(define (llm-config--server-tool-names session server)
+  (let ((frozen (buffer-local session 'chat-tool-specs)))
+    (cond
+      ((pair? frozen)
+       (map car (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
+                        frozen)))
+      ((and (equal? server "compos") (boundp (quote llm-tool-specs)))
+       (map car (llm-tool-specs)))
+      (else
+        (let ((d (mcp-server-detail server)))
+          (map (lambda (t) (if (pair? t) (car t) t))
+               (or (and (pair? d) (plist-get d 'tools)) '())))))))
+
+(define (llm-config--tools-groups buf)
+  (let* ((session (llm-config--session buf))
+         (can (boundp (quote chat-tool-server)))
+         (servers (if can (llm-config--chat-servers session) '())))
+    (append
+      (if (null? servers)
+          '()
+          (list
+            (cons (string-append "Servers · " (llm-config--tools-label buf))
+              (let loop ((ss servers) (k 1) (acc '()))
+                (if (or (null? ss) (> k 9))
+                    (reverse acc)
+                    (loop (cdr ss) (+ k 1)
+                      (cons
+                        (let ((server (car ss)))
+                          (transient-suffix (number->string k) server
+                            (lambda ()
+                              (let ((names (llm-config--server-tool-names session server)))
+                                (message
+                                  (string-append server ": "
+                                    (if (null? names)
+                                        "no tools yet — still connecting?"
+                                        (string-join names ", "))))))
+                            'transient 'stay
+                            'value-fn
+                            (lambda (_scope)
+                              (let ((n (llm-config--server-row-count session server)))
+                                (if n
+                                    (string-append (number->string n) " tools")
+                                    "connecting")))))
+                        acc)))))))
+      (list
+        (list "Change"
+          (transient-infix "p" "Presets" "llm-config-pick-preset"
+            (lambda (scope) (llm-config--presets-label scope)))
+          (transient-suffix "r" "Adopt the editor's live tools" "chat-refresh-tools")
+          (transient-suffix "l" "The full list, with docs" "chat-tool-list"))))))
+
+(transient-define-prefix "chat-tools"
+  "This chat's tool surface"
+  llm-config--tools-groups)
+
 (define (llm-config--bundle-candidates)
   (map (lambda (b) (list (or (llm-bundle-name b) "?") (llm-bundle-label b)))
        *llm-bundles*))
@@ -803,7 +880,7 @@
         (list "Tools"
           (transient-infix "p" "Presets" "llm-config-pick-preset"
             (lambda (scope) (llm-config--presets-label scope)))
-          (transient-suffix "t" "Tools" "chat-tool-list"
+          (transient-suffix "t" "Tools" "chat-tools"
             'value-fn (lambda (scope) (llm-config--tools-label scope))))
         (list "Permissions"
           (transient-infix "k" "Asks" "llm-config-pick-permission"

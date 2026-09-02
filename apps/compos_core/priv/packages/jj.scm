@@ -198,18 +198,26 @@
 
 ;;; --- the modeline -------------------------------------------------------
 
-;; The modeline says which change a save would amend: the open change's
-;; first line, re-read once after each flush and each label, never during
-;; a redraw. An unlabeled run shows its Agent: line, which is exactly the
+;; Every buffer of the repo says which change its save would amend: the
+;; open change's first line, in the buffer's own status bar. It is re-read
+;; once after each flush and each label, never during a redraw, and a
+;; buffer whose line is already right is left alone so a redraw costs
+;; nothing. An unlabeled run shows its Agent: line, which is exactly the
 ;; nudge to call jj-describe!.
 (define (jj-modeline-update! root)
-  (when (boundp 'global-mode-string-set!)
-    (let ((line (jj-at root "description.first_line()")))
-      (global-mode-string-set! 'jj
-        (cond ((equal? line "") "jj: undescribed")
-              ((> (string-length line) 48)
-               (string-append (substring line 0 47) "..."))
-              (else line))))))
+  (let* ((raw (jj-at root "description.first_line()"))
+         (line (cond ((equal? raw "") "jj: undescribed")
+                     ((> (string-length raw) 48)
+                      (string-append (substring raw 0 47) "..."))
+                     (else raw)))
+         (prefix (string-append root "/")))
+    (for-each
+      (lambda (b)
+        (let ((p (buffer-path b)))
+          (when (and p (string-prefix? prefix p)
+                     (not (equal? (buffer-local b 'modeline-vcs) line)))
+            (buffer-set-local! b 'modeline-vcs line))))
+      (buffer-list))))
 
 ;;; --- the hook -----------------------------------------------------------
 

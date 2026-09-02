@@ -2886,6 +2886,8 @@ defmodule Compos.Core.Editor do
       modeline_project: Map.get(locals, "modeline-project"),
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
+      # the version-control change this buffer's save would amend (jj.scm)
+      modeline_vcs: Map.get(locals, "modeline-vcs"),
       selected: Map.get(locals, "buffer-selected", false),
       dashboard_line: Map.get(locals, "dashboard-line"),
       # the same line as keyed segments: Scheme names the classes,

@@ -57,15 +57,41 @@
       (check-equal! (group-display-name #f) "" "#f prints as the empty string")
       (t--drop! id))))
 
-(deftest 'the-modeline-label-is-the-short-name
-  "a path-named group shows its last segment in the frame's group label"
+(deftest 'a-group-founded-from-a-path-is-named-by-its-last-segment
+  "the name is journal; the path stays as the origin and still finds the group"
   (lambda ()
-    (let ((id (group-record-create! "/zztest/docs/journal")))
-      (check-equal! (group-display-label-in id (selected-frame)) "journal"
-                    "the modeline says journal, not the path")
-      (check-equal! (group-display-name id) "/zztest/docs/journal"
-                    "prompts and messages keep the full name")
-      (group-record-delete! id))))
+    (let ((id (group-record-create! "/zztest/docs/zzjournal")))
+      (check-equal! (group-name id) "zzjournal" "the shortest name")
+      (check-equal! (group-display-label-in id (selected-frame)) "zzjournal"
+                    "the modeline says the short name")
+      (check-equal! (group-resolve-id "/zztest/docs/zzjournal") id
+                    "the founding path still finds the group")
+      (check-equal! (group-resolve-id "zzjournal") id "and so does the name")
+      (check-false! (group-record-create! "/zztest/docs/zzjournal")
+                    "founding it again answers #f, as for any name")
+      (t--drop! id))))
+
+(deftest 'two-groups-from-paths-with-one-last-segment-read-apart
+  "both lengthen by a segment: docs/journal and work/journal"
+  (lambda ()
+    (let* ((a (group-record-create! "/zztest/docs/zzjournal"))
+           (b (group-record-create! "/zztest/work/zzjournal")))
+      (check-equal! (group-name a) "docs/zzjournal" "the first lengthened")
+      (check-equal! (group-name b) "work/zzjournal" "the second reads apart")
+      (check-equal! (group-resolve-id "/zztest/work/zzjournal") b "each path finds its own")
+      (check-equal! (group-label b) "work/zzjournal" "the card wears the deduped name")
+      ;; the second goes: the first is alone again, and shortens
+      (t--drop! b)
+      (check-equal! (group-name a) "zzjournal" "alone again, the shortest name returns")
+      (t--drop! a))))
+
+(deftest 'a-typed-name-is-never-shortened
+  "a person's name for a group is the name, slashes and all"
+  (lambda ()
+    (let ((id (group-record-create! "zztest-a/b")))
+      (check-equal! (group-name id) "zztest-a/b" "kept whole")
+      (check-false! (group-record-origin (group-record-by-id id)) "no origin: not a path")
+      (t--drop! id))))
 
 (deftest 'group-label-shortens-a-path
   "a card wears the last segment, and a project root keeps its basename"

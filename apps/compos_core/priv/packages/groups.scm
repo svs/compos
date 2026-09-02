@@ -43,6 +43,12 @@
 (define (group-record-parent record)
   (and (> (length record) 7) (nth 7 record)))
 
+;; the path a group was founded from, or #f for a name a person typed.
+;; The group is found by its origin as well as by its name, so a caller
+;; holding the path still reaches it after the name shortened.
+(define (group-record-origin record)
+  (and (> (length record) 8) (nth 8 record)))
+
 (define (group-color-face value)
   (let* ((record (and value
                       (or (group-record-by-id value)
@@ -90,7 +96,18 @@
 (define (group-record-by-name name)
   (let loop ((records *group-records*))
     (cond ((null? records) #f)
-          ((equal? (group-record-name (car records)) name) (car records))
+          ((or (equal? (group-record-name (car records)) name)
+               (equal? (group-record-origin (car records)) name))
+           (car records))
+          (else (loop (cdr records))))))
+
+;; the record wearing exactly NAME, other than EXCEPT-ID, or #f
+(define (group-record-wearing name except-id)
+  (let loop ((records *group-records*))
+    (cond ((null? records) #f)
+          ((and (equal? (group-record-name (car records)) name)
+                (not (equal? (group-record-id (car records)) except-id)))
+           (car records))
           (else (loop (cdr records))))))
 
 (define (group-resolve-id value)
@@ -125,14 +142,14 @@
 (define (group-display-name g)
   (or (group-name g) (and (string? g) g) ""))
 
-;; A group founded by a directory or a file carries the full path as its
-;; name. On screen it wears the last segment: the modeline says journal,
-;; not /Users/svs/docs/journal. Prompts and messages keep the full name.
+;; A group's name is already the shortest one that reads apart (see
+;; group-assign-path-name!). A string that names no group yet, a project
+;; root on a card, wears its last segment.
 (define (group-short-name g)
   (let ((name (group-display-name g)))
-    (if (equal? name "")
-        ""
-        (car (reverse (string-split name "/"))))))
+    (cond ((equal? name "") "")
+          ((group-resolve-id g) name)
+          (else (car (reverse (string-split name "/")))))))
 
 (define (group-display-label-in g frame)
   (let ((name (group-short-name g)))
@@ -149,14 +166,85 @@
   (string-append "grp:" (number->string (current-time)) ":"
                  (number->string *group-next-id*)))
 
+;;; --- the shortest name that reads apart --------------------------------------
+;;; A group founded from a path (a directory in Dired, a file, a project
+;;; root) is named by the last segment of that path: journal, not
+;;; /Users/svs/docs/journal. When two groups would wear one name, both
+;;; lengthen by a segment until they read apart: docs/journal and
+;;; work/journal (Emacs uniquify, forward style). The path stays on the
+;;; record as its origin, so the group is still found by the path.
+
+(define (group-path-name? s)
+  (and (string? s) (or (string-prefix? "/" s) (string-prefix? "~" s))))
+
+(define (group--path-parts path)
+  (filter (lambda (part) (not (equal? part ""))) (string-split path "/")))
+
+;; the last N segments of PATH, joined by /
+(define (group--path-tail path n)
+  (let* ((parts (group--path-parts path))
+         (drop (max 0 (- (length parts) n))))
+    (string-join (list-tail-n parts drop) "/")))
+
+(define (group--set-name! id name)
+  (set! *group-records*
+    (map (lambda (record)
+           (if (equal? (group-record-id record) id)
+               (append (list (group-record-id record) name) (list-tail-n record 2))
+               record))
+         *group-records*)))
+
+;; give ID the shortest tail of PATH no other group wears. A group that
+;; wears that tail for a path of its own lengthens by one segment too, so
+;; the pair reads apart. A path with no free tail wears the whole path.
+(define (group-assign-path-name! id path)
+  (let ((parts (length (group--path-parts path))))
+    (let loop ((n 1))
+      (let* ((name (group--path-tail path n))
+             (other (group-record-wearing name id)))
+        (cond ((not other) (group--set-name! id name))
+              ((>= n parts) (group--set-name! id path))
+              (else
+                (let ((origin (group-record-origin other)))
+                  (when (and origin (not (equal? origin path)))
+                    (group--set-name! (group-record-id other)
+                                      (group--path-tail origin (+ n 1)))))
+                (loop (+ n 1))))))))
+
+;; every path-founded group takes the shortest name free now: a group
+;; that lengthened to read apart from one since deleted shortens again
+;; (Emacs uniquify-after-kill-buffer-p)
+(define (group-reshorten-path-names!)
+  (for-each
+    (lambda (record)
+      (let ((origin (group-record-origin record)))
+        (when origin (group-assign-path-name! (group-record-id record) origin))))
+    *group-records*))
+
+;; a record from before origins: a path name becomes an origin, and the
+;; group takes its short name
+(define (group-migrate-path-names!)
+  (for-each
+    (lambda (record)
+      (when (and (group-path-name? (group-record-name record))
+                 (not (group-record-origin record)))
+        (let ((id (group-record-id record))
+              (path (group-record-name record)))
+          (group-record-update! id 'origin path)
+          (group-assign-path-name! id path))))
+    *group-records*))
+
 (define (group-record-create! name)
   (let ((clean (string-trim name)))
     (cond ((equal? clean "") #f)
           ((group-record-by-name clean) #f)
           (else
             (let* ((id (group-new-id!))
-                   (record (list id clean #f #f "quiet" #f (group-next-color))))
+                   (path? (group-path-name? clean))
+                   (record (list id clean #f #f "quiet" #f (group-next-color)
+                                 #f (and path? clean))))
               (set! *group-records* (append *group-records* (list record)))
+              (when path? (group-assign-path-name! id clean))
               (desktop-dirty!)
               id)))))
 
@@ -195,7 +283,9 @@
                       (if (equal? field 'color) new-value
                           (group-record-color record))
                       (if (equal? field 'parent) new-value
-                          (group-record-parent record)))))
+                          (group-record-parent record))
+                      (if (equal? field 'origin) new-value
+                          (group-record-origin record)))))
           *group-records*))
       (desktop-dirty!)
       (when (member field '(name color))
@@ -209,6 +299,7 @@
       (set! *group-records*
         (remove (lambda (record) (equal? (group-record-id record) id))
                 *group-records*))
+      (group-reshorten-path-names!)
       (desktop-dirty!)
       (modeline-groups-refresh!))))
 
@@ -222,15 +313,15 @@
                                *group-colors*))))
           (loop (cdr rest) (+ index 1)
                 (cons (append (take-n record 6) (list color)
-                              (if (> (length record) 7)
-                                  (list (nth 7 record))
-                                  '()))
+                              (list (group-record-parent record)
+                                    (group-record-origin record)))
                       out))))))
 
 (define (group-state-restore! saved)
   (when (and (pair? saved) (pair? (cdr saved)))
     (set! *group-next-id* (car saved))
     (set! *group-records* (group-record-colors-restore (car (cdr saved))))
+    (group-migrate-path-names!)
     (modeline-groups-refresh!)))
 
 (define *group-frame-context-keys* '(current-group previous-group pinned-group))
@@ -513,7 +604,8 @@
       known)))
 
 (define (modeline-groups-refresh!)
-  (for-each buffer-modeline-group-refresh! (buffer-list))
+  ;; the list can name a buffer that sleeps or died: a local set there exits
+  (for-each buffer-modeline-group-refresh! (filter buffer-exists? (buffer-list)))
   #t)
 
 ;; Install derived color locals for buffers that predate this package reload.
@@ -3083,3 +3175,6 @@
 
 (group-current-recalculate!)
 (message "groups.scm loaded")
+
+;; the groups a running daemon holds from before origins
+(group-migrate-path-names!)

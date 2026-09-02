@@ -103,7 +103,7 @@ defmodule Compos.HelpTest do
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
   end
 
-  test "C-h k names the map that answered: a local key wins" do
+  test "C-h k names the map that answered: the mode's map" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
                     (run-command "switch-to-buffer"))})
 
@@ -113,7 +113,8 @@ defmodule Compos.HelpTest do
     text = Buffer.text("*Help*")
     assert text =~ "# `RET`"
     assert text =~ "switch-visit"
-    assert text =~ "local to this buffer"
+    # the switcher's keys are its mode's map, and the page says so
+    assert text =~ "in switch-mode-map"
   end
 
   test "C-h k over an unbound key says so, and the capture ends" do

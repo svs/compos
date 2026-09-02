@@ -98,3 +98,11 @@
     (check-equal! (keymap-lookup " *completion*" "x") "self-insert-command" "typing into the popup")
     (check-equal! (keymap-lookup " *completion*" "DEL") "completion-delete-backward" "DEL in the popup")
     (check-true! (member "transient-map" (keymap-names)) "Transient has a keymap")))
+
+(deftest 'a-list-mode-answers-to-its-own-map-under-list-mode-map
+  "the flags a list declares are on its map; every list's keys are the parent"
+  (lambda ()
+    (check-equal! (keymap-parent (mode-keymap "ibuffer-mode")) "list-mode-map" "the parent")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "d") "list-flag-D" "a declared flag key")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "/") "list-filter" "the filter, through the parent")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "?") "describe-mode" "help, through the parent")))

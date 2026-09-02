@@ -52,6 +52,13 @@ special buffer that is not a mode, or a user's one-off binding.
 (minor-mode-keys! "writing-mode" '(("M-<left>" "backward-word")))
 ```
 
+Every list mode's map has `list-mode-map` as its parent: help, the
+filter, the row motion, the marks and execute answer in every list, and
+a list's own keys and flag keys go on its map when `define-list-mode!`
+runs. A layout profile that brings flags of its own binds them on the
+buffer, since the profile is buffer state. The popup's move keys are
+`popup-mode`, on while the buffer floats.
+
 `priv/tests/keys-sweep-test.scm` enters every major mode and every
 minor mode in a fresh buffer and resolves each of its keys through the
 ladder, so a dead key fails the sweep.

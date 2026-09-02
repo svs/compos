@@ -711,18 +711,31 @@
 ;; way — `m`, `u`, `U` and `*` — and a list that declares flags also gets
 ;; the flag chars and `x`. They go in before the list's own keys, so a
 ;; list can still claim any of them for something else.
+;; Every list answers the same keys, from one map every list mode's map
+;; falls back to: help, the filter, the row motion, the marks, and
+;; execute. A list mode's own keys shadow them, because its map is the
+;; child. The flag keys a list declares go on its own map when it is
+;; defined (define-list-mode!); a layout profile that brings flags of
+;; its own binds them on the buffer, since the profile is buffer state.
+(define-keymap! "list-mode-map")
+(for-each (lambda (p) (define-key "list-mode-map" (car p) (cadr p)))
+  '(("?" "describe-mode")
+    ("/" "list-filter") ("\\" "list-filter-pop")
+    ("n" "list-next") ("p" "list-prev")
+    ("m" "list-mark") ("u" "list-unmark") ("U" "list-unmark-all") ("*" "list-mark-all")
+    ("x" "list-execute")))
+
+;; the flag keys of one list: (KEY FLAG-CHAR ...) rows become bindings
+;; on MAP, buffer or mode
+(define (list-flag-keys! bind fs)
+  (for-each (lambda (f) (bind (car f) (list-flag-command (car (cdr f))))) fs))
+
+;; a profile's own flags, beyond the mode's, go on the buffer
 (define (list-install-mark-keys! buf)
-  (let ((fs (or (list-opt buf 'flags) '())))
-    (when (or (pair? fs) (list-table? buf))
-      (local-set-key* buf "m" "list-mark")
-      (local-set-key* buf "u" "list-unmark")
-      (local-set-key* buf "U" "list-unmark-all")
-      (local-set-key* buf "*" "list-mark-all"))
-    (unless (null? fs)
-      (local-set-key* buf "x" "list-execute")
-      (for-each (lambda (f)
-                  (local-set-key* buf (car f) (list-flag-command (car (cdr f)))))
-                fs))))
+  (let ((fs (or (list-opt buf 'flags) '()))
+        (declared (or (plist-get (list-mode-opts (list-mode-of buf)) 'flags) '())))
+    (unless (equal? fs declared)
+      (list-flag-keys! (lambda (k c) (local-set-key* buf k c)) fs))))
 
 ;;; filters — a stack of (LABEL ARG), newest first
 
@@ -1834,28 +1847,15 @@
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
     (buffer-set-local! buf 'render-mode #f)
-    ;; every list is read-only, so "?" can be help in all of them — bound
-    ;; before the mode's own keys, which may claim it for something else
-    (local-set-key* buf "?" "describe-mode")
-    ;; m/u/U/* and the flag keys — also before the mode's own keys, for
-    ;; the same reason
+    ;; the keys are the mode's map, under list-mode-map (define-list-mode!);
+    ;; a layout profile's own flags are buffer state and bind here
     (list-install-mark-keys! buf)
-    ;; a table moves the same way in every list: n and p walk the rows and
-    ;; stop at the ends, and the line-motion keys REMAP, so the arrows and
-    ;; C-n/C-p walk them too
+    ;; a table moves the same way in every list: the line-motion keys
+    ;; REMAP, so the arrows and C-n/C-p walk the rows and stop at the ends
     (when (list-table? buf)
-      (local-set-key* buf "n" "list-next")
-      (local-set-key* buf "p" "list-prev")
       (local-remap*! buf "next-line" "list-next")
       (local-remap*! buf "previous-line" "list-prev")
       (local-remap*! buf "scroll-up-command" "list-page-down"))
-    ;; every list narrows the same way — `/` to type, `\` to widen. Both
-    ;; go in before the mode's own keys, which may claim them for
-    ;; something else.
-    (local-set-key* buf "/" "list-filter")
-    (local-set-key* buf "\\" "list-filter-pop")
-    (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
-              (or (plist-get opts 'keys) '()))
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
               (or (plist-get opts 'remap) '()))
     (buffer-set-read-only! buf #t)
@@ -1894,6 +1894,11 @@
   ;; a real mode: a restored list buffer gets its keys and its read-only
   ;; flag back from here, not from whatever command first opened it
   (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
+  ;; the list's keys: its own on its map, every list's under it
+  (keymap-parent! (mode-keymap name) "list-mode-map")
+  (mode-keys! name (or (plist-get opts 'keys) '()))
+  (list-flag-keys! (lambda (k c) (define-key (mode-keymap name) k c))
+                   (or (plist-get opts 'flags) '()))
   name)
 
 ;; open (or re-open) a list buffer in its mode
@@ -5972,12 +5977,13 @@
   '(("M-<left>" "popup-move-left") ("M-<right>" "popup-move-right")
     ("M-<up>" "popup-move-up") ("M-<down>" "popup-move-down")))
 
+(register-minor-mode! "popup-mode" (lambda (buf) #t) (lambda (buf) #t))
+(minor-mode-keys! "popup-mode" *popup-move-keys*)
+
 (define (popup-keys! name floating?)
-  (for-each (lambda (k)
-              (if floating?
-                  (local-set-key* name (car k) (cadr k))
-                  (local-unset-key* name (car k))))
-            *popup-move-keys*)
+  (if floating?
+      (enable-minor-mode! name "popup-mode")
+      (disable-minor-mode! name "popup-mode"))
   (buffer-set-local! name 'popup-keys (and floating? #t)))
 
 (define (popup-float! name side &optional size)
@@ -7150,15 +7156,14 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'mode-name "collect-mode")
-      (local-set-key "n" "collect-next")
-      (local-set-key "p" "collect-prev")
       ;; line movement REMAPS, so arrows, C-n/C-p and any user binding of
       ;; next-line all move-and-preview identically
       (local-remap! "next-line" "collect-next")
       (local-remap! "previous-line" "collect-prev")
-      (local-set-key "RET" "collect-accept")
-      (local-set-key "q" "collect-quit")
       (buffer-set-read-only! buf #t))))
+
+(mode-keys! "collect-mode"
+  '(("n" "collect-next") ("p" "collect-prev") ("RET" "collect-accept") ("q" "collect-quit")))
 
 (mode-doc! "collect-mode"
   "The prompt's candidates, as a buffer you can move around in. Moving previews the candidate in the other window. `RET` confirms it in the prompt you came from.")
@@ -7389,9 +7394,9 @@
       (let ((path (buffer-local buf 'tail-path)))
         (buffer-set-read-only! buf #t)
         (buffer-set-local! buf 'transient #t)
-        (local-set-key "q" "quit-window")
         (when (and path (not (process-running? buf)))
           (start-process! buf (tail-command path)))))))
+(mode-keys! "tail-mode" '(("q" "quit-window")))
 
 (mode-doc! "tail-mode"
   "A file that follows itself, local or over `ssh`. New lines append at the end. The buffer is read-only, and `q` closes it.")
@@ -7510,19 +7515,13 @@
                 *llm-mode-hooks*)))))
 
 (define (llm-mode--apply! buf)
-  (local-set-key* buf "M-o" "llm-send-buffer")
-  (local-set-key* buf "C-c m" "llm-set-model")
-  (local-set-key* buf "C-c b" "llm-configure")
   (llm-mode--paint! buf)
   (llm-mode--ensure-hook! buf))
 
 (define (llm-mode--teardown! buf)
   (llm-mode-reset-runtime! buf #f)
   (llm-mode--remove-hook! buf)
-  (overlay-clear! buf 'llm-mode-responses)
-  (local-unset-key* buf "M-o")
-  (local-unset-key* buf "C-c m")
-  (local-unset-key* buf "C-c b"))
+  (overlay-clear! buf 'llm-mode-responses))
 
 ;; the change rule behind M-o's response ranges is registered under the name
 ;; the buffer had. A renamed chat needs the rule again, under the new one.
@@ -7537,6 +7536,8 @@
         (llm-mode-reset-runtime! new #t)))))
 
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
+(minor-mode-keys! "llm-mode"
+  '(("M-o" "llm-send-buffer") ("C-c m" "llm-set-model") ("C-c b" "llm-configure")))
 
 (define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"
   (lambda ()
@@ -8082,10 +8083,6 @@
     (let ((buf (current-buffer))
           (interrupted? (buffer-local (current-buffer) 'chat-turn-active)))
       (buffer-provenance-stop! buf "mode:chat-mode" "mode-policy" "mode")
-      (local-set-key "C-c m" "chat-set-model")
-      (local-set-key "C-c $" "chat-cost")
-      (local-set-key "C-c b" "llm-configure")
-      (local-set-key "C-c C-k" "chat-reset")
       ;; On desktop restore EVERY runtime local is a lie: the process it
       ;; described died with the daemon. Clear the whole class — not just
       ;; the 'agent-queued that once deadlocked RET — so that bug cannot
@@ -8176,11 +8173,15 @@
         ;; chat without a runtime attaches the api backend on first send
         (when (boundp (quote agent-install-keys!))
           (agent-install-keys! buf))
-        (local-set-key "S-RET" "newline")
-        (local-set-key "C-c C-v" "chat-toggle-view")
         ;; a restored point can land inside the marker — typing/pasting
         ;; there corrupts the input boundary (bytes end up pre-marker)
         (chat-snap-to-input!)))))
+
+;; the chat's editor keys; agent-session.scm adds the send and permission
+;; keys to the same map
+(mode-keys! "chat-mode"
+  '(("C-c m" "chat-set-model") ("C-c $" "chat-cost") ("C-c b" "llm-configure")
+    ("C-c C-k" "chat-reset") ("S-RET" "newline") ("C-c C-v" "chat-toggle-view")))
 
 ;; there is only one chat interface: the rich group-chat surface. C-c c
 ;; opens the current buffer's group chat (founding a group if needed);

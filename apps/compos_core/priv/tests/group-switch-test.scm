@@ -82,9 +82,31 @@
     (t--sw-setup!)
     (t--sw-open-switcher!)
     (check-true! (minibuffer-state) "the prompt opened")
-    (check-equal! (plist-get (minibuffer-state) 'prompt)
-                  "Switch buffer: "
-                  "the buffer switcher owns the prompt")
+    (check-true! (string-prefix? "Switch to" (plist-get (minibuffer-state) 'prompt))
+                 "the buffer switcher owns the prompt")
+    (t--sw-done!)))
+
+(deftest 'the-switcher-pool-follows-the-invoking-window-history
+  "another window cannot reorder this window's previous buffers"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((noise "zz-sw-noise"))
+      (test-buffer! noise "")
+      (switch-to-buffer! t--sw-second)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-first)
+      (let ((window (active-window)))
+        (split-window! 'h 0.5)
+        (other-window!)
+        (switch-to-buffer! t--sw-second)
+        (switch-to-buffer! noise)
+        (select-window! window)
+        (let ((pool (filter (lambda (b) (member b (list t--sw-second t--sw-third noise)))
+                            (map car (switch-sectioned-rows t--sw-first #f window)))))
+          (check-equal! (car pool) t--sw-third "the last buffer in this window leads")
+          (check-equal! (cadr pool) t--sw-second "the older buffer follows it")
+          (check-equal! (caddr pool) noise "the other window's buffer comes last")))
+      (buffer-kill! noise))
     (t--sw-done!)))
 
 (deftest 'the-group-switcher-indexes-memberships-in-one-pass

@@ -23,22 +23,47 @@ defmodule Compos.WindowHealTest do
     refute Enum.any?(Editor.list_windows(), fn {_id, b} -> b == "heal-victim" end)
   end
 
-  test "killing a buffer removes its window instead of duplicating another buffer" do
+  # Emacs: kill-buffer keeps the window and shows another buffer in it.
+  # A split the person made is not undone by a kill.
+  test "killing a buffer keeps its window and fills it from the window's history" do
     Editor.delete_other_windows()
     {:ok, _} = Compos.Core.create_buffer("heal-survivor")
+    {:ok, _} = Compos.Core.create_buffer("heal-before")
     {:ok, _} = Compos.Core.create_buffer("heal-layout-victim")
     Editor.set_window_buffer("heal-survivor")
     Editor.split(:h, 0.5)
+    Editor.set_window_buffer("heal-before")
     Editor.set_window_buffer("heal-layout-victim")
     assert length(Editor.list_windows()) == 2
 
     Compos.Core.kill_buffer("heal-layout-victim")
 
-    assert Editor.list_windows() |> Enum.map(&elem(&1, 1)) == ["heal-survivor"]
-    Compos.Core.kill_buffer("heal-survivor")
+    assert length(Editor.list_windows()) == 2
+    assert Editor.list_windows() |> Enum.map(&elem(&1, 1)) |> Enum.sort() ==
+             ["heal-before", "heal-survivor"]
+
+    assert Editor.current_buffer() == "heal-before"
+    Enum.each(["heal-survivor", "heal-before"], &Compos.Core.kill_buffer/1)
   end
 
-  test "killing a buffer shown in every window collapses duplicate windows" do
+  test "a window with no history falls back to a buffer no window shows" do
+    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.create_buffer("heal-survivor")
+    {:ok, _} = Compos.Core.create_buffer("heal-elsewhere")
+    {:ok, _} = Compos.Core.create_buffer("heal-fresh-victim")
+    Editor.set_window_buffer("heal-elsewhere")
+    Editor.set_window_buffer("heal-survivor")
+    Editor.split(:h, 0.5)
+    Editor.set_window_buffer("heal-fresh-victim")
+
+    Compos.Core.kill_buffer("heal-fresh-victim")
+
+    assert length(Editor.list_windows()) == 2
+    refute Enum.any?(Editor.list_windows(), fn {_id, b} -> b == "heal-fresh-victim" end)
+    Enum.each(["heal-survivor", "heal-elsewhere"], &Compos.Core.kill_buffer/1)
+  end
+
+  test "killing a buffer shown in every window keeps every window" do
     Editor.delete_other_windows()
     {:ok, _} = Compos.Core.create_buffer("heal-duplicate-victim")
     Editor.set_window_buffer("heal-duplicate-victim")
@@ -47,8 +72,8 @@ defmodule Compos.WindowHealTest do
 
     Compos.Core.kill_buffer("heal-duplicate-victim")
 
-    assert length(Editor.list_windows()) == 1
-    refute Editor.current_buffer() == "heal-duplicate-victim"
+    assert length(Editor.list_windows()) == 2
+    refute Enum.any?(Editor.list_windows(), fn {_id, b} -> b == "heal-duplicate-victim" end)
   end
 
   test "killing a hidden buffer leaves the layout unchanged" do

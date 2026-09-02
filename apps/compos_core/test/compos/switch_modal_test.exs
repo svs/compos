@@ -119,13 +119,15 @@ defmodule Compos.SwitchModalTest do
 
     open_switcher()
 
-    # one term matches the mode annotation, the other the name — any order
+    # one term matches the mode annotation, the other the name — any order.
+    # A heading is an entry too; the rows under it are what narrowed.
+    rows = ~s{(map car (filter (lambda (e) (not (switch-separator? "#{@switch}" e))) (list-entries "#{@switch}")))}
     type("zz-textish zz-ma")
-    assert eval!(~s{(map car (list-entries "#{@switch}"))}) == ~s{("*zz-ma*")}
+    assert eval!(rows) == ~s{("*zz-ma*")}
 
     press(List.duplicate("DEL", 16))
     type("ma zz-textish")
-    assert eval!(~s{(map car (list-entries "#{@switch}"))}) == ~s{("*zz-ma*")}
+    assert eval!(rows) == ~s{("*zz-ma*")}
     press(["ESC"])
   end
 

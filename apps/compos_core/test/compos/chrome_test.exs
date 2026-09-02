@@ -303,7 +303,7 @@ defmodule Compos.ChromeTest do
 
       Session.eval(~s[(run-command "switch-to-buffer-prompt")])
       # a prompt opened rather than the command dying on the missing browser
-      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch buffer"
+      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to"
       Session.eval("(minibuffer-cancel!)")
     end
 

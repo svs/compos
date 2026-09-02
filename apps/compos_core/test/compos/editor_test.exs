@@ -101,6 +101,13 @@ defmodule Compos.EditorTest do
     {:ok, _} = Compos.Core.Session.eval(~s[(run-command "switch-to-buffer")])
   end
 
+  # the prompt's rows without the section headings
+  defp prompt_labels(mb) do
+    mb.candidates
+    |> Enum.reject(&(Map.get(&1, :kind) == "separator"))
+    |> Enum.map(& &1.label)
+  end
+
   defp clear_minibuffer do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
   end
@@ -3157,11 +3164,11 @@ defmodule Compos.EditorTest do
         id)
       """)
 
-    # pure history: the previous buffer is the default; groups have no
-    # rows of their own — the buffer rows carry the group
+    # history first: the previous buffer is the default; a group you
+    # never switched to has no card — the buffer rows carry the group
     open_switch_prompt()
     mb = Editor.render_state().minibuffer
-    labels = Enum.map(mb.candidates, & &1.label)
+    labels = prompt_labels(mb)
     assert hd(labels) == m2
     refute "[ctgrp-#{n}]" in labels
     assert mb.prompt =~ "default #{m2}"
@@ -3280,13 +3287,10 @@ defmodule Compos.EditorTest do
         id)
       """)
 
-    # the switch is itself a history entry: the group's card leads the
-    # stream, above the members its restore bumped
+    # the switch is itself a history entry: the group's card is a row
+    # of the groups section, and searching the group's name finds the
+    # card AND the members
     open_switch_prompt()
-    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
-    assert hd(labels) == "[hsgrp-#{n}]"
-
-    # searching the group's name finds the card AND the members
     type("hsgrp-#{n}")
     labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
     assert "[hsgrp-#{n}]" in labels
@@ -3430,7 +3434,7 @@ defmodule Compos.EditorTest do
              (switch-to-buffer! "*scratch*"))
       """)
 
-    open_group_switcher()
+    open_switch_prompt()
     type("one.txt")
     press(["C-RET"])
 
@@ -3487,7 +3491,7 @@ defmodule Compos.EditorTest do
 
     mb = Editor.render_state().minibuffer
     assert mb.input == ""
-    labels = Enum.map(mb.candidates, & &1.label)
+    labels = prompt_labels(mb)
     assert "[lkgrp-#{n}]" in labels
     assert m1 in labels
     assert m2 in labels
@@ -3601,11 +3605,13 @@ defmodule Compos.EditorTest do
 
     assert history =~ ~r/\A\("#{last}" "#{first}"/
 
-    open_group_switcher()
+    open_switch_prompt()
+    # the page shows a window of rows: narrow to this test's own buffers
+    type("wh-")
 
     labels =
-      Editor.render_state().minibuffer.candidates
-      |> Enum.map(& &1.label)
+      Editor.render_state().minibuffer
+      |> prompt_labels()
       |> Enum.filter(&(&1 in [first, last, noise]))
 
     assert labels == [last, first, noise]
@@ -4007,13 +4013,13 @@ defmodule Compos.EditorTest do
 
     test "windows can show different buffers", %{buf: buf} do
       other = "win-#{System.unique_integer([:positive])}"
-      # this test is about the windows, so it takes the plainest switcher:
-      # the modal one previews into the window it was opened from, which is
-      # a second thing happening to the layout under test
+      # this test is about the windows, so it takes the prompt form: the
+      # modal opens a popup window, which is a second thing happening to
+      # the layout under test
       Compos.Core.create_buffer(other)
       press(["C-x", "3"])
       press(["C-x", "o"])
-      open_group_switcher()
+      open_switch_prompt()
       type(other)
       press(["RET"])
 

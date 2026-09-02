@@ -7263,14 +7263,13 @@
           (if (and (buffer-path cur) (buffer-modified? cur))
               (message "Buffer is modified — save it, or C-x k to kill it")
               (begin
-                ;; Let the core release the killed buffer's leaves first.
-                ;; Pre-switching here makes the victim disappear from the
-                ;; tree before release_buffer! sees it, which preserves the
-                ;; wrong split and leaves an empty layout slot behind. The
-                ;; kill path already chooses a live, scoped fallback after
-                ;; collapsing any branches that contained the victim.
-                ;; the window a display made goes with the listing; a
-                ;; window the display took shows again what it showed
+                ;; The core releases the killed buffer's windows: each one
+                ;; stays and shows what it showed before (Emacs kill-buffer
+                ;; deletes no window), and buffer-kill-repair then fills a
+                ;; group window from its group. Only a display's own work is
+                ;; undone here first: the window a display made goes with
+                ;; the listing; a window the display took shows again what
+                ;; it showed.
                 (window-quit-restore! (active-window))
                 ;; a live process (tail, shell) dies with its buffer
                 (if (process-running? cur) (process-kill! cur))

@@ -1212,11 +1212,14 @@ defmodule Compos.Core.Editor do
     {:reply, %{visible: visible, current: current}, state}
   end
 
-  # Release every window from BUFFER before it dies. Remove its windows when
-  # another WORK window can preserve the frame: a popup floats over the
-  # frame and cannot, so a listing under a peek falls to its next buffer
-  # instead of leaving the peek as the only window. A sole window needs a
-  # live buffer.
+  # Killing a buffer never deletes a work window: the window stays and
+  # shows another buffer, as kill-buffer does in Emacs. Each window that
+  # showed the victim falls back to its own history first, then to the
+  # most recent buffer no window shows, then to any live buffer. Only a
+  # popup that showed the victim closes: nobody split for a popup, and
+  # one with nothing to show is not a window. Scheme policy refines the
+  # choice after the kill (buffer-kill-repair): a group window fills
+  # from its group.
   def handle_call({:release_buffer, buffer}, _from, state) do
     visible = Enum.flat_map(state.frames, fn {_id, f} -> visible_buffers(f.tree) end)
 
@@ -1228,20 +1231,18 @@ defmodule Compos.Core.Editor do
           b != buffer and Buffer.exists?(b)
         end) || live_scratch()
 
+    popup? = popup_buffer?(buffer)
+
     frames =
       Map.new(state.frames, fn {id, f} ->
         victim_ids = wins_showing(f.tree, buffer)
-
-        survivors =
-          f.tree
-          |> leaf_ids_buffers()
-          |> Enum.reject(fn {_id, b} -> b == buffer or popup_buffer?(b) end)
+        others = f.tree |> leaf_ids_buffers() |> Enum.reject(fn {win, _} -> win in victim_ids end)
 
         cond do
           victim_ids == [] ->
             {id, f}
 
-          survivors != [] ->
+          popup? and others != [] ->
             Enum.each(victim_ids, fn win ->
               wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
             end)
@@ -1251,15 +1252,11 @@ defmodule Compos.Core.Editor do
             {id, %{f | tree: tree, active: active}}
 
           true ->
-            keep = if f.active in victim_ids, do: f.active, else: hd(victim_ids)
-            remove = List.delete(victim_ids, keep)
-
-            Enum.each(remove, fn win ->
+            Enum.each(victim_ids, fn win ->
               wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
             end)
 
-            tree = Enum.reduce(remove, f.tree, &remove_leaf(&2, &1))
-            {id, %{f | tree: release_buffer_from_tree(tree, buffer, fallback), active: keep}}
+            {id, %{f | tree: release_buffer_from_tree(f.tree, buffer, fallback)}}
         end
       end)
 
@@ -2603,12 +2600,18 @@ defmodule Compos.Core.Editor do
   defp unpin_buffer_leaves(%{type: :split} = split, buffer),
     do: %{split | children: Enum.map(split.children, &unpin_buffer_leaves(&1, buffer))}
 
+  # a leaf that showed the victim shows what it showed before, when that
+  # buffer still lives; FALLBACK otherwise
   defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
-    leaf = Map.update(leaf, :history, [], &List.delete(&1, buffer))
+    history = leaf |> Map.get(:history, []) |> List.delete(buffer)
 
-    if leaf.buffer == buffer,
-      do: %{leaf | buffer: fallback, top: 0, manual: false},
-      else: leaf
+    if leaf.buffer == buffer do
+      own = Enum.find(history, &Buffer.exists?/1)
+      next = own || fallback
+      %{leaf | buffer: next, history: List.delete(history, next), top: 0, manual: false}
+    else
+      %{leaf | history: history}
+    end
   end
 
   defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback),

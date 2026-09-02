@@ -9662,10 +9662,10 @@
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 .dseg-gap { flex: 1 1 auto; }
 .dseg-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.dseg-jj { flex: 1 1 auto; }
-.dseg-jj .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
-                   display: -webkit-box; -webkit-box-orient: vertical;
-                   -webkit-line-clamp: 2; }
+.dseg-wide { flex: 1 1 auto; }
+.dseg-wide .dseg-v { white-space: normal; overflow: hidden; text-overflow: ellipsis;
+                     display: -webkit-box; -webkit-box-orient: vertical;
+                     -webkit-line-clamp: 2; }
 ")
 
 (define (dash--row k v &optional cls)
@@ -10039,8 +10039,20 @@
               (list "dseg-strong" (string-join (cdr parts) ":")))
         (list (list "dseg-strong" model)))))
 
+;; the open jj change of the buffer's repo: jj.scm keeps a cache by root,
+;; so a chat that lives in the repo shows the line as well as a file does
+(define (dash--vcs buf)
+  (and (boundp 'jj-modeline-line) (jj-modeline-line buf)))
+
+;; the chat's running summary, once the cheap model wrote one
+(define (dash--summary buf)
+  (and (chat-buffer? buf)
+       (let ((s (buffer-local buf 'chat-summary)))
+         (and (string? s) (not (equal? s "")) s))))
+
 (define (dashboard-line-blocks buf)
-  (let ((vcs (buffer-local buf 'modeline-vcs)))
+  (let ((vcs (dash--vcs buf))
+        (summary (dash--summary buf)))
     (append
       (list (dash--seg "mode" (dash--mode-segs buf) 'left)
             (dash--seg-rule)
@@ -10052,12 +10064,18 @@
                         (dash--seg "lane"
                           (list (list "f-ok dseg-strong" (dash--lane buf)))
                           'right "dseg-inline"))))
+      ;; a chat says what it is doing: the running summary, wrapping to
+      ;; two lines with the key inline
+      (if summary
+          (list (dash--seg-rule)
+                (dash--seg "summary" (list (list "f-dim" summary))
+                           'left "dseg-inline dseg-wide"))
+          '())
       ;; the repo rides along at the end, wide as it needs: the open jj
-      ;; change, kept fresh by jj.scm as commits go by, wrapping to two
-      ;; lines with the key inline
+      ;; change, kept fresh by jj.scm as commits go by
       (if vcs
           (list (dash--seg-rule)
-                (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-jj"))
+                (dash--seg "jj" (list (list "f-dim" vcs)) 'left "dseg-inline dseg-wide"))
           '()))))
 
 ;; The modeline names the buffer the short way: project coordinates inside

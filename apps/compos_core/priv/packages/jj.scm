@@ -74,7 +74,8 @@
 
 (define (jj-at root field)
   (string-trim
-    (jj-sh root (string-append "jj log -r @ --no-graph -T '" field "' 2>/dev/null"))))
+    (jj-sh root (string-append "jj log -r @ --no-graph --ignore-working-copy -T '"
+                               field "' 2>/dev/null"))))
 
 ;;; --- who wrote it -------------------------------------------------------
 
@@ -199,26 +200,62 @@
 ;;; --- the modeline -------------------------------------------------------
 
 ;; Every buffer of the repo says which change its save would amend: the
-;; open change's first line, in the buffer's own status bar. It is re-read
-;; once after each flush and each label, never during a redraw, and a
-;; buffer whose line is already right is left alone so a redraw costs
-;; nothing. An unlabeled run shows its Agent: line, which is exactly the
-;; nudge to call jj-describe!.
-(define (jj-modeline-update! root &optional slug)
+;; open change's first line, in the buffer's own status bar. The dashboard
+;; pulls the line from a cache by repo root, so a chat or a list that
+;; lives in the repo shows it as well as a file does. The cache fills once
+;; per root, then a flush or a label refreshes it. A redraw never runs jj.
+;; An unlabeled run shows its Agent: line, which is exactly the nudge to
+;; call jj-describe!.
+(define *jj-lines* '())       ; ((ROOT LINE) ...)
+(define *jj-dir-roots* '())   ; ((DIR ROOT) ...); ROOT is #f outside a repo
+
+;; the repo root of DIR, remembered per directory: a redraw asks for it
+;; on every command, and git-root is a walk up the tree
+(define (jj-dir-root dir)
+  (and (string? dir)
+       (let ((hit (assoc dir *jj-dir-roots*)))
+         (if hit
+             (cadr hit)
+             (let ((root (jj-root-of-dir dir)))
+               (set! *jj-dir-roots* (cons (list dir root) *jj-dir-roots*))
+               root)))))
+
+(define (jj-buffer-root buf)
+  (or (jj-root (buffer-path buf))
+      (jj-dir-root (buffer-directory buf))))
+
+(define (jj-read-line! root)
   (let* ((raw (jj-at root "description.first_line()"))
-         (line (if (equal? raw "") "jj: undescribed" raw))
-         (prefix (string-append root "/"))
-         ;; the chat that caused the commit watches it go by too
-         (chat (and slug (boundp 'agent-buf) (agent-buf slug))))
-    (for-each
-      (lambda (b)
-        (let ((p (buffer-path b)))
-          (when (and (or (and p (string-prefix? prefix p))
-                         (and chat (equal? b chat)))
-                     (not (equal? (buffer-local b 'modeline-vcs) line)))
-            (buffer-set-local! b 'modeline-vcs line)
-            (when (boundp 'dashboard--sync!) (dashboard--sync! b)))))
-      (buffer-list))))
+         (line (if (equal? raw "") "jj: undescribed" raw)))
+    (set! *jj-lines*
+          (cons (list root line)
+                (filter (lambda (e) (not (equal? (car e) root))) *jj-lines*)))
+    line))
+
+(public! 'jj-modeline-line
+  "(jj-modeline-line BUF) -- the first line of the open jj change of BUF's repo, or #f outside one")
+(define (jj-modeline-line buf)
+  (let ((root (jj-buffer-root buf)))
+    (and root
+         (let ((hit (assoc root *jj-lines*)))
+           (if hit (cadr hit) (jj-read-line! root))))))
+
+;; after a flush or a label: re-read the line once, then redraw the bars
+;; on screen that show this repo. Every other buffer picks the new line
+;; up from the cache on its next command.
+(define (jj-modeline-update! root &optional slug)
+  (jj-read-line! root)
+  ;; the chat that caused the commit watches it go by too
+  (let ((chat (and slug (boundp 'agent-buf) (agent-buf slug))))
+    (when (boundp 'dashboard--sync!)
+      (let loop ((bufs (append (map cadr (window-list)) (if chat (list chat) '())))
+                 (done '()))
+        (when (pair? bufs)
+          (let ((b (car bufs)))
+            (unless (member b done)
+              (when (or (equal? b chat) (equal? (jj-buffer-root b) root))
+                (dashboard--sync! b)))
+            (loop (cdr bufs) (cons b done))))))))
 
 ;;; --- the hook -----------------------------------------------------------
 

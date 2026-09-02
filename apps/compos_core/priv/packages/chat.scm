@@ -1047,6 +1047,8 @@
       (lambda (text)
         (when (and (string? text) (not (equal? text "")) (buffer-known? buf))
           (buffer-set-local! buf 'chat-summary (chat-summary--flatten text))
+          ;; the bar shows the paragraph now, not after the next command
+          (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
           ;; between turns no save is coming -- the archive takes the fresh
           ;; paragraph now; mid-turn the turn-end save carries it
           (unless (buffer-local buf 'chat-turn-active)

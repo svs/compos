@@ -1035,11 +1035,12 @@
   (when (buffer-known? buf)
     (llm-with-model
       (string-append
-        "You maintain a one-sentence running summary of a work chat between"
-        " a person and a coding agent. Rewrite it so a reader who opens the"
-        " chat later knows what it is doing and where it stands. One"
-        " sentence, plain text, no markdown, under 20 words. Answer with"
-        " the sentence only.\n\nCurrent summary:\n"
+        "You maintain a one-sentence label for a work chat between a person"
+        " and a coding agent. The label names the task the chat is on, the"
+        " way a title does: what kind of work, on what. Do not report steps"
+        " taken, findings, or status. Rewrite the label only when the task"
+        " changed. One sentence, plain text, no markdown, under 12 words."
+        " Answer with the sentence only.\n\nCurrent label:\n"
         (or (buffer-local buf 'chat-summary) "(none yet)")
         "\n\nLatest transcript:\n"
         (chat-summary--tail buf))

@@ -995,7 +995,7 @@
                 'turns (plist-get plan 'turns)))))))
 
 ;; ---------------------------------------------------------------------------
-;; The running summary: one paragraph that says what this chat is doing.
+;; The running summary: one sentence that says what this chat is doing.
 ;; agent.scm nudges chat-summary-note-tool! on every tool call; the debounce
 ;; folds a burst into one cheap-model completion, in the background and in
 ;; silence -- the paragraph only lands in the chat-summary buffer-local. It
@@ -1007,7 +1007,7 @@
 (effects! '(write external spend))
 
 (defcustom 'chat-summary-model "claude-haiku-4-5"
-  "The cheap model that keeps each chat's one-paragraph running summary."
+  "The cheap model that keeps each chat's one-sentence running summary."
   'group 'chat 'type 'string)
 
 (define *chat-summary-debounce-ms* 10000)
@@ -1035,11 +1035,11 @@
   (when (buffer-known? buf)
     (llm-with-model
       (string-append
-        "You maintain a one-paragraph running summary of a work chat between"
+        "You maintain a one-sentence running summary of a work chat between"
         " a person and a coding agent. Rewrite it so a reader who opens the"
         " chat later knows what it is doing and where it stands. One"
-        " paragraph, plain text, no markdown, under 80 words. Answer with"
-        " the paragraph only.\n\nCurrent summary:\n"
+        " sentence, plain text, no markdown, under 20 words. Answer with"
+        " the sentence only.\n\nCurrent summary:\n"
         (or (buffer-local buf 'chat-summary) "(none yet)")
         "\n\nLatest transcript:\n"
         (chat-summary--tail buf))

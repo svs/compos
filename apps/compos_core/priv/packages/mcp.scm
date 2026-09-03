@@ -83,8 +83,13 @@
   name)
 
 (define (preset-servers name)
+  ;; A named bundle resolves to its server list; a name the hub registered
+  ;; directly (no bundle) resolves to just itself, so toggling a bare
+  ;; server in the picker starts exactly that server.
   (let ((e (assoc name *chat-presets*)))
-    (if e (custom--plist-get (car (cdr e)) 'servers) '())))
+    (cond (e (custom--plist-get (car (cdr e)) 'servers))
+          ((assoc name *mcp-registry*) (list name))
+          (else '()))))
 
 (define (chat-presets-of buf)
   ;; The editor bridge is infrastructure, not an optional integration.  Every
@@ -266,13 +271,29 @@
 ;; Every registered preset, each marked with its state in THIS session.
 ;; The glyphs are the MCP hub's: ● is on, ○ is off.
 (define (chat-preset-candidates buf)
-  (let ((loaded (chat-presets-of buf)))
-    (map (lambda (e)
-           (let ((name (car e)))
-             (list (symbol->string name)
-                   (string-append (if (member name loaded) "● " "○ ")
-                                  (custom--plist-get (car (cdr e)) 'description)))))
-         *chat-presets*)))
+  ;; Named bundles first, then every server the MCP hub knows that no
+  ;; bundle already names — so a server added with mcp-register! is
+  ;; toggleable here without a define-preset!. A bundle's glyph tracks
+  ;; whether it is loaded; a bare server's tracks whether it is active,
+  ;; so a server a bundle pulls in reads on.
+  (let* ((loaded (chat-presets-of buf))
+         (active (chat-active-servers buf))
+         (preset-names (map car *chat-presets*))
+         (bundles
+          (map (lambda (e)
+                 (let ((name (car e)))
+                   (list (symbol->string name)
+                         (string-append (if (member name loaded) "● " "○ ")
+                                        (custom--plist-get (car (cdr e)) 'description)))))
+               *chat-presets*))
+         (servers
+          (map (lambda (srv)
+                 (let ((name (car srv)))
+                   (list (symbol->string name)
+                         (string-append (if (member name active) "● " "○ ") "server"))))
+               (filter (lambda (srv) (not (member (car srv) preset-names)))
+                       *mcp-registry*))))
+    (append bundles servers)))
 
 (define (chat-preset-on! buf name)
   (unless (member name (chat-presets-of buf))

@@ -183,7 +183,7 @@ defmodule Compos.Ui.Layouts do
           /* Window content persists across keyboard-panel patches. Keep it
              visually stable; only newly opened popups use an entry animation. */
           .editor-root:has(.mb-panel, .which-key, .transient-panel) .window {
-            animation: none; none;
+
           }
           .window {
             display: flex; flex-direction: column;
@@ -193,7 +193,7 @@ defmodule Compos.Ui.Layouts do
             box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border-bg, #d5cdb9));
             overflow: hidden;
             min-width: 0; min-height: 0;
-            animation: none; none;
+
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
           .window.workspace-pending {
@@ -476,7 +476,7 @@ defmodule Compos.Ui.Layouts do
             background: transparent;
             color: inherit;
             box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
-            animation: none; none;
+
           }
           /* The frame does not own the keyboard, so the cursor stops
              blinking and goes hollow. It does NOT go away: a reader who
@@ -486,7 +486,7 @@ defmodule Compos.Ui.Layouts do
             background: transparent !important;
             color: inherit !important;
             box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
-            animation: none; none !important;
+
           }
           .no-nums .linenum { display: none; }
           /* an img-embed seg: the picture, in the text's place */
@@ -867,7 +867,7 @@ defmodule Compos.Ui.Layouts do
           /* the minibuffer blocks keyboard input, so it overlays the buffers
              without changing their geometry while it is open. */
           .mb-panel {
-            position: absolute; left: 0; right: 0; bottom: 0; z-index: 50;
+            position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
             box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.18);
@@ -891,7 +891,7 @@ defmodule Compos.Ui.Layouts do
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             overflow: hidden;
             z-index: 40;
-            animation: none; none;
+
             /* A patched node stays visible without an entry animation. It does not
                fade or scale while the prompt is open.
                at its first frame and leave the palette painted at
@@ -1087,7 +1087,7 @@ defmodule Compos.Ui.Layouts do
           /* which-key is a keyboard-blocking overlay. Keep the buffer geometry
              unchanged while the prefix panel explains the pending keys. */
           .which-key {
-            position: absolute; left: 0; right: 0; bottom: 0; z-index: 50;
+            position: absolute; left: 0; right: 0; bottom: 30px; z-index: 50;
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
             padding: 10px 14px 12px;

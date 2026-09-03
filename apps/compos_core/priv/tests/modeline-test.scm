@@ -72,10 +72,10 @@
         (set! *jj-dir-roots* roots))
       (buffer-kill! buf))))
 
-(deftest 'a-buffer-without-a-file-shows-the-jj-line-of-its-directory
-  "the jj segment comes from the per-root cache through the buffer's directory"
+(deftest 'a-chat-without-a-file-shows-the-jj-line-of-its-directory
+  "the jj segment comes from the per-root cache through the buffer's directory; a plain list does not live in a repo"
   (lambda ()
-    (let ((buf "*zz-modeline-jj*")
+    (let ((buf "*chat:zz-modeline-jj*")
           (dir "/zz-modeline-jj-repo/sub/")
           (root "/zz-modeline-jj-repo")
           (lines *jj-lines*)
@@ -84,6 +84,9 @@
       (buffer-set-local! buf 'default-directory dir)
       (set! *jj-dir-roots* (cons (list dir root) *jj-dir-roots*))
       (set! *jj-lines* (cons (list root "jj: the open change") *jj-lines*))
+      (check-equal! (jj-modeline-line buf) #f
+                    "a buffer that is not a file, a listing, or a chat shows no jj line")
+      (buffer-set-local! buf 'mode-name "chat-mode")
       (check-equal! (jj-modeline-line buf) "jj: the open change"
                     "the line comes from the cache, not from a shell call")
       (check-equal! (t--dseg-value (dashboard-line-blocks buf) "jj") "jj: the open change"

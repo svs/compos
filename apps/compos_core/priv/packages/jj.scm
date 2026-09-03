@@ -221,9 +221,14 @@
                (set! *jj-dir-roots* (cons (list dir root) *jj-dir-roots*))
                root)))))
 
+;; a file, a directory listing, and a chat live in a repo. A list or a
+;; log does not, whatever directory it was born in.
 (define (jj-buffer-root buf)
-  (or (jj-root (buffer-path buf))
-      (jj-dir-root (buffer-directory buf))))
+  (let ((p (buffer-path buf)))
+    (cond (p (jj-root p))
+          ((or (dired-buffer? buf) (chat-buffer? buf))
+           (jj-dir-root (buffer-directory buf)))
+          (else #f))))
 
 (define (jj-read-line! root)
   (let* ((raw (jj-at root "description.first_line()"))

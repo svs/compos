@@ -624,7 +624,7 @@
     (t--sw-done!)))
 
 (deftest 'move-replaces-existing-memberships-with-the-destination
-  "move needs one destination and leaves the buffer in only that group"
+  "move needs one destination, leaves the buffer in only that group, and enters it"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source"))
@@ -642,6 +642,8 @@
       (check-true! (buffer-in-group? t--sw-first destination) "the destination is added")
       (check-equal! (buffer-group-ids t--sw-first) (list destination)
                     "the destination is the only membership")
+      (check-equal! (frame-group) destination
+                    "move enters the destination group")
       (check-true! (buffer-known? t--sw-first) "move keeps the buffer alive"))
     (t--sw-done!)))
 
@@ -703,6 +705,26 @@
                    "remove changes nothing on the scratch")
       (check-false! (buffer-in-group? t--sw-second destination)
                     "the scratch reaches no other group"))
+    (t--sw-done!)))
+
+(deftest 'move-includes-the-explicit-transient-work-buffer
+  "moving a Dired-like listing moves the listing itself"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-transient-source"))
+          (destination (group-record-create! "zzsw-transient-destination")))
+      ;; Dired listings are transient for current-group derivation, but the
+      ;; listing itself is still the explicit buffer the move command names.
+      (buffer-set-local! t--sw-first 'transient #t)
+      (buffer-add-group! t--sw-first source)
+      (switch-to-buffer! t--sw-first)
+      (run-command "group-move")
+      (t--sw-type! "zzsw-transient-destination")
+      (t--sw-key! "confirm")
+      (check-false! (buffer-in-group? t--sw-first source)
+                    "the listing leaves the source")
+      (check-true! (buffer-in-group? t--sw-first destination)
+                   "the listing reaches the destination"))
     (t--sw-done!)))
 
 (deftest 'a-lone-move-leaves-the-group-scratch-behind

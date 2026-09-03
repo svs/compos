@@ -2520,7 +2520,15 @@
                                (list legacy-scratch)
                                '())
                            (if (equal? owner buf) '() (list buf)))))))
-    (dedupe-names (filter buffer-family--eligible? candidates))))
+    ;; The buffer named by the command is always the explicit subject, even
+    ;; when its mode marks the listing transient. Attached companions still
+    ;; have to pass the ordinary eligibility gate: a transient companion must
+    ;; not travel with its owner.
+    (dedupe-names
+      (filter (lambda (name)
+                (or (equal? name buf)
+                    (buffer-family--eligible? name)))
+              candidates))))
 
 (define (group-create-with-buffer! name buf source)
   (let ((id (group-record-create! name))
@@ -2712,6 +2720,10 @@
           (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
           (group-move-sweep! here id)
           (set! *group-current-inhibit* #f)
+          ;; Moving is a context change as well as a membership change: after
+          ;; the buffers leave, enter the destination so the user is not left
+          ;; looking at the old group's repaired layout.
+          (switch-to-group! id)
           (group-current-recalculate!)
           (run-hooks 'group-membership-hook)
           (message (string-append "Moved " (number->string (length eligible))
@@ -2747,6 +2759,9 @@
               (for-each (lambda (member) (buffer-move-to-group! member to)) family)
               (group-move-sweep! here to)
               (set! *group-current-inhibit* #f)
+              ;; A single-buffer move has the same context semantics as a
+              ;; selection move: the destination becomes current.
+              (switch-to-group! to)
               (group-current-recalculate!)
               (run-hooks 'group-membership-hook)
               (message (string-append "Moved " (number->string (length family))

@@ -2120,6 +2120,10 @@ defmodule Compos.Ui.Layouts do
                 this.buf = this.el.dataset.buf;
                 this.stick = this.el.dataset.stick !== "false";
                 this.report = null;
+                this.placing = false;
+                this.ro = null;
+                this.reader = false;
+                this.raf = null;
                 this.linkH = (e) => {
                   const link = e.target.closest && e.target.closest("a[href]");
                   if (!link || !this.el.contains(link)) return;
@@ -2138,6 +2142,9 @@ defmodule Compos.Ui.Layouts do
                   // event; only a scroll the reader can see may move the
                   // saved place, or a long chat comes back at the top
                   if (!s.isConnected || s.clientHeight === 0) return;
+                  // the hook's own placement is not a scroll the reader
+                  // made, so it must not move the place they left
+                  if (this.placing) return;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
                   clearTimeout(this.report);
                   this.report = setTimeout(() => {
@@ -2149,8 +2156,64 @@ defmodule Compos.Ui.Layouts do
                   }, 250);
                 };
                 this.scroller.addEventListener("scroll", this.scrollH);
-                if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
-                else this.scroller.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10);
+                // A scroll event is an effect and cannot tell the
+                // reader's hand from the hook's own assignment. A
+                // gesture is the cause, so it is what ends the settle.
+                this.inputH = () => { this.reader = true; };
+                ["wheel", "touchstart", "pointerdown"].forEach((t) =>
+                  this.scroller.addEventListener(t, this.inputH, { passive: true })
+                );
+                this.settle();
+              },
+              // Put the transcript where the reader left it. A window that
+              // is hidden or not laid out yet reports no height and a
+              // short scrollHeight, so placing then lands a long chat near
+              // its top and nothing runs again to correct it. Wait for a
+              // real size, and never move a scroller already there.
+              place() {
+                const s = this.scroller;
+                if (!s.isConnected) return;
+                if (s.clientHeight === 0) {
+                  if (this.ro || typeof ResizeObserver === "undefined") return;
+                  this.ro = new ResizeObserver(() => {
+                    if (this.scroller.clientHeight === 0) return;
+                    this.ro.disconnect();
+                    this.ro = null;
+                    this.place();
+                  });
+                  this.ro.observe(s);
+                  return;
+                }
+                const max = Math.max(0, s.scrollHeight - s.clientHeight);
+                const want = this.stick
+                  ? max
+                  : Math.min(parseInt(this.el.dataset.scrollTop || "0", 10), max);
+                if (Math.abs(s.scrollTop - want) <= 1) return;
+                this.placing = true;
+                s.scrollTop = want;
+                requestAnimationFrame(() => { this.placing = false; });
+              },
+              // A transcript keeps growing for a moment after a page
+              // load: fonts land, images decode, late patches arrive.
+              // Each one moves the place under the reader, so hold the
+              // place until the height stops changing, then stop. The
+              // reader's first gesture ends it early: their input wins,
+              // and nothing here moves the view again.
+              settle() {
+                let last = -1;
+                let still = 0;
+                const t0 = Date.now();
+                const step = () => {
+                  this.raf = null;
+                  const s = this.scroller;
+                  if (this.reader || !s || !s.isConnected) return;
+                  still = s.scrollHeight === last ? still + 1 : 0;
+                  last = s.scrollHeight;
+                  this.place();
+                  if (still >= 3 || Date.now() - t0 > 2000) return;
+                  this.raf = requestAnimationFrame(step);
+                };
+                this.raf = requestAnimationFrame(step);
               },
               updated() {
                 // A window may show another chat without replacing the DOM
@@ -2160,16 +2223,20 @@ defmodule Compos.Ui.Layouts do
                 if (buf !== this.buf) {
                   this.buf = buf;
                   this.stick = this.el.dataset.stick !== "false";
-                  if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
-                  else this.scroller.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10);
+                  this.place();
                 } else if (this.stick) {
-                  this.scroller.scrollTop = this.scroller.scrollHeight;
+                  this.place();
                 }
               },
               destroyed() {
                 this.el.removeEventListener("click", this.linkH);
                 this.scroller.removeEventListener("scroll", this.scrollH);
+                ["wheel", "touchstart", "pointerdown"].forEach((t) =>
+                  this.scroller.removeEventListener(t, this.inputH)
+                );
                 clearTimeout(this.report);
+                if (this.raf) cancelAnimationFrame(this.raf);
+                if (this.ro) { this.ro.disconnect(); this.ro = null; }
               }
             },
             // point moves in the buffer, so the mark moves in the block
@@ -3359,13 +3426,22 @@ defmodule Compos.Ui.Layouts do
               restoreClientScroll() {
                 document.querySelectorAll(".buf.client-scroll").forEach((el) => {
                   if (el._composCtop) return;
-                  el._composCtop = true;
                   // the first sight of an element records the server's
                   // scroll request without applying it: a reload must
                   // not replay a scroll from before
-                  el._composScrollSeen = el.dataset.scroll || "";
-                  if (el.dataset.manual !== "true") return;
+                  if (el._composScrollSeen === undefined) {
+                    el._composScrollSeen = el.dataset.scroll || "";
+                  }
+                  if (el.dataset.manual !== "true") {
+                    el._composCtop = true;
+                    return;
+                  }
                   const want = parseInt(el.dataset.ctop || "0", 10);
+                  // an element with no height clamps the offset to 0 and
+                  // would come back at the top for good; leave it for a
+                  // patch that has a size
+                  if (want > 0 && el.clientHeight === 0) return;
+                  el._composCtop = true;
                   if (want > 0) el.scrollTop = want;
                 });
               },

@@ -142,8 +142,9 @@ vertically". A small local model reads the whole command catalog and answers
 with one command name. The editor runs that command. The model never writes
 Scheme: it picks, and the editor acts.
 
-The model is Ollama on this machine (`do-model`, default `qwen3:4b`, at
-`do-endpoint`). The reply is constrained to catalog names, so the model
+The model is `qwen3:4b` on this machine, served by llama.cpp's
+`llama-server` on port 8089 (`do-backend`, `do-endpoint`; Ollama on 11434
+works too). The editor checks the reply against the catalog, so the model
 cannot invent a command. A phrase that ran once runs again without the
 model; `M-x do-forget` clears that memory. A command with a `destroy` effect
 asks before it runs.

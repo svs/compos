@@ -12,22 +12,31 @@
 ;;; phrase this prompt ran before (the memory persists with the desktop),
 ;;; and an empty prompt, which lists that memory.
 ;;;
-;;; The catalog rides in the system prompt, so Ollama keeps its prefix in
-;;; the KV cache. The first call after a boot or a catalog change pays the
-;;; prefill once; do-warm! pays it early, off the user's keystroke.
+;;; The catalog rides in the system prompt, so the server keeps its prefix
+;;; in the KV cache. The first call after a boot or a catalog change pays
+;;; the prefill once; do-warm! pays it early, off the user's keystroke.
+;;;
+;;; Two servers speak here. llama-server (llama.cpp, the default) takes a
+;;; raw prompt on /completion and answers in about 0.35s on this machine.
+;;; Ollama takes chat messages on /api/chat and answers in about 0.75s,
+;;; because it re-checks the cached prefix on every request.
 
 (domain! 'interaction)
 (effects! '(read))
 
+(defcustom 'do-backend "llama-cpp"
+  "Which local server answers: llama-cpp (its /completion API) or ollama (its /api/chat API)."
+  'group 'llm 'type 'string)
+
+(defcustom 'do-endpoint "http://127.0.0.1:8089"
+  "The local server for do-backend. Ollama listens on 11434, llama-server on 8089."
+  'group 'llm 'type 'string)
+
 (defcustom 'do-model "qwen3:4b"
-  "The local Ollama model that maps a phrase to one command."
+  "The model name: the Ollama tag for ollama, a label for llama-cpp (one model per server)."
   'group 'llm 'type 'string)
 
-(defcustom 'do-endpoint "http://127.0.0.1:11434"
-  "The Ollama server that serves do-model."
-  'group 'llm 'type 'string)
-
-(defcustom 'do-debounce-ms 250
+(defcustom 'do-debounce-ms 150
   "How long the Do prompt waits after a keystroke before it asks the model."
   'group 'llm 'type 'number)
 
@@ -74,7 +83,7 @@
 
 ;;; --- the model call --------------------------------------------------------------
 
-(define (do--request-body phrase)
+(define (do--ollama-body phrase)
   ;; The assistant turn starts the answer, so the model generates only the
   ;; name and stops at the closing quote: four tokens instead of ten. A
   ;; grammar would force a leading quote on the name and skew the pick.
@@ -87,6 +96,29 @@
                           (list 'role "user" 'content phrase)
                           (list 'role "assistant" 'content "{\"command\": \""))
           'options (list 'temperature 0 'num_predict 16 'num_ctx 16384 'stop (list "\"")))))
+
+;; The same prompt as one string, in Qwen3's chat template. The empty
+;; think block is what the template writes when thinking is off.
+(define (do--llama-prompt phrase)
+  (string-append "<|im_start|>system\n" (do--catalog-prompt) "<|im_end|>\n"
+                 "<|im_start|>user\n" phrase "<|im_end|>\n"
+                 "<|im_start|>assistant\n<think>\n\n</think>\n\n{\"command\": \""))
+
+(define (do--llama-body phrase)
+  (json-encode
+    (list 'prompt (do--llama-prompt phrase)
+          'n_predict 16
+          'temperature 0
+          'stop (list "\"")
+          'cache_prompt #t)))
+
+(define (do--llama?) (equal? do-backend "llama-cpp"))
+
+(define (do--request-url)
+  (string-append do-endpoint (if (do--llama?) "/completion" "/api/chat")))
+
+(define (do--request-body phrase)
+  (if (do--llama?) (do--llama-body phrase) (do--ollama-body phrase)))
 
 ;; The name in a reply: the bare text before the closing quote, or the
 ;; command field when a model answers with the whole JSON object.
@@ -105,15 +137,17 @@
                      (if (string? e) (string-append do-model ": " e) "the model did not answer")))
       (let* ((json (or (plist-get r 'json) (json-parse (plist-get r 'body))))
              (msg (and json (plist-get json 'message)))
-             (content (and msg (plist-get msg 'content)))
+             ;; llama-server answers {"content": ...}; Ollama {"message": {"content": ...}}
+             (content (and json (or (plist-get json 'content)
+                                    (and msg (plist-get msg 'content)))))
              (name (and (string? content) (do--reply-name content))))
         (if (and (string? name) (command-fn name))
             (list 'ok name)
             (list 'error (string-append "no command for that"
                                         (if (string? content) (string-append ": " content) "")))))))
 
-(define (do--ask-ollama phrase k)
-  (http-request (string-append do-endpoint "/api/chat")
+(define (do--ask-server phrase k)
+  (http-request (do--request-url)
     (list 'method "post"
           'headers (list 'content-type "application/json")
           'body (do--request-body phrase)
@@ -122,7 +156,7 @@
 
 ;; The seam a test rebinds: (lambda (phrase k) ...) calling K with the reply.
 (define *do--ask* #f)
-(define (do--ask phrase k) ((or *do--ask* do--ask-ollama) phrase k))
+(define (do--ask phrase k) ((or *do--ask* do--ask-server) phrase k))
 
 (effects! '(external))
 (define (do-warm!)

@@ -81,6 +81,20 @@
     (check-equal! (car (do--parse-reply (list 'ok #f 'error "connection refused")))
                   'error "a failed request is an error")))
 
+(deftest 'do-reads-a-llama-server-reply-too
+  "llama-server answers with a top-level content field"
+  (lambda ()
+    (check-equal! (do--parse-reply (list 'ok #t 'status 200 'body "{\"content\":\"undo\"}"))
+                  (list 'ok "undo") "the content field is the name")))
+
+(deftest 'do-llama-prompt-carries-the-catalog-and-the-phrase
+  "the raw prompt holds the catalog, the phrase, and the opened answer"
+  (lambda ()
+    (let ((p (do--llama-prompt "close it")))
+      (check-true! (string-contains? p "\nkill-buffer: Kill a buffer") "the catalog is in the system turn")
+      (check-true! (string-contains? p "<|im_start|>user\nclose it<|im_end|>") "the phrase is the user turn")
+      (check-true! (string-suffix? "{\"command\": \"" p) "the assistant turn is opened"))))
+
 (deftest 'do-asks-before-a-destroying-command
   "only a command whose effects include a confirm effect needs confirmation"
   (lambda ()

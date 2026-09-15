@@ -135,6 +135,19 @@ In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
 `C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,
 `C-/` undoes, `M-x` runs a command, and `M-:` evaluates Scheme.
 
+## Say what you want
+
+`s-k` opens the Do prompt. Type a sentence, for example "split this window
+vertically". A small local model reads the whole command catalog and answers
+with one command name. The editor runs that command. The model never writes
+Scheme: it picks, and the editor acts.
+
+The model is Ollama on this machine (`do-model`, default `qwen3:4b`, at
+`do-endpoint`). The reply is constrained to catalog names, so the model
+cannot invent a command. A phrase that ran once runs again without the
+model; `M-x do-forget` clears that memory. A command with a `destroy` effect
+asks before it runs.
+
 ## Drive it from outside
 
 `eval` is the whole API. One round-trip runs any multi-step action:

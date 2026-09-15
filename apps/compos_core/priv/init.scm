@@ -162,6 +162,8 @@
 (require 'skills)
 (require 'prompts)
 (require 'llm-config)
+;; the Do prompt reads the whole command catalog: it loads after the apps
+(require 'do)
 ;; the agents' shell commands in the sandbox: it reads the chat's llm-config
 ;; and its group, and the shell gate in decide.scm asks it
 (require 'agent-sandbox)

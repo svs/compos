@@ -1,9 +1,9 @@
 ;;; todo.scm --- the shared todo list every app and agent coordinates through.
 ;;;
-;;; A task is a level-2 morg heading in a file under todo-directory. The
-;;; file is the project: hiring.md holds the tasks of project "hiring".
-;;; The heading keyword stays TODO or DONE, so morg-todo, morg-todos and
-;;; the agenda read these files unchanged; the finer state is #+state.
+;;; A task is a level-2 morg heading in a project's todos.md, found by
+;;; todo-directories: hiring/todos.md holds the tasks of project "hiring".
+;;; The heading keyword stays TODO or DONE, so morg-todo and the agenda
+;;; read these files unchanged; the finer state is #+state.
 ;;;
 ;;;   ## TODO Nudge Anusha on the offer :opptra:client:
 ;;;   DEADLINE: <2026-09-26>
@@ -35,8 +35,8 @@
 (domain! 'writing)
 (effects! '(read))
 
-(defcustom 'todo-directory "~/todo"
-  "Where the shared todo files live. Each .md file is one project.")
+(defcustom 'todo-directories '("~/.compos/**/todos.md")
+  "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
 
 (defcustom 'todo-user "svs"
   "The name a change is logged under when the caller names nobody.")
@@ -54,7 +54,7 @@
 
 ;;; --- small helpers -----------------------------------------------------------
 
-(define (todo--dir) (expand-path todo-directory))
+(define (todo--join dir n) (if (string-suffix? "/" dir) (string-append dir n) (string-append dir "/" n)))
 (define (todo--now) (format-time (current-time) "%Y-%m-%d %H:%M"))
 (define (todo--today) (format-time (current-time) "%Y-%m-%d"))
 
@@ -115,19 +115,62 @@
 
 ;;; --- files -------------------------------------------------------------------
 
-(define (todo--files)
-  (let ((dir (todo--dir)))
-    (if (file-directory? dir)
-        (map (lambda (n) (string-append dir "/" n))
-             (filter (lambda (n) (and (string-suffix? ".md" n) (not (string-prefix? "." n))))
-                     (list-dir dir)))
-        '())))
+;; the files todo-directories names. Expanding `**` walks every folder
+;; under it, which is slow on a big tree, so the list is kept and a task
+;; renews it: at load, on `g`, and when a new project's file is written.
+(define (todo--glob pattern)
+  (let walk ((dir "/") (segs (cdr (string-split (expand-path pattern) "/"))))
+    (let ((names (lambda () (let ((l (and (file-directory? dir) (list-dir dir)))) (if (pair? l) l '()))))
+          (subdirs (lambda (ns) (map (lambda (n) (substring-bytes n 0 (- (string-byte-length n) 1)))
+                                     (filter (lambda (n) (and (string-suffix? "/" n) (not (string-prefix? "." n)))) ns)))))
+      (cond ((null? segs) (if (and (file-exists? dir) (not (file-directory? dir))) (list dir) '()))
+            ((equal? (car segs) "**")
+             (fold (lambda (acc d) (append acc (walk (todo--join dir d) segs)))
+                   (walk dir (cdr segs)) (subdirs (names))))
+            ((string-contains? (car segs) "*")
+             (let ((re (string-append "^" (string-join (map regexp-quote (string-split (car segs) "*")) "[^/]*") "$")))
+               (fold (lambda (acc n) (append acc (walk (todo--join dir n) (cdr segs))))
+                     '()
+                     (filter (lambda (n) (and (not (string-prefix? "." n)) (re-match re n)))
+                             (map (lambda (n) (if (string-suffix? "/" n) (substring-bytes n 0 (- (string-byte-length n) 1)) n)) (names))))))
+            (else (walk (todo--join dir (car segs)) (cdr segs)))))))
 
-(define (todo--project-file project) (string-append (todo--dir) "/" (todo--slug project) ".md"))
+(define (todo--resolve)
+  (fold (lambda (acc f) (if (member f acc) acc (append acc (list f))))
+        '() (fold (lambda (acc p) (append acc (todo--glob p))) '() todo-directories)))
+
+(define *todo-files* #f)
+
+(define (todo--files)
+  (unless *todo-files* (set! *todo-files* (todo--resolve)))
+  (filter file-exists? *todo-files*))
+
+(define (todo--rescan!)
+  (task-run! todo--resolve
+    (lambda (ok? files)
+      (when ok?
+        (set! *todo-files* files)
+        (todo--agenda-sync!)
+        (when (buffer-exists? *todo-buffer*) (list-refresh! *todo-buffer*))))))
+
+;; a project's file: the one it has, else where the first pattern puts it,
+;; the first wildcard standing for the project and a later ** for nothing
+(define (todo--project-file project)
+  (or (todo--first (lambda (f) (equal? (todo--file-project f) project)) (todo--files))
+      (let loop ((segs (string-split (expand-path (car todo-directories)) "/")) (done #f) (acc '()))
+        (cond ((null? segs) (string-join (reverse acc) "/"))
+              ((and done (equal? (car segs) "**")) (loop (cdr segs) done acc))
+              ((string-contains? (car segs) "*")
+               (loop (cdr segs) #t
+                     (cons (string-join (string-split (if (equal? (car segs) "**") "*" (car segs)) "*") (todo--slug project)) acc)))
+              (else (loop (cdr segs) done (cons (car segs) acc)))))))
 
 (define (todo--file-project path)
-  (let ((n (file-name-nondirectory path)))
-    (substring-bytes n 0 (- (string-byte-length n) 3))))
+  (let* ((parts (string-split path "/"))
+         (n (list-ref parts (- (length parts) 1))))
+    (if (and (equal? n "todos.md") (> (length parts) 1))
+        (list-ref parts (- (length parts) 2))
+        (if (string-suffix? ".md" n) (substring-bytes n 0 (- (string-byte-length n) 3)) n))))
 
 ;; an open buffer may hold unsaved edits, so it reads live
 (define (todo--text path)
@@ -191,8 +234,27 @@
                        notes))
               (else (loop (cdr ls) t (cons line notes)))))))))
 
-;; every task in TEXT, in file order; the walk is fence-aware
+;; every task in TEXT, in file order. The markdown grammar gives each
+;; level-2 section and its span, fenced code and all; without the grammar
+;; a fence-aware line walk does the same.
+(define todo--ts-sections "(section (atx_heading (atx_h2_marker))) @task")
+
 (define (todo--parse path text)
+  (if (not (member "markdown" (ts-installed-grammars)))
+      (todo--parse-lines path text)
+      (let loop ((caps (filter (lambda (c) (equal? (car c) "task"))
+                               (ts-query-string "markdown" text todo--ts-sections)))
+                 (line 0) (at 0) (acc '()))
+        (if (null? caps)
+            (filter (lambda (t) (plist-get t 'id)) (reverse acc))
+            (let* ((s (cadr (car caps)))
+                   (line (+ line (- (length (string-split (substring-bytes text at s) "\n")) 1)))
+                   (ls (split-lines (substring-bytes text s (caddr (car caps)))))
+                   (head (and (pair? ls) (todo--heading (car ls)))))
+              (loop (cdr caps) line s
+                    (if head (cons (todo--task path (list line s head (cdr ls))) acc) acc)))))))
+
+(define (todo--parse-lines path text)
   (let loop ((ls (split-lines text)) (i 0) (pos 0) (fence #f) (cur #f) (acc '()))
     (let ((close (lambda () (if cur (cons (todo--task path cur) acc) acc)))
           (add (lambda (line) (and cur (list (car cur) (cadr cur) (caddr cur)
@@ -277,8 +339,21 @@
            (let ((cur (todo--text path)))
              (write-file! path (string-append cur (sep cur) text "\n"))))
           (else
-           (unless (file-directory? (todo--dir)) (make-directory! (todo--dir)))
-           (write-file! path (string-append "# " (todo--file-project path) "\n\n" text "\n"))))))
+           (write-file! path (string-append "# " (todo--file-project path) "\n\n" text "\n"))
+           (set! *todo-files* (append (todo--files) (list path)))
+           (todo--agenda-sync!)))))
+
+;; the agenda reads every project's todos.md; a new project joins it here
+(define (todo--agenda-sync!)
+  (let* ((mine (map abbreviate-file-name (todo--files)))
+         (others (filter (lambda (f) (let ((p (expand-path f)))
+                                       (not (or (member p (todo--files))
+                                                (and (string-suffix? "todos.md" p) (not (file-exists? p)))))))
+                         morg-agenda-files))
+         (want (append others mine)))
+    (unless (equal? want morg-agenda-files)
+      (customize-save! 'morg-agenda-files want))
+    want))
 
 ;;; --- the API: reading ------------------------------------------------------
 
@@ -501,6 +576,7 @@
   (list (list "open" '())
         (list "inbox" '(state "inbox"))
         (list "review" '(state "review"))
+        (list "working" '(state "doing"))
         (list "mine" 'mine)
         (list "overdue" '(overdue #t))
         (list "closed" '(state ("done" "cancelled")))))
@@ -511,7 +587,40 @@
   (let ((s (cadr (assoc (todo--view buf) *todo-views*))))
     (if (equal? s 'mine) (list 'assignee todo-user) s)))
 
-(define (todo--rows buf) (todo-list (todo--view-spec buf)))
+;; `/` narrows by words, all of which must hit: p:PROJECT, s:STATE,
+;; @ASSIGNEE, #TAG, !PRIORITY, or any text of the task
+(define (todo--match buf t input)
+  (let* ((s (lambda (k) (let ((v (plist-get t k))) (if (string? v) v ""))))
+         (has? (lambda (hay w) (or (equal? w "") (completion-match? hay w 'substring))))
+         (after (lambda (w n) (substring-bytes w n (string-byte-length w))))
+         (tags (string-join (or (plist-get t 'tags) '()) " "))
+         (hay (string-join (list (s 'title) (s 'project) (s 'state) (s 'assignee) tags
+                                 (s 'source) (s 'notes) (s 'id)) " ")))
+    (null? (remove (lambda (w)
+             (cond ((string-prefix? "p:" w) (has? (s 'project) (after w 2)))
+                   ((string-prefix? "s:" w) (has? (s 'state) (after w 2)))
+                   ((string-prefix? "@" w) (has? (s 'assignee) (after w 1)))
+                   ((string-prefix? "#" w) (has? tags (after w 1)))
+                   ((string-prefix? "!" w) (has? (s 'priority) (after w 1)))
+                   (else (has? hay w))))
+           (string-split input " ")))))
+
+(define *todo-sorts* '("urgency" "deadline" "created"))
+
+(define (todo--sort-by buf) (or (buffer-local buf 'todo-sort) "urgency"))
+
+(define (todo--resort ts by)
+  "deadline: soonest first, undated last. created: newest first. urgency: todo-list's own order."
+  (cond ((equal? by "deadline")
+         (map cadr (sort (map (lambda (t) (list (list (todo--date-num (plist-get t 'deadline))
+                                                      (or (plist-get t 'created) ""))
+                                                t))
+                              ts))))
+        ((equal? by "created")
+         (reverse (map cadr (sort (map (lambda (t) (list (or (plist-get t 'created) "") t)) ts)))))
+        (else ts)))
+
+(define (todo--rows buf) (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf)))
 
 (define (todo--due t)
   (let ((d (plist-get t 'deadline)))
@@ -547,16 +656,19 @@
         (or (plist-get t 'priority) "")
         (plist-get t 'title)
         (plist-get t 'project)
-        (or (plist-get t 'assignee) "")
+        (todo--who-status t)
         (todo--due t)))
 
 (define (todo--row-columns buf)
   (list (list (list "TODO" #f 'left 'end))
-        (list (list "" 2) (list "META" #f 'left 'end) (list "WHO" 20 'right))))
+        (list (list "" 2) (list "META" #f 'left 'end) (list "WHO" 20 'right))
+        (list (list "" #f 'left 'end))))
 
 (define (todo--row-cells buf t)
+  ;; a faint rule under each task keeps the two-line cards apart
   (list (list (plist-get t 'title))
-        (list "" (list (todo--meta t) "org-meta") (list (or (plist-get t 'assignee) "") "org-meta"))))
+        (list "" (list (todo--meta t) "org-meta") (list (todo--who-status t) "org-meta"))
+        (list (list (string-repeat "─" (max 1 (- (list-view-width buf) 4))) "faint"))))
 
 (define (todo--at) (list-current *todo-buffer*))
 
@@ -604,8 +716,108 @@
           (todo-update (plist-get t 'id)
                        (list 'priority (cond ((not p) "A") ((equal? p "A") "B") ((equal? p "B") "C") (else #f)))))))))
 
-(define-command "todo-assign" "Assign the task to someone, or an agent"
-  (lambda () (todo--ask-at! "Assign to: " 'assignee)))
+;; assigning hands the task to a fresh chat in a group: the chat is the
+;; assignee, and its first message is the brief
+(define (todo--brief t chat)
+  (let* ((id (plist-get t 'id))
+         (field (lambda (label k) (let ((v (plist-get t k)))
+                                    (if (todo--blank? v) "" (string-append label ": " v "\n")))))
+         (notes (plist-get t 'notes)))
+    (string-append
+     "You are assigned todo " id ": " (plist-get t 'title) "\n\n"
+     (field "Project" 'project) (field "Deadline" 'deadline) (field "Source" 'source)
+     (if (todo--blank? notes) "" (string-append "\nNotes:\n" notes "\n"))
+     "\nRead it with (todo-get \"" id "\"). Work it through the todo API as \"" chat "\":\n"
+     "- (todo-log \"" id "\" TEXT \"" chat "\") for progress\n"
+     "- (todo-review \"" id "\" SUMMARY \"" chat "\") before anything goes out, and stop there\n"
+     "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
+     "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n")))
+
+(define (todo-assign-chat! id group &optional who)
+  "(todo-assign-chat! ID GROUP [WHO]) — start a new chat in GROUP, make it the task's assignee and send it the brief; return the chat"
+  (let* ((t (todo--must id))
+         (g (or (group-resolve-id group) (group-ensure-record! group)))
+         (chat (group-chat-new-name g)))
+    (buffer-create chat)
+    (group-chat-init! chat g)
+    (chat-set-group! chat g)
+    (when (boundp 'llm-default-bundle-apply!) (llm-default-bundle-apply! chat))
+    (when (boundp 'workspace-chat-inherit!) (workspace-chat-inherit! chat (group-name g)))
+    (todo-update id (list 'assignee (chat-stable-id! chat)
+                          'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
+                          'log (string-append "assigned to a chat in " (group-name g))
+                          'by (or who todo-user)))
+    (agent-continue! chat (todo--brief (todo-get id) (chat-stable-id! chat)))
+    chat))
+
+;; the assignee of a chat-held task is the chat's stable id, since the
+;; chat renames itself after its first answer
+(define (todo--chat-of t)
+  (let ((a (plist-get t 'assignee)))
+    (and (string? a) (string-prefix? "chat:" a)
+         (todo--first (lambda (b) (equal? (buffer-local b 'chat-id) a)) (buffer-list)))))
+
+(define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
+
+;; a card says how its chat is doing. The event log's chat-status view
+;; knows it; the todo file does not hold it.
+(define (todo--status t)
+  (let* ((a (plist-get t 'assignee))
+         (row (and (string? a) (event-view-get 'chat-status a))))
+    (if (not row)
+        ""
+        (let ((status (plist-get row 'status))
+              (stop (plist-get row 'stop-reason)))
+          (string-append (if status (chats-state-label status) "turn ended")
+                         (if (and stop (not (agent-turn-end-normal? stop)))
+                             (string-append " (" stop ")")
+                             "")
+                         " " (format-time (plist-get row 'at) "%H:%M"))))))
+
+(define (todo--who-status t)
+  (let ((who (todo--who t)) (status (todo--status t)))
+    (cond ((equal? status "") who)
+          ((equal? who "") status)
+          (else (string-append who "  ·  " status)))))
+
+(define-command "todo-goto-chat" "Go to the chat the task is assigned to"
+  (lambda ()
+    (let* ((t (todo--at)) (chat (and t (todo--chat-of t))))
+      (cond ((not t) (message "No task at point"))
+            (chat (switch-to-buffer-in-group! chat))
+            (else (message "The task is not with a live chat"))))))
+
+(define-command "todo-assign" "Hand the task to a new chat in its project's group; C-u asks for the group"
+  (lambda ()
+    (let ((t (todo--at))
+          (ask? (and (current-prefix-arg) #t)))
+      (define (assign! g)
+        (let ((chat (todo-assign-chat! (plist-get t 'id) g)))
+          (list-refresh! *todo-buffer*)
+          (message (string-append "Assigned to " chat))))
+      (cond ((not t) (message "No task at point"))
+            ((or ask? (not (plist-get t 'project)))
+             (group-read-or-create! "Assign to a new chat in group: "
+               (lambda (g) (assign! g))))
+            (else (assign! (plist-get t 'project)))))))
+;; a card follows its chat: an event on a chat topic redraws the list
+;; when a window shows it, and marks it stale when none does
+(define (todo--on-chat-event e)
+  (when (buffer-known? *todo-buffer*)
+    (if (window-showing *todo-buffer*)
+        (debounce! 'todo-cards 250 (lambda (_) (list-redraw! *todo-buffer*)) #f)
+        (buffer-set-local! *todo-buffer* 'todo-stale #t))))
+
+(define (todo--redraw-if-stale)
+  (when (and (buffer-known? *todo-buffer*)
+             (buffer-local *todo-buffer* 'todo-stale)
+             (window-showing *todo-buffer*))
+    (buffer-set-local! *todo-buffer* 'todo-stale #f)
+    (list-redraw! *todo-buffer*)))
+
+(event-subscribe! "todo-cards" "chat:*" 'todo--on-chat-event)
+(add-hook! 'window-configuration-change-hook 'todo--redraw-if-stale)
+
 (define-command "todo-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w"
   (lambda () (todo--ask-at! "Deadline: " 'deadline)))
 (define-command "todo-set-project" "Move the task to another project"
@@ -621,7 +833,7 @@
           (when (buffer-exists? *todo-buffer*) (list-refresh! *todo-buffer*))
           (message (string-append "Filed " id)))))))
 
-(define-command "todo-next-view" "Cycle the view: open, inbox, review, mine, overdue, closed"
+(define-command "todo-next-view" "Cycle the view: open, inbox, review, working, mine, overdue, closed"
   (lambda ()
     (let* ((names (map car *todo-views*))
            (i (todo--rank (todo--view *todo-buffer*) names))
@@ -630,13 +842,21 @@
       (list-refresh! *todo-buffer*)
       (message (string-append "Todos: " next)))))
 
-(define-command "todo-refresh" "Re-read the todo files"
-  (lambda () (list-refresh! *todo-buffer*)))
+(define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
+  (lambda () (list-refresh! *todo-buffer*) (todo--rescan!)))
+
+(define-command "todo-next-sort" "Cycle the order: urgency, deadline, created"
+  (lambda ()
+    (let* ((i (todo--rank (todo--sort-by *todo-buffer*) *todo-sorts*))
+           (next (nth (modulo (+ i 1) (length *todo-sorts*)) *todo-sorts*)))
+      (buffer-set-local! *todo-buffer* 'todo-sort next)
+      (list-refresh! *todo-buffer*)
+      (message (string-append "Todos by " next)))))
 
 (define-list-mode! "todo-mode"
   (list
     'buffer *todo-buffer*
-    'title (lambda (buf) (string-append "Todos · " (todo--view buf)))
+    'title (lambda (buf) (string-append "Todos · " (todo--view buf) " · by " (todo--sort-by buf)))
     'layouts (list (list 'name 'wide
                          'min-cols todo-wide-cols
                          'columns todo--wide-columns
@@ -648,16 +868,18 @@
     'key (lambda (buf t) (plist-get t 'id))
     'rows todo--rows
     'render (lambda (buf t) (plist-get t 'title))
+    'match todo--match
     'footer (lambda (buf)
-              '(("RET" "open") ("t" "accept") ("d" "done") ("x" "cancel") ("w" "wait")
+              '(("RET" "open") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
                 ("a" "assign") ("D" "deadline") ("P" "project") ("!" "priority")
-                ("c" "capture") ("v" "view") ("g" "refresh") ("q" "quit")))
+                ("c" "capture") ("v" "view") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     'keys '(("RET" "todo-visit")
             ("t" "todo-accept")
             ("d" "todo-mark-done")
             ("x" "todo-mark-cancelled")
-            ("w" "todo-mark-waiting")
+            ("W" "todo-mark-waiting")
+            ("w" "todo-goto-chat")
             ("s" "todo-mark-doing")
             ("a" "todo-assign")
             ("D" "todo-set-deadline")
@@ -666,9 +888,10 @@
             ("!" "todo-cycle-priority")
             ("c" "todo-capture")
             ("v" "todo-next-view")
+            (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directory, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `w` parks it, `s` starts it. `a` assigns, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, mine, overdue, closed. `RET` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed. `>` cycles the order: urgency, deadline, created (newest first). `/` filters by words: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` opens the task's file."))
 
 (define-command "todo" "Show the shared todo list"
   (lambda ()
@@ -676,3 +899,34 @@
     (switch-to-buffer! *todo-buffer*)
     (set-mode! "todo-mode")
     *todo-buffer*))
+
+;;; --- the prompt --------------------------------------------------------------
+;;; Every chat learns the list. A project or group that wants it out says
+;;; (prompt-section-off! (current-buffer) "todo") in its config.
+
+(domain! 'chat)
+(effects! '(write))
+
+(define todo-prompt
+  "## Shared todo list
+
+The user and every agent share one todo list. Each project keeps its tasks in a PROJECT/todos.md that `todo-directories` finds. Use the todo calls; do not edit those files.
+
+- Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
+- File: `(todo-create TITLE PROPS)` gives the new id. A task you find goes in as inbox, for the user to triage.
+- Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress.
+- WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
+- A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")
+
+(define (todo--chat-mode-hook!)
+  (prompt-part-set! (current-buffer) "todo" todo-prompt))
+
+(add-hook! 'chat-mode-hook 'todo--chat-mode-hook!)
+
+;; a chat restored or opened before this package loaded missed the hook
+(for-each (lambda (b)
+            (when (chat-buffer? b)
+              (prompt-part-set! b "todo" todo-prompt)))
+          (buffer-list))
+
+(todo--rescan!)

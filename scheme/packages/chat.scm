@@ -619,6 +619,7 @@
                  '())
       'directory (or (buffer-local chat 'default-directory) (default-directory))
       'visible-context (editor-context chat)
+      'companion-tab (if (boundp (quote companion-tab)) (companion-tab chat) #f)
       'prompt (if (and (boundp (quote chat-prompt-frozen?))
                        (chat-prompt-frozen? chat))
                   'frozen
@@ -649,26 +650,6 @@
         (chat-prompt-snapshot-parts target 'direct live)
         live)))
 
-;; A model can run its tools and end the turn with no text, which leaves
-;; the user asking "done?". The direct lane then sends this once, in the
-;; same turn. "" turns the nudge off.
-(defvar 'chat-empty-reply-nudge
-  "You ended your turn without a reply. In two or three sentences, tell the user what you did and what is left.")
-
-;; A steer moves an ACP turn's close off the model result and onto an idle
-;; signal the adapter can lose. The turn then never closes on the wire and
-;; the chat says "streaming" at an agent that stopped. The runtime waits
-;; this many seconds after the result for the close, then ends the turn
-;; itself. 0 turns the recovery off.
-(defvar 'chat-steer-settle-seconds 45)
-
-;; The other silence. A connector can take the prompt and say nothing at
-;; all: no text, no tool, no result, no end. Such a turn never closes on
-;; the wire and the chat waits at "waiting..." for good. The runtime waits
-;; this many seconds for the connector's FIRST event, then ends the turn
-;; and reconnects the session. 0 turns the recovery off.
-(defvar 'chat-silent-turn-seconds 180)
-
 (define (chat-thread-context slug display)
   (let* ((name (agent-buf slug))
          (buf (or (buffer-ref name) name))
@@ -680,10 +661,7 @@
     (list 'turns (reverse (chat-model-record buf))
           'system (prompt-parts-text (chat-system-prompt-parts buf tools?))
           'tools (if tools? (chat-tools buf) '())
-          'dispatcher (chat-tool-dispatch slug)
-          'empty-reply-nudge chat-empty-reply-nudge
-          'steer-settle-seconds chat-steer-settle-seconds
-          'silent-turn-seconds chat-silent-turn-seconds)))
+          'dispatcher (chat-tool-dispatch slug))))
 
 (domain! 'chat)
 (effects! '(read))
@@ -715,11 +693,10 @@
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
     (let* ((buf (current-buffer))
-           (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
+           (rich? (equal? (buffer-local buf 'render-mode) "agent")))
       ;; "plain", not #f: the chosen view is identity (S11), and a cleared
       ;; local reads as "never chosen" — which the setup would re-default
-      (buffer-set-local! buf 'render-mode (if rich? "plain" "blocks"))
-      (chat-view-sync! buf)
+      (buffer-set-local! buf 'render-mode (if rich? "plain" "agent"))
       (message (if rich? "plain transcript" "rich transcript")))))
 
 ;;; (chat auto-titling died with the bare *chat* surface: a group chat is
@@ -1593,17 +1570,14 @@
   (debounce! (string-append "chat-summary:" buf) *chat-summary-debounce-ms*
              chat-summary-refresh! buf))
 
-;; Title a chat again. The reader types the title, or leaves the answer
-;; blank to ask the model. The model path names the chat from its first
-;; prompt again and lands a fresh running summary. Every other path titles
+;; One command for both facts a chat learns about itself: it names the
+;; chat again, and lands a fresh running summary. Every other path titles
 ;; a chat once; this is the one that overrules a title already there.
-;; AFTER runs when the answer is in.
-(define (chat-retitle! buf &optional after)
-  (minibuffer-read
-    (string-append "Title for " buf " (blank asks the model): ")
-    '()
-    (lambda (name)
-      (if (equal? (string-trim name) "")
+(define-command "chat-retitle" "Name this chat again and refresh its summary"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
           (begin
             (message "chat-retitle: asking the model")
             ;; the same two moments, both forced: the name comes from the
@@ -1611,16 +1585,7 @@
             ;; when the card writer is away does the hosted model answer.
             (or (and (chat-title-first-prompt! buf #t)
                      (chat-summary-turn! buf))
-                (chat-summary-refresh! buf #t)))
-          (chat-title buf name))
-      (when after (after)))))
-
-(define-command "chat-retitle" "Title this chat again; a blank title asks the model"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
-          (message "not a chat buffer")
-          (chat-retitle! buf)))))
+                (chat-summary-refresh! buf #t)))))))
 
 (domain! 'chat)
 (effects! '(write external execute))

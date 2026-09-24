@@ -177,8 +177,8 @@
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
                (or (buffer-local buf 'agent-tool-bodies) '())))
-       ;; a running card shows open; completion closes it again
-       (agent-card-set-open! buf (plist-get e 'id) #t)
+       ;; a running card stays closed: opening it for the run and
+       ;; closing it at completion made the transcript jump on every call
        ;; the arguments open the body, ahead of the result, so an opened
        ;; card shows the whole call and not just what came back
        (let ((args (agent-tool-input-text e)))

@@ -171,6 +171,10 @@ defmodule Compos.Ui.EditorLive do
 
           Compos.Core.Buffer.goto(buf, point)
 
+          # the caret moved with no command: point-motion-hook (editor.scm)
+          # lets a package follow point here as post-command-hook does
+          Compos.Core.Session.call_named("client-point-moved!", [buf])
+
           # a client that reports its caret can be asked to move it: the
           # visual-line commands take the browser's layout from here on,
           # and a headless buffer keeps the server's own motion
@@ -1742,6 +1746,7 @@ defmodule Compos.Ui.EditorLive do
           phx-hook="AppFrame"
           data-win={@node.id}
           data-ctop={@node.ctop}
+          data-app-message={@node.app_message}
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
           src={@node.app_url}
           title={@node.buffer}

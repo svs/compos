@@ -109,29 +109,30 @@ defmodule Compos.Ui.AppServer do
   end
 
   defp safe_path(buffer, rest) do
-    with root when is_binary(root) <- app_root(buffer) do
+    Enum.find_value(app_roots(buffer), fn root ->
       want = Path.expand(Path.join([root | rest]))
 
       if inside?(root, want) and File.regular?(want), do: want
-    end
+    end)
   end
 
-  # The directory an app's relative files come from: its file's own, or,
-  # for a buffer with no file (a page a package writes), the
-  # 'app-directory local the package sets.
-  defp app_root(buffer) do
+  # The directories an app's relative files come from, first match wins:
+  # its file's own, or, for a buffer with no file (a page a package
+  # writes), the 'app-directory local the package sets. That local is one
+  # directory or a list, so a slide deck's images resolve beside the deck.
+  defp app_roots(buffer) do
     case buffer_path(buffer) do
       path when is_binary(path) ->
-        Path.dirname(path)
+        [Path.dirname(path)]
 
       nil ->
-        case Buffer.locals(buffer)["app-directory"] do
-          dir when is_binary(dir) -> if File.dir?(dir), do: Path.expand(dir)
-          _ -> nil
-        end
+        Buffer.locals(buffer)["app-directory"]
+        |> List.wrap()
+        |> Enum.filter(&(is_binary(&1) and File.dir?(&1)))
+        |> Enum.map(&Path.expand/1)
     end
   catch
-    :exit, _ -> nil
+    :exit, _ -> []
   end
 
   defp inside?(root, want), do: want == root or String.starts_with?(want, root <> "/")

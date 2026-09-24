@@ -4318,6 +4318,11 @@
   (run-hooks 'after-save-hook)
   (message (string-append "Wrote " path)))
 
+;; The client's own caret moved point, with no command to run
+;; post-command-hook: point-motion-hook gets the buffer instead.
+(define (client-point-moved! buf)
+  (run-hook-with-args 'point-motion-hook buf))
+
 ;; remote buffers save over ssh, never through the local filesystem
 (define (save-remote-buffer! bpath)
   (let ((hp (remote-parse bpath)))

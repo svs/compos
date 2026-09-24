@@ -478,6 +478,14 @@
   (buffer-set-local! buf 'app-generation
                      (+ 1 (or (buffer-local buf 'app-generation) 0))))
 
+;; DATA goes into the running app with no reload: the page gets a message
+;; event whose data is (compos "message" data DATA). A page that loads
+;; later reads the buffer as it is then, so it is not sent the message.
+(define (app-post! buf data)
+  (let ((n (+ 1 (or (buffer-local buf 'app-message-count) 0))))
+    (buffer-set-local! buf 'app-message-count n)
+    (buffer-set-local! buf 'app-message (json-encode (list 'n n 'data data)))))
+
 (define (preview-app-buffers)
   (let loop ((bs (buffer-list)) (acc '()))
     (cond ((null? bs) (reverse acc))

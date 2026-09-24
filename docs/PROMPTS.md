@@ -83,6 +83,38 @@ state. Mode setup must rebuild it after restore or reload.
 agent surface. `code-agent-mode` owns the `code-agent` raw fragment. Mode changes
 update the prospective source, not a frozen conversation.
 
+A package adds its section to every chat the same way, from `chat-mode-hook`.
+A chat restored or opened before the package loaded missed that hook, so the
+package also sets the part on every chat that exists when it loads:
+
+```scheme
+(define (todo--chat-mode-hook!)
+  (prompt-part-set! (current-buffer) "todo" todo-prompt))
+
+(add-hook! 'chat-mode-hook 'todo--chat-mode-hook!)
+
+(for-each (lambda (b)
+            (when (chat-buffer? b)
+              (prompt-part-set! b "todo" todo-prompt)))
+          (buffer-list))
+```
+
+The todo package adds `todo`. Section names are unique: the last fragment of a
+name wins, in the place the name first took, so a buffer part replaces a prompt
+file of that name.
+
+A project's `compos.scm` or a group's `ai-config.scm` runs with the chat
+current, and turns one section off or on:
+
+```scheme
+(prompt-section-off! (current-buffer) "todo")
+(prompt-section-on! (current-buffer) "todo")
+```
+
+The switch is the chat's `prompt-disabled-parts`, the same one `C-c b` sets. It
+persists with the chat and applies when the prompt is composed, so it does not
+matter which runs first: the config or the part it names.
+
 Run `M-x chat-refresh-prompt` to replace the snapshot from current sources. This
 command intentionally breaks the direct prompt cache. It reconnects an idle ACP
 session immediately and defers a busy ACP reconnect until the next turn.

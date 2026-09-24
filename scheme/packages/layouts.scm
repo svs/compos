@@ -41,6 +41,11 @@
   "The first pane's share of the frame in the two-pane layout: a fraction between 0.3 and 0.9."
   'group 'windows 'type 'number)
 
+;; The two-chat layout reads this one.
+(defcustom 'window-layout-chat-ratio 0.25
+  "The chat pane's share of the frame in the two-chat layout, such as 0.25. The other two panes share the rest equally."
+  'group 'windows 'type 'number)
+
 (defcustom '*display-buffer-base-action* '()
   "Display actions tried after the rule for a buffer and before the fallback: a list of pop-up-window, reuse-window, use-some-window, same-window."
   'group 'windows 'type 'list)

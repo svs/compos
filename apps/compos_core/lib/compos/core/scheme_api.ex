@@ -2015,7 +2015,7 @@ defmodule Compos.Core.SchemeAPI do
        "(window-swap-hidden! VISIBLE HIDDEN) — show hidden window HIDDEN in the pane of VISIBLE, which becomes hidden; #t when it did."} =>
         fn [visible, hidden] -> Editor.swap_hidden_window(visible, hidden) == :ok end,
       {"window-arrange-line!",
-       "(window-arrange-line! DIR RATIO IDS) — lay the frame out as one line of windows IDS, visible or hidden; DIR h is side by side, v is stacked; the first pane takes RATIO; a visible window not in IDS becomes hidden; #t when it did."} =>
+       "(window-arrange-line! DIR RATIO IDS) — lay the frame out as one line of windows IDS, visible or hidden; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a visible window not in IDS becomes hidden; #t when it did."} =>
         fn [dir, ratio, ids] ->
           dir = if plain(dir) == "v", do: :v, else: :h
           Editor.arrange_line(dir, ratio, ids) == :ok

@@ -848,16 +848,17 @@
 ;; but the float stops floating.
 (define (display-buffer-in-window! win name)
   (when (and (not *display-preview*) (boundp 'buffer-promote!)) (buffer-promote! name))
-  ;; A dormant buffer wakes when a window asks for it, and the wake queues
-  ;; its runtime rather than building it. switch-to-buffer-here! has always
-  ;; made the buffer whole on this path; this one did not, so a display
-  ;; could put a buffer on screen with its text and no mode.
-  (let ((float (float-window))
-        (restoring (not (buffer-exists? name))))
-    (window-show-buffer! win name)
-    (when restoring (restore-buffer-runtime! name))
-    (when (and (float--class? name) (not (equal? win float)))
-      (window-float-class! name #f)))
+  ;; A dormant buffer wakes when a window asks for it, and the wake
+  ;; queues its runtime rather than building it. switch-to-buffer-here!
+  ;; has always made the buffer whole on this path; this one did not, so
+  ;; a display could put a buffer on screen with its text and no mode.
+  ;; Same rule in both doors: whole, then shown.
+  (let ((restoring (not (buffer-exists? name))))
+    (let ((float (float-window)))
+      (window-show-buffer! win name)
+      (when restoring (restore-buffer-runtime! name))
+      (when (and (float--class? name) (not (equal? win float)))
+        (window-float-class! name #f))))
   (window-state-changed!)
   win)
 
@@ -1004,26 +1005,22 @@
 ;; take their displays. A package adds its own (popper.scm).
 (define *display-buffer-outside-layout* '(shaped same same-window))
 
-;; An agent never puts its work in the user's window by accident. It works
-;; on a file buffer, or on a buffer it made, by name. When the user asks to
-;; see a buffer, the agent shows it in the other window
-;; (inhibit-same-window), whoever made the buffer. Any other display of
-;; such a buffer gets #f, so the agent can tell nothing was shown.
-(define (display-buffer-agent-refuses? name alist)
+;; An agent never puts a file in the user's window. It works on the file
+;; buffer by name. When the user asks it to open a file, it opens it in
+;; the other window (inhibit-same-window). Any other display gets #f, so
+;; the agent can tell nothing was shown.
+(define (display-buffer-agent-file? name alist)
   (and (agent-edit-author? (current-edit-author))
        (not (plist-get alist 'inhibit-same-window))
        (buffer-known? name)
-       (or (buffer-path name) (buffer-local name 'context-only))
+       (buffer-path name)
        #t))
 
-(define (display-buffer-agent-refusal name)
-  (message (string-append
-             "An agent shows a buffer only in the other window: "
-             "(display-buffer-other-window! NAME). Link: " (buffer-link name))))
-
 (define (display-buffer name &optional alist)
-  (if (display-buffer-agent-refuses? name (or alist '()))
-      (begin (display-buffer-agent-refusal name) #f)
+  (if (display-buffer-agent-file? name (or alist '()))
+      (begin
+        (message (string-append "An agent does not open files. Link: " (buffer-link name)))
+        #f)
       (let* ((a (or alist '()))
              (actions (display-buffer-actions-for name a)))
         (window-display!
@@ -1722,12 +1719,12 @@ keeps the buffer you were in and your point.")
 ;;; short of buffers and never out of room for one: the panes show a run
 ;;; of the strip, and a scroll moves the run.
 
-(define *window-layout-algorithms* '(single two-pane halves columns rows))
+(define *window-layout-algorithms* '(single two-pane halves columns rows two-chat))
 
 ;; the panes a layout holds
 (define (layout-capacity algorithm)
   (cond ((equal? algorithm 'single) 1)
-        ((equal? algorithm 'columns) 3)
+        ((member algorithm '(columns two-chat)) 3)
         ((member algorithm *window-layout-algorithms*) 2)
         (else #f)))
 
@@ -1739,9 +1736,15 @@ keeps the buffer you were in and your point.")
 ;; a layout short of buffers still shares the frame evenly: three columns
 ;; holding two buffers are two halves, not a third and two thirds.
 (define (layout-first-ratio algorithm count)
-  (if (equal? algorithm 'two-pane)
-      (layout--valid-ratio window-layout-main-ratio (/ 2 3))
-      (/ 1 count)))
+  (cond ((equal? algorithm 'two-pane)
+         (layout--valid-ratio window-layout-main-ratio (/ 2 3)))
+        ;; two equal panes and a narrow chat: a share for each pane
+        ((equal? algorithm 'two-chat)
+         (let ((chat (layout--valid-ratio window-layout-chat-ratio (/ 1 4))))
+           (cond ((= count 3) (list (/ (- 1 chat) 2) (/ (- 1 chat) 2) chat))
+                 ((= count 2) (- 1 chat))
+                 (else 1))))
+        (else (/ 1 count))))
 
 ;;; --- the ring ---------------------------------------------------------------
 ;;; The frame's windows make one cyclic ring, and the layout shows a run of
@@ -1870,13 +1873,23 @@ keeps the buffer you were in and your point.")
           (when (and win restoring) (restore-buffer-runtime! buf))
           win))))
 
+;; two-chat keeps the first chat of the frame's group in its last pane
+(define (layout--chat-last algorithm buffers)
+  (let* ((g (and (equal? algorithm 'two-chat) (frame-group)))
+         (chats (if g (filter (lambda (b) (equal? (buffer-group-role b g) "chat")) buffers) '())))
+    (if (null? chats)
+        buffers
+        (append (take (filter (lambda (b) (not (equal? b (car chats)))) buffers)
+                      (- (layout-capacity algorithm) 1))
+                (list (car chats))))))
+
 ;; Arrange explicit buffers with a named layout. The first buffer is the main
 ;; buffer and keeps focus. This is the stable agent-facing entry point.
 ;; Each pane is a window: one that shows the buffer is used again, and a
 ;; window that loses its pane becomes hidden, with its history and point.
 (define (tile-windows! algorithm buffers)
   (let* ((capacity (layout-capacity algorithm))
-         (known (layout--known-buffers buffers))
+         (known (layout--chat-last algorithm (layout--known-buffers buffers)))
          (panes (if capacity (take known capacity) known)))
     (cond
       ((not capacity) (message "Unknown window layout") #f)
@@ -1911,7 +1924,7 @@ keeps the buffer you were in and your point.")
 ;; next walk reads the ring again from the new panes.
 (define (tile-visible-windows! algorithm &optional requested)
   (let* ((focus (layout-focus-token))
-         (visible (or requested (layout-request-buffers)))
+         (visible (layout--chat-last algorithm (or requested (layout-request-buffers))))
          (capacity (or (layout-capacity algorithm) 1))
          (panes (take (layout--known-buffers (layout--fill-to visible capacity)) capacity))
          (result (and (pair? panes) (tile-windows! algorithm panes))))
@@ -1966,6 +1979,9 @@ keeps the buffer you were in and your point.")
   (window-layout-command 'columns))
 (define-command "window-layout-rows" "Show two equal panes, one above the other"
   (window-layout-command 'rows))
+(define-command "window-layout-two-chat"
+  "Show two equal panes and the group's chat in a narrow pane on the right"
+  (window-layout-command 'two-chat))
 
 ;; the commit: the chosen layout is the frame's target from here on
 (define (window-layout-choose! saved name &optional requested)
@@ -2005,6 +2021,7 @@ keeps the buffer you were in and your point.")
           ("halves" "two equal panes side by side")
           ("columns" "3 equal columns")
           ("rows" "two equal panes, stacked")
+          ("two-chat" "2 + chat: two equal panes and a narrow chat")
           ("free" "no target: a display may split a window"))
         ;; A move applies the candidate from the same buffer order the
         ;; choice uses, so the preview is what you get: applying a layout
@@ -2024,7 +2041,7 @@ keeps the buffer you were in and your point.")
         (lambda () (restore-preview!))
         #f #f #f #f
         '(("1" "single") ("2" "two-pane") ("=" "halves")
-          ("c" "columns") ("r" "rows") ("f" "free"))))))
+          ("c" "columns") ("r" "rows") ("+" "two-chat") ("f" "free"))))))
 
 (define-command "window-layout-free"
   "Drop the frame's target layout: a display may split a window again"
@@ -2073,7 +2090,7 @@ keeps the buffer you were in and your point.")
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("window-layout" "window-layout-free" "window-layout-single"
     "window-layout-two-pane" "window-layout-halves"
-    "window-layout-columns" "window-layout-rows"
+    "window-layout-columns" "window-layout-rows" "window-layout-two-chat"
     "layout-forward" "layout-backward"))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only

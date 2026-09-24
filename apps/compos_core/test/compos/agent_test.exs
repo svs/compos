@@ -2085,7 +2085,7 @@ defmodule Compos.AgentTest do
              |> Enum.any?(&match?([_, _, "tool", "tc-stuck", _, _, "running" | _], &1))
            end)
 
-    assert "tc-stuck" in (Buffer.get_local(buf, "agent-open-cards") || [])
+    refute "tc-stuck" in (Buffer.get_local(buf, "agent-open-cards") || [])
 
     [{owner, _}] = Registry.lookup(Compos.Core.AgentRegistry, slug)
     send(owner, {:backend_event, Backend.plist(type: :"turn-failed")})

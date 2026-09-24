@@ -2365,6 +2365,14 @@ defmodule Compos.Core.Editor do
   # the tree layout--fill-line! makes with split-window!.
   defp line_tree([leaf], _dir, _ratio), do: leaf
 
+  # RATIO may be a list of shares, one for each pane: each split takes its
+  # first pane's share of what is left
+  defp line_tree([first | rest], dir, [share | more]) do
+    total = share + Enum.sum(more)
+    ratio = if share > 0 and share < total, do: share / total, else: 1 / (length(rest) + 1)
+    %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, more)]}
+  end
+
   defp line_tree([first | rest], dir, ratio) do
     ratio = if is_number(ratio) and ratio > 0 and ratio < 1, do: ratio, else: 1 / (length(rest) + 1)
     %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, nil)]}
@@ -3335,6 +3343,9 @@ defmodule Compos.Core.Editor do
       # an app reloads when this number changes, and only then: a keystroke
       # must not restart the app you are typing at
       app_gen: Map.get(locals, "app-generation") || 0,
+      # the last message the package posted into its running app
+      # (app-post!, preview.scm); a new one reaches the page with no reload
+      app_message: Map.get(locals, "app-message"),
       top: top,
       # the payload says what the daemon knows about scroll (S1): manual
       # pins the windowed top; ctop is a client-scrolled window's pixel

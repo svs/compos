@@ -325,7 +325,11 @@
 ;; batch, and the list answers the state changes inside it.
 (define (agents-note-event! &optional slug)
   (when slug (chats-note-activity! (agent-buf slug)))
-  (when (and slug (agents-state-moved? slug)) (agents-restate!))
+  ;; a status that moved is news for more than this list: the event log
+  ;; publishes it on the chat's topic
+  (when (and slug (agents-state-moved? slug))
+    (run-hook-with-args 'agent-status-hook slug)
+    (agents-restate!))
   (agents-modeline-refresh!))
 
 (define (agents-current-buf)

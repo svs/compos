@@ -344,7 +344,13 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 
 ;;; --- known projects ----------------------------------------------------------
 
-(define *projects-file* (string-append (compos-home) "/projects"))
+(define *projects-file* (string-append (compos-home) "/projects.list"))
+
+;; The list was once the file <home>/projects; projects/ now holds each
+;; project's own files, so an old list moves aside once.
+(let ((old (string-append (compos-home) "/projects")))
+  (when (and (file-exists? old) (not (file-directory? old)) (not (file-exists? *projects-file*)))
+    (rename-file! old *projects-file*)))
 
 (define (known-projects)
   (let ((text (read-file *projects-file*)))

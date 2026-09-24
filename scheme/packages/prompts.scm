@@ -71,9 +71,18 @@
   (string-join (map (lambda (part) (car (cdr part))) parts) "\n\n"))
 
 ;; Every fragment is its own section: a prompt file, a generated part
-;; (catalog, recipes, mcp) or a part a mode added. An empty one is dropped.
+;; (catalog, recipes, mcp) or a part a mode or package added. An empty one is
+;; dropped. Names are unique: the last fragment of a name wins, in the place
+;; the name first took, so a buffer part overrides a prompt file.
 (define (prompt-section-parts fragments)
-  (filter (lambda (part) (not (equal? (cadr part) ""))) fragments))
+  (let loop ((rest fragments) (out '()))
+    (if (null? rest)
+        (filter (lambda (part) (not (equal? (cadr part) ""))) (reverse out))
+        (let ((part (car rest)))
+          (loop (cdr rest)
+                (if (assoc (car part) out)
+                    (map (lambda (p) (if (equal? (car p) (car part)) part p)) out)
+                    (cons part out)))))))
 
 ;; A prompt preset records only exceptions. New fragments therefore arrive on,
 ;; instead of silently disappearing from every bundle saved before they existed.
@@ -91,6 +100,23 @@
     (unless (equal? next old)
       (buffer-set-local! buf 'prompt-disabled-parts next))
     next))
+
+;; One section on or off for one chat. A project's compos.scm or a group's
+;; ai-config.scm runs with the chat current, so it says
+;;   (prompt-section-off! (current-buffer) "todo")
+;; The switch persists with the chat and applies when the prompt is composed,
+;; so it holds whichever runs first: the config or the part it turns off.
+(define (prompt-section-off! buf name)
+  (let ((key (if (symbol? name) (symbol->string name) name)))
+    (prompt-parts-set-disabled! buf
+      (if (member key (prompt-disabled-parts buf))
+          (prompt-disabled-parts buf)
+          (append (prompt-disabled-parts buf) (list key))))))
+
+(define (prompt-section-on! buf name)
+  (let ((key (if (symbol? name) (symbol->string name) name)))
+    (prompt-parts-set-disabled! buf
+      (remove (lambda (n) (equal? n key)) (prompt-disabled-parts buf)))))
 
 ;; Compatibility values for callers that still request one joined string.
 (define *agent-quiet-prompt* (prompt-file-text "quiet-editor.md"))
@@ -306,6 +332,10 @@
   "(prompt-part-remove! BUF NAME) — remove one buffer-local prompt fragment")
 (public! 'prompt-parts-set-disabled!
   "(prompt-parts-set-disabled! BUF NAMES) — set disabled prompt sections for this LLM surface")
+(public! 'prompt-section-off!
+  "(prompt-section-off! BUF NAME) — leave one prompt section out of this chat's prompt")
+(public! 'prompt-section-on!
+  "(prompt-section-on! BUF NAME) — put one prompt section back into this chat's prompt")
 (public! 'chat-prompt-sections-set!
   "(chat-prompt-sections-set! BUF NAMES) — set disabled sections and refresh a frozen prompt")
 (public! 'chat-prompt-freeze!

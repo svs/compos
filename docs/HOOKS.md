@@ -34,15 +34,13 @@ list. The local table lives in Scheme, keyed by buffer name.
 |------|-----------|------|
 | `pre-command-hook` | | before every command and every self-insert |
 | `post-command-hook` | | after every command and every self-insert |
+| `point-motion-hook` | BUF | the client's caret moved point in the editing state, with no command (editor_live.ex `sel`) |
 | `find-file-hook` | | after the visit command opened a file |
 | `before-save-hook`, `after-save-hook` | | around a save |
 | `MODE-hook` | | after `set-mode!` ran the mode's setup |
 | `frame-attach-hook` | | a client mounted a frame |
 | `window-configuration-change-hook` | | a frame's windows or their buffers changed |
-| `winner-restore-hook` | | winner-undo or winner-redo put an arrangement back; a package that keeps an arrangement of its own settles on it |
-| `window-state-change-hook` | | `window-state-changed!` ran: a window command or a layout moved something; groups.scm recalculates the current group here |
 | `theme-change-hook` | | after `load-theme` |
-| `buffer-restore-hook` | BUF | a restored buffer, before its mode setup; migrations.scm runs the one-shot migrations here |
 | `buffer-created-hook` | NAME | a new buffer has its text |
 | `buffer-woken-hook` | NAME | a dormant buffer came back |
 | `buffer-renamed-hook` | OLD NEW | `rename-buffer!` |
@@ -52,34 +50,13 @@ list. The local table lives in Scheme, keyed by buffer name.
 | `llm-config-changed-hook` | BUF | llm-config exited and the buffer's setup changed |
 | `group-membership-hook`, `group-kill-hook` | | see docs/groups.md |
 
-### Keyed hooks
+`on-fs-change!`, `on-buffer-created!`, `on-buffer-woken!`,
+`on-buffer-renamed!`, `on-buffer-shown!` are the older spellings of
+`add-hook!` on those hooks.
 
-A keyed hook holds one function per key. `(add-hook! '(block-click diff)
-FN)` puts FN under the key `diff`, and the same key replaces, so a package
-reload does not stack a second copy. `(hook-functions 'block-click)` is
-the plain list and then every keyed function, newest key first;
-`(hook-functions '(block-click diff))` is that one function, so a
-dispatcher runs one key or every key with the same `run-hook` call.
-`(remove-hook! '(block-click diff))` takes the key away, and
-`(hook-keys 'block-click)` names the keys.
-
-| Keyed hook | Key | Args | Who runs it |
-|---|---|---|---|
-| `block-click` | a mode's name | BUF ID | the first key that answers #t owns the click (components.scm) |
-| `preview-link` | the verb of a `compos:VERB/ARG` link | ARG | the verb's one function (preview.scm) |
-| `input-intent` | the intent type, such as "formatBold" | FROM TO TEXT | the type's one function; #t means handled (editor.scm) |
-| `endpoint-event` | a listener name | NAME KIND TEXT | every key (endpoint.scm) |
-| `lsp-event` | a listener name | ID METHOD PARAMS | every key (lsp.scm) |
-| `agent-turn-end` | a listener name | SLUG STOP-REASON OK? | every key, each one guarded (agent.scm) |
-| `candidate-face` | a package name | CATEGORY NAME | the first face answered, none means no face (groups.scm) |
-| `buffer-project-label`, `buffer-project-root`, `buffer-workspace-label` | a package name | BUFFER | the first label answered, none means "" (project.scm, worktrees.scm) |
-| `find-file-group-reader` | a package name | RECEIVE | the first reader runs; none means RECEIVE gets the frame's group (project.scm) |
-| `buffer-kill-repair` | a package name | NAME | the first thunk answered runs after the kill (groups.scm) |
-| `switch-buffer-source` | a package name | CANDIDATES | the first source shapes the switcher's pool (chrome.scm) |
-| `app-request` | a package name | BUF METHOD BODY | the first (STATUS BODY) answered owns an app page's `_compos/app` request; none is a 404 (preview.scm, spreadsheet.scm) |
-
-`add-paste-hook!` is not a hook on purpose: it keys a handler by mode and
-runs the first that answers.
+Two tables are not hooks on purpose. `on-input-intent!` keys a handler
+by intent type. `add-paste-hook!` keys a handler by mode and runs the
+first that answers.
 
 ### Dashboard presentation
 

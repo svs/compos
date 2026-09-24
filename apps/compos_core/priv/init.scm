@@ -94,6 +94,9 @@
 (load "agent-fleet.scm")
 ;; the spawn edges are the chats table's other view: it loads after it
 (load "subagents.scm")
+;; the event log: agents publish their status on it, so it follows the
+;; chats table, whose status hook feeds it
+(load "events.scm")
 (load "jj.scm")
 (load "keys.scm")
 (load "keymaps.scm")
@@ -152,6 +155,7 @@
 (load "worktrees.scm")
 (load "writing.scm")
 (load "dismiss.scm")
+(load "screenshot.scm")
 
 ;; the run and result blocks live with the other blocks and lean on
 ;; block.scm; they load here because their kind registrations need the

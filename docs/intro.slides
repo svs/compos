@@ -1,0 +1,218 @@
+---
+title: Compos
+theme: compos
+transition: slide
+---
+
+<!-- build: up; class: title center -->
+![Compos](http://localhost:4004/images/compos-emblem-v1.png)
+
+# Compos {zoom}
+
+The Hackable Harness for Power Users
+
+???
+
+All the harnesses are wonderful. Claude Code was revolutionary. But the more we use them, the more we realise that the original naive conception of a chatbot was great, but it is a limited interface. Compos is an exploration of an alternative architecture for an AI agent harness. One built on the timeless UX of emacs, modernised for the agentic age.
+
+---
+
+<!-- transition: zoom; focus: on -->
+## a wish list for a coding harness
+As an AI-pilled maniac, I want my agent harness to
++ keep me close to my work 
++ help me to manage context
++ get better with time
+---
+
+<!-- transition: zoom; focus: on -->
+## a wish list for a coding harness
+and as a power user, I want one that
++ is infinitely hackable
++ will meld itself to me
++ can run arbitrary code
+
+---
+
+and as a human I want it to 
+
++ be beautiful
++ be fast
++ be fun
+
+---
+# The Power User
+---
+## The Power User
+
+The power user is neglected in the coding agent world. The current paradigm is the second of three. Compos is ushering in the third. But not many people want this third way. This is for power users only.
+
++ Let's see all the ways in which the power user is neglected
+---
+![image](codex.png =full)
+
+---
+
+## The Three Paradigms
+
+![ChatGPT, December 2022](https://substackcdn.com/image/fetch/$s_!wHUr!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fbucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com%2Fpublic%2Fimages%2F3d560758-8116-4c21-bc33-119b50319b47_753x570.png =x300)
+
+### Work happens where it happens, the intelligence is elsewhere
+
+That's why you had to copy paste from chatgpt.
+
+---
+
+## The Three Paradigms
+
+@screenshot of claude code
+
+### 2. Work happens where where the intelligence is. You are elsewhere
+
+You're watching the TUI, the files it is editing are far from you. Even the diff is far. You have to switch tabs or just watch everything stream by. 
+
+You feel further and further from the code {step fade}
+
+---
+
+## The Three Paradigms
+
+### Work, you and the intelligence are all in the same place.
+
+![image](image_4.png)
+
+And the intelligence can work with you, to shape itself and the environment it runs in.
+
+---
+
+# A small example
+
+## of learned helplessness {step blur}
+
+???
+
+Sentry demo
+---
+
+## The current paradigm is of
++ separate applications
++ separate data
++ computers designed for humans
++ browsers designed for humans
+
+---
+
+## The way out?
++ one unified operating system over
++ all your data, from whichever app
+
+without a unified conception of the work, you cannot build a muscle memory. {step blur}
+
+if the human is in the loop, they need a proper rig. {step fade}
+---
+
+## Other harnesses are drones
+
+## Compos is the Iron Man suit {step blur}
+
+It wraps itself around you like an exoskeleton. {step fade}
+
+---
+![image](ono-sendai.png)
+
+all cowboys need a rigged out deck.
+
+---
+
+## MCP doesn't cut it
+- sipping context through a straw
+- using up agent context
+
+---
+<!-- transition: fade; class: center accent -->
+# You do not go to your context. {blur}
+
+Your context comes to you. {step up}
+
+???
+
+Mail, issues, feeds, code: all in buffers, with one access pattern and all your tools.
+
+---
+
+<!-- transition: cube -->
+## The Emacs model
+
+| Part | Job |
+|---|---|
+| Buffers | durable application state |
+| Windows | compose views |
+| Commands | one action surface for people and agents |
+| Modes | behavior in context |
+| Lisp | the whole environment, live and open |
+
+---
+
+<!-- transition: flip; class: center -->
+## The one rule
+
+**Elixir supplies mechanism. Scheme decides policy.** {pop}
+
+About 117,000 lines of Scheme and more than 1,000 commands, all redefinable while the editor runs {step up}
+
+---
+
+<!-- transition: blur; class: cols -->
+## Why the BEAM
+
+```text
+buffer  -> GenServer
+agent   -> supervised process
+client  -> browser, shell, nc, JSON-RPC
+```
+
+- A blocking tool call freezes only its own process
+- Every edit carries provenance: user, editor, process or agent
+- Agents do not trigger themselves
+
+---
+
+<!-- transition: wipe; focus: on; step: left -->
+## AI in every buffer
+
++ Chat is where the point is
++ Companion chats per buffer or per group
++ Direct API, ACP or codex-app-server
++ Agents write small Scheme programs, not slow tool round trips
+
+---
+
+<!-- transition: iris; class: center; bg: linear-gradient(135deg, #1f2a44, #3f7cac) -->
+## Applications in userland Scheme
+
+org-mode, spreadsheets, mail, git, dired, ibuffer, MCP hub, GraphQL, code browser, secrets, slides {up}
+
+The next one is one short chat away {step fade}
+
+---
+
+<!-- transition: slide; class: cols -->
+## Run it
+
+```sh
+mix deps.get
+mix run --no-halt
+open http://localhost:4004
+```
+
+- `C-x C-f` finds a file
+- `C-x b` switches buffers
+- `M-x` runs a command
+- `M-:` evaluates Scheme
+
+---
+
+<!-- transition: zoom; class: accent center -->
+# Build your environment by talking to it {pop}
+
+Press `o` to see every slide {step type}

@@ -281,15 +281,45 @@
 
 (define *site-chat-group* "*browse*")
 
-;; One chat per site, all in the *browse* group. The name carries the host,
-;; so the same site finds the same conversation again, and a dormant chat
-;; from an earlier session comes back rather than being made twice.
-(define (chrome--site-chat-name host)
-  (string-append "*chat:browse:" host "*"))
+;; One chat per browser tab, all in the *browse* group. The tab keeps its
+;; chat wherever it goes; a new tab starts a new one. The name only starts
+;; out as the host: a chat renames itself after its first turn.
+(define (chrome--site-chat-name host tab)
+  (let ((base (string-append "*chat:browse:" host "*")))
+    (if (and tab (buffer-known? base))
+        (string-append "*chat:browse:" host "<" (number->string tab) ">*")
+        base)))
+
+(define *companion-prompt*
+  (string-append
+   "## Companion tab\n\n"
+   "You are the chat in the side panel of one browser tab. "
+   "`(chat-context)` names it as `companion-tab`: its id and URL, current each turn.\n\n"
+   "- \"This\", \"here\" and \"the page\" mean that tab. Read it with "
+   "`(tab-read ID K)` or `(tab-selection ID K)`, not `get-visible-buffers`.\n"
+   "- To open, show or go to a web page, navigate that tab: `(tab-navigate ID URL K)`. "
+   "Never `browse`, `tab-open` or another window for a web page.\n"
+   "- Files and editor buffers are unaffected.\n"))
+
+;; what chat-context shows a site chat: the tab it sits beside, read live
+(define (companion-tab chat)
+  (let ((tab (buffer-local chat 'browse-tab)))
+    (and tab
+         (list 'id tab
+               'url (buffer-local chat 'browse-url)
+               'note "\"this\" is this tab; open web pages in it with (tab-navigate ID URL K)"))))
+
+;; the chat already beside TAB, whatever it is called by now
+(define (chrome--site-chat-find id tab)
+  (let loop ((bs (group-buffers id)))
+    (cond ((null? bs) #f)
+          ((equal? (buffer-local (car bs) 'browse-tab) tab) (car bs))
+          (else (loop (cdr bs))))))
 
 (define (site-chat host &optional tab url)
-  (let ((id (group-ensure-record! *site-chat-group*))
-        (name (chrome--site-chat-name host)))
+  (let* ((id (group-ensure-record! *site-chat-group*))
+         (name (or (and tab (chrome--site-chat-find id tab))
+                   (chrome--site-chat-name host tab))))
     (unless (buffer-known? name)
       (buffer-create name)
       (group-chat-init! name id)
@@ -298,10 +328,11 @@
         (llm-default-bundle-apply! name))
       (when (boundp (quote workspace-chat-inherit!))
         (workspace-chat-inherit! name (group-name id))))
-    ;; the tab it was last opened from: the way back to the page
+    ;; its tab, and where that tab is now: the way back to the page
     (buffer-set-local! name 'browse-site host)
     (when tab (buffer-set-local! name 'browse-tab tab))
     (when url (buffer-set-local! name 'browse-url url))
+    (prompt-part-set! name "companion-tab" *companion-prompt*)
     name))
 
 (define-command "site-chat-tab" "Go back to the browser tab this site chat was opened from"

@@ -223,75 +223,7 @@
 
 ;;; --- the week ----------------------------------------------------------------
 
-(define (morg-todos--text-entries path text)
-  (let loop ((lines (split-lines text)) (pos 0) (in-fence #f) (entries '()))
-    (if (null? lines)
-        (reverse entries)
-        (let* ((line (car lines))
-               (next (+ pos (string-byte-length line) 1)))
-          (cond
-            ((and in-fence (morg-fence-close? line))
-             (loop (cdr lines) next #f entries))
-            (in-fence
-             (loop (cdr lines) next in-fence entries))
-            ((morg-fence-info line)
-             (loop (cdr lines) next (morg-fence-info line) entries))
-            ((re-match "^\#{1,6}[ \t]" line)
-             (let ((parts (agenda--heading-parts line)))
-               (loop
-                (cdr lines) next #f
-                (if (equal? (car parts) "TODO")
-                    (cons (list 'title (cadr parts)
-                                'tags (caddr parts)
-                                'who #f
-                                'file path
-                                'pos pos)
-                          entries)
-                    entries))))
-            ;; a checkbox item is a TODO too: every state but done is
-            ;; unfinished, the writer's own statuses among them. A
-            ;; "[@:NAME]" marker says who has it, so the row can show them.
-            ((morg-checkbox-at line)
-             (let* ((box (morg-checkbox-at line))
-                    (parts (agenda--split-tags
-                             (substring-bytes line (nth 3 box)
-                                              (string-byte-length line)))))
-               (loop
-                (cdr lines) next #f
-                (if (equal? (cadr box) "x")
-                    entries
-                    (cons (list 'title (car parts)
-                                'tags (cadr parts)
-                                'who (morg-checkbox-name (cadr box))
-                                'file path
-                                'pos pos)
-                          entries)))))
-            (else
-             (loop (cdr lines) next #f entries)))))))
 
-(define (morg-todos--file-entries path)
-  (let ((text (if (buffer-exists? path)
-                  (buffer-text path)
-                  (read-file path))))
-    (if (string? text)
-        (morg-todos--text-entries path text)
-        '())))
-
-(define (morg-todos--rows buf)
-  (fold (lambda (entries path)
-          (append entries (morg-todos--file-entries path)))
-        '()
-        (agenda--files)))
-
-(define (morg-todos--key buf row)
-  (string-append (plist-get row 'file) ":"
-                 (number->string (plist-get row 'pos))))
-
-(define (morg-todos--cells buf row)
-  (list (plist-get row 'title)
-        (or (plist-get row 'who) "")
-        (or (plist-get row 'tags) "")
-        (file-name-nondirectory (plist-get row 'file))))
 
 (define (agenda--iota start n)
   (let loop ((i 0) (acc '()))
@@ -639,45 +571,7 @@
 (domain! 'writing)
 (effects! '(read write))
 
-(define *morg-todos-buffer* "*Morg TODOs*")
 
-(define-command "morg-todos-visit" "Open the TODO at point"
-  (lambda ()
-    (let ((row (list-current *morg-todos-buffer*)))
-      (if row
-          (agenda--visit!
-           (list 0 (plist-get row 'file) (plist-get row 'pos)))
-          (message "No TODO at point")))))
-
-(define-command "morg-todos-refresh" "Re-read all Morg TODO files"
-  (lambda () (list-mode-show! "morg-todos-mode")))
-
-(define-list-mode! "morg-todos-mode"
-  (list
-    'buffer *morg-todos-buffer*
-    'columns (lambda (buf)
-               (list (list "TODO" #f)
-                     (list "WHO" 10)
-                     (list "TAGS" 18)
-                     (list "FILE" 24)))
-    'cells morg-todos--cells
-    'key morg-todos--key
-    'rows morg-todos--rows
-    'render (lambda (buf row) (plist-get row 'title))
-    'footer (lambda (buf)
-              '(("RET" "open") ("g" "refresh") ("q" "quit")))
-    'noun "TODO"
-    'keys '(("RET" "morg-todos-visit")
-            ("g" "morg-todos-refresh")
-            ("q" "quit-window"))
-    'doc "Every unfinished TODO heading and checkbox item from morg-agenda-files."))
-
-(define-command "morg-todos" "Show all unfinished TODOs from your Morg files"
-  (lambda ()
-    (buffer-create *morg-todos-buffer*)
-    (switch-to-buffer! *morg-todos-buffer*)
-    (set-mode! "morg-todos-mode")
-    *morg-todos-buffer*))
 
 (define-key "mode-specific-map" "A" "morg-agenda")   ; C-c a is the agent prefix
 

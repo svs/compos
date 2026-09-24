@@ -1049,6 +1049,17 @@
             // C-g inside the app gives the keyboard back to the editor
             const sink = document.getElementById("kb-sink");
             if (sink) sink.focus();
+          } else if (m.compos === "key") {
+            // An editor key the app does not keep (Cmd-arrows): take the
+            // keyboard back and run it through the editor's dispatcher.
+            const sink = document.getElementById("kb-sink");
+            if (sink) sink.focus();
+            window.dispatchEvent(new KeyboardEvent("keydown", {
+              key: m.key, code: m.code,
+              shiftKey: !!m.shiftKey, altKey: !!m.altKey,
+              metaKey: !!m.metaKey, ctrlKey: !!m.ctrlKey,
+              bubbles: true, cancelable: true
+            }));
           } else if (m.compos === "request-focus") {
             // A cross-origin app cannot focus its own iframe element.
             // The parent grants focus only to the selected app window.
@@ -1063,6 +1074,9 @@
           }
         };
         window.addEventListener("message", this.onMsg);
+        // the page loads the buffer as it is now: a message already
+        // posted is in it, so only a later one is sent in
+        this.posted = this.el.dataset.appMessage;
         this.onLoad = () => this.apply();
         this.el.addEventListener("load", this.onLoad);
       },
@@ -1077,6 +1091,13 @@
         const w = this.el.contentWindow;
         if (!w) return;
         w.postMessage({ compos: "scroll", top: top }, "*");
+        // app-post! (preview.scm): the package's news, with no reload
+        const msg = this.el.dataset.appMessage;
+        if (msg && msg !== this.posted) {
+          this.posted = msg;
+          try { w.postMessage({ compos: "message", data: JSON.parse(msg).data }, "*"); }
+          catch (e) { console.warn("app-message", e); }
+        }
       }
     },
     // a block list that follows its tail (a chat transcript): it

@@ -1,11 +1,12 @@
 // sidepanel.js — this site's chat, beside the page.
 //
-// One chat per site, in the editor's *browse* group. The panel names the
-// page it sits beside; the editor finds or makes the chat, remembers the tab
-// so the chat can go back to it, and answers the chat's name. The panel then
-// shows that buffer as the editor draws it, through its buffer link.
-// The panel belongs to the tab it was opened on. When that tab goes to
-// another site, the panel shows that site's chat.
+// One chat per tab, in the editor's *browse* group. The panel names the
+// tab it sits beside; the editor finds or makes that tab's chat, remembers
+// where the tab is now, and answers the chat's name. The panel then shows
+// that buffer as the editor draws it, through its buffer link.
+// When the tab navigates, often because the chat sent it, the panel only
+// tells the editor the new URL. The chat on screen is never reloaded, so it
+// keeps its focus.
 
 const frame = document.getElementById("chat");
 const note = document.getElementById("note");
@@ -13,10 +14,11 @@ const tabId = Number(new URLSearchParams(location.search).get("tab")) || null;
 let shown = null;
 
 function say(text) {
+  // a chat on screen stays there; a failed update is not worth losing it
+  if (shown) return console.warn(text);
   note.textContent = text;
   note.hidden = false;
   frame.hidden = true;
-  shown = null;
 }
 
 async function follow() {

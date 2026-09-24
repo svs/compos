@@ -1193,9 +1193,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `morg-show-source` |  | Fill every :show-source block from its files |
 | `morg-tangle` |  | Write all Morg blocks with :tangle PATH headers |
 | `morg-todo` |  | Cycle the TODO state of the heading or checkbox at point |
-| `morg-todos` |  | Show all unfinished TODOs from your Morg files |
-| `morg-todos-refresh` |  | Re-read all Morg TODO files |
-| `morg-todos-visit` |  | Open the TODO at point |
 | `morg-widen` |  | Show the complete Morg document |
 | `write` |  | Enter the writing workspace |
 | `writing-mode` |  | Toggle writing mode in the current buffer |

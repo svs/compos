@@ -186,6 +186,30 @@
                    "mode setup rebuilds the derived local after restore")
       (t--prompt-cleanup buf))))
 
+(deftest 'the-last-fragment-of-a-name-wins
+  "a later fragment replaces an earlier one of the same name, in its place"
+  (lambda ()
+    (check-equal! (prompt-section-parts
+                    '(("scope" "file") ("todo" "") ("mode" "m") ("scope" "mine")))
+                  '(("scope" "mine") ("mode" "m"))
+                  "one section per name, empty ones dropped")))
+
+(deftest 'a-config-turns-one-section-off-and-on
+  "the switch holds whether it runs before or after the part it names"
+  (lambda ()
+    (let ((buf (test-buffer! "*prompt-switch*" "")))
+      (prompt-section-off! buf "todo")
+      (prompt-section-off! buf 'todo)
+      (check-equal! (prompt-disabled-parts buf) '("todo") "off once, by string or symbol")
+      (prompt-part-set! buf "todo" "the list")
+      (prompt-part-set! buf "other" "kept")
+      (check-equal! (prompt-parts-enabled buf (prompt-buffer-parts buf))
+                    '(("other" "kept"))
+                    "a part added after the switch stays out")
+      (prompt-section-on! buf "todo")
+      (check-equal! (prompt-disabled-parts buf) '() "on again")
+      (t--prompt-cleanup buf))))
+
 (deftest 'a-direct-chat-keeps-its-first-prompt-until-refresh
   "source changes do not alter the wire prompt during a conversation"
   (lambda ()

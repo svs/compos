@@ -2,6 +2,12 @@
 
 Welcome to the Compos tutorial.
 
+If you want to use AI, hold the META key (usually ALT or Option) and type x.
+Then type setup-ai-guide and press Return. We write this as M-x setup-ai-guide.
+That guide explains models, chats, agents, logins, and a first reply. You can
+do the editor lessons below without a model. Return to the guide before the
+Agents exercises.
+
 This is your personal copy of the tutorial. Later we will tell you to change
 it. Do not worry if you change it before we say so. That is called "editing",
 and editing is what Compos is for.
@@ -490,6 +496,10 @@ application.
 
 ## Agents
 
+Before you try this section, type M-x setup-ai-guide. Choose a connector,
+complete its login or key setup, and test one reply in a chat. Return here
+with C-h t. A connector in a list may still need authentication.
+
 In most programs, a chat sidebar and an application share a screen but stay
 separate systems. The assistant sees summaries and a few narrow actions, while
 the application keeps the real state somewhere else.
@@ -498,8 +508,9 @@ Compos begins with one environment. The application and the conversation are
 buffers in the same group. You and the agent act on the same named commands
 and the same state.
 
-The commands in this section are optional. They need a model provider, and
-your provider may charge for the requests they send.
+The commands in this section are optional. Your provider may charge for
+requests. A chat is the conversation buffer. A model writes responses. An
+agent uses that model with tools to work in Compos.
 
   M-x chat-new             Start a new chat buffer
   C-c b                    Choose the chat's connector, model, effort, tools
@@ -512,7 +523,8 @@ your provider may charge for the requests they send.
 
 A connector is how Compos reaches an agent or model. The connector picker
 shows the supported connectors below. A connector works when its program and
-credentials are available on this machine.
+credentials are available, or when its browser model can run. Test a reply
+before you rely on the connector.
 
   codex-app-server  Codex through codex app-server. It uses the Codex CLI's
                     existing ChatGPT login; it needs no API key.
@@ -538,8 +550,8 @@ connector is deprecated and is not shown in the picker.
    Press ESC to give the setup to the chat.
    Type a message and press RET to send it.
 
-If codex login status says you are logged in using ChatGPT, that chat uses the
-same account. Otherwise, run codex login in a terminal first.
+If you chose Codex, sign in with codex login in a terminal first. The AI
+starter guide explains how to check the login when a chat returns 401.
 
 >> From TUTORIAL, type M-x chat-companion-ask and ask: "What is the main idea
    of the section named Windows?"

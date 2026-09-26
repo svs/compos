@@ -5,7 +5,7 @@ Bash, curl, tar, and GNU coreutils are required.
 
 ## Install with one command
 
-Run this command in a terminal:
+Run this command in a Bash or Zsh terminal:
 
 ```bash
 COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
@@ -22,12 +22,33 @@ The installer also shows the release URL and the start command.
 The script uses `svs/compos` when this variable is not set.
 Upstream has no Linux release at this time.
 
+## Add Compos to PATH
+
+Run this command in the terminal where you will start Compos:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+This setting applies to the current terminal.
+The installer also prints the PATH command for the selected installation directory.
+
+To keep this setting for future terminals, add the same line to your shell startup file:
+
+| Shell | Startup file |
+| --- | --- |
+| Bash | `$HOME/.bashrc` |
+| Zsh | `${ZDOTDIR:-$HOME}/.zshrc` |
+
+Then open a new terminal.
+Run `command -v compos` to show the executable path.
+
 ## Start Compos
 
 1. Run this command:
 
    ```bash
-   COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 "$HOME/.local/bin/compos"
+   COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 compos
    ```
 
 2. Wait for `http://localhost:4004` to appear in the terminal.
@@ -77,7 +98,8 @@ To install Compos in `$HOME/apps/compos/bin`, run this command:
 COMPOS_BIN_DIR="$HOME/apps/compos/bin" COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
 ```
 
-Use the start command that the installer shows for this directory.
+Run the PATH command that the installer shows for the selected directory.
+Then use `compos` to start the installed executable.
 
 ## Requirements
 
@@ -144,13 +166,14 @@ Your settings and saved data remain in place.
 | `Linux asset ... is unavailable` | Make sure that the release contains both files listed above. |
 | `Checksum verification failed` | Run the installation command again. |
 | `Use glibc 2.39 or later` | Use a supported Linux system. |
+| `compos: command not found` | Run the PATH command shown above. |
 
 If a checksum failure occurs again, report the release URL and terminal message.
 
 If port 4004 is in use, start Compos with different ports:
 
 ```bash
-COMPOS_BIND=127.0.0.1 COMPOS_PORT=4014 COMPOS_APP_PORT=4015 "$HOME/.local/bin/compos"
+COMPOS_BIND=127.0.0.1 COMPOS_PORT=4014 COMPOS_APP_PORT=4015 compos
 ```
 
 Then open <http://localhost:4014>.

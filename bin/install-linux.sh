@@ -14,7 +14,8 @@ Environment:
 Example:
   COMPOS_REPO=harsh098/compos bash install-linux.sh
 
-The script installs Compos. It does not start the server.
+The script installs Compos. It prints the command to add its directory to PATH.
+It does not start the server.
 HELP
 }
 
@@ -35,6 +36,7 @@ bin_dir="${COMPOS_BIN_DIR:-$HOME/.local/bin}"
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
   die 'COMPOS_REPO must have the form owner/repository.'
 [[ -n "$bin_dir" ]] || die 'COMPOS_BIN_DIR must not be empty.'
+[[ "$bin_dir" != *:* ]] || die 'COMPOS_BIN_DIR must not contain a colon.'
 
 [[ "$(uname -s)" == Linux ]] || die 'This installer supports Linux only.'
 [[ "$(uname -m)" == x86_64 ]] || die 'This installer supports x86_64 only.'
@@ -119,6 +121,8 @@ staged_binary=''
 
 printf '\nInstalled Compos at %s/compos\n' "$bin_dir"
 printf 'Source: %s\n' "$release_url"
+printf '\nTo add Compos to PATH in this terminal, run:\n'
+printf 'export PATH=%q:"$PATH"\n' "$bin_dir"
 printf '\nTo start Compos, run:\n'
-printf 'COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 %q\n' "$bin_dir/compos"
+printf 'COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 compos\n'
 printf '\nOpen http://localhost:4004 in a browser after the server starts.\n'

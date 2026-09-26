@@ -1,137 +1,110 @@
 # Install Compos on Linux
 
-This guide installs the Linux x86_64 release of Compos.
+Use Linux x86_64 with glibc 2.39 or later.
+Bash, curl, tar, and GNU coreutils are required.
 
-The installer downloads a released executable. It does not build Compos from source.
-It checks the archive and executable with SHA-256 checksums before installation.
-It does not start the server.
+## Install with one command
 
-## 1. Check the requirements
-
-Use Linux on an x86_64 processor.
-Use glibc 2.39 or later.
-The release is built on Ubuntu 24.04.
-Alpine Linux, ARM Linux, macOS, and Windows are not supported by this installer.
-
-Use Bash, curl, tar, and GNU coreutils.
-A C compiler, Elixir, Erlang, Rust, Zig, and the GitHub CLI are not required for this installation.
-
-If the required commands are missing, install them with your system package manager.
-
-For Ubuntu 24.04 or later, run:
+Run this command in a terminal:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y bash curl tar coreutils libc-bin libtinfo6 libstdc++6
+COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
 ```
 
-For Fedora, run:
+The command installs Compos in `$HOME/.local/bin/compos`.
+Administrator access is not required for this directory.
+The installer downloads the release and does two SHA-256 checksum checks before installation.
+
+The terminal shows `Installed Compos at` when installation is complete.
+The installer also shows the release URL and the start command.
+
+**Release source:** This command selects `harsh098/compos` through `COMPOS_REPO`.
+The script uses `svs/compos` when this variable is not set.
+Upstream has no Linux release at this time.
+
+## Start Compos
+
+1. Run this command:
+
+   ```bash
+   COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 "$HOME/.local/bin/compos"
+   ```
+
+2. Wait for `http://localhost:4004` to appear in the terminal.
+3. Open <http://localhost:4004> in a browser.
+
+Keep the terminal open while you use Compos.
+The first start extracts the runtime into the user data directory.
+
+To stop Compos, press `Ctrl+C` in the server terminal.
+To start Compos again, run the same start command.
+
+## Select the release source
+
+`COMPOS_REPO` selects the GitHub repository that supplies the release.
+The default is `svs/compos`.
+The installer does not select another repository automatically.
+
+The installation command above uses `harsh098/compos` because that repository has a Linux release.
+
+If upstream has a Linux release, run this command to use the default:
+
+```bash
+bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
+```
+
+If `COMPOS_REPO` is already set, run `unset COMPOS_REPO` first.
+
+To use another mirror, replace `harsh098/compos` in the environment variable with that mirror's repository name.
+
+The selected repository must have a published release marked Latest.
+That release must contain these two files:
+
+- `compos-linux-x86_64.tar.gz`
+- `compos-linux-x86_64.tar.gz.sha256`
+
+The installer downloads both files from the same release.
+It installs the executable only after both checksum checks pass.
+
+## Select the installation directory
+
+`COMPOS_BIN_DIR` selects the directory for the executable.
+The default is `$HOME/.local/bin`.
+
+To install Compos in `$HOME/apps/compos/bin`, run this command:
+
+```bash
+COMPOS_BIN_DIR="$HOME/apps/compos/bin" COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
+```
+
+Use the start command that the installer shows for this directory.
+
+## Requirements
+
+The Linux release is built on Ubuntu 24.04.
+Use glibc 2.39 or later.
+This installer supports Linux x86_64 only.
+
+The executable contains the application and its runtime.
+A C compiler, Elixir, Erlang, Rust, Zig, and the GitHub CLI are not required for installation.
+
+If a required command is missing, install the system packages.
+
+For Ubuntu 24.04 or later, run this command:
+
+```bash
+sudo apt-get update && sudo apt-get install -y bash curl tar coreutils libc-bin libtinfo6 libstdc++6
+```
+
+For Fedora, run this command:
 
 ```bash
 sudo dnf install -y bash curl tar coreutils glibc ncurses-libs libstdc++
 ```
 
-## 2. Select the release repository
+Then run the installation command again.
 
-The installer uses `svs/compos` when `COMPOS_REPO` is not set.
-It does not select another repository automatically.
-
-Set `COMPOS_REPO` to use a mirror.
-For example, `COMPOS_REPO=harsh098/compos` selects this fork.
-
-The selected repository must have a published release marked Latest.
-That release must contain these assets:
-
-- `compos-linux-x86_64.tar.gz`
-- `compos-linux-x86_64.tar.gz.sha256`
-
-**Current availability:** `svs/compos` has no published Linux release.
-Use `harsh098/compos` for installation now.
-
-## 3. Install the available Linux release
-
-Copy this complete block into a terminal:
-
-```bash
-(
-  set -eu
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl --fail --silent --show-error --location \
-    https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh \
-    --output "$installer"
-  COMPOS_REPO=harsh098/compos bash "$installer"
-)
-```
-
-The block downloads the [Linux installer](bin/install-linux.sh) from this fork.
-The environment variable selects this fork's release assets.
-
-The installer performs these operations:
-
-1. Check the operating system, processor, glibc version, and required commands.
-2. Find the latest release in the selected repository.
-3. Download the archive and its checksum from that release.
-4. Check the archive checksum.
-5. Extract the executable.
-6. Check the executable checksum.
-7. Install the executable in `$HOME/.local/bin/compos`.
-8. Remove the temporary download files.
-
-The installer stops if a command or checksum check fails.
-It does not require administrator access for the default installation directory.
-
-After a successful installation, the terminal shows the executable path and release URL.
-
-### Use the upstream default
-
-When upstream publishes compatible Linux assets, run the downloaded script without `COMPOS_REPO`:
-
-```bash
-bash bin/install-linux.sh
-```
-
-Run this command from a checkout that contains the installer.
-If `COMPOS_REPO` is already set in your terminal, remove it first:
-
-```bash
-unset COMPOS_REPO
-bash bin/install-linux.sh
-```
-
-### Use another mirror or installation directory
-
-Set `COMPOS_REPO` to select a release repository.
-Set `COMPOS_BIN_DIR` to select the executable directory.
-
-For example, run this command from the checkout:
-
-```bash
-COMPOS_REPO=harsh098/compos \
-COMPOS_BIN_DIR="$HOME/apps/compos/bin" \
-bash bin/install-linux.sh
-```
-
-The installer prints the correct start command for the selected directory.
-
-## 4. Start Compos
-
-For the default installation directory, run:
-
-```bash
-COMPOS_BIND=127.0.0.1 COMPOS_PORT=4004 "$HOME/.local/bin/compos"
-```
-
-Keep the terminal open while you use Compos.
-The first start extracts the bundled runtime into the user data directory.
-
-Wait for the terminal to show `http://localhost:4004`.
-Then open <http://localhost:4004> in a browser.
-
-To stop Compos, press `Ctrl+C` in the server terminal.
-To start Compos again, run the same start command.
-
-## 5. Find the installed files
+## Installed files
 
 | Item | Default location |
 | --- | --- |
@@ -140,64 +113,44 @@ To start Compos again, run the same start command.
 | Extracted runtime | `$HOME/.local/share/.burrito` |
 
 The runtime location can change when `XDG_DATA_HOME` is set.
-Set `COMPOS_HOME` to select another directory for Compos settings and saved data.
+Set `COMPOS_HOME` to use another directory for settings and saved data.
 
-The installer changes the executable.
-It keeps your settings and saved data.
+## Install an update
 
-## 6. Install an update
+1. Stop Compos.
+2. Run the installation command again.
+3. Start Compos.
 
-Stop Compos before you install an update.
-Run the installation block in section 3 again.
-Then run the start command in section 4.
+The installer replaces the executable after the checksum checks pass.
+Your settings and saved data remain in place.
 
-The installer replaces the executable after both checksum checks pass.
+## Remove Compos
 
-## 7. Remove the executable
+1. Stop Compos.
+2. Run this command:
 
-Stop Compos.
-Then run:
-
-```bash
-rm -f "$HOME/.local/bin/compos"
-```
+   ```bash
+   rm -f "$HOME/.local/bin/compos"
+   ```
 
 If you selected another installation directory, remove `compos` from that directory.
 Your settings and saved data remain in place.
 
-## Troubleshooting
+## Correct installation problems
 
-### No published release exists
+| Terminal message | Action |
+| --- | --- |
+| `No published release exists` | Set `COMPOS_REPO` to a repository with a Linux release. |
+| `Linux asset ... is unavailable` | Make sure that the release contains both files listed above. |
+| `Checksum verification failed` | Run the installation command again. |
+| `Use glibc 2.39 or later` | Use a supported Linux system. |
 
-Check `COMPOS_REPO`.
-The default is `svs/compos`.
-Set `COMPOS_REPO=harsh098/compos` to use the available Linux release.
+If a checksum failure occurs again, report the release URL and terminal message.
 
-### A Linux asset is unavailable
-
-Check the selected release on GitHub.
-It must contain both asset names from section 2.
-The installer does not use prereleases through the Latest release link.
-
-### A checksum check fails
-
-Do not start the downloaded executable.
-Run the installer again to download a new copy.
-If the check fails again, report the release URL and error message.
-
-### The server cannot use port 4004
-
-Stop the other Compos process, or select different ports:
+If port 4004 is in use, start Compos with different ports:
 
 ```bash
-COMPOS_BIND=127.0.0.1 COMPOS_PORT=4014 COMPOS_APP_PORT=4015 \
-  "$HOME/.local/bin/compos"
+COMPOS_BIND=127.0.0.1 COMPOS_PORT=4014 COMPOS_APP_PORT=4015 "$HOME/.local/bin/compos"
 ```
 
 Then open <http://localhost:4014>.
-
-### The browser cannot connect
-
-Keep the server terminal open.
-Check that Compos has started without a fatal error.
-Use the URL for the port selected in the start command.

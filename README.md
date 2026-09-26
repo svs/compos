@@ -4,7 +4,13 @@
 
 ## Install on Linux
 
-Use the [Linux installation guide](INSTALLATION.md) to install the released executable.
+Run this command to install the Linux x86_64 release:
+
+```bash
+COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
+```
+
+Use the [Linux installation guide](INSTALLATION.md) for requirements, start commands, and other installation directories.
 
 ## on the plight of the modern worker, and some solutions
 

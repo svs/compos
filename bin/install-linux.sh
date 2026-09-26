@@ -58,7 +58,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'Check the latest release in %s.\n' "$repo"
+printf 'Read the latest release in %s.\n' "$repo"
 response="$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 \
   --head --output /dev/null --write-out '%{http_code} %{redirect_url}' \
   "https://github.com/$repo/releases/latest")" ||

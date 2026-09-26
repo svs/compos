@@ -38,7 +38,7 @@ defmodule Compos.Core.Agent do
   # the result within milliseconds, so this only expires when the adapter
   # lost the idle it needed. Scheme overrides it per turn through the turn
   # context (steer-settle-seconds); 0 turns the recovery off.
-  @settle_grace_ms 45_000
+  @settle_grace_ms 180_000
 
   # How long a turn waits for the connector to say ANYTHING. A connector
   # that takes the prompt and emits no event at all cannot end its own

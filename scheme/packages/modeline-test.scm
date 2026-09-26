@@ -750,6 +750,20 @@
                     "a preset names the whole setup and stands alone")
       (buffer-kill! buf))))
 
+(deftest 'tool-presets-show-on-the-mode-line-as-icons
+  "each preset is one glyph; compos is drawn as the logo by its class"
+  (lambda ()
+    (let ((buf "*chat:zz-modeline-presets*"))
+      (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
+      (check-false! (assoc "tools" (dash--modeline-facts buf #f)) "no presets, no fact")
+      (preset-icon! 'zz-web "W")
+      (buffer-set-local! buf 'chat-presets '(zz-web compos zz-other))
+      (let ((f (assoc "tools" (dash--modeline-facts buf #f))))
+        (check-equal! (cadr f) "W Z" "a registered glyph, else the first letter")
+        (check-equal! (caddr f) "preset-compos" "compos wears the logo"))
+      (buffer-kill! buf))))
+
 (deftest 'the-api-lane-adds-a-usage-fact-once-a-turn-has-billed
   "tokens, cost and cache hit rate join the mode line, ranked to shed first"
   (lambda ()

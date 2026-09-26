@@ -132,10 +132,8 @@
          ;; Only a chat that holds eval-scheme can load a skill.
          (code-active?
            (and compos? (minor-mode-on? buf "code-agent-mode")))
-         (sk (if (and compos? (boundp (quote skills-note)))
-                 (if (and code-active? (boundp (quote skills-note-without)))
-                     (skills-note-without "code-editing")
-                     (skills-note))
+         (sk (if (and compos? (boundp (quote skills-note-for)))
+                 (skills-note-for buf (and code-active? "code-editing"))
                  ""))
          (mode-parts
            (if (boundp (quote prompt-buffer-parts))

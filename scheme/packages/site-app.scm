@@ -716,7 +716,13 @@
   (string-append url (if (string-contains? url "?") "&" "?") param "=" id))
 
 (define (site-app-fetch-html! url k)
-  (browser-call "fetch" (list 'url url)
+  ;; Each Chrome profile is its own socket, and a call that names nothing goes
+  ;; to whichever profile registered last -- often not the one logged in to the
+  ;; site. The frame's own window names the profile this editor sits in.
+  (browser-call "fetch"
+    (append (list 'url url)
+            (let ((window (chrome-window-resolve!)))
+              (if window (list 'window window) '())))
     (lambda (reply)
       (let ((html (plist-get reply 'html)))
         (k (and (string? html) (equal? (plist-get reply 'status) 200) html))))))

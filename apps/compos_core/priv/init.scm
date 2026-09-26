@@ -141,6 +141,9 @@
 ;; a group's shared config lives in its home and reaches its buffers as they
 ;; join it; it may name a bundle, so it loads after llm-config
 (load "group-config.scm")
+;; the shared todo list: it sets a prompt part on every chat, so it follows
+;; prompts, chat and the event log
+(load "todo.scm")
 (load "sockets.scm")
 (load "switch.scm")
 (load "handheld.scm")

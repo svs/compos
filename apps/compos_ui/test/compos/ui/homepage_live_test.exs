@@ -12,7 +12,7 @@ defmodule Compos.Ui.HomepageLiveTest do
     assert html =~ "COMPOS / QUIET COMPUTING ENVIRONMENT"
     assert html =~ "compos-wordmark"
     assert html =~ "compos.in · © 2026 Compos"
-    assert html =~ "/images/compos-emblem-v1.png"
+    assert html =~ "/images/compos-logo.png"
     assert html =~ "/images/compos-study-symbolic-composition-v1.png"
     assert html =~ "Harness for Power Users."
     assert html =~ "It&#39;s like Emacs, but it&#39;s on the BEAM."

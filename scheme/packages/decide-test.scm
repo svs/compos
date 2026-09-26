@@ -75,3 +75,39 @@
     (let ((standard (decide--laya->standard #f)))
       (check-equal! (plist-get standard 'answers) '() "no rows")
       (check-equal! (plist-get standard 'usage) '(0 0 laya) "and nothing spent"))))
+
+(deftest 'decide-shell-gate-follows-the-policy
+  "a recognised kind gets what decide-shell-policy says; a build passes, a read is refused"
+  (lambda ()
+    (let ((seen decide--shell-seen))
+      (set! decide--shell-seen
+            (list (list "zz-build" 'build) (list "zz-read" 'read) (list "zz-edit" 'edit)))
+      (check-equal! (decide-shell-verdict "zz-build") #f "a build runs")
+      (check-equal! (decide-shell-verdict "zz-read") (decide-refusal 'read) "a read is refused")
+      (check-equal! (decide-shell-verdict "zz-edit") (decide-refusal 'edit) "an edit is refused")
+      (set! decide--shell-seen seen))))
+
+(deftest 'decide-shell-gate-hook-lets-plain-scheme-through
+  "a payload with no shell command never reaches a backend"
+  (lambda ()
+    (check-equal! (decide-shell-gate-hook "eval-scheme" '(code "(+ 1 2)")) #f "no shell, no verdict")
+    (check-equal! (decide-shell-gate-hook "read-file" '(path "x")) #f "another tool is not gated here")))
+
+(deftest 'decide-allow-git-silences-only-git
+  "with decide-allow-git on, git verbs stop asking and the rest still ask"
+  (lambda ()
+    (let ((was decide-allow-git))
+      (set! decide-allow-git #f)
+      (check-equal! (and (permission-denied-verb? "git merge --ff-only main") #t) #t "git merge asks by default")
+      (set! decide-allow-git #t)
+      (check-equal! (permission-denied-verb? "git merge --ff-only main") #f "git merge runs when allowed")
+      (check-equal! (permission-denied-verb? "git push origin main") #f "so does a push")
+      (check-equal! (and (permission-denied-verb? "sendmail bob") #t) #t "mail still asks")
+      (set! decide-allow-git was))))
+
+(deftest 'decide-refusal-words
+  "every refusal says what to do next"
+  (lambda ()
+    (check-equal! (string-contains? (decide-refusal 'denied) "ask what to do instead") #t "denied")
+    (check-equal! (string-contains? (decide-refusal 'policy "rm -rf") "(rm -rf)") #t "policy names its rule")
+    (check-equal! (string-contains? (decide-refusal 'read) "(grep PATTERN") #t "read names the editor call")))

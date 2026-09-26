@@ -305,3 +305,164 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
   "Backends 'decide' tries in order.")
 (public! 'decide-default
   "((purpose . backend-or-model) ...) purpose routing.")
+
+;; ── Refusals ───────────────────────────────────────────────
+;;
+;; Every no the editor says to an agent is decided here, in one place:
+;;
+;; - The permission verbs. A tool call, a command or a shell line whose
+;;   text names an act that cannot be taken back stops to ask, whatever
+;;   the chat's stance. permit? in agent-permissions.scm asks
+;;   permission-denied-verb?.
+;; - The shell gate. The shell commands inside an eval-scheme payload.
+;;   decide recognises what they are for, and decide-shell-policy says
+;;   what each kind gets. No list of literal commands: a build is a build
+;;   however it is spelled.
+;; - The words of every refusal, (decide-refusal KIND [DETAIL]), so the
+;;   agent reads one voice and is told what to do next.
+;;
+;; No key, no network, no answer: the shell gate opens. A classifier that
+;; cannot be reached must never become a lock on the editor.
+
+(effects! '(read))
+
+(defcustom 'decide-allow-git #f
+  "Let agents run every git command without asking: the ones that rewrite the work tree, and a push."
+  'group 'decide)
+
+(define *permission-deny-patterns*
+  (list
+        ;; Git that rewrites the work tree is a file write by another name:
+        ;; it lands text the editor never saw, and it can lose an unsaved
+        ;; buffer. Reading git, staging it, and committing it change no
+        ;; working file, so they stay out of this list.
+        "git[-_ ]+(checkout|restore|stash|clean|apply|pull|merge|rebase|revert)"
+        "git[-_ ]+reset[-_ ]+--(hard|merge)"
+        "send[-_ ]*mail" "sendmail" "mail[-_ ]*send" "smtp"
+        "send[-_ ]*(message|email|sms|text)"
+        "(permanently|forever)[-_ ]*delete" "delete[-_ ]*(permanently|forever)"
+        "empty[-_ ]*trash" "trash[-_ ]*empty" "expunge"
+        "rm[-_ ]+-[a-z]*[rf]"
+        ;; user ruling 2026-09-02: a push through jj is always allowed;
+        ;; agent identity rides in jj descriptions, never in authors.
+        "(?<!jj[-_ ])git[-_ ]+push" "force[-_ ]*push"
+        "\\bpublish\\b" "\\bdeploy\\b"))
+
+(define (decide--git-pattern? p) (string-contains? p "git[-_ ]+"))
+
+(define (permission-denied-verb? text)
+  "(permission-denied-verb? TEXT) — the deny pattern TEXT names, or #f; with decide-allow-git on, git never asks"
+  (let ((t (string-downcase text)))
+    (let loop ((ps *permission-deny-patterns*))
+      (cond ((null? ps) #f)
+            ((and decide-allow-git (decide--git-pattern? (car ps))) (loop (cdr ps)))
+            ((re-match? (car ps) t) (car ps))
+            (else (loop (cdr ps)))))))
+
+(effects! '(pure))
+
+(define decide--allowed-near-tree
+  "git, jj and the project's own build and test tools are the only shell commands allowed near the work tree.")
+
+(define (decide-refusal kind &optional detail)
+  "(decide-refusal KIND [DETAIL]) — the words of one refusal: edit, read, denied, or policy with DETAIL naming what the policy matched"
+  (cond ((equal? kind 'edit)
+         (string-append
+           "refused by the shell gate: a shell command may not write files. Edit the live buffer instead — "
+           "(find-file PATH), then (code-replace! BUF LINE NEW), (code-sexp-replace! BUF ANCHOR NEW) or "
+           "(buffer-replace! BUF OLD NEW), and save it with "
+           "(with-current-buffer BUF (lambda () (run-command \"save-buffer\"))). "
+           "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
+           "the catalog answers for the editor as it is now, and this list does not. "
+           decide--allowed-near-tree))
+        ((equal? kind 'read)
+         (string-append
+           "refused by the shell gate: a shell command may not read or search files. Use the editor — "
+           "(grep PATTERN [ROOT]) to search the project, (ls [DIR]) to list a directory, and "
+           "(find-file PATH) then (code-outline BUF), (code-read BUF LINE) or (buffer-text BUF) to read one. "
+           "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
+           "the catalog answers for the editor as it is now, and this list does not. "
+           decide--allowed-near-tree))
+        ((equal? kind 'denied)
+         "refused: denied in the chat. Do not retry it — ask what to do instead.")
+        (else
+         (string-append
+           "refused: compos's permission policy did not allow this (" (or detail "no rule") "). "
+           "Ask the user to run it, or to approve it in the chat."))))
+
+(effects! '(read external execute))
+
+(defcustom 'decide-shell-gate #t
+  "Recognise the shell commands in an agent's eval-scheme payload, and refuse the kinds decide-shell-policy refuses."
+  'group 'decide)
+
+(defcustom 'decide-shell-policy
+  '((edit refuse) (read refuse) (build allow) (git allow) (jj allow) (other allow))
+  "What each kind of shell command gets, allow or refuse. The kinds: edit writes files, read reads or searches them, build runs the project's own build, test or format tool, git and jj run version control, other touches no file."
+  'group 'decide)
+
+(define decide--shell-primitives "shell-command->string|start-process!")
+
+(define (decide--shell-criteria)
+  (list 'edit "A shell command creates, writes, moves, renames or deletes a file or directory by itself: a > or >> redirection, sed -i, tee, cp, mv, rm, mkdir, touch, ln, patch, or an install step."
+        'read "A shell command reads or searches files or directories: cat, head, tail, less, sed -n, ls, find, grep, rg, ag, wc, or a pipeline that feeds one of those a path."
+        'build "A shell command builds, tests, formats or type-checks the project with the project's own tool: mix compile, mix test, mix format, cargo build, cargo test, npm test, make, go test, and the like, with any environment variables, options, or a pipe of its own output into head or tail. It writes only that tool's own artifacts."
+        'git "Every shell command in it is a git invocation."
+        'jj "Every shell command in it is a jj invocation."
+        'other "No shell command in it reads or writes any file: date, uname, echo, env, which, uptime, a network call, and the like."))
+
+(define (decide--shell-questions)
+  (list 'kind
+        (decide-choice
+          (string-append
+            "This is Scheme an editor agent wants to evaluate. Read only the shell commands it runs "
+            "and say which description fits them. When more than one fits, choose the most restrictive: "
+            "edit first, then read, then build, then git or jj, then other.")
+          (decide--shell-criteria))))
+
+(define (decide--choice-symbol v)
+  (cond ((symbol? v) v)
+        ((and (string? v) (not (equal? v ""))) (string->symbol v))
+        (else #f)))
+
+(define (decide-shell-kind code)
+  "(decide-shell-kind CODE) — what the shell commands in CODE are for: edit, read, build, git, jj or other; #f when no backend answers"
+  (let* ((reply (ignore-errors (lambda () (decide code (decide--shell-questions) 'purpose 'fast))))
+         (row (and reply (assoc 'kind (plist-get reply 'answers)))))
+    (and row (decide--choice-symbol (plist-get (cadr row) 'choice)))))
+
+;; One payload, one kind, kept: an agent retries the same probe more
+;; often than it writes a new one, and a kept kind costs no round trip.
+;; The kind is kept, not the verdict, so a policy change counts at once.
+(define decide--shell-seen '())
+
+(define (decide--shell-kind-seen code)
+  (let ((hit (assoc code decide--shell-seen)))
+    (if hit
+        (cadr hit)
+        (let ((kind (decide-shell-kind code)))
+          ;; a backend that did not answer is not an answer: ask again next time
+          (when kind
+            (set! decide--shell-seen (cons (list code kind) decide--shell-seen))
+            (when (> (length decide--shell-seen) 200)
+              (set! decide--shell-seen (list-head decide--shell-seen 200))))
+          kind))))
+
+(define (decide-shell-verdict code)
+  "(decide-shell-verdict CODE) — the refusal the shell gate gives CODE, or #f to let it run"
+  (let* ((kind (decide--shell-kind-seen code))
+         (rule (and kind (assq kind decide-shell-policy))))
+    (and rule (equal? (cadr rule) 'refuse) (decide-refusal kind))))
+
+;; tool-call-hook: #f lets the call through, a string aborts it and becomes
+;; the result the agent reads instead
+(define (decide-shell-gate-hook name args)
+  "(decide-shell-gate-hook NAME ARGS) — tool-call-hook: refuse an eval-scheme payload whose shell commands decide-shell-policy refuses"
+  (and decide-shell-gate
+       (equal? name "eval-scheme")
+       (let ((code (plist-get args 'code)))
+         (and (string? code)
+              (re-match? decide--shell-primitives code)
+              (decide-shell-verdict code)))))
+
+(add-hook! 'tool-call-hook 'decide-shell-gate-hook)

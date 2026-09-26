@@ -21,8 +21,8 @@ defmodule Compos.Ui.Layouts do
         <meta name="boot-id" content={@boot_id} />
         <title>{@page_title}</title>
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="icon" type="image/png" href="/icons/compos-192.png" />
-        <link rel="apple-touch-icon" href="/icons/compos-192.png" />
+        <link rel="icon" type="image/png" href="/images/compos-logo.png" />
+        <link rel="apple-touch-icon" href="/images/compos-logo.png" />
         <link
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"

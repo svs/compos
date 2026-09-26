@@ -150,6 +150,47 @@
     (skills-scan!)
     (check-false! (assoc "zz-user-skill" (skills)) "and it leaves no row")))
 
+(deftest 'codex-finds-a-projects-own-skill-and-the-config-turns-it-off
+  "a project's .agents/skills is foreign to the catalog, and config.toml disables it by path"
+  (lambda ()
+    (let* ((dir (string-append (compos-home) "/zz-codex-project"))
+           (file (string-append dir "/.agents/skills/zz-foreign/SKILL.md")))
+      (write-file! file "---\nname: zz-foreign\ndescription: not ours\n---\n")
+      (check-true! (member file (codex-foreign-skills dir)) "the project's skill is found")
+      (let ((toml (codex-config-toml (list file))))
+        (check-contains! toml "[[skills.config]]" "one entry")
+        (check-contains! toml (string-append "path = \"" file "\"") "by its path")
+        (check-contains! toml "enabled = false" "turned off"))
+      (delete-file! file))))
+
+(deftest 'a-group-skill-reaches-only-the-groups-chats
+  "<group-home>/skills joins the index and (skill NAME) inside the group, and nowhere else"
+  (lambda ()
+    (let* ((id (group-record-create! "zz-skills-group"))
+           (file (string-append (group-home-dir id) "/skills/zz-group-skill/SKILL.md"))
+           (inside "*zz-skills-inside*")
+           (outside "*zz-skills-outside*"))
+      (write-file! file
+                   "---\nname: zz-group-skill\ndescription: A group skill.\n---\n\nThe group's own.\n")
+      (skills-scan!)
+      (buffer-create inside)
+      (buffer-add-group! inside id)
+      (buffer-create outside)
+      (check-contains! (skills-note-for inside #f) "zz-group-skill" "the group's index names it")
+      (check-contains! (skills-note-for inside #f) "code-editing" "beside the global skills")
+      (check-false! (string-contains? (skills-note-for outside #f) "zz-group-skill")
+                    "another buffer's index does not")
+      (check-contains! (with-current-buffer inside (lambda () (skill "zz-group-skill")))
+                       "The group's own." "the body inside the group")
+      (check-contains! (with-current-buffer outside (lambda () (skill "zz-group-skill")))
+                       "no such skill" "and a miss outside it")
+      (check-false! (assoc "zz-group-skill" *skills*) "the global catalog stays as it was")
+      (buffer-kill! inside)
+      (buffer-kill! outside)
+      (delete-file! file)
+      (group-record-delete! id)
+      (skills-scan!))))
+
 (deftest 'the-sweep-keeps-codexs-own-state-dirs-and-still-drops-a-stale-skill
   "codex writes under .system, which carries no SKILL.md of its own"
   (lambda ()

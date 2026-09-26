@@ -68,6 +68,8 @@ defmodule Compos.Core.Application do
       {DynamicSupervisor, name: Compos.Core.LaneSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Compos.Core.TaskSupervisor},
       Compos.Core.Telemetry,
+      # the durable event log; Session tells it nothing, it tells Session
+      Compos.Core.Events.Log,
       # before BufferStore and every buffer: a buffer publishes its row from
       # init, so the table must already exist when the first one starts
       Compos.Core.BufferView,

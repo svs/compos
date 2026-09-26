@@ -1218,14 +1218,58 @@
   "(read-file-numbered PATH) — read source text files with stable line numbers for exact citations")
 (catalog-meta! 'function "read-file-numbered" 'domain 'discovery 'effects '(read))
 
+;; A tool can answer with MCP content blocks instead of text:
+;; (tool-content ((type "image" mimeType "image/png" data B64) ...)).
+;; The MCP proxy sends the blocks as they are. A lane that takes text
+;; only reads (tool-result-text R).
+(define (tool-content blocks) (list 'tool-content blocks))
+
+(define (tool-content? r)
+  (and (pair? r) (equal? (car r) 'tool-content)))
+
+(define (tool-result-text r)
+  (cond ((string? r) r)
+        ((tool-content? r)
+         (string-join
+           (map (lambda (b)
+                  (if (equal? (plist-get b 'type) "text")
+                      (plist-get b 'text)
+                      (string-append "[" (plist-get b 'type)
+                                     " content: this backend reads text only]")))
+                (cadr r))
+           "\n"))
+        (else (value->string r))))
+
+(define *tool-image-mimes*
+  '(("png" "image/png") ("jpg" "image/jpeg") ("jpeg" "image/jpeg")
+    ("gif" "image/gif") ("webp" "image/webp")))
+
+;; (image-file-mime PATH) -> the image media type, or #f
+(define (image-file-mime path)
+  (let* ((parts (string-split path "."))
+         (ext (and (pair? (cdr parts)) (string-downcase (car (reverse parts)))))
+         (hit (and ext (assoc ext *tool-image-mimes*))))
+    (and hit (cadr hit))))
+
+(define (read-file-tool path line-numbers)
+  (let ((mime (image-file-mime path))
+        (source (read-file-source path)))
+    (cond ((not source) "error: file does not exist or cannot be read")
+          (mime
+           (tool-content
+             (list (list 'type "text" 'text (string-append "image " path))
+                   (list 'type "image" 'mimeType mime
+                         'data (base64-encode source)))))
+          ((not (string-valid-utf8? source))
+           (string-append "error: " path " is a binary file, not text"))
+          (else (read-file path line-numbers)))))
+
 (define-tool! 'read-file
-  "Read one source file. Set line_numbers to true for stable line numbers. Independent read-file, apropos, describe-function, code-outline, and code-read calls can run concurrently."
+  "Read one source file, or view an image file (png, jpg, gif, webp). Set line_numbers to true for stable line numbers. Independent read-file, apropos, describe-function, code-outline, and code-read calls can run concurrently."
   (list (list 'path "string" "absolute or workspace-relative source file path")
         (list 'line_numbers "boolean" "add stable line numbers" 'optional))
   (lambda (args)
-    (let ((result (read-file (plist-get args 'path)
-                             (plist-get args 'line_numbers))))
-      (if result result "error: file does not exist or cannot be read")))
+    (read-file-tool (plist-get args 'path) (plist-get args 'line_numbers)))
   '(read))
 
 
@@ -1363,14 +1407,10 @@
     (when key
       (set! *mcp-proxy-grants* (cons (list slug key) *mcp-proxy-grants*)))))
 
-(define (mcp-proxy--refused raw verdict tail)
+(define (mcp-proxy--refused raw verdict)
   (base64-encode
-    (string-append
-      "refused: compos's permission policy did not allow this ("
-      (or (and (boundp (quote permission-denied-verb?))
-               (permission-denied-verb? raw))
-          (symbol->string verdict))
-      "). " tail)))
+    (decide-refusal 'policy
+      (or (permission-denied-verb? raw) (symbol->string verdict)))))
 
 (define (mcp-proxy--run name args-json author)
   ;; The async lane. An eval-scheme payload whose whole program is
@@ -1393,13 +1433,18 @@
               (shell-command->string (car parts) resolve))
           'pending))
       ((and token read-only?)
+       ;; the task answers the caller itself. The callback runs on a lane
+       ;; with a time limit, and a callback that never ran left the proxy
+       ;; waiting ten minutes. It now only reports an error; eval-resolve!
+       ;; answers once, so a second resolve does nothing.
        (task-run!
          (lambda ()
-           (base64-encode (mcp-proxy--sync name args-json author)))
-         (lambda (ok value)
            (eval-resolve! token
-             (if ok value
-                 (base64-encode (string-append "error: " (value->string value)))))))
+             (base64-encode (mcp-proxy--sync name args-json author))))
+         (lambda (ok value)
+           (unless ok
+             (eval-resolve! token
+               (base64-encode (string-append "error: " (value->string value)))))))
        'pending)
       (else
         (base64-encode (mcp-proxy--sync name args-json author))))))
@@ -1420,8 +1465,7 @@
           (list answer
                 (if (member answer '(allow always))
                     (base64-encode (mcp-proxy--sync name args-json author))
-                    (base64-encode
-                      "refused: denied in the chat. Do not retry it — ask what to do instead.")))))
+                    (base64-encode (decide-refusal 'denied))))))
       (lambda (ok value)
         (if (not ok)
             (eval-resolve! token
@@ -1452,8 +1496,7 @@
       ;; no chat to ask in means nobody can answer, and the honest
       ;; answer to an unanswerable ask is still no
       (else
-        (mcp-proxy--refused raw verdict
-          "Ask the user to run it, or to approve it in the chat.")))))
+        (mcp-proxy--refused raw verdict)))))
 
 ;; the inline path, with the agent's edits attributed to its thread
 (define (mcp-proxy--sync name args-json author)
@@ -1506,9 +1549,16 @@
 ;; in the session by definition. (The "never dispatch in the session" rule
 ;; in mcp.ex is about MCP tools, which this surface does not expose;
 ;; mcp-call! already obeys it for those.)
+;; The proxy reads this prefix as "the rest is a JSON array of MCP content
+;; blocks". A NUL never starts a text result, so plain text passes as is.
+(define mcp-proxy-content-prefix "\x00;compos-content\n")
+
 (define (mcp-proxy-dispatch name args-json)
   (let ((r (llm-tool-call name (json-parse args-json))))
-    (if (string? r) r (value->string r))))
+    (cond ((string? r) r)
+          ((tool-content? r)
+           (string-append mcp-proxy-content-prefix (json-encode (cadr r))))
+          (else (value->string r)))))
 
 (category! 'chat)
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")

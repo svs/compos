@@ -2330,15 +2330,16 @@
               return;
             }
           }
-          // a client-scrolled buffer scrolls itself: the caret that
-          // Selection.modify moved stays in view
+          // a client-scrolled buffer scrolls itself: a caret that
+          // Selection.modify moved out of view lands in the middle of
+          // the window, as the hl-line follow in updated() does
           if (buf.classList.contains("client-scroll") && sel.focusNode) {
             const r = document.createRange();
             r.setStart(sel.focusNode, sel.focusOffset); r.collapse(true);
             const cr = r.getBoundingClientRect(), br = buf.getBoundingClientRect();
             if (cr.height && (cr.top < br.top || cr.bottom > br.bottom)) {
               buf._composSelfScroll = performance.now();
-              buf.scrollTop += cr.top < br.top ? cr.top - br.top - 8 : cr.bottom - br.bottom + 8;
+              buf.scrollTop += (cr.top + cr.bottom) / 2 - (br.top + br.bottom) / 2;
             }
           }
           this.sendSelection(buf, true);

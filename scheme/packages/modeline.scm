@@ -17,6 +17,11 @@
 
 
 (define-style! 'dashboard "
+.ml-fact-v.preset-compos::before {
+  content: \"\"; display: inline-block; width: 12px; height: 12px;
+  margin-right: 4px; vertical-align: -1px;
+  background: url(/images/compos-logo.png) center / contain no-repeat;
+}
 .dash { font-family: var(--font-sans); padding: 2px 6px 8px; }
 .dash-head { display: flex; align-items: flex-end; gap: 16px;
              padding: 10px 16px 12px; border-bottom: 1px solid var(--border-bg, #e2dbc9); }
@@ -394,6 +399,26 @@
     (and (pair? p)
          (string-join (map (lambda (x) (value->string x)) p) " · "))))
 
+;; A preset shows on the mode line as one glyph. The compos preset has no
+;; glyph: it wears the compos logo, drawn by the preset-compos class.
+(define *preset-icons* '())
+(define (preset-icon! name glyph)
+  (set! *preset-icons* (alist-put *preset-icons* name glyph)))
+
+(define (dash--preset-icon p)
+  (let ((e (assoc p *preset-icons*)))
+    (if e (cadr e) (string-upcase (substring (value->string p) 0 1)))))
+
+;; the presets as (GLYPHS TONE): compos leads as the logo, the rest follow
+(define (dash--preset-icons buf)
+  (let ((p (or (buffer-local buf 'chat-presets)
+               (let ((c (dash--here-chat buf)))
+                 (and c (buffer-local c 'chat-presets))))))
+    (and (pair? p)
+         (let ((rest (remove (lambda (x) (equal? x 'compos)) p)))
+           (list (string-join (map dash--preset-icon rest) " ")
+                 (if (member 'compos p) "preset-compos" ""))))))
+
 ;;; The tools HERE can call. A chat freezes its tool list at its first
 ;;; send, so the frozen list is what the model sees; before that, the
 ;;; live surface is what the next send will freeze. The card names the
@@ -710,7 +735,11 @@
       (if preset
           (list (list "preset" preset "" 1))
           (list (list "llm" (dash--model buf) "" 1)
-                (list "lane" (dash--lane buf) "ok" 2))))))
+                (list "lane" (dash--lane buf) "ok" 2)))
+      (let ((icons (dash--preset-icons buf)))
+        (if icons
+            (list (list "tools" (car icons) (cadr icons) 1))
+            '())))))
 
 ;; What a buffer can say about itself, as rows for the switcher's narrow:
 ;; the dashboard panel, the summary log of a chat, and for an agent
@@ -1304,6 +1333,8 @@
 (public! 'name-format-expand "(name-format-expand FORMAT VALS) — fill a name format's %-directives from ((KEY VALUE) ...)")
 (public! 'name-text "(name-text SEGMENTS) — the rendered name as one plain string")
 (public! 'name-icon! "(name-icon! KEY GLYPH) — register the icon :KEY: reaches in a name")
+(public! 'preset-icon! "(preset-icon! 'NAME GLYPH) — the glyph a tool preset shows on the mode line")
+(catalog-meta! 'function "preset-icon!" 'domain 'interaction 'effects '(write))
 (public! 'buffer-name-segments "(buffer-name-segments BUF) — the spans that draw BUF's name, from the buffer-local name-format or buffer-name-format")
 (catalog-meta! 'function "name-segments" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "name-format-expand" 'domain 'interaction 'effects '(pure))

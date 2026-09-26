@@ -1,0 +1,329 @@
+<!doctype html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>compos logo</title>
+<style>
+  body { margin: 0; padding: 16px; box-sizing: border-box; height: 100vh; display: grid; grid-template-columns: auto 1fr; gap: 16px;
+         font: 13px/1.4 -apple-system, 'Helvetica Neue', sans-serif; background: #f4f1ea; color: #222; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  #main { width: min(72vh, 560px); height: min(72vh, 560px); background: #fbf9f4; border: 1px solid #ddd6c8; border-radius: 6px; }
+  #over { width: 160px; height: 160px; background: #fff; border: 1px solid #ddd6c8; }
+  #gallery { display: flex; flex-wrap: wrap; gap: 8px; }
+  #gallery div { text-align: center; font-size: 11px; color: #777; }
+  #gallery canvas { display: block; width: 96px; height: 96px; background: #fbf9f4; border: 1px solid #ddd6c8; cursor: pointer; }
+  #stat { font-size: 18px; font-weight: 600; }
+  .hint { color: #777; font-size: 11px; }
+  textarea { width: 100%; height: 90px; font: 11px ui-monospace, monospace; box-sizing: border-box; }
+  button, select { font: inherit; }
+</style>
+</head>
+<body>
+<div class='col'>
+  <canvas id='main' width='560' height='560'></canvas>
+  <div id='stat'>-</div>
+  <div id='names' class='hint'></div>
+</div>
+<div class='col'>
+  <div><button id='run'>Pause</button>
+    <select id='mode'><option value='C'>C in the overlap</option><option value='λ'>&lambda; in the overlap</option><option value='abstract'>abstract</option></select>
+    <button id='build'>Build C</button> <button id='restart'>New start</button> <button id='svg'>SVG</button> <button id='json'>JSON</button></div>
+  <div class='hint'>Three inks (cyan, magenta, yellow) multiply. Where all three marks meet, the ink is black.
+    The small view shows only that black part; in a letter mode the target letter is red under it.</div>
+  <canvas id='over' width='128' height='128'></canvas>
+  <div><b>Best finds</b> <span class='hint'>click one to hold it; Refine gives it one more run</span></div>
+  <div id='gallery'></div>
+  <textarea id='out' spellcheck='false'></textarea>
+</div>
+<script>
+const FONT = `'Bravura', 'Noto Music', 'Apple Symbols', 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif`;
+const FONT_SVG = 'Bravura, Noto Music, Apple Symbols, Segoe UI Symbol, serif';
+const GLYPHS = [['𝄞', 'treble clef'], ['𝄢', 'bass clef'], ['♪', 'eighth note'], ['♫', 'beamed notes'],
+                ['♩', 'quarter note'], ['♯', 'sharp'], ['♭', 'flat'], ['𝄐', 'fermata'], ['𝄴', 'common time'], ['𝄵', 'cut time']];
+const INKS = ['#00a3cc', '#e0147a', '#f7c600'];
+const N = 128;
+const $ = id => document.getElementById(id);
+const ctx2d = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c.getContext('2d', { willReadFrequently: true }); };
+
+const probe = ctx2d(400, 400);
+probe.font = `100px ${FONT}`;
+const META = GLYPHS.map(([ch, name]) => {
+  const m = probe.measureText(ch);
+  const l = m.actualBoundingBoxLeft, r = m.actualBoundingBoxRight, a = m.actualBoundingBoxAscent, d = m.actualBoundingBoxDescent;
+  return { ch, name, cx: (r - l) / 2, cy: (d - a) / 2, h: Math.max(a + d, r + l) };
+}).filter(g => g.h > 10);
+
+function drawMark(c, m, W) {
+  const g = META[m.g], k = m.s * W / g.h;
+  c.save();
+  c.translate(m.x * W, m.y * W);
+  c.rotate(m.r);
+  c.scale((m.f ? -1 : 1) * k, k);
+  c.font = `100px ${FONT}`;
+  c.textAlign = 'left';
+  c.textBaseline = 'alphabetic';
+  c.fillText(g.ch, -g.cx, -g.cy);
+  c.restore();
+}
+
+const mc = ctx2d(N, N);
+function maskOf(m) {
+  mc.clearRect(0, 0, N, N);
+  mc.fillStyle = '#000';
+  drawMark(mc, m, N);
+  const d = mc.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
+  let n = 0;
+  for (let i = 0; i < N * N; i++) n += out[i] = d[i * 4 + 3] > 110 ? 1 : 0;
+  // seen: the share of the mark inside the frame. A mark that is mostly cut off can't be recognised.
+  const g = META[m.g];
+  out.seen = g.ink ? Math.min(1, n / (g.ink * (m.s / 0.5) ** 2)) : 1;
+  return out;
+}
+// The ink of each glyph when it is drawn whole: at s = 0.5 in the middle of the frame.
+META.forEach((g, k) => { g.ink = maskOf({ g: k, x: 0.5, y: 0.5, s: 0.5, r: 0, f: false }).reduce((a, b) => a + b, 0); });
+
+// The C is a plain thick ring with an opening on the right, not a font glyph.
+function ringC() {
+  const c = ctx2d(N, N);
+  c.lineWidth = 0.11 * N;
+  c.beginPath(); c.arc(N / 2, N / 2, 0.22 * N, Math.PI / 4, -Math.PI / 4); c.stroke();
+  const px = c.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) out[i] = px[i * 4 + 3] > 110 ? 1 : 0;
+  return out;
+}
+function letterMask(ch) {
+  if (ch === 'C') return ringC();
+  const c = ctx2d(N, N);
+  c.font = `bold 100px 'Helvetica Neue', Arial, sans-serif`;
+  const m = c.measureText(ch);
+  const l = m.actualBoundingBoxLeft, r = m.actualBoundingBoxRight, a = m.actualBoundingBoxAscent, d = m.actualBoundingBoxDescent;
+  const k = 0.56 * N / (a + d);
+  c.translate(N / 2, N / 2);
+  c.scale(k, k);
+  c.fillText(ch, -(r - l) / 2, -(d - a) / 2);
+  const px = c.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) out[i] = px[i * 4 + 3] > 110 ? 1 : 0;
+  return out;
+}
+
+let mode = localStorage.getItem('compos-logo-mode') || 'C';
+let target = letterMask(mode === 'abstract' ? 'C' : mode);
+// Some clipping is fine, but each mark must keep about 3/4 of itself in the frame.
+const clipped = ms => ms.reduce((a, m) => a + Math.max(0, 0.75 - m.seen), 0);
+function score(ms) {
+  let u = 0, two = 0, three = 0, inter = 0, tu = 0, near = 0, ta = 0, sx = 0, sy = 0, edge = 0;
+  for (let i = 0; i < N * N; i++) {
+    const c = ms[0][i] + ms[1][i] + ms[2][i];
+    if (mode !== 'abstract') {
+      const t = target[i];
+      if (c === 3 && t) inter++;
+      if (c === 3 || t) tu++;
+      if (t) { ta++; if (c === 2) near++; }
+      continue;
+    }
+    if (!c) continue;
+    const x = i % N, y = (i / N) | 0;
+    u++; sx += x; sy += y;
+    if (c === 2) two++; else if (c === 3) three++;
+    if (x < 2 || y < 2 || x > N - 3 || y > N - 3) edge++;
+  }
+  if (mode !== 'abstract') return (tu ? inter / tu + 0.15 * near / ta : 0) - 1.5 * clipped(ms);
+  if (!u) return 0;
+  const cx = sx / u / N - 0.5, cy = sy / u / N - 0.5;
+  return 1 - 2 * Math.abs(three / u - 0.18) - 1.5 * Math.abs(two / u - 0.3)
+           - 2 * (Math.abs(cx) + Math.abs(cy)) - 1.5 * Math.abs(u / (N * N) - 0.35) - 3 * edge / (4 * N) - 1.5 * clipped(ms);
+}
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+function randomState() {
+  const idx = META.map((_, k) => k).sort(() => Math.random() - 0.5).slice(0, 3);
+  return idx.map(g => ({ g, x: rnd(0.38, 0.62), y: rnd(0.38, 0.62), s: rnd(0.5, 0.95), r: rnd(-0.6, 0.6), f: Math.random() < 0.3 }));
+}
+
+let cur, curMasks, curScore, runBest, T, since, run = 0, held = null, running = true, stepsDone = 0, rate = 0;
+let finds = [], lineage = 0, from = null, heldFind = null, nextLine = 1;
+// The finds of each mode are kept in localStorage, so a reload of the page keeps them.
+const findsKey = () => 'compos-logo-finds:' + mode;
+function saveFinds() { try { localStorage.setItem(findsKey(), JSON.stringify(finds)); } catch (e) {} }
+function loadFinds() {
+  try { finds = JSON.parse(localStorage.getItem(findsKey())) || []; } catch (e) { finds = []; }
+  finds = finds.filter(f => f.state.every(m => META[m.g]));
+  // Score the old finds again, so finds from an older score don't outrank the new ones.
+  for (const f of finds) { f.state.forEach(m => m.s = Math.min(m.s, 1.2)); f.score = score(f.state.map(maskOf)); }
+  finds.sort((a, b) => b.score - a.score);
+  nextLine = finds.reduce((n, f) => Math.max(n, f.line + 1), 1);
+  drawGallery();
+}
+// Most runs refine a find from the gallery; the better ones are picked more often.
+// A few runs still start fresh, so new ideas keep coming in.
+function pickParent() {
+  if (finds.length < 4 || Math.random() < 0.15) return null;
+  return finds[Math.floor(Math.random() * Math.random() * finds.length)];
+}
+function start(seed) {
+  from = seed === undefined ? pickParent() : seed;
+  if (from) { cur = from.state.map(m => ({ ...m })); T = 0.004; lineage = from.line; }
+  else { cur = randomState(); T = 0.03; lineage = nextLine++; }
+  curMasks = cur.map(maskOf); curScore = score(curMasks);
+  runBest = { state: cur, score: curScore }; since = 0; run++;
+}
+function step() {
+  const i = (Math.random() * 3) | 0, m = { ...cur[i] }, p = Math.random();
+  if (p < 0.07) {
+    const used = cur.map(c => c.g), free = META.map((_, k) => k).filter(k => !used.includes(k));
+    if (free.length) m.g = free[(Math.random() * free.length) | 0];
+  } else if (p < 0.1) {
+    m.f = !m.f;
+  } else {
+    const z = Math.max(0.15, Math.sqrt(T / 0.03));
+    m.x = clamp(m.x + gauss() * 0.02 * z, 0.05, 0.95);
+    m.y = clamp(m.y + gauss() * 0.02 * z, 0.05, 0.95);
+    m.s = clamp(m.s * Math.exp(gauss() * 0.05 * z), 0.3, 1.2);
+    m.r += gauss() * 0.08 * z;
+  }
+  const ms = curMasks.slice(); ms[i] = maskOf(m);
+  const sc = score(ms);
+  if (sc >= curScore || Math.random() < Math.exp((sc - curScore) / T)) {
+    cur = cur.slice(); cur[i] = m; curMasks = ms; curScore = sc;
+  }
+  T *= 0.9995; since++; stepsDone++;
+  if (curScore > runBest.score + 1e-4) { runBest = { state: cur, score: curScore }; since = 0; }
+  if (since > (from ? 1500 : 3000)) { record(runBest); start(); }
+}
+
+// One gallery entry per lineage: a refined run replaces its parent only when it scores higher.
+function record(f) {
+  const old = finds.find(x => x.line === lineage);
+  if (old && old.score >= f.score) return;
+  if (old) { old.state = f.state; old.score = f.score; old.run = run; old.gen++; }
+  else finds.push({ ...f, run, line: lineage, gen: 0 });
+  finds.sort((a, b) => b.score - a.score);
+  finds = finds.filter((f, i) => f.built || i < 12);
+  saveFinds();
+  drawGallery();
+}
+function restoreHeld() {
+  const line = +localStorage.getItem('compos-logo-held:' + mode), it = finds.find(f => f.line === line);
+  if (it) pick(it);
+}
+function drawGallery() {
+  const gal = $('gallery'); gal.innerHTML = '';
+  for (const it of finds) {
+    const d = document.createElement('div'), c = document.createElement('canvas');
+    c.width = c.height = 192;
+    paint(c.getContext('2d'), it.state, 192);
+    c.onclick = () => pick(it);
+    d.appendChild(c); d.append(`${it.score.toFixed(3)} · #${it.line}${it.gen ? ' +' + it.gen : ''}`);
+    gal.appendChild(d);
+  }
+}
+
+// Holding a find stops the search. The held find is remembered, so a reload holds it again.
+function pick(it) {
+      held = it.state; heldFind = it; running = false; $('run').textContent = 'Refine';
+      localStorage.setItem('compos-logo-held:' + mode, it.line);
+      // Tell the editor around the preview which find is held, so an agent can read it.
+      parent.postMessage({ type: 'compos-logo-pick', mode, line: it.line, score: it.score, inks: INKS,
+        marks: it.state.map(m => ({ ...m, glyph: META[m.g].ch, name: META[m.g].name })), svg: toSVG(it.state) }, '*');
+}
+
+function paint(c, st, W) {
+  c.globalCompositeOperation = 'source-over';
+  c.fillStyle = '#fbf9f4'; c.fillRect(0, 0, W, W);
+  c.globalCompositeOperation = 'multiply';
+  st.forEach((m, i) => { c.fillStyle = INKS[i]; drawMark(c, m, W); });
+  c.globalCompositeOperation = 'source-over';
+}
+
+const main = $('main').getContext('2d'), over = $('over').getContext('2d');
+const overImg = over.createImageData(N, N);
+function render() {
+  const st = held || cur, ms = held ? held.map(maskOf) : curMasks;
+  paint(main, st, 560);
+  const d = overImg.data;
+  for (let i = 0; i < N * N; i++) {
+    const three = ms[0][i] && ms[1][i] && ms[2][i], t = mode !== 'abstract' && target[i];
+    d[i * 4] = three ? 0 : (t ? 240 : 255);
+    d[i * 4 + 1] = three ? 0 : (t ? 170 : 255);
+    d[i * 4 + 2] = three ? 0 : (t ? 170 : 255);
+    d[i * 4 + 3] = 255;
+  }
+  over.putImageData(overImg, 0, 0);
+  const best = finds.length ? finds[0].score.toFixed(3) : '-';
+  $('stat').textContent = `${mode !== 'abstract' ? mode + ' match' : 'balance'} ${score(ms).toFixed(3)} · best ${best} · run ${run} ${from ? 'refining #' + from.line : 'fresh'} · ${rate} steps/s`;
+  $('names').textContent = st.map(m => META[m.g].name).join(' + ');
+}
+
+let t0 = performance.now(), n0 = 0;
+function frame() {
+  if (running) { const s = performance.now(); while (performance.now() - s < 14) step(); }
+  const now = performance.now();
+  if (now - t0 > 1000) { rate = Math.round((stepsDone - n0) * 1000 / (now - t0)); t0 = now; n0 = stepsDone; }
+  render();
+  requestAnimationFrame(frame);
+}
+
+function toSVG(st) {
+  const W = 512;
+  const parts = st.map((m, i) => {
+    const g = META[m.g], k = m.s * W / g.h;
+    return `<text transform='translate(${(m.x * W).toFixed(1)} ${(m.y * W).toFixed(1)}) rotate(${(m.r * 180 / Math.PI).toFixed(2)}) scale(${((m.f ? -1 : 1) * k).toFixed(4)} ${k.toFixed(4)})' x='${(-g.cx).toFixed(2)}' y='${(-g.cy).toFixed(2)}' font-size='100' fill='${INKS[i]}' style='mix-blend-mode:multiply'>${g.ch}</text>`;
+  }).join('');
+  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${W} ${W}' font-family='${FONT_SVG}'><rect width='${W}' height='${W}' fill='#fbf9f4'/><g style='isolation:isolate'>${parts}</g></svg>`;
+}
+
+// The C from first principles, no search. Common time (cyan) and cut time (magenta) are both a C;
+// the head of a quarter note (yellow) lies under them. So the three inks meet on the C, and each
+// mark stays whole enough to read. Only the sizes are fitted, by a small grid.
+function buildC() {
+  const at = ch => META.findIndex(g => g.ch === ch);
+  const gC = at('𝄴'), gCut = at('𝄵'), gQ = at('♩');
+  if (gC < 0 || gCut < 0 || gQ < 0) { $('out').value = 'This browser has no font for 𝄴, 𝄵 or ♩.'; return; }
+  const both = (a, b) => a.map((v, i) => v & b[i]);
+  const count = a => a.reduce((s, v) => s + v, 0);
+  const c1 = { g: gC, x: 0.5, y: 0.5, s: 0.36, r: 0, f: false }, m1 = maskOf(c1), n1 = count(m1);
+  // Size and place cut time so its C lies on the common-time C.
+  let c2 = null, best = -1;
+  for (let s = 0.3; s <= 1.0; s += 0.02) for (let dx = -0.06; dx <= 0.06; dx += 0.015) for (let dy = -0.06; dy <= 0.06; dy += 0.015) {
+    const m = { g: gCut, x: 0.5 + dx, y: 0.5 + dy, s, r: 0, f: false }, mk = maskOf(m);
+    const sc = count(both(m1, mk)) / (n1 + count(mk) * 0.25);
+    if (sc > best) { best = sc; c2 = m; }
+  }
+  // Nudge the cyan C a little, so cyan and blue show at its edge. The black C is where they still meet.
+  const c1n = { ...c1, x: c1.x - 0.018, y: c1.y + 0.012 }, C = both(maskOf(c1n), maskOf(c2)), nC = count(C);
+  // The smallest quarter note whose head covers the C, with most of the note in the frame.
+  let q = null; best = -1;
+  const tryQ = m => { const mk = maskOf(m), sc = count(both(C, mk)) / nC - 0.08 * m.s - 1.5 * Math.max(0, 0.75 - mk.seen);
+                      if (sc > best) { best = sc; q = m; } };
+  for (let s = 0.6; s <= 1.6; s += 0.1) for (let x = 0.3; x <= 0.7; x += 0.05) for (let y = 0.3; y <= 0.8; y += 0.05) for (const r of [-0.3, 0, 0.3]) tryQ({ g: gQ, x, y, s, r, f: false });
+  for (let k = 0; k < 600; k++) tryQ({ ...q, x: q.x + gauss() * 0.01, y: q.y + gauss() * 0.01, s: q.s * Math.exp(gauss() * 0.03), r: q.r + gauss() * 0.04 });
+  const state = [c1n, c2, q];
+  const it = { state, score: score(state.map(maskOf)), run, line: nextLine++, gen: 0, built: true };
+  finds.unshift(it); saveFinds(); drawGallery(); pick(it);
+}
+$('build').onclick = buildC;
+
+const shown = () => held || (finds[0] ? finds[0].state : cur);
+$('run').onclick = () => {
+  running = !running;
+  if (running && heldFind) { record(runBest); start(heldFind); }
+  if (running) { held = null; heldFind = null; localStorage.removeItem('compos-logo-held:' + mode); }
+  $('run').textContent = running ? 'Pause' : 'Run';
+};
+$('restart').onclick = () => { record(runBest); start(); };
+$('mode').onchange = e => { mode = e.target.value; localStorage.setItem('compos-logo-mode', mode); if (mode !== 'abstract') target = letterMask(mode); loadFinds(); held = null; start(); };
+$('json').onclick = () => { $('out').value = JSON.stringify({ mode, inks: INKS, marks: shown().map(m => ({ ...m, glyph: META[m.g].ch, name: META[m.g].name })) }, null, 1); };
+$('svg').onclick = () => { $('out').value = toSVG(shown()); };
+
+$('mode').value = mode;
+loadFinds();
+start();
+restoreHeld();
+// The first time, show the built C at once.
+if (mode === 'C' && !finds.some(f => f.built)) buildC();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -103,6 +103,10 @@ defmodule ComposProxy do
     end
   end
 
+  # tools.scm mcp-proxy-content-prefix: the rest is a JSON array of MCP
+  # content blocks (an image a tool read, for example)
+  @content_prefix <<0, "compos-content\n">>
+
   defp handle(message) do
     case message do
       %{"method" => "initialize", "id" => id, "params" => params} ->
@@ -125,8 +129,13 @@ defmodule ComposProxy do
 
       %{"method" => "tools/call", "id" => id, "params" => %{"name" => name, "arguments" => args}} ->
         case call_tool(name, args || %{}) do
-          {:ok, text} ->
-            reply(id, %{content: [%{type: "text", text: text}]})
+          {:ok, @content_prefix <> blocks} ->
+            reply(id, %{content: :json.decode(blocks)})
+
+          {:ok, text} when is_binary(text) ->
+            if String.valid?(text),
+              do: reply(id, %{content: [%{type: "text", text: text}]}),
+              else: reply(id, %{content: [%{type: "text", text: "error: the tool result is not UTF-8 text"}], isError: true})
 
           {:error, msg} ->
             reply(id, %{content: [%{type: "text", text: "error: #{msg}"}], isError: true})
@@ -212,14 +221,24 @@ defmodule ComposProxy do
       |> IO.iodata_to_binary()
       |> Base.encode64()
 
-    case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}) do
+    code = ~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}
+
+    case rpc_eval(code, call_timeout(name)) do
       {:ok, b64} -> {:ok, b64 |> unprint() |> Base.decode64!()}
+      {:error, :timeout} -> {:error, "the editor did not answer #{name} in time; retry the call"}
       error -> error
     end
   end
 
-  defp rpc_eval(code) do
-    rpc_request("eval", %{code: code}, 600_000)
+  # A read-only call answers in milliseconds. One that takes a minute lost
+  # its answer in the editor, so the model gets an error it can retry. A
+  # write or shell call can run for minutes and keeps the long limit.
+  @read_timeout 60_000
+  @write_timeout 600_000
+  defp call_timeout(name), do: if(read_only?(name), do: @read_timeout, else: @write_timeout)
+
+  defp rpc_eval(code, timeout \\ @write_timeout) do
+    rpc_request("eval", %{code: code}, timeout)
   end
 
   defp rpc_request(method, params, timeout) do
@@ -240,6 +259,7 @@ defmodule ComposProxy do
              {:ok, resp} <- recv_line(s, "", timeout) do
           decode_rpc_response(resp)
         else
+          {:error, :timeout} -> {:error, :timeout}
           err -> {:error, "compos rpc unreachable: #{inspect(err)}"}
         end
       after

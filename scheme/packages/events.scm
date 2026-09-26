@@ -1,15 +1,20 @@
 ;;; events.scm --- the event log: topics, subscribers that keep a position, views.
 ;;;
-;;; Machine work reports here: an agent's status moved, or its turn ended.
-;;; A publisher writes an event to a TOPIC. A chat's topic is its stable
-;;; id, "chat:...". The log numbers every event with a seq and keeps the
-;;; newest events-log-limit of them.
+;;; Machine work reports here: an agent's status moved, a turn ended, a
+;;; mail or a WhatsApp message came in. A publisher writes an event to a
+;;; TOPIC. A chat's topic is its stable id, "chat:...".
+;;;
+;;; The log itself is in the core (Compos.Core.Events.Log): one SQLite
+;;; file, every event numbered with a seq, kept a year. An Elixir
+;;; publisher (a webhook, a file watch) writes there with
+;;; Compos.Core.Events.publish/3; Scheme writes with event-publish!.
+;;; Either way the event reaches the subscribers and views here.
 ;;;
 ;;; A subscriber has a NAME, a topic PATTERN ("chat:*" matches a prefix)
-;;; and a FN that gets each event. The log keeps the subscriber's position:
-;;; the seq of the last event it took. The log and the positions go to
-;;; events-file, so a subscriber that comes back after a restart first
-;;; takes the events it missed, oldest first.
+;;; and a FN that gets each event. The core keeps the subscriber's
+;;; position, the seq of the last event it took, so a subscriber that
+;;; comes back after a restart first takes the events it missed, oldest
+;;; first.
 ;;;
 ;;; A view is a read model: a fold over the events of a pattern, where
 ;;; (STEP STATE EVENT) gives the next state. Views are not saved; the log
@@ -24,20 +29,16 @@
 (domain! 'system)
 (effects! '(write))
 
-(defcustom 'events-log-limit 2000
-  "How many events the log keeps. A subscriber that is further behind than that misses the older ones.")
-
 (defcustom 'events-file "~/.compos/events"
-  "Where the event log and the subscriber positions are saved. Not a .scm name: the hot reloader evaluates every .scm file in the config home.")
+  "The event log before it moved into the core. Read once, into an empty core log.")
 
 ;; the state survives a reload of this file
-(define *events* (if (boundp '*events*) *events* '()))
-(define *events-count* (if (boundp '*events-count*) *events-count* 0))
-(define *events-seq* (if (boundp '*events-seq*) *events-seq* 0))
 (define *event-subs* (if (boundp '*event-subs*) *event-subs* '()))
-(define *event-positions* (if (boundp '*event-positions*) *event-positions* '()))
 (define *event-views* (if (boundp '*event-views*) *event-views* '()))
 (define *event-view-states* (if (boundp '*event-view-states*) *event-view-states* '()))
+;; the seq of the last event this session handed to its views and subscribers
+(define *events-pumped* (if (boundp '*events-pumped*) *events-pumped* #f))
+(define *events-pumping* #f)
 
 (effects! '(pure))
 
@@ -54,29 +55,33 @@
 (effects! '(read))
 
 (define (event-log &optional pattern limit)
-  "(event-log [PATTERN] [LIMIT]) — the events whose topic PATTERN matches, newest first"
-  (let ((es (if pattern
-                (filter (lambda (e) (event-topic-match? pattern (plist-get e 'topic))) *events*)
-                *events*)))
-    (if (and limit (> (length es) limit)) (list-head es limit) es)))
+  "(event-log [PATTERN] [LIMIT]) — the events whose topic PATTERN matches, newest first; LIMIT defaults to 200"
+  (event-log-newest (or pattern #f) (or limit 200)))
 
 (define (event-position name)
   "(event-position NAME) — the seq of the last event the subscriber NAME took, or #f"
-  (alist-get *event-positions* name))
+  (event-log-position name))
 
 (define (events--sub name)
   (let ((hit (filter (lambda (s) (equal? (car s) name)) *event-subs*)))
     (and (pair? hit) (car hit))))
 
+;; every event after AFTER that PATTERN matches, up to UPTO when given, oldest first
+(define (events--read-all after pattern &optional upto)
+  (let loop ((after after) (acc '()))
+    (let* ((batch (event-log-read after pattern 1000))
+           (keep (if upto (filter (lambda (e) (<= (plist-get e 'seq) upto)) batch) batch))
+           (acc (append acc keep)))
+      (if (and (= (length batch) 1000) (= (length keep) 1000))
+          (loop (plist-get (list-ref batch 999) 'seq) acc)
+          acc))))
+
 (define (events-since name)
   "(events-since NAME) — the events after NAME's position that its pattern matches, oldest first"
-  (let ((sub (events--sub name))
-        (pos (or (event-position name) 0)))
+  (let ((sub (events--sub name)))
     (if (not sub)
         '()
-        (reverse (filter (lambda (e) (and (> (plist-get e 'seq) pos)
-                                          (event-topic-match? (cadr sub) (plist-get e 'topic))))
-                         *events*)))))
+        (events--read-all (or (event-position name) 0) (cadr sub)))))
 
 (define (event-view name)
   "(event-view NAME) — the current state of the view NAME"
@@ -88,25 +93,6 @@
 
 (effects! '(write))
 
-(define (events--path) (expand-path events-file))
-
-(define (events--save! _)
-  (write-file! (events--path)
-               (value->string (list 'seq *events-seq* 'positions *event-positions* 'events *events*))))
-
-(define (events--save-soon!) (debounce! 'events-save 1000 events--save! #f))
-
-(define (events--restore!)
-  (let* ((path (events--path))
-         (text (and (file-exists? path) (read-file path)))
-         (forms (and text (scheme-read text)))
-         (saved (and (pair? forms) (car forms))))
-    (when (and (pair? saved) (null? *events*))
-      (set! *events-seq* (or (plist-get saved 'seq) 0))
-      (set! *event-positions* (or (plist-get saved 'positions) '()))
-      (set! *events* (or (plist-get saved 'events) '()))
-      (set! *events-count* (length *events*)))))
-
 (define (events--deliver! sub e)
   (let ((name (car sub)) (seq (plist-get e 'seq)))
     (when (> seq (or (event-position name) 0))
@@ -115,7 +101,7 @@
       (unless (ignore-errors (lambda () ((events--fn (caddr sub)) e) #t))
         (message (string-append "event subscriber " (events--name name)
                                 " failed on " (plist-get e 'topic))))
-      (set! *event-positions* (alist-put *event-positions* name seq)))))
+      (event-log-position-set! name seq))))
 
 (define (events--step-view! v e)
   (when (event-topic-match? (cadr v) (plist-get e 'topic))
@@ -124,34 +110,50 @@
       (when next
         (set! *event-view-states* (alist-put *event-view-states* (car v) (car next)))))))
 
+;; hand every event after *events-pumped* to the views and subscribers. A
+;; subscriber that publishes lands its event in a later batch of the same
+;; pump, never in a nested one.
+(define (events--pump!)
+  (unless *events-pumping*
+    (set! *events-pumping* #t)
+    (ignore-errors
+      (lambda ()
+        (let loop ()
+          (let ((batch (event-log-read *events-pumped* #f 500)))
+            (when (pair? batch)
+              (for-each
+               (lambda (e)
+                 (for-each (lambda (v) (events--step-view! v e)) *event-views*)
+                 (for-each (lambda (s) (when (event-topic-match? (cadr s) (plist-get e 'topic))
+                                         (events--deliver! s e)))
+                           *event-subs*)
+                 (set! *events-pumped* (plist-get e 'seq)))
+               batch)
+              (loop))))))
+    (set! *events-pumping* #f)))
+
+(define (events-arrived!)
+  "(events-arrived!) — the core log's notice that events arrived: hand them to the views and subscribers"
+  (events--pump!))
+
 (define (event-publish! topic kind &optional data)
   "(event-publish! TOPIC KIND [DATA]) — append an event to the log, fold it into the views and hand it to every subscriber whose pattern matches TOPIC; return its seq"
-  (set! *events-seq* (+ *events-seq* 1))
-  (let ((e (list 'seq *events-seq* 'topic topic 'kind kind 'data data 'at (current-time))))
-    (set! *events* (cons e *events*))
-    (set! *events-count* (+ *events-count* 1))
-    (when (> *events-count* events-log-limit)
-      (set! *events* (list-head *events* events-log-limit))
-      (set! *events-count* events-log-limit))
-    (for-each (lambda (v) (events--step-view! v e)) *event-views*)
-    (for-each (lambda (s) (when (event-topic-match? (cadr s) topic) (events--deliver! s e)))
-              *event-subs*)
-    (events--save-soon!)
-    *events-seq*))
+  (let ((seq (event-log-append! topic kind data)))
+    (events--pump!)
+    seq))
 
 (define (event-subscribe! name pattern fn)
   "(event-subscribe! NAME PATTERN FN) — call (FN EVENT) for each new event whose topic PATTERN matches. NAME keeps its position across reloads and restarts, so a NAME that comes back first takes what it missed. Give FN as a quoted function name, so a reload changes what runs"
   (set! *event-subs* (append (events--without name *event-subs*) (list (list name pattern fn))))
   (if (event-position name)
       (for-each (lambda (e) (events--deliver! (events--sub name) e)) (events-since name))
-      (set! *event-positions* (alist-put *event-positions* name *events-seq*)))
+      (event-log-position-set! name *events-pumped*))
   name)
 
 (define (event-unsubscribe! name)
   "(event-unsubscribe! NAME) — drop the subscriber NAME and forget its position"
   (set! *event-subs* (events--without name *event-subs*))
-  (set! *event-positions* (events--without name *event-positions*))
-  (events--save-soon!)
+  (event-log-forget! name)
   name)
 
 (define (event-define-view! name pattern step &optional init)
@@ -159,10 +161,21 @@
   (let ((v (list name pattern step)))
     (set! *event-views* (append (events--without name *event-views*) (list v)))
     (set! *event-view-states* (alist-put *event-view-states* name (or init '())))
-    (for-each (lambda (e) (events--step-view! v e)) (reverse *events*)))
+    (for-each (lambda (e) (events--step-view! v e)) (events--read-all 0 pattern *events-pumped*)))
   name)
 
-(events--restore!)
+;; the log that events.scm kept in events-file goes into an empty core
+;; log once. Positions stay behind: a subscriber starts at the present.
+(define (events--import!)
+  (let ((path (expand-path events-file)))
+    (when (and (= (event-log-seq) 0) (file-exists? path))
+      (let* ((forms (scheme-read (read-file path)))
+             (saved (and (pair? forms) (car forms))))
+        (when (pair? saved)
+          (event-log-import! (reverse (or (plist-get saved 'events) '())) '()))))))
+
+(ignore-errors events--import!)
+(unless *events-pumped* (set! *events-pumped* (event-log-seq)))
 
 ;;; The agents report here. agent-fleet runs agent-status-hook when a
 ;;; chat's runtime status moves, and agent.scm runs agent-turn-end when a

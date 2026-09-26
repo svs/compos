@@ -338,6 +338,9 @@ defmodule Compos.Scheme.Builtins do
       {"base64-encode", "(base64-encode S) — return S encoded as base64."} => fn [s] ->
         Base.encode64(s)
       end,
+      # a file read gives raw bytes; text consumers must refuse a binary
+      {"string-valid-utf8?", "(string-valid-utf8? S) — return #t if S is valid UTF-8 text."} =>
+        fn [s] -> is_binary(s) and String.valid?(s) end,
       {"base64-decode", "(base64-decode S) — decode the base64 string S; error on invalid input."} =>
         fn [s] ->
           case Base.decode64(s) do

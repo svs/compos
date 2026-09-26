@@ -39,7 +39,7 @@ defmodule Compos.SteerSettleTest do
     eval!("(set-symbol-value! 'chat-steer-settle-seconds 1)")
 
     on_exit(fn ->
-      eval!("(set-symbol-value! 'chat-steer-settle-seconds 45)")
+      eval!("(set-symbol-value! 'chat-steer-settle-seconds 180)")
       Enum.each(Agent.list(), &Agent.kill/1)
 
       Enum.each(Compos.Core.list_buffers(), fn name ->

@@ -85,7 +85,7 @@ defmodule Compos.Ui.HomepageLive do
 
         .home-brand { display: flex; align-items: center; gap: 12px; }
         .home-brand img { width: 38px; height: 38px; border-radius: 11px; }
-        .home-brand .compos-logo-image { width: 42px; height: 42px; border-radius: 50%; }
+        .home-brand .compos-logo-image { width: 42px; height: 42px; }
         .home-brand c-text { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
         .home-brand .compos-wordmark {
           color: #d8d5df;
@@ -595,7 +595,7 @@ defmodule Compos.Ui.HomepageLive do
             <img
              
               class="compos-logo-image"
-              src="/images/compos-emblem-v1.png"
+              src="/images/compos-logo.png"
               alt=""
             />
             <c-text class="compos-wordmark">compos</c-text>

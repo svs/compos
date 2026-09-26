@@ -27,6 +27,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(git_primitives())
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
+    |> Map.merge(event_log_primitives())
     |> Map.merge(sysmon_primitives())
     |> Map.merge(profiler_primitives())
     |> Map.merge(discovery_primitives())
@@ -354,6 +355,73 @@ defmodule Compos.Core.SchemeAPI do
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs, do: Prim.docs(entries())
+
+  # The durable event log (Compos.Core.Events.Log). events.scm wraps these
+  # in event-publish!, event-subscribe! and the views; nothing else should
+  # need them.
+  defp event_log_primitives do
+    alias Compos.Core.Events.Log
+
+    %{
+      {"event-log-append!",
+       "(event-log-append! TOPIC KIND DATA) — write one event to the durable log and return its seq. Use event-publish!."} =>
+        fn [topic, kind, data] -> Log.append(topic, kind, data) end,
+      {"event-log-read",
+       "(event-log-read AFTER PATTERN LIMIT) — at most LIMIT events after seq AFTER whose topic PATTERN matches (#f: every topic), oldest first."} =>
+        fn [after_seq, pattern, limit] ->
+          Log.read(trunc(after_seq || 0), pattern, trunc(limit)) |> Enum.map(&event_plist/1)
+        end,
+      {"event-log-newest",
+       "(event-log-newest PATTERN LIMIT) — at most LIMIT events whose topic PATTERN matches (#f: every topic), newest first."} =>
+        fn [pattern, limit] -> Log.newest(pattern, trunc(limit)) |> Enum.map(&event_plist/1) end,
+      {"event-log-seq", "(event-log-seq) — the seq of the newest event in the durable log, or 0."} =>
+        fn [] -> Log.seq() end,
+      {"event-log-position",
+       "(event-log-position NAME) — the saved seq of the subscriber NAME, or #f."} =>
+        fn [name] -> Log.position(name) || false end,
+      {"event-log-position-set!",
+       "(event-log-position-set! NAME SEQ) — save the seq of the last event the subscriber NAME took."} =>
+        fn [name, seq] ->
+          :ok = Log.set_position(name, trunc(seq))
+          :void
+        end,
+      {"event-log-forget!", "(event-log-forget! NAME) — drop the saved position of NAME."} =>
+        fn [name] ->
+          :ok = Log.forget(name)
+          :void
+        end,
+      {"event-log-import!",
+       "(event-log-import! EVENTS POSITIONS) — load EVENTS, plists with seq topic kind data at, and POSITIONS, an alist of name and seq, into an empty log; return how many events went in."} =>
+        fn [events, positions] ->
+          events =
+            for e <- events do
+              m = plist_map(e)
+              %{seq: m["seq"], topic: m["topic"], kind: m["kind"], data: m["data"], at: m["at"] || 0}
+            end
+
+          positions = for [name | seq] <- positions, do: {name, pos_seq(seq)}
+          Log.import(events, positions)
+        end
+    }
+  end
+
+  defp event_plist(e) do
+    [{:sym, "seq"}, e.seq, {:sym, "topic"}, e.topic, {:sym, "kind"}, e.kind, {:sym, "data"},
+     e.data, {:sym, "at"}, e.at]
+  end
+
+  defp plist_map(plist) do
+    plist
+    |> Enum.chunk_every(2)
+    |> Map.new(fn
+      [{:sym, k}, v] -> {k, v}
+      [k, v] -> {k, v}
+    end)
+  end
+
+  # an alist pair (name . seq) reads as [name | seq]; (name seq) as [name, seq]
+  defp pos_seq([seq]), do: seq
+  defp pos_seq(seq), do: seq
 
   defp telemetry_primitives do
     %{

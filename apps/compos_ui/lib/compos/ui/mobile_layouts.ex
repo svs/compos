@@ -34,8 +34,8 @@ defmodule Compos.Ui.MobileLayouts do
         <meta name="theme-color" content="#efece2" />
         <title>{@page_title}</title>
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="icon" type="image/png" href="/icons/compos-192.png" />
-        <link rel="apple-touch-icon" href="/icons/compos-192.png" />
+        <link rel="icon" type="image/png" href="/images/compos-logo.png" />
+        <link rel="apple-touch-icon" href="/images/compos-logo.png" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
           href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap"

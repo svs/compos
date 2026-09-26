@@ -58,7 +58,12 @@ nonstandard install out of the built-in connector catalog."
                                       "Task" "Agent" "TodoWrite"
                                       "SlashCommand" "ReportFindings"
                                       "TaskCreate" "TaskUpdate"
-                                      "TaskList" "TaskGet"))))
+                                      "TaskList" "TaskGet")
+                     ;; The API omits thinking text unless a client asks
+                     ;; for a summary. Without it, a long think shows only
+                     ;; "waiting…". The adapter spreads these options after
+                     ;; its own thinking config, so this value wins.
+                     thinking (type "adaptive" display "summarized"))))
     ;; the seed only has to hold until a session reports its own list;
     ;; llm-models-seen! keeps that answer for the connector
     models ("default" "claude-opus-5-5[1m]" "opus[1m]" "claude-fable-5-1[1m]" "claude-fable-5[1m]" "sonnet" "haiku")))

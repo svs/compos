@@ -8,7 +8,7 @@
 (category! 'chat)
 
 ;; auto: the agent is not interrupted for ordinary work. The deny-list
-;; below still stops the irreversible outward acts, whatever the stance,
+;; in decide.scm still stops the irreversible outward acts, whatever the stance,
 ;; and C-c b sets a stricter one per chat.
 (define *permission-default-mode* 'auto)
 
@@ -16,30 +16,8 @@
   (or (and buf (buffer-exists? buf) (buffer-local buf 'chat-permission-mode))
       *permission-default-mode*))
 
-(define *permission-deny-patterns*
-  (list
-        ;; Git that rewrites the work tree is a file write by another name:
-        ;; it lands text the editor never saw, and it can lose an unsaved
-        ;; buffer. Reading git, staging it, and committing it change no
-        ;; working file, so they stay out of this list.
-        "git[-_ ]+(checkout|restore|stash|clean|apply|pull|merge|rebase|revert)"
-        "git[-_ ]+reset[-_ ]+--(hard|merge)"
-        "send[-_ ]*mail" "sendmail" "mail[-_ ]*send" "smtp"
-        "send[-_ ]*(message|email|sms|text)"
-        "(permanently|forever)[-_ ]*delete" "delete[-_ ]*(permanently|forever)"
-        "empty[-_ ]*trash" "trash[-_ ]*empty" "expunge"
-        "rm[-_ ]+-[a-z]*[rf]"
-        ;; user ruling 2026-09-02: a push through jj is always allowed;
-        ;; agent identity rides in jj descriptions, never in authors.
-        "(?<!jj[-_ ])git[-_ ]+push" "force[-_ ]*push"
-        "\\bpublish\\b" "\\bdeploy\\b"))
-
-(define (permission-denied-verb? text)
-  (let ((t (string-downcase text)))
-    (let loop ((ps *permission-deny-patterns*))
-      (cond ((null? ps) #f)
-            ((re-match? (car ps) t) (car ps))
-            (else (loop (cdr ps)))))))
+;; The deny-list and permission-denied-verb? live in decide.scm with every
+;; other refusal: one place says no to an agent.
 
 (define (agent-permission-profile slug)
   (let ((buf (agent-buf slug)))
@@ -376,7 +354,17 @@
       "\nalways stops to ask, whatever the stance:\n"
       (apply string-append
         (map (lambda (p) (string-append "  " p "\n"))
-             *permission-deny-patterns*)))))
+             (filter (lambda (p) (not (and decide-allow-git (decide--git-pattern? p))))
+                     *permission-deny-patterns*)))
+      (if decide-allow-git "\ngit runs without asking (decide-allow-git)\n" "")
+      "\nshell gate: "
+      (if decide-shell-gate
+          (string-append "on — "
+            (string-join (map (lambda (r) (string-append (symbol->string (car r)) " " (symbol->string (cadr r))))
+                              decide-shell-policy)
+                         ", "))
+          "off")
+      "\n")))
 
 ;; The stance, set outright. Cycling it and applying a bundle take the same
 ;; road: the local, then the live agent, then the modeline.

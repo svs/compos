@@ -77,7 +77,7 @@
                 (check-false! (equal? fg "#26356b")
                               (string-append theme " does not wear paper's navy on " (symbol->string face))))))
           '(org-level-1 org-level-2 org-level-3 org-level-4)))
-      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+      '("paper" "compos" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
         "zenburn" "ascii" "crt" "paperized" "brut" "maharaja"))
     (theme-test-restore!)))
 
@@ -159,7 +159,7 @@
                        (string-append theme ": a search match is not a selection"))))
       ;; brut is light, and the same rule holds: a row under point that
       ;; does not stand off the sheet is a row you cannot find
-      '("paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+      '("compos" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
         "zenburn" "ascii" "crt" "brut" "maharaja"))
     (theme-test-restore!)))
 
@@ -226,6 +226,6 @@
                              (theme-test-face-attr face 'inherit))
                          (string-append theme " colours " (symbol->string face))))
           theme-test-ansi-faces))
-      '("paper" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+      '("paper" "compos" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
         "zenburn" "ascii" "crt" "paperized" "brut" "maharaja"))
     (theme-test-restore!)))

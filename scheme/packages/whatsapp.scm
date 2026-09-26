@@ -582,3 +582,146 @@
 (mode-icon! "whatsapp-mode" "W")
 (mode-icon! "whatsapp-chat-mode" "W")
 
+
+;;; The feed: every WhatsApp message becomes a "whatsapp:<chat jid>" event
+;;; in the event log. The bridge on the WhatsApp host pushes each message it
+;;; stores to a webhook here, over the tailnet. A slow sweep reads the
+;;; bridge's /api/messages after a saved rowid and adds what a push dropped;
+;;; a received message only the sweep found is a "feed:whatsapp" missed event.
+
+(domain! 'chat)
+(effects! '(write external))
+
+(defcustom 'whatsapp-feed-enabled #f
+  "Start the WhatsApp feed when this package loads."
+  'group 'whatsapp 'type 'boolean)
+
+(defcustom 'whatsapp-feed-host "100.93.101.79"
+  "The address the feed webhook listens on: this machine on the tailnet."
+  'group 'whatsapp 'type 'string)
+
+(defcustom 'whatsapp-feed-port 4790
+  "The port of the feed webhook."
+  'group 'whatsapp 'type 'integer)
+
+(defcustom 'whatsapp-feed-peer "100.110.113.41"
+  "The only address the webhook takes messages from: the bridge host."
+  'group 'whatsapp 'type 'string)
+
+(defcustom 'whatsapp-feed-bridge "http://100.110.113.41:8080"
+  "The bridge's REST server, which the sweep reads."
+  'group 'whatsapp 'type 'string)
+
+(defcustom 'whatsapp-feed-sweep-seconds 900
+  "Seconds between two sweeps of the bridge."
+  'group 'whatsapp 'type 'integer)
+
+;; the message ids the log holds, newest first; seeded from the log once
+(defvar '*whatsapp-feed-seen* #f)
+
+(effects! '(pure))
+
+(define (whatsapp-feed--event row)
+  "(whatsapp-feed--event ROW) — the topic, kind and data of one bridge message. A direct chat's topic is its phone number, so a person under a LID and under a phone JID is one conversation; a group's is its JID."
+  (list (string-append "whatsapp:"
+                       (let ((phone (plist-get row 'phone)))
+                         (if (and phone (not (equal? phone ""))) phone (plist-get row 'chat_jid))))
+        (if (plist-get row 'is_from_me) 'sent 'received)
+        (list 'id (plist-get row 'id)
+              'chat (plist-get row 'chat_jid)
+              'chat-name (plist-get row 'chat_name)
+              'phone (plist-get row 'phone)
+              'sender (plist-get row 'sender)
+              'sender-phone (plist-get row 'sender_phone)
+              'text (plist-get row 'content)
+              'at (plist-get row 'timestamp)
+              'media (plist-get row 'media_type)
+              'file (plist-get row 'filename))))
+
+(define (whatsapp-feed--reply status text)
+  (list 'status status 'headers '(("content-type" "text/plain")) 'body text))
+
+(effects! '(write))
+
+(define (whatsapp-feed-publish! row)
+  "(whatsapp-feed-publish! ROW) — log one bridge message unless the log has it; its seq, or #f"
+  (unless *whatsapp-feed-seen*
+    (set! *whatsapp-feed-seen*
+          (map (lambda (e) (plist-get (plist-get e 'data) 'id))
+               (event-log-newest "whatsapp:*" 2000))))
+  (let ((id (plist-get row 'id)))
+    (if (or (not id) (member id *whatsapp-feed-seen*))
+        #f
+        (let ((e (whatsapp-feed--event row)))
+          (set! *whatsapp-feed-seen* (take (cons id *whatsapp-feed-seen*) 2000))
+          (event-publish! (car e) (cadr e) (caddr e))))))
+
+(define (whatsapp-feed--handle request)
+  "(whatsapp-feed--handle REQUEST) — the webhook: one message the bridge pushed"
+  (cond ((not (equal? (plist-get request 'remote-address) whatsapp-feed-peer))
+         (whatsapp-feed--reply 403 "forbidden"))
+        ((not (and (equal? (plist-get request 'method) "POST")
+                   (equal? (plist-get request 'path) "/whatsapp")))
+         (whatsapp-feed--reply 404 "not found"))
+        (else
+         (let ((row (json-parse (plist-get request 'body))))
+           (if (not row)
+               (whatsapp-feed--reply 400 "bad json")
+               (begin (whatsapp-feed-publish! row)
+                      (whatsapp-feed--reply 200 "ok")))))))
+
+(effects! '(write external))
+
+(define (whatsapp-feed-sweep!)
+  "(whatsapp-feed-sweep!) — read the bridge after the saved rowid and log what the log lacks. The first sweep only saves the newest rowid."
+  (let ((after (event-log-position "whatsapp-feed-sweep")))
+    (http-get-json
+     (string-append whatsapp-feed-bridge "/api/messages?limit=500&after="
+                    (number->string (or after -1)))
+     '()
+     (lambda (rows)
+       (when (pair? rows)
+         (let ((missed 0))
+           (when after
+             (for-each (lambda (row)
+                         (when (and (whatsapp-feed-publish! row)
+                                    (not (plist-get row 'is_from_me)))
+                           (set! missed (+ missed 1))))
+                       rows))
+           (event-log-position-set! "whatsapp-feed-sweep"
+                                    (plist-get (car (reverse rows)) 'rowid))
+           (when (> missed 0)
+             (event-publish! "feed:whatsapp" 'missed (list 'count missed)))
+           (when (= (length rows) 500) (whatsapp-feed-sweep!))))))))
+
+(define (whatsapp-feed--tick _)
+  (ignore-errors (lambda () (whatsapp-feed-sweep!)))
+  (debounce! 'whatsapp-feed-sweep (* 1000 whatsapp-feed-sweep-seconds)
+             (lambda (x) (whatsapp-feed--tick x)) #f))
+
+(define (whatsapp-feed-start!)
+  "(whatsapp-feed-start!) — listen for the bridge's pushes and start the sweep"
+  (web-server-stop! "whatsapp-feed")
+  ;; started from a task, the server takes a lane of its own: the lane of
+  ;; whoever called this may be an agent's, gone after its turn
+  (task-await
+   (task-spawn
+    (lambda ()
+      (web-server-start! "whatsapp-feed"
+                         (list 'host whatsapp-feed-host 'port whatsapp-feed-port)
+                         (lambda (request) (whatsapp-feed--handle request))))))
+  (whatsapp-feed--tick #f))
+
+(define (whatsapp-feed-stop!)
+  "(whatsapp-feed-stop!) — stop the webhook and the sweep"
+  (web-server-stop! "whatsapp-feed")
+  (debounce-cancel! 'whatsapp-feed-sweep))
+
+(define-command "whatsapp-feed-start" "Turn WhatsApp messages into events: the webhook and the sweep"
+  (lambda () (whatsapp-feed-start!) (message "WhatsApp feed on")))
+
+(define-command "whatsapp-feed-stop" "Stop turning WhatsApp messages into events"
+  (lambda () (whatsapp-feed-stop!) (message "WhatsApp feed off")))
+
+(when whatsapp-feed-enabled
+  (ignore-errors (lambda () (whatsapp-feed-start!))))

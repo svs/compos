@@ -6,6 +6,7 @@
 ;;; user overlay — the same name wins. Every consumer derives from it:
 ;;;
 ;;;   - (skills) lists name and description; (skill NAME) returns the body.
+;;;   - A group adds its own skills on top (see group skills below).
 ;;;   - The chat system prompt carries a one-line index (skills-note,
 ;;;     appended by chat-tool-system in packages/mcp.scm).
 ;;;   - The sanitized Codex home renders the same list, so a
@@ -13,8 +14,9 @@
 ;;;     own ~/.codex state (codex-config-with-env, called by
 ;;;     agent-resolve-config).
 ;;;
-;;; A project's own .agents/skills stays native: the coding backends read
-;;; it from the cwd, and this catalog never touches it.
+;;; Codex also finds skills of its own (a project's .agents/skills, the
+;;; user's ~/.agents/skills, its system skills); the sanitized home's
+;;; config.toml turns each of them off (codex-skills-disable!).
 
 (domain! 'chat)
 (effects! '(read))
@@ -47,30 +49,35 @@
   (list (string-append (compos-priv-dir) "/skills")
         (string-append (compos-home) "/skills")))
 
-(define (skills--register! root entry)
+(define (skills--register root entry entries)
   (let* ((dirname (substring entry 0 (- (string-length entry) 1)))
          (dir (string-append root "/" dirname))
          (file (string-append dir "/SKILL.md"))
          (text (and (file-exists? file) (read-file file))))
-    (when text
-      (let* ((parsed (skills--parse text))
-             (name (or (car parsed) dirname))
-             (desc (or (cadr parsed) "")))
-        (set! *skills*
+    (if text
+        (let* ((parsed (skills--parse text))
+               (name (or (car parsed) dirname))
+               (desc (or (cadr parsed) "")))
           (cons (list name desc dir)
-                (remove (lambda (s) (equal? (car s) name)) *skills*)))))))
+                (remove (lambda (s) (equal? (car s) name)) entries)))
+        entries)))
 
-(define (skills-scan!)
-  (set! *skills* '())
+;; ENTRIES with every skill under ROOTS registered over it, in order
+(define (skills--scan-roots roots entries)
   (for-each
     (lambda (root)
       (when (file-exists? root)
         (for-each
           (lambda (entry)
             (when (string-suffix? "/" entry)
-              (skills--register! root entry)))
+              (set! entries (skills--register root entry entries))))
           (list-dir root))))
-    (skills--roots))
+    roots)
+  entries)
+
+(define (skills-scan!)
+  (set! *skills* (skills--scan-roots (skills--roots) '()))
+  (set! *group-skills* '())
   (for-each
     (lambda (s)
       ;; explicit stamps: a runtime rescan must not inherit whatever
@@ -82,16 +89,57 @@
   (skills-note-build!)
   (length *skills*))
 
+;;; --- group skills ----------------------------------------------------------------
+;;; A group adds the skills in its home, <group-home>/skills, and in its
+;;; directory's .claude/skills. They stay out of the global catalog: only
+;;; the group's chats see them, in their index and through (skill NAME).
+;;; The home wins over .claude, and both win over the global catalog.
+
+(define (skills-group-roots g)
+  (let* ((id (and g (group-resolve-id g)))
+         (record (and id (group-record-by-id id)))
+         (origin (and record (group-record-origin record))))
+    (if (not id)
+        '()
+        (append
+          (if (and origin (file-directory? origin))
+              (list (string-append origin "/.claude/skills"))
+              '())
+          (list (string-append (group-home-dir id) "/skills"))))))
+
+;; group id -> #f, or (entries note notes-without) when the group has
+;; skills of its own. Scanned on the first ask; skills-scan! drops them.
+(define *group-skills* '())
+
+(define (skills--group g)
+  (let* ((id (and g (group-resolve-id g)))
+         (hit (and id (assoc id *group-skills*))))
+    (cond
+      ((not id) #f)
+      (hit (cadr hit))
+      (else
+        (let* ((own (skills--scan-roots (skills-group-roots id) '()))
+               (entries (skills--scan-roots (skills-group-roots id) *skills*))
+               (set (if (null? own) #f (cons entries (skills--notes entries)))))
+          (set! *group-skills* (cons (list id set) *group-skills*))
+          set)))))
+
+;; the skills the current buffer's chat can load
+(define (skills--here)
+  (let ((set (skills--group (buffer-group (current-buffer)))))
+    (if set (car set) *skills*)))
+
 (define (skills)
-  (map (lambda (s) (list (car s) (cadr s))) (reverse *skills*)))
+  (map (lambda (s) (list (car s) (cadr s))) (reverse (skills--here))))
 
 (define (skill name)
   (let* ((n (if (symbol? name) (symbol->string name) name))
-         (s (assoc n *skills*)))
+         (entries (skills--here))
+         (s (assoc n entries)))
     (if s
         (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
         (string-append "no such skill: " n "; available: "
-                       (string-join (map car (reverse *skills*)) ", ")))))
+                       (string-join (map car (reverse entries)) ", ")))))
 
 ;; The index a system prompt carries: one line per skill, nothing more —
 ;; the body loads on demand. The string is built ONCE per scan:
@@ -114,16 +162,21 @@
           "\n")
         "\nLoad a skill with eval-scheme before you start its task.")))
 
+(define (skills--notes entries)
+  (list (skills-note-format entries)
+        ;; contextual variants, built once. Turn-start reads must not
+        ;; allocate them.
+        (map (lambda (excluded)
+               (list (car excluded)
+                     (skills-note-format
+                       (remove (lambda (s) (equal? (car s) (car excluded)))
+                               entries))))
+             entries)))
+
 (define (skills-note-build!)
-  (set! *skills-note* (skills-note-format *skills*))
-  ;; Build contextual variants once. Turn-start reads must not allocate them.
-  (set! *skills-notes-without*
-    (map (lambda (excluded)
-           (list (car excluded)
-                 (skills-note-format
-                   (remove (lambda (s) (equal? (car s) (car excluded)))
-                           *skills*))))
-         *skills*)))
+  (let ((notes (skills--notes *skills*)))
+    (set! *skills-note* (car notes))
+    (set! *skills-notes-without* (cadr notes))))
 
 (define (skills-note-without name)
   (let* ((n (if (symbol? name) (symbol->string name) name))
@@ -132,6 +185,16 @@
         (cadr hit)
         *skills-note*)))
 
+;; The index BUF's chat carries: the global one, or its group's when the
+;; group has skills of its own. WITHOUT names an active skill to leave
+;; out, or is #f.
+(define (skills-note-for buf without)
+  (let* ((set (skills--group (and buf (buffer-known? buf) (buffer-group buf))))
+         (note (if set (cadr set) *skills-note*))
+         (withouts (if set (caddr set) *skills-notes-without*))
+         (hit (and without (assoc without withouts))))
+    (if hit (cadr hit) note)))
+
 (skills-scan!)
 
 (public! 'skills "(skills) — every skill as (NAME DESCRIPTION)")
@@ -139,9 +202,13 @@
 (public! 'skills-note "(skills-note) — the one-line-per-skill index a system prompt carries")
 (public! 'skills-note-without
   "(skills-note-without NAME) — the cached skill index without one active skill")
+(public! 'skills-note-for
+  "(skills-note-for BUF WITHOUT) — the skill index BUF's chat carries: the global one, or its group's; WITHOUT is an active skill to leave out, or #f")
+(public! 'skills-group-roots
+  "(skills-group-roots G) — the directories G takes skills from: <dir>/.claude/skills, then <group-home>/skills")
 (effects! '(write))
 (public! 'skills-scan!
-  "(skills-scan!) — rescan priv/skills and ~/.compos/skills into the catalog")
+  "(skills-scan!) — rescan priv/skills and ~/.compos/skills into the catalog, and drop every group's skills to rescan on the next ask")
 
 ;;; --- the sanitized Codex home --------------------------------------------------
 ;;; codex reads its per-user state — config, auth, global instructions,
@@ -212,6 +279,7 @@
       conf
       (begin
         (codex-home-ensure!)
+        (codex-skills-disable! (plist-get conf 'cwd))
         (append
           (list 'env
                 (append (list (list "CODEX_HOME" (codex-home)))
@@ -219,10 +287,94 @@
                         (or (plist-get conf 'env) '())))
           conf))))
 
+;;; Codex finds skills of its own beside CODEX_HOME/skills: .agents/skills
+;;; in every directory from the cwd up to the git root, ~/.agents/skills,
+;;; /etc/codex/skills, and the system skills it keeps in skills/.system.
+;;; The sanitized home's config.toml turns each of them off by path, so a
+;;; thread sees the catalog and nothing else. Every thread shares the home,
+;;; so the list only grows: a path turned off for one cwd stays off for
+;;; the next. Codex reads the file as the process starts, and this runs
+;;; before the backend opens it.
+
+(define *codex-disabled* '())
+
+;; every <root>/*/SKILL.md
+(define (codex--skill-files root)
+  (let ((out '()))
+    (when (file-exists? root)
+      (for-each
+        (lambda (entry)
+          (when (string-suffix? "/" entry)
+            (let ((f (string-append root "/" entry "SKILL.md")))
+              ;; codex may record either name of a linked skill, so
+              ;; both go in
+              (when (file-exists? f)
+                (let ((real (file-realpath f)))
+                  (set! out (cons f out))
+                  (when (and (string? real) (not (equal? real f)))
+                    (set! out (cons real out))))))))
+        (list-dir root)))
+    (reverse out)))
+
+(define (codex--trim-slash d)
+  (if (and (> (string-length d) 1) (string-suffix? "/" d))
+      (substring d 0 (- (string-length d) 1))
+      d))
+
+;; CWD and each parent up to its git root; CWD alone outside a repository
+(define (codex--dirs-up cwd)
+  (let ((top (let ((r (git-root cwd))) (and (string? r) (codex--trim-slash r)))))
+    (let loop ((d (codex--trim-slash cwd)) (acc '()))
+      (let ((acc (cons d acc)))
+        (if (or (not top) (equal? d top) (<= (string-length d) (string-length top)))
+            (reverse acc)
+            (loop (string-join (reverse (cdr (reverse (string-split d "/")))) "/")
+                  acc))))))
+
+(define (codex-foreign-skills cwd)
+  (apply append
+    (map codex--skill-files
+      (append
+        (list (string-append (codex-home) "/skills/.system")
+              (string-append (expand-path "~") "/.agents/skills")
+              "/etc/codex/skills")
+        (if cwd
+            (map (lambda (d) (string-append d "/.agents/skills")) (codex--dirs-up cwd))
+            '())))))
+
+(define (codex--toml-string s)
+  (string-append "\""
+                 (string-join (string-split (string-join (string-split s "\\") "\\\\") "\"")
+                              "\\\"")
+                 "\""))
+
+(define (codex-config-toml paths)
+  (string-append
+    "# compos writes this file. A codex thread sees the editor's skills only.\n"
+    (string-join
+      (map (lambda (p)
+             (string-append "\n[[skills.config]]\npath = " (codex--toml-string p)
+                            "\nenabled = false\n"))
+           paths)
+      "")))
+
+(define (codex-skills-disable! cwd)
+  (let ((new (remove (lambda (p) (member p *codex-disabled*))
+                     (codex-foreign-skills cwd))))
+    (unless (null? new)
+      (set! *codex-disabled* (append *codex-disabled* new))
+      (write-file! (string-append (codex-home) "/config.toml")
+                   (codex-config-toml *codex-disabled*)))
+    *codex-disabled*))
+
 (public! 'codex-home-ensure!
   "(codex-home-ensure!) — render the sanitized Codex home: catalog skills plus a copied auth.json")
 (public! 'codex-config-with-env
   "(codex-config-with-env CONF) — the codex thread config with the sanitized CODEX_HOME environment")
+(public! 'codex-skills-disable!
+  "(codex-skills-disable! CWD) — turn off, in the sanitized home's config.toml, every skill codex would find beside the catalog; the paths turned off")
+(public! 'codex-foreign-skills
+  "(codex-foreign-skills CWD) — the SKILL.md paths codex finds on its own: .agents/skills up to the git root, ~/.agents/skills, /etc/codex/skills, skills/.system")
 (effects! '(pure))
 (public! 'codex-home "(codex-home) — the editor-owned CODEX_HOME directory")
 

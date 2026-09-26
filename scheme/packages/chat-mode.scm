@@ -1033,11 +1033,12 @@
 (define *chat-restart-message*
   "Continue the work interrupted by the editor restart. Recheck the current workspace state before acting.")
 
-;; Code-mode can grant a chat permission to continue after a daemon restart.
-;; Other chats restore their transcript but do not start external work.
+;; The mode setup calls this for a chat whose turn a restart interrupted.
+;; The setup reads the turn flag BEFORE chat-sweep-runtime-locals! clears
+;; it, so this fn must not read the flag again: it is always #f here.
+;; A live runtime means the user or a retry already restarted the chat.
 (define (chat-recover-interrupted! buf)
   (when (and (buffer-exists? buf)
-             (buffer-local buf 'chat-turn-active)
              (not (chat-live-runtime? buf)))
     (if (boundp (quote agent-send-msg!))
         (begin

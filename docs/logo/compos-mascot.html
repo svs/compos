@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>compos mascot</title>
+<style>
+  body { margin: 0; padding: 20px; background: #f4f1ea; color: #222;
+         font: 13px/1.4 -apple-system, 'Helvetica Neue', sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin-bottom: 18px; }
+  .card { text-align: center; color: #777; font-size: 11px; cursor: pointer; }
+  .card svg { display: block; background: #fbf9f4; border: 1px solid #ddd6c8; }
+  .card.on svg { outline: 2px solid #00a3cc; }
+  textarea { width: 100%; height: 90px; font: 11px ui-monospace, monospace; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<h1>compos mascot: a bass clef, six postures</h1>
+<div class='row' id='cands'></div>
+<div class='row' id='moods'></div>
+<div class='row' id='sizes'></div>
+<textarea id='out' spellcheck='false'></textarea>
+<script>
+// The mascot is a bass clef and nothing else, turned a quarter to the
+// left so its two dots sit side by side and read as eyes over the curl. A mood is a
+// posture: how the clef leans, squashes or stretches, and what the dots do.
+// It is printed like the logo, each part in two inks a little out of
+// register, so the overlaps turn navy, red and green.
+const INK = { c: '#00a3cc', m: '#e0147a', y: '#f7c600' };
+const layer = (c, inner, dx = 0, dy = 0) =>
+  `<g transform='translate(${dx} ${dy})' fill='${c}' style='mix-blend-mode:multiply'>${inner}</g>`;
+
+const CURL = `<path d='M 28 78 C 36 18 170 6 172 96 C 174 176 104 226 18 252 C 90 214 136 170 130 100 C 124 40 70 38 60 62 Z'/>`;
+const BALL = `<circle cx='46' cy='76' r='28'/>`;
+const dot = (x, y, d) => d === 'dash'
+  ? `<rect x='${x - 16}' y='${y - 5}' width='32' height='10' rx='5'/>`
+  : `<circle cx='${x}' cy='${y}' r='${d || 13}'/>`;
+
+const MOODS = {
+  calm:      { turn: 0,   sx: 1,    sy: 1,    dots: [13, 13] },
+  happy:     { turn: 8,   sx: 1.06, sy: 0.94, dots: [14, 14], lift: -10 },
+  curious:   { turn: -14, sx: 1,    sy: 1,    dots: [13, 11], gap: -8 },
+  wink:      { turn: 4,   sx: 1,    sy: 1,    dots: [13, 'dash'] },
+  surprised: { turn: -4,  sx: 0.94, sy: 1.08, dots: [17, 17], gap: 8 },
+  sleepy:    { turn: 22,  sx: 1.04, sy: 0.96, dots: ['dash', 'dash'], lift: 12 },
+};
+
+function mascot(mood, size) {
+  const k = MOODS[mood], gap = k.gap || 0;
+  const dots = dot(204, 64 - gap / 2, k.dots[0]) + dot(204, 130 + gap / 2, k.dots[1]);
+  const clef = layer(INK.c, CURL + BALL) + layer(INK.m, CURL, 7, 5) + layer(INK.y, BALL, -6, 4) +
+               layer(INK.m, dots) + layer(INK.y, dots, 5, 4);
+  const pose = `translate(${200 - 110} ${190 - 130 + (k.lift || 0)}) ` +
+               `rotate(${k.turn - 90} 110 130) translate(110 130) scale(${k.sx} ${k.sy}) translate(-110 -130)`;
+  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='${size}' height='${size}'>` +
+    `<rect width='400' height='400' fill='#fbf9f4'/>` +
+    `<g style='isolation:isolate'><g transform='${pose}'>${clef}</g></g></svg>`;
+}
+
+// Sigils that bow the right way. A bass clef always bulges toward its
+// dots, so turned it frowns. These are printed the same way, for comparison.
+const FERMATA_BELOW = `<path d='M 86 150 C 96 350 304 350 314 150 C 286 290 114 290 86 150 Z'/>`;
+const FERMATA_DOT = `<circle cx='200' cy='180' r='24'/>`;
+const REPEAT_DOTS = `<circle cx='150' cy='130' r='22'/><circle cx='250' cy='130' r='22'/>`;
+const REPEAT_BARS = `<rect x='96' y='214' width='208' height='30' rx='4'/><rect x='96' y='266' width='208' height='9'/>`;
+const plate = (inner, size) =>
+  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='${size}' height='${size}'>` +
+  `<rect width='400' height='400' fill='#fbf9f4'/><g style='isolation:isolate'>${inner}</g></svg>`;
+const CANDS = {
+  'fermata below': () => layer(INK.c, FERMATA_BELOW) + layer(INK.m, FERMATA_BELOW, 7, 5) +
+                         layer(INK.m, FERMATA_DOT) + layer(INK.y, FERMATA_DOT, 5, 4),
+  'repeat, turned': () => layer(INK.c, REPEAT_BARS) + layer(INK.m, REPEAT_BARS, 7, 5) +
+                          layer(INK.m, REPEAT_DOTS) + layer(INK.y, REPEAT_DOTS, 5, 4),
+  'bass clef, turned': () => mascot('calm', 400).replace(/^<svg[^>]*><rect[^>]*\/><g style='isolation:isolate'>|<\/g><\/svg>$/g, ''),
+};
+
+const $ = id => document.getElementById(id);
+let chosen = 'happy';
+function draw() {
+  $('cands').innerHTML = Object.keys(CANDS).map(n =>
+    `<div class='card'>${plate(CANDS[n](), 200)}${n}</div>`).join('');
+  $('moods').innerHTML = Object.keys(MOODS).map(m =>
+    `<div class='card ${m === chosen ? 'on' : ''}' data-m='${m}'>${mascot(m, 200)}${m}</div>`).join('');
+  $('sizes').innerHTML = [128, 64, 32, 16].map(s =>
+    `<div class='card'>${mascot(chosen, s)}${s}px</div>`).join('');
+  $('out').value = mascot(chosen, 512);
+  document.querySelectorAll('#moods .card').forEach(c => c.onclick = () => { chosen = c.dataset.m; draw(); });
+}
+draw();
+</script>
+</body>
+</html>

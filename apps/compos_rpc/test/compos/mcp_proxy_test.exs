@@ -104,6 +104,37 @@ defmodule Compos.McpProxyTest do
 
     assert %{"id" => 5, "result" => %{"content" => [%{"text" => "Show diff"}]}} = recv(port)
 
+    # An image file arrives as MCP image content. Its raw bytes are not
+    # UTF-8, and a text reply with them killed the call with no answer.
+    dir = Path.join(System.tmp_dir!(), "proxy-image-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    png = <<0x89, "PNG\r\n", 0x1A, "\n", 0, 0, 0, 13, 0xFF, 0xFE>>
+    File.write!(Path.join(dir, "shot.png"), png)
+    File.write!(Path.join(dir, "blob.bin"), png)
+
+    send_msg(port, %{
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: %{name: "read-file", arguments: %{path: Path.join(dir, "shot.png")}}
+    })
+
+    assert %{"id" => 6, "result" => %{"content" => [%{"type" => "text"}, image]}} = recv(port)
+    assert image["type"] == "image"
+    assert image["mimeType"] == "image/png"
+    assert Base.decode64!(image["data"]) == png
+
+    send_msg(port, %{
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: %{name: "read-file", arguments: %{path: Path.join(dir, "blob.bin")}}
+    })
+
+    assert %{"id" => 7, "result" => %{"content" => [%{"text" => text}]}} = recv(port)
+    assert text =~ "is a binary file"
+
     Port.close(port)
   end
 

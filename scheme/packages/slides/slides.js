@@ -450,11 +450,15 @@ let sel = 0;
 function scaleThumbs() {
   ov.querySelectorAll('.thumb').forEach(t => { t.firstChild.style.transform = `scale(${t.clientWidth / W})`; });
 }
-function select(n) {
+// opening the overview centers the slide at once; a key after that
+// scrolls only as far as the next thumb needs
+function select(n, opening) {
   const thumbs = ov.querySelectorAll('.thumb');
   sel = Math.max(0, Math.min(thumbs.length - 1, n));
   thumbs.forEach((t, k) => t.classList.toggle('sel', k === sel));
-  thumbs[sel].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  thumbs[sel].scrollIntoView(opening
+    ? { block: 'center', behavior: 'instant' }
+    : { block: 'nearest', behavior: 'smooth' });
 }
 function overview(on) {
   if (on === undefined) on = !ov.classList.contains('on');
@@ -480,7 +484,7 @@ function overview(on) {
     ov.appendChild(t);
   });
   scaleThumbs();
-  select(idx);
+  select(idx, true);
 }
 function columns() {
   return getComputedStyle(ov).gridTemplateColumns.split(' ').length || 1;

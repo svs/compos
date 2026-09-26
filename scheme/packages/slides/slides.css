@@ -119,8 +119,10 @@ body.hud #counter{opacity:.85}
 #help td{padding:3px 18px 3px 0}
 #help kbd{font:12px var(--mono);background:#26272e;border:1px solid #3a3b44;border-bottom-width:2px;border-radius:5px;padding:1px 6px;margin-right:3px}
 #overview.on{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:22px;padding:34px;overflow:auto;align-content:start}
-.thumb{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:10px;cursor:pointer;outline:3px solid transparent;outline-offset:3px;background:var(--bg);animation:a-zoom .35s both;animation-delay:calc(var(--k) * 22ms);transition:outline-color .2s}
-.thumb.sel{outline-color:var(--accent)}
+.thumb{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:10px;cursor:pointer;background:var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 6px 18px rgba(0,0,0,.25);opacity:.88;filter:saturate(.85);animation:a-zoom .35s both;animation-delay:calc(var(--k) * 22ms);transition:scale .35s cubic-bezier(.2,.9,.3,1.3),translate .35s cubic-bezier(.2,.9,.3,1.3),box-shadow .3s,opacity .3s,filter .3s}
+.thumb:hover{opacity:1;filter:none}
+.thumb.sel{z-index:2;opacity:1;filter:none;scale:1.1;translate:0 -6px;box-shadow:0 0 0 2px var(--accent),0 0 32px color-mix(in srgb,var(--accent) 45%,transparent),0 24px 60px rgba(0,0,0,.55)}
+.thumb.sel .n{background:var(--accent)}
 .thumb .slide{inset:auto;left:0;top:0;width:1280px;height:720px;transform-origin:0 0;pointer-events:none}
 .thumb .n{position:absolute;left:10px;bottom:8px;z-index:3;font:600 12px system-ui,sans-serif;color:#fff;background:rgba(0,0,0,.55);padding:2px 7px;border-radius:999px}
 /* speaker notes: s shows them under the slide */

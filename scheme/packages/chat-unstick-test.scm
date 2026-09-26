@@ -103,3 +103,24 @@
       (check-false! (string-contains? sa ":") "no colon: agent/<slug> is a legal ref")
       (buffer-kill! "*zz-us-a*")
       (buffer-kill! "*zz-us-b*"))))
+
+;; The sweep clears the turn flag before the debounced recovery runs. The
+;; recovery read the flag again, found #f, and never sent the nudge, so a
+;; chat that a restart interrupted waited for the user to type "continue".
+(deftest 'recovery-nudges-after-the-sweep-cleared-the-flag
+  "a restart-interrupted chat gets the restart message with the flag already down"
+  (lambda ()
+    (let* ((buf (t--us-chat! #t))
+           (sent '())
+           (old-attach chat-attach!)
+           (old-send agent-send-msg!))
+      (set! chat-attach! (lambda (b) "zz-slug"))
+      (set! agent-send-msg! (lambda (slug text) (set! sent (cons (list slug text) sent))))
+      (chat-sweep-runtime-locals! buf)
+      (check-false! (buffer-local buf 'chat-turn-active) "the sweep lowered the flag")
+      (chat-recover-interrupted! buf)
+      (set! chat-attach! old-attach)
+      (set! agent-send-msg! old-send)
+      (check-equal! sent (list (list "zz-slug" *chat-restart-message*))
+                    "the recovery sends the restart message once")
+      (buffer-kill! buf))))

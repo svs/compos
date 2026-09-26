@@ -439,7 +439,8 @@
           'shadow "0 14px 40px rgba(0, 0, 0, 0.7)"
           'shadow-deep "0 22px 60px rgba(0, 0, 0, 0.7)")))
 
-(define-theme "compos-dark"
+;; tokyo-night's base: the old compos-dark, which the block below extends
+(define-theme "tokyo-night"
   (list
     (list 'ts-keyword 'fg "#7aa2f7")
     (list 'ts-function 'fg "#d6d8de")
@@ -583,9 +584,9 @@
           'border "1px solid #11111b"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
-;; built on compos-dark: it inherits the strings, types, cursor, warn and
+;; built on the old compos-dark: it inherits the strings, types, cursor, warn and
 ;; diff faces and overrides the rest of the palette
-(define-theme-from "tokyo-night" "compos-dark"
+(define-theme-from "tokyo-night" "tokyo-night"
   (list
     (list 'ts-keyword 'fg "#bb9af7")
     (list 'ts-function 'fg "#7aa2f7")
@@ -613,6 +614,158 @@
     (list 'chrome 'gap "5px" 'radius "0"
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
+
+;;; --- compos: the logo's inks ------------------------------------------------
+;; compos and compos-dark: the logo's inks. Cyan, magenta and yellow are
+;; the highlights; the colours where two inks overlap (navy, red, green)
+;; carry the text that must stay readable.
+(define-theme-from "compos" "paper"
+  (list
+    (list 'ts-keyword 'fg "#c8106c")
+    (list 'ts-function 'fg "#00708f")
+    (list 'ts-string 'fg "#2f7d32")
+    (list 'ts-comment 'fg "#8a857a")
+    (list 'ts-number 'fg "#c62a1c")
+    (list 'ts-constant 'fg "#c62a1c")
+    (list 'ts-type 'fg "#283593")
+    (list 'ts-module 'fg "#283593")
+    (list 'ts-operator 'fg "#57534a")
+    (list 'ts-punctuation 'fg "#57534a")
+    (list 'ts-tag 'fg "#c8106c")
+    (list 'ts-attribute 'fg "#00708f")
+    (list 'ts-variable 'fg "#3b3a35")
+    (list 'ts-property 'fg "#57534a")
+    (list 'ts-escape 'fg "#c62a1c")
+    (list 'default 'bg "#e9e4d8" 'fg "#1b1a17")
+    (list 'window 'bg "#fbf9f4")
+    (list 'paper 'bg "#f1ece1")
+    (list 'window-inactive 'bg "#f5f1e8")
+    (list 'modeline 'bg "#ebe6db" 'fg "#57534a")
+    (list 'modeline-active 'bg "#cdeef7" 'fg "#1b1a17")
+    (list 'cursor 'bg "#00a3cc")
+    (list 'region 'bg "#fbe38a")
+    (list 'select 'bg "#d2eef7")
+    (list 'hl-line 'bg "#ede4c8")
+    (list 'accent 'fg "#00708f")
+    (list 'link 'fg "#00708f" 'decoration "underline")
+    (list 'agent-you 'bg "#fff0b0" 'fg "#c8106c")
+    (list 'llm-response 'fg "#283593" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#c8106c" 'style "italic")
+    (list 'warn 'fg "#9a7400")
+    (list 'ok 'fg "#2f7d32")
+    (list 'alert 'fg "#c62a1c")
+    (list 'org-level-1 'fg "#c8106c" 'weight "700")
+    (list 'org-level-2 'fg "#00708f" 'weight "600")
+    (list 'org-level-3 'fg "#283593" 'weight "600")
+    (list 'org-level-4 'fg "#c62a1c" 'weight "600")
+    (list 'group-color-1 'fg "#e0147a")
+    (list 'group-color-2 'fg "#00708f")
+    (list 'group-color-3 'fg "#9a7400")
+    (list 'group-color-4 'fg "#283593")
+    (list 'group-color-5 'fg "#c62a1c")
+    (list 'group-color-6 'fg "#2f7d32")
+    (list 'org-todo 'fg "#e0147a" 'weight "700")
+    (list 'org-done 'fg "#2f7d32" 'decoration "line-through")
+    (list 'org-date 'fg "#00708f" 'style "italic")
+    (list 'org-checkbox 'fg "#c8106c" 'weight "600")
+    (list 'nm-author 'fg "#283593" 'weight "400" 'style "italic")
+    (list 'nm-marked 'fg "#e0147a")
+    (list 'nm-hdr 'fg "#c8106c")
+    (list 'diff-file 'fg "#c8106c" 'weight "600")
+    (list 'diff-hunk 'fg "#00708f")
+    (list 'diff-add 'fg "#1f5a22" 'bg "rgba(47, 125, 50, 0.13)")
+    (list 'diff-del 'fg "#8f0d4d" 'bg "rgba(224, 20, 122, 0.11)")
+    (list 'diff-add-word 'bg "rgba(47, 125, 50, 0.30)")
+    (list 'diff-del-word 'bg "rgba(224, 20, 122, 0.26)")
+    (list 'code-scope 'bg "rgba(0, 163, 204, 0.07)")))
+
+(define-theme-from "compos-dark" "paper-night"
+  (list
+    (list 'ts-keyword 'fg "#ff4fa3")
+    (list 'ts-function 'fg "#3cc6ea")
+    (list 'ts-string 'fg "#f7c600")
+    (list 'ts-comment 'fg "#8a8795")
+    (list 'ts-number 'fg "#ff7059")
+    (list 'ts-constant 'fg "#ff7059")
+    (list 'ts-type 'fg "#8f9bff")
+    (list 'ts-module 'fg "#8f9bff")
+    (list 'ts-operator 'fg "#a7a3b0")
+    (list 'ts-punctuation 'fg "#8a8795")
+    (list 'ts-tag 'fg "#ff4fa3")
+    (list 'ts-attribute 'fg "#3cc6ea")
+    (list 'ts-variable 'fg "#e4e0d8")
+    (list 'ts-property 'fg "#c9c5cf")
+    (list 'ts-escape 'fg "#ff7059")
+    (list 'default 'bg "#0c0c10" 'fg "#f1ede4")
+    (list 'window 'bg "#16161c")
+    (list 'paper 'bg "#121217")
+    (list 'body 'fg "#dcd8cf")
+    (list 'border-soft 'bg "#2c2b35")
+    (list 'window-inactive 'bg "#121217")
+    (list 'modeline 'bg "#121217" 'fg "#a7a3b0")
+    (list 'modeline-active 'bg "#0d4f63" 'fg "#f1ede4")
+    (list 'cursor 'bg "#3cc6ea")
+    (list 'region 'bg "#4a3d00")
+    (list 'select 'bg "#3a1630")
+    (list 'hl-line 'bg "#2d2c3c")
+    (list 'linenum 'fg "#46444f")
+    (list 'border 'bg "#2c2b35")
+    (list 'accent 'fg "#3cc6ea")
+    (list 'link 'fg "#3cc6ea" 'decoration "underline")
+    (list 'agent-you 'bg "#3a3208" 'fg "#ff4fa3")
+    (list 'llm-response 'fg "#8f9bff" 'style "italic")
+    (list 'llm-prompt 'inherit 'llm-response)
+    (list 'diff-block 'fg "#ff4fa3" 'style "italic")
+    (list 'diff-block-source 'fg "#8a8795" 'style "italic")
+    (list 'dim 'fg "#8a8795")
+    (list 'faint 'fg "#6c6977")
+    (list 'warn 'fg "#f7c600")
+    (list 'ok 'fg "#5ccb6a")
+    (list 'alert 'fg "#ff7059")
+    (list 'org-level-1 'fg "#ff4fa3" 'weight "700")
+    (list 'org-level-2 'fg "#3cc6ea" 'weight "600")
+    (list 'org-level-3 'fg "#f7c600" 'weight "600")
+    (list 'org-level-4 'fg "#8f9bff" 'weight "600")
+    (list 'group-color-1 'fg "#ff4fa3")
+    (list 'group-color-2 'fg "#3cc6ea")
+    (list 'group-color-3 'fg "#f7c600")
+    (list 'group-color-4 'fg "#8f9bff")
+    (list 'group-color-5 'fg "#ff7059")
+    (list 'group-color-6 'fg "#5ccb6a")
+    (list 'org-todo 'fg "#ff4fa3" 'weight "700")
+    (list 'org-done 'fg "#5ccb6a" 'decoration "line-through")
+    (list 'org-priority 'fg "#f7c600" 'weight "600")
+    (list 'org-date 'fg "#3cc6ea" 'style "italic")
+    (list 'org-tag 'fg "#8a8795")
+    (list 'org-checkbox 'fg "#ff4fa3" 'weight "600")
+    (list 'org-cookie 'fg "#f7c600")
+    (list 'org-meta 'fg "#8a8795")
+    (list 'fold-marker 'fg "#8a8795")
+    (list 'nm-date 'fg "#8a8795")
+    (list 'nm-author 'fg "#3cc6ea")
+    (list 'nm-tags 'fg "#a7a3b0")
+    (list 'nm-marked 'fg "#ff4fa3")
+    (list 'nm-hdr 'fg "#ff4fa3")
+    (list 'nm-sep 'fg "#6c6977")
+    (list 'diff-file 'fg "#ff4fa3" 'weight "600")
+    (list 'diff-hunk 'fg "#3cc6ea")
+    (list 'diff-add 'fg "#8fe09a" 'bg "rgba(92, 203, 106, 0.13)")
+    (list 'diff-del 'fg "#ff8fc3" 'bg "rgba(255, 79, 163, 0.13)")
+    (list 'diff-add-word 'bg "rgba(92, 203, 106, 0.32)")
+    (list 'diff-del-word 'bg "rgba(255, 79, 163, 0.30)")
+    (list 'code-scope 'bg "rgba(60, 198, 234, 0.08)")
+    (list 'chrome 'gap "5px" 'radius "0"
+          'border "1px solid #2c2b35"
+          'shadow "0 14px 40px rgba(0, 0, 0, 0.7)"
+          'shadow-deep "0 22px 60px rgba(0, 0, 0, 0.7)")))
+
+;; a message you typed wears its ink: a magenta edge and magenta words on
+;; the yellow ground agent-you gives it
+(define compos-theme-skin
+  ".ag-user { color: var(--agent-you-fg); box-shadow: inset 3px 0 var(--agent-you-fg); }")
+(define-theme-skin! "compos" compos-theme-skin)
+(define-theme-skin! "compos-dark" compos-theme-skin)
 
 ;;; --- zenburn: the low-contrast classic --------------------------------------
 ;;; Jani Nurminen's palette, as Emacs has worn it since 2003. A grey-green

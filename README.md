@@ -2,6 +2,16 @@
 
 # compos
 
+## Install on Linux
+
+Run this command to install the Linux x86_64 release:
+
+```bash
+COMPOS_REPO=harsh098/compos bash -c 'installer=$(curl -fsSL https://raw.githubusercontent.com/harsh098/compos/main/bin/install-linux.sh) && bash -c "$installer"'
+```
+
+Use the [Linux installation guide](INSTALLATION.md) for requirements, start commands, and other installation directories.
+
 ## on the plight of the modern worker, and some solutions
 
 The modern knowledge worker - programmer, lawyer, teacher and so on - suffering terribly. Little by little the complexity in their life has increased to the point where the original conception of knowledge worker interfaces have long since ceased to be useful. The dominant computing paradigm of floating windows disconnected from each other visually and contextually is woefully out of date. 

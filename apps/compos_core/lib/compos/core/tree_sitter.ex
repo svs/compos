@@ -43,11 +43,8 @@ defmodule Compos.Core.TreeSitter do
     |> Enum.sort()
   end
 
-  # Grammars the editor ships with. These are sources, not libraries:
-  # a release carries the .c files and the machine that runs it
-  # compiles them once, into the same directory an installed grammar
-  # uses. A bundled grammar therefore needs no install step and no
-  # network — it is simply there, like the compiled-in four.
+  # Grammars the editor ships with. A Linux release also carries compiled
+  # libraries, so the machine that runs it does not need a C compiler.
   def bundled_dir, do: Application.app_dir(:compos_core, "priv/grammars")
 
   def bundled, do: bundled_dirs() |> Enum.map(&Path.basename/1) |> Enum.sort()
@@ -101,9 +98,24 @@ defmodule Compos.Core.TreeSitter do
     if stale?(lib, sources) or stale?(query, [highlights]) do
       File.mkdir_p!(grammars_dir())
 
-      with "ok" <- compile(name, src), do: copy_highlights(name, src)
+      with "ok" <- install_bundled(name, src, sources), do: copy_highlights(name, src)
     else
       "ok"
+    end
+  end
+
+  defp install_bundled(name, src, sources) do
+    prebuilt =
+      if :os.type() == {:unix, :linux} and
+           String.starts_with?(to_string(:erlang.system_info(:system_architecture)), "x86_64") do
+        Path.join([src, "prebuilt", "linux_x86_64", "#{name}.so"])
+      end
+
+    if prebuilt && File.exists?(prebuilt) && not stale?(prebuilt, sources) do
+      File.cp!(prebuilt, Path.join(grammars_dir(), name <> lib_ext()))
+      "ok"
+    else
+      compile(name, src)
     end
   end
 

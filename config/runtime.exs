@@ -70,16 +70,25 @@ if config_env() != :test do
   # an environment variable wins over the conf file
   get = fn env_key, conf_key -> System.get_env(env_key) || conf[conf_key] end
 
-  if registry = get.("COMPOS_DAEMON_REGISTRY", "registry") do
-    config :compos_core, daemon_registry_path: Path.expand(registry)
-  end
+  # Resolve the default with the current user's HOME, not the build user's HOME.
+  registry = get.("COMPOS_DAEMON_REGISTRY", "registry") || "~/.compos/daemons.json"
+  config :compos_core, daemon_registry_path: Path.expand(registry)
 
   if workspace = get.("COMPOS_WORKSPACE_ROOT", "workspace") do
     config :compos_core, workspace_root: Path.expand(workspace)
   end
 
   if port = get.("COMPOS_PORT", "port") do
-    config :compos_ui, Compos.Ui.Endpoint, http: [ip: {0, 0, 0, 0}, port: String.to_integer(port)]
+    bind = get.("COMPOS_BIND", "bind") || "0.0.0.0"
+
+    ip =
+      case bind do
+        "127.0.0.1" -> {127, 0, 0, 1}
+        "0.0.0.0" -> {0, 0, 0, 0}
+        _ -> raise "COMPOS_BIND must be 127.0.0.1 or 0.0.0.0"
+      end
+
+    config :compos_ui, Compos.Ui.Endpoint, http: [ip: ip, port: String.to_integer(port)]
   end
 
   # the preview-app origin; a second daemon must move this port too

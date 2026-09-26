@@ -1,0 +1,127 @@
+name: Linux x86_64 build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MIX_ENV: prod
+      BURRITO_TARGET: linux_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '26'
+          elixir-version: '1.19.6'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Prepare matching Erlang runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          otp_root="$(erl -noshell -eval 'io:format("~s", [code:root_dir()]), halt().')"
+          mkdir -p "$RUNNER_TEMP/compos-erts/otp"
+          cp -a "$otp_root"/erts-* "$RUNNER_TEMP/compos-erts/otp/"
+          cp -a "$otp_root"/lib "$RUNNER_TEMP/compos-erts/otp/"
+          echo "COMPOS_CUSTOM_ERTS=$RUNNER_TEMP/compos-erts" >> "$GITHUB_ENV"
+
+      - name: Build Burrito executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(zig version)" = '0.15.2'
+          mix deps.get
+          mix release compos
+          file burrito_out/compos_linux_x86_64
+
+      - name: Smoke test executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/compos-user"
+          mkdir -p "$HOME"
+          export COMPOS_INSTALL_DIR="$RUNNER_TEMP/compos-install"
+          export COMPOS_HOME="$RUNNER_TEMP/compos-state"
+          export COMPOS_CONFIG="$RUNNER_TEMP/compos-config"
+          export COMPOS_BIND=127.0.0.1
+          export COMPOS_PORT=14004
+          export COMPOS_APP_PORT=14005
+          mkdir -p "$RUNNER_TEMP/no-cc"
+          printf '#!/bin/sh\necho unexpected compiler call >&2\nexit 86\n' > "$RUNNER_TEMP/no-cc/cc"
+          chmod +x "$RUNNER_TEMP/no-cc/cc"
+          export PATH="$RUNNER_TEMP/no-cc:$PATH"
+          ./burrito_out/compos_linux_x86_64 > "$RUNNER_TEMP/compos.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; cat "$RUNNER_TEMP/compos.log"' EXIT
+          for attempt in {1..45}; do
+            if curl --fail --silent --show-error --output /dev/null http://127.0.0.1:14004/; then
+              test -s "$COMPOS_CONFIG/grammars/whatsapp.so"
+              test -s "$HOME/.compos/daemons.json"
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Package executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp burrito_out/compos_linux_x86_64 dist/compos-linux-x86_64
+          (cd dist && sha256sum compos-linux-x86_64 > SHA256SUMS)
+          tar -C dist -czf dist/compos-linux-x86_64.tar.gz compos-linux-x86_64 SHA256SUMS
+          (cd dist && sha256sum compos-linux-x86_64.tar.gz > compos-linux-x86_64.tar.gz.sha256)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compos-linux-x86_64
+          path: |
+            dist/compos-linux-x86_64.tar.gz
+            dist/compos-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: compos-linux-x86_64
+          path: dist
+
+      - name: Publish per-commit release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_SHA}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists"
+            exit 0
+          fi
+          printf 'Automated Linux x86_64 build from commit %s.\n\nThe archive includes the executable and SHA256SUMS for the executable. Verify the archive with the separate .sha256 asset before extracting.\n' "$GITHUB_SHA" > release-notes.md
+          gh release create "$tag" dist/compos-linux-x86_64.tar.gz dist/compos-linux-x86_64.tar.gz.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Linux x86_64 ${GITHUB_SHA:0:7}" --notes-file release-notes.md --latest

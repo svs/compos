@@ -199,7 +199,7 @@
              ((equal? backend "chrome-gemini-nano")
               (let ((ready? (and (setup--connector-ready? name) #t)))
                 (list name "local" ready?
-                      (if ready? "in your browser; no key, no install"
+                      (if ready? "connector loaded; test browser Prompt API support"
                           "needs a Chrome with the Prompt API"))))
              ((equal? backend "req-llm")
               (let ((key? (setup--any-llm-key?)))
@@ -539,11 +539,13 @@
       "it can read the buffers you have open. You do not paste context into it, and\n"
       "you do not leave your work to ask a question.\n\n"
       "## Start here\n\n"
+      "- **[Set up AI](compos:setup/ai)** — connect a model, then practise\n"
+      "  chats, file context, and agent threads.\n"
       "- **[Start the tutorial](compos:training/tutorial)** — learn by editing real\n"
       "  text.\n"
       "- Press `C-h t` to open or resume the tutorial at any time.\n"
       "- Press `C-h h` to find how to do a task, and `C-h ?` for every help command.\n"
-      "- [Set up your inference](compos:setup/inference)\n\n"
+      "- [Check available models](compos:setup/inference)\n\n"
       "## Then\n\n"
       "- [M-x and the editor philosophy](compos:setup/keys)\n"
       "- [Writing code with an agent](compos:setup/code)\n"
@@ -553,6 +555,15 @@
 (define-command "setup-welcome" "Open the welcome page"
   (lambda ()
     (setup--show-document! "Welcome to Compos" (setup-welcome-document))))
+
+(define-command "setup-ai-guide" "Read the first-run AI setup guide"
+  (lambda ()
+    (let ((guide (read-file
+                   (string-append (compos-priv-dir)
+                                  "/tutorials/START-WITH-AI.md"))))
+      (if guide
+          (setup--show-document! "Start with AI" guide)
+          (message "The bundled AI guide is missing")))))
 
 (define (setup-welcome-marker-path)
   (string-append (compos-home) "/welcome-seen"))
@@ -577,28 +588,28 @@
                  (kind (list-ref row 1))
                  (found? (list-ref row 2))
                  (detail (list-ref row 3)))
-             (string-append "- " (if found? "**here**" "missing")
+             (string-append "- " (if found? "**detected**" "needs setup")
                             " `" name "` (" kind ") - " detail "\n")))
          (setup-inference-scan))))
 
 (define (setup--inference-document)
   (string-append
-    "# First, your inference\n\n"
-    "Hello. I am Gemini Nano.\n\n"
-    "I run inside your browser, so I need no key, no install, and no account.\n"
-    "That makes me the one model that is always here, and it is why I speak first.\n\n"
-    "I am also small. Let me look for bigger ones.\n\n"
+    "# Find a model for Compos\n\n"
+    "Compos can use a browser model, a direct API, or an external agent.\n"
+    "This scan detects local commands and registered keys. It cannot check\n"
+    "your login, browser support, or whether a model will reply.\n"
+    "[Start with AI](compos:setup/ai) explains how to test a real reply.\n\n"
     "## What this machine has\n\n"
     (setup--inference-rows)
     "\n"
-    "An ACP agent is a coding agent the editor starts as a program and talks to\n"
-    "over the Agent Client Protocol: Codex, Claude Code, OpenCode, DeepSeek. The\n"
-    "editor supplies the tools and writes the prompt, so the agent edits your\n"
-    "buffers rather than files behind your back.\n\n"
-    "`missing` means the program is not installed here, not that it is unsupported.\n\n"
+    "Compos can start an external coding agent as a program. Claude Code,\n"
+    "OpenCode, and DeepSeek use the Agent Client Protocol (ACP). Codex uses\n"
+    "its app-server protocol. The scan does not check their logins.\n\n"
+    "`needs setup` means a command or key was not found. It does not mean\n"
+    "the connector is unsupported. `detected` does not prove it can reply.\n\n"
     "## Choosing\n\n"
-    "Pick the one you want as the default for new chats. You can change it per\n"
-    "chat later with `M-x agent-switch`, and change the default with `C-c b`.\n\n"
+    "Pick a default connector for new chats. In a chat, `C-c b` changes that\n"
+    "chat's setup. A detected connector still needs a real reply test.\n\n"
     "[Back to setup](compos:setup/report)\n"))
 
 (define (setup--choose-inference)
@@ -695,6 +706,7 @@
 (define (setup--follow-link arg)
   (cond ((equal? arg "report") (run-command "setup-report"))
         ((equal? arg "welcome") (run-command "setup-welcome"))
+        ((equal? arg "ai") (run-command "setup-ai-guide"))
         ((equal? arg "inference") (run-command "setup-inference"))
         ((equal? arg "secrets") (run-command "setup-secrets"))
         ((equal? arg "keys") (run-command "setup-teach-keys"))

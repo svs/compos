@@ -994,6 +994,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `messages-refresh` |  | Refresh the structured \*Messages\* list |
 | `messages-watch-list` |  | Say which message watches are in force |
 | `restart-daemon` |  | Save the desktop and restart the daemon |
+| `setup-ai-guide` |  | Read the first-run AI setup guide |
 | `setup-bootstrap-gemini` |  | Set Gemini Nano as the default local connector |
 | `setup-bot` |  | Walk through first-run setup one question at a time |
 | `setup-inference` |  | Check this machine for models and pick a default |

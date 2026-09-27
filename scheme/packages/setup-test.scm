@@ -3,6 +3,9 @@
 (domain! 'testing)
 (effects! '(read))
 
+(tests-need-a-disposable-editor!
+  "opens a guide window and changes first-run setup state")
+
 (deftest 'setup-report-is-secret-free
   "the report names setup surfaces but never asks for values"
   (lambda ()
@@ -77,6 +80,20 @@
   (lambda ()
     (setup--document-set! *setup-buffer* "# First\n\nLast\n")
     (check-equal! (buffer-point *setup-buffer*) 0 "the document point")))
+
+(deftest 'setup-ai-link-route-opens-a-guide-at-its-start
+  "the setup link route opens the AI guide in a readable help buffer"
+  (lambda ()
+    (let ((old setup-bot-silent-mode))
+      (set! setup-bot-silent-mode #f)
+      (buffer-set-local! *setup-buffer* 'help-title "not the AI guide")
+      (setup--follow-link "ai")
+      (check-equal! (buffer-local *setup-buffer* 'help-title) "Start with AI"
+                    "the guide is open")
+      (check-equal! (buffer-point *setup-buffer*) 0 "the guide starts at its title")
+      (check-true! (window-showing *setup-buffer*) "the guide is visible")
+      (set! setup-bot-silent-mode old)
+      (delete-other-windows!))))
 
 (deftest 'welcome-marker-makes-first-frame-policy-idempotent
   "every profile sees Welcome once without legacy-state detection"

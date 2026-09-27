@@ -686,7 +686,7 @@ To try an expression now, press {{eval-expression}}. In a Scheme buffer, {{eval-
 ;;; --- Setup and sharing -----------------------------------------------------------
 
 (defhowto! "Setup and sharing" "set up the AI models"
-  "Press {{setup-inference}}. It looks for the models on this machine and helps you choose a default. {{setup-secrets}} sets up a place for API keys, and {{setup-report}} shows what is set up.")
+  "Press {{setup-ai-guide}}. It explains models, chats, and agents, then walks through a real reply. {{setup-inference}} detects local commands and registered keys; it cannot check a login. For a guided OpenRouter key setup, use {{setup-bot}}.")
 
 (defhowto! "Setup and sharing" "share a link to a buffer"
   "Press {{copy-buffer-link}}. The link names this buffer and this line. A person who opens it gets the editor at that place.")

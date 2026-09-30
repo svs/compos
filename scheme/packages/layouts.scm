@@ -36,6 +36,11 @@
   "Rows a page scroll keeps from the screen before it. A page overlaps by this much and never leaves a gap (Emacs next-screen-context-lines)."
   'group 'windows 'type 'number)
 
+;; A frame's target layout until the person frees it (C-x l free).
+(defcustom 'window-layout-default 'columns
+  "The target layout a frame and a new group take: 'single, 'two-pane, 'halves, 'columns, 'rows, or 'two-chat. Windows are added as buffers open, up to the layout's panes."
+  'group 'windows 'type 'choice)
+
 ;; The two-pane layout reads this one.
 (defcustom 'window-layout-main-ratio 0.62
   "The first pane's share of the frame in the two-pane layout: a fraction between 0.3 and 0.9."

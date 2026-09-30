@@ -40,6 +40,10 @@
 ;; It is the first pane's share of the frame.
 (define window-layout-main-ratio (- 1 *window-third*))
 
+;; The layout a frame keeps as its target until the person frees it; a
+;; plain define here too, a custom in layouts.scm.
+(define window-layout-default 'columns)
+
 (define *display-buffer-defaults* (list 'side 'right 'size *window-third*))
 
 (define *display-buffer-alist*
@@ -523,12 +527,27 @@
 (define (layout-target) (frame-local 'layout-target))
 (define (layout-target-set! name)
   (set-frame-local! 'layout-target name)
+  (when name (set-frame-local! 'layout-freed #f))
   (unless name (set-frame-local! 'layout-slots #f))
   (when (and name (not (frame-local 'layout-slots)))
     (layout-target-note-slots! (layout-visible-buffers)))
   (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
   (layout-target-modeline!)
   name)
+
+;; A frame with no target takes window-layout-default, unless the person
+;; freed it. The shape stays as it is: the layout fills as windows come.
+(define (layout-target-default!)
+  (unless (or (layout-target) (frame-local 'layout-freed)
+              (not (layout-capacity window-layout-default)))
+    (layout-target-set! window-layout-default))
+  (layout-target))
+
+(define (layout-target-free!)
+  (layout-target-set! #f)
+  (set-frame-local! 'layout-freed #t))
+
+(add-hook! 'frame-attach-hook 'layout-target-default!)
 
 ;;; The modeline names the chosen layout as Markdown: `*layout*:NAME`. The label
 ;;; is bold and the target reads plainly beside it, with no segment gap between
@@ -1685,6 +1704,25 @@ keeps the buffer you were in and your point.")
         (append (take kept (- capacity 1)) (list focus))
         kept)))
 
+;; A pane that holds a mode (mode-consolidate, or a chosen preference)
+;; keeps that mode's buffers in its history. A layout that needs a new
+;; window fills it from the rest, so the pane loses no member.
+(define (layout-held-buffers)
+  (fold (lambda (held win)
+          (if (window-mode-preference win)
+              (append (filter (lambda (b) (window-prefers-buffer? win b))
+                              (window-prev-buffers win))
+                      held)
+              held))
+        '()
+        (display--work-windows)))
+
+(define (layout-unheld buffers)
+  (let ((held (layout-held-buffers)))
+    (if (null? held)
+        buffers
+        (filter (lambda (b) (not (member b held))) buffers))))
+
 (define (layout--fill-to buffers capacity)
   ;; The fill list costs a walk of every live buffer, so only pay for it when
   ;; the fit actually came up short. The common case -- more buffers than
@@ -1692,7 +1730,7 @@ keeps the buffer you were in and your point.")
   (let ((fitted (layout--fit buffers capacity)))
     (if (>= (length fitted) capacity)
         fitted
-        (let loop ((rest (filter window-fill-primary? (window-fill-buffers)))
+        (let loop ((rest (layout-unheld (filter window-fill-primary? (window-fill-buffers))))
                    (result fitted))
           (cond ((>= (length result) capacity) result)
                 ((null? rest) result)
@@ -1916,7 +1954,7 @@ keeps the buffer you were in and your point.")
 (define (layout-request-buffers)
   (let* ((visible (layout-target-visible-buffers))
          (hidden (map window-buffer-any (layout-hidden-windows)))
-         (work (if (frame-group) (window-fill-buffers) '())))
+         (work (if (frame-group) (layout-unheld (window-fill-buffers)) '())))
     ;; Existing panes keep their buffers, including deliberate duplicates,
     ;; transient lists and visible non-members. Only hidden fillers are filtered.
     (let loop ((rest (append hidden work)) (out (reverse visible)))
@@ -1996,7 +2034,7 @@ keeps the buffer you were in and your point.")
   (debounce-cancel! "window-layout-preview")
   (cond ((equal? name "free")
          (preview-end #f)
-         (layout-target-set! #f)
+         (layout-target-free!)
          (message "Layout free: a display may split a window again"))
         (else
           (if (let ((ok (window-layout-preview-without-history! name requested)))
@@ -2050,7 +2088,7 @@ keeps the buffer you were in and your point.")
 (define-command "window-layout-free"
   "Drop the frame's target layout: a display may split a window again"
   (lambda ()
-    (layout-target-set! #f)
+    (layout-target-free!)
     (message "Layout free: a display may split a window again")))
 
 ;;; --- scrolling the ring -----------------------------------------------------

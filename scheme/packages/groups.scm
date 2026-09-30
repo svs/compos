@@ -1305,36 +1305,34 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; switch the frame to a group: save the layout you leave, then bring
 ;; the group's saved layout back exactly as you left it. A group with
 ;; no saved layout opens its most recent member full-frame.
-;; a group that never saved a layout still ARRIVES arranged: the most
-;; recent work buffer on the left, and on the right the group chat
-;; (companion noise "loud") or the next work buffer. One member alone
-;; fills the frame.
+;; a group that never saved a layout still ARRIVES arranged: its most
+;; recent work buffers fill the frame's target layout (three columns by
+;; default), with the group chat last when its noise is "loud". One
+;; member alone fills the frame. A scratch is never a pane.
 (define (group-default-layout! g)
-  (let* ((docs (group-docs g))
+  (layout-target-default!)
+  (let* ((docs (filter group-primary-fill? (group-docs g)))
          (chat (if (pair? docs) (group-primary-chat g) (group-chat g)))
-         (main (cond ((pair? docs) (car docs))
-                     (chat chat)
-                     (else
-                       (unless (buffer-exists? "*scratch*")
-                         (buffer-create "*scratch*"))
-                       "*scratch*")))
-         (loud (equal? (group-noise g) "loud"))
-         (side (cond ((and loud chat (pair? docs)) chat)
-                     ((and (pair? docs) (pair? (cdr docs))) (car (cdr docs)))
-                     (else #f))))
+         (loud (and chat (pair? docs) (equal? (group-noise g) "loud")))
+         (capacity (or (layout-capacity (layout-target)) 2))
+         (work (take docs (min (length docs) (if loud (- capacity 1) capacity))))
+         (panes (cond ((pair? work) (if loud (append work (list chat)) work))
+                      (chat (list chat))
+                      (else
+                        (unless (buffer-exists? "*scratch*")
+                          (buffer-create "*scratch*"))
+                        (list "*scratch*")))))
     (delete-other-windows!)
-    (switch-to-buffer-here! main)
-    ;; The surviving physical pane must not carry the group we just left.
-    (set-window-prev-buffers! (active-window) '())
-    (set-window-restore! (active-window) #f)
-    (when side
-      (split-window! 'h 0.6)
-      (other-window!)
-      (switch-to-buffer-here! side)
-      (set-window-prev-buffers! (active-window) '())
-      (set-window-restore! (active-window) #f)
-      (let ((window (window-showing main)))
-        (when window (select-window! window))))))
+    (switch-to-buffer-here! (car panes))
+    (when (pair? (cdr panes))
+      (tile-windows! (or (layout-target) (layout-for-count (length panes))) panes))
+    ;; No pane may carry the group we just left.
+    (for-each (lambda (row)
+                (set-window-prev-buffers! (car row) '())
+                (set-window-restore! (car row) #f))
+              (window-list))
+    (let ((window (window-showing (car panes))))
+      (when window (select-window! window)))))
 
 ;; a restored window whose buffer is an empty, unmodified, pathlike
 ;; shell — and whose file exists — re-reads from disk. The layout
@@ -1368,16 +1366,12 @@ is forgotten and that group falls back to creation order in the switcher."
                     (filter (lambda (candidate)
                               (not (member candidate shown)))
                             pool)))
-              (let ((blank (and (null? hidden) (boundp 'group-blank-buffer)
-                                (group-blank-buffer id))))
+              (begin
                 (cond ((pair? hidden)
                        (window-set-buffer! win (car hidden))
                        (set! shown (cons (car hidden) shown)))
-                      ;; sealed: the pane keeps its place as a blank pane,
-                      ;; the group's scratch, rather than a foreign buffer
-                      ((and blank (not (member blank shown)))
-                       (window-set-buffer! win blank)
-                       (set! shown (cons blank shown)))
+                      ;; sealed: with no member to show, the pane goes
+                      ;; rather than show a foreign buffer
                       ((> (length (window-list)) 1)
                        (delete-window-id! win))
                       (else
@@ -1586,7 +1580,8 @@ is forgotten and that group falls back to creation order in the switcher."
                   (group-revive-layout-files! saved)
                   (window-tree-set! saved)
                   (group-restore-sanitize! id)
-                  (layout-target-set! (group-layout-target id)))
+                  (layout-target-set! (group-layout-target id))
+                  (layout-target-default!))
                 ;; the windows the frame hid belong to the group it left
                 (begin (window-hidden-clear!)
                        (group-default-layout! id))))
@@ -2820,6 +2815,9 @@ is forgotten and that group falls back to creation order in the switcher."
                   (unless (matches? shown)
                     (display-buffer-in-window! destination (car matching)))
                   (set-window-prev-buffers! destination matching)
+                  ;; the pane now holds the mode: a layout that needs a
+                  ;; new window never takes one of these out of its history
+                  (window-mode-preference! destination mode)
                   (set-window-restore! destination #f)
                   (select-window! destination)
                   (layout-target-note-slots! (layout-target-visible-buffers))))
@@ -3448,6 +3446,25 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-kill-frame-window-count frame)
   (length (filter (lambda (row) (equal? (caddr row) frame)) (window-list-all))))
 
+;; The group a killed buffer's window refills from: the frame's group,
+;; else the dying buffer's own group. A frame that already lost its group
+;; still never takes a buffer from the whole ring. A group-kill takes its
+;; frame out first, and the window falls to the next buffer.
+(define (group-kill-window-group frame name)
+  (or (group-resolve-id (frame-local-in frame 'current-group))
+      (let loop ((ids (or (group-context-memberships name) '())))
+        (cond ((null? ids) #f)
+              ((and (group-resolve-id (car ids)) (not (group-dying? (car ids))))
+               (group-resolve-id (car ids)))
+              (else (loop (cdr ids)))))))
+
+;; What a group window shows in place of NAME when no member is left: the
+;; group's chat. A scratch is no stand-in; it is made for nobody.
+(define (group-kill-blank group name)
+  (or (group-kill-last-chat group name)
+      (let ((chat (group-chat group)))
+        (and chat (not (equal? chat name)) chat))))
+
 ;; The window of a killed buffer stays in its group (user ruling,
 ;; 2026-09-03): it shows the member it showed before, most recent first
 ;; from its own history (user ruling, 2026-09-03: a window refills MRU),
@@ -3477,20 +3494,26 @@ is forgotten and that group falls back to creation order in the switcher."
             (lambda (found row)
               (if (equal? (cadr row) name)
                   (let ((frame (caddr row)))
-                    (cons (list (car row) frame
-                                (group-resolve-id (frame-local-in frame 'current-group)))
+                    (cons (list (car row) frame (group-kill-window-group frame name))
                           found))
                   found))
             '()
             (window-list-all)))
         (active (active-window)))
+    ;; Every group window leaves the dying buffer now, before the core
+    ;; refills it from the global ring. A foreign stand-in, even for one
+    ;; turn, lets the derived group of that frame drop to none.
     (for-each
       (lambda (place)
         (let ((win (car place))
+              (frame (cadr place))
               (group (caddr place)))
           (when (and group (not (group-dying? group)))
-            (let ((next (group-kill-previous-member group name win (cadr place))))
-              (when next (window-set-buffer! win next))))))
+            (let ((next (or (group-kill-previous-member group name win frame)
+                            (group-kill-blank group name))))
+              (cond (next (window-set-buffer! win next))
+                    ((> (group-kill-frame-window-count frame) 1)
+                     (delete-window-id! win)))))))
       places)
     (layout-strip-forget! name)
     (lambda ()
@@ -3508,8 +3531,7 @@ is forgotten and that group falls back to creation order in the switcher."
                       ((group-kill-keeper? shown group) #t)
                       (else
                         (let ((blank (and (not (group-dying? group))
-                                          (or (group-blank-buffer group)
-                                              (group-chat group)))))
+                                          (group-kill-blank group name))))
                           (cond (blank (window-set-buffer! win blank))
                                 ((> (group-kill-frame-window-count frame) 1)
                                  (delete-window-id! win))

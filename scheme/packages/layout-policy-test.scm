@@ -32,14 +32,18 @@
   (for-each (lambda (b)
               (when (or (string-prefix? "zz-lp-" b)
                         (string-prefix? "*chat:zz-lp-" b)
-                        (string-prefix? "*scratch:zz-lp-" b))
+                        (string-prefix? "*scratch:zz-lp-" b)
+                        ;; group-switch tests reuse group ids, so a chat
+                        ;; one of them left can pass for this group's
+                        (string-prefix? "*chat:zz-sw-" b)
+                        (string-prefix? "*chat:zzsw-" b))
                 (buffer-kill! b)))
             (buffer-list))
   (for-each (lambda (name) (when (group-record-by-name name) (group-record-delete! name)))
             '("zz-lp-group" "zz-lp-other" "zz-lp-away")))
 (define (lp-start!)
   (set! *lp-trace* '())
-  (layout-target-set! #f)
+  (layout-target-free!)
   (set-frame-local! 'pinned-group #f)
   (lp-clean!)
   ;; the first buffer founds the group, so the default layout shows it and
@@ -155,7 +159,8 @@
     (lp-snapshot! 'first-group)
     (lp-group! "other")
     (lp-snapshot! 'second-group)
-    (check-false! (layout-target) "a new group does not inherit the old target")
+    (check-equal! (layout-target) window-layout-default
+                  "a new group takes the default target, not the old group's")
     (switch-to-group! "zz-lp-group")
     (lp-snapshot! 'first-group-restored)
     (check-equal! (layout-target) 'two-pane "the old group's target returns")

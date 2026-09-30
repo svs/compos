@@ -34,7 +34,8 @@
   (set! *group-records* '())
   (set! *group-mru* '())
   (set! *group-next-id* 0)
-  (layout-target-set! #f)
+  ;; these tests read a free frame; the default target has its own
+  (layout-target-free!)
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
@@ -396,8 +397,8 @@
       (when (buffer-known? chat) (buffer-kill! chat)))
     (t--sw-done!)))
 
-(deftest 'a-killed-buffers-window-shows-the-group-scratch-without-a-chat
-  "no chat: the group's scratch takes the place, never a foreign buffer"
+(deftest 'a-killed-buffers-window-shows-the-group-chat-without-a-member
+  "no member left: the group's chat takes the place, never a scratch or a foreign buffer"
   (lambda ()
     (t--sw-setup!)
     (let ((foreign "zz-sw-foreign"))
@@ -407,8 +408,9 @@
         (buffer-kill! t--sw-second)
         (check-equal! (length (window-list)) 2 "the window stays")
         (let ((shown (window-buffer win)))
-          (check-true! (group-scratch-buffer? shown) "and shows the group's scratch")
-          (check-true! (buffer-in-group? shown id) "which is a member")
+          (check-false! (group-scratch-buffer? shown) "not a scratch")
+          (check-true! (and (chat-buffer? shown) (equal? (chat-group-id shown) id))
+                       "but the group's chat")
           (check-false! (equal? shown foreign) "not the foreign buffer")
           (when (buffer-known? shown) (buffer-kill! shown))))
       (buffer-kill! foreign))
@@ -1750,14 +1752,16 @@
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-here"))
           (foreign (group-record-create! "zzsw-foreign")))
+      ;; the panes are laid out before any group exists: a switch in a
+      ;; group makes the buffer join it, and third must stay foreign
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-second)
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second here)
       (buffer-add-group! t--sw-third foreign)
       (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (switch-to-buffer! t--sw-second)
 
       (buffer-kill! t--sw-second)
 
@@ -1768,6 +1772,84 @@
           (check-true! (buffer-in-group? (cadr row) here)
                        "every visible replacement belongs to the current group"))
         (window-list)))
+    (t--sw-done!)))
+
+(deftest 'a-frame-without-a-group-refills-a-killed-member-from-its-group
+  "a frame that lost its group never takes the killed pane's foreign history"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-lost-here"))
+          (foreign (group-record-create! "zzsw-lost-foreign")))
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-second)
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second here)
+      (buffer-add-group! t--sw-third foreign)
+      (set-frame-local! 'current-group #f)
+
+      (buffer-kill! t--sw-second)
+
+      (check-false! (member t--sw-third (map cadr (window-list)))
+                    "the pane's foreign history stayed hidden")
+      (for-each
+        (lambda (row)
+          (check-true! (group-kill-keeper? (cadr row) here)
+                       "every pane shows the killed buffer's group"))
+        (window-list)))
+    (t--sw-done!)))
+
+(deftest 'a-new-group-fills-the-default-three-columns
+  "a group with no saved layout opens its members in the default columns"
+  (lambda ()
+    (t--sw-setup!)
+    (set-frame-local! 'layout-freed #f)
+    (let ((id (group-record-create! "zzsw-cols")))
+      (for-each (lambda (b) (buffer-add-group! b id))
+                (list t--sw-first t--sw-second t--sw-third))
+      (switch-to-group! id)
+      (check-equal! (layout-target) 'columns "the frame takes the default target")
+      (check-equal! (length (window-list)) 3 "one pane for each member")
+      (for-each
+        (lambda (row)
+          (check-false! (string-prefix? "*scratch" (cadr row)) "no pane is a scratch"))
+        (window-list)))
+    (t--sw-done!)))
+
+(deftest 'a-freed-frame-stays-free-in-a-new-group
+  "C-x l free is the person's choice: a group entry does not undo it"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((id (group-record-create! "zzsw-free")))
+      (buffer-add-group! t--sw-first id)
+      (buffer-add-group! t--sw-second id)
+      (switch-to-group! id)
+      (check-false! (layout-target) "the frame stays free"))
+    (t--sw-done!)))
+
+(deftest 'a-new-pane-leaves-a-consolidated-windows-members-alone
+  "a layout that needs a window fills it from buffers no pane holds"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((id (group-record-create! "zzsw-held")))
+      (for-each (lambda (b) (buffer-add-group! b id))
+                (list t--sw-first t--sw-second t--sw-third))
+      (buffer-set-local! t--sw-first 'mode-name "text-mode")
+      (buffer-set-local! t--sw-second 'mode-name "text-mode")
+      (buffer-set-local! t--sw-third 'mode-name "fundamental-mode")
+      (delete-other-windows!)
+      (switch-to-buffer-here! t--sw-first)
+      (set-frame-local! 'current-group id)
+      (let ((win (active-window)))
+        (set-window-prev-buffers! win (list t--sw-second))
+        (window-mode-preference! win "text-mode")
+        (tile-visible-windows! 'columns)
+        (check-false! (window-showing t--sw-second) "the held member stays in its pane")
+        (check-true! (window-showing t--sw-third) "the new pane takes other work")
+        (check-true! (member t--sw-second (window-prev-buffers win))
+                     "and the pane keeps it in its history")
+        (window-mode-preference! win #f)))
     (t--sw-done!)))
 
 (deftest 'a-pinned-empty-group-lands-on-its-chat-after-the-final-kill
@@ -1882,15 +1964,15 @@
           (switch-to-group! away)
           (check-equal! (length (window-list)) 1 "the other group shows its own one pane")
           (switch-to-group! home)
-          (check-equal! (length (window-list)) 3 "coming back restores the three panes")
-          ;; sealed: the pane that showed the foreign buffer is a blank
-          ;; pane now, the group's scratch, and the foreign buffer is out
+          ;; sealed: the pane that showed the foreign buffer has no member
+          ;; to show, so it goes; no scratch stands in for it
+          (check-equal! (length (window-list)) 2 "coming back restores the group's two panes")
           (check-false! (window-showing foreign) "the foreign buffer is not shown")
-          (check-true! (let loop ((ws (window-list)))
-                         (cond ((null? ws) #f)
-                               ((string-prefix? "*scratch:" (cadr (car ws))) #t)
-                               (else (loop (cdr ws)))))
-                       "its pane shows the group's scratch"))
+          (check-false! (let loop ((ws (window-list)))
+                          (cond ((null? ws) #f)
+                                ((string-prefix? "*scratch:" (cadr (car ws))) #t)
+                                (else (loop (cdr ws)))))
+                        "no pane shows a scratch"))
         (buffer-kill! foreign)
         (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
                   (group-buffers-as home 'scratch))))
@@ -2059,6 +2141,9 @@
       (switch-to-group! id)
       (check-equal! (group-frame-owner id) (selected-frame) "entering it adopts it")
       (check-true! (member id (group-ids-mru)) "and this frame lists it now"))
+    ;; the entry made the group's chat; a later test must not find it
+    (for-each (lambda (b) (when (string-prefix? "*chat:zz-sw-orphan" b) (buffer-kill! b)))
+              (buffer-list))
     (t--sw-done!)))
 
 (deftest 'every-completed-window-change-saves-the-groups-layout

@@ -390,7 +390,8 @@
 (define (agent-tool-title e)
   (let ((name (plist-get e 'name))
         (args (agent-tool-args e)))
-    (if (not name)
+    ;; a refining update carries no name, and the wire's nil is true
+    (if (not (string? name))
         (or (plist-get e 'title) "tool")     ; an adapter's own title
         (let ((v (agent-path-abbrev (and args (agent-tool-primary args))))
               (shown (agent-tool-name-display name)))
@@ -421,9 +422,16 @@
         (when (and entry
                    (number? (nth 7 entry))
                    (<= (nth 1 entry) (nth 7 entry)))
-          (let ((title (agent-tool-title e))
-                (kind (nth 5 entry))
-                (args (agent-tool-input-text e)))
+          ;; the update names no tool: the call that opened it did
+          (let* ((known (assoc (plist-get e 'id)
+                               (or (buffer-local buf 'chat-tool-pending) '())))
+                 (e (if (and (not (string? (plist-get e 'name)))
+                             known (string? (nth 1 known)))
+                        (append (list 'name (nth 1 known)) e)
+                        e))
+                 (title (agent-tool-title e))
+                 (kind (nth 5 entry))
+                 (args (agent-tool-input-text e)))
             (unless (equal? title (nth 4 entry))
               (agent-block-retitle! buf (plist-get e 'id) title)
               (when (equal? (nth 6 entry) "running")

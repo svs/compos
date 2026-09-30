@@ -88,7 +88,7 @@
                                           (- (monotonic-ms) t0))
                   (list 'answers '() 'usage (list 0 0 'laya (- (monotonic-ms) t0))))))))
       (else
-        (task-run! (lambda () (apply decide state questions opts))
+        (task-run! (lambda () (apply decide (append (list state questions) opts)))
           (lambda (ok? v) (k (if ok? v (list 'answers '() 'usage (list 0 0 effective 0))))))))))
 
 (define (decide--first-live)
@@ -397,8 +397,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
   'group 'decide)
 
 (defcustom 'decide-shell-policy
-  '((edit refuse) (read refuse) (build allow) (git allow) (jj allow) (other allow))
-  "What each kind of shell command gets, allow or refuse. The kinds: edit writes files, read reads or searches them, build runs the project's own build, test or format tool, git and jj run version control, other touches no file."
+  '((edit ask) (read ask) (build allow) (git allow) (jj allow) (other allow))
+  "What each kind of shell command gets: allow, ask or refuse. Ask raises a permission card in the chat and refuses when nobody answers in permission-ask-timeout-ms, or when the lane has no chat to ask. The kinds: edit writes files, read reads or searches them, build runs the project's own build, test or format tool, git and jj run version control, other touches no file."
   'group 'decide)
 
 (define decide--shell-primitives "shell-command->string|start-process!")
@@ -449,10 +449,32 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
           kind))))
 
 (define (decide-shell-verdict code)
-  "(decide-shell-verdict CODE) — the refusal the shell gate gives CODE, or #f to let it run"
+  "(decide-shell-verdict CODE) — the refusal the shell gate gives CODE, or #f to let it run; an ask the user has not approved refuses"
   (let* ((kind (decide--shell-kind-seen code))
          (rule (and kind (assq kind decide-shell-policy))))
-    (and rule (equal? (cadr rule) 'refuse) (decide-refusal kind))))
+    (cond ((not rule) #f)
+          ((equal? (cadr rule) 'refuse) (decide-refusal kind))
+          ((and (equal? (cadr rule) 'ask) (not (equal? code decide--shell-approved)))
+           (decide-refusal kind))
+          (else #f))))
+
+;; The one payload the user just approved. The approved call runs in the
+;; Task that waited for the answer, so this set! lives in that Task's heap
+;; and ends with it.
+(define decide--shell-approved #f)
+
+(define (decide-shell-approve! code)
+  "(decide-shell-approve! CODE) — let CODE through the gate's ask, in this Task"
+  (set! decide--shell-approved code))
+
+(define (decide-shell-asks? code)
+  "(decide-shell-asks? CODE) — #t when the shell gate would ask the user before the eval-scheme payload CODE runs"
+  (and decide-shell-gate
+       (string? code)
+       (re-match? decide--shell-primitives code)
+       (let* ((kind (decide--shell-kind-seen code))
+              (rule (and kind (assq kind decide-shell-policy))))
+         (and rule (equal? (cadr rule) 'ask) #t))))
 
 ;; tool-call-hook: #f lets the call through, a string aborts it and becomes
 ;; the result the agent reads instead

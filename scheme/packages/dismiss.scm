@@ -191,7 +191,8 @@
 (define-command "dismiss-buffer" "Dismiss a child first, otherwise run this buffer's normal q action"
   (lambda ()
     (let* ((buf (current-buffer)) (child (dismiss--child-target buf)))
-      (cond (child (dismiss--close-child! child))
+      (cond ((equal? (listing-preview-owner) buf) (listing-peek-dismiss!))
+            (child (dismiss--close-child! child))
             ((and (buffer-parent buf) (buffer-dismissible? buf)) (dismiss--close-child! buf))
             (else
               ;; Resolve without our map, then put it back before calling.

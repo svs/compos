@@ -450,6 +450,10 @@ defmodule Compos.Core.Agent do
       from: from
     }
 
+    # a card the editor raised itself may carry its own deadline; nobody
+    # answering it in time is a no
+    if ms = req[:timeout_ms], do: Process.send_after(self(), {:permission_timeout, id}, ms)
+
     state =
       %{state | next_rpc_id: id + 1, pending_permission: pending}
       |> set_status(:needs_attention)
@@ -460,7 +464,10 @@ defmodule Compos.Core.Agent do
           title: req.title,
           kind: req.kind,
           raw: req.raw,
-          options: options
+          options: options,
+          # the editor asked because its own policy said ask: the card
+          # shows, and no chat policy answers it on the user's behalf
+          editor: true
         )
       )
 

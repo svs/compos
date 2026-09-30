@@ -159,6 +159,22 @@
 (define-command "anchor-previous" "Move point to the previous anchor"
   (lambda () (anchor--step! -1)))
 
+;; The arrows' walk: a page whose parts are anchors moves from part to part,
+;; and past the last one (or in a buffer with none) the arrow is a line again.
+;; It does not wrap; a ring is TAB's, an arrow stops at the end.
+(define (anchor--arrow! dir)
+  (let* ((buf (current-buffer))
+         (pos (buffer-point buf))
+         (hit (if (> dir 0) (anchor--after buf pos) (anchor--before buf pos))))
+    (cond (hit (goto-char! (anchor-start hit)) (anchor-sync! buf))
+          ((> dir 0) (next-line!))
+          (else (previous-line!)))))
+
+(define-command "anchor-down" "Move point to the next anchor, or down a line when there is none"
+  (lambda () (anchor--arrow! 1)))
+(define-command "anchor-up" "Move point to the previous anchor, or up a line when there is none"
+  (lambda () (anchor--arrow! -1)))
+
 (define-command "anchor-jump" "Go to an anchor of this buffer by name"
   (lambda ()
     (let* ((buf (current-buffer))

@@ -28,6 +28,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
     |> Map.merge(event_log_primitives())
+    |> Map.merge(workflow_primitives())
     |> Map.merge(sysmon_primitives())
     |> Map.merge(profiler_primitives())
     |> Map.merge(discovery_primitives())
@@ -401,6 +402,113 @@ defmodule Compos.Core.SchemeAPI do
 
           positions = for [name | seq] <- positions, do: {name, pos_seq(seq)}
           Log.import(events, positions)
+        end
+    }
+  end
+
+  # Workflows (Compos.Core.Workflow): supervised consumers of the log whose
+  # handlers are Scheme. workflows.scm wraps these in define-workflow!,
+  # emit! and once!. Inside a workflow's batch, emit! and once! collect in
+  # the lane process instead of writing, and the batch commits them with
+  # its new position in one transaction.
+  defp workflow_primitives do
+    alias Compos.Core.{Workflow, Workflows}
+    alias Compos.Core.Events.Log
+
+    %{
+      {"workflow-define!",
+       "(workflow-define! NAME SPEC) — start or reconfigure the workflow NAME. SPEC is a plist: listen (patterns), quiet-ms, max-wait-ms, batch, max-attempts, backoff-ms, max-backoff-ms, timeout-ms, from."} =>
+        fn [name, spec] ->
+          m = plist_map(spec)
+
+          opts =
+            for {key, field} <- [
+                  {"quiet-ms", :quiet_ms},
+                  {"max-wait-ms", :max_wait_ms},
+                  {"batch", :batch},
+                  {"max-attempts", :max_attempts},
+                  {"backoff-ms", :backoff_ms},
+                  {"max-backoff-ms", :max_backoff_ms},
+                  {"timeout-ms", :timeout_ms},
+                  {"from", :from}
+                ],
+                is_number(m[key]),
+                into: %{},
+                do: {field, trunc(m[key])}
+
+          case Workflows.define(Map.merge(opts, %{name: name, listen: m["listen"] || []})) do
+            :ok -> true
+            {:error, reason} -> raise "workflow-define!: " <> to_string(reason)
+          end
+        end,
+      {"workflow-stop!", "(workflow-stop! NAME) — stop the workflow NAME; its position stays."} =>
+        fn [name] ->
+          Workflows.stop(name)
+          :void
+        end,
+      {"workflow-pause!", "(workflow-pause! NAME) — pause NAME after the batch it runs, if any."} =>
+        fn [name] -> Workflow.pause(name) == :ok end,
+      {"workflow-resume!", "(workflow-resume! NAME) — let NAME run again."} =>
+        fn [name] -> Workflow.resume(name) == :ok end,
+      {"workflow-step!", "(workflow-step! NAME) — run one batch of NAME, then pause it."} =>
+        fn [name] -> Workflow.step(name) == :ok end,
+      {"workflow-rewind!", "(workflow-rewind! NAME SEQ) — move NAME back to SEQ; it takes every event after SEQ again."} =>
+        fn [name, seq] -> Workflow.rewind(name, trunc(seq)) == :ok end,
+      {"workflow-status",
+       "(workflow-status NAME) — a plist: status, position, head, behind, runs, handled, failed, parked, attempts, last-error, running-ms; #f when NAME does not run."} =>
+        fn [name] ->
+          case Workflow.status(name) do
+            %{} = s -> Compos.Core.Events.scheme(s)
+            _ -> false
+          end
+        end,
+      {"workflow-names", "(workflow-names) — the names of the running workflows."} =>
+        fn [] -> Workflows.names() end,
+      {"workflow-in-batch?", "(workflow-in-batch?) — #t inside a workflow's batch, where emit! and once! wait for the commit."} =>
+        fn [] -> Process.get(:compos_workflow_txn) != nil end,
+      {"workflow-emit!",
+       "(workflow-emit! TOPIC KIND DATA) — write an event: now, answering its seq, or inside a batch at its commit, answering #f."} =>
+        fn [topic, kind, data] ->
+          case Process.get(:compos_workflow_txn) do
+            nil ->
+              Log.append(topic, kind, data)
+
+            txn ->
+              Process.put(:compos_workflow_txn, %{txn | emits: [{topic, kind, data} | txn.emits]})
+              false
+          end
+        end,
+      {"workflow-once",
+       "(workflow-once KEY) — (VALUE) when once! has recorded KEY, in the log or in this batch, else #f."} =>
+        fn [key] ->
+          pending =
+            case Process.get(:compos_workflow_txn) do
+              nil -> nil
+              txn -> List.keyfind(txn.onces, key, 0)
+            end
+
+          case pending do
+            {_, value} ->
+              [value]
+
+            nil ->
+              case Log.once(key) do
+                {:ok, value} -> [value]
+                :none -> false
+              end
+          end
+        end,
+      {"workflow-once-record!",
+       "(workflow-once-record! KEY VALUE) — record VALUE under KEY: now, or inside a batch at its commit."} =>
+        fn [key, value] ->
+          case Process.get(:compos_workflow_txn) do
+            nil ->
+              Log.put_once(key, value)
+
+            txn ->
+              Process.put(:compos_workflow_txn, %{txn | onces: [{key, value} | txn.onces]})
+              value
+          end
         end
     }
   end

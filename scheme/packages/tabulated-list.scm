@@ -48,7 +48,8 @@
 ;;;           prompt standing in front of this list calls it.
 ;;;   regroup (buf) -> cycle what a section is. M-g in that prompt calls it.
 
-(define *list-modes* '())
+;; survives a reload of this file: every mode registered its options once
+(define *list-modes* (if (boundp '*list-modes*) *list-modes* '()))
 
 (define (list-mode-opts name)
   (let ((e (assoc name *list-modes*)))
@@ -1004,12 +1005,19 @@
                 (list-label-lines buf cols)))))
 
 ;; the header as lines. A mode's own 'header is text it wrote itself, so
-;; its lines carry no faces.
+;; its lines carry no faces, and it replaces the table's head. A 'panel is
+;; text too, but it goes above the table's head and keeps it.
 (define (list-head-lines buf)
   (let ((f (list-opt buf 'header)))
-    (cond (f (map (lambda (l) (list l '())) (string-split (f buf) "\n")))
-          ((list-table? buf) (list-table-head buf))
+    (cond (f (list-text-lines (f buf)))
+          ((list-table? buf) (append (list-panel-lines buf) (list-table-head buf)))
           (else (list (list "" '()))))))
+
+(define (list-text-lines text) (map (lambda (l) (list l '())) (string-split text "\n")))
+
+(define (list-panel-lines buf)
+  (let ((f (list-opt buf 'panel)))
+    (if f (list-text-lines (f buf)) '())))
 
 ;;; --- the keys card -------------------------------------------------------
 ;;; The keymap every list-mode buffer carries (docs/DESIGN-PORT.md, stage
@@ -1296,8 +1304,10 @@
                (start (nth i offsets))
                ;; Selection uses the geometry already written. Re-rendering
                ;; a row here did expensive cell work on every cursor move.
-               (end (if (< (+ i 1) (length offsets))
-                        (nth (+ i 1) offsets) (buffer-size buf))))
+               ;; 'selection-trim leaves a row's trailing spacer bytes unlit
+               (end (- (if (< (+ i 1) (length offsets))
+                           (nth (+ i 1) offsets) (buffer-size buf))
+                       (or (list-opt buf 'selection-trim) 0))))
           ;; the key is a change, and a change is a refresh: write it
           ;; only when the selection moved
           (let ((key (list-key buf entry)))
@@ -1936,6 +1946,11 @@
            (was (list-index buf))
            ;; each window's own row, before the rows move under it
            (places (list-window-places buf))
+           ;; a 'follow-head list: the row on top before this draw, which a
+           ;; reader who stays there follows to the new top
+           (top-key (let ((es (list-entries buf)))
+                      (and (list-opt buf 'follow-head) (pair? es) (list-key buf (car es)))))
+           (following? (and (list-opt buf 'follow-head) (or (not was) (= was 0))))
            (filtered (list-render-rows! buf fetch))
            (order (list-opt buf 'order-filtered))
            (rows (if order (order buf filtered) filtered))
@@ -1998,7 +2013,8 @@
         ;; shows it. list-goto-index! deliberately propagates interactive
         ;; motion to those windows; a background refresh must preserve each
         ;; window's independent place instead.
-        (let* ((at (cond ((and i (pair? rows)) (min i last))
+        (let* ((at (cond ((and following? (pair? rows)) 0)
+                         ((and i (pair? rows)) (min i last))
                          ((and was (pair? rows)) (min was last))
                          (else #f)))
                (q (if at
@@ -2009,7 +2025,28 @@
       (list-snap-point! buf)
       (list-update-selection! buf)
       ;; the windows that show this list, each on its own row again
-      (list-restore-window-places! buf places rows))))
+      (list-restore-window-places! buf places rows)
+      (when top-key (list-follow-head! buf places top-key)))))
+
+;; A 'follow-head list is a stream, newest first, like tail -f turned
+;; over. A window on the top row, or in the head, stays on top as rows
+;; arrive: its point goes to the start, so the panel and the column titles
+;; stay in sight. Any other window keeps its row, which the restore above
+;; already did.
+(define (list-follow-head! buf places top-key)
+  (let ((following (filter (lambda (place) (or (not (cadr place)) (equal? (cadr place) top-key)))
+                           places))
+        (active (active-window)))
+    (for-each (lambda (place)
+                (unless (equal? (window-point (car place)) 0)
+                  (window-set-point! (car place) 0)))
+              following)
+    ;; the buffer's point is the selected window's: it follows too, unless
+    ;; the reader is in this list on a row of their own. Left behind, it
+    ;; reaches the other windows on the next redraw.
+    (when (or (not (equal? (window-buffer active) buf))
+              (pair? (filter (lambda (place) (equal? (car place) active)) following)))
+      (unless (equal? (buffer-point buf) 0) (buffer-goto! buf 0)))))
 
 ;; `g` and every source change fetch again; a filter keystroke only
 ;; redraws, and a 'local-filter list then reuses its cached source.

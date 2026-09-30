@@ -332,6 +332,7 @@
                 (jj-sh root (string-append "jj describe -r " rev " -m '" (jj-quote msg) "' 2>&1"))
                 (jj-modeline-update! root slug)
                 text))))))
+(public! 'jj-describe! "(jj-describe! TEXT) — describe this run's jj change as TEXT, with its Agent line; TEXT, or #f when no change is this run's")
 
 ;;; --- the push -----------------------------------------------------------
 

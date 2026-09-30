@@ -217,9 +217,13 @@
 
 ;; the supported customize surface
 (category! 'customize)
+(domain! 'customize)
+(effects! '(write))
 (public! 'defcustom "(defcustom 'name DEFAULT DOC 'group G 'type T) — declare a customizable variable")
 (public! 'customize-save! "(customize-save! 'name VALUE) — set + persist to custom.scm")
+(effects! '(read))
 (public! 'customize-apropos "(customize-apropos PATTERN) — search customizables by name/doc")
+(effects! '(write))
 (public! 'customize-save-face! "(customize-save-face! 'face 'attr VALUE) — persist one face attribute")
 (effects! '(write))
 (public! 'add-to-list! "(add-to-list! 'name ELEMENT [APPEND]) — put ELEMENT first in the list variable, or last with APPEND, unless it is there")

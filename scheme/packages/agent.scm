@@ -241,7 +241,9 @@
        (let* ((title (plist-get e 'title))
               (kind (or (plist-get e 'kind) ""))
               (raw (or (plist-get e 'raw) ""))
-              (verdict (permit? buf title kind raw)))
+              ;; a card the editor raised itself was already weighed
+              ;; by its policy, which said ask: only the user answers it
+              (verdict (if (plist-get e 'editor) 'ask (permit? buf title kind raw))))
          (cond
            ((equal? verdict 'allow)
             (agent-answer-permission! slug "allow_once" "allow"))

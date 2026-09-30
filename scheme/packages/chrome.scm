@@ -426,7 +426,15 @@
         "browser category denied in code-mode; use compos state, or ask the user to enable M-x browser-mode as a last resort")))
 
 (define (tab-list k)
-  (chrome-call "tabs" '() (lambda (r) (k (plist-get r 'tabs)))))
+  ;; only this frame's window: another window's tabs belong to another frame,
+  ;; often another profile with other logins. An unknown window lists nothing.
+  (let ((w (chrome-window-resolve!)))
+    (chrome-call "tabs" (if w (list 'window w) '())
+      (lambda (r)
+        (k (if w
+               (filter (lambda (t) (equal? (plist-get t 'window) w))
+                       (or (plist-get r 'tabs) '()))
+               '()))))))
 
 ;; the reader's fetch, THROUGH the browser: the user's cookies and
 ;; Chrome's http cache ride along, so a page that knows them logged in
@@ -457,7 +465,12 @@
 ;; there is nothing to watch for but the clock.
 (define (browser-snapshot url k &optional wait)
   (if (browser-connected?)
-      (browser-call "snapshot" (if wait (list 'url url 'wait wait) (list 'url url))
+      (browser-call "snapshot"
+        ;; the window routes the load to this frame's own profile and its logins
+        (let ((w (chrome-window-resolve!)))
+          (append (list 'url url)
+                  (if wait (list 'wait wait) '())
+                  (if w (list 'window w) '())))
         (lambda (reply)
           (k (let ((h (plist-get reply 'html)))
                (and (string? h) (not (equal? h "")) h)))))
@@ -685,21 +698,26 @@
               (if tab (chrome--goto-tab! tab pick) (message "No such tab")))))))))
 
 (category! 'chrome)
+(domain! 'chrome)
+(effects! '(read external))
 (public! 'tab-list "(tab-list K) — K gets every open browser tab, in every window, as plists: id, title, url, active, window")
 (public! 'tab-window "(tab-window) — the browser window this frame belongs to, or #f")
 (public! 'tabs-here "(tabs-here K) — K gets only the tabs in this frame's browser window")
-(public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; TAB is an id or a tab from tab-list")
 (public! 'tab-read "(tab-read TAB K) — K gets the tab's url, title and visible text; TAB is an id or a tab from tab-list")
+(public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets (TYPE TEXT BASE64) — TEXT for a text body, BASE64 for bytes, never both — or #f")
+(public! 'browser-snapshot "(browser-snapshot URL K &optional WAIT) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; WAIT is a CSS selector to wait for before reading; K gets html or #f")
+(public! 'browser-connected? "(browser-connected?) — is the compos Chrome extension attached?")
+(effects! '(write external execute))
+(public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; TAB is an id or a tab from tab-list")
+(public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")
+(effects! '(write external display))
 (public! 'tab-say "(tab-say TAB TEXT) — put a line on that tab's screen")
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
 (public! 'tab-open "(tab-open URL &optional WINDOW BACKGROUND) — open a new tab, in this frame's browser window unless WINDOW says otherwise; BACKGROUND opens it without going there")
-(public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets (TYPE TEXT BASE64) — TEXT for a text body, BASE64 for bytes, never both — or #f")
-(public! 'browser-snapshot "(browser-snapshot URL K &optional WAIT) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; WAIT is a CSS selector to wait for before reading; K gets html or #f")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
+(effects! '(destroy external display))
 (public! 'tab-close "(tab-close TAB) — close a tab")
-(public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")
-(public! 'browser-connected? "(browser-connected?) — is the compos Chrome extension attached?")
 
 ;; every name below stamps itself
 (domain! 'chrome)

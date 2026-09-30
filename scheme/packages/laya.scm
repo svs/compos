@@ -8,7 +8,7 @@
 ;;;
 ;;; The daemon is an endpoint, the editor's own registry of long-lived
 ;;; connections. Nothing here keeps a second list of running programs:
-;;; M-x sockets already shows it, M-x models starts and stops it on the
+;;; M-x sockets already shows it, M-x local-models starts and stops it on the
 ;;; host line endpoint:laya, and decide.scm asks it for an answer.
 ;;;
 ;;; The checkpoints are the ones this machine already holds - the

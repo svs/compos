@@ -97,6 +97,10 @@
 ;; the event log: agents publish their status on it, so it follows the
 ;; chats table, whose status hook feeds it
 (load "events.scm")
+;; workflows: Scheme handlers over the event log that the core runs
+;; exactly once; the demo scene is one you can drive (M-x events-demo)
+(load "workflows.scm")
+(load "events-demo.scm")
 (load "jj.scm")
 (load "keys.scm")
 (load "keymaps.scm")
@@ -107,6 +111,9 @@
 (load "lsp.scm")
 (load "mcp-hub.scm")
 (load "mcp.scm")
+;; the architecture canvas: one draw tool on the compos MCP, routed to a
+;; backend (tldraw Desktop by default); it posts through http.scm
+(load "draw.scm")
 (load "models.scm")
 ;; the on-device tool caller: it fetches its engine and weights on the
 ;; first call, so a machine that never asks it pays nothing
@@ -155,6 +162,8 @@
 (load "web.scm")
 (load "xslt.scm")
 (load "web-server.scm")
+(load "webhooks.scm")
+(load "anon.scm")
 (load "worktrees.scm")
 (load "writing.scm")
 (load "dismiss.scm")

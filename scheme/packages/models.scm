@@ -1,6 +1,6 @@
 ;;; models.scm --- the model hosts on this machine, and on the network.
 ;;;
-;;; M-x models lists the models every host in models-hosts holds, and
+;;; M-x local-models lists the models every host in models-hosts holds, and
 ;;; says which of them a host keeps loaded in memory now.
 ;;;
 ;;;   RET   show what the model is: family, parameters, quantization
@@ -943,7 +943,7 @@
             ("h" "models-add-host") ("H" "models-forget-host")
             ("g" "models-refresh") ("q" "quit-window"))))
 
-(define-command "models" "List the models every model host holds"
+(define-command "local-models" "List the models every model host holds"
   (lambda () (list-mode-show! "models-mode")))
 
 ;;; --- the public surface -----------------------------------------------------------------
@@ -952,8 +952,8 @@
 (domain! 'llm)
 (effects! '(read external))
 
-(public! 'models
-  "M-x models - list the models every model host holds, and which of them each keeps loaded")
+(public! 'local-models
+  "M-x local-models - list the models every model host holds, and which of them each keeps loaded")
 (public! 'models-base
   "(models-base) - the URL of the model host the list talks to")
 (public! 'models-loaded
@@ -972,5 +972,5 @@
 (public! 'models-unserve
   "M-x models-unserve - stop the daemon this line's host is")
 
-(defrecipe! "which local models are running" "(models)")
+(defrecipe! "which local models are running" "(local-models)")
 (defrecipe! "install a local model" "(run-command \"models-install\")")

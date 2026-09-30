@@ -2395,12 +2395,20 @@
 ;; a new chat buffer in the current group; the old conversation stays.
 ;; The frame's group wins; a buffer outside any group founds one only
 ;; when the frame stands in none.
-(define-command "chat-new" "Start a new chat buffer; with a prefix, choose or create its group"
+(define-command "chat-new" "Start a new chat buffer; with a prefix, hand a task to a new chat in a group and stay here"
   (interactive 'P)
   (lambda (prefix)
     (if prefix
+        ;; fire and forget: the task goes to the todo list and its chat
+        ;; works in the background; neither the group nor a window moves
         (group-read-or-create! "New chat in group: "
-          (lambda (g) (group-chat-new! g)))
+          (lambda (g)
+            (minibuffer-read (string-append "Task for " (group-name g) ": ") '()
+              (lambda (task)
+                (if (equal? (string-trim task) "")
+                    (message "No task, no chat")
+                    (let ((r (todo-spawn-chat! g task)))
+                      (message (string-append "Task " (car r) " handed to " (cadr r)))))))))
         (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
           (if (not g)
               (message "No group for a chat")

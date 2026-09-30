@@ -1547,16 +1547,14 @@
           (chat-list-leave! row)))))
 
 (define-command "chat-list-quit"
-  "Leave the chat list and change nothing"
+  "Close the preview, else leave the chat list and change nothing"
   (lambda ()
-    ;; one q leaves. The card is the list's own preview, not something
-    ;; to put away first: dismissing it and leaving are one move. Two
-    ;; presses also lost the frame -- the card's restore put the list
-    ;; back on screen, and the second q found nothing recorded and
-    ;; deleted the window instead of giving the arrangement back.
-    (when (equal? (listing-preview-owner) (chat-list-buffer))
-      (listing-peek-dismiss!))
-    (chat-list-leave! #f)))
+    ;; q puts away the card first, like every other list: the card floats
+    ;; in the list's own window, so dismissing it leaves the list and the
+    ;; arrangement as they were. The next q leaves.
+    (if (equal? (listing-preview-owner) (chat-list-buffer))
+        (listing-peek-dismiss!)
+        (chat-list-leave! #f))))
 
 (define-command "ichat" "Open the chat buffer listing here"
   (lambda () (chat-list-open!)))

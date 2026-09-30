@@ -87,6 +87,26 @@
       (check-equal! (decide-shell-verdict "zz-edit") (decide-refusal 'edit) "an edit is refused")
       (set! decide--shell-seen seen))))
 
+(deftest 'decide-shell-gate-asks-then-lets-the-approved-payload-through
+  "an ask kind asks; unapproved it refuses, approved it runs, and only that payload"
+  (lambda ()
+    (let ((seen decide--shell-seen) (policy decide-shell-policy) (approved decide--shell-approved))
+      (set! decide--shell-seen
+            (list (list "(shell-command->string \"zz-edit\")" 'edit)
+                  (list "(shell-command->string \"zz-other\")" 'edit)
+                  (list "(shell-command->string \"zz-build\")" 'build)))
+      (set! decide-shell-policy '((edit ask) (build allow)))
+      (check-equal! (decide-shell-asks? "(shell-command->string \"zz-edit\")") #t "an edit asks")
+      (check-equal! (decide-shell-asks? "(shell-command->string \"zz-build\")") #f "a build does not")
+      (check-equal! (decide-shell-asks? "(+ 1 2)") #f "no shell, no ask")
+      (check-equal! (decide-shell-verdict "(shell-command->string \"zz-edit\")") (decide-refusal 'edit) "unapproved, refused")
+      (decide-shell-approve! "(shell-command->string \"zz-edit\")")
+      (check-equal! (decide-shell-verdict "(shell-command->string \"zz-edit\")") #f "approved, runs")
+      (check-equal! (decide-shell-verdict "(shell-command->string \"zz-other\")") (decide-refusal 'edit) "another payload still refused")
+      (set! decide--shell-approved approved)
+      (set! decide-shell-policy policy)
+      (set! decide--shell-seen seen))))
+
 (deftest 'decide-shell-gate-hook-lets-plain-scheme-through
   "a payload with no shell command never reaches a backend"
   (lambda ()

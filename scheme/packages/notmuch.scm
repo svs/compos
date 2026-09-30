@@ -188,17 +188,21 @@ when a message has no text/plain part." 'group 'notmuch)
              (if (string? notmuch-profile) (string-append "\"" notmuch-profile "\"") "unset")
              ". Run M-x notmuch-switch-host. Refusing to read this machine's default database."))))
 
-(define (nm--cmd args)
-  (nm--mailbox-check!)
-  (let ((here (string-append
-                (if (equal? notmuch-profile "")
-                    ""
-                    (string-append "NOTMUCH_PROFILE=" (sh-quote notmuch-profile) " "))
-                notmuch-program " " args)))
-    (if (equal? notmuch-host "")
+;; MAILBOX, a (HOST PROFILE) pair as in notmuch-mailboxes, runs ARGS on that
+;; mailbox rather than the chosen one; the mail feed reads every mailbox so
+(define (nm--cmd args &optional mailbox)
+  (unless mailbox (nm--mailbox-check!))
+  (let* ((host (if mailbox (car mailbox) notmuch-host))
+         (profile (if mailbox (cadr mailbox) notmuch-profile))
+         (here (string-append
+                 (if (equal? profile "")
+                     ""
+                     (string-append "NOTMUCH_PROFILE=" (sh-quote profile) " "))
+                 notmuch-program " " args)))
+    (if (equal? host "")
         here
         ;; the remote shell reads the whole call as one word
-        (string-append notmuch-ssh-program " " (sh-quote notmuch-host)
+        (string-append notmuch-ssh-program " " (sh-quote host)
                        " " (sh-quote here)))))
 
 (define (nm--host-label)
@@ -246,13 +250,13 @@ when a message has no text/plain part." 'group 'notmuch)
         (error (string-append "Notmuch tag failed: "
                  (if (equal? (string-trim body) "") output (string-trim body)))))))
 
-(define (nm--run args)
+(define (nm--run args &optional mailbox)
   (if (string-prefix? "tag " args)
       (nm--tag-result
         (shell-command->string
-          (string-append "compos_tag_output=$(" (nm--cmd args)
+          (string-append "compos_tag_output=$(" (nm--cmd args mailbox)
             " 2>&1); compos_tag_status=$?; printf '%s\\n%s' \"$compos_tag_status\" \"$compos_tag_output\"")))
-      (shell-command->string (nm--cmd args))))
+      (shell-command->string (nm--cmd args mailbox))))
 
 (define (nm--json args)
   (json-parse (nm--run args)))
@@ -2744,3 +2748,165 @@ would let a word in the body pick the account the mail goes out from."
   "(notmuch-sender-count QUERY LIMIT) — biggest senders matching QUERY (from: addresses, deduplicated), top LIMIT as \"COUNT\\tSENDER\" lines, most first")
 (public! 'notmuch
   "(notmuch ARGS) — the raw notmuch CLI, ARGS is everything after `notmuch` as one string, e.g. \"tag -inbox -- from:luma.com\" or \"count -- tag:inbox from:luma.com\"; prefer this for bulk ops by query (archive/tag many at once) and for verifying a change actually happened, instead of enumerating thread ids one at a time")
+
+;;; The mail feed: every message a mailbox indexes becomes a
+;;; "mail:<profile>" event in the event log, headers only; the body stays
+;;; in notmuch. The mail host's post-new hook posts each batch of tag:new
+;;; to the feed webhook's /mail. A slow sweep asks each mailbox for what
+;;; changed after its saved lastmod revision and adds what a push dropped;
+;;; a received message only the sweep found is a "feed:mail:<profile>"
+;;; missed event.
+
+(domain! 'mail)
+(effects! '(write external))
+
+(defcustom 'mail-feed-enabled #f
+  "Start the mail feed when this package loads."
+  'group 'notmuch 'type 'boolean)
+
+(defcustom 'mail-feed-host "marilyn"
+  "The machine whose notmuch mailboxes the feed reads."
+  'group 'notmuch 'type 'string)
+
+(defcustom 'mail-feed-profiles '("svs.io" "recruiting" "vidura")
+  "The notmuch profiles the feed reads, one per mailbox."
+  'group 'notmuch 'type 'list)
+
+(defcustom 'mail-feed-sweep-seconds 900
+  "Seconds between two sweeps of the mailboxes."
+  'group 'notmuch 'type 'integer)
+
+;; the message ids the log holds, newest first; seeded from the log once
+(defvar '*mail-feed-seen* #f)
+
+(effects! '(pure))
+
+(define (mail-feed--messages tree)
+  "(mail-feed--messages TREE) — every matched message in notmuch show JSON, whose threads nest replies in lists"
+  (cond ((not (pair? tree)) '())
+        ((symbol? (car tree))
+         (if (and (plist-get tree 'id) (plist-get tree 'match)) (list tree) '()))
+        (else (apply append (map mail-feed--messages tree)))))
+
+(define (mail-feed--address from)
+  "(mail-feed--address FROM) — the bare address of a From header, lower case"
+  (let ((parts (string-split (or from "") "<")))
+    (string-downcase
+     (string-trim (if (> (length parts) 1) (car (string-split (cadr parts) ">")) (car parts))))))
+
+(define (mail-feed--event profile msg)
+  "(mail-feed--event PROFILE MSG) — the topic, kind and data of one notmuch message"
+  (let ((h (plist-get msg 'headers))
+        (tags (or (plist-get msg 'tags) '())))
+    (list (string-append "mail:" profile)
+          (if (member "sent" tags) 'sent 'received)
+          (list 'id (plist-get msg 'id)
+                'mailbox profile
+                'from (plist-get h 'From)
+                'address (mail-feed--address (plist-get h 'From))
+                'to (plist-get h 'To)
+                'cc (plist-get h 'Cc)
+                'subject (plist-get h 'Subject)
+                'at (plist-get msg 'timestamp)
+                'tags tags))))
+
+(define (mail-feed--mailbox profile)
+  "(mail-feed--mailbox PROFILE) — the mailbox (HOST PROFILE) the feed reads for PROFILE"
+  (list mail-feed-host profile))
+
+(effects! '(write))
+
+(define (mail-feed-publish! profile msg)
+  "(mail-feed-publish! PROFILE MSG) — log one notmuch message unless the log has it; its seq, or #f"
+  (unless *mail-feed-seen*
+    (set! *mail-feed-seen*
+          (map (lambda (e) (plist-get (plist-get e 'data) 'id))
+               (event-log-newest "mail:*" 5000))))
+  (let ((id (plist-get msg 'id)))
+    (if (or (not id) (member id *mail-feed-seen*))
+        #f
+        (let ((e (mail-feed--event profile msg)))
+          (set! *mail-feed-seen* (take (cons id *mail-feed-seen*) 5000))
+          (event-publish! (car e) (cadr e) (caddr e))))))
+
+(define (mail-feed--handle request)
+  "(mail-feed--handle REQUEST) — the feed webhook's /mail: one post-new batch, notmuch show JSON, its profile in x-notmuch-profile"
+  (let* ((h (assoc "x-notmuch-profile" (plist-get request 'headers)))
+         (profile (and h (cadr h)))
+         (tree (json-parse (plist-get request 'body))))
+    (cond ((not (equal? (plist-get request 'method) "POST")) (event-feed-reply 405 "POST only"))
+          ((not (member profile mail-feed-profiles)) (event-feed-reply 400 "unknown mailbox"))
+          ((not tree) (event-feed-reply 400 "bad json"))
+          (else
+           (for-each (lambda (m) (mail-feed-publish! profile m)) (mail-feed--messages tree))
+           (event-feed-reply 200 "ok")))))
+
+(effects! '(write external))
+
+(define (mail-feed--revision profile)
+  "(mail-feed--revision PROFILE) — the mailbox's lastmod revision, or #f; it blocks, so call it from a task"
+  (let ((f (string-split (string-trim (nm--run "count --lastmod '*'" (mail-feed--mailbox profile)))
+                         "\t")))
+    (and (= (length f) 3) (string->number (caddr f)))))
+
+(define (mail-feed--sweep-one! profile)
+  "(mail-feed--sweep-one! PROFILE) — read what changed in PROFILE after its saved revision and log what the log lacks. The first sweep only saves the revision."
+  (let ((after (event-log-position (string-append "mail-feed:" profile)))
+        (since (event-log-position (string-append "mail-feed-since:" profile))))
+    (task-run!
+     (lambda ()
+       (let ((rev (mail-feed--revision profile)))
+         (list rev
+               (and rev after since
+                    (json-parse
+                     (nm--run
+                      (string-append
+                       "show --format=json --body=false --entire-thread=false "
+                       (sh-quote (string-append
+                                  "lastmod:" (number->string after) ".."
+                                  " and date:@" (number->string (max since (- (current-time) 172800)))
+                                  "..")))
+                      (mail-feed--mailbox profile)))))))
+     (lambda (ok? value)
+       (when (and ok? (car value))
+         (let ((missed 0))
+           (for-each (lambda (m)
+                       (when (and (mail-feed-publish! profile m)
+                                  (not (member "sent" (or (plist-get m 'tags) '()))))
+                         (set! missed (+ missed 1))))
+                     (mail-feed--messages (or (cadr value) '())))
+           (unless since
+             (event-log-position-set! (string-append "mail-feed-since:" profile) (current-time)))
+           (event-log-position-set! (string-append "mail-feed:" profile) (car value))
+           (when (> missed 0)
+             (event-publish! (string-append "feed:mail:" profile) 'missed (list 'count missed)))))))))
+
+(define (mail-feed-sweep!)
+  "(mail-feed-sweep!) — sweep every mailbox of mail-feed-profiles"
+  (for-each mail-feed--sweep-one! mail-feed-profiles))
+
+(define (mail-feed--tick _)
+  (ignore-errors (lambda () (mail-feed-sweep!)))
+  (debounce! 'mail-feed-sweep (* 1000 mail-feed-sweep-seconds)
+             (lambda (x) (mail-feed--tick x)) #f))
+
+(define (mail-feed-start!)
+  "(mail-feed-start!) — take the mail host's pushes and start the sweep"
+  (event-feed-route! "/mail" (lambda (request) (mail-feed--handle request)))
+  (event-feed-start!)
+  (mail-feed--tick #f))
+
+(define (mail-feed-stop!)
+  "(mail-feed-stop!) — stop taking the mail host's pushes and stop the sweep"
+  (set! *event-feed-routes* (events--without "/mail" *event-feed-routes*))
+  (debounce-cancel! 'mail-feed-sweep))
+
+(define-command "mail-feed-start" "Turn new mail into events: the webhook and the sweep"
+  (lambda () (mail-feed-start!) (message "Mail feed on")))
+
+(define-command "mail-feed-stop" "Stop turning new mail into events"
+  (lambda () (mail-feed-stop!) (message "Mail feed off")))
+
+;; after the load, not in it: a start inside the loader does not take
+(when mail-feed-enabled
+  (debounce! 'mail-feed-boot 0 (lambda (_) (mail-feed-start!)) #f))

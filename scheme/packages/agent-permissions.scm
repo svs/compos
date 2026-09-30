@@ -214,6 +214,10 @@
   "Auto-deny an unanswered permission after this long, in chats no window shows."
   'group 'chat 'type 'integer)
 
+(defcustom 'permission-ask-timeout-ms 30000
+  "Deny a permission card the editor raised itself, such as the shell gate's ask, when nobody answers it in this long."
+  'group 'chat 'type 'integer)
+
 (define (agent-arm-permission-deadline! slug)
   (unless (window-showing (agent-buf slug))
     (agent-permission-deadline! slug permission-timeout-ms)))

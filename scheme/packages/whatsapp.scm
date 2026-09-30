@@ -596,18 +596,6 @@
   "Start the WhatsApp feed when this package loads."
   'group 'whatsapp 'type 'boolean)
 
-(defcustom 'whatsapp-feed-host "100.93.101.79"
-  "The address the feed webhook listens on: this machine on the tailnet."
-  'group 'whatsapp 'type 'string)
-
-(defcustom 'whatsapp-feed-port 4790
-  "The port of the feed webhook."
-  'group 'whatsapp 'type 'integer)
-
-(defcustom 'whatsapp-feed-peer "100.110.113.41"
-  "The only address the webhook takes messages from: the bridge host."
-  'group 'whatsapp 'type 'string)
-
 (defcustom 'whatsapp-feed-bridge "http://100.110.113.41:8080"
   "The bridge's REST server, which the sweep reads."
   'group 'whatsapp 'type 'string)
@@ -638,9 +626,6 @@
               'media (plist-get row 'media_type)
               'file (plist-get row 'filename))))
 
-(define (whatsapp-feed--reply status text)
-  (list 'status status 'headers '(("content-type" "text/plain")) 'body text))
-
 (effects! '(write))
 
 (define (whatsapp-feed-publish! row)
@@ -657,18 +642,14 @@
           (event-publish! (car e) (cadr e) (caddr e))))))
 
 (define (whatsapp-feed--handle request)
-  "(whatsapp-feed--handle REQUEST) — the webhook: one message the bridge pushed"
-  (cond ((not (equal? (plist-get request 'remote-address) whatsapp-feed-peer))
-         (whatsapp-feed--reply 403 "forbidden"))
-        ((not (and (equal? (plist-get request 'method) "POST")
-                   (equal? (plist-get request 'path) "/whatsapp")))
-         (whatsapp-feed--reply 404 "not found"))
-        (else
-         (let ((row (json-parse (plist-get request 'body))))
-           (if (not row)
-               (whatsapp-feed--reply 400 "bad json")
-               (begin (whatsapp-feed-publish! row)
-                      (whatsapp-feed--reply 200 "ok")))))))
+  "(whatsapp-feed--handle REQUEST) — the feed webhook's /whatsapp: one message the bridge pushed"
+  (if (not (equal? (plist-get request 'method) "POST"))
+      (event-feed-reply 405 "POST only")
+      (let ((row (json-parse (plist-get request 'body))))
+        (if (not row)
+            (event-feed-reply 400 "bad json")
+            (begin (whatsapp-feed-publish! row)
+                   (event-feed-reply 200 "ok"))))))
 
 (effects! '(write external))
 
@@ -701,20 +682,13 @@
 
 (define (whatsapp-feed-start!)
   "(whatsapp-feed-start!) — listen for the bridge's pushes and start the sweep"
-  (web-server-stop! "whatsapp-feed")
-  ;; started from a task, the server takes a lane of its own: the lane of
-  ;; whoever called this may be an agent's, gone after its turn
-  (task-await
-   (task-spawn
-    (lambda ()
-      (web-server-start! "whatsapp-feed"
-                         (list 'host whatsapp-feed-host 'port whatsapp-feed-port)
-                         (lambda (request) (whatsapp-feed--handle request))))))
+  (event-feed-route! "/whatsapp" (lambda (request) (whatsapp-feed--handle request)))
+  (event-feed-start!)
   (whatsapp-feed--tick #f))
 
 (define (whatsapp-feed-stop!)
-  "(whatsapp-feed-stop!) — stop the webhook and the sweep"
-  (web-server-stop! "whatsapp-feed")
+  "(whatsapp-feed-stop!) — stop taking the bridge's pushes and stop the sweep"
+  (set! *event-feed-routes* (events--without "/whatsapp" *event-feed-routes*))
   (debounce-cancel! 'whatsapp-feed-sweep))
 
 (define-command "whatsapp-feed-start" "Turn WhatsApp messages into events: the webhook and the sweep"
@@ -723,5 +697,6 @@
 (define-command "whatsapp-feed-stop" "Stop turning WhatsApp messages into events"
   (lambda () (whatsapp-feed-stop!) (message "WhatsApp feed off")))
 
+;; after the load, not in it: a start inside the loader does not take
 (when whatsapp-feed-enabled
-  (ignore-errors (lambda () (whatsapp-feed-start!))))
+  (debounce! 'whatsapp-feed-boot 0 (lambda (_) (whatsapp-feed-start!)) #f))

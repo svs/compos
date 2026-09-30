@@ -211,6 +211,8 @@
          (string-append "M-x command:\n" (function-source (command-fn name))))
         (else (string-append "no function or command named "
                              (symbol->string name)))))
+(public! 'describe-function "(describe-function 'NAME) — the Scheme source of a function or M-x command; a builtin gives its one-line doc")
+(catalog-meta! 'function "describe-function" 'domain 'discovery 'effects '(read))
 
 (define-tool! 'describe-function
   "Read a function's actual implementation. Userland functions and M-x commands return their full Scheme source (most of the editor — dired, org, chat, modes — is userland); builtins are Elixir and return only a marker. Use it to understand how something works before changing it."
@@ -1218,6 +1220,12 @@
   "(read-file-numbered PATH) — read source text files with stable line numbers for exact citations")
 (catalog-meta! 'function "read-file-numbered" 'domain 'discovery 'effects '(read))
 
+;; write-file! is a builtin: the Elixir side writes the file. Declared here
+;; so a search for writing a file finds it in the files domain.
+(public! 'write-file!
+  "(write-file! PATH TEXT) — write TEXT to PATH, replacing the file, and create its parent directories; answer #t. It writes the disk only: a buffer open on PATH keeps its old text, so to change a file someone has open, edit its buffer.")
+(catalog-meta! 'function "write-file!" 'domain 'files 'category 'files 'effects '(write))
+
 ;; A tool can answer with MCP content blocks instead of text:
 ;; (tool-content ((type "image" mimeType "image/png" data B64) ...)).
 ;; The MCP proxy sends the blocks as they are. A lane that takes text
@@ -1460,23 +1468,57 @@
 (define (mcp-proxy--ask slug name args-json author raw)
   (let ((token (eval-defer!)))
     (task-run!
-      (lambda ()
-        (let ((answer (agent-ask-permission! slug name raw)))
-          (list answer
-                (if (member answer '(allow always))
-                    (base64-encode (mcp-proxy--sync name args-json author))
-                    (base64-encode (decide-refusal 'denied))))))
-      (lambda (ok value)
-        (if (not ok)
-            (eval-resolve! token
-              (base64-encode (string-append "error: " (value->string value))))
-            (begin
-              ;; the grant is recorded HERE, on the Session, where the
-              ;; global lives — the Task that waited has its own heap
-              (when (equal? (car value) 'always)
-                (mcp-proxy--grant! slug name raw))
-              (eval-resolve! token (cadr value))))))
+      (lambda () (agent-ask-permission! slug name raw permission-ask-timeout-ms))
+      (lambda (ok answer)
+        (cond
+          ((not ok)
+           (eval-resolve! token
+             (base64-encode (string-append "error: " (value->string answer)))))
+          ((member answer '(allow always))
+           ;; the grant is recorded HERE, on the Session, where the
+           ;; global lives — the Task that waited has its own heap
+           (when (equal? answer 'always)
+             (mcp-proxy--grant! slug name raw))
+           (mcp-proxy--run-approved token name args-json author))
+          (else
+           (eval-resolve! token (base64-encode (decide-refusal 'denied)))))))
     'pending))
+
+;; The approved call. A lone shell command runs in its own Task, as any
+;; shell command does, so an install that takes minutes is not killed at the
+;; shell time limit. Anything else runs here, and the shell gate lets this
+;; one payload through while it does.
+(define (mcp-proxy--run-approved token name args-json author)
+  (let ((parts (and (equal? name "eval-scheme") (mcp-proxy--shell-code args-json))))
+    (if parts
+        (let ((resolve (lambda (out)
+                         (eval-resolve! token (base64-encode (value->string out))))))
+          (if (cadr parts)
+              (shell-command->string (car parts) (cadr parts) resolve)
+              (shell-command->string (car parts) resolve)))
+        (let ((code (mcp-proxy--code args-json))
+              (gate? (boundp (quote decide-shell-approve!))))
+          (when (and code gate?) (decide-shell-approve! code))
+          (let ((out (mcp-proxy--sync name args-json author)))
+            (when gate? (decide-shell-approve! #f))
+            (eval-resolve! token (base64-encode out)))))))
+
+(define (mcp-proxy--code args-json)
+  (let ((args (json-parse args-json)))
+    (and args
+         (let ((code (plist-get args 'code)))
+           (and (string? code) code)))))
+
+;; The shell gate's ask. A payload permit? lets through still stops here
+;; when decide-shell-policy asks for its kind of shell command; a refusal
+;; from permit? stays a refusal.
+(define (mcp-proxy--shell-ask name args-json verdict)
+  (if (and (member verdict '(allow allow-always))
+           (equal? name "eval-scheme")
+           (boundp (quote decide-shell-asks?))
+           (decide-shell-asks? (mcp-proxy--code args-json)))
+      'ask
+      verdict))
 
 (define (mcp-proxy-call name args-b64 &optional author)
   (let* ((args-json (base64-decode args-b64))
@@ -1487,7 +1529,8 @@
                         (substring author 6 (string-length author)))
                    (agent-slug-of (current-buffer))))
          (verdict (cond ((mcp-proxy--granted? slug name raw) 'allow-always)
-                        (else (permit? #f name "tool" raw)))))
+                        (else (mcp-proxy--shell-ask name args-json
+                                (permit? #f name "tool" raw))))))
     (cond
       ((member verdict '(allow allow-always))
        (mcp-proxy--run name args-json author))

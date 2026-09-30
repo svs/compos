@@ -17,6 +17,13 @@ defmodule Compos.Core.Events.Log do
   Scheme once (`events-arrived!`), and Scheme reads what it has not yet
   delivered. Scheme owns subscribers, views and policy
   (`scheme/packages/events.scm`).
+
+  Workflows (`Compos.Core.Workflow`) consume the log in Elixir. Each append
+  reaches them as a message, `{:event_appended, seq, topic}`, and a
+  workflow's batch lands through `commit/5`: its events, its once keys and
+  its new position in one transaction, fenced on the position it read
+  from. The `once` table keeps what `once!` recorded, for as long as the
+  file lives.
   """
 
   use GenServer
@@ -43,6 +50,27 @@ defmodule Compos.Core.Events.Log do
 
   @doc "The seq of the newest event, or 0."
   def seq, do: GenServer.call(__MODULE__, :seq)
+
+  @doc "At most LIMIT events after SEQ whose topic matches any of PATTERNS, oldest first."
+  def read_any(after_seq, patterns, limit) when is_list(patterns),
+    do: GenServer.call(__MODULE__, {:read_any, after_seq || 0, patterns, limit})
+
+  @doc """
+  Commit one workflow batch in a single transaction: EVENTS ({topic, kind,
+  data}) appended, ONCES ({key, value}) recorded, and the position NAME
+  moved from EXPECTED to UPTO. Nothing is written unless NAME still stands
+  at EXPECTED: a rewind, or a second runner, between the read and the
+  commit makes the batch a no-op. So a batch commits exactly once. Answer
+  `{:ok, seqs}` or `{:error, :moved}`.
+  """
+  def commit(name, expected, upto, events, onces),
+    do: GenServer.call(__MODULE__, {:commit, name, expected, upto, events, onces})
+
+  @doc "The value once! recorded under KEY: `{:ok, value}`, or `:none`."
+  def once(key), do: GenServer.call(__MODULE__, {:once, key})
+
+  @doc "Record VALUE under KEY unless a value is there already. Answer the value that stands."
+  def put_once(key, value), do: GenServer.call(__MODULE__, {:put_once, key, value})
 
   def position(name), do: GenServer.call(__MODULE__, {:position, name})
   def set_position(name, seq), do: GenServer.call(__MODULE__, {:set_position, name, seq})
@@ -76,6 +104,10 @@ defmodule Compos.Core.Events.Log do
       CREATE TABLE IF NOT EXISTS positions (
         name BLOB PRIMARY KEY,
         seq INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS once (
+        key BLOB PRIMARY KEY,
+        value BLOB,
+        at INTEGER NOT NULL);
       """)
 
     state = %{db: db, notify: nil}
@@ -86,17 +118,77 @@ defmodule Compos.Core.Events.Log do
 
   @impl true
   def handle_call({:append, topic, kind, data, at}, _from, state) do
-    at = at || System.os_time(:second)
+    seq = insert_event(state, topic, kind, data, at || System.os_time(:second))
+    announce([{seq, topic}])
+    {:reply, seq, arm(state)}
+  end
 
-    run(state, "INSERT INTO events (topic, kind, data, at) VALUES (?1, ?2, ?3, ?4)", [
-      topic,
-      {:blob, :erlang.term_to_binary(kind)},
-      {:blob, :erlang.term_to_binary(data)},
-      at
+  def handle_call({:read_any, after_seq, patterns, limit}, _from, state) do
+    {where, args} = topics_where(patterns)
+
+    rows =
+      all(
+        state,
+        "SELECT seq, topic, kind, data, at FROM events WHERE seq > ?1" <>
+          where <> " ORDER BY seq LIMIT ?2",
+        [after_seq, limit] ++ args
+      )
+
+    {:reply, Enum.map(rows, &event/1), state}
+  end
+
+  def handle_call({:commit, name, expected, upto, events, onces}, _from, state) do
+    ensure_once(state)
+
+    if position_of(state, name) != expected do
+      {:reply, {:error, :moved}, state}
+    else
+      :ok = Sqlite3.execute(state.db, "BEGIN IMMEDIATE")
+
+      try do
+        at = System.os_time(:second)
+        appended = for {topic, kind, data} <- events, do: {insert_event(state, topic, kind, data, at), topic}
+
+        for {key, value} <- onces do
+          run(state, "INSERT OR IGNORE INTO once (key, value, at) VALUES (?1, ?2, ?3)", [
+            key(key),
+            {:blob, :erlang.term_to_binary(value)},
+            at
+          ])
+        end
+
+        put_position(state, name, upto)
+        :ok = Sqlite3.execute(state.db, "COMMIT")
+        announce(appended)
+        {:reply, {:ok, Enum.map(appended, &elem(&1, 0))}, arm(state)}
+      rescue
+        e ->
+          Sqlite3.execute(state.db, "ROLLBACK")
+          {:reply, {:error, Exception.message(e)}, state}
+      end
+    end
+  end
+
+  def handle_call({:once, key}, _from, state) do
+    ensure_once(state)
+
+    case all(state, "SELECT value FROM once WHERE key = ?1", [key(key)]) do
+      [[value]] -> {:reply, {:ok, :erlang.binary_to_term(value)}, state}
+      [] -> {:reply, :none, state}
+    end
+  end
+
+  def handle_call({:put_once, key, value}, _from, state) do
+    ensure_once(state)
+
+    run(state, "INSERT OR IGNORE INTO once (key, value, at) VALUES (?1, ?2, ?3)", [
+      key(key),
+      {:blob, :erlang.term_to_binary(value)},
+      System.os_time(:second)
     ])
 
-    {:ok, seq} = Sqlite3.last_insert_rowid(state.db)
-    {:reply, seq, arm(state)}
+    [[stands]] = all(state, "SELECT value FROM once WHERE key = ?1", [key(key)])
+    {:reply, :erlang.binary_to_term(stands), state}
   end
 
   def handle_call({:read, after_seq, pattern, limit}, _from, state) do
@@ -204,6 +296,76 @@ defmodule Compos.Core.Events.Log do
 
   @impl true
   def terminate(_reason, state), do: Sqlite3.close(state.db)
+
+  defp insert_event(state, topic, kind, data, at) do
+    run(state, "INSERT INTO events (topic, kind, data, at) VALUES (?1, ?2, ?3, ?4)", [
+      topic,
+      {:blob, :erlang.term_to_binary(kind)},
+      {:blob, :erlang.term_to_binary(data)},
+      at
+    ])
+
+    {:ok, seq} = Sqlite3.last_insert_rowid(state.db)
+    seq
+  end
+
+  # The processes that consume the log in Elixir (Compos.Core.Workflow)
+  # hear of each event at once, by message: {:event_appended, seq, topic}.
+  # Scheme still hears of a burst through events-arrived!.
+  defp announce([]), do: :ok
+
+  defp announce(appended) do
+    Registry.dispatch(Compos.Core.EventRegistry, :event_log, fn entries ->
+      for {pid, _} <- entries, {seq, topic} <- appended, do: send(pid, {:event_appended, seq, topic})
+    end)
+  end
+
+  defp position_of(state, name) do
+    case all(state, "SELECT seq FROM positions WHERE name = ?1", [key(name)]) do
+      [[seq]] -> seq
+      [] -> nil
+    end
+  end
+
+  defp put_position(state, name, seq) do
+    run(
+      state,
+      "INSERT INTO positions (name, seq) VALUES (?1, ?2) ON CONFLICT (name) DO UPDATE SET seq = ?2",
+      [key(name), seq]
+    )
+  end
+
+  # a log opened before the once table existed gets it on first use
+  defp ensure_once(state) do
+    unless Process.get(:events_once_table) do
+      :ok =
+        Sqlite3.execute(
+          state.db,
+          "CREATE TABLE IF NOT EXISTS once (key BLOB PRIMARY KEY, value BLOB, at INTEGER NOT NULL)"
+        )
+
+      Process.put(:events_once_table, true)
+    end
+  end
+
+  # any of PATTERNS: each a prefix ("demo:*") or one topic; the arguments
+  # follow ?1 and ?2, which the query keeps for the seq and the limit
+  defp topics_where([]), do: {" AND 0", []}
+
+  defp topics_where(patterns) do
+    {clauses, args, _} =
+      Enum.reduce(patterns, {[], [], 3}, fn pattern, {cs, as, n} ->
+        if String.ends_with?(pattern, "*") do
+          prefix = String.trim_trailing(pattern, "*")
+          c = "substr(topic, 1, ?#{n}) = ?#{n + 1}"
+          {[c | cs], as ++ [String.length(prefix), prefix], n + 2}
+        else
+          {["topic = ?#{n}" | cs], as ++ [pattern], n + 1}
+        end
+      end)
+
+    {" AND (" <> Enum.join(Enum.reverse(clauses), " OR ") <> ")", args}
+  end
 
   # one notice per burst: Scheme reads everything new when it runs
   defp arm(%{notify: nil} = state),

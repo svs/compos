@@ -49,6 +49,8 @@ A provider is one way to reach calendars. macos is one provider, not the design.
 | ics | any subscription URL | yes | no | rules only |
 | vdir | a vdirsyncer directory, which is what Linux actually runs | yes | yes | rules only |
 | local | a calendar compos owns, kept in the text file | yes | yes | none |
+| google | one Google account over REST, through the editor's own OAuth (google-connect) | yes | yes, and update | expanded by Google |
+| gog | one Google account through the gog CLI and its keychain token | yes | yes, and update | expanded by Google |
 
 The contract:
 
@@ -57,7 +59,8 @@ The contract:
       'events       (lambda (src from to) ...)  occurrences in a window
       'put!         (lambda (src event) ...)    create or update, returns a uid
       'delete!      (lambda (src uid) ...)
-      'capabilities '(read write expanded))
+      'update!      (lambda (src id expect changes) ...)   only with update
+      'capabilities '(read write update expanded))
 
 The capability that matters most is `expanded`. macos returns occurrences, so nothing expands recurrence. Every other provider returns rules, so the RRule work comes back with the first non-macOS provider and not one day before. It is bought when it is needed.
 
@@ -130,7 +133,11 @@ Two verbs, and no others:
 
 Four rules hold them in place. A write is only ever one event, named explicitly by the caller. No sync path writes, so a refresh can never push. `calendar-add!` needs a source whose config says `'writes #t`, and refuses when two sources both claim it rather than guessing. And `calendar-remove!` names the event and states the title it expects to find there: if the identifier has moved to another event the removal is refused, so a stale id cannot delete the wrong thing.
 
-There is no update verb and no bulk verb. Changing an event means removing it and adding it, which keeps every destructive call down to one named event.
+There is no bulk verb. On macos, changing an event means removing it and adding it, which keeps every destructive call down to one named event. The google and gog providers carry `update`, because removing and adding a Google event would cancel its invite:
+
+    (calendar-update! EVENT-ID EXPECTED-TITLE 'start "YYYY-MM-DD HH:MM" ['end ...] ['title ...] ['notify #t] ['source ID])
+
+It checks the title the same way `calendar-remove!` does. A new start with no end keeps the event's length. Guests hear of the change only with `'notify #t`. With more than one writing source, name one with `'source`, the `source_id` every row carries.
 
 ## The event record
 
@@ -283,7 +290,7 @@ So Linux gets a separate importer into the same text file: CalDAV directly, or a
 | P6 | mirroring between calendars, full or busy-only, with a link map | |
 | P7 | freebusy and RSVP | |
 
-gog is dropped. It is Google-only, it is a pain to set up, the copy here is seven minor versions stale, and macOS reaches the same account for free.
+gog is back as a provider, beside google. Both reach one Google account without the Aqua agent, and both can update an event in place. macOS still reaches every account at once.
 
 ## Landmines
 

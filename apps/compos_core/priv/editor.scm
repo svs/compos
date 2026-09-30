@@ -6208,12 +6208,19 @@
 (effects! '(write))
 (public! 'open-buffer-link! "(open-buffer-link! NAME LINE) — show the buffer a link names; LINE may be #f")
 (catalog-meta! 'function "open-buffer-link!" 'domain 'buffers 'effects '(write display))
-(effects! '(unknown))
+(domain! 'files)
+(effects! '(write))
 (public! 'buffer-save! "(buffer-save! [PATH]) — save the current buffer to its path; with PATH, save there and adopt PATH")
+(effects! '(read))
 (public! 'write-rules "(write-rules) — the rules that decide which writes happen, as (NAME REASON CONFIRMABLE? PRED) records")
+(effects! '(write))
 (public! 'defwrite-rule! "(defwrite-rule! 'NAME REASON CONFIRMABLE? PRED) — add or replace a write rule; PRED reads (PATH SOURCE) and answers #t to refuse")
+(effects! '(read))
 (public! 'write-refusal "(write-refusal PATH SOURCE PERMITTED?) — #f when the write is allowed, else the reason it is not")
+(effects! '(write))
 (public! 'allow-one-write! "(allow-one-write! PATH) — let the next write to PATH set the confirmable rules aside; a person's answer buys this, and it is spent once")
+(domain! 'unknown)
+(effects! '(unknown))
 (public! '*scheme-write-roots* "extra directories where a buffer may start a new .scm file")
 (public! 'save-buffer-named! "(save-buffer-named! NAME) — save another buffer; the window goes back where it was")
 (catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
@@ -6245,6 +6252,12 @@
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write display)))
   '("goto-char!" "set-mb-redirect!" "insert!" "delete-char!" "set-mark!"
     "end-of-buffer!" "beginning-of-buffer!"))
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(read)))
+  '("point" "buffer-point" "editor-context" "line-start-position" "region-text"
+    "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"))
+(catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
+(catalog-meta! 'function "register-context-provider!" 'domain 'chat 'effects '(write))
 
 (category! 'windows)
 (domain! 'windows)
@@ -6286,6 +6299,8 @@
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"
   'domain 'interaction 'effects '(write display))
+(catalog-meta! 'function "message" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
 
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
@@ -6378,6 +6393,13 @@
 (public! 'frame-attached! "(frame-attached!) — a client attached this frame; runs frame-attach-hook so per-frame display state is pushed again")
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
 (public! 'overlay-clear! "(overlay-clear! NAME TAG)")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'commands 'effects '(write)))
+  '("define-command" "domain!" "effects!" "namespace!" "catalog-meta!"
+    "add-hook!" "remove-hook!"))
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'commands 'effects '(read)))
+  '("command-names" "command-doc" "key-for-command" "hook-functions"))
 
 ;; the buffer cache — external data drawn from what the buffer already
 ;; holds; the fetch runs off the UI lane through a continuation
@@ -6406,6 +6428,9 @@
 (public! 'git-diff "(git-diff DIR [OPTS] [CB]) -> list of (file-a A file-b B binary? BOOL hunks (...)); each hunk is (header H old-start N old-count N new-start N new-count N lines ((ctx|add|del TEXT) ...)). OPTS: (base \"HEAD\" path P staged #t); a #f base diffs the work tree against the index")
 (public! 'git-log "(git-log DIR N [CB]) -> last N commits as (sha S short-sha S author A date ISO subject S)")
 (public! 'git-show "(git-show DIR REF [CB]) -> the raw text of one commit")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(read)))
+  '("git-root" "git-status" "git-diff" "git-log" "git-show"))
 
 ;; the file watcher
 ;; The event is content-free: it names the root, and the handler re-queries.
@@ -6450,6 +6475,32 @@
 (domain! 'system)
 (effects! '(read))
 (public! 'random "(random N) -> a whole number from 0 up to N, not N; clock-seeded, to pick at random, not for secrets")
+
+;; the builtins every agent reaches for; their docs are the primitives' own
+(category! 'system)
+(domain! 'system)
+(effects! '(pure))
+(public! 'plist-get "(plist-get PLIST KEY) — the value after KEY in the flat PLIST; #f when KEY is absent")
+(public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
+(public! 'with-current-buffer "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window")
+(effects! '(read))
+(public! 'monotonic-ms "(monotonic-ms) — a monotonic millisecond count, for timing one span")
+(public! 'task-await "(task-await TASK [MS]) — wait for a Scheme task and answer its value, or raise its error")
+(public! 'task-alive? "(task-alive? TASK) — #t while TASK remains available")
+(effects! '(write execute))
+(public! 'task-spawn "(task-spawn THUNK) — run a zero-argument closure concurrently over the shared editor world")
+(public! 'task-run! "(task-run! THUNK CALLBACK [MS]) — run THUNK concurrently; later call CALLBACK with OK? and its value or error")
+(public! 'task-cancel! "(task-cancel! TASK) — stop a Scheme task")
+(public! 'shell-command->string "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a task and call it with the output")
+(domain! 'windows)
+(effects! '(read))
+(public! 'window-list-all "(window-list-all) — (WIN BUFFER FRAME) rows for every window in every frame")
+(effects! '(write display))
+(public! 'with-frame-windows "(with-frame-windows THUNK) — run THUNK on the frame's real windows: current-buffer and switch-to-buffer! act on them")
+(public! 'window-set-buffer! "(window-set-buffer! WIN BUF) — show BUF in window WIN without selecting it")
+(domain! 'commands)
+(effects! '(write))
+(public! 'public! "(public! 'NAME DOC [CATEGORY]) — put NAME in the catalog under the current domain! and effects! stamps")
 ;;; --- jit-lock ------------------------------------------------------------------
 ;; Emacs jit-lock. Display asks for faces on the lines it builds and on
 ;; no other lines. The buffer marks the text it handed out with the

@@ -5,7 +5,7 @@ transition: slide
 ---
 
 <!-- build: up; class: title center -->
-![Compos](http://localhost:4004/images/compos-emblem-v1.png)
+![Compos](http://localhost:4004/images/compos-logo.png)
 
 # Compos {zoom}
 
@@ -215,4 +215,4 @@ open http://localhost:4004
 <!-- transition: zoom; class: accent center -->
 # Build your environment by talking to it {pop}
 
-Press `o` to see every slide {step type}
+oPress `o` to see every slide {step type}

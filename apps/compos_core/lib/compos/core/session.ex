@@ -1384,13 +1384,19 @@ defmodule Compos.Core.Session do
       # process — never the Session, because the caller is a Task behind
       # eval-defer!.
       {"agent-ask-permission!",
-       "(agent-ask-permission! SLUG TITLE RAW) — raise a permission card in the chat and block until it is answered; return 'allow, 'always or 'deny."} =>
-        fn [slug, title, raw] ->
-          case Compos.Core.Agent.ask_permission(s(slug), %{
-                 title: to_string(title),
-                 kind: "tool",
-                 raw: to_string(raw)
-               }) do
+       "(agent-ask-permission! SLUG TITLE RAW [MS]) — raise a permission card in the chat and block until it is answered, or deny it after MS; return 'allow, 'always or 'deny."} =>
+        fn args ->
+          [slug, title, raw | rest] = args
+
+          request = %{title: to_string(title), kind: "tool", raw: to_string(raw)}
+
+          request =
+            case rest do
+              [ms] when is_number(ms) and ms > 0 -> Map.put(request, :timeout_ms, trunc(ms))
+              _ -> request
+            end
+
+          case Compos.Core.Agent.ask_permission(s(slug), request) do
             :always -> {:sym, "always"}
             :allow -> {:sym, "allow"}
             _ -> {:sym, "deny"}

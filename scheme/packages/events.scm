@@ -216,3 +216,61 @@
     (alist-put state topic (plist-put row 'at (plist-get e 'at)))))
 
 (event-define-view! 'chat-status "chat:*" 'events--chat-status-step)
+
+;;; The feed webhook: one HTTP server on the tailnet through which other
+;;; machines hand events in. A package claims a path with event-feed-route!;
+;;; the server takes requests only from the addresses in events-feed-peers.
+
+(domain! 'system)
+(effects! '(write external))
+
+(defcustom 'events-feed-host "100.93.101.79"
+  "The address the feed webhook listens on: this machine on the tailnet."
+  'group 'events 'type 'string)
+
+(defcustom 'events-feed-port 4790
+  "The port of the feed webhook."
+  'group 'events 'type 'integer)
+
+(defcustom 'events-feed-peers '("100.110.113.41")
+  "The addresses the feed webhook takes events from."
+  'group 'events 'type 'list)
+
+;; (PATH HANDLER) per claimed path; HANDLER takes the request plist
+(defvar '*event-feed-routes* '())
+
+(effects! '(pure))
+
+(define (event-feed-reply status text)
+  "(event-feed-reply STATUS TEXT) — a plain-text response plist for a feed handler"
+  (list 'status status 'headers '(("content-type" "text/plain")) 'body text))
+
+(effects! '(write external))
+
+(define (event-feed-route! path handler)
+  "(event-feed-route! PATH HANDLER) — hand the feed webhook's requests for PATH to HANDLER, which answers a response plist"
+  (set! *event-feed-routes* (cons (list path handler) (events--without path *event-feed-routes*))))
+
+(define (events--feed-handle request)
+  (let ((route (assoc (plist-get request 'path) *event-feed-routes*)))
+    (cond ((not (member (plist-get request 'remote-address) events-feed-peers))
+           (event-feed-reply 403 "forbidden"))
+          ((not route) (event-feed-reply 404 "not found"))
+          (else ((cadr route) request)))))
+
+(define (event-feed-start!)
+  "(event-feed-start!) — start the feed webhook unless it runs"
+  (when (null? (filter (lambda (s) (equal? (plist-get s 'name) "event-feed")) (conn-list 'web-server)))
+    ;; started from a task, the server takes a lane of its own: the lane of
+    ;; whoever called this may be an agent's, gone after its turn
+    (task-await
+     (task-spawn
+      (lambda ()
+        (web-server-start! "event-feed"
+                           (list 'host events-feed-host 'port events-feed-port
+                                 'max-body (* 16 1024 1024))
+                           (lambda (request) (events--feed-handle request))))))))
+
+(define (event-feed-stop!)
+  "(event-feed-stop!) — stop the feed webhook"
+  (web-server-stop! "event-feed"))

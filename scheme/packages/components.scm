@@ -6,7 +6,7 @@
 
 (namespace! 'ui)
 
-(define *components* '()) ; ((qualified props example fn) ...)
+(define *components* (if (boundp '*components*) *components* '())) ; ((qualified props example fn) ...)
 
 (define (component--get pl key &optional fallback)
   (let loop ((xs pl))
@@ -176,8 +176,8 @@
                          'class (if current? "c-tab c-tab-on" "c-tab")
                          'click id
                          'attrs (list (list "current" (if current? "true" "false")))
-                         'segs (append (if key (list (list "c-tab-key" key)) '())
-                                       (list (list "c-tab-label" label))))))
+                         'segs (append (if key (list (list "c-tab-key c-action-key" key)) '())
+                                       (list (list "c-tab-label c-action-label" label))))))
                (component--get p 'tabs '())))))
 
 (defcomponent 'ui/fold-head
@@ -238,6 +238,50 @@
 
 ;;; --- living gallery ----------------------------------------------------------
 
+(defcomponent 'ui/table
+  "A small table: column titles over rows of cells. A column is (TITLE) or (TITLE right); a cell is text, or (TEXT CLASS) to colour it."
+  '((columns list required) (rows list required) (class string optional))
+  '(columns (("workflow") ("runs" right) ("state")) rows (("triage" "12" ("ok" "good")) ("todos" "9" ("failing" "bad"))))
+  (lambda (p)
+    (let* ((cols (component--get p 'columns '()))
+           (align (lambda (col) (if (member 'right col) " c-num" "")))
+           (cell (lambda (col c)
+                   (let ((text (if (pair? c) (car c) c))
+                         (class (if (and (pair? c) (pair? (cdr c))) (string-append " " (cadr c)) "")))
+                     (list 'tag "c-td" 'class (string-append "c-td" (align col) class) 'text (or text ""))))))
+      (list 'tag "c-table" 'class (string-append "c-table " (component--get p 'class ""))
+            'children
+            (cons (list 'tag "c-tr" 'class "c-tr c-thead"
+                        'children (map (lambda (col) (list 'tag "c-th" 'class (string-append "c-th" (align col))
+                                                           'text (car col)))
+                                       cols))
+                  (map (lambda (row)
+                         (list 'tag "c-tr" 'class "c-tr"
+                               'children (let loop ((cs cols) (xs row) (out '()))
+                                           (if (or (null? cs) (null? xs)) (reverse out)
+                                               (loop (cdr cs) (cdr xs) (cons (cell (car cs) (car xs)) out))))))
+                       (component--get p 'rows '())))))))
+
+(defcomponent 'ui/stat
+  "One number with its label and a line under it. CLASS good, warn or bad colours the number."
+  '((label string required) (value string required) (sub string optional) (class string optional))
+  '(label "model p50" value "154ms" sub "p95 256ms" class "good")
+  (lambda (p)
+    (list 'tag "c-stat" 'class (string-append "c-stat " (component--get p 'class ""))
+          'children (append (list (list 'tag "c-label" 'class "c-stat-label" 'text (component--get p 'label ""))
+                                  (list 'tag "c-value" 'class "c-stat-value" 'text (component--get p 'value "")))
+                            (if (component--has? p 'sub)
+                                (list (list 'tag "c-text" 'class "c-stat-sub" 'text (component--get p 'sub)))
+                                '())))))
+
+(defcomponent 'ui/stats
+  "A row of ui/stat tiles that wraps on a narrow window. STATS is a list of ui/stat props."
+  '((stats list required) (class string optional))
+  '(stats ((label "calls" value "398") (label "p50" value "154ms" class "good")))
+  (lambda (p)
+    (list 'tag "c-stats" 'class (string-append "c-stats " (component--get p 'class ""))
+          'children (map (lambda (s) (component 'ui/stat s)) (component--get p 'stats '())))))
+
 (defcomponent 'ui/keys-bar
   "The keymap a list-mode buffer carries: a card at the window's bottom corner with the main keys and `? all N`; expanded, the whole map as a grid per keymap."
   '((main list required) (grids list optional) (expanded boolean optional))
@@ -260,7 +304,7 @@
                                 (list 'tag "div" 'class "keys-more"
                                       'click "list-keys-toggle"
                                       'attrs (list (list "title" (if expanded "fewer keys" "every key")))
-                                      'segs (list (list "c-keymap-key" "?" "c-action-key")
+                                      'segs (list (list "c-keymap-key c-action-key" "?" "c-action-key")
                                                   (list "keys-more-word"
                                                         (cond (expanded "fewer")
                                                               ((> n 0) (string-append "all " (number->string n)))
@@ -274,7 +318,7 @@
                                                        (list "count" (number->string (length (cadr g))))))
                                      (map (lambda (r)
                                             (list 'tag "c-binding" 'class "c-binding"
-                                                  'segs (list (list "c-keymap-key" (car r) "c-action-key")
+                                                  'segs (list (list "c-keymap-key c-action-key" (car r) "c-action-key")
                                                               (list "do" (cadr r)))))
                                           (cadr g)))))
                        grids)
@@ -292,7 +336,7 @@
                  (list 'tag "c-row" 'class "c-keymap-row"
                        'segs
                        (append
-                         (list (list "c-keymap-key" (car k) "c-action-key")
+                         (list (list "c-keymap-key c-action-key" (car k) "c-action-key")
                                (list "c-keymap-cmd" (cadr k)))
                          (if (> (length k) 2)
                              (list (list "c-keymap-doc" (nth 2 k)))
@@ -396,6 +440,19 @@
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
 .c-group { display: block; margin: 0 0 10px; }
+.c-table { display: table; width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+.c-tr { display: table-row; }
+.c-th, .c-td { display: table-cell; padding: 3px 10px; white-space: nowrap; border-bottom: 1px solid var(--border-bg); }
+.c-th { color: var(--dim-fg); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+.c-num { text-align: right; font-variant-numeric: tabular-nums; }
+.c-td.good, .c-stat.good .c-stat-value { color: var(--success-fg, #2e8b57); }
+.c-td.warn, .c-stat.warn .c-stat-value { color: var(--warning-fg, #b8860b); }
+.c-td.bad, .c-stat.bad .c-stat-value { color: var(--alert-fg, #d13b32); font-weight: 600; }
+.c-stats { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.c-stat { display: flex; flex-direction: column; min-width: 11ch; padding: 6px 10px; border: 1px solid var(--border-bg); font-family: var(--font-mono); }
+.c-stat-label { color: var(--dim-fg); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.c-stat-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.c-stat-sub { color: var(--dim-fg); font-size: 10px; }
 .c-keymap { display: flex; flex-wrap: wrap; gap: var(--s4) var(--s9); padding: 5px 12px; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.35; white-space: normal; color: var(--text-faint); }
 .c-keymap-row { display: inline-flex; align-items: baseline; gap: var(--s4); min-width: 0; max-width: 100%; white-space: nowrap; }
 /* the key is a c-action-key (layouts.ex): one element, one colour */
@@ -406,9 +463,14 @@
 ")
 
 (category! 'ui)
+(domain! 'ui)
+(effects! '(write))
 (public! 'defcomponent "(defcomponent NAME DOC PROPS EXAMPLE FN) — register a pure block-mode UI component")
+(effects! '(pure))
 (public! 'component "(component NAME PROPS) — instantiate a registered UI component")
-(public! 'describe-component "(describe-component NAME) — show a component's props, example and owner")
+(effects! '(read))
+(public! 'describe-component "(describe-component NAME) — a component's props, example and owner, or #f")
+(effects! '(read external spend))
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")
 
 (domain! 'ui)

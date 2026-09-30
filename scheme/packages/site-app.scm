@@ -36,6 +36,11 @@
 
 (define (site-app-buffer name) (string-append "*" (symbol->string name) "*"))
 (define (site-app-mode name) (string-append (symbol->string name) "-mode"))
+;; each section of the site is its own index buffer, in a list mode of its own
+(define (site-app-page-buffer name id)
+  (string-append "*" (symbol->string name) "-" (symbol->string id) "*"))
+(define (site-app-page-mode name id)
+  (string-append (symbol->string name) "-" (symbol->string id) "-mode"))
 (define (site-app-pages spec) (or (plist-get spec 'pages) '()))
 
 (define (site-app-page spec id)
@@ -77,6 +82,63 @@
 (define (site-app-row-key buf row)
   (or (plist-get row 'key) (plist-get row 'href)))
 
+(define site-app-section-click "site-app-section:")
+(define site-app-status-click "site-app-status:")
+
+(define (site-app-filter-on? tab query)
+  (if query
+      (equal? (plist-get tab 'query) query)
+      (equal? (plist-get tab 'active) "yes")))
+
+(define (site-app-composml-head buf head)
+  ;; the site's navbar, then the section's status tabs, each a row of tabs
+  (let* ((spec (buffer-local buf 'site-app-spec))
+         (current (buffer-local buf 'site-app-page))
+         (filters (or (buffer-local buf 'site-app-filters) '()))
+         (query (buffer-local buf 'site-app-filter)))
+    (append
+      (list (component 'ui/tabs
+              (list 'class "sa-sections"
+                    'tabs (map (lambda (page)
+                                 (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
+                                       (plist-get page 'label)
+                                       (equal? current (plist-get page 'id))
+                                       (string-append "M-" (plist-get page 'key))))
+                               (site-app-pages spec)))))
+      (if (null? filters)
+          '()
+          (list (component 'ui/tabs
+                  (list 'class "sa-status"
+                        'tabs (map (lambda (tab)
+                                     (let ((count (plist-get tab 'count)))
+                                       (list (string-append site-app-status-click (plist-get tab 'query))
+                                             (if (equal? count "") (plist-get tab 'label)
+                                                 (string-append (plist-get tab 'label) " " count))
+                                             (site-app-filter-on? tab query))))
+                                   filters))))))))
+
+(define (site-app-composml buf row)
+  ;; a row as blocks: one cell per column, on the column widths. Its class
+  ;; names the width the fixed columns need with room left for the one that
+  ;; takes the rest; the stylesheet moves that one to a line of its own in a
+  ;; narrower window rather than squeezing it into a sliver
+  (let* ((cols (or (plist-get (site-app-current-page buf) 'columns) '()))
+         (fixed (fold (lambda (sum col) (+ sum 1 (or (plist-get col 'width) 0))) 0 cols))
+         (need (* 10 (quotient (+ fixed 30 9) 10))))
+    (list 'tag "div" 'class (string-append "sa-row sa-need-" (number->string (min 140 (max 60 need))))
+          'attrs (list (list "style"
+                             (string-append "grid-template-columns:"
+                                            (string-join (map (lambda (col)
+                                                                (let ((w (plist-get col 'width)))
+                                                                  (if w (string-append (number->string w) "ch") "minmax(0,1fr)")))
+                                                              cols)
+                                                         " "))))
+          'children (map (lambda (col)
+                           (list 'tag "span"
+                                 'class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")
+                                 'text (or (site-app-field row (plist-get col 'field)) "")))
+                         cols))))
+
 (define (site-app-title buf)
   (let* ((spec (buffer-local buf 'site-app-spec))
          (page (site-app-current-page buf)))
@@ -84,16 +146,32 @@
                    " · " (or (plist-get page 'label) ""))))
 
 (define (site-app-header buf)
+  ;; the site's navbar, then the section's own status tabs when it has them
   (let* ((spec (buffer-local buf 'site-app-spec))
-         (current (buffer-local buf 'site-app-page)))
-    (string-join
-      (map (lambda (page)
-             (let ((label (plist-get page 'label)) (key (plist-get page 'key)))
-               (if (equal? current (plist-get page 'id))
-                   (string-append "[" key " " label "]")
-                   (string-append " " key " " label " "))))
-           (site-app-pages spec))
-      "  ")))
+         (current (buffer-local buf 'site-app-page))
+         (nav (string-join
+                (map (lambda (page)
+                       (let ((text (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))))
+                         (if (equal? current (plist-get page 'id))
+                             (string-append "[" text "]")
+                             (string-append " " text " "))))
+                     (site-app-pages spec))
+                " "))
+         (filters (or (buffer-local buf 'site-app-filters) '()))
+         (query (buffer-local buf 'site-app-filter)))
+    (if (null? filters)
+        nav
+        (string-append nav "\n"
+          (string-join
+            (map (lambda (tab)
+                   (let* ((count (plist-get tab 'count))
+                          (text (if (equal? count "") (plist-get tab 'label)
+                                    (string-append (plist-get tab 'label) " " count))))
+                     (if (equal? (plist-get tab 'query) query)
+                         (string-append "[" text "]")
+                         (string-append " " text " "))))
+                 filters)
+            " ")))))
 
 (define (site-app-rows buf) (or (buffer-local buf 'site-app-rows) '()))
 
@@ -109,20 +187,32 @@
   ;; The site renders its pages whole before any script runs, so a plain fetch
   ;; through the extension (your cookies, no tab) reads them. The live tab is
   ;; kept for what only a live page can do: pressing its buttons.
-  (site-app-fetch-html! (site-app-url (site-app-spec name) (plist-get page 'path)) k))
+  (let* ((url (site-app-url (site-app-spec name) (plist-get page 'path)))
+         (query (buffer-local (site-app-page-buffer name (plist-get page 'id)) 'site-app-filter)))
+    (site-app-fetch-html! (if (and (string? query) (> (string-length query) 0))
+                              (string-append url "?" query)
+                              url)
+                          k)))
 
 (define (site-app-fill! name page html)
-  (let* ((buf (site-app-buffer name))
-         (rows (site-app-parse (plist-get page 'sheet) html)))
+  (let* ((buf (site-app-page-buffer name (plist-get page 'id)))
+         (rows (site-app-parse (plist-get page 'sheet) html))
+         (sheet (plist-get (site-app-spec name) 'tabs-sheet))
+         (tabs (or (and sheet (site-app-parse sheet html)) '()))
+         (on (and (pair? tabs) (site-app-find (lambda (t) (equal? (plist-get t 'active) "yes")) tabs))))
     (if (not (or (pair? rows) (null? rows)))
         (message (string-append (symbol->string name) ": stylesheet did not return rows"))
         (begin
           (buffer-set-local! buf 'site-app-page (plist-get page 'id))
           (buffer-set-local! buf 'site-app-rows rows)
+          (buffer-set-local! buf 'site-app-filters (if (pair? tabs) tabs '()))
+          ;; the page says which of its tabs it drew; that is the one we are on
+          (when on (buffer-set-local! buf 'site-app-filter (plist-get on 'query)))
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf)
           (message (string-append (number->string (length rows))
-                                  " " (string-downcase (plist-get page 'label))))))
+                                  " " (string-downcase (plist-get page 'label))
+                                  (if on (string-append " · " (plist-get on 'label)) "")))))
     rows))
 
 (define (site-app-read-page! name page)
@@ -156,40 +246,67 @@
                     (k tab))))))))))
 
 (define (site-app-select-page! index)
-  (let* ((buf (current-buffer))
-         (spec (buffer-local buf 'site-app-spec))
+  (let* ((spec (buffer-local (current-buffer) 'site-app-spec))
          (pages (site-app-pages spec)))
     (when (< index (length pages))
-      (site-app-read-page! (plist-get spec 'name) (list-ref pages index)))))
+      (site-app-open! (plist-get spec 'name) (plist-get (list-ref pages index) 'id)))))
 
-(define-command "site-app-tab-1" "Open this website app's first tab"
-  (lambda () (site-app-select-page! 0)))
-(define-command "site-app-tab-2" "Open this website app's second tab"
-  (lambda () (site-app-select-page! 1)))
-(define-command "site-app-tab-3" "Open this website app's third tab"
-  (lambda () (site-app-select-page! 2)))
-(define-command "site-app-tab-4" "Open this website app's fourth tab"
-  (lambda () (site-app-select-page! 3)))
-(define-command "site-app-tab-5" "Open this website app's fifth tab"
-  (lambda () (site-app-select-page! 4)))
+(define (site-app-filter-step! delta)
+  ;; walk the section's status tabs, then read the section at the new one
+  (let* ((buf (current-buffer))
+         (spec (buffer-local buf 'site-app-spec))
+         (filters (or (buffer-local buf 'site-app-filters) '()))
+         (n (length filters)))
+    (if (= n 0)
+        (message "This section has no status tabs")
+        (let* ((query (buffer-local buf 'site-app-filter))
+               (at (let loop ((rest filters) (i 0))
+                     (cond ((null? rest) 0)
+                           ((equal? (plist-get (car rest) 'query) query) i)
+                           (else (loop (cdr rest) (+ i 1))))))
+               (next (list-ref filters (modulo (+ at delta) n))))
+          (site-app-set-filter! buf (plist-get next 'query))))))
+
+(define (site-app-set-filter! buf query)
+  ;; show one status tab of the section, then read the section at it
+  (let ((spec (buffer-local buf 'site-app-spec)))
+    (buffer-set-local! buf 'site-app-filter query)
+    (list-refresh! buf)
+    (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf))))
+
+(define-command "site-app-filter-next" "Show the next status tab of this section"
+  (lambda () (site-app-filter-step! 1)))
+(define-command "site-app-filter-prev" "Show the previous status tab of this section"
+  (lambda () (site-app-filter-step! -1)))
+
+(for-each
+  (lambda (n)
+    (let ((i (number->string n)))
+      (define-command (string-append "site-app-tab-" i) (string-append "Open section " i " of this website app")
+        (lambda () (site-app-select-page! (- n 1))))))
+  '(1 2 3 4 5 6 7 8 9))
 (define-command "site-app-refresh" "Read this website app tab again"
   (lambda ()
     (let* ((buf (current-buffer))
            (spec (buffer-local buf 'site-app-spec)))
       (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf)))))
 
-(define (site-app-open! name)
+(define (site-app-open! name &optional id)
+  ;; each section is its own buffer; one already read is shown as it stands, g rereads it
   (let* ((spec (site-app-spec name))
-         (buf (site-app-buffer name))
-         (page (site-app-page spec (plist-get spec 'home-page))))
+         (page (site-app-page spec (or id (plist-get spec 'home-page))))
+         (pid (plist-get page 'id))
+         (buf (site-app-page-buffer name pid))
+         (mode (site-app-page-mode name pid)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf)
     (buffer-set-local! buf 'site-app-spec spec)
-    (buffer-set-local! buf 'site-app-page (plist-get page 'id))
-    (unless (buffer-derived-mode? buf (site-app-mode name))
-      (with-current-buffer buf (lambda () (set-mode! (site-app-mode name)))))
+    (buffer-set-local! buf 'site-app-page pid)
+    (unless (buffer-derived-mode? buf mode)
+      (with-current-buffer buf (lambda () (set-mode! mode))))
     (switch-to-buffer! buf)
-    (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page)))
+    (when (null? (site-app-rows buf))
+      (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page))))
     buf))
 
 
@@ -410,7 +527,10 @@
                    (let* ((title (site-app-unlabel (or (plist-get (car kids) 'text) "")))
                           (first (b 'line title (plist-get (car kids) 'href)))
                           (body (site-app-node-blocks b (cdr kids) tones))
-                          (card (component 'ui/card (list 'title title 'open? #t 'body body 'class "sa-card"))))
+                          (card (component 'ui/card (list 'title title 'open? #t 'body body
+                                                           ;; a sheet may name the kind of card, for its own look
+                                                           'class (let ((kind (plist-get node 'class)))
+                                                                    (if kind (string-append "sa-card " kind) "sa-card"))))))
                      (loop (cdr rest) 'item (cons (site-app-claim card first (max first (b 'count #f #f))) acc))))))
             ((equal? tag "c-heading")
              (let* ((count (and next (re-match? "^[0-9]+$" (or (plist-get next 'text) "")) (plist-get next 'text)))
@@ -478,7 +598,11 @@
          (stars (and (pair? profile) (re-match? "^★+$" (or (plist-get (car profile) 'text) "")) (car profile)))
          (rest (if stars (cdr profile) profile))
          (name (and (pair? rest) (car rest)))
+         ;; prose and tags under the facts line: a headline, the specialisations
+         (prose? (lambda (n) (member (plist-get n 'tag) (list "c-paragraph" "c-list-item"))))
+         (extras (filter prose? (if name (cdr rest) rest)))
          (facts (filter (lambda (n) (and (not (equal? (plist-get n 'tag) "c-action"))
+                                         (not (prose? n))
                                          (not (member (plist-get n 'text)
                                                       (list title (and state-node (plist-get state-node 'text)))))))
                         (if name (cdr rest) rest))))
@@ -487,6 +611,9 @@
                                 (list (list "sa-crumbs" (or (plist-get data 'title) ""))
                                       (list "sa-position" position))
                                 "sa-crumb-row" #f))
+      ;; a page that is no job's (a candidate) has no title row: its name is the heading
+      (if (equal? (or (plist-get data 'job) "") "")
+          '()
       (let ((n (b 'line (if state (string-append title "  " state) title) (plist-get data 'job_href))))
         (list (site-app-claim
                 (list 'tag "div" 'class "sa-title"
@@ -495,7 +622,7 @@
                                             (list (component 'ui/badge (list 'text state 'class
                                                     (string-append "sa-state " (or (site-app-tone-class tones state) "")))))
                                             '())))
-                n n)))
+                n n))))
       (if name
           (list (site-app-row-block b (string-append (if stars (string-append (plist-get stars 'text) "  ") "") (plist-get name 'text))
                                     (append (if stars (list (list "sa-stars" (plist-get stars 'text)) (list "" "  ")) '())
@@ -512,6 +639,7 @@
                                            (site-app-toned-segs (car ts) "sa-fact" tones))
                                    #f)))))
             (list (site-app-row-block b (string-join texts " · ") segs "sa-facts" #f))))
+      (site-app-node-blocks b extras tones)
       (if (null? tabs)
           '()
           (let ((n (b 'line (string-join (map (lambda (t) (site-app-capitalize (plist-get t 'label))) tabs) "   ") #f)))
@@ -527,6 +655,41 @@
                                                           (number->string i))
                                                     acc))))))
                     n n)))))))
+
+;; Up and down go from one piece of the page to the next, not line by line:
+;; the top of the page is one stop, then every card, fact row or paragraph of
+;; the open tab; a section's heading is not a stop.
+(define (site-app-stops blocks)
+  (let loop ((bs blocks) (past-tabs #f) (acc (list 1)))
+    (if (null? bs)
+        (reverse acc)
+        (let* ((block (car bs))
+               (class (or (plist-get block 'class) ""))
+               (lines (plist-get block 'lines)))
+          (cond ((re-match? "\\bsa-tabs\\b" class) (loop (cdr bs) #t acc))
+                ((or (not past-tabs) (not lines) (re-match? "\\bsa-section\\b" class))
+                 (loop (cdr bs) past-tabs acc))
+                (else (loop (cdr bs) past-tabs
+                            (if (member (car lines) acc) acc (cons (car lines) acc)))))))))
+
+(define (site-app-detail-stop! dir)
+  ;; the next stop past point, or a plain line when there is none that way
+  (let* ((buf (current-buffer))
+         (line (car (buffer-line-at-point buf)))
+         (stops (or (buffer-local buf 'site-app-stops) '()))
+         (next (if (> dir 0)
+                   (let ((after (filter (lambda (n) (> n line)) stops)))
+                     (and (pair? after) (car after)))
+                   (let ((before (filter (lambda (n) (< n line)) stops)))
+                     (and (pair? before) (car (reverse before)))))))
+    (cond (next (buffer-goto-line! buf next))
+          ((> dir 0) (next-line!))
+          (else (previous-line!)))))
+
+(define-command "site-app-detail-next" "Go to the next piece of this page"
+  (lambda () (site-app-detail-stop! 1)))
+(define-command "site-app-detail-prev" "Go to the previous piece of this page"
+  (lambda () (site-app-detail-stop! -1)))
 
 (define (site-app-draw! buf)
   (let* ((data (buffer-local buf 'site-app-data))
@@ -555,6 +718,7 @@
       (buffer-set-text! buf text #t)
       (buffer-goto-line! buf (max 1 (min line (b 'count #f #f)))))
     (buffer-set-local! buf 'site-app-links (b 'links #f #f))
+    (buffer-set-local! buf 'site-app-stops (site-app-stops blocks))
     (buffer-set-locals! buf
       (list 'render-mode "blocks"
             'render-blocks (list (list 'tag "div" 'class "sa-page" 'children blocks))))
@@ -568,6 +732,20 @@
 (define (site-app-detail-link-at buf)
   (let ((hit (assoc (car (buffer-line-at-point buf)) (or (buffer-local buf 'site-app-links) '()))))
     (and hit (list 0 0 (cadr hit)))))
+
+(add-hook! (list 'block-click 'site-app-list)
+  ;; a click on a section or status tab is the same move as its key
+  (lambda (buf id)
+    (let ((spec (buffer-local buf 'site-app-spec)))
+      (cond ((not (and spec (string? id))) #f)
+            ((string-prefix? site-app-section-click id)
+             (site-app-open! (plist-get spec 'name)
+                             (string->symbol (substring id (string-length site-app-section-click) (string-length id))))
+             #t)
+            ((string-prefix? site-app-status-click id)
+             (site-app-set-filter! buf (substring id (string-length site-app-status-click) (string-length id)))
+             #t)
+            (else #f)))))
 
 (add-hook! (list 'block-click 'site-app)
   (lambda (buf id)
@@ -583,6 +761,17 @@
 
 (define-style! 'site-app "
 .sa-page { padding: 6px 4px 24px; line-height: 1.45; font-size: 12px; }
+.sa-row { display: grid; column-gap: 1ch; container-type: inline-size; }
+.sa-row > .sa-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@container (max-width: 60ch) { .sa-need-60 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 70ch) { .sa-need-70 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 80ch) { .sa-need-80 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 90ch) { .sa-need-90 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 100ch) { .sa-need-100 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 110ch) { .sa-need-110 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 120ch) { .sa-need-120 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 130ch) { .sa-need-130 > .sa-cell:last-child { grid-column: 1 / -1; } }
+@container (max-width: 140ch) { .sa-need-140 > .sa-cell:last-child { grid-column: 1 / -1; } }
 .sa-page .c-tab, .sa-page .c-section { font-size: 10.5px; }
 .sa-page .c-badge { font-size: 9.5px; }
 .sa-crumb-row { padding: 0; font-size: 10.5px; }
@@ -606,6 +795,11 @@
 .c-badge.sa-warn { background: rgba(194,138,46,.16); }
 .c-badge.sa-info { background: rgba(122,162,247,.16); }
 .sa-card { margin: 0 0 8px; }
+.sa-job .c-caret { display: none; }
+.sa-job .c-fold-head { background: transparent; }
+.sa-job.current { background: var(--hl-line-bg); }
+.sa-job .c-fold-title { font-family: ui-serif, Georgia, serif; font-size: 14px; font-weight: 700; color: var(--fg); }
+.sa-job .sa-facts .sa-fact:nth-child(-n+3) { color: var(--accent-fg); font-weight: 600; }
 .sa-card > :not(.c-fold-head) { padding-left: 12px; padding-right: 12px; }
 .sa-section { margin-top: 6px; }
 .sa-field, .sa-li { padding: 1px 0; }
@@ -764,6 +958,13 @@
       (display-buffer-detail! buf list-buf)
       (cond
         ((not sheet) #f)
+        ((plist-get page 'detail-fetch)
+         ;; one plain page with no tabs to press: fetch it, no live tab needed
+         (site-app-fetch-html! url
+           (lambda (html)
+             (let ((data (and html (site-app-parse sheet html))))
+               (when (and data (buffer-known? buf) (equal? gen (site-app-gen name)))
+                 (site-app-render-detail! name row data))))))
         ((plist-get page 'detail-tab-param)
          (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids))
         (else
@@ -907,7 +1108,9 @@
                             (site-app-detail-action-keys buf)))
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
-        (app-detail-keys! (site-app-mode (buffer-local buf 'site-app-name)) mode)))))
+        (let ((name (buffer-local buf 'site-app-name)))
+          (for-each (lambda (page) (app-detail-keys! (site-app-page-mode name (plist-get page 'id)) mode))
+                    (site-app-pages (site-app-spec name))))))))
 
 (define-command "site-app-detail-tab-1" "Show this page's first tab" (lambda () (site-app-detail-nth! 1)))
 (define-command "site-app-detail-tab-2" "Show this page's second tab" (lambda () (site-app-detail-nth! 2)))
@@ -935,6 +1138,8 @@
 (mode-keys! "site-app-detail-mode"
   (list (list "TAB" "site-app-detail-next-tab")
         (list "S-TAB" "site-app-detail-prev-tab")
+        (list "<down>" "site-app-detail-next")
+        (list "<up>" "site-app-detail-prev")
         (list "1" "site-app-detail-tab-1")
         (list "2" "site-app-detail-tab-2")
         (list "3" "site-app-detail-tab-3")
@@ -952,41 +1157,57 @@
 
 (define (define-site-app spec)
   (let* ((name (plist-get spec 'name))
-         (mode (site-app-mode name))
-         (buf (site-app-buffer name)))
+         (title (or (plist-get spec 'title) (symbol->string name)))
+         (pages (site-app-pages spec)))
     (site-app-put! name spec)
     (for-each (lambda (page)
                 (let ((mode (plist-get page 'detail-mode)))
                   (when mode
                     (define-mode mode (lambda () (buffer-set-read-only! (current-buffer) #t)))
                     (mode-parent! mode "site-app-detail-mode"))))
-              (site-app-pages spec))
-    (define-list-mode! mode
-      (list 'doc "A website app backed by one live background browser tab. Number keys switch site sections, / filters rows, g rereads the live page, q quits."
-            'buffer buf
-            'transient #f
-            'noun "item"
-            'rows site-app-rows
-            'key site-app-row-key
-            'columns site-app-columns
-            'cells site-app-cells
-            'title site-app-title
-            'header site-app-header
-            'preview site-app-show-detail!
-            'footer (lambda (b) (list (list "1–5" "tabs") (list "/" "filter")
-                                      (list "g" "refresh") (list "q" "quit")))
-            'keys (list (list "RET" "site-app-detail")
-                        (list "1" "site-app-tab-1")
-                        (list "2" "site-app-tab-2")
-                        (list "3" "site-app-tab-3")
-                        (list "4" "site-app-tab-4")
-                        (list "5" "site-app-tab-5")
-                        (list "g" "site-app-refresh")
-                        (list "q" "quit-window"))))
-    ;; The index keeps its own bindings; unclaimed detail-page keys run in the
-    ;; adjacent detail, just as they do when focus is on the detail itself.
-    (when (boundp 'app-detail-keys!)
-      (app-detail-keys! mode "site-app-detail-mode"))
+              pages)
+    ;; Every section is an index of its own: its buffer, its mode, its command.
+    (for-each
+      (lambda (page)
+        (let* ((id (plist-get page 'id))
+               (mode (site-app-page-mode name id))
+               (command (string-append (symbol->string name) "-" (symbol->string id))))
+          (define-list-mode! mode
+            (list 'doc (string-append title " " (plist-get page 'label)
+                                      ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, number keys switch the tabs of the page beside the list, / filters rows, g rereads, q quits.")
+                  'buffer (site-app-page-buffer name id)
+                  'transient #f
+                  'noun "item"
+                  'rows site-app-rows
+                  'key site-app-row-key
+                  'columns site-app-columns
+                  'cells site-app-cells
+                  'title site-app-title
+                  'header site-app-header
+                  ;; rows and head as blocks, so the sections and status tabs are tabs
+                  'collection "c-list"
+                  'composml site-app-composml
+                  'composml-head site-app-composml-head
+                  'preview site-app-show-detail!
+                  'footer (lambda (b) (list (list "M-1–9" "sections") (list "[ ]" "status") (list "1–5" "page tabs")
+                                            (list "/" "filter") (list "g" "refresh") (list "q" "quit")))
+                  ;; Digits are left free so they reach the page beside the list, as
+                  ;; its tab keys; the sections move to M-digit.
+                  'keys (append (list (list "RET" "site-app-detail")
+                                      (list "[" "site-app-filter-prev")
+                                      (list "]" "site-app-filter-next")
+                                      (list "g" "site-app-refresh")
+                                      (list "q" "quit-window"))
+                                (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
+                                                       (string-append "site-app-tab-" (plist-get p 'key))))
+                                     pages))))
+          ;; The index keeps its own bindings; unclaimed detail-page keys run in the
+          ;; adjacent detail, just as they do when focus is on the detail itself.
+          (when (boundp 'app-detail-keys!)
+            (app-detail-keys! mode "site-app-detail-mode"))
+          (define-command command (string-append "Open " title " " (plist-get page 'label))
+            (lambda () (site-app-open! name id)))))
+      pages)
     spec))
 
 (domain! 'web)

@@ -84,6 +84,9 @@ defmodule Compos.Core.Application do
       Compos.Core.Browser,
       Compos.Core.Google,
       Compos.Core.Session,
+      # the workflows: supervised consumers of the event log whose handlers
+      # are Scheme, so they follow Session; Scheme defines them as it loads
+      Compos.Core.Workflows,
       Compos.Core.Desktop,
       # dev: a saved source file reaches this daemon without a restart
       Compos.Core.Hotload,

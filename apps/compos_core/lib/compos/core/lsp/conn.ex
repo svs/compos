@@ -7,8 +7,18 @@ defmodule Compos.Core.LSP.Conn do
   root. The handshake (initialize -> initialized) runs async on connect;
   didOpen calls that arrive earlier queue and flush when the server is
   ready. Document sync lives here, not in Scheme: the conn subscribes to
-  `Compos.Core.Events` per open buffer and pushes a debounced full-text
-  didChange, so the server's view can never drift from the rope.
+  `Compos.Core.Events` per open buffer and pushes a debounced didChange,
+  so the server's view can never drift from the rope.
+
+  A server that offers `TextDocumentSyncKind.Incremental` gets each edit
+  as a range and its new text. The conn keeps a shadow of every open
+  document, applies each buffer change to it in order, and reads the
+  edit's range from the shadow before the change lands. The shadow is
+  the server's view; the buffer version is the chain. A change that is
+  not one edit at the next version (an undo, a whole-text rewrite, a
+  missed event) breaks the chain, and the next flush sends the whole
+  text again and starts the chain over. A server that offers full sync
+  gets the whole text on every flush, as before.
 
   Position encoding is negotiated in initialize (utf-8 when the server
   offers it, else the mandatory utf-16). Positions convert to byte
@@ -245,12 +255,21 @@ defmodule Compos.Core.LSP.Conn do
   # loop pinned one elixir-ls at 8 cores with the version stuck at 0.
   def handle_info({:buffer_change, _name, %{source: :locals}}, state), do: {:noreply, state}
 
-  def handle_info({:buffer_change, name, _change}, state) do
-    if Map.has_key?(state.docs, name) and not MapSet.member?(state.dirty, name) do
-      Process.send_after(self(), {:flush_doc, name}, @flush_ms)
-      {:noreply, %{state | dirty: MapSet.put(state.dirty, name)}}
-    else
-      {:noreply, state}
+  def handle_info({:buffer_change, name, change}, state) do
+    case Map.fetch(state.docs, name) do
+      {:ok, doc} ->
+        doc = doc |> upgrade_doc() |> record_change(change, state.encoding, incremental?(state))
+        state = put_in(state, [:docs, name], doc)
+
+        if MapSet.member?(state.dirty, name) do
+          {:noreply, state}
+        else
+          Process.send_after(self(), {:flush_doc, name}, @flush_ms)
+          {:noreply, %{state | dirty: MapSet.put(state.dirty, name)}}
+        end
+
+      :error ->
+        {:noreply, state}
     end
   end
 
@@ -265,11 +284,7 @@ defmodule Compos.Core.LSP.Conn do
         {:noreply, do_close(state, name)}
 
       true ->
-        {:noreply,
-         send_notification(state, "textDocument/didChange", %{
-           "textDocument" => %{"uri" => uri(name), "version" => Buffer.version(name)},
-           "contentChanges" => [%{"text" => Buffer.text(name)}]
-         })}
+        {:noreply, flush_doc(state, name)}
     end
   end
 
@@ -451,20 +466,106 @@ defmodule Compos.Core.LSP.Conn do
 
   # --- documents -------------------------------------------------------------
 
+  # The shadow: the text the server holds, its version, and the range
+  # edits not yet sent, newest first. `full` asks the next flush to send
+  # the whole text, because the chain of one edit per version broke.
+  defp new_doc(uri, text, version),
+    do: %{uri: uri, text: text, version: version, changes: [], full: false}
+
+  # A server states incremental sync as the kind 2, or as the `change`
+  # field of the sync options.
+  defp incremental?(%{caps: caps}) do
+    case caps["textDocumentSync"] do
+      2 -> true
+      %{"change" => 2} -> true
+      _ -> false
+    end
+  end
+
+  # A conn from before the shadow holds a doc of one field. The next
+  # flush sends the whole text and starts the shadow from it.
+  defp upgrade_doc(%{full: _} = doc), do: doc
+  defp upgrade_doc(doc), do: Map.merge(new_doc(doc.uri, "", 0), %{doc | full: true})
+
+  # a full-sync server takes no ranges; the flush sends the whole text
+  defp record_change(doc, _change, _enc, false), do: doc
+  defp record_change(doc, change, enc, true), do: record_change(doc, change, enc)
+
+  defp record_change(%{full: true} = doc, _change, _enc), do: doc
+
+  defp record_change(doc, %{version: v, pos: pos, inserted: ins, deleted: del}, enc)
+       when v == doc.version + 1 and (ins != "" or del > 0) and pos >= 0 and
+              pos + del <= byte_size(doc.text) do
+    text = doc.text
+    start = Pos.to_lsp_at(text, pos, enc)
+    stop = if del == 0, do: start, else: Pos.to_lsp_at(text, pos + del, enc)
+    rest = binary_part(text, pos + del, byte_size(text) - pos - del)
+
+    %{
+      doc
+      | text: binary_part(text, 0, pos) <> ins <> rest,
+        version: v,
+        changes: [%{"range" => %{"start" => start, "end" => stop}, "text" => ins} | doc.changes]
+    }
+  end
+
+  # not one edit at the next version: the whole text goes at the flush
+  defp record_change(doc, _change, _enc), do: %{doc | full: true, changes: []}
+
+  defp flush_doc(state, name) do
+    doc = upgrade_doc(state.docs[name])
+
+    if incremental?(state) and not doc.full do
+      case doc.changes do
+        [] ->
+          state
+
+        changes ->
+          state
+          |> send_notification("textDocument/didChange", %{
+            "textDocument" => %{"uri" => doc.uri, "version" => doc.version},
+            "contentChanges" => Enum.reverse(changes)
+          })
+          |> put_in([:docs, name], %{doc | changes: []})
+      end
+    else
+      {text, version} = text_and_version(name)
+
+      state
+      |> send_notification("textDocument/didChange", %{
+        "textDocument" => %{"uri" => doc.uri, "version" => version},
+        "contentChanges" => [%{"text" => text}]
+      })
+      |> put_in([:docs, name], new_doc(doc.uri, text, version))
+    end
+  end
+
+  # one read of the row, so the text and the version are of one moment
+  defp text_and_version(buffer) do
+    case Compos.Core.BufferView.fetch(buffer) do
+      {:ok, view} when is_map_key(view, :rope) ->
+        {Compos.Core.BufferView.text(view), view.version || 0}
+
+      _ ->
+        {Buffer.text(buffer), Buffer.version(buffer) || 0}
+    end
+  end
+
   defp do_open(state, buffer) do
     if Buffer.exists?(buffer) do
       Events.subscribe(buffer)
+      {text, version} = text_and_version(buffer)
 
       state
       |> send_notification("textDocument/didOpen", %{
         "textDocument" => %{
           "uri" => uri(buffer),
           "languageId" => state.spec["language"] || "plaintext",
-          "version" => Buffer.version(buffer) || 0,
-          "text" => Buffer.text(buffer)
+          "version" => version,
+          "text" => text
         }
       })
-      |> put_in([:docs, buffer], %{uri: uri(buffer)})
+      |> put_in([:docs, buffer], new_doc(uri(buffer), text, version))
     else
       log(state, :note, "didOpen skipped, no buffer: #{buffer}")
     end

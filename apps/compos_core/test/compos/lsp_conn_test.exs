@@ -155,6 +155,57 @@ defmodule Compos.LSPConnTest do
     assert sync =~ "\"length\":9"
   end
 
+  test "an incremental server gets each edit as a range, and its text follows the buffer" do
+    pid = start!("fake-inc", %{"FAKE_LSP_INCREMENTAL" => "1"})
+    buf = doc!(pid, "one\ntwo\nthree\n")
+
+    :ok = Buffer.insert_at(buf, 4, "zwei ", source: :editor)
+    :ok = Buffer.delete_range(buf, 0, 4, source: :editor)
+    # a multi-line insert with a multibyte character before it
+    :ok = Buffer.insert_at(buf, 0, "\u00e9\nvier\n", source: :editor)
+
+    wait_until(fn -> Enum.any?(log_texts(pid), &(&1 =~ "fake/sync")) end)
+    wait_until(fn -> synced_text(pid) == Buffer.text(buf) end)
+    assert synced_text(pid) == "\u00e9\nvier\nzwei two\nthree\n"
+    sync = Enum.filter(log_texts(pid), &(&1 =~ "fake/sync")) |> List.last()
+    assert sync =~ "\"ranged\":3"
+    refute Enum.any?(log_texts(pid), &(&1 =~ "fake/sync" and &1 =~ "\"ranged\":0"))
+  end
+
+  test "a change that is not one edit sends the whole text, then ranges again" do
+    pid = start!("fake-inc-undo", %{"FAKE_LSP_INCREMENTAL" => "1"})
+    buf = doc!(pid, "alpha\n")
+
+    :ok = Buffer.insert_at(buf, 0, "Z", source: :editor)
+    wait_until(fn -> synced_text(pid) == "Zalpha\n" end)
+
+    # an undo is one rewrite with no position: the chain breaks and heals
+    :ok = Buffer.undo(buf)
+    wait_until(fn -> synced_text(pid) == "alpha\n" end)
+    assert Enum.any?(log_texts(pid), &(&1 =~ "fake/sync" and &1 =~ "\"ranged\":0"))
+
+    :ok = Buffer.insert_at(buf, 5, "!", source: :editor)
+    wait_until(fn -> synced_text(pid) == "alpha!\n" end)
+    last = Enum.filter(log_texts(pid), &(&1 =~ "fake/sync")) |> List.last()
+    assert last =~ "\"ranged\":1"
+  end
+
+  test "utf-8 incremental positions land on the right bytes" do
+    pid = start!("fake-inc-u8", %{"FAKE_LSP_INCREMENTAL" => "1", "FAKE_LSP_ENCODING" => "utf-8"})
+    buf = doc!(pid, "caf\u00e9 au\nlait\n")
+    :ok = Buffer.insert_at(buf, 6, "s", source: :editor)
+    :ok = Buffer.delete_range(buf, 9, 4, source: :editor)
+    wait_until(fn -> synced_text(pid) == Buffer.text(buf) end)
+    assert synced_text(pid) == "caf\u00e9 saut\n"
+  end
+
+  defp synced_text(pid) do
+    case Enum.filter(log_texts(pid), &(&1 =~ "fake/sync")) |> List.last() do
+      nil -> nil
+      text -> text |> Jason.decode!() |> get_in(["params", "text"])
+    end
+  end
+
   test "a killed buffer closes its document at flush" do
     pid = start!("fake-close")
     buf = doc!(pid, "gone\n")

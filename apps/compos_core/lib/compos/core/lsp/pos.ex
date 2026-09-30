@@ -32,6 +32,25 @@ defmodule Compos.Core.LSP.Pos do
     %{line: line, character: units(prefix, enc)}
   end
 
+  @doc """
+  Byte position -> %{line, character} with no line index: scans the text
+  before BYTE_POS once. For the two positions of one edit, where an index
+  of the whole text would cost more than the scan.
+  """
+  def to_lsp_at(text, byte_pos, enc) do
+    pos = byte_pos |> max(0) |> min(byte_size(text))
+    prefix = binary_part(text, 0, pos)
+    newlines = :binary.matches(prefix, "\n")
+
+    bol =
+      case List.last(newlines) do
+        nil -> 0
+        {at, _} -> at + 1
+      end
+
+    %{line: length(newlines), character: units(binary_part(prefix, bol, pos - bol), enc)}
+  end
+
   @doc "%{\"line\", \"character\"} (or atom keys) -> clamped byte position."
   def from_lsp(text, starts, lsp_pos, enc) do
     line = pos_field(lsp_pos, :line)

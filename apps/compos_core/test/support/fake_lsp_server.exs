@@ -16,7 +16,8 @@
 defmodule FakeLSP do
   def run do
     enc = if System.get_env("FAKE_LSP_ENCODING") == "utf-8", do: :utf8, else: :utf16
-    loop(%{docs: %{}, enc: enc, next_id: 1000})
+    sync = if System.get_env("FAKE_LSP_INCREMENTAL") == "1", do: 2, else: 1
+    loop(%{docs: %{}, enc: enc, sync: sync, next_id: 1000})
   end
 
   defp loop(state) do
@@ -87,16 +88,29 @@ defmodule FakeLSP do
     body = msg |> :json.encode() |> IO.iodata_to_binary()
     frame = "Content-Length: #{byte_size(body)}\r\n\r\n" <> body
 
+    # Under a Port, stdio is a unicode device: IO.write emits a UTF-8 body
+    # as the same bytes, so the Content-Length holds. IO.binwrite would
+    # take the body for latin1 and re-encode every multibyte character.
     if System.get_env("FAKE_LSP_SPLIT") == "1" do
-      half = div(byte_size(frame), 2)
-      IO.binwrite(:stdio, binary_part(frame, 0, half))
+      half = char_boundary(frame, div(byte_size(frame), 2))
+      IO.write(:stdio, binary_part(frame, 0, half))
       :timer.sleep(30)
-      IO.binwrite(:stdio, binary_part(frame, half, byte_size(frame) - half))
+      IO.write(:stdio, binary_part(frame, half, byte_size(frame) - half))
     else
-      IO.binwrite(:stdio, frame)
+      IO.write(:stdio, frame)
     end
   catch
     _, _ -> :ok
+  end
+
+  # the first byte at or after AT that starts a character
+  defp char_boundary(bin, at) when at >= byte_size(bin), do: byte_size(bin)
+
+  defp char_boundary(bin, at) do
+    case :binary.at(bin, at) do
+      b when b in 0x80..0xBF -> char_boundary(bin, at + 1)
+      _ -> at
+    end
   end
 
   defp reply(id, result), do: send_msg(%{jsonrpc: "2.0", id: id, result: result})
@@ -106,7 +120,7 @@ defmodule FakeLSP do
 
   defp handle(%{"method" => "initialize", "id" => id}, state) do
     caps = %{
-      textDocumentSync: 1,
+      textDocumentSync: state.sync,
       hoverProvider: true,
       definitionProvider: true,
       referencesProvider: true,
@@ -146,12 +160,33 @@ defmodule FakeLSP do
     state
   end
 
+  # a change with a range edits the doc in place; one without replaces it
   defp handle(%{"method" => "textDocument/didChange", "params" => p}, state) do
     uri = p["textDocument"]["uri"]
     version = p["textDocument"]["version"]
-    [%{"text" => text} | _] = p["contentChanges"]
+    changes = p["contentChanges"]
+
+    text =
+      Enum.reduce(changes, state.docs[uri] || "", fn
+        %{"range" => range, "text" => ins}, text ->
+          s = byte_at(text, range["start"], state.enc)
+          e = byte_at(text, range["end"], state.enc)
+          binary_part(text, 0, s) <> ins <> binary_part(text, e, byte_size(text) - e)
+
+        %{"text" => whole}, _text ->
+          whole
+      end)
+
     state = put_in(state, [:docs, uri], text)
-    notify("fake/sync", %{uri: uri, version: version, length: byte_size(text)})
+
+    notify("fake/sync", %{
+      uri: uri,
+      version: version,
+      length: byte_size(text),
+      text: text,
+      ranged: Enum.count(changes, &Map.has_key?(&1, "range"))
+    })
+
     diagnose(uri, text, state)
     state
   end
@@ -241,6 +276,30 @@ defmodule FakeLSP do
 
     for {idx, len} <- :binary.matches(text, token) do
       %{start: lsp_pos(text, idx, state.enc), end: lsp_pos(text, idx + len, state.enc)}
+    end
+  end
+
+  # the inverse of lsp_pos: line and character units to a byte offset
+  defp byte_at(text, %{"line" => line, "character" => char}, enc) do
+    starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {p, _} -> p + 1 end)]
+    bol = Enum.at(starts, line, byte_size(text))
+    rest = binary_part(text, bol, byte_size(text) - bol)
+    line_text = rest |> String.split("\n", parts: 2) |> hd()
+
+    case enc do
+      :utf8 ->
+        bol + min(char, byte_size(line_text))
+
+      :utf16 ->
+        {consumed, _} =
+          line_text
+          |> String.codepoints()
+          |> Enum.reduce_while({0, 0}, fn cp, {bytes, units} ->
+            u = if :binary.first(:unicode.characters_to_binary(cp, :utf8, {:utf16, :big})) in 0xD8..0xDB, do: 2, else: 1
+            if units + u > char, do: {:halt, {bytes, units}}, else: {:cont, {bytes + byte_size(cp), units + u}}
+          end)
+
+        bol + consumed
     end
   end
 

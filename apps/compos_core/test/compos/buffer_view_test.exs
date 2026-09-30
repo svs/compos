@@ -63,18 +63,19 @@ defmodule Compos.BufferViewTest do
     test "locals, overlays, and folds land in the row", %{name: name} do
       Buffer.set_local(name, "mode-name", "Fundamental")
       Buffer.set_overlays(name, "test", [{0, 5, "f-keyword"}])
-      Buffer.set_hidden(name, "test", [1])
+      Buffer.set_hidden(name, "test", [{1, 3}])
 
       view = view!(name)
       assert view.locals["mode-name"] == "Fundamental"
       assert view.overlay_gen == Buffer.overlay_gen(name)
 
-      # the row keeps the per-tag maps; the reader flattens them
-      assert view.overlays == %{"test" => [{0, 5, "f-keyword"}]}
+      # the row keeps the per-tag trees; the reader flattens them
+      assert Map.keys(view.overlays) == ["test"]
+      assert Compos.Core.Itree.to_list(view.overlays["test"]) == [{0, 5, "f-keyword"}]
       assert BufferView.overlays(view) == [{0, 5, "f-keyword"}]
-      assert BufferView.hidden(view) == [1]
+      assert BufferView.hidden(view) == [{1, 3}]
       assert Buffer.overlays(name) == [{0, 5, "f-keyword"}]
-      assert Buffer.hidden(name) == [1]
+      assert Buffer.hidden(name) == [{1, 3}]
     end
 
     test "narrowing lands in the row and old hot-loaded rows stay wide", %{name: name} do

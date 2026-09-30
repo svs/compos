@@ -6450,5 +6450,72 @@
 (domain! 'system)
 (effects! '(read))
 (public! 'random "(random N) -> a whole number from 0 up to N, not N; clock-seeded, to pick at random, not for secrets")
+;;; --- jit-lock ------------------------------------------------------------------
+;; Emacs jit-lock. Display asks for faces on the lines it builds and on
+;; no other lines. The buffer marks the text it handed out with the
+;; `fontified` text property, and an edit takes the mark off only the
+;; lines it touches. Each function on fontification-functions gets
+;; (BUF START END), byte positions on whole lines, and paints that range
+;; with overlay-set-range!. A buffer that no window shows costs nothing.
+;;
+;; The positions hold at one buffer version. An edit before the paint
+;; moves the bytes, so a painter reads buffer-version before it reads the
+;; text and passes it to overlay-set-range!. The buffer then drops a late
+;; paint, takes the mark off that paint's text where it is now, and asks
+;; for that text again. The runner drops a range that is late already.
+;;
+;; `fontified` is not sticky: text typed at the end of a marked span takes
+;; no mark, so the next draw fontifies it.
+(text-property-default-nonsticky! 'fontified #t)
+
+(domain! 'faces)
+(effects! '(write))
+
+(define (jit-lock--fontify buf start end &optional version)
+  (when (buffer-exists? buf)
+    (if (and version (not (= version (buffer-version buf))))
+        (jit-lock-refontify! buf)
+        (with-current-buffer buf
+          (lambda () (run-hook-with-args 'fontification-functions buf start end))))))
+
+(define (jit-lock-register! fn)
+  "(jit-lock-register! FN) - call FN with (BUF START END) for each range a window draws"
+  (add-hook! 'fontification-functions fn #t)
+  (jit-lock-enable! #t)
+  fn)
+
+(define (jit-lock-unregister! fn)
+  "(jit-lock-unregister! FN) - stop calling FN; Display stops asking when no function is left"
+  (remove-hook! 'fontification-functions fn)
+  (jit-lock-enable! (pair? (hook--global 'fontification-functions)))
+  fn)
+
+(define (jit-lock-refontify-all!)
+  "(jit-lock-refontify-all!) - make every buffer fontify its drawn lines again"
+  (for-each jit-lock-refontify! (buffer-list)))
+
+(public! 'jit-lock-register! "(jit-lock-register! FN) — call FN with (BUF START END) for each range a window draws, once per edit of that range")
+(public! 'jit-lock-unregister! "(jit-lock-unregister! FN) — stop calling FN for drawn ranges")
+(public! 'jit-lock-refontify! "(jit-lock-refontify! BUF) — forget what BUF fontified; the next draw fontifies its lines again")
+(public! 'jit-lock-refontify-all! "(jit-lock-refontify-all!) — make every buffer fontify its drawn lines again")
+(public! 'overlay-set-range! "(overlay-set-range! BUF TAG START END RANGES [VERSION]) — replace TAG's overlays that start in START..END with (START END FACE) RANGES; #f and no change when BUF is past VERSION")
+
+;;; --- text properties -----------------------------------------------------------
+;; Emacs text properties, BUF first as every buffer primitive here takes
+;; it. A value sits on the text: every edit moves it, and text typed at
+;; the end of a span takes the value unless the property is nonsticky.
+(domain! 'buffers)
+(effects! '(write))
+(public! 'put-text-property! "(put-text-property! BUF START END PROP VALUE) — give the text START..END the property PROP with VALUE; #f removes it")
+(public! 'remove-text-properties! "(remove-text-properties! BUF START END PROPS) — take the properties PROPS, a list of names, off START..END")
+(public! 'text-property-default-nonsticky! "(text-property-default-nonsticky! PROP ON) — with ON, text typed at the end of a PROP span takes no PROP")
+(effects! '(read))
+(public! 'get-text-property "(get-text-property BUF POS PROP) — the value of PROP at POS, or #f")
+(public! 'text-properties-at "(text-properties-at BUF POS) — every property at POS, as (PROP VALUE) pairs")
+(public! 'next-single-property-change "(next-single-property-change BUF POS PROP [LIMIT]) — the first position after POS where PROP changes; #f when it does not, LIMIT when not before LIMIT")
+(public! 'previous-single-property-change "(previous-single-property-change BUF POS PROP [LIMIT]) — the last position before POS where PROP changes; #f when it does not, LIMIT when not after LIMIT")
+(public! 'text-property-any "(text-property-any BUF START END PROP VALUE) — the first position in START..END where PROP is VALUE, or #f")
+(public! 'text-property-spans "(text-property-spans BUF PROP) — every span of PROP as (START END VALUE), in order")
+(public! 'text-property-default-nonsticky "(text-property-default-nonsticky) — the property names that do not grow over text typed at their end")
 
 (message "editor.scm loaded")

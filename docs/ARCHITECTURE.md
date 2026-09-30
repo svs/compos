@@ -52,6 +52,18 @@ dispatch it to another worker.
   event **with provenance** (`:user | :editor | :process | {:agent, id}`).
   Provenance is load-bearing: it's how read-only works (only `:user` is
   blocked) and how the reactor avoids agent feedback loops.
+- **Itree / TextProps** — the position structures under overlays, folds
+  and text properties. `Itree` is a persistent interval tree: a port of the
+  gap walks and the `limit` augmentation of Emacs `src/itree.c` on a
+  weight-balanced tree, so an edit moves every range in O(log n) in the
+  same step that edits the text, and a reader that holds the old root sees
+  the old positions. The buffer keeps one tree per overlay tag, one per
+  fold tag, and one per text property name. `TextProps` adds the Emacs
+  stickiness rules: a property is rear-sticky unless it is on the default
+  nonsticky list or in the `rear-nonsticky` of the character before the
+  insert. jit-lock marks drawn text with the `fontified` property; an edit
+  takes the mark off the lines it touches, and a late paint takes it off
+  its own text, where that text is now.
 - **Editor** — a map of **frames**, one per attached browser: each frame has
   its own window tree (ratio splits), active window, minibuffer
   (` *minibuf-<fid>*` backing buffer), echo, completion popup, viewport rows.

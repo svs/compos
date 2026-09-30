@@ -146,6 +146,8 @@ defmodule Compos.Core.Display do
   # Prepare only selected source lines. Faces arrive asynchronously and
   # must match this snapshot. Text rendering never calls the parser.
   defp build_static(leaf, lines, previous, whitespace) do
+    request_jit(leaf, lines)
+
     spans =
       display_spans(leaf, lines)
       |> Enum.with_index()
@@ -232,6 +234,20 @@ defmodule Compos.Core.Display do
     )
 
     {rows, next}
+  end
+
+  # jit-lock: the lines this window builds, and only those, get faces
+  # from fontification-functions. The buffer skips what it already did.
+  defp request_jit(_leaf, []), do: :ok
+
+  defp request_jit(leaf, lines) do
+    if Compos.Core.JitLock.on?() do
+      {{_, start}, _} = hd(lines)
+      {{part, last}, _} = List.last(lines)
+      Compos.Core.Buffer.request_jit(leaf.buffer, leaf.version, start, last + byte_size(part) + 1)
+    end
+
+    :ok
   end
 
   defp display_spans(%{ts_lang: lang}, _) when lang in [nil, false], do: []

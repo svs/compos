@@ -818,6 +818,33 @@ defmodule Compos.Core.SchemeAPI do
 
           :void
         end,
+      {"overlay-set-range!",
+       "(overlay-set-range! BUF TAG START END RANGES [VERSION]) — replace TAG's overlays that start in START..END with RANGES; #f when BUF is no longer at VERSION."} =>
+        fn args ->
+          [name, tag, start, stop, ranges | rest] = args
+          version = List.first(rest)
+
+          Buffer.set_overlays_range(
+            name,
+            plain(tag),
+            start,
+            stop,
+            Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end),
+            if(is_integer(version), do: version)
+          ) == :ok
+        end,
+      {"jit-lock-enable!",
+       "(jit-lock-enable! ON) — ask Display for the lines it builds, and run fontification-functions on them."} =>
+        fn [on] ->
+          Compos.Core.JitLock.enable(on not in [false, nil])
+          :void
+        end,
+      {"jit-lock-refontify!",
+       "(jit-lock-refontify! BUF) — forget what BUF fontified, so the next draw runs fontification-functions again."} =>
+        fn [name] ->
+          if Buffer.exists?(name), do: Buffer.jit_reset(name)
+          :void
+        end,
       {"overlay-clear!",
        "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay."} =>
         fn [name, tag] ->
@@ -881,6 +908,63 @@ defmodule Compos.Core.SchemeAPI do
         :ok = Buffer.widen(name)
         :void
       end,
+      # text properties: values on the text, moved by every edit, taken by
+      # inserted text under the Emacs stickiness rules. The Emacs names,
+      # with BUF first as every buffer primitive here takes it.
+      {"put-text-property!",
+       "(put-text-property! BUF START END PROP VALUE) — give the text START..END the property PROP with VALUE; #f removes it."} =>
+        fn [name, start, stop, prop, value] ->
+          :ok = Buffer.put_text_property(name, start, stop, plain(prop), value)
+          :void
+        end,
+      {"remove-text-properties!",
+       "(remove-text-properties! BUF START END PROPS) — take the properties PROPS, a list of names, off START..END."} =>
+        fn [name, start, stop, props] ->
+          :ok = Buffer.remove_text_properties(name, start, stop, Enum.map(props, &plain/1))
+          :void
+        end,
+      {"get-text-property",
+       "(get-text-property BUF POS PROP) — the value of PROP at POS, or #f."} =>
+        fn [name, pos, prop] ->
+          case Buffer.get_text_property(name, pos, plain(prop)) do
+            nil -> false
+            value -> value
+          end
+        end,
+      {"text-properties-at",
+       "(text-properties-at BUF POS) — every property at POS, as (PROP VALUE) pairs."} =>
+        fn [name, pos] ->
+          Enum.map(Buffer.text_properties_at(name, pos), fn {prop, value} -> [{:sym, prop}, value] end)
+        end,
+      {"next-single-property-change",
+       "(next-single-property-change BUF POS PROP [LIMIT]) — the first position after POS where PROP changes; #f when it does not, LIMIT when not before LIMIT."} =>
+        fn [name, pos, prop | rest] ->
+          Buffer.next_single_property_change(name, pos, plain(prop), limit(rest)) || false
+        end,
+      {"previous-single-property-change",
+       "(previous-single-property-change BUF POS PROP [LIMIT]) — the last position before POS where PROP changes; #f when it does not, LIMIT when not after LIMIT."} =>
+        fn [name, pos, prop | rest] ->
+          Buffer.previous_single_property_change(name, pos, plain(prop), limit(rest)) || false
+        end,
+      {"text-property-any",
+       "(text-property-any BUF START END PROP VALUE) — the first position in START..END where PROP is VALUE, or #f."} =>
+        fn [name, start, stop, prop, value] ->
+          Buffer.text_property_any(name, start, stop, plain(prop), value) || false
+        end,
+      {"text-property-spans",
+       "(text-property-spans BUF PROP) — every span of PROP as (START END VALUE), in order."} =>
+        fn [name, prop] ->
+          Enum.map(Buffer.text_property_spans(name, plain(prop)), fn {s, e, v} -> [s, e, v] end)
+        end,
+      {"text-property-default-nonsticky!",
+       "(text-property-default-nonsticky! PROP ON) — with ON, text typed at the end of a PROP span takes no PROP; the Emacs variable of that name."} =>
+        fn [prop, on] ->
+          :ok = Compos.Core.TextProps.set_default_nonsticky(plain(prop), on not in [false, nil])
+          :void
+        end,
+      {"text-property-default-nonsticky",
+       "(text-property-default-nonsticky) — the property names that do not grow over text typed at their end."} =>
+        fn [] -> Enum.map(Compos.Core.TextProps.default_nonsticky(), &{:sym, &1}) end,
       {"buffer-set-read-only!",
        "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag."} => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
@@ -3188,6 +3272,10 @@ defmodule Compos.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # the optional LIMIT of a property-change search: an integer, or nothing
+  defp limit([limit | _]) when is_integer(limit), do: limit
+  defp limit(_), do: nil
 
   # The transient menu the frame renders. META rows: ("subtitle" TEXT),
   # ("context" TEXT), ("chips" ((LABEL ACTIVE?) ...)), ("columns" ((TITLE ...) ...)),

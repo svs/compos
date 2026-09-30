@@ -51,7 +51,7 @@ defmodule Compos.Core.Buffer do
 
   require Logger
 
-  alias Compos.Core.{BufferHistoryStore, BufferStore, BufferView, Events, Rope, Text, TS}
+  alias Compos.Core.{BufferHistoryStore, BufferStore, BufferView, Events, Itree, JitLock, Rope, Text, TextProps, TS}
   alias Compos.Core.BufferHistory, as: History
 
   @registry Compos.Core.BufferRegistry
@@ -111,9 +111,12 @@ defmodule Compos.Core.Buffer do
             goal_col: nil,
             last_insert_end: nil,
             insert_run: 0,
+            # overlays and hidden: one `Compos.Core.Itree` per tag; props: one per
+            # property name. An edit moves every tree in O(log n).
             overlays: %{},
             overlay_gen: 0,
             hidden: %{},
+            props: %{},
             narrow_range: nil,
             ts: nil,
             fontify: %{task: nil, timer: nil, pending: [], cache: []},
@@ -400,6 +403,10 @@ defmodule Compos.Core.Buffer do
   def set_overlays(name, tag, ranges), do: GenServer.call(via(name), {:set_overlays, tag, ranges})
   def clear_overlays(name, tag \\ :all), do: GenServer.call(via(name), {:clear_overlays, tag})
 
+  @doc "Replace only TAG's overlays inside START..STOP with RANGES; the rest of TAG stays."
+  def set_overlays_range(name, tag, start, stop, ranges, version \\ nil),
+    do: GenServer.call(via(name), {:set_overlays_range, tag, start, stop, ranges, version})
+
   # The live row carries the ranges. A dormant row does not, and a dormant
   # buffer asked for them wakes, as it did when it had no row at all.
   def overlays(name) do
@@ -458,6 +465,55 @@ defmodule Compos.Core.Buffer do
     case BufferView.field(name, :narrow_range) do
       {:ok, range} -> range
       :error -> live_call(name, :narrow_range, nil)
+    end
+  end
+
+  # text properties: values on the text itself, moved by every edit, taken
+  # by inserted text under the Emacs stickiness rules (`Compos.Core.TextProps`)
+  @doc "Give START..STOP the property PROP with VALUE. `nil` or `false` removes it."
+  def put_text_property(name, start, stop, prop, value)
+      when is_integer(start) and is_integer(stop) and is_binary(prop),
+      do: GenServer.call(via(name), {:put_text_property, start, stop, prop, value})
+
+  @doc "Take the properties PROPS off START..STOP."
+  def remove_text_properties(name, start, stop, props)
+      when is_integer(start) and is_integer(stop) and is_list(props),
+      do: GenServer.call(via(name), {:remove_text_properties, start, stop, props})
+
+  @doc "The value of PROP at POS, or nil."
+  def get_text_property(name, pos, prop) when is_integer(pos) and is_binary(prop),
+    do: TextProps.get(props_of(name), pos, prop)
+
+  @doc "Every property at POS, as `{prop, value}` pairs."
+  def text_properties_at(name, pos) when is_integer(pos), do: TextProps.at(props_of(name), pos)
+
+  @doc "The first position after POS where PROP changes, or nil. LIMIT caps the answer."
+  def next_single_property_change(name, pos, prop, limit \\ nil) do
+    props_of(name) |> TextProps.next_change(pos, prop) |> cap_change(limit, :next)
+  end
+
+  @doc "The last position before POS where PROP changes, or nil. LIMIT floors the answer."
+  def previous_single_property_change(name, pos, prop, limit \\ nil) do
+    props_of(name) |> TextProps.previous_change(pos, prop) |> cap_change(limit, :previous)
+  end
+
+  @doc "The first position in START..STOP where PROP is VALUE, or nil."
+  def text_property_any(name, start, stop, prop, value),
+    do: TextProps.any(props_of(name), start, stop, prop, value)
+
+  @doc "The spans of PROP as `{start, stop, value}`, in order."
+  def text_property_spans(name, prop), do: TextProps.spans(props_of(name), prop)
+
+  defp cap_change(change, nil, _), do: change
+  defp cap_change(nil, limit, _), do: limit
+  defp cap_change(change, limit, :next), do: min(change, limit)
+  defp cap_change(change, limit, :previous), do: max(change, limit)
+
+  # the live row carries the trees; a dormant buffer has none
+  defp props_of(name) do
+    case BufferView.field(name, :props) do
+      {:ok, props} when is_map(props) -> props
+      _ -> live_call(name, :props, %{})
     end
   end
 
@@ -791,6 +847,19 @@ defmodule Compos.Core.Buffer do
   end
 
   @doc """
+  Display built the lines START..STOP at VERSION. The buffer sends the
+  parts that no one fontified yet to `fontification-functions`.
+  """
+  def request_jit(name, version, start, stop)
+      when is_integer(version) and is_integer(start) and is_integer(stop) and start >= 0 and
+             stop >= start do
+    GenServer.cast(via(name), {:jit, version, start, stop})
+  end
+
+  @doc "Forget the fontified ranges, so the next draw runs `fontification-functions` again."
+  def jit_reset(name), do: GenServer.call(via(name), :jit_reset)
+
+  @doc """
   Highlight spans from the buffer's incremental tree-sitter state ([] if the
   buffer has no ts-lang). Cached per version, shared by every client.
   """
@@ -993,7 +1062,34 @@ defmodule Compos.Core.Buffer do
     |> Map.put_new(:narrow_range, Map.get(state, :display_range))
     |> Map.put_new(:log_current, false)
     |> Map.put_new(:fontify, %{task: nil, timer: nil, pending: [], cache: []})
+    |> upgrade_ranges()
   end
+
+  # A process from before the tree holds overlays and folds as lists, and
+  # the jit-lock marks as a list of its own. The marks are dropped: the
+  # next draw asks again.
+  defp upgrade_ranges(%{props: _} = state), do: state
+
+  defp upgrade_ranges(state) do
+    state
+    |> Map.put(:overlays, Map.new(state.overlays, fn {tag, v} -> {tag, overlay_tree(v)} end))
+    |> Map.put(:hidden, hidden_trees(state.hidden))
+    |> Map.put(:props, %{})
+    |> Map.delete(:jit)
+  end
+
+  defp overlay_tree(list) when is_list(list), do: Itree.from_list(list)
+  defp overlay_tree(tree), do: tree
+
+  defp hidden_trees(by_tag) when is_map(by_tag),
+    do: Map.new(by_tag, fn {tag, v} -> {tag, hidden_tree(v)} end)
+
+  defp hidden_trees(_), do: %{}
+
+  defp hidden_tree(list) when is_list(list), do: Itree.from_list(Enum.map(list, fn {s, e} -> {s, e, nil} end))
+  defp hidden_tree(tree), do: tree
+
+  defp hidden_pairs(tree), do: tree |> Itree.to_list() |> Enum.map(fn {s, e, _} -> {s, e} end)
 
   defp published({:reply, reply, state}, before),
     do: {:reply, reply, publish_and_notify(state, before)}
@@ -1028,7 +1124,7 @@ defmodule Compos.Core.Buffer do
   # message that only reads costs one pointer comparison each and writes
   # nothing.
   @view_fields ~w(name id rope bin version saved_version path read_only
-                  point mark locals overlays overlay_gen hidden narrow_range win_points fontify
+                  point mark locals overlays overlay_gen hidden props narrow_range win_points fontify
                   persistent discard dirty)a
 
   # A killed buffer publishes nothing more: the kill forgot its row, and a
@@ -1078,6 +1174,7 @@ defmodule Compos.Core.Buffer do
       overlays: state.overlays,
       overlay_gen: state.overlay_gen,
       hidden: state.hidden,
+      props: state.props,
       narrow_range: state.narrow_range,
       win_points: state.win_points,
       fontification: Map.get(state, :fontify, %{cache: []}).cache
@@ -1106,6 +1203,20 @@ defmodule Compos.Core.Buffer do
   end
 
   defp on_cast(:touch, state), do: {:noreply, touch_state(state)}
+
+  defp on_cast({:jit, version, start, stop}, state) do
+    stop = min(stop, Rope.byte_size(state.rope))
+
+    case version == state.version and JitLock.gaps(state.props, start, stop) do
+      gaps when is_list(gaps) and gaps != [] ->
+        JitLock.dispatch(state.name, version, gaps)
+        props = Enum.reduce(gaps, state.props, fn {s, e}, p -> JitLock.mark(p, s, e, version) end)
+        {:noreply, %{state | props: props}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
 
   defp on_info(:checkpoint, state),
     do: {:noreply, %{write_checkpoint(state) | checkpoint_timer: nil}}
@@ -1362,25 +1473,39 @@ defmodule Compos.Core.Buffer do
     {:reply, values, state}
   end
 
-  # An overlay change repaints the views that show the buffer, the way a
-  # local does. A mode that paints from the reactor (morg, markdown) sets
-  # its overlays after the keystroke's own redraw; without this the last
-  # typed character wears the old face until the next key. The phantom
-  # :locals source triggers no reactor rule, so no paint loop starts.
   defp on_call({:set_overlays, tag, ranges}, _from, state) do
+    ranges = Enum.sort_by(ranges, &elem(&1, 0))
+
     # the same ranges again paint the same pixels: no change, no refresh
-    if Map.get(state.overlays, tag) == ranges do
+    if Itree.to_list(Map.get(state.overlays, tag)) == ranges do
       {:reply, :ok, state}
     else
-      state = %{
-        state
-        | overlays: Map.put(state.overlays, tag, ranges),
-          overlay_gen: state.overlay_gen + 1
-      }
+      {:reply, :ok, repainted(state, Map.put(state.overlays, tag, Itree.from_list(ranges)))}
+    end
+  end
 
-      Events.broadcast_editor(:locals)
-      broadcast(state, state.point, "", 0, :locals)
+  # jit-lock paints one range at a time: an overlay that starts inside
+  # START..STOP belongs to that range and goes; every other one stays.
+  #
+  # The positions are for VERSION. After an edit they name other bytes, so
+  # the paint goes nowhere. The buffer takes the `fontified` mark off the
+  # text of that paint, where the text is now, and the next draw asks for
+  # that text again and for no other.
+  defp on_call({:set_overlays_range, _tag, start, _stop, _ranges, version}, _from, state)
+       when is_integer(version) and version != state.version do
+    state = %{state | props: JitLock.forget_request(state.props, version, start)}
+    {:reply, :stale, redrawn(state)}
+  end
+
+  defp on_call({:set_overlays_range, tag, start, stop, ranges, _version}, _from, state) do
+    ranges = Enum.sort_by(ranges, &elem(&1, 0))
+    {removed, kept} = Itree.remove_between(Map.get(state.overlays, tag), start, stop)
+
+    if removed == ranges do
       {:reply, :ok, state}
+    else
+      tree = Enum.reduce(ranges, kept, fn {s, e, f}, t -> Itree.insert(t, s, e, f) end)
+      {:reply, :ok, repainted(state, Map.put(state.overlays, tag, tree))}
     end
   end
 
@@ -1396,13 +1521,31 @@ defmodule Compos.Core.Buffer do
      }}
   end
 
-  defp on_call(:overlays, _from, state),
-    do: {:reply, state.overlays |> Map.values() |> Enum.concat(), state}
+  defp on_call(:overlays, _from, state), do: {:reply, all_overlays(state), state}
 
   defp on_call({:overlays, tag}, _from, state),
-    do: {:reply, Map.get(state.overlays, tag, []), state}
+    do: {:reply, Itree.to_list(Map.get(state.overlays, tag)), state}
 
   defp on_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
+
+  # A reset moves overlay_gen, which is in the Display row key, so every
+  # view builds its lines again and asks for them again.
+  defp on_call(:jit_reset, _from, state) do
+    state = %{state | props: JitLock.forget(state.props)}
+    {:reply, :ok, redrawn(state)}
+  end
+
+  defp on_call({:put_text_property, start, stop, prop, value}, _from, state) do
+    {start, stop} = clamp_range(start, stop, state)
+    {:reply, :ok, %{state | props: TextProps.put(state.props, start, stop, prop, value)}}
+  end
+
+  defp on_call({:remove_text_properties, start, stop, props}, _from, state) do
+    {start, stop} = clamp_range(start, stop, state)
+    {:reply, :ok, %{state | props: TextProps.remove(state.props, start, stop, props)}}
+  end
+
+  defp on_call(:props, _from, state), do: {:reply, state.props, state}
 
   # an empty range list drops the tag: an owner with nothing folded costs
   # nothing to union
@@ -1418,7 +1561,7 @@ defmodule Compos.Core.Buffer do
   defp on_call({:set_hidden, tag, ranges}, _from, state) do
     state =
       state
-      |> Map.put(:hidden, Map.put(state.hidden, tag, Enum.sort(ranges)))
+      |> Map.put(:hidden, Map.put(state.hidden, tag, hidden_tree(Enum.sort(ranges))))
       |> checkpoint_later()
 
     {:reply, :ok, state}
@@ -1427,7 +1570,7 @@ defmodule Compos.Core.Buffer do
   defp on_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
 
   defp on_call({:hidden, tag}, _from, state),
-    do: {:reply, Map.get(state.hidden, tag, []), state}
+    do: {:reply, hidden_pairs(Map.get(state.hidden, tag)), state}
 
   defp on_call({:clear_hidden, :all}, _from, state),
     do: {:reply, :ok, state |> Map.put(:hidden, %{}) |> checkpoint_later()}
@@ -1873,7 +2016,7 @@ defmodule Compos.Core.Buffer do
        version: state.version,
        modified: state.version != state.saved_version,
        locals: state.locals,
-       overlays: state.overlays |> Map.values() |> Enum.concat(),
+       overlays: all_overlays(state),
        overlay_gen: state.overlay_gen,
        hidden: hidden_union(state),
        narrow_range: state.narrow_range,
@@ -2481,11 +2624,12 @@ defmodule Compos.Core.Buffer do
     state =
       state
       |> adjust_point_delete(pos, removed)
-      |> adjust_ranges(&adjust_delete(&1, pos, removed), &adjust_delete(&1, pos, removed))
+      |> ranges_delete(pos, removed)
       |> adjust_marker_locals(marker_delete(pos, removed))
       |> adjust_point_insert(pos, added)
-      |> adjust_ranges(&adjust_insert(&1, pos, added), &adjust_insert_stay(&1, pos, added))
+      |> ranges_insert(pos, added)
       |> adjust_marker_locals(marker_insert(pos, added))
+      |> jit_touch(pos, pos + added)
 
     # An undo authors what it restores: the actor who asked for it is
     # responsible for the text coming back. A merge authors nothing new, and
@@ -2609,7 +2753,7 @@ defmodule Compos.Core.Buffer do
       read_only: cp[:read_only] || false,
       encoding: cp[:encoding] || :utf8,
       locals: cp[:locals] || %{},
-      hidden: cp[:hidden] || %{},
+      hidden: hidden_trees(cp[:hidden] || %{}),
       version: version,
       saved_version: saved_version,
       authors: restored_authors(cp, size),
@@ -2660,7 +2804,7 @@ defmodule Compos.Core.Buffer do
       read_only: state.read_only,
       encoding: state.encoding,
       locals: BufferStore.checkpoint_locals(state.locals, modified),
-      hidden: state.hidden,
+      hidden: Map.new(state.hidden, fn {tag, tree} -> {tag, hidden_pairs(tree)} end),
       buffer_version: state.version,
       modified: modified,
       provenance: state.provenance,
@@ -2853,7 +2997,9 @@ defmodule Compos.Core.Buffer do
     state = adjust_point_insert(state, pos, len)
 
     state =
-      adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
+      state
+      |> ranges_insert(pos, len)
+      |> jit_touch(pos, pos + len)
 
     state = adjust_marker_locals(state, marker_insert(pos, len))
 
@@ -2910,7 +3056,8 @@ defmodule Compos.Core.Buffer do
 
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
-    state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
+    state = ranges_delete(state, pos, len)
+    state = jit_touch(state, pos, pos)
     state = adjust_marker_locals(state, marker_delete(pos, len))
     # After open_changeset, for the reason given in do_insert.
     {_changeset, state} = open_changeset(state, actor, src)
@@ -3265,48 +3412,101 @@ defmodule Compos.Core.Buffer do
     end)
   end
 
-  # shift overlay + hidden range endpoints through an edit; collapsed
-  # ranges (start >= end after a delete) are dropped. Starts and ends
-  # adjust differently on insert: text inserted exactly at an end stays
-  # outside the range (Emacs rear-advance nil) — a closed fold must not
-  # swallow text appended at its boundary.
-  defp adjust_ranges(state, fs, fe) do
-    overlays =
-      Map.new(state.overlays, fn {tag, ranges} ->
-        {tag,
-         ranges
-         |> Enum.map(fn {s, e, face} -> {fs.(s), fe.(e), face} end)
-         |> Enum.reject(fn {s, e, _} -> s >= e end)}
-      end)
+  # Every position range moves with the text, in the same step as the
+  # edit: overlays, folds and text properties are trees that shift in
+  # O(log n) (`Compos.Core.Itree`); the narrowing is one pair. Text
+  # inserted exactly at an end stays outside the range (Emacs rear-advance
+  # nil): a closed fold must not swallow text appended at its boundary. A
+  # range that a delete closes is dropped.
+  defp ranges_insert(state, _pos, 0), do: state
 
-    # the same adjustment, per tag: a tag that loses every range drops out
-    hidden =
-      state.hidden
-      |> Enum.map(fn {tag, ranges} ->
-        {tag,
-         ranges
-         |> Enum.map(fn {s, e} -> {fs.(s), fe.(e)} end)
-         |> Enum.reject(fn {s, e} -> s >= e end)}
-      end)
-      |> Enum.reject(fn {_tag, ranges} -> ranges == [] end)
-      |> Map.new()
-
-    narrow_range =
-      case state.narrow_range do
-        {s, e} ->
-          s = fs.(s)
-          e = fe.(e)
-          if s < e, do: {s, e}, else: nil
-
-        nil ->
-          nil
-      end
-
-    %{state | overlays: overlays, hidden: hidden, narrow_range: narrow_range}
+  defp ranges_insert(state, pos, len) do
+    %{
+      state
+      | overlays: Map.new(state.overlays, fn {tag, t} -> {tag, Itree.insert_gap(t, pos, len)} end),
+        hidden: Map.new(state.hidden, fn {tag, t} -> {tag, Itree.insert_gap(t, pos, len)} end),
+        props: TextProps.insert_gap(state.props, pos, len),
+        narrow_range:
+          shift_narrow(state.narrow_range, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
+    }
   end
 
+  defp ranges_delete(state, _pos, 0), do: state
+
+  defp ranges_delete(state, pos, len) do
+    # a tag that loses every fold drops out; an overlay tag keeps its key
+    hidden =
+      state.hidden
+      |> Enum.flat_map(fn {tag, t} ->
+        case Itree.delete_gap(t, pos, len) do
+          nil -> []
+          t -> [{tag, t}]
+        end
+      end)
+      |> Map.new()
+
+    %{
+      state
+      | overlays: Map.new(state.overlays, fn {tag, t} -> {tag, Itree.delete_gap(t, pos, len)} end),
+        hidden: hidden,
+        props: TextProps.delete_gap(state.props, pos, len),
+        narrow_range:
+          shift_narrow(state.narrow_range, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
+    }
+  end
+
+  defp shift_narrow(nil, _fs, _fe), do: nil
+
+  defp shift_narrow({s, e}, fs, fe) do
+    s = fs.(s)
+    e = fe.(e)
+    if s < e, do: {s, e}, else: nil
+  end
+
+  # An edit takes the `fontified` mark off the whole lines it touches,
+  # from POS to STOP in the new text, so the next draw fontifies those
+  # lines again (Emacs jit-lock-after-change).
+  defp jit_touch(state, pos, stop) do
+    if JitLock.marked?(state.props) do
+      rope = state.rope
+      size = Rope.byte_size(rope)
+      ls = Rope.line_to_byte(rope, Rope.byte_to_line(rope, min(pos, size)))
+      le = Rope.line_to_byte(rope, Rope.byte_to_line(rope, min(stop, size)) + 1)
+      %{state | props: JitLock.touch(state.props, ls, max(le, stop))}
+    else
+      state
+    end
+  end
+
+  defp all_overlays(state), do: Enum.flat_map(state.overlays, fn {_tag, t} -> Itree.to_list(t) end)
+
   defp hidden_union(state),
-    do: state.hidden |> Map.values() |> Enum.concat() |> Enum.sort()
+    do: state.hidden |> Enum.flat_map(fn {_tag, t} -> hidden_pairs(t) end) |> Enum.sort()
+
+  defp clamp_range(start, stop, state) do
+    size = Rope.byte_size(state.rope)
+    {start |> max(0) |> min(size), stop |> max(0) |> min(size)}
+  end
+
+  # An overlay change repaints the views that show the buffer, the way a
+  # local does. A mode that paints from the reactor (morg, markdown) sets
+  # its overlays after the keystroke's own redraw; without this the last
+  # typed character wears the old face until the next key. The phantom
+  # :locals source triggers no reactor rule, so no paint loop starts.
+  defp repainted(state, overlays) do
+    state = %{state | overlays: overlays, overlay_gen: state.overlay_gen + 1}
+    Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
+    state
+  end
+
+  # overlay_gen is in the Display row key: every view builds its lines
+  # again and asks jit-lock for them again.
+  defp redrawn(state) do
+    state = %{state | overlay_gen: state.overlay_gen + 1}
+    broadcast(state, state.point, "", 0, :locals)
+    state
+  end
 
   defp adjust_insert(p, pos, len) when p >= pos, do: p + len
   defp adjust_insert(p, _pos, _len), do: p
@@ -3502,8 +3702,7 @@ defmodule Compos.Core.Buffer do
   defp snap_atomic_overlay(point, motion, state) do
     range =
       state.overlays
-      |> Map.values()
-      |> Enum.concat()
+      |> Enum.flat_map(fn {_tag, t} -> Itree.at(t, point) end)
       |> Enum.find(fn
         {s, e, face} when is_binary(face) ->
           String.contains?(face, "img-embed") and point > s and point < e

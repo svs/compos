@@ -270,10 +270,22 @@ defmodule Compos.Core.BufferView do
   so a writer that flattened would pay per keystroke for a shape only a
   render wants.
   """
-  def overlays(%{overlays: by_tag}), do: by_tag |> Map.values() |> Enum.concat()
+  def overlays(%{overlays: by_tag}), do: Enum.flat_map(by_tag, fn {_tag, t} -> ranges(t) end)
 
-  @doc "Every tag's folded lines, as one sorted list."
-  def hidden(%{hidden: by_tag}), do: by_tag |> Map.values() |> Enum.concat() |> Enum.sort()
+  @doc "Every tag's folded ranges, as one sorted list of `{start, stop}` pairs."
+  def hidden(%{hidden: by_tag}) do
+    by_tag
+    |> Enum.flat_map(fn {_tag, t} -> ranges(t) end)
+    |> Enum.map(fn
+      {s, e, _} -> {s, e}
+      {s, e} -> {s, e}
+    end)
+    |> Enum.sort()
+  end
+
+  # a row published before the tree holds a list; the tree flattens in order
+  defp ranges(list) when is_list(list), do: list
+  defp ranges(tree), do: Compos.Core.Itree.to_list(tree)
 
   @doc """
   The render payload for one window, or nil when the buffer has no live

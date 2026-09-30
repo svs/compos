@@ -574,3 +574,87 @@
         (check-false! (minor-mode-on? buf "paredit-mode") "the setting turns it off")
         (buffer-kill! buf))
       (set! paredit-in-scheme-mode saved))))
+
+;;; --- the window and the scan state cache --------------------------------------
+;;; A command reads a window of bytes around point, not the whole
+;;; buffer, and the scan state at a position comes from a cache that an
+;;; edit trims from its position on.
+
+(define (t--par-big-text)
+  ;; 3000 top-level forms, then one form point sits in: about 60 KB
+  (string-append (string-repeat "(define (f x) (list x 1))\n" 3000)
+                 "(let ((y (g x)))\n  (h y))\n"))
+
+(deftest 'a-window-reads-like-the-string-and-ends-at-its-edge
+  "the scanner answers the same offsets through a window; outside it there is no text"
+  (lambda ()
+    (let* ((buf (t--par! "(foo bar) baz (qux)" 0))
+           (w (par--window buf 5)))
+      (check-equal! (par--ch w 0) "(" "the first byte")
+      (check-equal! (par-scan-forward w 0) 9 "over a list, as on the string")
+      (check-equal! (par-scan-forward w 9) 13 "over an atom")
+      (check-equal! (par-up w 5) 0 "the enclosing opener")
+      (check-equal! (par-close w 5) 8 "its closer")
+      (check-equal! (par--end w) 19 "the window ends at the buffer end")
+      (check-false! (par--ch w 19) "no byte past it")
+      (let ((saved paredit-scan-limit))
+        (set! paredit-scan-limit 1024)
+        (let* ((big (t--par! (t--par-big-text) 60000))
+               (w2 (par--window big 60000)))
+          (check-equal! (par--start w2) (- 60000 1024) "the window starts a limit before point")
+          (check-false! (par--ch w2 0) "the buffer start is outside it")
+          (check-equal! (par--ch w2 60000) (substring-bytes (buffer-text big) 60000 60001) "point is inside"))
+        (set! paredit-scan-limit saved))
+      (t--par-done!))))
+
+(deftest 'show-paren-lights-the-pair-in-a-large-buffer-through-a-window
+  "point after the last closer lights it and its opener, with a scan bounded to the window"
+  (lambda ()
+    (let* ((text (t--par-big-text))
+           (n (string-byte-length text))
+           (buf (t--par! text n)))
+      (buffer-goto! buf (- n 1))
+      (switch-to-buffer! buf)
+      (paredit--show-paren!)
+      (let ((ov (buffer-overlays buf 'paren))
+            (open (- n 26)))
+        (check-equal! (length ov) 2 "two delimiters lit")
+        (check-equal! (map car ov) (list open (- n 2)) "the let and its closer")
+        (check-equal! (substring-bytes text open (+ open 5)) "(let " "the opener is the let"))
+      (buffer-goto! buf 5)
+      (paredit--show-paren!)
+      (check-equal! (buffer-overlays buf 'paren) '() "beside an atom, nothing is lit")
+      (t--par-done!))))
+
+(deftest 'the-scan-cache-keeps-entries-before-an-edit-and-drops-those-after
+  "checkpoints every 2048 bytes; an edit at P drops the entries at or after P"
+  (lambda ()
+    (let* ((body (string-repeat " (a b) (c \"d\")" 500))
+           (text (string-append "(top" body ")\n"))
+           (buf (t--par! text 0))
+           (w (par--window buf 6002)))
+      (check-equal! (par--mode (par--ctx w 6002)) 'code "the state at 6002, a top-level space")
+      (check-equal! (par--openers (par--ctx w 6002)) '(0) "inside top, at depth one")
+      (let ((entries (paredit--ppss buf)))
+        (check-true! (>= (length entries) 2) "checkpoints were recorded")
+        (check-true! (let loop ((ps (map car entries)))
+                       (or (null? ps) (null? (cdr ps))
+                           (and (> (car ps) (cadr ps)) (loop (cdr ps)))))
+                     "largest position first")
+        (check-true! (= (modulo (car (car entries)) 2048) 0) "on a step boundary"))
+      ;; an edit after every checkpoint keeps them all
+      (buffer-insert! buf 6500 "x")
+      (let ((before (length (paredit--ppss buf))))
+        (par--ctx (par--window buf 6002) 6002)
+        (check-equal! (length (paredit--ppss buf)) before "an edit past them keeps the entries"))
+      ;; an edit before the first checkpoint drops them all, and the state
+      ;; still comes out right: a new opener at 3 deepens everything after
+      (buffer-insert! buf 3 "(")
+      (let ((st (par--ctx (par--window buf 6003) 6003)))
+        (check-equal! (par--openers st) '(3 0) "the new opener is seen")
+        (check-true! (>= (length (paredit--ppss buf)) 2) "and the cache filled again")
+        (check-true! (> (car (car (paredit--ppss buf))) 2048) "with entries after the edit"))
+      ;; a string opened early flips the state at the far end
+      (buffer-insert! buf 5 "\"")
+      (check-equal! (par--mode (par--ctx (par--window buf 6004) 6004)) 'string "the state after the edit is fresh")
+      (t--par-done!))))

@@ -248,6 +248,36 @@ defmodule Compos.Core.Buffer do
     end
   end
 
+  @doc """
+  The bytes START..STOP of the text, clamped, read from the row without
+  flattening the rope: a scan over a window of a large buffer must not
+  copy the whole buffer first.
+  """
+  def slice(name, start, stop) when is_integer(start) and is_integer(stop) do
+    case BufferView.field(name, :bin) do
+      {:ok, bin} when is_binary(bin) ->
+        {s, e} = clamp_slice(start, stop, Kernel.byte_size(bin))
+        binary_part(bin, s, e - s)
+
+      _ ->
+        case BufferView.field(name, :rope) do
+          {:ok, %Rope{} = rope} ->
+            {s, e} = clamp_slice(start, stop, Rope.byte_size(rope))
+            Rope.slice(rope, s, e - s)
+
+          _ ->
+            text = text(name)
+            {s, e} = clamp_slice(start, stop, Kernel.byte_size(text))
+            binary_part(text, s, e - s)
+        end
+    end
+  end
+
+  defp clamp_slice(start, stop, size) do
+    s = start |> max(0) |> min(size)
+    {s, stop |> max(s) |> min(size)}
+  end
+
   defp text_of_row(name) do
     case BufferView.fetch(name) do
       {:ok, view} -> if BufferView.live?(view), do: BufferView.text(view), else: dormant_text(view)

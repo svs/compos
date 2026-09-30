@@ -12,15 +12,71 @@
 (domain! 'edit)
 (effects! '(write))
 
+;;; --- the text source ---------------------------------------------------------
+;;; The scanner reads TEXT through these accessors. TEXT is a string,
+;;; or a window: the bytes of one buffer around a position, at most
+;;; paredit-scan-limit on each side, so no command copies the whole
+;;; buffer. A position outside the window reads as the end of the text,
+;;; the way Emacs stops at blink-matching-paren-distance. Positions are
+;;; buffer byte offsets in both cases.
+
+(defcustom 'paredit-scan-limit 100000
+  "How many bytes on each side of point a paredit command reads. A pair
+farther apart than this is not lit and not found.")
+
+(define (par--window buf center)
+  (let* ((limit (max 1024 (or paredit-scan-limit 100000)))
+         (size (buffer-size buf))
+         (base (max 0 (- center limit)))
+         (stop (min size (+ center limit))))
+    (list 'par-window buf base
+          (with-current-buffer buf (lambda () (buffer-substring base stop))))))
+
+(define (par--window? text) (and (pair? text) (equal? (car text) 'par-window)))
+(define (par--wbuf text) (cadr text))
+(define (par--wbase text) (caddr text))
+(define (par--wstr text) (list-ref text 3))
+
+;; The first and the one-past-last byte the scanner may read.
+(define (par--start text) (if (par--window? text) (par--wbase text) 0))
+(define (par--end text)
+  (if (par--window? text)
+      (+ (par--wbase text) (string-byte-length (par--wstr text)))
+      (string-byte-length text)))
+
+(define (par--ch text i)
+  (if (par--window? text)
+      (let ((j (- i (par--wbase text))) (str (par--wstr text)))
+        (if (and (>= j 0) (< j (string-byte-length str)))
+            (substring-bytes str j (+ j 1))
+            #f))
+      (if (and (>= i 0) (< i (string-byte-length text)))
+          (par--sub text i (+ i 1))
+          #f)))
+
+;; Bytes A..B of TEXT.
+(define (par--sub text a b)
+  (if (par--window? text)
+      (let ((base (par--wbase text)))
+        (substring-bytes (par--wstr text) (- a base) (- b base)))
+      (substring-bytes text a b)))
+
+;; The first NEEDLE at or after I, or #f.
+(define (par--index text needle i)
+  (if (par--window? text)
+      (let ((idx (string-index (par--wstr text) needle (max 0 (- i (par--wbase text))))))
+        (and idx (+ idx (par--wbase text))))
+      (string-index text needle i)))
+
+;; The last NEEDLE that starts before POS, or #f.
+(define (par--rindex-before text needle pos)
+  (let ((idx (string-rindex (par--sub text (par--start text) pos) needle)))
+    (and idx (+ idx (par--start text)))))
+
 ;;; --- the scanner -------------------------------------------------------------
 ;;; Pure functions from (TEXT POS) to a byte offset or #f. Delimiters
 ;;; are ASCII bytes, so byte comparison is UTF-8-safe: a continuation
 ;;; byte never equals "(".
-
-(define (par--ch text i)
-  (if (and (>= i 0) (< i (string-byte-length text)))
-      (substring-bytes text i (+ i 1))
-      #f))
 
 (define (par--opener? c) (or (equal? c "(") (equal? c "[")))
 (define (par--closer? c) (or (equal? c ")") (equal? c "]")))
@@ -32,59 +88,141 @@
 ;; The anchor bounds each scan to one top-level form. A "\n(" inside a
 ;; multi-line string defeats the heuristic (the Emacs caveat).
 (define (par--anchor text pos)
-  (if (<= pos 0)
-      0
-      (let ((idx (string-rindex (substring-bytes text 0 pos) "\n(")))
-        (if idx (+ idx 1) 0))))
+  (if (<= pos (par--start text))
+      (par--start text)
+      (let ((idx (par--rindex-before text "\n(" pos)))
+        (if idx (+ idx 1) (par--start text)))))
 
 ;; Walk TEXT from START to LIMIT. Return (MODE OPENERS EXTRA): MODE is
 ;; 'code, 'string, 'line-comment, or a block-comment depth; OPENERS
 ;; lists unclosed opener positions, innermost first; EXTRA is the start
-;; of the current string or comment, else #f.
-(define (par--state text start limit)
-  (let loop ((i start) (mode 'code) (openers '()) (extra #f))
+;; of the current string or comment, else #f. The walk starts in STATE
+;; when one is given, and calls NOTE with the position and the state at
+;; every multiple of par--ppss-step it passes, for the cache.
+(define (par--state text start limit &optional state note)
+  (let loop ((i start)
+             (mode (if state (par--mode state) 'code))
+             (openers (if state (par--openers state) '()))
+             (extra (if state (par--extra state) #f))
+             (next (* (+ (quotient start par--ppss-step) 1) par--ppss-step)))
+    (when (and note (>= i next) (< i limit))
+      (note i (list mode openers extra)))
     (if (>= i limit)
         (list mode openers extra)
-        (let ((c (par--ch text i)))
+        (let ((c (par--ch text i))
+              (next (if (>= i next) (+ next par--ppss-step) next)))
           (cond
             ((equal? mode 'string)
-             (cond ((equal? c "\\") (loop (+ i 2) mode openers extra))
-                   ((equal? c "\"") (loop (+ i 1) 'code openers #f))
-                   (else (loop (+ i 1) mode openers extra))))
+             (cond ((equal? c "\\") (loop (+ i 2) mode openers extra next))
+                   ((equal? c "\"") (loop (+ i 1) 'code openers #f next))
+                   (else (loop (+ i 1) mode openers extra next))))
             ((equal? mode 'line-comment)
              (if (equal? c "\n")
-                 (loop (+ i 1) 'code openers #f)
-                 (loop (+ i 1) mode openers extra)))
+                 (loop (+ i 1) 'code openers #f next)
+                 (loop (+ i 1) mode openers extra next)))
             ((number? mode)
              (cond ((and (equal? c "#") (equal? (par--ch text (+ i 1)) "|"))
-                    (loop (+ i 2) (+ mode 1) openers extra))
+                    (loop (+ i 2) (+ mode 1) openers extra next))
                    ((and (equal? c "|") (equal? (par--ch text (+ i 1)) "#"))
                     (loop (+ i 2) (if (= mode 1) 'code (- mode 1)) openers
-                          (if (= mode 1) #f extra)))
-                   (else (loop (+ i 1) mode openers extra))))
-            ((equal? c "\"") (loop (+ i 1) 'string openers i))
-            ((equal? c ";") (loop (+ i 1) 'line-comment openers i))
+                          (if (= mode 1) #f extra) next))
+                   (else (loop (+ i 1) mode openers extra next))))
+            ((equal? c "\"") (loop (+ i 1) 'string openers i next))
+            ((equal? c ";") (loop (+ i 1) 'line-comment openers i next))
             ((and (equal? c "#") (equal? (par--ch text (+ i 1)) "|"))
-             (loop (+ i 2) 1 openers i))
+             (loop (+ i 2) 1 openers i next))
             ((and (equal? c "#") (equal? (par--ch text (+ i 1)) "\\"))
              ;; #\X is an atom: the delimiter byte after #\ is not a delimiter
-             (loop (+ i 3) mode openers extra))
-            ((par--opener? c) (loop (+ i 1) mode (cons i openers) extra))
+             (loop (+ i 3) mode openers extra next))
+            ((par--opener? c) (loop (+ i 1) mode (cons i openers) extra next))
             ((par--closer? c)
-             (loop (+ i 1) mode (if (null? openers) openers (cdr openers)) extra))
-            (else (loop (+ i 1) mode openers extra)))))))
+             (loop (+ i 1) mode (if (null? openers) openers (cdr openers)) extra next))
+            (else (loop (+ i 1) mode openers extra next)))))))
 
 (define (par--mode st) (car st))
 (define (par--openers st) (cadr st))
 (define (par--extra st) (caddr st))
 
-;; The scan state at POS, from the nearest top-level anchor.
+;; The scan state at POS, from the nearest top-level anchor. A window
+;; answers from the buffer's cache; a string scans every time.
 (define (par--ctx text pos)
-  (par--state text (par--anchor text pos) pos))
+  (if (par--window? text)
+      (par--ctx-cached (par--wbuf text) text pos)
+      (par--state text (par--anchor text pos) pos)))
+
+;;; --- the scan state cache ----------------------------------------------------
+;;; Emacs syntax-ppss: the state at checkpoints along the text, so a
+;;; command scans from the nearest checkpoint at or after its anchor,
+;;; not from the anchor. One alist-put entry per buffer holding
+;;; (VERSION . ENTRIES), and
+;;; ENTRIES is an alist of (POS . STATE) with the largest POS first. An
+;;; edit drops every entry at or after its position: the text before it
+;;; did not change, and an entry there holds only positions before it.
+;;; The buffer's edit log says where the edits since VERSION landed.
+
+(define par--ppss-step 2048)
+(define *par-ppss* '())
+
+(define (paredit--ppss buf)
+  "(paredit--ppss BUF) - the cache entries for BUF, (POS . STATE) with the largest POS first"
+  (let ((c (assoc buf *par-ppss*)))
+    (if c (cdr (cadr c)) '())))
+
+(define (par--ppss-put! buf version entries)
+  (set! *par-ppss* (alist-put *par-ppss* buf (cons version entries))))
+
+(define (par--ppss-forget! buf)
+  (set! *par-ppss* (filter (lambda (c) (not (equal? (car c) buf))) *par-ppss*)))
+
+;; The cache at the buffer's version: entries at or after any edit
+;; since the cached version go. A cached version the log no longer
+;; reaches, or one edit per version missing from it, empties the cache.
+(define (par--ppss-sync! buf)
+  (let* ((c (assoc buf *par-ppss*))
+         (cached (if c (car (cadr c)) -1))
+         (entries (if c (cdr (cadr c)) '()))
+         (version (buffer-version buf)))
+    (cond
+      ((and c (= cached version)) entries)
+      ((not c) (par--ppss-put! buf version '()) '())
+      (else
+       (let* ((since (filter (lambda (r) (> (car r) cached)) (buffer-edit-log buf)))
+              (kept (if (= (length since) (- version cached))
+                        (let ((low (apply min (map caddr since))))
+                          (filter (lambda (e) (< (car e) low)) entries))
+                        '())))
+         (par--ppss-put! buf version kept)
+         kept)))))
+
+(define (par--ppss-add! buf pos state)
+  (let* ((c (assoc buf *par-ppss*))
+         (entries (if c (cdr (cadr c)) '())))
+    (unless (assoc pos entries)
+      (par--ppss-put! buf (if c (car (cadr c)) (buffer-version buf))
+        (let loop ((es entries) (acc '()))
+          (cond ((null? es) (reverse (cons (cons pos state) acc)))
+                ((< (car (car es)) pos) (append (reverse acc) (cons (cons pos state) es)))
+                (else (loop (cdr es) (cons (car es) acc)))))))))
+
+;; The nearest entry with ANCHOR <= POS <= AT, or #f.
+(define (par--ppss-nearest entries anchor at)
+  (let loop ((es entries))
+    (cond ((null? es) #f)
+          ((<= (car (car es)) at) (if (>= (car (car es)) anchor) (car es) #f))
+          (else (loop (cdr es))))))
+
+(define (par--ctx-cached buf text pos)
+  (let* ((entries (par--ppss-sync! buf))
+         (anchor (par--anchor text pos))
+         (hit (par--ppss-nearest entries anchor pos)))
+    (if (and hit (= (car hit) pos))
+        (cdr hit)
+        (par--state text (if hit (car hit) anchor) pos (and hit (cdr hit))
+                    (lambda (p st) (par--ppss-add! buf p st))))))
 
 ;; Position after a "|#" that closes the "#|" at I.
 (define (par--block-comment-end text i)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i (+ i 2)) (depth 1))
       (cond ((>= i n) n)
             ((and (equal? (par--ch text i) "#")
@@ -98,7 +236,7 @@
 ;; Position after the closing quote of the string body starting at I
 ;; (I is inside the string, after the opening quote).
 (define (par--string-end text i)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i i))
       (cond ((>= i n) n)
             ((equal? (par--ch text i) "\\") (loop (+ i 2)))
@@ -108,14 +246,14 @@
 ;; First position at or after I that starts a datum or a closer. Skips
 ;; whitespace and comments.
 (define (par--skip text i)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i i))
       (if (>= i n)
           i
           (let ((c (par--ch text i)))
             (cond ((par--ws? c) (loop (+ i 1)))
                   ((equal? c ";")
-                   (let ((nl (string-index text "\n" i)))
+                   (let ((nl (par--index text "\n" i)))
                      (if nl (loop (+ nl 1)) n)))
                   ((and (equal? c "#") (equal? (par--ch text (+ i 1)) "|"))
                    (loop (par--block-comment-end text i)))
@@ -124,7 +262,7 @@
 ;; Position after the closer that matches the opener at AT, or #f when
 ;; the list never closes.
 (define (par--list-end text at)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i (+ at 1)) (mode 'code) (depth 1))
       (if (>= i n)
           #f
@@ -155,7 +293,7 @@
 
 ;; End of the atom whose body continues at I.
 (define (par--atom-end text i)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i i))
       (if (>= i n)
           i
@@ -168,7 +306,7 @@
 ;; End of the datum at or after I, or #f at a closer or end of text.
 ;; I must be in code context.
 (define (par-scan-forward text i)
-  (let* ((n (string-byte-length text))
+  (let* ((n (par--end text))
          (s (par--skip text i)))
     (if (>= s n)
         #f
@@ -187,7 +325,7 @@
 (define (par--starts-before text from pos)
   (let loop ((i from) (acc '()))
     (let ((s (par--skip text i)))
-      (if (or (>= s pos) (>= s (string-byte-length text)))
+      (if (or (>= s pos) (>= s (par--end text)))
           acc
           (let ((c (par--ch text s)))
             (if (par--closer? c)
@@ -221,7 +359,7 @@
 
 ;; Position inside the next nested list after POS, or #f.
 (define (par-down text pos)
-  (let ((n (string-byte-length text)))
+  (let ((n (par--end text)))
     (let loop ((i pos))
       (let ((s (par--skip text i)))
         (if (>= s n)
@@ -241,7 +379,7 @@
 
 (define (paredit--with-text fn)
   (let ((buf (current-buffer)))
-    (fn buf (buffer-text buf) (point))))
+    (fn buf (par--window buf (point)) (point))))
 
 (define-command "paredit-forward" "Move forward across one expression"
   (lambda ()
@@ -257,7 +395,7 @@
                    (if e
                        (goto-char! e)
                        (let ((s (par--skip text p)))
-                         (if (and (< s (string-byte-length text))
+                         (if (and (< s (par--end text))
                                   (par--closer? (par--ch text s)))
                              (goto-char! (+ s 1))
                              (message "No next expression"))))))))))))
@@ -436,7 +574,7 @@
   (lambda ()
     (paredit--with-text
       (lambda (buf text p)
-        (if (>= p (string-byte-length text))
+        (if (>= p (par--end text))
             #f
             (let ((st (par--ctx text p))
                   (prev (par--ch text (- p 1)))
@@ -478,8 +616,8 @@
   (lambda ()
     (paredit--with-text
       (lambda (buf text p)
-        (let* ((n (string-byte-length text))
-               (nl (string-index text "\n" p))
+        (let* ((n (par--end text))
+               (nl (par--index text "\n" p))
                (eol (if nl nl n))
                (st (par--ctx text p)))
           (cond
@@ -536,7 +674,7 @@
                     (message "Nothing to slurp")
                     (begin
                       (buffer-replace-range! buf c (- e c)
-                        (string-append (substring-bytes text (+ c 1) e)
+                        (string-append (par--sub text (+ c 1) e)
                                        (par--ch text c)))
                       (goto-char! p))))))))))
 
@@ -559,7 +697,7 @@
                                             (par-scan-forward text (cadr starts)))))
                             (buffer-replace-range! buf prev-e (- (+ c 1) prev-e)
                               (string-append (par--ch text c)
-                                             (substring-bytes text prev-e c)))
+                                             (par--sub text prev-e c)))
                             (goto-char! (min p prev-e)))))))))))))
 
 (define-command "paredit-slurp-backward" "Pull the previous expression into this list"
@@ -574,7 +712,7 @@
                     (message "Nothing to slurp")
                     (buffer-replace-range! buf s (- (+ o 1) s)
                       (string-append (par--ch text o)
-                                     (substring-bytes text s o)))))))))))
+                                     (par--sub text s o)))))))))))
 
 (define-command "paredit-barf-backward" "Push the first expression out of this list"
   (lambda ()
@@ -584,13 +722,13 @@
           (if (not o)
               (message "No enclosing list")
               (let ((s1 (par--skip text (+ o 1))))
-                (if (or (>= s1 (string-byte-length text))
+                (if (or (>= s1 (par--end text))
                         (par--closer? (par--ch text s1)))
                     (message "Nothing to barf")
                     (let* ((e1 (par-scan-forward text s1))
                            (s2 (par--skip text e1)))
                       (buffer-replace-range! buf o (- s2 o)
-                        (string-append (substring-bytes text (+ o 1) e1) " ("))
+                        (string-append (par--sub text (+ o 1) e1) " ("))
                       (goto-char! (max (+ e1 1)
                                        (+ p (- (+ e1 1) s2)))))))))))))
 
@@ -606,7 +744,7 @@
                     (message "Unclosed list")
                     (begin
                       (buffer-replace-range! buf o (- e o)
-                        (substring-bytes text (+ o 1) (- e 1)))
+                        (par--sub text (+ o 1) (- e 1)))
                       (goto-char! (- p 1)))))))))))
 
 (define-command "paredit-raise" "Replace the enclosing list with this expression"
@@ -622,7 +760,7 @@
                     (message "Nothing to raise")
                     (let ((ds (par-scan-backward text de)))
                       (buffer-replace-range! buf o (- e o)
-                        (substring-bytes text ds de))
+                        (par--sub text ds de))
                       (goto-char! o))))))))))
 
 (define-command "paredit-wrap-round" "Wrap the next expression in a pair"
@@ -634,7 +772,7 @@
               (message "Nothing to wrap")
               (let ((s (par--skip text p)))
                 (buffer-replace-range! buf s (- e s)
-                  (string-append "(" (substring-bytes text s e) ")"))
+                  (string-append "(" (par--sub text s e) ")"))
                 (goto-char! (+ s 1)))))))))
 
 ;;; --- the mode ----------------------------------------------------------------
@@ -687,6 +825,7 @@
 (define (paredit--setup! buf) #t)
 
 (define (paredit--teardown! buf)
+  (par--ppss-forget! buf)
   (overlay-clear! buf 'paren))
 
 ;;; --- show-paren --------------------------------------------------------------
@@ -707,8 +846,8 @@
 (define (paredit--show-paren!)
   (let ((buf (current-buffer)))
     (when (minor-mode-on? buf "paredit-mode")
-      (let* ((text (buffer-text buf))
-             (p (point))
+      (let* ((p (point))
+             (text (par--window buf p))
              (pair (and (equal? (par--mode (par--ctx text p)) 'code)
                         (paredit--paren-pair text p))))
         (if pair

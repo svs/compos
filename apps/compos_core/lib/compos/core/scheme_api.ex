@@ -1292,10 +1292,7 @@ defmodule Compos.Core.SchemeAPI do
         fn [buffer] -> Compos.Core.Terminal.mark(buffer) end,
       {"buffer-substring",
        "(buffer-substring START END) — return the current buffer's text between byte START and END."} =>
-        fn [s, e] ->
-          text = Buffer.text(Editor.current_buffer())
-          binary_part(text, s, min(e, Kernel.byte_size(text)) - s)
-        end,
+        fn [s, e] -> Buffer.slice(Editor.current_buffer(), s, e) end,
       {"process-kill!", "(process-kill! BUF) — kill the buffer's process."} => fn [buffer] ->
         Compos.Core.Terminal.kill(buffer)
         :void

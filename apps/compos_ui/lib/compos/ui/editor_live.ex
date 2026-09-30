@@ -91,9 +91,9 @@ defmodule Compos.Ui.EditorLive do
   # so without the drain every keystroke rendered twice — once here, once in
   # handle_info
   @impl true
-  def handle_event("key", %{"k" => spec}, socket) do
+  def handle_event("key", %{"k" => spec} = p, socket) do
     Input.dispatch(socket.assigns.frame, spec)
-    {:noreply, socket |> drain() |> refresh()}
+    {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 
   # an intent from the browser's text pipeline (beforeinput): what the user
@@ -114,7 +114,7 @@ defmodule Compos.Ui.EditorLive do
       Compos.Core.KeyDispatch.handle_intent(type, from, to, text, at, v)
     end)
 
-    {:noreply, socket |> drain() |> refresh()}
+    {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 
   # Cross the DOM slice boundary against the versioned buffer, then recenter.
@@ -445,12 +445,12 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # system clipboard: Cmd-V arrives as a browser paste event
-  def handle_event("paste", %{"text" => text}, socket) when is_binary(text) do
+  def handle_event("paste", %{"text" => text} = p, socket) when is_binary(text) do
     Input.run(socket.assigns.frame, fn ->
       Compos.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
     end)
 
-    {:noreply, socket |> drain() |> refresh()}
+    {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 
   # Browsers expose pasted files as clipboard items. Keep the bytes base64
@@ -672,6 +672,7 @@ defmodule Compos.Ui.EditorLive do
     # server draws the cursor and marks the current row again, and the
     # client scrolls that row into view.
     caret_owner = if state.minibuffer, do: nil, else: state.active
+    socket = sync_ropes(socket, state.tree, caret_owner)
 
     {tree, line_cache} =
       decorate_display(
@@ -775,6 +776,37 @@ defmodule Compos.Ui.EditorLive do
 
     {socket, state_ms}
   end
+
+  # Input runs an event before it returns, so the next render holds the
+  # effect of the input numbered SEQ. The client's rope drops its
+  # prediction up to that number (Compos.Ui.RopeSync).
+  defp ack(socket, %{"seq" => seq}) when is_integer(seq), do: assign(socket, intent_ack: seq)
+  defp ack(socket, _params), do: socket
+
+  # The client holds a rope of the text in the window that owns the caret,
+  # when Scheme turns predict-mode on there (Compos.Ui.RopeSync). Only that
+  # window takes typed text, so only that window keeps an entry.
+  defp sync_ropes(socket, tree, owner) do
+    sent = socket.assigns[:rope_sent] || %{}
+    ack = socket.assigns[:intent_ack] || 0
+
+    leaf =
+      tree |> leaves() |> Enum.find(&(&1.id == owner and Compos.Ui.RopeSync.predict?(&1)))
+
+    case leaf do
+      nil ->
+        assign(socket, rope_sent: %{})
+
+      leaf ->
+        {payload, entry} = Compos.Ui.RopeSync.payload(leaf, Map.get(sent, leaf.id), ack)
+        socket = assign(socket, rope_sent: %{leaf.id => entry})
+        if payload, do: push_event(socket, "rope", payload), else: socket
+    end
+  end
+
+  defp leaves(%{type: :leaf} = leaf), do: [leaf]
+  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
+  defp leaves(_), do: []
 
   # A window draws its buffer's mode-line format, else the frame default.
   defp with_mode_line(%{type: :split, children: children} = split, default),

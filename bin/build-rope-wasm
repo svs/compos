@@ -1,0 +1,12 @@
+#!/bin/sh
+# Build the browser's rope (native/compos_rope_wasm) into priv/static/rope.wasm.
+# It needs a Rust toolchain with the wasm32-unknown-unknown target.
+# Set CARGO to use a toolchain that is not first on PATH.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+crate="$root/apps/compos_core/native/compos_rope_wasm"
+out="$root/apps/compos_ui/priv/static/rope.wasm"
+"${CARGO:-cargo}" build --quiet --release --target wasm32-unknown-unknown \
+  --manifest-path "$crate/Cargo.toml"
+cp "$crate/target/wasm32-unknown-unknown/release/compos_rope_wasm.wasm" "$out"
+echo "$out: $(wc -c < "$out" | tr -d ' ') bytes"

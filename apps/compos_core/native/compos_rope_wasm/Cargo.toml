@@ -1,0 +1,21 @@
+[package]
+name = "compos_rope_wasm"
+version = "0.1.0"
+edition = "2021"
+
+# The browser's copy of the buffer rope: the same ropey as compos_rope,
+# built for wasm32-unknown-unknown. bin/build-rope-wasm writes
+# apps/compos_ui/priv/static/rope.wasm.
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ropey = "1.6"
+
+[profile.release]
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"
+strip = true

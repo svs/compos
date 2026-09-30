@@ -57,7 +57,7 @@ defmodule Compos.Ui.Endpoint do
   plug(Plug.Static,
     at: "/",
     from: :compos_ui,
-    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js strip-slide.js mobile.css mobile.js)
+    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js strip-slide.js rope.js rope.wasm predict.js mobile.css mobile.js)
   )
 
   if code_reloading? do

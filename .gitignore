@@ -33,3 +33,4 @@ __pycache__/
 
 # Local Compos state
 /.compos/
+apps/compos_core/native/compos_rope_wasm/target/

@@ -1830,7 +1830,7 @@
           // every key goes to the editor as the key it is. A visual
           // row move is Scheme reading the wrap map this client
           // measured after the last paint; nothing is decided here.
-          Telem.push(this, "key", { k: spec });
+          Telem.push(this, "key", { k: spec, seq: composPredict.barrier() });
         };
         window.addEventListener("keydown", this.handler);
         this.keyupH = (e) => {
@@ -1869,7 +1869,7 @@
           const text = e.clipboardData && e.clipboardData.getData("text/plain");
           if (!text) return;
           e.preventDefault();
-          this.pushEvent("paste", { text });
+          this.pushEvent("paste", { text, seq: composPredict.barrier() });
         };
         window.addEventListener("paste", this.pasteH);
 
@@ -2080,6 +2080,14 @@
           buf.querySelectorAll(":scope > .line.hl-line, :scope > .semantic-record > .line.hl-line").forEach((l) => { if (l !== row) l.classList.remove("hl-line"); });
           if (row) row.classList.add("hl-line");
         };
+        // the browser's rope (predict.js) reads and edits these rows
+        composPredict.init({
+          domPos, domByte, countsBytes,
+          place: () => this.syncEditable(),
+          bufOf: (win) => document.querySelector(
+            `.window[data-win-id="${win}"] .buf[contenteditable]`)
+        }, "/rope.wasm");
+        this.handleEvent("rope", (p) => composPredict.event(p));
         this.beforeInputH = (e) => {
           const buf = editableOf(e.target);
           if (!buf) return;
@@ -2114,7 +2122,10 @@
               ? domByte(domSel.focusNode, domSel.focusOffset)
               : null;
           const ver = parseInt(buf.dataset.v, 10);
+          // the rope paints a typed character now (predict.js)
+          const seq = composPredict.intent(buf, e, winIdOf(buf));
           Telem.push(this, "intent", {
+            seq,
             win: winIdOf(buf), type: e.inputType,
             from: from == null ? -1 : from, to: to == null ? -1 : to,
             at: caret == null ? -1 : caret,
@@ -2139,6 +2150,7 @@
           buf.removeAttribute("phx-update");
           if (this._chordComp) { this._chordComp = false; return; }
           Telem.push(this, "intent", {
+            seq: composPredict.barrier(),
             win: winIdOf(buf), type: "insertCompositionText",
             from: -1, to: -1, text: e.data || ""
           });
@@ -3146,6 +3158,8 @@
       },
       onPatchEnd: () => {
         if (window.stripSlide) window.stripSlide.after();
+        // a patch puts the daemon's rows back; paint the pending ops again
+        composPredict.afterPatch();
       }
     },
     params: () => ({

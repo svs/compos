@@ -171,7 +171,7 @@
 ;;; save: two saves then cost one reattach per chat.
 (define (llm-config--follow! target)
   (let ((follow (or (frame-local 'llm-config-follow) '()))
-        (session (llm-config--session target))
+        (session (and (buffer-exists? target) (llm-config--session target)))
         (moved 0))
     (for-each
       (lambda (entry)
@@ -199,11 +199,14 @@
 (define (llm-config--selected-name) (frame-local 'llm-config-selected))
 
 ;;; Every exit gives the selected row's config to the chat: ESC and C-g
-;;; alike. To keep the chat as it is, select its own row.
+;;; alike. To keep the chat as it is, select its own row. A chat that died
+;;; while the menu was open gets nothing: the menu only closes.
 (define (llm-config--quit! buf)
   (let ((box (llm-config--config-of (llm-config--selected-name)))
+        (alive (buffer-exists? buf))
         (applied #f))
-    (when (and (pair? box)
+    (when (and alive
+               (pair? box)
                (not (llm-config--same? box (llm-config--current buf))))
       (llm-bundle-apply! buf box)
       (llm-config-remember! box)
@@ -211,10 +214,11 @@
     (let ((moved (llm-config--follow! buf)))
       (message
         (string-append
-          (if applied
-              (string-append "the chat now runs "
-                             (or (llm-config--selected-name) "its own setup"))
-              "no change")
+          (cond (applied
+                 (string-append "the chat now runs "
+                                (or (llm-config--selected-name) "its own setup")))
+                (alive "no change")
+                (else "the chat is gone"))
           (if (> moved 0)
               (string-append " · " (number->string moved)
                              (if (= moved 1) " other chat follows" " other chats follow")
@@ -225,7 +229,7 @@
     (set-frame-local! 'llm-config-source #f)
     (set-frame-local! 'llm-config-selected #f)
     (set-frame-local! 'llm-config-new #f)
-    (llm-config-changed! buf)))
+    (when alive (llm-config-changed! buf))))
 
 ;;; --- tools ------------------------------------------------------------------
 ;;; Presets are the tool selection: a preset names MCP servers, and the

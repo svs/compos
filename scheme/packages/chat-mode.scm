@@ -2064,6 +2064,11 @@
 ;; otherwise unchanged session reconnects at the end, without asking —
 ;; naming a whole setup IS the answer to that question.
 (define (llm-bundle-apply! buf bundle)
+  (if (not (buffer-exists? buf))
+      #f
+      (llm-bundle-apply-live! buf bundle)))
+
+(define (llm-bundle-apply-live! buf bundle)
   (let* ((b (llm-bundle-normalize bundle))
          (session (llm-config-session buf))
          (presets (llm-bundle-presets b))

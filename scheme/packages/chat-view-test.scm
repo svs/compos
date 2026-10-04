@@ -101,6 +101,10 @@
     (check-false! (chat-activity-shown "streaming" 'api)
                   "a chat with no runtime is not working")
     (check-false! (chat-activity-shown #f 'running) "no label, no row")
+    (check-false! (chat-activity-shown "tool · eval" 'running)
+                  "a running tool shows as its block, not again in the row")
+    (check-equal! (chat-activity-shown "thinking · reading" 'running)
+                  "thinking · reading" "thinking still shows")
     ;; the same three statuses decide it in the event handler, so the two
     ;; cannot drift apart
     (check-equal! *agent-working-statuses* '(running needs_attention starting)

@@ -994,7 +994,10 @@
 
 ;; the decision alone: one label, one status, no buffer and no runtime
 (define (chat-activity-shown label status)
+  ;; a running tool already shows as its own block in the transcript, so
+  ;; the row would only repeat it
   (and (string? label)
+       (not (string-prefix? "tool · " label))
        (or (not status) (member status *chat-activity-statuses*))
        label))
 

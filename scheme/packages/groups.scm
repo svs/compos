@@ -4491,6 +4491,30 @@ is forgotten and that group falls back to creation order in the switcher."
              (message "The current buffer is not a work buffer"))
             (else (buffer-move-read-destination! buf))))))
 
+(define (pull-buffer-candidates here)
+  "The work buffers outside HERE, annotated as every buffer prompt is: mode, groups, project, path."
+  (annotate 'buffer
+            (filter (lambda (buf)
+                      (and (group-membership-buffer? buf)
+                           (not (group-scratch-buffer? buf))
+                           (not (buffer-in-group? buf here))))
+                    (buffer-list))))
+
+(define-command "pull-buffer-here" "Pull a buffer from wherever it is into this group, and show it here"
+  (lambda ()
+    (let ((here (group-here)))
+      (if (not here)
+          (message "There is no group here")
+          (minibuffer-read* "Pull buffer here: "
+            (pull-buffer-candidates here)
+            (list
+              (list 'confirm
+                (lambda (name)
+                  (when (buffer-known? name)
+                    (group-move-buffers-here! (group-membership-targets name))
+                    (switch-to-buffer! name))))))))))
+(catalog-meta! 'command "pull-buffer-here" 'domain 'buffers 'effects '(write))
+
 (define (buffer-family-remove-groups! buf ids)
   (for-each
     (lambda (id)
@@ -4629,7 +4653,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda ()
     (let ((chat (current-buffer)))
       (minibuffer-read "Companion for buffer: "
-        (filter (lambda (b) (not (equal? b chat))) (buffer-list-mru))
+        (annotate 'buffer (filter (lambda (b) (not (equal? b chat))) (buffer-list-mru)))
         (lambda (doc)
           (if (not (buffer-exists? doc))
               (message (string-append "No buffer " doc))

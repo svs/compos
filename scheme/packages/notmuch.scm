@@ -45,7 +45,7 @@ anything else is an ssh destination."
   'group 'notmuch)
 
 (defcustom 'notmuch-ssh-program
-  "ssh -o BatchMode=yes -o ControlMaster=auto -o ControlPath=~/.compos/ssh-%C -o ControlPersist=300"
+  "ssh -o BatchMode=yes -o ControlMaster=auto -o ControlPath=/tmp/compos-ssh-%C -o ControlPersist=300"
   "How a remote mail host is reached; one multiplexed connection keeps a call cheap."
   'group 'notmuch)
 
@@ -2559,26 +2559,112 @@ would let a word in the body pick the account the mail goes out from."
              (cadr (car rs)))
             (else (loop (cdr rs)))))))
 
+(define (nm--mime-type path)
+  "The MIME type of PATH, from its extension; application/octet-stream when unknown."
+  (let* ((m (re-match "\\.([A-Za-z0-9]+)$" path))
+         (ext (if m (string-downcase (cadr m)) "")))
+    (cond ((equal? ext "pdf") "application/pdf")
+          ((member ext '("png" "gif" "webp")) (string-append "image/" ext))
+          ((member ext '("jpg" "jpeg")) "image/jpeg")
+          ((member ext '("txt" "md" "org")) "text/plain")
+          ((equal? ext "csv") "text/csv")
+          ((equal? ext "html") "text/html")
+          ((equal? ext "zip") "application/zip")
+          ((equal? ext "xlsx") "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+          ((equal? ext "docx") "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+          (else "application/octet-stream"))))
+
+(define (nm--base64-lines s)
+  "S as base64, broken into lines of 76."
+  (let* ((b (base64-encode s)) (n (string-length b)))
+    (let loop ((i 0) (acc '()))
+      (if (>= i n)
+          (string-join (reverse acc) "\n")
+          (loop (+ i 76) (cons (substring b i (min n (+ i 76))) acc))))))
+
+(define (nm--header-word s)
+  "S as a header value: as it is when ASCII, else an RFC 2047 encoded word."
+  (if (= (string-length s) (string-byte-length s))
+      s
+      (string-append "=?UTF-8?B?" (base64-encode s) "?=")))
+
+(define (nm--default-from)
+  "The From of the mailbox notmuch reads: its user.name and user.primary_email."
+  (let ((name (string-trim (notmuch "config get user.name")))
+        (email (string-trim (notmuch "config get user.primary_email"))))
+    (if (equal? name "") email (string-append name " <" email ">"))))
+
+(define (mail-message headers body &optional attachments)
+  "(mail-message HEADERS BODY [ATTACHMENTS]) — the RFC 822 text of a mail.
+HEADERS is a plist of from, to, cc, bcc, subject, in-reply-to and references;
+from defaults to the mailbox's own address. BODY is plain text. Each of
+ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
+  (let* ((from (or (plist-get headers 'from) (nm--default-from)))
+         (head (lambda (name key)
+                 (let ((v (plist-get headers key)))
+                   (if (and v (not (equal? v "")))
+                       (string-append name ": " (nm--header-word v) "\n")
+                       ""))))
+         (top (string-append "From: " (nm--header-word from) "\n"
+                             (head "To" 'to) (head "Cc" 'cc) (head "Bcc" 'bcc)
+                             (head "Subject" 'subject)
+                             (head "In-Reply-To" 'in-reply-to) (head "References" 'references)
+                             "MIME-Version: 1.0\n"))
+         (files (or attachments '())))
+    (if (null? files)
+        (string-append top "Content-Type: text/plain; charset=UTF-8\n"
+                       "Content-Transfer-Encoding: 8bit\n\n" body "\n")
+        (let ((boundary (string-append "compos-" (number->string (abs (monotonic-ms)))
+                                       "-" (number->string (random 1000000)))))
+          (string-append
+            top "Content-Type: multipart/mixed; boundary=\"" boundary "\"\n\n"
+            "--" boundary "\n"
+            "Content-Type: text/plain; charset=UTF-8\n"
+            "Content-Transfer-Encoding: 8bit\n\n" body "\n"
+            (apply string-append
+                   (map (lambda (a)
+                          (let* ((path (expand-path (if (pair? a) (car a) a)))
+                                 (name (if (pair? a) (cadr a) (file-name-nondirectory path))))
+                            (if (not (file-exists? path))
+                                (error (string-append "mail-message: no file " path)))
+                            (string-append
+                              "\n--" boundary "\n"
+                              "Content-Type: " (nm--mime-type name) "; name=\"" name "\"\n"
+                              "Content-Disposition: attachment; filename=\"" name "\"\n"
+                              "Content-Transfer-Encoding: base64\n\n"
+                              (nm--base64-lines (read-file path)) "\n")))
+                        files))
+            "\n--" boundary "--\n")))))
+
+(define (mail-send-text! text)
+  "(mail-send-text! TEXT) — send the RFC 822 TEXT through the route its From picks; #t when sent, else the error as a string"
+  (let ((route (nm--send-route text))
+        (tmp (string-append (expand-path "~") "/.compos/outgoing.eml")))
+    (if (not route)
+        "No send route matches — set notmuch-send-routes"
+        (begin
+          (write-file! tmp text)
+          (let ((out (shell-command->string
+                       (string-append "cat " (sh-quote tmp) " | "
+                                      (nm--host-cmd (string-append route " && echo SENT-OK"))))))
+            (delete-file! tmp)
+            (if (string-contains? out "SENT-OK") #t (string-trim out)))))))
+
+(define (mail-send! headers body &optional attachments)
+  "(mail-send! HEADERS BODY [ATTACHMENTS]) — build the mail as mail-message does and send it; #t when sent, else the error as a string"
+  (mail-send-text! (mail-message headers body attachments)))
+
 (define-command "mail-send" "Send this buffer as an email"
   (lambda ()
-    (let* ((buf (current-buffer))
-           ;; the separator line becomes the RFC822 blank line
-           (text (string-join
-                   (string-split (buffer-text buf)
+    ;; the separator line becomes the RFC822 blank line
+    (let* ((text (string-join
+                   (string-split (buffer-text (current-buffer))
                                  (string-append "\n" *mail-header-separator* "\n"))
                    "\n\n"))
-           (route (nm--send-route text))
-           (tmp (string-append (expand-path "~") "/.compos/outgoing.eml")))
-      (if (not route)
-          (message "No send route matches — set notmuch-send-routes")
-          (begin
-            (write-file! tmp text)
-            (let ((out (shell-command->string
-                         (string-append "cat " (sh-quote tmp) " | "
-                                        (nm--host-cmd (string-append route " && echo SENT-OK"))))))
-              (if (string-contains? out "SENT-OK")
-                  (begin (run-command "quit-window") (message "Sent"))
-                  (message (string-append "Send failed: " (string-trim out))))))))))
+           (sent (mail-send-text! text)))
+      (if (equal? sent #t)
+          (begin (run-command "quit-window") (message "Sent"))
+          (message (string-append "Send failed: " sent))))))
 
 (define-command "mail-abort" "Abandon this compose buffer"
   (lambda ()
@@ -2742,6 +2828,12 @@ would let a word in the body pick the account the mail goes out from."
   "(mail-search QUERY) — notmuch search (from:, to:, subject:, tag:, dates, free text); one thread per line with its thread:ID")
 (public! 'mail-read-thread
   "(mail-read-thread THREAD-ID) — full text of an email thread, thread: prefix optional")
+(effects! '(read))
+(public! 'mail-message "(mail-message HEADERS BODY [ATTACHMENTS]) — the RFC 822 text of a mail; HEADERS is a plist of from to cc bcc subject in-reply-to references, each attachment a path or (PATH NAME)")
+(effects! '(write external))
+(public! 'mail-send! "(mail-send! HEADERS BODY [ATTACHMENTS]) — send a mail with files attached; #t when sent, else the error")
+(public! 'mail-send-text! "(mail-send-text! TEXT) — send RFC 822 TEXT through the route its From picks; #t when sent, else the error")
+(effects! '(unknown))
 (public! 'mail-tag!
   "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread; returns how many messages it actually matched (a real count, not a blind \"done\") — 0 means the thread id was wrong")
 (public! 'notmuch-sender-count

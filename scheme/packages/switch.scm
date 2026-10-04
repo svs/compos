@@ -855,7 +855,7 @@
       (if (null? rows)
           (message "No other buffer in this window")
           (let ((restore! (lambda () (preview-end #f))))
-            (minibuffer-read-preview "Window buffers: " rows
+            (minibuffer-read-preview "Window buffers: " (annotate 'buffer rows)
               (lambda (row)
                 (when (and (string? row) (buffer-known? row) (window-exists? home))
                   (preview-show row 'here home)))
@@ -898,12 +898,16 @@
          (names (switch-prompt-buffers here group (active-window)))
          (rows (if ibuffer-info
                    (buffer-read-many names '(path modified) '(mode-name group-id group-ids group))
-                   (buffer-read-many names '(path) '())))
+                   (buffer-read-many names '(path) '(mode-name))))
          (names (map car (filter (lambda (r) (ibuffer-workspace-path? (cadr r))) rows)))
          (candidates (switch-bare-candidates names))
          (display (if ibuffer-info
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
-                      (map car candidates)))
+                      ;; the mode stays beside every buffer, info or not
+                      (map (lambda (c)
+                             (let ((r (assoc (cadr c) rows)))
+                               (list (car c) (or (and r (nth 2 r)) ""))))
+                           candidates)))
          (woken '())
          (restore! (lambda () (preview-end #f)))
          (sleep-woken! (lambda (keep)

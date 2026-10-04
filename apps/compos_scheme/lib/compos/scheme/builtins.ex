@@ -41,6 +41,13 @@ defmodule Compos.Scheme.Builtins do
       {"equal?", "(equal? A B) — return true if A and B are structurally equal."} => fn [a, b] ->
         a == b
       end,
+      # Values are BEAM terms and a pair is never mutated in place, so there is
+      # no identity to compare: eq? and eqv? are exact equality. They differ from
+      # equal? on numbers only: (eqv? 2 2.0) is false, as in Scheme.
+      {"eq?", "(eq? A B) — return true if A and B are the same value: equal, with 2 and 2.0 kept apart."} =>
+        fn [a, b] -> a === b end,
+      {"eqv?", "(eqv? A B) — return true if A and B are the same value, as eq? does."} =>
+        fn [a, b] -> a === b end,
       {"not", "(not X) — return true if X is false."} => fn [a] -> a == false end,
       {"modulo", "(modulo A B) — return A modulo B; the result takes the sign of B."} => fn [a, b] ->
         Integer.mod(a, b)

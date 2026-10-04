@@ -11,26 +11,135 @@
 (define *onboarding-group* "getting-started")
 (define *onboarding-welcome* "*onboarding*")
 
-(define onboarding-welcome-text
-  "# Welcome to compos
 
-The window beside this one is your guide. It is a chat: type in it and
-press `RET` to send.
+;;; The stage page. onboarding-mode draws one step: its title, its text,
+;;; and its keys. Each step is a minor mode, onboarding-step-N-mode, whose
+;;; keymap holds the keys the step teaches. The page shows that keymap, and
+;;; the keys bar shows it beside the onboarding-mode map.
 
-This window is the **stage**. The guide puts here what each step is about:
-a file to edit, a help page, a list of buffers. You can work in it.
+(define *onboarding-steps* '())
 
-- `C-x o` moves the focus between the two windows.
-- `C-g` stops anything that waits for you.
-")
+(define (onboarding-step-mode n)
+  (string-append "onboarding-step-" (number->string n) "-mode"))
+
+(define (define-onboarding-step! n title text keys)
+  "Step N of the stage page. TEXT marks a key as `KEY`; KEYS are (KEY COMMAND LABEL)."
+  (let ((mode (onboarding-step-mode n)))
+    (register-minor-mode! mode (lambda (buf) #t) (lambda (buf) #t))
+    (minor-mode-keys! mode (map (lambda (k) (list (car k) (cadr k))) keys))
+    (set! *onboarding-steps*
+          (cons (list n title text keys)
+                (filter (lambda (s) (not (equal? (car s) n))) *onboarding-steps*)))
+    mode))
+
+(define (onboarding--step n) (assoc n *onboarding-steps*))
+
+(define (onboarding--last-step)
+  (apply max (cons 1 (map car *onboarding-steps*))))
+
+(define *onboarding-mode-keys*
+  '(("n" "onboarding-next-step" "Next step")
+    ("p" "onboarding-previous-step" "Previous step")))
+
+(define (onboarding--segs line)
+  ;; `KEY` in the text draws as a pressable key.
+  (let loop ((parts (string-split line "`")) (key? #f) (out '()))
+    (cond ((null? parts) (reverse out))
+          ((equal? (car parts) "") (loop (cdr parts) (not key?) out))
+          (else (loop (cdr parts) (not key?)
+                      (cons (list (if key? "c-action-key" "") (car parts)) out))))))
+
+(define (onboarding--pairs keys)
+  (map (lambda (k) (list (car k) (caddr k))) keys))
+
+(define (onboarding--draw! buf)
+  (let* ((n (or (buffer-local buf 'onboarding-step) 1))
+         (step (or (onboarding--step n) (list n "" "" '())))
+         (title (list-ref step 1))
+         (text (list-ref step 2))
+         (keys (list-ref step 3)))
+    (buffer-set-read-only! buf #f)
+    (buffer-set-text! buf
+      (string-append title "\n\n" text "\n\n"
+                     (string-join (map (lambda (k) (string-append (car k) "  " (caddr k))) keys)
+                                  "\n")
+                     "\n"))
+    (buffer-set-read-only! buf #t)
+    (buffer-set-locals! buf
+      (list 'render-mode "blocks"
+            'render-root (list 'tag "onboarding-page")
+            'render-blocks
+            (append
+              (list (list 'tag "c-headerline" 'class "onb-title"
+                          'text (string-append "Step " (number->string n) " of "
+                                               (number->string (onboarding--last-step))
+                                               ": " title)))
+              (map (lambda (p) (component 'ui/row (list 'segs (onboarding--segs p))))
+                   (string-split text "\n\n"))
+              (list (component 'ui/keymap (list 'keys keys))))
+            'footer-line-blocks
+            (list (component 'ui/keys-bar
+                    (list 'main (append (onboarding--pairs keys)
+                                        (onboarding--pairs *onboarding-mode-keys*))
+                          'grids (list (list (onboarding-step-mode n) (onboarding--pairs keys))
+                                       (list "onboarding-mode"
+                                             (onboarding--pairs *onboarding-mode-keys*))))))))
+    buf))
+
+(define (onboarding-step! buf n)
+  "Show step N on the stage page BUF, with its step mode on. Answer the step shown."
+  (when (onboarding--step n)
+    (for-each (lambda (s)
+                (let ((mode (onboarding-step-mode (car s))))
+                  (when (minor-mode-on? buf mode) (disable-minor-mode! buf mode))))
+              *onboarding-steps*)
+    (buffer-set-local! buf 'onboarding-step n)
+    (enable-minor-mode! buf (onboarding-step-mode n))
+    (onboarding--draw! buf))
+  (buffer-local buf 'onboarding-step))
+
+(define-mode "onboarding-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'desktop-skip-locals
+        '(render-root render-blocks footer-line-blocks))
+      (onboarding-step! buf (or (buffer-local buf 'onboarding-step) 1))))
+  'doc "The onboarding stage page, one step at a time. The page shows the keys the step teaches, and they work here. `n` goes to the next step and `p` to the one before.")
+(mode-parent! "onboarding-mode" "special-mode")
+(mode-keys! "onboarding-mode"
+  (map (lambda (k) (list (car k) (cadr k))) *onboarding-mode-keys*))
+
+(define-command "onboarding-next-step" "Go to the next onboarding step"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (n (+ 1 (or (buffer-local buf 'onboarding-step) 1))))
+      (if (onboarding--step n)
+          (onboarding-step! buf n)
+          (message "This is the last step")))))
+
+(define-command "onboarding-previous-step" "Go to the previous onboarding step"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (n (- (or (buffer-local buf 'onboarding-step) 1) 1)))
+      (if (onboarding--step n)
+          (onboarding-step! buf n)
+          (message "This is the first step")))))
+
+(define-onboarding-step! 1 "Two windows"
+  "The window beside this one is your guide. It is a chat: type in it and press `RET` to send.
+
+This window is the stage. The guide puts here what each step is about, and you can work in it.
+
+`C-x o` moves the focus between the two windows. `C-g` stops anything that waits for you."
+  '(("C-x o" "other-window" "Move to the other window")
+    ("C-g" "keyboard-quit" "Stop what waits for you")))
 
 (define (onboarding--welcome!)
-  ;; A page to read, not to edit: rendered and read-only.
   (unless (buffer-exists? *onboarding-welcome*)
-    (buffer-set-text! *onboarding-welcome* onboarding-welcome-text)
-    (buffer-set-read-only! *onboarding-welcome* #t)
-    (buffer-set-local! *onboarding-welcome* 'preview-renderer "markdown")
-    (enable-minor-mode! *onboarding-welcome* "preview-mode"))
+    (buffer-create *onboarding-welcome*))
+  (unless (equal? (buffer-local *onboarding-welcome* 'mode-name) "onboarding-mode")
+    (with-current-buffer *onboarding-welcome*
+      (lambda () (set-mode! "onboarding-mode"))))
   *onboarding-welcome*)
 
 (define (onboarding-group)
@@ -139,3 +248,7 @@ a file to edit, a help page, a list of buffers. You can work in it.
   "(onboarding-show! BUF) — show BUF on the stage; the focus does not move")
 (public! 'onboarding-stage-run!
   "(onboarding-stage-run! COMMAND) — run an M-x command on the stage and give the focus back")
+(public! 'onboarding-step!
+  "(onboarding-step! BUF N) — show step N on the stage page, with onboarding-step-N-mode on")
+(public! 'define-onboarding-step!
+  "(define-onboarding-step! N TITLE TEXT KEYS) — a stage step; `KEY` in TEXT draws as a key, KEYS are (KEY COMMAND LABEL)")

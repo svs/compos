@@ -51,7 +51,11 @@
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-insert! buf 0 text)
-    (with-current-buffer buf (lambda () (set-mode! "text-mode")))
+    (with-current-buffer buf (lambda () (set-mode! "morg-mode")))
+    ;; Rendered, and still editable: morg draws it in place.
+    (unless (minor-mode-on? buf "preview-mode")
+      (enable-minor-mode! buf "preview-mode"))
+    (preview-heal! buf)
     (let ((point (max 0 (min point (buffer-size buf)))))
       (buffer-goto! buf point)
       (buffer-set-local! buf 'training-starting-point point))

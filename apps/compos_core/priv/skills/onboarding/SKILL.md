@@ -13,6 +13,10 @@ about, and the user practises there.
 
 - `(onboarding-stage-buffer)` gives what the stage shows now.
 - `(onboarding-show! BUF)` puts a buffer on the stage.
+- `*onboarding*` is the step page, in `onboarding-mode`.
+  `(onboarding-step! "*onboarding*" N)` shows step N there, with its
+  keys drawn as keys and its `onboarding-step-N-mode` keymap on. Use it
+  for a step that has a page; the user turns pages with `n` and `p`.
 - `(onboarding-stage-run! "COMMAND")` runs an M-x command on the stage,
   for a command that shows a buffer at once: `help-with-tutorial`,
   `describe-mode`, `ibuffer`. For a command that asks a question, tell the

@@ -875,8 +875,22 @@
     (cond ((mb-rail-move! -1) #t)
           ((mb-list-move! -1) #t)
           (else (minibuffer-prev!) (mb-select-notify!)))))
-(define-command "minibuffer-delete-backward" "Delete the character before point"
-  (lambda () (minibuffer-del!)))
+;; A prompt may let its rows be deleted: *mb-row-delete-fn* is a thunk that
+;; deletes the highlighted row. <delete> runs it, and DEL does on an empty
+;; input, where there is no character to delete.
+(define *mb-row-delete-fn* #f)
+
+(define-command "minibuffer-delete-backward" "Delete the character before point, or the highlighted row of an empty prompt that allows it"
+  (lambda ()
+    (if (and *mb-row-delete-fn* (equal? (minibuffer-input) ""))
+        (*mb-row-delete-fn*)
+        (minibuffer-del!))))
+
+(define-command "minibuffer-delete-row" "Delete the highlighted row, in a prompt that allows it"
+  (lambda ()
+    (if *mb-row-delete-fn*
+        (*mb-row-delete-fn*)
+        (message "Nothing here deletes a row"))))
 (define-command "minibuffer-complete"
   "Fold the section at hand in the list behind the prompt, else complete the input"
   (lambda () (if (mb-list-call! 'fold) #t (minibuffer-complete!))))
@@ -885,10 +899,19 @@
   (lambda () (if (mb-list-call! 'regroup) #t (message "no list here"))))
 (define-command "minibuffer-next-section"
   "Move to the next section in the list behind the prompt, else the next history entry"
-  (lambda () (if (mb-list-section! 1) #t (run-command "next-history-element"))))
+  (lambda ()
+    (cond ((and *mb-history-key* (>= *mb-history-pos* 0))
+           (run-command "next-history-element"))
+          ((mb-list-section! 1) #t)
+          (else (run-command "next-history-element")))))
 (define-command "minibuffer-previous-section"
   "Move to the previous section in the list behind the prompt, else the previous history entry"
-  (lambda () (if (mb-list-section! -1) #t (run-command "previous-history-element"))))
+  ;; an empty prompt, or one already walking its history, walks the history
+  (lambda ()
+    (cond ((and *mb-history-key* (or (>= *mb-history-pos* 0) (equal? (minibuffer-input) "")))
+           (run-command "previous-history-element"))
+          ((mb-list-section! -1) #t)
+          (else (run-command "previous-history-element")))))
 
 ;;; --- candidate preview (the consult mechanism) -------------------------------
 ;;; Emacs previews by hooking SELECTION, not windows: consult registers a
@@ -1364,6 +1387,12 @@
 (define (on-buffer-shown! fn) (add-hook! 'buffer-shown-hook fn))
 (define (on-buffer-renamed! fn) (add-hook! 'buffer-renamed-hook fn))
 (define (take-n lst n) (take lst n))
+
+;; The first element of LST that PRED holds for, or #f: SRFI-1 find.
+(define (find pred lst)
+  (cond ((null? lst) #f)
+        ((pred (car lst)) (car lst))
+        (else (find pred (cdr lst)))))
 
 ;; A whole number from 0 up to N, not N. A generator seeded from the clock:
 ;; enough to pick a file or a row at random, not for secrets. The editor had
@@ -3339,7 +3368,8 @@
     ("C-c C-o" "minibuffer-collect")
     ;; the same prompt as the bar, panel, or modal while it is up
     ("C-c C-t" "minibuffer-cycle-shape")
-    ("DEL" "minibuffer-delete-backward")))
+    ("DEL" "minibuffer-delete-backward")
+    ("<delete>" "minibuffer-delete-row")))
 
 (for-each
   (lambda (key)
@@ -5046,6 +5076,12 @@
                                   (history-items key)))))
     (set! *minibuffer-history* (alist-put *minibuffer-history* key (take items *minibuffer-history-max*)))))
 
+;; forget one entry, as if it had never been chosen
+(define (history-remove! key item)
+  (set! *minibuffer-history*
+        (alist-put *minibuffer-history* key
+                   (filter (lambda (x) (not (equal? x item))) (history-items key)))))
+
 ;; reorder candidates so remembered ones lead, in recency order
 (define (history-order key candidates)
   (let ((hist (filter (lambda (h) (member h candidates)) (history-items key))))
@@ -5068,196 +5104,19 @@
     ;; raw prefix across that boundary, then consume it after the selected
     ;; command has had the same view it would get from a direct keybinding.
     (let ((prefix (current-prefix-arg)))
-      (minibuffer-read "M-x "
+      (set! *mb-history-key* 'M-x)
+      (set! *mb-history-pos* -1)
+      (minibuffer-read* "M-x "
         (annotate 'command (history-order 'M-x (command-names)))
-        (lambda (cmd)
-          (history-push! 'M-x cmd)
-          (when prefix (set-prefix-arg! prefix))
-          (run-command cmd)
-          (when prefix (set-prefix-arg! #f)))))))
-
-;;; Cmd-p answers "how do I do this?" while M-x answers "what is the
-;;; command called?". Apropos supplies task-language matches from command
-;;; docs and recipes; the palette projects that broad catalog down to things
-;;; a reader can act on here.
-;; A plain sentence can bind a key: "bind C-x C-g k to group-kill". The
-;; palette recognizes it, offers it first, and runs it on RET.
-(define (command-palette--bind-parse query)
-  (let* ((q (string-trim (or query "")))
-         (words (remove (lambda (w) (equal? w "")) (string-split q " "))))
-    (and (>= (length words) 4)
-         (equal? (string-downcase (car words)) "bind")
-         (let loop ((ws (cdr words)) (keys '()))
-           (cond
-             ((null? ws) #f)
-             ((equal? (string-downcase (car ws)) "to")
-              (and (not (null? keys))
-                   (pair? (cdr ws))
-                   (null? (cddr ws))
-                   (let ((command (cadr ws))
-                         (seq (string-join (reverse keys) " ")))
-                     (and (not (equal? seq ""))
-                          (command-fn command)
-                          (list seq command)))))
-             (else (loop (cdr ws) (cons (car ws) keys))))))))
-
-(define (command-palette--bind-hit query)
-  (let ((parsed (command-palette--bind-parse query)))
-    (and parsed
-         (list 'kind "intent"
-               'name (string-append "bind " (car parsed) " to " (cadr parsed))
-               'keys (car parsed)
-               'command (cadr parsed)))))
-
-(define (command-palette--candidate hit)
-  (let ((kind (plist-get hit 'kind))
-        (name (or (plist-get hit 'name) (plist-get hit 'task))))
-    (cond
-      ((equal? kind "command")
-       (list name
-             (string-append "command  "
-                            (let ((key (plist-get hit 'key))) (if key key ""))
-                            "  " (or (plist-get hit 'doc) ""))))
-      ((equal? kind "recipe")
-       (let ((inputs (or (plist-get hit 'inputs) '())))
-         (list name
-               (if (null? inputs)
-                   "recipe  runs immediately"
-                   (string-append "recipe  asks for "
-                                  (number->string (length inputs))
-                                  (if (= (length inputs) 1) " input" " inputs"))))))
-      ((equal? kind "intent")
-       (list name
-             (string-append "bind  " (plist-get hit 'keys)
-                            " → " (plist-get hit 'command)
-                            "  everywhere")))
-      (else #f))))
-
-;; A command the palette can draw: name, key and doc, in apropos hit shape.
-(define (command-palette--command-hit name)
-  (list 'kind "command" 'name name 'doc (command-doc name)
-        'key (let ((k (key-for-command name))) (if (equal? k "") #f k))))
-
-;; The palette draws commands and recipes, so it searches those two alone.
-;; The whole catalog costs an index rebuild after every package load, and
-;; the semantic pass costs a network call. The palette searches again on
-;; every keystroke burst and can pay neither.
-(define (command-palette--search query)
-  (let ((words (apropos-query-words query)))
-    (append
-      (let ((bind (command-palette--bind-hit query)))
-        (if bind (list bind) '()))
-      (map command-palette--command-hit
-           (filter (lambda (name)
-                     (apropos-text-hit?
-                       (string-append name " " (command-doc name)) words))
-                   (command-names)))
-      (map command-palette--recipe-hit
-           (filter (lambda (recipe)
-                     (apropos-text-hit? (command-palette--recipe-text recipe) words))
-                   (if (boundp (quote *recipes*)) *recipes* '()))))))
-
-;; A recipe the palette can draw, in apropos hit shape.
-(define (command-palette--recipe-hit recipe)
-  (list 'kind "recipe" 'name (car recipe) 'inputs (caddr recipe)))
-
-;; A recipe matches on its task words and the aliases people use for it.
-(define (command-palette--recipe-text recipe)
-  (let ((entry (catalog-entry 'recipe (car recipe))))
-    (string-append (car recipe) " "
-                   (or (and entry (catalog--get entry 'aliases)) ""))))
-
-(define (command-palette-candidates query)
-  (if (equal? (string-trim query) "")
-      ;; The resting palette is familiar and cheap: the same MRU command
-      ;; table as M-x. The search takes over as soon as the user states intent.
-      (annotate 'command (history-order 'M-x (command-names)))
-      (filter (lambda (candidate) candidate)
-              (map command-palette--candidate (command-palette--search query)))))
-
-(define *command-palette-debounce-ms* 80)
-
-(define (command-palette--refresh input)
-  ;; A timer can outlive the prompt that scheduled it. Never put Cmd-p's
-  ;; results into a later prompt, and never let an old query replace a newer
-  ;; one after the user has kept typing.
-  (let ((state (minibuffer-state)))
-    (when (and state
-               (equal? (plist-get state 'prompt) "Command: ")
-               (equal? (plist-get state 'input) input))
-      (minibuffer-set-candidates! (command-palette-candidates input)))))
-
-(define (command-palette--render-recipe expr bindings)
-  ;; Every input becomes a printed Scheme string, not source. Quotes,
-  ;; backslashes and newlines are escaped by value->string before the token is
-  ;; replaced, so a path or prompt value cannot turn into executable code.
-  (if (null? bindings)
-      expr
-      (let* ((binding (car bindings))
-             (token (string-append "{{" (symbol->string (car binding)) "}}"))
-             (rendered (string-join (string-split expr token)
-                                    (value->string (cadr binding)))))
-        (command-palette--render-recipe rendered (cdr bindings)))))
-
-(define (command-palette--eval-recipe recipe bindings)
-  (let ((result
-          (eval-string-safe
-            (command-palette--render-recipe (cadr recipe) bindings))))
-    (if (equal? (car result) 'ok)
-        (message (value->string (cadr result)))
-        (message (string-append "Recipe error: " (cadr result))))))
-
-(define (command-palette--collect-recipe recipe inputs bindings)
-  (if (null? inputs)
-      (command-palette--eval-recipe recipe bindings)
-      (let ((input (car inputs)))
-        (minibuffer-read (cadr input) '()
-          (lambda (value)
-            (command-palette--collect-recipe
-              recipe (cdr inputs) (append bindings (list (list (car input) value)))))))))
-
-(define (command-palette--run-recipe recipe)
-  (command-palette--collect-recipe recipe (caddr recipe) '()))
-
-(define (command-palette--run choice)
-  (let ((bind (command-palette--bind-parse choice)))
-    (cond
-      ((command-fn choice)
-       (history-push! 'M-x choice)
-       (run-command choice))
-      ((and bind (boundp (quote keys-bind-intent)))
-       (keys-bind-intent (car bind) (cadr bind)))
-      ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
-       (command-palette--run-recipe (assoc choice *recipes*)))
-      (else (message (string-append "No command or recipe named " choice))))))
-
-(domain! 'interaction)
-(effects! '(write execute))
-
-(define-command "command-palette"
-  "Find an action by intent across command docs and recipes"
-  (lambda ()
-    ;; every pick and every ask goes on 'palette, so M-p walks them back
-    (set! *mb-history-key* 'palette)
-    (set! *mb-history-pos* -1)
-    (minibuffer-read* "Command: " (command-palette-candidates "")
-      (list (list 'confirm
-              (lambda (choice)
-                (set! *mb-history-key* #f)
-                (unless (equal? choice "") (history-push! 'palette choice))
-                (command-palette--run choice)))
-            (list 'cancel (lambda () (set! *mb-history-key* #f)))
-            (list 'change
-              (lambda (input)
-                (debounce!
-                  (string-append "command-palette:" (selected-frame))
-                  *command-palette-debounce-ms*
-                  command-palette--refresh
-                  input)))
-            ;; Apropos already matched and ranked these results. In
-            ;; particular, a doc match need not contain INPUT in its label.
-            (list 'filter #f)
-            (list 'style "palette")))))
+        (list (list 'confirm
+                (lambda (cmd)
+                  (set! *mb-history-key* #f)
+                  (history-push! 'M-x cmd)
+                  (when prefix (set-prefix-arg! prefix))
+                  (run-command cmd)
+                  (when prefix (set-prefix-arg! #f))))
+              (list 'cancel (lambda () (set! *mb-history-key* #f)))
+              (list 'style #f))))))
 
 (domain! 'unknown)
 (effects! '(unknown))

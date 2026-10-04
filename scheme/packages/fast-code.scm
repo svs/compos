@@ -701,6 +701,7 @@
   (let* ((model (or model0 fast-code-model))
          (t0 (fast-now-ms))
          (authored (fast-recipe intent))
+         (remembered (and (not authored) (fast-remembered intent)))
          (steps '())
          (timing '())
          ;; the record M-x fast-trace reads: each stage adds what it saw
@@ -725,9 +726,14 @@
                        (set! *fast-pending* #f)
                        (k (list 'code (car (cdr r)) 'steps steps 'timing timing
                                 'trace trace 'source model 'ms ms))))))))
-    (if authored
+    (cond
+      (authored
         (k (list 'code authored 'source 'recipe 'ms (- (fast-now-ms) t0)
-                 'trace (list 'path "recipe title")))
+                 'trace (list 'path "recipe title"))))
+      (remembered
+        (k (list 'code remembered 'source 'remembered 'ms (- (fast-now-ms) t0)
+                 'trace (list 'path "remembered"))))
+      (else
         ;; decide first: one operation goes straight to the stitch; several,
         ;; or a doubt, are broken into steps, one apropos each
         (let ((finish (lambda (r) (set! timing (append timing (list 'total (- (fast-now-ms) t0))))
@@ -749,7 +755,18 @@
                         (note 'split-raw steps-text)
                         (set! timing (append timing (list 'split (- (fast-now-ms) t0))))
                         (fast-stitch! intent steps finish searched model note))
-                      (fast-llm-failed finish))))))))))
+                      (fast-llm-failed finish)))))))))))
+
+;; The code the same words got last time, when it ran clean. The newest
+;; record of the words decides: one that failed sends them to the model.
+(define (fast-remembered intent)
+  (let ((rec (find (lambda (r) (equal? (plist-get r 'intent) (string-trim intent)))
+                   *fast-trace*)))
+    (and rec
+         (string? (plist-get rec 'code))
+         (string? (plist-get rec 'gave))
+         (not (string-prefix? "error:" (plist-get rec 'gave)))
+         (plist-get rec 'code))))
 
 ;; the error side of llm-with-model: the ask ends, and its record says why
 (define (fast-llm-failed done)
@@ -807,7 +824,7 @@
                  (fast-short-reason (plist-get r 'reason))))
 
 (define (fast-run! intent)
-  (unless (fast-recipe intent)
+  (unless (or (fast-recipe intent) (fast-remembered intent))
     (message (string-append "fast: asking " fast-code-model "...")))
   (fast-resolve intent
     (lambda (r)
@@ -879,8 +896,16 @@
 ;; What you typed is a row. A sentence (three words or more) leads, so RET
 ;; hands your words to fast-code, the way ! completion does; a short query
 ;; keeps the palette's own ranking, and your words close the list.
-(define (fast-palette-rows query base)
-  (let ((q (string-trim query)))
+;; A past ask with a remembered answer says so, and how to drop it.
+(define (fast-palette-mark row)
+  (if (and (pair? row) (pair? (cdr row)) (equal? (cadr row) "past  ask")
+           (fast-remembered (car row)))
+      (list (car row) "past  ask  remembered")
+      row))
+
+(define (fast-palette-rows query base0)
+  (let ((q (string-trim query))
+        (base (map fast-palette-mark base0)))
     (cond
       ((equal? q "") base)
       ((pair? (filter (lambda (c) (equal? (car c) q)) base)) base)
@@ -929,6 +954,27 @@
 
 (define-command "fast-recipes" "Show the functions fast-code learned"
   (lambda () (with-frame-windows fast-show-learned)))
+
+;; A wrong answer is forgotten: every record of the words goes, so the next
+;; time they reach the model again. The words stay in the palette history.
+(define (fast-forget-answer! intent)
+  (let ((words (string-trim intent)))
+    (set! *fast-trace* (remove (lambda (r) (equal? (plist-get r 'intent) words)) *fast-trace*))
+    (ignore-errors
+      (lambda ()
+        (write-file! (fast-trace-path)
+          (fold (lambda (acc r) (string-append (json-encode r #f) "\n" acc)) "" *fast-trace*))))
+    words))
+
+(define (fast-remembered-intents)
+  (fast-distinct (filter fast-remembered
+                         (filter string? (map (lambda (r) (plist-get r 'intent)) *fast-trace*)))))
+
+(define-command "fast-forget-answer" "Forget the answer fast-code remembers for some words"
+  (lambda ()
+    (completing-read "Forget the answer to: " (fast-remembered-intents)
+      (lambda (intent) (message (string-append "fast: forgot the answer to " (fast-forget-answer! intent))))
+      'require-match #t)))
 
 (define-command "fast-forget" "Forget a function fast-code learned"
   (lambda ()
@@ -1040,3 +1086,4 @@
 ;; learned functions come back first; both are safe to re-run after a reload
 (fast-learned-load!)
 (fast-palette-install!)
+(set! *command-palette-row-delete* (lambda (name) (fast-forget-answer! name)))

@@ -19,7 +19,7 @@
     (buffer-kill! "*zz-work*")))
 
 (deftest 'the-visible-verbs-take-the-windows-as-they-stand
-  "group-new-from-visible founds a group from the visible work buffers; group-move-visible moves them"
+  "group-from-visible founds a group from the visible work buffers under a new name, and moves them to a group picked by name"
   (lambda ()
     (delete-other-windows!)
     (buffer-create "*zz-vis-a*") (buffer-create "*zz-vis-b*")
@@ -40,7 +40,7 @@
       (group-record-delete! id))))
 
 (deftest 'moving-the-visible-buffers-keeps-them-on-screen
-  "group-move-visible changes the group alone: the same windows stay up"
+  "group-from-visible on a picked group changes the group alone: the same windows stay up"
   (lambda ()
     (delete-other-windows!)
     (buffer-create "*zz-mv-a*") (buffer-create "*zz-mv-b*")

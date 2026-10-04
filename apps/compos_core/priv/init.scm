@@ -58,6 +58,8 @@
 ; mode hook on the chats already open, and that hook watches for
 ; completion. A cold boot has no chat open then; a Session restart does.
 (load "completion.scm")
+;; s-p: intent search over commands, recipes and past asks
+(load "palette.scm")
 
 (load "anchor.scm")
 (load "agenda.scm")

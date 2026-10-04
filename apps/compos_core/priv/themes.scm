@@ -1815,7 +1815,7 @@
 
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
-(public! 'theme-apply! "(theme-apply! NAME) — put NAME's faces on screen without persisting; #t, or #f for no such theme")
+(public! 'theme-apply! "(theme-apply! NAME) — low level: put NAME's faces on every frame, ignoring frame isolation, without persisting; #t, or #f for no such theme. To switch theme, call load-theme")
 (public! 'frame-theme-apply! "(frame-theme-apply! NAME [FRAME]) — FRAME wears NAME on its own; NAME #f gives it the global theme again")
 (public! 'frame-theme "(frame-theme [FRAME]) -> the theme FRAME wears on its own, or #f")
 (public! 'theme-current "(theme-current) -> the theme on screen in this frame")

@@ -26,9 +26,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `group-kill` |  | Kill every buffer in the current group; in the board, the marked groups |
 | `group-members` | `C-x C-g b` | Open the switcher on this group's members |
 | `group-move` | `C-x C-g m` | Move the selected buffers, else this buffer, to one group |
-| `group-move-visible` |  | Move every visible work buffer to another group |
 | `group-new` | `C-x C-g n` | Create and enter an empty group, or seed it with the selection |
-| `group-new-from-visible` | `C-x C-g v` | Found a group from every visible work buffer, with the windows as its first layout |
+| `group-from-visible` | `C-x C-g v` | Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows |
 | `group-pin` | `C-x C-g p` | Toggle a frame pin that keeps the current group through window changes |
 | `group-reload-config` |  | Re-read this group's config and directory into every buffer in it |
 | `group-rename` |  | Rename the current group; in the board, the group at point |

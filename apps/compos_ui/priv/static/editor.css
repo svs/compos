@@ -1960,12 +1960,18 @@ c-action-key {
 /* the input is the last row of the frame, the candidates sit
    above it: Emacs' minibuffer shape */
 .mb-panel:not(.palette) .mb-input-row {
-  padding: 10px 20px 11px; font-size: 18px;
+  padding: 8px 20px 9px; font-size: 1em;
 }
 .mb-panel:not(.palette) .mb-body { flex: 0 1 auto; min-height: 0; }
 .mb-panel:not(.palette) .mb-cands { max-height: min(48dvh, 440px); }
-.mb-panel:not(.palette) .prompt { font-size: 18px; margin-right: 8px; }
-.mb-panel:not(.palette) .mb-input { font-size: 18px; }
+/* em, like the palette: a fixed 18px read louder than the buffers the
+   prompt sits under. The prompt is a label for the input, so it steps
+   back in colour and weight and the typed text leads. */
+.mb-panel:not(.palette) .prompt {
+  font-size: 1em; margin-right: 8px;
+  font-weight: 500; color: var(--dim-fg, #8a857a);
+}
+.mb-panel:not(.palette) .mb-input { font-size: 1em; }
 /* A plain completion prompt IS the minibuffer (editor.scm,
    minibuffer-read*): the bottom rows of the frame, in the flow.
    It takes its height from the window tree, which shrinks by

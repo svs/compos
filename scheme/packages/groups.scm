@@ -4035,24 +4035,27 @@ is forgotten and that group falls back to creation order in the switcher."
               ;; stand become the group's first layout
               (group-create-and-enter! name selected (window-tree))))))))
 
-;; The two "visible" verbs: the windows as they stand are the seed, with
-;; no marking. The verb table folded them into group-new (a selection,
-;; else nothing) and group-move; a person wants them by name.
-(define-command "group-new-from-visible"
-  "Found a group from every visible work buffer, with the windows as its first layout"
-  (lambda ()
-    (if (null? (group-visible-work-buffers))
-        (message "No work buffers visible")
-        (group-read-new-name "New group from these windows: " group-found-from-windows!))))
-
-(define-command "group-move-visible"
-  "Move every visible work buffer to another group"
+;; The "visible" verb: the windows as they stand are the seed, with no
+;; marking. A group picked from the list takes the visible work buffers, and
+;; the windows stay as they are. A new name founds a group from them, with
+;; the windows as its first layout, and enters it.
+(define-command "group-from-visible"
+  "Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows"
   (lambda ()
     (let ((buffers (group-visible-work-buffers)))
       (if (null? buffers)
           (message "No work buffers visible")
-          ;; Everything on screen goes, so the windows stay as they are.
-          (group-move-read-destination! buffers #t)))))
+          (minibuffer-read (string-append "Move " (number->string (length buffers))
+                                          (if (= (length buffers) 1) " buffer" " buffers")
+                                          " to (pick or type new): ")
+                           (group-names)
+            (lambda (input)
+              (let* ((name (string-trim input))
+                     (id (and (not (equal? name "")) (group-resolve-id name))))
+                (cond ((equal? name "") (message "Group needs a name"))
+                      (id (group-confirm-target! id
+                            (lambda () (group-move-buffers-to! buffers id #t))))
+                      (else (group-found-from-windows! name))))))))))
 
 (define-command "buffer-new" "Create a buffer in the current group"
   (lambda ()
@@ -4716,7 +4719,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (define-key "buffer-group-map" "m" "group-move")
   (define-key "buffer-group-map" "n" "group-new")
   (define-key "buffer-group-map" "r" "remove-group-from-buffer")
-  (define-key "buffer-group-map" "v" "group-new-from-visible"))
+  (define-key "buffer-group-map" "v" "group-from-visible"))
 
 (group-keymap-install!)
 
@@ -4829,7 +4832,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda (name) (catalog-meta! 'command name 'domain 'buffers 'effects '(write)))
   '("group-add" "group-move" "remove-group-from-buffer"
     "remove-buffers-from-group" "group-new" "group-rename"
-    "group-new-from-visible" "group-move-visible"
+    "group-from-visible"
     "group-dissolve" "group-revive"))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))

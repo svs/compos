@@ -99,7 +99,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x C-g m` | `group-move` | Move the selected buffers, else this buffer, to one group |
 | `C-x C-g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
 | `C-x C-g r` | `remove-group-from-buffer` | Toggle this buffer out of the groups it belongs to; C-g applies |
-| `C-x C-g v` | `group-new-from-visible` | Found a group from every visible work buffer, with the windows as its first layout |
+| `C-x C-g v` | `group-from-visible` | Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows |
 | `C-x C-q` | `read-only-mode` | Toggle whether this buffer refuses edits |
 | `C-x C-s` | `save-buffer` | Save the current buffer to its file |
 | `C-x C-t` | `switch-window-buffer` | Choose another buffer from this window's title |

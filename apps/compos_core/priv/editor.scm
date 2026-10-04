@@ -5237,8 +5237,16 @@
 (define-command "command-palette"
   "Find an action by intent across command docs and recipes"
   (lambda ()
+    ;; every pick and every ask goes on 'palette, so M-p walks them back
+    (set! *mb-history-key* 'palette)
+    (set! *mb-history-pos* -1)
     (minibuffer-read* "Command: " (command-palette-candidates "")
-      (list (list 'confirm command-palette--run)
+      (list (list 'confirm
+              (lambda (choice)
+                (set! *mb-history-key* #f)
+                (unless (equal? choice "") (history-push! 'palette choice))
+                (command-palette--run choice)))
+            (list 'cancel (lambda () (set! *mb-history-key* #f)))
             (list 'change
               (lambda (input)
                 (debounce!
@@ -5517,7 +5525,7 @@
 ;; Cmd-up and Cmd-down always walk the group (groups.scm), in every state.
 (for-each (lambda (k) (keymap-unset! "editing-caret-map" k)) '("s-<up>" "s-<down>"))
 
-(define *editing-landing* #f)   ; (frame window buffer) of the last landing
+(define *editing-landing* '())  ; ((frame window buffer) ...) the last landing of each frame
 
 (define (editing-state? buf)
   (if (member "editing-state-map" (buffer-minor-maps buf)) #t #f))
@@ -5594,12 +5602,16 @@
   (let ((w (active-window)))
     (and w (list (selected-frame) w (window-buffer w)))))
 
-;; a new landing starts in the movement state
+;; a new landing starts in the movement state. Each frame keeps its own:
+;; a window change in another frame is not a landing here, and with one
+;; record for all of them it put the buffer you were typing in back in
+;; the movement state at your next key.
 (define (editing--check-landing!)
   (let ((here (editing--landing)))
-    (unless (equal? here *editing-landing*)
-      (set! *editing-landing* here)
-      (let ((buf (and here (caddr here))))
+    (when (and here (not (member here *editing-landing*)))
+      (set! *editing-landing*
+        (cons here (remove (lambda (l) (equal? (car l) (car here))) *editing-landing*)))
+      (let ((buf (caddr here)))
         (when (and buf (buffer-exists? buf))
           (editing-state-off! buf))))))
 
@@ -5819,9 +5831,12 @@
        (run-command "kill-word") #t)
       ((and (= from to) (member type '("deleteSoftLineForward" "deleteHardLineForward")))
        (run-command "kill-line") #t)
+      ;; a soft line is the visual row when the wrap map can say
       ((and (= from to) (member type '("deleteSoftLineBackward" "deleteHardLineBackward")))
-       (let ((bol (line-start-position (line-number-at-pos (point)))))
-         (input-intent--replace! bol (point) "")))
+       (let* ((bol (line-start-position (line-number-at-pos (point))))
+              (row (and (equal? type "deleteSoftLineBackward") (visual-row-start (point))))
+              (start (if (and row (< row (point))) row bol)))
+         (input-intent--replace! start (point) "")))
       ((string-prefix? "delete" type)
        (input-intent--replace! from to ""))
       ((equal? type "historyUndo") (run-command "undo") #t)

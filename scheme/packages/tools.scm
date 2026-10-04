@@ -1393,32 +1393,55 @@
 ;; That is the fail-closed rule, applied where it bites.
 ;; author: the proxy sends its thread's slug (COMPOS_AGENT), so edits an
 ;; external agent makes through this bridge land in buffer-authors
-(define *mcp-proxy-grants* '())
+;; What "always" remembers: the VERB the policy tripped on, for every
+;; chat of the asking chat's group. It is kept in the group record, so it
+;; lasts as long as the group. The key is never eval-scheme itself — that
+;; tool's name says nothing about what it runs.
+(define (mcp-proxy--grant-key slug name args-json raw)
+  ;; the pattern itself, so the box can list it and take it back; a
+  ;; shell gate ask keys on its kind, such as "shell edit"
+  (let* ((chat (and slug (agent-info slug) (agent-buf slug)))
+         (group (and chat (buffer-group chat)))
+         (verb (or (permission-denied-verb? raw)
+                   (car (mcp-proxy--action slug name args-json raw)))))
+    (and group (not (equal? verb "eval-scheme")) (list group verb))))
 
-;; What "always" remembers, as (SLUG KEY). The key is the VERB the
-;; policy tripped on, never the tool: always-allowing a whatsapp tool must
-;; not also allow the next irreversible verb it can reach, and "always"
-;; on eval-scheme must never blanket-allow every future eval — that tool's
-;; name says nothing about what it runs. With no key worth keeping,
-;; always simply means once.
-(define (mcp-proxy--grant-key name raw)
-  (or (and (boundp (quote permission-denied-verb?))
-           (permission-denied-verb? raw))
-      (and (not (equal? name "eval-scheme")) name)))
+(define (mcp-proxy--granted? slug name args-json raw)
+  (let ((key (mcp-proxy--grant-key slug name args-json raw)))
+    (and key
+         (member (cadr key) (or (group-setting (car key) 'always-verbs) '()))
+         #t)))
 
-(define (mcp-proxy--granted? slug name raw)
-  (let ((key (and slug (mcp-proxy--grant-key name raw))))
-    (and key (member (list slug key) *mcp-proxy-grants*) #t)))
-
-(define (mcp-proxy--grant! slug name raw)
-  (let ((key (and slug (mcp-proxy--grant-key name raw))))
+(define (mcp-proxy--grant! slug name args-json raw)
+  (let ((key (mcp-proxy--grant-key slug name args-json raw)))
     (when key
-      (set! *mcp-proxy-grants* (cons (list slug key) *mcp-proxy-grants*)))))
+      (let ((verbs (or (group-setting (car key) 'always-verbs) '())))
+        (unless (member (cadr key) verbs)
+          (group-setting-set! (car key) 'always-verbs (cons (cadr key) verbs)))))))
 
 (define (mcp-proxy--refused raw verdict)
   (base64-encode
     (decide-refusal 'policy
       (or (permission-denied-verb? raw) (symbol->string verdict)))))
+
+;; A lone shell command, run off the lane with RESOLVE taking its output.
+;; It runs in the sandbox of the chat it came from: the edit author is not
+;; set on this path, so the chat comes from AUTHOR or the current buffer.
+(define (mcp-proxy--shell-run! parts author resolve)
+  (let* ((chat (or (and author (string-prefix? "agent:" author)
+                        (agent-buf (substring author 6 (string-length author))))
+                   (and (agent-slug-of (current-buffer)) (current-buffer))))
+         (cmd (if (boundp (quote agent-sandbox-wrap))
+                  (agent-sandbox-wrap (car parts) chat)
+                  (car parts)))
+         (run (if (boundp (quote %shell-command->string-builtin))
+                  %shell-command->string-builtin
+                  shell-command->string)))
+    (let ((dir (or (cadr parts)
+                   (and chat (with-current-buffer chat default-directory)))))
+      (if dir
+          (run cmd dir resolve)
+          (run cmd resolve)))))
 
 (define (mcp-proxy--run name args-json author)
   ;; The async lane. An eval-scheme payload whose whole program is
@@ -1436,9 +1459,7 @@
         (let ((resolve (lambda (out)
                          (eval-resolve! token
                            (base64-encode (value->string out))))))
-          (if (cadr parts)
-              (shell-command->string (car parts) (cadr parts) resolve)
-              (shell-command->string (car parts) resolve))
+          (mcp-proxy--shell-run! parts author resolve)
           'pending))
       ((and token read-only?)
        ;; the task answers the caller itself. The callback runs on a lane
@@ -1465,10 +1486,91 @@
 ;; The wait happens in a Task behind eval-defer!, so the Session stays
 ;; free while the card sits there, and the chat's own C-c C-y / C-c C-n
 ;; answer it like any other.
+;; What the card says: why this call stopped and what it will do, so the
+;; answer is a decision and not a guess. The tool's name alone is not.
+(define (mcp-proxy--shell-commands x)
+  "the command strings of every shell call in the read payload X, in order"
+  (cond ((not (pair? x)) '())
+        ((and (member (car x) decide--shell-symbols) (pair? (cdr x)) (string? (cadr x)))
+         (cons (if (and (pair? (cddr x)) (string? (caddr x)))
+                   (string-append (cadr x) "   [in " (abbreviate-file-name (caddr x)) "]")
+                   (cadr x))
+               (mcp-proxy--shell-commands (cddr x))))
+        (else (append (mcp-proxy--shell-commands (car x))
+                      (mcp-proxy--shell-commands (cdr x))))))
+
+(define (mcp-proxy--clip s n)
+  (if (> (string-length s) n) (string-append (substring s 0 n) " ...") s))
+
+;; What the always-ask patterns read in an eval: the name of every call
+;; and the command of every shell call, not the payload's text. A string,
+;; a comment or quoted data names no action, and must not raise a card.
+;; Code that does not read is matched as it came: that fails closed.
+(define (mcp-proxy--calls x)
+  "the head names of every call in the read payload X, quoted data left out"
+  (cond ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        (else (append (if (symbol? (car x)) (list (symbol->string (car x))) '())
+                      (apply append (map mcp-proxy--calls x))))))
+
+(define (mcp-proxy--call-text name args-json)
+  (let* ((raw (string-append name " " args-json))
+         (code (and (equal? name "eval-scheme") (mcp-proxy--code args-json)))
+         (forms (and code (ignore-errors (lambda () (scheme-read code))))))
+    (if (pair? forms)
+        (string-join (cons name (append (mcp-proxy--calls forms)
+                                        (mcp-proxy--shell-commands forms)))
+                     " ")
+        raw)))
+
+(define (mcp-proxy--smallest x pat)
+  "the smallest list in the read payload X whose text PAT matches, or #f"
+  (and (pair? x)
+       (re-match? pat (string-downcase (value->string x)))
+       (or (let loop ((ys x))
+             (and (pair? ys)
+                  (or (mcp-proxy--smallest (car ys) pat) (loop (cdr ys)))))
+           x)))
+
+;; (mcp-proxy--action SLUG NAME ARGS-JSON RAW) -> (VERB TARGET)
+;; What made this call ask, and what it acts on: the card names both, and
+;; Always is kept for exactly that pair. A shell command without a
+;; directory runs in the chat's, so the target says which.
+(define (mcp-proxy--action slug name args-json raw)
+  (let* ((code (and (equal? name "eval-scheme") (mcp-proxy--code args-json)))
+         (forms (and code (ignore-errors (lambda () (scheme-read code)))))
+         (cmds (if (pair? forms) (mcp-proxy--shell-commands forms) '()))
+         (pat (permission-denied-verb? raw))
+         (hit (and pat (re-match pat (string-downcase raw))))
+         (kind (and code (pair? cmds) (not pat) (decide--shell-kind-seen code)))
+         (verb (cond (hit (string-trim (car hit)))
+                     (kind (string-append "shell " (symbol->string kind)))
+                     (else name)))
+         (shell (if pat
+                    (filter (lambda (c) (re-match? pat (string-downcase c))) cmds)
+                    cmds))
+         (chat (and slug (agent-info slug) (agent-buf slug)))
+         (dir (and chat (with-current-buffer chat default-directory)))
+         (in (lambda (c)
+               (if (or (re-match? "   \\[in " c) (not dir))
+                   c
+                   (string-append c "   [in " (abbreviate-file-name dir) "]"))))
+         (form (and pat (null? shell) (pair? forms) (mcp-proxy--smallest forms pat)))
+         (target (cond ((pair? shell) (string-join (map in shell) "  ;  "))
+                       (form (value->string form))
+                       (code (first-line code))
+                       (else args-json))))
+    (list verb (mcp-proxy--clip target 300))))
+
+(define (mcp-proxy--ask-title slug name args-json raw)
+  (let ((action (mcp-proxy--action slug name args-json raw)))
+    (string-append (car action) ": " (cadr action))))
+
 (define (mcp-proxy--ask slug name args-json author raw)
   (let ((token (eval-defer!)))
     (task-run!
-      (lambda () (agent-ask-permission! slug name raw permission-ask-timeout-ms))
+      (lambda () (agent-ask-permission! slug (mcp-proxy--ask-title slug name args-json raw)
+                                         raw permission-ask-timeout-ms))
       (lambda (ok answer)
         (cond
           ((not ok)
@@ -1478,7 +1580,7 @@
            ;; the grant is recorded HERE, on the Session, where the
            ;; global lives — the Task that waited has its own heap
            (when (equal? answer 'always)
-             (mcp-proxy--grant! slug name raw))
+             (mcp-proxy--grant! slug name args-json raw))
            (mcp-proxy--run-approved token name args-json author))
           (else
            (eval-resolve! token (base64-encode (decide-refusal 'denied)))))))
@@ -1493,9 +1595,7 @@
     (if parts
         (let ((resolve (lambda (out)
                          (eval-resolve! token (base64-encode (value->string out))))))
-          (if (cadr parts)
-              (shell-command->string (car parts) (cadr parts) resolve)
-              (shell-command->string (car parts) resolve)))
+          (mcp-proxy--shell-run! parts author resolve))
         (let ((code (mcp-proxy--code args-json))
               (gate? (boundp (quote decide-shell-approve!))))
           (when (and code gate?) (decide-shell-approve! code))
@@ -1520,18 +1620,41 @@
       'ask
       verdict))
 
+;; The shell gate's refusal. A kind the policy refuses stays refused
+;; whatever the permission mode or an Always granted: the ask above only
+;; turns an allow into an ask, so without this a refuse let the call run.
+(define (mcp-proxy--shell-refusal name args-json)
+  (and (equal? name "eval-scheme")
+       (boundp (quote decide-shell-verdict))
+       decide-shell-gate
+       (let ((code (mcp-proxy--code args-json)))
+         (and code
+              (decide-shell-calls? code)
+              (let* ((kind (decide--shell-kind-seen code))
+                     (rule (and kind (assq kind decide-shell-policy))))
+                (and rule (equal? (cadr rule) 'refuse)
+                     (decide-refusal kind)))))))
+
 (define (mcp-proxy-call name args-b64 &optional author)
   (let* ((args-json (base64-decode args-b64))
-         (raw (string-append name " " args-json))
+         (raw (mcp-proxy--call-text name args-json))
          ;; the author names the thread when one is attributed; otherwise
          ;; the chat this eval runs in is the one that has to answer
          (slug (or (and author (string-prefix? "agent:" author)
                         (substring author 6 (string-length author)))
                    (agent-slug-of (current-buffer))))
-         (verdict (cond ((mcp-proxy--granted? slug name raw) 'allow-always)
+         ;; a read the gate refuses and can say in Scheme runs as Scheme
+         (answer (and (equal? name "eval-scheme")
+                      (boundp (quote decide-shell-read-answer))
+                      (decide-shell-read-answer (mcp-proxy--code args-json))))
+         (refusal (and (not answer) (mcp-proxy--shell-refusal name args-json)))
+         (verdict (cond ((or answer refusal) 'deny)
+                        ((mcp-proxy--granted? slug name args-json raw) 'allow-always)
                         (else (mcp-proxy--shell-ask name args-json
                                 (permit? #f name "tool" raw))))))
     (cond
+      (answer (base64-encode answer))
+      (refusal (base64-encode refusal))
       ((member verdict '(allow allow-always))
        (mcp-proxy--run name args-json author))
       ((and (equal? verdict 'ask) slug (agent-info slug))
@@ -1584,7 +1707,9 @@
               (list (cadr form) (car rest)))
              ((and (pair? rest) (null? (cdr rest))
                    (equal? (car rest) '(default-directory)))
-              (list (cadr form) (default-directory)))
+              ;; the chat's directory, found where the command runs:
+              ;; here the Session's current buffer is not the chat
+              (list (cadr form) #f))
              (else #f))))))
 
 ;; This surface serves mcp-proxy-tools-json — the Scheme registry — so

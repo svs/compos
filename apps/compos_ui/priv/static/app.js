@@ -1263,15 +1263,16 @@
           this.place();
           return;
         }
-        // chat-to-bottom said, in so many words, follow again. A
-        // token is unambiguous where the stick flag is not: it
-        // changes only when someone asked, never because a report
-        // is in flight, so adopting it cannot fight the reader.
+        // chat-to-bottom said, in so many words, follow again, and
+        // chat-to-top said go to this place. A token is unambiguous
+        // where the stick flag is not: it changes only when someone
+        // asked, never because a report is in flight, so adopting
+        // the place it came with cannot fight the reader.
         if (seq !== this.followSeq) {
           this.followSeq = seq;
-          this.stick = true;
-          this.anchor = null;
-          this.offset = 0;
+          this.stick = this.el.dataset.stick !== "false";
+          this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
+          this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
           this.place();
           return;
         }

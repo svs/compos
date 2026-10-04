@@ -65,7 +65,8 @@ nonstandard install out of the built-in connector catalog."
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"
-    models ("gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-5.5"
+    models ("gpt-6.1-sol" "gpt-6-astra" "gpt-6-sol" "gpt-6-luna"
+            "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-5.5"
             "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex-spark")))
 
 (define-connector! "codex-app-server" *codex-app-server-connector*)
@@ -210,7 +211,16 @@ nonstandard install out of the built-in connector catalog."
         (message (if n
                      (string-append "model catalog: " (number->string n)
                                     " models")
-                     "model catalog: no answer"))))))
+                     "model catalog: no answer"))))
+    ;; every agent connector reports its own list (chat-mode.scm)
+    (for-each
+      (lambda (name)
+        (llm-models-probe! name
+          (lambda (connector n)
+            (message (string-append connector ": "
+                       (if n (string-append (number->string n) " models")
+                           "no answer"))))))
+      (llm-models-probe-connectors))))
 
 ;; Every model the direct lane can be asked for: the favorites first, then
 ;; one of everything the snapshot and the providers know. sort is a

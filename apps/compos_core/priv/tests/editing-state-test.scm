@@ -74,6 +74,15 @@
     (editing--check-landing!)
     (check-equal! (editing-state? t--es-a) #f "coming back is a new landing")))
 
+(deftest 'a-landing-in-another-frame-leaves-this-one-armed
+  "each frame keeps its own landing: another frame's window change is not one here"
+  (lambda ()
+    (t--es-setup!)
+    (editing--after-command! "forward-char")
+    (set! *editing-landing* (cons (list "zz-other-frame" 1 t--es-b) *editing-landing*))
+    (editing--check-landing!)
+    (check-equal! (editing-state? t--es-a) #t "still armed after the other frame landed")))
+
 (deftest 'a-read-only-buffer-stays-in-the-movement-state
   "a command in a read-only buffer does not enter the editing state"
   (lambda ()

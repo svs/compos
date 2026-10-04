@@ -300,9 +300,19 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 ;; about — and PATTERN leads, because the pattern is the thought and the
 ;; root is the detail. Outside a repo the working directory is the root.
 (define (grep pattern &optional root)
-  (project-search-matches
-    (or root (project-root-cached (default-directory)) (default-directory))
-    pattern))
+  (if (and root (file-exists? root) (not (file-directory? root)))
+      ;; a file: its own lines, in the rows a project search gives
+      (let ((base (car (reverse (string-split root "/")))))
+        (let loop ((ls (string-split (read-file root) "\n")) (i 1) (acc '()))
+          (if (null? ls)
+              (reverse acc)
+              (loop (cdr ls) (+ i 1)
+                    (if (re-match? pattern (car ls))
+                        (cons (list (string-append base ":" (number->string i)) base i (car ls)) acc)
+                        acc)))))
+      (project-search-matches
+        (or root (project-root-cached (default-directory)) (default-directory))
+        pattern)))
 
 ;; preview borrows the window, the jump takes it. Both load the file once,
 ;; so a previewed match costs the same read as an opened one. The mode is

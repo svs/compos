@@ -593,8 +593,10 @@
 (effects! '(write external))
 
 (defcustom 'whatsapp-feed-enabled #f
-  "Start the WhatsApp feed when this package loads."
-  'group 'whatsapp 'type 'boolean)
+  "Run the WhatsApp feed. It starts at boot, so it stays on after a restart."
+  'group 'whatsapp 'type 'boolean
+  ;; custom.scm loads after this package, so the saved value arrives here
+  'set (lambda (on) (whatsapp-feed--apply on)))
 
 (defcustom 'whatsapp-feed-bridge "http://100.110.113.41:8080"
   "The bridge's REST server, which the sweep reads."
@@ -698,5 +700,10 @@
   (lambda () (whatsapp-feed-stop!) (message "WhatsApp feed off")))
 
 ;; after the load, not in it: a start inside the loader does not take
-(when whatsapp-feed-enabled
-  (debounce! 'whatsapp-feed-boot 0 (lambda (_) (whatsapp-feed-start!)) #f))
+(define (whatsapp-feed--apply on)
+  "(whatsapp-feed--apply ON) — start or stop the feed once the boot is done; starting twice is harmless"
+  ;; at boot a task cannot start yet, so the feed waits for the boot to end
+  (debounce! 'whatsapp-feed-boot 0
+             (lambda (_) (if on (whatsapp-feed-start!) (whatsapp-feed-stop!))) #f))
+
+(when whatsapp-feed-enabled (whatsapp-feed--apply #t))

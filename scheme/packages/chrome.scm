@@ -349,12 +349,20 @@
             (else (message "No tab for this chat"))))))
 
 (define (chrome--serve op args)
+  ;; Only the editor's own page says which window this frame sits in. Any
+  ;; other request may come from a page in another window, and taking its
+  ;; window here sent this frame's tabs there, out of sight.
   (let ((w (plist-get args 'window)))
-    (when w (set-frame-local! 'chrome-window w)))
+    (when (and w (equal? op "register")
+               (let ((f (plist-get args 'frame))) (or (not f) (equal? f (selected-frame)))))
+      (set-frame-local! 'chrome-window w)))
   ;; the overlay is disabled on the editor's own page, so any request that
-  ;; names a tab came from a real web page — that is the place to come back to
-  (let ((tb (plist-get args 'tab)))
-    (when tb
+  ;; names a tab came from a real web page — that is the place to come back to,
+  ;; when it is in this frame's window
+  (let ((tb (plist-get args 'tab))
+        (w (plist-get args 'window))
+        (mine (chrome-window)))
+    (when (and tb (or (not w) (not mine) (equal? w mine)))
       (set-frame-local! 'chrome-tab tb)
       (let ((t (chrome--tab-by-id tb *chrome-tab-cache*)))
         (when t (chrome--note-tab! (car (chrome--tab-candidate t)))))))
@@ -446,7 +454,7 @@
 ;; and its caller falls back to curl instead of erroring.
 (define (browser-fetch url k)
   (if (browser-connected?)
-      (browser-call "fetch" (list 'url url)
+      (browser-call "fetch" (chrome-here (list 'url url))
         (lambda (reply)
           (k (let ((type (plist-get reply 'type))
                    (html (plist-get reply 'html))
@@ -467,10 +475,8 @@
   (if (browser-connected?)
       (browser-call "snapshot"
         ;; the window routes the load to this frame's own profile and its logins
-        (let ((w (chrome-window-resolve!)))
-          (append (list 'url url)
-                  (if wait (list 'wait wait) '())
-                  (if w (list 'window w) '())))
+        (chrome-here (append (list 'url url)
+                             (if wait (list 'wait wait) '())))
         (lambda (reply)
           (k (let ((h (plist-get reply 'html)))
                (and (string? h) (not (equal? h "")) h)))))
@@ -566,6 +572,15 @@
 ;; Which browser window this frame belongs to. Every tab carries its own, so
 ;; this is what tells a tab in front of the reader from a tab on another
 ;; screen.
+;; Every browser thing happens in the active frame's window. A call that
+;; names neither a tab nor a window goes to whichever profile registered last,
+;; so each op that picks a place passes its ARGS through this.
+(define (chrome-here args)
+  (if (or (plist-get args 'tab) (plist-get args 'window))
+      args
+      (let ((w (chrome-window-resolve!)))
+        (if w (append args (list 'window w)) args))))
+
 (define (tab-window)
   (chrome-window-resolve!))
 
@@ -723,6 +738,7 @@
 (domain! 'chrome)
 (effects! '(read))
 (public! 'chrome-window "(chrome-window) — the browser window this frame is displayed in, or #f")
+(public! 'chrome-here "(chrome-here ARGS) — ARGS routed to the active frame's browser window, unless they already name a tab or window")
 (public! 'chrome-window-resolve!
   "(chrome-window-resolve!) — this frame's browser window, asking the browser when the extension has not said; remembers its own frame's answer")
 

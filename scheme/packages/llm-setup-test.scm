@@ -34,14 +34,22 @@
       '("a" "b" "c")
       "one of each")))
 
-(deftest 'the-model-list-keeps-the-live-answer-and-what-it-missed
-  "The picker shows the live list first, then anything declared it never named"
+(deftest 'the-model-list-is-the-backends-own
+  "A reported list is the whole menu; the declared seed shows only before one"
   (lambda ()
-    (check-equal!
-      (llm-model-options-merge '(("opus[1m]" "Opus (1M context)"))
-                               '(("opus[1m]" "") ("sonnet" "")))
-      '(("opus[1m]" "Opus (1M context)") ("sonnet" ""))
-      "a live display name wins, and a declared model still shows")))
+    (let ((saved *llm-connector-models*)
+          (buf (test-buffer! "zz-llm-models-own" "")))
+      (set! *llm-connector-models* '())
+      (define-connector! "zz-seeded" '(models ("seed-a" "seed-b")))
+      (check-equal! (map car (chat-model-options buf "zz-seeded")) '("seed-a" "seed-b")
+                    "nothing reported yet: the seed")
+      (llm-models-seen! "zz-seeded" '(("live-a" "Live A")))
+      (check-equal! (chat-model-options buf "zz-seeded") '(("live-a" "Live A"))
+                    "reported: only the backend's list")
+      (set! *agent-connectors*
+            (filter (lambda (c) (not (equal? (car c) "zz-seeded"))) *agent-connectors*))
+      (set! *llm-connector-models* saved)
+      (buffer-kill! buf))))
 
 (deftest 'a-connectors-model-list-outlives-its-session
   "The models a session reported are offered again for that connector"

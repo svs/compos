@@ -356,6 +356,11 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
     (let loop ((ps *permission-deny-patterns*))
       (cond ((null? ps) #f)
             ((and decide-allow-git (decide--git-pattern? (car ps))) (loop (cdr ps)))
+            ;; a pattern only a shell command acts on: the sandbox holds it
+            ((and (boundp (quote agent-sandbox-on?))
+                  (member (car ps) agent-sandbox-covered-patterns)
+                  (agent-sandbox-on?))
+             (loop (cdr ps)))
             ((re-match? (car ps) t) (car ps))
             (else (loop (cdr ps)))))))
 
@@ -403,6 +408,24 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
 
 (define decide--shell-primitives "shell-command->string|start-process!")
 
+;; The payload calls a shell when one of these names stands in its code as
+;; a symbol. Text that only names them, in a string or a comment, does
+;; not: an agent editing this file must not be taken for a shell read.
+(define decide--shell-symbols (list 'shell-command->string 'start-process!))
+
+(define (decide--tree-calls? x)
+  (and (pair? x)
+       (or (and (member (car x) decide--shell-symbols) #t)
+           (decide--tree-calls? (car x))
+           (decide--tree-calls? (cdr x)))))
+
+(define (decide-shell-calls? code)
+  "(decide-shell-calls? CODE) — #t when the eval-scheme payload CODE calls a shell; a payload that does not read as Scheme is judged by its text"
+  (let ((forms (ignore-errors (lambda () (scheme-read code)))))
+    (if (pair? forms)
+        (decide--tree-calls? forms)
+        (re-match? decide--shell-primitives code))))
+
 (define (decide--shell-criteria)
   (list 'edit "A shell command creates, writes, moves, renames or deletes a file or directory by itself: a > or >> redirection, sed -i, tee, cp, mv, rm, mkdir, touch, ln, patch, or an install step."
         'read "A shell command reads or searches files or directories: cat, head, tail, less, sed -n, ls, find, grep, rg, ag, wc, or a pipeline that feeds one of those a path."
@@ -448,10 +471,19 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
               (set! decide--shell-seen (list-head decide--shell-seen 200))))
           kind))))
 
+(define (decide--shell-rule kind)
+  "the policy row for KIND: a kind the sandbox holds runs, when the agent's chat has it on"
+  (cond ((not kind) #f)
+        ((and (boundp (quote agent-sandbox-on?))
+              (member kind agent-sandbox-covered-kinds)
+              (agent-sandbox-on?))
+         (list kind 'allow))
+        (else (assq kind decide-shell-policy))))
+
 (define (decide-shell-verdict code)
   "(decide-shell-verdict CODE) — the refusal the shell gate gives CODE, or #f to let it run; an ask the user has not approved refuses"
   (let* ((kind (decide--shell-kind-seen code))
-         (rule (and kind (assq kind decide-shell-policy))))
+         (rule (decide--shell-rule kind)))
     (cond ((not rule) #f)
           ((equal? (cadr rule) 'refuse) (decide-refusal kind))
           ((and (equal? (cadr rule) 'ask) (not (equal? code decide--shell-approved)))
@@ -471,10 +503,195 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
   "(decide-shell-asks? CODE) — #t when the shell gate would ask the user before the eval-scheme payload CODE runs"
   (and decide-shell-gate
        (string? code)
-       (re-match? decide--shell-primitives code)
+       (decide-shell-calls? code)
        (let* ((kind (decide--shell-kind-seen code))
-              (rule (and kind (assq kind decide-shell-policy))))
+              (rule (decide--shell-rule kind)))
          (and rule (equal? (cadr rule) 'ask) #t))))
+
+;; The read translator. A read the gate refuses, when it can be said in
+;; Scheme, runs as that Scheme call instead: the agent gets its answer,
+;; and the answer names the call, so the next search is the call. It is a
+;; parser, not a model: a command it does not know is left to the refusal.
+
+(effects! '(pure))
+
+(define (decide--sh-words cmd)
+  "the words of CMD as sh splits them, or #f when CMD needs more than splitting: a pipe, a redirect, a variable, a glob, a substitution"
+  (let ((n (string-length cmd)))
+    (let loop ((i 0) (word #f) (q #f) (words '()))
+      (if (>= i n)
+          (and (not q) (reverse (if word (cons word words) words)))
+          (let ((c (substring cmd i (+ i 1)))
+                (next (and (< (+ i 1) n) (substring cmd (+ i 1) (+ i 2)))))
+            (cond
+              ((and q (equal? c q)) (loop (+ i 1) (or word "") #f words))
+              ((equal? q "'") (loop (+ i 1) (string-append (or word "") c) q words))
+              ((and q (member c '("$" "`"))) #f)
+              ((and q (equal? c "\\") next (member next '("$" "`" "\"" "\\")))
+               (loop (+ i 2) (string-append (or word "") next) q words))
+              (q (loop (+ i 1) (string-append (or word "") c) q words))
+              ((member c '("'" "\"")) (loop (+ i 1) (or word "") c words))
+              ((member c '(" " "\t" "\n")) (loop (+ i 1) #f #f (if word (cons word words) words)))
+              ((member c '("|" ";" "&" ">" "<" "$" "`" "(" ")" "*" "?" "{" "~")) #f)
+              ((and (equal? c "\\") next)
+               (loop (+ i 2) (string-append (or word "") next) #f words))
+              (else (loop (+ i 1) (string-append (or word "") c) #f words))))))))
+
+(define (decide--bre->ere pat)
+  "a grep basic regexp as an extended one: \\| \\( \\) \\+ \\? are the operators, and the bare ones are literal"
+  (let ((n (string-length pat)) (ops '("|" "(" ")" "+" "?" "{" "}")))
+    (let loop ((i 0) (out ""))
+      (if (>= i n)
+          out
+          (let ((c (substring pat i (+ i 1)))
+                (next (and (< (+ i 1) n) (substring pat (+ i 1) (+ i 2)))))
+            (cond ((and (equal? c "\\") next (member next ops)) (loop (+ i 2) (string-append out next)))
+                  ((and (equal? c "\\") next) (loop (+ i 2) (string-append out c next)))
+                  ((member c ops) (loop (+ i 1) (string-append out "\\" c)))
+                  (else (loop (+ i 1) (string-append out c)))))))))
+
+(define (decide--only-chars? s allowed)
+  (let loop ((i 0))
+    (or (>= i (string-length s))
+        (and (string-contains? allowed (substring s i (+ i 1))) (loop (+ i 1))))))
+
+(define (decide--sh-path dir p)
+  (cond ((string-prefix? "/" p) p)
+        ((equal? p ".") dir)
+        ((string-prefix? "./" p) (decide--sh-path dir (substring p 2 (string-length p))))
+        ((string-suffix? "/" dir) (string-append dir p))
+        (else (string-append dir "/" p))))
+
+(define (decide--slice xs from upto)
+  "the elements FROM to UPTO of XS, counting from 1, clipped to XS"
+  (let loop ((xs xs) (i 1) (acc '()))
+    (if (or (null? xs) (> i upto))
+        (reverse acc)
+        (loop (cdr xs) (+ i 1) (if (>= i from) (cons (car xs) acc) acc)))))
+
+(define (decide--capped lines empty)
+  (let ((n (length lines)))
+    (cond ((null? lines) empty)
+          ((> n 300) (string-append (string-join (list-head lines 300) "\n")
+                                    "\n... " (number->string (- n 300)) " more lines"))
+          (else (string-join lines "\n")))))
+(effects! '(read))
+
+(define (decide--file-lines path)
+  (let ((ls (string-split (read-file path) "\n")))
+    ;; a file that ends in a newline has no line after it
+    (if (and (pair? ls) (equal? (car (reverse ls)) "")) (reverse (cdr (reverse ls))) ls)))
+
+(define (decide--grep-path pat p dir)
+  (let ((full (decide--sh-path dir p)))
+    (cond ((file-directory? full)
+           (map (lambda (r)
+                  (string-append (if (equal? p ".") (nth 1 r) (decide--sh-path p (nth 1 r)))
+                                 ":" (number->string (nth 2 r)) ":" (nth 3 r)))
+                (grep pat full)))
+          ((file-exists? full)
+           (map (lambda (r) (string-append p ":" (number->string (nth 2 r)) ":" (nth 3 r)))
+                (grep pat full)))
+          (else (list (string-append p ": no such file or directory"))))))
+
+(define (decide--grep-plan cmd flags operands dir)
+  (and (pair? operands)
+       (decide--only-chars? flags "rRnisHIEFSw")
+       (let* ((has (lambda (c) (string-contains? flags c)))
+              (pat (car operands))
+              (pat (cond ((has "F") (regexp-quote pat))
+                         ((or (has "E") (not (equal? cmd "grep"))) pat)
+                         (else (decide--bre->ere pat))))
+              (pat (if (has "w") (string-append "\\b(" pat ")\\b") pat))
+              (pat (if (has "i") (string-append "(?i)" pat) pat))
+              (paths (if (null? (cdr operands)) (list ".") (cdr operands))))
+         (list (string-append "(grep " (format "~s" pat) " " (format "~s" (decide--sh-path dir (car paths))) ")")
+               (lambda ()
+                 (decide--capped (apply append (map (lambda (p) (decide--grep-path pat p dir)) paths))
+                                 "no match"))))))
+
+(define (decide--grep-words cmd args dir)
+  (let loop ((as args) (flags ""))
+    (cond ((null? as) #f)
+          ((equal? (car as) "--") (decide--grep-plan cmd flags (cdr as) dir))
+          ((string-prefix? "--" (car as)) #f)
+          ((and (string-prefix? "-" (car as)) (> (string-length (car as)) 1))
+           (loop (cdr as) (string-append flags (substring (car as) 1 (string-length (car as))))))
+          (else (decide--grep-plan cmd flags as dir)))))
+
+(define (decide--lines-plan path from upto dir)
+  "read lines FROM to UPTO of PATH; UPTO #f is the end, a negative FROM counts from the end"
+  (let ((full (decide--sh-path dir path)))
+    (list (string-append "(read-file-numbered " (format "~s" full) ")")
+          (lambda ()
+            (let* ((ls (decide--file-lines full))
+                   (n (length ls))
+                   (from (if (< from 0) (max 1 (+ n from 1)) from)))
+              (string-join (decide--slice ls from (or upto n)) "\n"))))))
+
+(define (decide--count-arg args)
+  "head and tail: (N FILE) from -n N FILE, -N FILE or FILE"
+  (cond ((and (= (length args) 3) (equal? (car args) "-n") (string->number (cadr args)))
+         (list (string->number (cadr args)) (caddr args)))
+        ((and (= (length args) 2) (string-prefix? "-" (car args))
+              (string->number (substring (car args) 1 (string-length (car args)))))
+         (list (string->number (substring (car args) 1 (string-length (car args)))) (cadr args)))
+        ((and (= (length args) 1) (not (string-prefix? "-" (car args)))) (list 10 (car args)))
+        (else #f)))
+
+(define (decide--sed-plan args dir)
+  "sed -n 'Ap' FILE and sed -n 'A,Bp' FILE, where B may be $"
+  (and (= (length args) 3) (equal? (car args) "-n") (string-suffix? "p" (cadr args))
+       (let* ((s (cadr args))
+              (range (string-split (substring s 0 (- (string-length s) 1)) ","))
+              (from (string->number (car range)))
+              (end? (and (pair? (cdr range)) (equal? (cadr range) "$")))
+              (upto (cond ((null? (cdr range)) from)
+                          (end? #f)
+                          (else (string->number (cadr range))))))
+         (and from (or upto end?) (<= (length range) 2)
+              (decide--lines-plan (caddr args) from upto dir)))))
+
+(define (decide--read-plan words dir)
+  "(CALL THUNK) for a shell read the translator knows, or #f"
+  (let ((cmd (car words)) (args (cdr words)))
+    (cond ((member cmd '("grep" "egrep" "rg")) (decide--grep-words cmd args dir))
+          ((equal? cmd "cat")
+           (and (= (length args) 1) (not (string-prefix? "-" (car args)))
+                (decide--lines-plan (car args) 1 #f dir)))
+          ((equal? cmd "head")
+           (let ((a (decide--count-arg args))) (and a (decide--lines-plan (cadr a) 1 (car a) dir))))
+          ((equal? cmd "tail")
+           (let ((a (decide--count-arg args))) (and a (decide--lines-plan (cadr a) (- (car a)) #f dir))))
+          ((equal? cmd "sed") (decide--sed-plan args dir))
+          (else #f))))
+
+(define (decide--shell-call code)
+  "(CMD DIR) when the whole payload CODE is one shell-command->string call, else #f"
+  (let* ((forms (ignore-errors (lambda () (scheme-read code))))
+         (form (and (pair? forms) (null? (cdr forms)) (car forms))))
+    (and (pair? form)
+         (equal? (car form) 'shell-command->string)
+         (pair? (cdr form))
+         (string? (cadr form))
+         (let ((rest (cddr form)))
+           (cond ((null? rest) (list (cadr form) (default-directory)))
+                 ((and (null? (cdr rest)) (string? (car rest))) (list (cadr form) (car rest)))
+                 ((and (null? (cdr rest)) (equal? (car rest) '(default-directory)))
+                  (list (cadr form) (default-directory)))
+                 (else #f))))))
+
+(define (decide-shell-read-answer code)
+  "(decide-shell-read-answer CODE) — when the eval-scheme payload CODE is one shell read the gate refuses and the translator can say in Scheme, run that Scheme call and answer its text, the call named first; else #f"
+  (let ((rule (assq 'read decide-shell-policy)))
+    (and decide-shell-gate rule (equal? (cadr rule) 'refuse) (string? code)
+         (let* ((parts (decide--shell-call code))
+                (words (and parts (decide--sh-words (car parts))))
+                (plan (and (pair? words) (decide--read-plan words (cadr parts))))
+                (text (and plan (ignore-errors (cadr plan)))))
+           (and (string? text)
+                (string-append ";; the shell gate ran this read as " (car plan)
+                               " -- call that directly next time\n" text))))))
 
 ;; tool-call-hook: #f lets the call through, a string aborts it and becomes
 ;; the result the agent reads instead
@@ -484,7 +701,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
        (equal? name "eval-scheme")
        (let ((code (plist-get args 'code)))
          (and (string? code)
-              (re-match? decide--shell-primitives code)
-              (decide-shell-verdict code)))))
+              (decide-shell-calls? code)
+              (or (decide-shell-read-answer code)
+                  (decide-shell-verdict code))))))
 
 (add-hook! 'tool-call-hook 'decide-shell-gate-hook)

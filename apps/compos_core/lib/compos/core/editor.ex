@@ -3321,8 +3321,9 @@ defmodule Compos.Core.Editor do
       render_mode: render_mode(locals),
       visual_line_mode: Map.get(locals, "visual-line-mode") == true,
       # hl-line-mode: the page highlights the current line unless the
-      # buffer turned it off
-      hl_line: Map.get(locals, "hl-line-mode") != "off",
+      # buffer turned it off, or you are editing in it: the caret is
+      # the place there, and the band is only noise
+      hl_line: Map.get(locals, "hl-line-mode") != "off" and Map.get(locals, "editing-state") != true,
       blocks: blocks_leaf(locals),
       # a block tree's caret input and its reader place, both nil for a
       # tree that declares neither

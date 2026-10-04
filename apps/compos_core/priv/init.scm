@@ -101,6 +101,7 @@
 ;; exactly once; the demo scene is one you can drive (M-x events-demo)
 (load "workflows.scm")
 (load "events-demo.scm")
+(load "events-list.scm")
 (load "jj.scm")
 (load "keys.scm")
 (load "keymaps.scm")
@@ -145,6 +146,9 @@
 (load "skills.scm")
 (load "prompts.scm")
 (load "llm-config.scm")
+;; the agents' shell commands in the sandbox: it reads the chat's llm-config
+;; and its group, and the shell gate in decide.scm asks it
+(load "agent-sandbox.scm")
 ;; a group's shared config lives in its home and reaches its buffers as they
 ;; join it; it may name a bundle, so it loads after llm-config
 (load "group-config.scm")

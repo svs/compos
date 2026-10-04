@@ -1045,4 +1045,6 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
               (prompt-part-set! b "todo" todo-prompt)))
           (buffer-list))
 
-(todo--rescan!)
+;; a task cannot start while the boot loads this file, and a failed form
+;; drops the whole package; so the first scan waits for the boot to end
+(debounce! 'todo-boot-rescan 0 (lambda (_) (todo--rescan!)) #f)

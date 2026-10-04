@@ -206,17 +206,7 @@ defmodule Compos.Core.Events.Log do
   end
 
   def handle_call({:newest, pattern, limit}, _from, state) do
-    {where, args} = topic_where(pattern)
-
-    rows =
-      all(
-        state,
-        "SELECT seq, topic, kind, data, at FROM events WHERE seq > ?1" <>
-          where <> " ORDER BY seq DESC LIMIT ?2",
-        [0, limit] ++ args
-      )
-
-    {:reply, Enum.map(rows, &event/1), state}
+    {:reply, Enum.map(newest(state, pattern, limit), &event/1), state}
   end
 
   def handle_call(:seq, _from, state) do
@@ -376,6 +366,37 @@ defmodule Compos.Core.Events.Log do
   defp prune(state) do
     days = Application.get_env(:compos_core, :events_retain_days, 365)
     run(state, "DELETE FROM events WHERE at < ?1", [System.os_time(:second) - days * 86_400])
+  end
+
+  # A prefix walks the (topic, seq) index and keeps the newest seqs there;
+  # the rowid walk would read every row of the log to find a rare topic.
+  defp newest(state, pattern, limit) when is_binary(pattern) do
+    if String.ends_with?(pattern, "*") do
+      prefix = String.trim_trailing(pattern, "*")
+
+      all(
+        state,
+        "SELECT seq, topic, kind, data, at FROM events WHERE seq IN " <>
+          "(SELECT seq FROM events INDEXED BY events_topic " <>
+          "WHERE topic >= ?1 AND topic < ?1 || char(1114111) " <>
+          "ORDER BY seq DESC LIMIT ?2) ORDER BY seq DESC",
+        [prefix, limit]
+      )
+    else
+      all(
+        state,
+        "SELECT seq, topic, kind, data, at FROM events WHERE topic = ?1 ORDER BY seq DESC LIMIT ?2",
+        [pattern, limit]
+      )
+    end
+  end
+
+  defp newest(state, _every, limit) do
+    all(
+      state,
+      "SELECT seq, topic, kind, data, at FROM events ORDER BY seq DESC LIMIT ?1",
+      [limit]
+    )
   end
 
   # "chat:*" is a prefix, anything else one topic, nil every topic

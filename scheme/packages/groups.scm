@@ -82,12 +82,10 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; with no origin path gets a home under compos-home, keyed by its id so
 ;; a rename never orphans what it already saved.
 (define (group-home-dir g)
-  (let* ((id (group-resolve-id g))
-         (record (and id (group-record-by-id id)))
-         (origin (and record (group-record-origin record))))
-    (if (and origin (file-directory? origin))
-        (string-append origin "/.compos")
-        (string-append (compos-home) "/groups/" (group-home-slug (or id "group"))))))
+  ;; always under the editor's home, never in the group's directory: a
+  ;; project stays clean, and a group's cwd can change without moving it.
+  (string-append (compos-home) "/groups/"
+                 (group-home-slug (or (group-resolve-id g) "group"))))
 
 ;; VALUE names a group, or is a colour slot already. -> the face name for
 ;; that slot, or "accent" for anything off the scale.
@@ -3824,11 +3822,11 @@ is forgotten and that group falls back to creation order in the switcher."
                 (buffer-create buf))
               (group-chat--claim-name! buf)
               (group-chat-init! buf id)
-              (chat-set-group! buf id)
-              (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
               ;; the named default first, so a group's own config overrides it
               (when (boundp (quote llm-default-bundle-apply!))
-                (llm-default-bundle-apply! buf))
+                (llm-default-bundle-apply! buf id))
+              (chat-set-group! buf id)
+              (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
               (when (boundp (quote workspace-chat-inherit!))
                 (workspace-chat-inherit! buf (group-name id)))
               buf))
@@ -3849,11 +3847,11 @@ is forgotten and that group falls back to creation order in the switcher."
         (let ((buf (group-chat-new-name id)))
           (buffer-create buf)
           (group-chat-init! buf id)
-          (chat-set-group! buf id)
-          (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
           ;; the named default first, so a group's own config overrides it
           (when (boundp (quote llm-default-bundle-apply!))
-            (llm-default-bundle-apply! buf))
+            (llm-default-bundle-apply! buf id))
+          (chat-set-group! buf id)
+          (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
           (when (boundp (quote workspace-chat-inherit!))
             (workspace-chat-inherit! buf (group-name id)))
           ;; a group's chats share one window: the chat pane. A new chat
@@ -4782,7 +4780,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (effects! '(read))
 (public! 'group-home-dir
-  "(group-home-dir G) -> the directory G saves its chats and other artifacts under"
+  "(group-home-dir G) -> ~/.compos/groups/<id>, the directory G saves its chats, config and skills under"
   'buffers)
 (public! 'buffer-color-group
   "(buffer-color-group NAME) -> the buffer-owned group that supplies its color, or #f"

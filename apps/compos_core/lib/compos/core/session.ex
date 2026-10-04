@@ -1162,18 +1162,41 @@ defmodule Compos.Core.Session do
           :void
         end,
       {"llm-with-model",
-       "(llm-with-model PROMPT MODEL CALLBACK) — async completion on MODEL; CALLBACK gets the reply text."} =>
-        fn [prompt, model, callback] ->
+       "(llm-with-model PROMPT MODEL CALLBACK [ON-ERROR]) — async completion on MODEL; CALLBACK gets the reply text, ON-ERROR the error text."} =>
+        fn [prompt, model, callback | rest] ->
           key = {:llm, make_ref()}
-          Roots.put(key, callback)
+          Roots.put(key, {callback, rest})
 
-          Compos.Core.LLM.complete(prompt, to_string(model), fn text ->
-            try do
-              apply_reply_callback(callback, [text])
-            after
-              Roots.drop(key)
+          on_error =
+            case rest do
+              [fail | _] when fail != false ->
+                fn msg ->
+                  try do
+                    apply_reply_callback(fail, [to_string(msg)])
+                  after
+                    Roots.drop(key)
+                  end
+                end
+
+              _ ->
+                fn msg ->
+                  Roots.drop(key)
+                  __MODULE__.message("llm error: #{msg}")
+                end
             end
-          end)
+
+          Compos.Core.LLM.complete(
+            prompt,
+            to_string(model),
+            fn text ->
+              try do
+                apply_reply_callback(callback, [text])
+              after
+                Roots.drop(key)
+              end
+            end,
+            on_error
+          )
 
           :void
         end,

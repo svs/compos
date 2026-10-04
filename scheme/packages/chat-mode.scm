@@ -1557,7 +1557,7 @@
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
     workspace-isolation-choice project-defaults-inherited chat-companion-of
-    ;; the group whose ai-config.scm this chat already ran: a chat takes it
+    ;; the group whose group-on-chat hooks this chat already ran: a chat takes them
     ;; once, so the mark has to outlive a restart
     group-config-loaded))
 
@@ -1660,7 +1660,8 @@
     (let ((buf (current-buffer)))
       (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
           (message "not a chat buffer")
-          (let ((g (buffer-group buf)))
+          (let ((g (buffer-group buf))
+                (titled? (string? (buffer-local buf 'chat-title))))
             ;; FIRST: resolve anything the runtime is waiting on. A pending
             ;; permission answered after its blocks are gone is the
             ;; blind-banner race; killing the thread resolves it cancelled.
@@ -1675,10 +1676,14 @@
             (chat-clear-locals! buf chat-conversation-locals)
             (chat-clear-locals! buf chat-runtime-locals)
             (buffer-delete-range! buf 0 (buffer-size buf))
-            (group-chat-init! buf (or g buf))
-            (set-mode! "chat-mode")
-            (end-of-buffer!)
-            (message "Chat reset"))))))
+            ;; the title named the old conversation: go back to a fresh
+            ;; untitled name so the next prompt titles it again
+            (let ((buf (let ((fresh (and titled? g (group-chat-new-name g))))
+                         (if (and fresh (rename-buffer! buf fresh)) fresh buf))))
+              (group-chat-init! buf (or g buf))
+              (with-current-buffer buf
+                (lambda () (set-mode! "chat-mode") (end-of-buffer!)))
+              (message "Chat reset")))))))
 
 ;; the manual door for the same repair the mode setup runs on restore. A
 ;; turn that shows as running while the runtime is idle or gone stays hung
@@ -1883,7 +1888,9 @@
       (let ((off (llm-bundle-prompt-disabled b)))
         (if (and off (pair? off))
             (list (string-append (number->string (length off)) " prompt off"))
-            '())))
+            '()))
+      (let ((s (llm-bundle-get b 'sandbox #f)))
+        (if (member s '("on" "off")) (list (string-append "sandbox " s)) '())))
     " · "))
 
 ;; The buffer whose LLM session the presets and the stance belong to. A chat
@@ -1991,7 +1998,9 @@
         'agent-mode
         (or (buffer-local session 'agent-mode) "")
         'prompt-disabled
-        (or (buffer-local session 'prompt-disabled-parts) '())))))
+        (or (buffer-local session 'prompt-disabled-parts) '())
+        'sandbox
+        (or (buffer-local session 'sandbox) "group")))))
 
 (define (llm-config-remember! bundle)
   (let ((b (llm-bundle-normalize bundle)))
@@ -2074,7 +2083,11 @@
          (presets (llm-bundle-presets b))
          (permission (llm-bundle-permission b))
          (mode (llm-bundle-agent-mode b))
-         (prompt-disabled (llm-bundle-prompt-disabled b)))
+         (prompt-disabled (llm-bundle-prompt-disabled b))
+         (sandbox (llm-bundle-get b 'sandbox #f)))
+    ;; on or off holds for this chat; group hands it back to the group
+    (when sandbox
+      (buffer-set-local! session 'sandbox (if (member sandbox '("on" "off")) sandbox #f)))
     (when (and permission (boundp (quote chat-permission-mode-set!)))
       (chat-permission-mode-set! session (string->symbol permission)))
     (when (and presets (boundp (quote chat-presets-set!)))
@@ -2142,22 +2155,65 @@
     (set! *llm-connector-models* (alist-put *llm-connector-models* connector entries)))
   entries)
 
-;; Known models keep their order and their display names; a declared model
-;; the live list never mentioned still shows, at the end. A catalog that
-;; drops what it cannot confirm is how a working model left the menu.
-(define (llm-model-options-merge known extra)
-  (append known
-    (filter (lambda (o) (not (assoc (car o) known))) extra)))
+;; Ask a connector for its models with no chat: open a session that nobody
+;; talks to, keep the list it reports at start, and close it. A backend that
+;; never answers is closed at the deadline. K hears the connector and the
+;; count, or #f.
+(define *llm-models-probe-deadline-ms* 30000)
+
+(define (llm-models-probe! connector &optional k)
+  (let ((id (string-append "models-probe-" connector))
+        (done #f))
+    (define (finish! n)
+      (unless done
+        (set! done #t)
+        (when (member id (agent-list)) (llm-session-close! id))
+        (when k (k connector n))))
+    (define (handler slug events)
+      (for-each
+        (lambda (e)
+          (let ((type (plist-get e 'type)))
+            (cond ((and (equal? type 'model-state) (pair? (plist-get e 'available)))
+                   (llm-models-seen! connector (plist-get e 'available))
+                   (finish! (length (plist-get e 'available))))
+                  ((member type '(dead error)) (finish! #f)))))
+        events))
+    (when (member id (agent-list)) (llm-session-close! id))
+    (if (ignore-errors
+          (lambda ()
+            (llm-session-open! id
+              (agent-resolve-config (list 'connector connector 'cwd (getenv "HOME")))
+              #f handler #f #f)
+            #t))
+        (debounce! id *llm-models-probe-deadline-ms* (lambda (_) (finish! #f)) #f)
+        (finish! #f))
+    id))
+
+;; The connectors that run an agent process and report their own models
+(define (llm-models-probe-connectors)
+  (filter (lambda (name)
+            (let ((conf (connector-config name)))
+              (and (plist-get conf 'cmd) (not (plist-get conf 'hidden)))))
+          (map car *agent-connectors*)))
+
+;; The backend's own list is the menu. The declared seed shows only for a
+;; connector that has not reported yet, and the picker asks it once.
+(defvar '*llm-models-probed* '())
 
 (define (chat-model-options buf connector)
   (let* ((live (and (equal? connector (buffer-local buf 'agent-connector))
                     (buffer-local buf 'agent-models)))
          (entries (if (pair? live) live (llm-models-remembered connector))))
-    (llm-model-options-merge
-      (map (lambda (e)
-             (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
-           entries)
-      (map (lambda (m) (list m "")) (connector-models connector)))))
+    (when (and (null? entries)
+               (not (member connector *llm-models-probed*))
+               (member connector (llm-models-probe-connectors)))
+      (set! *llm-models-probed* (cons connector *llm-models-probed*))
+      (llm-models-probe! connector))
+    (if (pair? entries)
+        (map (lambda (e)
+               (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
+             entries)
+        (map (lambda (m) (list m "")) (connector-models connector)))))
 
 ;; A backend's session modes are the connector's truth as well, and they
 ;; arrive on the same asynchronous event. Remembering them is what lets the

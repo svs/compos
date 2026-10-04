@@ -86,7 +86,8 @@
                             m))
           'prompt-disabled (or (llm-bundle-prompt-disabled nb)
                                (llm-bundle-prompt-disabled live)
-                               '()))))
+                               '())
+          'sandbox (or (llm-bundle-get nb 'sandbox #f) (llm-bundle-get live 'sandbox #f) "group"))))
 
 ;; BUF's live setup as one whole bundle, with no name
 (define (llm-config--current buf)
@@ -97,7 +98,7 @@
        (null? (filter (lambda (x) (not (member x b))) a))))
 
 (define *llm-config-box-fields*
-  '(connector model effort presets permission agent-mode prompt-disabled))
+  '(connector model effort presets permission agent-mode prompt-disabled sandbox))
 
 (define (llm-config--field-same? key a b)
   (let ((x (llm-bundle-get a key #f)) (y (llm-bundle-get b key #f)))
@@ -534,6 +535,20 @@
 (define (llm-config--filesystem)
   (if (boundp (quote agent-filesystem-tools)) agent-filesystem-tools "deny"))
 
+(define-command "llm-config-pick-sandbox" "Choose whether this chat's shell commands run in the sandbox, in the box"
+  (lambda ()
+    (llm-config-read! "Sandbox: "
+      (llm-config-current-first
+        (list (list "on" "shell commands write only in the chat's directory, temp and tool caches")
+              (list "off" "shell commands write anywhere")
+              (list "group" "as the chat's group says, else agent-sandbox"))
+        (or (llm-config--box-get 'sandbox) "group"))
+      (lambda (choice)
+        (unless (equal? choice "")
+          (llm-config--box-set! 'sandbox choice)
+          (llm-config--refresh!)))
+      (lambda () #f))))
+
 (define-command "llm-config-pick-permission" "Choose when this session stops to ask, in the box"
   (lambda ()
     (if (not (boundp (quote chat-permission-mode-set!)))
@@ -579,6 +594,60 @@
       "One setting for every chat. It applies now, not when the menu closes.")))
 
 ;; the report never covers the chat that asked for it
+
+;; What always asks, and what this group took off the list with Always.
+;; The patterns are global; an Always is kept in the group record as the
+;; pattern it answered, so the box can show it and take it back.
+(define (llm-config--group scope)
+  (let ((buf (and scope (llm-config--session scope))))
+    (and buf (buffer-exists? buf) (buffer-group buf))))
+
+(define (llm-config--allowed-verbs g)
+  (or (and g (group-setting g 'always-verbs)) '()))
+
+(define (llm-config--verb-label pat)
+  "PAT as words: send[-_ ]*mail reads send mail"
+  (let* ((s (re-replace-all "\\(\\?<![^)]*\\)" pat ""))
+         (s (re-replace-all "\\\\b" s ""))
+         (s (re-replace-all "\\[-_ \\][*+]" s " "))
+         (s (string-replace s "-[a-z]*[rf]" "-r/-f"))
+         (s (re-replace-all "[()]" s "")))
+    (string-replace s "|" "/")))
+
+(define (llm-config--asks-text scope)
+  (let* ((pats (if (boundp (quote *permission-deny-patterns*)) *permission-deny-patterns* '()))
+         (n (length (llm-config--allowed-verbs (llm-config--group scope)))))
+    (string-append (number->string (length pats)) " verbs"
+                   (if (> n 0) (string-append " · " (number->string n) " allowed here") ""))))
+
+(define-command "llm-config-pick-asks" "Choose which always-ask verbs this group allows, in the box"
+  (lambda ()
+    (let* ((g (llm-config--group (transient-scope)))
+           (allowed (llm-config--allowed-verbs g))
+           (pats (if (boundp (quote *permission-deny-patterns*)) *permission-deny-patterns* '()))
+           ;; an Always for a shell kind is not a pattern, but it is still
+           ;; this group's to take back
+           (keys (append pats (filter (lambda (v) (not (member v pats))) allowed)))
+           (rows (map (lambda (k)
+                        (list (llm-config--verb-label k)
+                              (if (member k allowed) "allowed in this group" "asks")
+                              k))
+                      keys)))
+      (if (not g)
+          (message "this chat has no group")
+          (llm-config-read! "Always asks — choose one to switch it: "
+            (map (lambda (r) (list (car r) (cadr r))) rows)
+            (lambda (choice)
+              (let ((r (assoc choice rows)))
+                (when r
+                  (let ((k (caddr r)))
+                    (group-setting-set! g 'always-verbs
+                      (if (member k allowed)
+                          (filter (lambda (v) (not (equal? v k))) allowed)
+                          (cons k allowed)))))
+                (llm-config--refresh!)))
+            (lambda () #f)
+            "Allowed in this group: every chat of the group runs it without a card.")))))
 
 (define-command "llm-config-permission-report"
   "Show everything this session's permission policy does"
@@ -851,14 +920,45 @@
   (when (boundp 'agent-update-modeline!) (agent-update-modeline! buf))
   b)
 
-(define (llm-default-bundle-apply! buf)
-  (let ((b (llm-default-bundle-record)))
+(define (llm-bundle-resolve v)
+  ;; a bundle's name, or a bundle itself
+  (cond ((and (string? v) (not (equal? v ""))) (llm-bundle-named v))
+        ((pair? v) v)
+        (else #f)))
+
+(define (llm-group-bundle g)
+  ;; G's 'llm setting: a preset's name or a whole bundle; #f when it names none
+  (let ((id (and g (group-resolve-id g))))
+    (when (and id (boundp 'group-config-ensure!)) (group-config-ensure! id))
+    (and id (llm-bundle-resolve (group-setting id 'llm)))))
+
+(define (llm-default-bundle-apply! buf &optional g)
+  (let ((b (or (llm-group-bundle (or g (buffer-group buf)))
+               (llm-default-bundle-record))))
     (cond ((not b) #f)
           ((buffer-local buf 'agent-slug) (llm-bundle-apply! buf b))
           (else (llm-default--seed! buf b)))))
 
 (public! 'llm-default-bundle-apply!
-  "(llm-default-bundle-apply! BUF) — put llm-default-bundle's setup on a new chat; #f when no default is named")
+  "(llm-default-bundle-apply! BUF [GROUP]) — put the group's 'llm bundle, else llm-default-bundle, on a new chat; #f when neither names one")
+(public! 'llm-group-bundle
+  "(llm-group-bundle G) — G's 'llm setting as a bundle: it names a preset or is one; #f when unset")
+
+(define-command "group-llm" "Choose the preset this group's new chats start with"
+  (lambda ()
+    (let ((id (group-resolve-id (or (buffer-group (current-buffer)) (frame-group)))))
+      (if (not id)
+          (message "no group here")
+          (minibuffer-read* "Group preset: "
+            (cons "(global default)" (map llm-bundle-name *llm-bundles*))
+            (list
+              (list 'confirm
+                (lambda (name)
+                  (let ((v (if (equal? name "(global default)") #f name)))
+                    (when (group-config-set! id 'llm v)
+                      (message (string-append (group-name id) ": new chats start with "
+                                              (or v "the global default")
+                                              " (group.scm)"))))))))))))
 
 (define-command "llm-config-save-default" "Make the box's preset the default for new chats"
   (lambda ()
@@ -894,6 +994,8 @@
              (else (string-append (number->string (length v)) " off"))))
       ((equal? key 'agent-mode) (llm-config--agent-mode-text v))
       ((equal? key 'permission) (or v "as is"))
+      ((equal? key 'sandbox)
+       (if (member v '("on" "off")) v "as group"))
       ((equal? key 'connector) (or v *default-connector*))
       (else (or v "default")))))
 
@@ -1047,7 +1149,7 @@
       (llm-config--refresh!))
     'transient 'stay
     'value-fn (lambda (_scope)
-                (if (llm-config--more?) "" "prompt · asks · agent mode · files"))))
+                (if (llm-config--more?) "" "prompt · sandbox"))))
 
 (define (llm-config--box-items)
   (list
@@ -1062,21 +1164,15 @@
     (transient-suffix "i" "prompt" "llm-prompt-sections"
       'value-fn (lambda (_scope) (llm-config--field-value 'prompt-disabled))
       'flags-fn (lambda (_scope) (if (llm-config--drifted? 'prompt-disabled) "drift" "")))
-    (llm-config--field-row "k" "asks" 'permission "llm-config-pick-permission")
-    (llm-config--field-row "a" "agent mode" 'agent-mode "llm-config-pick-agent-mode"
-      'if (lambda (scope) (pair? (llm-config--agent-modes scope))))
-    (transient-infix "f" "files · every chat" "llm-config-pick-filesystem"
-      (lambda (_scope) (llm-config--filesystem)))
+    (llm-config--field-row "x" "sandbox" 'sandbox "llm-config-pick-sandbox")
+    ;; our gates decide what asks: the sandbox, and a card for an action
+    ;; it cannot see. The backend's own stances (asks, agent mode, file
+    ;; tools) are not fields.
     (transient-suffix "t" "tool surface" "chat-tools"
       'value-fn (lambda (scope) (llm-config--tools-label scope)))
     (transient-suffix "v" "show prompt" "chat-show-prompt" 'transient 'stay)
-    (transient-suffix "d" "policy" "llm-config-permission-report" 'transient 'stay
-      'value-fn (lambda (_scope)
-                  (if (boundp (quote *permission-deny-patterns*))
-                      (string-append (number->string
-                                       (length *permission-deny-patterns*))
-                                     " deny patterns")
-                      "")))))
+    (transient-infix "d" "always asks" "llm-config-pick-asks"
+      (lambda (scope) (llm-config--asks-text scope)))))
 
 ;; the right column's title: whose config it is
 (define (llm-config--config-title)

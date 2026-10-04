@@ -151,3 +151,16 @@
       (run-command "previous-line")
       (check-equal! (point) 2 "up from the first measured row is a source move to the line above")
       (t--vl-done! buf))))
+
+(deftest 'a-soft-line-delete-stops-at-the-visual-row
+  "Cmd-Backspace deletes to the start of the row point is on, not of its source line"
+  (lambda ()
+    (let ((buf (t--vl-buf! "zz-vl-soft-delete" t--vl-words)))
+      (t--vl-map! buf t--vl-word-rows)
+      (goto-char! 13)
+      (input-intent! "deleteSoftLineBackward" 13 13 "")
+      (check-equal! (buffer-text buf) "aaaa bbbb c dddd\nshort\n" "only the row's text before point")
+      (goto-char! 3)
+      (input-intent! "deleteHardLineBackward" 3 3 "")
+      (check-equal! (buffer-text buf) "a bbbb c dddd\nshort\n" "a hard line delete still takes the source line")
+      (t--vl-done! buf))))

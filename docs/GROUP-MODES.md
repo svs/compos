@@ -79,7 +79,8 @@ implementation contract, the phases, and the acceptance list. Read
 
 ### LLM
 
-6. The `llm` facet names a bundle. The whole bundle applies: connector,
+6. The `llm` facet names a bundle or is one (a bundle plist). Unset, a
+   new chat takes `llm-default-bundle`. The whole bundle applies: connector,
    model, effort, presets, permission stance, agent mode, prompt sections.
    A group mode does not invent a second record of LLM settings.
 7. `group-chat-init!` applies the resolved bundle to a group chat when it
@@ -89,7 +90,8 @@ implementation contract, the phases, and the acceptance list. Read
    applies the bundle at that scope:
    - `buffer`: today's behaviour (`llm-bundle-apply!`), and sets
      `'llm-scope 'buffer` on the session buffer. The chat is pinned.
-   - `group`: `(group-setting-set! G 'llm NAME)`, then re-applies the bundle
+   - `group`: `(group-config-set! G 'llm NAME)` writes it into the group's
+     `group.scm`, then re-applies the bundle
      to every chat of G whose `llm-scope` is not `buffer`.
    - `global`: sets `llm-default-bundle` (a new defcustom), then re-applies
      to every chat whose `llm-scope` is `#f`.

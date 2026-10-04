@@ -444,7 +444,11 @@
                            ;; and the walk position resets
                            (chat-history-push! buf input)
                            (chat-history-reset! buf)
-                           (let ((result (agent-send-msg! slug input)))
+                           ;; /NAME args runs a skill from the chat's skills dirs
+                           (let ((result (agent-send-msg! slug
+                                           (or (and (boundp 'skill-expand-input)
+                                                    (skill-expand-input input))
+                                               input))))
                              (if (equal? result 'queued)
                                  ;; mid-turn: the message moves up into the
                                  ;; transcript at once, muted, and the input
@@ -487,6 +491,8 @@
         (cond
           ((and (string-prefix? "!" input) (boundp 'fast-chat-capf))
            (or (fast-chat-capf) nothing))
+          ((and (string-prefix? "/" input) (boundp 'skill-input-capf))
+           (or (skill-input-capf) nothing))
           ((and chat-scheme-input
                 (boundp 'scheme-ide--capf)
                 (string-prefix? "(" input))
@@ -868,6 +874,20 @@
             (with-current-buffer buf (lambda () (end-of-buffer!)))
             (chat-follow-again! buf)
             (buffer-windows-follow-point! buf))))))
+;; The other end: the first message. The transcript draws only its newest
+;; blocks, so the top first reveals every earlier one; then the reader's
+;; place is the very top, and the bumped token makes the page take it.
+(define-command "chat-to-top" "Scroll this chat to its first message"
+  (lambda ()
+    (let ((buf (chat-to-bottom-target)))
+      (if (not buf)
+          (message "no chat here")
+          (let ((seq (buffer-local buf 'follow-seq)))
+            (with-current-buffer buf (lambda () (beginning-of-buffer!)))
+            (buffer-set-local! buf 'chat-view-reveal (length (agent-blocks buf)))
+            (when (boundp 'chat-view-sync!) (chat-view-sync! buf))
+            (buffer-set-local! buf 'follow-place '(#t 0 #f 0))
+            (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0))))))))
 
 ;; A chat comes back at its newest message. A browser that attaches a
 ;; frame (a page load, a reconnect after a restart) shows each chat in
@@ -884,8 +904,8 @@
 ;; M-> is end-of-buffer everywhere else, and in a chat the end of the
 ;; buffer IS the newest message — but point alone does not move the
 ;; transcript. On chat-mode's own map the key keeps its meaning and
-;; gains the scroller.
-(mode-keys! "chat-mode" '(("M->" "chat-to-bottom")))
+;; gains the scroller. M-< is its mirror.
+(mode-keys! "chat-mode" '(("M->" "chat-to-bottom") ("M-<" "chat-to-top")))
 
 (effects! '(write))
 

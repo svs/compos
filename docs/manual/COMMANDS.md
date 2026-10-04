@@ -16,7 +16,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `buffer-log-refresh` |  | Redraw the revision list |
 | `buffer-magic-group` |  | Classify the current buffer with JEV and move it when a group matches |
 | `bury-buffer` |  | Put this buffer at the end of the buffer list; its window shows the one before |
-| `chat-load-config` |  | Load this group's config into this chat |
+| `chat-load-config` |  | Run this group's chat hooks on this chat again |
 | `copy-buffer-link` | `C-c l` | Copy an compos:// link to this buffer and line to the clipboard |
 | `find-file` | `C-x C-f` | Visit a file, prompting with filename completion |
 | `group-add` | `C-c g` | Put the selected buffers, else this buffer, in a group |

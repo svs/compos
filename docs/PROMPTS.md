@@ -103,8 +103,8 @@ The todo package adds `todo`. Section names are unique: the last fragment of a
 name wins, in the place the name first took, so a buffer part replaces a prompt
 file of that name.
 
-A project's `compos.scm` or a group's `ai-config.scm` runs with the chat
-current, and turns one section off or on:
+A project's `compos.scm`, or a `group-on-chat` hook in a group's `group.scm`,
+runs with the chat current, and turns one section off or on:
 
 ```scheme
 (prompt-section-off! (current-buffer) "todo")

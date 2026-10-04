@@ -234,12 +234,11 @@
           (if live
               (k remembered)
               (chrome-call "open"
-                (append (list 'url (site-app-url spec (plist-get spec 'home))
-                              'background #t)
-                        (let ((window (chrome-window-resolve!)))
-                          (if window (list 'window window) '()))
-                        (let ((after (chrome-tab-resolve!)))
-                          (if after (list 'after after) '())))
+                (chrome-here
+                  (append (list 'url (site-app-url spec (plist-get spec 'home))
+                                'background #t)
+                          (let ((after (chrome-tab-resolve!)))
+                            (if after (list 'after after) '()))))
                 (lambda (reply)
                   (let ((tab (plist-get reply 'tab)))
                     (site-app-note-tab! name tab)
@@ -913,10 +912,7 @@
   ;; Each Chrome profile is its own socket, and a call that names nothing goes
   ;; to whichever profile registered last -- often not the one logged in to the
   ;; site. The frame's own window names the profile this editor sits in.
-  (browser-call "fetch"
-    (append (list 'url url)
-            (let ((window (chrome-window-resolve!)))
-              (if window (list 'window window) '())))
+  (browser-call "fetch" (chrome-here (list 'url url))
     (lambda (reply)
       (let ((html (plist-get reply 'html)))
         (k (and (string? html) (equal? (plist-get reply 'status) 200) html))))))

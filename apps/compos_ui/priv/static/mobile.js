@@ -48,8 +48,11 @@ const Hooks = {
     updated() {
       const seq = parseInt(this.el.dataset.followSeq || "0", 10);
       if (this.el.dataset.buf !== this.buf) { this.buf = this.el.dataset.buf; this.stick = true; }
-      // chat-to-bottom asked to follow again
-      else if (seq !== this.followSeq) { this.stick = true; }
+      // chat-to-bottom asked to follow again, chat-to-top to go to a place
+      else if (seq !== this.followSeq) {
+        this.stick = this.el.dataset.stick !== "false";
+        if (!this.stick) { this.followSeq = seq; this.el.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10); return; }
+      }
       this.followSeq = seq;
       if (this.stick) this.place();
       else if (this.fromEnd !== undefined) this.el.scrollTop = this.el.scrollHeight - this.fromEnd;

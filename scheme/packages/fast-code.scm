@@ -624,10 +624,22 @@
 ;;; took. From the palette and from ! alike. The last hundred stay in memory
 ;;; and in fast-code-trace.jsonl; M-x fast-trace reads them.
 
-(define *fast-trace* '())
-(define *fast-trace-last* #f)
-
 (define (fast-trace-path) (string-append (compos-home) "/fast-code-trace.jsonl"))
+
+;; the file holds the oldest first; a restart reads it back, so the next
+;; record adds to the history instead of writing over it
+(define (fast-trace-load)
+  (ignore-errors
+    (lambda ()
+      (if (file-exists? (fast-trace-path))
+          (reverse (filter (lambda (r) r)
+                           (map json-parse
+                                (filter (lambda (l) (not (equal? (string-trim l) "")))
+                                        (string-split (read-file (fast-trace-path)) "\n")))))
+          '()))))
+
+(define *fast-trace* (or (fast-trace-load) '()))
+(define *fast-trace-last* #f)
 
 (define (fast-trace-add! rec)
   (set! *fast-trace* (take-n (cons rec *fast-trace*) 100))
@@ -736,7 +748,12 @@
                         (set! steps (fast-steps steps-text))
                         (note 'split-raw steps-text)
                         (set! timing (append timing (list 'split (- (fast-now-ms) t0))))
-                        (fast-stitch! intent steps finish searched model note)))))))))))
+                        (fast-stitch! intent steps finish searched model note))
+                      (fast-llm-failed finish))))))))))
+
+;; the error side of llm-with-model: the ask ends, and its record says why
+(define (fast-llm-failed done)
+  (lambda (msg) (done (list 'no (string-append "llm error: " msg)))))
 
 (define (fast-stitch! intent steps done &optional searched model0 note0)
   (let ((model (or model0 fast-code-model))
@@ -774,7 +791,9 @@
                             (let ((r2 (fast-accept text2 intent)))
                               (note 'retry text2)
                               (note 'retry-verdict (if (equal? (car r2) 'ok) "ok" (car (cdr r2))))
-                              (done r2))))))))))))))
+                              (done r2)))
+                          (fast-llm-failed done)))))
+                (fast-llm-failed done))))))))
 
 ;; A refusal lists every problem for the model's retry. The person gets one
 ;; sentence: what went wrong first, without the model's names near it.

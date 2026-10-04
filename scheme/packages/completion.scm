@@ -44,7 +44,10 @@
     (let ((r (capf-collect (capf-sources))))
       (if (and (pair? r)
                (pair? (caddr r))
-               (>= (- (point) (car r)) completion-auto-prefix))
+               ;; a source may ask for a shorter prefix: 'auto-prefix N
+               (>= (- (point) (car r))
+                   (or (plist-get (cdr (cdr (cdr r))) 'auto-prefix)
+                       completion-auto-prefix)))
           (completion-show! (car r) (cadr r) (caddr r))
           (completion-dismiss!)))))
 
@@ -67,5 +70,8 @@
     (desktop-skip! buf 'capf-auto-watch)
     (buffer-set-local! buf 'capf-auto-watch
       (on-change! buf
+        ;; a person types into the current buffer, so ask it for its name:
+        ;; BUF is the name at watch time, and a chat that takes its title
+        ;; is renamed after that
         (lambda (pos inserted deleted source)
-          (capf-auto--changed! buf inserted deleted source))))))
+          (capf-auto--changed! (current-buffer) inserted deleted source))))))

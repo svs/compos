@@ -37,12 +37,14 @@ defmodule Compos.Core.LLM do
   def complete(prompt, callback) when is_function(callback, 1),
     do: complete(prompt, model(), callback)
 
-  def complete(prompt, requested_model, callback)
+  # on_error gets the error text; without one the error goes to *Messages*
+  def complete(prompt, requested_model, callback, on_error \\ nil)
       when is_binary(requested_model) and is_function(callback, 1) do
     {:ok, _} =
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         case run_request(prompt, requested_model) do
           {:ok, text} -> callback.(text)
+          {:error, msg} when is_function(on_error, 1) -> on_error.(msg)
           {:error, msg} -> Session.message("llm error: #{msg}")
         end
       end)
@@ -619,6 +621,15 @@ defmodule Compos.Core.LLM do
     end
   end
 
+  # A Finch HTTP/2 pool takes requests only while its one connection is up.
+  # On a start, and after the server closes the connection, it waits 500 ms
+  # or more before it connects again, and every request in that gap fails at
+  # once: :pool_not_available while the pool is out of the registry,
+  # :disconnected or :read_only when the request reaches it. The first ask
+  # after a quiet spell found that gap.
+  @retry_transport [:pool_not_available, :disconnected, :read_only, :connection_closed, :closed]
+
+  defp retryable?(%{reason: reason}) when reason in @retry_transport, do: true
   defp retryable?(%{reason: reason}) when is_map(reason), do: retryable?(reason)
   defp retryable?(_), do: false
 

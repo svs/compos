@@ -95,6 +95,25 @@
 ;;; the group's chats see them, in their index and through (skill NAME).
 ;;; The home wins over .claude, and both win over the global catalog.
 
+(define (skills-group-dir g)
+  ;; the group's own skills: its 'skills-dir setting, or <group-home>/skills
+  (when (boundp 'group-config-ensure!) (group-config-ensure! g))
+  (let ((dir (group-setting g 'skills-dir)))
+    (if (and (string? dir) (not (equal? dir "")))
+        (expand-path dir)
+        (string-append (group-home-dir g) "/skills"))))
+
+(define (skills-group-forget! g)
+  ;; G's skills are read again on next use
+  (let ((id (group-resolve-id g)))
+    (set! *group-skills* (filter (lambda (e) (not (equal? (car e) id))) *group-skills*))
+    id))
+
+(define (skills-group-dir-set! g dir)
+  ;; DIR, or #f for the default, written into G's group.scm
+  (group-config-set! g 'skills-dir dir)
+  (skills-group-dir g))
+
 (define (skills-group-roots g)
   (let* ((id (and g (group-resolve-id g)))
          (record (and id (group-record-by-id id)))
@@ -105,7 +124,7 @@
           (if (and origin (file-directory? origin))
               (list (string-append origin "/.claude/skills"))
               '())
-          (list (string-append (group-home-dir id) "/skills"))))))
+          (list (skills-group-dir id))))))
 
 ;; group id -> #f, or (entries note notes-without) when the group has
 ;; skills of its own. Scanned on the first ask; skills-scan! drops them.
@@ -140,6 +159,43 @@
         (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
         (string-append "no such skill: " n "; available: "
                        (string-join (map car (reverse entries)) ", ")))))
+
+;; "/NAME args" typed in a chat: NAME is looked up in the skills dirs the
+;; chat can load, and nothing else. A first word that names no skill, a path
+;; such as /Users/me, sends as it was typed.
+(define (skill-input-split input)
+  (let* ((s (string-trim input))
+         (cut (filter (lambda (i) i)
+                      (list (string-index s " " 0) (string-index s "\n" 0))))
+         (end (if (null? cut) (string-length s) (apply min cut))))
+    (and (string-prefix? "/" s)
+         (> end 1)
+         (list (substring s 1 end)
+               (string-trim (substring s end (string-length s)))))))
+
+(define (skill-expand-input input)
+  (let* ((parts (skill-input-split input))
+         (s (and parts (assoc (car parts) (skills--here)))))
+    (and s
+         (string-append
+           "Use the skill " (car s) ". Its instructions:\n\n"
+           (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
+           (if (equal? (cadr parts) "")
+               ""
+               (string-append "\n\nArguments: " (cadr parts)))))))
+
+(define (skill-input-capf)
+  (let* ((input (chat-input-text (current-buffer)))
+         (start (chat-input-start (current-buffer))))
+    (and (string-prefix? "/" input)
+         (not (string-index input " " 0))
+         (not (string-index input "\n" 0))
+         ;; the / is part of the completion, so typing it alone opens the list
+         (list start (point)
+               (filter (lambda (n) (string-prefix? input n))
+                       (map (lambda (s) (string-append "/" (car s)))
+                            (reverse (skills--here))))
+               'auto-prefix 1))))
 
 ;; The index a system prompt carries: one line per skill, nothing more —
 ;; the body loads on demand. The string is built ONCE per scan:
@@ -199,14 +255,24 @@
 
 (public! 'skills "(skills) — every skill as (NAME DESCRIPTION)")
 (public! 'skill "(skill NAME) — the working instructions of one skill")
+(public! 'skill-expand-input
+  "(skill-expand-input INPUT) — for chat input \"/NAME args\" where NAME is a skill this chat can load, the message that runs it; else #f")
+(public! 'skill-input-capf
+  "(skill-input-capf) — completion of a skill name after / in the chat input, or #f")
 (public! 'skills-note "(skills-note) — the one-line-per-skill index a system prompt carries")
 (public! 'skills-note-without
   "(skills-note-without NAME) — the cached skill index without one active skill")
 (public! 'skills-note-for
   "(skills-note-for BUF WITHOUT) — the skill index BUF's chat carries: the global one, or its group's; WITHOUT is an active skill to leave out, or #f")
 (public! 'skills-group-roots
-  "(skills-group-roots G) — the directories G takes skills from: <dir>/.claude/skills, then <group-home>/skills")
+  "(skills-group-roots G) — the directories G takes skills from: <dir>/.claude/skills, then (skills-group-dir G)")
+(public! 'skills-group-dir
+  "(skills-group-dir G) — G's own skills directory: its 'skills-dir setting, or <group-home>/skills")
 (effects! '(write))
+(public! 'skills-group-dir-set!
+  "(skills-group-dir-set! G DIR) — write 'skills-dir DIR into G's group.scm, or #f for <group-home>/skills")
+(public! 'skills-group-forget!
+  "(skills-group-forget! G) — drop G's cached skills so the next ask reads them again")
 (public! 'skills-scan!
   "(skills-scan!) — rescan priv/skills and ~/.compos/skills into the catalog, and drop every group's skills to rescan on the next ask")
 

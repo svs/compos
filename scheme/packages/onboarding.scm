@@ -12,22 +12,25 @@
 (define *onboarding-welcome* "*onboarding*")
 
 (define onboarding-welcome-text
-  "Welcome to compos.
+  "# Welcome to compos
 
 The window beside this one is your guide. It is a chat: type in it and
-press RET to send.
+press `RET` to send.
 
-This window is the stage. The guide puts here what each step is about:
+This window is the **stage**. The guide puts here what each step is about:
 a file to edit, a help page, a list of buffers. You can work in it.
 
-C-x o moves the focus between the two windows.
-C-g stops anything that waits for you.
+- `C-x o` moves the focus between the two windows.
+- `C-g` stops anything that waits for you.
 ")
 
 (define (onboarding--welcome!)
+  ;; A page to read, not to edit: rendered and read-only.
   (unless (buffer-exists? *onboarding-welcome*)
-    (buffer-create *onboarding-welcome*)
-    (buffer-append! *onboarding-welcome* onboarding-welcome-text))
+    (buffer-set-text! *onboarding-welcome* onboarding-welcome-text)
+    (buffer-set-read-only! *onboarding-welcome* #t)
+    (buffer-set-local! *onboarding-welcome* 'preview-renderer "markdown")
+    (enable-minor-mode! *onboarding-welcome* "preview-mode"))
   *onboarding-welcome*)
 
 (define (onboarding-group)
@@ -88,6 +91,15 @@ C-g stops anything that waits for you.
                   (window-set-buffer! w after)))
               (select-window! back))))
         (and w (window-buffer w))))))
+
+(define (onboarding--help-on-stage? name alist)
+  ;; Help asked for on the stage opens on the stage, where q closes it.
+  ;; The other window is the guide, and help there would cover it.
+  (and (equal? name *help-buffer*)
+       (let ((w (onboarding--stage)))
+         (and w (equal? w (active-window))))))
+
+(add-display-rule! onboarding--help-on-stage? 'same-window)
 
 (define (onboarding-start!)
   "Open the onboarding group: the guide chat, and the stage beside it."

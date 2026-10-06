@@ -1201,7 +1201,7 @@ is forgotten and that group falls back to creation order in the switcher."
         (begin
           (set-frame-local! 'isolated #f)
           ;; its own theme goes with it
-          (when (frame-theme) (frame-theme-apply! #f))
+          (frame-theme-apply! #f)
           (desktop-dirty!)
           (frame-group-label-refresh!)
           (message "Frame shares unowned groups again"))

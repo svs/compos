@@ -189,7 +189,8 @@
   ;; the theme FRAME wears on its own, or #f when it wears the global one.
   ;; themes.scm loads before window.scm defines frame locals, and a face
   ;; read at load comes here: until then, every frame wears the global theme.
-  (let ((name (and (boundp 'frame-local-in)
+  ;; Only an isolated frame wears its own: a stale pin must not hide load-theme.
+  (let ((name (and (theme--isolated? frame)
                    (frame-local-in (or frame (selected-frame)) 'theme))))
     (and name (assoc name *themes*) name)))
 

@@ -30,6 +30,28 @@ fn language(name: &str) -> Option<Language> {
     }
 }
 
+/// Compiled highlight queries, one per language. Query::new compiles the
+/// query text each time, and the Elixir query takes about 50ms: a diff of
+/// 40 hunks paid 80 compiles, 4 seconds on the UI lane. The compiled query
+/// is immutable, so one Arc serves every call. ts_load_grammar drops the
+/// entry for a grammar it replaces.
+fn compiled() -> &'static Mutex<HashMap<String, Arc<Query>>> {
+    static COMPILED: OnceLock<Mutex<HashMap<String, Arc<Query>>>> = OnceLock::new();
+    COMPILED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn compiled_query(name: &str, lang: &Language) -> Option<Arc<Query>> {
+    if let Some(q) = compiled().lock().unwrap().get(name) {
+        return Some(q.clone());
+    }
+    let query = Arc::new(Query::new(lang, &highlights_query(name)?).ok()?);
+    compiled()
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), query.clone());
+    Some(query)
+}
+
 fn highlights_query(name: &str) -> Option<String> {
     match name {
         "elixir" => Some(tree_sitter_elixir::HIGHLIGHTS_QUERY.to_string()),
@@ -75,6 +97,7 @@ fn ts_load_grammar(name: String, lib_path: String, highlights: String) -> String
         return format!("error: bad highlights query: {e}");
     }
 
+    compiled().lock().unwrap().remove(&name);
     dynamic().lock().unwrap().insert(name, (lang, highlights));
     "ok".into()
 }
@@ -89,13 +112,13 @@ fn parse(lang: Language, text: &str) -> Option<tree_sitter::Tree> {
 #[rustler::nif(schedule = "DirtyCpu")]
 fn ts_highlight(lang_name: String, text: String) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
-    let (Some(lang), Some(hq)) = (language(&lang_name), highlights_query(&lang_name)) else {
+    let Some(lang) = language(&lang_name) else {
         return out;
     };
-    let Some(tree) = parse(lang.clone(), &text) else {
+    let Some(query) = compiled_query(&lang_name, &lang) else {
         return out;
     };
-    let Ok(query) = Query::new(&lang, &hq) else {
+    let Some(tree) = parse(lang, &text) else {
         return out;
     };
     let names = query.capture_names();
@@ -485,7 +508,7 @@ fn ts_state_new(lang_name: String) -> Option<ResourceArc<TsRes>> {
     let lang = language(&lang_name)?;
     let mut parser = Parser::new();
     parser.set_language(&lang).ok()?;
-    let query = highlights_query(&lang_name).and_then(|hq| Query::new(&lang, &hq).ok()).map(Arc::new);
+    let query = compiled_query(&lang_name, &lang);
     Some(ResourceArc::new(TsRes(Mutex::new(TsState {
         parser,
         query,

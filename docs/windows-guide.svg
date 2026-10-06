@@ -1,0 +1,64 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 880 480' font-family='-apple-system, Helvetica, Arial, sans-serif' font-size='13'>
+  <defs>
+    <marker id='a' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto-start-reverse'>
+      <path d='M0,0 L10,5 L0,10 z' fill='#555'/>
+    </marker>
+  </defs>
+  <rect width='880' height='480' fill='#ffffff'/>
+
+  <text x='20' y='26' font-weight='bold' font-size='15'>Frame: the editor surface</text>
+  <rect x='20' y='40' width='600' height='420' rx='10' fill='#f6f7f9' stroke='#333' stroke-width='2'/>
+
+  <rect x='20' y='40' width='600' height='36' rx='10' fill='#e4e8ef' stroke='#333' stroke-width='2'/>
+  <rect x='34' y='47' width='130' height='22' rx='5' fill='#3b6fd8'/>
+  <text x='99' y='62' fill='#fff' text-anchor='middle'>getting-started</text>
+  <rect x='172' y='47' width='70' height='22' rx='5' fill='#fff' stroke='#999'/>
+  <text x='207' y='62' text-anchor='middle'>mail</text>
+  <rect x='250' y='47' width='80' height='22' rx='5' fill='#fff' stroke='#999'/>
+  <text x='290' y='62' text-anchor='middle'>compos</text>
+
+  <rect x='36' y='92' width='250' height='352' rx='6' fill='#fff' stroke='#3b6fd8' stroke-width='2' stroke-dasharray='6 4'/>
+  <text x='46' y='112' fill='#3b6fd8' font-weight='bold'>Pane: left</text>
+  <rect x='50' y='124' width='222' height='306' rx='5' fill='#eef7ee' stroke='#2e8b57' stroke-width='2'/>
+  <text x='60' y='144' fill='#2e8b57' font-weight='bold'>Window</text>
+  <rect x='64' y='156' width='194' height='260' rx='4' fill='#fff' stroke='#c27c0e' stroke-width='2'/>
+  <text x='74' y='176' fill='#c27c0e' font-weight='bold'>Buffer: the chat</text>
+  <text x='74' y='200' fill='#666'>You type here and the</text>
+  <text x='74' y='216' fill='#666'>agent answers.</text>
+
+  <rect x='302' y='92' width='302' height='352' rx='6' fill='#fff' stroke='#3b6fd8' stroke-width='2' stroke-dasharray='6 4'/>
+  <text x='312' y='112' fill='#3b6fd8' font-weight='bold'>Pane: right</text>
+  <rect x='316' y='124' width='274' height='306' rx='5' fill='#eef7ee' stroke='#2e8b57' stroke-width='2'/>
+  <text x='326' y='144' fill='#2e8b57' font-weight='bold'>Window: a stack of buffers</text>
+  <rect x='352' y='160' width='216' height='220' rx='4' fill='#fbf3e4' stroke='#c27c0e'/>
+  <text x='362' y='178' fill='#8a5a0a'>notes.md (first)</text>
+  <rect x='342' y='190' width='216' height='210' rx='4' fill='#fbf3e4' stroke='#c27c0e'/>
+  <text x='352' y='208' fill='#8a5a0a'>TUTORIAL</text>
+  <rect x='332' y='220' width='216' height='196' rx='4' fill='#fff' stroke='#c27c0e' stroke-width='2'/>
+  <text x='342' y='240' fill='#c27c0e' font-weight='bold'>On top: *Help*</text>
+  <text x='342' y='264' fill='#666'>You see the top buffer only.</text>
+  <text x='342' y='282' fill='#666'>q closes it. The buffer</text>
+  <text x='342' y='300' fill='#666'>under it comes back.</text>
+
+  <text x='660' y='26' font-weight='bold'>Groups: one per task</text>
+  <text x='660' y='44' fill='#666'>The tabs at the top. Each group</text>
+  <text x='660' y='60' fill='#666'>keeps its buffers and windows.</text>
+  <path d='M 655 52 L 338 58' stroke='#555' stroke-width='1.5' fill='none' marker-end='url(#a)'/>
+
+  <rect x='660' y='124' width='200' height='136' rx='5' fill='#fafafa' stroke='#2e8b57' stroke-width='2' stroke-dasharray='4 4'/>
+  <text x='670' y='144' fill='#2e8b57' font-weight='bold'>Hidden window</text>
+  <text x='670' y='166' fill='#666'>It has no pane now.</text>
+  <text x='670' y='184' fill='#666'>It keeps its buffers,</text>
+  <text x='670' y='202' fill='#666'>its point and its history.</text>
+  <text x='670' y='228' fill='#666'>A layout with more panes</text>
+  <text x='670' y='244' fill='#666'>shows it again.</text>
+
+  <rect x='660' y='300' width='14' height='14' fill='#fff' stroke='#3b6fd8' stroke-width='2' stroke-dasharray='4 3'/>
+  <text x='682' y='312'>Pane: a place on the screen</text>
+  <rect x='660' y='326' width='14' height='14' fill='#eef7ee' stroke='#2e8b57' stroke-width='2'/>
+  <text x='682' y='338'>Window: sits in a pane</text>
+  <rect x='660' y='352' width='14' height='14' fill='#fff' stroke='#c27c0e' stroke-width='2'/>
+  <text x='682' y='364'>Buffer: the content</text>
+  <text x='660' y='402' fill='#666'>The layout (C-x l) sets</text>
+  <text x='660' y='418' fill='#666'>how many panes there are.</text>
+</svg>

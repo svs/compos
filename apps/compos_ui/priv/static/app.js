@@ -584,6 +584,14 @@
             Telem.push(this, "key", { k: spec });
             return false;
           }
+          // a Cmd chord means nothing to a terminal: it is the editor's,
+          // and the keymaps in force in the buffer answer it (the editing
+          // state's caret map, which term-mode remaps to the shell's line keys)
+          if (spec && spec.startsWith("s-")) {
+            e.preventDefault();
+            if (e.type === "keydown") Telem.push(this, "key", { k: spec });
+            return false;
+          }
           return true;
         });
 

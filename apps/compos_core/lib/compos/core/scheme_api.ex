@@ -35,6 +35,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(irc_primitives())
     |> Map.merge(google_primitives())
     |> Map.merge(http_primitives())
+    |> Map.merge(Compos.Core.Cron.primitives())
     |> Compos.Core.SchemeRawNames.add()
   end
 

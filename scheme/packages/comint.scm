@@ -25,6 +25,9 @@
   ;; a window command takes them back
   (buffer-set-local! buf 'takes-keyboard #t)
   (local-remap*! buf "self-insert-command" "term-send-key")
+  ;; the editing state's caret map moves by line; the line is the shell's
+  (local-remap*! buf "beginning-of-line" "term-beginning-of-line")
+  (local-remap*! buf "end-of-line" "term-end-of-line")
   (unless (process-running? buf)
     ;; A terminal app records its own launch command in the buffer.  That
     ;; local rides the desktop, so waking *opencode* starts OpenCode again
@@ -55,6 +58,12 @@
            (text (and (pair? keys) (null? (cdr keys)) (term--key-text (car keys)))))
       (when text (process-send! (current-buffer) text)))))
 
+(define-command "term-beginning-of-line" "Move to the start of the shell's line"
+  (lambda () (process-send! (current-buffer) "\x01;")))
+
+(define-command "term-end-of-line" "Move to the end of the shell's line"
+  (lambda () (process-send! (current-buffer) "\x05;")))
+
 (mode-keys! "term-mode"
   (map (lambda (entry) (list (car entry) "term-send-key")) term--key-bytes))
 
@@ -67,7 +76,7 @@
   (lambda (buf) (shell-mode-name-migrate! buf)))
 
 (mode-doc! "term-mode"
-  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard; `C-g` or a window command takes the keyboard back.")
+  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, and every Cmd chord stays the editor's: the editing state's Cmd-left and Cmd-right move to the start and end of the shell's line; `C-g` or a window command takes the keyboard back. `ESC` stays the terminal's.")
 
 (define-command "shell" "Open a raw PTY shell in the *shell* buffer"
   (lambda ()

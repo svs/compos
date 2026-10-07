@@ -92,7 +92,6 @@
 (load "tutorial.scm")
 (load "http.scm")
 (load "ibuffer.scm")
-(load "housekeeping.scm")
 ;; the buffers of one major mode, as ibuffer lists them
 (load "mode-list.scm")
 ;; the chats table is the mode list of chat-mode: it loads after it
@@ -105,6 +104,8 @@
 ;; workflows: Scheme handlers over the event log that the core runs
 ;; exactly once; the demo scene is one you can drive (M-x events-demo)
 (load "workflows.scm")
+;; jobs on a clock; the workflow "cron" runs them, so it follows workflows
+(load "cron.scm")
 (load "events-demo.scm")
 (load "events-list.scm")
 (load "jj.scm")

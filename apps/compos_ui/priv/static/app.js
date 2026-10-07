@@ -553,7 +553,9 @@
 
           this.dataSub = this.term.onData(data => this.channel.push("input", { data }));
         };
-        this.editorSequence = false;
+        // the movement state: keys go to the editor until it arms editing
+        const ownWin = this.el.closest(".window");
+        this.editorSequence = !(ownWin?.classList.contains("active") && ownWin.dataset.editing === "true");
         this.keyboardOwnerH = (event) => {
           const owner = event.detail && event.detail.terminal;
           const owns = owner === this.el.id;
@@ -628,7 +630,8 @@
           // width first, transcript second
           this.fit();
           this.connect();
-          const active = this.el.closest(".window")?.classList.contains("active");
+          const win = this.el.closest(".window");
+          const active = win?.classList.contains("active") && win.dataset.editing === "true";
           const editorOpen = document.querySelector(
             ".mb-panel, .which-key, .transient-panel"
           );
@@ -1636,7 +1639,9 @@
           );
           const terminal = editorOpen
             ? null
-            : document.querySelector(".window.active .terminal-view");
+            // a terminal owns the keys in the editing state only, as an
+            // editable buffer does; the movement state gives them to the editor
+            : document.querySelector('.window.active[data-editing="true"] .terminal-view');
           window.dispatchEvent(new CustomEvent("compos:keyboard-owner", {
             detail: { terminal: terminal ? terminal.id : null }
           }));

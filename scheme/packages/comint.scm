@@ -20,6 +20,11 @@
   (buffer-set-local! buf 'render-mode "terminal")
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-read-only! buf #t)
+  ;; the focus state of an editable buffer: a landing gives the keys to
+  ;; the editor, the first typed key gives them to the terminal, and C-g or
+  ;; a window command takes them back
+  (buffer-set-local! buf 'takes-keyboard #t)
+  (local-remap*! buf "self-insert-command" "term-send-key")
   (unless (process-running? buf)
     ;; A terminal app records its own launch command in the buffer.  That
     ;; local rides the desktop, so waking *opencode* starts OpenCode again
@@ -29,6 +34,29 @@
 
 (define-mode "term-mode"
   (lambda () (terminal-mode-init! (current-buffer))))
+
+;; The key that arms the editing state reaches the editor, not the
+;; terminal. It goes on to the PTY, so the first letter is not lost.
+(define term--key-bytes
+  (list (list "SPC" " ")
+        (list "RET" "\r")
+        (list "TAB" "\t")
+        (list "DEL" "\x7f;")))
+
+(define (term--key-text key)
+  (let ((named (assoc key term--key-bytes)))
+    (cond (named (cadr named))
+          ((= (string-length key) 1) key)
+          (else #f))))
+
+(define-command "term-send-key" "Send this key to the terminal, and give it the keyboard"
+  (lambda ()
+    (let* ((keys (last-keys))
+           (text (and (pair? keys) (null? (cdr keys)) (term--key-text (car keys)))))
+      (when text (process-send! (current-buffer) text)))))
+
+(mode-keys! "term-mode"
+  (map (lambda (entry) (list (car entry) "term-send-key")) term--key-bytes))
 
 ;; an old desktop names a terminal buffer's mode shell-mode; term-mode is
 ;; the one name (migrations.scm runs this once per buffer)

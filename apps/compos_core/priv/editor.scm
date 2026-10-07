@@ -5551,7 +5551,10 @@
         (quit *editing-quit*))
     (set! *editing-quit* #f)
     (cond ((not (and buf (buffer-exists? buf))) #t)
-          ((buffer-read-only? buf) (editing-state-off! buf))
+          ;; a terminal is read-only text, yet it is a place you type: its
+          ;; editing state hands the keyboard to the terminal itself
+          ((and (buffer-read-only? buf) (not (buffer-local buf 'takes-keyboard)))
+           (editing-state-off! buf))
           ((or quit (equal? cmd "keyboard-quit")) (editing-state-off! buf))
           ((editing-neutral-command? cmd) #t)
           ((equal? cmd "self-insert-command") (editing-state-on! buf))

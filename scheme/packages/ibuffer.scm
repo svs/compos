@@ -87,10 +87,20 @@
     (cons (cons buf defaults)
           (filter (lambda (v) (not (equal? (car v) buf))) *ibuffer-views*))))
 
+(define *ibuffer-view-modes*
+  (if (boundp '*ibuffer-view-modes*) *ibuffer-view-modes* '("ibuffer-mode")))
+
+;; a list mode built on this table (mode-list.scm): its buffers are views,
+;; never rows, and its rows answer the verbs the way the table's do
+(define (ibuffer-view-mode! mode)
+  (unless (member mode *ibuffer-view-modes*)
+    (set! *ibuffer-view-modes* (cons mode *ibuffer-view-modes*))
+    (register-target-provider! mode ibuffer-target-at)))
+
 (define (ibuffer-view? b)
   (and (string? b)
        (or (assoc b *ibuffer-views*)
-           (member (buffer-local b 'mode-name) '("ibuffer-mode" "chat-list-mode")))
+           (member (buffer-local b 'mode-name) *ibuffer-view-modes*))
        #t))
 
 (define (ibuffer-view-default buf key)
@@ -403,6 +413,13 @@
 (define (ibuffer-scope! name thunk)
   (set! *ibuffer-scopes* (alist-put *ibuffer-scopes* name thunk)))
 
+;; a scope that needs to know which list asks: FN gets the list buffer
+(define *ibuffer-buffer-scopes*
+  (if (boundp '*ibuffer-buffer-scopes*) *ibuffer-buffer-scopes* '()))
+
+(define (ibuffer-scope-for! name fn)
+  (set! *ibuffer-buffer-scopes* (alist-put *ibuffer-buffer-scopes* name fn)))
+
 ;; #f means the ordinary complete table. A list, including an empty list,
 ;; is the exact result set that a buffer prompt handed to ibuffer. A
 ;; symbol names a registered scope. The source keeps MRU order; a
@@ -414,8 +431,11 @@
   (let ((scope (buffer-local buf 'ibuffer-scope)))
     (cond ((equal? scope #f) (buffer-list-mru))
           ((symbol? scope)
-           (let ((s (assoc scope *ibuffer-scopes*)))
-             (if s ((cadr s)) '())))
+           (let ((v (assoc scope *ibuffer-buffer-scopes*))
+                 (s (assoc scope *ibuffer-scopes*)))
+             (cond (v ((cadr v) buf))
+                   (s ((cadr s)))
+                   (else '()))))
           (else scope))))
 
 (define (ibuffer-source buf)
@@ -1615,7 +1635,10 @@
          (t3 (monotonic-ms))
          ;; a management table's headings are rows; a picker's are not
          (_i (buffer-set-local! buf 'ibuffer-heading-rows
-                                (and (not picker?) (member (or mode "ibuffer-mode") '("ibuffer-mode" "ibuffer-pretty-mode")) #t)))
+                                (and (not picker?)
+                                     (member (or mode "ibuffer-mode")
+                                             (cons "ibuffer-pretty-mode" *ibuffer-view-modes*))
+                                     #t)))
          (_opts (buffer-set-local! buf 'ibuffer-render-options (or options '())))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
@@ -1954,9 +1977,7 @@
   (let ((row (list-current buf)))
     (and (string? row) (list 'buffer row row))))
 
-(for-each
-  (lambda (mode) (register-target-provider! mode ibuffer-target-at))
-  '("ibuffer-mode" "chat-list-mode"))
+(register-target-provider! "ibuffer-mode" ibuffer-target-at)
 
 ;; the buffers a C-. verb acts on: the table's targets in a table, else
 ;; the one row the menu named
@@ -2356,8 +2377,7 @@
                              (let ((name (car r)) (path (nth 1 r)) (mode (or (nth 4 r) "")))
                                (and (not (string-prefix? " " name))
                                     (not (assoc name *ibuffer-views*))
-                                    (not (equal? mode "ibuffer-mode"))
-                                    (not (equal? mode "chat-list-mode"))
+                                    (not (member mode *ibuffer-view-modes*))
                                     (not (nth 10 r))
                                     (ibuffer-workspace-path? path))))
                            raw))

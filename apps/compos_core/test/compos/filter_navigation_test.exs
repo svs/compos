@@ -153,14 +153,14 @@ defmodule Compos.FilterNavigationTest do
     for b <- ["*zz-nav-a*", "*zz-nav-b*", "*zz-excluded*"],
         do: Buffer.append(b, " separationneedle", source: :editor)
 
-    eval!(~S{(list-mode-show! "chat-list-mode") (define *nf-view* (current-buffer))})
+    eval!(~S{(list-mode-show! "chat-list-mode") (define *nf-view* (current-buffer)) (ibuffer-set-grouping! 'none *nf-view*)})
     press("/")
     press(String.graphemes("separationneedle"))
     press("C-g")
     for _ <- 1..100, eval!(~S{(chat-list-hit "*zz-excluded*")}) == "#f", do: Process.sleep(20)
 
     assert eval!("(map ibuffer-heading-label (filter ibuffer-heading? (list-entries *nf-view*)))") ==
-             ~s{("Title matches" "Metadata matches" "Transcript matches")}
+             ~s{("Name matches" "Other matches" "Text matches")}
 
     assert eval!("(filter string? (list-entries *nf-view*))") ==
              ~s{("*zz-nav-a*" "*zz-nav-b*" "*zz-excluded*")}
@@ -169,7 +169,7 @@ defmodule Compos.FilterNavigationTest do
              "(filter (lambda (row) (and (ibuffer-heading? row) (list-selectable? *nf-view* row))) (list-entries *nf-view*))"
            ) == "()"
 
-    assert eval!("(buffer-text *nf-view*)") =~ "TRANSCRIPT MATCHES"
+    assert eval!("(buffer-text *nf-view*)") =~ "TEXT MATCHES"
     press("\\")
     assert eval!("(list-query *nf-view*)") == ~s("")
   end
@@ -241,7 +241,7 @@ defmodule Compos.FilterNavigationTest do
     assert eval!("*nf-metadata-reads*") == reads
 
     eval!(~S"""
-    (set! *chat-list-hits* '("transcriptonlyneedle" ("*zz-nav-a*" "transcriptonlyneedle")))
+    (set! *mode-list-search* '("chat-mode" "transcriptonlyneedle" (("*zz-nav-a*" "transcriptonlyneedle"))))
     (list-refresh! *nf-view*)
     (list-set-query! *nf-view* "transcriptonlyneedle")
     """)

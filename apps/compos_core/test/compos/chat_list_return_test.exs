@@ -47,7 +47,7 @@ defmodule Compos.ChatListReturnTest do
                  Session.eval(
                    """
                    (run-command "chat-list")
-                   (local-set-key "<f10>" "chat-list-quit")
+                   (local-set-key "<f10>" "ibuffer-quit")
                    """,
                    frame
                  )
@@ -74,7 +74,7 @@ defmodule Compos.ChatListReturnTest do
         assert {:ok, "other"} =
                  Session.eval("(car (window-restore (car (car (window-list)))))", frame)
 
-        assert {:ok, _} = Session.eval("(run-command \"chat-list-quit\")", frame)
+        assert {:ok, _} = Session.eval("(run-command \"ibuffer-quit\")", frame)
         assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
         assert {:ok, ^expected_tree} = Session.eval("(window-tree)", frame)
       after
@@ -121,7 +121,7 @@ defmodule Compos.ChatListReturnTest do
         end
 
       for {frame, tree} <- expected do
-        assert {:ok, _} = Session.eval("(local-set-key \"<f10>\" \"chat-list-quit\")", frame)
+        assert {:ok, _} = Session.eval("(local-set-key \"<f10>\" \"ibuffer-quit\")", frame)
         KeyDispatch.handle_key(frame, "<f10>")
         assert {:ok, ^tree} = Session.eval("(window-tree)", frame)
       end

@@ -65,6 +65,7 @@ A registered site can replace `readable` with an XSLT stylesheet under `web/pars
 | `www.linkedin.com/talent` | `linkedin-recruiter.xsl` | yes |
 | `mukeshbishnoi.com` | `mukeshbishnoi.xsl` | no |
 | `www.mukeshbishnoi.com` | `mukeshbishnoi.xsl` | no |
+| `www.nobelprize.org` | `nobelprize.xsl` | no |
 
 A transform-only parser should be registered directly in `*web--sites*`. Rendering should be enabled only when a normal fetch produces a script shell.
 

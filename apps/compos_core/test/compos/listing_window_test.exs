@@ -7,12 +7,12 @@ defmodule Compos.ListingWindowTest do
     value
   end
 
-  # ibuffer leaves in two presses: the first takes the card down, the
-  # second the list. The chat list leaves in one, because it is a picker
-  # you are passing through — see docs/CHAT-LIST.md.
+  # a list leaves in two presses: the first takes the card down, the
+  # second the list. The chat list is ibuffer over the chats, so it leaves
+  # the same way.
   for {command, quit, card_press?} <- [
         {"ibuffer", "ibuffer-quit", true},
-        {"ichat", "chat-list-quit", false}
+        {"ichat", "ibuffer-quit", true}
       ] do
     @command command
     @quit quit

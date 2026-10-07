@@ -102,7 +102,8 @@
     ("https://timesofindia.indiatimes.com" "toi.xsl" #f)
     ("https://www.linkedin.com/talent" "linkedin-recruiter.xsl" #t)
     ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
-    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))
+    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
+    ("https://www.nobelprize.org" "nobelprize.xsl" #f)))
 
 ;; A bundled parser is a bare file name under web/parsers. A user package
 ;; keeps its stylesheet beside its own source, so an absolute path is taken

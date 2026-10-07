@@ -1,5 +1,13 @@
 # Chat list
 
+The chat list is the mode list of `chat-mode`: `(mode-list "chat-mode")`,
+ibuffer over the chats (`scheme/packages/mode-list.scm`). The chats add
+only what is theirs, with `mode-list-define!` in `agent-fleet.scm`: the
+agents that are no chat buffer, the 40 recent rows at rest, the state and
+model sections, the saved chats under the live ones, the transcript a
+filter reads, and the verbs on the chat at point. `M-x mode-list` lists
+the buffers of any other mode the same way.
+
 ## Two surfaces, one table
 
 `C-x c` is the minibuffer form — a popup under the work with its filter
@@ -12,12 +20,11 @@ the buffers; `C-x b` is a plain completion list.
 verbs, the grouping and the folds; the minibuffer form borrows none of
 that state, so the sort and folds you set in one stay where you left them.
 
-The window form is one list. It opens in the window you called it from
-and joins that window's group. A view per group — what `ibuffer` does —
-made a `*chat-list*<n>` for every group the frame had ever stood in, so
-which list you got depended on where you were standing. A list in a
-group of its own was tried and reverted too: arriving had to cross
-groups, which dragged the frame through that group's whole layout.
+The window form keeps one view per group, the way `ibuffer` does:
+`*chat-list*` in the first group that opens it, `*chat-list*<n>` in the
+others. `q`, `RET`, `f`, `<`, `>`, the folds and the card are ibuffer's
+own, so the chat list leaves in two presses with a card up, like
+`ibuffer`.
 
 `t` turns the sections off and on. Off is the flat list, most recent
 first — the chat you half-remember the name of is near the top. `<`
@@ -172,17 +179,16 @@ and revives it, where you stood when you asked for it.
 
 ## Grouping
 
-`<` cycles what a section is. `none` is the flat list in most recently
-used order, and it is the default. A row carries the name of its chat's
-group in its own column, so the group reads without the sections;
-sectioning by group drops the column rather than say it twice.
+`<` cycles what a section is. `group` is the default, as in `ibuffer`;
+`t` turns the sections off for the flat list in most recently used
+order. A flat row carries the name of its chat's group in its own column
+in the wide layout, so the group reads without the sections; sectioning
+by group drops the column rather than say it twice.
 
 - none (MRU) — the group in a column
 - group
 - state
 - model
-
-The grouping is part of the one state.
 
 ## A switch is a switch of group
 

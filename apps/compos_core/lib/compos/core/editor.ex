@@ -72,8 +72,18 @@ defmodule Compos.Core.Editor do
   def desktop_view(fid \\ nil), do: GenServer.call(__MODULE__, {:desktop_view, fid(fid)})
 
   # frames
-  @doc "Attach a client: nil -> fresh frame; known id -> reattach; unknown id -> create with it."
-  def attach_frame(id), do: GenServer.call(__MODULE__, {:attach_frame, id})
+  @doc """
+  Attach a client: nil -> fresh frame; known id -> reattach; unknown id -> create with it.
+
+  The caller is the frame's client and is monitored. A frame whose client
+  is gone for `:frame_grace_ms` (default 30 minutes) is handed to Scheme's
+  `frame-client-lost!`, which deletes it: a closed browser tab is a dead
+  display, and Emacs deletes the frame of a dead display. `client: nil`
+  attaches with no client (a desktop restore); such a frame expires on the
+  same clock unless a client claims it first.
+  """
+  def attach_frame(id, opts \\ []),
+    do: GenServer.call(__MODULE__, {:attach_frame, id, Keyword.get(opts, :client, :caller)})
 
   @doc "Returns {:ok, closed_minibuffer | nil} so the caller can fire on_cancel."
   def delete_frame(id), do: GenServer.call(__MODULE__, {:delete_frame, id})
@@ -653,6 +663,10 @@ defmodule Compos.Core.Editor do
      %{
        frames: %{@main_frame => frame},
        frame_mru: [@main_frame],
+       # frame id => {client pid, monitor ref}: the one LiveView showing it
+       frame_clients: %{},
+       # frame id => timer ref: the grace running since its client left
+       frame_timers: %{},
        # the one window whose point is swapped into its buffer (the selected
        # window of the last-active frame): {frame_id, win_id, buffer}
        swapped: nil,
@@ -678,10 +692,13 @@ defmodule Compos.Core.Editor do
   # --- frame lifecycle --------------------------------------------------------
 
   @impl true
-  def handle_call({:attach_frame, id}, _from, state) do
+  def handle_call({:attach_frame, id, client}, {caller, _}, state) do
+    client = if client == :caller, do: caller, else: client
+
     case state.frames[id] do
       %{} ->
-        {:reply, {:ok, id}, state |> bump_frame(id) |> resync_swap()}
+        state = state |> bump_frame(id) |> resync_swap() |> frame_client(id, client)
+        {:reply, {:ok, id}, state}
 
       nil ->
         id = if valid_frame_id?(id), do: id, else: gen_frame_id()
@@ -722,7 +739,8 @@ defmodule Compos.Core.Editor do
         }
 
         state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
-        changed({:ok, id}, state |> bump_frame(id) |> resync_swap(), id)
+        state = state |> bump_frame(id) |> resync_swap() |> frame_client(id, client)
+        changed({:ok, id}, state, id)
     end
   end
 
@@ -757,9 +775,41 @@ defmodule Compos.Core.Editor do
             frame_mru: List.delete(state.frame_mru, id)
         }
 
+        state = state |> drop_frame_client(id) |> cancel_frame_timer(id)
         changed({:ok, f.minibuffer}, resync_swap(state), id)
     end
   end
+
+  # the client of a frame is gone: the tab closed, reloaded, or lost its
+  # socket. Start the grace; a reattach within it cancels the clock.
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case Enum.find(state.frame_clients, fn {_fid, {_pid, r}} -> r == ref end) do
+      {fid, _} ->
+        state = %{state | frame_clients: Map.delete(state.frame_clients, fid)}
+        {:noreply, arm_frame_timer(state, fid)}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  # the grace ran out with no client: hand the frame to Scheme, which
+  # decides (frame-client-lost! in editor.scm deletes it). This server
+  # never calls into Session itself — deadlock — so a Task carries it.
+  def handle_info({:frame_expired, fid}, state) do
+    state = %{state | frame_timers: Map.delete(state.frame_timers, fid)}
+
+    if state.frames[fid] && not Map.has_key?(state.frame_clients, fid) do
+      Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+        Session.call_named("frame-client-lost!", [fid], fid)
+      end)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   def handle_call(:frame_list, _from, state), do: {:reply, state.frame_mru, state}
 

@@ -92,7 +92,9 @@
 (load "tutorial.scm")
 (load "http.scm")
 (load "ibuffer.scm")
-;; the chats table is the ibuffer template over the chats: it loads after it
+;; the buffers of one major mode, as ibuffer lists them
+(load "mode-list.scm")
+;; the chats table is the mode list of chat-mode: it loads after it
 (load "agent-fleet.scm")
 ;; the spawn edges are the chats table's other view: it loads after it
 (load "subagents.scm")

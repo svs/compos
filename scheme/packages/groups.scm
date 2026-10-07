@@ -330,10 +330,8 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-record-by-id id)
   (if (pseudo-group-id? id)
       (pseudo-record-by-id id)
-      (let loop ((records *group-records*))
-        (cond ((null? records) #f)
-              ((equal? (group-record-id (car records)) id) (car records))
-              (else (loop (cdr records)))))))
+      ;; a record leads with its id, so the builtin assoc finds it
+      (assoc id *group-records*)))
 
 (define (group-record-by-name name)
   (let loop ((records *group-records*))
@@ -1987,9 +1985,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; Group navigation uses the same recency stream as buffer navigation.
 ;; Groups without a history entry trail in record order.
-(define (group-ids-mru)
-  ;; this workspace only: the frame's own groups, and the unowned ones
-  ;; unless the frame is isolated
+(define (group-ids-mru-split)
+  ;; (MINE AWAY), both in MRU order: MINE is this workspace's groups, the
+  ;; frame's own and the unowned ones unless the frame is isolated; AWAY is
+  ;; the groups another live frame owns
   ;;
   ;; The frame tab bar calls this on every render, so it settles the frame
   ;; once for the whole pass and reads the records in one sweep. Going
@@ -2006,15 +2005,21 @@ is forgotten and that group falls back to creation order in the switcher."
                              ((null? (cdr rest)) #f)
                              ((equal? (car rest) 'frame) (cadr rest))
                              (else (loop (cddr rest)))))))
-         (mine (fold (lambda (out record)
-                       (let ((owner (owner-of record)))
-                         (if (or (equal? owner here)
-                                 (and (not isolated)
-                                      (not (and owner (member owner frames) #t))))
-                             (cons (group-record-id record) out)
-                             out)))
-                     '() *group-records*)))
-    (filter (lambda (id) (and (member id mine) #t)) (group-ids-mru-all))))
+         (mine '())
+         (away '()))
+    (for-each (lambda (record)
+                (let* ((owner (owner-of record))
+                       (alive (and owner (member owner frames) #t)))
+                  (cond ((or (equal? owner here) (and (not isolated) (not alive)))
+                         (set! mine (cons (group-record-id record) mine)))
+                        (alive (set! away (cons (group-record-id record) away))))))
+              *group-records*)
+    (let ((all (group-ids-mru-all)))
+      (list (filter (lambda (id) (and (member id mine) #t)) all)
+            (filter (lambda (id) (and (member id away) #t)) all)))))
+
+(define (group-ids-mru)
+  (car (group-ids-mru-split)))
 
 (define (group-mru-note! value)
   (let ((id (group-resolve-id value)))
@@ -2336,6 +2341,17 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
+(define (group-switch-card g label)
+  ;; a row says only what the group record knows, its saved layout: a count
+  ;; of members means reading every buffer, so the highlighted row alone
+  ;; gets one (group-switch-candidate-in)
+  (let* ((saved (group-layout g))
+         (panes (if saved (length (window-tree-buffers saved)) 0))
+         (shape (cond ((= panes 0) "nothing yet")
+                      ((= panes 1) "one pane")
+                      (else (string-append (number->string panes) " panes")))))
+    (list label shape "container" '() "" (list (list "opens" shape)))))
+
 (define (group-switch-prompt-rows)
   ;; ((CANDIDATE ...) . ((LABEL ID) ...)): the rows the prompt draws,
   ;; and the group each label means. The prompt hands a selection back as its
@@ -2344,14 +2360,14 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; instead of the name index, which answers with the first group of that
   ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
-         (all (group-ids-mru))
-         (away (filter group-elsewhere-frame (group-ids-mru-all)))
+         (split (group-ids-mru-split))
+         (all (car split))
+         (away (cadr split))
          (recent (append (filter (lambda (id) (not (equal? id current))) all)
                          (filter (lambda (id) (equal? id current)) all)))
          (mine (group-buffer-memberships (current-buffer)))
          (mine-recent (filter (lambda (id) (member id mine)) recent))
          (others (filter (lambda (id) (not (member id mine))) recent))
-         (index (group-members-index))
          (seen '())
          (rows '())
          (candidate
@@ -2363,7 +2379,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                (string-append name " #" (number->string (+ taken 1))))))
                (set! seen (cons name seen))
                (set! rows (cons (list label g) rows))
-               (group-switch-candidate-in index g label))))
+               (group-switch-card g label))))
          ;; the pseudo groups come after every real one, the empty ones left out
          (pseudo (filter (lambda (id) (pair? (pseudo-group-buffers id)))
                          (pseudo-group-ids)))
@@ -2640,11 +2656,27 @@ is forgotten and that group falls back to creation order in the switcher."
                              'frame)
                            ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
+               ;; the highlighted row alone says how many buffers its group
+               ;; holds; the members index is read once, at the first rest
+               (count-now!
+                 (lambda (name)
+                   (let ((id (and open (group-switch-id name))))
+                     (when id
+                       (unless index (set! index (group-members-index)))
+                       (set! candidates
+                         (map (lambda (c)
+                                (if (and (equal? (car c) name)
+                                         (not (equal? (cadr c) "in another window")))
+                                    (group-switch-candidate-in index id name)
+                                    c))
+                              candidates))
+                       (minibuffer-set-candidates! candidates)))))
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
+                   (debounce! "group-switch-count" 60 count-now! name)
                    ;; 0 keeps the frame still: the card already says what a
                    ;; group holds, and a look is a whole-frame draw per
                    ;; highlight, panes and all

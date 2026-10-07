@@ -69,7 +69,7 @@ defmodule Compos.SwitcherPerformanceTest do
         (lambda (buf fetch)
           (when (equal? buf " *chats*")
             (set! *zz-perf-draws* (+ *zz-perf-draws* 1)))))
-      (advice-add! 'chat-list-rows 'before 'zz-perf
+      (advice-add! 'mode-list-rows 'before 'zz-perf
         (lambda (buf) (set! *zz-perf-fetches* (+ *zz-perf-fetches* 1)))))
     """)
 

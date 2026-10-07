@@ -24,7 +24,7 @@
 
 (define (chats-test-reset!)
   (when (buffer-known? *chat-list*)
-    (run-command "chat-list-quit")
+    (run-command "ibuffer-quit")
     (buffer-set-locals! *chat-list*
       (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
     (list-filter-clear! *chat-list*)
@@ -118,7 +118,7 @@
     (set! *agents-state-last* '())))
 
 (deftest 'the-chat-list-is-one-application
-  "*chat-list* wears the chat list mode built from the ibuffer template, over the chat scope"
+  "*chat-list* is the mode list of chat-mode: ibuffer over the chat scope"
   (lambda ()
     (chats-test-open! 'group 'name)
     (check-equal! (buffer-local *chat-list* 'mode-name) "chat-list-mode" "the mode")
@@ -127,7 +127,6 @@
     (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
     (check-contains! (buffer-text *chat-list*) "Chats" "the title")
     (check-contains! (buffer-text *chat-list*) "3 chats" "the noun is chat")
-    (check-equal! (list-key-lines *chat-list*) '() "no key bar stands over the rows")
     (chats-test-reset!)))
 
 (deftest 'the-list-arrives-in-the-invoking-group
@@ -229,7 +228,7 @@
       (chats-test-open! 'none 'name)
       (check-equal! (frame-local 'pinned-group) before
                     "standing pins nothing: previewing is a card, and a card moves no group")
-      (run-command "chat-list-quit")
+      (run-command "ibuffer-quit")
       (check-equal! (frame-local 'pinned-group) before "and leaving changes nothing either"))
     (chats-test-reset!)))
 
@@ -244,7 +243,7 @@
       (run-command "chat-list")
       (check-equal! (window-buffer (active-window)) (chat-list-buffer)
                     "the list stands in the window it took")
-      (run-command "chat-list-quit")
+      (run-command "ibuffer-quit")
       (check-equal! (length (window-list)) before "and gave the arrangement back")
       (check-equal! (window-buffer (active-window)) "*zz-chats-a*"
                     "showing what it displaced"))
@@ -269,11 +268,11 @@
         (check-equal! (length (window-list)) windows
                       "the second row adds no window")
         (check-equal! (float-window) host "and the card stands where it stood")))
-    (run-command "chat-list-quit")
+    (run-command "ibuffer-quit")
     (chats-test-reset!)))
 
-(deftest 'one-q-leaves-with-a-card-up
-  "the card is the list's own preview, so taking it and leaving are one press"
+(deftest 'two-qs-leave-with-a-card-up
+  "the card is the list's own preview: q takes it, and the next q leaves, as in ibuffer"
   (lambda ()
     (chats-test-reset!)
     (chats-test-chat! "*zz-chats-a*" #f)
@@ -285,9 +284,11 @@
       (run-command "chat-list")
       (listing-preview! (chat-list-buffer) "*zz-chats-b*")
       (check-true! (float-open?) "the row floats a card over the neighbour")
-      (run-command "chat-list-quit")
+      (run-command "ibuffer-quit")
       (check-false! (float-open?) "one q takes the card")
-      (check-false! (window-showing (chat-list-buffer)) "and the list with it")
+      (check-true! (and (window-showing (chat-list-buffer)) #t) "and leaves the list")
+      (run-command "ibuffer-quit")
+      (check-false! (window-showing (chat-list-buffer)) "the next q leaves the list")
       (check-equal! (length (window-list)) before "the arrangement comes back whole"))
     (chats-test-reset!)))
 
@@ -314,7 +315,7 @@
   (lambda ()
     (let ((from (frame-group)))
       (chats-test-open! 'none 'name)
-      (run-command "chat-list-quit")
+      (run-command "ibuffer-quit")
       (check-equal! (frame-group) from "the frame is back in the group you came from")
       (check-false! (group-pinned) "the application's pin is gone")
       (check-false! (window-showing *chat-list*) "and the list is not left standing"))
@@ -355,22 +356,22 @@
     (chats-test-reset!)))
 
 (deftest 'chats-rest-is-mru-with-the-group-in-the-row
-  "the list rests flat in MRU order and every row wears its chat's group"
+  "the flat list is in MRU order and every row wears its chat's group"
   (lambda ()
     (let ((ids (chats-test-open! 'none 'recent)))
-      (check-equal! (ibuffer-view-default *chat-list* 'grouping) 'none
-                    "the registered view rests flat")
+      (check-equal! (ibuffer-view-default *chat-list* 'grouping) 'group
+                    "the list rests in sections, as ibuffer does")
       (check-equal! (ibuffer-view-default *chat-list* 'sort) 'recent
                     "and in most recently used order")
       (check-equal! (chats-test-headings) '() "a flat list has no sections")
       (check-true! (member 'group (map ibuffer-field-tag
-                                       (chat-list-fields *chat-list* *chat-list-compact-fields*)))
+                                       (ibuffer-fields *chat-list* *ibuffer-wide-fields*)))
                    "the group is a column of the flat row")
       (check-equal! (ibuffer-row-group-label "*zz-chats-a*") (group-short-name (car ids))
                     "and the cell names the chat's own group")
       (ibuffer-set-grouping! 'group *chat-list*)
       (check-equal! (member 'group (map ibuffer-field-tag
-                                        (chat-list-fields *chat-list* *chat-list-compact-fields*)))
+                                        (ibuffer-fields *chat-list* *ibuffer-wide-fields*)))
                     #f "sectioning by group drops the column rather than say it twice")
       (chats-test-reset!))))
 
@@ -434,16 +435,16 @@
   (lambda ()
     (chats-test-open! 'none 'name)
     (define *chats-other-grouping* (ibuffer-grouping "*ibuffer*"))
-    (run-command "chat-list-regroup")
+    (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'group "none then group")
-    (run-command "chat-list-regroup")
+    (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'state "group then state")
     (check-equal! (chats-test-heading-labels) '("idle") "one section: idle")
     (check-equal! (length (chats-test-names)) 3 "every chat is idle")
-    (run-command "chat-list-regroup")
+    (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'model "state then model")
     (check-equal! (chats-test-heading-labels) '("no model") "a chat with no model says so")
-    (run-command "chat-list-regroup")
+    (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'none "model then none, and round again")
     (check-equal! (ibuffer-grouping "*ibuffer*") *chats-other-grouping* "the *ibuffer* view keeps its own")
     (chats-test-reset!)))
@@ -453,12 +454,12 @@
   (lambda ()
     (chats-test-open! 'none 'name)
     (buffer-append! "*zz-chats-c*" "we settled on the zzhaystack budget in the end")
-    (run-command "chat-list-filter")
+    (run-command "list-filter")
     (minibuffer-change! "zzhaystack")
     (check-equal! (plist-get (minibuffer-state) 'input) "zzhaystack" "input is immediate")
     (check-false! (chat-list-hit "*zz-chats-c*") "no synchronous transcript scan")
     (minibuffer-cancel!)
-    (check-equal! (cadr *chat-list-search-request*) "zzhaystack" "closing keeps the search")
+    (check-equal! (cadr *mode-list-search*) "zzhaystack" "closing keeps the search")
     (check-equal! (list-query *chat-list*) "zzhaystack" "closing preserves narrowing")
     (chats-test-reset!)))
 
@@ -497,7 +498,7 @@
   (lambda ()
     (chats-test-reset!)
     (chats-test-chat! "*zz-chats-a*" (group-record-create! "zz-chats-one"))
-    (chats-test-chat! "*zz-chats-b*" (group-record-by-name "zz-chats-one"))
+    (chats-test-chat! "*zz-chats-b*" (group-record-id (group-record-by-name "zz-chats-one")))
     (run-command "chat-prompt")
     (let* ((view *chat-prompt-buffer*)
            (home (buffer-local view 'ibuffer-prompt-home-window))

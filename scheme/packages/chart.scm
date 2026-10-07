@@ -95,6 +95,16 @@
 
 (define (chart--n v) (number->string (/ (round (* v 10)) 10.0)))
 
+;; The lists side by side: (chart--zip '(1 2) '(a b)) is ((1 a) (2 b)).
+(define (chart--zip &rest lists)
+  (if (or (null? lists) (memq '() lists) (null? (car lists)))
+      '()
+      (cons (map car lists) (apply chart--zip (map cdr lists)))))
+
+;; Call F on the items of LISTS in step, as Scheme's own for-each does.
+(define (chart--each f &rest lists)
+  (for-each (lambda (row) (apply f row)) (apply chart--zip lists)))
+
 (define (chart--scale d0 d1 r0 r1)
   (let ((span (if (= d0 d1) 1 (- d1 d0))))
     (lambda (v) (+ r0 (* (- r1 r0) (/ (- v d0) span))))))
@@ -152,10 +162,10 @@
       (list ".sf{fill:" surface "}.ring{stroke:" surface "}"
             ".t1{fill:" t1 "}.t2{fill:" t2 "}.mu{fill:" muted "}"
             ".grid{stroke:" grid "}.base{stroke:" base "}")
-      (map (lambda (c i)
-             (let ((n (number->string (+ i 1))))
+      (map (lambda (row)
+             (let ((c (car row)) (n (number->string (+ 1 (cadr row)))))
                (string-append ".f" n "{fill:" c "}.k" n "{stroke:" c "}")))
-           palette (iota (length palette))))))
+           (chart--zip palette (iota (length palette)))))))
 
 (define (chart--style theme)
   (let ((light (chart--ink "#fcfcfb" "#0b0b0b" "#52514e" "#898781" "#e1e0d9" "#c3c2b7"
@@ -197,7 +207,7 @@
 (define (chart--legend-svg items)
   (apply string-append
     (map (lambda (it)
-           (let ((x (car it)) (y (cadr it)) (i (+ 1 (cadddr it))))
+           (let ((x (car it)) (y (cadr it)) (i (+ 1 (car (cdr (cddr it))))))
              (string-append
                "<rect x='" (chart--n x) "' y='" (chart--n (- y 9))
                "' width='10' height='10' rx='2' class='f" (number->string i) "'/>"
@@ -301,7 +311,7 @@
                  (chart--scale (car xticks) (car (reverse xticks)) left right)))
          (base-y (sy (if (<= ymin 0 ymax) 0 ymin)))
          (out '()))
-    (define (emit! . parts) (set! out (cons (apply string-append parts) out)))
+    (define (emit! &rest parts) (set! out (cons (apply string-append parts) out)))
     (define (hline y cls)
       (emit! "<line x1='" (chart--n left) "' x2='" (chart--n right) "' y1='" (chart--n y)
              "' y2='" (chart--n y) "' class='" cls "' stroke-width='1'/>"))
@@ -313,7 +323,7 @@
     (when title (emit! (chart--text left0 26 "t1 ti" "start" title)))
     (when legend? (emit! (chart--legend-svg legend)))
     ;; The grid and the y labels
-    (for-each (lambda (v s)
+    (chart--each (lambda (v s)
                 (hline (sy v) "grid")
                 (emit! (chart--text (- left 8) (+ (sy v) 4) "mu tn" "end" s)))
               yticks ylabels)
@@ -321,7 +331,7 @@
     ;; The x labels. Categories thin out when they do not fit their band.
     (if category?
         (let ((every (max 1 (ceiling (/ (+ 8 (chart--widest cat-labels)) band)))))
-          (for-each (lambda (s i)
+          (chart--each (lambda (s i)
                       (when (= 0 (remainder i every))
                         (emit! (chart--text (sx i) (+ bottom 18) "mu" "middle" s))))
                     cat-labels (iota (length cat-labels))))
@@ -333,3 +343,107 @@
       (let ((cy (/ (+ top bottom) 2)))
         (emit! (chart--text 16 cy "t2" "middle" y-label
                             (string-append " transform='rotate(-90 16 " (chart--n cy) ")'")))))
+    ;; The marks
+    (cond
+      ((eq? type 'bar)
+       (let* ((group-w (* band 0.7))
+              (w (max 1 (/ (- group-w (* 2 (- count 1))) count))))
+         (chart--each
+           (lambda (pts k name)
+             (for-each
+               (lambda (p)
+                 (let ((x (+ (- (sx (car p)) (/ group-w 2)) (* k (+ w 2))))
+                       (cat (if (< (car p) (length cat-labels)) (list-ref cat-labels (car p)) "")))
+                   (emit! "<path class='f" (number->string (+ k 1)) "' d='"
+                          (chart--bar-path x w base-y (sy (cadr p))) "'><title>"
+                          (html-escape (string-append (if (string=? name "") "" (string-append name ", "))
+                                                      cat ": " (yfmt (cadr p))))
+                          "</title></path>")))
+               pts))
+           all (iota count) names)))
+      ((eq? type 'scatter)
+       (chart--each
+         (lambda (pts k)
+           (for-each
+             (lambda (p)
+               (emit! "<circle cx='" (chart--n (sx (car p))) "' cy='" (chart--n (sy (cadr p)))
+                      "' r='4' stroke-width='2' class='ring f" (number->string (+ k 1)) "'/>"))
+             pts))
+         all (iota count)))
+      (else
+       (chart--each
+         (lambda (pts k)
+           (let ((xy (map (lambda (p) (list (sx (car p)) (sy (cadr p)))) pts))
+                 (n (number->string (+ k 1))))
+             (when (and (eq? type 'area) (pair? xy))
+               (emit! "<path class='f" n "' fill-opacity='0.14' d='" (chart--poly xy)
+                      "L" (chart--n (car (car (reverse xy)))) "," (chart--n base-y)
+                      "L" (chart--n (car (car xy))) "," (chart--n base-y) "Z'/>"))
+             (emit! "<path class='k" n
+                    "' fill='none' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' d='"
+                    (chart--poly xy) "'/>")
+             (when (= (length xy) 1)
+               (emit! "<circle cx='" (chart--n (car (car xy))) "' cy='" (chart--n (cadr (car xy)))
+                      "' r='4' class='f" n "'/>"))))
+         all (iota count))))
+    (when direct?
+      (for-each (lambda (l) (emit! (chart--text (+ right 10) (+ (car l) 4) "t2" "start" (cadr l))))
+                (chart--spread
+                  (fold (lambda (acc row)
+                          (let ((pts (car row)) (name (cadr row)))
+                            (if (null? pts) acc (cons (list (sy (cadr (car (reverse pts)))) name) acc))))
+                        '() (chart--zip all names))
+                  (+ top 4) bottom)))
+    (emit! "</svg>")
+    (apply string-append (reverse out))))
+
+;;; Files and showing
+
+(effects! '(write))
+
+(defgroup 'chart "Charts drawn from a Scheme spec.")
+
+(defcustom 'chart-directory "~/.compos/charts"
+  "Where chart-show! writes the SVG file of a chart."
+  'group 'chart 'type 'string)
+
+(define (chart--home path)
+  (if (string-prefix? "~/" path) (string-append (getenv "HOME") (substring path 1 (string-length path))) path))
+
+(define (chart--slug s)
+  (let* ((clean (re-replace-all "[^a-z0-9]+" (string-downcase s) "-"))
+         (parts (filter (lambda (p) (not (string=? p ""))) (string-split clean "-"))))
+    (if (null? parts) "chart" (string-join parts "-"))))
+
+(define (chart-path spec)
+  (string-append (chart--home chart-directory) "/"
+                 (chart--slug (chart--label-text (chart--opt spec 'name (chart--opt spec 'title "chart"))))
+                 ".svg"))
+
+(define (chart-save! spec path)
+  (let ((path (chart--home path)))
+    (write-file! path (chart-svg spec))
+    path))
+
+(effects! '(write display))
+
+;; Write the chart and show it in the other window. The focus stays.
+(define (chart-show! spec &optional path)
+  (let ((path (chart-save! spec (if path path (chart-path spec))))
+        (group (buffer-group (current-buffer))))
+    (with-frame-windows
+      (lambda ()
+        (window-set-buffer! (get-other-window)
+                            (if (buffer-known? path) path (visit path group)))))
+    path))
+
+(effects! '(pure))
+(public! 'chart-svg
+  "(chart-svg SPEC) — the SVG text of the chart SPEC describes: a plist of type (line area bar scatter), series ((NAME DATA) ...), data, categories, title, x-label, y-label, width, height, y-zero, y-format, x-format, theme")
+(public! 'chart-ticks
+  "(chart-ticks LO HI [N]) — about N round tick values that cover LO..HI, in steps of 1, 2 or 5 times a power of ten")
+(effects! '(write))
+(public! 'chart-path "(chart-path SPEC) — the file chart-show! writes for SPEC, named from its name or title under chart-directory")
+(public! 'chart-save! "(chart-save! SPEC PATH) — write the chart SPEC describes to PATH as SVG; return the path")
+(effects! '(write display))
+(public! 'chart-show! "(chart-show! SPEC [PATH]) — write the chart as SVG and show the image in the other window; focus stays; return the path")

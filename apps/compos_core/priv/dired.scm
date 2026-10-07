@@ -527,7 +527,11 @@
            "open in. The arrows move the rows while you type, and `RET` "
            "keeps the narrowing and the row you chose. `\\` widens by one "
            "and `.` hides the dotfiles. `s` changes sorting, `S` reverses it, "
-           "and `G` groups directories first. The filters and sorting persist.")
+           "and `G` groups directories first. The filters and sorting persist. "
+           "`% m` marks and `% d` flags by regexp, `~` flags backups, `t` toggles "
+           "the marks, `% R` renames by regexp. `!` runs a shell command on the "
+           "marked files. `C-x C-q` edits the names as text. With a Dired in "
+           "another window, `C` and `R` offer its directory.")
     ;; a file name is a file name: `/` matches the same annotation
     ;; C-x C-f shows beside one
     'category 'file
@@ -571,7 +575,8 @@
     'footer (lambda (buf)
               '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("*" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
-                ("/" "filter") ("." "dotfiles")
+                ("/" "filter") ("." "dotfiles") ("% m" "mark regexp") ("t" "toggle")
+                ("!" "shell") ("C-x C-q" "edit names")
                 ("^" "up") ("g" "revert") ("q" "quit peek, then dired")))
     ;; Marked rows go to trash by default. Permanent deletion uses `D`.
     'flags (list (list "d" "D" "trash"
@@ -597,7 +602,11 @@
             ("C" "dired-copy") ("M" "dired-chmod") ("T" "dired-touch")
             ("L" "dired-symlink") ("s" "dired-sort-cycle")
             ("S" "dired-sort-reverse") ("G" "dired-dirs-first")
-            ("." "dired-filter-dotfiles"))))
+            ("." "dired-filter-dotfiles")
+            ("% m" "dired-mark-files-regexp") ("% d" "dired-flag-files-regexp")
+            ("% R" "dired-do-rename-regexp") ("t" "dired-toggle-marks")
+            ("~" "dired-flag-backup-files") ("!" "dired-do-shell-command")
+            ("&" "dired-do-shell-command") ("C-x C-q" "dired-toggle-read-only"))))
 
 (define (dired-arm-watch! buf)
   (let ((dir (dired-dir buf)))
@@ -855,7 +864,7 @@
           (buf (current-buffer)))
       (if (not entry)
           (message "Select a file, not the parent row")
-          (read-file-name "Rename to: "
+          (dired-read-target "Rename to: " buf
             (lambda (destination)
               (let* ((source (string-append (dired-dir buf) "/" entry))
                      (target (expand-path (normalize-file-input destination)))
@@ -870,7 +879,7 @@
            (entries (dired-action-targets buf)))
       (if (null? entries)
           (message "Select a file, not the parent row")
-          (read-file-name (if (= (length entries) 1) "Copy to: " "Copy into directory: ")
+          (dired-read-target (if (= (length entries) 1) "Copy to: " "Copy into directory: ") buf
             (lambda (destination)
               (let* ((raw (normalize-file-input destination))
                      (dest (expand-path raw))
@@ -946,6 +955,226 @@
         (make-directory! (string-append (dired-dir (current-buffer)) "/" name))
         (dired-refresh-buffer! (current-buffer))
         (message "Created")))))
+
+;; --- the rest of Emacs Dired: regexp marks, wdired, dwim target, shell ------
+
+;; copy and rename offer the directory of a Dired in another window
+(define dired-dwim-target #t)
+
+;; a remote provider lists its own files; these verbs act on local paths
+(define (dired-local? buf)
+  (if (dired-provider buf)
+      (begin (message "This operation is not supported by this directory provider.") #f)
+      #t))
+
+(define (dired-path buf name)
+  (if (string-prefix? "/" name) name (string-append (dired-dir buf) "/" name)))
+
+;; the directory of a Dired in another window of this frame, as the
+;; dired-dwim-target of Emacs offers it
+(define (dired-dwim-dir buf)
+  (and dired-dwim-target
+       (let loop ((ws (window-list)))
+         (if (null? ws)
+             #f
+             (let ((other (cadr (car ws))))
+               (if (and (not (equal? other buf))
+                        (buffer-exists? other)
+                        (dired-buffer? other))
+                   (string-append (dired-dir other) "/")
+                   (loop (cdr ws))))))))
+
+(define (dired-read-target prompt buf k)
+  (let ((dir (dired-dwim-dir buf)))
+    (if dir (read-file-name-initial prompt dir k) (read-file-name prompt k))))
+
+(define (dired-shown-files buf)
+  (filter (lambda (e) (list-markable? buf e)) (list-entries buf)))
+
+(define (dired-mark-matching! buf pat ch verb)
+  (let ((hits (filter (lambda (e) (re-find pat (dired-entry-base e) 0))
+                      (dired-shown-files buf))))
+    (for-each (lambda (e) (list-mark! buf e ch)) hits)
+    (list-redraw! buf)
+    (message (string-append verb " " (number->string (length hits)) " file(s)"))))
+
+(define-command "dired-mark-files-regexp" "Mark every shown file whose name matches a regexp"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Mark files (regexp): " '()
+        (lambda (pat) (dired-mark-matching! buf pat *list-mark-char* "Marked"))))))
+
+(define-command "dired-flag-files-regexp" "Flag every shown file whose name matches a regexp for trash"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Flag for trash (regexp): " '()
+        (lambda (pat) (dired-mark-matching! buf pat "D" "Flagged"))))))
+
+(define-command "dired-flag-backup-files" "Flag backup and auto-save files for trash"
+  (lambda ()
+    (dired-mark-matching! (current-buffer) "(~|^#.*#)$" "D" "Flagged")))
+
+(define-command "dired-toggle-marks" "Mark the unmarked files and unmark the marked ones"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (i (list-index buf)))
+      (for-each
+        (lambda (e)
+          (let ((m (list-mark-of buf e)))
+            (cond ((equal? m " ") (list-mark! buf e *list-mark-char*))
+                  ((equal? m *list-mark-char*) (list-mark! buf e #f)))))
+        (dired-shown-files buf))
+      (list-redraw! buf)
+      (when i (list-goto-index! buf i)))))
+
+(define (dired-zip as bs)
+  (if (or (null? as) (null? bs))
+      '()
+      (cons (list (car as) (car bs)) (dired-zip (cdr as) (cdr bs)))))
+
+(define (dired-duplicate names)
+  (cond ((null? names) #f)
+        ((member (car names) (cdr names)) (car names))
+        (else (dired-duplicate (cdr names)))))
+
+;; PAIRS is ((OLD NEW) ...). Every file moves to a temporary name first,
+;; so a swap or a rotation of names works. Answers the count, or #f.
+(define (dired-rename-all! buf pairs)
+  (let* ((olds (map car pairs))
+         (news (map cadr pairs))
+         (twice (dired-duplicate news))
+         (clash (filter (lambda (n) (and (not (member n olds))
+                                         (file-exists? (dired-path buf n))))
+                        news)))
+    (cond ((null? pairs) 0)
+          (twice (message (string-append "Two files would be named " twice)) #f)
+          ((pair? clash) (message (string-append "Already exists: " (car clash))) #f)
+          (else
+            (let* ((stamp (number->string (monotonic-ms)))
+                   (moves (map (lambda (p)
+                                 (list (car p) (string-append (car p) ".dired-" stamp) (cadr p)))
+                               pairs)))
+              (for-each (lambda (m) (rename-file! (dired-path buf (car m)) (dired-path buf (cadr m))))
+                        moves)
+              (for-each (lambda (m) (rename-file! (dired-path buf (cadr m)) (dired-path buf (caddr m))))
+                        moves)
+              (dired-refresh-buffer! buf)
+              (length pairs))))))
+
+(define-command "dired-do-rename-regexp" "Rename the marked files by a regexp replacement; \\1 is a group"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (names (map dired-entry-base (dired-action-targets buf))))
+      (cond ((null? names) (message "Select a file, not the parent row"))
+            ((dired-local? buf)
+             (minibuffer-read "Rename from (regexp): " '()
+               (lambda (pat)
+                 (minibuffer-read (string-append "Rename " pat " to: ") '()
+                   (lambda (repl)
+                     (let ((n (dired-rename-all! buf
+                                (filter (lambda (p) (not (equal? (car p) (cadr p))))
+                                        (map (lambda (b) (list b (re-replace pat b repl))) names)))))
+                       (when n
+                         (message (string-append "Renamed " (number->string n) " file(s)")))))))))))))
+
+;; wdired: the names as text. Change a line to rename that file; the
+;; line count must stay. C-c C-c renames, C-c C-k leaves.
+(define-command "dired-toggle-read-only" "Edit the file names as text: C-c C-c renames, C-c C-k cancels"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (names (map dired-entry-base (dired-shown-files buf)))
+           (ed (string-append "*wdired:" (or (dired-dir buf) "") "*")))
+      (when (dired-local? buf)
+        (buffer-set-text! ed (string-append (string-join names "\n") "\n") #f)
+        (buffer-set-local! ed 'wdired-dired buf)
+        (buffer-set-local! ed 'wdired-names names)
+        (buffer-set-local! ed 'mode-name "wdired-mode")
+        (buffer-mark-saved! ed)
+        (switch-to-buffer! ed)
+        (set-mode! "wdired-mode")
+        (message "Edit the names. C-c C-c renames, C-c C-k cancels")))))
+
+(define (wdired-lines text)
+  (let ((ls (map string-trim (string-split text "\n"))))
+    (filter (lambda (l) (not (equal? l ""))) ls)))
+
+(define (wdired-leave! ed)
+  (let ((buf (buffer-local ed 'wdired-dired)))
+    (buffer-mark-saved! ed)
+    (if (and buf (buffer-exists? buf))
+        (switch-to-buffer! buf)
+        (run-command "quit-window"))
+    (buffer-kill! ed)))
+
+(define-command "wdired-finish-edit" "Rename the files whose names you changed"
+  (lambda ()
+    (let* ((ed (current-buffer))
+           (buf (buffer-local ed 'wdired-dired))
+           (olds (or (buffer-local ed 'wdired-names) '()))
+           (news (wdired-lines (buffer-text ed))))
+      (cond ((not (and buf (buffer-exists? buf)))
+             (message "The Dired buffer is gone"))
+            ((not (= (length olds) (length news)))
+             (message "Keep one line for each file: do not add or remove lines"))
+            (else
+              (let ((n (dired-rename-all! buf
+                         (filter (lambda (p) (not (equal? (car p) (cadr p))))
+                                 (dired-zip olds news)))))
+                (when n
+                  (wdired-leave! ed)
+                  (message (string-append "Renamed " (number->string n) " file(s)")))))))))
+
+(define-command "wdired-abort-changes" "Leave the name edit and rename nothing"
+  (lambda ()
+    (wdired-leave! (current-buffer))
+    (message "No files renamed")))
+
+(define-mode "wdired-mode"
+  (lambda () (buffer-set-read-only! (current-buffer) #f)))
+
+(mode-keys! "wdired-mode"
+  '(("C-c C-c" "wdired-finish-edit") ("C-x C-s" "wdired-finish-edit")
+    ("C-c C-k" "wdired-abort-changes")))
+
+;; `*` in the command stands for every file, `?` runs it once for each
+;; file; otherwise the files go at the end
+(define (dired-shell-line cmd files)
+  (let ((words (string-split cmd " "))
+        (quoted (map sh-quote files)))
+    (cond ((member "*" words)
+           (string-join (map (lambda (w) (if (equal? w "*") (string-join quoted " ") w)) words) " "))
+          ((member "?" words)
+           (string-join
+             (map (lambda (q) (string-join (map (lambda (w) (if (equal? w "?") q w)) words) " "))
+                  quoted)
+             "; "))
+          (else (string-append cmd " " (string-join quoted " "))))))
+
+(effects! '(write execute))
+(define-command "dired-do-shell-command" "Run a shell command on the marked files: * is all of them, ? is each one"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (files (map dired-entry-base (dired-action-targets buf))))
+      (cond ((null? files) (message "Select a file, not the parent row"))
+            ((dired-local? buf)
+             (minibuffer-read
+               (string-append "! on " (if (= (length files) 1)
+                                            (car files)
+                                            (string-append (number->string (length files)) " files"))
+                              ": ")
+               '()
+               (lambda (cmd)
+                 (let ((line (dired-shell-line cmd files))
+                       (out "*Shell Command Output*"))
+                   (message (string-append "Running: " line))
+                   (shell-command->string line (string-append (dired-dir buf) "/")
+                     (lambda (text)
+                       (dired-refresh-buffer! buf)
+                       (if (and (string? text) (not (equal? (string-trim text) "")))
+                           (begin (buffer-set-text! out text #t)
+                                  (display-buffer out))
+                           (message (string-append "Done: " line)))))))))))))
+(effects! '(write))
 
 (define-key "ctl-x-map" "d" "dired")
 (define-key "ctl-x-map" "C-d" "dired")

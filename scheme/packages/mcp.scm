@@ -30,7 +30,17 @@
 
 (define *mcp-registry* '())
 
+;; A chat never widens its own tool surface. Adding a server, naming a
+;; preset or turning one on is the user's act: an agent that could do it
+;; from eval-scheme would walk around every permission the chat holds.
+;; The eval-scheme tool binds *llm-tool-buffer* while agent code runs.
+(define (mcp-refuse-agent! who)
+  (when (and (boundp '*llm-tool-buffer*) *llm-tool-buffer*)
+    (error (string-append (symbol->string who)
+                          ": a chat cannot add MCP servers or presets; ask the user"))))
+
 (define (mcp-register! name spec)
+  (mcp-refuse-agent! 'mcp-register!)
   (set! *mcp-registry* (alist-put *mcp-registry* name spec))
   name)
 
@@ -60,6 +70,14 @@
     (if i (string-append (substring-bytes u 0 i) "?…") u)))
 
 ;; connect a registered server unless it already is — safe to call every send
+;; the builtin, kept once: a reload must not capture the wrapper below.
+;; mcp-ensure! connects only registered servers, so it calls the builtin.
+(define mcp--connect (if (boundp 'mcp--connect) mcp--connect mcp-connect!))
+
+(define (mcp-connect! name spec)
+  (mcp-refuse-agent! 'mcp-connect!)
+  (mcp--connect name spec))
+
 (define (mcp-ensure! name)
   (let ((e (assoc name *mcp-registry*)))
     (cond ((not e)
@@ -67,7 +85,7 @@
           ((mcp-connected? name) #t)
           (else
             (message (string-append "mcp: connecting " (symbol->string name) "…"))
-            (mcp-connect! (symbol->string name)
+            (mcp--connect (symbol->string name)
                           (mcp-resolve-spec (car (cdr e))))))))
 
 ;;; --- presets -----------------------------------------------------------------
@@ -75,6 +93,7 @@
 (define *chat-presets* '())
 
 (define (define-preset! name description servers)
+  (mcp-refuse-agent! 'define-preset!)
   (set! *chat-presets* (alist-put *chat-presets* name (list 'description description 'servers servers)))
   name)
 
@@ -229,6 +248,8 @@
 (define (chat-presets-set! buf names)
   (let ((wanted (if (member 'compos names) names (cons 'compos names)))
         (now (chat-presets-of buf)))
+    (unless (null? (filter (lambda (p) (not (member p now))) wanted))
+      (mcp-refuse-agent! 'chat-presets-set!))
     (if (and (= (length wanted) (length now))
              (null? (filter (lambda (p) (not (member p now))) wanted)))
         #f
@@ -290,6 +311,7 @@
     (append bundles servers)))
 
 (define (chat-preset-on! buf name)
+  (mcp-refuse-agent! 'chat-preset-on!)
   (unless (member name (chat-presets-of buf))
     (buffer-set-local! buf 'chat-presets (cons name (chat-presets-of buf))))
   (for-each mcp-ensure! (preset-servers name))

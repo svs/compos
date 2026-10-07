@@ -2290,9 +2290,11 @@ defmodule Compos.Core.Editor do
   # socket. Start the grace; a reattach within it cancels the clock.
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case Enum.find(state.frame_clients, fn {_fid, {_pid, r}} -> r == ref end) do
+    clients = frame_clients(state)
+
+    case Enum.find(clients, fn {_fid, {_pid, r}} -> r == ref end) do
       {fid, _} ->
-        state = %{state | frame_clients: Map.delete(state.frame_clients, fid)}
+        state = Map.put(state, :frame_clients, Map.delete(clients, fid))
         {:noreply, arm_frame_timer(state, fid)}
 
       nil ->
@@ -2304,9 +2306,9 @@ defmodule Compos.Core.Editor do
   # decides (frame-client-lost! in editor.scm deletes it). This server
   # never calls into Session itself — deadlock — so a Task carries it.
   def handle_info({:frame_expired, fid}, state) do
-    state = %{state | frame_timers: Map.delete(state.frame_timers, fid)}
+    state = Map.put(state, :frame_timers, Map.delete(frame_timers(state), fid))
 
-    if state.frames[fid] && not Map.has_key?(state.frame_clients, fid) do
+    if state.frames[fid] && not Map.has_key?(frame_clients(state), fid) do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         Session.call_named("frame-client-lost!", [fid], fid)
       end)
@@ -2322,34 +2324,39 @@ defmodule Compos.Core.Editor do
   defp frame_grace_ms,
     do: Application.get_env(:compos_core, :frame_grace_ms, @frame_grace_default)
 
+  # Map.get, not a key: a hot reload swaps this module in over a state that
+  # init built before these two keys existed
+  defp frame_clients(state), do: Map.get(state, :frame_clients, %{})
+  defp frame_timers(state), do: Map.get(state, :frame_timers, %{})
+
   # Record who shows the frame. A pid replaces the previous client and
   # stops the grace. nil says "no client here" (a desktop restore) and
   # starts the grace only when no client holds the frame already: a tab
   # that connected before the restore ran keeps its frame.
   defp frame_client(state, fid, nil) do
-    if Map.has_key?(state.frame_clients, fid), do: state, else: arm_frame_timer(state, fid)
+    if Map.has_key?(frame_clients(state), fid), do: state, else: arm_frame_timer(state, fid)
   end
 
   defp frame_client(state, fid, pid) when is_pid(pid) do
     state =
-      case state.frame_clients[fid] do
+      case frame_clients(state)[fid] do
         {^pid, _ref} ->
           state
 
         _other ->
           state = drop_frame_client(state, fid)
           ref = Process.monitor(pid)
-          %{state | frame_clients: Map.put(state.frame_clients, fid, {pid, ref})}
+          Map.put(state, :frame_clients, Map.put(frame_clients(state), fid, {pid, ref}))
       end
 
     cancel_frame_timer(state, fid)
   end
 
   defp drop_frame_client(state, fid) do
-    case state.frame_clients[fid] do
+    case frame_clients(state)[fid] do
       {_pid, ref} ->
         Process.demonitor(ref, [:flush])
-        %{state | frame_clients: Map.delete(state.frame_clients, fid)}
+        Map.put(state, :frame_clients, Map.delete(frame_clients(state), fid))
 
       nil ->
         state
@@ -2359,17 +2366,17 @@ defmodule Compos.Core.Editor do
   defp arm_frame_timer(state, fid) do
     state = cancel_frame_timer(state, fid)
     ref = Process.send_after(self(), {:frame_expired, fid}, frame_grace_ms())
-    %{state | frame_timers: Map.put(state.frame_timers, fid, ref)}
+    Map.put(state, :frame_timers, Map.put(frame_timers(state), fid, ref))
   end
 
   defp cancel_frame_timer(state, fid) do
-    case state.frame_timers[fid] do
+    case frame_timers(state)[fid] do
       nil ->
         state
 
       ref ->
         Process.cancel_timer(ref)
-        %{state | frame_timers: Map.delete(state.frame_timers, fid)}
+        Map.put(state, :frame_timers, Map.delete(frame_timers(state), fid))
     end
   end
 

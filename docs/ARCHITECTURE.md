@@ -71,8 +71,12 @@ dispatch it to another worker.
   MRU buffer ring. Window ids are global integers, so a bare id names one
   window anywhere; selecting a foreign window selects its frame. Clients
   attach by frame id (localStorage) and reattach across reloads and daemon
-  restarts. Renders a per-frame *display payload*: only the visible slice of
-  each window.
+  restarts. The Editor monitors each frame's client. A frame with no client
+  for `:frame_grace_ms` (30 minutes) goes to Scheme's `frame-client-lost!`,
+  which runs `frame-delete-hook` and deletes it: a closed tab is a dead
+  display. A desktop restore attaches frames with no client, so a tab that
+  never returns leaves no frame behind. Renders a per-frame *display
+  payload*: only the visible slice of each window.
 - **Frame / Input** — the dispatching frame rides the process dictionary
   (`Frame.current/0`); Input is the serialized input queue (one keystroke =
   one atomic multi-call dispatch), stamping the frame and bumping the frame

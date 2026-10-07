@@ -464,7 +464,20 @@
           (else scope))))
 
 (define (ibuffer-source buf)
-  (filter ibuffer-row? (ibuffer-scope-names buf)))
+  ;; one snapshot of every name, not three buffer reads a row: this is
+  ;; ibuffer-row? over the snapshot's path, mode and context-only
+  (let ((rows (buffer-read-many (filter string? (ibuffer-scope-names buf))
+                                '(path) '(mode-name context-only))))
+    (map car
+         (filter (lambda (r)
+                   (let ((b (car r)) (path (list-ref r 1)) (mode (list-ref r 2)))
+                     (and (buffer-known? b)
+                          (not (assoc b *ibuffer-views*))
+                          (not (member mode *ibuffer-view-modes*))
+                          (not (string-prefix? " " b))
+                          (not (equal? (list-ref r 3) #t))
+                          (ibuffer-workspace-path? (or path (and (string-prefix? "/" b) b))))))
+                 rows))))
 
 ;; The number the chip reads as "N of M". Working M out again means
 ;; asking every buffer in the scope five questions, and the scope cannot

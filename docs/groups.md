@@ -529,7 +529,9 @@ comes last. In a mixed frame the groups of the selected buffer come first.
 Groups with no MRU entry trail in creation order. The non-empty pseudo groups
 follow, then other frames' groups in a marked section. The new-group action is
 `C-c C-n` in the switcher, not a row. Its label says whether it starts empty,
-moves the selected buffer, or starts with it.
+moves the selected buffer, or starts with it. The text you typed to filter
+the list names the new group, so a search that finds nothing becomes the
+group. With no text, `C-c C-n` asks for a name.
 
 ### Candidate preview
 

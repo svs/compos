@@ -2240,19 +2240,60 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; once, and one scan of every buffer per group cost the prompt 1.7s at
 ;; 25 groups and 80 buffers.
 (define (group-members-index)
-  (let loop ((bufs
-                    (filter (lambda (b) (not (buffer-context-only? b)))
-                            (dedupe-names (append (buffer-list-mru) (buffer-list)))))
-             (index '()))
-    (if (null? bufs)
-        (map (lambda (cell) (cons (car cell) (reverse (cdr cell)))) index)
-        (loop (cdr bufs)
-              (let add ((ids (group-buffer-memberships (car bufs)))
-                        (index index))
-                (if (null? ids)
-                    index
-                    (add (cdr ids)
-                         (group-members-index-push index (car ids) (car bufs)))))))))
+  ;; one metadata snapshot of every buffer, not three buffer-local reads a
+  ;; buffer: with hundreds of buffers the per-buffer reads were most of the
+  ;; group switcher's wait. A row that still needs a write (a legacy key, a
+  ;; stale id) takes group-buffer-memberships, which migrates it.
+  (let* ((names (dedupe-names (append (buffer-list-mru) (buffer-list))))
+         (rows (buffer-read-many names '()
+                 '("context-only" "mode-name" "group-id" "group-ids" "group" "companion-of")))
+         (resolved '())
+         (resolve (lambda (id)
+                    (let ((hit (assoc id resolved)))
+                      (if hit
+                          (cadr hit)
+                          (let ((valid (group-resolve-id id)))
+                            (set! resolved (cons (list id valid) resolved))
+                            valid)))))
+         (memberships
+           (lambda (row)
+             (let ((buf (car row))
+                   (mode (list-ref row 2))
+                   (held (list-ref row 3))
+                   (ids (list-ref row 4))
+                   (legacy (or (list-ref row 5) (list-ref row 6))))
+               (cond ((equal? mode "chat-mode")
+                      (let ((valid (and held (resolve held))))
+                        (cond ((and valid (equal? valid held)) (list valid))
+                              ;; a deleted group: no member, and nothing to write
+                              ((and held (not valid)) '())
+                              (else (group-buffer-memberships buf)))))
+                     ((and (pair? ids) (not legacy)
+                           (null? (filter resolve ids)))
+                      '())
+                     ((and (pair? ids) (null? (cdr ids)) (not legacy)
+                           (equal? (resolve (car ids)) (car ids)))
+                      ids)
+                     ((or (pair? ids) legacy) (group-buffer-memberships buf))
+                     (else '()))))))
+    (let* ((live (filter (lambda (row) (not (equal? (cadr row) #t))) rows))
+           ;; (ID N BUF): sorted by id, and by N within one id, so each group
+           ;; keeps its buffers in list order without a list rebuild a buffer
+           (triples
+             (sort (let walk ((rows live) (n 0) (out '()))
+                     (if (null? rows)
+                         out
+                         (walk (cdr rows) (+ n 1)
+                               (fold (lambda (out id) (cons (list id n (car (car rows))) out))
+                                     out (memberships (car rows)))))))))
+      (let group ((triples (reverse triples)) (index '()))
+        (cond ((null? triples) index)
+              ((and (pair? index) (equal? (car (car index)) (car (car triples))))
+               (group (cdr triples)
+                      (cons (cons (car (car index)) (cons (list-ref (car triples) 2) (cdr (car index))))
+                            (cdr index))))
+              (else (group (cdr triples)
+                           (cons (list (car (car triples)) (list-ref (car triples) 2)) index))))))))
 
 (define (group-members-index-push index id buf)
   (let ((cell (assoc id index)))
@@ -2275,10 +2316,8 @@ is forgotten and that group falls back to creation order in the switcher."
         (list "opens" shape)))
 
 (define (group-switch-candidate-in index g &optional label)
-  (let* ((members (group-members-in index g))
-         (names (map buffer-modeline-name members))
-         (n (length names))
-         (hint (if (null? names)
+  (let* ((n (length (group-members-in index g)))
+         (hint (if (= n 0)
                    "no buffers"
                    (string-append (number->string n) " buffer" (if (= n 1) "" "s")))))
     ;; the card names the group and counts it, and wears no member chips
@@ -2341,15 +2380,18 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (switch-to-group-candidates)
   (car (group-switch-prompt-rows)))
 
-(define (group-switch-run-new-action! action)
-  (let ((label (car action))
-        (buf (car (cdr action)))
-        (source (car (cdr (cdr action)))))
-    (group-read-new-name (string-append label ": ")
-      (lambda (name)
-        (if buf
-            (group-create-with-buffer! name buf source)
-            (group-create-and-enter! name '() #f))))))
+(define (group-switch-run-new-action! action &optional typed)
+  (let* ((label (car action))
+         (buf (car (cdr action)))
+         (source (car (cdr (cdr action))))
+         (create! (lambda (name)
+                    (if buf
+                        (group-create-with-buffer! name buf source)
+                        (group-create-and-enter! name '() #f)))))
+    (cond ((and typed (not (equal? typed "")) (group-record-by-name typed))
+           (message (string-append "Group " typed " already exists")))
+          ((and typed (not (equal? typed ""))) (create! typed))
+          (else (group-read-new-name (string-append label ": ") create!)))))
 
 ;; What the highlight shows while you move through the groups: the
 ;; WHOLE group, not one buffer of it — the arrangement you would land
@@ -2374,7 +2416,13 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((saved (group-layout g))
          (panes (if saved
                     (length (window-tree-buffers saved))
-                    (min 2 (length (group-preview-members-in index g))))))
+                    ;; two is the most a card says, so stop looking at two
+                    (let count ((bufs (group-members-in index g)) (n 0))
+                      (cond ((or (= n 2) (null? bufs)) n)
+                            ((and (group-work-buffer? (car bufs))
+                                  (not (buffer-local (car bufs) 'scratch-owner)))
+                             (count (cdr bufs) (+ n 1)))
+                            (else (count (cdr bufs) n)))))))
     (cond ((= panes 0) "nothing yet")
           ((= panes 1) "one pane")
           (else (string-append (number->string panes) " panes")))))
@@ -2518,13 +2566,16 @@ is forgotten and that group falls back to creation order in the switcher."
 (local-set-key* (minibuffer-buffer) "M-m" "group-switch-move-buffer")
 (local-set-key* (minibuffer-buffer) "C-k" "group-switch-kill")
 
-(define-command "group-switch-new" "Create a group from the group switcher"
+(define-command "group-switch-new" "Create a group from the group switcher, named by what you typed"
   (lambda ()
-    (let ((action (frame-local 'group-switch-new-action)))
-      (when (and (minibuffer-state) action)
-        ;; Cancel restores the invoking arrangement before the name prompt.
-        (minibuffer-cancel!)
-        (group-switch-run-new-action! action)))))
+    (let ((action (frame-local 'group-switch-new-action))
+          (state (minibuffer-state)))
+      (when (and state action)
+        ;; the filter you typed to look for the group names the new one
+        (let ((typed (string-trim (or (plist-get state 'input) ""))))
+          ;; Cancel restores the invoking arrangement before the name prompt.
+          (minibuffer-cancel!)
+          (group-switch-run-new-action! action typed))))))
 
 ;; C-n belongs to the list: every prompt in the editor moves the
 ;; selection with it, and the modal's own legend says so. Taking it
@@ -2547,7 +2598,8 @@ is forgotten and that group falls back to creation order in the switcher."
         (let* ((action (group-switch-new-action))
                (prompt-rows (group-switch-prompt-rows))
                (candidates (car prompt-rows))
-               (index (group-members-index))
+               ;; built by the first look: a prompt that never looks never pays
+               (index #f)
                ;; #f once the prompt closed: a look that was still
                ;; waiting must not draw after it
                (open #t)
@@ -2583,6 +2635,7 @@ is forgotten and that group falls back to creation order in the switcher."
                        (if id
                            (preview-show
                              (lambda ()
+                               (unless index (set! index (group-members-index)))
                                (set! woken (append (group-preview-draw! index id) woken)))
                              'frame)
                            ;; An unmatched filter leaves the invoking windows intact.

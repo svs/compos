@@ -8,8 +8,7 @@ defmodule Compos.GroupSwitchNewTest do
   end
 
   setup do
-    path = Path.join([:code.priv_dir(:compos_core), "tests", "group-switch-test.scm"])
-    eval!(~s{(load "#{path}")})
+    eval!("(load-package-tests-once!)")
     on_exit(fn -> Session.eval("(t--sw-done!)") end)
     :ok
   end
@@ -44,6 +43,14 @@ defmodule Compos.GroupSwitchNewTest do
     assert eval!("(frame-local 'group-switch-new-action)") == "#f"
     assert eval!("(and (member \"group-switch-modal-map\" (buffer-minor-maps (minibuffer-buffer))) #t)") == "#f"
     eval!("(minibuffer-cancel!)")
+  end
+
+  test "C-c C-n names the new group by the switcher's filter text" do
+    eval!("(t--sw-setup!) (run-command \"group-switch\") (minibuffer-change! \"zz-typed-new\")")
+    KeyDispatch.handle_key("C-c")
+    KeyDispatch.handle_key("C-n")
+    assert eval!("(and (minibuffer-state) #t)") == "#f"
+    assert eval!("(and (group-resolve-id \"zz-typed-new\") #t)") == "#t"
   end
 
   test "cancelling the group selector removes its modal keymap" do

@@ -45,7 +45,7 @@ defmodule Compos.Core.BufferView do
   use GenServer
 
   alias Compos.Core.Buffer.Ref
-  alias Compos.Core.{BufferStore, Rope}
+  alias Compos.Core.{BufferStore, GroupIndex, Rope}
 
   @table :compos_buffer_view
 
@@ -75,6 +75,7 @@ defmodule Compos.Core.BufferView do
     :ets.delete(@table, name)
     :ets.match_delete(@table, {{:big_local, name, :_}, :_})
     Process.delete({__MODULE__, :big, name})
+    GroupIndex.drop(name)
     :ok
   rescue
     # the table is gone (see `lookup/1`) — there is no row to drop
@@ -83,6 +84,7 @@ defmodule Compos.Core.BufferView do
 
   @doc "Publish VIEW under its own name, and under its id for `Ref` readers."
   def put(%{name: name, id: id} = view) do
+    GroupIndex.update(name, view)
     view = split_big(view)
     :ets.insert(@table, [{name, view}, {{:id, id}, name}])
     :ok
@@ -99,7 +101,9 @@ defmodule Compos.Core.BufferView do
   buffer that is already live.
   """
   def put_new(%{name: name, id: id} = view) do
-    :ets.insert_new(@table, [{name, view}, {{:id, id}, name}])
+    new? = :ets.insert_new(@table, [{name, view}, {{:id, id}, name}])
+    if new?, do: GroupIndex.update(name, view)
+    new?
   rescue
     ArgumentError -> false
   end
@@ -448,6 +452,7 @@ defmodule Compos.Core.BufferView do
   @impl true
   def init(_) do
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+    GroupIndex.new_tables()
 
     # A restart starts with an empty table and an empty watch list, and a
     # buffer only publishes when something about it changes. Adopt every live
@@ -474,6 +479,30 @@ defmodule Compos.Core.BufferView do
 
     send(self(), :reindex)
     {:ok, watched}
+  end
+
+  @doc """
+  Build the group index from the rows when it is missing: a daemon that
+  started before the index gets one without a restart.
+  """
+  def ensure_group_index, do: GenServer.call(__MODULE__, :ensure_group_index)
+
+  @impl true
+  def handle_call(:ensure_group_index, _from, watched) do
+    unless GroupIndex.ready?() do
+      GroupIndex.new_tables()
+
+      for name <- :ets.select(@table, [{{:"$1", :_}, [{:is_binary, :"$1"}], [:"$1"]}]) do
+        # read the row again at the moment it is filed: a buffer that
+        # published since the select already filed its newer keys
+        case lookup(name) do
+          [{^name, %{} = view}] -> GroupIndex.update(name, view)
+          _ -> :ok
+        end
+      end
+    end
+
+    {:reply, :ok, watched}
   end
 
   @impl true

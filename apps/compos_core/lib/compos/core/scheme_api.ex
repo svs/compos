@@ -1919,6 +1919,28 @@ defmodule Compos.Core.SchemeAPI do
           Buffer.set_locals(buf, locals)
           :void
         end,
+      {"group-index-select",
+       "(group-index-select NAMES KEYS) — the NAMES, in order, whose group locals name one of KEYS or need the slow path; #f with no index."} =>
+        fn [names, keys] when is_list(names) and is_list(keys) ->
+          case Compos.Core.GroupIndex.select(names, keys) do
+            :error -> false
+            hits -> hits
+          end
+        end,
+      {"group-index-buckets",
+       "(group-index-buckets NAMES) — ((KEY NAME ...) ...): the NAMES that are not context-only, by the group key their locals hold, each in the order of NAMES; KEY slow needs the slow path. #f with no index."} =>
+        fn [names] when is_list(names) ->
+          case Compos.Core.GroupIndex.buckets(names) do
+            :error -> false
+            buckets -> Enum.map(buckets, fn {k, ns} -> [if(k == :slow, do: {:sym, "slow"}, else: k) | ns] end)
+          end
+        end,
+      {"group-index-ensure!",
+       "(group-index-ensure!) — build the group index from the buffer rows when it is missing; #t once it exists."} =>
+        fn [] ->
+          Compos.Core.BufferView.ensure_group_index()
+          Compos.Core.GroupIndex.ready?()
+        end,
       {"buffer-local",
        "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset."} => fn [
                                                                                                    buf,

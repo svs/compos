@@ -702,6 +702,7 @@
          (t0 (fast-now-ms))
          (authored (fast-recipe intent))
          (remembered (and (not authored) (fast-remembered intent)))
+         (templated (and (not authored) (not remembered) (fast-template intent)))
          (steps '())
          (timing '())
          ;; the record M-x fast-trace reads: each stage adds what it saw
@@ -733,6 +734,9 @@
       (remembered
         (k (list 'code remembered 'source 'remembered 'ms (- (fast-now-ms) t0)
                  'trace (list 'path "remembered"))))
+      (templated
+        (k (list 'code templated 'source 'template 'ms (- (fast-now-ms) t0)
+                 'trace (list 'path "template"))))
       (else
         ;; decide first: one operation goes straight to the stitch; several,
         ;; or a doubt, are broken into steps, one apropos each
@@ -767,6 +771,41 @@
          (string? (plist-get rec 'gave))
          (not (string-prefix? "error:" (plist-get rec 'gave)))
          (plist-get rec 'code))))
+
+;; The same words with one changed: "ascii theme" gave (load-theme "ascii"),
+;; so "paper theme" gives (load-theme "paper"). The changed word is the slot
+;; when the old answer holds it as a string literal; the rest must match.
+(define (fast-words s)
+  (filter (lambda (w) (not (equal? w ""))) (string-split (string-trim s) " ")))
+
+(define (fast-slot-fill old new code)
+  (let ((ow (fast-words old)) (nw (fast-words new)))
+    (and (> (length ow) 1)
+         (= (length ow) (length nw))
+         (let loop ((a ow) (b nw) (slot #f))
+           (cond
+             ((null? a)
+              (and slot
+                   (string-replace code (format "~s" (car slot)) (format "~s" (cadr slot)))))
+             ((equal? (string-downcase (car a)) (string-downcase (car b)))
+              (loop (cdr a) (cdr b) slot))
+             ((and (not slot) (string-contains? code (format "~s" (car a))))
+              (loop (cdr a) (cdr b) (list (car a) (car b))))
+             (else #f))))))
+
+(define (fast-template intent)
+  (let loop ((rs *fast-trace*))
+    (and (pair? rs)
+         (let* ((r (car rs))
+                (code (plist-get r 'code))
+                (filled (and (string? code)
+                             (string? (plist-get r 'gave))
+                             (not (string-prefix? "error:" (plist-get r 'gave)))
+                             (string? (plist-get r 'intent))
+                             (fast-slot-fill (plist-get r 'intent) intent code))))
+           (if (and filled (equal? (car (fast-accept filled)) 'ok))
+               filled
+               (loop (cdr rs)))))))
 
 ;; the error side of llm-with-model: the ask ends, and its record says why
 (define (fast-llm-failed done)
@@ -824,7 +863,7 @@
                  (fast-short-reason (plist-get r 'reason))))
 
 (define (fast-run! intent)
-  (unless (or (fast-recipe intent) (fast-remembered intent))
+  (unless (or (fast-recipe intent) (fast-remembered intent) (fast-template intent))
     (message (string-append "fast: asking " fast-code-model "...")))
   (fast-resolve intent
     (lambda (r)

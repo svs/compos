@@ -38,3 +38,16 @@
   (lambda ()
     (t--ag-chat! #f)
     (check-equal! (t--ag-report! "opus[1m]") "opus[1m]" "the report wins")))
+
+;;; --- the backend's session rides with the conversation ----------------------
+
+(deftest 'a-session-event-is-kept-with-the-conversation
+  "the session id and the connector that issued it land in the chat's locals"
+  (lambda ()
+    (t--ag-chat! #f)
+    (agent-handle-event "zz-ag" (list 'type 'session 'id "sess-1" 'resumed #f))
+    (check-equal! (buffer-local t--ag-buf 'agent-session) "sess-1" "the id is kept")
+    (check-equal! (buffer-local t--ag-buf 'agent-session-connector) "zz-connector"
+                  "with the connector that issued it")
+    (check-equal! (and (member 'agent-session chat-conversation-locals) #t) #t
+                  "a reset clears it with the conversation")))

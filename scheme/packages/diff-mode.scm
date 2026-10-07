@@ -1378,6 +1378,9 @@
     (let ((buf (current-buffer)))
       (diff--install-keys!)
       (buffer-set-read-only! buf #t)
+      ;; the text is git's answer, regenerated on every refresh: a history
+      ;; of it says nothing the repository does not
+      (buffer-provenance-discard! buf "mode:diff-mode" "mode-policy" "mode")
       ;; the text regenerates from the backend, so the desktop saves the
       ;; locals and not the content — and not the drawn projection either:
       ;; diff-refresh below rebuilds render-blocks from git on restore

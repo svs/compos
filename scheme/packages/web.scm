@@ -1616,6 +1616,8 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
+      ;; the text is a rendering of a fetched page: the page is the record
+      (buffer-provenance-discard! buf "mode:browse-mode" "mode-policy" "mode")
       (desktop-skip! buf 'browse-pages)
       (desktop-skip! buf 'browse-html)
       (buffer-set-local! buf 'window-class "writing")

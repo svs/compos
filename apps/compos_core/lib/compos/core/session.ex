@@ -1480,7 +1480,7 @@ defmodule Compos.Core.Session do
       end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
       {"agent-info",
-       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, ending, steers, settling, silent, permission, question; or #f. ending is #t while a finished turn waits on an unresolved steer. settling is #t while a steered turn waits for its close; silent is #t while a turn waits for the connector's first event."} =>
+       "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, ending, steers, parked, session, settling, silent, permission, question; or #f. ending is #t while a finished turn waits on an unresolved steer. parked is #t while an idle thread has closed its adapter; session is the backend session id the next adapter reopens, or #f. settling is #t while a steered turn waits for its close; silent is #t while a turn waits for the connector's first event."} =>
         fn [slug] ->
           case Compos.Core.Agent.info(s(slug)) do
             {:error, _} ->

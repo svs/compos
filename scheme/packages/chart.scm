@@ -14,7 +14,7 @@
 ;;;   categories  the x labels of a bar chart or of a line over named steps
 ;;;   title, x-label, y-label  text
 ;;;   name        the file name chart-show! uses; the title by default
-;;;   width, height            pixels; 640 by 360
+;;;   width, height            pixels; 520 by 300
 ;;;   y-zero      #t keeps 0 on the y axis; bar and area always keep it
 ;;;   y-format, x-format       procedures from a number to its label
 ;;;   theme       auto follows the system, or light or dark
@@ -156,10 +156,10 @@
 (define *chart-palette-dark*
   '("#3987e5" "#d95926" "#199e70" "#c98500" "#d55181" "#008300" "#9085e9" "#e66767"))
 
-(define (chart--ink surface t1 t2 muted grid base palette)
+(define (chart--ink surface edge t1 t2 muted grid base palette)
   (apply string-append
     (append
-      (list ".sf{fill:" surface "}.ring{stroke:" surface "}"
+      (list ".sf{fill:" surface "}.ring{stroke:" surface "}.bd{stroke:" edge "}"
             ".t1{fill:" t1 "}.t2{fill:" t2 "}.mu{fill:" muted "}"
             ".grid{stroke:" grid "}.base{stroke:" base "}")
       (map (lambda (row)
@@ -168,9 +168,9 @@
            (chart--zip palette (iota (length palette)))))))
 
 (define (chart--style theme)
-  (let ((light (chart--ink "#fcfcfb" "#0b0b0b" "#52514e" "#898781" "#e1e0d9" "#c3c2b7"
+  (let ((light (chart--ink "#fcfcfb" "rgba(11,11,11,0.10)" "#0b0b0b" "#52514e" "#898781" "#e1e0d9" "#c3c2b7"
                            *chart-palette-light*))
-        (dark (chart--ink "#1a1a19" "#ffffff" "#c3c2b7" "#898781" "#2c2c2a" "#383835"
+        (dark (chart--ink "#1a1a19" "rgba(255,255,255,0.10)" "#ffffff" "#c3c2b7" "#898781" "#2c2c2a" "#383835"
                           *chart-palette-dark*)))
     (string-append
       "<style>text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:12px}"
@@ -288,8 +288,8 @@
          (xs (if category? '() (map car (apply append all))))
          (xticks (if category? '() (chart-ticks (fold min (car xs) xs) (fold max (car xs) xs) 6)))
          (xfmt (chart--opt spec 'x-format (chart--tick-format xticks)))
-         (width (chart--opt spec 'width 640))
-         (height (chart--opt spec 'height 360))
+         (width (chart--opt spec 'width 520))
+         (height (chart--opt spec 'height 300))
          (title (chart--opt spec 'title #f))
          (x-label (chart--opt spec 'x-label #f))
          (y-label (chart--opt spec 'y-label #f))
@@ -297,13 +297,13 @@
          (theme (if (string? theme) (string->symbol theme) theme))
          (direct? (and (memq type '(line area)) (<= 2 count 4)))
          (legend? (>= count 2))
-         (left0 12)
-         (top0 (+ 12 (if title 22 0)))
-         (legend (if legend? (chart--legend-items names left0 (- width 12) (+ top0 12)) '()))
+         (left0 20)
+         (top0 (+ 16 (if title 22 0)))
+         (legend (if legend? (chart--legend-items names left0 (- width 20) (+ top0 12)) '()))
          (top (+ 10 (if legend? (+ 8 (cadr (car (reverse legend)))) top0)))
-         (left (+ 12 (if y-label 18 0) (chart--widest ylabels) 8))
-         (right (- width 16 (if direct? (+ 10 (chart--widest names)) 0)))
-         (bottom (- height 12 18 (if x-label 18 0)))
+         (left (+ 20 (if y-label 18 0) (chart--widest ylabels) 8))
+         (right (- width 24 (if direct? (+ 10 (chart--widest names)) 0)))
+         (bottom (- height 20 18 (if x-label 18 0)))
          (sy (chart--scale ymin ymax bottom top))
          (band (/ (- right left) (max 1 (length cats))))
          (sx (if category?
@@ -319,8 +319,13 @@
            "' height='" (number->string height) "' viewBox='0 0 " (number->string width) " "
            (number->string height) "' role='img'>")
     (emit! "<title>" (html-escape (or title "chart")) "</title>" (chart--style theme))
-    (emit! "<rect class='sf' width='100%' height='100%' rx='6'/>")
-    (when title (emit! (chart--text left0 26 "t1 ti" "start" title)))
+    ;; The card: rounded, with a hairline edge and a soft shadow under it.
+    (emit! "<defs><filter id='lift' x='-5%' y='-5%' width='110%' height='120%'>"
+           "<feDropShadow dx='0' dy='1.5' stdDeviation='2.5' flood-color='#000' flood-opacity='0.14'/>"
+           "</filter></defs>")
+    (emit! "<rect class='sf bd' x='5' y='4' width='" (number->string (- width 10))
+           "' height='" (number->string (- height 12)) "' rx='12' stroke-width='1' filter='url(#lift)'/>")
+    (when title (emit! (chart--text left0 32 "t1 ti" "start" title)))
     (when legend? (emit! (chart--legend-svg legend)))
     ;; The grid and the y labels
     (chart--each (lambda (v s)
@@ -338,11 +343,11 @@
         (for-each (lambda (v) (emit! (chart--text (sx v) (+ bottom 18) "mu tn" "middle" (xfmt v))))
                   xticks))
     (when x-label
-      (emit! (chart--text (/ (+ left right) 2) (- height 12) "t2" "middle" x-label)))
+      (emit! (chart--text (/ (+ left right) 2) (- height 18) "t2" "middle" x-label)))
     (when y-label
       (let ((cy (/ (+ top bottom) 2)))
-        (emit! (chart--text 16 cy "t2" "middle" y-label
-                            (string-append " transform='rotate(-90 16 " (chart--n cy) ")'")))))
+        (emit! (chart--text 22 cy "t2" "middle" y-label
+                            (string-append " transform='rotate(-90 22 " (chart--n cy) ")'")))))
     ;; The marks
     (cond
       ((eq? type 'bar)

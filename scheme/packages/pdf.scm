@@ -850,7 +850,11 @@
 
 (mode-parent! "pdf-reader-mode" "special-mode")
 (define-mode "pdf-reader-mode"
-  (lambda () (pdf-reader-setup! (current-buffer))))
+  (lambda ()
+    ;; the text is extracted from the PDF, which is the record: a history
+    ;; of the extraction says nothing the file does not
+    (buffer-provenance-discard! (current-buffer) "mode:pdf-reader-mode" "mode-policy" "mode")
+    (pdf-reader-setup! (current-buffer))))
 
 (mode-keys! "pdf-reader-mode"
   '(

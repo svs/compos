@@ -49,6 +49,10 @@ defmodule Compos.Core.MixProject do
       # the database mechanism: wire protocol, auth, pooling, and type
       # decoding are not things Scheme can supply
       {:postgrex, "~> 0.20"},
+      # cron: Quantum owns the timer and the cron grammar; Scheme owns the
+      # jobs (scheme/packages/cron.scm). tz gives it the local time zone.
+      {:quantum, "~> 3.5"},
+      {:tz, "~> 0.28"},
       {:rustler, "~> 0.36.0"}
     ]
   end

@@ -810,6 +810,16 @@ defmodule Compos.Core.Buffer do
     GenServer.call(via(name), {:provenance_stop, source(opts), author(opts), opts})
   end
 
+  @doc """
+  Stop recording and drop the history: the log file and the weave. For a
+  buffer whose text is a rendering of a record kept elsewhere (a chat log,
+  a git diff, a PDF) the history says nothing the record does not. The
+  checkpoint carries the text from here on.
+  """
+  def provenance_discard(name, opts \\ []) do
+    GenServer.call(via(name), {:provenance_discard, source(opts), author(opts), opts})
+  end
+
   @doc "Close the current Provenance changeset without deleting history."
   def provenance_checkpoint(name, opts \\ []) do
     GenServer.call(via(name), {:provenance_checkpoint, source(opts), author(opts), opts})
@@ -1939,6 +1949,30 @@ defmodule Compos.Core.Buffer do
       state = %{
         state
         | provenance: %{state.provenance | enabled: false, policy_source: policy_source}
+      }
+
+      {:reply, :ok, checkpoint_later(state)}
+    end
+  end
+
+  # A mode's discard yields to a user's explicit policy the way a mode's
+  # stop does. Otherwise: recording off, weave gone, log file gone. The
+  # next checkpoint carries the text, because nothing mirrors it any more.
+  defp on_call({:provenance_discard, _src, _author, opts}, _from, state) do
+    policy_source = policy_of(opts)
+
+    if policy_source == "mode" and state.provenance.policy_source == "user" do
+      {:reply, :ok, state}
+    else
+      state = flush_provenance(state)
+      BufferHistoryStore.forget(state.id)
+
+      state = %{
+        state
+        | provenance: %{state.provenance | enabled: false, policy_source: policy_source},
+          history: nil,
+          history_persisted: nil,
+          log_current: false
       }
 
       {:reply, :ok, checkpoint_later(state)}

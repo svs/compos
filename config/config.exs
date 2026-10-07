@@ -44,6 +44,9 @@ config :req_llm, stream_pool_protocols: [:http2]
 # of the machine. Zero disables the bound.
 config :compos_core, scheme_heap_limit_mb: 1024
 
+# cron times are local times; Quantum and Crontab need a zone database
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 # The nesting one Scheme program may reach. The evaluator reads the process
 # stack, which a tail call does not grow, so this bounds real recursion and
 # never an iteration count. It stops a function that calls itself with no

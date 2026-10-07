@@ -92,6 +92,7 @@
 (load "tutorial.scm")
 (load "http.scm")
 (load "ibuffer.scm")
+(load "housekeeping.scm")
 ;; the buffers of one major mode, as ibuffer lists them
 (load "mode-list.scm")
 ;; the chats table is the mode list of chat-mode: it loads after it

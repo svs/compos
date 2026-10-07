@@ -1097,7 +1097,11 @@
   (lambda ()
     (let ((buf (current-buffer))
           (interrupted? (buffer-local (current-buffer) 'chat-turn-active)))
-      (buffer-provenance-stop! buf "mode:chat-mode" "mode-policy" "mode")
+      ;; the transcript is a rendering of the chat log, which is the record
+      ;; of who said what: a history of the rendering says nothing the log
+      ;; does not, so the mode keeps none, and drops any an open or a
+      ;; restore recorded before this setup ran
+      (buffer-provenance-discard! buf "mode:chat-mode" "mode-policy" "mode")
       ;; On desktop restore EVERY runtime local is a lie: the process it
       ;; described died with the daemon. Clear the whole class — not just
       ;; the 'agent-queued that once deadlocked RET — so that bug cannot
@@ -1553,9 +1557,9 @@
 ;; An idle adapter is two OS processes and up to a few hundred MB for a
 ;; conversation nobody is having. A chat idle this long closes its adapter
 ;; and keeps the session; the next message reopens it on the same session.
-;; 0 keeps every adapter running.
-(defcustom 'agent-idle-seconds 600
-  "Seconds a chat sits idle before its agent adapter is closed. The next message reopens the same session. 0 never closes one.")
+;; 0 keeps every adapter running. A plain define: custom.scm loads after
+;; this file, so defcustom is not available here yet; set! it in init.scm.
+(define agent-idle-seconds 600)
 
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise

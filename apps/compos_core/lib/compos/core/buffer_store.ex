@@ -288,6 +288,99 @@ defmodule Compos.Core.BufferStore do
 
   def graveyard_log, do: Path.join(dir(), "graveyard.log")
 
+  @doc """
+  Delete every graveyard entry (checkpoint and log) buried more than
+  KEEP_DAYS ago, by file mtime. The burial line in `graveyard.log` stays,
+  so the id -> name record outlives the bytes. Returns how many ids went.
+  """
+  def sweep_graveyard(keep_days) when is_integer(keep_days) and keep_days >= 0 do
+    cutoff = System.os_time(:second) - keep_days * 86_400
+    dead_logs = Path.join(Compos.Core.BufferHistoryStore.dir(), "dead")
+
+    ids =
+      Enum.uniq(
+        ids_in(graveyard_dir(), ".etf") ++ ids_in(dead_logs, ".loro")
+      )
+
+    ids
+    |> Enum.filter(fn id ->
+      older?(Path.join(graveyard_dir(), id <> ".etf"), cutoff) and
+        older?(Path.join(dead_logs, id <> ".loro"), cutoff)
+    end)
+    |> Enum.map(fn id ->
+      File.rm(Path.join(graveyard_dir(), id <> ".etf"))
+      File.rm(Path.join(dead_logs, id <> ".loro"))
+    end)
+    |> length()
+  end
+
+  @doc """
+  Delete the history log of every dormant buffer whose checkpoint carries
+  its text and whose mode opted out of recording: the text is a rendering
+  of a record kept elsewhere, and the log repeats the checkpoint. Live
+  buffers are left to their own process. The graveyard is swept the same
+  way. Returns how many logs went.
+  """
+  def sweep_redundant_history do
+    live =
+      Compos.Core.list_buffers()
+      |> Enum.map(&Buffer.id/1)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    logs = Compos.Core.BufferHistoryStore.dir()
+
+    sweep_pairs(dir(), logs, live) +
+      sweep_pairs(graveyard_dir(), Path.join(logs, "dead"), MapSet.new())
+  end
+
+  defp sweep_pairs(checkpoints, logs, live) do
+    checkpoints
+    |> ids_in(".etf")
+    |> Enum.reject(&MapSet.member?(live, &1))
+    |> Enum.filter(fn id ->
+      File.exists?(Path.join(logs, id <> ".loro")) and
+        redundant_log?(Path.join(checkpoints, id <> ".etf"))
+    end)
+    |> Enum.map(&File.rm(Path.join(logs, &1 <> ".loro")))
+    |> length()
+  end
+
+  # text in the checkpoint, recording off by a mode's policy. A user's own
+  # stop keeps its log: provenance-start bridges the gap from it.
+  defp redundant_log?(checkpoint) do
+    case File.read(checkpoint) do
+      {:ok, bytes} ->
+        cp = :erlang.binary_to_term(bytes)
+
+        is_map(cp) and is_binary(cp[:text]) and
+          match?(%{enabled: false, policy_source: "mode"}, cp[:provenance])
+
+      _ ->
+        false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp ids_in(directory, ext) do
+    case File.ls(directory) do
+      {:ok, files} ->
+        for f <- files, String.ends_with?(f, ext), do: Path.basename(f, ext)
+
+      _ ->
+        []
+    end
+  end
+
+  # a missing file is as old as can be
+  defp older?(path, cutoff) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} -> mtime <= cutoff
+      _ -> true
+    end
+  end
+
   defp entomb(id, name) do
     src = checkpoint_path(id)
 

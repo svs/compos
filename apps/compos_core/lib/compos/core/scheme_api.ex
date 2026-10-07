@@ -904,6 +904,33 @@ defmodule Compos.Core.SchemeAPI do
 
             :void
         end,
+      {"buffer-provenance-discard!",
+       "(buffer-provenance-discard! BUF [ACTOR REASON POLICY]) — stop recording and delete the history; the checkpoint carries the text. For a buffer that renders a record kept elsewhere."} =>
+        fn
+          [name] ->
+            :ok = Buffer.provenance_discard(name, source: :editor)
+            :void
+
+          [name, actor, reason, policy_source] ->
+            :ok =
+              Buffer.provenance_discard(
+                name,
+                source: :editor,
+                author: plain(actor),
+                reason: plain(reason),
+                policy_source: plain(policy_source)
+              )
+
+            :void
+        end,
+      {"buffer-store-sweep-graveyard!",
+       "(buffer-store-sweep-graveyard! KEEP-DAYS) — delete graveyard checkpoints and logs buried more than KEEP-DAYS ago; the burial log stays. Returns the count."} =>
+        fn [days] when is_integer(days) and days >= 0 ->
+          Compos.Core.BufferStore.sweep_graveyard(days)
+        end,
+      {"buffer-store-sweep-redundant-history!",
+       "(buffer-store-sweep-redundant-history!) — delete the history log of every dormant buffer whose checkpoint carries its text and whose mode opted out of recording. Returns the count."} =>
+        fn [] -> Compos.Core.BufferStore.sweep_redundant_history() end,
       {"buffer-provenance-checkpoint!",
        "(buffer-provenance-checkpoint! BUF) — close the current changeset."} => fn [name] ->
         case Buffer.provenance_checkpoint(name, source: :editor) do

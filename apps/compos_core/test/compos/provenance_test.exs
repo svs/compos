@@ -71,6 +71,38 @@ defmodule Compos.ProvenanceTest do
   defp inserted(%{ops: ops}), do: Enum.map_join(ops, & &1.inserted)
   defp inserted(%{operation: %{ops: ops}}), do: Enum.map_join(ops, & &1.inserted)
 
+  # --- a mode that renders a record kept elsewhere keeps no history -----------
+
+  test "a mode's discard deletes the log and the checkpoint carries the text" do
+    name = new_buffer("discard", "hello")
+    id = Buffer.id(name)
+    :ok = Buffer.checkpoint_now(name)
+    assert File.exists?(BufferHistoryStore.path(id)), "the default policy wrote a log"
+
+    :ok = Buffer.provenance_discard(name, source: :editor, policy_source: "mode")
+    refute File.exists?(BufferHistoryStore.path(id))
+    refute Buffer.provenance(name).enabled
+
+    # later text lands in the checkpoint, and no log comes back
+    Buffer.append(name, " world")
+    :ok = Buffer.checkpoint_now(name)
+    cp = Compos.Core.BufferStore.checkpoint_path(id) |> File.read!() |> :erlang.binary_to_term()
+    assert cp[:text] == "hello world"
+    assert cp[:provenance].policy_source == "mode"
+    refute File.exists?(BufferHistoryStore.path(id))
+  end
+
+  test "a user's own stop outranks a mode's discard" do
+    name = new_buffer("discard-user", "kept")
+    id = Buffer.id(name)
+    :ok = Buffer.checkpoint_now(name)
+    :ok = Buffer.provenance_stop(name, source: :editor, policy_source: "user")
+
+    :ok = Buffer.provenance_discard(name, source: :editor, policy_source: "mode")
+    assert File.exists?(BufferHistoryStore.path(id)), "the user's history stays"
+    assert Buffer.provenance(name).policy_source == "user"
+  end
+
   test "a buffer starts with a root change naming where its text came from" do
     name = new_buffer("root", "base")
 

@@ -1084,9 +1084,11 @@ defmodule Compos.Core.Markdown.Html do
   @doc """
   A chat paragraph: CommonMark reflow and no block chrome. One bad block
   must not kill the transcript that holds it, so a failure draws the text.
+  OPTS takes the image hooks of `document/5`: `local_url` turns an
+  absolute image path into a URL the page can load.
   """
-  def prose(md) do
-    case render(md, [], soft_breaks: true, chrome: false) do
+  def prose(md, opts \\ []) do
+    case render(md, [], soft_breaks: true, chrome: false, image_src: &local_image_src(&1, opts)) do
       {:ok, html} ->
         html
 

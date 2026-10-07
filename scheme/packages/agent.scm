@@ -417,6 +417,7 @@
       ;; its memory instead of reading a pasted transcript.
       ((equal? type 'session)
        (buffer-set-local! buf 'agent-session (plist-get e 'id))
+       (buffer-set-local! buf 'agent-session-connector (buffer-local buf 'agent-connector))
        (when (plist-get e 'resumed)
          (message (string-append "agent " slug ": session resumed"))))
 

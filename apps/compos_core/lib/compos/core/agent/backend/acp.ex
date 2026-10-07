@@ -396,42 +396,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
     end
   end
 
-  # what a session answers with, new or loaded: the model it runs, the
-  # modes and config options it offers, then the thread goes idle
-  defp session_ready(state, result) do
-        # the adapter reports which model the session ACTUALLY runs (and
-        # the pickable list) — the truth the modeline shows
-        state =
-          case result do
-            %{"models" => %{"currentModelId" => cur} = ms} ->
-              emit(state,
-                type: :"model-state",
-                current: cur,
-                available:
-                  for m <- Map.get(ms, "availableModels", []) do
-                    [Map.get(m, "modelId"), Map.get(m, "name", "")]
-                  end
-              )
-
-            _ ->
-              state
-          end
-
-        # ...and which permission modes it offers, in the SAME payload. We
-        # used to drop this: it is how `auto` stops the agent asking at all.
-        state = emit_mode_state(state, Map.get(result, "modes"))
-
-        # a config-options agent (opencode) reports model and mode as
-        # session config options instead of the two keys above
-        state = ingest_config_options(state, Map.get(result, "configOptions"))
-        state = push_pinned_model(state)
-        state = push_pinned_effort(state)
-        state = push_pinned_mode(state)
-
-        emit(state, type: :ready)
-
-  end
-
   # requests and notifications from the agent
   defp handle_frame(state, %{"method" => method} = frame) do
     id = Map.get(frame, "id")
@@ -482,6 +446,42 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp handle_frame(state, _frame), do: state
+
+  # what a session answers with, new or loaded: the model it runs, the
+  # modes and config options it offers, then the thread goes idle
+  defp session_ready(state, result) do
+        # the adapter reports which model the session ACTUALLY runs (and
+        # the pickable list) — the truth the modeline shows
+        state =
+          case result do
+            %{"models" => %{"currentModelId" => cur} = ms} ->
+              emit(state,
+                type: :"model-state",
+                current: cur,
+                available:
+                  for m <- Map.get(ms, "availableModels", []) do
+                    [Map.get(m, "modelId"), Map.get(m, "name", "")]
+                  end
+              )
+
+            _ ->
+              state
+          end
+
+        # ...and which permission modes it offers, in the SAME payload. We
+        # used to drop this: it is how `auto` stops the agent asking at all.
+        state = emit_mode_state(state, Map.get(result, "modes"))
+
+        # a config-options agent (opencode) reports model and mode as
+        # session config options instead of the two keys above
+        state = ingest_config_options(state, Map.get(result, "configOptions"))
+        state = push_pinned_model(state)
+        state = push_pinned_effort(state)
+        state = push_pinned_mode(state)
+
+        emit(state, type: :ready)
+
+  end
 
   # a tool call as one searchable string; an adapter may put anything in
   # there, so an unencodable payload degrades to inspect rather than

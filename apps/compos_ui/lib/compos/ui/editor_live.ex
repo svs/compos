@@ -2011,7 +2011,7 @@ defmodule Compos.Ui.EditorLive do
   # both previews follow the live theme; `(buffer-set-local! buf
   # 'preview-authored #t)` renders html exactly as authored instead
   # The transcript is markdown; the page renderer draws it (core).
-  defp prose_html(md), do: Compos.Core.Markdown.Html.prose(md)
+  defp prose_html(md), do: Compos.Core.Markdown.Html.prose(md, local_url: &LocalImage.url/1)
 
   # A folded call still says what it returned. New calls separate input and
   # output with a blank line. Older calls contain only their result.

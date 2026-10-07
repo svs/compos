@@ -359,7 +359,8 @@
            "is the telemetry the same command left in the scheme, live "
            "and browser layers, oldest first. The last is what the VM "
            "paid. g reads the layers again once the browser has "
-           "reported, / narrows, p arms the next command, q quits.")
+           "reported, F draws the Scheme call stacks as a flamegraph, / "
+           "narrows, p arms the next command, q quits.")
     'buffer *profile-buffer*
     'rows profile--rows
     'columns profile--columns
@@ -372,8 +373,9 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("g" "refresh") ("p" "profile again") ("/" "filter") ("q" "quit")))
+              '(("g" "refresh") ("F" "flamegraph") ("p" "profile again") ("/" "filter") ("q" "quit")))
     'keys '(("g" "list-revert")
+            ("F" "profile-flamegraph")
             ("p" "profile")
             ("q" "quit-window"))))
 
@@ -390,10 +392,119 @@
 
 (effects! '(read write display))
 
+;; the flamegraph: the Scheme call stacks the evaluator folded while the
+;; profile was armed, (PATH SELF-US CALLS) with PATH "outer;inner;leaf".
+;; One sort and one sweep lay them out, as flamegraph.pl does: a frame
+;; opens where a stack first holds it and closes where the next stack
+;; stops sharing it, so a bar's width is the time spent under it.
+
+(define *profile-flame-buffer* "*Flamegraph*")
+(define *profile-flame-width* 1200)
+(define *profile-flame-row* 17)
+
+(define (profile--flame-frames stacks)
+  ;; (DEPTH NAME START END) in microseconds from the left edge, and the total.
+  ;; OPEN is the frames of the previous stack, deepest first, so the ones a
+  ;; new stack stops sharing come off its head
+  (let sweep ((ss (sort (map (lambda (s) (list (string-split (car s) ";") (cadr s))) stacks)))
+              (prev '()) (open '()) (x 0) (out '()))
+    (if (null? ss)
+        (list (fold (lambda (out o) (cons (list (car o) (cadr o) (caddr o) x) out)) out open) x)
+        (let* ((frames (car (car ss)))
+               (common (let count ((a prev) (b frames) (n 0))
+                         (if (and (pair? a) (pair? b) (equal? (car a) (car b)))
+                             (count (cdr a) (cdr b) (+ n 1))
+                             n))))
+          (let close ((open open) (out out))
+            (if (and (pair? open) (>= (car (car open)) common))
+                (close (cdr open) (cons (list (car (car open)) (cadr (car open)) (caddr (car open)) x) out))
+                (let push ((fs (list-tail frames common)) (d common) (open open))
+                  (if (pair? fs)
+                      (push (cdr fs) (+ d 1) (cons (list d (car fs) x) open))
+                      (sweep (cdr ss) frames open (+ x (max 0 (cadr (car ss)))) out)))))))))
+
+(define (profile--flame-escape s) (html-escape s))
+
+(define (profile--flame-color name)
+  ;; warm, and the same name keeps its colour from one profile to the next
+  (let ((h (let hash ((i 0) (acc 7))
+             (let ((byte (string-byte name i)))
+               (if byte (hash (+ i 1) (modulo (+ (* acc 31) byte) 9973)) acc)))))
+    (string-append "rgb(" (number->string (+ 205 (modulo h 50))) ","
+                   (number->string (+ 80 (modulo (quotient h 50) 130))) ","
+                   (number->string (+ 30 (modulo (quotient h 7) 50))) ")")))
+
+(define (profile-flamegraph-html stacks title)
+  "(profile-flamegraph-html STACKS TITLE) -- an HTML page with the SVG flamegraph of folded STACKS, root at the top"
+  (let* ((laid (profile--flame-frames stacks))
+         (frames (car laid))
+         (total (max 1 (cadr laid)))
+         (w *profile-flame-width*)
+         (row *profile-flame-row*)
+         (depth (+ 1 (fold (lambda (m f) (max m (car f))) 0 frames)))
+         (px (lambda (us) (quotient (* us w) total)))
+         (bars (filter (lambda (f) (>= (- (px (cadddr* f)) (px (caddr f))) 1)) frames)))
+    (string-append
+      "<html><head><style>"
+      "body{margin:0;background:#fff;font-family:ui-monospace,Menlo,monospace}"
+      ".head{padding:.5rem .8rem;font-size:13px;color:#333}"
+      "svg{width:100%;height:auto}text{font-size:11px;fill:#000;pointer-events:none}"
+      "rect{stroke:#fff;stroke-width:.5}rect:hover{stroke:#000;stroke-width:1}"
+      "</style></head><body>"
+      "<div class='head'>" (profile--flame-escape title) " · " (profile--ms total) " ms of Scheme · "
+      (number->string (length frames)) " frames · hover a bar for its time</div>"
+      "<svg viewBox='0 0 " (number->string w) " " (number->string (* depth row)) "' xmlns='http://www.w3.org/2000/svg'>"
+      (apply string-append
+        (map (lambda (f)
+               (let* ((x0 (px (caddr f))) (x1 (px (cadddr* f))) (bw (- x1 x0))
+                      (y (* (car f) row)) (us (- (cadddr* f) (caddr f)))
+                      (name (profile--flame-escape (cadr f))))
+                 (string-append
+                   "<g><title>" name " — " (profile--ms us) " ms, "
+                   (number->string (profile--share us total)) "%</title>"
+                   "<rect x='" (number->string x0) "' y='" (number->string y)
+                   "' width='" (number->string bw) "' height='" (number->string (- row 1))
+                   "' fill='" (profile--flame-color (cadr f)) "'/>"
+                   ;; a name fits at about 7 pixels a character
+                   (if (> bw 24)
+                       (let ((room (quotient (- bw 6) 7)))
+                         (string-append "<text x='" (number->string (+ x0 3)) "' y='" (number->string (+ y row -5)) "'>"
+                                        (if (> (string-length (cadr f)) room)
+                                            (profile--flame-escape (string-append (substring (cadr f) 0 (max 0 (- room 1))) "…"))
+                                            name)
+                                        "</text>"))
+                       "")
+                   "</g>")))
+             bars))
+      "</svg></body></html>")))
+
+(define (cadddr* l) (car (cdr (cdr (cdr l)))))
+
+(define (profile-flamegraph! report)
+  "(profile-flamegraph! REPORT) -- draw REPORT's Scheme stacks into *Flamegraph*, and answer the buffer"
+  (let ((buf *profile-flame-buffer*))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (buffer-set-read-only! buf #f)
+    (buffer-set-text! buf (profile-flamegraph-html (or (plist-get report 'stacks) '())
+                                                   (string-append "Profile of " (or (plist-get report 'command) "a call"))))
+    (buffer-set-local! buf 'preview-renderer "html")
+    (enable-minor-mode! buf "preview-mode")
+    (preview-heal! buf)
+    (buffer-set-read-only! buf #t)
+    buf))
+
 (define (profile--show! report)
   (unless (buffer-exists? *profile-buffer*) (buffer-create *profile-buffer*))
   (buffer-set-local! *profile-buffer* 'profile-report report)
   (list-mode-show! "profile-mode"))
+
+(define-command "profile-flamegraph" "Show the last profile's Scheme call stacks as a flamegraph"
+  (lambda ()
+    (let ((report (and (buffer-exists? *profile-buffer*)
+                       (buffer-local *profile-buffer* 'profile-report))))
+      (if (not report)
+          (message "No profile yet: M-x profile, then run a command.")
+          (display-buffer-other-window! (profile-flamegraph! report))))))
 
 (define-command "profile" "Profile the next command and show where its time went"
   (lambda ()

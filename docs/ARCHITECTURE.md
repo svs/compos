@@ -195,6 +195,14 @@ built:
    `Compos.Core.Agent.Backend.ACP` owns the adapter subprocess and the
    JSON-RPC wire; `scheme/packages/agent.scm` and its modules
    (`agent-connectors.scm`, `agent-permissions.scm`) hold the policy.
+   One adapter per chat, two OS processes each. A chat idle for
+   `agent-idle-seconds` (chat-mode.scm, 600) parks: the Agent closes the
+   adapter and keeps the session id the backend named (the `session`
+   event, also a conversation local, `agent-session`). The next prompt,
+   a revive and a daemon restart open a new adapter with `resume-session`,
+   and the backend asks `session/load` when the agent advertises
+   `loadSession`; the replayed history is dropped, the transcript has it.
+   An agent that cannot load says so in the transcript and starts fresh.
 
 Inverse direction: **MCP server** over the existing RPC core, so external agents
 drive *us* (`priv/compos-mcp-proxy.exs`, a stdio bridge to `~/.compos/sock`) — tools = the semantic layer (`buffer-read`, `ts-query`,

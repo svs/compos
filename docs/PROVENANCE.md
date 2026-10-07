@@ -226,7 +226,17 @@ Provenance attaches to buffer identity, not filesystem presence.
 - scratch and note buffers receive normal durable history when the buffer is durable
 - REPL and process buffers default to session retention; their modes may opt out of noisy output while retaining user-authored input elsewhere
 - generated lists and dashboards may opt out because their source data is authoritative
-- chat-mode may opt out because the transcript store already owns history
+- a mode that renders a record kept elsewhere discards: `buffer-provenance-discard!`
+  stops recording, drops the weave and deletes the log file, and the
+  checkpoint carries the text from then on. chat-mode (the chat log is the
+  record), diff-mode (git), pdf-reader-mode (the PDF) and browse-mode (the
+  page) do this in their setup fn. A user's explicit start or stop still
+  outranks the mode's policy
+- `housekeeping.scm` sweeps what such buffers wrote before their mode said
+  so (`history-sweep-redundant`: a log whose checkpoint carries the text and
+  whose policy source is "mode"), and empties the graveyard of entries older
+  than `graveyard-keep-days` (`graveyard-sweep`; the burial log stays). Both
+  run once per boot, a minute in
 - remote resource buffers use their origin URI as metadata, not as identity
 - read-only buffers may still have a root revision and imported external revisions
 

@@ -53,14 +53,23 @@ defmodule Compos.GroupSwitchNewTest do
     assert eval!("(and (group-resolve-id \"zz-typed-new\") #t)") == "#t"
   end
 
-  test "switcher rows read no buffers; the highlighted row counts its own" do
+  test "every switcher row counts its group's buffers, from the group index" do
     eval!("(t--sw-setup!)")
-    hints = eval!("(map cadr (car (group-switch-prompt-rows)))")
-    refute hints =~ "buffer"
-    eval!("(run-command \"group-switch\")")
-    KeyDispatch.handle_key("C-n")
-    Process.sleep(300)
-    assert eval!(~S{(plist-get (minibuffer-state) 'candidates)}) =~ "buffer"
+
+    # each row's hint is the count of the members the index holds for it
+    assert eval!(~S{
+      (let* ((built (group-switch-prompt-rows))
+             (index (group-members-index)))
+        (null? (filter (lambda (pair)
+                         (let* ((c (assoc (car pair) (car built)))
+                                (n (length (group-members-in index (cadr pair)))))
+                           (and (not (pseudo-group-id? (cadr pair)))
+                                (not (equal? (cadr c) "in another window"))
+                                (not (equal? (cadr c)
+                                             (if (= n 0) "no buffers"
+                                                 (string-append (number->string n)
+                                                                (if (= n 1) " buffer" " buffers"))))))))
+                       (cdr built))))}) == "#t"
   end
 
   test "cancelling the group selector removes its modal keymap" do

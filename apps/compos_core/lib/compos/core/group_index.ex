@@ -144,6 +144,24 @@ defmodule Compos.Core.GroupIndex do
     end
   end
 
+  @doc """
+  The group key of each of NAMES, in their order: the id or name its
+  locals hold, `:slow`, or nil for a buffer in no group. `:error` when
+  there is no index.
+  """
+  def group_keys_of(names) do
+    if ready?() do
+      Enum.map(names, fn name ->
+        case :ets.lookup(@keys, name) do
+          [{_, keys, _}] -> Enum.find(keys, &group_key?/1)
+          _ -> nil
+        end
+      end)
+    else
+      :error
+    end
+  end
+
   @doc "Every buffer name, most recently used first, as `buffer-list-mru` gives them."
   def mru, do: Compos.Core.Editor.buffer_mru()
 

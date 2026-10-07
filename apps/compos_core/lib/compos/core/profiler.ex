@@ -65,6 +65,8 @@ defmodule Compos.Core.Profiler do
     put(:procs, process_snapshot())
     put(:vm, vm_counters())
     put(:at_ms, System.os_time(:millisecond))
+    # the Scheme stacks go in this table too, so a cancel clears them
+    Compos.Scheme.Profile.start(table())
     put(:t0, System.monotonic_time(:microsecond))
     :ok
   end
@@ -79,9 +81,12 @@ defmodule Compos.Core.Profiler do
   """
   def stop do
     t1 = System.monotonic_time(:microsecond)
+    Compos.Scheme.Profile.stop()
     mods = get(:mods)
 
     if is_list(mods) do
+      stacks = Compos.Scheme.Profile.stacks(table())
+
       t0 = get(:t0) || t1
       before = get(:procs) || %{}
       vm0 = get(:vm) || vm_counters()
@@ -98,6 +103,7 @@ defmodule Compos.Core.Profiler do
         at_ms: at_ms,
         modules: length(mods),
         functions: functions,
+        stacks: stacks,
         processes: procs,
         vm0: vm0,
         vm1: vm1
@@ -109,6 +115,7 @@ defmodule Compos.Core.Profiler do
 
   @doc "Disarm and forget the snapshot. True when a profile was armed."
   def cancel do
+    Compos.Scheme.Profile.stop()
     mods = get(:mods)
     untrace(mods || [])
     clear()
@@ -128,6 +135,11 @@ defmodule Compos.Core.Profiler do
       modules: r.modules,
       functions_seen: length(r.functions),
       functions: hot,
+      # the Scheme call stacks, folded: (PATH SELF-US CALLS), heaviest first
+      stacks:
+        r.stacks
+        |> Enum.sort_by(fn {_, us, _} -> -us end)
+        |> Enum.map(fn {path, us, calls} -> [path, us, calls] end),
       processes: r.processes,
       reductions: r.vm1.reductions - r.vm0.reductions,
       gcs: r.vm1.gcs - r.vm0.gcs,

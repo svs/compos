@@ -599,6 +599,27 @@
 ;;; left out. MEMBERSHIPS-OF answers a row's group ids. The C-x b prompt
 ;;; reads the same buckets, so the two surfaces section alike.
 
+(define (ibuffer-memberships-many rows memberships-of)
+  ;; every row's groups, in order. The kernel's group index gives each
+  ;; row's key in one read; a key that is a group's own id is the answer,
+  ;; and anything else (a name, a stale id, a legacy row) asks MEMBERSHIPS-OF.
+  ;; A row that is no buffer name, or a daemon with no index, asks it too.
+  (let ((keys (and (eq? memberships-of ibuffer-memberships)
+                   (boundp 'group-index-keys)
+                   (null? (filter (lambda (r) (not (string? r))) rows))
+                   (group-index-keys rows)))
+        (records *group-records*))
+    (if (not keys)
+        (map memberships-of rows)
+        (let walk ((rs rows) (ks keys) (out '()))
+          (if (null? rs)
+              (reverse out)
+              (walk (cdr rs) (cdr ks)
+                    (cons (cond ((not (car ks)) '())
+                                ((and (string? (car ks)) (assoc (car ks) records)) (list (car ks)))
+                                (else (memberships-of (car rs))))
+                          out)))))))
+
 (define (ibuffer-group-buckets rows current memberships-of)
   (let* ((named (sort (map (lambda (id)
                              (list (string-downcase (or (group-name id) "")) id))
@@ -606,19 +627,23 @@
                                    (group-ids)))))
          (ordered (append (if current (list current) '()) (map cadr named)))
          (last (length ordered))
-         (rank-of (lambda (row)
-                    (let ((ms (memberships-of row)))
-                      (let loop ((gs ordered) (i 0))
-                        (cond ((null? gs) last)
-                              ((member (car gs) ms) i)
-                              (else (loop (cdr gs) (+ i 1))))))))
+         ;; (ID RANK) once, so a row's place is one assoc, not a walk of
+         ;; every group asking whether the row is in it
+         (ranks (let number ((gs ordered) (i 0) (out '()))
+                  (if (null? gs) out (number (cdr gs) (+ i 1) (cons (list (car gs) i) out)))))
+         (rank-in (lambda (ms)
+                    (fold (lambda (best id)
+                            (let ((r (assoc id ranks)))
+                              (if (and r (< (cadr r) best)) (cadr r) best)))
+                          last ms)))
          ;; one sort by (section, arrival) puts every row where it belongs
          ;; and keeps the order it came in. Filtering the rows once per
          ;; group walked 300 rows 50 times on an open of the switcher.
-         (placed (sort (let mark ((rs rows) (i 0) (out '()))
+         (placed (sort (let mark ((rs rows) (ms (ibuffer-memberships-many rows memberships-of))
+                                  (i 0) (out '()))
                          (if (null? rs) out
-                           (mark (cdr rs) (+ i 1)
-                                 (cons (list (rank-of (car rs)) i (car rs)) out))))))
+                           (mark (cdr rs) (cdr ms) (+ i 1)
+                                 (cons (list (rank-in (car ms)) i (car rs)) out))))))
          (runs (let walk ((ps placed) (out '()))
                  (if (null? ps) (reverse out)
                    (let ((r (car (car ps))))

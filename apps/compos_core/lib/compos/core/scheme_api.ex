@@ -1953,6 +1953,21 @@ defmodule Compos.Core.SchemeAPI do
             modes -> Enum.map(modes, fn {m, ns} -> [m | ns] end)
           end
         end,
+      {"group-index-keys",
+       "(group-index-keys NAMES) — each name's group key, in order: the id or name its locals hold, slow, or #f; #f with no index."} =>
+        fn [names] when is_list(names) ->
+          case Compos.Core.GroupIndex.group_keys_of(names) do
+            :error ->
+              false
+
+            keys ->
+              Enum.map(keys, fn
+                nil -> false
+                :slow -> {:sym, "slow"}
+                k -> k
+              end)
+          end
+        end,
       {"group-index-mode-counts",
        "(group-index-mode-counts) — ((MODE N) ...) over every buffer, sorted by mode; #f with no index."} =>
         fn [] ->

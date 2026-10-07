@@ -1729,10 +1729,14 @@ defmodule Compos.Core.Editor do
   # the WHOLE history, group marks included: a group switch is an entry
   # like any buffer visit, so one stream ranks every place you went
   def handle_call(:mru_all, _from, state) do
+    # one read of the names, not one per entry: each read walks the registry
+    # and the store, and the history holds dozens of entries
+    known = MapSet.new(Compos.Core.buffer_names())
+
     rows =
       Enum.flat_map(state.mru, fn
         {:group, g} -> [["group", g]]
-        b when is_binary(b) -> if b in Compos.Core.buffer_names(), do: [["buffer", b]], else: []
+        b when is_binary(b) -> if MapSet.member?(known, b), do: [["buffer", b]], else: []
         # anything else is not a place the user went. Drop it, never raise
         # on it: this runs inside Editor.handle_call, and a raise here kills
         # the Editor and takes every buffer's local keymap with it. A chat

@@ -59,14 +59,20 @@
 ;; The buffers
 
 (define (mode-list-buffers mode)
-  ;; one snapshot of every buffer, not a buffer-local read per buffer. It
-  ;; is read again each time: a buffer can change its mode, or become an
-  ;; agent, without the buffer list changing.
-  (let* ((names (dedupe-names (append (buffer-list-mru) (buffer-list))))
+  ;; read again each time: a buffer can change its mode, or become an
+  ;; agent, without the buffer list changing. The kernel's index names the
+  ;; buffers in MODE or holding a member local, so the rule below reads
+  ;; those rows only; a daemon without the index reads every buffer.
+  (let* ((names (append (buffer-list-mru) (buffer-list)))
+         (extra (mode-list-opt mode 'member-locals '()))
+         (hits (and (boundp 'buffer-index-select)
+                    (buffer-index-select
+                      (cons (list 'mode mode) (map (lambda (l) (list 'has l)) extra))
+                      names)))
          (member? (mode-list-opt mode 'member?
                     (lambda (row) (equal? (cadr row) mode))))
-         (rows (buffer-read-many names '()
-                 (cons "mode-name" (mode-list-opt mode 'member-locals '())))))
+         (rows (buffer-read-many (or hits (dedupe-names names)) '()
+                 (cons "mode-name" extra))))
     (map car (filter (lambda (row)
                        (and (not (string-prefix? " " (car row)))
                             (member? row)))

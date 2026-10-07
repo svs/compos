@@ -199,12 +199,24 @@ defmodule Compos.Scheme.Eval do
   def eval([op | arg_forms], env, store) do
     {f, store} = eval_arg(op, env, store)
     {args, store} = eval_args(arg_forms, env, store, [])
-    apply_fn(f, args, store)
+
+    # an armed profiler times the call under the name it was called by;
+    # disarmed, this is one persistent_term read and the tail call stays
+    case Compos.Scheme.Profile.table() do
+      nil ->
+        apply_fn(f, args, store)
+
+      table ->
+        Compos.Scheme.Profile.call(table, call_name(op), fn -> apply_fn(f, args, store) end)
+    end
   end
 
   def eval(other, _env, _store) do
     raise Error, message: "cannot evaluate: #{inspect(other)}"
   end
+
+  defp call_name({:sym, name}), do: name
+  defp call_name(_), do: "(lambda)"
 
   @doc "Apply a Scheme callable to already-evaluated args."
   def apply_fn({:interposed, original, wrapper}, args, store) do

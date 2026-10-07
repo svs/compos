@@ -157,7 +157,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (cond ((null? records)
            ;; a mode group may not be read yet: refresh once, then look again
            (and (string-prefix? "pseudo:mode-" id)
-                (not (equal? (buffer-list-mru) *mode-groups-key*))
+                (not (equal? (mode-groups-key) *mode-groups-key*))
                 (begin (mode-groups-refresh!) (pseudo-record-by-id id))))
           ((equal? (group-record-id (car records)) id) (car records))
           (else (loop (cdr records))))))
@@ -166,7 +166,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (let loop ((records *pseudo-group-records*))
     (cond ((null? records)
            (and (string-prefix? "mode: " name)
-                (not (equal? (buffer-list-mru) *mode-groups-key*))
+                (not (equal? (mode-groups-key) *mode-groups-key*))
                 (begin (mode-groups-refresh!) (pseudo-record-by-name name))))
           ((equal? (group-record-name (car records)) name) (car records))
           (else (loop (cdr records))))))
@@ -212,7 +212,10 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the members now: the function's answer, less the buffers that went
 (define (pseudo-group-buffers g)
   (let ((entry (assoc (and (pseudo-group-id? g) g) *pseudo-group-members*)))
-    (if entry (filter buffer-known? ((cadr entry))) '())))
+    (cond ((not entry) '())
+          ;; a mode group reads the buffer list itself: every name is known
+          ((member g *mode-group-ids*) ((cadr entry)))
+          (else (filter buffer-known? ((cadr entry)))))))
 
 ;; every pseudo group BUF belongs to now
 (define (buffer-pseudo-group-ids buf)
@@ -258,28 +261,41 @@ is forgotten and that group falls back to creation order in the switcher."
                      mode)))
 
 (define (mode-group-buffers mode)
-  (mode-groups-refresh!)
-  (let ((row (assoc mode *mode-groups-table*)))
-    (if row (cdr row) '())))
+  ;; read now, from the kernel's index: the table below only decides which
+  ;; modes are groups
+  (or (and (boundp 'buffer-index-select)
+           (buffer-index-select (list (list 'mode mode))))
+      (begin
+        (mode-groups-refresh!)
+        (let ((row (assoc mode *mode-groups-table*)))
+          (if row (cdr row) '())))))
+
+(define (mode-groups-key)
+  ;; the kernel's count per mode changes only when a mode gains or loses a
+  ;; buffer, not on every switch as the buffer list's order does
+  (or (and (boundp 'group-index-mode-counts) (group-index-mode-counts))
+      (buffer-list-mru)))
+
+(define (mode-groups-read)
+  ;; ((MODE BUF ...) ...), the modes in the order of their most recent buffer
+  (or (and (boundp 'group-index-modes) (group-index-modes))
+      (let* ((rows (filter (lambda (row) (string? (cadr row)))
+                           (buffer-read-many (buffer-list-mru) '() '("mode-name"))))
+             (modes (fold (lambda (out row)
+                            (if (member (cadr row) out) out (append out (list (cadr row)))))
+                          '() rows)))
+        (map (lambda (mode)
+               (cons mode (map car (filter (lambda (row) (equal? (cadr row) mode)) rows))))
+             modes))))
 
 (define (mode-groups-refresh!)
-  (let ((key (buffer-list-mru)))
+  (let ((key (mode-groups-key)))
     (unless (equal? key *mode-groups-key*)
       ;; the key goes first, so a define below that reads the records
       ;; finds the table current instead of refreshing again
       (set! *mode-groups-key* key)
-      (let* ((rows (filter (lambda (row)
-                             (let ((mode (cadr row)))
-                               (and (string? mode)
-                                    (not (member mode mode-groups-exclude)))))
-                           (buffer-read-many key '() '("mode-name"))))
-             (modes (fold (lambda (out row)
-                            (if (member (cadr row) out) out (append out (list (cadr row)))))
-                          '() rows))
-             (table (map (lambda (mode)
-                           (cons mode (map car (filter (lambda (row) (equal? (cadr row) mode))
-                                                       rows))))
-                         modes))
+      (let* ((table (filter (lambda (row) (not (member (car row) mode-groups-exclude)))
+                            (mode-groups-read)))
              (wanted (if (> mode-groups-min 0)
                          (filter (lambda (row) (>= (length (cdr row)) mode-groups-min)) table)
                          '())))
@@ -2339,12 +2355,13 @@ is forgotten and that group falls back to creation order in the switcher."
               (else (group (cdr triples)
                            (cons (list (car (car triples)) (list-ref (car triples) 2)) index))))))))
 
-(define (group-members-index-push index id buf)
-  (let ((cell (assoc id index)))
-    (if cell
-        (cons (cons id (cons buf (cdr cell)))
-              (remove (lambda (c) (equal? (car c) id)) index))
-        (cons (list id buf) index))))
+(define (group-members-in index g)
+  ;; a pseudo group is in no index unless the caller put it there: its
+  ;; function says its members
+  (let ((cell (assoc (if (pseudo-group-id? g) g (group-resolve-id g)) index)))
+    (cond (cell (cdr cell))
+          ((pseudo-group-id? g) (pseudo-group-buffers g))
+          (else '()))))
 
 (define (group-members-in index g)
   ;; a pseudo group is in no index: its function says its members
@@ -2389,8 +2406,12 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; instead of the name index, which answers with the first group of that
   ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
+         ;; the pseudo groups' members, read once; the empty ones are left out
+         (pseudo-cells (filter (lambda (cell) (pair? (cdr cell)))
+                               (map (lambda (id) (cons id (pseudo-group-buffers id)))
+                                    (pseudo-group-ids))))
          ;; one read of the kernel's group index counts every row
-         (index (group-members-index))
+         (index (append pseudo-cells (group-members-index)))
          (split (group-ids-mru-split))
          (all (car split))
          (away (cadr split))
@@ -2412,8 +2433,7 @@ is forgotten and that group falls back to creation order in the switcher."
                (set! rows (cons (list label g) rows))
                (group-switch-candidate-in index g label))))
          ;; the pseudo groups come after every real one, the empty ones left out
-         (pseudo (filter (lambda (id) (pair? (pseudo-group-buffers id)))
-                         (pseudo-group-ids)))
+         (pseudo (map car pseudo-cells))
          (here-candidates
            (map candidate (append (if (group-visible-homogeneous? current)
                                       recent (append mine-recent others))
@@ -2463,8 +2483,13 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((saved (group-layout g))
          (panes (if saved
                     (length (window-tree-buffers saved))
-                    ;; two is the most a card says, so stop looking at two
-                    (let count ((bufs (group-members-in index g)) (n 0))
+                    ;; two is the most a card says, so stop looking at two.
+                    ;; A mode group's members share one mode, so its first
+                    ;; ones speak for all: a group of 200 chats is not
+                    ;; walked to the end to learn it holds no work buffer
+                    (let count ((bufs (let ((all (group-members-in index g)))
+                                        (if (member g *mode-group-ids*) (take all 3) all)))
+                                (n 0))
                       (cond ((or (= n 2) (null? bufs)) n)
                             ((and (group-work-buffer? (car bufs))
                                   (not (buffer-local (car bufs) 'scratch-owner)))

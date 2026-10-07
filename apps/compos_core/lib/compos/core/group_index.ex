@@ -126,11 +126,13 @@ defmodule Compos.Core.GroupIndex do
 
   @doc """
   The NAMES that are not context-only, bucketed by key: `[{key, [name ...]}]`,
-  each bucket in the order of NAMES. `:error` when there is no index.
+  each bucket in the order of NAMES, a repeated name once. `:error` when
+  there is no index.
   """
   def buckets(names) do
     if ready?() do
       names
+      |> Enum.uniq()
       |> Enum.reduce(%{}, fn name, acc ->
         case :ets.lookup(@keys, name) do
           [{_, keys, false}] -> Enum.reduce(keys, acc, &Map.update(&2, &1, [name], fn ns -> [name | ns] end))

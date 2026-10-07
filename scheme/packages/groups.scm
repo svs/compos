@@ -2245,12 +2245,51 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; once, and one scan of every buffer per group cost the prompt 1.7s at
 ;; 25 groups and 80 buffers.
 (define (group-members-index)
+  ;; ((ID BUF ...) ...), every group's members in buffer-list order. The
+  ;; kernel buckets the buffers by the group key their locals hold
+  ;; (group-index-buckets), so this resolves one key per group, not one
+  ;; buffer at a time. An alias key, a stale id or a legacy row goes
+  ;; through group-buffer-memberships, which migrates it.
+  ;; the kernel drops the names the two lists share
+  (let* ((names (append (buffer-list-mru) (buffer-list)))
+         (buckets (and (boundp 'group-index-buckets) (group-index-buckets names)))
+         (records *group-records*))
+    (if (not buckets)
+        (group-members-index-scan (dedupe-names names))
+        (let ((index '()) (extra '()))
+          (for-each
+            (lambda (bucket)
+              (let* ((key (car bucket))
+                     ;; a record's first field is its id: one assoc for the
+                     ;; usual key, the full resolve for a name or an origin
+                     (valid (and (string? key)
+                                 (if (assoc key records) key (group-resolve-id key)))))
+                (cond ((and valid (equal? valid key))
+                       (set! index (cons bucket index)))
+                      ;; a deleted group: no member, and nothing to write
+                      ((and (string? key) (not valid)) #f)
+                      (else
+                        (for-each (lambda (b)
+                                    (for-each (lambda (id) (set! extra (cons (list id b) extra)))
+                                              (group-buffer-memberships b)))
+                                  (cdr bucket))))))
+            buckets)
+          ;; the rare rows the slow path settled join their group's cell
+          (fold (lambda (index pair)
+                  (let ((cell (assoc (car pair) index)))
+                    (cond ((not cell) (cons pair index))
+                          ((member (cadr pair) (cdr cell)) index)
+                          (else (cons (append cell (list (cadr pair)))
+                                      (remove (lambda (c) (equal? (car c) (car pair))) index))))))
+                index (reverse extra))))))
+
+;; with no kernel index: one metadata read of every buffer
+(define (group-members-index-scan names)
   ;; one metadata snapshot of every buffer, not three buffer-local reads a
   ;; buffer: with hundreds of buffers the per-buffer reads were most of the
   ;; group switcher's wait. A row that still needs a write (a legacy key, a
   ;; stale id) takes group-buffer-memberships, which migrates it.
-  (let* ((names (dedupe-names (append (buffer-list-mru) (buffer-list))))
-         (rows (buffer-read-many names '()
+  (let* ((rows (buffer-read-many names '()
                  '("context-only" "mode-name" "group-id" "group-ids" "group" "companion-of")))
          (resolved '())
          (resolve (lambda (id)
@@ -2341,16 +2380,6 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
-(define (group-switch-card g label)
-  ;; a row says only what the group record knows, its saved layout: a count
-  ;; of members means reading every buffer, so the highlighted row alone
-  ;; gets one (group-switch-candidate-in)
-  (let* ((saved (group-layout g))
-         (panes (if saved (length (window-tree-buffers saved)) 0))
-         (shape (cond ((= panes 0) "nothing yet")
-                      ((= panes 1) "one pane")
-                      (else (string-append (number->string panes) " panes")))))
-    (list label shape "container" '() "" (list (list "opens" shape)))))
 
 (define (group-switch-prompt-rows)
   ;; ((CANDIDATE ...) . ((LABEL ID) ...)): the rows the prompt draws,
@@ -2360,6 +2389,8 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; instead of the name index, which answers with the first group of that
   ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
+         ;; one read of the kernel's group index counts every row
+         (index (group-members-index))
          (split (group-ids-mru-split))
          (all (car split))
          (away (cadr split))
@@ -2379,7 +2410,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                (string-append name " #" (number->string (+ taken 1))))))
                (set! seen (cons name seen))
                (set! rows (cons (list label g) rows))
-               (group-switch-card g label))))
+               (group-switch-candidate-in index g label))))
          ;; the pseudo groups come after every real one, the empty ones left out
          (pseudo (filter (lambda (id) (pair? (pseudo-group-buffers id)))
                          (pseudo-group-ids)))
@@ -2656,27 +2687,11 @@ is forgotten and that group falls back to creation order in the switcher."
                              'frame)
                            ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
-               ;; the highlighted row alone says how many buffers its group
-               ;; holds; the members index is read once, at the first rest
-               (count-now!
-                 (lambda (name)
-                   (let ((id (and open (group-switch-id name))))
-                     (when id
-                       (unless index (set! index (group-members-index)))
-                       (set! candidates
-                         (map (lambda (c)
-                                (if (and (equal? (car c) name)
-                                         (not (equal? (cadr c) "in another window")))
-                                    (group-switch-candidate-in index id name)
-                                    c))
-                              candidates))
-                       (minibuffer-set-candidates! candidates)))))
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
                (peek!
                  (lambda (name)
-                   (debounce! "group-switch-count" 60 count-now! name)
                    ;; 0 keeps the frame still: the card already says what a
                    ;; group holds, and a look is a whole-frame draw per
                    ;; highlight, panes and all
@@ -3378,9 +3393,8 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-members-of names id)
   ;; Which of NAMES belong to group ID, in the order given.
   ;;
-  ;; Membership lives on the buffer, so the only way to ask is to look at
-  ;; every buffer. That part is unavoidable; paying a call per buffer is
-  ;; not. One batched read brings back the locals that decide it, and the
+  ;; Membership lives on the buffer. The kernel's group index names the
+  ;; few buffers that can belong (group-index-candidates). One batched read brings back the locals that decide it, and the
   ;; test is then membership in ID's own handful of aliases -- its id, its
   ;; name, its origin -- rather than group-resolve-id re-scanning every
   ;; group record for every buffer. A stale id resolves to nothing, so it
@@ -3410,8 +3424,15 @@ is forgotten and that group falls back to creation order in the switcher."
                          ((null? (cdr gids)) (mine? (car gids)))
                          (else (slow? b)))))
                (buffer-read-many
-                 names '()
+                 (group-index-candidates names aliases) '()
                  '("mode-name" "group-id" "group-ids" "group" "companion-of")))))))
+
+(define (group-index-candidates names keys)
+  ;; the kernel files every buffer under the group its locals name
+  ;; (GroupIndex), so the rule above reads a handful of rows, not every
+  ;; buffer. A daemon without the index reads them all, as before.
+  (or (and (boundp 'group-index-select) (group-index-select names keys))
+      names))
 
 (define (group-buffers g)
   (let ((id (group-resolve-id g)))

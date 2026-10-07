@@ -401,6 +401,14 @@
 (define (preview--follow-document! source href group)
   (let ((buf (visit (preview--file-target source href) group))
         (line (preview--line-param href)))
+    ;; A reader who follows a link from a rendered page keeps reading
+    ;; rendered pages.
+    (when (and (buffer-exists? buf)
+               (minor-mode-on? source "preview-mode")
+               (not (minor-mode-on? buf "preview-mode"))
+               (preview-renderer-for buf))
+      (enable-minor-mode! buf "preview-mode")
+      (preview-heal! buf))
     (when (and line (buffer-exists? buf))
       (with-current-buffer buf
         (lambda ()

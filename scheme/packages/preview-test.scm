@@ -128,6 +128,23 @@
                     "../notes/a%20draft.md"
                     "the link keeps path separators and encodes spaces"))))
 
+(deftest 'a-document-link-keeps-preview-mode
+  "a link followed from a rendered page opens the target rendered"
+  (lambda ()
+    (let ((target (string-append (compos-priv-dir) "/prompts/chat-context.md")))
+      (for-each
+        (lambda (on)
+          (let ((source (test-buffer! "zz-preview-follow.md" "# from\n")))
+            (when (buffer-known? target) (buffer-kill! target))
+            (when on (enable-minor-mode! source "preview-mode"))
+            (let ((buf (preview--follow-document! source target #f)))
+              (check-equal! buf target "the link visits the target")
+              (check-equal! (minor-mode-on? buf "preview-mode") on
+                            "the target takes the source's preview state")
+              (buffer-kill! buf))
+            (buffer-kill! source)))
+        '(#t #f)))))
+
 (define (t--preview-link-target)
   (string-append (compos-priv-dir) "/editor.scm"))
 

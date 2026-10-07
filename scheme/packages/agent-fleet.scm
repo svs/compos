@@ -337,7 +337,10 @@
 ;; buffer-known?: buffer-exists? dropped every dormant row, which left
 ;; nearly every verb saying there was no chat here.
 (define (agents-targets)
-  (filter buffer-known? (ibuffer-targets (chat-list-buffer))))
+  ;; the list the key was pressed in; *chat-list*<2> is no other list
+  (let ((here (current-buffer)))
+    (filter buffer-known?
+            (ibuffer-targets (if (equal? (mode-list-of here) "chat-mode") here (chat-list-buffer))))))
 
 ;; the slug of a chat whose runtime is up. A dormant chat keeps its slug
 ;; local, so the local alone does not say there is a runtime to answer.
@@ -777,11 +780,6 @@
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
     'recent-limit (lambda () chat-list-recent-limit)
     'defaults '(sort recent grouping group)
-    'groupings
-      (list (list 'state (lambda (b) (chats-state-label (chat-row-status b))))
-            (list 'model (lambda (b)
-                           (let ((m (chats-model b)))
-                             (if (or (not m) (equal? m "")) "no model" m)))))
     ;; a chat you archived is still a chat you switch to: the saved
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
@@ -795,11 +793,12 @@
                "The chats, as ibuffer lists buffers: the recent ones at rest, the "
                "chat you used last at the top. f filters every chat, by title, "
                "state, model, and by a word somebody said in it. < cycles the "
-               "sections (none, group, state, model), > the order, t "
+               "sections (group, none: the most recent first), > the order, t "
                "turns the sections off and on. RET enters the chat; on a saved "
-               "conversation at the bottom, RET reads it back. s steers the chat "
-               "at point, y and d answer its permission, r gives it a title, k "
-               "stops its runtime, a archives it, + starts a chat, g reads the "
+               "conversation at the bottom, RET reads it back. SPC marks, as in "
+               "ibuffer. s steers the chat at point or the marked ones, y and d "
+               "answer a permission, r gives a title, k kills, a archives, "
+               "+ starts a chat, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
         'title (lambda (buf) "Chats")
@@ -807,12 +806,9 @@
         'section-note (lambda (buf members) (chats-live-note members))
         ;; the list stands still: g draws it again when you ask
         'stamp #f
-        ;; the verbs act on the chat at point: no marks, no flags
-        'markable? (lambda (buf e) #f)
-        'flags '()
         'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
                 ("a" "chats-archive") ("r" "chat-retitle-at-point")
-                ("k" "chats-kill-runtime") ("g" "agents-refresh")
+                ("g" "agents-refresh")
                 ("+" "agent-open")))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))

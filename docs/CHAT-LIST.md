@@ -28,7 +28,7 @@ own, so the chat list leaves in two presses with a card up, like
 
 `t` turns the sections off and on. Off is the flat list, most recent
 first — the chat you half-remember the name of is near the top. `<`
-cycles what a section is: none, group, state, model.
+does the same: the sections are the groups, or none.
 
 ## One window, a floating card, and the frame comes back
 
@@ -134,14 +134,14 @@ line that matched.
 ## The verbs
 
 The chat list is the only list of chats, so the things you do to a chat
-are done here. A verb acts on the chat at point and leaves the list
-standing. There are no marks and no flag-then-run: that is a table's
-idea, not an application's.
+are done here. A verb acts on the marked chats, or on the chat at point when none is
+marked, and leaves the list standing. `SPC` marks, as in `ibuffer`.
 
 - `s` steers it
 - `y` and `d` answer the permission it waits on
 - `r` gives it a title
-- `k` stops its runtime and keeps the transcript
+- `k` kills it, as `ibuffer`'s `k` does; `M-x chats-kill-runtime` only
+  stops its runtime and keeps the transcript
 - `a` archives it: the runtime stops, the buffer goes, the file stays
 - `g` draws the list again
 - `+` starts a new chat
@@ -153,7 +153,7 @@ locals still answer, and they are still what the row at point names.
 answered "no chat here" on nearly every row.
 
 `s` wakes a sleeping chat, because steering one is a message to send it.
-`y`, `d` and `k` do not: a chat with no runtime is asking nothing and has
+`y`, `d` and `chats-kill-runtime` do not: a chat with no runtime is asking nothing and has
 nothing to stop, so they say which chat is asleep rather than claiming
 there is no chat under the cursor.
 

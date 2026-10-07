@@ -430,22 +430,15 @@
                     "and it has no runtime to answer with"))
     (chats-test-reset!)))
 
-(deftest 'chats-sections-by-state
-  "the grouping cycles none, group, state, model; a chat with no runtime sits under idle"
+(deftest 'chats-sections-by-group-or-none
+  "the grouping cycles none and group only: state and model are no sections"
   (lambda ()
     (chats-test-open! 'none 'name)
     (define *chats-other-grouping* (ibuffer-grouping "*ibuffer*"))
     (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'group "none then group")
     (run-command "list-cycle-grouping")
-    (check-equal! (ibuffer-grouping *chat-list*) 'state "group then state")
-    (check-equal! (chats-test-heading-labels) '("idle") "one section: idle")
-    (check-equal! (length (chats-test-names)) 3 "every chat is idle")
-    (run-command "list-cycle-grouping")
-    (check-equal! (ibuffer-grouping *chat-list*) 'model "state then model")
-    (check-equal! (chats-test-heading-labels) '("no model") "a chat with no model says so")
-    (run-command "list-cycle-grouping")
-    (check-equal! (ibuffer-grouping *chat-list*) 'none "model then none, and round again")
+    (check-equal! (ibuffer-grouping *chat-list*) 'none "group then none, and round again")
     (check-equal! (ibuffer-grouping "*ibuffer*") *chats-other-grouping* "the *ibuffer* view keeps its own")
     (chats-test-reset!)))
 

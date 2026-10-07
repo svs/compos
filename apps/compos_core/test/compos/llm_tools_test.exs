@@ -68,7 +68,7 @@ defmodule Compos.LLMToolsTest do
       # apropos reads the catalog, and its semantic pass embeds the query
       # through an external service, so the stamp names external and spend.
       # agent-permissions.scm allows the tool anyway: discovery must not ask.
-      assert eval!(~s{(nth 3 (assoc "apropos" (llm-tool-specs)))}) == "(read external spend)"
+      assert eval!(~s{(nth 3 (assoc "apropos" (llm-tool-specs)))}) == "(read external)"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do

@@ -52,7 +52,7 @@ defmodule Compos.PermissionTest do
         (execute* "go" '(backend "stub" script
           ((#{calls}
             (type chunk text "twenty done"))
-           ((type permission rpc-id 99 title "Send mail to the team" kind "external"
+           ((type permission rpc-id 99 title "Send mail to the team" kind "execute"
                   options (("ok" "Allow" "allow_once")))))))
         """)
 
@@ -138,7 +138,7 @@ defmodule Compos.PermissionTest do
                  "type" => "tool_use",
                  "id" => "t1",
                  "name" => "eval-scheme",
-                 "input" => %{"code" => ~s{(mail-send "bob" "hi")}}
+                 "input" => %{"code" => ~s{(shell-command->string "sendmail bob" d)}}
                }
              ],
              "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
@@ -231,7 +231,7 @@ defmodule Compos.PermissionTest do
   # the deny-list alone, and a crashing policy let the call through.
   describe "one gate" do
     test "the same payload is refused on all three chokepoints" do
-      payload = ~s{(mail-send "bob@example.com" "hi")}
+      payload = ~s{(shell-command->string "sendmail bob@example.com" d)}
 
       # 1. the policy, asked directly — what both lanes consult
       assert eval!(~s{(permit? #f "eval-scheme" "tool" #{inspect(payload)})}) == "ask"

@@ -369,25 +369,43 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
 (define decide--allowed-near-tree
   "git, jj and the project's own build and test tools are the only shell commands allowed near the work tree.")
 
+(define decide--edit-advice
+  (string-append
+    "Edit the live buffer instead — "
+    "(find-file PATH), then (code-replace! BUF LINE NEW), (code-sexp-replace! BUF ANCHOR NEW) or "
+    "(buffer-replace! BUF OLD NEW), and save it with "
+    "(with-current-buffer BUF (lambda () (run-command \"save-buffer\"))). "
+    "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
+    "the catalog answers for the editor as it is now, and this list does not. "))
+
+(define decide--read-advice
+  (string-append
+    "Use the editor — "
+    "(grep PATTERN [ROOT]) to search the project, (ls [DIR]) to list a directory, and "
+    "(find-file PATH) then (code-outline BUF), (code-read BUF LINE) or (buffer-text BUF) to read one. "
+    "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
+    "the catalog answers for the editor as it is now, and this list does not. "))
+
 (define (decide-refusal kind &optional detail)
-  "(decide-refusal KIND [DETAIL]) — the words of one refusal: edit, read, denied, or policy with DETAIL naming what the policy matched"
+  "(decide-refusal KIND [DETAIL]) — the words of one refusal: edit, read, denied with DETAIL naming the kind of shell command the user denied, or policy with DETAIL naming what the policy matched"
   (cond ((equal? kind 'edit)
          (string-append
-           "refused by the shell gate: a shell command may not write files. Edit the live buffer instead — "
-           "(find-file PATH), then (code-replace! BUF LINE NEW), (code-sexp-replace! BUF ANCHOR NEW) or "
-           "(buffer-replace! BUF OLD NEW), and save it with "
-           "(with-current-buffer BUF (lambda () (run-command \"save-buffer\"))). "
-           "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
-           "the catalog answers for the editor as it is now, and this list does not. "
-           decide--allowed-near-tree))
+           "refused by the shell gate: a shell command may not write files. "
+           decide--edit-advice decide--allowed-near-tree))
         ((equal? kind 'read)
          (string-append
-           "refused by the shell gate: a shell command may not read or search files. Use the editor — "
-           "(grep PATTERN [ROOT]) to search the project, (ls [DIR]) to list a directory, and "
-           "(find-file PATH) then (code-outline BUF), (code-read BUF LINE) or (buffer-text BUF) to read one. "
-           "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
-           "the catalog answers for the editor as it is now, and this list does not. "
-           decide--allowed-near-tree))
+           "refused by the shell gate: a shell command may not read or search files. "
+           decide--read-advice decide--allowed-near-tree))
+        ;; A denied read or edit says what to use instead, so the agent
+        ;; carries on with the editor rather than stopping to ask.
+        ((and (equal? kind 'denied) (equal? detail 'read))
+         (string-append
+           "refused: the user denied this shell command, which reads or searches files. "
+           "Do not read files through the shell. " decide--read-advice))
+        ((and (equal? kind 'denied) (equal? detail 'edit))
+         (string-append
+           "refused: the user denied this shell command, which writes files. "
+           "Do not write files through the shell. " decide--edit-advice))
         ((equal? kind 'denied)
          "refused: denied in the chat. Do not retry it — ask what to do instead.")
         (else

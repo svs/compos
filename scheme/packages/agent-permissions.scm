@@ -153,6 +153,26 @@
              ((equal? agent-filesystem-tools "ask") 'ask)
              (else 'reject))))
 
+;; The deny-list is decide's, and decide judges shell commands: a shell
+;; line, or the shell calls inside an eval-scheme payload. A word in a
+;; search, a query or a string is not an act, so nothing else reads it.
+(define *permission-eval-tools* '("eval-scheme" "mcp__compos__eval-scheme"))
+
+(define (permission-shell-text title kind raw)
+  "the text decide's deny-list reads: a shell line whole, the shell commands of an eval-scheme payload, #f for any other call"
+  (cond ((equal? kind "execute") (string-append (or title "") " " (or raw "")))
+        ((member title *permission-eval-tools*)
+         (let* ((code (if (and (string? raw) (string-prefix? "{" (string-trim raw))
+                               (boundp (quote mcp-proxy--code)))
+                          (or (mcp-proxy--code raw) raw)
+                          raw))
+                (forms (and code (ignore-errors (lambda () (scheme-read code))))))
+           ;; a payload that does not read is judged whole, as before
+           (if (and (pair? forms) (boundp (quote mcp-proxy--shell-commands)))
+               (string-join (mcp-proxy--shell-commands forms) " ; ")
+               code)))
+        (else #f)))
+
 ;; (permit? BUF TITLE KIND RAW) -> allow-always | ask | reject: the one
 ;; permission decision. Every lane asks it: the ACP request, the direct
 ;; lane, the MCP proxy and an M-x command a chat runs.
@@ -160,7 +180,9 @@
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
                          (buffer-local buf 'agent-permission-profile))))
-      (cond ((permission-denied-verb? text) 'ask)
+      (cond ((let ((shell (permission-shell-text title kind raw)))
+               (and shell (permission-denied-verb? shell)))
+             'ask)
             ((profile-denies? profile text) 'reject)
             ;; the user already answered "always" for this verb in this
             ;; chat. It sits under the deny-list and the profile, which

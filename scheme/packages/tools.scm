@@ -1000,7 +1000,7 @@
 (category! 'discovery)
 (public! 'apropos
   "(apropos QUERY &rest FILTERS) — hybrid literal/semantic catalog search; accepts kind/package/namespace/domain/effect filters, and 'lexical #t for the catalog alone (no embedding call). The public call shape is unchanged.")
-(catalog-meta! 'function "apropos" 'domain 'discovery 'effects '(read external spend))
+(catalog-meta! 'function "apropos" 'domain 'discovery 'effects '(read external))
 
 ;; The word test on its own. A surface that searches one narrow source -
 ;; the command palette searches commands and recipes - matches the words
@@ -1159,7 +1159,7 @@
                                           n (primitive-doc n) words catalogued-names))
                                       (global-names)))))
               (apply apropos (cons q filters)))))))
-  '(read external spend))
+  '(read external))
 
 (define-tool! 'apropos-categories
   "List the catalog facets: kinds, packages, namespaces, domains, and effects. Cheapest way to see the shape of the surface before searching it."
@@ -1583,7 +1583,8 @@
              (mcp-proxy--grant! slug name args-json raw))
            (mcp-proxy--run-approved token name args-json author))
           (else
-           (eval-resolve! token (base64-encode (decide-refusal 'denied)))))))
+           (eval-resolve! token
+             (base64-encode (decide-refusal 'denied (mcp-proxy--shell-kind name args-json))))))))
     'pending))
 
 ;; The approved call. A lone shell command runs in its own Task, as any
@@ -1623,6 +1624,13 @@
 ;; The shell gate's refusal. A kind the policy refuses stays refused
 ;; whatever the permission mode or an Always granted: the ask above only
 ;; turns an allow into an ask, so without this a refuse let the call run.
+(define (mcp-proxy--shell-kind name args-json)
+  "(mcp-proxy--shell-kind NAME ARGS-JSON) — the kind of shell command (read, edit, ...) an eval-scheme call runs, or #f"
+  (and (equal? name "eval-scheme")
+       (boundp (quote decide-shell-verdict))
+       (let ((code (mcp-proxy--code args-json)))
+         (and code (decide-shell-calls? code) (decide--shell-kind-seen code)))))
+
 (define (mcp-proxy--shell-refusal name args-json)
   (and (equal? name "eval-scheme")
        (boundp (quote decide-shell-verdict))
@@ -1651,7 +1659,10 @@
          (verdict (cond ((or answer refusal) 'deny)
                         ((mcp-proxy--granted? slug name args-json raw) 'allow-always)
                         (else (mcp-proxy--shell-ask name args-json
-                                (permit? #f name "tool" raw))))))
+                                (permit? #f name "tool"
+                                         (or (and (equal? name "eval-scheme")
+                                                  (mcp-proxy--code args-json))
+                                             raw)))))))
     (cond
       (answer (base64-encode answer))
       (refusal (base64-encode refusal))

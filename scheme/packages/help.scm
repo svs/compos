@@ -419,7 +419,7 @@
       (lambda (query)
         (history-push! 'apropos query)
         (apropos-page query)))))
-(catalog-meta! 'command "apropos" 'domain 'discovery 'effects '(read external spend))
+(catalog-meta! 'command "apropos" 'domain 'discovery 'effects '(read external))
 
 (define-command "apropos-rebuild-embeddings"
   "Clear and rebuild the OpenAI embedding cache for the current catalog"

@@ -34,7 +34,7 @@
       ;; default (auto): ordinary tools run, deny-listed ones ask
       (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'allow-always "the default runs an ordinary tool")
-      (check-equal! (permit? buf "eval-scheme" "tool" "(mail-send ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(shell-command->string \"sendmail bob\" d)")
                     'ask "the default still asks for the deny-list")
 
       ;; approve: a shell command is the one thing it stops for
@@ -51,7 +51,7 @@
       (buffer-set-local! buf 'chat-permission-mode 'auto)
       (check-equal! (permit? buf "eval-scheme" "tool" "(+ 1 1)")
                     'allow-always "auto runs an ordinary tool")
-      (check-equal! (permit? buf "eval-scheme" "tool" "(mail-send ...)")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(shell-command->string \"sendmail bob\" d)")
                     'ask "auto still asks for the deny-list")
       (buffer-kill! buf))))
 
@@ -265,4 +265,19 @@
                     'ask "the ask stance asks for every tool")
       (check-equal! (llm-inline--option '(options (("allow_once" "Yes") ("reject_once" "No"))) "reject")
                     "reject_once" "the refusal option by prefix")
+      (buffer-kill! buf))))
+
+(deftest 'a-word-in-a-search-is-not-an-act
+  "the deny-list reads shell commands only: a query or a string that names a
+   verb runs, and the same verb in a shell call still asks"
+  (lambda ()
+    (let ((buf (t--perm-buf "*zz-words*")))
+      (buffer-set-local! buf 'chat-presets '(compos))
+      (check-equal! (permit? buf "mcp__compos__apropos" "other" "{\"query\":\"whatsapp send message\"}")
+                    'allow-always "apropos for send message runs")
+      (check-equal! (permit? buf "eval-scheme" "tool" "(mcp-find \"whatsapp|send_message\")")
+                    'allow-always "a string in a payload is not a shell command")
+      (check-equal! (permit? buf "mcp__compos__eval-scheme" "other"
+                             "{\"code\":\"(shell-command->string \\\"git push --force\\\" d)\"}")
+                    'ask "a shell push inside eval-scheme still asks")
       (buffer-kill! buf))))

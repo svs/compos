@@ -517,7 +517,7 @@
     'preview dired--preview
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
-           "git says. Select files with `SPC` (or `m`) and the whole listing with `*`; "
+           "git says. Select files with `SPC` (or `m`) and the whole listing with `* s`; "
            "`x` trashes what you marked, and `d` flags a file for the same "
            "`x`. `D` flags permanent deletion. `RET` on a file peeks it in the other window, "
            "read-only; `RET` again or `M-RET` opens it here as your own; `q` dismisses "
@@ -531,7 +531,10 @@
            "`% m` marks and `% d` flags by regexp, `~` flags backups, `t` toggles "
            "the marks, `% R` renames by regexp. `!` runs a shell command on the "
            "marked files. `C-x C-q` edits the names as text. With a Dired in "
-           "another window, `C` and `R` offer its directory.")
+           "another window, `C` and `R` offer its directory. `*` is the marking "
+           "prefix: `* /` directories, `* *` executables, `* @` links, `* .` an "
+           "extension, `* c` changes a mark, `* !` drops them all, `* C-n` and "
+           "`* C-p` go to the next and previous mark.")
     ;; a file name is a file name: `/` matches the same annotation
     ;; C-x C-f shows beside one
     'category 'file
@@ -573,7 +576,7 @@
     'meta (lambda (buf) (dired-meta buf))
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
-              '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("*" "all") ("d" "flag")
+              '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("* s" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles") ("% m" "mark regexp") ("t" "toggle")
                 ("!" "shell") ("C-x C-q" "edit names")
@@ -606,7 +609,15 @@
             ("% m" "dired-mark-files-regexp") ("% d" "dired-flag-files-regexp")
             ("% R" "dired-do-rename-regexp") ("t" "dired-toggle-marks")
             ("~" "dired-flag-backup-files") ("!" "dired-do-shell-command")
-            ("&" "dired-do-shell-command") ("C-x C-q" "dired-toggle-read-only"))))
+            ("&" "dired-do-shell-command") ("C-x C-q" "dired-toggle-read-only")
+            ;; `*` is the marking prefix, as in Emacs; `* s` or `t` marks all
+            ("* m" "list-mark") ("* u" "list-unmark") ("* !" "list-unmark-all")
+            ("* s" "dired-mark-subdir-files") ("* /" "dired-mark-directories")
+            ("* *" "dired-mark-executables") ("* @" "dired-mark-symlinks")
+            ("* ." "dired-mark-extension") ("* %" "dired-mark-files-regexp")
+            ("* t" "dired-toggle-marks") ("* c" "dired-change-marks")
+            ("* C-n" "dired-next-marked-file") ("* C-p" "dired-prev-marked-file")
+            ("M-}" "dired-next-marked-file") ("M-{" "dired-prev-marked-file"))))
 
 (define (dired-arm-watch! buf)
   (let ((dir (dired-dir buf)))
@@ -1135,6 +1146,80 @@
 (mode-keys! "wdired-mode"
   '(("C-c C-c" "wdired-finish-edit") ("C-x C-s" "wdired-finish-edit")
     ("C-c C-k" "wdired-abort-changes")))
+
+;; --- the * prefix: marking as Emacs Dired does it --------------------------
+
+(define (dired-mark-where! buf pred verb)
+  (let ((hits (filter (lambda (e) (pred (dired-info buf e) e)) (dired-shown-files buf))))
+    (for-each (lambda (e) (list-mark! buf e *list-mark-char*)) hits)
+    (list-redraw! buf)
+    (message (string-append verb " " (number->string (length hits)) " file(s)"))))
+
+(define (dired-type? info type) (and info (equal? (plist-get info 'type) type)))
+
+(define-command "dired-mark-subdir-files" "Mark every file this listing shows"
+  (lambda ()
+    (dired-mark-where! (current-buffer) (lambda (info e) #t) "Marked")))
+
+(define-command "dired-mark-directories" "Mark every directory this listing shows"
+  (lambda ()
+    (dired-mark-where! (current-buffer)
+      (lambda (info e) (or (dired-directory? e) (dired-type? info "directory")))
+      "Marked")))
+
+(define-command "dired-mark-executables" "Mark every executable file this listing shows"
+  (lambda ()
+    (dired-mark-where! (current-buffer)
+      (lambda (info e)
+        (and (dired-type? info "regular")
+             (re-find "^-(..x|.....x|........x)" (or (plist-get info 'perms) "") 0)))
+      "Marked")))
+
+(define-command "dired-mark-symlinks" "Mark every symbolic link this listing shows"
+  (lambda ()
+    (dired-mark-where! (current-buffer) (lambda (info e) (dired-type? info "symlink")) "Marked")))
+
+(define-command "dired-mark-extension" "Mark every file with an extension"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Mark extension: " '()
+        (lambda (ext)
+          (let ((bare (if (string-prefix? "." ext) (substring ext 1 (string-length ext)) ext)))
+            (dired-mark-matching! buf (string-append "[.]" (regexp-quote bare) "$")
+                                  *list-mark-char* "Marked")))))))
+
+(define-command "dired-change-marks" "Change one mark character to another"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Change mark: " '()
+        (lambda (old)
+          (minibuffer-read (string-append "Change " old " to: ") '()
+            (lambda (new)
+              (let ((hits (filter (lambda (e) (equal? (list-mark-of buf e) old))
+                                  (dired-shown-files buf))))
+                (for-each (lambda (e) (list-mark! buf e (if (equal? new " ") #f new))) hits)
+                (list-redraw! buf)
+                (message (string-append "Changed " (number->string (length hits)) " mark(s)"))))))))))
+
+;; the next row with any mark or flag, around the end as Emacs goes
+(define (dired-goto-marked! step)
+  (let* ((buf (current-buffer))
+         (rows (list-entries buf))
+         (n (length rows))
+         (i (or (list-index buf) 0)))
+    (let loop ((k 1))
+      (if (> k n)
+          (message "No marked files")
+          (let ((j (modulo (+ i (* step k)) n)))
+            (if (equal? (list-mark-of buf (list-ref rows j)) " ")
+                (loop (+ k 1))
+                (list-goto-index! buf j)))))))
+
+(define-command "dired-next-marked-file" "Move to the next marked file"
+  (lambda () (dired-goto-marked! 1)))
+
+(define-command "dired-prev-marked-file" "Move to the previous marked file"
+  (lambda () (dired-goto-marked! -1)))
 
 ;; `*` in the command stands for every file, `?` runs it once for each
 ;; file; otherwise the files go at the end

@@ -73,3 +73,28 @@
     (check-equal! (dired-shell-line "wc -l" '("a" "b c")) "wc -l 'a' 'b c'" "files go last")
     (check-equal! (dired-shell-line "tar cf x.tar *" '("a" "b")) "tar cf x.tar 'a' 'b'" "* is all")
     (check-equal! (dired-shell-line "gzip ?" '("a" "b")) "gzip 'a'; gzip 'b'" "? is each")))
+
+(deftest 'dired-star-prefix-marks-by-kind
+  "* / marks directories, * . an extension, * s every file"
+  (lambda ()
+    (let ((buf (t--dx-make! '("a.txt" "b.md"))))
+      (make-directory! (string-append t--dx-dir "/sub"))
+      (dired-refresh-buffer! buf)
+      (with-current-buffer buf (lambda () (run-command "dired-mark-directories")))
+      (check-equal! (length (list-marked buf *list-mark-char*)) 1 "only the directory")
+      (list-clear-marks! buf)
+      (dired-mark-matching! buf "[.]md$" *list-mark-char* "Marked")
+      (check-equal! (list-marked buf *list-mark-char*) '("b.md") "only the md file")
+      (with-current-buffer buf (lambda () (run-command "dired-mark-subdir-files")))
+      (check-equal! (length (list-marked buf *list-mark-char*)) 3 "every file, not ..")
+      (t--dx-remove!))))
+
+(deftest 'dired-next-marked-file-goes-around
+  "* C-n goes to the next mark and wraps past the end"
+  (lambda ()
+    (let ((buf (t--dx-make! '("a" "b" "c"))))
+      (list-mark! buf "a" *list-mark-char*)
+      (list-goto-index! buf 3)
+      (with-current-buffer buf (lambda () (run-command "dired-next-marked-file")))
+      (check-equal! (list-current buf) "a" "wrapped to the marked file")
+      (t--dx-remove!))))

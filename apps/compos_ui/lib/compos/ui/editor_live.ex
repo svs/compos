@@ -672,7 +672,7 @@ defmodule Compos.Ui.EditorLive do
     # server draws the cursor and marks the current row again, and the
     # client scrolls that row into view.
     caret_owner = if state.minibuffer, do: nil, else: state.active
-    socket = sync_ropes(socket, state.tree, caret_owner)
+    socket = sync_ropes(socket, state, caret_owner)
 
     {tree, line_cache} =
       decorate_display(
@@ -786,19 +786,23 @@ defmodule Compos.Ui.EditorLive do
   # The client holds a rope of the text in the window that owns the caret,
   # when Scheme turns predict-mode on there (Compos.Ui.RopeSync). Only that
   # window takes typed text, so only that window keeps an entry.
-  defp sync_ropes(socket, tree, owner) do
+  defp sync_ropes(socket, state, owner) do
     sent = socket.assigns[:rope_sent] || %{}
     ack = socket.assigns[:intent_ack] || 0
 
     leaf =
-      tree |> leaves() |> Enum.find(&(&1.id == owner and Compos.Ui.RopeSync.predict?(&1)))
+      state.tree
+      |> leaves()
+      |> Enum.find(&(&1.id == owner and Compos.Ui.RopeSync.predict?(&1)))
 
     case leaf do
       nil ->
         assign(socket, rope_sent: %{})
 
       leaf ->
-        {payload, entry} = Compos.Ui.RopeSync.payload(leaf, Map.get(sent, leaf.id), ack)
+        registry = Map.get(state.chrome || %{}, "predict-skip")
+        skip = Compos.Ui.RopeSync.skip_keys(leaf, registry)
+        {payload, entry} = Compos.Ui.RopeSync.payload(leaf, Map.get(sent, leaf.id), ack, skip)
         socket = assign(socket, rope_sent: %{leaf.id => entry})
         if payload, do: push_event(socket, "rope", payload), else: socket
     end

@@ -10,7 +10,9 @@ defmodule Compos.Ui.RopeSync do
 
   The first payload for a window carries the whole text. Each later payload
   carries one contiguous change from the text sent last, the buffer version,
-  point, and `ack`: the last intent sequence number the daemon ran. The
+  point, and `ack`: the last intent sequence number the daemon ran. A
+  payload also carries `skip`, the keys the client must send with no
+  prediction, when they change (`predict-skip!` in predict.scm). The
   client sends that number with each intent. The daemon owns the text: when
   its text differs from a prediction, the client takes the daemon's text.
   """
@@ -18,21 +20,22 @@ defmodule Compos.Ui.RopeSync do
   @doc """
   The payload for LEAF against SENT (the entry this module returned last for
   that window, or nil), and the entry to keep. The payload is nil when the
-  client already holds everything that the payload would carry.
+  client already holds everything that the payload would carry. SKIP is
+  the list of keys from `skip_keys/2`.
   """
-  def payload(%{id: win, buffer: buffer, version: v, point: pt} = leaf, sent, ack) do
+  def payload(%{id: win, buffer: buffer, version: v, point: pt} = leaf, sent, ack, skip \\ []) do
     text = leaf_text(leaf)
-    entry = {buffer, v, pt, ack, text}
+    entry = {buffer, v, pt, ack, skip, text}
 
     payload =
       case sent do
-        {^buffer, ^v, ^pt, ^ack, _} ->
+        {^buffer, ^v, ^pt, ^ack, ^skip, _} ->
           nil
 
-        {^buffer, ^v, _, _, _} ->
+        {^buffer, ^v, _, _, _, _} ->
           %{win: win, v: v, pt: pt, ack: ack}
 
-        {^buffer, _, _, _, old} ->
+        {^buffer, _, _, _, _, old} ->
           {at, del, ins} = delta(old, text)
           %{win: win, v: v, pt: pt, ack: ack, at: at, del: del, ins: ins}
 
@@ -40,8 +43,35 @@ defmodule Compos.Ui.RopeSync do
           %{win: win, v: v, pt: pt, ack: ack, text: text}
       end
 
+    payload =
+      case {payload, sent} do
+        {nil, _} -> nil
+        {p, {_, _, _, _, ^skip, _}} -> p
+        {p, _} -> Map.put(p, :skip, skip)
+      end
+
     {payload, entry}
   end
+
+  @doc """
+  The keys the client sends with no prediction in LEAF. REGISTRY is the
+  chrome value "predict-skip" that Scheme publishes: a list of
+  `[mode | keys]`. A mode counts when LEAF wears it, major or minor.
+  """
+  def skip_keys(leaf, registry) when is_list(registry) do
+    modes = [Map.get(leaf, :mode) | Map.get(leaf, :minor_modes) || []]
+
+    registry
+    |> Enum.flat_map(fn
+      [mode | keys] when is_binary(mode) -> if mode in modes, do: keys, else: []
+      _ -> []
+    end)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  def skip_keys(_leaf, _registry), do: []
 
   @doc """
   The one contiguous replacement that turns OLD into NEW, as

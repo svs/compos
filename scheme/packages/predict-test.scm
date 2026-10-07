@@ -38,3 +38,25 @@
       (run-command "predict-mode")
       (check-false! (minor-mode-on? buf "predict-mode") "the command turns it off")
       (buffer-kill! buf))))
+
+(deftest 'predict-skips-the-keys-paredit-takes-over
+  "a buffer in paredit-mode sends ( and DEL with no prediction"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-predict-paredit" "(a b)")))
+      (check-false! (member "(" (predict-skip-keys buf)) "no mode, no skip")
+      (enable-minor-mode! buf "paredit-mode")
+      (check-true! (member "(" (predict-skip-keys buf)) "paredit takes (")
+      (check-true! (member "DEL" (predict-skip-keys buf)) "paredit takes DEL")
+      (check-false! (member "a" (predict-skip-keys buf)) "a plain char still predicts")
+      (disable-minor-mode! buf "paredit-mode")
+      (check-false! (member "DEL" (predict-skip-keys buf)) "the skip ends with the mode")
+      (buffer-kill! buf))))
+
+(deftest 'predict-skip-registry-reaches-the-frame-chrome
+  "predict-skip! publishes the registry for the daemon to send"
+  (lambda ()
+    (predict-skip! "zz-predict-test-mode" '("q"))
+    (check-true! (member '("zz-predict-test-mode" "q") *predict-skip*) "the registry holds the entry")
+    (set! *predict-skip*
+      (remove (lambda (e) (equal? (car e) "zz-predict-test-mode")) *predict-skip*))
+    (predict--publish!)))

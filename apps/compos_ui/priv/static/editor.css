@@ -2070,3 +2070,6 @@ c-action-key {
   color: var(--dim-fg, #57534a);
 }
 
+
+/* predict.js hides the daemon's rows while it shows its painted copies */
+.buf > c-line[hidden], .semantic-record > c-line[hidden] { display: none !important; }

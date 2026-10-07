@@ -822,6 +822,12 @@ farther apart than this is not lit and not found.")
                 (else #f))))))
   *paredit-keys*)
 
+;; The browser must not predict a key that paredit takes over: "(" also
+;; inserts ")", and DEL beside a delimiter only moves (predict.scm).
+(predict-skip! "paredit-mode"
+  (filter (lambda (k) (member k '("(" ")" "[" "]" "\"" "DEL" "RET")))
+          (map car *paredit-keys*)))
+
 (define (paredit--setup! buf) #t)
 
 (define (paredit--teardown! buf)

@@ -29,6 +29,39 @@
 (mode-doc! "predict-mode"
   "Paint typed text in the browser before the daemon answers. The daemon's text wins.")
 
+;;; --- keys a mode takes over ----------------------------------------------------
+;;; The browser predicts a plain insert for a typed char, a newline for
+;;; RET, and a char deletion for DEL. A mode that binds one of those keys
+;;; to its own command names the key here. The browser then sends that
+;;; key with no prediction, so it never paints an edit the mode does not
+;;; make. The registry rides the frame chrome as "predict-skip": a list
+;;; of (MODE KEY ...), and the daemon sends the keys of the modes a
+;;; buffer wears.
+
+(define *predict-skip* '())
+
+(define (predict--publish!)
+  (frame-chrome-set! "predict-skip" *predict-skip*))
+
+(define (predict-skip! mode keys)
+  (set! *predict-skip*
+    (cons (cons mode keys)
+          (remove (lambda (e) (equal? (car e) mode)) *predict-skip*)))
+  (predict--publish!))
+
+(define (predict-skip-keys buf)
+  (let ((modes (cons (or (buffer-local buf 'mode-name) "")
+                     (or (buffer-local buf 'minor-modes) '()))))
+    (apply append
+      (map cdr (filter (lambda (e) (member (car e) modes)) *predict-skip*)))))
+
+(predict--publish!)
+
+(public! 'predict-skip!
+  "(predict-skip! MODE KEYS) — the browser sends KEYS without a prediction in a buffer that wears MODE")
+(public! 'predict-skip-keys
+  "(predict-skip-keys BUF) — the keys the browser sends without a prediction in BUF")
+
 ;; A file buffer takes plain typed text. A chat, a list, or a process
 ;; buffer draws its own rows, so the browser cannot predict them.
 (define (predict--eligible? buf)

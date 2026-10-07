@@ -6,9 +6,14 @@
 // then one change per version, point, and ack (the last input sequence
 // number it ran; Compos.Ui.RopeSync). Every intent and key carries a
 // sequence number. A typed character, Enter, or Backspace at the caret
-// becomes a pending op: the client applies it to the rows at once. When
-// the daemon's ack passes an op, the client drops the op, because the
-// daemon's rows now hold its real effect.
+// becomes a pending op: the client applies it to the rows at once.
+//
+// The rows on the screen can be older than the last rope event: while
+// an input waits for its reply, LiveView holds the patch of the locked
+// editor but dispatches the events. So the client keeps the rope of
+// each recent version, and paints against the version the rows show
+// (data-v). An op stays pending until the rows show a version whose
+// ack passes it; then the daemon's rows hold its real effect.
 //
 // A pending op acts at point, as the daemon's command does. So the
 // prediction is the daemon's text plus the pending ops, each applied at
@@ -17,12 +22,14 @@
 //
 // The client predicts nothing that it cannot prove: an input it cannot
 // predict (a chord, a paste, a selection) blocks prediction until the
-// daemon acks it, and a row the client cannot read makes it stop.
+// daemon acks it, and a row the client cannot read makes it stop. A key
+// that a mode takes over (paredit's "(" and DEL) arrives in "skip": the
+// client sends it with no prediction (predict-skip! in predict.scm).
 (function () {
   const utf8 = new TextEncoder();
   const bytes = (s) => utf8.encode(s).length;
   const S = {
-    Rope: null, loading: null, queue: [], h: null, seq: 0, win: null,
+    Rope: null, loading: null, queue: [], h: null, seq: 0, win: null, shadow: null,
     stats: { predicted: 0, skipped: 0, drift: 0, paint: [], confirm: [] }
   };
 
@@ -78,11 +85,14 @@
     return pt;
   }
 
+  // V, a view: the daemon's rope at the version the rows show (server),
+  // its point (pt), and the ops that version does not hold (pending)
+
   // the rope after the first K pending ops, and the point they leave
-  function stateAfter(W, k) {
-    const r = W.server.clone();
-    let pt = W.pt;
-    for (let i = 0; i < k; i++) pt = step(r, pt, W.pending[i]);
+  function stateAfter(V, k) {
+    const r = V.server.clone();
+    let pt = V.pt;
+    for (let i = 0; i < k; i++) pt = step(r, pt, V.pending[i]);
     return { r, pt };
   }
 
@@ -95,17 +105,17 @@
   }
 
   // the lowest byte the whole queue touches, in daemon coordinates
-  function lowest(W) {
-    let pt = W.pt, lo = W.pt;
-    const r = W.server.clone();
-    for (const o of W.pending) { pt = step(r, pt, o); lo = Math.min(lo, pt); }
+  function lowest(V) {
+    let pt = V.pt, lo = V.pt;
+    const r = V.server.clone();
+    for (const o of V.pending) { pt = step(r, pt, o); lo = Math.min(lo, pt); }
     r.free();
     return lo;
   }
 
   // does the window show the text after the first K ops?
-  function shows(buf, W, k, lo) {
-    const st = stateAfter(W, k);
+  function shows(buf, V, k, lo) {
+    const st = stateAfter(V, k);
     const want = region(st.r, lo, st.pt);
     st.r.free();
     return domRegion(buf, want.start, want.n) === want.text;
@@ -130,10 +140,46 @@
     if (num && /^\d+$/.test(num.textContent)) num.textContent = String(parseInt(num.textContent, 10) + d);
   }
 
+  // a copy must not carry the ids LiveView finds its elements by
   function stripIds(node) {
     if (node.nodeType !== 1 && node.nodeType !== 11) return;
-    if (node.removeAttribute) node.removeAttribute("id");
-    node.querySelectorAll("[id]").forEach((e) => e.removeAttribute("id"));
+    const strip = (e) => { e.removeAttribute("id"); e.removeAttribute("data-phx-id"); };
+    if (node.removeAttribute) strip(node);
+    node.querySelectorAll("[id], [data-phx-id]").forEach(strip);
+  }
+
+  // ---- the shadow: edited copies beside the daemon's rows ----
+  // LiveView keeps an element whose server render did not change, so an
+  // edit made inside a row it rendered can stay on the screen after the
+  // daemon's answer. The client never edits those rows. It hides the rows
+  // from the edit to the end, and paints copies of them. restore() takes
+  // the copies away and shows the daemon's rows again, as LiveView left them.
+
+  function restore() {
+    const sh = S.shadow;
+    if (!sh) return;
+    S.shadow = null;
+    sh.clones.forEach((c) => c.remove());
+    sh.hidden.forEach((r) => {
+      if (!r.isConnected) return;
+      r.classList.add("line");
+      r.removeAttribute("hidden");
+    });
+    // the point we painted goes too, unless a patch set a new one
+    if (sh.setPt != null && sh.buf.dataset.pt === sh.setPt) sh.buf.dataset.pt = sh.pt;
+  }
+
+  function shadow(buf, start) {
+    const rows = rowsOf(buf);
+    const i = rows.findIndex((r) => parseInt(r.dataset.s, 10) === start);
+    if (i < 0) return false;
+    const hidden = rows.slice(i);
+    if (hidden.some((r) => r.matches(".semantic-direct"))) return false;
+    const clones = hidden.map((r) => { const c = r.cloneNode(true); stripIds(c); return c; });
+    hidden[hidden.length - 1].after(...clones);
+    hidden.forEach((r) => { r.classList.remove("line"); r.setAttribute("hidden", ""); });
+    S.shadow = { buf, clones, hidden, pt: buf.dataset.pt, setPt: null };
+    return true;
   }
 
   function emptyRowMark(content) {
@@ -225,12 +271,12 @@
   }
 
   // apply ops K.. to rows that show the text after the first K ops
-  function paintFrom(buf, W, k) {
-    const st = stateAfter(W, k);
+  function paintFrom(buf, V, k) {
+    const st = stateAfter(V, k);
     const r = st.r;
     let pt = st.pt, ok = true;
-    for (let i = k; i < W.pending.length && ok; i++) {
-      const o = W.pending[i];
+    for (let i = k; i < V.pending.length && ok; i++) {
+      const o = V.pending[i];
       if (o.kind === "ins") {
         ok = o.text === "\n" ? paintNewline(buf, pt) : paintInsert(buf, pt, o.text);
         r.insert(pt, o.text);
@@ -249,18 +295,47 @@
     return ok ? pt : null;
   }
 
-  // put the rows and the caret where the pending ops leave them
+  // the view for the rows BUF shows, or null when the client has no rope
+  // for their version
+  function viewOf(W, buf) {
+    const h = W.hist.get(parseInt(buf.dataset.v, 10));
+    if (!h) return null;
+    return { server: h.r, pt: h.pt, ack: h.ack, pending: W.ops.filter((o) => o.seq > h.ack) };
+  }
+
+  // the rows show version V: older ropes and the ops it holds can go
+  function prune(W, v, ack) {
+    for (const [k, h] of W.hist) if (k < v) { h.r.free(); W.hist.delete(k); }
+    W.ops = W.ops.filter((o) => o.seq > ack);
+  }
+
+  // show the daemon's rows, then copies with the pending ops painted;
+  // false when the rows are not the text the rope holds
   function repaint(W) {
     const buf = S.h.bufOf(W.win);
-    if (!buf || buf.hasAttribute("phx-update")) return;
-    if (!W.pending.some((o) => o.kind !== "none")) return;
-    const lo = lowest(W);
-    let pt = null;
-    if (shows(buf, W, W.pending.length, lo)) pt = stateAfter(W, W.pending.length).pt;
-    else if (shows(buf, W, 0, lo)) pt = paintFrom(buf, W, 0);
-    if (pt == null) { S.stats.drift++; return; }
+    const had = !!S.shadow;
+    restore();
+    if (!buf || buf.hasAttribute("phx-update")) return false;
+    const V = viewOf(W, buf);
+    if (!V) return false;
+    prune(W, parseInt(buf.dataset.v, 10), V.ack);
+    if (!V.pending.some((o) => o.kind !== "none")) {
+      if (had) S.h.place();
+      return true;
+    }
+    const lo = lowest(V);
+    const ok = shows(buf, V, 0, lo) && shadow(buf, V.server.lineToByte(V.server.byteToLine(lo)));
+    const pt = ok ? paintFrom(buf, V, 0) : null;
+    if (pt == null) {
+      restore();
+      S.stats.drift++;
+      S.h.place();
+      return false;
+    }
     buf.dataset.pt = String(pt);
+    S.shadow.setPt = buf.dataset.pt;
     S.h.place();
+    return true;
   }
 
   // ---- the daemon's side ----
@@ -268,44 +343,50 @@
   function event(p) {
     if (!S.Rope) { S.queue.push(p); return; }
     let W = S.win && S.win.win === p.win ? S.win : null;
+    let rope;
     if (p.text != null) {
-      if (S.win) S.win.server.free();
-      W = S.win = { win: p.win, server: S.Rope.from(p.text), pending: W ? W.pending : [] };
-    } else if (!W) {
-      return;
-    } else if (p.at != null) {
-      W.server.remove(p.at, p.at + p.del);
-      if (p.ins) W.server.insert(p.at, p.ins);
+      restore();
+      if (S.win) S.win.hist.forEach((h) => h.r.free());
+      W = S.win = { win: p.win, hist: new Map(), ops: W ? W.ops : [],
+        skip: W ? W.skip : new Set() };
+      rope = S.Rope.from(p.text);
+    } else {
+      const base = W && W.hist.get(W.v);
+      if (!base) return;
+      rope = base.r.clone();
+      if (p.at != null) {
+        rope.remove(p.at, p.at + p.del);
+        if (p.ins) rope.insert(p.at, p.ins);
+      }
     }
-    W.v = p.v; W.pt = p.pt; W.ack = p.ack;
+    const old = W.hist.get(p.v);
+    if (old) old.r.free();
+    W.hist.set(p.v, { r: rope, pt: p.pt, ack: p.ack });
+    W.v = p.v;
+    if (p.skip) W.skip = new Set(p.skip);
     const now = performance.now();
-    W.pending = W.pending.filter((o) => {
-      if (o.seq > p.ack) return true;
-      if (o.kind !== "none") S.stats.confirm.push(now - o.t);
-      return false;
-    });
+    for (const o of W.ops) {
+      if (o.seq <= p.ack && !o.confirmed) {
+        o.confirmed = true;
+        if (o.kind !== "none") S.stats.confirm.push(now - o.t);
+      }
+    }
     if (S.stats.confirm.length > 500) S.stats.confirm.splice(0, 250);
     repaint(W);
   }
 
-  // after every patch: the patch put the daemon's rows back. LiveView
-  // runs this before it dispatches the rope event of the same message:
-  // rows newer than the rope wait for that event, which repaints.
+  // after every patch: the patch put the daemon's rows back
   function afterPatch() {
-    const W = S.win;
-    if (!W || !W.pending.length) return;
-    const buf = S.h.bufOf(W.win);
-    if (!buf || parseInt(buf.dataset.v, 10) !== W.v) return;
-    repaint(W);
+    if (S.win && S.win.ops.length) repaint(S.win);
   }
 
   // ---- the client's side ----
 
   // a key or an input the client does not predict: it blocks prediction
-  // until the daemon acks it
+  // until the rows show its effect
   function barrier() {
     const seq = ++S.seq;
-    if (S.win) S.win.pending.push({ seq, kind: "none", t: performance.now() });
+    if (S.win) S.win.ops.push({ seq, kind: "none", t: performance.now() });
     return seq;
   }
 
@@ -316,25 +397,16 @@
     const seq = ++S.seq;
     const op = W && predictable(buf, e, W);
     if (!op) {
-      if (W) { W.pending.push({ seq, kind: "none", t }); S.stats.skipped++; }
+      if (W) { W.ops.push({ seq, kind: "none", t }); S.stats.skipped++; }
       return seq;
     }
-    const k = W.pending.length;
-    W.pending.push({ seq, t, ...op });
-    const lo = lowest(W);
-    if (!shows(buf, W, k, lo)) {
-      W.pending[k] = { seq, kind: "none", t };
-      S.stats.drift++;
+    W.ops.push({ seq, t, ...op });
+    if (!repaint(W)) {
+      // the op stays as a barrier: the rows do not show it
+      const o = W.ops.find((x) => x.seq === seq);
+      if (o) { o.kind = "none"; delete o.text; }
       return seq;
     }
-    const pt = paintFrom(buf, W, k);
-    if (pt == null) {
-      W.pending[k] = { seq, kind: "none", t };
-      S.stats.drift++;
-      return seq;
-    }
-    buf.dataset.pt = String(pt);
-    S.h.place();
     S.stats.predicted++;
     S.stats.paint.push(performance.now() - t);
     if (S.stats.paint.length > 500) S.stats.paint.splice(0, 250);
@@ -342,26 +414,29 @@
   }
 
   function predictable(buf, e, W) {
-    if (W.pending.some((o) => o.kind === "none")) return null;
     if (e.isComposing || buf.hasAttribute("phx-update")) return null;
+    const V = viewOf(W, buf);
+    if (!V || V.pending.some((o) => o.kind === "none")) return null;
     const sel = window.getSelection();
     if (!sel || !sel.isCollapsed || !buf.contains(sel.focusNode)) return null;
     const mark = buf.dataset.mark;
     if (mark !== undefined && mark !== "" && mark !== buf.dataset.pt) return null;
     // the caret must stand where the ops leave point: a native arrow
     // moved it, and its report is not an op
-    const st = stateAfter(W, W.pending.length);
+    const st = stateAfter(V, V.pending.length);
     const expect = st.pt;
     st.r.free();
     if (S.h.domByte(sel.focusNode, sel.focusOffset) !== expect) return null;
+    const skip = (key) => W.skip.has(key);
     switch (e.inputType) {
       case "insertText":
-        return e.data && !e.data.includes("\n") ? { kind: "ins", text: e.data } : null;
+        if (!e.data || e.data.includes("\n") || [...e.data].some(skip)) return null;
+        return { kind: "ins", text: e.data };
       case "insertParagraph":
       case "insertLineBreak":
-        return { kind: "ins", text: "\n" };
+        return skip("RET") ? null : { kind: "ins", text: "\n" };
       case "deleteContentBackward":
-        return { kind: "del" };
+        return skip("DEL") ? null : { kind: "del" };
       default:
         return null;
     }
@@ -385,7 +460,7 @@
       predicted: s.predicted, skipped: s.skipped, drift: s.drift,
       paint_median: median(s.paint), paint_p95: p95(s.paint),
       confirm_median: median(s.confirm), confirm_p95: p95(s.confirm),
-      window: S.win ? S.win.win : null, pending: S.win ? S.win.pending.length : 0
+      window: S.win ? S.win.win : null, pending: S.win ? S.win.ops.length : 0
     };
   }
 

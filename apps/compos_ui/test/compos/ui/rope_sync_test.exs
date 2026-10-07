@@ -51,6 +51,27 @@ defmodule Compos.Ui.RopeSyncTest do
     end
   end
 
+  describe "skip keys" do
+    test "a mode the leaf wears contributes its keys" do
+      registry = [["paredit-mode", "(", ")", "DEL"], ["other-mode", "x"], ["text", "RET"]]
+      leaf = %{mode: "text", minor_modes: ["paredit-mode"]}
+      assert RopeSync.skip_keys(leaf, registry) == ["(", ")", "DEL", "RET"]
+      assert RopeSync.skip_keys(%{mode: "Fundamental", minor_modes: []}, registry) == []
+      assert RopeSync.skip_keys(leaf, nil) == []
+    end
+
+    test "the payload carries the keys when they change, and only then" do
+      leaf = %{id: 1, buffer: "b", version: 1, point: 0, text: "ab"}
+      {p1, e1} = RopeSync.payload(leaf, nil, 0, ["DEL"])
+      assert p1.skip == ["DEL"]
+      assert {nil, ^e1} = RopeSync.payload(leaf, e1, 0, ["DEL"])
+      {p2, e2} = RopeSync.payload(leaf, e1, 0, [])
+      assert p2.skip == []
+      {p3, _} = RopeSync.payload(%{leaf | point: 1}, e2, 0, [])
+      refute Map.has_key?(p3, :skip)
+    end
+  end
+
   describe "the rope event" do
     setup do
       Editor.minibuffer_close()

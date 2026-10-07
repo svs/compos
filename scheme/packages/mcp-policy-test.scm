@@ -235,3 +235,26 @@
     (let ((out (eval-string-safe "(mcp-call! 'zz-not-a-server \"echo\" \"{}\")")))
       (check-equal! (car out) 'error "the call fails")
       (check-contains! (cadr out) "not connected" "and says why"))))
+
+(deftest 'a-chat-sees-only-the-servers-its-bundle-holds
+  "mcp-find, mcp-tool-schema and mcp-call! from an agent's chat reach only
+   its bundle's servers; the user's own eval reaches every server"
+  (lambda ()
+    (let ((buf "*zz-bundle-chat*"))
+      (buffer-create buf)
+      (buffer-set-local! buf 'agent-slug "zz-bundle")
+      (buffer-set-local! buf 'chat-presets '(compos))
+      (with-current-buffer buf
+        (lambda ()
+          (check-equal! (mcp-visible? 'zz-hidden) #f "a server outside the bundle is invisible")
+          (check-equal! (mcp-visible? 'compos) #t "the editor bridge always is")
+          (check-equal! (mcp-call! 'zz-hidden "echo" "{}")
+                        "mcp: zz-hidden is not in this chat's bundle" "the call says so")
+          (check-equal! (mcp-tool-schema 'zz-hidden "echo")
+                        "mcp: zz-hidden is not in this chat's bundle" "and so does the schema")
+          (check-equal! (mcp-find "echo" 'zz-hidden) '() "and the search finds nothing")))
+      (buffer-set-local! buf 'agent-slug #f)
+      (with-current-buffer buf
+        (lambda ()
+          (check-equal! (mcp-visible? 'zz-hidden) #t "outside a chat every server is visible")))
+      (buffer-kill! buf))))

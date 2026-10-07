@@ -218,12 +218,15 @@ defmodule Compos.TransientTest do
     assert row("tools").value == "editor only → zztransient"
     assert Buffer.get_local(buf, "chat-presets") == []
 
+    # the picker stays open for the next toggle
+    assert Editor.render_state().minibuffer.prompt == "Preset: "
+
     # compos is the editor bridge: it never turns off
-    press("p")
     type("compos")
     press("RET")
     assert Editor.snapshot().echo =~ "stays on"
 
+    press("C-g")
     press("ESC")
     assert Editor.render_state().transient == nil
     assert Buffer.get_local(buf, "chat-presets") == [sym: "zztransient", sym: "compos"]

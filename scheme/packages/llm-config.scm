@@ -298,18 +298,27 @@
            (llm-config--box-set! 'presets (cons name loaded))
            (message (string-append "Preset " (symbol->string name) " on in the box"))))))
 
-(define-command "llm-config-pick-preset" "Turn a tool preset on or off in the box"
+(define (llm-config--pick-preset-loop! preselect)
+  (minibuffer-read* "Preset: "
+    (llm-config--preset-candidates)
+    (append
+      (list (list 'confirm
+                  (lambda (name)
+                    (unless (equal? name "")
+                      (llm-config--toggle-preset! (string->symbol name))
+                      (llm-config--refresh!)
+                      (llm-config--pick-preset-loop! name))))
+            (list 'cancel (lambda () #f))
+            (list 'style "palette")
+            (list 'legend '(("RET" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
+            (list 'note "RET turns a preset on or off and keeps the list open; C-g when done. The chat gets them when the menu closes."))
+      (if preselect (list (list 'preselect preselect)) '()))))
+
+(define-command "llm-config-pick-preset" "Turn tool presets on or off in the box"
   (lambda ()
     (if (not (boundp (quote chat-preset-candidates)))
         (message "No MCP presets — packages/mcp.scm is not loaded")
-        (llm-config-read! "Preset: "
-          (llm-config--preset-candidates)
-          (lambda (name)
-            (unless (equal? name "")
-              (llm-config--toggle-preset! (string->symbol name))
-              (llm-config--refresh!)))
-          (lambda () #f)
-          "RET turns the preset on or off in the box. The chat gets it when the menu closes."))))
+        (llm-config--pick-preset-loop! #f))))
 
 ;;; --- prompt sections ----------------------------------------------------------
 ;; One child transient holds a draft. Toggling rows changes only that draft.

@@ -358,10 +358,24 @@
 ;; serves.
 (define (mcp-self? name) (equal? name 'compos))
 
+;; An agent's chat sees only the servers its bundle holds: the rest are
+;; invisible to it, through Scheme as through its own tools. Outside a
+;; chat, the user's own eval sees every server.
+(define (mcp-visible? name)
+  (let ((buf (current-buffer)))
+    (or (mcp-self? name)
+        (not (and buf (buffer-local buf 'agent-slug)))
+        (and (member name (chat-active-servers buf)) #t))))
+
+(define (mcp-invisible-note name)
+  (string-append "mcp: " (symbol->string name) " is not in this chat's bundle"))
+
 (define (mcp-call! name tool args &optional cb)
-  (if (mcp-self? name)
-      (begin (message "mcp: compos is this editor — call its functions directly") #f)
-      (begin
+  (cond
+    ((mcp-self? name)
+     (message "mcp: compos is this editor — call its functions directly") #f)
+    ((not (mcp-visible? name)) (mcp-invisible-note name))
+    (else
         (mcp-ensure! name)
         (if cb
             (mcp-tool-call (symbol->string name) tool args cb)
@@ -386,6 +400,11 @@
 ;; nothing about the server. mcp-tools/mcp-tool-schema are to a server what
 ;; apropos/describe-function are to the editor.
 (define (mcp-tool-schema name tool)
+  (if (not (mcp-visible? name))
+      (mcp-invisible-note name)
+      (mcp-tool-schema--visible name tool)))
+
+(define (mcp-tool-schema--visible name tool)
   (unless (mcp-self? name)
     (mcp-ensure! name)
     (mcp-await-ready (symbol->string name)))
@@ -413,7 +432,7 @@
 ;; server, which is the point: the model asked.
 (define (mcp-find pattern &optional server)
   (let ((words (map string-downcase (string-split (string-downcase pattern) "|")))
-        (names (filter (lambda (n) (not (mcp-self? n)))
+        (names (filter (lambda (n) (and (not (mcp-self? n)) (mcp-visible? n)))
                        (if server
                            (list server)
                            (map car (reverse *mcp-registry*))))))
@@ -463,7 +482,7 @@
           "after a usable hit. A server "
           "whose tools you do not hold is three eval-scheme calls away, and "
           "nothing else in the editor API knows anything about it: "
-          "(mcp-find \"words|more words\") searches every server's tools by "
+          "(mcp-find \"words|more words\") searches those servers' tools by "
           "name and description and returns (SERVER TOOL DESCRIPTION) — "
           "start here, the way you start with apropos for the editor; "
           "(mcp-tool-schema 'SERVER \"TOOL\") gives that tool's JSON "

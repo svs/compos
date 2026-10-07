@@ -68,7 +68,15 @@ defmodule Compos.Core.Agent.Backend.ACP do
       tool_started: %{},
       # an adapter with no system-prompt channel takes our sections on the
       # session's first turn, and only that one
-      system_sent: false
+      system_sent: false,
+      # the session this thread held before its adapter was closed (an idle
+      # park, a daemon restart): initialize asks for it back with
+      # session/load when the agent advertises loadSession
+      resume: Map.get(config, "resume-session"),
+      # session/load replays the whole conversation as session/update
+      # notifications before it answers; the transcript already shows that
+      # text, so every update is dropped until the reply lands
+      loading: false
     }
 
     {:ok,

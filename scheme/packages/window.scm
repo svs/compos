@@ -2692,10 +2692,13 @@ keeps the buffer you were in and your point.")
 ;; walk the group's buffers in the pane you stand in, and groups.scm binds
 ;; them, because the walk is a group's business. One escape hatch, one
 ;; axis: whatever the frame looks like, Cmd-down is always the next buffer.
-;; Cmd-Shift-arrows swap the two panes.
+;; Cmd-Shift-arrows swap the two panes. Cmd-Ctrl-left and Cmd-Ctrl-right
+;; move this buffer to the neighboring pane.
 (global-set-key (arrow-chord 'super "<left>") "focus-left")
 (global-set-key (arrow-chord 'super "<right>") "focus-right")
 (window-default-keybindings '(shift super))
+(global-set-key (arrow-chord '(super control) "<left>") "buffer-left")
+(global-set-key (arrow-chord '(super control) "<right>") "buffer-right")
 
 ;;; --- the public API of this file ----------------------------------------------
 ;;; The catalog scope of each entry is the one it had in editor.scm.

@@ -230,6 +230,7 @@ Tests: `scheme/packages/display-buffer-test.scm`, run by the package suite (`--i
 Cmd-Shift-arrows run the `window-*` commands, which swap the active window
 with its neighbor. The `buffer-*` commands move the active view onto the
 neighboring pane's history and show the source pane's previous group buffer.
-They have no default key; `(buffer-default-keybindings)` binds them.
+Cmd-Ctrl-left and Cmd-Ctrl-right run `buffer-left` and `buffer-right`;
+`(buffer-default-keybindings)` binds all four to other arrows.
 List modes may specify `'special #f` for persistent app buffers such as
 WhatsApp; generated lists otherwise keep the special default.

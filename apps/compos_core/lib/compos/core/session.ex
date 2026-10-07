@@ -1534,6 +1534,12 @@ defmodule Compos.Core.Session do
                 info.ending,
                 {:sym, "steers"},
                 info.steers,
+                # idle with its adapter closed; the session id it holds for
+                # the next adapter (#f before the backend named one)
+                {:sym, "parked"},
+                Map.get(info, :parked, false),
+                {:sym, "session"},
+                Map.get(info, :session) || false,
                 # the two silences a stalled chat can be in. An Agent from
                 # before a hot reload reports neither, so ask with a default
                 {:sym, "settling"},

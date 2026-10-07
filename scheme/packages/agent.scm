@@ -411,6 +411,15 @@
          (agent-block-push! buf start (agent-mark slug) "meta" '()))
        (buffer-set-local! buf 'chat-connector-suspect #t))
 
+      ;; The backend named its session. The chat keeps the id with the
+      ;; conversation: a parked adapter, a revive and a daemon restart all
+      ;; open the next adapter on it (ACP session/load), so the agent keeps
+      ;; its memory instead of reading a pasted transcript.
+      ((equal? type 'session)
+       (buffer-set-local! buf 'agent-session (plist-get e 'id))
+       (when (plist-get e 'resumed)
+         (message (string-append "agent " slug ": session resumed"))))
+
       ((equal? type 'dead)
        (chat-activity! buf "disconnected")
        (buffer-set-local! buf 'chat-turn-active #f)

@@ -1050,12 +1050,29 @@ defmodule Compos.Core.Editor do
   # It moves no window, so it never broadcasts; it answers whether the
   # measurement CHANGED, and the caller tells Scheme so the tables can
   # lay themselves out again.
+  #
+  # A report names only the windows the client could measure: a window
+  # that shows no text lines (a chat) is left out. So a report updates the
+  # windows it names and keeps the last width of the others. Dropping them
+  # made the next table in such a window draw at an estimate, then reflow
+  # when its real width arrived: a visible second draw.
   def handle_call({:set_window_cols, map, fid}, _from, state) when is_map(map) do
     f = frame(state, fid)
+    old = Map.get(f, :win_cols, %{})
 
-    if Map.get(f, :win_cols, %{}) == map,
-      do: {:reply, false, state},
-      else: {:reply, true, put_frame(state, Map.put(f, :win_cols, map))}
+    cond do
+      # an empty report forgets every width; the client never sends one
+      map == %{} ->
+        {:reply, old != %{}, put_frame(state, Map.put(f, :win_cols, %{}))}
+
+      Enum.all?(map, fn {id, n} -> Map.get(old, id) == n end) ->
+        {:reply, false, state}
+
+      true ->
+        live = for [id | _] <- leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0}), do: id
+        cols = old |> Map.take(live) |> Map.merge(map)
+        {:reply, true, put_frame(state, Map.put(f, :win_cols, cols))}
+    end
   end
 
   # what the client measured after its last paint. It moves nothing and

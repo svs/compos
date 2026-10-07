@@ -426,6 +426,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
         state = ingest_config_options(state, Map.get(result, "configOptions"))
         state = push_pinned_model(state)
         state = push_pinned_effort(state)
+        state = push_pinned_mode(state)
 
         emit(state, type: :ready)
 
@@ -779,6 +780,17 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # a pinned model ('model in the resolved config) has no spawn-time route
   # on this lane — the session starts on the agent's default, then we set
   # the option before ready
+  # a permission mode chosen while the thread was parked (no adapter) rides
+  # in the config; the new session takes it here
+  defp push_pinned_mode(%{config: %{"mode" => mode}} = state) when is_binary(mode) do
+    if "mode" in state.config_option_ids,
+      do: set_config_option(state, "mode", mode),
+      else:
+        request(state, "session/set_mode", %{"sessionId" => state.session_id, "modeId" => mode})
+  end
+
+  defp push_pinned_mode(state), do: state
+
   defp push_pinned_model(state) do
     model = Map.get(state.config, "model")
 

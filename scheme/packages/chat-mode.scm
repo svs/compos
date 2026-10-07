@@ -1288,6 +1288,16 @@
                           'presets (if (boundp (quote chat-presets-of))
                                        (chat-presets-of buf)
                                        '()))
+                    ;; the session this conversation already lives in, when
+                    ;; the same connector issued it: the adapter loads it
+                    ;; instead of starting empty
+                    (let ((sid (buffer-local buf 'agent-session)))
+                      (if (and sid
+                               (equal? (buffer-local buf 'agent-session-connector)
+                                       connector))
+                          (list 'resume-session sid)
+                          '()))
+                    (list 'idle-seconds agent-idle-seconds)
                     (let ((effort (buffer-local buf 'agent-effort)))
                       (if effort (list 'effort effort) '()))
                     (if (and model (not (equal? model "")))
@@ -1540,6 +1550,13 @@
 ;; opened from, which is identity, not conversation or runtime)
 ;; 'render-mode is the chat's chosen VIEW ("blocks" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
+;; An idle adapter is two OS processes and up to a few hundred MB for a
+;; conversation nobody is having. A chat idle this long closes its adapter
+;; and keeps the session; the next message reopens it on the same session.
+;; 0 keeps every adapter running.
+(defcustom 'agent-idle-seconds 600
+  "Seconds a chat sits idle before its agent adapter is closed. The next message reopens the same session. 0 never closes one.")
+
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise
     ;; the last name the chat DERIVED from its group: a name the person
@@ -1588,6 +1605,10 @@
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
     chat-log-id
+    ;; the backend session this conversation lives in, and the connector
+    ;; that issued it: a parked adapter, a revive and a restart reopen the
+    ;; same session (ACP session/load); a reset starts a new one
+    agent-session agent-session-connector
     ;; the running summary and every paragraph before it: a reset starts
     ;; a new conversation with nothing to say yet
     chat-summary chat-summary-log
@@ -1739,17 +1760,25 @@
          (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
-    ;; a fresh ACP session starts empty and has to be seeded; the api lane
-    ;; replays the record on every request anyway
-    (buffer-set-local! buf 'agent-seed-context
-      (and (not (connector-can? cname 'stateless)) (> mark 0) (not (equal? said ""))))
-    (let ((slug (chat-attach-agent! buf cname)))
-      ;; a chat that comes back leaves no "[agent stopped]" line behind
-      (when (boundp (quote agent-drop-stopped-markers!))
-        (agent-drop-stopped-markers! buf))
-      (unless (equal? said "")
-        (message (string-append "agent " slug ": revived (fresh session)")))
-      slug)))
+    ;; a fresh ACP session starts empty and has to be seeded; one the same
+    ;; connector issued before (agent-session) remembers the conversation
+    ;; and loads instead; the api lane replays the record on every request
+    ;; anyway
+    (let ((resume (and (buffer-local buf 'agent-session)
+                       (equal? (buffer-local buf 'agent-session-connector) cname))))
+      (buffer-set-local! buf 'agent-seed-context
+        (and (not resume) (not (connector-can? cname 'stateless))
+             (> mark 0) (not (equal? said ""))))
+      (let ((slug (chat-attach-agent! buf cname)))
+        ;; a chat that comes back leaves no "[agent stopped]" line behind
+        (when (boundp (quote agent-drop-stopped-markers!))
+          (agent-drop-stopped-markers! buf))
+        (unless (equal? said "")
+          (message (string-append "agent " slug
+                                  (if resume
+                                      ": reopening its session"
+                                      ": revived (fresh session)"))))
+        slug))))
 
 (define (chat-ensure-runtime! buf)
   (or (buffer-local buf 'agent-slug) (chat-attach! buf)))

@@ -292,6 +292,19 @@ defmodule Compos.Core.Agent do
     end
   end
 
+  # parked (no adapter): a choice made now rides in the config the next
+  # adapter starts with, so nothing is lost and nothing is woken for it
+  def handle_call({:set_model, model_id}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "model", model_id)}}
+
+  def handle_call({:set_effort, effort}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "effort", effort)}}
+
+  def handle_call({:set_mode, mode_id}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "mode", mode_id)}}
+
+  def handle_call(:cancel, _from, %{handle: nil} = state), do: {:reply, :ok, state}
+
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
 
@@ -577,6 +590,9 @@ defmodule Compos.Core.Agent do
        buffer: Buffer.name(state.buffer_ref),
        buffer_id: Buffer.id(state.buffer_ref),
        status: state.status,
+       # idle with its adapter closed: the next prompt reopens the session
+       parked: is_nil(state.handle),
+       session: Map.get(state, :resume),
        queued:
          length(state.prompt_queue) + length(state.steering_queue) +
            map_size(state.pending_steers) + length(state.steering_fallbacks),
@@ -803,7 +819,7 @@ defmodule Compos.Core.Agent do
     if state.pending_permission, do: resolve_permission(state, nil)
     if state.pending_question, do: resolve_question(state, state.pending_question.id, nil)
 
-    state.backend.close(state.handle)
+    if state.handle, do: state.backend.close(state.handle)
     :ok
   end
 
@@ -1212,6 +1228,7 @@ defmodule Compos.Core.Agent do
       |> cancel_settle_timer()
       |> cancel_silent_timer()
       |> Map.put(:steered_turn, false)
+      |> cancel_idle_timer()
       |> Map.put(:status, :running)
       |> emit_status(:running)
 

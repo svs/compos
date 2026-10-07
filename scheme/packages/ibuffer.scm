@@ -150,8 +150,8 @@
 ;; ibuffer-prefetch-local!, and a fetch reads them for every row in one
 ;; snapshot, not one buffer-local a row. A row the note does not hold reads
 ;; the buffer itself.
-(define *ibuffer-row-local-keys* '())
-(define *ibuffer-row-locals* '())    ; ((BUF VALUE ...) ...), in key order
+(defvar '*ibuffer-row-local-keys* '())
+(defvar '*ibuffer-row-locals* '())    ; ((BUF VALUE ...) ...), in key order
 
 (define (ibuffer-prefetch-local! key)
   (unless (member key *ibuffer-row-local-keys*)

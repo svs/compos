@@ -51,10 +51,13 @@
 ;; first's answer instead of paying its cost again.
 (define *chat-row-status-memo* (list #f #f))
 
+;; a list reads every chat's agent in one snapshot
+(ibuffer-prefetch-local! 'agent-slug)
+
 (define (chat-row-status b)
   (if (equal? (car *chat-row-status-memo*) b)
       (cadr *chat-row-status-memo*)
-      (let* ((slug (buffer-local b 'agent-slug))
+      (let* ((slug (ibuffer-row-local b 'agent-slug))
              (status (if slug (agent-status slug) 'api)))
         (set! *chat-row-status-memo* (list b status))
         status)))

@@ -143,7 +143,32 @@
 (define *ibuffer-kind-notes* '())
 
 (define (ibuffer-note-kinds! rows)
-  (set! *ibuffer-kind-notes* (map (lambda (b) (list b (ibuffer-row-kind* b))) rows)))
+  (set! *ibuffer-kind-notes* (map (lambda (b) (list b (ibuffer-row-kind* b))) rows))
+  (ibuffer-note-locals! rows))
+
+;; the same for the locals a kind's cells read: a kind names them with
+;; ibuffer-prefetch-local!, and a fetch reads them for every row in one
+;; snapshot, not one buffer-local a row. A row the note does not hold reads
+;; the buffer itself.
+(define *ibuffer-row-local-keys* '())
+(define *ibuffer-row-locals* '())    ; ((BUF VALUE ...) ...), in key order
+
+(define (ibuffer-prefetch-local! key)
+  (unless (member key *ibuffer-row-local-keys*)
+    (set! *ibuffer-row-local-keys* (append *ibuffer-row-local-keys* (list key)))))
+
+(define (ibuffer-note-locals! rows)
+  (set! *ibuffer-row-locals*
+        (if (null? *ibuffer-row-local-keys*)
+            '()
+            (buffer-read-many (filter string? rows) '() *ibuffer-row-local-keys*))))
+
+(define (ibuffer-row-local b key)
+  (let ((row (assoc b *ibuffer-row-locals*))
+        (tail (member key *ibuffer-row-local-keys*)))
+    (if (and row tail)
+        (list-ref row (- (+ (length *ibuffer-row-local-keys*) 1) (length tail)))
+        (buffer-local b key))))
 
 (define (ibuffer-row-kind b)
   (let ((e (assoc b *ibuffer-kind-notes*)))
@@ -1057,11 +1082,7 @@
 ;; columns; the dot and the icon can be multibyte, so the span counts
 ;; their bytes and not their columns.
 (define (ibuffer-prefix-chars a b)
-  (let ((n (min (string-length a) (string-length b))))
-    (let loop ((i 0))
-      (if (and (< i n) (equal? (substring a i (+ i 1)) (substring b i (+ i 1))))
-          (loop (+ i 1))
-          i))))
+  (string-length (common-prefix (list a b))))
 
 (define (ibuffer-row-bytes buf b)
   (fold (lambda (n line) (+ n (string-byte-length (car line)) 1))

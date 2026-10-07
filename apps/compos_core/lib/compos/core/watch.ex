@@ -65,7 +65,8 @@ defmodule Compos.Core.Watch do
   def init(_opts) do
     # a FileSystem backend that dies must not take the watcher with it
     Process.flag(:trap_exit, true)
-    {:ok, %{roots: %{}, pids: %{}}}
+    home = Path.expand(Compos.Core.home())
+    {:ok, %{roots: %{}, pids: %{}, home: Enum.uniq([home, realpath(home)])}}
   end
 
   @impl true
@@ -105,6 +106,7 @@ defmodule Compos.Core.Watch do
     with root when is_binary(root) <- state.pids[pid],
          entry when not is_nil(entry) <- state.roots[root],
          true <- relevant?(path),
+         false <- home_data?(path, state.home),
          true <- entry.deep > 0 or direct_child?(path, root, entry.real) do
       {:noreply, put_entry(state, root, arm(entry, root))}
     else
@@ -263,6 +265,40 @@ defmodule Compos.Core.Watch do
           _ -> false
         end
     end
+  end
+
+  # The config home is the daemon's own working directory: buffer
+  # checkpoints, history docs, chat logs, the desktop, the event log, and
+  # caches. The daemon writes there every second. The home is also a git
+  # repository, so one visited file under it arms a deep watch on the whole
+  # home, and a watch that fires on the daemon's own writes feeds itself:
+  # each run schedules a desktop save, and the save is the next event.
+  # Only the user's files count there: init.scm, custom.scm, packages/,
+  # a group's group.scm, a note the user keeps in the home.
+  @home_data ~w(buffers buffers-quarantine docs chats desktop-backups llm_db cache google
+                grammars worktree-daemons tmp pdf-cache pdf-edit-undo web-etags browse-files
+                recordings attachments annotations codex-home dsh-home models sock peer-id
+                web-history web-visited)
+  @home_data_prefixes ~w(browse-fetch- desktop)
+  @home_data_suffixes ~w(.log .jsonl .db .db-wal .db-shm .bak .etf ~)
+
+  defp home_data?(path, homes) do
+    case Enum.find_value(homes, &home_parts(path, &1)) do
+      [first | rest] ->
+        first in @home_data or
+          Enum.any?(@home_data_prefixes, &String.starts_with?(first, &1)) or
+          Enum.any?(@home_data_suffixes, &String.ends_with?(first, &1)) or
+          match?(["groups", _, "chats" | _], [first | rest])
+
+      _ ->
+        false
+    end
+  end
+
+  # the path's segments below HOME, or nil when the path is not under it
+  defp home_parts(path, home) do
+    prefix = home <> "/"
+    if String.starts_with?(path, prefix), do: Path.split(String.replace_prefix(path, prefix, ""))
   end
 
   # --- the event -------------------------------------------------------------

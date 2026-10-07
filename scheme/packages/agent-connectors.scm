@@ -60,8 +60,10 @@ nonstandard install out of the built-in connector catalog."
                                       "TaskCreate" "TaskUpdate"
                                       "TaskList" "TaskGet"))))
     ;; the seed only has to hold until a session reports its own list;
-    ;; llm-models-seen! keeps that answer for the connector
-    models ("default" "claude-opus-5-5[1m]" "opus[1m]" "claude-fable-5-1[1m]" "sonnet" "haiku")))
+    ;; llm-models-seen! keeps that answer for the connector, and the picker
+    ;; still offers a model here that the adapter does not list yet
+    models ("default" "claude-opus-5-5[1m]" "opus[1m]" "claude-fable-5-1[1m]" "sonnet" "haiku"
+            "claude-haiku-5-5")))
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"
@@ -82,7 +84,7 @@ nonstandard install out of the built-in connector catalog."
   '(cmd "opencode acp"
     model-config #t
     models ("opencode/big-pickle" "opencode/claude-sonnet-5"
-            "opencode/claude-opus-5" "opencode/claude-haiku-4-5"
+            "opencode/claude-opus-5" "opencode/claude-haiku-5-5"
             "opencode/gemini-3.1-pro")))
 
 (define-connector! "deepseek"

@@ -2210,9 +2210,15 @@
       (set! *llm-models-probed* (cons connector *llm-models-probed*))
       (llm-models-probe! connector))
     (if (pair? entries)
-        (map (lambda (e)
-               (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
-             entries)
+        ;; a declared model that the connector does not list yet (a new
+        ;; release the adapter has no alias for) comes after its own list
+        (append
+          (map (lambda (e)
+                 (list (car e) (if (pair? (cdr e)) (or (cadr e) "") "")))
+               entries)
+          (map (lambda (m) (list m ""))
+               (filter (lambda (m) (not (assoc m entries)))
+                       (connector-models connector))))
         (map (lambda (m) (list m "")) (connector-models connector)))))
 
 ;; A backend's session modes are the connector's truth as well, and they

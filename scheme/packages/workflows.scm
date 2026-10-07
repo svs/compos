@@ -120,7 +120,7 @@
   "yes? answers #t at this probability or above."
   'group 'workflows 'type 'number)
 
-(defcustom 'workflow-extract-model "claude-haiku-4-5-20251001"
+(defcustom 'workflow-extract-model "claude-haiku-5-5"
   "The model extract reads records with."
   'group 'workflows 'type 'string)
 

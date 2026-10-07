@@ -741,7 +741,7 @@
         "openrouter:anthropic/claude-sonnet-5"
         "claude-sonnet-5"
         "claude-opus-5"
-        "claude-haiku-4-5-20251001"))
+        "claude-haiku-5-5"))
 
 ;; the same switch, keeping the connector: in place when the running
 ;; backend can take the model, a seeded fresh session otherwise
@@ -1157,7 +1157,7 @@
 (domain! 'chat)
 (effects! '(write external spend))
 
-(defcustom 'chat-summary-model "claude-haiku-4-5"
+(defcustom 'chat-summary-model "claude-haiku-5-5"
   "The cheap model that keeps each chat's one-sentence running summary."
   'group 'chat 'type 'string)
 

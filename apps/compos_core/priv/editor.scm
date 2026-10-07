@@ -1369,6 +1369,15 @@
 (define (frame-attached!)
   (run-hooks 'frame-attach-hook))
 
+;; a frame's client left and did not come back within the grace the
+;; editor keeps: the browser tab is closed. Emacs deletes the frame of a
+;; display that is gone; so does this. The sole frame stays. The hook
+;; runs first, with the id, so a package can drop what it keeps per frame.
+(define (frame-client-lost! id)
+  (when (and (member id (frame-list)) (> (length (frame-list)) 1))
+    (run-hook-with-args 'frame-delete-hook id)
+    (delete-frame! id)))
+
 ;;; --- the older spellings -------------------------------------------------------
 ;;; A package outside the repo (the user's own, another checkout) may name a
 ;;; door by the name it had before the keyed hooks. Each old name is one

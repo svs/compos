@@ -47,6 +47,81 @@ defmodule Compos.FramesTest do
     assert {:error, :no_frame} = Editor.delete_frame(fid)
   end
 
+  # --- a frame lives as long as its client ------------------------------------
+
+  # a client process that attaches a frame and holds it until told to stop
+  defp client_attach(id \\ nil) do
+    test = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, fid} = Editor.attach_frame(id)
+        send(test, {:attached, fid})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:attached, fid}, 2_000
+    {pid, fid}
+  end
+
+  defp short_grace do
+    Application.put_env(:compos_core, :frame_grace_ms, 150)
+    on_exit(fn -> Application.delete_env(:compos_core, :frame_grace_ms) end)
+  end
+
+  defp wait_until(fun, left \\ 3_000) do
+    cond do
+      fun.() -> true
+      left <= 0 -> false
+      true ->
+        Process.sleep(50)
+        wait_until(fun, left - 50)
+    end
+  end
+
+  test "a frame whose client died is deleted after the grace" do
+    short_grace()
+    {pid, fid} = client_attach()
+    assert fid in Editor.frame_list()
+
+    send(pid, :stop)
+    assert wait_until(fn -> fid not in Editor.frame_list() end)
+  end
+
+  test "a reattach within the grace keeps the frame" do
+    short_grace()
+    {pid, fid} = client_attach()
+    send(pid, :stop)
+
+    # this test process is the new client, and it is alive
+    {:ok, ^fid} = Editor.attach_frame(fid)
+    Process.sleep(400)
+    assert fid in Editor.frame_list()
+  end
+
+  test "a restored frame with no client expires; one a client holds stays" do
+    short_grace()
+    {:ok, "f-restored"} = Editor.attach_frame("f-restored", client: nil)
+    assert wait_until(fn -> "f-restored" not in Editor.frame_list() end)
+
+    {_pid, held} = client_attach()
+    # the restore ran after the tab connected: the client keeps the frame
+    {:ok, ^held} = Editor.attach_frame(held, client: nil)
+    Process.sleep(400)
+    assert held in Editor.frame_list()
+  end
+
+  test "the sole frame never expires" do
+    short_grace()
+    # f-main is the only frame; a client-less attach to it arms the clock
+    {:ok, "f-main"} = Editor.attach_frame("f-main", client: nil)
+    Process.sleep(400)
+    assert "f-main" in Editor.frame_list()
+  end
+
   test "frames have independent trees; window ids are globally unique" do
     {:ok, fid} = Editor.attach_frame(nil)
     before = Editor.list_windows("f-main")

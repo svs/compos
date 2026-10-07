@@ -642,7 +642,9 @@ defmodule Compos.Core.Desktop do
   # v1 (single :tree key): one frame, restored into the default.
   defp restore_frames(%{frames: frames}) do
     for %{id: fid, tree: tree, active_buffer: active} = frame <- Enum.reverse(frames) do
-      {:ok, ^fid} = Editor.attach_frame(fid)
+      # no client: the frame waits for its tab to reconnect, and expires
+      # on the editor's grace when none does
+      {:ok, ^fid} = Editor.attach_frame(fid, client: nil)
       Editor.restore_tree(tree, active, fid)
       Editor.set_hidden_windows(Map.get(frame, :hidden, []), fid)
     end

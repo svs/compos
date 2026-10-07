@@ -780,37 +780,6 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  # the client of a frame is gone: the tab closed, reloaded, or lost its
-  # socket. Start the grace; a reattach within it cancels the clock.
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case Enum.find(state.frame_clients, fn {_fid, {_pid, r}} -> r == ref end) do
-      {fid, _} ->
-        state = %{state | frame_clients: Map.delete(state.frame_clients, fid)}
-        {:noreply, arm_frame_timer(state, fid)}
-
-      nil ->
-        {:noreply, state}
-    end
-  end
-
-  # the grace ran out with no client: hand the frame to Scheme, which
-  # decides (frame-client-lost! in editor.scm deletes it). This server
-  # never calls into Session itself — deadlock — so a Task carries it.
-  def handle_info({:frame_expired, fid}, state) do
-    state = %{state | frame_timers: Map.delete(state.frame_timers, fid)}
-
-    if state.frames[fid] && not Map.has_key?(state.frame_clients, fid) do
-      Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-        Session.call_named("frame-client-lost!", [fid], fid)
-      end)
-    end
-
-    {:noreply, state}
-  end
-
-  def handle_info(_msg, state), do: {:noreply, state}
-
   def handle_call(:frame_list, _from, state), do: {:reply, state.frame_mru, state}
 
   def handle_call(:last_active_frame, _from, state),
@@ -2313,6 +2282,95 @@ defmodule Compos.Core.Editor do
       resync_swap(put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active})),
       f.id
     )
+  end
+
+  # --- frame clients ----------------------------------------------------------
+
+  # the client of a frame is gone: the tab closed, reloaded, or lost its
+  # socket. Start the grace; a reattach within it cancels the clock.
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case Enum.find(state.frame_clients, fn {_fid, {_pid, r}} -> r == ref end) do
+      {fid, _} ->
+        state = %{state | frame_clients: Map.delete(state.frame_clients, fid)}
+        {:noreply, arm_frame_timer(state, fid)}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  # the grace ran out with no client: hand the frame to Scheme, which
+  # decides (frame-client-lost! in editor.scm deletes it). This server
+  # never calls into Session itself — deadlock — so a Task carries it.
+  def handle_info({:frame_expired, fid}, state) do
+    state = %{state | frame_timers: Map.delete(state.frame_timers, fid)}
+
+    if state.frames[fid] && not Map.has_key?(state.frame_clients, fid) do
+      Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+        Session.call_named("frame-client-lost!", [fid], fid)
+      end)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  @frame_grace_default 30 * 60_000
+
+  defp frame_grace_ms,
+    do: Application.get_env(:compos_core, :frame_grace_ms, @frame_grace_default)
+
+  # Record who shows the frame. A pid replaces the previous client and
+  # stops the grace. nil says "no client here" (a desktop restore) and
+  # starts the grace only when no client holds the frame already: a tab
+  # that connected before the restore ran keeps its frame.
+  defp frame_client(state, fid, nil) do
+    if Map.has_key?(state.frame_clients, fid), do: state, else: arm_frame_timer(state, fid)
+  end
+
+  defp frame_client(state, fid, pid) when is_pid(pid) do
+    state =
+      case state.frame_clients[fid] do
+        {^pid, _ref} ->
+          state
+
+        _other ->
+          state = drop_frame_client(state, fid)
+          ref = Process.monitor(pid)
+          %{state | frame_clients: Map.put(state.frame_clients, fid, {pid, ref})}
+      end
+
+    cancel_frame_timer(state, fid)
+  end
+
+  defp drop_frame_client(state, fid) do
+    case state.frame_clients[fid] do
+      {_pid, ref} ->
+        Process.demonitor(ref, [:flush])
+        %{state | frame_clients: Map.delete(state.frame_clients, fid)}
+
+      nil ->
+        state
+    end
+  end
+
+  defp arm_frame_timer(state, fid) do
+    state = cancel_frame_timer(state, fid)
+    ref = Process.send_after(self(), {:frame_expired, fid}, frame_grace_ms())
+    %{state | frame_timers: Map.put(state.frame_timers, fid, ref)}
+  end
+
+  defp cancel_frame_timer(state, fid) do
+    case state.frame_timers[fid] do
+      nil ->
+        state
+
+      ref ->
+        Process.cancel_timer(ref)
+        %{state | frame_timers: Map.delete(state.frame_timers, fid)}
+    end
   end
 
   # scope: a frame id (only that frame's clients re-render) or :all (global

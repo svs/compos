@@ -12,7 +12,7 @@
 (domain! 'fast-code)
 (effects! '(read write external execute spend))
 
-(defcustom 'fast-code-model "claude-haiku-4-5"
+(defcustom 'fast-code-model "claude-haiku-5-5"
   "The model that writes the expression, and any function it needs. Measured on the API lane, Haiku 4.5 answered in 0.8 to 1 second, the fastest of seven."
   'group 'fast-code)
 

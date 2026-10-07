@@ -136,6 +136,39 @@ defmodule Compos.WatchTest do
     end
   end
 
+  # the config home is where the daemon writes its own state every second;
+  # the home is a git repository, so a visited file under it watches it deep
+  test "the daemon's own writes under the config home are silent, the user's files are not",
+       ctx do
+    {root, pid} = watch_quietly(ctx, deep: true)
+    home = Path.expand(Compos.Core.home())
+    at_home = fn rel -> send(ctx.server, {:file_event, pid, {Path.join(home, rel), [:modified]}}) end
+
+    for rel <- [
+          "buffers",
+          "buffers/abc.etf",
+          "docs/abc.loro",
+          "desktop.etf",
+          "desktop.etf.bak",
+          "events.db-wal",
+          "daemon.log",
+          "llm-usage.jsonl",
+          "chats/one.json",
+          "groups/g1/chats/one.json",
+          "browse-fetch-12.html"
+        ] do
+      at_home.(rel)
+    end
+
+    refute_receive {:fs_changed, _}, @settle
+
+    for rel <- ["init.scm", "custom.scm", "packages/mine.scm", "groups/g1/group.scm", "notes/todo.md"] do
+      at_home.(rel)
+      assert_receive {:fs_changed, ^root}, @settle, "expected #{rel} to count"
+      quiet()
+    end
+  end
+
   test "a watch is shallow: a change below a child directory is silent", ctx do
     {root, pid} = watch_quietly(ctx)
 

@@ -10,6 +10,9 @@
 ;;; that buffer is. Locals persist with the desktop, so the set survives
 ;;; a restart.
 
+;; a move retags an app's buffers through group membership
+(require 'groups)
+
 (domain! 'windows)
 (effects! '(read))
 

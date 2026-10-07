@@ -166,6 +166,7 @@
 
 ;;; --- the commands -------------------------------------------------------------
 
+;;;###autoload
 (define-command "doom" "Play DOOM"
   (lambda ()
     (if (doom--installed?)
@@ -178,6 +179,7 @@
                   (doom--open!)
                   (message (if (string? ok) ok "doom: install failed")))))))))
 
+;;;###autoload
 (define-command "doom-install"
   "Fetch the DOOM engine and the shareware IWAD, and write the app page"
   (lambda ()

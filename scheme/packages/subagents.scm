@@ -9,6 +9,9 @@
 ;;; This is the ibuffer template with one view over it, the way *chats* is
 ;;; in agent-fleet.scm. No second list engine.
 
+;; the spawn edges are the chats table's other view
+(require 'agent-fleet)
+
 (domain! 'chat)
 (effects! '(read))
 (category! 'chat)

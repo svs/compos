@@ -1315,6 +1315,17 @@ defmodule Compos.Core.SchemeAPI do
           {:error, _} -> false
         end
       end,
+      # (autoload-cookies PATH) -> the forms under the ;;;###autoload cookies
+      # of the file, in order. The reader is Elixir's; which of those forms
+      # become stubs is Scheme's (autoload-install-form!).
+      {"autoload-cookies",
+       "(autoload-cookies PATH) — the form under each ;;;###autoload line of the file, in order; () when the file has none or does not read."} =>
+        fn [p] ->
+          case File.read(Path.expand(p)) do
+            {:ok, text} -> autoload_cookie_forms(text)
+            {:error, _} -> []
+          end
+        end,
       # (getenv NAME) — an unset OR empty variable is #f: a caller asking for
       # a key wants the next source in the chain, not the empty string
       {"getenv",
@@ -2716,6 +2727,18 @@ defmodule Compos.Core.SchemeAPI do
           _, _ -> {false, store}
         end
       end,
+      # (load) restores its stamps with this, so a file that raises leaves
+      # the loader clean. The cleanup runs against the caller's store: its
+      # job is the globals, which live in ETS and need no store back.
+      {"unwind-protect",
+       "(unwind-protect THUNK CLEANUP) — THUNK's value; CLEANUP runs after THUNK, also when THUNK raises, and the error goes on."} =>
+        fn [thunk, cleanup], store ->
+          try do
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          after
+            Compos.Scheme.Eval.apply_fn(cleanup, [], store)
+          end
+        end,
       # describe-key arms this, then reads the sequence back with (last-keys)
       {"capture-key!",
        "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms."} =>
@@ -3824,4 +3847,25 @@ defmodule Compos.Core.SchemeAPI do
       m -> {min(p, m), max(p, m)}
     end
   end
+  @autoload_cookie ";;;###autoload"
+
+  # The text after a cookie line reads as one form. A form that does not
+  # read is skipped: a broken cookie is that file's problem, not the boot's.
+  defp autoload_cookie_forms(text) do
+    text
+    |> String.split("\n")
+    |> Enum.with_index()
+    |> Enum.filter(fn {line, _} -> String.trim(line) == @autoload_cookie end)
+    |> Enum.flat_map(fn {_, i} ->
+      rest = text |> String.split("\n") |> Enum.drop(i + 1) |> Enum.join("\n")
+
+      try do
+        {form, _} = Compos.Scheme.Reader.read_one(rest)
+        [form]
+      rescue
+        _ -> []
+      end
+    end)
+  end
+
 end

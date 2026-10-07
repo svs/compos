@@ -17,6 +17,9 @@
 ;;;   C-c C-c run the code block at point · C-c C-x tangle marked blocks
 ;;;   C-x n n narrow to the heading · C-x n w widen
 
+;; the morg block kinds come first
+(require 'morg-kinds "morg/morg-kinds.scm")
+
 (category! 'writing)
 (domain! 'writing)
 (effects! '(read))

@@ -1357,10 +1357,12 @@
                                     " results for " query
                                     " · page " (number->string page))))))))
 
+;;;###autoload
 (define-command "amazon" "Open the Amazon app"
   (lambda ()
     (amazon-open! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query))))
 
+;;;###autoload
 (define-command "amazon-search" "Search Amazon and fill the listing"
   (lambda ()
     (read-string "Amazon: "

@@ -20,6 +20,7 @@
 
 (effects! '(destroy))
 
+;;;###autoload
 (define-command "graveyard-sweep"
   "Delete graveyard entries older than graveyard-keep-days; the burial log stays"
   (lambda ()
@@ -28,6 +29,7 @@
                               " entries older than "
                               (number->string graveyard-keep-days) " days")))))
 
+;;;###autoload
 (define-command "history-sweep-redundant"
   "Delete history logs of dormant buffers whose checkpoint carries the text"
   (lambda ()

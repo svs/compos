@@ -628,9 +628,11 @@
             ((equal? tab 'applications) (buffer-set-local! buf 'recruiting-applications #f)))
       (rec-load-tab! buf tab #f))))
 
+;;;###autoload
 (define-command "recruiting-job" "Open another job in its own listing"
   (lambda () (rec-pick-job! #f)))
 
+;;;###autoload
 (define-command "recruiting" "Open a job from the ATS with its tabs"
   (lambda () (rec-pick-job! #t)))
 

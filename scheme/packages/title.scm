@@ -174,6 +174,7 @@
       (llm-with-model (title--prompt text) (title--model)
         (lambda (raw) (k (and (string? raw) (not (equal? raw "")) (title--parse raw)))))))
 
+;;;###autoload
 (define-command "title-server"
   "Start the on-device card writer, or say where it stands"
   (lambda ()

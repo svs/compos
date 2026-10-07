@@ -227,6 +227,7 @@
   (display-buffer-other-window! *movie-stream-buffer*)
   (movie-select-stream-row! index))
 
+;;;###autoload
 (define-command "buffer-movie" "Play this buffer's Provenance as a frame-wide movie"
   (lambda ()
     (let* ((source (current-buffer))

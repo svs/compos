@@ -8,6 +8,9 @@
 ;;; on every change, when a buffer appears, and when it is restored.
 ;;; (Emacs: goto-address-mode plus ffap, always on.)
 
+;; a buffer's directory is dired's
+(require 'dired)
+
 (domain! 'interaction)
 (effects! '(read display))
 

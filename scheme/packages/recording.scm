@@ -93,6 +93,7 @@
          (set! *recording-last* #f)
          path)))
 
+;;;###autoload
 (define-command "recording-start"
   "Start the window recording: log the visible windows on each change"
   (lambda ()

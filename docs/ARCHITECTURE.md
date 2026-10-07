@@ -87,8 +87,15 @@ dispatch it to another worker.
   popup → buffer keymap; breaks the undo chain for non-undo commands.
 - **Session** — owns the Scheme interpreter; loads `priv/editor.scm`,
   `priv/themes.scm`, and `priv/init.scm`, then `~/.compos/ai-config.scm`,
-  `~/.compos/init.scm`, and `~/.compos/custom.scm`. All commands are Scheme
-  closures in an ETS table. Ordinary evaluation runs on lanes: one serial
+  `~/.compos/init.scm`, and `~/.compos/custom.scm`. Load order is Emacs's:
+  `init.scm` is a manifest of `(require 'name)` lines; a package that
+  needs another at load time requires it at its top, and `(load)` provides
+  the library name, so a second require is free and a cycle is an error.
+  An app the stock boot leaves out marks its entry commands with
+  `;;;###autoload`; the harvest at the end of `init.scm` installs stubs
+  for every unprovided file on `load-path`, so M-x has the command and the
+  first run loads the file. All commands are Scheme closures in an ETS
+  table. Ordinary evaluation runs on lanes: one serial
   worker per owner (the UI, a group, a buffer, an RPC client, an agent).
 - **SchemeTask** — one-shot Scheme computations in supervised BEAM processes
   over the live shared environment. Explicit Scheme can fan out with task

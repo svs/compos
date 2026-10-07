@@ -4237,8 +4237,10 @@
             #f
             (let* ((plain (string-append (car dirs) "/" name))
                    (scm (string-append plain ".scm")))
+              ;; a directory of that name (priv/skills, priv/prompts) is
+              ;; not the library
               (cond ((file-exists? scm) scm)
-                    ((file-exists? plain) plain)
+                    ((and (file-exists? plain) (not (file-directory? plain))) plain)
                     (else (loop (cdr dirs)))))))))
 
 (define (load--library-name path)
@@ -4264,16 +4266,210 @@
           (ns *loading-namespace*)
           (org *loading-origin*)
           (dom *catalog-domain*)
-          (eff *catalog-effects*))
+          (eff *catalog-effects*)
+          (chain *features-loading*)
+          (feature (string->symbol (load--library-name path))))
       (origin! (load--origin path))
-      (package! (string->symbol (load--library-name path)))
-      (let ((result (builtin-load path)))
+      (package! feature)
+      (set! *features-loading* (cons feature chain))
+      ;; the stamps go back whether the file loads or raises: a file that
+      ;; raised must not leave the loader naming it as the package
+      (let ((result (unwind-protect
+                      (lambda () (builtin-load path))
+                      (lambda ()
+                        (set! *features-loading* chain)
+                        (set! *loading-package* pkg)
+                        (set! *loading-namespace* ns)
+                        (set! *loading-origin* org)
+                        (set! *catalog-domain* dom)
+                        (set! *catalog-effects* eff)))))
+        ;; the boot loader reports a file that did not load; a load after
+        ;; boot raises instead, so the feature stays unprovided either way
+        (unless (eq? result 'load-failed) (provide feature))
+        result))))
+
+;;; --- features: provide, require, autoload -------------------------------------
+;;; Emacs's answer to load order, copied. A file that needs another file
+;;; at load time says (require 'name) at its top; init.scm is a manifest,
+;;; not a proof. (load NAME) provides the library name when the file
+;;; loads, so a (provide ...) line at the end of a file is optional here.
+;;; (require F) loads F once: a second require is free. A require of a
+;;; file that is loading now is a cycle, and it is an error, as in Emacs.
+
+(defvar '*features* '() "The features the loaded files provide, as symbols.")
+(define *features-loading* '())   ; the require chain, innermost first
+(define *after-load-thunks* '())  ; ((FEATURE THUNK) ...), newest first
+
+(define (featurep f) (and (member f *features*) #t))
+
+;; (provide F) records F and runs the thunks waiting on it, in the order
+;; with-eval-after-load took them
+(define (provide f)
+  (unless (featurep f) (set! *features* (cons f *features*)))
+  (let ((waiting (reverse (filter (lambda (e) (equal? (car e) f)) *after-load-thunks*))))
+    (set! *after-load-thunks* (remove (lambda (e) (equal? (car e) f)) *after-load-thunks*))
+    (for-each (lambda (e) ((cadr e))) waiting))
+  f)
+
+;; (with-eval-after-load F THUNK): THUNK runs now when F is provided, or
+;; when F is provided later. The glue between two packages goes here, so
+;; neither package needs the other at load time.
+(define (with-eval-after-load f thunk)
+  (if (featurep f)
+      (thunk)
+      (set! *after-load-thunks* (cons (list f thunk) *after-load-thunks*)))
+  f)
+
+(define (require--chain f)
+  (string-join (map symbol->string (reverse (cons f *features-loading*))) " -> "))
+
+;; (require F [FILENAME]) loads F unless it is provided. FILENAME names
+;; the file when it is not F.scm on load-path. An error names the
+;; chain of requires that reached the missing or cyclic feature.
+(define (require f &optional filename)
+  (cond ((featurep f) f)
+        ((member f *features-loading*)
+         (error (string-append "recursive require: " (require--chain f))))
+        (else
+         (let ((name (or filename (symbol->string f))))
+           (unless (locate-library name)
+             (error (string-append "cannot require " (symbol->string f)
+                                   ": " name " is not on load-path ("
+                                   (require--chain f) ")")))
+           (load name)
+           (unless (featurep f)
+             (error (string-append "required feature " (symbol->string f)
+                                   " was not provided by " name)))
+           f))))
+
+;;; An autoload is a stub under a name. The first call loads FILE, which
+;;; defines the name for real, and the call goes on to that definition.
+;;; M-x and the catalog see the name before the file loads, so an app the
+;;; stock boot leaves out still has its commands.
+
+(define *autoloads* '())   ; ((NAME FILE) ...): NAME a symbol or a command name
+
+(define (autoload--note! name file)
+  (set! *autoloads* (cons (list name file) (remove (lambda (e) (equal? (car e) name)) *autoloads*))))
+
+(define (autoload--forget! name)
+  (set! *autoloads* (remove (lambda (e) (equal? (car e) name)) *autoloads*)))
+
+;; the file an autoload stub would load for NAME, or #f when NAME is defined
+(define (autoload-file name)
+  (let ((e (assoc name *autoloads*))) (and e (cadr e))))
+
+;; (autoload 'NAME FILE [DOC]): NAME is a function once FILE loads. The
+;; stub loads FILE, then applies the real definition. A file that does
+;; not define NAME is an error, not a loop.
+(define (autoload name file &optional doc)
+  (unless (boundp name)
+    (let ((self #f))
+      (set! self
+            (lambda (&rest args)
+              (autoload--forget! name)
+              (load file)
+              (let ((fn (and (boundp name) (symbol-value name))))
+                (when (or (not fn) (eq? fn self))
+                  (error (string-append "autoload: " file " did not define "
+                                        (symbol->string name))))
+                (apply fn args))))
+      (autoload--note! name file)
+      (set-symbol-value! name self)
+      (when doc
+        (catalog-register! 'function (symbol->string name) doc 'autoload file))))
+  name)
+
+;; (autoload-command NAME FILE [DOC]): the command NAME exists for M-x and
+;; the keys; its first run loads FILE, whose define-command replaces the
+;; stub, and runs the command.
+(define (autoload-command name file &optional doc)
+  (unless (command-fn name)
+    (let ((self #f))
+      (set! self
+            (lambda (&rest args)
+              (autoload--forget! name)
+              (load file)
+              (let ((fn (command-fn name)))
+                (when (or (not fn) (eq? fn self))
+                  (error (string-append "autoload: " file " did not define the command " name)))
+                (apply fn args))))
+      (autoload--note! name file)
+      (define-command name (or doc (string-append "Loads " (load--library-name file) " on first use")) self)
+      (catalog-meta! 'command name 'autoload file)))
+  name)
+
+;;; ;;;###autoload cookies: Emacs's loaddefs, read at boot instead of
+;;; generated at build time. A line that is exactly ";;;###autoload" marks
+;;; the form below it. (autoload-harvest!) scans every file on load-path
+;;; whose feature is not provided and installs what the cookies name: a
+;;; define-command becomes an autoload-command, a (define (f ...) ...)
+;;; becomes an autoload, and any other form runs as it is, so a mode's
+;;; auto-mode entry or a list registration exists before its file loads.
+
+(define (autoload-install-form! form file)
+  (cond ((and (pair? form) (eq? (car form) 'define-command)
+              (pair? (cdr form)) (string? (cadr form)))
+         (autoload-command (cadr form) file
+                           (and (pair? (cddr form)) (string? (caddr form)) (caddr form))))
+        ((and (pair? form) (eq? (car form) 'define)
+              (pair? (cdr form)) (pair? (cadr form)) (symbol? (car (cadr form))))
+         (autoload (car (cadr form)) file))
+        (else (eval form))))
+
+;; the autoload files in DIR: every .scm but the tests, as library names
+(define (autoload--candidates dir)
+  (filter (lambda (name)
+            (and (string-suffix? ".scm" name)
+                 (not (string-suffix? "-test.scm" name))))
+          (list-dir dir)))
+
+;; the stubs of one file carry that file's package and origin, as its
+;; definitions will; the cookie proves nothing about effects, so they are
+;; unknown until the file loads. The stamps go back after the file.
+(define (autoload--install-file! path forms)
+  (let ((pkg *loading-package*)
+        (ns *loading-namespace*)
+        (org *loading-origin*)
+        (dom *catalog-domain*)
+        (eff *catalog-effects*))
+    (unwind-protect
+      (lambda ()
+        (origin! (load--origin path))
+        (package! (string->symbol (load--library-name path)))
+        (domain! 'unknown)
+        (effects! '(unknown))
+        (for-each
+         (lambda (form)
+           (unless (ignore-errors (lambda () (autoload-install-form! form path) #t))
+             (message (string-append "autoload cookie in " path " did not install") "error")))
+         forms))
+      (lambda ()
         (set! *loading-package* pkg)
         (set! *loading-namespace* ns)
         (set! *loading-origin* org)
         (set! *catalog-domain* dom)
-        (set! *catalog-effects* eff)
-        result))))
+        (set! *catalog-effects* eff)))))
+
+;; (autoload-harvest! [DIRS]) installs the cookies of every file in DIRS
+;; (load-path by default) whose feature is not provided. Returns the files
+;; it read. A file whose cookie form fails to install is reported and
+;; skipped; it never stops the harvest.
+(define (autoload-harvest! &optional dirs)
+  (let ((read '()))
+    (for-each
+     (lambda (dir)
+       (for-each
+        (lambda (name)
+          (let ((path (string-append dir "/" name)))
+            (unless (featurep (string->symbol (load--library-name path)))
+              (let ((forms (autoload-cookies path)))
+                (when (pair? forms)
+                  (set! read (cons path read))
+                  (autoload--install-file! path forms))))))
+        (autoload--candidates dir)))
+     (or dirs load-path))
+    (reverse read)))
 
 ;; Where a .scm file may live: every load-path directory, the home, and
 ;; whatever the user adds here to work on Scheme somewhere else.
@@ -6389,6 +6585,27 @@
 (effects! '(pure))
 (public! 'plist-get "(plist-get PLIST KEY) — the value after KEY in the flat PLIST; #f when KEY is absent")
 (public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
+(domain! 'files)
+(effects! '(read))
+(public! 'featurep "(featurep F) — #t when the feature F is provided: its file loaded, or (provide 'F) ran")
+(public! 'locate-library "(locate-library NAME) — the file (load NAME) reads, or #f")
+(public! 'autoload-file "(autoload-file NAME) — the file the autoload stub under NAME would load, or #f when NAME is defined")
+(effects! '(write))
+(public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
+(public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
+(public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")
+(public! 'autoload "(autoload 'NAME FILE [DOC]) — NAME is a stub that loads FILE on its first call, then applies the real definition")
+(public! 'autoload-command "(autoload-command NAME FILE [DOC]) — the command NAME exists for M-x and the keys; its first run loads FILE")
+(public! 'autoload-harvest! "(autoload-harvest! [DIRS]) — install the ;;;###autoload cookies of every unprovided file in DIRS (load-path); returns the files read")
+(public! 'load "(load NAME) — find NAME on load-path, evaluate it, and provide its library name")
+(public! 'add-to-list! "(add-to-list! 'VAR VALUE) — VALUE goes to the front of the list VAR names, once")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(read)))
+  '("featurep" "locate-library" "autoload-file"))
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(write)))
+  '("provide" "require" "with-eval-after-load" "autoload" "autoload-command"
+    "autoload-harvest!" "load" "add-to-list!"))
 (public! 'with-current-buffer "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window")
 (effects! '(read))
 (public! 'monotonic-ms "(monotonic-ms) — a monotonic millisecond count, for timing one span")

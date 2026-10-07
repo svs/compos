@@ -8,10 +8,27 @@ defmodule Compos.LoadTest do
 
   alias Compos.Core.Session
 
+  # the files one Scheme file names at its top level. A (load "x.scm") is
+  # a module of a compound package; a (require 'x) or (require 'x
+  # "dir/x.scm") is an entry point in init.scm and a dependency anywhere
+  # else, so the two are read apart.
+  defp loads(src), do: Regex.scan(~r/^\(load\s+"([^"]+)"\)/m, src) |> Enum.map(&Enum.at(&1, 1))
+
+  defp requires(src) do
+    Regex.scan(~r/^\(require\s+'([\w-]+)(?:\s+"([^"]+)")?\)/m, src)
+    |> Enum.map(fn
+      [_, name] -> name <> ".scm"
+      [_, _name, path] -> path
+    end)
+  end
+
+  test "every bundled file loads at boot" do
+    assert Session.boot_errors() == []
+  end
+
   test "stock init reaches every bundled package through package entry points" do
     priv = Application.app_dir(:compos_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))
-    load_pattern = ~r/\(load\s+"([^"]+)"\)/
 
     # the bundled packages: scheme/packages at the project root
     dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages")]
@@ -19,46 +36,51 @@ defmodule Compos.LoadTest do
 
     # init.scm also loads editor/blocks and editor/goto-address by name;
     # only the entries a package directory holds are packages
-    top_level =
-      load_pattern
-      |> Regex.scan(init, capture: :all_but_first)
-      |> Enum.map(&hd/1)
-      |> Enum.filter(locate)
+    top_level = (requires(init) ++ loads(init)) |> Enum.filter(locate)
 
     nested =
-      Enum.flat_map(top_level, fn package ->
-        locate.(package)
-        |> File.read!()
-        |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
-        |> Enum.map(&hd/1)
-      end)
+      Enum.flat_map(top_level, fn package -> package |> locate.() |> File.read!() |> loads() end)
 
     loaded = top_level ++ nested
 
+    # the package files, without the tests beside them
     packages =
       Enum.flat_map(dirs, fn dir ->
         dir |> Path.join("**/*.scm") |> Path.wildcard() |> Enum.map(&Path.relative_to(&1, dir))
       end)
+      |> Enum.reject(&String.ends_with?(&1, "-test.scm"))
 
-    # the apps the stock boot leaves out (priv/init.scm names them); a user
-    # init loads them by name, and test_helper.exs loads them for the suite
+    # the apps the stock boot leaves out. A user init may load one by
+    # name; test_helper.exs loads them for the suite; and the ones with
+    # commands reach M-x through their ;;;###autoload cookies, which the
+    # harvest at the end of init.scm installs.
     opt_in =
-      ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training)
+      ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training
+         ats chart decide fast-code fast-code-eval housekeeping onboarding recruiting site-app slides)
       |> Enum.map(&(&1 <> ".scm"))
 
-    assert Enum.sort(loaded) == Enum.sort(packages -- (opt_in ++ ["calendar/calendar.scm"]))
+    # an app nobody loads must still be reachable: a command means a cookie.
+    # A file another package requires is a library, and its commands are
+    # that package's to reach.
+    libraries = Enum.flat_map(packages, fn pkg -> pkg |> locate.() |> File.read!() |> requires() end)
+
+    for app <- opt_in -- libraries,
+        src = File.read!(locate.(app)),
+        src =~ ~r/^\(define-command /m do
+      assert src =~ ~r/^;;;###autoload\n\(define-command /m,
+             "#{app} defines commands but marks none with ;;;###autoload"
+    end
+
+    expected = packages -- (opt_in ++ ["calendar/calendar.scm"])
+    assert Enum.sort(loaded -- expected) == [], "loaded, but not a stock package"
+    assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
     assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages"
     assert length(loaded) == length(Enum.uniq(loaded))
 
     assert "agent.scm" in top_level
     refute "agent-transcript.scm" in top_level
 
-    agent_modules =
-      "agent.scm"
-      |> locate.()
-      |> File.read!()
-      |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
-      |> Enum.map(&hd/1)
+    agent_modules = "agent.scm" |> locate.() |> File.read!() |> loads()
 
     # agent-fleet is the chats table, loaded by init.scm after ibuffer
     assert agent_modules == [
@@ -68,10 +90,12 @@ defmodule Compos.LoadTest do
              "agent-session.scm"
            ]
 
+    # one file is one package: the loader stamps a module of a compound
+    # package with the module's own name
     assert {:ok, entry} =
              Session.eval(~s{(catalog-entry 'function "agent-answer-question!")})
 
-    assert entry =~ ~s{qualified-name "agent/agent-answer-question!"}
+    assert entry =~ ~s{qualified-name "agent-transcript/agent-answer-question!"}
   end
 
   test "(load ...) resolves a relative path against the config home" do

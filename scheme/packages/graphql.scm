@@ -518,6 +518,7 @@
 (category! 'graphql)
 
 (effects! '(write external))
+;;;###autoload
 (define-command "graphql-query" "Run a GraphQL query against a registered endpoint"
   (lambda ()
     (if (null? *graphql-endpoints*)
@@ -529,6 +530,7 @@
               (lambda (q) (graphql-run (string->symbol ep) q))))))))
 
 (effects! '(read))
+;;;###autoload
 (define-command "graphql-endpoints" "List the registered GraphQL endpoints"
   (lambda () (message (string-trim (graphql-endpoints)))))
 

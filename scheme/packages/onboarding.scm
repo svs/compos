@@ -233,6 +233,7 @@ This window is the stage. The guide puts here what each step is about, and you c
             (run-command "agent-send"))))
       chat)))
 
+;;;###autoload
 (define-command "onboarding"
   "Learn compos with a guide: a chat, and a stage window beside it"
   (lambda () (onboarding-start!)))

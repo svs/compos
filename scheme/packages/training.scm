@@ -115,10 +115,12 @@
                             (or (buffer-local source 'mode-name) "fundamental-mode")))
     chat))
 
+;;;###autoload
 (define-command "training-bot"
   "Open the tutorial and start its guided companion-chat tour"
   (lambda () (training-start-tour!)))
 
+;;;###autoload
 (define-command "training-guide" "Open the learn-by-doing tutorial"
   (lambda () (run-command "help-with-tutorial")))
 

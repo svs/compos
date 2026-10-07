@@ -16,6 +16,9 @@
 ;;; The past is the editor's one keyed history ring, under 'scheme-eval, the
 ;;; ring every prompt reads, so it survives a restart and M-: shares it.
 
+;; the REPL derives its mode from scheme-mode
+(require 'scheme-ide)
+
 (domain! 'code)
 (effects! '(pure))
 

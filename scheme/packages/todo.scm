@@ -32,6 +32,11 @@
 ;;;
 ;;; OFFSET RULE: byte offsets only (string-byte-length, substring-bytes).
 
+;; the todo list sets a prompt part on every chat and reads the event log
+(require 'prompts)
+(require 'chat)
+(require 'events)
+
 (domain! 'writing)
 (effects! '(read))
 

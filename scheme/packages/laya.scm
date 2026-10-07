@@ -15,6 +15,9 @@
 ;;; huggingface cache, and laya-model-roots. The daemon reads that cache;
 ;;; it carries no list of model names of its own.
 
+;; laya registers its daemon in the endpoint registry
+(require 'endpoint)
+
 (domain! 'llm)
 (effects! '(write external execute))
 

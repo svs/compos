@@ -98,6 +98,7 @@
     "if(l&&l.indexOf('Now playing')!==0)return l;"
     "return 'nothing playing';})()"))
 
+;;;###autoload
 (define-command "spotify-play-pause" "Play or pause the Spotify tab"
   (lambda ()
     (spotify--eval (spotify--click-js "control-button-playpause" "play/pause") spotify--say)))
@@ -118,6 +119,7 @@
   (lambda ()
     (spotify--eval (spotify--click-sel-js spotify--like-sel "liked") spotify--say)))
 
+;;;###autoload
 (define-command "spotify-now-playing" "Say what is playing"
   (lambda () (spotify--eval spotify--now-js spotify--say)))
 
@@ -145,6 +147,7 @@
     "(function(){location.href='https://open.spotify.com/search/'"
     "+encodeURIComponent(" (json-encode q) ");return 'searching';})()"))
 
+;;;###autoload
 (define-command "spotify-search" "Search Spotify in its own tab"
   (lambda ()
     (minibuffer-read "Spotify: " '()
@@ -157,6 +160,7 @@
                 (tab-activate t)
                 (message (string-append "Spotify: " q)))))))))
 
+;;;###autoload
 (define-command "spotify" "Bring the Spotify tab to the front"
   (lambda ()
     (spotify-tab (lambda (t) (tab-activate t) (message "Spotify")))))

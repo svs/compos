@@ -22,6 +22,9 @@
 ;;; docs/EVENT BUS.md has the design and worked examples; events-demo.scm
 ;;; is a scene you can drive.
 
+;; a workflow listens on the event log
+(require 'events)
+
 (domain! 'system)
 (effects! '(write))
 

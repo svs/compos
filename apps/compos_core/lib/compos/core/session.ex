@@ -870,7 +870,9 @@ defmodule Compos.Core.Session do
           # *Messages* buffer, and the editor comes up without that file.
           case safe_eval_string(interp, File.read!(path), file) do
             {:ok, _, interp} ->
-              interp
+              # a bootstrap file is provided like a loaded one, so a
+              # (require 'editor) is free and the autoload harvest skips it
+              provide_feature(interp, Path.basename(file, ".scm"))
 
             {:error, msg} ->
               record_boot_error!(file, msg)
@@ -973,12 +975,18 @@ defmodule Compos.Core.Session do
   # kept even when a later form in it failed: the definitions that did
   # evaluate are real, and dropping them would take working packages down
   # with the broken one.
+  # The value 'load-failed tells the Scheme (load) wrapper that the file
+  # did not load, so it does not provide the file's feature and a (require)
+  # of that feature fails where it stands instead of trusting a half-loaded
+  # file.
+  @load_failed {:sym, "load-failed"}
+
   defp boot_load(eval_src, src, store, file) do
     eval_src.(src, store)
   rescue
     error ->
       record_boot_error!(file, Exception.message(error))
-      {:void, store}
+      {@load_failed, store}
   catch
     :exit, {:calling_self, _} ->
       record_boot_error!(
@@ -987,11 +995,11 @@ defmodule Compos.Core.Session do
           "Boot-time code may not ask for the published interpreter."
       )
 
-      {:void, store}
+      {@load_failed, store}
 
     kind, value ->
       record_boot_error!(file, "#{kind}: #{inspect(value)}")
-      {:void, store}
+      {@load_failed, store}
   end
 
   # The boot errors, oldest first. They are collected during init, before
@@ -1004,6 +1012,13 @@ defmodule Compos.Core.Session do
 
   @doc "The files that did not load at boot, with the reason for each."
   def boot_errors, do: :persistent_term.get(@pt_boot_errors, [])
+
+  defp provide_feature(interp, feature) do
+    case Scheme.eval_string(interp, "(provide '#{feature})") do
+      {:ok, _, interp2} -> interp2
+      {:error, _} -> interp
+    end
+  end
 
   defp stamp_origin_user(interp) do
     case Scheme.eval_string(interp, "(origin! 'user)") do
@@ -1631,6 +1646,9 @@ defmodule Compos.Core.Session do
       end,
       {"eval-string", "(eval-string SRC) — evaluate SRC as Scheme; return the last value."} =>
         fn [src], store -> eval_src.(src, store) end,
+      # the autoload harvest reads a form from a file and runs it as it is
+      {"eval", "(eval FORM) — evaluate the datum FORM at the top level; return its value."} =>
+        fn [form], store -> Compos.Scheme.Eval.eval(form, global, store) end,
       # The deferred-reply lane. An eval that hands slow work to a Task
       # claims its caller's reply slot with eval-defer! and answers through
       # eval-resolve! when the Task's callback delivers the value. The

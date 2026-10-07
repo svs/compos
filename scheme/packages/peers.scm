@@ -69,6 +69,7 @@
 (public! 'peer-sync!
   "(peer-sync! PEER BUF) — one exchange both ways, after which both replicas agree")
 
+;;;###autoload
 (define-command "sync-buffer-with-peer"
   "Exchange this buffer's changes with another replica"
   (lambda ()

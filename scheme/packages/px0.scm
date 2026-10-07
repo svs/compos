@@ -144,6 +144,7 @@
    (string-append "pkill -f " (sh-quote (string-append "px0 " root " -port")) " || true")
    root))
 
+;;;###autoload
 (define-command "px0" "Browse this project in px0"
   (lambda ()
     (let* ((root (px0--root))

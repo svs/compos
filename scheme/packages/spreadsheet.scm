@@ -614,6 +614,7 @@
         (json-encode (spreadsheet--default-workbook))))
     (spreadsheet-open-with-backend! spreadsheet-default-backend source)))
 
+;;;###autoload
 (define-command "spreadsheet-open" "Open a text-backed spreadsheet workbook"
   (lambda ()
     (read-file-name "Spreadsheet file: " spreadsheet-open!)))

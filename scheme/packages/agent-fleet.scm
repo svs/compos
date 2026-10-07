@@ -3,6 +3,10 @@
 ;;; This module owns the *chat-list* application and the actions across chat
 ;;; buffers. Runtime lifecycle and transcript rendering remain in agent.scm.
 
+;; the chats table is the mode list of chat-mode
+(require 'mode-list)
+(require 'chat-mode)
+
 (domain! 'chat)
 (effects! '(write))
 (category! 'chat)

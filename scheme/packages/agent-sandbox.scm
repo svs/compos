@@ -12,6 +12,9 @@
 ;;; (sandbox on, off, or as the group), the chat's group (M-x
 ;;; group-sandbox), and agent-sandbox for every chat.
 
+;; the sandbox reads the chat's llm-config
+(require 'llm-config)
+
 (domain! 'system)
 (effects! '(write))
 (category! 'system)

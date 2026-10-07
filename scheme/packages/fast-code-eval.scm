@@ -230,6 +230,7 @@
 
 (define-command "fast-eval-show" "Show the eval row's whole record" (lambda () (fast-eval-show)))
 (define-command "fast-eval-refresh" "Draw the eval table again" (lambda () (list-refresh! fast-eval-buffer)))
+;;;###autoload
 (define-command "fast-eval" "Show the fast-code eval as a table"
   (lambda () (list-mode-show! "fast-eval-mode")))
 

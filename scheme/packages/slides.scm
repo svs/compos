@@ -195,6 +195,7 @@
 
 (add-hook! 'find-file-hook 'slides--on-visit!)
 
+;;;###autoload
 (define-command "slides-deck-mode" "Link or unlink this deck and its slides"
   (lambda ()
     (if (toggle-minor-mode! "slides-deck-mode")
@@ -438,6 +439,7 @@
 (define (slides--source-of buf)
   (or (buffer-local buf 'slides-source) buf))
 
+;;;###autoload
 (define-command "slides-present" "Present this Markdown buffer as slides in the other window"
   (lambda ()
     (let ((app (slides-present! (slides--source-of (current-buffer)))))
@@ -451,6 +453,7 @@
           (begin (slides-present! source) (message "Slides redrawn"))
           (message "The deck of these slides is gone")))))
 
+;;;###autoload
 (define-command "slides-edit" "Show the deck at the slide the presenter shows"
   (lambda ()
     (let* ((app (current-buffer))
@@ -473,6 +476,7 @@
     (switch-to-buffer! (visit full (buffer-group (current-buffer))))
     (run-command "slides-present")))
 
+;;;###autoload
 (define-command "slides-new" "Start a deck from the starter deck and present it"
   (lambda () (read-file-name "New deck: " slides-new!)))
 
@@ -485,6 +489,7 @@
     (unless (window-showing app) (display-buffer-other-window! app))
     app))
 
+;;;###autoload
 (define-command "slides-demo" "Present the slides demo: every feature of a deck, each on its own slide"
   (lambda () (slides-demo!)))
 

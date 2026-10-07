@@ -22,6 +22,9 @@
 ;;; A close shows the popup that the closed popup covered in the popup
 ;;; window. When no popup is under it, the close deletes the popup window.
 
+;; the popup keys take the backtick family from groups
+(require 'groups)
+
 (domain! 'windows)
 (effects! '(read))
 

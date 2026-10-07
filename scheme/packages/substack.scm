@@ -291,6 +291,7 @@
 
 (effects! '(write external display))
 (define (substack--mode) (buffer-local (current-buffer) 'mode-name))
+;;;###autoload
 (define-command "substack-open" "Open the next Substack view"
   (lambda ()
     (cond ((equal? (substack--mode) "substack-mode")
@@ -450,6 +451,7 @@
           (when id (group-layout-save! id)))
         (message (string-append (number->string (length rows))
                                 " Substack subscriptions"))))))
+;;;###autoload
 (define-command "substack" "Open the Substack app"
   (lambda ()
     (unless (buffer-exists? *substack-buffer*) (buffer-create *substack-buffer*))

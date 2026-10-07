@@ -829,6 +829,7 @@
 
 ;;; --- the commands -------------------------------------------------------------
 
+;;;###autoload
 (define-command "doom-lite" "Play Doom in a buffer"
   (lambda ()
     (buffer-create *doom-lite-buffer*)

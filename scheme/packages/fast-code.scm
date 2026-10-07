@@ -681,6 +681,7 @@
 (define (fast-trace-text n)
   (apply string-append (map fast-trace-entry (take-n *fast-trace* n))))
 
+;;;###autoload
 (define-command "fast-trace" "Show the last fast-code resolutions, stage by stage"
   (lambda ()
     (with-frame-windows
@@ -982,6 +983,7 @@
         (set-symbol-value! 'fast--palette-orig-run #f)
         "palette -> fast-code removed")))
 
+;;;###autoload
 (define-command "fast-code" "Turn an intent into Scheme and run it"
   (lambda () (minibuffer-read "Fast intent: " '() fast-run!)))
 
@@ -991,6 +993,7 @@
   (display-buffer-other-window!
     (visit (fast-learned-path) (buffer-group (current-buffer)))))
 
+;;;###autoload
 (define-command "fast-recipes" "Show the functions fast-code learned"
   (lambda () (with-frame-windows fast-show-learned)))
 
@@ -1020,8 +1023,10 @@
     (completing-read "Forget: " (fast-learned-names)
       (lambda (name) (message (string-append "fast: forgot " (fast-forget! name)))))))
 
+;;;###autoload
 (define-command "fast-palette-install" "Send unmatched palette input to fast-code" (lambda () (message (fast-palette-install!))))
 (define-command "fast-palette-remove" "Restore the plain command palette" (lambda () (message (fast-palette-remove!))))
+;;;###autoload
 (define-command "fast-toggle" "Toggle fast" (lambda () (set! fast-enabled? (not fast-enabled?)) (message (if fast-enabled? "fast: on" "fast: off"))))
 
 ;;; --- Completion -----------------------------------------------------

@@ -3,8 +3,7 @@
 (package! 'ats)
 (origin! 'user)
 
-(unless (boundp 'define-site-app)
-  (load "/Users/svs/src/compos/scheme/packages/site-app.scm"))
+(require 'site-app)
 
 (define *ats-sheets* "/Users/svs/src/svs-recruiting/compos-recruiting/")
 (define (ats-sheet file) (string-append *ats-sheets* file))
@@ -137,5 +136,6 @@
 (domain! 'web)
 (effects! '(write external display))
 
+;;;###autoload
 (define-command "ats" "Open SVS recruiting as a live website app"
   (lambda () (site-app-open! 'ats)))

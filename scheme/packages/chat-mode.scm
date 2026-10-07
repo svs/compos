@@ -1557,9 +1557,10 @@
 ;; An idle adapter is two OS processes and up to a few hundred MB for a
 ;; conversation nobody is having. A chat idle this long closes its adapter
 ;; and keeps the session; the next message reopens it on the same session.
-;; 0 keeps every adapter running. A plain define: custom.scm loads after
-;; this file, so defcustom is not available here yet; set! it in init.scm.
-(define agent-idle-seconds 600)
+;; 0 keeps every adapter running.
+(require 'custom)
+(defcustom 'agent-idle-seconds 600
+  "Seconds a chat is idle before its adapter closes; 0 keeps every adapter running.")
 
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise

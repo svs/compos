@@ -914,6 +914,7 @@ a{color:var(--accent);text-decoration:none}
 (define-command "linkedin-tab-prev" "Show the previous LinkedIn tab"
   (lambda () (linkedin--step-tab! -1)))
 
+;;;###autoload
 (define-command "linkedin-messages" "Show the Recruiter inbox in the listing"
   (lambda ()
     (if (buffer-exists? *linkedin-buffer*)
@@ -922,6 +923,7 @@ a{color:var(--accent);text-decoration:none}
                (buffer-set-local! *linkedin-buffer* 'linkedin-tab 'messages)
                (linkedin-threads-open!)))))
 
+;;;###autoload
 (define-command "linkedin" "Open the LinkedIn Recruiter app"
   (lambda () (linkedin-open! #t)))
 

@@ -588,7 +588,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `llm-config-revert` |  | Undo the unsaved changes to this config |
 | `llm-config-save-bundle` |  | Save this config as a preset under a name |
 | `llm-config-save-default` |  | Make the box's preset the default for new chats |
-| `llm-config-save-into` |  | Overwrite the preset with this config |
+| `llm-config-save-into` |  | Update the preset with this config |
 | `llm-config-use-bundle` |  | Move to a saved preset by name |
 | `llm-configure` | `C-c b` | LLM setup |
 | `llm-mode` |  | Toggle in-buffer LLM interaction and response formatting |

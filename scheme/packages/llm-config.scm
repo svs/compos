@@ -787,7 +787,7 @@
 (define-command "llm-config-save-bundle" "Save this config as a preset under a name"
   (lambda () (llm-config--save-as!)))
 
-(define-command "llm-config-save-into" "Overwrite the preset with this config"
+(define-command "llm-config-save-into" "Update the preset with this config"
   (lambda ()
     (let* ((name (llm-config--source-name))
            (old (and (string? name) (llm-bundle-named name))))
@@ -799,7 +799,7 @@
               (llm-bundle-save! name (llm-config--box))
               (llm-config--drop-draft! name)
               (llm-config--refresh!)
-              (message (string-append "overwrote " name
+              (message (string-append "updated " name
                          " · other chats on " name " follow when the menu closes")))))))
 
 (define-command "llm-config-revert" "Undo the unsaved changes to this config"
@@ -1220,7 +1220,8 @@
         (list (list "s" "llm-config-save-into")
               (list "S" "llm-config-save-bundle")
               (list "u" "llm-config-revert")))
-    (list (list "M-s" "llm-config-save-bundle")
+    (list (list "M-u" "llm-config-save-into")
+          (list "M-s" "llm-config-save-bundle")
           (list "M-n" "llm-config-new-preset")
           (list "M-k" "llm-config-forget-bundle")
           (list "M-d" "llm-config-save-default"))))
@@ -1255,6 +1256,7 @@
           (append
             (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select")
                   (list "→" "edit config"))
+            (if (and name drift?) (list (list "M-u" (string-append "update " name))) '())
             (list (list "M-s" "save as…") (list "M-n" "new preset"))
             (if name (list (list "M-k" "delete…")) '())
             (if (and name (not drift?) (not (equal? name llm-default-bundle)))
@@ -1262,7 +1264,7 @@
                 '()))
           (append
             (list (list "←" "back to presets"))
-            (if (and name drift?) (list (list "s" (string-append "overwrite " name))) '())
+            (if (and name drift?) (list (list "s" (string-append "update " name))) '())
             (list (list "S" "save as…"))
             (if drift? (list (list "u" "undo changes")) '())))
       (list (list "ESC C-g" (string-append "apply " (or sel "this chat")

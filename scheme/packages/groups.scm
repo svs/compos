@@ -349,13 +349,25 @@ is forgotten and that group falls back to creation order in the switcher."
       ;; a record leads with its id, so the builtin assoc finds it
       (assoc id *group-records*)))
 
+(define *group-name-table* '(#f))   ; (RECORDS (KEY RECORD) ...)
+
+;; ((KEY RECORD) ...): each record's name, then its origin, in record order,
+;; so one assoc answers what the walk below used to. Rebuilt only when the
+;; records change; eq? compares them by content.
+(define (group-name-table)
+  (let ((records *group-records*))
+    (if (eq? (car *group-name-table*) records)
+        (cdr *group-name-table*)
+        (let ((table (reverse (fold (lambda (out r)
+                                      (cons (list (group-record-origin r) r)
+                                            (cons (list (group-record-name r) r) out)))
+                                    '() records))))
+          (set! *group-name-table* (cons records table))
+          table))))
+
 (define (group-record-by-name name)
-  (let loop ((records *group-records*))
-    (cond ((null? records) (pseudo-record-by-name name))
-          ((or (equal? (group-record-name (car records)) name)
-               (equal? (group-record-origin (car records)) name))
-           (car records))
-          (else (loop (cdr records))))))
+  (let ((hit (assoc name (group-name-table))))
+    (if hit (cadr hit) (pseudo-record-by-name name))))
 
 ;; the record wearing exactly NAME, other than EXCEPT-ID, or #f
 (define (group-record-wearing name except-id)

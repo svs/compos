@@ -332,16 +332,33 @@
   (buffer-set-local! buf 'group *sentry-group*)
   buf)
 
+(define (sentry--age-label iso)
+  ;; ISO-8601 UTC as an age: "now", "5m", "2h", "26d"
+  (if (not (and (string? iso) (>= (string-length iso) 16)))
+      ""
+      (let* ((n (lambda (a z) (string->number (substring iso a z))))
+             (secs (- (parts->time (n 0 4) (n 5 7) (n 8 10) (n 11 13) (n 14 16))
+                      (parts->time 1970 1 1 0 0)))
+             (age (max 0 (- (current-time) secs))))
+        (cond ((< age 60) "now")
+              ((< age 3600) (string-append (number->string (quotient age 60)) "m"))
+              ((< age 86400) (string-append (number->string (quotient age 3600)) "h"))
+              (else (string-append (number->string (quotient age 86400)) "d"))))))
+
 (define (sentry--issue-cells buf issue)
-  (let ((level (plist-get issue 'level)))
+  ;; two lines: the title owns the first, the level is the bar beside it
+  (let* ((level (plist-get issue 'level))
+         (face (cond ((equal? level "error") "alert")
+                     ((equal? level "warning") "warn")
+                     (else "dim")))
+         (count (sentry--text (plist-get issue 'count))))
     (list
-      (list (plist-get issue 'shortId) "accent")
-      (list level (cond ((equal? level "error") "alert")
-                        ((equal? level "warning") "warn")
-                        (else "dim")))
-      (list (plist-get issue 'count) "dim")
-      (list (plist-get issue 'lastSeen) "dim")
-      (sentry--redact (plist-get issue 'title)))))
+      (list (list "▌" face)
+            (sentry--redact (plist-get issue 'title))
+            (list (sentry--age-label (plist-get issue 'lastSeen)) "dim"))
+      (list " "
+            (list (plist-get issue 'shortId) "accent")
+            (list (string-append count (if (equal? count "1") " event" " events")) "dim")))))
 
 (define (sentry--issue-meta buf)
   (string-append
@@ -872,11 +889,12 @@
     'rows sentry--issue-rows
     'cache-fetch sentry--fetch-issues
     'cache-ttl sentry-cache-ttl
-    'columns (lambda (buf)
-               (list (list "issue" 13) (list "level" 8)
-                     (list "events" 7 'right) (list "last seen" 20)
-                     (list "title" #f)))
-    'cells sentry--issue-cells
+    'row-columns (lambda (buf)
+                   (list (list (list "" 1) (list "title" #f 'left 'end)
+                               (list "seen" 4 'right))
+                         (list (list "" 1) (list "issue" #f)
+                               (list "events" 11 'right))))
+    'row-cells sentry--issue-cells
     'title (lambda (buf) "Sentry issues")
     'meta sentry--issue-meta
     'total (lambda (buf) (length (list-entries buf)))

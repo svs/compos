@@ -5439,6 +5439,23 @@
 ;; to the movement state would never answer the focus chords again.
 (editing-state-maps-off! "chat-mode" '("editing-caret-map"))
 
+;; The focus key: the key that returns a buffer from the editing state to
+;; the movement state. ESC and C-g do it everywhere; a mode whose buffers
+;; need ESC for themselves (a terminal) names another key, and the title
+;; shows it while the buffer is in the editing state.
+(define *mode-focus-keys* '())   ; ((MODE KEY) ...)
+
+(define (mode-focus-key! mode key)
+  (set! *mode-focus-keys* (alist-put *mode-focus-keys* mode key))
+  (unless (member key '("ESC" "C-g"))
+    (define-key (mode-keymap mode) key "keyboard-quit")))
+
+(define (focus-key buf)
+  (let loop ((es *mode-focus-keys*))
+    (cond ((null? es) "ESC")
+          ((buffer-derived-mode? buf (car (car es))) (cadr (car es)))
+          (else (loop (cdr es))))))
+
 ;; The state is a fact the presentation carries: the header line's state
 ;; tag is what the window's ground reads -- a cua window sits, a focus
 ;; window floats -- and nothing else invalidates that line when the maps go
@@ -5574,6 +5591,8 @@
 (catalog-meta! 'function "editing-state-maps-off!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-commands!" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "editing-neutral-command?" 'domain 'windows 'effects '(read))
+(catalog-meta! 'function "mode-focus-key!" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "focus-key" 'domain 'windows 'effects '(read))
 
 ;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
 ;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
@@ -6203,6 +6222,8 @@
 (public! 'editing-state? "(editing-state? BUF) — #t when BUF is in the editing state: the state's maps are in force, and the Cmd-arrows move point rather than the focus unless the mode refuses editing-caret-map")
 (public! 'editing-state-on! "(editing-state-on! BUF) — enter the editing state in BUF; the first command after a landing does this")
 (public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows move the focus; keyboard-quit, a window command, and a new landing do this")
+(public! 'mode-focus-key! "(mode-focus-key! MODE KEY) — KEY returns MODE's buffers from the editing state to focus; the title shows it while editing. ESC is the default")
+(public! 'focus-key "(focus-key BUF) — the key that returns BUF from the editing state to focus")
 (public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map, so the Cmd-arrows stay the window motion in a chat")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")

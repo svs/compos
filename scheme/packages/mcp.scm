@@ -33,9 +33,10 @@
 ;; A chat never widens its own tool surface. Adding a server, naming a
 ;; preset or turning one on is the user's act: an agent that could do it
 ;; from eval-scheme would walk around every permission the chat holds.
-;; The eval-scheme tool binds *llm-tool-buffer* while agent code runs.
+;; An agent's tool call runs under the edit author "agent:SLUG", which
+;; the session restores when the call ends, even when it raises.
 (define (mcp-refuse-agent! who)
-  (when (and (boundp '*llm-tool-buffer*) *llm-tool-buffer*)
+  (when (let ((a (current-edit-author))) (and (string? a) (string-prefix? "agent:" a)))
     (error (string-append (symbol->string who)
                           ": a chat cannot add MCP servers or presets; ask the user"))))
 

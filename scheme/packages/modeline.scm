@@ -205,8 +205,11 @@
 /* the open jj change takes the free width of the row, so the fill steps aside */
 .dash-persistent .dseg-wide[name=jj] { flex: 1 1 0; min-width: 0; }
 .dash-persistent:has(.dseg-wide[name=jj]) .dseg-fill { display: none; }
-/* the state needs no word: a floating window says it */
-.dash-state-mark { display: none; }
+/* focus needs no word: a floating window says it. The editing state
+   shows its focus key, the key that gives the keyboard back. */
+.dash-state-mark.dash-state-focus { display: none; }
+.dash-state-mark.dash-state-editing { font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 /* the verbosity switch: three tracked words, the current one in ink with
    an accent seam under it. Square, no fill, no icon. */
 .dseg-verbosity { display: inline-flex; align-items: baseline; gap: var(--s6); flex: none;
@@ -707,10 +710,17 @@
 ;; words: an editing buffer is a cua buffer and stays put; every other
 ;; buffer is a focus buffer and can be moved.
 (define (dash--state-mark buf)
-  (let ((st (dash--state buf)))
-    (list 'tag "c-tag"
-          'class (string-append "dash-state-mark dash-state-" st)
-          'text (if (equal? st "editing") "cua" "focus"))))
+  (let* ((st (dash--state buf))
+         (key (and (equal? st "editing") (focus-key buf))))
+    (append
+     (list 'tag "c-tag"
+           'class (string-append "dash-state-mark dash-state-" st)
+           ;; in the editing state the tag is the focus key: the one way back
+           'text (or key "focus"))
+     (if key
+         (list 'attrs (list (list "data-focus-key" key)
+                            (list "title" (string-append key " returns to focus"))))
+         '()))))
 
 ;; The one switcher: a single action at the end of the header line that
 ;; opens a narrow about this buffer. The design keeps one icon, not three.

@@ -577,19 +577,15 @@
           const editorOpen = !!document.querySelector(
             ".mb-panel, .which-key, .transient-panel"
           );
-          const editorEntry = ["C-x", "M-x", "C-g", "C-`", "M-`", "C-M-`", "s-p"].includes(spec);
+          // the mode's focus key, as the title shows it, gives the keyboard back
+          const focusKey = this.el.closest(".window")
+            ?.querySelector(".dash-state-mark[data-focus-key]")?.dataset.focusKey;
+          const editorEntry = spec === focusKey ||
+            ["C-x", "M-x", "C-g", "C-`", "M-`", "C-M-`", "s-p"].includes(spec);
           if (spec && (this.editorSequence || editorOpen || editorEntry)) {
             e.preventDefault();
             this.editorSequence = true;
             Telem.push(this, "key", { k: spec });
-            return false;
-          }
-          // a Cmd chord means nothing to a terminal: it is the editor's,
-          // and the keymaps in force in the buffer answer it (the editing
-          // state's caret map, which term-mode remaps to the shell's line keys)
-          if (spec && spec.startsWith("s-")) {
-            e.preventDefault();
-            if (e.type === "keydown") Telem.push(this, "key", { k: spec });
             return false;
           }
           return true;

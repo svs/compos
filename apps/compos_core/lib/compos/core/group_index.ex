@@ -9,6 +9,10 @@ defmodule Compos.Core.GroupIndex do
   forgets, so the index holds what the rows hold, live and dormant, and
   needs no hook of its own.
 
+  The same rows file each buffer under `{:mode, MODE}` and under `{:has,
+  LOCAL}` for the few locals in `@flags`, so "every chat" and "every buffer
+  in mode M" are lookups too.
+
   It is ephemeral: the tables die with `BufferView` and refill as the
   buffers publish again. It files the raw values the locals hold, not
   resolved groups. Scheme still decides membership (aliases, stale ids),
@@ -19,6 +23,10 @@ defmodule Compos.Core.GroupIndex do
 
   @keys :compos_group_keys
   @members :compos_group_members
+
+  # locals a list asks "who holds this" about: an agent is listed with the
+  # chats even when its buffer is no chat
+  @flags ["agent-slug"]
 
   @doc "Create the tables. `BufferView` owns them, so they live as long as the rows."
   def new_tables do
@@ -37,27 +45,33 @@ defmodule Compos.Core.GroupIndex do
   def ready?, do: :ets.whereis(@members) != :undefined
 
   @doc """
-  The keys a row files under, and whether it is context-only. The rule is
-  the one `group-members-of` applies: a chat by its `group-id`, any other
-  buffer by its one `group-ids` entry.
+  The keys a row files under, and whether it is context-only. The group
+  rule is the one `group-members-of` applies: a chat by its `group-id`,
+  any other buffer by its one `group-ids` entry.
   """
   def keys_of(%{} = locals) do
-    gids = Map.get(locals, "group-ids")
-    gid = Map.get(locals, "group-id")
-
-    keys =
-      cond do
-        set?(Map.get(locals, "group")) or set?(Map.get(locals, "companion-of")) -> [:slow]
-        Map.get(locals, "mode-name") == "chat-mode" -> if is_binary(gid), do: [gid], else: []
-        is_list(gids) and length(gids) > 1 -> [:slow]
-        match?([id] when is_binary(id), gids) -> gids
-        true -> []
-      end
-
+    mode = Map.get(locals, "mode-name")
+    has = for f <- @flags, set?(Map.get(locals, f)), do: {:has, f}
+    keys = group_keys(locals) ++ if(is_binary(mode), do: [{:mode, mode}], else: []) ++ has
     {keys, Map.get(locals, "context-only") == true}
   end
 
   def keys_of(_), do: {[], false}
+
+  defp group_keys(locals) do
+    gids = Map.get(locals, "group-ids")
+    gid = Map.get(locals, "group-id")
+
+    cond do
+      set?(Map.get(locals, "group")) or set?(Map.get(locals, "companion-of")) -> [:slow]
+      Map.get(locals, "mode-name") == "chat-mode" -> if is_binary(gid), do: [gid], else: []
+      is_list(gids) and length(gids) > 1 -> [:slow]
+      match?([id] when is_binary(id), gids) -> gids
+      true -> []
+    end
+  end
+
+  defp group_key?(k), do: is_binary(k) or k == :slow
 
   # a Scheme value is set unless it is #f: the empty list is set
   defp set?(v), do: v not in [nil, false]
@@ -111,14 +125,74 @@ defmodule Compos.Core.GroupIndex do
   The NAMES, in their order, filed under any of KEYS or under `:slow`.
   `:error` when there is no index.
   """
-  def select(names, keys) do
+  def select(names, keys), do: filed(names, [:slow | keys])
+
+  @doc """
+  The NAMES, in their order, filed under any of KEYS: a group key, `{:mode,
+  MODE}` or `{:has, LOCAL}`. `:error` when there is no index.
+  """
+  def filed(names, keys) do
     if ready?() do
       hits =
-        [:slow | keys]
+        keys
         |> Enum.flat_map(fn k -> :ets.lookup(@members, k) end)
         |> MapSet.new(fn {_, name} -> name end)
 
-      Enum.filter(names, &MapSet.member?(hits, &1))
+      names |> Enum.uniq() |> Enum.filter(&MapSet.member?(hits, &1))
+    else
+      :error
+    end
+  end
+
+  @doc "Every buffer name, most recently used first, as `buffer-list-mru` gives them."
+  def mru, do: Compos.Core.Editor.buffer_mru()
+
+  @doc "`mru/0` and then the live buffers it leaves out, the internal ones."
+  def all, do: Enum.uniq(mru() ++ Compos.Core.list_buffers())
+
+  @doc """
+  The NAMES by their mode: `[{mode, [name ...]}]`, each in the order of
+  NAMES, a repeated name once, the modes in the order of their first
+  name. `:error` when there is no index.
+  """
+  def modes(names) do
+    if ready?() do
+      names
+      |> Enum.uniq()
+      |> Enum.with_index()
+      |> Enum.reduce(%{}, fn {name, i}, acc ->
+        case :ets.lookup(@keys, name) do
+          [{_, keys, _}] ->
+            Enum.reduce(keys, acc, fn
+              {:mode, m}, acc ->
+                Map.update(acc, m, {i, [name]}, fn {f, ns} -> {f, [name | ns]} end)
+
+              _, acc ->
+                acc
+            end)
+
+          _ ->
+            acc
+        end
+      end)
+      |> Enum.sort_by(fn {_, {first, _}} -> first end)
+      |> Enum.map(fn {m, {_, ns}} -> {m, Enum.reverse(ns)} end)
+    else
+      :error
+    end
+  end
+
+  @doc "`[{mode, count}]` over every row, sorted by mode: what changes when a mode gains or loses a buffer."
+  def mode_counts do
+    if ready?() do
+      fn {_, keys, _}, acc ->
+        Enum.reduce(keys, acc, fn
+          {:mode, m}, acc -> Map.update(acc, m, 1, &(&1 + 1))
+          _, acc -> acc
+        end)
+      end
+      |> :ets.foldl(%{}, @keys)
+      |> Enum.sort()
     else
       :error
     end
@@ -135,8 +209,13 @@ defmodule Compos.Core.GroupIndex do
       |> Enum.uniq()
       |> Enum.reduce(%{}, fn name, acc ->
         case :ets.lookup(@keys, name) do
-          [{_, keys, false}] -> Enum.reduce(keys, acc, &Map.update(&2, &1, [name], fn ns -> [name | ns] end))
-          _ -> acc
+          [{_, keys, false}] ->
+            keys
+            |> Enum.filter(&group_key?/1)
+            |> Enum.reduce(acc, &Map.update(&2, &1, [name], fn ns -> [name | ns] end))
+
+          _ ->
+            acc
         end
       end)
       |> Enum.map(fn {k, ns} -> {k, Enum.reverse(ns)} end)

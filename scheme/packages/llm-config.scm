@@ -137,8 +137,13 @@
 
 ;; the saved bundle whose setup equals BUF's live setup, or #f
 (define (llm-config--matching-bundle buf)
-  (let ((cur (llm-config--current buf)))
-    (llm-config--matching cur cur)))
+  ;; two presets can hold the same setup (Coding and Smartbrew); the one
+  ;; picked in the box names the chat while its setup still matches
+  (let* ((cur (llm-config--current buf))
+         (chosen (llm-bundle-named (buffer-local buf 'llm-preset))))
+    (if (and chosen (llm-config--same? cur (llm-config--fill chosen cur)))
+        chosen
+        (llm-config--matching cur cur))))
 
 ;;; The name the dashboard line shows. It follows the buffer's own setup, not
 ;;; the menu's box, so a chat that drifted off its bundle names no preset.
@@ -148,7 +153,7 @@
 
 (define (llm-config--setup! buf)
   (let* ((live (llm-config--current buf))
-         (match (llm-config--matching live live)))
+         (match (llm-config--matching-bundle buf)))
     (set-frame-local! 'llm-config-live live)
     (set-frame-local! 'llm-config-box live)
     (set-frame-local! 'llm-config-source (and match (llm-bundle-name match)))
@@ -205,6 +210,8 @@
 (define (llm-config--quit! buf)
   (let ((box (llm-config--config-of (llm-config--selected-name)))
         (alive (buffer-exists? buf))
+        (renamed (and (buffer-exists? buf)
+                      (not (equal? (llm-config--selected-name) (llm-config-preset-name buf)))))
         (applied #f))
     (when (and alive
                (pair? box)
@@ -212,10 +219,11 @@
       (llm-bundle-apply! buf box)
       (llm-config-remember! box)
       (set! applied #t))
+    (when alive (buffer-set-local! buf 'llm-preset (llm-config--selected-name)))
     (let ((moved (llm-config--follow! buf)))
       (message
         (string-append
-          (cond (applied
+          (cond ((or applied renamed)
                  (string-append "the chat now runs "
                                 (or (llm-config--selected-name) "its own setup")))
                 (alive "no change")

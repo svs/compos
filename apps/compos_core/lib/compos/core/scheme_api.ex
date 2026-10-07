@@ -1928,18 +1928,55 @@ defmodule Compos.Core.SchemeAPI do
           end
         end,
       {"group-index-buckets",
-       "(group-index-buckets NAMES) — ((KEY NAME ...) ...): the NAMES that are not context-only, by the group key their locals hold, each in the order of NAMES; KEY slow needs the slow path. #f with no index."} =>
-        fn [names] when is_list(names) ->
+       "(group-index-buckets [NAMES]) — ((KEY NAME ...) ...): NAMES, every buffer most recent first by default, that are not context-only, by the group key their locals hold, each in the order of NAMES; KEY slow needs the slow path. #f with no index."} =>
+        fn args ->
+          names = with [names] when is_list(names) <- args, do: names, else: (_ -> Compos.Core.GroupIndex.all())
+
           case Compos.Core.GroupIndex.buckets(names) do
             :error -> false
             buckets -> Enum.map(buckets, fn {k, ns} -> [if(k == :slow, do: {:sym, "slow"}, else: k) | ns] end)
           end
         end,
       {"group-index-ensure!",
-       "(group-index-ensure!) — build the group index from the buffer rows when it is missing; #t once it exists."} =>
-        fn [] ->
-          Compos.Core.BufferView.ensure_group_index()
+       "(group-index-ensure! [REBUILD]) — build the group index from the buffer rows when it is missing, or file every row again with REBUILD; #t once it exists."} =>
+        fn args ->
+          Compos.Core.BufferView.ensure_group_index(args == [true])
           Compos.Core.GroupIndex.ready?()
+        end,
+      {"group-index-modes",
+       "(group-index-modes [NAMES]) — ((MODE NAME ...) ...): NAMES, every buffer most recent first by default, by their mode, in the order of their first name; #f with no index."} =>
+        fn args ->
+          names = with [names] when is_list(names) <- args, do: names, else: (_ -> Compos.Core.GroupIndex.mru())
+
+          case Compos.Core.GroupIndex.modes(names) do
+            :error -> false
+            modes -> Enum.map(modes, fn {m, ns} -> [m | ns] end)
+          end
+        end,
+      {"group-index-mode-counts",
+       "(group-index-mode-counts) — ((MODE N) ...) over every buffer, sorted by mode; #f with no index."} =>
+        fn [] ->
+          case Compos.Core.GroupIndex.mode_counts() do
+            :error -> false
+            counts -> Enum.map(counts, fn {m, n} -> [m, n] end)
+          end
+        end,
+      {"buffer-index-select",
+       "(buffer-index-select KEYS [NAMES]) — NAMES, every buffer most recent first by default, filed under any of KEYS: (mode MODE), (has LOCAL), or a group key; #f with no index."} =>
+        fn [keys | rest] when is_list(keys) ->
+          names = with [names] when is_list(names) <- rest, do: names, else: (_ -> Compos.Core.GroupIndex.mru())
+
+          keys =
+            Enum.map(keys, fn
+              [{:sym, "mode"}, m] -> {:mode, m}
+              [{:sym, "has"}, l] -> {:has, Compos.Core.Prims.s(l)}
+              k -> k
+            end)
+
+          case Compos.Core.GroupIndex.filed(names, keys) do
+            :error -> false
+            hits -> hits
+          end
         end,
       {"buffer-local",
        "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset."} => fn [

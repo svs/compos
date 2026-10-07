@@ -483,13 +483,15 @@ defmodule Compos.Core.BufferView do
 
   @doc """
   Build the group index from the rows when it is missing: a daemon that
-  started before the index gets one without a restart.
+  started before the index gets one without a restart. REBUILD files every
+  row again, for an index whose rule changed under it.
   """
-  def ensure_group_index, do: GenServer.call(__MODULE__, :ensure_group_index)
+  def ensure_group_index(rebuild \\ false),
+    do: GenServer.call(__MODULE__, {:ensure_group_index, rebuild})
 
   @impl true
-  def handle_call(:ensure_group_index, _from, watched) do
-    unless GroupIndex.ready?() do
+  def handle_call({:ensure_group_index, rebuild}, _from, watched) do
+    if rebuild or not GroupIndex.ready?() do
       GroupIndex.new_tables()
 
       for name <- :ets.select(@table, [{{:"$1", :_}, [{:is_binary, :"$1"}], [:"$1"]}]) do

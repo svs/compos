@@ -66,6 +66,42 @@ defmodule Compos.Scheme.Builtins do
       end,
       {"max", "(max N ...) — return the largest of the numbers."} => fn args -> Enum.max(args) end,
       {"abs", "(abs N) — return the absolute value of N."} => fn [x] -> abs(x) end,
+      # Math is Erlang's :math. floor, ceiling, round and truncate answer
+      # integers, as they do in Emacs Lisp.
+      {"floor", "(floor N [DIVISOR]) — return the largest integer not above N, or N/DIVISOR."} =>
+        &floor_div/1,
+      {"ceiling", "(ceiling N) — return the smallest integer not below N."} => fn [x] ->
+        ceil(x)
+      end,
+      {"round", "(round N) — return the nearest integer to N; a half rounds away from zero."} =>
+        fn [x] -> round(x) end,
+      {"truncate", "(truncate N) — return N without its fraction, as an integer."} => fn [x] ->
+        trunc(x)
+      end,
+      {"float", "(float N) — return N as a float."} => fn [x] -> x * 1.0 end,
+      {"integer?", "(integer? X) — return true if X is an integer."} => fn [x] ->
+        is_integer(x)
+      end,
+      {"float?", "(float? X) — return true if X is a float."} => fn [x] -> is_float(x) end,
+      {"zero?", "(zero? N) — return true if N is 0 or 0.0."} => fn [x] -> x == 0 end,
+      {"sqrt", "(sqrt N) — return the square root of N, a float."} => fn [x] ->
+        :math.sqrt(x)
+      end,
+      {"expt",
+       "(expt BASE POWER) — return BASE to POWER; an integer when both are integers and POWER is not negative."} =>
+        &expt/1,
+      {"exp", "(exp N) — return e to the power N."} => fn [x] -> :math.exp(x) end,
+      {"log", "(log N [BASE]) — return the logarithm of N, natural or in BASE."} => &log/1,
+      {"sin", "(sin N) — return the sine of N radians."} => fn [x] -> :math.sin(x) end,
+      {"cos", "(cos N) — return the cosine of N radians."} => fn [x] -> :math.cos(x) end,
+      {"tan", "(tan N) — return the tangent of N radians."} => fn [x] -> :math.tan(x) end,
+      {"asin", "(asin N) — return the arc sine of N, in radians."} => fn [x] -> :math.asin(x) end,
+      {"acos", "(acos N) — return the arc cosine of N, in radians."} => fn [x] ->
+        :math.acos(x)
+      end,
+      {"atan", "(atan Y [X]) — return the arc tangent of Y, or of Y/X in the right quadrant."} =>
+        &atan/1,
+      {"float-pi", "(float-pi) — return pi."} => fn [] -> :math.pi() end,
       {"member", "(member X LST) — return the tail of LST from the first X, or false."} => fn [
                                                                                                 x,
                                                                                                 l
@@ -685,6 +721,21 @@ defmodule Compos.Scheme.Builtins do
   defp sub([x | rest]), do: Enum.reduce(rest, x, fn b, a -> a - b end)
 
   defp divide([x | rest]), do: Enum.reduce(rest, x, fn b, a -> a / b end)
+
+  defp floor_div([x]), do: floor(x)
+  defp floor_div([a, b]) when is_integer(a) and is_integer(b), do: Integer.floor_div(a, b)
+  defp floor_div([a, b]), do: floor(a / b)
+
+  defp expt([b, p]) when is_integer(b) and is_integer(p) and p >= 0, do: Integer.pow(b, p)
+  defp expt([b, p]), do: :math.pow(b, p)
+
+  defp log([x]), do: :math.log(x)
+  defp log([x, 10]), do: :math.log10(x)
+  defp log([x, 2]), do: :math.log2(x)
+  defp log([x, base]), do: :math.log(x) / :math.log(base)
+
+  defp atan([y]), do: :math.atan(y)
+  defp atan([y, x]), do: :math.atan2(y, x)
 
   # Walk the arguments in place. chunk_every built the whole list of
   # overlapping pairs first, so a comparison over a long list allocated a

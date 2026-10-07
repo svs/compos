@@ -2363,13 +2363,6 @@ is forgotten and that group falls back to creation order in the switcher."
           ((pseudo-group-id? g) (pseudo-group-buffers g))
           (else '()))))
 
-(define (group-members-in index g)
-  ;; a pseudo group is in no index: its function says its members
-  (if (pseudo-group-id? g)
-      (pseudo-group-buffers g)
-      (let ((cell (assoc (group-resolve-id g) index)))
-        (if cell (cdr cell) '()))))
-
 ;; The facts beside a card say what the group holds and the shape it
 ;; opens in. They list no members: the card is for choosing a group.
 (define (group-switch-facts hint shape)

@@ -1330,6 +1330,16 @@ directory > file.semantic-direct > [data-col] {
   min-width: 0; white-space: pre; overflow: hidden;
 }
 directory > file.semantic-direct[mark]:not([mark='']):not([mark=' ']) {
-  box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
+  background: color-mix(in srgb, var(--accent-fg, #7aa2f7) 18%, transparent);
+}
+directory > file.semantic-direct[mark]:not([mark='']):not([mark=' ']) > [data-col] {
+  font-weight: 600;
+}
+directory > file.semantic-direct:is([mark='D'], [mark='!']) {
+  background: color-mix(in srgb, var(--error-fg, #d0453a) 16%, transparent);
+  color: var(--error-fg, #d0453a);
+}
+directory > file.semantic-direct:is([mark='D'], [mark='!']) > filename {
+  text-decoration: line-through;
 }
 ")

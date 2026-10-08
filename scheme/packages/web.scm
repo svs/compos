@@ -2083,7 +2083,10 @@ the tabs. C-s searches to any link.")
     "Set RENDER? to #t only when the server answers a fetch with a script shell: it costs a real browser tab. "
     "web--calm-command runs xsltproc --html before pandoc. "
     "Preserve useful links, content images, and semantic text in transformed HTML. "
-    "Unregistered sites read through readable, and a short calm reading falls back to the full page.")
+    "Unregistered sites read through readable, and a short calm reading falls back to the full page. "
+    "The fetch goes first; a site the table marks, a bot wall, a thin answer, or a shell the judge "
+    "(decide, browse-judge-shells) names reads again in a real tab, and that host starts in a tab for "
+    "the session. A host whose calm reading found nothing reads full on its next page.")
   'domain 'web
   'effects '(pure)
   'use "create web/parsers/example.xsl; add (\"https://example.com\" \"example.xsl\" #f) to *web--sites*")

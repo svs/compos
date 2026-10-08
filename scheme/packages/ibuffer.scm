@@ -723,14 +723,16 @@
 ;;; reads the same buckets, so the two surfaces section alike.
 
 (define (ibuffer-memberships-many rows memberships-of)
-  ;; every row's groups, in order. The kernel's group index gives each
-  ;; row's key in one read; a key that is a group's own id is the answer,
+  ;; every row's groups, in order. The buffer rows give each row's group
+  ;; key in one read; a key that is a group's own id is the answer,
   ;; and anything else (a name, a stale id, a legacy row) asks MEMBERSHIPS-OF.
   ;; A row that is no buffer name, or a daemon with no index, asks it too.
   (let ((keys (and (eq? memberships-of ibuffer-memberships)
-                   (boundp 'group-index-keys)
                    (null? (filter (lambda (r) (not (string? r))) rows))
-                   (group-index-keys rows)))
+                   ;; a row that is no buffer has no key: it asks
+                   (let ((got (cadr (buffer-rows (list 'names rows 'hidden #t 'context-only #t
+                                                       'fields '(group))))))
+                     (map (lambda (r) (let ((hit (assoc r got))) (if hit (cadr hit) 'ask))) rows))))
         (records *group-records*))
     (if (not keys)
         (map memberships-of rows)

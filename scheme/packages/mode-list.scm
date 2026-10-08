@@ -60,23 +60,15 @@
 
 (define (mode-list-buffers mode)
   ;; read again each time: a buffer can change its mode, or become an
-  ;; agent, without the buffer list changing. The kernel's index names the
-  ;; buffers in MODE or holding a member local, so the rule below reads
-  ;; those rows only; a daemon without the index reads every buffer.
-  (let* ((names (append (buffer-list-mru) (buffer-list)))
-         (extra (mode-list-opt mode 'member-locals '()))
-         (hits (and (boundp 'buffer-index-select)
-                    (buffer-index-select
-                      (cons (list 'mode mode) (map (lambda (l) (list 'has l)) extra))
-                      names)))
+  ;; agent, without the buffer list changing. One read of the buffer rows
+  ;; names the buffers in MODE or holding a member local, most recent
+  ;; first, as (NAME MODE LOCALS...) rows for the rule below.
+  (let* ((extra (mode-list-opt mode 'member-locals '()))
          (member? (mode-list-opt mode 'member?
                     (lambda (row) (equal? (cadr row) mode))))
-         (rows (buffer-read-many (or hits (dedupe-names names)) '()
-                 (cons "mode-name" extra))))
-    (map car (filter (lambda (row)
-                       (and (not (string-prefix? " " (car row)))
-                            (member? row)))
-                     rows))))
+         (rows (cadr (buffer-rows (list 'modes (list mode) 'has extra 'context-only #t
+                                        'fields (cons 'mode extra))))))
+    (map car (filter member? rows))))
 
 (define (mode-list--blank? q) (equal? (string-trim q) ""))
 

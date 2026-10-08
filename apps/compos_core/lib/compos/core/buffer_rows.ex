@@ -10,7 +10,7 @@ defmodule Compos.Core.BufferRows do
   process: one pass, however many buffers there are.
   """
 
-  alias Compos.Core.{BufferView, GroupIndex}
+  alias Compos.Core.BufferView
 
   @doc "The fields a row can carry. Any other name is read as a buffer local."
   def fields, do: ~w(name path size modified live mode title group used windows)
@@ -20,6 +20,8 @@ defmodule Compos.Core.BufferRows do
 
     * `names` - only these buffers
     * `modes`, `exclude-modes` - by `mode-name`
+    * `has` - locals: a row holding any of them is kept beside the `modes`
+      rows, whatever its mode
     * `exclude-names` - leave these out
     * `groups` - only the buffers whose group key is one of these
     * `dirs` - only the buffers with no path or a path under one of these
@@ -31,23 +33,43 @@ defmodule Compos.Core.BufferRows do
       each section in the sort order
     * `offset`, `limit` - the page
     * `fields` - what each row carries after its name
+    * `bucket` - a field: the rows come back as buckets, `[KEY | NAMES]`,
+      each bucket in the sort order, the buckets in the order of their
+      first row; a row with no value for the field is in none
 
   TOTAL counts the rows before the page. A row is `[NAME | VALUES]`.
   """
   def query(opts) do
-    fields = List.wrap(opts["fields"] || [])
-    extra = Enum.reject(fields, &(&1 in fields()))
+    fields = List.wrap(opts["fields"] || []) ++ List.wrap(opts["bucket"] || [])
+    extra = Enum.uniq(Enum.reject(fields, &(&1 in fields())) ++ List.wrap(opts["has"] || []))
 
     rows =
       scan(extra)
       |> keep(opts)
-      |> with_groups(opts, fields)
+      |> in_groups(opts)
       |> match(opts["match"])
       |> sort(opts["sort"] || "recent", opts["group-by"])
 
     total = length(rows)
     page = Enum.slice(rows, opts["offset"] || 0, opts["limit"] || total)
-    {total, Enum.map(page, &row_out(&1, fields))}
+
+    case opts["bucket"] do
+      key when is_binary(key) -> {total, buckets(page, key)}
+      _ -> {total, Enum.map(page, &row_out(&1, fields))}
+    end
+  end
+
+  defp buckets(rows, key) do
+    {order, by_key} =
+      Enum.reduce(rows, {[], %{}}, fn r, {order, acc} ->
+        case Map.get(r, key, r["extra"][key]) do
+          v when v in [nil, false] -> {order, acc}
+          v when is_map_key(acc, v) -> {order, Map.update!(acc, v, &[r["name"] | &1])}
+          v -> {[v | order], Map.put(acc, v, [r["name"]])}
+        end
+      end)
+
+    order |> Enum.reverse() |> Enum.map(fn k -> [k | Enum.reverse(by_key[k])] end)
   end
 
   # One select over the read model. A dormant row from before a field
@@ -69,7 +91,8 @@ defmodule Compos.Core.BufferRows do
     body =
       [:"$1", get.(:path), get.(:size), get.(:modified), live,
        local.("mode-name"), local.("context-only"), local.("list-title"),
-       local.("chat-title"), local.("last-seen")] ++ Enum.map(extra, local)
+       local.("chat-title"), local.("last-seen"), local.("group-id"), local.("group-ids"),
+       local.("group"), local.("companion-of")] ++ Enum.map(extra, local)
 
     uses =
       BufferView.table()
@@ -78,7 +101,8 @@ defmodule Compos.Core.BufferRows do
 
     BufferView.table()
     |> :ets.select([{{:"$1", m}, [{:is_binary, :"$1"}], [body]}])
-    |> Enum.map(fn [name, path, size, modified, live, mode, ctx, title, chat_title, seen | rest] ->
+    |> Enum.map(fn [name, path, size, modified, live, mode, ctx, title, chat_title, seen, gid, gids,
+                    legacy, companion | rest] ->
       use = Map.get(uses, name, %{})
 
       %{
@@ -92,6 +116,7 @@ defmodule Compos.Core.BufferRows do
         "title" => title_of(name, title, chat_title),
         "used" => Map.get(use, :used) || (is_number(seen) && round(seen * 1000)) || 0,
         "windows" => Map.get(use, :windows, []),
+        "group" => group_key(mode, gid, gids, legacy, companion),
         "extra" => extra |> Enum.zip(Enum.map(rest, &BufferView.big_value/1)) |> Map.new()
       }
     end)
@@ -99,6 +124,22 @@ defmodule Compos.Core.BufferRows do
     # no read model yet: the table is gone between a crash and a restart
     ArgumentError -> []
   end
+
+  # The group a buffer's locals name: a chat by its `group-id`, any other
+  # buffer by its one `group-ids` entry. A row only Scheme can settle
+  # (several ids, a legacy `group` or `companion-of`) is "slow".
+  defp group_key(mode, gid, gids, legacy, companion) do
+    cond do
+      set?(legacy) or set?(companion) -> "slow"
+      mode == "chat-mode" -> if is_binary(gid), do: gid
+      is_list(gids) and length(gids) > 1 -> "slow"
+      match?([id] when is_binary(id), gids) -> hd(gids)
+      true -> nil
+    end
+  end
+
+  # a Scheme value is set unless it is #f: the empty list is set
+  defp set?(v), do: v not in [nil, false]
 
   # a list names a row by its `list-title`, a chat by its `chat-title`,
   # anything else by its buffer name
@@ -110,6 +151,7 @@ defmodule Compos.Core.BufferRows do
     names = set(opts["names"])
     excluded = set(opts["exclude-names"])
     modes = set(opts["modes"])
+    has = List.wrap(opts["has"] || [])
     no_modes = set(opts["exclude-modes"])
     dirs = List.wrap(opts["dirs"] || [])
     hidden = opts["hidden"] == true
@@ -120,12 +162,19 @@ defmodule Compos.Core.BufferRows do
 
       (names == nil or MapSet.member?(names, name)) and
         (excluded == nil or not MapSet.member?(excluded, name)) and
-        (modes == nil or MapSet.member?(modes, r["mode"])) and
+        mode_ok?(r, modes, has) and
         (no_modes == nil or not MapSet.member?(no_modes, r["mode"])) and
         (hidden or not String.starts_with?(name, " ")) and
         (ctx or not r["context-only"]) and
         under?(r["path"], dirs)
     end)
+  end
+
+  defp mode_ok?(_r, nil, []), do: true
+
+  defp mode_ok?(r, modes, has) do
+    (modes != nil and MapSet.member?(modes, r["mode"])) or
+      Enum.any?(has, &(r["extra"][&1] not in [nil, false]))
   end
 
   defp under?(_path, []), do: true
@@ -135,26 +184,10 @@ defmodule Compos.Core.BufferRows do
   defp set(v) when v in [nil, false], do: nil
   defp set(list), do: MapSet.new(List.wrap(list))
 
-  # the group key is the index's, read only when a query asks for it
-  defp with_groups(rows, opts, fields) do
-    if opts["groups"] || opts["group-by"] == "group" || "group" in fields do
-      keys =
-        case GroupIndex.group_keys_of(Enum.map(rows, & &1["name"])) do
-          :error -> Enum.map(rows, fn _ -> nil end)
-          keys -> keys
-        end
-
-      rows =
-        Enum.zip_with(rows, keys, fn r, k ->
-          Map.put(r, "group", if(k == :slow, do: "slow", else: k))
-        end)
-
-      case set(opts["groups"]) do
-        nil -> rows
-        groups -> Enum.filter(rows, &MapSet.member?(groups, &1["group"]))
-      end
-    else
-      rows
+  defp in_groups(rows, opts) do
+    case set(opts["groups"]) do
+      nil -> rows
+      groups -> Enum.filter(rows, &MapSet.member?(groups, &1["group"]))
     end
   end
 

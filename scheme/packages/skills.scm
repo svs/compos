@@ -385,7 +385,7 @@
     (or (app-await (lambda (k) (llm-with-model text (llm-model-for 'fast) k))) "")))
 
 (define (skill-decide state questions &rest opts)
-  (apply decide state questions opts))
+  (apply decide (append (list state questions) opts)))
 
 (effects! '(write external spend))
 

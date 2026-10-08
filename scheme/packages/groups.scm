@@ -261,32 +261,19 @@ is forgotten and that group falls back to creation order in the switcher."
                      mode)))
 
 (define (mode-group-buffers mode)
-  ;; read now, from the kernel's index: the table below only decides which
+  ;; read now, from the buffer rows: the table below only decides which
   ;; modes are groups
-  (or (and (boundp 'buffer-index-select)
-           (buffer-index-select (list (list 'mode mode))))
-      (begin
-        (mode-groups-refresh!)
-        (let ((row (assoc mode *mode-groups-table*)))
-          (if row (cdr row) '())))))
+  (map car (cadr (buffer-rows (list 'modes (list mode) 'context-only #t)))))
 
 (define (mode-groups-key)
-  ;; the kernel's count per mode changes only when a mode gains or loses a
-  ;; buffer, not on every switch as the buffer list's order does
-  (or (and (boundp 'group-index-mode-counts) (group-index-mode-counts))
-      (buffer-list-mru)))
+  ;; the count per mode changes only when a mode gains or loses a buffer,
+  ;; not on every switch as the buffer list's order does
+  (sort (map (lambda (run) (list (car run) (length (cdr run))))
+             (cadr (buffer-rows (list 'hidden #t 'context-only #t 'bucket 'mode))))))
 
 (define (mode-groups-read)
   ;; ((MODE BUF ...) ...), the modes in the order of their most recent buffer
-  (or (and (boundp 'group-index-modes) (group-index-modes))
-      (let* ((rows (filter (lambda (row) (string? (cadr row)))
-                           (buffer-read-many (buffer-list-mru) '() '("mode-name"))))
-             (modes (fold (lambda (out row)
-                            (if (member (cadr row) out) out (append out (list (cadr row)))))
-                          '() rows)))
-        (map (lambda (mode)
-               (cons mode (map car (filter (lambda (row) (equal? (cadr row) mode)) rows))))
-             modes))))
+  (cadr (buffer-rows (list 'context-only #t 'bucket 'mode))))
 
 (define (mode-groups-refresh!)
   (let ((key (mode-groups-key)))
@@ -2272,44 +2259,51 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the order group-buffers-mru gives. The switcher lists every group at
 ;; once, and one scan of every buffer per group cost the prompt 1.7s at
 ;; 25 groups and 80 buffers.
-(define (group-members-index)
-  ;; ((ID BUF ...) ...), every group's members in buffer-list order. The
-  ;; kernel buckets the buffers by the group key their locals hold
-  ;; (group-index-buckets), so this resolves one key per group, not one
-  ;; buffer at a time. An alias key, a stale id or a legacy row goes
-  ;; through group-buffer-memberships, which migrates it.
-  ;; the kernel drops the names the two lists share
-  (let* ((names (append (buffer-list-mru) (buffer-list)))
-         (buckets (and (boundp 'group-index-buckets) (group-index-buckets names)))
-         (records *group-records*))
-    (if (not buckets)
-        (group-members-index-scan (dedupe-names names))
-        (let ((index '()) (extra '()))
-          (for-each
-            (lambda (bucket)
-              (let* ((key (car bucket))
-                     ;; a record's first field is its id: one assoc for the
-                     ;; usual key, the full resolve for a name or an origin
-                     (valid (and (string? key)
-                                 (if (assoc key records) key (group-resolve-id key)))))
-                (cond ((and valid (equal? valid key))
-                       (set! index (cons bucket index)))
-                      ;; a deleted group: no member, and nothing to write
-                      ((and (string? key) (not valid)) #f)
-                      (else
-                        (for-each (lambda (b)
-                                    (for-each (lambda (id) (set! extra (cons (list id b) extra)))
-                                              (group-buffer-memberships b)))
-                                  (cdr bucket))))))
-            buckets)
-          ;; the rare rows the slow path settled join their group's cell
-          (fold (lambda (index pair)
-                  (let ((cell (assoc (car pair) index)))
-                    (cond ((not cell) (cons pair index))
-                          ((member (cadr pair) (cdr cell)) index)
-                          (else (cons (append cell (list (cadr pair)))
-                                      (remove (lambda (c) (equal? (car c) (car pair))) index))))))
-                index (reverse extra))))))
+(define (group-buffer-rows)
+  ;; the group list is the buffer list, bucketed: (GROUPS MODES), where
+  ;; GROUPS is ((GROUP-KEY BUF ...) ...) over every buffer that is not
+  ;; context-only and MODES is ((MODE BUF ...) ...) over every buffer a
+  ;; name shows, each bucket most recent first
+  (list (cadr (buffer-rows (list 'hidden #t 'bucket 'group)))
+        (cadr (buffer-rows (list 'context-only #t 'bucket 'mode)))))
+
+
+(define (group-members-index &optional rows)
+  ;; ((ID BUF ...) ...), every group's members, most recent first: the
+  ;; buffer rows bucketed by the group key their locals hold, so this
+  ;; resolves one key per group, not one buffer at a time. An alias key,
+  ;; a stale id or a legacy row (key "slow") goes through
+  ;; group-buffer-memberships, which migrates it. A context-only buffer
+  ;; is in no group.
+  (let* ((buckets (car (or rows (group-buffer-rows))))
+         (records *group-records*)
+         (index '())
+         (extra '()))
+    (for-each
+      (lambda (bucket)
+        (let* ((key (car bucket))
+               ;; a record's first field is its id: one assoc for the
+               ;; usual key, the full resolve for a name or an origin
+               (valid (and (not (equal? key "slow"))
+                           (if (assoc key records) key (group-resolve-id key)))))
+          (cond ((and valid (equal? valid key))
+                 (set! index (cons bucket index)))
+                ;; a deleted group: no member, and nothing to write
+                ((and (not (equal? key "slow")) (not valid)) #f)
+                (else
+                  (for-each (lambda (b)
+                              (for-each (lambda (id) (set! extra (cons (list id b) extra)))
+                                        (group-buffer-memberships b)))
+                            (cdr bucket))))))
+      buckets)
+    ;; the rare rows the slow path settled join their group's cell
+    (fold (lambda (index pair)
+            (let ((cell (assoc (car pair) index)))
+              (cond ((not cell) (cons pair index))
+                    ((member (cadr pair) (cdr cell)) index)
+                    (else (cons (append cell (list (cadr pair)))
+                                (remove (lambda (c) (equal? (car c) (car pair))) index))))))
+          index (reverse extra))))
 
 ;; with no kernel index: one metadata read of every buffer
 (define (group-members-index-scan names)
@@ -2403,18 +2397,15 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-switch-candidate-in (group-members-index) g))
 
 
-(define (pseudo-group-cells)
+(define (pseudo-group-cells &optional rows)
   ;; ((ID BUF ...) ...) for every pseudo group, the empty ones left out.
-  ;; The mode groups come from one read of the kernel's mode index, not
-  ;; one read a group; the others ask their own members.
+  ;; A mode group is the buffer rows bucketed by mode, read once for all
+  ;; of them; the others ask their own members.
   (let* ((ids (pseudo-group-ids))
-         (modes (and (boundp 'group-index-modes) (group-index-modes)))
-         (by-id (if modes
-                    (map (lambda (row)
-                           (cons (string-append "pseudo:" (group-home-slug (mode-group-name (car row))))
-                                 (cdr row)))
-                         modes)
-                    '())))
+         (by-id (map (lambda (run)
+                       (cons (string-append "pseudo:" (group-home-slug (mode-group-name (car run))))
+                             (cdr run)))
+                     (cadr (or rows (group-buffer-rows))))))
     (filter (lambda (cell) (pair? (cdr cell)))
             (map (lambda (id)
                    (let ((hit (and (member id *mode-group-ids*) (assoc id by-id))))
@@ -2430,9 +2421,11 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
          ;; the pseudo groups' members, read once; the empty ones are left out
-         (pseudo-cells (pseudo-group-cells))
-         ;; one read of the kernel's group index counts every row
-         (index (append pseudo-cells (group-members-index)))
+         ;; the group list is the buffer list, bucketed: one read of the
+         ;; buffer rows makes every group's cell, real and pseudo
+         (brows (group-buffer-rows))
+         (pseudo-cells (pseudo-group-cells brows))
+         (index (append pseudo-cells (group-members-index brows)))
          (split (group-ids-mru-split))
          (all (car split))
          (away (cadr split))
@@ -3474,11 +3467,12 @@ is forgotten and that group falls back to creation order in the switcher."
                  '("mode-name" "group-id" "group-ids" "group" "companion-of")))))))
 
 (define (group-index-candidates names keys)
-  ;; the kernel files every buffer under the group its locals name
-  ;; (GroupIndex), so the rule above reads a handful of rows, not every
-  ;; buffer. A daemon without the index reads them all, as before.
-  (or (and (boundp 'group-index-select) (group-index-select names keys))
-      names))
+  ;; the buffer rows carry the group key each buffer's locals name, so the
+  ;; rule above reads a handful of rows, not every buffer; a key the rows
+  ;; cannot settle ("slow") is always a candidate
+  (let ((hits (map car (cadr (buffer-rows (list 'names names 'hidden #t 'context-only #t
+                                                'groups (cons "slow" keys)))))))
+    (dedupe-names (filter (lambda (n) (member n hits)) names))))
 
 (define (group-buffers g)
   (let ((id (group-resolve-id g)))

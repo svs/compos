@@ -83,10 +83,14 @@ defmodule Compos.Core.Application do
       # dropped — the browser would then be told this daemon serves nothing
       Compos.Core.Browser,
       Compos.Core.Google,
-      Compos.Core.Session,
       # the workflows: supervised consumers of the event log whose handlers
-      # are Scheme, so they follow Session; Scheme defines them as it loads
+      # are Scheme. Before Session: a package defines its workflow at load,
+      # inside Session's boot, and a workflow started then waits for
+      # Session.ready? before it runs a batch. Started after Session, the
+      # first define-workflow! starts the tree on its own and this child
+      # fails as "already started"; the daemon does not boot.
       Compos.Core.Workflows,
+      Compos.Core.Session,
       # cron: Quantum's scheduler. A due job appends to the log, and
       # cron.scm schedules the jobs as it loads
       Compos.Core.Cron,

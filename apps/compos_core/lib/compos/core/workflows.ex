@@ -6,8 +6,10 @@ defmodule Compos.Core.Workflows do
 
   Scheme defines workflows (`define-workflow!` in workflows.scm) when its
   package loads, so after a daemon restart they come back as the packages
-  load. `define/1` is idempotent: defining a running workflow again
-  reconfigures it in place, and its position is untouched.
+  load. The tree starts this supervisor before Session for that reason: a
+  package loads inside Session's boot. `define/1` is idempotent: defining
+  a running workflow again reconfigures it in place, and its position is
+  untouched.
   """
 
   use Supervisor

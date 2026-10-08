@@ -26,6 +26,19 @@ defmodule Compos.LoadTest do
     assert Session.boot_errors() == []
   end
 
+  # A package may call define-workflow! at load, inside Session's boot. The
+  # first call starts the workflow tree when the application did not, and
+  # an application child that starts later fails as "already started".
+  test "the workflow tree is up before the Scheme world boots" do
+    # which_children lists the newest child first
+    children = Enum.reverse(Supervisor.which_children(Compos.Core.Supervisor))
+    ids = for {id, _, _, _} <- children, do: id
+    assert Enum.find_index(ids, &(&1 == Compos.Core.Workflows)) < Enum.find_index(ids, &(&1 == Session))
+
+    pids = for {_, pid, _, _} <- children, do: pid
+    assert Process.whereis(Compos.Core.Workflows) in pids
+  end
+
   test "stock init reaches every bundled package through package entry points" do
     priv = Application.app_dir(:compos_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))

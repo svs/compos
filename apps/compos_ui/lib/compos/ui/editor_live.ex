@@ -1118,6 +1118,7 @@ defmodule Compos.Ui.EditorLive do
       </c-group>
       <.frame_header_line state={@state} tabs={@tabs} />
       <.frame_echo state={@state} />
+      <.frame_notices state={@state} />
       <c-windows class="windows" role="main" data-slide={assigns[:slide]}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
@@ -1328,6 +1329,27 @@ defmodule Compos.Ui.EditorLive do
       </c-key-hints>
     </c-statusbar>
     """
+  end
+
+  # The notices that pass in the corner, newest on top, as Scheme publishes
+  # them (notifications.scm): (SEQ SOURCE TITLE BODY). They take no focus
+  # and no click; M-x notifications keeps the history.
+  defp frame_notices(assigns) do
+    ~M"""
+    <c-group :if={notices(@state) != []} class="notices" role="status" aria-live="polite">
+      <c-group :for={{seq, source, title, body} <- notices(@state)} id={"notice-" <> seq} class="notice">
+        <c-text class="notice-source">{source}</c-text>
+        <c-text class="notice-title">{title}</c-text>
+        <c-text :if={body != ""} class="notice-body">{body}</c-text>
+      </c-group>
+    </c-group>
+    """
+  end
+
+  defp notices(state) do
+    for [seq, source, title, body] <- chrome(state, "notifications"),
+        Enum.all?([seq, source, title, body], &is_binary/1),
+        do: {seq, source, title, body}
   end
 
   # The echo area's key hints, as Scheme publishes them (echo-key-hints in

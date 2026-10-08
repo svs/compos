@@ -39,15 +39,20 @@
 
 (define (notifications--source e)
   "notify:whatsapp is whatsapp"
-  (substring (plist-get e 'topic) (string-length "notify:")))
+  (let ((topic (plist-get e 'topic)))
+    (substring topic (string-length "notify:") (string-length topic))))
 
 (define (notifications--text x)
   (if (and (string? x) (> (string-length x) 0)) x #f))
 
 (define (notifications--name from)
   "the name of a From header: Slack <no-reply@slack.com> is Slack"
-  (let ((name (string-trim (car (string-split from " <")))))
-    (if (> (string-length name) 0) name from)))
+  (let* ((name (string-trim (car (string-split from " <"))))
+         (n (string-length name)))
+    (cond ((= n 0) from)
+          ((and (> n 1) (string-prefix? "\"" name) (string-suffix? "\"" name))
+           (substring name 1 (- n 1)))
+          (else name))))
 
 (define (notifications--chrome)
   (map (lambda (n) (list (number->string (car n)) (nth 1 n) (nth 2 n) (nth 3 n)))

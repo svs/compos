@@ -3109,3 +3109,42 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
 ;; after the load, not in it: a start inside the loader does not take
 (when mail-feed-enabled
   (debounce! 'mail-feed-boot 0 (lambda (_) (mail-feed-start!)) #f))
+
+;;; notices: inbox mail that arrives passes in the corner
+
+(domain! 'mail)
+(effects! '(write display))
+
+(defcustom 'mail-notify #t
+  "Show a notice for each inbox mail that arrives.")
+
+(defcustom 'mail-notify-skip-tags
+  '("spam" "promotions" "social" "forums" "updates" "newsletter" "transactional")
+  "Mail with one of these notmuch tags makes no notice.")
+
+(define (mail-notify--name from)
+  "the name of a From header: \"Air India\" <x@y> is Air India, a bare address stays"
+  (let* ((name (string-trim (car (string-split from " <"))))
+         (n (string-length name)))
+    (cond ((= n 0) from)
+          ((and (> n 1) (string-prefix? "\"" name) (string-suffix? "\"" name))
+           (substring name 1 (- n 1)))
+          (else name))))
+
+(define (mail-notify-wanted? e)
+  "#t when the mail E is in the inbox and wears none of mail-notify-skip-tags"
+  (let ((tags (or (plist-get (plist-get e 'data) 'tags) '())))
+    (and (member "inbox" tags)
+         (null? (filter (lambda (t) (member t mail-notify-skip-tags)) tags)))))
+
+(define (mail-notify--saw e)
+  "a received inbox mail makes a notice: the sender's name, then the subject"
+  (let ((d (plist-get e 'data)))
+    (when (and mail-notify (eq? (plist-get e 'kind) 'received) (mail-notify-wanted? e))
+      (notify! "mail"
+               (mail-notify--name (or (plist-get d 'from) "Mail"))
+               (or (plist-get d 'subject) "")
+               (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq)
+                     'mailbox (plist-get d 'mailbox) 'id (plist-get d 'id))))))
+
+(event-subscribe! "mail-notify" "mail:*" 'mail-notify--saw)

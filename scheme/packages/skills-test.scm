@@ -214,10 +214,10 @@
 
       (shell-command->string (string-append "rm -rf " home)))))
 
-;;; --- compiled skills: the parts that need no model ---------------------------
+;;; --- skills that carry code: the parts that need no model -----------------
 
 (deftest 'skill-unknown-names-only-the-operators-nothing-defines
-  "a compiled form may call core Scheme, the catalog and its own locals"
+  "a skill's code may call core Scheme, the catalog and its own locals"
   (lambda ()
     (check-equal! (skill--unknown '(lambda (args)
                                      (let loop ((xs (list args)) (n 0))
@@ -228,28 +228,25 @@
     (check-equal! (skill--unknown '(lambda (x) (case x ((zz-a zz-b) 1) (else 2))))
                   '() "case datums are not calls")))
 
-(deftest 'skill-code-takes-the-lambda-out-of-a-fenced-reply
-  "the model may fence or explain; only the form is kept"
+(deftest 'skill-run-block-is-only-the-marked-block
+  "an unmarked scheme block is an example, not the code"
   (lambda ()
-    (check-equal! (skill--code "Here:\n```scheme\n(lambda (args) args)\n```\nDone.")
-                  "(lambda (args) args)" "the form alone")
-    (check-false! (skill--code "no code here") "no form, no code")))
+    (check-equal! (skill--run-block "Prose.\n\n```scheme\n(example)\n```\n\n```scheme run\n(lambda (args) args)\n```\n")
+                  "(lambda (args) args)" "the marked block alone")
+    (check-false! (skill--run-block "```scheme\n(example)\n```\n") "no marked block, no code")))
 
-(deftest 'a-skill-is-none-then-current-then-stale
-  "skill.scm carries a hash of its prose, so an edit to SKILL.md makes it out of date"
+(deftest 'a-skill-with-a-run-block-is-code-and-its-code-runs
+  "the block reads, passes the check and runs; a skill without one is prose"
   (lambda ()
     (shell-command->string (string-append "mkdir -p " t--skill-dir))
     (t--skill-write! "Say hello.")
     (skills-scan!)
-    (check-equal! (skill-state "zz-user-skill") 'none "no skill.scm yet")
-    (write-file! (skill--compiled-path t--skill-dir)
-                 (string-append "(skill-source "
-                                (json-encode (skill--hash (read-file (string-append t--skill-dir "/SKILL.md"))))
-                                ")\n(lambda (args) (string-append \"hello \" args))\n"))
-    (check-equal! (skill-state "zz-user-skill") 'current "compiled from this prose")
-    (check-equal! ((eval (cadr (skill--compiled t--skill-dir))) "you") "hello you"
-                  "the compiled form runs")
-    (t--skill-write! "Say goodbye.")
-    (check-equal! (skill-state "zz-user-skill") 'stale "the prose changed")
+    (check-equal! (skill-state "zz-user-skill") 'prose "no block yet")
+    (t--skill-write! "Say hello.\n\n```scheme run\n(lambda (args) (string-append \"hello \" args))\n```")
+    (check-equal! (skill-state "zz-user-skill") 'code "the block is the code")
+    (check-equal! (skill-check "zz-user-skill") '() "and it passes the check")
+    (check-equal! ((eval (car (skill--code t--skill-dir))) "you") "hello you" "the code runs")
+    (t--skill-write! "Say hello.\n\n```scheme run\n(lambda (args) (zz-made-up args))\n```")
+    (check-contains! (car (skill-check "zz-user-skill")) "zz-made-up" "the check names a made-up call")
     (shell-command->string (string-append "rm -rf " t--skill-dir))
     (skills-scan!)))

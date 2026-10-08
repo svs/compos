@@ -707,3 +707,33 @@
              (lambda (_) (if on (whatsapp-feed-start!) (whatsapp-feed-stop!))) #f))
 
 (when whatsapp-feed-enabled (whatsapp-feed--apply #t))
+
+;;; notices: a WhatsApp message that arrives passes in the corner
+
+(domain! 'chat)
+(effects! '(write display))
+
+(defcustom 'whatsapp-notify #t
+  "Show a notice for each WhatsApp message that arrives.")
+
+(define (whatsapp-notify--text x)
+  (if (and (string? x) (> (string-length x) 0)) x #f))
+
+(define (whatsapp-notify--saw e)
+  "a received message, other than a status update, makes a notice: the chat, then the first line"
+  (let ((d (plist-get e 'data)))
+    (when (and whatsapp-notify
+               (eq? (plist-get e 'kind) 'received)
+               (not (equal? (plist-get d 'chat) "status@broadcast")))
+      (let ((text (whatsapp-notify--text (plist-get d 'text)))
+            (media (whatsapp-notify--text (plist-get d 'media))))
+        (notify! "whatsapp"
+                 (or (whatsapp-notify--text (plist-get d 'chat-name))
+                     (whatsapp-notify--text (plist-get d 'phone))
+                     "WhatsApp")
+                 (cond (text (first-line text))
+                       (media (string-append "[" media "]"))
+                       (else ""))
+                 (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq)))))))
+
+(event-subscribe! "whatsapp-notify" "whatsapp:*" 'whatsapp-notify--saw)

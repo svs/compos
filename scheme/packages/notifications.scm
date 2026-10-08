@@ -4,7 +4,8 @@
 ;;; under notify:SOURCE, so the log is the history. A new notice shows in a
 ;;; small stack in the corner of every frame and leaves after
 ;;; notifications-seconds. It takes no focus and no key.
-;;; WhatsApp messages and inbox mail that arrive become notices too.
+;;; This is only the pipe: each mode subscribes to its own events and
+;;; decides what makes a notice.
 
 (domain! 'interaction)
 (effects! '(write))
@@ -17,16 +18,6 @@
 
 (defcustom 'notifications-history-limit 500
   "How many of the newest notices M-x notifications shows.")
-
-(defcustom 'notifications-whatsapp #t
-  "Show a notice for each WhatsApp message that arrives.")
-
-(defcustom 'notifications-mail #t
-  "Show a notice for each inbox mail that arrives.")
-
-(defcustom 'notifications-mail-skip-tags
-  '("spam" "promotions" "social" "forums" "updates" "newsletter" "transactional")
-  "Mail with one of these notmuch tags makes no notice.")
 
 (define *notifications-buffer* "*notifications*")
 
@@ -41,18 +32,6 @@
   "notify:whatsapp is whatsapp"
   (let ((topic (plist-get e 'topic)))
     (substring topic (string-length "notify:") (string-length topic))))
-
-(define (notifications--text x)
-  (if (and (string? x) (> (string-length x) 0)) x #f))
-
-(define (notifications--name from)
-  "the name of a From header: Slack <no-reply@slack.com> is Slack"
-  (let* ((name (string-trim (car (string-split from " <"))))
-         (n (string-length name)))
-    (cond ((= n 0) from)
-          ((and (> n 1) (string-prefix? "\"" name) (string-suffix? "\"" name))
-           (substring name 1 (- n 1)))
-          (else name))))
 
 (define (notifications--chrome)
   (map (lambda (n) (list (number->string (car n)) (nth 1 n) (nth 2 n) (nth 3 n)))
@@ -95,41 +74,7 @@
   (event-publish! (string-append "notify:" source) 'notice
                   (append (list 'title title 'body (or body "")) (or props '()))))
 
-;;; the comms channels
-
-(define (notifications--whatsapp e)
-  (when (and notifications-whatsapp
-             (eq? (plist-get e 'kind) 'received)
-             (not (equal? (notifications--data e 'chat) "status@broadcast")))
-    (let ((text (notifications--text (notifications--data e 'text)))
-          (media (notifications--text (notifications--data e 'media))))
-      (notify! "whatsapp"
-               (or (notifications--text (notifications--data e 'chat-name))
-                   (notifications--text (notifications--data e 'phone))
-                   "WhatsApp")
-               (cond (text (first-line text))
-                     (media (string-append "[" media "]"))
-                     (else ""))
-               (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq))))))
-
-(define (notifications--mail-wanted? e)
-  (let ((tags (or (notifications--data e 'tags) '())))
-    (and (member "inbox" tags)
-         (null? (filter (lambda (t) (member t notifications-mail-skip-tags)) tags)))))
-
-(define (notifications--mail e)
-  (when (and notifications-mail
-             (eq? (plist-get e 'kind) 'received)
-             (notifications--mail-wanted? e))
-    (notify! "mail"
-             (notifications--name (or (notifications--data e 'from) "Mail"))
-             (or (notifications--data e 'subject) "")
-             (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq)
-                   'mailbox (notifications--data e 'mailbox) 'id (notifications--data e 'id)))))
-
 (event-subscribe! "notifications" "notify:*" 'notifications--saw)
-(event-subscribe! "notifications-whatsapp" "whatsapp:*" 'notifications--whatsapp)
-(event-subscribe! "notifications-mail" "mail:*" 'notifications--mail)
 
 ;;; M-x notifications: the history
 

@@ -94,6 +94,11 @@ defmodule Compos.Core.Application do
       # cron: Quantum's scheduler. A due job appends to the log, and
       # cron.scm schedules the jobs as it loads
       Compos.Core.Cron,
+      %{
+        id: :cron_boot,
+        start: {Task, :start_link, [&Compos.Core.Cron.boot/0]},
+        restart: :temporary
+      },
       Compos.Core.Desktop,
       # dev: a saved source file reaches this daemon without a restart
       Compos.Core.Hotload,

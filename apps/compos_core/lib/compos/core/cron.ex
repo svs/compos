@@ -46,7 +46,16 @@ defmodule Compos.Core.Cron do
   end
 
   @doc "True when the scheduler runs. A daemon that booted before cron existed has none."
-  def running?, do: GenServer.whereis(__job_broadcaster__()) != nil
+  def running?, do: Code.ensure_loaded?(Quantum) and GenServer.whereis(__job_broadcaster__()) != nil
+
+  @doc """
+  Hand cron.scm its jobs. The packages load before the scheduler and the
+  workflows start, so cron.scm defines its workflow and schedules the jobs
+  of cron-file here, once both are up.
+  """
+  def boot do
+    Compos.Core.Session.call_named("cron--boot!", [], nil, 60_000, {:system, :cron_boot})
+  end
 
   @doc "The job's run: one event on `cron:NAME`. Quantum calls this when NAME is due."
   def fire(name, spec) do

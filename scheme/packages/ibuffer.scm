@@ -1713,7 +1713,14 @@
                                              (cons "ibuffer-pretty-mode" *ibuffer-view-modes*))
                                      #t)))
          (_opts (buffer-set-local! buf 'ibuffer-render-options (or options '())))
-         (_g (ibuffer-refresh! buf))
+         ;; a view that kept its rows shows them at once and refreshes
+         ;; right after the draw: a refresh is ~170 ms the key would wait
+         ;; for, and an unchanged table patches nothing.
+         (_g (if (and (not picker?) (> (buffer-size buf) 0))
+                 (debounce! (string-append "ibuffer-open:" buf) 0
+                            (lambda (b) (when (buffer-exists? b) (ibuffer-refresh! b)))
+                            buf)
+                 (ibuffer-refresh! buf)))
          (t4 (monotonic-ms))
          (_h (ibuffer-goto-first-row! buf))
          (t5 (monotonic-ms)))

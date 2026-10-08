@@ -933,11 +933,23 @@
 ;; Reset deliberately forgets 'chat-log-id, so recovery cannot depend on the
 ;; current buffer remembering which conversation came before it.  Present the
 ;; concise enough for completion, while the callback resolves the full path.
+(define *chat-log-files-newest* #f)
 (define (chat-log-files-newest)
-  (map cadr
-    (sort
-      (map (lambda (path) (list (- 0 (file-mtime path)) path))
-           (chat-log-files)))))
+  ;; Every saved log, newest first. Listing 70 folders and dating 600 files
+  ;; cost ~30 ms on each draw of the chat list, so the answer is kept until
+  ;; a folder's own date moves: that is a log added or removed. A log an
+  ;; open chat appends to keeps its old place here until then.
+  (let* ((dirs (cons (chat-log-legacy-dir)
+                     (map (lambda (g) (string-append (group-home-dir g) "/chats")) (group-ids))))
+         (key (map (lambda (d) (list d (and (file-exists? d) (file-mtime d)))) dirs)))
+    (if (and *chat-log-files-newest* (equal? (car *chat-log-files-newest*) key))
+        (cadr *chat-log-files-newest*)
+        (let ((paths (map cadr
+                       (sort
+                         (map (lambda (path) (list (- 0 (file-mtime path)) path))
+                              (chat-log-files))))))
+          (set! *chat-log-files-newest* (list key paths))
+          paths))))
 
 (define (chat-log-leaf path)
   (cadr (path-split path)))

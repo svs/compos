@@ -1637,7 +1637,11 @@
 ;;; all, and the drawn rows are a prefix of the entries, so an index means
 ;;; the same row in both.
 
-(define (list-page-size buf) (list-opt buf 'page-size))
+;; 'page-size is a count, or a function of the buffer: a page that
+;; follows the window draws what the reader can see and no more
+(define (list-page-size buf)
+  (let ((size (list-opt buf 'page-size)))
+    (if (procedure? size) (size buf) size)))
 
 ;; how many rows the next draw writes: the pages opened so far, or one
 (define (list-page-limit buf)

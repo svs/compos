@@ -2403,6 +2403,24 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-switch-candidate-in (group-members-index) g))
 
 
+(define (pseudo-group-cells)
+  ;; ((ID BUF ...) ...) for every pseudo group, the empty ones left out.
+  ;; The mode groups come from one read of the kernel's mode index, not
+  ;; one read a group; the others ask their own members.
+  (let* ((ids (pseudo-group-ids))
+         (modes (and (boundp 'group-index-modes) (group-index-modes)))
+         (by-id (if modes
+                    (map (lambda (row)
+                           (cons (string-append "pseudo:" (group-home-slug (mode-group-name (car row))))
+                                 (cdr row)))
+                         modes)
+                    '())))
+    (filter (lambda (cell) (pair? (cdr cell)))
+            (map (lambda (id)
+                   (let ((hit (and (member id *mode-group-ids*) (assoc id by-id))))
+                     (if hit hit (cons id (pseudo-group-buffers id)))))
+                 ids))))
+
 (define (group-switch-prompt-rows)
   ;; ((CANDIDATE ...) . ((LABEL ID) ...)): the rows the prompt draws,
   ;; and the group each label means. The prompt hands a selection back as its
@@ -2412,9 +2430,7 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; name and so showed another group's buffers.
   (let* ((current (frame-group))
          ;; the pseudo groups' members, read once; the empty ones are left out
-         (pseudo-cells (filter (lambda (cell) (pair? (cdr cell)))
-                               (map (lambda (id) (cons id (pseudo-group-buffers id)))
-                                    (pseudo-group-ids))))
+         (pseudo-cells (pseudo-group-cells))
          ;; one read of the kernel's group index counts every row
          (index (append pseudo-cells (group-members-index)))
          (split (group-ids-mru-split))

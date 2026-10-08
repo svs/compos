@@ -2039,6 +2039,22 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                  ] ->
         Buffer.get_local(buf, plain(k)) || false
       end,
+      {"buffer-rows",
+       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, read from the buffer read model, live and dormant, with no cache. SPEC is a plist: names, modes, exclude-modes, exclude-names, groups, dirs, hidden, context-only, match, sort (recent name size), group-by (group mode), offset, limit, fields. A field is name, path, size, modified, live, mode, title, group, used (ms), windows, or any buffer local. A row is (NAME FIELD-VALUES...); missing values are #f."} =>
+        fn args ->
+          spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
+
+          opts =
+            spec
+            |> Enum.chunk_every(2)
+            |> Map.new(fn
+              [k, v] -> {plain(k), rows_opt(v)}
+              [k] -> {plain(k), true}
+            end)
+
+          {total, rows} = Compos.Core.BufferRows.query(opts)
+          [total, rows]
+        end,
       {"buffer-read-many",
        "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id."} =>
         fn [names, fields, keys] ->
@@ -3502,6 +3518,10 @@ defmodule Compos.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # a buffer-rows option: symbols read as their names, in lists too
+  defp rows_opt(v) when is_list(v), do: Enum.map(v, &plain/1)
+  defp rows_opt(v), do: plain(v)
 
   # the optional LIMIT of a property-change search: an integer, or nothing
   defp limit([limit | _]) when is_integer(limit), do: limit

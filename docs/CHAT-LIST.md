@@ -3,10 +3,9 @@
 The chat list is the mode list of `chat-mode`: `(mode-list "chat-mode")`,
 ibuffer over the chats (`scheme/packages/mode-list.scm`). The chats add
 only what is theirs, with `mode-list-define!` in `agent-fleet.scm`: the
-agents that are no chat buffer, the 40 recent rows at rest, the state and
-model sections, the saved chats under the live ones, the transcript a
-filter reads, and the verbs on the chat at point. `M-x mode-list` lists
-the buffers of any other mode the same way.
+agents that are no chat buffer, the saved chats under the live ones, the
+transcript a filter reads, and the verbs on the chat at point. `M-x
+mode-list` lists the buffers of any other mode the same way.
 
 ## Two surfaces, one table
 
@@ -205,5 +204,4 @@ narrowed to the chats that say them.
 
 ## Settings
 
-- `chat-list-recent-limit`: how many chats the resting list shows.
 - `chats-archived-limit`: how many saved chats the last section holds.

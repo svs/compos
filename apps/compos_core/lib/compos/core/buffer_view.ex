@@ -73,6 +73,7 @@ defmodule Compos.Core.BufferView do
     end
 
     :ets.delete(@table, name)
+    :ets.delete(@table, {:use, name})
     :ets.match_delete(@table, {{:big_local, name, :_}, :_})
     Process.delete({__MODULE__, :big, name})
     GroupIndex.drop(name)
@@ -81,6 +82,46 @@ defmodule Compos.Core.BufferView do
     # the table is gone (see `lookup/1`) — there is no row to drop
     ArgumentError -> :ok
   end
+
+  @doc """
+  Record that NAME was used at MS, system milliseconds. What the editor
+  knows of a buffer's use sits beside its row, under `{:use, NAME}`:
+  `used` and `windows`. `Compos.Core.Editor` is its only writer.
+  """
+  def note_used(name, ms) when is_binary(name), do: update_use(name, &Map.put(&1, :used, ms))
+  def note_used(_, _), do: :ok
+
+  @doc """
+  Record which windows show each buffer: BY_BUFFER maps a name to its
+  window ids. A name in WAS and not in BY_BUFFER is shown nowhere now.
+  Only the names whose windows changed are written.
+  """
+  def note_windows(by_buffer, was) do
+    for {name, ids} <- by_buffer, Map.get(was, name) != ids,
+        do: update_use(name, &Map.put(&1, :windows, ids))
+
+    for {name, _} <- was, not Map.has_key?(by_buffer, name),
+        do: update_use(name, &Map.put(&1, :windows, []))
+
+    :ok
+  end
+
+  @doc "NAME's use: `%{used: MS | nil, windows: [ID]}`."
+  def use_of(name) do
+    case lookup({:use, name}) do
+      [{_, use}] -> use
+      [] -> %{used: nil, windows: []}
+    end
+  end
+
+  defp update_use(name, f) when is_binary(name) do
+    :ets.insert(@table, {{:use, name}, f.(use_of(name))})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp update_use(_, _), do: :ok
 
   @doc "Publish VIEW under its own name, and under its id for `Ref` readers."
   def put(%{name: name, id: id} = view) do

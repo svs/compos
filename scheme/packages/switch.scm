@@ -879,34 +879,61 @@
            (if (member (car pair) duplicates) (list (cadr pair) (cadr pair)) pair)) pairs)))
 
 (define (switch-buffer-info-candidates candidates rows groups)
-  (map (lambda (candidate)
-    (let* ((r (assoc (cadr candidate) rows))
-           (mode (or (nth 3 r) ""))
-           (ids (if (equal? mode "chat-mode") (nth 4 r) (or (nth 5 r) (nth 6 r))))
-           (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
-           (group (string-join (map (lambda (id)
-                    (let ((g (assoc id groups))) (if g (cadr g) id))) ids) ", "))
-           (parts (filter (lambda (s) (not (equal? s "")))
-                    (list (if (and (nth 1 r) (nth 2 r)) "*" "") mode group))))
-      (list (car candidate) (string-join parts "  ")))) candidates))
+  ;; CANDIDATES and ROWS come in the same order, so a row is the next one,
+  ;; never a search through every row
+  (let loop ((cs candidates) (rs rows) (out '()))
+    (if (null? cs)
+        (reverse out)
+        (let* ((candidate (car cs))
+               (r (if (and (pair? rs) (equal? (car (car rs)) (cadr candidate)))
+                      (car rs)
+                      (or (assoc (cadr candidate) rows) (list (cadr candidate) #f #f #f #f #f #f))))
+               (mode (or (nth 3 r) ""))
+               (ids (if (equal? mode "chat-mode") (nth 4 r) (or (nth 5 r) (nth 6 r))))
+               (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
+               (group (string-join (map (lambda (id)
+                        (let ((g (assoc id groups))) (if g (cadr g) id))) ids) ", "))
+               (parts (filter (lambda (s) (not (equal? s "")))
+                        (list (if (and (nth 1 r) (nth 2 r)) "*" "") mode group))))
+          (loop (cdr cs) (if (pair? rs) (cdr rs) rs)
+                (cons (list (car candidate) (string-join parts "  ")) out))))))
+
+(define (switch-prompt-rows here win)
+  ;; switch-prompt-buffers' order from one read of the buffer rows: the
+  ;; buffers WIN showed before, every other buffer by recent use, HERE,
+  ;; then the recent files. A row is (NAME PATH MODIFIED MODE GROUP-ID
+  ;; GROUP-IDS GROUP); a file that is no buffer has #f for each.
+  (let* ((all (filter (lambda (r) (not (and (nth 7 r) (nth 8 r))))
+                      (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
+                                               'fields '(path modified mode group-id group-ids group
+                                                         live preview-opened))))))
+         (row-of (lambda (r) (list-head r 7)))
+         (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
+         (led (filter (lambda (r) r)
+                      (map (lambda (n) (and (not (equal? n here)) (assoc n all))) mine)))
+         (led-names (map car led))
+         (rest (filter (lambda (r) (not (or (equal? (car r) here) (member (car r) led-names)))) all))
+         (self (let ((r (assoc here all))) (if r (list r) '())))
+         (buffers (map row-of (append led rest self))))
+    (append buffers
+            (map (lambda (f) (list (car f) #f #f #f #f #f #f))
+                 (filter (lambda (f) (not (assoc (car f) buffers))) (switch-recent-rows))))))
 
 (define (switch-bare-prompt!)
   (let* ((start (monotonic-ms))
          (home (active-window))
          (here (or (window-buffer home) (current-buffer)))
          (group (or (buffer-group here) (frame-local 'current-group)))
-         (names (switch-prompt-buffers here group (active-window)))
-         (rows (if ibuffer-info
-                   (buffer-read-many names '(path modified) '(mode-name group-id group-ids group))
-                   (buffer-read-many names '(path) '(mode-name))))
-         (names (map car (filter (lambda (r) (ibuffer-workspace-path? (cadr r))) rows)))
+         (rows (filter (lambda (r) (ibuffer-workspace-path? (cadr r)))
+                       (switch-prompt-rows here (active-window))))
+         (names (map car rows))
          (candidates (switch-bare-candidates names))
          (display (if ibuffer-info
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
                       ;; the mode stays beside every buffer, info or not
                       (map (lambda (c)
                              (let ((r (assoc (cadr c) rows)))
-                               (list (car c) (or (and r (nth 2 r)) ""))))
+                               (list (car c) (or (and r (nth 3 r)) ""))))
                            candidates)))
          (woken '())
          (restore! (lambda () (preview-end #f)))

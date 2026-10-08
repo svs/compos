@@ -86,24 +86,50 @@
   'group 'chat 'type 'integer)
 
 (define (chats-live-log-paths)
-  (let loop ((bs (chat-list-bufs)) (acc '()))
-    (if (null? bs)
-        acc
-        (let ((id (buffer-local (car bs) 'chat-log-id)))
-          (loop (cdr bs)
-                (if id
-                    (cons (string-append (chat-log-dir-for (car bs)) "/" id ".chat") acc)
-                    acc))))))
+  ;; every open chat's log, from one read of the buffer rows: a chat's log
+  ;; lies in its group's folder, and each folder is looked up once
+  (let ((known (group-ids)) (dirs '()))
+    (let loop ((rows (cadr (buffer-rows (list 'names (chat-list-bufs) 'hidden #t 'context-only #t
+                                              'fields '(chat-log-id group-id mode)))))
+               (acc '()))
+      (if (null? rows)
+          acc
+          (let* ((row (car rows)) (id (nth 1 row)) (gid (nth 2 row)))
+            (loop (cdr rows)
+                  (if (string? id)
+                      ;; group-id names a chat's group; any other buffer
+                      ;; answers buffer-group its own way
+                      (let ((dir (if (and (equal? (nth 3 row) "chat-mode") (string? gid) (member gid known))
+                                     (let ((hit (assoc gid dirs)))
+                                       (if hit
+                                           (cadr hit)
+                                           (let ((d (string-append (group-home-dir gid) "/chats")))
+                                             (set! dirs (cons (list gid d) dirs))
+                                             d)))
+                                     (chat-log-dir-for (car row)))))
+                        (cons (string-append dir "/" id ".chat") acc))
+                      acc)))))))
 
 (define (chats-archived-rows)
   (if (not (boundp (quote chat-log-files-newest)))
       '()
-      (let ((live (chats-live-log-paths)))
-        (take (filter (lambda (path)
-                          (and (not (buffer-known? path))
-                               (not (member path live))))
-                        (chat-log-files-newest))
-                chats-archived-limit))))
+      ;; the newest closed logs, read until there are enough: the rest of
+      ;; the 600 are never shown, so they are never checked. A log is open
+      ;; when an open chat holds its id, and its file is named for the id.
+      (let ((live (filter string? (map (lambda (r) (nth 1 r))
+                                       (cadr (buffer-rows (list 'hidden #t 'context-only #t
+                                                                'fields '(chat-log-id))))))))
+        (let loop ((paths (chat-log-files-newest)) (n 0) (out '()))
+          (if (or (null? paths) (>= n chats-archived-limit))
+              (reverse out)
+              (let* ((path (car paths))
+                     (leaf (file-name-nondirectory path))
+                     (id (if (string-suffix? ".chat" leaf)
+                             (substring leaf 0 (- (string-length leaf) 5))
+                             leaf)))
+                (if (or (buffer-known? path) (member id live))
+                    (loop (cdr paths) n out)
+                    (loop (cdr paths) (+ n 1) (cons path out)))))))))
 
 (define (chats-archived-row? e)
   (and (string? e) (not (buffer-known? e))))
@@ -241,7 +267,8 @@
   (string-append (chats-metadata-text b) " " (or (chat-list-hit b) "")))
 
 (ibuffer-kind! 'chat
-  (list 'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
+  (list 'mode "chat-mode"
+        'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
         ;; a round dot, lit by what the chat is doing: the eye reads a
         ;; colour before it reads a word, and the live one pulses
         'dot (lambda (b)
@@ -773,8 +800,6 @@
 (category! 'chat)
 (effects! '(write display))
 
-(defcustom 'chat-list-recent-limit 40
-  "How many chats the chat list shows at rest. A search reads every chat.")
 
 (define (chat-list--read-text b)
   (let* ((id (buffer-local b 'chat-log-id))
@@ -810,7 +835,6 @@
     ;; an agent is listed with the chats even where its buffer is no chat
     'member-locals '("agent-slug")
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
-    'recent-limit (lambda () chat-list-recent-limit)
     'defaults '(sort recent grouping group)
     ;; a chat you archived is still a chat you switch to: the saved
     ;; conversations come under the live ones, and RET reads one back

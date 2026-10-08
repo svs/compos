@@ -2414,7 +2414,24 @@ defmodule Compos.Core.Editor do
       end
 
     Enum.each(fids, &Events.broadcast_frame/1)
+    note_windows(state)
     {:reply, reply, notify_configuration(state, fids)}
+  end
+
+  # Publish which windows show each buffer beside its row, for the lists.
+  # Only the buffers whose windows changed are written.
+  defp note_windows(state) do
+    now =
+      for {_fid, f} <- state.frames, {id, buf} <- leaf_ids_buffers(f.tree), is_binary(buf), reduce: %{} do
+        acc -> Map.update(acc, buf, [id], &(&1 ++ [id]))
+      end
+
+    was = Process.get(:compos_buffer_windows, %{})
+
+    if now != was do
+      Compos.Core.BufferView.note_windows(now, was)
+      Process.put(:compos_buffer_windows, now)
+    end
   end
 
   # Every mutation commits through changed/3, so this is the one place
@@ -2518,6 +2535,7 @@ defmodule Compos.Core.Editor do
   # offers `false` here; it names no place, so it never enters the history.
   defp bump_mru(state, buffer) when is_binary(buffer) do
     Compos.Core.BufferStore.touch(buffer)
+    Compos.Core.BufferView.note_used(buffer, System.system_time(:millisecond))
     if Buffer.exists?(buffer), do: Buffer.touch(buffer)
     push_mru(state, buffer)
   end

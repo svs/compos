@@ -142,8 +142,45 @@
 ;; note. A row the note does not hold (a section a view adds) is asked.
 (define *ibuffer-kind-notes* '())
 
+(define (ibuffer-buffer-kind b mode)
+  ;; the kind of a known buffer whose mode is MODE: a kind that declares
+  ;; 'mode takes the buffers of that mode, one that declares 'buffers? asks
+  ;; its when?, and the rest -- archived logs, subagents -- are no buffers
+  (let loop ((ks *ibuffer-kinds*))
+    (if (null? ks)
+        'buffer
+        (let ((p (cadr (car ks))))
+          (cond ((and (plist-get p 'mode) (equal? (plist-get p 'mode) mode)) (car (car ks)))
+                ((and (plist-get p 'buffers?) ((plist-get p 'when?) b)) (car (car ks)))
+                (else (loop (cdr ks))))))))
+(define (ibuffer-page-size buf)
+  (let* ((shown (filter (lambda (w) (equal? (nth 1 w) buf)) (window-list-all)))
+         (rows (if (pair? shown) (window-rows (car (car shown))) (window-rows))))
+    (max 20 (+ (or rows 0) 8))))
+
 (define (ibuffer-note-kinds! rows)
-  (set! *ibuffer-kind-notes* (map (lambda (b) (list b (ibuffer-row-kind* b))) rows))
+  ;; every buffer's mode in one read; only a name that is no buffer asks
+  ;; each kind's when?
+  (let ((modes (if (pair? *ibuffer-source-rows*)
+                   *ibuffer-source-rows*
+                   (cadr (buffer-rows (list 'names (filter string? rows) 'hidden #t 'context-only #t
+                                            'fields '(mode))))))
+        ;; a mode's kind, decided once: a kind that asks when? of a buffer
+        ;; ('buffers?) is decided a row at a time
+        (by-mode '())
+        (per-row? (pair? (filter (lambda (k) (plist-get (cadr k) 'buffers?)) *ibuffer-kinds*))))
+    (set! *ibuffer-kind-notes*
+          (map (lambda (b)
+                 (let ((m (and (string? b) (assoc b modes))))
+                   (list b (cond ((not m) (ibuffer-row-kind* b))
+                                 (per-row? (ibuffer-buffer-kind b (cadr m)))
+                                 (else (let ((hit (assoc (cadr m) by-mode)))
+                                         (if hit
+                                             (cadr hit)
+                                             (let ((k (ibuffer-buffer-kind b (cadr m))))
+                                               (set! by-mode (cons (list (cadr m) k) by-mode))
+                                               k))))))))
+               rows)))
   (ibuffer-note-locals! rows))
 
 ;; the same for the locals a kind's cells read: a kind names them with
@@ -399,11 +436,27 @@
 (define (ibuffer-md-row? b)
   (not (and (string? b) (buffer-known? b) (buffer-path b))))
 
-(define (ibuffer-row-title b)
+(define *ibuffer-title-memo* '())
+(define *ibuffer-title-memo-at* 0)
+(define (ibuffer-title-memo-clear!)
+  (set! *ibuffer-title-memo* '())
+  (set! *ibuffer-title-memo-at* (monotonic-ms)))
+(define (ibuffer-row-title-fresh b)
   (let ((parts (ibuffer-row-name b)))
     (if (ibuffer-md-row? b)
         (ibuffer-md-text (string-append (car parts) (cadr parts)))
         (string-append (car parts) (cadr parts)))))
+(define (ibuffer-row-title b)
+  ;; one refresh asks a row's title ~10 times: the sort over the whole
+  ;; scope, the cells, the line names. Each answer holds for one refresh,
+  ;; and never longer than half a second.
+  (when (> (- (monotonic-ms) *ibuffer-title-memo-at*) 500) (ibuffer-title-memo-clear!))
+  (let ((hit (assoc b *ibuffer-title-memo*)))
+    (if hit
+        (cadr hit)
+        (let ((title (ibuffer-row-title-fresh b)))
+          (set! *ibuffer-title-memo* (cons (list b title) *ibuffer-title-memo*))
+          title))))
 
 (define (ibuffer-row-icon b) (if (buffer-known? b) (buffer-icon b) ""))
 
@@ -474,21 +527,24 @@
                    (else '()))))
           (else scope))))
 
+(define *ibuffer-source-rows* '())
+(define *ibuffer-source-sort* #f)
 (define (ibuffer-source buf)
-  ;; one snapshot of every name, not three buffer reads a row: this is
-  ;; ibuffer-row? over the snapshot's path, mode and context-only
-  (let ((rows (buffer-read-many (filter string? (ibuffer-scope-names buf))
-                                '(path) '(mode-name context-only))))
-    (map car
-         (filter (lambda (r)
-                   (let ((b (car r)) (path (list-ref r 1)) (mode (list-ref r 2)))
-                     (and (buffer-known? b)
-                          (not (assoc b *ibuffer-views*))
-                          (not (member mode *ibuffer-view-modes*))
-                          (not (string-prefix? " " b))
-                          (not (equal? (list-ref r 3) #t))
-                          (ibuffer-workspace-path? (or path (and (string-prefix? "/" b) b))))))
-                 rows))))
+  ;; one read of the buffer rows: ibuffer-row? over each row's path, mode
+  ;; and context-only, in the order the view sorts. The rows stay for the
+  ;; kinds and the name ranks of this draw, so neither reads them again.
+  (let* ((sort-by (if (equal? (ibuffer-sort buf) 'size) 'size
+                      (if (equal? (ibuffer-sort buf) 'recent) 'recent 'name)))
+         (rows (filter (lambda (r)
+                         (ibuffer-workspace-path? (or (nth 2 r) (and (string-prefix? "/" (car r)) (car r)))))
+                       (cadr (buffer-rows (list 'names (filter string? (ibuffer-scope-names buf))
+                                                'exclude-names (map car *ibuffer-views*)
+                                                'exclude-modes *ibuffer-view-modes*
+                                                'sort sort-by
+                                                'fields '(mode path)))))))
+    (set! *ibuffer-source-rows* rows)
+    (set! *ibuffer-source-sort* sort-by)
+    (map car rows)))
 
 ;; The number the chip reads as "N of M". Working M out again means
 ;; asking every buffer in the scope five questions, and the scope cannot
@@ -579,9 +635,27 @@
 
 ;;; --- sorting ------------------------------------------------------------------
 
+(define *ibuffer-name-ranks* #f)
+(define (ibuffer-note-name-ranks! rows)
+  ;; the order of every buffer by title, from the buffer rows: a section
+  ;; sorts by rank, and builds no title to do it. A source read sorted by
+  ;; name already holds that order.
+  (set! *ibuffer-name-ranks*
+        (let loop ((names (if (equal? *ibuffer-source-sort* 'name)
+                              (map car *ibuffer-source-rows*)
+                              (map car (cadr (buffer-rows (list 'names (filter string? rows)
+                                                                'hidden #t 'context-only #t
+                                                                'sort 'name))))))
+                   (i 0) (acc '()))
+          (if (null? names) acc (loop (cdr names) (+ i 1) (cons (list (car names) i) acc))))))
 (define (ibuffer-sort-names rows)
-  (map cadr (sort (map (lambda (row) (list (string-downcase (ibuffer-row-title row)) row))
-                       rows))))
+  (map (lambda (k) (list-ref k 2))
+       (sort (map (lambda (row)
+                    (let ((rank (and *ibuffer-name-ranks* (assoc row *ibuffer-name-ranks*))))
+                      (if rank
+                          (list 0 (cadr rank) row)
+                          (list 1 (string-downcase (ibuffer-row-title row)) row))))
+                  rows))))
 
 (define (ibuffer-sort-sizes rows)
   (map cadr (sort (map (lambda (row) (list (- 0 (or (ibuffer-row-size row) 0)) row))
@@ -754,9 +828,13 @@
 ;; redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows buf)
   (ibuffer-columns-clear!)
+  (ibuffer-title-memo-clear!)
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
     (ibuffer-note-kinds! rows)
+    (if (member (ibuffer-sort buf) '(size recent))
+        (set! *ibuffer-name-ranks* #f)
+        (ibuffer-note-name-ranks! rows))
     (cond ((equal? grouping 'mode) (ibuffer-mode-sections buf rows))
           ((equal? grouping 'directory) (ibuffer-directory-sections buf rows))
           ;; 'none says the table is one list: no heading, no section, the
@@ -2341,7 +2419,9 @@
     'meta (lambda (buf) (ibuffer-meta buf))
     'total (lambda (buf) (ibuffer-total buf))
     'compact #t
-    'page-size 60
+    ;; the rows the window can show and a few more: a row past them is
+    ;; drawn when the reader moves there
+    'page-size (lambda (buf) (ibuffer-page-size buf))
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
                          (and (string? b)

@@ -213,3 +213,43 @@
                    "the bundled skills are rendered in its place")
 
       (shell-command->string (string-append "rm -rf " home)))))
+
+;;; --- compiled skills: the parts that need no model ---------------------------
+
+(deftest 'skill-unknown-names-only-the-operators-nothing-defines
+  "a compiled form may call core Scheme, the catalog and its own locals"
+  (lambda ()
+    (check-equal! (skill--unknown '(lambda (args)
+                                     (let loop ((xs (list args)) (n 0))
+                                       (if (null? xs) (skill-ask "q") (loop (cdr xs) (+ n 1))))))
+                  '() "locals, named let and the helpers are known")
+    (check-equal! (skill--unknown '(lambda (args) (zz-made-up args) (quote (zz-data 1))))
+                  '(zz-made-up) "a made-up name is caught, quoted data is not")
+    (check-equal! (skill--unknown '(lambda (x) (case x ((zz-a zz-b) 1) (else 2))))
+                  '() "case datums are not calls")))
+
+(deftest 'skill-code-takes-the-lambda-out-of-a-fenced-reply
+  "the model may fence or explain; only the form is kept"
+  (lambda ()
+    (check-equal! (skill--code "Here:\n```scheme\n(lambda (args) args)\n```\nDone.")
+                  "(lambda (args) args)" "the form alone")
+    (check-false! (skill--code "no code here") "no form, no code")))
+
+(deftest 'a-skill-is-none-then-current-then-stale
+  "skill.scm carries its prose, so an edit to SKILL.md makes it out of date"
+  (lambda ()
+    (shell-command->string (string-append "mkdir -p " t--skill-dir))
+    (t--skill-write! "Say hello.")
+    (skills-scan!)
+    (check-equal! (skill-state "zz-user-skill") 'none "no skill.scm yet")
+    (write-file! (skill--compiled-path t--skill-dir)
+                 (string-append "(skill-source "
+                                (json-encode (read-file (string-append t--skill-dir "/SKILL.md")))
+                                ")\n(lambda (args) (string-append \"hello \" args))\n"))
+    (check-equal! (skill-state "zz-user-skill") 'current "compiled from this prose")
+    (check-equal! ((eval (cadr (skill--compiled t--skill-dir))) "you") "hello you"
+                  "the compiled form runs")
+    (t--skill-write! "Say goodbye.")
+    (check-equal! (skill-state "zz-user-skill") 'stale "the prose changed")
+    (shell-command->string (string-append "rm -rf " t--skill-dir))
+    (skills-scan!)))

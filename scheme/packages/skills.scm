@@ -276,6 +276,203 @@
 (public! 'skills-scan!
   "(skills-scan!) — rescan priv/skills and ~/.compos/skills into the catalog, and drop every group's skills to rescan on the next ask")
 
+;;; --- compiled skills -----------------------------------------------------------
+;;; compile-skill turns a skill's prose into one Scheme procedure and keeps
+;;; it beside SKILL.md as skill.scm, with the prose it came from. skill-run
+;;; runs that procedure; a skill with no skill.scm runs as an agent turn on
+;;; its prose and never compiles on its own. A skill.scm whose prose has
+;;; changed since is out of date, and skill-run compiles it again first.
+
+(domain! 'setup)
+(effects! '(read))
+
+(define (skill--name name) (if (symbol? name) (symbol->string name) name))
+
+;; the directory of skill NAME, or #f
+(define (skill--dir name)
+  (let ((s (assoc (skill--name name) (skills--here))))
+    (and s (caddr s))))
+
+(define (skill--compiled-path dir) (string-append dir "/skill.scm"))
+
+;; (SOURCE PROCEDURE-FORM) from DIR's skill.scm, or #f
+(define (skill--compiled dir)
+  (let* ((path (skill--compiled-path dir))
+         (forms (and (file-exists? path) (scheme-read (read-file path))))
+         (src (and (pair? forms) (car forms))))
+    (and (pair? forms) (pair? (cdr forms))
+         (pair? src) (eq? (car src) 'skill-source)
+         (list (cadr src) (cadr forms)))))
+
+;; none, current or stale
+(define (skill--state dir)
+  (let ((c (skill--compiled dir)))
+    (cond ((not c) 'none)
+          ((equal? (car c) (read-file (string-append dir "/SKILL.md"))) 'current)
+          (else 'stale))))
+
+(define (skill-state name)
+  (let ((dir (skill--dir name)))
+    (if dir (skill--state dir) 'none)))
+
+;; The names a compiled form may call without a definition.
+(define skill--syntax
+  '(quote quasiquote unquote unquote-splicing lambda define let let* letrec
+    letrec* if cond case when unless and or begin do set! else => &rest &optional))
+
+(define (skill--flat x)
+  (cond ((symbol? x) (list x))
+        ((pair? x) (append (skill--flat (car x)) (skill--flat (cdr x))))
+        (else '())))
+
+;; every name FORM binds anywhere: parameters, let and do variables, defines
+(define (skill--bound form)
+  (if (not (pair? form))
+      '()
+      (let ((head (car form)) (rest (cdr form)))
+        (append
+          (cond ((not (pair? rest)) '())
+                ((memq head '(lambda define)) (skill--flat (car rest)))
+                ((memq head '(let let* letrec letrec* do))
+                 (let* ((named (symbol? (car rest)))
+                        (binds (if named (if (pair? (cdr rest)) (cadr rest) '()) (car rest))))
+                   (append (if named (list (car rest)) '())
+                           (if (pair? binds)
+                               (apply append (map (lambda (b) (if (pair? b) (list (car b)) '())) binds))
+                               '()))))
+                (else '()))
+          (if (eq? head 'quote) '() (apply append (map skill--bound (filter pair? form))))))))
+
+;; the operators FORM calls that nothing defines
+(define (skill--unknown form)
+  (let ((locals (skill--bound form)))
+    (let walk ((x form) (acc '()))
+      (if (or (not (pair? x)) (memq (car x) '(quote quasiquote)))
+          acc
+          (let* ((head (car x))
+                 (acc (if (and (symbol? head) (not (memq head skill--syntax))
+                               (not (memq head locals)) (not (boundp head))
+                               (not (memq head acc)))
+                          (cons head acc)
+                          acc))
+                 (kids (if (and (eq? head 'case) (pair? (cdr x)))
+                           (cons (cadr x) (apply append (map (lambda (c) (if (pair? c) (cdr c) '())) (cddr x))))
+                           x)))
+            (let loop ((ks kids) (acc acc))
+              (if (null? ks) acc (loop (cdr ks) (walk (car ks) acc)))))))))
+
+;; the (lambda ...) in a model's reply, without fences or prose around it
+(define (skill--code reply)
+  (let ((start (string-index reply "(lambda")))
+    (and start
+         (let ((end (or (string-index reply "```" start) (string-length reply))))
+           (string-trim (substring-bytes reply start end))))))
+
+;; the functions a skill's prose is about, one line each
+(define (skill--hints query)
+  (string-join
+    (map (lambda (r)
+           (let ((doc (or (plist-get r 'doc) "")))
+             (string-append (or (plist-get r 'sig) (plist-get r 'name)) " - "
+                            (if (> (string-length doc) 200) (substring doc 0 200) doc))))
+         (filter (lambda (r) (equal? (plist-get r 'kind) "function")) (apropos query)))
+    "\n"))
+
+(define (skill--compile-prompt name body hints)
+  (string-append
+    "Compile this compos skill into compos Scheme.\n\n"
+    "Answer with exactly one form and nothing else: (lambda (args) BODY).\n"
+    "ARGS is the text the caller passed, maybe empty. Return a string: what the skill reports.\n"
+    "Do every step the skill names in plain Scheme. Where a step needs judgment, call\n"
+    "  (skill-ask PROMPT [ABOUT]) -> the fast model's answer as text\n"
+    "  (skill-decide STATE QUESTIONS) -> typed answers: (answers ((KEY VALUE) ...) usage (...))\n"
+    "The procedure runs in a task. It may block on those two calls, but it never sleeps, "
+    "polls, displays a buffer or moves focus.\n"
+    "This is compos Scheme, not Emacs Lisp. Call only core Scheme and the functions below. "
+    "A rest parameter is spelled &rest.\n\n"
+    "## Functions\n\n" hints "\n\n## Skill: " name "\n\n" body))
+
+(effects! '(read external spend))
+
+;; The two calls a compiled skill makes where it needs judgment.
+(define (skill-ask prompt &optional about)
+  (let ((text (if about (string-append prompt "\n\n" about) prompt)))
+    (or (app-await (lambda (k) (llm-with-model text (llm-model-for 'fast) k))) "")))
+
+(define (skill-decide state questions &rest opts)
+  (apply decide state questions opts))
+
+(effects! '(write external spend))
+
+;; Compile skill NAME into its skill.scm. Blocks on the coding model, so
+;; call it from a task. Answers the path, or raises with the reason.
+(define (compile-skill name)
+  (let* ((n (skill--name name))
+         (dir (or (skill--dir n) (error (string-append "no such skill: " n))))
+         (source (read-file (string-append dir "/SKILL.md")))
+         (parsed (skills--parse source))
+         (prompt (skill--compile-prompt n (caddr parsed)
+                                        (skill--hints (or (cadr parsed) n))))
+         (reply (or (app-await (lambda (k) (llm-with-model prompt (llm-model-for 'coding) k))) ""))
+         (code (or (skill--code reply) (error "compile-skill: the model answered no lambda form")))
+         (forms (or (scheme-read code) (error "compile-skill: the answer does not read"))))
+    (unless (and (= (length forms) 1) (pair? (car forms)) (eq? (car (car forms)) 'lambda))
+      (error "compile-skill: the answer is not one lambda form"))
+    (let ((unknown (skill--unknown (car forms))))
+      (when (pair? unknown)
+        (error (string-append "compile-skill: the answer calls unknown names: "
+                              (string-join (map symbol->string unknown) ", ")))))
+    (write-file! (skill--compiled-path dir)
+                 (string-append ";;; skill.scm --- " n " compiled from SKILL.md by compile-skill.\n"
+                                ";;; Run compile-skill again instead of editing this file.\n\n"
+                                "(skill-source " (json-encode source) ")\n\n" code "\n"))
+    (skill--compiled-path dir)))
+
+;; no skill.scm: one agent turn on the fast model, with the prose as its task
+(define (skill--run-prose name args k)
+  (let ((slug (execute* (string-append (skill name) "\n\n## Input\n\n" args)
+                        (list 'connector "api" 'model (llm-model-for 'fast)))))
+    (subagent-wait slug (lambda (results) (k #t (plist-get (car results) 'text))))))
+
+;; Run skill NAME on ARGS, a string. K gets OK? and the result, or the error.
+(define (skill-run name args k)
+  (let* ((n (skill--name name))
+         (dir (skill--dir n)))
+    (cond ((not dir) (k #f (string-append "no such skill: " n)))
+          ((eq? (skill--state dir) 'none) (skill--run-prose n args k))
+          (else
+            (task-run!
+              (lambda ()
+                (when (eq? (skill--state dir) 'stale) (compile-skill n))
+                ((eval (cadr (skill--compiled dir))) args))
+              k)))))
+
+(define-command "compile-skill" "Compile a skill into Scheme, beside its SKILL.md"
+  (lambda ()
+    (minibuffer-read "Compile skill: " (map car (skills))
+      (lambda (name)
+        (message (string-append "Compiling " name "..."))
+        (task-run! (lambda () (compile-skill name))
+          (lambda (ok? v)
+            (message (if ok?
+                         (string-append "Compiled " name " into " v)
+                         (string-append "compile-skill " name ": "
+                                        (if (string? v) v (format "~a" v)))))))))))
+
+(effects! '(read))
+(public! 'skill-state
+  "(skill-state NAME) - none, current or stale: the state of the skill's skill.scm")
+(effects! '(read external spend))
+(public! 'skill-ask
+  "(skill-ask PROMPT [ABOUT]) - the fast model's answer as text, for a compiled skill. Blocks: call it from a task")
+(public! 'skill-decide
+  "(skill-decide STATE QUESTIONS [OPTS ...]) - decide with its default config, for a compiled skill's typed choices")
+(effects! '(write external spend))
+(public! 'compile-skill
+  "(compile-skill NAME) - compile a skill into its skill.scm with the coding model; answers the path. Blocks: call it from a task")
+(public! 'skill-run
+  "(skill-run NAME ARGS K) - run a skill: its skill.scm, compiled again first when out of date, else an agent turn on its prose. K gets OK? and the result")
+
 ;;; --- the sanitized Codex home --------------------------------------------------
 ;;; codex reads its per-user state — config, auth, global instructions,
 ;;; skills — from CODEX_HOME. The editor gives it a home it owns instead

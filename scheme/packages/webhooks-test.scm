@@ -51,3 +51,25 @@
       (check-true! hook "the saved endpoint is defined")
       (check-true! (equal? "t0k" (plist-get hook 'token)) "it keeps its token"))
     (webhook-remove! "zz-test-saved")))
+
+(define (webhooks-test--handler key events) #t)
+
+(deftest 'webhooks-saved-workflow-comes-back
+  "a kept endpoint brings back its methods and its workflow, and the list row says the handler"
+  (lambda ()
+    (let ((saved webhooks-saved))
+      (set! webhooks-saved (list (list "zz-test-wf" "/hooks/zz-test-wf" #f
+                                       (list 'methods (list "POST" "PUT")
+                                             'workflow "webhooks-test--handler"))))
+      (webhooks--define-saved!)
+      (set! webhooks-saved saved))
+    (check-true! (equal? (list "POST" "PUT") (plist-get (webhook-get "zz-test-wf") 'methods))
+                 "it keeps its methods")
+    (check-true! (eq? 'webhooks-test--handler (webhook-workflow "zz-test-wf")) "it keeps its workflow")
+    (check-true! (member "webhook-zz-test-wf" (workflow-names)) "the workflow runs")
+    (check-true! (string-prefix? "webhooks-test--handler"
+                                 (car (list-ref (webhooks--cells #f "zz-test-wf") 5)))
+                 "the row names the handler")
+    (webhook-detach-workflow! "zz-test-wf")
+    (check-false! (webhook-workflow "zz-test-wf") "detach forgets the workflow")
+    (webhook-remove! "zz-test-wf")))

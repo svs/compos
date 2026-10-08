@@ -152,6 +152,30 @@
     (set! *webhooks* (filter (lambda (e) (not (equal? (car e) name))) *webhooks*))
     had))
 
+(define *webhook-workflows* '())  ; (NAME HANDLER): the handler symbol of the workflow on webhook:NAME
+
+(define (webhooks--workflow-name name) (string-append "webhook-" name))
+
+(define (webhook-workflow name)
+  "(webhook-workflow NAME) — the handler of the workflow attached to webhook NAME, or #f"
+  (let ((e (assoc name *webhook-workflows*))) (if e (cadr e) #f)))
+
+(define (webhook-attach-workflow! name handler)
+  "(webhook-attach-workflow! NAME HANDLER) — run (HANDLER KEY EVENTS) on every webhook:NAME event, as the workflow webhook-NAME; HANDLER is a quoted name"
+  (define-workflow! (webhooks--workflow-name name)
+    'listen (list (string-append "webhook:" name))
+    'handle handler)
+  (set! *webhook-workflows* (append (filter (lambda (e) (not (equal? (car e) name))) *webhook-workflows*)
+                                    (list (list name handler))))
+  name)
+
+(define (webhook-detach-workflow! name)
+  "(webhook-detach-workflow! NAME) — stop the workflow on webhook NAME; its position stays"
+  (when (webhook-workflow name)
+    (ignore-errors (lambda () (workflow-stop! (webhooks--workflow-name name))))
+    (set! *webhook-workflows* (filter (lambda (e) (not (equal? (car e) name))) *webhook-workflows*)))
+  name)
+
 (effects! '(write external))
 
 (define (webhooks-start!)
@@ -196,11 +220,29 @@
 (effects! '(write))
 
 (define (webhooks--define-saved!)
-  "(webhooks--define-saved!) — define every endpoint webhooks-saved holds"
+  "(webhooks--define-saved!) — define every endpoint webhooks-saved holds, with its workflow"
   (for-each (lambda (row)
               (ignore-errors
-               (lambda () (define-webhook! (car row) (list 'path (cadr row) 'token (caddr row))))))
+               (lambda ()
+                 (let ((opts (if (> (length row) 3) (list-ref row 3) '())))
+                   (define-webhook! (car row) (list 'path (cadr row) 'token (caddr row)
+                                                    'methods (plist-get opts 'methods)))
+                   (when (plist-get opts 'workflow)
+                     (webhook-attach-workflow! (car row) (string->symbol (plist-get opts 'workflow))))))))
             webhooks-saved))
+
+(define (webhooks--keep! name)
+  "(webhooks--keep! NAME) — write endpoint NAME and its workflow to webhooks-saved, or drop it when NAME is gone. An endpoint with a Scheme handler belongs to its code and is not kept"
+  (let* ((hook (webhook-get name))
+         (wf (webhook-workflow name))
+         (rest (filter (lambda (row) (not (equal? (car row) name))) webhooks-saved)))
+    (unless (and hook (plist-get hook 'handler))
+      (customize-save! 'webhooks-saved
+                       (if hook
+                           (append rest (list (list name (plist-get hook 'path) (plist-get hook 'token)
+                                                    (list 'methods (plist-get hook 'methods)
+                                                          'workflow (if wf (symbol->string wf) #f)))))
+                           rest)))))
 
 (define (webhooks--blank? s) (or (not s) (equal? (string-trim s) "")))
 
@@ -211,38 +253,200 @@
         (unless (webhooks--blank? name)
           (read-string "Token (empty for none): "
             (lambda (token)
-              (let* ((name (string-trim name))
-                     (token (if (webhooks--blank? token) #f (string-trim token)))
-                     (path (string-append "/hooks/" name)))
-                (define-webhook! name (list 'path path 'token token))
-                (customize-save! 'webhooks-saved
-                                 (append (filter (lambda (row) (not (equal? (car row) name))) webhooks-saved)
-                                         (list (list name path token))))
+              (let ((name (string-trim name))
+                    (token (if (webhooks--blank? token) #f (string-trim token))))
+                (define-webhook! name (list 'token token))
+                (webhooks--keep! name)
+                (webhooks-refresh!)
                 (message (string-append "webhook " name ": "
                                         (or (webhook-url name)
-                                            (string-append path ", M-x webhooks-start to listen"))))))))))))
+                                            (string-append (plist-get (webhook-get name) 'path)
+                                                           ", M-x webhooks-start to listen"))))))))))))
+
+(define (webhooks--delete! name)
+  (webhook-detach-workflow! name)
+  (webhook-remove! name)
+  (webhooks--keep! name)
+  (webhooks-refresh!)
+  (message (string-append "webhook " name " removed")))
 
 (define-command "webhook-delete" "Remove a webhook endpoint and forget it"
   (lambda ()
     (if (null? *webhooks*)
         (message "no webhooks defined")
         (completing-read "Delete webhook: " (map car *webhooks*)
-          (lambda (name)
-            (when name
-              (webhook-remove! name)
-              (customize-save! 'webhooks-saved
-                               (filter (lambda (row) (not (equal? (car row) name))) webhooks-saved))
-              (message (string-append "webhook " name " removed"))))
+          (lambda (name) (when name (webhooks--delete! name)))
           'require-match #t))))
+
+;; M-x webhooks: the endpoints as a list, and the verbs on them
+
+(defface! 'webhooks-name 'fg "#26356b" 'weight "600")
+(defface! 'webhooks-path 'fg "#7a5a1a")
+
+(define *webhooks-buffer* "*webhooks*")
+
+(define (webhooks-refresh!)
+  (when (buffer-exists? *webhooks-buffer*) (list-refresh! *webhooks-buffer*)))
+
+(define (webhooks--last name)
+  (let ((es (event-log-newest (string-append "webhook:" name) 1)))
+    (if (pair? es) (format-time (plist-get (car es) 'at) "%a %d %b %H:%M") "-")))
+
+(define (webhooks--workflow-text name)
+  (let ((h (webhook-workflow name)))
+    (if (not h)
+        "-"
+        (let ((st (workflow-status (webhooks--workflow-name name))))
+          (string-append (symbol->string h)
+                         (if st (string-append " · " (format "~a" (plist-get st 'status))) " · stopped")
+                         (if (and st (plist-get st 'last-error)) " · failing" ""))))))
+
+(define (webhooks--cells buf name)
+  (let ((hook (webhook-get name)))
+    (if (not hook)
+        (list (list name "webhooks-name") (list "" "faint") (list "" "faint")
+              (list "" "faint") (list "" "faint") (list "" "faint"))
+        (list (list name "webhooks-name")
+              (list (plist-get hook 'path) "webhooks-path")
+              (list (string-join (plist-get hook 'methods) ",") "dim")
+              (list (if (plist-get hook 'token) "yes" "-") "dim")
+              (list (webhooks--last name) "dim")
+              (list (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)) "default")))))
+
+(define (webhooks--meta buf)
+  (string-append (number->string (length *webhooks*)) " endpoints · "
+                 (if (webhooks-running?)
+                     (string-append "listening on " webhooks-host ":" (number->string webhooks-port))
+                     "server stopped, s starts it")))
+
+(define (webhooks--on-current fn)
+  (let ((name (list-current *webhooks-buffer*)))
+    (if name (fn name) (message "no webhook on this line"))))
+
+(define (webhooks--said name what)
+  (webhooks-refresh!)
+  (message (string-append "webhook " name ": " what
+                          (let ((hook (webhook-get name)))
+                            (if (and hook (plist-get hook 'handler)) " (Scheme handler: not kept)" "")))))
+
+(define (webhooks--methods text)
+  (let ((ms (filter (lambda (m) (not (webhooks--blank? m)))
+                    (map (lambda (m) (string-upcase (string-trim m)))
+                         (string-split (or text "") ",")))))
+    (if (null? ms) #f ms)))
+
+(define-command "webhooks-edit" "Change the path, methods and token of the webhook on this line"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (let ((hook (webhook-get name)))
+          (read-string "Path: "
+            (lambda (path)
+              (read-string "Methods (comma separated): "
+                (lambda (methods)
+                  (read-string "Token (empty for none): "
+                    (lambda (token)
+                      (define-webhook! name
+                        (list 'path (if (webhooks--blank? path) #f (string-trim path))
+                              'methods (webhooks--methods methods)
+                              'token (if (webhooks--blank? token) #f (string-trim token))
+                              'peers (plist-get hook 'peers))
+                        (plist-get hook 'handler))
+                      (webhooks--keep! name)
+                      (webhooks--said name "changed"))
+                    'initial (or (plist-get hook 'token) "")))
+                'initial (string-join (plist-get hook 'methods) ",")))
+            'initial (plist-get hook 'path)))))))
+
+(define-command "webhooks-attach-workflow" "Run a Scheme handler, as a workflow, on every request to the webhook on this line"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (read-string "Workflow handler, called as (HANDLER KEY EVENTS): "
+          (lambda (text)
+            (unless (webhooks--blank? text)
+              (let ((sym (string->symbol (string-trim text))))
+                (if (not (boundp sym))
+                    (message (string-append "no function named " (string-trim text)))
+                    (begin (webhook-attach-workflow! name sym)
+                           (webhooks--keep! name)
+                           (webhooks--said name (string-append "workflow " (symbol->string sym))))))))
+          'initial (let ((h (webhook-workflow name))) (if h (symbol->string h) "")))))))
+
+(define-command "webhooks-detach-workflow" "Stop the workflow on the webhook on this line"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (if (not (webhook-workflow name))
+            (message (string-append "webhook " name " has no workflow"))
+            (begin (webhook-detach-workflow! name)
+                   (webhooks--keep! name)
+                   (webhooks--said name "workflow stopped")))))))
+
+(define-command "webhooks-remove" "Remove the webhook on this line and forget it"
+  (lambda () (webhooks--on-current webhooks--delete!)))
+
+(define-command "webhooks-copy-url" "Copy the URL of the webhook on this line"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (let ((url (webhook-url name)))
+          (if url
+              (begin (kill-new url) (message (string-append "copied " url)))
+              (message "the server is stopped, s starts it")))))))
+
+(define-command "webhooks-toggle-server" "Start the webhook server, or stop it"
+  (lambda ()
+    (if (webhooks-running?)
+        (begin (webhooks-stop!) (message "webhook server stopped"))
+        (message (string-append "webhooks listen on " (webhooks-start!))))
+    (webhooks-refresh!)))
+
+(define-command "webhooks-refresh" "Redraw the webhook list"
+  (lambda () (webhooks-refresh!)))
+
+(define-list-mode! "webhooks-mode"
+  (list
+    'doc (string-append
+           "The webhook endpoints: path, methods, whether a token guards it, the last request, "
+           "and the workflow that handles its events. c defines one, e edits the path, "
+           "methods and token, w attaches a workflow handler, W stops it, k removes the "
+           "endpoint, y copies its URL, s starts or stops the server, g redraws, "
+           "/ narrows, and q quits.")
+    'buffer *webhooks-buffer*
+    'transient #f
+    'rows (lambda (buf) (map car *webhooks*))
+    'columns (lambda (buf)
+               (list (list "webhook" 16) (list "path" 22) (list "methods" 10)
+                     (list "token" 6) (list "last request" 17) (list "workflow" #f)))
+    'cells webhooks--cells
+    'title (lambda (buf) "Webhooks")
+    'meta webhooks--meta
+    'no-marks #t
+    'local-filter #t
+    'footer (lambda (buf)
+              '(("c" "define") ("e" "edit") ("w" "workflow") ("k" "remove")
+                ("s" "server") ("/" "filter") ("q" "quit")))
+    'keys '(("c" "webhook-define") ("e" "webhooks-edit")
+            ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
+            ("k" "webhooks-remove") ("y" "webhooks-copy-url")
+            ("s" "webhooks-toggle-server") ("g" "webhooks-refresh")
+            ("q" "quit-window"))))
+
+(define-command "webhooks" "List the webhook endpoints: define, edit, attach workflows"
+  (lambda () (list-mode-show! "webhooks-mode")))
 
 (effects! '(write))
 (public! 'define-webhook! "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace webhook endpoint NAME. OPTS: 'path (default /hooks/NAME), 'methods (default POST only), 'token (checked against the x-webhook-token header or Authorization: Bearer), 'peers (the remote addresses allowed). HANDLER gets the request plist plus 'webhook and 'json, and answers a response plist, a body string, or anything else for ok. Without HANDLER each request becomes a webhook:NAME event")
 (public! 'webhook-remove! "(webhook-remove! NAME) — drop webhook endpoint NAME")
+(public! 'webhook-attach-workflow! "(webhook-attach-workflow! NAME HANDLER) — run (HANDLER KEY EVENTS) on every webhook:NAME event, as the workflow webhook-NAME; give HANDLER as a quoted name")
+(public! 'webhook-detach-workflow! "(webhook-detach-workflow! NAME) — stop the workflow on webhook NAME")
 (effects! '(read))
 (public! 'webhook-get "(webhook-get NAME) — the webhook endpoint plist named NAME, or #f")
 (public! 'webhook-list "(webhook-list) — every webhook endpoint as (NAME METHODS PATH)")
 (public! 'webhook-url "(webhook-url NAME) — the URL of webhook NAME on the running server, or #f")
 (public! 'webhooks-running? "(webhooks-running?) — #t while the webhook server listens")
+(public! 'webhook-workflow "(webhook-workflow NAME) — the handler of the workflow attached to webhook NAME, or #f")
 (effects! '(write external))
 (public! 'webhooks-start! "(webhooks-start!) — start the webhook server on webhooks-host and webhooks-port; answers its URL")
 (public! 'webhooks-stop! "(webhooks-stop!) — stop the webhook server; the endpoints stay defined")

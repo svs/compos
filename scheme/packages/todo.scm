@@ -32,11 +32,6 @@
 ;;;
 ;;; OFFSET RULE: byte offsets only (string-byte-length, substring-bytes).
 
-;; the todo list sets a prompt part on every chat and reads the event log
-(require 'prompts)
-(require 'chat)
-(require 'events)
-
 (domain! 'writing)
 (effects! '(read))
 
@@ -116,7 +111,10 @@
   (string-append "t-" (format-time (current-time) "%y%m%d-%H%M%S")
                  "-" (number->string (+ 100 (random 900)))))
 
-(define (todo--log-line who text) (string-append (todo--now) " " who " " text))
+;; A log entry is one line of the file: a line break in TEXT would end the
+;; entry and put the rest in the task's body.
+(define (todo--log-line who text)
+  (string-append (todo--now) " " who " " (re-replace-all "\\s*\\n\\s*" (string-trim text) " ")))
 
 ;;; --- files -------------------------------------------------------------------
 

@@ -32,6 +32,16 @@ defmodule Compos.MarkdownHtmlTest do
     assert bare(render!("- one\n")) =~ ~r{<ul[^>]*><li[^>]*>one}
   end
 
+  test "a backslash escape draws the character, and code keeps its backslash" do
+    # pandoc writes a literal | as \|, and a browse page drew the backslash
+    html = bare(render!("see a \\| b and `c\\|d`\n"))
+
+    assert html =~ "see a | b"
+    assert html =~ "c\\|d"
+    assert bare(render!("```\ne\\|f\n```\n")) =~ "e\\|f"
+    assert bare(render!("two \\\\ x\n")) =~ "two \\ x"
+  end
+
   test "a tight item's text stands beside its bullet" do
     # wrapped in a block-level <p>, every bullet sat alone on a line above
     # its own sentence

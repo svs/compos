@@ -104,6 +104,9 @@ defmodule Compos.Core.Markdown.Html do
   # has to show.
   @containers ~w(root answer list item quote table table_head table_row code)a
 
+  # CommonMark: a backslash before ASCII punctuation escapes it
+  @backslash_escape ~r/\\[!-\/:-@\[-`{-~]/
+
   defp nodes(nodes, text, from, marks, parent \\ :root) do
     content? = parent not in @containers
 
@@ -226,7 +229,26 @@ defmodule Compos.Core.Markdown.Html do
   # the renderer took out, so `**bold**` threw it off by four.
   defp run(_text, from, to) when from >= to, do: []
 
-  defp run(text, from, to),
+  # A backslash escape draws the character it escapes: pandoc writes a
+  # literal | as \|. The backslash is markup, so the run splits around it
+  # and each part still names its own source byte. Code is verbatim.
+  defp run(text, from, to) do
+    escapes =
+      if Process.get(:compos_md_verbatim),
+        do: [],
+        else: Regex.scan(@backslash_escape, binary_part(text, from, to - from), return: :index)
+
+    {parts, cursor} =
+      Enum.map_reduce(escapes, from, fn [{at, _}], cursor ->
+        {span(text, cursor, from + at), from + at + 1}
+      end)
+
+    [parts, span(text, cursor, to)]
+  end
+
+  defp span(_text, from, to) when from >= to, do: []
+
+  defp span(text, from, to),
     do: [
       ~s(<span class="s" data-s="#{from}">),
       escape(binary_part(text, from, to - from)),
@@ -413,7 +435,7 @@ defmodule Compos.Core.Markdown.Html do
           # would draw the same newline twice and open the block by a line for
           # every line it holds.
           marks = code_marks(node, text, lang, marks)
-          {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
+          {inner, marks} = verbatim(fn -> without_breaks(fn -> children(node, text, marks) end) end)
           class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
 
           {[
@@ -886,6 +908,9 @@ defmodule Compos.Core.Markdown.Html do
     end
   end
 
+  defp node(%{kind: :code_span} = node, text, marks),
+    do: verbatim(fn -> generic_node(node, text, marks) end)
+
   defp node(node, text, marks), do: generic_node(node, text, marks)
 
   defp generic_node(node, text, marks) do
@@ -1024,6 +1049,18 @@ defmodule Compos.Core.Markdown.Html do
   # While the flag stands, a newline draws as itself and not as a break.
   # The old value is put back, so one code block does not silence the
   # breaks of the document below it.
+  # Code: a backslash there is the author's, not an escape.
+  defp verbatim(fun) do
+    was = Process.get(:compos_md_verbatim)
+    Process.put(:compos_md_verbatim, true)
+
+    try do
+      fun.()
+    after
+      Process.put(:compos_md_verbatim, was)
+    end
+  end
+
   defp without_breaks(fun) do
     was = Process.get(:compos_md_nobreak)
     Process.put(:compos_md_nobreak, true)

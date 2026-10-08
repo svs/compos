@@ -455,12 +455,120 @@
             (check-equal! (web--want buf) "full" "the ask flipped")
             (check-equal! (buffer-local buf 'browse-reading) "full" "and so did the reading")
             (check-contains! (buffer-text buf) "whole" "the buffer holds the new reading")
+            (set! *web--frame-hosts* (list (list "site.test" #t)))
+
+            (with-current-buffer buf
+              (lambda () (run-command "browse-toggle-reading")))
+            (check-equal! (buffer-local buf 'render-mode) "web" "then the page itself")
+            (check-equal! (buffer-local buf 'web-url) "https://site.test/story.html"
+                          "drawn from its own address")
+            (check-contains! (buffer-text buf) "whole" "with the text kept underneath")
 
             (with-current-buffer buf
               (lambda () (run-command "browse-toggle-reading")))
             (check-equal! (web--want buf) "calm" "and it switches back")
+            (check-equal! (buffer-local buf 'render-mode) "markdown" "to the rendered text")
+            (check-false! (buffer-local buf 'web-url) "and the page is gone")
             (check-equal! fetches 1 "still no fetch"))))
       (set! web--read saved-read))
+    (t--web-kill-tabs!)))
+
+(deftest 'calm-mode-is-the-calm-reading-on-and-off
+  "calm-mode names the reading R and the default already choose"
+  (lambda ()
+    (let ((saved-read web--read))
+      (t--web-with-fetch
+        (lambda (url want k)
+          (k (list want "# calm\n\nthe [article](https://site.test/x)\n" "<html>page</html>")))
+        (lambda ()
+          (let ((buf (browse "https://site.test/story.html")))
+            (set! web--read
+              (lambda (url file reading k)
+                (k (string-append "# " reading "\n\nthe page\n"))))
+            (check-true! (minor-mode-on? buf "calm-mode") "a calm page wears calm-mode")
+            (with-current-buffer buf (lambda () (run-command "calm-mode")))
+            (check-equal! (web--want buf) "full" "off is the full reading")
+            (check-false! (minor-mode-on? buf "calm-mode") "and the mode is off")
+            (set! *web--frame-hosts* (list (list "site.test" #t)))
+            (with-current-buffer buf (lambda () (run-command "browse-toggle-reading")))
+            (check-false! (minor-mode-on? buf "calm-mode") "the page itself is not calm")
+            (with-current-buffer buf (lambda () (run-command "calm-mode")))
+            (check-equal! (web--want buf) "calm" "on leaves the page for calm")
+            (check-false! (web--page? buf) "the page is gone")
+            (check-true! (minor-mode-on? buf "calm-mode") "and the mode is on"))))
+      (set! web--read saved-read)
+      (set! *web--frame-hosts* '()))
+    (t--web-kill-tabs!)))
+
+(deftest 'point-anywhere-on-a-links-markup-is-on-the-link
+  "a click lands point on the [ or in the (url), and RET still follows"
+  (lambda ()
+    (let ((buf (buffer-create "*t-link-at*"))
+          (md "see [the label](https://x.test/a) after\n"))
+      (buffer-insert! buf 0 md)
+      (buffer-set-local! buf 'web-links (web--markdown-links md))
+      (check-false! (web--link-at buf 3) "the space before is not")
+      (check-true! (and (web--link-at buf 4) #t) "the opening [ is")
+      (check-true! (and (web--link-at buf 5) #t) "the label is")
+      (check-true! (and (web--link-at buf 20) #t) "the (url) is")
+      (check-true! (and (web--link-at buf 32) #t) "the closing ) is")
+      (check-false! (web--link-at buf 33) "the space after is not")
+      (buffer-kill! buf))))
+
+(deftest 'a-run-of-site-furniture-folds-to-one-line
+  "jump lists, link headings and subscribe lines fold; the page's own lists stay"
+  (lambda ()
+    (let* ((md (string-append
+                 "## home\n\nintro\n\n## [log](log.html)\n\n"
+                 "Get updates via our [RSS feed](https://x.test/rss), or our [newsletter](https://y.test).\n\n"
+                 "- [01](#jan)\n- [02](#feb)\n- [03](#mar)\n\n"
+                 "## January\n\n- Devine's [feed](https://a.test) ([RSS](https://a.test/rss))\n\n"
+                 "```\ncode\n\n\nkept\n```\n"))
+           (r (web--chrome-fold md))
+           (out (car r))
+           (runs (cadr r)))
+      (check-equal! (length runs) 1 "one run, and the feeds list is not furniture")
+      (check-contains! out "*▸ navigation · 6 links*" "the run counts its links")
+      (check-contains! out "code\n\n\nkept" "a fence keeps its blank lines")
+      (check-equal! (substring-bytes out (cadr (car runs)) (+ (cadr (car runs)) 18)) "## [log](log.html)"
+                    "the run starts at its first block")
+      (let ((buf (buffer-create "*t-chrome-fold*")))
+        (buffer-insert! buf 0 out)
+        (web--chrome-apply! buf runs)
+        (check-equal! (buffer-hidden buf) (list (web--chrome-range (car runs))) "folded at first")
+        (web--chrome-toggle! buf (car runs))
+        (check-equal! (buffer-hidden buf) '() "RET opens it")
+        (check-contains! (buffer-text buf) "*▾ navigation" "and the arrow turns")
+        (web--chrome-toggle! buf (car runs))
+        (check-equal! (length (buffer-hidden buf)) 1 "and closes it again")
+        (buffer-kill! buf)))))
+
+(deftest 'a-site-that-forbids-frames-has-no-page-view
+  "R skips the page itself where the browser would only draw a refusal"
+  (lambda ()
+    (check-true! (web--frame-denied? '(x-frame-options "DENY")) "X-Frame-Options forbids")
+    (check-true! (web--frame-denied? '(content-security-policy "default-src 'self'; frame-ancestors 'self'"))
+                 "so does a CSP that names its ancestors")
+    (check-false! (web--frame-denied? '(content-security-policy "frame-ancestors *")) "unless it names everyone")
+    (check-false! (web--frame-denied? '(content-type "text/html")) "and silence allows")
+    (let ((saved-read web--read))
+      (t--web-with-fetch
+        (lambda (url want k)
+          (k (list want "# calm\n\nthe [article](https://site.test/x)\n" "<html>page</html>")))
+        (lambda ()
+          (let ((buf (browse "https://site.test/story.html")))
+            (set! web--read
+              (lambda (url file reading k)
+                (k (string-append "# " reading "\n\nthe page\n"))))
+            (set! *web--frame-hosts* (list (list "site.test" #f)))
+            (with-current-buffer buf (lambda () (run-command "browse-toggle-reading")))
+            (check-equal! (web--want buf) "full" "calm, then full")
+            (with-current-buffer buf (lambda () (run-command "browse-toggle-reading")))
+            (check-false! (web--page? buf) "no page view")
+            (check-false! (buffer-local buf 'web-url) "and no frame")
+            (check-equal! (web--want buf) "calm" "R went on to calm"))))
+      (set! web--read saved-read)
+      (set! *web--frame-hosts* '()))
     (t--web-kill-tabs!)))
 
 ;;; --- history with point ---------------------------------------------------------

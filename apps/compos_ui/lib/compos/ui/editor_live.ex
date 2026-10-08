@@ -939,6 +939,12 @@ defmodule Compos.Ui.EditorLive do
     {Map.merge(leaf, %{lines: [], app_url: AppServer.app_url(leaf.buffer, leaf.app_gen)}), cache}
   end
 
+  # a live web page: the site's own origin serves it, so the window holds
+  # only the frame that points at it
+  defp decorate(%{type: :leaf, render_mode: "web"} = leaf, cache, _faces, _active) do
+    {Map.put(leaf, :lines, []), cache}
+  end
+
   # Scheme selects browser-file-mode. The view only signs its local path and
   # gives the browser an inert frame in which to use its native media viewer.
   defp decorate(%{type: :leaf, render_mode: "file", path: path} = leaf, cache, _faces, _active)
@@ -1790,6 +1796,21 @@ defmodule Compos.Ui.EditorLive do
         ></iframe>
         </c-preview>
       <% else %>
+      <%= if @node.render_mode == "web" and is_binary(@node.web_url) do %>
+        <%!-- A web page in its own origin, as a tab would hold it. The
+             browser refuses it every reach into this page; a site that
+             forbids framing shows the browser's refusal, and o opens it in
+             the real browser. --%>
+        <c-preview kind="web" source={@node.web_url} buffer={@node.buffer} style="display: contents">
+        <iframe
+          class="app-preview"
+          src={@node.web_url}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          referrerpolicy="no-referrer"
+          title={@node.buffer}
+        ></iframe>
+        </c-preview>
+      <% else %>
       <%= if @node.render_mode == "app" and Map.has_key?(@node, :app_url) do %>
         <%!-- An app runs its own scripts, so it must not share the editor's
              origin: it is served from 127.0.0.1:4005, and the parent is
@@ -1891,6 +1912,7 @@ defmodule Compos.Ui.EditorLive do
         <% end %>
         <% end %>
       </.dynamic_tag>
+      <% end %>
       <% end %>
       <% end %>
       <% end %>

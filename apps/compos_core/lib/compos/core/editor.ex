@@ -1179,7 +1179,7 @@ defmodule Compos.Core.Editor do
   # the render modes the client draws in an iframe
   defp preview?(buffer) do
     try do
-      Buffer.get_local(buffer, "render-mode") in ["html", "markdown", "app", "file"]
+      Buffer.get_local(buffer, "render-mode") in ["html", "markdown", "app", "file", "web"]
     catch
       :exit, _ -> false
     end
@@ -3501,6 +3501,8 @@ defmodule Compos.Core.Editor do
       # the last message the package posted into its running app
       # (app-post!, preview.scm); a new one reaches the page with no reload
       app_message: Map.get(locals, "app-message"),
+      # a live web page drawn in the window (render-mode "web", web.scm)
+      web_url: Map.get(locals, "web-url"),
       top: top,
       # the payload says what the daemon knows about scroll (S1): manual
       # pins the windowed top; ctop is a client-scrolled window's pixel

@@ -53,8 +53,10 @@
 ;;;         subscribe box and the like counts.
 ;;;   FULL  the whole document as text.
 ;;;
-;;; `R` switches between them. The switch re-reads the html the buffer
-;;; already holds, so it costs one conversion and no network.
+;;; `R` cycles calm, full and the PAGE itself: the live site, drawn in
+;;; the window. A switch between the readings re-reads the html the
+;;; buffer already holds, so it costs one conversion and no network.
+;;; calm-mode turns the calm reading on and off.
 ;;;
 ;;; A reading is a CHOICE, not a discovery. The reader asks for one in
 ;;; 'browse-want and gets one in 'browse-reading. The two differ when
@@ -1150,9 +1152,10 @@
     (when url
       (buffer-set-local! buf 'modeline-name
         (string-append "*browse:" (web--slug url) "*")))
+    (web--calm-mark! buf)
     (buffer-set-local! buf 'modeline-info
       (string-append
-        (web--reading-label buf)
+        (if (web--page? buf) "page · " (web--reading-label buf))
         (or url "")
         (let ((age (cache-age-label buf)))
           (if age (string-append " · " age) ""))))))
@@ -1234,15 +1237,131 @@
 
 (define (web--ms n) (string-append (number->string n) "ms"))
 
+;;; --- chrome folds ---------------------------------------------------------------
+;;; A calm reading still carries a site's own furniture when the parser
+;;; kept it: a jump list of in-page links, a heading that is only a link,
+;;; a subscribe line. Each run of them folds to one line, "▸ navigation
+;;; · N links", and RET on that line opens it. A wrong guess costs one
+;;; line, so the tests are plain text and need no model.
+
+(define *web--chrome-min-links* 3)
+
+(define (web--link-only-item? line)
+  (and (re-match "^\\s*[-*+] \\[[^\\]]+\\]\\([^)]+\\)\\s*$" line) #t))
+
+(define (web--chrome-block? lines)
+  (let ((text (string-join lines " ")))
+    (cond
+      ;; a list of nothing but links: an index or a jump list
+      ((and (>= (length lines) 3) (null? (filter (lambda (l) (not (web--link-only-item? l))) lines))) #t)
+      ;; a heading that is only a link names a section of the site
+      ((and (= (length lines) 1)
+            (re-match "^#{1,6} \\[[^\\]]+\\]\\([^)]+\\)\\s*$" (car lines)))
+       #t)
+      ;; a short paragraph that asks you to subscribe or follow; a list
+      ;; that names feeds is the page's own news
+      ((and (= (length lines) 1)
+            (< (string-length text) 300)
+            (not (re-match "^\\s*([-*+]|\\d+\\.) " text))
+            (not (string-prefix? "#" text))
+            (re-match "\\]\\(" text)
+            (re-match "(?i)subscri|newsletter|\\brss\\b|sign(ing)? up|follow us" text))
+       #t)
+      (else #f))))
+
+(define (web--md-blocks md)
+  ;; the blocks of MD, split on blank lines, as (LINES START END) with
+  ;; byte offsets; END stops before the last line's newline. A fenced
+  ;; block is one block, blank lines and all, and is never chrome.
+  (let loop ((ls (string-split md "\n")) (at 0) (cur '()) (start 0) (fence? #f) (out '()))
+    (define (close out end)
+      (if (null? cur) out (cons (list (reverse cur) start end) out)))
+    (if (null? ls)
+        (reverse (close out (max start (- at 1))))
+        (let* ((line (car ls))
+               (next (+ at (string-byte-length line) 1))
+               (fence-line? (string-prefix? "```" (string-trim line))))
+          (cond
+            ((and (not fence?) (not fence-line?) (equal? (string-trim line) ""))
+             (loop (cdr ls) next '() next #f (close out (- at 1))))
+            (else
+              (loop (cdr ls) next (cons line cur) (if (null? cur) at start)
+                    (if fence-line? (not fence?) fence?) out)))))))
+
+(define (web--block-links lines)
+  (length (re-find* "\\]\\(" (string-join lines "\n"))))
+
+;; MD with a summary line before each run of chrome blocks, and the runs:
+;; (MD ((SUMMARY-START RUN-START RUN-END) ...)) in byte offsets. The page
+;; is rebuilt from its blocks, one blank line apart.
+(define (web--chrome-fold md)
+  (let* ((runs
+           ;; consecutive chrome blocks, as (START END LINKS)
+           (let loop ((bs (web--md-blocks md)) (run #f) (out '()))
+             (define (close out)
+               (if (and run (>= (caddr run) *web--chrome-min-links*)) (cons run out) out))
+             (cond ((null? bs) (reverse (close out)))
+                   ((and (not (string-prefix? "```" (string-trim (car (car (car bs))))))
+                         (web--chrome-block? (car (car bs))))
+                    (let ((b (car bs)))
+                      (loop (cdr bs)
+                            (if run
+                                (list (car run) (caddr b) (+ (caddr run) (web--block-links (car b))))
+                                (list (cadr b) (caddr b) (web--block-links (car b))))
+                            out)))
+                   (else (loop (cdr bs) #f (close out))))))
+         (pieces '()) (at 0) (shift 0) (out '()))
+    (for-each
+      (lambda (r)
+        (let* ((summary (string-append "*▸ navigation · " (number->string (caddr r)) " links*\n\n"))
+               (n (string-byte-length summary))
+               (s (+ (car r) shift)))
+          (set! pieces (cons summary (cons (substring-bytes md at (car r)) pieces)))
+          (set! at (car r))
+          (set! out (cons (list s (+ s n) (+ (cadr r) shift n)) out))
+          (set! shift (+ shift n))))
+      runs)
+    (list (apply string-append (reverse (cons (substring-bytes md at (string-byte-length md)) pieces)))
+          (reverse out))))
+
+;; a run hides its lines: a line is hidden when its start falls in (S, E]
+(define (web--chrome-range r) (list (- (cadr r) 1) (caddr r)))
+
+(define (web--chrome-apply! buf runs)
+  (buffer-set-local! buf 'web-chrome-runs runs)
+  (fold-set! buf 'web-chrome (map web--chrome-range runs)))
+
+;; the run whose summary line holds P
+(define (web--chrome-at buf p)
+  (let loop ((rs (or (buffer-local buf 'web-chrome-runs) '())))
+    (cond ((null? rs) #f)
+          ((and (>= p (car (car rs))) (< p (- (cadr (car rs)) 1))) (car rs))
+          (else (loop (cdr rs))))))
+
+(define (web--chrome-toggle! buf r)
+  (let* ((range (web--chrome-range r))
+         (open? (not (member range (fold-get buf 'web-chrome))))
+         (s (car r)))
+    (fold-toggle! buf 'web-chrome range)
+    ;; the arrow says which way it stands: ▸ and ▾ are the same width
+    (buffer-replace-range! buf (+ s 1) 3 (if open? "▸" "▾"))))
+
 (define (web--render! buf md)
   (let* ((t0 (monotonic-ms))
          (url (buffer-local buf 'browse-url))
          (md (if url (web--absolute-images md url) md))
+         ;; the calm reading folds what is left of the site's furniture
+         (folded (if (equal? (buffer-local buf 'browse-reading) "calm")
+                     (web--chrome-fold md)
+                     (list md '())))
+         (md (car folded))
          (links (web--markdown-links md)))
     (buffer-set-read-only! buf #f)
+    (fold-clear! buf 'web-chrome)
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-insert! buf 0 md)
     (buffer-set-read-only! buf #t)
+    (web--chrome-apply! buf (cadr folded))
     ;; Canonical Markdown stays in the buffer. preview-mode owns rendering;
     ;; web-links only keeps source positions for TAB, n/p and RET.
     (buffer-set-local! buf 'web-links links)
@@ -1253,7 +1372,9 @@
       (buffer-set-local! buf 'browse-restore-point #f)
       (buffer-goto! buf (min (or p 0) (buffer-size buf)))
       (buffer-windows-follow-point! buf))
-    (web--update-modeline! buf)
+    ;; a page that came by l, r or g while the page itself shows: the
+    ;; window follows it there
+    (if (web--page? buf) (web--page-show! buf) (web--update-modeline! buf))
     (when url
       (web--remember-visit! url (web--title md))
       (let ((t (web--timing url)))
@@ -1458,9 +1579,16 @@
         (string-append origin "/"))))
 
 (define (web--link-at buf p)
+  ;; The range is the label, but point can land on any byte of the link's
+  ;; markup: the page puts it on the opening [ when the caret stands at
+  ;; the start, and past the ] when it stands at the end. The whole
+  ;; [label](url) is the link.
   (let loop ((ls (or (buffer-local buf 'web-links) '())))
     (cond ((null? ls) #f)
-          ((and (>= p (car (car ls))) (< p (car (cdr (car ls))))) (car ls))
+          ((let* ((l (car ls))
+                  (tail (+ (cadr l) 2 (string-byte-length (caddr l)))))
+             (and (>= p (- (car l) 1)) (<= p tail)))
+           (car ls))
           (else (loop (cdr ls))))))
 
 ;; the first link starting after P, or the last one starting before it —
@@ -1491,18 +1619,22 @@
       (message "the picture is already on the page")
       (tab-open url)))
 
-(define-command "browse-follow" "Follow the link at point"
+(define-command "browse-follow" "Follow the link at point; on a folded run of site furniture, open or close it"
   (lambda ()
     (let* ((buf (current-buffer))
-           (l (web--link-at buf (point))))
-      (if (not l)
-          (message "no link here")
+           (fold (web--chrome-at buf (point)))
+           (l (and (not fold) (web--link-at buf (point)))))
+      (cond
+        (fold (web--chrome-toggle! buf fold))
+        ((not l)
+          (message "no link here"))
+        (else
           (let ((url (web--resolve (car (cdr (cdr l)))
                                    (or (buffer-local buf 'browse-url) ""))))
             ;; an image is not text: the browser renders it
             (if (web--image-url? url)
                 (web--open-image! url)
-                (web--goto-url! buf url #t)))))))
+                (web--goto-url! buf url #t))))))))
 
 ;; Cmd-RET, the browser reflex: the link at point opens as its own tab
 (define-command "browse-follow-new-tab" "Open the link at point in a new tab"
@@ -1613,8 +1745,6 @@
                                    (cache-refresh! buf))
                                   (else (browse u))))))))))))
 
-;; the ORIGINAL page is the browser's job — the editor renders text,
-;; and for everything else there is a real renderer one key away
 ;; The switch re-reads the html this buffer already holds: one
 ;; conversion, no network. Only a page served from the session copy —
 ;; which keeps markdown, not html — has to fetch again.
@@ -1644,12 +1774,119 @@
                     (web--update-modeline! buf)
                     (message "no article on this page — showing it whole"))))))))))
 
-(define-command "browse-toggle-reading" "Switch between the calm and the full reading"
+(define-command "browse-toggle-reading" "Cycle the calm reading, the full reading and the page itself"
   (lambda ()
     (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'browse-want
-        (if (equal? (web--want buf) "calm") "full" "calm"))
-      (web--reread! buf))))
+      (cond ((web--page? buf) (web--calm-apply! buf))
+            ((equal? (web--want buf) "calm") (web--calm-teardown! buf))
+            (else (web--page-show! buf (lambda () (web--calm-apply! buf))))))))
+
+;;; --- the page itself ------------------------------------------------------------
+;;; The third view: the live page, drawn in the window by the site's own
+;;; origin (render-mode "web"). The text stays in the buffer underneath,
+;;; so leaving the page needs no fetch. A site that forbids framing shows
+;;; the browser's refusal there; o still opens it in the real browser.
+
+(define (web--page? buf)
+  (equal? (buffer-local buf 'browse-page) #t))
+
+;; calm-mode is on exactly while the buffer asks for calm and shows text.
+;; R and a changed default move the ask without the mode's commands, so
+;; the modeline update keeps the mode list true.
+(define (web--calm-mark! buf)
+  (let ((on? (and (equal? (web--want buf) "calm") (not (web--page? buf))))
+        (others (remove (lambda (name) (equal? name "calm-mode"))
+                        (or (buffer-local buf 'minor-modes) '()))))
+    (buffer-set-local! buf 'minor-modes (if on? (cons "calm-mode" others) others))))
+
+;; A site may forbid every frame: X-Frame-Options, or a CSP whose
+;; frame-ancestors does not admit everyone. The browser would draw its
+;; refusal, so the page view is not offered there. One request per
+;; host answers it, and the answer holds for the session.
+(define *web--frame-hosts* '())
+
+(define (web--frame-denied? headers)
+  (let ((xfo (plist-get headers 'x-frame-options))
+        (csp (plist-get headers 'content-security-policy)))
+    (or (and (string? xfo) (not (equal? (string-trim xfo) "")))
+        (and (string? csp)
+             (let ((fa (filter (lambda (d) (string-prefix? "frame-ancestors" (string-trim d)))
+                               (string-split csp ";"))))
+               (and (pair? fa)
+                    (not (string-contains? (car fa) "*"))))))))
+
+;; K gets #t when URL's host lets the page sit in a window
+(define (web--framable url k)
+  (let ((known (assoc (web--host url) *web--frame-hosts*)))
+    (if known
+        (k (cadr known))
+        (http-get url '()
+          (lambda (r)
+            (let ((ok? (and (pair? r)
+                            (not (web--frame-denied? (or (plist-get r 'headers) '()))))))
+              (set! *web--frame-hosts* (cons (list (web--host url) ok?) *web--frame-hosts*))
+              (k ok?)))))))
+
+(define (web--page-on! buf url)
+  (buffer-set-local! buf 'browse-page #t)
+  (buffer-set-local! buf 'web-url url)
+  (buffer-set-local! buf 'render-mode "web")
+  (web--update-modeline! buf))
+
+;; the page itself, when the site allows it. DENIED runs when it does
+;; not: R moves on to calm, and a page reached by l, r or g stays text.
+(define (web--page-show! buf &optional denied)
+  (let ((url (buffer-local buf 'browse-url)))
+    (if (not url)
+        (message "no page here")
+        (web--framable url
+          (lambda (ok?)
+            (when (and (buffer-exists? buf) (equal? (buffer-local buf 'browse-url) url))
+              (if ok?
+                  (web--page-on! buf url)
+                  (begin
+                    (message (string-append (web--host url) " cannot be shown in a window — o opens it"))
+                    (web--page-hide! buf)
+                    (when denied (denied))))))))))
+
+(define (web--page-hide! buf)
+  (when (web--page? buf)
+    (buffer-set-local! buf 'browse-page #f)
+    (buffer-set-local! buf 'web-url #f)
+    (buffer-set-local! buf 'render-mode #f)
+    (unless (equal? (buffer-local buf 'browse-view) "source")
+      (disable-minor-mode! buf "preview-mode")
+      (enable-minor-mode! buf "preview-mode"))
+    (web--update-modeline! buf)))
+
+(define-command "browse-page" "Show the page itself, live, in this window"
+  (lambda () (web--page-show! (current-buffer))))
+
+;; calm-mode: the calm reading, on and off. Off is the full reading. It
+;; turns on with no fetch when the buffer already reads calm.
+(define (web--calm-apply! buf)
+  (web--page-hide! buf)
+  (unless (equal? (web--want buf) "calm")
+    (buffer-set-local! buf 'browse-want "calm")
+    (web--calm-mark! buf)
+    (web--reread! buf)))
+
+(define (web--calm-teardown! buf)
+  (web--page-hide! buf)
+  (unless (equal? (web--want buf) "full")
+    (buffer-set-local! buf 'browse-want "full")
+    (web--calm-mark! buf)
+    (web--reread! buf)))
+
+(register-minor-mode! "calm-mode" web--calm-apply! web--calm-teardown!)
+(mode-doc! "calm-mode"
+  "The calm reading of a browse page: the article alone. Off shows the
+whole document. R cycles calm, full and the page itself.")
+(define-command "calm-mode" "Toggle the calm reading of this page"
+  (lambda ()
+    (if (buffer-derived-mode? (current-buffer) "browse-mode")
+        (toggle-minor-mode! "calm-mode")
+        (message "calm-mode reads browse pages"))))
 
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
@@ -1927,8 +2164,9 @@
 
 (mode-doc! "browse-mode"
   "A web page as readable text, in one of two readings. Calm shows
-the article alone; full shows the whole document. R switches
-between them without fetching again. RET follows the link at point,
+the article alone; full shows the whole document. R cycles calm,
+full and the page itself, live in this window, where the site
+allows it, without fetching again; calm-mode turns calm on and off. RET follows the link at point,
 s-RET opens it as its own tab, and M-RET peeks it beside this window:
 the next M-RET replaces the peek, and M-RET on the same link keeps
 it. TAB and n/p walk the links, and M-<up> and M-<down> walk

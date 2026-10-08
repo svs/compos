@@ -5559,6 +5559,14 @@
       ;; stay put: only C-g reached minibuffer-cancel. Quit the prompt
       ;; first, and both keys say the same thing.
       ((minibuffer-active?) (minibuffer-cancel!))
+      ;; A reading surface quits with q: a list, a preview, a help
+      ;; buffer. C-g is the key every quit answers to, so it does the
+      ;; same there. A writable buffer types q, so it keeps the plain quit.
+      ((and (buffer-read-only? (current-buffer))
+            (let ((cmd (key-binding "q")))
+              (and (string? cmd)
+                   (not (member cmd '("self-insert-command" "keyboard-quit"))))))
+       (run-command (key-binding "q")))
       ;; C-g closes the dashboard panel too, so the key that opened it
       ;; is not the only key that puts it away
       (else (dashboard-panel-close! (current-buffer))

@@ -4336,11 +4336,16 @@
              (error (string-append "cannot require " (symbol->string f)
                                    ": " name " is not on load-path ("
                                    (require--chain f) ")")))
-           (load name)
-           (unless (featurep f)
-             (error (string-append "required feature " (symbol->string f)
-                                   " was not provided by " name)))
-           f))))
+           (let ((result (load name)))
+             (cond ((featurep f) f)
+                   ;; the boot loader swallowed the file's own error and
+                   ;; said so in *Messages*. A second error here would
+                   ;; stop the manifest at this line, and every file
+                   ;; after it would go unloaded for one file's fault.
+                   ((eq? result 'load-failed) #f)
+                   (else
+                     (error (string-append "required feature " (symbol->string f)
+                                           " was not provided by " name)))))))))
 
 ;;; An autoload is a stub under a name. The first call loads FILE, which
 ;;; defines the name for real, and the call goes on to that definition.

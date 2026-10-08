@@ -854,55 +854,63 @@
       (set! *web--tab-hosts* saved-tabs)
       (set! *web-fetch-html* saved))))
 
-(deftest 'a-host-whose-calm-found-nothing-reads-full-at-once
-  "Readability costs a process; a host with no article does not pay it on every page"
-  (lambda ()
-    (let ((saved-full *web--full-hosts*))
-      (set! *web--full-hosts* '())
-      (check-false! (web--calm-skip? "https://shop.test/a" "calm") "nothing learned yet")
-      (web--full-host! "https://shop.test/a")
-      (check-true! (web--calm-skip? "https://shop.test/b" "calm") "the host reads full now")
-      (check-false! (web--calm-skip? "https://shop.test/b" "full") "full was the ask anyway")
-      (web--full-host! "https://news.ycombinator.com/")
-      (check-false! (web--calm-skip? "https://news.ycombinator.com/item?id=1" "calm")
-                    "a site with a stylesheet keeps calm: xsltproc is one process")
-      (web--full-host-forget! "https://shop.test/c")
-      (check-false! (web--calm-skip? "https://shop.test/b" "calm") "forgotten")
-      (set! *web--full-hosts* saved-full))))
+;; the readings answer on a callback, as the shell does
+(define (t--web-read-later md)
+  (lambda (k) (shell-command->string "true" (lambda (out) (k md)))))
 
-(deftest 'calm-that-found-nothing-teaches-the-host
-  "the first page pays for calm and full; the next page from the host pays for full alone"
+(deftest 'a-calm-ask-reads-both-ways-at-once-and-decide-picks
+  "an index page costs the slower reading, not the sum; an article still reads calm"
   (lambda ()
     (let ((saved-fetch *web-fetch-html*)
           (saved-read web--read)
+          (saved-arbiter *web--arbiter*)
           (saved-judge *web--judge*)
-          (saved-full *web--full-hosts*)
           (saved-learn browse-learn-parsers)
-          (asked '())
-          (answers '()))
-      (set! *web--full-hosts* '())
+          (calm-md "# calm\n\nthe [article](https://site.test/a)\n")
+          (full-md "# full\n\nthe [whole](https://site.test/b) page\n"))
+      (define (read-with verdict calm)
+        (let ((asked '()) (answer 'none))
+          (set! web--read
+                (lambda (url file reading k)
+                  (set! asked (append asked (list reading)))
+                  ((t--web-read-later (if (equal? reading "calm") calm full-md)) k)))
+          (set! *web--arbiter*
+                (lambda (url html k) ((t--web-read-later verdict) k)))
+          (web--attempt "https://site.test/page" "calm" #f
+                        (lambda (found) (set! answer found)))
+          (let ((asked-at-once asked))
+            (check-true! (wait-until (lambda () (not (eq? answer 'none))) 5000 20)
+                         "the reading answered")
+            (list asked-at-once (nth 0 answer) (nth 1 answer)))))
       (set! browse-learn-parsers #f)
       (set! *web--judge* (lambda (url md k) (k #f)))
       (set! *web-fetch-html*
             (lambda (url k &optional revalidate? render?)
-              (k "<html><body>index</body></html>")))
-      (set! web--read
-            (lambda (url file reading k)
-              (set! asked (append asked (list reading)))
-              (k (if (equal? reading "full")
-                     "# whole\n\nthe page [a](https://shop.test/a)\n"
-                     #f))))
-      (web--attempt "https://shop.test/" "calm" #f
-                    (lambda (found) (set! answers (append answers (list (car found))))))
-      (web--attempt "https://shop.test/b" "calm" #f
-                    (lambda (found) (set! answers (append answers (list (car found))))))
-      (check-equal! asked '("calm" "full" "full") "calm once, then full alone")
-      (check-equal! answers '("full" "full") "both pages read full")
+              (k "<html><body><h1>a page</h1></body></html>")))
+      (let ((index (read-with 'index calm-md))
+            (article (read-with 'article calm-md))
+            (unknown (read-with 'unknown calm-md))
+            (nothing (read-with 'article #f)))
+        (check-equal! (nth 0 index) '("calm" "full") "both readings start before either answers")
+        (check-equal! (nth 1 index) "full" "an index page reads full")
+        (check-equal! (nth 2 index) full-md "whatever calm found")
+        (check-equal! (nth 1 article) "calm" "an article reads calm")
+        (check-equal! (nth 1 unknown) "calm" "no verdict: calm when it found one")
+        (check-equal! (nth 1 nothing) "full" "an article whose calm found nothing reads full"))
       (set! browse-learn-parsers saved-learn)
-      (set! *web--full-hosts* saved-full)
       (set! *web--judge* saved-judge)
+      (set! *web--arbiter* saved-arbiter)
       (set! web--read saved-read)
       (set! *web-fetch-html* saved-fetch))))
+
+(deftest 'the-arbiter-reads-the-pages-head-without-its-tags
+  "the question carries the title and the first words, not the markup"
+  (lambda ()
+    (let ((head (web--html-head "<html><head><title>A story</title><script>x<y</script></head><body><p>It   begins.</p></body></html>")))
+      (check-contains! head "A story" "the title")
+      (check-contains! head "It begins." "the first words, one space apart")
+      (check-false! (string-contains? head "<") "no tags")
+      (check-false! (string-contains? head "x<y") "no script"))))
 
 (effects! '(write))
 
@@ -912,12 +920,15 @@
     (let ((saved-fetch *web-fetch-html*)
           (saved-read web--read)
           (saved-judge *web--judge*)
+          (saved-arbiter *web--arbiter*)
           (saved-tabs *web--tab-hosts*)
           (saved-judged *web--judged-hosts*)
           (saved-learn browse-learn-parsers)
           (ways '())
           (verdicts 0))
       (set! browse-learn-parsers #f)
+      ;; the reading is not the question here: every page is an article
+      (set! *web--arbiter* (lambda (url html k) (k 'article)))
       (set! *web--tab-hosts* '())
       (set! *web--judged-hosts* '())
       (set! *web-fetch-html*
@@ -951,6 +962,7 @@
               (check-equal! verdicts 1 "one question per host")))))
       (t--web-kill-tabs!)
       (set! browse-learn-parsers saved-learn)
+      (set! *web--arbiter* saved-arbiter)
       (set! *web--judged-hosts* saved-judged)
       (set! *web--tab-hosts* saved-tabs)
       (set! *web--judge* saved-judge)

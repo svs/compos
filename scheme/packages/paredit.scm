@@ -824,9 +824,12 @@ farther apart than this is not lit and not found.")
 
 ;; The browser must not predict a key that paredit takes over: "(" also
 ;; inserts ")", and DEL beside a delimiter only moves (predict.scm).
-(predict-skip! "paredit-mode"
-  (filter (lambda (k) (member k '("(" ")" "[" "]" "\"" "DEL" "RET")))
-          (map car *paredit-keys*)))
+;; predict is not in the stock boot, so the registration waits for it.
+(with-eval-after-load 'predict
+  (lambda ()
+    (predict-skip! "paredit-mode"
+      (filter (lambda (k) (member k '("(" ")" "[" "]" "\"" "DEL" "RET")))
+              (map car *paredit-keys*)))))
 
 (define (paredit--setup! buf) #t)
 

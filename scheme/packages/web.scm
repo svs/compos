@@ -166,36 +166,17 @@
     (and site (car (cdr (cdr site))) #t)))
 
 ;;; --- what a host taught this session --------------------------------------------
-;;; Two lists of hosts, kept for the session. A host is on the first when
-;;; its calm reading found no article: the next page from it reads full at
-;;; once and skips Readability. A host is on the second when a plain fetch
-;;; answered a shell: the next page from it starts in a real tab.
-;;; web-register-site! is the durable form of the second list.
+;;; The hosts whose plain fetch answered a shell, kept for the session:
+;;; the next page from one starts in a real tab. web-register-site! is
+;;; the durable form of this list.
 
-(define *web--full-hosts* '())
 (define *web--tab-hosts* '())
 
-(define (web--full-host? url) (and (member (web--host url) *web--full-hosts*) #t))
 (define (web--tab-host? url) (and (member (web--host url) *web--tab-hosts*) #t))
-
-(define (web--full-host! url)
-  (unless (web--full-host? url)
-    (set! *web--full-hosts* (cons (web--host url) *web--full-hosts*))))
 
 (define (web--tab-host! url)
   (unless (web--tab-host? url)
     (set! *web--tab-hosts* (cons (web--host url) *web--tab-hosts*))))
-
-(define (web--full-host-forget! url)
-  (set! *web--full-hosts* (filter (lambda (h) (not (equal? h (web--host url)))) *web--full-hosts*)))
-
-;; Calm on this host found nothing last time, and no stylesheet makes
-;; calm cheap here: read full at once. A site with a parser keeps calm,
-;; because xsltproc is one process and reads a different page.
-(define (web--calm-skip? url want)
-  (and (equal? want "calm")
-       (web--full-host? url)
-       (not (web--site-parser url))))
 
 ;;; --- reading the html -----------------------------------------------------------
 
@@ -638,30 +619,110 @@
           ((not (string? (web--doc-text doc))) (k (list #f #f #f)))
           (else
             (let* ((html (web--doc-text doc))
-                   (file (web--write-html! html))
-                   ;; the host taught the reader that calm finds nothing here
-                   (reading (if (web--calm-skip? url want) "full" want)))
+                   (file (web--write-html! html)))
               (web--learn-later! url html want)
-              (web--read url file reading
-                (lambda (md)
-                  (cond
-                    (md (web--judge-later! url md rendered?)
+              (web--read-wanted url file html want
+                (lambda (reading md)
+                  (if md
+                      (begin
+                        (web--judge-later! url md rendered?)
                         (web--answer file (list reading md html) k))
-                    ;; Calm found no article. That is an answer, not a
-                    ;; failure: an index page IS its links, so read it
-                    ;; whole. Full finding nothing is the real failure.
-                    ((equal? reading "calm")
-                     (web--full-host! url)
-                     (web--read url file "full"
-                       (lambda (full)
-                         (if full
-                             (begin
-                               (web--judge-later! url full rendered?)
-                               (web--answer file (list "full" full html) k))
-                             (web--retry url want file rendered? k retried?)))))
-                    (else (web--retry url want file rendered? k retried?))))))))))
+                      (web--retry url want file rendered? k retried?)))))))))
     *web--revalidate*
     rendered?))
+
+;;; --- which reading ----------------------------------------------------------------
+;;; Calm is the article; full is the whole page. An index page has no
+;;; article, and Readability finds that out at the price of a process,
+;;; or finds a fragment and shows a sidebar for the page. So a calm ask
+;;; starts three things at once: the calm reading, the full reading, and
+;;; one question to decide, from the page's head, whether the page is an
+;;; article at all. Decide picks the reading; the thin test decides when
+;;; decide cannot. The page costs the slower of its reading and the
+;;; question, never the sum. A site with a stylesheet reads calm through
+;;; its sheet, which is built for its pages, so no question is asked.
+
+;; the seam: (ARBITER URL HTML K), K gets 'article, 'index or 'unknown
+(define *web--arbiter* #f)
+
+(define *web--arbiter-bytes* 1500)
+
+;; how long the arbiter may keep a page whose readings are in
+(define *web--arbiter-ms* 10000)
+
+(define (web--article-question)
+  (decide-noul
+    (string-append
+      "Is this page one article, story, post, or document to read, "
+      "rather than an index, a listing, a feed, a search result, a "
+      "shop, or a home page whose content is its links?")))
+
+;; the page's head as text: its title and first words, tags gone
+(define (web--html-head html)
+  (let* ((text (re-replace-all "<[^>]*>" (web--without-scripts html) " "))
+         (text (re-replace-all "\\s+" text " ")))
+    (substring text 0 (min *web--arbiter-bytes* (string-length text)))))
+
+(define (web--decide-article url html k)
+  (if (boundp 'decide-async)
+      (decide-async
+        (string-append "The page " url " begins: " (web--html-head html))
+        (list 'article (web--article-question))
+        (lambda (reply)
+          (let ((rows (or (plist-get reply 'answers) '())))
+            (k (cond ((null? rows) 'unknown)
+                     ((web--judge-yes? reply 'article) 'article)
+                     (else 'index)))))
+        'purpose 'fast 'timeout 10)
+      (k 'unknown)))
+
+;; K gets (READING MD): the reading that was found and its markdown, or
+;; (#f #f) when the page reads as nothing either way.
+(define (web--read-wanted url file html want k)
+  (if (or (equal? want "full") (web--site-parser url))
+      (web--read-in-order url file want k)
+      (web--read-both url file html k)))
+
+;; one reading, then the other: full alone, or a sheet's calm then full
+(define (web--read-in-order url file want k)
+  (web--read url file want
+    (lambda (md)
+      (cond (md (k want md))
+            ((equal? want "calm")
+             (web--read url file "full" (lambda (full) (k (and full "full") full))))
+            (else (k #f #f))))))
+
+(define (web--read-both url file html k)
+  (let ((calm 'pending) (full 'pending) (verdict 'pending) (done #f))
+    (define (answer! reading md)
+      (unless done
+        (set! done #t)
+        (k (and md reading) md)))
+    (define (settle!)
+      (cond (done #f)
+            ((eq? verdict 'pending) #f)
+            ;; the page is its links: the whole page is the reading
+            ((and (eq? verdict 'index) (not (eq? full 'pending)))
+             (answer! "full" full))
+            ((eq? verdict 'index) #f)
+            ;; an article, or no verdict: calm when it found one, else full
+            ((eq? calm 'pending) #f)
+            (calm (answer! "calm" calm))
+            ((not (eq? full 'pending)) (answer! "full" full))
+            (else #f)))
+    (define (verdict! v)
+      (when (eq? verdict 'pending)
+        (set! verdict v)
+        (settle!)))
+    (web--read url file "calm" (lambda (md) (set! calm md) (settle!)))
+    (unless done
+      (web--read url file "full" (lambda (md) (set! full md) (settle!))))
+    (unless done
+      ((or *web--arbiter* web--decide-article) url html verdict!)
+      ;; a question that never answers must not hold the page
+      (unless done
+        (debounce! (string-append "browse-arbiter:" url) *web--arbiter-ms*
+                   (lambda (x) (verdict! 'unknown)) #f)))))
 
 ;;; --- the judge --------------------------------------------------------------------
 ;;; A fetch answers a shell the thin test cannot see: x.com's error page
@@ -1534,12 +1595,9 @@
 
 (define-command "browse-toggle-reading" "Switch between the calm and the full reading"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (want (if (equal? (web--want buf) "calm") "full" "calm"))
-           (url (buffer-local buf 'browse-url)))
-      (buffer-set-local! buf 'browse-want want)
-      ;; a reader who asks for calm here wants it on the next page too
-      (when (and url (equal? want "calm")) (web--full-host-forget! url))
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'browse-want
+        (if (equal? (web--want buf) "calm") "full" "calm"))
       (web--reread! buf))))
 
 (define-command "browse-open-external" "Open this page in the real browser"
@@ -2086,7 +2144,8 @@ the tabs. C-s searches to any link.")
     "Unregistered sites read through readable, and a short calm reading falls back to the full page. "
     "The fetch goes first; a site the table marks, a bot wall, a thin answer, or a shell the judge "
     "(decide, browse-judge-shells) names reads again in a real tab, and that host starts in a tab for "
-    "the session. A host whose calm reading found nothing reads full on its next page.")
+    "the session. A calm ask starts the calm and the full readings at once, and decide says from "
+    "the page's head whether it is an article or an index; the thin test picks when decide cannot.")
   'domain 'web
   'effects '(pure)
   'use "create web/parsers/example.xsl; add (\"https://example.com\" \"example.xsl\" #f) to *web--sites*")

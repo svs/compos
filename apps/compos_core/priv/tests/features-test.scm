@@ -84,6 +84,22 @@
     (check-false! (ignore-errors (lambda () (require 'zz-ft-no-such-feature))) "raised")
     (check-false! (featurep 'zz-ft-no-such-feature) "not provided")))
 
+(deftest 'a-require-whose-file-failed-at-boot-answers-false-and-goes-on
+  "the boot loader records the file's own error; the manifest line after it still runs"
+  (lambda ()
+    (t--ft-make!)
+    (t--ft-forget! 'zz-broken)
+    (t--ft-write! "zz-broken.scm" "(define zz-broken-loaded #t)\n")
+    (let ((saved builtin-load))
+      ;; what the boot loader answers for a file that raised
+      (set! builtin-load (lambda (path) 'load-failed))
+      (check-equal! (require 'zz-broken) #f "no feature, and no second error")
+      (set! builtin-load saved))
+    (check-false! (featurep 'zz-broken) "nothing provided")
+    (check-equal! (require 'zz-broken) 'zz-broken "the same require after a fix loads it")
+    (t--ft-forget! 'zz-broken)
+    (t--ft-remove!)))
+
 (deftest 'recursive-require-is-an-error
   "a requires b requires a: an error, and the loader is clean after it"
   (lambda ()

@@ -50,6 +50,7 @@
 (require 'isearch)
 (require 'capf)
 (require 'visual-line)
+(require 'predict)
 (require 'collect)
 (require 'comint)
 (require 'advice)

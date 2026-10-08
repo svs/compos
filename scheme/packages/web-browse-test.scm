@@ -1012,3 +1012,46 @@
                    "a real table stays a table")
       (delete-file! nested)
       (delete-file! plain))))
+
+(effects! '(read))
+
+(deftest 'image-targets-are-absolute-in-the-buffer-and-links-stay-as-written
+  "the preview draws an image from its own document; a link is resolved when followed"
+  (lambda ()
+    (check-equal! (web--absolute-images
+                    "see ![alt](../m/a.png) and [l](/x) and ![b](https://c.test/b.png) ![](data:image/png;base64,AA==)"
+                    "https://h.test/site/home.html")
+                  "see ![alt](https://h.test/m/a.png) and [l](/x) and ![b](https://c.test/b.png) ![](data:image/png;base64,AA==)"
+                  "one image resolved, one link untouched, two already absolute")
+    (check-equal! (web--absolute-images "no images here [l](a.html)" "https://h.test/")
+                  "no images here [l](a.html)" "a page with no image is itself")
+    (check-equal! (web--resolve "../../m/a.png" "https://h.test/a/b/c.html")
+                  "https://h.test/m/a.png" "dot segments collapse")))
+
+(deftest 'a-page-reports-its-stages
+  "fetch, read and render, in one line a person can quote"
+  (lambda ()
+    (let ((saved-fetch *web-fetch-html*)
+          (saved-read web--read)
+          (saved-arbiter *web--arbiter*)
+          (saved-judge *web--judge*)
+          (saved-learn browse-learn-parsers)
+          (answer 'none))
+      (set! browse-learn-parsers #f)
+      (set! *web--judge* (lambda (url md k) (k #f)))
+      (set! *web--arbiter* (lambda (url html k) (k 'article)))
+      (set! *web-fetch-html*
+            (lambda (url k &optional revalidate? render?) (k "<html><body>x</body></html>")))
+      (set! web--read
+            (lambda (url file reading k) (k "# a\n\nthe [page](https://t.test/a)\n")))
+      (web--attempt "https://t.test/timed" "calm" #f (lambda (found) (set! answer found)))
+      (let ((t (web--timing "https://t.test/timed")))
+        (check-true! (and t (number? (plist-get t 'fetch)) (number? (plist-get t 'read)) #t)
+                     "the fetch and the read were measured")
+        (check-equal! (plist-get t 'way) "fetch" "and the way is named")
+        (check-equal! (plist-get t 'reading) "calm" "with the reading"))
+      (set! browse-learn-parsers saved-learn)
+      (set! *web--judge* saved-judge)
+      (set! *web--arbiter* saved-arbiter)
+      (set! web--read saved-read)
+      (set! *web-fetch-html* saved-fetch))))

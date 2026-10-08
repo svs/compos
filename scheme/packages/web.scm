@@ -608,8 +608,10 @@
 ;; Fetch, then read. RENDERED? says this document came from a real tab,
 ;; so an empty answer stops instead of asking for a tab again.
 (define (web--attempt url want rendered? k &optional retried?)
+  (define t0 (monotonic-ms))
   (*web-fetch-html* url
     (lambda (fetched)
+      (define t1 (monotonic-ms))
       (let ((doc (web--as-document fetched)))
         (cond
           ((not doc) (web--retry url want #f rendered? k retried?))
@@ -623,6 +625,8 @@
               (web--learn-later! url html want)
               (web--read-wanted url file html want
                 (lambda (reading md)
+                  (web--timing! url (list 'fetch (- t1 t0) 'read (- (monotonic-ms) t1)
+                                          'way (if rendered? "tab" "fetch") 'reading reading))
                   (if md
                       (begin
                         (web--judge-later! url md rendered?)
@@ -1112,9 +1116,17 @@
           (let* ((q (string-index base "?"))
                  (clean (if q (substring-bytes base 0 q) base))
                  (slash (string-rindex clean "/")))
-            (if (and slash (> slash (+ (string-index clean "://") 2)))
-                (string-append (substring-bytes clean 0 (+ slash 1)) url)
-                (string-append clean "/" url)))))))
+            (web--collapse-dots
+              (if (and slash (> slash (+ (string-index clean "://") 2)))
+                  (string-append (substring-bytes clean 0 (+ slash 1)) url)
+                  (string-append clean "/" url))))))))
+
+;; "/site/../media/a.png" is "/media/a.png": a browser reads both, the
+;; preview's image cache and the history read one name
+(define (web--collapse-dots url)
+  (let loop ((s url) (n 0))
+    (let ((next (re-replace-all "/[^/.][^/]*/\\.\\./" s "/")))
+      (if (or (equal? next s) (> n 16)) next (loop next (+ n 1))))))
 
 ;; the public name: other packages (feeds) resolve their links the
 ;; same one way
@@ -1191,8 +1203,42 @@
     (buffer-kill! buf)
     file-buf))
 
+;; Image targets are absolute in the buffer: the preview draws them in
+;; a document of its own, where a relative path has no page to resolve
+;; against. Readability wrote them absolute; a full or a sheet reading
+;; keeps what the page wrote. Links stay as written: a follow resolves.
+(define *web--image-pattern* "!\\[([^]]*)\\]\\(([^)]*)\\)")
+
+(define (web--absolute-images md url)
+  (let loop ((hits (re-find* *web--image-pattern* md)) (pos 0) (chunks '()))
+    (if (null? hits)
+        (string-join (reverse (cons (substring-bytes md pos (string-byte-length md)) chunks)) "")
+        (let* ((ms (car (car hits)))
+               (me (car (cdr (car hits))))
+               (parts (web--link-parts (substring-bytes md ms me))))
+          (loop (cdr hits) me
+                (cons (string-append "![" (car parts) "](" (web--resolve (car (cdr parts)) url) ")")
+                      (cons (substring-bytes md pos ms) chunks)))))))
+
+;; the stages of the last pages, by url: (URL fetch MS read MS)
+(define *web--timings* '())
+
+(define (web--timing! url plist)
+  (set! *web--timings*
+        (cons (cons url plist)
+              (filter (lambda (e) (not (equal? (car e) url))) *web--timings*)))
+  (when (> (length *web--timings*) 20)
+    (set! *web--timings* (reverse (cdr (reverse *web--timings*))))))
+
+(define (web--timing url) (let ((e (assoc url *web--timings*))) (and e (cdr e))))
+
+(define (web--ms n) (string-append (number->string n) "ms"))
+
 (define (web--render! buf md)
-  (let ((links (web--markdown-links md)))
+  (let* ((t0 (monotonic-ms))
+         (url (buffer-local buf 'browse-url))
+         (md (if url (web--absolute-images md url) md))
+         (links (web--markdown-links md)))
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-insert! buf 0 md)
@@ -1208,8 +1254,13 @@
       (buffer-goto! buf (min (or p 0) (buffer-size buf)))
       (buffer-windows-follow-point! buf))
     (web--update-modeline! buf)
-    (let ((url (buffer-local buf 'browse-url)))
-      (when url (web--remember-visit! url (web--title md))))))
+    (when url
+      (web--remember-visit! url (web--title md))
+      (let ((t (web--timing url)))
+        (when t
+          (message (string-append "browse: fetch " (web--ms (plist-get t 'fetch))
+                                  ", read " (web--ms (plist-get t 'read))
+                                  ", render " (web--ms (- (monotonic-ms) t0)))))))))
 
 ;; overlays are runtime: the mode setup rebuilds them from 'web-links.
 ;; Image links embed pictures. Short note links use the compact date face.

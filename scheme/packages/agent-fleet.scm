@@ -344,10 +344,13 @@
 ;; buffer-known?: buffer-exists? dropped every dormant row, which left
 ;; nearly every verb saying there was no chat here.
 (define (agents-targets)
-  ;; the list the key was pressed in; *chat-list*<2> is no other list
+  ;; the chat you are in, else the list the key was pressed in;
+  ;; *chat-list*<2> is no other list
   (let ((here (current-buffer)))
-    (filter buffer-known?
-            (ibuffer-targets (if (equal? (mode-list-of here) "chat-mode") here (chat-list-buffer))))))
+    (if (chat-buffer? here)
+        (list here)
+        (filter buffer-known?
+                (ibuffer-targets (if (equal? (mode-list-of here) "chat-mode") here (chat-list-buffer)))))))
 
 ;; the slug of a chat whose runtime is up. A dormant chat keeps its slug
 ;; local, so the local alone does not say there is a runtime to answer.
@@ -478,6 +481,27 @@
             (for-each agents-archive! bs)
             (agents-relist!)
             (agents-report "archived" bs))))))
+
+(define (agents-delete! b)
+  (let ((path (chat-log-path b)))
+    (agents-archive! b)
+    (delete-file-path! path #f)))
+
+(define-command "chat-delete"
+  "Delete this chat, or the chat at point: the runtime stops, the buffer goes, the file goes to the trash"
+  (lambda ()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (yes-or-no?
+            (if (= (length bs) 1)
+                (string-append "Delete " (chats-title (car bs)) "?")
+                (string-append "Delete " (number->string (length bs)) " chats?"))
+            (lambda (yes)
+              (when yes
+                (for-each agents-delete! bs)
+                (agents-relist!)
+                (agents-report "deleted" bs))))))))
 
 ;; k stops the runtime and keeps the transcript: the chat stays in the
 ;; list, readable, and the next message you send revives it
@@ -730,6 +754,7 @@
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chat-delete" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-kill-runtime" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-stop-all" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-start-all" 'domain 'chat 'effects '(write external execute))
@@ -804,7 +829,7 @@
                "turns the sections off and on. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "
-               "answer a permission, r gives a title, k kills, a archives, "
+               "answer a permission, r gives a title, k kills, a archives, D deletes, "
                "+ starts a chat, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
@@ -814,7 +839,7 @@
         ;; the list stands still: g draws it again when you ask
         'stamp #f
         'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
-                ("a" "chats-archive") ("r" "chat-retitle-at-point")
+                ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh")
                 ("+" "agent-open")))))
 

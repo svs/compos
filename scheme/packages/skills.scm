@@ -278,7 +278,7 @@
 
 ;;; --- compiled skills -----------------------------------------------------------
 ;;; compile-skill turns a skill's prose into one Scheme procedure and keeps
-;;; it beside SKILL.md as skill.scm, with the prose it came from. skill-run
+;;; it beside SKILL.md as skill.scm, with a hash of its prose. skill-run
 ;;; runs that procedure; a skill with no skill.scm runs as an agent turn on
 ;;; its prose and never compiles on its own. A skill.scm whose prose has
 ;;; changed since is out of date, and skill-run compiles it again first.
@@ -295,7 +295,17 @@
 
 (define (skill--compiled-path dir) (string-append dir "/skill.scm"))
 
-;; (SOURCE PROCEDURE-FORM) from DIR's skill.scm, or #f
+;; a 61-bit hash of TEXT, as a string: is this the prose skill.scm came from
+(define (skill--hash text)
+  (let ((n (string-byte-length text)) (m 2305843009213693951))
+    (let loop ((i 0) (h n))
+      (cond ((<= (+ i 4) n)
+             (loop (+ i 4) (remainder (+ (* h 1099511628211) (bytes->integer text i 4)) m)))
+            ((< i n)
+             (loop (+ i 1) (remainder (+ (* h 257) (bytes->integer text i 1)) m)))
+            (else (number->string h))))))
+
+;; (HASH PROCEDURE-FORM) from DIR's skill.scm, or #f
 (define (skill--compiled dir)
   (let* ((path (skill--compiled-path dir))
          (forms (and (file-exists? path) (scheme-read (read-file path))))
@@ -308,7 +318,7 @@
 (define (skill--state dir)
   (let ((c (skill--compiled dir)))
     (cond ((not c) 'none)
-          ((equal? (car c) (read-file (string-append dir "/SKILL.md"))) 'current)
+          ((equal? (car c) (skill--hash (read-file (string-append dir "/SKILL.md")))) 'current)
           (else 'stale))))
 
 (define (skill-state name)
@@ -425,7 +435,7 @@
     (write-file! (skill--compiled-path dir)
                  (string-append ";;; skill.scm --- " n " compiled from SKILL.md by compile-skill.\n"
                                 ";;; Run compile-skill again instead of editing this file.\n\n"
-                                "(skill-source " (json-encode source) ")\n\n" code "\n"))
+                                "(skill-source " (json-encode (skill--hash source)) ")\n\n" code "\n"))
     (skill--compiled-path dir)))
 
 ;; no skill.scm: one agent turn on the fast model, with the prose as its task

@@ -236,7 +236,7 @@
     (check-false! (skill--code "no code here") "no form, no code")))
 
 (deftest 'a-skill-is-none-then-current-then-stale
-  "skill.scm carries its prose, so an edit to SKILL.md makes it out of date"
+  "skill.scm carries a hash of its prose, so an edit to SKILL.md makes it out of date"
   (lambda ()
     (shell-command->string (string-append "mkdir -p " t--skill-dir))
     (t--skill-write! "Say hello.")
@@ -244,7 +244,7 @@
     (check-equal! (skill-state "zz-user-skill") 'none "no skill.scm yet")
     (write-file! (skill--compiled-path t--skill-dir)
                  (string-append "(skill-source "
-                                (json-encode (read-file (string-append t--skill-dir "/SKILL.md")))
+                                (json-encode (skill--hash (read-file (string-append t--skill-dir "/SKILL.md"))))
                                 ")\n(lambda (args) (string-append \"hello \" args))\n"))
     (check-equal! (skill-state "zz-user-skill") 'current "compiled from this prose")
     (check-equal! ((eval (cadr (skill--compiled t--skill-dir))) "you") "hello you"

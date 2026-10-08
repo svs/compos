@@ -430,6 +430,16 @@
                     "and it has no runtime to answer with"))
     (chats-test-reset!)))
 
+(deftest 'a-verb-in-a-chat-acts-on-that-chat
+  "in a chat, a verb acts on that chat, not on the row at point in the list"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (check-equal! (list-current *chat-list*) "*zz-chats-a*" "the list is on a")
+    (check-equal! (with-current-buffer "*zz-chats-c*" agents-targets)
+                  '("*zz-chats-c*")
+                  "the verb acts on the chat you are in")
+    (chats-test-reset!)))
+
 (deftest 'chats-sections-by-group-or-none
   "the grouping cycles none and group only: state and model are no sections"
   (lambda ()

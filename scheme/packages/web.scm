@@ -97,6 +97,9 @@
   ;; pages; fetch through the real browser so its cookies are preserved.
   '(("https://svsrecruiting.com" #f #t)
     ("https://substack.com" "substack.xsl" #t)
+    ;; x.com answers a plain fetch with 300kb of "Something went wrong"
+    ("https://x.com" #f #t)
+    ("https://twitter.com" #f #t)
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
     ("https://news.ycombinator.com" "hackernews.xsl" #f)
     ("https://timesofindia.indiatimes.com" "toi.xsl" #f)
@@ -161,6 +164,38 @@
 (define (web--site-render? url)
   (let ((site (web--site url)))
     (and site (car (cdr (cdr site))) #t)))
+
+;;; --- what a host taught this session --------------------------------------------
+;;; Two lists of hosts, kept for the session. A host is on the first when
+;;; its calm reading found no article: the next page from it reads full at
+;;; once and skips Readability. A host is on the second when a plain fetch
+;;; answered a shell: the next page from it starts in a real tab.
+;;; web-register-site! is the durable form of the second list.
+
+(define *web--full-hosts* '())
+(define *web--tab-hosts* '())
+
+(define (web--full-host? url) (and (member (web--host url) *web--full-hosts*) #t))
+(define (web--tab-host? url) (and (member (web--host url) *web--tab-hosts*) #t))
+
+(define (web--full-host! url)
+  (unless (web--full-host? url)
+    (set! *web--full-hosts* (cons (web--host url) *web--full-hosts*))))
+
+(define (web--tab-host! url)
+  (unless (web--tab-host? url)
+    (set! *web--tab-hosts* (cons (web--host url) *web--tab-hosts*))))
+
+(define (web--full-host-forget! url)
+  (set! *web--full-hosts* (filter (lambda (h) (not (equal? h (web--host url)))) *web--full-hosts*)))
+
+;; Calm on this host found nothing last time, and no stylesheet makes
+;; calm cheap here: read full at once. A site with a parser keeps calm,
+;; because xsltproc is one process and reads a different page.
+(define (web--calm-skip? url want)
+  (and (equal? want "calm")
+       (web--full-host? url)
+       (not (web--site-parser url))))
 
 ;;; --- reading the html -----------------------------------------------------------
 
@@ -246,24 +281,45 @@
     (write-file! file (or text ""))
     file))
 
+(define (web--empty-reading? md)
+  (or (web--thin? md) (web--blocked? md)))
+
 ;; FILE of html -> markdown for one READING. K gets the markdown, or #f.
 (define (web--read url file reading k)
-  (shell-command->string
-    (if (equal? reading "full")
-        (web--full-command file)
-        (web--calm-command url file))
-    (lambda (md)
-      (cond
-        ;; The table rescue comes FIRST. A page laid out in nested
-        ;; tables — news.ycombinator.com is one — reads as the eight
-        ;; bytes "[TABLE]\n", which the thin test would throw away.
-        ((and (equal? reading "full")
-              (string? md)
-              (string-contains? md "[TABLE]"))
-         (shell-command->string (web--flatten-command file)
-           (lambda (flat) (k (if (or (web--thin? flat) (web--blocked? flat)) #f flat)))))
-        ((or (web--thin? md) (web--blocked? md)) (k #f))
-        (else (k md))))))
+  (if (and (equal? reading "full") (web--file-has-table? file))
+      (web--read-full-with-tables file k)
+      (shell-command->string
+        (if (equal? reading "full")
+            (web--full-command file)
+            (web--calm-command url file))
+        (lambda (md) (k (if (web--empty-reading? md) #f md))))))
+
+(define (web--file-has-table? file)
+  (let ((html (read-file file)))
+    (and (string? html) (string-contains? html "<table") #t)))
+
+;; A page laid out in nested tables — news.ycombinator.com is one — reads
+;; as the eight bytes "[TABLE]\n", which the thin test would throw away,
+;; and the flattened page is the reading then. Both passes start at
+;; once: the flat one costs a second pandoc, and run after the first it
+;; cost a second wait. The plain pass answers as soon as it is whole,
+;; and only a "[TABLE]" answer waits for the flat one.
+(define (web--read-full-with-tables file k)
+  (let ((plain 'pending) (flat 'pending) (done #f))
+    (define (answer! md)
+      (unless done
+        (set! done #t)
+        (k (if (web--empty-reading? md) #f md))))
+    (define (settle!)
+      (cond (done #f)
+            ((eq? plain 'pending) #f)
+            ((and (string? plain) (string-contains? plain "[TABLE]"))
+             (unless (eq? flat 'pending) (answer! flat)))
+            (else (answer! plain))))
+    (shell-command->string (web--full-command file)
+      (lambda (md) (set! plain md) (settle!)))
+    (shell-command->string (web--flatten-command file)
+      (lambda (md) (set! flat md) (settle!)))))
 
 ;;; --- content types --------------------------------------------------------------
 ;;; A page is not always html. The fetch names the body's content type
@@ -532,18 +588,16 @@
 ;; URL and the WANTed reading -> the reading that was found, its
 ;; markdown, and the html it came from. K gets that list, or (#f #f #f).
 (define (web--pipeline url want k)
-  ;; A REAL TAB is the browser. The extension's plain fetch carries the
-  ;; user's cookies, but it is still a bare HTTP client, and the sites
-  ;; that matter answer a bare client with something other than their
-  ;; page: DuckDuckGo sends a bot wall, and x.com sends 300kb of
-  ;; "Something went wrong" — big enough to pass the thin test, so the
-  ;; reader accepted the error page AS the page and never retried.
-  ;; So the tab goes first whenever a browser is attached. A body html
-  ;; cannot read is what the fetch is still for: a snapshot of a PDF is
-  ;; Chrome's viewer shell, which reads thin, and web--retry falls back
-  ;; to the fetch that answers bytes.
+  ;; The FETCH goes first. The extension's fetch runs inside Chrome, so
+  ;; it carries the user's cookies and Chrome's own client, and it costs
+  ;; the network alone; a real tab costs a page load, every subresource,
+  ;; and a settle, one to three seconds more. The sites that answer a
+  ;; bare client with something other than their page start in a tab:
+  ;; the site table names the known ones, a bot wall or a thin answer
+  ;; retries in a tab, and a shell the thin test cannot see is for the
+  ;; judge below, which marks the host for the rest of the session.
   (web--attempt url (web--reading want)
-                (or (web--site-render? url) (browser-connected?))
+                (or (web--site-render? url) (web--tab-host? url))
                 k))
 
 ;; the browse tab reading URL, if one still is. A learn that lands after
@@ -584,24 +638,98 @@
           ((not (string? (web--doc-text doc))) (k (list #f #f #f)))
           (else
             (let* ((html (web--doc-text doc))
-                   (file (web--write-html! html)))
+                   (file (web--write-html! html))
+                   ;; the host taught the reader that calm finds nothing here
+                   (reading (if (web--calm-skip? url want) "full" want)))
               (web--learn-later! url html want)
-              (web--read url file want
+              (web--read url file reading
                 (lambda (md)
                   (cond
-                    (md (web--answer file (list want md html) k))
+                    (md (web--judge-later! url md rendered?)
+                        (web--answer file (list reading md html) k))
                     ;; Calm found no article. That is an answer, not a
                     ;; failure: an index page IS its links, so read it
                     ;; whole. Full finding nothing is the real failure.
-                    ((equal? want "calm")
+                    ((equal? reading "calm")
+                     (web--full-host! url)
                      (web--read url file "full"
                        (lambda (full)
                          (if full
-                             (web--answer file (list "full" full html) k)
+                             (begin
+                               (web--judge-later! url full rendered?)
+                               (web--answer file (list "full" full html) k))
                              (web--retry url want file rendered? k retried?)))))
                     (else (web--retry url want file rendered? k retried?))))))))))
     *web--revalidate*
     rendered?))
+
+;;; --- the judge --------------------------------------------------------------------
+;;; A fetch answers a shell the thin test cannot see: x.com's error page
+;;; is 300kb, a login wall is a whole page, an app frame says "loading".
+;;; The page shows at once, and the judge reads its head afterwards. A
+;;; shell marks the host for the session and fetches the page again,
+;;; which now starts in a tab. One question per host per session.
+
+(defcustom 'browse-judge-shells #t
+  "Ask decide whether a fetched page is an application shell. A shell reads again in a real tab, and its host starts in a tab for the rest of the session."
+  'group 'web 'type 'boolean)
+
+;; the seam: (JUDGE URL MD K), K gets #t for a shell. #f is decide.
+(define *web--judge* #f)
+
+(define *web--judged-hosts* '())
+
+(define *web--judge-bytes* 1500)
+
+(define (web--judge-question)
+  (decide-noul
+    (string-append
+      "Is this text an application shell, an error page, a login wall, "
+      "a bot challenge, or a placeholder that says the content loads "
+      "later, rather than the page's own content?")))
+
+;; the answer to KEY in a decide REPLY, as a yes or a no
+(define (web--judge-yes? reply key)
+  (let loop ((rows (or (plist-get reply 'answers) '())))
+    (cond ((null? rows) #f)
+          ((let ((k (car (car rows))))
+             (equal? (if (symbol? k) (symbol->string k) k) (symbol->string key)))
+           (let ((noul (and (pair? (cadr (car rows))) (plist-get (cadr (car rows)) 'noul))))
+             (and (number? noul) (>= noul 0.5))))
+          (else (loop (cdr rows))))))
+
+(define (web--decide-shell url md k)
+  (if (and (boundp 'decide-async) (browser-connected?))
+      (decide-async
+        (string-append "The page " url " read through a plain HTTP fetch as this text:\n\n"
+                       (substring md 0 (min *web--judge-bytes* (string-length md))))
+        (list 'shell (web--judge-question))
+        (lambda (reply) (k (web--judge-yes? reply 'shell)))
+        'purpose 'fast 'timeout 20)
+      (k #f)))
+
+;; the tab reading URL fetches its page again. A judge that lands after
+;; the reader moved on must not pull the page back.
+(define (web--refetch-url! url)
+  (let loop ((bs (web--tabs)))
+    (cond ((null? bs) #f)
+          ((equal? (buffer-local (car bs) 'browse-url) url)
+           (buffer-set-local! (car bs) 'cache-time #f)
+           (cache-refresh! (car bs))
+           #t)
+          (else (loop (cdr bs))))))
+
+(define (web--judge-later! url md rendered?)
+  (when (and browse-judge-shells
+             (not rendered?)
+             (not (web--tab-host? url))
+             (not (member (web--host url) *web--judged-hosts*)))
+    (set! *web--judged-hosts* (cons (web--host url) *web--judged-hosts*))
+    ((or *web--judge* web--decide-shell) url md
+     (lambda (shell?)
+       (when shell?
+         (web--tab-host! url)
+         (web--refetch-url! url))))))
 
 ;; a seam a test replaced may still answer with a bare html string
 (define (web--as-document fetched)

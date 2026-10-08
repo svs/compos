@@ -380,7 +380,18 @@
                       (string-append out head text)
                       (cons (list at (string-byte-length text) (nth 3 hit)) spans))))))))
 
-(define (ibuffer-md-text src) (car (ibuffer-md-plain src)))
+(define *ibuffer-md-text-memo* '())
+(define (ibuffer-md-text src)
+  ;; a pure function of a short name, but a tree-sitter query each call:
+  ;; every refresh sorted by it. 512 names, then start over.
+  (let ((hit (assoc src *ibuffer-md-text-memo*)))
+    (if hit
+        (cadr hit)
+        (let ((text (car (ibuffer-md-plain src))))
+          (set! *ibuffer-md-text-memo*
+                (cons (list src text)
+                      (if (> (length *ibuffer-md-text-memo*) 512) '() *ibuffer-md-text-memo*)))
+          text))))
 
 ;; A file's name is a file's name: it says what the disk says, marks and
 ;; all. Only a name somebody wrote as prose -- a chat's title -- is read
@@ -1663,6 +1674,9 @@
          (buf (or view (ibuffer-group-view! (or mode "ibuffer-mode") *ibuffer-buffer*)))
          (t0 (monotonic-ms))
          (_a (buffer-create buf))
+         ;; a closed view must not fall asleep: waking it cost 110-190 ms,
+         ;; only for the refresh below to redraw it from nothing.
+         (_p (buffer-set-local! buf 'buffer-pinned #t))
          (_b (buffer-set-local! buf 'ibuffer-scope scope))
          ;; Typed narrowing is temporary. Keep any mode-specific filters.
          (_c (list-clear-query! buf))

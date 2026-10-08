@@ -825,3 +825,178 @@
       (delete-file! path))
     (t--web-kill-tabs!)
     (run-command "delete-other-windows")))
+
+;;; --- the order of the ways, and what a host teaches ------------------------------
+
+(effects! '(read))
+
+(deftest 'the-fetch-goes-first-and-a-site-that-needs-a-tab-starts-there
+  "a tab costs a page load; only a site known to answer a shell pays it first"
+  (lambda ()
+    (let ((saved *web-fetch-html*)
+          (saved-tabs *web--tab-hosts*))
+      (define (first-way url)
+        (let ((seen '()))
+          (set! *web-fetch-html*
+                (lambda (url k &optional revalidate? render?)
+                  (set! seen (append seen (list (and render? #t))))
+                  (k #f)))
+          (web--pipeline url "calm" (lambda (found) #f))
+          (car seen)))
+      (set! *web--tab-hosts* '())
+      (check-false! (first-way "https://plain.test/page") "an unknown site: the fetch")
+      (check-true! (first-way "https://www.linkedin.com/talent/home")
+                   "a site the table marks: the tab")
+      (check-true! (first-way "https://x.com/someone")
+                   "x.com answers a fetch with an error page: the tab")
+      (web--tab-host! "https://plain.test/other")
+      (check-true! (first-way "https://plain.test/page") "a host that taught the reader: the tab")
+      (set! *web--tab-hosts* saved-tabs)
+      (set! *web-fetch-html* saved))))
+
+(deftest 'a-host-whose-calm-found-nothing-reads-full-at-once
+  "Readability costs a process; a host with no article does not pay it on every page"
+  (lambda ()
+    (let ((saved-full *web--full-hosts*))
+      (set! *web--full-hosts* '())
+      (check-false! (web--calm-skip? "https://shop.test/a" "calm") "nothing learned yet")
+      (web--full-host! "https://shop.test/a")
+      (check-true! (web--calm-skip? "https://shop.test/b" "calm") "the host reads full now")
+      (check-false! (web--calm-skip? "https://shop.test/b" "full") "full was the ask anyway")
+      (web--full-host! "https://news.ycombinator.com/")
+      (check-false! (web--calm-skip? "https://news.ycombinator.com/item?id=1" "calm")
+                    "a site with a stylesheet keeps calm: xsltproc is one process")
+      (web--full-host-forget! "https://shop.test/c")
+      (check-false! (web--calm-skip? "https://shop.test/b" "calm") "forgotten")
+      (set! *web--full-hosts* saved-full))))
+
+(deftest 'calm-that-found-nothing-teaches-the-host
+  "the first page pays for calm and full; the next page from the host pays for full alone"
+  (lambda ()
+    (let ((saved-fetch *web-fetch-html*)
+          (saved-read web--read)
+          (saved-judge *web--judge*)
+          (saved-full *web--full-hosts*)
+          (saved-learn browse-learn-parsers)
+          (asked '())
+          (answers '()))
+      (set! *web--full-hosts* '())
+      (set! browse-learn-parsers #f)
+      (set! *web--judge* (lambda (url md k) (k #f)))
+      (set! *web-fetch-html*
+            (lambda (url k &optional revalidate? render?)
+              (k "<html><body>index</body></html>")))
+      (set! web--read
+            (lambda (url file reading k)
+              (set! asked (append asked (list reading)))
+              (k (if (equal? reading "full")
+                     "# whole\n\nthe page [a](https://shop.test/a)\n"
+                     #f))))
+      (web--attempt "https://shop.test/" "calm" #f
+                    (lambda (found) (set! answers (append answers (list (car found))))))
+      (web--attempt "https://shop.test/b" "calm" #f
+                    (lambda (found) (set! answers (append answers (list (car found))))))
+      (check-equal! asked '("calm" "full" "full") "calm once, then full alone")
+      (check-equal! answers '("full" "full") "both pages read full")
+      (set! browse-learn-parsers saved-learn)
+      (set! *web--full-hosts* saved-full)
+      (set! *web--judge* saved-judge)
+      (set! web--read saved-read)
+      (set! *web-fetch-html* saved-fetch))))
+
+(effects! '(write))
+
+(deftest 'a-shell-marks-the-host-and-the-page-fetches-again-in-a-tab
+  "the fetched page shows at once; the judge's verdict starts the tab"
+  (lambda ()
+    (let ((saved-fetch *web-fetch-html*)
+          (saved-read web--read)
+          (saved-judge *web--judge*)
+          (saved-tabs *web--tab-hosts*)
+          (saved-judged *web--judged-hosts*)
+          (saved-learn browse-learn-parsers)
+          (ways '())
+          (verdicts 0))
+      (set! browse-learn-parsers #f)
+      (set! *web--tab-hosts* '())
+      (set! *web--judged-hosts* '())
+      (set! *web-fetch-html*
+            (lambda (url k &optional revalidate? render?)
+              (set! ways (append ways (list (and render? #t))))
+              (k (if render?
+                     "<html><body>the page</body></html>"
+                     "<html><body>Something went wrong</body></html>"))))
+      (set! web--read
+            (lambda (url file reading k)
+              (k (if (string-contains? (read-file file) "went wrong")
+                     "# x\n\nSomething went wrong. Try reloading. [home](https://shell.test/)\n"
+                     "# x\n\nthe page [a](https://shell.test/a)\n"))))
+      ;; the judge answers on a callback, as decide does: the page is on
+      ;; screen and its fetch is over before the verdict lands
+      (set! *web--judge*
+            (lambda (url md k)
+              (set! verdicts (+ verdicts 1))
+              (shell-command->string "true"
+                (lambda (out) (k (string-contains? md "went wrong"))))))
+      (t--web-with-fetch *web-fetch*
+        (lambda ()
+          (let ((buf (browse "https://shell.test/home")))
+            (check-contains! (buffer-text buf) "went wrong" "the fetched page shows at once")
+            (check-true! (wait-until (lambda () (string-contains? (buffer-text buf) "the page")) 5000 20)
+                         "the tab's reading replaced the shell")
+            (check-equal! ways '(#f #t) "the fetch, then the tab")
+            (check-true! (web--tab-host? "https://shell.test/x") "the host starts in a tab now")
+            (let ((next (browse "https://shell.test/next")))
+              (check-contains! (buffer-text next) "the page" "the next page read in a tab")
+              (check-equal! verdicts 1 "one question per host")))))
+      (t--web-kill-tabs!)
+      (set! browse-learn-parsers saved-learn)
+      (set! *web--judged-hosts* saved-judged)
+      (set! *web--tab-hosts* saved-tabs)
+      (set! *web--judge* saved-judge)
+      (set! web--read saved-read)
+      (set! *web-fetch-html* saved-fetch))))
+
+(deftest 'the-judge-reads-a-yes-from-a-decide-reply
+  "a noul at or above a half is a shell; a missing answer is not"
+  (lambda ()
+    (check-true! (web--judge-yes? '(answers ((shell (type noul noul 0.9 confidence 1.0))) usage (0 0 laya))
+                                  'shell)
+                 "a yes")
+    (check-false! (web--judge-yes? '(answers ((shell (type noul noul 0.1))) usage (0 0 laya)) 'shell)
+                  "a no")
+    (check-true! (web--judge-yes? '(answers (("shell" (type noul noul 1.0)))) 'shell)
+                 "a key that came back as a string")
+    (check-false! (web--judge-yes? '(answers () usage (0 0 jev 0)) 'shell) "no answer is a no")))
+
+(deftest 'a-nested-table-layout-reads-as-rows-and-a-plain-table-stays-one
+  "both passes start at once; the flat one is the reading only when pandoc gave up"
+  (lambda ()
+    (let ((nested (web--write-html!
+                    (string-append
+                      "<html><body><table><tr><td><table><tr><td><p>first cell with enough "
+                      "words in it to pass the thin test of two hundred bytes, which the reading "
+                      "applies to every answer before it shows one, and a few more words so the "
+                      "flattened reading is long enough on its own.</p><ul><li>one item</li>"
+                      "<li>two items</li></ul></td></tr></table></td></tr></table></body></html>")))
+          (plain (web--write-html!
+                   (string-append
+                     "<html><body><p>intro paragraph of enough words to pass the thin test of "
+                     "two hundred bytes, which the reading applies to every answer before it "
+                     "shows one, so this line goes on a while longer still.</p><table><tr>"
+                     "<th>name</th><th>age</th></tr><tr><td>ann</td><td>3</td></tr></table>"
+                     "</body></html>")))
+          (a 'none)
+          (b 'none))
+      (web--read "https://t.test/" nested "full" (lambda (md) (set! a md)))
+      (web--read "https://t.test/" plain "full" (lambda (md) (set! b md)))
+      (check-true! (wait-until (lambda () (and (not (eq? a 'none)) (not (eq? b 'none)))) 15000 25)
+                   "both readings answered")
+      (check-true! (and (string? a) (string-contains? a "first cell") #t)
+                   "the nested layout reads as its text")
+      (check-false! (and (string? a) (string-contains? a "[TABLE]"))
+                    "and not as a placeholder")
+      (check-true! (and (string? b) (string-contains? b "| ann") #t)
+                   "a real table stays a table")
+      (delete-file! nested)
+      (delete-file! plain))))

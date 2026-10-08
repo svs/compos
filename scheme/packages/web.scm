@@ -1534,9 +1534,12 @@
 
 (define-command "browse-toggle-reading" "Switch between the calm and the full reading"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'browse-want
-        (if (equal? (web--want buf) "calm") "full" "calm"))
+    (let* ((buf (current-buffer))
+           (want (if (equal? (web--want buf) "calm") "full" "calm"))
+           (url (buffer-local buf 'browse-url)))
+      (buffer-set-local! buf 'browse-want want)
+      ;; a reader who asks for calm here wants it on the next page too
+      (when (and url (equal? want "calm")) (web--full-host-forget! url))
       (web--reread! buf))))
 
 (define-command "browse-open-external" "Open this page in the real browser"

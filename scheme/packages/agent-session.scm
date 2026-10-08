@@ -945,6 +945,7 @@
     ("C-d" "chat-delete-forward")
     ("RET" "agent-send")
     ("C-RET" "agent-interrupt-send")
+    ("s-RET" "chat-send-new")
     ("C-g" "chat-abort")
     ("TAB" "agent-toggle-fold")
     ("<up>" "chat-history-previous")

@@ -1097,11 +1097,7 @@
   (lambda ()
     (let ((buf (current-buffer))
           (interrupted? (buffer-local (current-buffer) 'chat-turn-active)))
-      ;; the transcript is a rendering of the chat log, which is the record
-      ;; of who said what: a history of the rendering says nothing the log
-      ;; does not, so the mode keeps none, and drops any an open or a
-      ;; restore recorded before this setup ran
-      (buffer-provenance-discard! buf "mode:chat-mode" "mode-policy" "mode")
+      (buffer-provenance-stop! buf "mode:chat-mode" "mode-policy" "mode")
       ;; On desktop restore EVERY runtime local is a lie: the process it
       ;; described died with the daemon. Clear the whole class — not just
       ;; the 'agent-queued that once deadlocked RET — so that bug cannot
@@ -1292,16 +1288,6 @@
                           'presets (if (boundp (quote chat-presets-of))
                                        (chat-presets-of buf)
                                        '()))
-                    ;; the session this conversation already lives in, when
-                    ;; the same connector issued it: the adapter loads it
-                    ;; instead of starting empty
-                    (let ((sid (buffer-local buf 'agent-session)))
-                      (if (and sid
-                               (equal? (buffer-local buf 'agent-session-connector)
-                                       connector))
-                          (list 'resume-session sid)
-                          '()))
-                    (list 'idle-seconds agent-idle-seconds)
                     (let ((effort (buffer-local buf 'agent-effort)))
                       (if effort (list 'effort effort) '()))
                     (if (and model (not (equal? model "")))
@@ -1554,14 +1540,6 @@
 ;; opened from, which is identity, not conversation or runtime)
 ;; 'render-mode is the chat's chosen VIEW ("blocks" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
-;; An idle adapter is two OS processes and up to a few hundred MB for a
-;; conversation nobody is having. A chat idle this long closes its adapter
-;; and keeps the session; the next message reopens it on the same session.
-;; 0 keeps every adapter running.
-(require 'custom)
-(defcustom 'agent-idle-seconds 600
-  "Seconds a chat is idle before its adapter closes; 0 keeps every adapter running.")
-
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise
     ;; the last name the chat DERIVED from its group: a name the person
@@ -1610,10 +1588,6 @@
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
     chat-log-id
-    ;; the backend session this conversation lives in, and the connector
-    ;; that issued it: a parked adapter, a revive and a restart reopen the
-    ;; same session (ACP session/load); a reset starts a new one
-    agent-session agent-session-connector
     ;; the running summary and every paragraph before it: a reset starts
     ;; a new conversation with nothing to say yet
     chat-summary chat-summary-log
@@ -1765,25 +1739,17 @@
          (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
-    ;; a fresh ACP session starts empty and has to be seeded; one the same
-    ;; connector issued before (agent-session) remembers the conversation
-    ;; and loads instead; the api lane replays the record on every request
-    ;; anyway
-    (let ((resume (and (buffer-local buf 'agent-session)
-                       (equal? (buffer-local buf 'agent-session-connector) cname))))
-      (buffer-set-local! buf 'agent-seed-context
-        (and (not resume) (not (connector-can? cname 'stateless))
-             (> mark 0) (not (equal? said ""))))
-      (let ((slug (chat-attach-agent! buf cname)))
-        ;; a chat that comes back leaves no "[agent stopped]" line behind
-        (when (boundp (quote agent-drop-stopped-markers!))
-          (agent-drop-stopped-markers! buf))
-        (unless (equal? said "")
-          (message (string-append "agent " slug
-                                  (if resume
-                                      ": reopening its session"
-                                      ": revived (fresh session)"))))
-        slug))))
+    ;; a fresh ACP session starts empty and has to be seeded; the api lane
+    ;; replays the record on every request anyway
+    (buffer-set-local! buf 'agent-seed-context
+      (and (not (connector-can? cname 'stateless)) (> mark 0) (not (equal? said ""))))
+    (let ((slug (chat-attach-agent! buf cname)))
+      ;; a chat that comes back leaves no "[agent stopped]" line behind
+      (when (boundp (quote agent-drop-stopped-markers!))
+        (agent-drop-stopped-markers! buf))
+      (unless (equal? said "")
+        (message (string-append "agent " slug ": revived (fresh session)")))
+      slug)))
 
 (define (chat-ensure-runtime! buf)
   (or (buffer-local buf 'agent-slug) (chat-attach! buf)))
@@ -2522,6 +2488,19 @@
     (group-ask! (group-ensure! (current-buffer)))))
 
 (global-set-key "C-c c" "chat")
+(define-command "chat-send-new" "Send the input to a new chat in this group; this chat keeps its conversation"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (typed (string-trim (chat-input-text buf)))
+           (g (or (frame-group) (group-ensure! buf))))
+      (cond ((equal? typed "") (message "Nothing to send"))
+            ((not g) (message "No group for a chat"))
+            (else
+             (chat-clear-input! buf)
+             (when (group-chat-new! g)
+               (insert! typed)
+               (run-command "agent-send")))))))
+
 (global-set-key "C-c n" "chat-new")
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")

@@ -17,3 +17,12 @@
                   "0123…9abc" "four each side is the smallest preview")
     (check-equal! (doppler--elide-value #f)
                   "••••" "a missing value stays hidden")))
+
+;; A value with a line break drew its row on two lines, and every row below
+;; it was off by one: the arrow keys moved to the wrong row.
+(deftest 'an-elided-value-is-one-line
+  "a secret value with line breaks elides to a single line"
+  (lambda ()
+    (let ((shown (doppler--elide-value "abcdefghij\nklmnop\r\nqrstuvwxyz0123")))
+      (check-false! (string-contains? shown "\n") "no line feed")
+      (check-false! (string-contains? shown "\r") "no carriage return"))))

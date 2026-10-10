@@ -281,9 +281,13 @@
     ("doppler:widen" "Widen" "\\")
     ("doppler:refresh" "Refresh" "g")))
 
-(define (doppler--elide-value value)
+(define (doppler--elide-value raw)
   ;; Up to ten characters at each end, cut back on a shorter value so that
-  ;; at least five characters always stay hidden.
+  ;; at least five characters always stay hidden. A row is one line: a
+  ;; value with a line break (a password, a JSON blob) drew two, and every
+  ;; row below it was off by a line, so the arrows moved to the wrong row.
+  (let ((value (and (string? raw)
+                    (string-replace (string-replace raw "\r" " ") "\n" " "))))
   (if (string? value)
       (let* ((n (string-length value))
              (side (min 10 (quotient (- n 5) 2))))
@@ -291,7 +295,7 @@
             "••••"
             (string-append (substring value 0 side) "…"
                            (substring value (- n side) n))))
-      "••••"))
+      "••••")))
 
 (define (doppler--row-block buf name i first-line)
   ;; FIRST-LINE is the 1-based text line of row 0: one past the header.
@@ -306,7 +310,8 @@
             'class "doppler-row"
             'click (string-append "doppler:row:" (number->string i))
             'lines (list line line)
-            'mark "current"))))
+            'mark "current"
+            'anchor (string-append "doppler:" name)))))
 
 (define (doppler--render-blocks! buf names)
   (desktop-skip! buf 'render-blocks)

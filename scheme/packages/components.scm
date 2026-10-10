@@ -130,16 +130,20 @@
 (defcomponent 'ui/row
   "A selectable list row made from text or styled segments."
   '((tag string optional) (text string optional) (segs list optional) (click any optional)
-    (class string optional) (lines list optional) (mark string optional))
+    (class string optional) (lines list optional) (mark string optional)
+    (anchor string optional))
   '(segs (("" "name") ("c-dim" "  detail")))
   (lambda (p)
+    ;; an anchor lets the view scroll the marked row into sight: the
+    ;; client follows a block only when it has both a mark and an anchor
     (append (list 'tag (component--get p 'tag "c-row")
                   'class (string-append "c-row " (component--get p 'class "")))
             (if (component--has? p 'segs) (list 'segs (component--get p 'segs))
                 (list 'text (component--get p 'text "")))
             (if (component--has? p 'click) (list 'click (component--get p 'click)) '())
             (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
-            (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '()))))
+            (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '())
+            (if (component--has? p 'anchor) (list 'anchor (component--get p 'anchor)) '()))))
 
 (defcomponent 'ui/actions
   "A row of clickable actions with optional keyboard hints."

@@ -2227,15 +2227,12 @@
 ;; k on a group row is the group's kill: every member, then the group
 ;; itself. Killing the members one by one would leave the group behind,
 ;; empty, which is not what the row you are on stands for.
-(define-command "ibuffer-kill" "Kill the marked buffers, the row at point, or the group at point"
+(define-command "ibuffer-kill" "Kill the marked buffers, the row at point, or the shown buffers of the heading at point"
+  ;; k kills buffers, never a group: on a heading it takes the members the
+  ;; filter shows. K is the group kill.
   (lambda ()
-    (let* ((view (current-buffer))
-           (row (ibuffer-current view)))
-      (if (and (ibuffer-heading? row)
-               (string-prefix? "group:" (ibuffer-heading-key row))
-               (ibuffer-group-at view))
-          (run-command "ibuffer-group-kill")
-          (ibuffer-kill-targets! view (ibuffer-targets view) 0 0)))))
+    (let ((view (current-buffer)))
+      (ibuffer-kill-targets! view (ibuffer-targets view) 0 0))))
 
 ;; the group at point: under group sectioning, the section's group;
 ;; otherwise the group of the buffer on the row

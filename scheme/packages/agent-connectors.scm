@@ -458,7 +458,11 @@ nonstandard install out of the built-in connector catalog."
   ;; Chat buffers keep the bottom modeline free of LLM configuration.
   (buffer-set-local! buf 'modeline-preset #f)
   (buffer-set-local! buf 'modeline-info #f)
-  (buffer-set-local! buf 'modeline-info-command #f))
+  (buffer-set-local! buf 'modeline-info-command #f)
+  ;; the model, lane and preset facts are drawn once and kept; a model the
+  ;; adapter reports after a reattach must redraw them, or the window keeps
+  ;; the default model it drew before the session knew its own
+  (when (boundp 'dashboard--sync!) (dashboard--sync! buf)))
 
 ;; the catalog the providers last reported, so a fresh session offers the
 ;; long list before anything is fetched

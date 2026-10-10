@@ -79,7 +79,7 @@
                      var(--dim-fg, #8a857a));
                    display: flex; align-items: center; gap: var(--s9); min-width: 0;
                    overflow: hidden;
-                   padding: 5px var(--s8) 5px var(--s6);
+                   padding: 2px var(--s8) 2px var(--s6);
                    border-top: 1px solid transparent;
                    border-bottom: var(--border);
                    background: var(--surface-chrome); cursor: pointer; }
@@ -106,7 +106,7 @@
 /* The one switcher: a square action cell, no fill, dim until the pointer
    is on it. Same shape as every other action in the frame. */
 .dseg-action { display: inline-flex; align-items: center; justify-content: center;
-               flex: 0 0 auto; width: 24px; height: 24px;
+               flex: 0 0 auto; width: 20px; height: 18px;
                border: 1px solid transparent; cursor: default; user-select: none;
                font: var(--fw-reg) 13px/1 var(--font-mono); color: var(--text-dim); }
 .dseg-action:hover { color: var(--text-strong); }
@@ -169,23 +169,22 @@
 .dash-persistent .dseg-stack { flex-direction: row; align-items: baseline; gap: 6px; }
 .dash-persistent .dseg-stack { gap: 16px; }
 .dash-persistent .dseg-v { white-space: nowrap; }
-/* The title is a name in a bar, not a heading: mono at the UI size,
-   semibold, one line, its exact characters. The mode's glyph leads it in
+/* The title is a name in a bar, not a heading: sans at the UI size,
+   medium, one line, its exact characters. The mode's glyph leads it in
    the accent, and a hairline carries the eye from the name to the tail. */
 .dash-persistent .dseg-chat-title { flex: 0 1 auto; min-width: 8ch; display: flex; align-items: baseline; gap: var(--s4); }
 .dash-persistent .dseg-chat-title[glyph]::before {
   content: attr(glyph); flex: none; font-family: var(--font-mono);
   font-size: var(--fs-ui); color: var(--accent); }
-/* Space age: light, wide-tracked mono. A chat's title is a sentence and
-   goes to tracked capitals; a buffer name is case-significant and keeps
-   its case, tracked the same. */
+/* A clean sans at medium weight, untracked. A chat's title is a sentence
+   and goes to capitals; a buffer name is case-significant and keeps its case. */
 .dash-persistent .dseg-chat-title .dseg-v {
-  display: block; font-weight: 300; line-height: 1.3;
-  font-family: var(--font-mono); font-size: var(--fs-small); letter-spacing: 0.14em;
+  display: block; font-weight: 500; line-height: 1.2;
+  font-family: var(--font-sans); font-size: 13px; letter-spacing: -0.005em;
   color: var(--text-strong); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
 .dash-persistent .dseg-chat-title:not(.dseg-title-mono) .dseg-v { text-transform: uppercase; }
-.dash-persistent .dseg-chat-title .dseg-strong { font-weight: 300; }
+.dash-persistent .dseg-chat-title .dseg-strong { font-weight: 500; }
 /* a file's name, with its directory below it: small, muted, ~ for home.
    The two lines sit tight, so the header line grows as little as it can. */
 .dseg-title-stack { display: flex; flex-direction: column; min-width: 0; gap: 0; }
@@ -210,13 +209,17 @@
 .dash-state-mark.dash-state-focus { display: none; }
 .dash-state-mark.dash-state-editing { font-family: var(--font-mono); font-size: var(--fs-micro);
   color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
-/* the verbosity switch: three tracked words, the current one in ink with
-   an accent seam under it. Square, no fill, no icon. */
-.dseg-verbosity { display: inline-flex; align-items: baseline; gap: var(--s6); flex: none;
-                  font-size: var(--fs-micro); letter-spacing: var(--ls-label); text-transform: uppercase; }
-.dseg-verb { color: var(--text-dim); padding: 1px 0 2px; border-bottom: 1px solid transparent; cursor: default; }
+/* the verbosity switch: a segmented control. Three lowercase words in a
+   faint rounded track; the current one sits on a soft raised pill. */
+.dseg-verbosity { display: inline-flex; align-items: center; gap: 1px; flex: none; padding: 1px;
+                  border-radius: 6px; background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+                  font: 500 11px/1 var(--font-sans); letter-spacing: 0; }
+.dseg-verb { color: var(--text-dim); padding: 2px 7px; border-radius: 5px; cursor: default;
+             transition: color .12s, background-color .12s; }
 .dseg-verb:hover { color: var(--text-strong); }
-.dseg-verb.on { color: var(--text-strong); border-bottom-color: var(--accent); }
+.dseg-verb.on { color: var(--text-strong);
+                background: color-mix(in srgb, var(--text-strong) 14%, transparent);
+                box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
 .dash-persistent:has(.dseg-chat-title) .dseg-rule { display: none; }
 /* the chip is a label, not a column: it never wraps and never grows */
 .dash-persistent .dseg-group-badge .dseg-v {
@@ -852,7 +855,7 @@
              ;; title leads; the open jj change of the repo follows it, kept
              ;; fresh by jj.scm, and steps back when a chat writes a summary.
              ;; A click on either opens the log of every line it showed.
-             ;; the title is a name in a bar: mono, one line, led by the
+             ;; the title is a name in a bar: sans, one line, led by the
              ;; mode's own glyph in the accent
              (append (list (list 'wide
                              (dash--wide-seg #f title

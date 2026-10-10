@@ -17,6 +17,31 @@
     window.addEventListener("resize", set);
   })();
 
+  // Put TEXT on the system clipboard. navigator.clipboard exists only in
+  // a secure context: https, or localhost. A daemon opened by host name
+  // over plain http (http://marilyn:4004) has none, so a hidden textarea
+  // and execCommand("copy") carry the text there.
+  const copyText = (text) => {
+    if (!text) return;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => copyTextFallback(text));
+    } else {
+      copyTextFallback(text);
+    }
+  };
+  const copyTextFallback = (text) => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:-1000px;left:-1000px;opacity:0";
+    const focused = document.activeElement;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+    if (focused && focused.focus) focused.focus({ preventScroll: true });
+  };
+
   const NAMED = {
     "Enter": "RET", "Backspace": "DEL", "Delete": "<delete>", "Tab": "TAB", " ": "SPC",
     "Escape": "ESC", "ArrowLeft": "<left>", "ArrowRight": "<right>",
@@ -565,7 +590,7 @@
         window.addEventListener("compos:keyboard-owner", this.keyboardOwnerH);
         this.term.attachCustomKeyEventHandler((e) => {
           if (e.metaKey && e.key.toLowerCase() === "c" && this.term.hasSelection()) {
-            navigator.clipboard.writeText(this.term.getSelection());
+            copyText(this.term.getSelection());
             return false;
           }
 
@@ -1785,7 +1810,7 @@
               window.getSelection().isCollapsed) {
             e.preventDefault();
             const text = previewSelection();
-            if (text) navigator.clipboard.writeText(text);
+            if (text) copyText(text);
             else this.pushEvent("copy", {});
             return;
           }
@@ -2382,7 +2407,7 @@
         });
 
         this.handleEvent("clipboard", ({ text }) => {
-          if (text) navigator.clipboard.writeText(text);
+          copyText(text);
         });
 
         // this TAB's frame rides the payload as data-frame (S5,

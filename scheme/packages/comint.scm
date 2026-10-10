@@ -19,7 +19,10 @@
 (define (terminal-mode-init! buf)
   (buffer-set-local! buf 'render-mode "terminal")
   (buffer-set-local! buf 'line-numbers "off")
-  (buffer-set-read-only! buf #t)
+  ;; a terminal is a place you type, not a reading surface: it is never
+  ;; read-only, so q is a letter and C-g only leaves the editing state.
+  ;; A desktop from before this change restores the flag, so clear it.
+  (buffer-set-read-only! buf #f)
   ;; the focus state of an editable buffer: a landing gives the keys to
   ;; the editor, the first typed key gives them to the terminal, and C-g or
   ;; a window command takes them back

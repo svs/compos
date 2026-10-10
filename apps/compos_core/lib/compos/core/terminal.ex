@@ -150,7 +150,7 @@ defmodule Compos.Core.Terminal do
         :binary,
         :exit_status,
         :stderr_to_stdout,
-        args: ["-q", "/dev/null", "/bin/sh", "-c", wrapper],
+        args: script_args(wrapper),
         env: pty_env(raw)
       ])
 
@@ -354,6 +354,21 @@ defmodule Compos.Core.Terminal do
   defp echo_setting(true), do: ""
   defp echo_setting(false), do: "stty -echo 2>/dev/null; "
 
+  # BSD script (macOS) takes the command after the file. util-linux
+  # script (Linux) takes one -c string, which it runs with $SHELL, so the
+  # wrapper goes to /bin/sh inside single quotes.
+  @doc false
+  def script_args(wrapper), do: script_args(:os.type(), wrapper)
+
+  @doc false
+  def script_args({:unix, :darwin}, wrapper),
+    do: ["-q", "/dev/null", "/bin/sh", "-c", wrapper]
+
+  def script_args(_os, wrapper),
+    do: ["-q", "-e", "-c", "exec /bin/sh -c " <> sh_quote(wrapper), "/dev/null"]
+
+  defp sh_quote(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
+
   defp pty_env(true) do
     [
       {~c"TERM", ~c"xterm-256color"},
@@ -361,11 +376,21 @@ defmodule Compos.Core.Terminal do
       {~c"NO_COLOR", false},
       {~c"CLICOLOR", ~c"1"},
       {~c"PROMPT_EOL_MARK", ~c""}
-    ]
+    ] ++ host_terminal_unset()
   end
 
   defp pty_env(false),
-    do: [{~c"TERM", ~c"dumb"}, {~c"PS1", ~c"$ "}, {~c"PROMPT_EOL_MARK", ~c""}]
+    do:
+      [{~c"TERM", ~c"dumb"}, {~c"PS1", ~c"$ "}, {~c"PROMPT_EOL_MARK", ~c""}] ++
+        host_terminal_unset()
+
+  # The daemon can start inside tmux or screen. The PTY is the editor's
+  # terminal, not the host's: a child that sees TMUX wraps its escape
+  # sequences for tmux, and the browser terminal draws them as text.
+  defp host_terminal_unset do
+    for name <- ~w(TMUX TMUX_PANE TMUX_PLUGIN_MANAGER_PATH STY TERM_PROGRAM TERM_PROGRAM_VERSION),
+        do: {String.to_charlist(name), false}
+  end
 
   # CSI/OSC sequences and stray carriage returns from a comint pty.
   # " +\r" is the partial-line padding (zsh PROMPT_SP): drop the padding
@@ -410,7 +435,7 @@ defmodule Compos.Core.Terminal do
   defp resize_tty(tty, cols, rows) when is_binary(tty) do
     case System.cmd(
            "/bin/stty",
-           ["-f", tty, "rows", Integer.to_string(rows), "cols", Integer.to_string(cols)],
+           [stty_device_flag(), tty, "rows", Integer.to_string(rows), "cols", Integer.to_string(cols)],
            stderr_to_stdout: true
          ) do
       {_, 0} -> :ok
@@ -419,6 +444,11 @@ defmodule Compos.Core.Terminal do
   end
 
   defp resize_tty(_, _, _), do: {:error, :tty_not_ready}
+
+  # BSD stty names the device with -f; GNU stty uses -F
+  defp stty_device_flag do
+    if :os.type() == {:unix, :darwin}, do: "-f", else: "-F"
+  end
 
   defp history_push(history, bytes, ""), do: {history, bytes}
 

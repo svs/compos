@@ -144,4 +144,17 @@ defmodule Compos.TerminalTest do
     wait_until(fn -> length(String.split(Buffer.text(name), "TERM=dumb")) == 3 end)
     assert Terminal.mark(name) == Buffer.byte_size(name)
   end
+
+  test "a command with quotes and && runs under this platform's script" do
+    name = start_terminal!("printf '%s\\n' 'it''s-ready' && echo done; cat")
+    wait_until(fn -> Buffer.text(name) =~ "its-ready" and Buffer.text(name) =~ "done" end)
+    assert Terminal.running?(name)
+  end
+
+  test "a terminal does not inherit the host's tmux" do
+    System.put_env("TMUX", "/tmp/tmux-test,1,0")
+    on_exit(fn -> System.delete_env("TMUX") end)
+    name = start_terminal!("printf 'TMUX=%s\\n' \"${TMUX-unset}\"; cat")
+    wait_until(fn -> Buffer.text(name) =~ "TMUX=unset" end)
+  end
 end

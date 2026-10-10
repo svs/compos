@@ -7,7 +7,7 @@
 // can use overlapping ids without colliding.
 //
 // One extension, many daemons: people run one per life — work, personal — each
-// on its own port. Every daemon gets its own socket. Unlike v1, a daemon may
+// on its own port, or on another machine. Every daemon gets its own socket. Unlike v1, a daemon may
 // address ANY tab, not only tabs it opened: the whole point is that compos's
 // keys and commands are ambient.
 //
@@ -15,7 +15,10 @@
 // overlay and ordinary reads with nothing to detect and no infobar; the
 // debugger comes out only for input that has to be trusted.
 
-const DEFAULTS = { ports: [4004], scan: true, scanFrom: 4004, scanTo: 4013, keys: true };
+// a daemon is "PORT" on this machine, or "HOST:PORT" on another one
+const DEFAULTS = { daemons: ["4004"], scan: true, scanFrom: 4004, scanTo: 4013, keys: true };
+const LOCAL = "127.0.0.1";
+const DEFAULT_URL = "http://localhost:4004/";
 
 const RETRY_MS = 3000;
 const RESCAN_MS = 15000;
@@ -24,19 +27,47 @@ const HEARTBEAT_MS = 20000;
 // how long a debugger session lingers before we let go of the tab
 const CDP_IDLE_MS = 30000;
 
-/** port -> Conn */
+/** "host:port" -> Conn */
 const conns = new Map();
 
+function localHost(host) {
+  return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(String(host).toLowerCase());
+}
+
+/** the one record for a daemon's address; every local spelling is one key */
+function daemonAt(host, port) {
+  host = localHost(host) ? LOCAL : String(host).toLowerCase();
+  return { host, port, key: `${host}:${port}`, local: host === LOCAL };
+}
+
+/** "4004" | "host:4004" | "[::1]:4004" -> daemon record, or null */
+function parseDaemon(text) {
+  const m = /^(?:(\[[^\]]+\]|[^:\s]+):)?(\d{1,5})$/.exec(String(text).trim());
+  if (!m) return null;
+  const port = Number(m[2]);
+  if (port < 1 || port > 65535) return null;
+  return daemonAt(m[1] || LOCAL, port);
+}
+
 async function settings() {
-  return { ...DEFAULTS, ...(await chrome.storage.sync.get(DEFAULTS)) };
+  const stored = await chrome.storage.sync.get(null);
+  const s = { ...DEFAULTS, ...stored };
+  // v0.6 stored pinned ports as numbers under `ports`
+  if (!stored.daemons && Array.isArray(stored.ports)) s.daemons = stored.ports.map(String);
+  s.daemons = s.daemons.map(parseDaemon).filter(Boolean);
+  return s;
 }
 
 // --- one daemon ------------------------------------------------------------
 
 class Conn {
-  constructor(port) {
+  constructor(host, port) {
+    this.host = host;
     this.port = port;
-    this.name = `:${port}`;
+    this.local = host === LOCAL;
+    this.key = `${host}:${port}`;
+    this.address = this.local ? `:${port}` : this.key;
+    this.name = this.address;
     this.pending = new Map(); // id -> {resolve, reject}
     this.nextId = 1;
     this.ws = null;
@@ -46,7 +77,7 @@ class Conn {
   open() {
     // a scan probe to a dead port fails fast and quietly; that is the whole
     // discovery mechanism, so onerror must stay silent
-    const ws = new WebSocket(`ws://127.0.0.1:${this.port}/browser`);
+    const ws = new WebSocket(`ws://${this.host}:${this.port}/browser`);
     this.ws = ws;
 
     ws.onopen = () => {
@@ -67,7 +98,7 @@ class Conn {
       this.pending.clear();
       // a pinned port is worth waiting for; a scanned one is rediscovered
       if (this.pinned) this.retry = setTimeout(() => this.open(), RETRY_MS);
-      else conns.delete(this.port);
+      else conns.delete(this.key);
     };
 
     ws.onerror = () => ws.close();
@@ -75,6 +106,11 @@ class Conn {
 
   get up() {
     return this.ws?.readyState === 1;
+  }
+
+  /** where a browser tab finds this daemon's editor */
+  get url() {
+    return `http://${this.local ? "localhost" : this.host}:${this.port}/`;
   }
 
   post(msg) {
@@ -137,7 +173,7 @@ class Conn {
     clearTimeout(this.retry);
     clearInterval(this.heart);
     this.ws?.close();
-    conns.delete(this.port);
+    conns.delete(this.key);
   }
 }
 
@@ -480,11 +516,11 @@ const OPS = {
 
   // Every compos tab answers a frame probe with its frame id. The daemon
   // sweeps frames with M-x refresh-frames: a frame no tab answers for is
-  // dead. Probe ALL localhost tabs, not the editors map — that map keeps
+  // dead. Probe ALL editor tabs, not the editors map — that map keeps
   // one binding per window, and a background compos tab still holds a
   // live frame.
   async frames() {
-    const tabs = await chrome.tabs.query({ url: ["http://localhost/*", "http://127.0.0.1/*"] });
+    const tabs = await chrome.tabs.query({ url: editorUrlPatterns() });
     const out = [];
     await Promise.all(
       tabs.map(async (t) => {
@@ -720,6 +756,15 @@ const OPS = {
 /** chrome windowId -> {tabId, frame} */
 const editors = new Map();
 
+// the hosts an editor page can load from: this machine, plus every daemon
+// host in the settings. A match pattern names no port, so one pattern per
+// host covers every daemon there. A bracketed IPv6 host is no match pattern.
+function editorUrlPatterns() {
+  const hosts = new Set(["localhost", "127.0.0.1"]);
+  for (const c of conns.values()) if (!c.local && !c.host.startsWith("[")) hosts.add(c.host);
+  return [...hosts].flatMap((h) => [`http://${h}/*`, `https://${h}/*`]);
+}
+
 function anyConn() {
   for (const c of conns.values()) if (c.up) return c;
   return null;
@@ -770,7 +815,7 @@ function announce(windowId, frame) {
 // answers a frame probe. This runs when a daemon connects, which is also when
 // the binding matters again.
 async function rediscoverEditors() {
-  const tabs = await chrome.tabs.query({ url: ["http://localhost/*", "http://127.0.0.1/*"] });
+  const tabs = await chrome.tabs.query({ url: editorUrlPatterns() });
   await Promise.all(
     tabs.map(async (t) => {
       try {
@@ -821,7 +866,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   const answer = async () => {
     if (msg.cmd === "status") {
       return [...conns.values()].map((c) => ({
+        key: c.key,
+        host: c.host,
         port: c.port,
+        address: c.address,
         name: c.name,
         up: c.up,
         pinned: !!c.pinned
@@ -844,7 +892,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.cmd === "site-chat") {
       const conn = await whenConn();
       const r = await conn.ask("site-chat", { host: msg.host, tab: msg.tab, url: msg.url, window: msg.window });
-      return { ...r, port: conn.port };
+      return { ...r, port: conn.port, url: conn.url };
     }
 
     const conn = anyConn();
@@ -885,9 +933,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
+/** the connection whose daemon serves this URL, if we hold one */
+function connFor(url) {
+  try {
+    const u = new URL(url || "");
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+    return conns.get(daemonAt(u.hostname, port).key) || null;
+  } catch {
+    return null;
+  }
+}
+
 function composTab(url) {
-  const m = /^https?:\/\/(localhost|127\.0\.0\.1):(\d+)\//.exec(url || "");
-  return !!m && conns.has(Number(m[2]));
+  return !!connFor(url);
 }
 
 chrome.action.onClicked.addListener((tab) => {
@@ -908,8 +967,9 @@ chrome.action.onClicked.addListener((tab) => {
 // on the same daemon is a second frame, which is rarely what "take me to my
 // editor" means.
 
-async function focusOrOpen(port, windowId) {
-  const url = `http://localhost:${port}/`;
+async function focusOrOpen(conn, windowId) {
+  // nothing connected? still go somewhere useful — the default daemon
+  const url = conn ? conn.url : DEFAULT_URL;
   const existing = await chrome.tabs.query({ url: `${url}*` });
 
   // prefer one already in this window — one window, one compos
@@ -925,13 +985,16 @@ async function focusOrOpen(port, windowId) {
 }
 
 function liveDaemons() {
-  return [...conns.values()].filter((c) => c.up).sort((a, b) => a.port - b.port);
+  // this machine first, then by host, then by port
+  const order = (a, b) =>
+    a.host === b.host ? a.port - b.port : a.local ? -1 : b.local ? 1 : a.host.localeCompare(b.host);
+  return [...conns.values()].filter((c) => c.up).sort(order);
 }
 
 chrome.omnibox.onInputChanged.addListener((text, suggest) => {
   const live = liveDaemons();
   const q = text.trim().toLowerCase();
-  const match = (c) => !q || c.name.toLowerCase().includes(q) || String(c.port).includes(q);
+  const match = (c) => !q || c.name.toLowerCase().includes(q) || c.key.includes(q);
 
   chrome.omnibox.setDefaultSuggestion({
     description: live.length
@@ -941,23 +1004,23 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
 
   suggest(
     live.filter(match).map((c) => ({
-      content: String(c.port),
-      description: `<match>${c.name}</match> — localhost:${c.port}`
+      content: c.key,
+      description: `<match>${c.name}</match> — ${c.local ? "localhost" : c.host}:${c.port}`
     }))
   );
 });
 
 chrome.omnibox.onInputEntered.addListener(async (text) => {
   const live = liveDaemons();
-  const typed = parseInt(text.trim(), 10);
+  const typed = text.trim().toLowerCase();
   const pick =
-    live.find((c) => c.port === typed) ||
-    live.find((c) => c.name.toLowerCase() === text.trim().toLowerCase()) ||
+    live.find((c) => c.key === typed) ||
+    live.find((c) => String(c.port) === typed) ||
+    live.find((c) => c.name.toLowerCase() === typed) ||
     live[0];
 
   const win = (await chrome.windows.getCurrent()).id;
-  // nothing connected? still go somewhere useful — the default port
-  await focusOrOpen(pick ? pick.port : DEFAULTS.ports[0], win);
+  await focusOrOpen(pick || null, win);
 });
 
 // Alt+Shift+A: this window's compos, or the nearest one.
@@ -970,29 +1033,35 @@ chrome.commands.onCommand.addListener(async (name) => {
     await chrome.windows.update(win, { focused: true });
     return;
   }
-  const live = liveDaemons();
-  await focusOrOpen(live.length ? live[0].port : DEFAULTS.ports[0], win);
+  await focusOrOpen(liveDaemons()[0] || null, win);
 });
 
 // --- discovery -------------------------------------------------------------
 
 async function sweep() {
-  const { ports, scan, scanFrom, scanTo } = await settings();
+  const { daemons, scan, scanFrom, scanTo } = await settings();
 
-  const wanted = new Set(ports);
-  if (scan) for (let p = scanFrom; p <= scanTo; p++) wanted.add(p);
+  // the pinned daemons by key; the scan adds local ports around them
+  const wanted = new Map(daemons.map((d) => [d.key, d]));
+  const pinned = new Set(wanted.keys());
+  if (scan) {
+    for (let p = scanFrom; p <= scanTo; p++) {
+      const d = daemonAt(LOCAL, p);
+      if (!wanted.has(d.key)) wanted.set(d.key, d);
+    }
+  }
 
-  for (const [port, conn] of conns) if (!wanted.has(port)) conn.close();
+  for (const [key, conn] of conns) if (!wanted.has(key)) conn.close();
 
-  for (const port of wanted) {
-    const existing = conns.get(port);
+  for (const [key, d] of wanted) {
+    const existing = conns.get(key);
     if (existing) {
-      existing.pinned = ports.includes(port);
+      existing.pinned = pinned.has(key);
       continue;
     }
-    const conn = new Conn(port);
-    conn.pinned = ports.includes(port);
-    conns.set(port, conn);
+    const conn = new Conn(d.host, d.port);
+    conn.pinned = pinned.has(key);
+    conns.set(key, conn);
   }
 }
 

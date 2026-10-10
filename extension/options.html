@@ -66,14 +66,15 @@
     </p>
 
     <label>
-      Ports
-      <span class="hint">— comma separated. Always connected, and retried if down.</span>
+      Daemons
+      <span class="hint">— comma separated: a port here, or host:port on another
+      machine. Always connected, and retried if down.</span>
     </label>
-    <input type="text" id="ports" placeholder="4004, 4005" />
+    <input type="text" id="daemons" placeholder="4004, work-mac:4005" />
 
     <label>
       <span class="row"><input type="checkbox" id="scan" /> Also scan a range</span>
-      <span class="hint">— picks up a daemon you just started, with no config.</span>
+      <span class="hint">— picks up a daemon you just started here, with no config.</span>
     </label>
     <p class="row">
       <input type="number" id="scanFrom" min="1" max="65535" />
@@ -86,7 +87,7 @@
     <h2>Connections</h2>
     <table>
       <thead>
-        <tr><th style="width: 2em"></th><th>Port</th><th>Daemon</th></tr>
+        <tr><th style="width: 2em"></th><th>Address</th><th>Daemon</th></tr>
       </thead>
       <tbody id="conns"></tbody>
     </table>

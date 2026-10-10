@@ -51,8 +51,13 @@ address, not a port, and Chrome treats a bare word as a search anyway.
 
 The extension serves **every daemon you run**. By default it connects to port
 4004 and scans 4004–4013, so a daemon you just started is picked up with no
-configuration. The **Options** page pins ports, changes the range, shows what's
+configuration. The **Options** page pins daemons, changes the range, shows what's
 connected, and turns key capture off if <kbd>C-x</kbd> is fighting a site.
+
+A daemon on another machine is `host:port` in the Daemons field, for example
+`work-mac:4005` or `100.64.0.7:4004`. The daemon admits a browser from its own
+tailnet (see `Compos.Ui.Reach`), so a tailnet name or address works as typed.
+The scan range stays on this machine.
 
 Run a second daemon like this:
 

@@ -48,7 +48,8 @@ async function show() {
   if (!r?.ok) return say(`compos: ${r?.error || "no answer"}`);
   if (!r.result?.buffer) return say(`compos answered without a chat: ${JSON.stringify(r.result)}`);
 
-  const src = `http://localhost:${r.result.port}/b/${encodeURIComponent(r.result.buffer)}`;
+  const base = r.result.url || `http://localhost:${r.result.port}/`;
+  const src = `${base}b/${encodeURIComponent(r.result.buffer)}`;
   if (src !== shown) {
     console.log("site chat", src);
     frame.src = src;

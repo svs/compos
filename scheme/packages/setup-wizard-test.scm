@@ -105,3 +105,48 @@
       (check-equal! (current-buffer) *setup-wizard-buffer* "the wizard")
       (buffer-kill! *setup-wizard-buffer*)
       (set! setup-default-connector saved))))
+
+(deftest 'setup-reset-starts-onboarding-over
+  "setup-reset forgets the chosen connector and shows the wizard on its first step"
+  (lambda ()
+    (let ((saved setup-default-connector))
+      (set! setup-default-connector "zz-chosen")
+      (setup-reset!)
+      (check-equal! setup-default-connector "" "the choice is gone")
+      (check-equal! (current-buffer) *setup-wizard-buffer* "the wizard shows")
+      (check-equal! (setup-wizard-step *setup-wizard-buffer*) "model" "on its first step")
+      (customize-save! 'setup-default-connector saved))))
+
+(deftest 'setup-chooses-the-columns-layout
+  "opening the wizard puts the frame in the columns layout"
+  (lambda ()
+    (layout-target-set! #f)
+    (setup-wizard! "model")
+    (check-equal! (layout-target) 'columns "the frame")
+    (check-equal! window-layout-default 'columns "the saved default")))
+
+(deftest 'every-machine-can-paste-or-run-a-command-for-a-key
+  "the key backends always offer a command and a paste, whatever is installed"
+  (lambda ()
+    (let ((labels (map car (setup-key-backends-here))))
+      (check-true! (member "A command that prints the key" labels) "a command")
+      (check-true! (member "Paste the key" labels) "a paste"))))
+
+(deftest 'a-set-key-can-be-changed
+  "the hosted card offers to change a key that is set"
+  (lambda ()
+    (let ((saved *default-connector*))
+      (set! *default-connector* "api")
+      (check-equal! (setup-wizard--card-actions '("api" "hosted" #t "a key"))
+                    '(("wizard:key" "Change the key")) "the default card")
+      (set! *default-connector* saved))))
+
+(deftest 'desktop-clear-leaves-one-window-on-the-home-page
+  "a clear leaves one window, and it shows the home page"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-clear*" "")))
+      (split-window! 'h 0.5)
+      (desktop-clear--finish '() (list buf))
+      (check-equal! (length (window-list)) 1 "one window")
+      (check-true! (member (current-buffer) (list *setup-wizard-buffer* *setup-buffer*))
+                   "the home page"))))

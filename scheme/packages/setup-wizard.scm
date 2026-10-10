@@ -113,18 +113,24 @@
   (let ((e (assoc name *setup-wizard-installs*)))
     (and e (cadr e))))
 
-;; The buttons of one connector card. ROW is (NAME KIND READY? DETAIL).
+;; The buttons of one connector card. ROW is (NAME KIND READY? DETAIL). The
+;; hosted card always offers its key: a set key can be replaced.
 (define (setup-wizard--card-actions row)
-  (let ((name (list-ref row 0))
-        (kind (list-ref row 1))
-        (ready? (list-ref row 2)))
+  (let* ((name (list-ref row 0))
+         (kind (list-ref row 1))
+         (ready? (list-ref row 2))
+         (default? (equal? name *default-connector*))
+         (use (if (and ready? (not default?))
+                  (list (list (string-append "wizard:use:" name) "Use this"))
+                  '())))
     (cond
-      ((equal? name *default-connector*) '())
-      (ready? (list (list (string-append "wizard:use:" name) "Use this")))
+      ((equal? kind "hosted")
+       (append use (list (list "wizard:key" (if ready? "Change the key" "Add a key")))))
+      (default? '())
+      (ready? use)
       ((setup-wizard--install-for name)
        (list (list (string-append "wizard:install:" (setup-wizard--install-for name))
                    "Install")))
-      ((equal? kind "hosted") (list (list "wizard:key" "Add a key")))
       (else '()))))
 
 ;; The hosted connector reads as what it is: your own key for a hosted
@@ -136,7 +142,7 @@
   (if (equal? (list-ref row 0) "api")
       (if (list-ref row 2)
           "A key is stored. Chats use it directly, with no agent program."
-          "Paste a key from OpenRouter, Anthropic, or OpenAI. No agent program is needed.")
+          "Use a key from OpenRouter, Anthropic, or OpenAI. No agent program is needed.")
       (string-append (list-ref row 1) " · " (list-ref row 3))))
 
 (define (setup-wizard--card row)
@@ -230,9 +236,12 @@
 (define (setup-open-learning-space!)
   (run-command "onboarding"))
 
-;; A hosted key in three steps, all in the editor: pick the provider, its
-;; key page opens in a tab, paste the key. The key lives where a user's
-;; keys live: (define *openrouter-api-key* "...") in ~/.compos/secrets.scm,
+;; A hosted key, all in the editor: pick the provider, then where the key
+;; is: a secret tool (Doppler, 1Password, the Keychain, the Secret Service),
+;; a command, or a paste. A tool asks its own names, and secrets.scm keeps
+;; the lookup, so the value stays in the tool. The key lives where a user's
+;; keys live:
+;; (define *openrouter-api-key* "...") in ~/.compos/secrets.scm,
 ;; mode 600. ~/.compos/ai-config.scm loads that file at boot and registers
 ;; the key, and the wizard registers it now as well, so no restart is due.
 (define *setup-key-providers*
@@ -261,7 +270,7 @@
           (else (loop (cdr lines) (cons (car lines) out) done?)))))
 
 ;; VALUE-FORM is the Scheme text that yields the key: a string literal for a
-;; pasted key, a doppler-secret-get call for a key that stays in Doppler.
+;; pasted key, or a lookup call (doppler-secret-get, op-secret-get, ...).
 (define (setup--write-secret! var value-form)
   (let* ((path (setup--config-file "secrets.scm"))
          (old (or (read-file path)
@@ -301,36 +310,6 @@
         (message "Setup: the key was empty; nothing changed")
         (setup--use-key! entry (setup--scheme-string key) key buf))))
 
-;; The key stays in Doppler: secrets.scm holds the lookup, and every boot
-;; asks Doppler for the current value. A rotated key needs no edit here.
-(define (setup--doppler-place)
-  (let ((p (and (buffer-exists? *doppler-buffer*) (buffer-local *doppler-buffer* 'doppler-project)))
-        (c (and (buffer-exists? *doppler-buffer*) (buffer-local *doppler-buffer* 'doppler-config))))
-    (list (or p key-doppler-project) (or c key-doppler-config))))
-
-(define (setup-key-from-doppler! entry buf)
-  (let* ((place (setup--doppler-place))
-         (project (car place))
-         (config (cadr place))
-         (names (dp--secret-name-list project config))
-         (wanted (string-upcase (string-append (list-ref entry 1) "_API_KEY")))
-         ;; the conventional name first, so RET takes it
-         (ordered (if (member wanted names)
-                      (cons wanted (remove (lambda (n) (equal? n wanted)) names))
-                      names)))
-    (if (null? names)
-        (message (string-append "Setup: Doppler has no secrets in " project "/" config))
-        (minibuffer-read (string-append "Doppler secret (" project "/" config "): ") ordered
-          (lambda (name)
-            (let ((key (doppler-secret-get project config name)))
-              (if (not (and (string? key) (not (equal? key ""))))
-                  (message (string-append "Setup: Doppler gave no value for " name))
-                  (setup--use-key! entry
-                    (string-append "(doppler-secret-get " (setup--scheme-string project) " "
-                                   (setup--scheme-string config) " "
-                                   (setup--scheme-string name) ")")
-                    key buf))))))))
-
 (define (setup-key-paste! entry buf)
   (unless setup-bot-silent-mode (tab-open (list-ref entry 3)))
   (minibuffer-read (string-append "Paste your " (list-ref entry 1)
@@ -338,20 +317,99 @@
                    '()
     (lambda (key) (setup-store-key! entry key buf))))
 
+;; FORM is the Scheme call that reads the key from a secret tool. It runs
+;; once now: a lookup that answers nothing is not written to secrets.scm.
+(define (setup-key-from-form! entry form buf)
+  (let* ((r (eval-string-safe form))
+         (key (and (pair? r) (equal? (car r) 'ok) (cadr r))))
+    (if (and (string? key) (not (equal? key "")))
+        (setup--use-key! entry form key buf)
+        (message (string-append "Setup: " form " gave no key; check the names and try again")))))
+
+(define (setup--ask prompt choices k)
+  (minibuffer-read prompt choices (lambda (v) (k (string-trim v)))))
+
+(define (setup-key-doppler! entry buf)
+  (let ((wanted (string-upcase (string-append (list-ref entry 1) "_API_KEY"))))
+    (setup--ask "Doppler project: " (doppler--project-candidates)
+      (lambda (project)
+        (setup--ask "Doppler config: " (doppler--config-candidates project)
+          (lambda (config)
+            (let* ((names (dp--secret-name-list project config))
+                   (ordered (if (member wanted names)
+                                (cons wanted (remove (lambda (n) (equal? n wanted)) names))
+                                names)))
+              (setup--ask "Doppler secret: " ordered
+                (lambda (name)
+                  (setup-key-from-form! entry
+                    (string-append "(doppler-secret-get " (setup--scheme-string project) " "
+                                   (setup--scheme-string config) " "
+                                   (setup--scheme-string name) ")")
+                    buf))))))))))
+
+(define (setup-key-1password! entry buf)
+  (setup--ask "1Password vault: " '("Private")
+    (lambda (vault)
+      (setup--ask "1Password item: " (list (list-ref entry 1))
+        (lambda (item)
+          (setup--ask "1Password field: " '("credential" "password")
+            (lambda (field)
+              (setup-key-from-form! entry
+                (string-append "(op-secret-get "
+                               (setup--scheme-string (string-append "op://" vault "/" item "/" field))
+                               ")")
+                buf))))))))
+
+(define (setup-key-keychain! entry buf)
+  (setup--ask "Keychain service: " (list (string-append (list-ref entry 1) "-api-key"))
+    (lambda (service)
+      (setup--ask "Keychain account (RET for any): " '("")
+        (lambda (account)
+          (setup-key-from-form! entry
+            (string-append "(keychain-secret-get " (setup--scheme-string service)
+                           (if (equal? account "") "" (string-append " " (setup--scheme-string account)))
+                           ")")
+            buf))))))
+
+(define (setup-key-secret-tool! entry buf)
+  (setup--ask "Secret Service service name: " (list (string-append (list-ref entry 1) "-api-key"))
+    (lambda (service)
+      (setup-key-from-form! entry
+        (string-append "(secret-tool-get " (setup--scheme-string service) ")") buf))))
+
+(define (setup-key-command! entry buf)
+  (setup--ask "Shell command that prints the key: " '()
+    (lambda (cmd)
+      (setup-key-from-form! entry
+        (string-append "(secret-command " (setup--scheme-string cmd) ")") buf))))
+
+;; (LABEL PROGRAM ASK): a backend appears when its program is installed.
+;; "A command" and "Paste the key" need no program.
+(define *setup-key-backends*
+  (list (list "Doppler" "doppler" setup-key-doppler!)
+        (list "1Password" "op" setup-key-1password!)
+        (list "macOS Keychain" "security" setup-key-keychain!)
+        (list "Linux Secret Service" "secret-tool" setup-key-secret-tool!)
+        (list "A command that prints the key" #f setup-key-command!)
+        (list "Paste the key" #f setup-key-paste!)))
+
+(define (setup-key-backends-here)
+  (filter (lambda (b) (or (not (cadr b)) (setup--program-present? (cadr b))))
+          *setup-key-backends*))
+
 (define (setup-wizard-add-key! buf)
   (minibuffer-read "Which provider is the key from? " (map car *setup-key-providers*)
     (lambda (label)
-      (let ((entry (assoc label *setup-key-providers*)))
-        (cond
-          ((not entry) (message "Setup: no key added"))
-          ((setup--program-present? "doppler")
-           (minibuffer-read "Where is the key? "
-             '("In Doppler — secrets.scm asks Doppler at each boot" "Paste it — secrets.scm holds the key")
-             (lambda (where)
-               (if (string-prefix? "In Doppler" where)
-                   (setup-key-from-doppler! entry buf)
-                   (setup-key-paste! entry buf)))))
-          (else (setup-key-paste! entry buf)))))))
+      (let ((entry (assoc label *setup-key-providers*))
+            (backends (setup-key-backends-here)))
+        (if (not entry)
+            (message "Setup: no key added")
+            (minibuffer-read "Where is the key? " (map car backends)
+              (lambda (where)
+                (let ((b (assoc where backends)))
+                  (if b
+                      ((caddr b) entry buf)
+                      (message "Setup: no key added"))))))))))
 
 (define (setup-wizard-click buf id)
   (cond
@@ -371,14 +429,29 @@
     (and (equal? (buffer-local buf 'mode-name) "setup-wizard-mode")
          (setup-wizard-click buf id))))
 
+;; Setup chooses the columns layout: buffers open side by side, and the
+;; guide's chat, its stage, and the next buffer share the frame as columns.
+;; The choice is saved, so every frame and group starts in columns.
+(define (setup-choose-columns!)
+  (unless (equal? window-layout-default 'columns)
+    (customize-save! 'window-layout-default 'columns))
+  (set-frame-local! 'layout-freed #f)
+  (unless (equal? (layout-target) 'columns)
+    (layout-target-set! 'columns)))
+
 (define (setup-wizard! &optional step)
+  (setup-choose-columns!)
   (let ((buf *setup-wizard-buffer*))
     (unless (buffer-exists? buf)
       (buffer-create buf)
       (buffer-append! buf "Setup\n"))
     (when step (buffer-set-local! buf 'setup-wizard-step step))
-    (switch-to-buffer! buf)
-    (set-mode! "setup-wizard-mode")
+    ;; a window on a blank buffer gives its place to the wizard; a window
+    ;; on work keeps it, and the wizard opens in the next column
+    (if (member (current-buffer) '("*scratch*" "*Messages*"))
+        (switch-to-buffer-here! buf)
+        (switch-to-buffer! buf))
+    (with-current-buffer buf (lambda () (set-mode! "setup-wizard-mode")))
     buf))
 
 ;;; --- the home page -------------------------------------------------------------
@@ -408,6 +481,22 @@
   (if (setup-complete?)
       (setup-welcome-here!)
       (setup-wizard! "model")))
+
+;; Start the onboarding over: the connector choice and the welcome marker
+;; go, and the home page is the wizard again. Keys in secrets.scm stay:
+;; they are the user's, and the wizard offers to change them.
+(define (setup-reset!)
+  (customize-save! 'setup-default-connector "")
+  (when (file-exists? (setup-welcome-marker-path))
+    (delete-file-path! (setup-welcome-marker-path) #t))
+  (setup-apply-default-connector!)
+  (when (buffer-exists? *setup-wizard-buffer*)
+    (buffer-set-local! *setup-wizard-buffer* 'setup-wizard-step "model"))
+  (compos-home!)
+  (message "Setup: reset. Choose a model to start again"))
+
+(define-command "setup-reset" "Start setup over: forget the chosen model and show the setup wizard"
+  (lambda () (setup-reset!)))
 
 (define-command "compos-home" "Open the Compos home page: setup until it is done, then the welcome page"
   (lambda () (compos-home!)))

@@ -35,3 +35,16 @@
           (key-get "ZZ_KEYS_ONCE")
           (key-get "ZZ_KEYS_ONCE")
           (check-equal! asked 1 "one ask for two lookups"))))))
+
+(deftest 'a-secret-argument-is-one-shell-word
+  "a quote inside a lookup argument stays inside its shell word"
+  (lambda ()
+    (check-equal! (secret--shell-word "it's") "'it'\\''s'" "the quote")
+    (check-equal! (secret-command (string-append "printf %s " (secret--shell-word "a b'c")))
+                  "a b'c" "the shell reads it back whole")))
+
+(deftest 'a-secret-command-answers-its-output-or-false
+  "secret-command trims the output, and an empty output is #f"
+  (lambda ()
+    (check-equal! (secret-command "echo '  k-123  '") "k-123" "trimmed")
+    (check-false! (secret-command "true") "no output")))

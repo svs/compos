@@ -179,6 +179,42 @@
                           (else v))
                     (spec-resolve (cddr spec) fields))))))
 
+;;; --- secret backends ----------------------------------------------------------
+;;; One function per secret tool. Each answers the secret as a string, or #f.
+;;; secrets.scm names a key by one of these calls, so the value stays in the
+;;; tool and every boot reads the current one.
+
+(domain! 'secrets)
+(effects! '(read external execute))
+
+;; TEXT as one shell word: inside single quotes, with each quote closed,
+;; escaped, and opened again.
+(define (secret--shell-word text)
+  (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
+
+;; The output of CMD trimmed, or #f when it printed nothing.
+(define (secret-command cmd)
+  (let ((out (string-trim (shell-command->string (string-append cmd " 2>/dev/null")))))
+    (if (equal? out "") #f out)))
+
+;; 1Password: REF is a secret reference, op://VAULT/ITEM/FIELD.
+(define (op-secret-get ref)
+  (secret-command (string-append "op read " (secret--shell-word ref))))
+
+;; The macOS Keychain: a generic password by its service, and by account
+;; when one is given.
+(define (keychain-secret-get service &optional account)
+  (secret-command
+    (string-append "security find-generic-password -w -s " (secret--shell-word service)
+                   (if (and account (not (equal? account "")))
+                       (string-append " -a " (secret--shell-word account))
+                       ""))))
+
+;; The Linux Secret Service: the secret stored with the attribute
+;; service=SERVICE (secret-tool store --label=... service SERVICE).
+(define (secret-tool-get service)
+  (secret-command (string-append "secret-tool lookup service " (secret--shell-word service))))
+
 (category! 'secrets)
 (public! 'spec-resolve
   "(spec-resolve SPEC FIELDS) — resolve the \"@VAR\" references in a config spec; FIELDS names each secret-bearing key as 'value, 'plist, or 'each")
@@ -198,3 +234,11 @@
   "(llm-base-url PROVIDER) — the address a provider's requests go to, or #f for the provider's own")
 (public! 'register-llm-base-url!
   "(register-llm-base-url! PROVIDER VALUE) — send a provider's requests to a self-hosted OpenAI-compatible server")
+(public! 'secret-command
+  "(secret-command CMD) — the trimmed output of the shell command CMD, or #f; a key from any tool")
+(public! 'op-secret-get
+  "(op-secret-get \"op://VAULT/ITEM/FIELD\") — a 1Password secret, through op read")
+(public! 'keychain-secret-get
+  "(keychain-secret-get SERVICE [ACCOUNT]) — a macOS Keychain generic password")
+(public! 'secret-tool-get
+  "(secret-tool-get SERVICE) — a Linux Secret Service secret stored with service=SERVICE")

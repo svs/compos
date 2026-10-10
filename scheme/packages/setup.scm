@@ -231,6 +231,9 @@
         (setup--document-set! buf markdown)
         (buffer-set-local! buf 'help-title title)
         (with-current-buffer buf (lambda () (set-mode! "help-mode")))
+        ;; a setup page is a page to read: it opens rendered, never as source
+        (unless (minor-mode-on? buf "preview-mode")
+          (enable-minor-mode! buf "preview-mode"))
         (display-buffer-other-window! buf))))
 
 (define (setup--show-document! title markdown)
@@ -432,39 +435,40 @@
 
 (define (setup-report)
   "Return a secret-free setup report for the bot and the user."
-  (let* ((backends (setup-secret-backends))
-         (connectors (setup-connectors))
-         (secret-lines
-           (map (lambda (b)
-                  (string-append "- " (car b) ": "
-                                 (setup--yes-no (nth 2 b))
-                                 " (`" (nth 1 b) "`)"))
-                backends))
-         (connector-lines
-           (map (lambda (c)
-                  (string-append "- " (car c) ": "
-                                 (setup--yes-no (cadr c))
-                                 " — " (caddr c)))
-                connectors)))
-    (string-append
-      "# compos setup\n\n"
-      "[Inference](#inference) · [Secrets](#secret-backends) · "
-      "[Connectors](#connectors) · [Lessons](#next-lessons)\n\n"
-      "## Inference\n\n"
-      "Gemini Nano is the bootstrap connector. It runs through the Chrome Prompt API.\n\n"
-      "[Create an OpenRouter key](https://openrouter.ai/settings/keys), then rerun the setup bot.\n\n"
-      "Run `M-x setup-bootstrap-gemini` to select it as the default.\n\n"
-      "## Secret backends\n\n"
-      "The key chain reads environment variables, ~/.compos key files, then Doppler.\n"
-      "These installed tools are candidates for the setup bot:\n\n"
-      (string-join secret-lines "\n") "\n\n"
-      "The setup bot never prints secret values.\n\n"
-      "## Connectors\n\n"
-      (string-join connector-lines "\n") "\n\n"
-      "## Next lessons\n\n"
-      "- `M-x setup-teach-code` explains the code-agent workflow.\n"
-      "- `M-x setup-teach-keys` explains M-x and the editor philosophy.\n"
-      "- `M-x apropos` searches the live command and function catalog.\n")))
+  (string-append
+    "# Setup status\n\n"
+    "[Inference](#inference) · [Secrets](#secret-backends) · "
+    "[Connectors](#connectors) · [Lessons](#next-lessons)\n\n"
+    "---\n\n"
+    "## Inference\n\n"
+    "Gemini Nano is the bootstrap connector. It runs through the Chrome Prompt API.\n\n"
+    (setup--table '("Do this" "Why")
+      '(("`M-x setup-bootstrap-gemini`" "Select Gemini Nano as the default connector.")
+        ("[Create an OpenRouter key](https://openrouter.ai/settings/keys)"
+         "A hosted model. Then run `M-x setup-bot` again.")
+        ("`M-x setup-install-claude`" "Install Claude Code and its ACP adapter.")
+        ("`M-x setup-install-codex`" "Install the Codex CLI.")))
+    "\n## Secret backends\n\n"
+    "The key chain reads environment variables, `~/.compos` key files, then Doppler. "
+    "The setup bot never prints secret values.\n\n"
+    (setup--table '("" "Tool" "Command")
+      (map (lambda (b)
+             (list (setup--state (nth 2 b))
+                   (string-append "**" (car b) "**")
+                   (string-append "`" (nth 1 b) "`")))
+           (setup-secret-backends)))
+    "\n## Connectors\n\n"
+    (setup--table '("" "Connector" "Detail")
+      (map (lambda (c)
+             (list (setup--state (cadr c))
+                   (string-append "**" (car c) "**")
+                   (caddr c)))
+           (setup-connectors)))
+    "\n## Next lessons\n\n"
+    (setup--table '("Command" "What you learn")
+      '(("[`M-x setup-teach-code`](compos:setup/code)" "The code-agent workflow.")
+        ("[`M-x setup-teach-keys`](compos:setup/keys)" "M-x and the editor philosophy.")
+        ("`M-x apropos`" "Search the live command and function catalog.")))))
 
 (define-command "setup-bot" "Walk through first-run setup one question at a time"
   (lambda () (setup--ask-secrets)))
@@ -485,72 +489,78 @@
 (define-command "setup-teach-code" "Teach the code-agent workflow"
   (lambda ()
     (setup--show-document! "learning to write code" (string-append
-      "# Learning to write code\n\n"
-      "[Back to setup](compos:setup/report)\n\n"
-      "1. Open a project file with `C-x C-f`.\n"
-      "2. Start a chat with `M-x start-chat`.\n"
-      "3. Enable `M-x code-agent-mode` in that chat.\n"
-      "4. Ask for a plan before asking for an edit.\n"
-      "5. Review the buffer diff.\n"
-      "6. Run focused tests, then the relevant full suite.\n\n"
-      "The agent edits live buffers through named tools. Scheme owns the policy.\n"
-      "The BEAM owns processes, sockets, PTYs, and model transport.\n"
+      "# Writing code with an agent\n\n"
+      "[← Back to setup](compos:setup/report)\n\n"
+      "---\n\n"
+      (setup--table '("Step" "Do this")
+        '(("**1**" "Open a project file with `C-x C-f`.")
+          ("**2**" "Start a chat with `M-x start-chat`.")
+          ("**3**" "Turn on `M-x code-agent-mode` in that chat.")
+          ("**4**" "Ask for a plan before you ask for an edit.")
+          ("**5**" "Review the buffer diff.")
+          ("**6**" "Run the focused tests, then the relevant full suite.")))
+      "\n> **How it works.** The agent edits live buffers through named tools. "
+      "Scheme owns the policy. The BEAM owns processes, sockets, PTYs, and model transport.\n\n"
       "Use `(skill \"code-editing\")` when the agent needs the full code skill.\n"))))
 
 (define-command "setup-teach-keys" "Teach M-x and the compos philosophy"
   (lambda ()
     (setup--show-document! "M-x and the editor philosophy" (string-append
       "# M-x and the editor philosophy\n\n"
-      "[Back to setup](compos:setup/report)\n\n"
-      "`M-x` runs a named command. Type part of a command name, then select it.\n"
+      "[← Back to setup](compos:setup/report)\n\n"
+      "---\n\n"
+      "**`M-x` runs a named command.** Type part of a command name, then select it. "
       "Commands are the stable interface for people and agents. Key bindings are preferences.\n\n"
-      "`M-x apropos` searches commands and functions by words.\n"
-      "`M-x contextual-help` explains the current buffer.\n"
-      "`C-h k` explains a key.\n"
-      "`C-h m` explains the current mode.\n"
-      "`M-:` evaluates Scheme.\n\n"
-      "The editor keeps state in buffers. Windows compose views. Modes add local policy.\n"
-      "Scheme decides editor behavior. Elixir supplies mechanisms that Scheme cannot provide.\n"
-      "This keeps the system open, inspectable, and teachable.\n"))))
+      (setup--table '("Key" "What it does")
+        '(("`M-x apropos`" "Search commands and functions by words.")
+          ("`M-x contextual-help`" "Explain the current buffer.")
+          ("`C-h k`" "Explain a key.")
+          ("`C-h m`" "Explain the current mode.")
+          ("`M-:`" "Evaluate Scheme.")))
+      "\n> **The philosophy.** The editor keeps state in buffers. Windows compose views. "
+      "Modes add local policy. Scheme decides editor behaviour, and Elixir supplies "
+      "the mechanisms that Scheme cannot provide. This keeps the system open, "
+      "inspectable, and teachable.\n"))))
 
+(define (setup-logo-path)
+  (string-append (compos-priv-dir) "/images/compos-logo-small.png"))
+
+;; The first page a new user reads. It is a web page in the preview: a
+;; logo, a short promise, three doors, and three keys. Each door is a
+;; compos: link, so a click runs the setup command it names.
 (define (setup-welcome-document)
   (string-append
-      "# Welcome to Compos\n\n"
-      "Compos is a composable computer for knowledge work: an editor, a browser,\n"
-      "a mail client, and a place for agents. It follows the model of Emacs: one\n"
-      "program holds every kind of text, and all of it uses the same small set of\n"
-      "keys.\n\n"
-      "You do not have to learn it all now. This page is the short version.\n\n"
-      "## One key\n\n"
-      "`M-x` runs any command by name. If you forget everything else, press `M-x`\n"
-      "and type a word for what you want: `file`, `group`, `mail`, `browse`. The\n"
-      "list gets shorter as you type, and it shows each command's key beside the\n"
-      "name.\n\n"
-      "`C-g` cancels anything. No key you press is hard to undo.\n\n"
-      "## Buffers, windows, groups\n\n"
-      "- A **buffer** holds text: a file, a chat, a mail thread, a web page, or the\n"
-      "  output of a command. Almost everything you see is a buffer.\n"
-      "- A **window** shows a buffer. Windows split, and each one keeps its own\n"
-      "  point.\n"
-      "- A **group** is the set of buffers for one task, with the window\n"
-      "  arrangement you left. Switch to a group and that task comes back.\n\n"
-      "## The agent works in your buffers\n\n"
-      "A chat is a buffer, so it sits in the group with the work it is about, and\n"
-      "it can read the buffers you have open. You do not paste context into it, and\n"
-      "you do not leave your work to ask a question.\n\n"
-      "## Start here\n\n"
-      "- **[Set up AI](compos:setup/ai)** — connect a model, then practise\n"
-      "  chats, file context, and agent threads.\n"
-      "- **[Start the tutorial](compos:training/tutorial)** — learn by editing real\n"
-      "  text.\n"
-      "- Press `C-h t` to open or resume the tutorial at any time.\n"
-      "- Press `C-h h` to find how to do a task, and `C-h ?` for every help command.\n"
-      "- [Check available models](compos:setup/inference)\n\n"
-      "## Then\n\n"
-      "- [M-x and the editor philosophy](compos:setup/keys)\n"
-      "- [Writing code with an agent](compos:setup/code)\n"
-      "- [Setup status](compos:setup/report)\n\n"
-      "Press `C-x C-f` to open a file when you want to start working.\n"))
+    "# Welcome to Compos\n\n"
+    "![Compos](" (setup-logo-path) ")\n\n"
+    "**A composable computer for knowledge work.** An editor, a browser, "
+    "a mail client, and a place for agents: one program, one small set of keys.\n\n"
+    "---\n\n"
+    "## Start here\n\n"
+    (setup--table '("Go to" "What you get")
+      '(("**[Set up Compos →](compos:setup/wizard)**"
+         "Choose a model. Then a guide teaches you in a chat, starting with windows.")
+        ("**[Start the tutorial →](compos:training/tutorial)**"
+         "Learn by editing real text. `C-h t` resumes it at any time.")
+        ("**[Read the AI guide →](compos:setup/ai)**"
+         "Models, chats, agents, logins, and how to test a first reply.")))
+    "\n## Three keys to remember\n\n"
+    (setup--table '("Key" "What it does")
+      '(("`M-x`" "Run any command by name. Type a word: `file`, `group`, `mail`, `browse`.")
+        ("`C-g`" "Cancel anything. No key that you press is hard to undo.")
+        ("`C-h h`" "Find how to do a task. `C-h ?` lists every help command.")))
+    "\n## How it fits together\n\n"
+    (setup--table '("Idea" "Meaning")
+      '(("**Buffer**" "Holds text: a file, a chat, a mail thread, a web page, or command output.")
+        ("**Window**" "Shows a buffer. Windows split, and each window keeps its own point.")
+        ("**Group**" "The buffers for one task, with their layout. Switch to a group, and the task comes back.")))
+    "\n> **The agent works in your buffers.** A chat is a buffer, so it sits "
+    "beside the work it is about and reads the buffers you have open. "
+    "You do not paste context, and you do not leave your work.\n\n"
+    "---\n\n"
+    "**Read next:** [M-x and the editor philosophy](compos:setup/keys) · "
+    "[Writing code with an agent](compos:setup/code) · "
+    "[Setup status](compos:setup/report)\n\n"
+    "Press `C-x C-f` to open a file when you want to start work.\n"))
 
 (define-command "setup-welcome" "Open the welcome page"
   (lambda ()
@@ -581,62 +591,93 @@
     (unless (ignore-errors (lambda () (setup-mark-welcome-seen!)))
       (message "Could not record that the Welcome page was shown"))))
 
-(define (setup--inference-rows)
-  (apply string-append
-    (map (lambda (row)
-           (let ((name (list-ref row 0))
-                 (kind (list-ref row 1))
-                 (found? (list-ref row 2))
-                 (detail (list-ref row 3)))
-             (string-append "- " (if found? "**detected**" "needs setup")
-                            " `" name "` (" kind ") - " detail "\n")))
-         (setup-inference-scan))))
+(define (setup--table header rows)
+  "A Markdown pipe table. HEADER and each row are lists of cell strings."
+  (let ((line (lambda (cells)
+                (string-append "| " (string-join cells " | ") " |\n"))))
+    (string-append
+      (line header)
+      (line (map (lambda (c) "---") header))
+      (apply string-append (map line rows)))))
 
-(define (setup--inference-document)
-  (string-append
-    "# Find a model for Compos\n\n"
-    "Compos can use a browser model, a direct API, or an external agent.\n"
-    "This scan detects local commands and registered keys. It cannot check\n"
-    "your login, browser support, or whether a model will reply.\n"
-    "[Start with AI](compos:setup/ai) explains how to test a real reply.\n\n"
-    "## What this machine has\n\n"
-    (setup--inference-rows)
-    "\n"
-    "Compos can start an external coding agent as a program. Claude Code,\n"
-    "OpenCode, and DeepSeek use the Agent Client Protocol (ACP). Codex uses\n"
-    "its app-server protocol. The scan does not check their logins.\n\n"
-    "`needs setup` means a command or key was not found. It does not mean\n"
-    "the connector is unsupported. `detected` does not prove it can reply.\n\n"
-    "## Choosing\n\n"
-    "Pick a default connector for new chats. In a chat, `C-c b` changes that\n"
-    "chat's setup. A detected connector still needs a real reply test.\n\n"
-    "[Back to setup](compos:setup/report)\n"))
+(define (setup--state found?) (if found? "● ready" "○ setup"))
 
-(define (setup--choose-inference)
-  "Offer what this machine can run. With no coding agent and no key there is
-   nothing to choose yet, so the honest next step is secrets, not a menu of
-   connectors that cannot answer."
-  (let* ((available (setup-inference-available))
-         (agents (setup-inference-acp-available))
-         (secrets? (and (null? agents) (not (setup--any-llm-key?)))))
-    (minibuffer-read
-      (if secrets? "No agent and no key. Next: " "Default connector: ")
-      (if secrets?
-          (list "Set up secrets" "Keep Gemini Nano")
-          (append available (list "Decide later")))
-      (lambda (choice)
-        (cond
-          ((equal? choice "Set up secrets") (run-command "setup-secrets"))
-          ((member choice available)
-           (customize-save! 'setup-default-connector choice)
-           (set! *default-connector* choice)
-           (message (string-append "Setup: " choice " is the default connector")))
-          (else (setup-provider-bootstrap!)))))))
+;;; --- install a coding agent -----------------------------------------------------
 
-(define-command "setup-inference" "Check this machine for models and pick a default"
-  (lambda ()
-    (setup--show-document! "Inference" (setup--inference-document))
-    (setup--choose-inference)))
+;; One row per agent: the steps install each program that is missing, in
+;; order, and SIGNIN is the command the user runs once after the install.
+;; The npm packages resolve through PATH, so the connectors find them.
+(define *setup-agent-installs*
+  '(("claude"
+     connector "claude-code"
+     steps (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
+            ("claude-agent-acp" "npm install -g @agentclientprotocol/claude-agent-acp"))
+     signin "claude")
+    ("codex"
+     connector "codex-app-server"
+     steps (("codex" "npm install -g @openai/codex"))
+     signin "codex login")))
+
+(define (setup--agent-install name)
+  (let ((row (assoc name *setup-agent-installs*)))
+    (and row (cdr row))))
+
+(define (setup-agent-missing-steps name)
+  "The (PROGRAM COMMAND) steps of agent NAME whose program is not on PATH."
+  (filter (lambda (step) (not (setup--program-present? (car step))))
+          (plist-get (setup--agent-install name) 'steps)))
+
+(define (setup--steps-need-npm? steps)
+  (and (find (lambda (step) (string-prefix? "npm " (cadr step))) steps) #t))
+
+(define (setup-agent-install-script name steps)
+  "The shell text that runs STEPS for agent NAME, then leaves a login shell.
+   The shell stays so that the user can read the output and sign in."
+  (let ((signin (plist-get (setup--agent-install name) 'signin)))
+    (string-append
+      (string-join (map cadr steps) " && ")
+      " && printf '\\n%s installed. Run `%s` once to sign in, then M-x setup.\\n' "
+      "'" name "' '" signin "'"
+      "; exec \"${SHELL:-/bin/sh}\" -l")))
+
+(define (setup-agent-install-buffer name)
+  (string-append "*setup-install:" name "*"))
+
+(define (setup-install-agent! name)
+  "Install the coding agent NAME in a terminal buffer. Return the buffer, or
+   #f when nothing runs: every program is present, or npm is missing."
+  (let ((steps (setup-agent-missing-steps name)))
+    (cond
+      ((null? steps)
+       (message (string-append "Setup: " name " is already installed"))
+       #f)
+      ((and (setup--steps-need-npm? steps) (not (setup--program-present? "npm")))
+       (message "Setup: npm is missing; install Node.js first")
+       #f)
+      (else
+       (let ((buf (setup-agent-install-buffer name)))
+         (buffer-create buf)
+         (buffer-set-local! buf 'mode-name "term-mode")
+         (buffer-set-local! buf 'terminal-command
+                            (setup-agent-install-script name steps))
+         (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
+         ;; a restore must not run the install again: the restored
+         ;; buffer starts a plain login shell over the old transcript
+         (buffer-set-local! buf 'terminal-command #f)
+         (unless setup-bot-silent-mode (switch-to-buffer! buf))
+         buf)))))
+
+(effects! '(write execute external))
+
+(define-command "setup-install-claude"
+  "Install Claude Code and its ACP adapter in a terminal buffer"
+  (lambda () (setup-install-agent! "claude")))
+
+(define-command "setup-install-codex"
+  "Install the Codex CLI in a terminal buffer"
+  (lambda () (setup-install-agent! "codex")))
+
+(effects! '(read write external))
 
 (define (setup-inference-acp-available)
   "The coding agents this machine can actually start."
@@ -645,31 +686,28 @@
                    (setup-inference-scan))))
 
 (define (setup--secrets-rows)
-  (apply string-append
+  (setup--table '("" "Provider" "Detail")
     (map (lambda (row)
-           (let ((name (list-ref row 0))
-                 (ready? (list-ref row 2))
-                 (hint (list-ref row 3)))
-             (string-append "- " (if ready? "**ready**" "not set up")
-                            " " name " - " hint "\n")))
+           (list (setup--state (list-ref row 2))
+                 (string-append "**" (list-ref row 0) "**")
+                 (list-ref row 3)))
          (setup-secret-scan))))
 
 (define (setup--secrets-document)
   (string-append
     "# Your secrets\n\n"
-    "No coding agent is installed here, so inference has to come from a hosted\n"
-    "model, and a hosted model needs an API key.\n\n"
-    "A key does not belong in a config file. The editor reads keys through a\n"
-    "chain: config holds an `@NAME` reference, and the value is resolved from\n"
-    "your secret provider at the moment it is used. The value stays where you\n"
-    "put it, and nothing writes it into a buffer or a transcript.\n\n"
+    "[← Back to setup](compos:setup/report)\n\n"
+    "**No coding agent is installed here,** so inference must come from a hosted model, "
+    "and a hosted model needs an API key.\n\n"
+    "---\n\n"
     "## What this machine has\n\n"
     (setup--secrets-rows)
-    "\n"
-    "`not set up` means the tool is installed but has no account or key yet.\n"
-    "That difference matters: a Doppler that was never logged in resolves\n"
-    "every reference to empty, and the failure looks like a broken key.\n\n"
-    "[Back to setup](compos:setup/report)\n"))
+    "\n`setup` means that the tool is installed but has no account or key yet. "
+    "A Doppler that was never logged in resolves every reference to empty, "
+    "and the failure looks like a broken key.\n\n"
+    "> **A key does not belong in a config file.** Config holds an `@NAME` reference. "
+    "The editor resolves the value from your secret provider when it uses the key. "
+    "Nothing writes the value into a buffer or a transcript.\n"))
 
 (define (setup--choose-secrets)
   (let ((names (map car (setup-secret-scan))))
@@ -704,7 +742,8 @@
 (add-hook! 'frame-attach-hook 'setup-show-welcome-once! #t)
 
 (define (setup--follow-link arg)
-  (cond ((equal? arg "report") (run-command "setup-report"))
+  (cond ((equal? arg "wizard") (run-command "setup"))
+        ((equal? arg "report") (run-command "setup-report"))
         ((equal? arg "welcome") (run-command "setup-welcome"))
         ((equal? arg "ai") (run-command "setup-ai-guide"))
         ((equal? arg "inference") (run-command "setup-inference"))

@@ -1,692 +1,515 @@
 # Compos Tutorial
 
-Welcome to the Compos tutorial.
+Welcome. This tutorial teaches Compos by doing: you read it, and you edit it as you go.
 
-If you want to use AI, hold the META key (usually ALT or Option) and type x.
-Then type setup-ai-guide and press Return. We write this as M-x setup-ai-guide.
-That guide explains models, chats, agents, logins, and a first reply. You can
-do the editor lessons below without a model. Return to the guide before the
-Agents exercises.
+This is your personal copy of the tutorial. Later we tell you to change it. Do not worry if you change it before we say so. That is called "editing", and editing is what Compos is for.
 
-This is your personal copy of the tutorial. Later we will tell you to change
-it. Do not worry if you change it before we say so. That is called "editing",
-and editing is what Compos is for.
+> **Want to use AI?** Hold the META key (usually ALT or Option) and type `x`. Then type `setup-ai-guide` and press Return. We write this as `M-x setup-ai-guide`. The guide explains models, chats, agents, logins and a first reply. You can do the editor lessons without a model. Return to the guide before the Agents exercises.
 
-You are reading one buffer. A buffer is a named place where Compos holds text:
-a file, a chat, a help page, or this tutorial. This buffer is named TUTORIAL.
-The cursor in the text is called point. Commands move point.
+You are reading one buffer. A **buffer** is a named place where Compos holds text: a file, a chat, a help page, or this tutorial. This buffer is named TUTORIAL. The cursor in the text is called **point**. Commands move point.
 
-Compos commands involve the CONTROL key (often labelled CTRL or CTL) or the
-META key (usually labelled ALT or Option). Instead of writing that in full
-each time, we use these abbreviations:
+Compos commands use the CONTROL key (often labelled CTRL or CTL) or the META key (usually labelled ALT or Option). We use these abbreviations:
 
-  C-<chr>  Hold the CONTROL key while you type the character <chr>.
-  M-<chr>  Hold the META or ALT key while you type <chr>.
-  C-M-<chr>  Hold both CONTROL and META while you type <chr>.
+| Key | What it means |
+| --- | --- |
+| `C-<chr>` | Hold the CONTROL key while you type the character `<chr>`. |
+| `M-<chr>` | Hold the META or ALT key while you type `<chr>`. |
+| `C-M-<chr>` | Hold both CONTROL and META while you type `<chr>`. |
 
-You do not need to learn everything at once. Three commands make a wrong guess
-easy to repair:
+You do not need to learn everything at once. Three commands make a wrong guess easy to repair:
 
-  C-g    Cancel the command or prompt you are in.
-  M-x    Run a command by name.
-  C-h t  Open or resume this tutorial.
+| Key | What it does |
+| --- | --- |
+| `C-g` | Cancel the command or prompt you are in. |
+| `M-x` | Run a command by name. |
+| `C-h t` | Open or resume this tutorial. |
 
-C-h h (how-do-i) lists recipes for common tasks. C-h ? lists every help command.
+`C-h h` (how-do-i) lists recipes for common tasks. `C-h ?` lists every help command.
 
-The characters ">>" at the left margin mark directions for you to try. The
-indented lines below them explain what to do. For example:
+The boxes marked **Try it** are directions for you to do now. For example:
 
->> Type M-x to open the command prompt.
-   Then type C-g to close it and return here.
+> **Try it.** Type `M-x` to open the command prompt. Then type `C-g` to close it and return here.
+
+---
 
 ## Contents
 
 The sections, in order.
 
-To jump to a section, type C-s and search for its heading, including the two
-hash marks. For example, search for "## Agents", then press RET to keep point
-there. Type C-r instead when the heading is above you. Type C-g to cancel the
-search and return to where you started.
+To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `C-g` to cancel the search and return to where you started.
 
-  Why Compos
-  Key notation
-  Named commands
-  Moving by screens
-  Moving point
-  Windows
-  Editing and undo
-  Prefix arguments
-  Killing and yanking
-  Searching and replacing
-  Files and buffers
-  Help
-  Modes and keymaps
-  Lists and peeks
-  Browsing the web
-  Groups
-  Agents
-  Persistence
-  The editor is malleable
-  Scheme and the BEAM
-  Where to go next
+1. Why Compos
+2. Key notation
+3. Named commands
+4. Moving by screens
+5. Moving point
+6. Windows
+7. Editing and undo
+8. Prefix arguments
+9. Killing and yanking
+10. Searching and replacing
+11. Files and buffers
+12. Help
+13. Modes and keymaps
+14. Lists and peeks
+15. Browsing the web
+16. Groups
+17. Agents
+18. Persistence
+19. The editor is malleable
+20. Scheme and the BEAM
+21. Where to go next
+
+---
 
 ## Why Compos
 
-Most programs make you leave your work to find the next piece of information.
-You switch to a browser, then to a chat window, then to a terminal, and you
-rebuild the task in your head each time.
+Most programs make you leave your work to find the next piece of information. You switch to a browser, then to a chat window, then to a terminal, and you rebuild the task in your head each time.
 
-Compos does it differently. The information comes to you, in another window,
-without your leaving what you are doing.
+**Compos does it differently. The information comes to you**, in another window, without your leaving what you are doing.
 
-Emacs, the editor Compos is modelled on, was built this way long before agents
-existed. A programmer could keep code in one window and documentation in
-another, and read the documentation without leaving the code. Mail, help,
-shells, directories and source all lived in the same program, and the same
-movement and editing commands worked in all of them.
+Emacs, the editor Compos is modelled on, was built this way long before agents existed. A programmer could keep code in one window and documentation in another, and read the documentation without leaving the code. Mail, help, shells, directories and source all lived in the same program, and the same movement and editing commands worked in all of them.
 
-Compos keeps that idea and adds a graphical display, work that runs at the
-same time, saved state, and agents. An agent is a model that works on the same
-buffers you do. A web page, a file, a chat, a mail thread, a search result and
-a running process are all buffers in one system.
+Compos keeps that idea and adds a graphical display, work that runs at the same time, saved state, and agents. An **agent** is a model that works on the same buffers you do. A web page, a file, a chat, a mail thread, a search result and a running process are all buffers in one system.
 
-Every one of them has a name, named commands, a place on the screen, and state
-that you and an agent can both change.
+Every one of them has a name, named commands, a place on the screen, and state that you and an agent can both change.
 
-Every window, list and page uses the same movement and editing keys. So the
-next sections teach those keys, on the text in front of you. When they are
-familiar, the sections on Windows, Lists and peeks, Groups and Agents show the
-idea above in action.
+Every window, list and page uses the same movement and editing keys. So the next sections teach those keys, on the text in front of you. When they are familiar, the sections on Windows, Lists and peeks, Groups and Agents show the idea above in action.
 
 The tutorial is a buffer too. You are learning Compos from inside Compos.
 
 ## Key notation
 
-Some commands use more than one key. A space between keys means "then", not
-"at the same time".
+Some commands use more than one key. A space between keys means "then", not "at the same time".
 
-For example, C-x C-f means:
+For example, `C-x C-f` means:
 
-  1. Hold CONTROL and press x, then release both keys.
-  2. Hold CONTROL and press f, then release both keys.
+1. Hold CONTROL and press `x`, then release both keys.
+2. Hold CONTROL and press `f`, then release both keys.
 
-C-x is called a prefix key. It tells Compos to wait for the next key. The next
-key chooses the command.
+`C-x` is called a **prefix key**. It tells Compos to wait for the next key. The next key chooses the command.
 
 Some keys are written by name:
 
-  RET    Return
-  SPC    Space
-  DEL    Backspace
+| Key | Keyboard key |
+| --- | --- |
+| `RET` | Return |
+| `SPC` | Space |
+| `DEL` | Backspace |
 
-Angle brackets name a key on the keyboard: <down>, <up>, <left> and <right>
-are the arrow keys. s- means hold the Super key, which is Command on macOS.
+Angle brackets name a key on the keyboard: `<down>`, `<up>`, `<left>` and `<right>` are the arrow keys. `s-` means hold the Super key, which is Command on macOS.
 
-If a prefix, a prompt or a search waits for input you do not want to give,
-type C-g. A lone Escape also quits, but C-g is the habit to keep.
+If a prefix, a prompt or a search waits for input you do not want to give, type `C-g`. A lone Escape also quits, but `C-g` is the habit to keep.
 
->> Hold CONTROL and press x, then release both keys.
-   Compos is now waiting for the next key.
-   Type C-g to cancel.
+> **Try it.** Hold CONTROL and press `x`, then release both keys. Compos is now waiting for the next key. Type `C-g` to cancel.
 
 You started a prefix command and cancelled it.
 
 ## Named commands
 
-Every action in Compos is a named command. A key binding, a menu, a Scheme
-program, an agent, a test, or an outside client can all run the same command.
-The key is only one way to ask for the action.
+Every action in Compos is a named command. A key binding, a menu, a Scheme program, an agent, a test, or an outside client can all run the same command. The key is only one way to ask for the action.
 
-M-x asks for a command by name. The list gets shorter as you type, and it
-shows each command's key beside the name. So using names teaches you the keys.
+`M-x` asks for a command by name. The list gets shorter as you type, and it shows each command's key beside the name. So using names teaches you the keys.
 
->> Type M-x, then type recenter, then choose recenter-top-bottom and press
-   RET. The line at point moves on the screen, but point stays on the same
-   text.
+> **Try it.** Type `M-x`, then type `recenter`, then choose `recenter-top-bottom` and press `RET`. The line at point moves on the screen, but point stays on the same text.
 
-You never need to know a command before you use it. Type the words you would
-use to describe what you want.
+You never need to know a command before you use it. Type the words you would use to describe what you want.
 
->> Type M-x, then type tutorial, and notice help-with-tutorial with C-h t
-   beside it. Type C-g to leave the command picker.
+> **Try it.** Type `M-x`, then type `tutorial`, and notice `help-with-tutorial` with `C-h t` beside it. Type `C-g` to leave the command picker.
 
-Agents use this same list. An agent does not guess which rectangle is a
-button. It finds and runs the named commands you use.
+Agents use this same list. An agent does not guess which rectangle is a button. It finds and runs the named commands you use.
 
 ## Moving by screens
 
-A buffer often holds more text than one window can show. The window shows one
-screenful; the rest continues above and below. Scrolling moves the view over
-the text. It never changes the text.
+A buffer often holds more text than one window can show. The window shows one screenful; the rest continues above and below. Scrolling moves the view over the text. It never changes the text.
 
->> Type C-v once to move forward almost one screen.
-   Then type M-v once to move backward and return here.
+> **Try it.** Type `C-v` once to move forward almost one screen. Then type `M-v` once to move backward and return here.
 
-  C-v    Move forward almost one screen
-  M-v    Move backward almost one screen
-  C-l    Put the line at point in the middle of the screen (lowercase L)
+| Key | What it does |
+| --- | --- |
+| `C-v` | Move forward almost one screen |
+| `M-v` | Move backward almost one screen |
+| `C-l` | Put the line at point in the middle of the screen (lowercase L) |
 
->> Type C-l and watch this line move to the middle.
-   The text does not change.
+> **Try it.** Type `C-l` and watch this line move to the middle. The text does not change.
 
-When you scroll a whole screen, the lines at the edge stay, so you can keep
-reading without losing your place.
+When you scroll a whole screen, the lines at the edge stay, so you can keep reading without losing your place.
 
-The modeline at the bottom of the window shows the buffer name, the size and
-point, and whether you are near the top, middle or bottom of the buffer.
+The modeline at the bottom of the window shows the buffer name, the size and point, and whether you are near the top, middle or bottom of the buffer.
 
 ## Moving point
 
-  C-f    Move forward one character
-  C-b    Move backward one character
-  C-n    Move to the next line
-  C-p    Move to the previous line
-  C-a    Move to the start of the line
-  C-e    Move to the end of the line
-  M-f    Move forward one word
-  M-b    Move backward one word
-  M-<    Move to the start of the buffer
-  M->    Move to the end of the buffer
+| Key | What it does |
+| --- | --- |
+| `C-f` | Move forward one character |
+| `C-b` | Move backward one character |
+| `C-n` | Move to the next line |
+| `C-p` | Move to the previous line |
+| `C-a` | Move to the start of the line |
+| `C-e` | Move to the end of the line |
+| `M-f` | Move forward one word |
+| `M-b` | Move backward one word |
+| `M-<` | Move to the start of the buffer |
+| `M->` | Move to the end of the buffer |
 
-The letters are easy to remember: P for previous, N for next, B for backward
-and F for forward. You will use these commands all the time.
+The letters are easy to remember: **P** for previous, **N** for next, **B** for backward and **F** for forward. You will use these commands all the time.
 
->> Move through this paragraph with C-f, C-b, C-n and C-p only.
-   Then use M-f and M-b to travel by words.
-   Finish with C-a and C-e.
+> **Try it.** Move through this paragraph with `C-f`, `C-b`, `C-n` and `C-p` only. Then use `M-f` and `M-b` to travel by words. Finish with `C-a` and `C-e`.
 
-The command names are literal: forward-char, backward-char, next-line,
-previous-line, forward-word. A key is a short name for a command, not a
-second interface you must learn.
+The command names are literal: `forward-char`, `backward-char`, `next-line`, `previous-line`, `forward-word`. A key is a short name for a command, not a second interface you must learn.
 
->> Type M-> to visit the end of the tutorial and read the last line.
-   Type M-< to come back.
+> **Try it.** Type `M->` to visit the end of the tutorial and read the last line. Type `M-<` to come back.
 
 ## Windows
 
-Compos can show more than one window at a time. A window shows a buffer.
-Splitting a window does not copy the buffer, and closing a window does not
-kill the buffer.
+Compos can show more than one window at a time. A window shows a buffer. Splitting a window does not copy the buffer, and closing a window does not kill the buffer.
 
-  C-x 2    Split the window below
-  C-x 3    Split the window to the right
-  C-x o    Move to the other window
-  C-x b    Show another buffer in this window
-  C-x 0    Close the selected window
-  C-x 1    Close every other window
+| Key | What it does |
+| --- | --- |
+| `C-x 2` | Split the window below |
+| `C-x 3` | Split the window to the right |
+| `C-x o` | Move to the other window |
+| `C-x b` | Show another buffer in this window |
+| `C-x 0` | Close the selected window |
+| `C-x 1` | Close every other window |
 
->> Type C-x 2 to split the screen into two windows.
-   Compos may show another buffer in the new window.
-   Type C-x o, then C-x b, choose TUTORIAL and press RET.
-   Both windows now show TUTORIAL.
-   Move point in the second window.
-   Each window remembers its own point, even though both show the same text.
+> **Try it.** Type `C-x 2` to split the screen into two windows. Compos may show another buffer in the new window. Type `C-x o`, then `C-x b`, choose TUTORIAL and press `RET`. Both windows now show TUTORIAL. Move point in the second window. Each window remembers its own point, even though both show the same text.
 
 One small command shows the whole idea:
 
-  C-M-v     Scroll the other window while you stay in this one
-  M-<down>  The same
-  M-<up>    Scroll the other window backward
+| Key | What it does |
+| --- | --- |
+| `C-M-v` | Scroll the other window while you stay in this one |
+| `M-<down>` | The same |
+| `M-<up>` | Scroll the other window backward |
 
->> Stay in this window and type C-M-v a few times.
-   Watch the other view move while your point and your focus stay here.
-   Then type M-<up> once.
+> **Try it.** Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
 
-You did not leave your work to read the reference. You brought the reference
-beside the work and controlled it. This is the promise from the start of the
-tutorial: the context comes to you. The same command can scroll a help page, a
-peek (a preview beside the work, covered later), the messages buffer or any
-other useful neighbour.
+You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a peek (a preview beside the work, covered later), the messages buffer or any other useful neighbour.
 
->> Type C-x 1 to return to one window.
+> **Try it.** Type `C-x 1` to return to one window.
 
 ## Editing and undo
 
 Typing inserts text at point.
 
-  DEL    Delete the character before point
-  C-d    Delete the character after point
-  M-d    Kill the next word
-  C-k    Kill from point to the end of the line
+| Key | What it does |
+| --- | --- |
+| `DEL` | Delete the character before point |
+| `C-d` | Delete the character after point |
+| `M-d` | Kill the next word |
+| `C-k` | Kill from point to the end of the line |
 
-Put point after the >> on the line below and type your name:
+> **Try it.** Put point at the end of the line below and type your name.
 
->>
+My name is:
 
-To undo the last change, type C-/. C-x u does the same. Type C-/ again to undo
-one change more. After any command other than undo, the next undo goes forward
-again. So undo after a break is redo.
+To undo the last change, type `C-/`. `C-x u` does the same. Type `C-/` again to undo one change more. After any command other than undo, the next undo goes forward again. So undo after a break is redo.
 
->> Type three words on the blank line below.
-   Delete a few characters.
-   Type C-/ until the line is empty again.
+> **Try it.** Type three words at the end of the practice line below. Delete a few characters. Type `C-/` until the line is as it was.
 
+Practice line:
 
-Every command is one undo step. Typing joins into groups, and commands such as
-newline and kill make useful boundaries. Edit freely; the editor keeps the
-history.
+Every command is one undo step. Typing joins into groups, and commands such as newline and kill make useful boundaries. Edit freely; the editor keeps the history.
 
 ## Prefix arguments
 
-Most Compos commands accept a count. To give one, type C-u and then the digits,
-before you type the command. With a META key there is a shorter way: hold META
-and type the digits.
+Most Compos commands accept a count. To give one, type `C-u` and then the digits, before you type the command. With a META key there is a shorter way: hold META and type the digits.
 
->> Type C-u 5 C-n. Point moves down five lines.
-   Type M-3 C-p to move back three lines.
+> **Try it.** Type `C-u 5 C-n`. Point moves down five lines. Type `M-3 C-p` to move back three lines.
 
-A command uses the count in different ways. Movement, deletion, killing,
-scrolling and undo repeat. A command that takes no count may read C-u as a
-request for another version of itself.
+A command uses the count in different ways. Movement, deletion, killing, scrolling and undo repeat. A command that takes no count may read `C-u` as a request for another version of itself.
 
->> Type C-u 5 C-v to scroll five lines.
-   Then type C-u 5 M-v to scroll back.
+> **Try it.** Type `C-u 5 C-v` to scroll five lines. Then type `C-u 5 M-v` to scroll back.
 
-You do not need prefix arguments often. The point is that commands compose: a
-small set of movements and edits expresses large actions.
+You do not need prefix arguments often. The point is that **commands compose**: a small set of movements and edits expresses large actions.
 
 ## Killing and yanking
 
-To set the mark, type C-SPC. If macOS uses C-SPC to switch input sources, type
-M-SPC instead. Move point after you set the mark, and the text between the mark
-and point becomes the active region.
+To set the mark, type `C-SPC`. If macOS uses `C-SPC` to switch input sources, type `M-SPC` instead. Move point after you set the mark, and the text between the mark and point becomes the active **region**.
 
-  C-w        Kill the region
-  M-w        Copy the region and leave it in place
-  C-y        Yank the most recent killed text
-  M-y        Replace that yank with an older kill
-  C-x C-x    Exchange point and mark
+When you edit a file, the usual keys from other editors work: Shift with an arrow key selects, `s-a` (Cmd-A) selects everything, and Cmd-C, Cmd-X and Cmd-V copy, cut and paste. You can keep using them; the keys below are there when you want them.
 
->> Put point at the start of this sentence, type C-SPC, move to the end with
-   C-e, and type C-w.
-   Then type C-y to bring the sentence back.
+| Key | What it does |
+| --- | --- |
+| `C-w` | Kill the region |
+| `M-w` | Copy the region and leave it in place |
+| `C-y` | Yank the most recent killed text |
+| `M-y` | Replace that yank with an older kill |
+| `C-x C-x` | Exchange point and mark |
 
-Killing is more useful than deleting, because killed text goes into a shared
-kill ring. Do several kills in a row and they join into one entry. So C-k C-k
-C-k removes several lines, and one C-y restores them together.
+> **Try it.** Put point at the start of the practice sentence below, type `C-SPC`, move to the end with `C-e`, and type `C-w`. Then type `C-y` to bring the sentence back.
 
-The mark also remembers places. C-u C-SPC returns to earlier marks in this
-buffer. C-x C-SPC walks the global mark ring across buffers.
+This practice sentence is here for you to kill and yank.
 
->> Set the mark here, move somewhere else in the tutorial, then type C-u
-   C-SPC to return.
-   Type C-g if you wanted the jump only, without an active region.
+Killing is more useful than deleting, because killed text goes into a shared **kill ring**. Do several kills in a row and they join into one entry. So `C-k C-k C-k` removes several lines, and one `C-y` restores them together.
+
+The mark also remembers places. `C-u C-SPC` returns to earlier marks in this buffer. `C-x C-SPC` walks the global mark ring across buffers.
+
+> **Try it.** Set the mark here, move somewhere else in the tutorial, then type `C-u C-SPC` to return. Type `C-g` if you wanted the jump only, without an active region.
 
 ## Searching and replacing
 
-To search forward, type C-s. To search backward, type C-r. Each character you
-type makes the match more specific at once. Search is a movement command; it
-does not make you fill a form before you see a result.
+To search forward, type `C-s`. To search backward, type `C-r`. Each character you type makes the match more specific at once. Search is a movement command; it does not make you fill a form before you see a result.
 
->> Type C-s, then type "window", and watch point move as the match becomes
-   specific.
-   Type C-s again for the next match, or C-g to stop.
+> **Try it.** Type `C-s`, then type "window", and watch point move as the match becomes specific. Type `C-s` again for the next match, or `C-g` to stop.
 
-While you search, RET accepts the match. C-g quits and returns to where the
-search started, where that makes sense.
+While you search, `RET` accepts the match. `C-g` quits and returns to where the search started, where that makes sense.
 
-M-% runs query-replace. It asks for the old text and the new text, then visits
-each match, so you choose which ones to change.
+`M-%` runs `query-replace`. It asks for the old text and the new text, then visits each match, so you choose which ones to change.
 
->> Put point at the start of the next line.
-   Type M-%, replace "colour" with "color", and answer y for the match.
-   Type C-/ afterward if you want the original text back.
+> **Try it.** Put point at the start of the practice line below. Type `M-%`, replace "colour" with "color", and answer `y` for the match. Type `C-/` afterward if you want the original text back.
 
 This practice line uses the word colour once.
 
 ## Files and buffers
 
-Compos checkpoints buffers, including unsaved ones, so their text can survive
-a restart. Put text in a file when it should also exist outside Compos and have
-a path that other programs can open.
+Compos checkpoints buffers, including unsaved ones, so their text can survive a restart. Put text in a file when it should also exist outside Compos and have a path that other programs can open.
 
-A file is data on disk. A buffer is a named place where the editor holds text.
-A file buffer visits the file it came from: editing the buffer changes the
-buffer, and C-x C-s writes the buffer back to the file.
+A **file** is data on disk. A **buffer** is a named place where the editor holds text. A file buffer visits the file it came from: editing the buffer changes the buffer, and `C-x C-s` writes the buffer back to the file.
 
-  C-x C-f    Find or create a file
-  C-x C-s    Save the current file buffer
-  C-x b      Switch buffers
-  C-x k      Kill a buffer
+| Key | What it does |
+| --- | --- |
+| `C-x C-f` | Find or create a file |
+| `C-x C-s` | Save the current file buffer |
+| `C-x b` | Switch buffers |
+| `C-x k` | Kill a buffer |
 
-This TUTORIAL buffer does not visit the master file. So your edits cannot
-change the installed tutorial.
+This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
 
->> Type C-x C-f and enter /tmp/compos-practice.txt.
-   Type a line and save it with C-x C-s.
-   Then type C-x b, choose TUTORIAL and press RET to return.
+> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose TUTORIAL and press `RET` to return.
 
-Almost everything you see in Compos lives in a buffer. Files are one kind.
-Help pages, chats, directory listings, web pages, mail, process output, search
-results and dashboards are buffers too.
+Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
 
-Because of that, they share the same window commands, links, search, modes,
-saved state, groups and agent context.
+Because of that, they share the same window commands, links, search, modes, saved state, groups and agent context.
 
 ## Help
 
-Compos documents itself while it runs. All the help commands start with C-h.
+Compos documents itself while it runs. All the help commands start with `C-h`.
 
-  C-h k    Describe the next key you type
-  C-h m    Describe the current major mode and its keys
-  C-h b    List the bindings active here
-  C-h B    Open the keymap browser, which you can edit
-  C-h a    Search commands and functions by words
-  M-?      Explain the current context, or the name at point
-  C-h t    Open or resume this tutorial
+| Key | What it does |
+| --- | --- |
+| `C-h k` | Describe the next key you type |
+| `C-h m` | Describe the current major mode and its keys |
+| `C-h b` | List the bindings active here |
+| `C-h B` | Open the keymap browser, which you can edit |
+| `C-h a` | Search commands and functions by words |
+| `M-?` | Explain the current context, or the name at point |
+| `C-h t` | Open or resume this tutorial |
 
->> Type C-h k C-M-v and read about scroll-other-window.
-   Type q to dismiss the help page.
+> **Try it.** Type `C-h k C-M-v` and read about `scroll-other-window`. Type `q` to dismiss the help page.
 
->> Type C-h m in TUTORIAL.
-   Notice the mode, the maps in force, and the commands they add.
-   Type q when you finish.
+> **Try it.** Type `C-h m` in TUTORIAL. Notice the mode, the maps in force, and the commands they add. Type `q` when you finish.
 
-M-x apropos searches everything that is defined. A public definition carries a
-domain, its effects, a signature and documentation, so people and agents can
-both find it.
+`M-x apropos` searches everything that is defined. A public definition carries a domain, its effects, a signature and documentation, so people and agents can both find it.
 
->> Type M-x apropos, search for "other window", and read the results.
-   Type q to return to the tutorial.
+> **Try it.** Type `M-x apropos`, search for "other window", and read the results. Type `q` to return to the tutorial.
 
 ## Modes and keymaps
 
-A major mode gives a buffer its main interpretation: text, Scheme, chat,
-browse, help, a list. A minor mode adds separate behaviour, such as previews
-or editing conventions.
+A **major mode** gives a buffer its main interpretation: text, Scheme, chat, browse, help, a list. A **minor mode** adds separate behaviour, such as previews or editing conventions.
 
-Behaviour is not fixed to a set of application types. It composes from named
-maps, modes, hooks, buffer-local values and commands.
+Behaviour is not fixed to a set of application types. It composes from named maps, modes, hooks, buffer-local values and commands.
 
-When you type a key, Compos looks for it in this order: temporary maps, the
-thing at point, minor modes, the buffer and its major mode, read-only
-behaviour, then global bindings. Context can change a familiar key without
-throwing away the common interface.
+When you type a key, Compos looks for it in this order: temporary maps, the thing at point, minor modes, the buffer and its major mode, read-only behaviour, then global bindings. Context can change a familiar key without throwing away the common interface.
 
->> Type C-h B.
-   The keymap browser shows every binding in force here, which map supplied
-   it, and whether another binding shadows it.
-   Type / to filter for "tutorial" or "scroll". Type q to leave.
+> **Try it.** Type `C-h B`. The keymap browser shows every binding in force here, which map supplied it, and whether another binding shadows it. Type `/` to filter for "tutorial" or "scroll". Type `q` to leave.
 
-So a list, a source file, a chat and a browser page can differ where they
-should, and stay consistent where they can.
+So a list, a source file, a chat and a browser page can differ where they should, and stay consistent where they can.
 
 ## Lists and peeks
 
 Compos applications share one list interface:
 
-  n          Move to the next row
-  p          Move to the previous row
-  /          Narrow the rows as you type
-  Backslash  Remove the newest filter
-  SPC        Mark items, when the list supports selection
-  g          Refresh, when the list supports refreshing
+| Key | What it does |
+| --- | --- |
+| `n` | Move to the next row |
+| `p` | Move to the previous row |
+| `/` | Narrow the rows as you type |
+| Backslash | Remove the newest filter |
+| `SPC` | Mark items, when the list supports selection |
+| `g` | Refresh, when the list supports refreshing |
 
-A list mode adds its own actions, such as RET to visit a row and q to quit.
-A list mode can also give a shared key a different action. C-n and C-p
-always move by rows.
+A list mode adds its own actions, such as `RET` to visit a row and `q` to quit. A list mode can also give a shared key a different action. `C-n` and `C-p` always move by rows.
 
->> Type M-x ibuffer.
-   This list manages buffers. Move through the rows with C-n and C-p. In
-   ibuffer, p turns the row preview on and off. Type / and part of a
-   buffer name, press RET to accept the filter, then press Backslash to widen
-   the list again.
+> **Try it.** Type `M-x ibuffer`. This list manages buffers. Move through the rows with `C-n` and `C-p`. In ibuffer, `p` turns the row preview on and off. Type `/` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
 
-A peek shows you something without switching context. A list such as dired can
-show the row at point in another window, while your selection stays in the
-list. The next peek replaces the previous one, and q dismisses it. M-<down>
-and M-<up> scroll the peek without taking your focus.
+A **peek** shows you something without switching context. A list such as dired can show the row at point in another window, while your selection stays in the list. The next peek replaces the previous one, and `q` dismisses it. `M-<down>` and `M-<up>` scroll the peek without taking your focus.
 
-This is scroll-other-window made into a pattern: look at nearby context
-without losing the work that led you there.
+This is `scroll-other-window` made into a pattern: look at nearby context without losing the work that led you there.
 
->> Type C-x b TUTORIAL RET when you are ready to return.
+> **Try it.** Type `C-x b TUTORIAL RET` when you are ready to return.
 
 ## Browsing the web
 
-M-x browse opens a URL, or a search, as readable Markdown in a browse buffer.
-The page on the web stays the source of truth, and preview mode gives it a
-graphical reading surface.
+`M-x browse` opens a URL, or a search, as readable Markdown in a browse buffer. The page on the web stays the source of truth, and preview mode gives it a graphical reading surface.
 
->> Type M-x browse and enter https://example.com.
-   When the page appears, try TAB, n and p to move among links.
-   Type q to return to the tutorial.
+> **Try it.** Type `M-x browse` and enter `https://example.com`. When the page appears, try `TAB`, `n` and `p` to move among links. Type `q` to return to the tutorial.
 
 In browse mode:
 
-  RET          Follow a link in the current browse tab
-  s-RET        Open a separate browse tab (Command-RET on macOS)
-  M-RET        Peek the link in another window
-  l            Go back (Meta-Left does the same)
-  Meta-Right   Go forward
-  R            Toggle calm and full readings
-  o            Open the page in the outside browser
-  w            Copy the link at point, or the page URL
-  H            Open the reading history
-  C-c C-v      Cycle the view: monospace, serif, then Markdown source
+| Key | What it does |
+| --- | --- |
+| `RET` | Follow a link in the current browse tab |
+| `s-RET` | Open a separate browse tab (Command-RET on macOS) |
+| `M-RET` | Peek the link in another window |
+| `l` | Go back (Meta-Left does the same) |
+| Meta-Right | Go forward |
+| `R` | Toggle calm and full readings |
+| `o` | Open the page in the outside browser |
+| `w` | Copy the link at point, or the page URL |
+| `H` | Open the reading history |
+| `C-c C-v` | Cycle the view: monospace, serif, then Markdown source |
 
-The web is not reduced to a screenshot, and an agent does not have to guess at
-DOM selectors. The readable page has a buffer, named commands, links, history,
-point and a mode, like everything else here.
+The web is not reduced to a screenshot, and an agent does not have to guess at DOM selectors. The readable page has a buffer, named commands, links, history, point and a mode, like everything else here.
 
 ## Groups
 
-A group remembers a task: its buffers, its companion chat, and the window
-arrangement you left behind. Switching to a group restores the context, not
-one document.
+A **group** remembers a task: its buffers, its companion chat, and the window arrangement you left behind. Switching to a group restores the context, not one document.
 
-  M-x group-new    Create and enter a group
-  C-x g            Switch groups
-  C-x C-g C-g      Return to the previous group
-  C-x C-g b        List the buffers in the current group
-  C-x C-g s        Tile the group
+| Key | What it does |
+| --- | --- |
+| `M-x group-new` | Create and enter a group |
+| `C-x g` | Switch groups |
+| `C-x C-g C-g` | Return to the previous group |
+| `C-x C-g b` | List the buffers in the current group |
+| `C-x C-g s` | Tile the group |
 
->> Type M-x group-new and call the group tutorial-practice.
-   With nothing marked, the new group starts empty and opens its scratch
-   buffer.
-   Type C-x g to look at the group switcher, then C-g if you do not want
-   to switch.
-   Type C-x b, choose TUTORIAL and press RET to return here.
+> **Try it.** Type `M-x group-new` and call the group `tutorial-practice`. With nothing marked, the new group starts empty and opens its scratch buffer. Type `C-x g` to look at the group switcher, then `C-g` if you do not want to switch. Type `C-x b`, choose TUTORIAL and press `RET` to return here.
 
-A task should not be a pile of tabs that you rebuild from memory. Its sources,
-notes, pages, process output and conversation should come back together.
+A task should not be a pile of tabs that you rebuild from memory. Its sources, notes, pages, process output and conversation should come back together.
 
-A buffer can belong to several useful contexts without being trapped in one
-application.
+A buffer can belong to several useful contexts without being trapped in one application.
 
 ## Agents
 
-Before you try this section, type M-x setup-ai-guide. Choose a connector,
-complete its login or key setup, and test one reply in a chat. Return here
-with C-h t. A connector in a list may still need authentication.
+> **Before you start.** Type `M-x setup-ai-guide`. Choose a connector, complete its login or key setup, and test one reply in a chat. Return here with `C-h t`. A connector in a list may still need authentication.
 
-In most programs, a chat sidebar and an application share a screen but stay
-separate systems. The assistant sees summaries and a few narrow actions, while
-the application keeps the real state somewhere else.
+In most programs, a chat sidebar and an application share a screen but stay separate systems. The assistant sees summaries and a few narrow actions, while the application keeps the real state somewhere else.
 
-Compos begins with one environment. The application and the conversation are
-buffers in the same group. You and the agent act on the same named commands
-and the same state.
+Compos begins with one environment. The application and the conversation are buffers in the same group. You and the agent act on the same named commands and the same state.
 
-The commands in this section are optional. Your provider may charge for
-requests. A chat is the conversation buffer. A model writes responses. An
-agent uses that model with tools to work in Compos.
+The commands in this section are optional. Your provider may charge for requests. A **chat** is the conversation buffer. A **model** writes responses. An **agent** uses that model with tools to work in Compos.
 
-  M-x chat-new             Start a new chat buffer
-  C-c b                    Choose the chat's connector, model, effort, tools
-                           and permissions
-  M-x agent-switch         Move a running chat to another connector and model
-  C-c w                    Switch between a work buffer and its chat
-  M-x chat-companion-ask   Ask the companion a question without leaving the
-                           work buffer
-  M-|                      Send the active region through an LLM
+| Key | What it does |
+| --- | --- |
+| `M-x chat-new` | Start a new chat buffer |
+| `C-c b` | Choose the chat's connector, model, effort, tools and permissions |
+| `M-x agent-switch` | Move a running chat to another connector and model |
+| `C-c w` | Switch between a work buffer and its chat |
+| `M-x chat-companion-ask` | Ask the companion a question without leaving the work buffer |
 
-A connector is how Compos reaches an agent or model. The connector picker
-shows the supported connectors below. A connector works when its program and
-credentials are available, or when its browser model can run. Test a reply
-before you rely on the connector.
+`M-|` sends the active region through an LLM.
 
-  codex-app-server  Codex through codex app-server. It uses the Codex CLI's
-                    existing ChatGPT login; it needs no API key.
-  claude-code       Claude Code through ACP. It needs a configured adapter and
-                    a Claude login.
-  opencode          OpenCode through ACP. It uses the providers configured in
-                    OpenCode.
-  deepseek          DeepSeek Harness through ACP. It needs an installed and
-                    configured DSH profile.
-  api               Direct model APIs for providers whose keys you configured
-                    in Compos.
-  gemini-nano       The local browser model, when the browser provides it.
+A **connector** is how Compos reaches an agent or model. The connector picker shows the supported connectors below. A connector works when its program and credentials are available, or when its browser model can run. Test a reply before you rely on the connector.
 
-ACP is the Agent Client Protocol. It lets Compos start an external coding
-agent as a process and exchange structured messages, tools and permissions
-with it. Codex now uses its app-server protocol instead. The older codex-acp
-connector is deprecated and is not shown in the picker.
+| Connector | What it needs |
+| --- | --- |
+| `codex-app-server` | Codex through `codex app-server`. It uses the Codex CLI's existing ChatGPT login; it needs no API key. |
+| `claude-code` | Claude Code through ACP. It needs a configured adapter and a Claude login. |
+| `opencode` | OpenCode through ACP. It uses the providers configured in OpenCode. |
+| `deepseek` | DeepSeek Harness through ACP. It needs an installed and configured DSH profile. |
+| `api` | Direct model APIs for providers whose keys you configured in Compos. |
+| `gemini-nano` | The local browser model, when the browser provides it. |
 
->> Type M-x chat-new. In the new chat, type C-c b. The left column lists
-   saved presets, and the right column shows this chat's setup.
-   Press <right> to move to the setup. Press b and choose codex-app-server.
-   Press m and choose a model, or choose default for the connector default.
-   Press ESC to give the setup to the chat.
-   Type a message and press RET to send it.
+ACP is the Agent Client Protocol. It lets Compos start an external coding agent as a process and exchange structured messages, tools and permissions with it. Codex now uses its app-server protocol instead. The older `codex-acp` connector is deprecated and is not shown in the picker.
 
-If you chose Codex, sign in with codex login in a terminal first. The AI
-starter guide explains how to check the login when a chat returns 401.
+> **Try it.** Type `M-x chat-new`. In the new chat, type `C-c b`. The left column lists saved presets, and the right column shows this chat's setup. Press `<right>` to move to the setup. Press `b` and choose `codex-app-server`. Press `m` and choose a model, or choose `default` for the connector default. Press `ESC` to give the setup to the chat. Type a message and press `RET` to send it.
 
->> From TUTORIAL, type M-x chat-companion-ask and ask: "What is the main idea
-   of the section named Windows?"
-   The companion reads the live tutorial buffer, so you do not paste it into
-   another program.
+If you chose Codex, sign in with `codex login` in a terminal first. The AI starter guide explains how to check the login when a chat returns 401.
 
->> Open the practice file from the Files and buffers section with C-x C-f
-   /tmp/compos-practice.txt.
-   Type M-x chat-companion-ask there and ask: "Summarize this file."
-   The companion reads the file buffer. You did not copy any of it into the
-   chat.
+> **Try it.** From TUTORIAL, type `M-x chat-companion-ask` and ask: "What is the main idea of the section named Windows?" The companion reads the live tutorial buffer, so you do not paste it into another program.
 
->> Type M-x training-companion-summarize-mode to ask the companion to teach
-   the current major mode.
+> **Try it.** Open the practice file from the Files and buffers section with `C-x C-f /tmp/compos-practice.txt`. Type `M-x chat-companion-ask` there and ask: "Summarize this file." The companion reads the file buffer. You did not copy any of it into the chat.
+
+> **Try it.** Type `M-x training-companion-summarize-mode` to ask the companion to teach the current major mode.
 
 Agents also write extensions. Ask for one and watch it appear as a command:
 
->> Type M-x chat-companion-ask and ask: "Define a Scheme command named
-   tutorial-agent-hello that prints a greeting."
-   Then type M-x tutorial-agent-hello.
+> **Try it.** Type `M-x chat-companion-ask` and ask: "Define a Scheme command named tutorial-agent-hello that prints a greeting." Then type `M-x tutorial-agent-hello`.
 
-The agent wrote the definition with the same Scheme evaluator the editor
-itself runs. The context is concrete: it is there in the buffer.
+The agent wrote the definition with the same Scheme evaluator the editor itself runs. The context is concrete: it is there in the buffer.
 
 ## Persistence
 
-Compos runs as a daemon. It does not lose its state like a web page that you
-close.
+Compos runs as a daemon. It does not lose its state like a web page that you close.
 
-Durable buffers, frame window trees, points, chats, groups and selected local
-state survive a restart. Compos puts back the saved theme, and browser clients
-reconnect to their frames.
+Durable buffers, frame window trees, points, chats, groups and selected local state survive a restart. Compos puts back the saved theme, and browser clients reconnect to their frames.
 
-Buffer checkpoints keep file paths and live contents, including unsaved edits.
-Buffers that visit no file are checkpointed too. A mode rebuilds its live
-behaviour around the restored state.
+Buffer checkpoints keep file paths and live contents, including unsaved edits. Buffers that visit no file are checkpointed too. A mode rebuilds its live behaviour around the restored state.
 
-Your work is not a form submission, and your chat is not an archive behind a
-settings page. When you leave and return, the world you built is still there.
+Your work is not a form submission, and your chat is not an archive behind a settings page. **When you leave and return, the world you built is still there.**
 
-The tutorial follows the same rule. Normal checkpoints preserve a live
-TUTORIAL buffer without asking. When its point or text has changed, C-x k asks
-whether to keep this copy and position for C-h t.
+The tutorial follows the same rule. Normal checkpoints preserve a live TUTORIAL buffer without asking. When its point or text has changed, `C-x k` asks whether to keep this copy and position for `C-h t`.
 
-One thing does not come back this way: a definition you add at runtime. The
-next section explains why.
+One thing does not come back this way: a definition you add at runtime. The next section explains why.
 
 ## The editor is malleable
 
-Compos is not only a fixed editor. It is a live Scheme environment. Loading a
-file is evaluation, and a symbol is a stable name whose definition can change
-while the system runs. The evaluator is part of the product.
+Compos is not only a fixed editor. It is a live Scheme environment. Loading a file is evaluation, and a symbol is a stable name whose definition can change while the system runs. The evaluator is part of the product.
 
-  M-:        Evaluate one Scheme expression
-  C-x C-e    Evaluate the expression before point, in a Scheme buffer
+| Key | What it does |
+| --- | --- |
+| `M-:` | Evaluate one Scheme expression |
+| `C-x C-e` | Evaluate the expression before point, in a Scheme buffer |
 
->> Type M-:, enter the expression below, and press RET.
+> **Try it.** Type `M-:`, enter the expression below, and press `RET`.
 
-   (message "Hello from the live Scheme environment")
+```scheme
+(message "Hello from the live Scheme environment")
+```
 
-The message appears at once. No build, restart, bundler or plugin host was
-needed.
+The message appears at once. No build, restart, bundler or plugin host was needed.
 
 You can make a command the same way.
 
->> Type M-:, enter the following expression as one line, and press RET.
+> **Try it.** Type `M-:`, enter the following expression as one line, and press `RET`.
 
-   (define-command "tutorial-hello" "Say hello from the tutorial" (lambda () (message "The running editor has a new command")))
+```scheme
+(define-command "tutorial-hello" "Say hello from the tutorial" (lambda () (message "The running editor has a new command")))
+```
 
->> Now type M-x tutorial-hello.
+> **Try it.** Now type `M-x tutorial-hello`.
 
-The definition lasts until you restart, unless you put it in
-~/.compos/init.scm or in a project's compos.scm. A buffer holds data, and the
-daemon brings data back from its checkpoints. A definition is part of the
-running program, and the program starts again from your init files. So try a
-change live first, then keep it when it proves useful. An agent can make the
-same small extension for you.
+The definition lasts until you restart, unless you put it in `~/.compos/init.scm` or in a project's `compos.scm`. A buffer holds data, and the daemon brings data back from its checkpoints. A definition is part of the running program, and the program starts again from your init files. So try a change live first, then keep it when it proves useful. An agent can make the same small extension for you.
 
-In Compos, a missing workflow can begin as a few lines of Scheme and grow only
-as far as its usefulness demands.
+In Compos, a missing workflow can begin as a few lines of Scheme and grow only as far as its usefulness demands.
 
 ## Scheme and the BEAM
 
 One rule explains the whole system:
 
-Elixir supplies mechanism. Scheme decides policy.
+> **Elixir supplies mechanism. Scheme decides policy.**
 
-Scheme owns what you experience as the editor: commands, keymaps, modes,
-hooks, completion, display rules, themes, chats, mail, browser policy,
-permission prompts and applications.
+Scheme owns what you experience as the editor: commands, keymaps, modes, hooks, completion, display rules, themes, chats, mail, browser policy, permission prompts and applications.
 
-Elixir and OTP own the mechanisms that move bytes, cross operating-system
-boundaries, or need reliable concurrent lifetimes: ropes, parsers, sockets,
-PTYs, schedulers, model transport, buffers as processes, and supervision.
+Elixir and OTP own the mechanisms that move bytes, cross operating-system boundaries, or need reliable concurrent lifetimes: ropes, parsers, sockets, PTYs, schedulers, model transport, buffers as processes, and supervision.
 
-So Compos needs no large plugin lifecycle framework of the JavaScript kind.
-Lisp already supplies symbols, late binding, live evaluation, dynamic context
-and inspectable state. Ordinary definitions and registrations stay ordinary.
-External resources such as processes, sockets and timers get explicit owners
-through OTP.
+So Compos needs no large plugin lifecycle framework of the JavaScript kind. Lisp already supplies symbols, late binding, live evaluation, dynamic context and inspectable state. Ordinary definitions and registrations stay ordinary. External resources such as processes, sockets and timers get explicit owners through OTP.
 
-The boundary keeps the system open without making the runtime fragile. Scheme
-can redefine what a key means while the editor runs. OTP can stop a slow model
-stream, or a failing process, from freezing the interface.
+The boundary keeps the system open without making the runtime fragile. Scheme can redefine what a key means while the editor runs. OTP can stop a slow model stream, or a failing process, from freezing the interface.
 
-The browser is a renderer and a client, not the editor. The headless daemon is
-the system of record. The browser UI, the desktop shell and RPC clients address
-the same core, and another client, such as a TUI, can use it too.
+The browser is a renderer and a client, not the editor. The headless daemon is the system of record. The browser UI, the desktop shell and RPC clients address the same core, and another client, such as a TUI, can use it too.
+
+---
 
 ## Where to go next
 
 You have practised the main ideas:
 
-  - Information comes to you, through buffers, windows, peeks, browser tabs
-    and groups.
-  - Named commands give people and agents one place to act.
-  - Modes and keymaps specialize a common interface without splitting it.
-  - A conversation lives beside the state it discusses.
-  - The live Scheme environment lets the editor grow around your work.
-  - OTP supplies durable, concurrent mechanisms below that policy.
+- Information comes to you, through buffers, windows, peeks, browser tabs and groups.
+- Named commands give people and agents one place to act.
+- Modes and keymaps specialize a common interface without splitting it.
+- A conversation lives beside the state it discusses.
+- The live Scheme environment lets the editor grow around your work.
+- OTP supplies durable, concurrent mechanisms below that policy.
 
-You do not need to remember every key. Keep using M-x to find commands, C-h to
-look at the current world, and C-g to leave anything unfinished.
+You do not need to remember every key. Keep using `M-x` to find commands, `C-h` to look at the current world, and `C-g` to leave anything unfinished.
 
-To leave the tutorial, type C-x k. If you moved or edited it, Compos asks
-whether to save this copy and your position. Type C-h t whenever you want to
-come back. If you decline a saved copy, the next C-h t loads the installed
-master.
+To leave the tutorial, type `C-x k`. If you moved or edited it, Compos asks whether to save this copy and your position. Type `C-h t` whenever you want to come back. If you decline a saved copy, the next `C-h t` loads the installed master.
 
-For setup and the full documentation, read README.md, docs/README.md and
-docs/LEARN COMPOS.md in the Compos source checkout.
+For setup and the full documentation, read `README.md`, `docs/README.md` and `docs/LEARN COMPOS.md` in the Compos source checkout.
 
-The best next step is real work. Find a file with C-x C-f, bring one useful
-piece of context beside it, and ask the companion to help you make the
-environment fit the task.
+**The best next step is real work.** Find a file with `C-x C-f`, bring one useful piece of context beside it, and ask the companion to help you make the environment fit the task.
 
-This tutorial aims to be clear to a new user. If some part is not clear, do not
-sit and blame yourself. Report it, and the text will improve.
+This tutorial aims to be clear to a new user. If some part is not clear, do not sit and blame yourself. Report it, and the text will improve.

@@ -163,6 +163,8 @@
 (require 'scratch)
 (require 'sentry)
 (require 'setup)
+;; the first-run wizard: the model step, then the guide
+(require 'setup-wizard)
 (require 'skills)
 (require 'prompts)
 (require 'llm-config)

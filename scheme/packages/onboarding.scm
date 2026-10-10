@@ -130,9 +130,13 @@
 
 This window is the stage. The guide puts here what each step is about, and you can work in it.
 
-`C-x o` moves the focus between the two windows. `C-g` stops anything that waits for you."
-  '(("C-x o" "other-window" "Move to the other window")
-    ("C-g" "keyboard-quit" "Stop what waits for you")))
+The focus is the window your keys go to. `s-<left>` and `s-<right>` move it to the window on that side; `C-x o` moves it to the next window.
+
+Typing in a window starts editing there. `C-g` stops editing, and the arrows move the focus again. Ask the guide anything, at any time."
+  '(("s-<left>" "focus-left" "Focus the window on the left")
+    ("s-<right>" "focus-right" "Focus the window on the right")
+    ("C-x o" "other-window" "Move to the next window")
+    ("C-g" "keyboard-quit" "Stop editing, or stop what waits for you")))
 
 (define (onboarding--welcome!)
   (unless (buffer-exists? *onboarding-welcome*)

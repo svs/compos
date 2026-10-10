@@ -208,3 +208,85 @@
       (set! *agent-connectors* old-connectors)
       (set! setup-default-connector old-saved)
       (set! *default-connector* old-default))))
+
+;;; --- install a coding agent ----------------------------------------------------
+
+(deftest 'the-agent-install-commands-exist
+  "setup names one install command for each coding agent"
+  (lambda ()
+    (check-true! (member "setup-install-claude" (command-names)) "claude")
+    (check-true! (member "setup-install-codex" (command-names)) "codex")))
+
+(define (setup-test--with-present present fn)
+  (let ((old setup--program-present?))
+    (set! setup--program-present? (lambda (program) (and (member program present) #t)))
+    (let ((result (fn)))
+      (set! setup--program-present? old)
+      result)))
+
+(deftest 'an-agent-install-runs-only-the-missing-steps
+  "a program already on PATH is not installed again"
+  (lambda ()
+    (check-equal! (map car (setup-test--with-present '()
+                             (lambda () (setup-agent-missing-steps "claude"))))
+                  '("claude" "claude-agent-acp") "a bare machine needs both")
+    (check-equal! (map car (setup-test--with-present '("claude")
+                             (lambda () (setup-agent-missing-steps "claude"))))
+                  '("claude-agent-acp") "the CLI is present; the adapter is not")
+    (check-equal! (map car (setup-test--with-present '()
+                             (lambda () (setup-agent-missing-steps "codex"))))
+                  '("codex") "codex")))
+
+(deftest 'an-agent-install-script-installs-then-names-the-sign-in
+  "the script runs each step, names the sign-in command, and leaves a shell"
+  (lambda ()
+    (let ((script (setup-agent-install-script "codex"
+                    '(("codex" "npm install -g @openai/codex")))))
+      (check-contains! script "npm install -g @openai/codex" "the step")
+      (check-contains! script "codex login" "the sign-in command")
+      (check-contains! script "-l" "a login shell stays"))))
+
+(deftest 'an-installed-agent-starts-no-terminal
+  "nothing runs when every program is present"
+  (lambda ()
+    (check-false! (setup-test--with-present '("claude" "claude-agent-acp" "npm")
+                    (lambda () (setup-install-agent! "claude")))
+                  "no install")
+    (check-false! (buffer-exists? (setup-agent-install-buffer "claude"))
+                  "no terminal buffer")))
+
+(deftest 'an-npm-install-without-npm-starts-no-terminal
+  "a missing npm stops the install before a terminal opens"
+  (lambda ()
+    (check-false! (setup-test--with-present '()
+                    (lambda () (setup-install-agent! "codex")))
+                  "no install")
+    (check-false! (buffer-exists? (setup-agent-install-buffer "codex"))
+                  "no terminal buffer")))
+
+;;; --- the pages read as web pages -----------------------------------------------
+
+(deftest 'a-setup-page-opens-rendered
+  "a setup document opens in preview-mode, not as Markdown source"
+  (lambda ()
+    (let ((here (current-buffer))
+          (old setup-bot-silent-mode))
+      (set! setup-bot-silent-mode #f)
+      (when (buffer-exists? *setup-buffer*) (buffer-kill! *setup-buffer*))
+      (run-command "setup-welcome")
+      (check-true! (minor-mode-on? *setup-buffer* "preview-mode") "preview-mode is on")
+      (check-equal! (buffer-local *setup-buffer* 'preview-renderer) "markdown" "the renderer")
+      (set! setup-bot-silent-mode old)
+      (buffer-kill! *setup-buffer*)
+      (switch-to-buffer! here))))
+
+(deftest 'the-welcome-page-has-its-doors-and-its-keys
+  "the welcome page links the three first steps and names the three keys"
+  (lambda ()
+    (let ((doc (setup-welcome-document)))
+      (check-contains! doc "](compos:setup/wizard)" "the wizard")
+      (check-contains! doc "](compos:training/tutorial)" "the tutorial")
+      (check-contains! doc "](compos:setup/ai)" "the AI guide")
+      (check-contains! doc "| `M-x` |" "the command key")
+      (check-contains! doc (setup-logo-path) "the logo")
+      (check-true! (file-exists? (setup-logo-path)) "the logo file ships"))))

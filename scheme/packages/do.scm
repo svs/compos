@@ -169,7 +169,7 @@
 
 (persist-global! 'do-memory
   (lambda () *do-memory*)
-  (lambda (v) (set! *do-memory* (if (list? v) v '()))))
+  (lambda (v) (set! *do-memory* (if (or (pair? v) (null? v)) v '()))))
 
 (define (do--normalize phrase) (string-downcase (string-trim phrase)))
 

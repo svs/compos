@@ -279,7 +279,7 @@
                                          ". Answer [] when there is nothing.")
                           about 'model (plist-get opts 'model) 'max 512))
          (parsed (json-parse (workflow--unfence text))))
-    (if (list? parsed) parsed '())))
+    (if (or (pair? parsed) (null? parsed)) parsed '())))
 
 
 ;;; the catalog

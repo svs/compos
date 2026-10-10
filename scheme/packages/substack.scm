@@ -186,7 +186,7 @@
       (message (string-append "Reading " (plist-get row 'name) "..."))
       (*substack-json-fetch* (substack--archive-url row)
         (lambda (posts)
-          (if (not (list? posts))
+          (if (not (or (pair? posts) (null? posts)))
               (begin
                 (substack-log! (string-append "Archive failed: "
                                              (plist-get row 'name)))

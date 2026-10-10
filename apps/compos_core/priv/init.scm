@@ -82,6 +82,10 @@
 (require 'code)
 (require 'daemons)
 (require 'db)
+;; the typed-decision API and the agents' permission gate: user config calls
+;; decide-config! to name the backend chain, so this loads before the user
+;; config runs, and the permission policy asks its shell gate
+(require 'decide)
 (require 'diff-mode)
 (require 'doppler)
 (require 'endpoint)

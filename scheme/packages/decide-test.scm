@@ -135,3 +135,11 @@
     (check-equal! (string-contains? (decide-refusal 'denied 'read) "ask what to do instead") #f "a denied read does not stop to ask")
     (check-equal! (string-contains? (decide-refusal 'denied 'edit) "(buffer-replace! BUF") #t "a denied edit names the editor call")
     (check-equal! (decide-refusal 'denied 'other) (decide-refusal 'denied) "any other denial still asks")))
+
+;; The boot manifest lost decide.scm once, and the permission policy then
+;; denied every agent action on an unbound name.
+(deftest 'the-shell-gate-is-loaded-at-boot
+  "the permission gate's shell check is defined and answers"
+  (lambda ()
+    (check-true! (decide-shell-calls? "(shell-command->string \"ls\")") "a shell call")
+    (check-false! (decide-shell-calls? "(+ 1 2)") "plain arithmetic")))

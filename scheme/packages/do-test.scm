@@ -107,3 +107,18 @@
     (let ((row (do--row "undo" 'model)))
       (check-equal! (car row) "undo" "the label is the command")
       (check-equal! (length row) 3 "label, hint, kind"))))
+
+;; desktop-clear resets every global. This reset raised on an unbound
+;; list?, and the clear stopped with the groups gone and no buffer killed.
+(deftest 'the-do-memory-reset-accepts-any-value
+  "the do-memory global keeps a list and turns anything else into an empty list"
+  (lambda ()
+    (let ((put (caddr (assoc 'do-memory *desktop-globals*)))
+          (saved *do-memory*))
+      (put '(("open mail" "notmuch")))
+      (check-equal! *do-memory* '(("open mail" "notmuch")) "a list stays")
+      (put #f)
+      (check-equal! *do-memory* '() "anything else is empty")
+      (put '())
+      (check-equal! *do-memory* '() "the empty list stays")
+      (set! *do-memory* saved))))

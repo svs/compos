@@ -2715,6 +2715,11 @@
         (when (process-running? b) (process-kill! b))
         (buffer-kill! b))
       doomed)
+    ;; Emacs deletes the other windows too. The windows outlived their
+    ;; buffers, and each one fell back to the same *scratch*. One window
+    ;; is left, and it shows the home page when a package defines one.
+    (delete-other-windows!)
+    (when (boundp 'compos-home!) (compos-home!))
     (message
       (string-append "Cleared desktop: "
                      (number->string (length doomed)) " buffers"

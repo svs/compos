@@ -426,3 +426,22 @@
       (group-kill! b)
       (check-equal! (frame-group) a "the frame is in the other group")
       (group-kill! a))))
+
+;; Two windows on one chat looked like a window that would not close.
+(deftest 'a-killed-buffer-beside-the-chat-closes-its-window
+  "with no member left, the window closes rather than show the chat twice"
+  (lambda ()
+    (let* ((g (t--group "beside-chat"))
+           (chat (group-chat g))
+           (buf (test-buffer! "*zztest-beside*" "")))
+      (buffer-add-group! buf g)
+      (switch-to-group! g)
+      (delete-other-windows!)
+      (switch-to-buffer-here! chat)
+      (split-window! 'h 0.5)
+      (let ((other (car (car (filter (lambda (r) (not (equal? (car r) (active-window))))
+                                     (window-list))))))
+        (window-set-buffer! other buf))
+      (kill-buffer-confirm! buf #f)
+      (check-equal! (map cadr (window-list)) (list chat) "one window, on the chat")
+      (group-kill! g))))

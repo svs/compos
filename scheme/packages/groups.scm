@@ -3628,6 +3628,15 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-dying? group)
   (and *group-dying* (equal? (group-resolve-id group) *group-dying*)))
 
+;; #t when a window of FRAME other than WIN shows BUF
+(define (group-kill-shown-elsewhere? buf win frame)
+  (and (find (lambda (row)
+               (and (equal? (caddr row) frame)
+                    (not (equal? (car row) win))
+                    (equal? (cadr row) buf)))
+             (window-list-all))
+       #t))
+
 ;; how many windows FRAME has
 (define (group-kill-frame-window-count frame)
   (length (filter (lambda (row) (equal? (caddr row) frame)) (window-list-all))))
@@ -3695,11 +3704,17 @@ is forgotten and that group falls back to creation order in the switcher."
               (frame (cadr place))
               (group (caddr place)))
           (when (and group (not (group-dying? group)))
-            (let ((next (or (group-kill-previous-member group name win frame)
-                            (group-kill-blank group name))))
+            (let* ((member (group-kill-previous-member group name win frame))
+                   (blank (and (not member) (group-kill-blank group name)))
+                   ;; the chat another window of this frame already shows is
+                   ;; no stand-in: two windows on one chat looked like a
+                   ;; window that would not close
+                   (shown? (and blank (group-kill-shown-elsewhere? blank win frame)))
+                   (next (or member (and (not shown?) blank))))
               (cond (next (window-set-buffer! win next))
                     ((> (group-kill-frame-window-count frame) 1)
-                     (delete-window-id! win)))))))
+                     (delete-window-id! win))
+                    (blank (window-set-buffer! win blank)))))))
       places)
     (layout-strip-forget! name)
     (lambda ()

@@ -3101,6 +3101,43 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; says whether the selected frame stood in the killed group.
 (define *group-killed* #f)
 
+;; The group whose last buffer BUF is, or #f. The group's scratch is its
+;; blank pane, not a member that counts: a group that holds only BUF and
+;; its scratch empties when BUF dies.
+(define (group-last-buffer-of b)
+  (let ((g (and (group-membership-buffer? b)
+                (not (group-scratch-buffer? b))
+                (group-resolve-id (buffer-group b)))))
+    (and g
+         (null? (filter (lambda (other)
+                          (and (not (equal? other b))
+                               (not (group-scratch-buffer? other))))
+                        (group-buffers g)))
+         g)))
+
+;; A kill of the last buffer of a group asks once, and a yes kills
+;; the group with it. A no kills nothing.
+(advice-add! 'kill-buffer-confirm! 'around 'group-last-buffer
+  (lambda (next target done)
+    (let ((g (and (buffer-known? target) (group-last-buffer-of target))))
+      (if (not g)
+          (next target done)
+          (y-or-n (string-append target " is the last buffer of group "
+                                 (group-name g) ". Kill it and dissolve the group?")
+            ;; group-kill! takes the frame out of the group before its
+            ;; members die. A kill of TARGET first ran the kill repair
+            ;; inside the dying group: its stand-in window buffer joined the
+            ;; group and died with it, and the window showed a dead buffer.
+            ;; Unsaved work survives group-kill!; the plain kill then asks.
+            (lambda ()
+              (group-kill! g)
+              (if (buffer-known? target)
+                  (next target done)
+                  (when done (done #t))))
+            (lambda ()
+              (message "Not killed")
+              (when done (done #f))))))))
+
 (defgroup 'groups "Work contexts: groups of buffers and their layouts.")
 
 (defcustom 'magic-grouping #f
@@ -3233,24 +3270,29 @@ is forgotten and that group falls back to creation order in the switcher."
 
 
 (defcustom 'group-after-kill "follow"
-  "After you kill the group you stand in: \"follow\" enters the group of the buffer the window fell to, with that group's layout; \"stay\" shows the buffer and no group."
+  "After you kill the group you stand in: \"follow\" enters the most recent other group, or the home page when no group is left; \"stay\" shows the next buffer and no group."
   'group 'groups 'type 'string)
 
-;; The kill left the window on the next buffer. The frame follows that
-;; buffer into its group: the next context, not a lone buffer. A buffer
-;; in no group leaves the frame in no group, showing that buffer.
+;; The kill left the frame in no group. It enters the most recent group
+;; that is left: the next context, not a lone buffer. With no group left,
+;; the frame shows the home page.
 (define (group-kill-follow!)
   (let ((killed *group-killed*))
     ;; one kill, one follow: a reload registers the handler again
     (set! *group-killed* #f)
     (when (and killed (caddr killed) (equal? group-after-kill "follow"))
-      (let* ((ids (group-buffer-memberships (current-buffer)))
-             (recent (filter (lambda (g) (member g ids)) (group-ids-mru)))
-             (next (and (pair? recent) (car recent))))
-        (when next
-          (switch-to-group! next)
-          (message (string-append "Killed group " (cadr killed) ". Now in "
-                                  (or (group-name next) ""))))))))
+      (let ((next (let ((ids (group-ids-mru))) (and (pair? ids) (car ids)))))
+        (cond
+          (next
+           (switch-to-group! next)
+           (message (string-append "Killed group " (cadr killed) ". Now in "
+                                   (or (group-name next) ""))))
+          ;; the home page is setup-wizard.scm's, found by name: a reload
+          ;; of either file keeps the link
+          ((boundp 'compos-home!)
+           (delete-other-windows!)
+           (compos-home!)
+           (message (string-append "Killed group " (cadr killed)))))))))
 
 (add-hook! 'group-kill-hook 'group-kill-follow!)
 
@@ -3671,7 +3713,15 @@ is forgotten and that group falls back to creation order in the switcher."
                 (cond ((not group)
                        (unless (fill-candidate? shown)
                          (let ((replacement (group-kill-plain-replacement name)))
-                           (when replacement (window-set-buffer! win replacement)))))
+                           (when replacement (window-set-buffer! win replacement))))
+                       ;; nothing is open: the sole window of a frame fell
+                       ;; to a buffer that is nobody's work. It shows the
+                       ;; home page instead.
+                       (when (and (boundp 'compos-home!)
+                                  (member (window-buffer win) '("*scratch*" "*Messages*"))
+                                  (= (group-kill-frame-window-count frame) 1))
+                         (select-window! win)
+                         (compos-home!)))
                       ((group-kill-keeper? shown group) #t)
                       (else
                         (let ((blank (and (not (group-dying? group))

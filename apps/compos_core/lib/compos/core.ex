@@ -353,7 +353,9 @@ defmodule Compos.Core do
         # scratch name in that case, so the next key reached a :noproc.
         # Keep the sole scratch process when it is itself last; otherwise
         # recreate scratch before releasing the last non-scratch buffer.
-        last_live? = not Enum.any?(list_buffers(), &(&1 != name))
+        # a minibuffer is no place to land: it does not count as live work
+        last_live? =
+          not Enum.any?(list_buffers(), &(&1 != name and not String.starts_with?(&1, " ")))
 
         cond do
           last_live? and name == @scratch ->

@@ -1243,6 +1243,11 @@ defmodule Compos.Core.Editor do
       end) ||
         Enum.find(state.mru, fn b ->
           b != buffer and Buffer.exists?(b)
+        end) ||
+        # the recent list can lack every live buffer; a refill must never
+        # name the buffer that dies, or the window keeps a dead name
+        Enum.find(Compos.Core.list_buffers(), fn b ->
+          b != buffer and not String.starts_with?(b, " ")
         end) || live_scratch()
 
     float? = float_buffer?(buffer)

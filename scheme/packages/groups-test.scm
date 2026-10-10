@@ -350,3 +350,79 @@
       (check-false! (member "mode: zztest" (pseudo-group-names))
                     "one buffer left is no group")
       (buffer-kill! a))))
+
+;;; --- the last buffer of a group --------------------------------------------
+
+;; y-or-n reads its answer on the minibuffer's change handler: the same
+;; path a typed answer takes.
+(define (t--answer! key) (minibuffer-change! key))
+
+(deftest 'killing-the-last-buffer-of-a-group-asks-and-kills-the-group
+  "a yes kills the last work buffer and its group"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-last-yes*" ""))
+          (g (t--group "last-yes")))
+      (buffer-add-group! buf g)
+      (check-equal! (group-last-buffer-of buf) g "the buffer is the last buffer")
+      (kill-buffer-confirm! buf #f)
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "dissolve the group?" "it asks")
+      (t--answer! "y")
+      (check-false! (buffer-known? buf) "the buffer is gone")
+      (check-false! (group-resolve-id g) "the group is gone")
+      (t--drop! (group-resolve-id g)))))
+
+(deftest 'a-no-to-the-last-buffer-kills-nothing
+  "a no keeps the buffer and the group"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-last-no*" ""))
+          (g (t--group "last-no")))
+      (buffer-add-group! buf g)
+      (kill-buffer-confirm! buf #f)
+      (t--answer! "n")
+      (check-true! (buffer-known? buf) "the buffer stays")
+      (check-equal! (group-resolve-id g) g "the group stays")
+      (buffer-kill! buf)
+      (t--drop! g))))
+
+(deftest 'a-buffer-with-company-dies-without-a-question
+  "a group that keeps other work loses only the buffer, and nothing asks"
+  (lambda ()
+    (let ((a (test-buffer! "*zztest-company-a*" ""))
+          (b (test-buffer! "*zztest-company-b*" ""))
+          (g (t--group "company")))
+      (buffer-add-group! a g)
+      (buffer-add-group! b g)
+      (check-false! (group-last-buffer-of a) "another buffer remains")
+      (kill-buffer-confirm! a #f)
+      (check-false! (minibuffer-state) "no question")
+      (check-false! (buffer-known? a) "the buffer is gone")
+      (check-equal! (group-resolve-id g) g "the group stays")
+      (buffer-kill! b)
+      (t--drop! g))))
+
+;; The kill repair shows the group's chat when the work is gone, so the
+;; chat is often the last buffer. Its kill asks too.
+(deftest 'a-chat-that-is-the-last-buffer-asks-too
+  "killing the only chat of a group with no other buffer asks to kill the group"
+  (lambda ()
+    (let* ((g (t--group "last-chat"))
+           (chat (group-chat g)))
+      (check-equal! (group-last-buffer-of chat) g "the chat is the last buffer")
+      (kill-buffer-confirm! chat #f)
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "dissolve the group?" "it asks")
+      (t--answer! "y")
+      (check-false! (buffer-known? chat) "the chat is gone")
+      (check-false! (group-resolve-id g) "the group is gone"))))
+
+(deftest 'killing-the-group-you-stand-in-enters-the-most-recent-other
+  "after a kill the frame enters the most recent group that is left"
+  (lambda ()
+    (let ((buf (test-buffer! "*zztest-follow*" ""))
+          (a (t--group "follow-a"))
+          (b (t--group "follow-b")))
+      (buffer-add-group! buf a)
+      (switch-to-group! a)
+      (switch-to-group! b)
+      (group-kill! b)
+      (check-equal! (frame-group) a "the frame is in the other group")
+      (group-kill! a))))

@@ -529,7 +529,7 @@ defmodule Compos.Core.LLM do
     spec = req_model_spec(model)
 
     with {:ok, key_opts_list} <- key_opts(spec) do
-      ctx = to_req_context(messages, system)
+      ctx = messages |> to_req_context(system) |> openrouter_cache_marks(spec)
       opts = key_opts_list ++ req_opts(spec, tools)
 
       opts =
@@ -752,14 +752,14 @@ defmodule Compos.Core.LLM do
     end)
   end
 
-  # Anthropic's cache is Anthropic's whether the request goes direct or
-  # through OpenRouter — the gate used to read the provider prefix alone,
-  # so every openrouter:anthropic/* chat paid full price for a prefix the
-  # model would have cached.
+  # The anthropic_* cache options belong to req_llm's Anthropic provider.
+  # Its OpenRouter provider validates its options and refuses them, so an
+  # openrouter:anthropic/* chat failed before it sent anything. OpenRouter
+  # caches Anthropic models through cache_control marks on the content,
+  # which this request does not set yet.
   defp anthropic_cached?(spec) do
     case String.split(spec, ":", parts: 2) do
       ["anthropic", _] -> true
-      ["openrouter", model] -> String.starts_with?(model, "anthropic/")
       _ -> false
     end
   end
@@ -792,6 +792,72 @@ defmodule Compos.Core.LLM do
 
     tool
   end
+
+  # OpenRouter caches an Anthropic model at cache_control marks on the
+  # content; it has no request option for it. Two breakpoints: the system
+  # prompt, which Anthropic caches together with the tools in front of it,
+  # and the newest message, so the transcript a tool round resends bills
+  # at the cache-read rate. The TTL is the same one the direct lane asks.
+  @doc false
+  def openrouter_cache_marks(%ReqLLM.Context{messages: messages} = ctx, spec) do
+    if openrouter_anthropic?(spec) do
+      mark = %{type: "ephemeral", ttl: cache_ttl()}
+
+      messages =
+        messages
+        |> mark_first(fn m -> m.role == :system end, mark)
+        |> Enum.reverse()
+        |> mark_first(fn m -> m.role != :system end, mark)
+        |> Enum.reverse()
+
+      %{ctx | messages: messages}
+    else
+      ctx
+    end
+  end
+
+  defp openrouter_anthropic?(spec) do
+    case String.split(spec, ":", parts: 2) do
+      ["openrouter", model] -> String.starts_with?(model, "anthropic/")
+      _ -> false
+    end
+  end
+
+  # Mark the last text part of the first message that PRED holds for.
+  defp mark_first(messages, pred, mark) do
+    {out, _} =
+      Enum.map_reduce(messages, false, fn m, done? ->
+        if not done? and pred.(m) do
+          case mark_last_text(m, mark) do
+            {:ok, marked} -> {marked, true}
+            :none -> {m, false}
+          end
+        else
+          {m, done?}
+        end
+      end)
+
+    out
+  end
+
+  defp mark_last_text(%ReqLLM.Message{content: parts} = m, mark) when is_list(parts) do
+    idx =
+      parts
+      |> Enum.with_index()
+      |> Enum.filter(fn {p, _} -> p.type == :text and is_binary(p.text) and p.text != "" end)
+      |> List.last()
+
+    case idx do
+      {part, i} ->
+        meta = Map.put(part.metadata || %{}, :cache_control, mark)
+        {:ok, %{m | content: List.replace_at(parts, i, %{part | metadata: meta})}}
+
+      nil ->
+        :none
+    end
+  end
+
+  defp mark_last_text(_m, _mark), do: :none
 
   # Anthropic-shaped loop messages -> ReqLLM.Context
   defp to_req_context(messages, system) do

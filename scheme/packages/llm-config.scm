@@ -60,7 +60,11 @@
 (define (llm-config--box-set! key value)
   (set-frame-local! 'llm-config-box (llm-bundle-put (llm-config--box) key value))
   (set-frame-local! 'llm-config-drafts
-    (alist-put (llm-config--drafts) (llm-config--draft-key) (llm-config--box))))
+    (alist-put (llm-config--drafts) (llm-config--draft-key) (llm-config--box)))
+  ;; An edit chooses the row it edits. The exit gives the selected row to
+  ;; the chat, and a change made on one row while another stayed selected
+  ;; was dropped on ESC: the chat kept its old backend and model.
+  (set-frame-local! 'llm-config-selected (llm-config--source-name)))
 
 (define (llm-config--drop-draft! key)
   (set-frame-local! 'llm-config-drafts

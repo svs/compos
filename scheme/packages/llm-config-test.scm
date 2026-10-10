@@ -81,3 +81,19 @@
   (lambda ()
     (check-false! (llm-bundle-apply! "zz-no-such-chat" '(permission "approve"))
                   "the apply answers #f")))
+
+;; The exit gives the selected row to the chat. An edit on another row
+;; was a draft the exit ignored, so the chat kept its old backend.
+(deftest 'an-edit-selects-the-row-it-edits
+  "changing a field of the shown row makes that row the one the exit applies"
+  (lambda ()
+    (set-frame-local! 'llm-config-source "zz-shown")
+    (set-frame-local! 'llm-config-selected "zz-other")
+    (set-frame-local! 'llm-config-box '())
+    (set-frame-local! 'llm-config-drafts '())
+    (llm-config--box-set! 'connector "opencode")
+    (check-equal! (llm-config--selected-name) "zz-shown" "the edited row is selected")
+    (check-equal! (plist-get (llm-config--config-of "zz-shown") 'connector) "opencode"
+                  "and the exit applies its draft")
+    (for-each (lambda (k) (set-frame-local! k #f))
+              '(llm-config-source llm-config-selected llm-config-box llm-config-drafts))))

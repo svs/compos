@@ -114,6 +114,11 @@
 ;; listing already answers are left alone: the listing wins its own map.
 ;;
 ;; Answers the keys it mirrored.
+(define app--listing-own-keys
+  ;; Moving between rows belongs to the listing even where its map leaves the
+  ;; key to the global one; mirroring these would scroll the page instead.
+  '("<up>" "<down>" "C-n" "C-p" "<prior>" "<next>" "<home>" "<end>"))
+
 (define (app-detail-keys! list-mode detail-mode)
   (let ((lmap (mode-keymap list-mode))
         (dmap (mode-keymap detail-mode)))
@@ -121,6 +126,7 @@
          (fold (lambda (done pair)
                  (let ((keys (car pair)) (cmd (cadr pair)))
                    (if (or (keymap-lookup lmap keys)
+                           (member keys app--listing-own-keys)
                            (string-prefix? "keymap:" cmd))
                        done
                        (begin (define-key lmap keys (app--detail-shim! cmd))

@@ -1,5 +1,7 @@
 ## Reading
 
+Ask `(buffer-outline BUF)` before you read any buffer. A page answers with its anchors as `(NAME FIRST-LINE LAST-LINE)`, the parts its reader walks; `(buffer-section BUF NAME)` reads one. A file without anchors answers with its headings or its definitions.
+
 Treat every file as structured content. Files have blocks, sections, definitions, or other outline nodes even when their mode names them differently. Inspect the file's outline first and read only the relevant blocks. Prefer tree-sitter structure when a grammar is available. Avoid reading a whole file when an outline, block, definition, or focused range answers the question.
 
 Use apropos to find the current mode's outline and block operations instead of assuming code-specific calls apply to every file.

@@ -86,7 +86,8 @@
 (define site-app-status-click "site-app-status:")
 
 (define (site-app-filter-on? tab query)
-  (if query
+  ;; a grouped filter is one facet of several, so only the page knows it is on
+  (if (and query (not (plist-get tab 'group)))
       (equal? (plist-get tab 'query) query)
       (equal? (plist-get tab 'active) "yes")))
 
@@ -105,17 +106,35 @@
                                        (equal? current (plist-get page 'id))
                                        (string-append "M-" (plist-get page 'key))))
                                (site-app-pages spec)))))
-      (if (null? filters)
-          '()
-          (list (component 'ui/tabs
-                  (list 'class "sa-status"
-                        'tabs (map (lambda (tab)
-                                     (let ((count (plist-get tab 'count)))
-                                       (list (string-append site-app-status-click (plist-get tab 'query))
-                                             (if (equal? count "") (plist-get tab 'label)
-                                                 (string-append (plist-get tab 'label) " " count))
-                                             (site-app-filter-on? tab query))))
-                                   filters))))))))
+      ;; one row of tabs per group of filters, in the page's order
+      (map (lambda (group)
+             (component 'ui/tabs
+               (list 'class (if group (string-append "sa-status sa-status-" group) "sa-status")
+                     'tabs (map (lambda (tab)
+                                  (let ((count (plist-get tab 'count)))
+                                    (list (string-append site-app-status-click (plist-get tab 'query))
+                                          (if (equal? count "") (plist-get tab 'label)
+                                              (string-append (plist-get tab 'label) " " count))
+                                          (site-app-filter-on? tab query))))
+                                (filter (lambda (tab) (equal? (plist-get tab 'group) group)) filters)))))
+           (fold (lambda (groups tab)
+                   (if (member (plist-get tab 'group) groups) groups (append groups (list (plist-get tab 'group)))))
+                 '() filters)))))
+
+(define (site-app-cell buf col row)
+  ;; one cell; a column's 'kind draws it as a status pill, gold stars or a name.
+  ;; A cell draws its segs and text, never nested blocks, so a pill is a seg
+  (let ((text (or (site-app-field row (plist-get col 'field)) ""))
+        (kind (plist-get col 'kind))
+        (class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")))
+    (cond ((equal? text "") (list 'tag "span" 'class class 'text ""))
+          ((eq? kind 'badge)
+           (let ((tone (site-app-tone-class (plist-get (buffer-local buf 'site-app-spec) 'tones) text)))
+             (list 'tag "span" 'class (string-append class " sa-badge-cell")
+                   'segs (list (list (if tone (string-append "c-badge sa-pill " tone) "c-badge sa-pill") text)))))
+          ((eq? kind 'stars) (list 'tag "span" 'class (string-append class " sa-stars-cell") 'text text))
+          ((eq? kind 'name) (list 'tag "span" 'class (string-append class " sa-name-cell") 'text text))
+          (else (list 'tag "span" 'class class 'text text)))))
 
 (define (site-app-composml buf row)
   ;; a row as blocks: one cell per column, on the column widths. Its class
@@ -133,10 +152,7 @@
                                                                   (if w (string-append (number->string w) "ch") "minmax(0,1fr)")))
                                                               cols)
                                                          " "))))
-          'children (map (lambda (col)
-                           (list 'tag "span"
-                                 'class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")
-                                 'text (or (site-app-field row (plist-get col 'field)) "")))
+          'children (map (lambda (col) (site-app-cell buf col row))
                          cols))))
 
 (define (site-app-title buf)
@@ -197,7 +213,7 @@
 (define (site-app-fill! name page html)
   (let* ((buf (site-app-page-buffer name (plist-get page 'id)))
          (rows (site-app-parse (plist-get page 'sheet) html))
-         (sheet (plist-get (site-app-spec name) 'tabs-sheet))
+         (sheet (or (plist-get page 'tabs-sheet) (plist-get (site-app-spec name) 'tabs-sheet)))
          (tabs (or (and sheet (site-app-parse sheet html)) '()))
          (on (and (pair? tabs) (site-app-find (lambda (t) (equal? (plist-get t 'active) "yes")) tabs))))
     (if (not (or (pair? rows) (null? rows)))
@@ -206,8 +222,9 @@
           (buffer-set-local! buf 'site-app-page (plist-get page 'id))
           (buffer-set-local! buf 'site-app-rows rows)
           (buffer-set-local! buf 'site-app-filters (if (pair? tabs) tabs '()))
-          ;; the page says which of its tabs it drew; that is the one we are on
-          (when on (buffer-set-local! buf 'site-app-filter (plist-get on 'query)))
+          ;; the page says which of its tabs it drew; that is the one we are on.
+          ;; Grouped filters are facets, several on at once: the query we read stands
+          (when (and on (not (plist-get on 'group))) (buffer-set-local! buf 'site-app-filter (plist-get on 'query)))
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf)
           (message (string-append (number->string (length rows))
@@ -275,6 +292,26 @@
 
 (define-command "site-app-filter-next" "Show the next status tab of this section"
   (lambda () (site-app-filter-step! 1)))
+
+(define (site-app-filter-label tab)
+  (let ((count (plist-get tab 'count)))
+    (if (or (not count) (equal? count "")) (plist-get tab 'label)
+        (string-append (plist-get tab 'label) " " count))))
+
+(define-command "site-app-filter-choose" "Ask for a status tab of this section and show it"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (filters (or (buffer-local buf 'site-app-filters) '())))
+      (if (null? filters)
+          (run-command "list-filter")
+          (completing-read "State: " (map site-app-filter-label filters)
+            (lambda (choice)
+              (let loop ((rest filters))
+                (cond ((null? rest) (message (string-append "No state " choice)))
+                      ((equal? (site-app-filter-label (car rest)) choice)
+                       (site-app-set-filter! buf (plist-get (car rest) 'query)))
+                      (else (loop (cdr rest))))))
+            'require-match #t)))))
 (define-command "site-app-filter-prev" "Show the previous status tab of this section"
   (lambda () (site-app-filter-step! -1)))
 
@@ -383,7 +420,8 @@
   (let ((n (length (site-app-detail-tabs buf))))
     (append (site-app-detail-action-keys buf)
             (if (> n 0) (list (list (string-append "1–" (number->string n)) "tabs")) '())
-            (list (list "TAB" "next tab")
+            (list (list "M-↑↓" "parts")
+                  (list "M-g a" "part by name")
                   (list "RET" "open link")
                   (list "g" "reload")
                   (list "o" "on the site")
@@ -422,13 +460,13 @@
   (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
     (and hit (cdr hit))))
 
-(define (site-app-detail-put-section! buf id nodes)
+(define (site-app-detail-put-section! buf id nodes &optional quiet)
   (when (buffer-known? buf)
     (buffer-set-local! buf 'site-app-sections
       (cons (cons id (if (equal? nodes 'failed) 'failed (or nodes '())))
             (filter (lambda (e) (not (equal? (car e) id)))
                     (or (buffer-local buf 'site-app-sections) '()))))
-    (site-app-draw! buf)))
+    (unless quiet (site-app-draw! buf))))
 
 
 ;; A tab that restates the header (the candidate's stars and name) says it once.
@@ -451,6 +489,55 @@
 ;;; the view follows it. Search and copy read the text.
 
 (define site-app-link-click "site-app-link:")
+(define site-app-act-click "site-app-act:")
+
+(define (site-app-action-bar buf)
+  ;; (LABEL KEY KIND IN-APP?): every button the page has, each with its key
+  (map (lambda (k)
+         (let ((click (or (plist-get (list-ref k 3) 'click) "")))
+           (list (cadr k) (car k)
+                 (cond ((re-match? "approve" click) "good")
+                       ((re-match? "reject|delete" click) "bad")
+                       (else "plain"))
+                 (caddr k))))
+       (site-app-keyed-actions buf)))
+
+(define (site-app-unanchored blocks)
+  (map (lambda (blk)
+         (if (pair? blk)
+             (let strip ((pl blk) (acc '()))
+               (cond ((null? pl) (let ((out (reverse acc)))
+                                   (if (plist-get out 'children)
+                                       (plist-put out 'children (site-app-unanchored (plist-get out 'children)))
+                                       out)))
+                     ((eq? (car pl) 'sa-anchor) (strip (cddr pl) acc))
+                     (else (strip (cddr pl) (cons (cadr pl) (cons (car pl) acc))))))
+             blk))
+       blocks))
+
+(define (site-app-anchors blocks)
+  ;; (NAME FIRST LAST) for every block that names itself a stop, in page order
+  (let walk ((bs blocks) (acc '()))
+    (if (null? bs) acc
+        (let* ((blk (car bs))
+               (acc (if (and (pair? blk) (plist-get blk 'sa-anchor) (plist-get blk 'lines))
+                        (append acc (list (cons (plist-get blk 'sa-anchor) (plist-get blk 'lines))))
+                        acc)))
+          (walk (cdr bs) (if (pair? blk) (walk (or (plist-get blk 'children) '()) acc) acc))))))
+
+(define (site-app-set-anchors! buf text blocks)
+  ;; anchors are byte ranges: a block's first line to the end of its last
+  (let* ((starts (let loop ((ls (string-split text "\n")) (at 0) (acc '()))
+                   (if (null? ls) (reverse (cons at acc))
+                       (loop (cdr ls) (+ at (string-byte-length (car ls)) 1) (cons at acc)))))
+         (n (- (length starts) 1))
+         (at (lambda (line) (list-ref starts (max 0 (min n (- line 1)))))))
+    (anchor-set! buf (map (lambda (a)
+                            (let ((name (car a)))
+                              (list (if (> (string-length name) 48) (string-append (substring name 0 47) "…") name)
+                                    (at (cadr a)) (max (+ 1 (at (cadr a))) (- (at (+ 1 (caddr a))) 1)))))
+                          (site-app-anchors blocks)))
+    (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))))
 
 ;; a word's tone as a class: the spec's 'tones ((REGEX KIND) ...) and gold stars
 (define (site-app-tone-class tones word)
@@ -485,11 +572,13 @@
             ((equal? op 'links) links)
             (else n)))))
 
-(define (site-app-claim block first last)
+(define (site-app-claim block first last &optional name)
   ;; the anchor is what makes the renderer mark the block data-current, and
-  ;; the view scrolls to follow that mark
+  ;; the view scrolls to follow that mark. NAME makes the block a stop of
+  ;; anchor-mode too, so M-<up> and M-<down> walk the page by its parts
   (append block (list 'lines (list first last) 'mark "current"
-                      'anchor (string-append "sa-" (number->string first)))))
+                      'anchor (string-append "sa-" (number->string first)))
+          (if name (list 'sa-anchor name) '())))
 
 (define (site-app-click-props href)
   (if href (list 'click (string-append site-app-link-click href)) '()))
@@ -530,13 +619,29 @@
                                                            ;; a sheet may name the kind of card, for its own look
                                                            'class (let ((kind (plist-get node 'class)))
                                                                     (if kind (string-append "sa-card " kind) "sa-card"))))))
-                     (loop (cdr rest) 'item (cons (site-app-claim card first (max first (b 'count #f #f))) acc))))))
+                     (loop (cdr rest) 'item (cons (site-app-claim card first (max first (b 'count #f #f))
+                                                                  (and (null? (site-app-anchors body)) title))
+                                                  acc))))))
+            ((equal? tag "c-group")
+             ;; a run the sheet set apart (a note, a letter): its records in a box of their own
+             (let* ((first (+ 1 (b 'count #f #f)))
+                    (body (site-app-node-blocks b (plist-get node 'children) tones))
+                    ;; the note reads as one stop; a letter keeps its sections as stops
+                    (body (if (equal? (plist-get node 'class) "sa-note") (site-app-unanchored body) body)))
+               (loop (cdr rest) 'group
+                     (if (null? body) acc
+                         (cons (site-app-claim (list 'tag "div" 'class (string-append "sa-group " (or (plist-get node 'class) ""))
+                                                     'children body)
+                                               first (max first (b 'count #f #f))
+                                               (let ((lead (or (plist-get (car (site-app-kept (plist-get node 'children))) 'text) "")))
+                                                 (if (equal? (plist-get node 'class) "sa-letter") (string-append "Email · " lead) lead)))
+                               acc)))))
             ((equal? tag "c-heading")
              (let* ((count (and next (re-match? "^[0-9]+$" (or (plist-get next 'text) "")) (plist-get next 'text)))
                     (n (b 'line (if count (string-append text " " count) text) href))
                     (block (component 'ui/section (append (list 'title text 'class "sa-section")
                                                           (if count (list 'count (string->number count)) '())))))
-               (loop (if count (cddr rest) (cdr rest)) 'heading (cons (site-app-claim block n n) acc))))
+               (loop (if count (cddr rest) (cdr rest)) 'heading (cons (site-app-claim block n n text) acc))))
             ((and (site-app-short-field? node) next (site-app-short-field? next))
              (let* ((run (site-app-take-while site-app-short-field? rest))
                     (texts (map (lambda (x) (let ((t (string-trim (plist-get x 'text))))
@@ -575,7 +680,19 @@
                                              "sa-li" href)
                          acc)))
             ((and (equal? tag "c-paragraph") (re-match? ":\\s*$" text))
-             (loop (cdr rest) text (cons (site-app-text-block b "sa-sub" (site-app-unlabel text) #f) acc)))
+             (loop (cdr rest) text (cons (append (site-app-text-block b "sa-sub" (site-app-unlabel text) #f)
+                                                 (list 'sa-anchor (site-app-unlabel text)))
+                                         acc)))
+            ((and (equal? tag "c-paragraph") (not href) (re-match? "^[A-Z][A-Za-z /_-]{0,24}: " text))
+             ;; "Type: evidence-gap": the label set off from what it says
+             (let ((at (string-index text ": ")))
+               (loop (cdr rest) 'paragraph
+                     (cons (append (site-app-row-block b text
+                                               (cons (list "sa-k" (substring text 0 at))
+                                                     (list (list "" (substring text (+ at 2) (string-length text)))))
+                                               "sa-p sa-kv" #f)
+                                   '())
+                           acc))))
             ((equal? tag "c-paragraph")
              (loop (cdr rest) 'paragraph (cons (site-app-text-block b (if href "sa-p sa-link" "sa-p") text href) acc)))
             (else
@@ -588,9 +705,8 @@
 
 ;; The header, in the page's order: breadcrumbs, the title with where the item
 ;; stands, the candidate, their facts, and the tabs.
-(define (site-app-head-blocks b data tones tabs active)
-  (let* ((position (or (plist-get data 'position) ""))
-         (title (string-append (or (plist-get data 'job) "") " at " (or (plist-get data 'company) "")))
+(define (site-app-head-blocks b data tones tabs active &optional actions)
+  (let* ((title (string-append (or (plist-get data 'job) "") " at " (or (plist-get data 'company) "")))
          (state-node (site-app-state-node data))
          (state (and state-node (car (string-split (string-trim (plist-get state-node 'text)) " "))))
          (profile (site-app-kept (plist-get data 'profile)))
@@ -605,11 +721,8 @@
                                          (not (member (plist-get n 'text)
                                                       (list title (and state-node (plist-get state-node 'text)))))))
                         (if name (cdr rest) rest))))
+    ;; no breadcrumbs or position: the list beside the page is the navigation
     (append
-      (list (site-app-row-block b (string-append (or (plist-get data 'title) "") "   " position)
-                                (list (list "sa-crumbs" (or (plist-get data 'title) ""))
-                                      (list "sa-position" position))
-                                "sa-crumb-row" #f))
       ;; a page that is no job's (a candidate) has no title row: its name is the heading
       (if (equal? (or (plist-get data 'job) "") "")
           '()
@@ -621,7 +734,7 @@
                                             (list (component 'ui/badge (list 'text state 'class
                                                     (string-append "sa-state " (or (site-app-tone-class tones state) "")))))
                                             '())))
-                n n))))
+                n n title))))
       (if name
           (list (site-app-row-block b (string-append (if stars (string-append (plist-get stars 'text) "  ") "") (plist-get name 'text))
                                     (append (if stars (list (list "sa-stars" (plist-get stars 'text)) (list "" "  ")) '())
@@ -639,6 +752,20 @@
                                    #f)))))
             (list (site-app-row-block b (string-join texts " · ") segs "sa-facts" #f))))
       (site-app-node-blocks b extras tones)
+      (if (null? (or actions '()))
+          '()
+          ;; the site's buttons, each with its key when the app presses it; the rest are o's, on the site
+          (let ((n (b 'line (string-join (map (lambda (a) (string-append (cadr a) " " (car a))) actions) "   ") #f)))
+            (list (site-app-claim
+                    (component 'ui/actions
+                      (list 'class "sa-actions"
+                            'actions (map (lambda (a)
+                                            (list (string-append site-app-act-click (cadr a))
+                                                  (if (list-ref a 3) (car a) (string-append (car a) " ↗"))
+                                                  (cadr a)
+                                                  (string-append "sa-act sa-act-" (caddr a) (if (list-ref a 3) "" " sa-act-site"))))
+                                          actions)))
+                    n n))))
       (if (null? tabs)
           '()
           (let ((n (b 'line (string-join (map (lambda (t) (site-app-capitalize (plist-get t 'label))) tabs) "   ") #f)))
@@ -706,16 +833,20 @@
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
                  (append
-                   (site-app-head-blocks b data tones tabs active)
+                   (site-app-head-blocks b data tones tabs active (site-app-action-bar buf))
                    (cond ((not section) (list (site-app-text-block b "sa-loading" "Loading…" #f)))
                          ((equal? section 'failed)
                           (list (site-app-text-block b "sa-loading" "The site did not answer for this tab. g reads the page again." #f)))
                          ((null? (site-app-real section)) (list (site-app-text-block b "sa-loading" "Nothing here." #f)))
-                         (else (site-app-node-blocks b (site-app-drop-repeats section data) tones))))))))
+                         (else (site-app-node-blocks b (site-app-drop-repeats section data) tones)))
+                   ;; a mark under the last part, so the reader knows the page is done
+                   (list (let ((n (b 'line "— end —" #f)))
+                           (site-app-claim (list 'tag "div" 'class "sa-end" 'text "end") n n))))))))
     (let* ((line (car (buffer-line-at-point buf)))
            (text (b 'text #f #f)))
       (buffer-set-text! buf text #t)
-      (buffer-goto-line! buf (max 1 (min line (b 'count #f #f)))))
+      (buffer-goto-line! buf (max 1 (min line (b 'count #f #f))))
+      (site-app-set-anchors! buf text blocks))
     (buffer-set-local! buf 'site-app-links (b 'links #f #f))
     (buffer-set-local! buf 'site-app-stops (site-app-stops blocks))
     (buffer-set-locals! buf
@@ -752,6 +883,11 @@
           ((string-prefix? site-app-tab-click id)
            (site-app-detail-select! buf (substring id (string-length site-app-tab-click) (string-length id)))
            #t)
+          ((string-prefix? site-app-act-click id)
+           (let ((key (substring id (string-length site-app-act-click) (string-length id))))
+             (with-current-buffer buf
+               (lambda () (site-app-detail-act! key))))
+           #t)
           ((string-prefix? site-app-link-click id)
            (tab-open (site-app-url (site-app-spec (buffer-local buf 'site-app-name))
                                    (substring id (string-length site-app-link-click) (string-length id))))
@@ -759,9 +895,13 @@
           (else #f))))
 
 (define-style! 'site-app "
-.sa-page { padding: 6px 4px 24px; line-height: 1.45; font-size: 12px; }
-.sa-row { display: grid; column-gap: 1ch; container-type: inline-size; }
+.sa-page { padding: 10px 14px 32px; line-height: 1.55; font-size: 13px; font-family: var(--font-sans); color: var(--default-fg); max-width: 88ch; }
+.sa-row { display: grid; column-gap: 1ch; align-items: center; container-type: inline-size; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
 .sa-row > .sa-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sa-stars-cell { color: var(--warn-fg); font-size: 11px; letter-spacing: -1px; }
+.sa-name-cell { font-weight: 600; color: var(--default-fg); }
+.sa-badge-cell { display: flex; align-items: center; }
+.sa-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 60ch) { .sa-need-60 > .sa-cell:last-child { grid-column: 1 / -1; } }
 @container (max-width: 70ch) { .sa-need-70 > .sa-cell:last-child { grid-column: 1 / -1; } }
 @container (max-width: 80ch) { .sa-need-80 > .sa-cell:last-child { grid-column: 1 / -1; } }
@@ -773,38 +913,56 @@
 @container (max-width: 140ch) { .sa-need-140 > .sa-cell:last-child { grid-column: 1 / -1; } }
 .sa-page .c-tab, .sa-page .c-section { font-size: 10.5px; }
 .sa-page .c-badge { font-size: 9.5px; }
-.sa-crumb-row { padding: 0; font-size: 10.5px; }
-.sa-crumbs, .sa-position { color: var(--dim-fg); font-family: var(--font-mono); }
-.sa-position { margin-left: 12px; }
 .sa-title { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 2px; }
-.sa-title-text { font-family: ui-serif, Georgia, 'Times New Roman', serif; font-size: 19px; font-weight: 700; color: var(--fg); }
+.sa-title-text { font-family: var(--font-serif, ui-serif, Georgia, serif); font-size: 22px; font-weight: 700; line-height: 1.2; color: var(--default-fg); }
 .sa-state { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
 .sa-candidate { padding: 0; font-size: 13px; }
-.sa-name { font-family: ui-serif, Georgia, serif; font-weight: 700; color: var(--fg); }
-.sa-stars { color: #e0af68; }
+.sa-name { font-family: ui-serif, Georgia, serif; font-weight: 700; color: var(--default-fg); }
+.sa-stars { color: var(--warn-fg); }
 .sa-facts { padding: 0; font-size: 11.5px; color: var(--dim-fg); }
 .sa-sep { color: var(--border-bg); }
 .sa-tabs { margin-top: 8px; }
-.sa-good { color: var(--success-fg, #4f9a61); font-weight: 600; }
-.sa-bad { color: var(--error-fg, #c9544d); font-weight: 600; }
-.sa-warn { color: var(--warning-fg, #c28a2e); font-weight: 600; }
+.sa-good { color: var(--ok-fg); font-weight: 600; }
+.sa-bad { color: var(--alert-fg); font-weight: 600; }
+.sa-warn { color: var(--warn-fg); font-weight: 600; }
 .sa-info { color: var(--accent-fg); font-weight: 600; }
-.c-badge.sa-good { background: rgba(79,154,97,.16); }
-.c-badge.sa-bad { background: rgba(201,84,77,.16); }
-.c-badge.sa-warn { background: rgba(194,138,46,.16); }
-.c-badge.sa-info { background: rgba(122,162,247,.16); }
-.sa-card { margin: 0 0 8px; }
+.c-badge.sa-good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
+.c-badge.sa-bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
+.c-badge.sa-warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
+.c-badge.sa-info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
+.sa-card { margin: 0 0 14px; border: 0; border-left: 2px solid var(--border-bg); background: transparent; }
+.sa-card > .c-fold-head { background: transparent; padding: 2px 12px 6px; }
+.sa-card .c-fold-title { font-size: 13px; font-weight: 600; color: var(--default-fg); }
+.sa-card .c-caret { color: var(--dim-fg); }
+.sa-card.current, .sa-card:has(.current) { border-left-color: var(--accent-fg); }
+.sa-group { margin: 8px 0 12px; padding: 12px 16px; }
+.sa-note { background: color-mix(in srgb, var(--warn-fg) 9%, transparent); border-left: 3px solid var(--warn-fg); }
+.sa-note > :first-child { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--warn-fg); margin-bottom: 6px; }
+.sa-letter { background: var(--hl-line-bg); border: 1px solid var(--border-bg); font-family: var(--font-serif, ui-serif, Georgia, serif); font-size: 14px; line-height: 1.65; padding: 18px 22px; }
+.sa-letter .sa-p { margin: 0 0 10px; }
+.sa-letter .sa-li { padding: 2px 0 2px 1.2em; text-indent: -1.2em; }
+.sa-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.sa-act { border: 1px solid var(--border-bg); padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.sa-act .c-action-key { font-family: var(--font-mono); font-weight: 700; margin-right: 6px; padding: 0 5px; border: 1px solid currentColor; border-radius: 3px; font-size: 11px; }
+.sa-act-good:not(.sa-act-site) { color: var(--ok-fg); border-color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 12%, transparent); }
+.sa-act-bad:not(.sa-act-site) { color: var(--alert-fg); border-color: var(--alert-fg); }
+.sa-act-site { color: var(--dim-fg); border-style: dashed; }
+.sa-act-site.sa-act-bad { color: color-mix(in srgb, var(--alert-fg) 70%, var(--dim-fg)); }
+.sa-end { margin: 36px auto 16px; width: 36px; height: 0; border-top: 1px solid var(--border-bg); opacity: .6; font-size: 0; color: transparent; }
+.sa-kv .sa-k { font-weight: 700; color: var(--default-fg); margin-right: .35em; }
 .sa-job .c-caret { display: none; }
 .sa-job .c-fold-head { background: transparent; }
 .sa-job.current { background: var(--hl-line-bg); }
-.sa-job .c-fold-title { font-family: ui-serif, Georgia, serif; font-size: 14px; font-weight: 700; color: var(--fg); }
+.sa-job .c-fold-title { font-family: ui-serif, Georgia, serif; font-size: 14px; font-weight: 700; color: var(--default-fg); }
 .sa-job .sa-facts .sa-fact:nth-child(-n+3) { color: var(--accent-fg); font-weight: 600; }
 .sa-card > :not(.c-fold-head) { padding-left: 12px; padding-right: 12px; }
 .sa-section { margin-top: 6px; }
-.sa-field, .sa-li { padding: 1px 0; }
+.sa-field, .sa-li { padding: 2px 0; }
+.sa-li { padding-left: 1.2em; text-indent: -1.2em; white-space: normal; }
+.sa-li .sa-bullet { display: inline-block; width: 1.2em; text-indent: 0; }
 .sa-bullet { color: var(--accent-fg); }
-.sa-p { margin: 2px 0 6px; }
-.sa-sub { font-weight: 700; margin-top: 6px; }
+.sa-p { margin: 2px 0 8px; max-width: 75ch; }
+.sa-sub { font-weight: 700; margin: 10px 0 4px; }
 .sa-link { color: var(--accent-fg); cursor: pointer; }
 .sa-quote { border-left: 2px solid var(--accent-fg); padding: 2px 10px; margin: 4px 0 8px; white-space: pre-wrap; }
 .sa-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
@@ -935,19 +1093,49 @@
         (k (and (string? html) (equal? (plist-get reply 'status) 200) html))))))
 
 (define (site-app-fetch-tab! name buf row url page id gen)
+  ;; Each page keeps its own read: an answer lands in its page whenever it comes,
+  ;; so moving on wastes nothing. A page on screen redraws; one off screen only files it.
   (let* ((sheet (plist-get page 'detail-sheet))
          (tab-url (site-app-with-param url (plist-get page 'detail-tab-param) id))
          (file! (lambda (html)
-                  (when (and (buffer-known? buf) (equal? gen (site-app-gen name)))
-                    (let ((data (and html (site-app-parse sheet html))))
+                  (when (and (buffer-known? buf) (equal? gen (buffer-local buf 'site-app-gen)))
+                    (let ((data (and html (site-app-parse sheet html)))
+                          (shown (member buf (get-visible-buffers))))
                       (when (and data (not (equal? (buffer-local buf 'site-app-data-gen) gen)))
                         (buffer-set-local! buf 'site-app-data-gen gen)
-                        (site-app-render-detail! name row data))
-                      (site-app-detail-put-section! buf id
-                        (if data (plist-get data 'section) 'failed)))))))
+                        (if shown (site-app-render-detail! name row data) (buffer-set-local! buf 'site-app-data data)))
+                      (when data (buffer-set-local! buf 'site-app-fetched-at (monotonic-ms)))
+                      (site-app-detail-put-section! buf id (if data (plist-get data 'section) 'failed) (not shown)))))))
     (site-app-fetch-html! tab-url
       (lambda (html)
         (if html (file! html) (site-app-fetch-html! tab-url file!))))))
+
+(define (site-app-warm! name list-buf row page)
+  ;; read a row's page before it is asked for, filed off screen, unless it is fresh
+  (let* ((buf (site-app-prepare-detail! name row page))
+         (at (buffer-local buf 'site-app-fetched-at)))
+    (unless (and at (buffer-local buf 'site-app-data) (< (- (monotonic-ms) at) 60000))
+      (let ((gen (monotonic-ms))
+            (url (site-app-url (site-app-spec name) (plist-get row 'href))))
+        (buffer-set-local! buf 'site-app-name name)
+        (buffer-set-local! buf 'site-app-row row)
+        (buffer-set-local! buf 'site-app-list list-buf)
+        (buffer-set-local! buf 'site-app-gen gen)
+        (buffer-set-local! buf 'site-app-data-gen #f)
+        (for-each (lambda (t) (site-app-fetch-tab! name buf row url page (plist-get t 'id) gen))
+                  (or (plist-get page 'detail-tabs) '()))))))
+
+(define (site-app-warm-around! name list-buf row page)
+  ;; the rows a reader goes to next: three below, one above
+  (let* ((rows (site-app-rows list-buf))
+         (key (plist-get row 'key))
+         (i (let loop ((rs rows) (i 0))
+              (cond ((null? rs) #f) ((equal? (plist-get (car rs) 'key) key) i) (else (loop (cdr rs) (+ i 1)))))))
+    (when i
+      (for-each (lambda (j)
+                  (when (and (>= j 0) (< j (length rows)))
+                    (site-app-warm! name list-buf (list-ref rows j) page)))
+                (list (+ i 1) (+ i 2) (+ i 3) (- i 1))))))
 
 (define (site-app-show-detail! list-buf row)
   (when row
@@ -955,6 +1143,10 @@
            (spec (site-app-spec name))
            (page (site-app-current-page list-buf))
            (made (site-app-prepare-detail! name row page))
+           ;; what this page last read draws at once; a read under a minute old stands
+           (cached (buffer-local made 'site-app-data))
+           (fresh (and cached (buffer-local made 'site-app-fetched-at)
+                       (< (- (monotonic-ms) (buffer-local made 'site-app-fetched-at)) 60000)))
            (buf (site-app-render-detail! name row #f))
            (sheet (plist-get page 'detail-sheet))
            (wait (plist-get page 'detail-wait))
@@ -962,15 +1154,17 @@
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            (gen (site-app-next-gen! name)))
       (buffer-set-local! buf 'site-app-list list-buf)
-      (buffer-set-local! buf 'site-app-gen gen)
-      (buffer-set-local! buf 'site-app-sections '())
-      ;; a fresh read: this page's data is stale until an answer of this read lands
-      (buffer-set-local! buf 'site-app-data-gen #f)
+      (unless fresh
+        (buffer-set-local! buf 'site-app-gen gen)
+        ;; the old read stays on screen until this one's answers replace it
+        (unless cached (buffer-set-local! buf 'site-app-sections '()))
+        (buffer-set-local! buf 'site-app-data-gen #f))
       (unless (buffer-local buf 'site-app-active)
         (buffer-set-local! buf 'site-app-active (and (pair? ids) (car ids))))
       (display-buffer-detail! buf list-buf)
       (cond
         ((not sheet) #f)
+        (fresh #f)
         ((plist-get page 'detail-fetch)
          ;; one plain page with no tabs to press: fetch it, no live tab needed
          (site-app-fetch-html! url
@@ -979,7 +1173,8 @@
                (when (and data (buffer-known? buf) (equal? gen (site-app-gen name)))
                  (site-app-render-detail! name row data))))))
         ((plist-get page 'detail-tab-param)
-         (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids))
+         (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids)
+         (site-app-warm-around! name list-buf row page))
         (else
          ;; no tab URLs: load the page in the live tab and press each tab
          (site-app-navigate! name url wait
@@ -1068,10 +1263,13 @@
 ;; ('buf 'action 'selector 'live 'done). Any other button is pressed as it is.
 (define (site-app-detail-act! key)
   (let* ((buf (current-buffer))
-         (action (and (assoc key (site-app-detail-action-keys buf))
-                      (site-app-find (lambda (a) (equal? (plist-get a 'key) key)) (site-app-detail-actions buf)))))
-    (if (not action)
-        (message (string-append "No action on " key " here"))
+         (keyed (assoc key (site-app-keyed-actions buf)))
+         (action (and keyed (caddr keyed) (list-ref keyed 3))))
+    (cond
+      ((not keyed) (message (string-append "No action on " key " here")))
+      ;; a button the app does not press: its form is on the site
+      ((not action) (run-command "site-app-detail-open") (message (string-append (cadr keyed) ": on the site")))
+      (else
         (let* ((name (buffer-local buf 'site-app-name))
                (spec (site-app-spec name))
                (page (site-app-current-page (buffer-local buf 'site-app-list)))
@@ -1090,7 +1288,7 @@
                           (tab-press tab selector
                             (lambda (html)
                               (done (if html (string-append label ": done")
-                                        (string-append label ": the site did not answer"))))))))))))))
+                                        (string-append label ": the site did not answer")))))))))))))))
 
 (define site-app-action-letters
   '("a" "b" "c" "d" "e" "f" "h" "i" "j" "k" "l" "m" "n" "p" "r" "s" "t" "u" "v" "w" "x" "y" "z"))
@@ -1102,17 +1300,34 @@
           site-app-action-letters)
 
 ;; the page's buttons with keys: bound in its mode and listed in its keys bar
-(define (site-app-detail-action-keys buf)
-  ;; the page spec's 'detail-keys names the buttons the app presses; the rest
-  ;; are done on the site itself, which o opens
+(define (site-app-keyed-actions buf)
+  ;; (KEY LABEL IN-APP? ACTION) for every button the page has: no button goes
+  ;; without a key. The site's own key comes first, else the first free letter
+  ;; of the label. The page spec's 'detail-keys names the buttons the app
+  ;; presses itself; the rest open the page on the site, where their forms are
   (let* ((list-buf (buffer-local buf 'site-app-list))
          (page (and list-buf (site-app-current-page list-buf)))
          (allowed (and page (plist-get page 'detail-keys))))
-    (filter (lambda (k) (and (member (car k) site-app-action-letters)
-                             (or (not allowed) (member (car k) allowed))))
-            (map (lambda (a) (list (plist-get a 'key) (string-downcase (site-app-without-key (plist-get a 'text)))))
-                 (filter (lambda (a) (let ((k (plist-get a 'key))) (and k (not (equal? k "")))))
-                         (site-app-detail-actions buf))))))
+    (let loop ((as (site-app-detail-actions buf)) (used '()) (acc '()))
+      (if (null? as) (reverse acc)
+          (let* ((a (car as))
+                 (label (site-app-without-key (or (plist-get a 'text) "")))
+                 (own (plist-get a 'key))
+                 (free (lambda (k) (and (member k site-app-action-letters) (not (member k used)) k)))
+                 (key (or (and own (free own))
+                          (let try ((cs (string-split (string-downcase label) "")))
+                            (cond ((null? cs) #f) ((free (car cs)) (car cs)) (else (try (cdr cs)))))
+                          (let try ((ls site-app-action-letters))
+                            (cond ((null? ls) #f) ((free (car ls)) (car ls)) (else (try (cdr ls))))))))
+            (loop (cdr as) (if key (cons key used) used)
+                  (if key
+                      (cons (list key label (and own (equal? own key) (or (not allowed) (member key allowed)) #t) a) acc)
+                      acc)))))))
+
+(define (site-app-detail-action-keys buf)
+  ;; the button keys as (KEY WHAT) for the keys bar and the bindings
+  (map (lambda (k) (list (car k) (string-append (string-downcase (cadr k)) (if (caddr k) "" " ↗"))))
+       (site-app-keyed-actions buf)))
 
 (define (site-app-bind-action-keys! buf)
   ;; the page's minor mode holds its button keys, else its major mode does
@@ -1166,6 +1381,29 @@
         (list "o" "site-app-detail-open")
         (list "q" "quit-window")))
 
+(define (site-app-list-detail list-buf)
+  ;; the page the list shows beside it
+  (site-app-find (lambda (b) (equal? (buffer-local b 'site-app-list) list-buf)) (get-visible-buffers)))
+
+(define (site-app-detail-anchor-step! command)
+  ;; from the list, walk the page beside it by its parts: the list keeps its row.
+  ;; The page's window keeps its own point, so the walk starts there and moves it
+  (let* ((d (site-app-list-detail (current-buffer)))
+         (w (and d (site-app-find (lambda (x) (equal? (cadr x) d)) (window-list-all)))))
+    (if (not d)
+        (message "No page beside this list")
+        (begin
+          (with-current-buffer d
+            (lambda ()
+              (when w (goto-char! (window-point (car w))))
+              (run-command command)))
+          (when w (window-set-point! (car w) (buffer-point d)))))))
+
+(define-command "site-app-detail-anchor-next" "Go to the next part of the page beside the list"
+  (lambda () (site-app-detail-anchor-step! "anchor-read-next")))
+(define-command "site-app-detail-anchor-prev" "Go to the previous part of the page beside the list"
+  (lambda () (site-app-detail-anchor-step! "anchor-read-previous")))
+
 (define-command "site-app-detail" "Open the item on this website app row"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1199,7 +1437,7 @@
                (command (string-append (symbol->string name) "-" (symbol->string id))))
           (define-list-mode! mode
             (list 'doc (string-append title " " (plist-get page 'label)
-                                      ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, number keys switch the tabs of the page beside the list, / filters rows, g rereads, q quits.")
+                                      ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits.")
                   'buffer (site-app-page-buffer name id)
                   'transient #f
                   'noun "item"
@@ -1214,18 +1452,23 @@
                   'composml site-app-composml
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
-                  'footer (lambda (b) (list (list "M-1–9" "sections") (list "[ ]" "status") (list "1–5" "page tabs")
-                                            (list "/" "filter") (list "g" "refresh") (list "q" "quit")))
+                  'footer (lambda (b) (list (list "M-1–9" "sections") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
+                                            (list "/" "state") (list "g" "refresh") (list "q" "quit")))
                   ;; Digits are left free so they reach the page beside the list, as
                   ;; its tab keys; the sections move to M-digit.
                   'keys (append (list (list "RET" "site-app-detail")
                                       (list "[" "site-app-filter-prev")
                                       (list "]" "site-app-filter-next")
                                       (list "g" "site-app-refresh")
+                                      ;; the page beside the list, part by part, without leaving the row
+                                      (list "M-<down>" "site-app-detail-anchor-next")
+                                      (list "M-<up>" "site-app-detail-anchor-prev")
                                       (list "q" "quit-window"))
                                 (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
                                                        (string-append "site-app-tab-" (plist-get p 'key))))
                                      pages))))
+          ;; / asks for a status tab; the list mode's own row filter stays on f
+          (define-key (mode-keymap mode) "/" "site-app-filter-choose")
           ;; The index keeps its own bindings; unclaimed detail-page keys run in the
           ;; adjacent detail, just as they do when focus is on the detail itself.
           (when (boundp 'app-detail-keys!)

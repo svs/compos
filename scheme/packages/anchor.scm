@@ -175,6 +175,58 @@
 (define-command "anchor-up" "Move point to the previous anchor, or up a line when there is none"
   (lambda () (anchor--arrow! -1)))
 
+;; The reading walk, M-<up> and M-<down>. An anchor always comes first,
+;; however far: the page chose its stops. Past the last one the key pages,
+;; so the rest of a long part still reads. A page is counted in rows as
+;; drawn: a line wraps at the window's width, so one paragraph can be many.
+(define (anchor--lines buf)
+  ;; (START ROWS) for each line of BUF
+  (let ((cols (max 20 (or (buffer-cols buf) 80))))
+    (let loop ((ls (string-split (buffer-text buf) "\n")) (at 0) (acc '()))
+      (if (null? ls) (reverse acc)
+          (let ((n (string-length (car ls))))
+            (loop (cdr ls) (+ at (string-byte-length (car ls)) 1)
+                  (cons (list at (max 1 (quotient (+ n cols -1) cols))) acc)))))))
+
+(define (anchor--rows lines from to)
+  ;; rows drawn from the line holding FROM up to the line holding TO
+  (let ((lo (min from to)) (hi (max from to)))
+    (fold (lambda (sum l)
+            (if (and (>= (car l) (anchor--line-start lines lo)) (< (car l) (anchor--line-start lines hi)))
+                (+ sum (cadr l)) sum))
+          0 lines)))
+
+(define (anchor--line-start lines pos)
+  (fold (lambda (best l) (if (<= (car l) pos) (car l) best)) 0 lines))
+
+(define (anchor--page-from lines pos dir page)
+  ;; the line start one page of rows from POS
+  (let walk ((ls (if (> dir 0)
+                     (filter (lambda (l) (> (car l) pos)) lines)
+                     (reverse (filter (lambda (l) (< (car l) (anchor--line-start lines pos))) lines))))
+             (rows 0) (last #f))
+    (cond ((null? ls) last)
+          ((>= rows page) (car (car ls)))
+          (else (walk (cdr ls) (+ rows (cadr (car ls))) (car (car ls)))))))
+
+(define (anchor--read! dir)
+  (let* ((buf (current-buffer))
+         (pos (buffer-point buf))
+         (hit (if (> dir 0) (anchor--after buf pos) (anchor--before buf pos)))
+         (lines (anchor--lines buf))
+         (page (max 1 (- (window-rows) 3)))
+         (edge (if (> dir 0) (car (car (reverse lines))) 0)))
+    (cond (hit (goto-char! (anchor-start hit)) (anchor-sync! buf) (message (anchor-name hit)))
+          ((> (anchor--rows lines pos edge) 0)
+           (let ((to (anchor--page-from lines pos dir page)))
+             (when to (goto-char! to) (anchor-sync! buf))))
+          (else (message (if (> dir 0) "No next anchor" "No previous anchor"))))))
+
+(define-command "anchor-read-next" "Move to the next anchor, or one page down past the last"
+  (lambda () (anchor--read! 1)))
+(define-command "anchor-read-previous" "Move to the previous anchor, or one page up before the first"
+  (lambda () (anchor--read! -1)))
+
 (define-command "anchor-jump" "Go to an anchor of this buffer by name"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -214,17 +266,40 @@
 (minor-mode-keys! "anchor-mode"
   '(("TAB" "anchor-next")
     ("S-TAB" "anchor-previous")
-    ("M-<down>" "anchor-next")
-    ("M-<up>" "anchor-previous")
-    ("M-down" "anchor-next")
-    ("M-up" "anchor-previous")
+    ("M-<down>" "anchor-read-next")
+    ("M-<up>" "anchor-read-previous")
+    ("M-down" "anchor-read-next")
+    ("M-up" "anchor-read-previous")
     ("M-g a" "anchor-jump")))
 
 (mode-doc! "anchor-mode"
-  "The page's parts, one key apart. `TAB` goes to the next anchor and `S-TAB` to the previous one; `M-g a` goes to one by name. The anchor point stands in puts its own keys in front of the buffer's, so the same letter can mean a different thing in each part of the page.")
+  "The page's parts, one key apart. `TAB` goes to the next anchor and `S-TAB` to the previous one. `M-<down>` and `M-<up>` do too, and page past the last anchor. `M-g a` goes to one by name. The anchor point stands in puts its own keys in front of the buffer's, so the same letter can mean a different thing in each part of the page.")
 
 (define-command "anchor-mode" "Walk this buffer's anchors, each with its own keys"
   (lambda () (toggle-minor-mode! "anchor-mode")))
+
+;;; --- reading a buffer by its parts -----------------------------------------
+
+;; What an agent asks first of any buffer: its parts, the way a reader walks
+;; them. A page that declares anchors answers with them; a file answers with
+;; its headings or its definitions.
+(define (buffer-outline buf)
+  (let ((as (anchor-list buf)))
+    (cond ((pair? as)
+           (with-current-buffer buf
+             (lambda ()
+               (map (lambda (a) (list (anchor-name a)
+                                      (line-number-at-pos (anchor-start a))
+                                      (line-number-at-pos (max (anchor-start a) (- (anchor-end a) 1)))))
+                    as))))
+          ((or (buffer-derived-mode? buf "markdown-mode") (buffer-derived-mode? buf "morg-mode"))
+           (markdown-outline buf))
+          (else (code-outline buf)))))
+
+(define (buffer-section buf name)
+  ;; the text of one anchor, by the name buffer-outline gave
+  (let ((a (anchor-find buf name)))
+    (and a (with-current-buffer buf (lambda () (buffer-substring (anchor-start a) (anchor-end a)))))))
 
 ;;; --- the surface -----------------------------------------------------------
 
@@ -243,3 +318,6 @@
 (public! 'anchor-end "(anchor-end ANCHOR) — the byte after its last")
 (public! 'anchor-keymap "(anchor-keymap ANCHOR) — the keymap in force inside it, or #f")
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
+(public! 'buffer-outline
+  "(buffer-outline BUF) — BUF's parts, read first: its anchors as (NAME FIRST-LINE LAST-LINE); with none, its markdown headings or code definitions")
+(public! 'buffer-section "(buffer-section BUF NAME) — the text of the anchor buffer-outline named NAME, or #f")

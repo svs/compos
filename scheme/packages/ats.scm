@@ -65,6 +65,8 @@
         'wait "main section ul > li"
         'sheet (ats-sheet "approvals.xsl")
         'detail-sheet (ats-sheet "approval-detail.xsl")
+        ;; the tabs and the state, rating and fit chips, each a facet of the URL
+        'tabs-sheet (ats-sheet "approvals-tabs.xsl")
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
         'detail-minor "ats-approval-mode"
@@ -81,10 +83,10 @@
                ("candidate" "c-candidate")
                ("job" "c-job-details")))
         'columns
-        (list (list 'label "★" 'width 5 'field 'rating 'face "dim")
-              (list 'label "candidate" 'width 22 'field 'candidate)
-              (list 'label "proposal" 'width 20 'field 'proposal)
-              (list 'label "fit" 'width 11 'field 'fit 'face "dim")
+        (list (list 'label "★" 'width 6 'field 'rating 'kind 'stars)
+              (list 'label "candidate" 'width 22 'field 'candidate 'kind 'name)
+              (list 'label "proposal" 'width 14 'field 'proposal 'kind 'badge)
+              (list 'label "fit" 'width 11 'field 'fit 'kind 'badge)
               (list 'label "company" 'width 16 'field 'company 'face "dim")
               (list 'label "job" 'width #f 'field 'job))))
 

@@ -1723,7 +1723,8 @@ is forgotten and that group falls back to creation order in the switcher."
     (and (pair? ids)
          (if (and here (member here ids)) here (car ids)))))
 
-;; An explicit picker chooses a pane; mode affinity moves the window to it.
+;; An explicit pick goes to the pane that prefers its mode, else this one.
+;; Nothing swaps: the panes stay where they are.
 (define (switch-to-buffer-in-chosen-pane! b)
   (let ((home (group-home-of b)))
     (when (and home (not (equal? home (frame-group))))
@@ -1733,14 +1734,13 @@ is forgotten and that group falls back to creation order in the switcher."
              (mode (buffer-local b 'mode-name))
              (preferred (or (window-showing-mode mode) (window-showing b))))
         (when (and preferred (not (equal? preferred pane)))
-          (window-swap-id! pane preferred)
           (select-window! preferred))
         (switch-to-buffer-here! b)
         (set-window-restore! (active-window) #f)
         (active-window))))))
 
 (public! 'switch-to-buffer-in-chosen-pane!
-  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: move the mode window into the selected pane within BUFFER's group")
+  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: show BUFFER in the pane that prefers its mode, else this one, within BUFFER's group; no pane moves")
 
 (define (switch-to-buffer-in-group! b)
   (let ((id (group-home-of b)))

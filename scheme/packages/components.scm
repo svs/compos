@@ -130,31 +130,29 @@
 (defcomponent 'ui/row
   "A selectable list row made from text or styled segments."
   '((tag string optional) (text string optional) (segs list optional) (click any optional)
-    (class string optional) (lines list optional) (mark string optional)
-    (anchor string optional))
+    (class string optional) (lines list optional) (mark string optional))
   '(segs (("" "name") ("c-dim" "  detail")))
   (lambda (p)
-    ;; an anchor lets the view scroll the marked row into sight: the
-    ;; client follows a block only when it has both a mark and an anchor
     (append (list 'tag (component--get p 'tag "c-row")
                   'class (string-append "c-row " (component--get p 'class "")))
             (if (component--has? p 'segs) (list 'segs (component--get p 'segs))
                 (list 'text (component--get p 'text "")))
             (if (component--has? p 'click) (list 'click (component--get p 'click)) '())
             (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
-            (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '())
-            (if (component--has? p 'anchor) (list 'anchor (component--get p 'anchor)) '()))))
+            (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '()))))
 
 (defcomponent 'ui/actions
-  "A row of clickable actions with optional keyboard hints."
+  "A row of clickable actions with keyboard hints. An action is (CLICK LABEL [KEY [CLASS]]); CLASS marks that one action, a tone such as good or bad."
   '((tag string optional) (actions list required) (class string optional))
-  '(actions (("refresh" "Refresh" "g") ("add" "Add" "+")))
+  '(actions (("refresh" "Refresh" "g") ("add" "Add" "+") ("delete" "Delete" "d" "bad")))
   (lambda (p)
     (list 'tag (component--get p 'tag "c-toolbar")
           'class (string-append "c-actions " (component--get p 'class ""))
           'children
           (map (lambda (action)
-                 (list 'tag "c-action" 'class "c-action" 'click (car action)
+                 (list 'tag "c-action"
+                       'class (if (and (> (length action) 3) (nth 3 action)) (string-append "c-action " (nth 3 action)) "c-action")
+                       'click (car action)
                        'segs
                        (append
                          (if (> (length action) 2)

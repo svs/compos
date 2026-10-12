@@ -292,6 +292,37 @@ Every action answers: a `message` on the way in, a `message` with the result, an
 
 Actions that leave the editor — a cart, a send, a purchase — are the user's click, never the agent's. Wire them; do not fire them to test.
 
+## The detail page: keys, anchors, cache
+
+compos beats the website because it has keymaps. A review runs from the listing without leaving it: the listing's keys reach the page beside it, and the page is read by its parts. Build every detail this way.
+
+### Every button has a key
+
+There is no button without a key, and the key is drawn on it. Draw the bar with `ui/actions`; an action is `(CLICK LABEL KEY [CLASS])`, CLASS its tone (`good`, `bad`). Take the site's own key when it has one, else the first free letter of the label. A button the app cannot press itself still gets its key: it opens the page on the site, and the label says so (`↗`). The same key works from the listing (`app-detail-keys!`).
+
+### Anchor the content, never the controls
+
+The page declares its anchors with `anchor-set!` after every draw and turns on `anchor-mode`. An anchor is a stop for reading, so:
+
+- Never anchor anything a key already reaches: the action bar, the tabs, a menu, a pager.
+- The first anchor is the header. Then the content parts in reading order: for an approval, the assessment, then the email and its sections.
+- A card is a stop only when nothing inside it is one.
+- No breadcrumbs or position line on the page. The listing is the navigation.
+- End the page with a mark under the last part (a rule and `end`), so the reader knows there is no more.
+
+`M-<down>` and `M-<up>` walk the anchors, and an anchor always comes first however far it is. Past the last one they page. From the listing, the same keys walk the page beside it: move the detail window's own point (`window-set-point!`), not only its buffer's, or nothing visible happens.
+
+Agents read a page the same way: `(buffer-outline BUF)` first, then `(buffer-section BUF NAME)`. A page with no anchors is a wall to them too.
+
+### The cache is the product
+
+- One detail buffer per row keeps what it last read. Opening it draws that at once; a read under a minute old stands, an older one rereads behind it.
+- Read the rows a reader goes to next before they are asked for (three below, one above), filed off screen: store, do not draw.
+- An answer lands in its own row's buffer whenever it comes. Check the buffer's own generation, not one global counter, or moving on throws the reads away.
+
+### Colours come from the theme
+
+`var(--ok-fg)`, `var(--warn-fg)`, `var(--alert-fg)`, `var(--accent-fg)`, `var(--dim-fg)`, `var(--default-fg)`, `var(--hl-line-bg)`, `var(--border-bg)`; tints with `color-mix(in srgb, var(--ok-fg) 16%, transparent)`. Never a hex: it breaks every dark theme.
 ## Entry command
 
 One command named after the app, and it is the only way in:

@@ -106,6 +106,8 @@
                        (if (equal? (site-app-field row 'candidate) "")
                            (site-app-field row 'name)
                            (string-append (site-app-field row 'candidate) " · " (site-app-field row 'job))))
+        ;; sections a detail tab reads in another order: (TAB SECTION BEFORE)
+        'detail-moves '(("candidate" "Notes" "Work Experience"))
         ;; words the site colours, wherever they appear on a page
         'tones '(("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)

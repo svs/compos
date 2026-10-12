@@ -540,6 +540,9 @@
 .c-keymap-doc { color: var(--text-dim); }
 /* reading views: sizes in em, so a buffer's text scale carries them */
 .c-page { padding: 10px 14px 32px; max-width: 88ch; font-family: var(--font-sans); line-height: 1.55; color: var(--default-fg); }
+.c-page .c-table { font-family: var(--font-sans); font-size: .95em; margin: .3em 0 .9em; }
+.c-page .c-th, .c-page .c-td { white-space: normal; padding: .45em .8em; vertical-align: top; }
+.c-page .c-th { font-size: .75em; }
 .c-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: .6em; margin: .3em 0 .15em; }
 .c-title-text { font-family: var(--font-serif, ui-serif, Georgia, serif); font-weight: 700; line-height: 1.2; color: var(--default-fg); }
 .c-title-1 .c-title-text { font-size: 1.7em; }

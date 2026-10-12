@@ -714,6 +714,57 @@
   (let ((hit (and *site-app-folding* (assoc title (or (buffer-local *site-app-folding* 'site-app-folds) '())))))
     (if hit (cadr hit) default)))
 
+;; A spec's 'detail-moves puts a section of a tab before another: the
+;; evaluation above the work experience. A section is its heading and what
+;; follows it up to the next heading.
+(define (site-app-heading-at nodes title)
+  (let loop ((ns nodes) (i 0))
+    (cond ((null? ns) #f)
+          ((and (pair? (car ns)) (equal? (plist-get (car ns) 'tag) "c-heading")
+                (equal? (string-trim (or (plist-get (car ns) 'text) "")) title))
+           i)
+          (else (loop (cdr ns) (+ i 1))))))
+
+(define (site-app-move-section nodes title before)
+  (let ((i (site-app-heading-at nodes title)))
+    (if (not i)
+        nodes
+        (let* ((after (list-tail nodes (+ i 1)))
+               (len (let loop ((ns after) (n 1))
+                      (if (or (null? ns) (and (pair? (car ns)) (equal? (plist-get (car ns) 'tag) "c-heading")))
+                          n (loop (cdr ns) (+ n 1)))))
+               (seg (list-head (list-tail nodes i) len))
+               (rest (append (list-head nodes i) (list-tail nodes (+ i len))))
+               (k (site-app-heading-at rest before)))
+          (if (not k) nodes
+              (append (list-head rest k) seg (list-tail rest k)))))))
+
+(define (site-app-moved spec tab nodes)
+  (let loop ((ms (or (and spec (plist-get spec 'detail-moves)) '())) (ns nodes))
+    (cond ((null? ms) ns)
+          ((equal? (car (car ms)) tab) (loop (cdr ms) (site-app-move-section ns (cadr (car ms)) (caddr (car ms)))))
+          (else (loop (cdr ms) ns)))))
+
+;; a teaser the site keeps folded is dropped when what it folds is on the
+;; page already (the Last note, over the Notes it repeats)
+(define (site-app-texts nodes)
+  (let walk ((ns nodes) (acc '()))
+    (if (null? ns) acc
+        (walk (cdr ns)
+              (if (and (pair? (car ns)) (not (plist-get (car ns) 'folded)))
+                  (walk (or (plist-get (car ns) 'children) '())
+                        (if (plist-get (car ns) 'text) (cons (plist-get (car ns) 'text) acc) acc))
+                  acc)))))
+
+(define (site-app-drop-teasers nodes)
+  (let ((seen (site-app-texts nodes)))
+    (filter (lambda (n)
+              (not (and (pair? n) (plist-get n 'folded)
+                        (let ((kids (filter pair? (or (plist-get n 'children) '()))))
+                          (and (pair? kids) (pair? (cdr kids))
+                               (member (plist-get (cadr kids) 'text) seen))))))
+            nodes)))
+
 (define (site-app-node-blocks b nodes tones)
   (let loop ((rest (site-app-kept nodes)) (prev #f) (acc '()))
     (if (null? rest)
@@ -806,6 +857,18 @@
                (for-each (lambda (l) (b 'line l #f)) lines)
                (loop (cdr rest) 'quote
                      (cons (site-app-claim (component 'ui/quote (list 'text (string-join lines "\n")))
+                                           first (max first (b 'count #f #f)))
+                           acc))))
+            ((equal? tag "c-table")
+             ;; a table the site draws as a grid (Education): a header row, then one line a row
+             (let* ((cols (map (lambda (c) (if (and (pair? (cdr c)) (equal? (cadr c) "right")) (list (car c) 'right) (list (car c))))
+                               (or (plist-get node 'columns) '())))
+                    (rows (or (plist-get node 'rows) '()))
+                    (first (+ 1 (b 'count #f #f))))
+               (when (pair? cols) (b 'line (string-join (map car cols) "  ") #f))
+               (for-each (lambda (r) (b 'line (string-join r "  ") #f)) rows)
+               (loop (cdr rest) 'table
+                     (cons (site-app-claim (component 'ui/table (list 'columns cols 'rows rows))
                                            first (max first (b 'count #f #f)))
                            acc))))
             ((equal? tag "c-list-item")
@@ -977,7 +1040,7 @@
                          ((equal? section 'failed)
                           (let ((t "The site did not answer for this tab. g reads the page again.")) (list (site-app-part b 'ui/empty t (list 'text t) #f))))
                          ((null? (site-app-real section)) (list (site-app-part b 'ui/empty "Nothing here." (list 'text "Nothing here.") #f)))
-                         (else (site-app-summary (site-app-node-blocks b (site-app-drop-repeats section data) tones)))))))))
+                         (else (site-app-summary (site-app-node-blocks b (site-app-drop-repeats (site-app-drop-teasers (site-app-moved spec active section)) data) tones)))))))))
     (let* ((line (car (buffer-line-at-point buf)))
            (text (b 'text #f #f)))
       (buffer-set-text! buf text #t)

@@ -296,15 +296,16 @@
 ;; Subtle on purpose: an anchor is a section, not a match, so its whole
 ;; range wears this. A theme that names the face wins.
 (defface! 'anchor-current 'inherit 'lazy-highlight)
-;; the same mark on a block page: the part point is in stays as it is, and
-;; the rest of the page steps back, so the eye lands on the part and not on
-;; a box drawn round it. Each level of the page dims what is beside the path
-;; down to the part.
+;; the same mark on a block page: the part point is in is framed a little
+;; way out from its text, and the rest of the page steps back a little, still
+;; readable. Outline and ring, not padding, so nothing on the page moves. Each level of the page dims what is beside the path down to the
+;; part.
 (define-style! 'anchor "
-.blocks-scroll :has(.anchor-current:not(.anchor-top)) > :not(.anchor-current):not(:has(.anchor-current)) { opacity: .38; }
+.blocks-scroll :has(.anchor-current:not(.anchor-top)) > :not(.anchor-current):not(:has(.anchor-current)) { opacity: .62; }
+.anchor-current { outline: 1px solid color-mix(in srgb, var(--accent-fg) 55%, transparent); outline-offset: 8px; border-radius: 4px; box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent-fg) 6%, transparent); background-image: linear-gradient(color-mix(in srgb, var(--accent-fg) 6%, transparent), color-mix(in srgb, var(--accent-fg) 6%, transparent)); transition: outline-color .28s ease, box-shadow .28s ease; }
 .blocks-scroll :has(.anchor-current) > * { transition: opacity .28s ease; }
-.anchor-current .current:not(.anchor-current) { background: transparent; }
-.anchor-current:is(.c-prose, .c-bullet, .c-meta, .c-title, .c-row).current { background: transparent; }
+.anchor-current .current:not(.anchor-current) { background-color: transparent; }
+.anchor-current:is(.c-prose, .c-bullet, .c-meta, .c-title, .c-row).current { background-color: transparent; }
 ")
 
 (define (anchor-imenu-rows buf)

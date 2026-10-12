@@ -195,6 +195,7 @@
 (require 'worktrees)
 (require 'writing)
 (require 'dismiss)
+(require 'content-scale)
 (require 'screenshot)
 
 ;; the run and result blocks live with the other blocks and lean on

@@ -47,6 +47,47 @@
 ;; the list this detail was opened from, or #f. A kept detail is nobody's
 ;; child any more, and still says which list it came from, so the walk keeps
 ;; reaching it.
+;; The page beside the list you are in reads with you: it keeps the colours
+;; of the selected window instead of stepping down as an inactive one, so
+;; surfing from the list does not show the page muted.
+(define *detail-live* #f)
+
+(define (detail--classes buf)
+  (filter (lambda (c) (not (equal? c ""))) (string-split (or (buffer-local buf 'window-class) "") " ")))
+
+(define (detail--set-live! buf on?)
+  (when (and buf (buffer-exists? buf))
+    (let* ((cs (filter (lambda (c) (not (equal? c "detail-live"))) (detail--classes buf)))
+           (cs (if on? (append cs (list "detail-live")) cs)))
+      (buffer-set-local! buf 'window-class (if (null? cs) #f (string-join cs " "))))))
+
+(define (detail--beside owner)
+  ;; the page on screen that OWNER, the selected window's buffer, opened
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((and (not (equal? (car (car ws)) (active-window)))
+                (equal? (buffer-local (cadr (car ws)) 'detail-of) owner))
+           (cadr (car ws)))
+          (else (loop (cdr ws))))))
+
+(define (detail--sync-live!)
+  (let* ((owner (window-buffer (active-window)))
+         (buf (and owner (detail--beside owner))))
+    (unless (equal? buf *detail-live*)
+      (detail--set-live! *detail-live* #f)
+      (detail--set-live! buf #t)
+      (set! *detail-live* buf))))
+
+(add-hook! 'post-command-hook 'detail--sync-live!)
+
+(define-style! 'detail "
+.window.inactive.detail-live {
+  --text-strong: inherit; --text-body: inherit; --text-soft: inherit; --text-faint: inherit; --text-dim: inherit;
+  --accent: inherit; --accent-wash: inherit; --ok: inherit; --warn: inherit; --edge: inherit;
+  --surface-pane: var(--paper-bg, #efeadf); --surface-sunken: inherit; --surface-chrome: var(--paper-bg, #efeadf); --surface-select: inherit;
+}
+")
+
 (define (detail-owner &optional buf)
   (let* ((b (or buf (current-buffer)))
          (of (and (buffer-known? b) (buffer-local b 'detail-of))))

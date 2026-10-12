@@ -161,33 +161,21 @@
     (string-append (or (plist-get spec 'title) (symbol->string (plist-get spec 'name)))
                    " · " (or (plist-get page 'label) ""))))
 
-(define (site-app-header buf)
-  ;; the site's navbar, then the section's own status tabs when it has them
-  (let* ((spec (buffer-local buf 'site-app-spec))
-         (current (buffer-local buf 'site-app-page))
-         (nav (string-join
-                (map (lambda (page)
-                       (let ((text (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))))
-                         (if (equal? current (plist-get page 'id))
-                             (string-append "[" text "]")
-                             (string-append " " text " "))))
-                     (site-app-pages spec))
-                " "))
-         (filters (or (buffer-local buf 'site-app-filters) '()))
-         (query (buffer-local buf 'site-app-filter)))
-    (if (null? filters)
-        nav
-        (string-append nav "\n"
-          (string-join
-            (map (lambda (tab)
-                   (let* ((count (plist-get tab 'count))
-                          (text (if (equal? count "") (plist-get tab 'label)
-                                    (string-append (plist-get tab 'label) " " count))))
-                     (if (equal? (plist-get tab 'query) query)
-                         (string-append "[" text "]")
-                         (string-append " " text " "))))
-                 filters)
-            " ")))))
+(define (site-app-header blocks)
+  ;; the page's head, title through the actions, is its top part: the
+  ;; header. The tabs are not in it: they are the page's own switch
+  (let* ((tabs? (lambda (x) (and (pair? x) (re-match? "\\bc-tabs\\b" (or (plist-get x 'class) "")))))
+         (head (filter (lambda (x) (not (tabs? x))) blocks))
+         (tabs (filter tabs? blocks))
+         (real (filter (lambda (x) (and (pair? x) (plist-get x 'lines))) head))
+         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'sa-anchor) (plist-get (car bs) 'sa-anchor)) (else (find (cdr bs)))))))
+    (if (null? real)
+        blocks
+        (cons (site-app-claim (component 'ui/group (list 'body (site-app-unanchored head)))
+                              (apply min (map (lambda (x) (car (plist-get x 'lines))) real))
+                              (apply max (map (lambda (x) (cadr (plist-get x 'lines))) real))
+                              name)
+              tabs))))
 
 (define (site-app-rows buf) (or (buffer-local buf 'site-app-rows) '()))
 
@@ -675,7 +663,9 @@
   ;; the loose blocks a run opens with, before its first part, are one part:
   ;; a tab's Summary (headline, where, tags, profile link), or the opening of
   ;; a card or section whose parts are its own (no part holds another)
-  (let* ((head (site-app-take-while (lambda (x) (and (pair? x) (not (plist-get x 'sa-anchor)) (plist-get x 'lines))) blocks))
+  (let* ((head (site-app-take-while (lambda (x) (and (pair? x) (not (plist-get x 'sa-anchor)) (plist-get x 'lines)
+                                                    (null? (site-app-anchors (or (plist-get x 'children) '())))))
+                                    blocks))
          (rest (list-tail blocks (length head))))
     (if (< (length head) (or least 2))
         blocks
@@ -747,9 +737,15 @@
                              (open? (site-app-open? title (not (plist-get node 'folded))))
                              (first (b 'line title (plist-get (car kids) 'href)))
                              (body (if open? (site-app-node-blocks b (cdr kids) tones) '()))
-                             (card (component 'ui/card (list 'title title 'open? open? 'body body))))
-                        (loop (cdr rest) 'item (cons (append (site-app-claim card first (max first (b 'count #f #f)) title)
-                                                             (list 'sa-keys "site-app-card-map" 'sa-fold (list title open?)))
+                             ;; a card with parts of its own is no part: they are, and its fold key
+                             ;; rides on the first of them
+                             (flat? (null? (site-app-anchors body)))
+                             (fold (list title open?))
+                             (body (if flat? body
+                                       (site-app-with-keys (site-app-summary body title 1) "site-app-card-map" fold)))
+                             (card (component 'ui/card (list 'title title 'open? open? 'body body)))
+                             (claimed (site-app-claim card first (max first (b 'count #f #f)) (and flat? title))))
+                        (loop (cdr rest) 'item (cons (if flat? (append claimed (list 'sa-keys "site-app-card-map" 'sa-fold fold)) claimed)
                                                      acc)))))))
             ((equal? tag "c-group")
              ;; a run the sheet set apart: the note staff read, or the letter the candidate would
@@ -760,15 +756,18 @@
                     ;; the note's first record is its label
                     (label (and (not letter?) (pair? kids) (begin (b 'line lead #f) lead)))
                     (body (site-app-node-blocks b (if label (cdr kids) kids) tones))
-                    ;; the note reads as one stop; a letter keeps its sections as stops
-                    (body (if letter? body (site-app-unanchored body))))
+                    ;; the note reads as one stop; a letter keeps its sections as stops, its
+                    ;; opening then one of them
+                    (body (if letter? body (site-app-unanchored body)))
+                    (flat? (null? (site-app-anchors body)))
+                    (body (if flat? body (site-app-summary body (string-append "Email · " lead) 1))))
                (loop (cdr rest) 'group
                      (if (and (null? body) (not label)) acc
                          (cons (site-app-claim (component 'ui/callout
                                                  (append (list 'tone (if letter? "paper" "note") 'body body)
                                                          (if label (list 'label label) '())))
                                                first (max first (b 'count #f #f))
-                                               (if letter? (string-append "Email · " lead) lead))
+                                               (and flat? (if letter? (string-append "Email · " lead) lead)))
                                acc)))))
             ((equal? tag "c-heading")
              (let* ((count (and next (re-match? "^[0-9]+$" (or (plist-get next 'text) "")) (plist-get next 'text)))

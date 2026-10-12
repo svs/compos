@@ -671,42 +671,51 @@
                               (apply max (map (lambda (x) (cadr (plist-get x 'lines))) real))
                               name)))))
 
-(define (site-app-summary blocks)
-  ;; the loose blocks a tab opens with, before its first part (a headline,
-  ;; where and how long, the tags, the profile link), are one part: Summary
+(define (site-app-summary blocks &optional name least)
+  ;; the loose blocks a run opens with, before its first part, are one part:
+  ;; a tab's Summary (headline, where, tags, profile link), or the opening of
+  ;; a card or section whose parts are its own (no part holds another)
   (let* ((head (site-app-take-while (lambda (x) (and (pair? x) (not (plist-get x 'sa-anchor)) (plist-get x 'lines))) blocks))
          (rest (list-tail blocks (length head))))
-    (if (< (length head) 2)
+    (if (< (length head) (or least 2))
         blocks
         (cons (site-app-claim (component 'ui/group (list 'body head))
                               (car (plist-get (car head) 'lines))
                               (cadr (plist-get (car (reverse head)) 'lines))
-                              "Summary")
+                              (or name "Summary"))
               rest))))
 
+(define (site-app-with-keys blocks keys fold)
+  ;; the first part of BLOCKS carries KEYS: a card that is no part itself
+  ;; is folded from the part it opens with
+  (let loop ((bs blocks) (acc '()) (done #f))
+    (cond ((null? bs) (reverse acc))
+          ((and (not done) (pair? (car bs)) (plist-get (car bs) 'sa-anchor))
+           (loop (cdr bs) (cons (append (car bs) (list 'sa-keys keys 'sa-fold fold)) acc) #t))
+          (else (loop (cdr bs) (cons (car bs) acc) done)))))
+
 (define (site-app-sectioned blocks)
-  ;; a heading or a lead-in and what follows it, up to the next of its rank or
-  ;; higher, are one part: one anchor, so the walk, imenu and the highlight
-  ;; take the whole section and not its title
+  ;; a heading or a lead-in and what follows it, up to the next one, is one
+  ;; part, so the walk, imenu and the highlight take the whole section. Parts
+  ;; sit side by side: a section that holds parts (Work Experience's jobs) is
+  ;; no part itself, and its heading with any loose lines under it is one
   (let loop ((bs blocks) (acc '()))
     (cond ((null? bs) (reverse acc))
           ((site-app-rank (car bs))
            (let* ((head (car bs))
-                  (r (site-app-rank head))
-                  (body (site-app-take-while (lambda (x) (let ((q (site-app-rank x))) (or (not q) (> q r)))) (cdr bs)))
+                  (name (plist-get head 'sa-anchor))
+                  (body (site-app-take-while (lambda (x) (not (site-app-rank x))) (cdr bs)))
+                  (inner (cons (car (site-app-unanchored (list head))) body))
+                  (flat? (null? (site-app-anchors body)))
                   (first (car (plist-get head 'lines)))
                   (last (let span ((xs body) (m first))
                           (if (null? xs) m
                               (let ((ls (and (pair? (car xs)) (plist-get (car xs) 'lines))))
                                 (span (cdr xs) (if ls (max m (cadr ls)) m)))))))
-             (let ((parts (site-app-sectioned body)))
-               (loop (list-tail (cdr bs) (length body))
-                     (cons (site-app-claim (component 'ui/group (list 'body (cons (car (site-app-unanchored (list head))) parts)))
-                                           first last
-                                           ;; a section of nothing but cards (Work Experience) is no stop of
-                                           ;; its own: the walk goes card by card
-                                           (and (not (site-app-all-parts? parts)) (plist-get head 'sa-anchor)))
-                           acc)))))
+             (loop (list-tail (cdr bs) (length body))
+                   (cons (site-app-claim (component 'ui/group (list 'body (if flat? inner (site-app-summary inner name 2))))
+                                         first last (and flat? name))
+                         acc))))
           (else (loop (cdr bs) (cons (car bs) acc))))))
 
 ;; folds the reader set on this page's cards, by title: (TITLE OPEN?)

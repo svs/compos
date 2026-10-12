@@ -3056,7 +3056,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-kill! g)
   (let* ((id (begin (group-migrate-live!) (group-resolve-id g)))
          (name (or (group-name id) ""))
-         (members (if id (group-buffers id) '()))
+         (members (if id (group-known-buffers id) '()))
          (survivors '())
          (stood (and id (equal? (frame-local 'current-group) id)))
          (tomb (and id (group-tombstone id members))))
@@ -3524,6 +3524,16 @@ is forgotten and that group falls back to creation order in the switcher."
         (pseudo-group-buffers id)
         (group-members-of (buffer-list) id))))
 
+;; group-buffers answers the live members only. A kill must reach the
+;; dormant ones too: they stay asleep in the listings, and a group killed
+;; without them leaves them behind with no group.
+(define (group-known-buffers g)
+  (let ((id (group-resolve-id g)))
+    (if (pseudo-group-id? id)
+        (pseudo-group-buffers id)
+        (group-members-of (map car (cadr (buffer-rows (list 'hidden #t 'fields '()))))
+                          id))))
+
 ;; Members in MRU order; buffers never visited this session trail.
 ;; A group is a set, so the list dedupes by name.
 (define (group-buffers-mru g)
@@ -3577,10 +3587,17 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; the next buffer for a window in no group: the first of the pool that
 ;; is not the dying buffer
+;; A kill pulls the next buffer into the window, and a dormant one wakes
+;; whole there: text, then its mode, keys and overlays, as a display does.
+(define (group-kill-show! win name)
+  (let ((restoring (not (buffer-exists? name))))
+    (window-set-buffer! win name)
+    (when restoring (restore-buffer-runtime! name))))
+
 (define (group-kill-plain-replacement name)
   (let loop ((bs (window-fill-buffers)))
     (cond ((null? bs) #f)
-          ((and (not (equal? (car bs) name)) (buffer-exists? (car bs))) (car bs))
+          ((and (not (equal? (car bs) name)) (buffer-known? (car bs))) (car bs))
           (else (loop (cdr bs))))))
 
 ;; the group's most recent chat other than NAME, still alive
@@ -3713,7 +3730,7 @@ is forgotten and that group falls back to creation order in the switcher."
                    ;; window that would not close
                    (shown? (and blank (group-kill-shown-elsewhere? blank win frame)))
                    (next (or member (and (not shown?) blank))))
-              (cond (next (window-set-buffer! win next))
+              (cond (next (group-kill-show! win next))
                     ((> (group-kill-frame-window-count frame) 1)
                      (delete-window-id! win))
                     (blank (window-set-buffer! win blank)))))))
@@ -3730,7 +3747,7 @@ is forgotten and that group falls back to creation order in the switcher."
                 (cond ((not group)
                        (unless (fill-candidate? shown)
                          (let ((replacement (group-kill-plain-replacement name)))
-                           (when replacement (window-set-buffer! win replacement))))
+                           (when replacement (group-kill-show! win replacement))))
                        ;; nothing is open: the sole window of a frame fell
                        ;; to a buffer that is nobody's work. It shows the
                        ;; home page instead.
@@ -3743,7 +3760,7 @@ is forgotten and that group falls back to creation order in the switcher."
                       (else
                         (let ((blank (and (not (group-dying? group))
                                           (group-kill-blank group name))))
-                          (cond (blank (window-set-buffer! win blank))
+                          (cond (blank (group-kill-show! win blank))
                                 ((> (group-kill-frame-window-count frame) 1)
                                  (delete-window-id! win))
                                 (else

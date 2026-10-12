@@ -961,11 +961,12 @@
 
 (define-command "dired-mkdir" "Prompt for a name and create a directory here"
   (lambda ()
-    (minibuffer-read "Create directory: " '()
-      (lambda (name)
-        (make-directory! (string-append (dired-dir (current-buffer)) "/" name))
-        (dired-refresh-buffer! (current-buffer))
-        (message "Created")))))
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Create directory: " '()
+        (lambda (name)
+          (make-directory! (dired-path buf name))
+          (with-current-buffer buf (dired-refresh-buffer! buf))
+          (message "Created"))))))
 
 ;; --- the rest of Emacs Dired: regexp marks, wdired, dwim target, shell ------
 

@@ -1125,6 +1125,7 @@ defmodule Compos.Ui.EditorLive do
       <.frame_header_line state={@state} tabs={@tabs} />
       <.frame_echo state={@state} />
       <.frame_notices state={@state} />
+      <.frame_keycast state={@state} />
       <c-windows class="windows" role="main" data-slide={assigns[:slide]}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
@@ -1356,6 +1357,73 @@ defmodule Compos.Ui.EditorLive do
     for [seq, source, title, body] <- chrome(state, "notifications"),
         Enum.all?([seq, source, title, body], &is_binary/1),
         do: {seq, source, title, body}
+  end
+
+  # The keys show-keys-mode casts for people who watch (show-keys.scm):
+  # (KEYS COMMAND COUNT) rows, newest last, then the prefix still pending,
+  # which runs no command yet. show-keys.scm ships the CSS.
+  defp frame_keycast(assigns) do
+    ~M"""
+    <c-group :if={keycast(@state) != [] || keycast_pending(@state)} class="keycast" aria-hidden="true">
+      <c-group :for={{keys, count} <- keycast(@state)} class="keycast-entry">
+        <c-action-key class="keycast-keys">{keys}</c-action-key>
+        <c-text :if={count != ""} class="keycast-count">{count}</c-text>
+      </c-group>
+      <c-group :if={keycast_pending(@state)} class="keycast-entry keycast-pending">
+        <c-action-key class="keycast-keys">{keycast_label(@state, keycast_pending(@state))}</c-action-key>
+      </c-group>
+    </c-group>
+    """
+  end
+
+  # A row is (KEYS COUNT KIND): KIND "keys" draws KEYS with the labels,
+  # "text" draws typed text as it is.
+  defp keycast(state) do
+    for [keys, count, kind] <- chrome(state, "show-keys"),
+        Enum.all?([keys, count, kind], &is_binary/1),
+        do: {if(kind == "keys", do: keycast_label(state, keys), else: keys), count}
+  end
+
+  # "C-x s-k" as the page shows it, from the show-keys-labels chrome
+  # value: (FROM TO) pairs; a FROM that ends in - is a modifier, the rest
+  # name whole keys. An unnamed letter is upper-cased, <name> loses <>.
+  defp keycast_label(state, keys) do
+    table = for [from, to] <- chrome(state, "show-keys-labels"), do: {from, to}
+    {mods, names} = Enum.split_with(table, fn {from, _} -> String.ends_with?(from, "-") end)
+    names = Map.new(names)
+
+    keys
+    |> String.split(" ", trim: true)
+    |> Enum.map_join(" ", &keycast_chord(&1, mods, names))
+  end
+
+  defp keycast_chord(chord, mods, names) do
+    case Enum.find(mods, fn {from, _} ->
+           String.starts_with?(chord, from) and byte_size(chord) > byte_size(from)
+         end) do
+      {from, to} ->
+        to <> keycast_chord(binary_part(chord, byte_size(from), byte_size(chord) - byte_size(from)), mods, names)
+
+      nil ->
+        cond do
+          Map.has_key?(names, chord) -> names[chord]
+          String.length(chord) == 1 -> String.upcase(chord)
+          true -> chord |> String.trim_leading("<") |> String.trim_trailing(">")
+        end
+    end
+  end
+
+  # The pending prefix as one string, or nil. The chrome value show-keys-on
+  # is "all", "modifiers" (only a prefix that holds a modifier), or absent.
+  defp keycast_pending(state) do
+    pending = Map.get(state, :pending) || []
+    on = chrome(state, "show-keys-on", nil)
+
+    cond do
+      pending == [] or on not in ["all", "modifiers"] -> nil
+      on == "modifiers" and not Enum.any?(pending, &Regex.match?(~r/^[CMsHAS]-/, &1)) -> nil
+      true -> Enum.join(pending, " ")
+    end
   end
 
   # The echo area's key hints, as Scheme publishes them (echo-key-hints in

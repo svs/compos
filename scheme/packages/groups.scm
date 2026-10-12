@@ -3108,11 +3108,17 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((g (and (group-membership-buffer? b)
                 (not (group-scratch-buffer? b))
                 (group-resolve-id (buffer-group b)))))
+    ;; Count every member, dormant ones too, and never through a list's
+    ;; filter: group-buffers sees only the live buffers, so a group whose
+    ;; other members slept looked empty and a yes killed it.
     (and g
          (null? (filter (lambda (other)
                           (and (not (equal? other b))
+                               (not (string-prefix? " " other))
                                (not (group-scratch-buffer? other))))
-                        (group-buffers g)))
+                        (map car (cadr (buffer-rows (list 'groups (list g)
+                                                          'hidden #t
+                                                          'context-only #t))))))
          g)))
 
 ;; A kill of the last buffer of a group asks once, and a yes kills

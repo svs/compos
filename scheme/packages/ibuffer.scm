@@ -745,12 +745,16 @@
                                 (else (memberships-of (car rs))))
                           out)))))))
 
-(define (ibuffer-group-buckets rows current memberships-of)
-  (let* ((named (sort (map (lambda (id)
-                             (list (string-downcase (or (group-name id) "")) id))
-                           (filter (lambda (id) (not (equal? id current)))
-                                   (group-ids)))))
-         (ordered (append (if current (list current) '()) (map cadr named)))
+(define (ibuffer-group-buckets rows current memberships-of &optional order)
+  ;; ORDER 'recent puts the other groups most recently used first; any
+  ;; other ORDER puts them by name
+  (let* ((others (lambda (ids) (filter (lambda (id) (not (equal? id current))) ids)))
+         (named (if (equal? order 'recent)
+                    (others (group-ids-mru-all))
+                    (map cadr (sort (map (lambda (id)
+                                           (list (string-downcase (or (group-name id) "")) id))
+                                         (others (group-ids)))))))
+         (ordered (append (if current (list current) '()) named))
          (last (length ordered))
          ;; (ID RANK) once, so a row's place is one assoc, not a walk of
          ;; every group asking whether the row is in it
@@ -800,7 +804,7 @@
   (apply append
     (map (lambda (bucket)
            (ibuffer-section buf (car bucket) (nth 1 bucket) (nth 2 bucket) (nth 3 bucket)))
-         (ibuffer-group-buckets rows current ibuffer-memberships))))
+         (ibuffer-group-buckets rows current ibuffer-memberships (ibuffer-sort buf)))))
 
 ;; the rows bucketed by a key fn, one section per key, keys by name;
 ;; LAST names the key that goes at the end whatever its name
@@ -2771,4 +2775,4 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys replace the template's by key, and add the rest")
 (public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW CLOSE!)")
 (public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE! [WHERE]) — open a row: WHERE 'other keeps it in the window that previewed it, else the window the table leaves; CLOSE! closes the table")
-(public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name, ungrouped")
+(public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF [ORDER]) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name (ORDER 'recent: most recently used first), ungrouped")

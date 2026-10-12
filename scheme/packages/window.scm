@@ -1802,7 +1802,7 @@ keeps the buffer you were in and your point.")
 
 ;; the commands that continue a walk
 (define *layout-walk-commands*
-  '("focus-left" "focus-right" "focus-up" "focus-down"
+  '("previous-pane" "next-pane" "focus-up" "focus-down"
     "layout-forward" "layout-backward"))
 
 (define (layout-strip) (or (frame-local 'layout-strip) '()))
@@ -2112,7 +2112,7 @@ keeps the buffer you were in and your point.")
 ;; up go backwards.
 (define (layout-edge-scroll! dir)
   (and (layout-target)
-       (if (member dir '(right down))
+       (if (member dir '(right down next))
            (layout-scroll-to! 1 'last)
            (layout-scroll-to! -1 'first))))
 
@@ -2475,7 +2475,27 @@ keeps the buffer you were in and your point.")
 ;; leaf's normalized frame rectangle, and the neighbor in DIR is the nearest
 ;; window past the active edge whose span contains the active center — so
 ;; motion follows what's on screen, not the split tree's shape.
+(define (window-in-order step)
+  "The pane STEP places along from this one, left to right and top to
+bottom, as a window-rects row; #f past either end."
+  (let* ((rs (map (lambda (k) (list-ref k 2))
+                  (sort (map (lambda (r) (list (list-ref r 2) (list-ref r 3) r))
+                             (window-rects)))))
+         (ids (map car rs))
+         (me (let find ((l ids) (i 0))
+               (cond ((null? l) #f)
+                     ((equal? (car l) (active-window)) i)
+                     (else (find (cdr l) (+ i 1)))))))
+    (and me
+         (let ((i (+ me step)))
+           (and (>= i 0) (< i (length rs)) (list-ref rs i))))))
+
 (define (window-in-direction dir)
+  (cond ((equal? dir 'next) (window-in-order 1))
+        ((equal? dir 'previous) (window-in-order -1))
+        (else (window-in-geometry dir))))
+
+(define (window-in-geometry dir)
   (let* ((rs (window-rects))
          (me (let find ((l rs))
                (cond ((null? l) #f)
@@ -2524,10 +2544,10 @@ keeps the buffer you were in and your point.")
       (select-window! from)
       (message "A peek: RET on its row opens it, M-<down> scrolls it"))))
 
-(define-command "focus-left" "Select the window to the left"
-  (lambda () (focus-move-safe! 'left)))
-(define-command "focus-right" "Select the window to the right"
-  (lambda () (focus-move-safe! 'right)))
+(define-command "previous-pane" "Select the previous pane"
+  (lambda () (focus-move-safe! 'previous)))
+(define-command "next-pane" "Select the next pane"
+  (lambda () (focus-move-safe! 'next)))
 (define-command "focus-up" "Select the window above"
   (lambda () (focus-move-safe! 'up)))
 (define-command "focus-down" "Select the window below"
@@ -2562,12 +2582,13 @@ keeps the buffer you were in and your point.")
             (window-set-point! (car neighbor) point)))))
 
 (for-each
-  (lambda (dir)
-    (let ((name (string-append "buffer-" (symbol->string dir))))
+  (lambda (spec)
+    (let ((name (car spec)) (dir (cadr spec)))
       (define-command name "Move this buffer to the neighboring pane and reveal its previous buffer"
         (lambda () (buffer-move! dir)))
       (catalog-meta! 'command name 'domain 'windows 'effects '(write display))))
-  '(left right up down))
+  '(("buffer-previous-pane" previous) ("buffer-next-pane" next)
+    ("buffer-up" up) ("buffer-down" down)))
 
 ;; Move this logical window into the directional neighbor's pane and follow it.
 ;; The neighboring logical window moves into this pane; both complete stacks stay whole.
@@ -2581,18 +2602,18 @@ keeps the buffer you were in and your point.")
             (message "Could not move window"))
         (message (string-append "No window " (symbol->string dir))))))
 
-(define-command "window-left" "Move this window leftward with its complete buffer stack"
-  (lambda () (window-swap! 'left)))
-(define-command "window-right" "Move this window rightward with its complete buffer stack"
-  (lambda () (window-swap! 'right)))
+(define-command "window-previous-pane" "Move this window to the previous pane with its complete buffer stack"
+  (lambda () (window-swap! 'previous)))
+(define-command "window-next-pane" "Move this window to the next pane with its complete buffer stack"
+  (lambda () (window-swap! 'next)))
 (define-command "window-up" "Move this window upward with its complete buffer stack"
   (lambda () (window-swap! 'up)))
 (define-command "window-down" "Move this window downward with its complete buffer stack"
   (lambda () (window-swap! 'down)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("focus-left" "focus-right" "focus-up" "focus-down"
-    "window-left" "window-right"
+  '("previous-pane" "next-pane" "focus-up" "focus-down"
+    "window-previous-pane" "window-next-pane"
     "window-up" "window-down"))
 
 ;; Eat the pane next door: it goes away and this window takes exactly its

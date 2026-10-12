@@ -837,35 +837,79 @@
 
 ;; The title picker is deliberately window-local: it offers only the buffers
 ;; in this pane's own previous-buffer stack, not the frame-wide switch pool.
-(define (switch-window-buffers)
+(define (switch-window-buffers &optional mode-only)
   (let* ((win (active-window))
-         (here (window-buffer win)))
+         (here (window-buffer win))
+         (mode (and mode-only (buffer-local here 'mode-name))))
     (filter (lambda (name)
               (and (string? name)
                    (not (equal? name here))
-                   (buffer-known? name)))
+                   (buffer-known? name)
+                   (or (not mode-only)
+                       (if mode
+                           (buffer-derived-mode? name mode)
+                           (not (buffer-local name 'mode-name))))))
             (window-prev-buffers win))))
+
+(define (switch-window-buffer-pick! step &optional mode-only)
+  "Offer this window's other buffers in the minibuffer. Each row shows in
+the window as the selection moves; RET keeps it and C-g puts the old one
+back. STEP 1 starts on the newest row, -1 on the oldest."
+  (let* ((home (active-window))
+         (rows (switch-window-buffers mode-only)))
+    (if (null? rows)
+        (message (if mode-only
+                     "No other buffer of this mode in this window"
+                     "No other buffer in this window"))
+        (let ((restore! (lambda () (preview-end #f))))
+          (minibuffer-read-preview (if mode-only "Window buffers, this mode: " "Window buffers: ")
+            (annotate 'buffer rows)
+            (lambda (row)
+              (when (and (string? row) (buffer-known? row) (window-exists? home))
+                (preview-show row 'here home)))
+            (lambda (row)
+              (restore!)
+              (when (and (string? row) (buffer-known? row))
+                (switch-to-buffer-here! row)
+                (group-current-recalculate!)))
+            restore!
+            #f "minibuffer")
+          (when (< step 0)
+            (for-each (lambda (_) (minibuffer-next!)) (cdr rows)))
+          (mb-select-notify!)))))
 
 (define-command "switch-window-buffer"
   "Choose another buffer from this window's title"
-  (lambda ()
-    (let* ((home (active-window))
-           (here (window-buffer home))
-           (rows (switch-window-buffers)))
-      (if (null? rows)
-          (message "No other buffer in this window")
-          (let ((restore! (lambda () (preview-end #f))))
-            (minibuffer-read-preview "Window buffers: " (annotate 'buffer rows)
-              (lambda (row)
-                (when (and (string? row) (buffer-known? row) (window-exists? home))
-                  (preview-show row 'here home)))
-              (lambda (row)
-                (restore!)
-                (when (and (string? row) (buffer-known? row))
-                  (switch-to-buffer-here! row)
-                  (group-current-recalculate!)))
-              restore!
-              #f "minibuffer"))))))
+  (lambda () (switch-window-buffer-pick! 1)))
+
+(define-command "window-next-buffer"
+  "Walk this window's buffers in the minibuffer, newest first"
+  (lambda () (switch-window-buffer-pick! 1)))
+
+(define-command "window-previous-buffer"
+  "Walk this window's buffers in the minibuffer, oldest first"
+  (lambda () (switch-window-buffer-pick! -1)))
+
+(define-command "window-next-mode-buffer"
+  "Walk this window's buffers of this mode in the minibuffer, newest first"
+  (lambda () (switch-window-buffer-pick! 1 #t)))
+
+(define-command "window-previous-mode-buffer"
+  "Walk this window's buffers of this mode in the minibuffer, oldest first"
+  (lambda () (switch-window-buffer-pick! -1 #t)))
+
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("window-next-buffer" "window-previous-buffer"
+    "window-next-mode-buffer" "window-previous-mode-buffer"))
+
+;; While the walk is open, the keys that opened it move the selection.
+(for-each
+  (lambda (k) (define-key "minibuffer-mode-map" (car k) (cadr k)))
+  '(("S-<up>" "minibuffer-previous-candidate")
+    ("S-<down>" "minibuffer-next-candidate")
+    ("s-<up>" "minibuffer-previous-candidate")
+    ("s-<down>" "minibuffer-next-candidate")))
 
 (define (switch-bare-candidates names)
   (let* ((pairs (map (lambda (name)

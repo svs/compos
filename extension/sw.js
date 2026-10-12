@@ -630,8 +630,14 @@ const OPS = {
   // BACKGROUND opens it behind the tab you are on. It is its own flag because
   // the daemon sends a Scheme #f as null, and `active: null` read as "not
   // false" and took the focus.
-  async open({ url, active, window, background, after }) {
+  // READER puts it in the reader's minimized window instead: a tab the
+  // editor works for you, which you never see.
+  async open({ url, active, window, background, after, reader }) {
     const create = { url, active: !background && active !== false };
+    if (reader) {
+      const t = await chrome.tabs.create({ ...create, active: false, windowId: await readerWindow() });
+      return { tab: t.id, window: t.windowId };
+    }
     // AFTER is the tab of the frame that asked: two frames can share a
     // window, so the window alone does not say whose tab this is. The new
     // tab sits right after it.

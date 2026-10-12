@@ -268,10 +268,10 @@
               (k remembered)
               (chrome-call "open"
                 (chrome-here
-                  (append (list 'url (site-app-url spec (plist-get spec 'home))
-                                'background #t)
-                          (let ((after (chrome-tab-resolve!)))
-                            (if after (list 'after after) '()))))
+                  ;; the reader's minimized window: the app works the site out of sight
+                  (list 'url (site-app-url spec (plist-get spec 'home))
+                        'background #t
+                        'reader #t))
                 (lambda (reply)
                   (let ((tab (plist-get reply 'tab)))
                     (site-app-note-tab! name tab)
@@ -1411,12 +1411,23 @@
         '())))
 
 ;; after an action: read the page and the list again, the way the site redraws
-(define (site-app-detail-after! buf note)
+(define (site-app-detail-after! buf note &optional advance)
+  ;; ADVANCE: the press did its job, so go on to the next row, as the site does
   (message note)
   (let* ((list-buf (buffer-local buf 'site-app-list))
-         (name (buffer-local buf 'site-app-name)))
-    (when (buffer-known? buf)
-      (site-app-show-detail! list-buf (buffer-local buf 'site-app-row)))
+         (name (buffer-local buf 'site-app-name))
+         (row (buffer-local buf 'site-app-row))
+         (es (list-entries list-buf))
+         (i (let loop ((rs es) (i 0))
+              (cond ((null? rs) #f) ((equal? (car rs) row) i) (else (loop (cdr rs) (+ i 1))))))
+         (j (and advance i (cond ((< (+ i 1) (length es)) (+ i 1)) ((> i 0) (- i 1)) (else #f)))))
+    (cond
+      (j (list-goto-index! list-buf j)
+         (site-app-show-detail! list-buf (nth j es)))
+      ;; the press changed the page: the minute-old read no longer stands
+      ((buffer-known? buf)
+       (buffer-set-local! buf 'site-app-fetched-at #f)
+       (site-app-show-detail! list-buf row)))
     (site-app-read-page! name (site-app-current-page list-buf))))
 
 ;; A key finds the button that carries it. The page spec's 'detail-actions maps a
@@ -1439,7 +1450,7 @@
                (label (site-app-without-key (or (plist-get action 'text) "")))
                (selector (site-app-button-selector action))
                (live (lambda (k) (site-app-live-tab! name url k)))
-               (done (lambda (note) (site-app-detail-after! buf note))))
+               (done (lambda (note &optional advance) (site-app-detail-after! buf note advance))))
           (if hit
               ((cadr hit) (list 'buf buf 'action action 'selector selector 'live live 'done done))
               (begin
@@ -1449,7 +1460,8 @@
                           (tab-press tab selector
                             (lambda (html)
                               (done (if html (string-append label ": done")
-                                        (string-append label ": the site did not answer")))))))))))))))
+                                        (string-append label ": the site did not answer"))
+                                    (and html #t))))))))))))))
 
 (define site-app-action-letters
   '("a" "b" "c" "d" "e" "f" "h" "i" "j" "k" "l" "m" "n" "p" "r" "s" "t" "u" "v" "w" "x" "y" "z"))

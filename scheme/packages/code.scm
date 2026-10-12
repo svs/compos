@@ -1422,14 +1422,19 @@
 
 ;; -> (LINE KIND NAME DOC) rows, the outline contract
 (define (imenu-rows buf)
-  (if (buffer-derived-mode? buf "morg-mode")
-      (map (lambda (e)
-             (list (line-number-at-pos (car e)) "heading"
-                   (string-trim (cadr e)) ""))
-           (filter (lambda (e) (equal? (morg-kind e) 'heading))
-                   (morg-scan buf)))
-      (let ((rows (code-outline buf)))
-        (if (string? rows) '() rows))))
+  ;; a mode can own the index: the buffer-local imenu-index-function names a
+  ;; function from BUF to rows, the way Emacs's imenu-create-index-function does
+  (cond ((symbol? (buffer-local buf 'imenu-index-function))
+         ((eval (buffer-local buf 'imenu-index-function)) buf))
+        ((buffer-derived-mode? buf "morg-mode")
+         (map (lambda (e)
+                (list (line-number-at-pos (car e)) "heading"
+                      (string-trim (cadr e)) ""))
+              (filter (lambda (e) (equal? (morg-kind e) 'heading))
+                      (morg-scan buf))))
+        (else
+         (let ((rows (code-outline buf)))
+           (if (string? rows) '() rows)))))
 
 (define (imenu--snip s)
   (let ((s (string-trim s)))
@@ -1451,11 +1456,14 @@
                (label (if (member name seen)
                           (string-append name " (L" (number->string line) ")")
                           name))
-               (hint (string-append
-                       kind " · L" (number->string line)
-                       (if (or (not doc) (equal? doc ""))
-                           ""
-                           (string-append " — " (imenu--snip doc))))))
+               ;; a row with no kind is a part of a page: its words say more than its line
+               (hint (if (equal? kind "")
+                         (imenu--snip (or doc ""))
+                         (string-append
+                           kind " · L" (number->string line)
+                           (if (or (not doc) (equal? doc ""))
+                               ""
+                               (string-append " — " (imenu--snip doc)))))))
           (loop (cdr rs) (cons name seen)
                 (cons (list label line hint) out))))))
 

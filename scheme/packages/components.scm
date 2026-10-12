@@ -363,6 +363,82 @@
                 '())
             (component--get p 'body '())))))
 
+;; Reading views: a page of prose, not rows. Each takes TEXT or SEGS, where a
+;; seg's class may be c-strong, c-dim, c-sep or a tone: c-good, c-warn,
+;; c-bad, c-info.
+(define (component--content p)
+  (if (component--has? p 'segs) (list 'segs (component--get p 'segs))
+      (list 'text (component--get p 'text ""))))
+
+(define (component--click p)
+  (if (component--has? p 'click) (list 'click (component--get p 'click)) '()))
+
+(defcomponent 'ui/page
+  "A page of reading: its blocks in a padded column of comfortable width."
+  '((body blocks optional))
+  '(body ((tag "c-group" class "c-prose" text "A paragraph.")))
+  (lambda (p) (list 'tag "c-group" 'class "c-page" 'children (component--get p 'body '()))))
+
+(defcomponent 'ui/title
+  "A page title in large serif type, with an optional status badge beside it. LEVEL 2 is a smaller one."
+  '((text string optional) (segs list optional) (badge string optional) (tone string optional)
+    (level number optional) (click any optional))
+  '(text "Backend Engineer at Thine" badge "new" tone "info")
+  (lambda (p)
+    (append
+      (list 'tag "c-group"
+            'class (string-append "c-title c-title-" (number->string (component--get p 'level 1)))
+            'children (append (list (append (list 'tag "c-text" 'class "c-title-text") (component--content p)))
+                              (if (component--has? p 'badge)
+                                  (list (component 'ui/badge (list 'text (component--get p 'badge)
+                                                                   'class (component--get p 'tone ""))))
+                                  '())))
+      (component--click p))))
+
+(defcomponent 'ui/meta
+  "A quiet line of facts under a title: dim, small, its items apart by dots."
+  '((segs list required))
+  '(segs (("" "applied") ("c-sep" " · ") ("c-warn" "potential") ("c-sep" " · ") ("" "2 days ago")))
+  (lambda (p) (list 'tag "c-group" 'class "c-meta" 'segs (component--get p 'segs))))
+
+(defcomponent 'ui/prose
+  "A paragraph of reading text."
+  '((text string optional) (segs list optional) (click any optional))
+  '(segs (("c-strong" "Verdict ") ("" "clears the bar.")))
+  (lambda (p) (append (list 'tag "c-group" 'class "c-prose") (component--content p) (component--click p))))
+
+(defcomponent 'ui/bullet
+  "One bulleted line of reading text; the bullet hangs, the text wraps under itself."
+  '((text string optional) (segs list optional) (click any optional))
+  '(text "No Kubernetes evidence on the CV")
+  (lambda (p) (append (list 'tag "c-group" 'class "c-bullet") (component--content p) (component--click p))))
+
+(defcomponent 'ui/callout
+  "A box set apart from the page, with a small label: TONE note for an aside, paper for a letter."
+  '((label string optional) (tone string optional) (body blocks optional))
+  '(label "Internal note" tone "note" body ((tag "c-group" class "c-prose" text "Not sent.")))
+  (lambda (p)
+    (list 'tag "c-group"
+          'class (string-append "c-callout c-callout-" (component--get p 'tone "note"))
+          'children (append (if (component--has? p 'label)
+                                (list (list 'tag "c-group" 'class "c-callout-label" 'text (component--get p 'label)))
+                                '())
+                            (component--get p 'body '())))))
+
+(defcomponent 'ui/quote
+  "Quoted text that keeps its own line breaks."
+  '((text string required))
+  '(text "first line\nsecond line")
+  (lambda (p) (list 'tag "c-group" 'class "c-quote" 'text (component--get p 'text))))
+
+(defcomponent 'ui/chips
+  "A wrapping row of short tags."
+  '((items list required))
+  '(items ("backend" "fullstack" "startup"))
+  (lambda (p)
+    (list 'tag "c-group" 'class "c-chips"
+          'children (map (lambda (t) (component 'ui/badge (list 'text t))) (component--get p 'items)))))
+
 (define *component-gallery-buffer* "*Components*")
 
 (define (component-gallery-blocks)
@@ -421,46 +497,80 @@
     (if (run-hook-with-args-until-success 'block-click buf id) #t #f)))
 
 (define-style! 'components "
-.c-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); padding: 12px 2px 6px; border-bottom: 1px solid var(--border-bg); }
+.c-section { font-family: var(--font-mono); font-size: .85em; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); padding: 12px 2px 6px; border-bottom: 1px solid var(--border-bg); }
 .c-card { margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 0; overflow: hidden; }
+.c-card > :not(.c-fold-head) { margin-left: 10px; margin-right: 10px; }
 .c-fold-head { display: flex; gap: 8px; padding: 6px 10px; background: var(--hl-line-bg); cursor: pointer; font-family: var(--font-mono); }
 .c-caret, .c-dim, .c-kv-key { color: var(--dim-fg); }
 .c-row { padding: 4px 10px; font-family: var(--font-mono); }
 .c-row.current { background: var(--hl-line-bg); }
 .c-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
 .c-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 0; margin: 0 0 10px; border-bottom: 1px solid var(--border-bg); }
-.c-tab { display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border: 1px solid transparent; border-bottom: none; border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg); }
+.c-tab { display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px; border: 1px solid transparent; border-bottom: none; border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: .85em; color: var(--dim-fg); }
 .c-tab:hover { background: var(--hl-line-bg); color: var(--fg); }
 .c-tab-on { color: var(--fg); border-color: var(--border-bg); background: var(--hl-line-bg); }
 .c-tab-key { color: var(--accent-fg); font-weight: 600; }
-.c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: .85em; }
 .c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
 .c-action-key { color: var(--accent-fg); font-weight: 600; }
 .c-action-label { color: var(--fg); }
 .c-empty { padding: 12px; color: var(--dim-fg); font-family: var(--font-mono); }
-.c-badge { display: inline-block; border-radius: 0; padding: 1px 7px; background: var(--hl-line-bg); font-size: 10px; }
-.c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }
+.c-badge { display: inline-block; border-radius: 0; padding: 1px 7px; background: var(--hl-line-bg); font-size: .77em; }
+.c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: .85em; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
 .c-group { display: block; margin: 0 0 10px; }
-.c-table { display: table; width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+.c-table { display: table; width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: .85em; }
 .c-tr { display: table-row; }
 .c-th, .c-td { display: table-cell; padding: 3px 10px; white-space: nowrap; border-bottom: 1px solid var(--border-bg); }
-.c-th { color: var(--dim-fg); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+.c-th { color: var(--dim-fg); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: .77em; }
 .c-num { text-align: right; font-variant-numeric: tabular-nums; }
 .c-td.good, .c-stat.good .c-stat-value { color: var(--success-fg, #2e8b57); }
 .c-td.warn, .c-stat.warn .c-stat-value { color: var(--warning-fg, #b8860b); }
 .c-td.bad, .c-stat.bad .c-stat-value { color: var(--alert-fg, #d13b32); font-weight: 600; }
 .c-stats { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
 .c-stat { display: flex; flex-direction: column; min-width: 11ch; padding: 6px 10px; border: 1px solid var(--border-bg); font-family: var(--font-mono); }
-.c-stat-label { color: var(--dim-fg); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
-.c-stat-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.c-stat-sub { color: var(--dim-fg); font-size: 10px; }
+.c-stat-label { color: var(--dim-fg); font-size: .77em; text-transform: uppercase; letter-spacing: .06em; }
+.c-stat-value { font-size: 1.4em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.c-stat-sub { color: var(--dim-fg); font-size: .77em; }
 .c-keymap { display: flex; flex-wrap: wrap; gap: var(--s4) var(--s9); padding: 5px 12px; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.35; white-space: normal; color: var(--text-faint); }
 .c-keymap-row { display: inline-flex; align-items: baseline; gap: var(--s4); min-width: 0; max-width: 100%; white-space: nowrap; }
 /* the key is a c-action-key (layouts.ex): one element, one colour */
 .c-keymap-key { display: inline-block; flex: none; font-size: var(--fs-meta); line-height: 1.2; }
 .c-keymap-cmd { color: var(--text-faint); }
 .c-keymap-doc { color: var(--text-dim); }
+/* reading views: sizes in em, so a buffer's text scale carries them */
+.c-page { padding: 10px 14px 32px; max-width: 88ch; font-family: var(--font-sans); line-height: 1.55; color: var(--default-fg); }
+.c-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: .6em; margin: .3em 0 .15em; }
+.c-title-text { font-family: var(--font-serif, ui-serif, Georgia, serif); font-weight: 700; line-height: 1.2; color: var(--default-fg); }
+.c-title-1 .c-title-text { font-size: 1.7em; }
+.c-title-2 .c-title-text { font-size: 1.1em; }
+.c-meta { font-family: var(--font-sans); font-size: .88em; line-height: 1.5; color: var(--dim-fg); margin: .15em 0 .5em; }
+.c-prose { font-family: var(--font-sans); line-height: 1.6; margin: .15em 0 .7em; max-width: 75ch; }
+.c-bullet { font-family: var(--font-sans); line-height: 1.6; margin: 0 0 .25em; padding-left: 1.3em; text-indent: -1.3em; max-width: 80ch; }
+.c-bullet::before { content: '•'; display: inline-block; width: 1.3em; text-indent: 0; color: var(--accent-fg); }
+.c-prose.current, .c-bullet.current, .c-meta.current, .c-title.current { background: var(--hl-line-bg); }
+.c-callout { margin: .6em 0 1em; padding: .9em 1.2em; border-left: 3px solid var(--border-bg); background: var(--hl-line-bg); }
+.c-callout-label { font-family: var(--font-mono); font-size: .77em; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); margin-bottom: .5em; }
+.c-callout-note { background: color-mix(in srgb, var(--warn-fg) 9%, transparent); border-left-color: var(--warn-fg); }
+.c-callout-note .c-callout-label { color: var(--warn-fg); }
+.c-callout-paper { border: 1px solid var(--border-bg); font-family: var(--font-serif, ui-serif, Georgia, serif); font-size: 1.08em; padding: 1.3em 1.6em; }
+.c-callout-paper .c-prose, .c-callout-paper .c-bullet { font-family: inherit; max-width: none; }
+.c-quote { border-left: 2px solid var(--accent-fg); padding: .15em .8em; margin: .3em 0 .7em; white-space: pre-wrap; line-height: 1.55; }
+.c-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: .3em 0 .5em; }
+.c-strong { font-weight: 700; color: var(--default-fg); }
+.c-sep { color: var(--border-bg); }
+.c-good { color: var(--ok-fg); font-weight: 600; }
+.c-warn { color: var(--warn-fg); font-weight: 600; }
+.c-bad { color: var(--alert-fg); font-weight: 600; }
+.c-info { color: var(--accent-fg); font-weight: 600; }
+.c-badge.good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
+.c-badge.warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
+.c-badge.bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
+.c-badge.info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
+.c-action.good { color: var(--ok-fg); border-color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 12%, transparent); }
+.c-action.bad { color: var(--alert-fg); border-color: var(--alert-fg); }
+.c-action.dim { color: var(--dim-fg); border-style: dashed; }
+.c-action.good .c-action-label, .c-action.bad .c-action-label, .c-action.dim .c-action-label { color: inherit; }
 
 ")
 

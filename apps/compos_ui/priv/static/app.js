@@ -1523,6 +1523,10 @@
       mounted() {
         this.scroller = this.el.querySelector(".blocks-scroll");
         this.last = null;
+        // the reader's own wheel or touch takes the page back from a glide
+        this.stop = () => cancelAnimationFrame(this.raf);
+        this.el.addEventListener("wheel", this.stop, {passive: true});
+        this.el.addEventListener("touchstart", this.stop, {passive: true});
         this.follow();
       },
       updated() {
@@ -1532,11 +1536,51 @@
         if (!this.scroller) return;
         const marked = this.el.querySelectorAll("[data-current]");
         const cur = marked.length ? marked[marked.length - 1] : null;
+        const curKey = cur ? (cur.dataset.anchor || null) : null;
+        // anchor-mode marks the part point is in: going to a new part glides
+        // to it, so the eye travels with the page instead of being teleported
+        const part = this.el.querySelector(".anchor-current");
+        const partKey = part ? (part.dataset.anchor || part.textContent.slice(0, 40)) : null;
+        if (part && partKey !== this.lastPart) {
+          this.lastPart = partKey;
+          this.last = curKey;
+          this.glide(part);
+          return;
+        }
+        this.lastPart = partKey;
         if (!cur) return;
-        const key = cur.dataset.anchor || null;
-        if (key !== null && key === this.last) return;
-        this.last = key;
+        if (curKey !== null && curKey === this.last) return;
+        this.last = curKey;
         cur.scrollIntoView({ block: "nearest" });
+      },
+      // a part that fits stays put when it is already in full view; else it
+      // comes to rest just under the top. Ease-out, quicker for short hops.
+      glide(el) {
+        const s = this.scroller;
+        const sr = s.getBoundingClientRect(), er = el.getBoundingClientRect();
+        const zoom = (sr.height / s.offsetHeight) || 1;
+        const pad = 24 * zoom;
+        if (er.top >= sr.top + pad && er.bottom <= sr.bottom - pad) return;
+        const max = s.scrollHeight - s.clientHeight;
+        const target = Math.max(0, Math.min(max, s.scrollTop + (er.top - sr.top - pad) / zoom));
+        cancelAnimationFrame(this.raf);
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches) { s.scrollTop = target; return; }
+        const from = s.scrollTop, d = target - from;
+        if (Math.abs(d) < 1) return;
+        const dur = Math.min(560, 240 + Math.abs(d) * 0.22);
+        const ease = t => 1 - Math.pow(1 - t, 4);
+        const t0 = performance.now();
+        const step = now => {
+          const t = Math.min(1, (now - t0) / dur);
+          s.scrollTop = from + d * ease(t);
+          if (t < 1) this.raf = requestAnimationFrame(step);
+        };
+        this.raf = requestAnimationFrame(step);
+      },
+      destroyed() {
+        cancelAnimationFrame(this.raf);
+        this.el.removeEventListener("wheel", this.stop);
+        this.el.removeEventListener("touchstart", this.stop);
       }
     },
     // one rule for every list the arrows move through: the area

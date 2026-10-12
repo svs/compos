@@ -116,3 +116,39 @@
                       "and a name still finds its part")
         (check-false! (anchor-goto! *t-anchor-buf* "tabs")
                       "a name that is gone lands nowhere")))))
+
+(deftest 'a-block-page-marks-the-block-of-the-anchor
+  "on a page drawn as blocks, the outermost block spanning the anchor carries anchor-current"
+  (lambda ()
+    (let ((buf "*zz-anchor-blocks*"))
+      (buffer-create buf)
+      (buffer-set-text! buf "one\ntwo\nthree" #t)
+      (buffer-set-locals! buf
+        (list 'render-mode "blocks"
+              'render-blocks (list (list 'tag "div" 'class "a" 'lines '(1 1))
+                                   (list 'tag "div" 'class "b" 'lines '(2 3)
+                                         'children (list (list 'tag "div" 'class "c" 'lines '(2 3)))))))
+      (anchor-set! buf (list (list "b" 4 13)))
+      (buffer-goto! buf 5)
+      (anchor-sync! buf)
+      (let ((blocks (buffer-local buf 'render-blocks)))
+        (check-equal! (plist-get (car blocks) 'class) "a" "the other block")
+        (check-equal! (plist-get (cadr blocks) 'class) "b anchor-current" "the outermost")
+        (check-equal! (plist-get (car (plist-get (cadr blocks) 'children)) 'class) "c" "not the inner one"))
+      (buffer-goto! buf 0)
+      (anchor-sync! buf)
+      (check-equal! (plist-get (cadr (buffer-local buf 'render-blocks)) 'class) "b" "off when point leaves")
+      (buffer-kill! buf))))
+
+(deftest 'anchor-mode-gives-imenu-its-parts
+  "with anchor-mode on, imenu lists the anchors; off, the buffer's own index again"
+  (lambda ()
+    (let ((buf "*zz-anchor-imenu*"))
+      (buffer-create buf)
+      (buffer-set-text! buf "one\ntwo\nthree" #t)
+      (enable-minor-mode! buf "anchor-mode")
+      (anchor-set! buf (list (list "two" 4 7) (list "three" 8 13)))
+      (check-equal! (imenu-rows buf) '((2 "part" "two" "") (3 "part" "three" "")) "the parts")
+      (disable-minor-mode! buf "anchor-mode")
+      (check-equal! (buffer-local buf 'imenu-index-function) #f "off again")
+      (buffer-kill! buf))))

@@ -116,7 +116,48 @@
            (buffer-at-point-map! buf map))
          (overlay-set! buf 'anchor
            (if a (list (list (anchor-start a) (anchor-end a) "anchor-current")) '()))
+         (anchor--mark-blocks! buf a)
          a)))
+
+;; A page drawn as blocks shows no text overlay, so there the highlight is
+;; the block the anchor spans: the outermost one whose lines are the anchor's
+;; carries anchor-current. The tree is rewritten only when the anchor or the
+;; page changes.
+(define (anchor--span-lines buf a)
+  (and a (with-current-buffer buf
+           (lambda () (list (line-number-at-pos (anchor-start a))
+                            (line-number-at-pos (max (anchor-start a) (- (anchor-end a) 1))))))))
+
+(define (anchor--unclass class)
+  (string-trim (string-join (filter (lambda (c) (not (equal? c "anchor-current")))
+                                    (string-split (or class "") " "))
+                            " ")))
+
+(define (anchor--marked blocks lines)
+  (let ((done #f))
+    (let walk ((bs blocks))
+      (map (lambda (blk)
+             (if (not (pair? blk)) blk
+                 (let* ((class (anchor--unclass (plist-get blk 'class)))
+                        (hit (and lines (not done) (equal? (plist-get blk 'lines) lines)))
+                        (blk (if (or hit (plist-get blk 'class))
+                                 (plist-put blk 'class (if hit (string-append class " anchor-current") class))
+                                 blk)))
+                   (when hit (set! done #t))
+                   (if (pair? (plist-get blk 'children))
+                       (plist-put blk 'children (walk (plist-get blk 'children)))
+                       blk))))
+           bs))))
+
+(define (anchor--mark-blocks! buf a)
+  (let ((blocks (buffer-local buf 'render-blocks))
+        (lines (anchor--span-lines buf a))
+        (last (buffer-local buf 'anchor-marked)))
+    (when (and (equal? (buffer-local buf 'render-mode) "blocks") (pair? blocks)
+               (not (and last (eq? (cdr last) blocks) (equal? (car last) lines))))
+      (let ((new (anchor--marked blocks lines)))
+        (buffer-set-local! buf 'anchor-marked (cons lines new))
+        (buffer-set-local! buf 'render-blocks new)))))
 
 (define (anchor--post-command!)
   (let ((buf (current-buffer)))
@@ -168,7 +209,17 @@
          (hit (if (> dir 0) (anchor--after buf pos) (anchor--before buf pos))))
     (cond (hit (goto-char! (anchor-start hit)) (anchor-sync! buf))
           ((> dir 0) (next-line!))
-          (else (previous-line!)))))
+          (else (previous-line!) (anchor--clamp-top! buf)))))
+
+;; nothing above the top anchor is a place to go: the walk up stops there
+(define (anchor--top buf)
+  (let ((as (anchor-list buf))) (and (pair? as) (anchor-start (car as)))))
+
+(define (anchor--clamp-top! buf)
+  (let ((top (anchor--top buf)))
+    (when (and top (< (buffer-point buf) top))
+      (goto-char! top)
+      (anchor-sync! buf))))
 
 (define-command "anchor-down" "Move point to the next anchor, or down a line when there is none"
   (lambda () (anchor--arrow! 1)))
@@ -219,7 +270,8 @@
     (cond (hit (goto-char! (anchor-start hit)) (anchor-sync! buf) (message (anchor-name hit)))
           ((> (anchor--rows lines pos edge) 0)
            (let ((to (anchor--page-from lines pos dir page)))
-             (when to (goto-char! to) (anchor-sync! buf))))
+             (when to (goto-char! to) (anchor-sync! buf))
+             (when (< dir 0) (anchor--clamp-top! buf))))
           (else (message (if (> dir 0) "No next anchor" "No previous anchor"))))))
 
 (define-command "anchor-read-next" "Move to the next anchor, or one page down past the last"
@@ -243,8 +295,34 @@
 ;; Subtle on purpose: an anchor is a section, not a match, so its whole
 ;; range wears this. A theme that names the face wins.
 (defface! 'anchor-current 'inherit 'lazy-highlight)
+;; the same mark on a block page: a tint and a hairline round the block
+(define-style! 'anchor "
+.anchor-current { background-image: linear-gradient(color-mix(in srgb, var(--accent-fg) 7%, transparent), color-mix(in srgb, var(--accent-fg) 7%, transparent)); outline: 1px solid color-mix(in srgb, var(--accent-fg) 45%, transparent); outline-offset: 2px; border-radius: 2px; }
+.anchor-current .current:not(.anchor-current) { background: transparent; }
+")
+
+(define (anchor-imenu-rows buf)
+  ;; imenu's index of an anchored page: its parts, a part inside another
+  ;; indented under it, its first words for the preview
+  (let ((text (buffer-text buf)))
+    (let loop ((as (anchor-list buf)) (open '()) (acc '()))
+      (if (null? as)
+          (reverse acc)
+          (let* ((a (car as))
+                 (open (filter (lambda (o) (and (<= (anchor-start o) (anchor-start a))
+                                                (>= (anchor-end o) (anchor-end a))))
+                               open))
+                 (path (string-append (string-join (map (lambda (o) "   ") open) "") (anchor-name a)))
+                 (body (substring-bytes text (anchor-start a) (anchor-end a)))
+                 (lines (cdr (string-split body "\n")))
+                 (doc (if (pair? lines) (string-join lines " ") "")))
+            (loop (cdr as) (cons a open)
+                  (cons (list (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a))))
+                              "" path doc)
+                        acc)))))))
 
 (define (anchor--apply! buf)
+  (buffer-set-local! buf 'imenu-index-function 'anchor-imenu-rows)
   ;; Anchor navigation must win over generic scrolling in other minor maps.
   (let ((maps (buffer-minor-maps buf)))
     (buffer-minor-maps! buf
@@ -256,7 +334,10 @@
 (define (anchor--teardown! buf)
   (when (buffer-exists? buf)
     (buffer-at-point-map! buf #f)
-    (overlay-set! buf 'anchor '()))
+    (when (eq? (buffer-local buf 'imenu-index-function) 'anchor-imenu-rows)
+      (buffer-set-local! buf 'imenu-index-function #f))
+    (overlay-set! buf 'anchor '())
+    (anchor--mark-blocks! buf #f))
   #t)
 
 ;; TAB and S-TAB are the page's walk, the way they are a browser's. A mode
@@ -318,6 +399,7 @@
 (public! 'anchor-end "(anchor-end ANCHOR) — the byte after its last")
 (public! 'anchor-keymap "(anchor-keymap ANCHOR) — the keymap in force inside it, or #f")
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
+(public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor")
 (public! 'buffer-outline
   "(buffer-outline BUF) — BUF's parts, read first: its anchors as (NAME FIRST-LINE LAST-LINE); with none, its markdown headings or code definitions")
 (public! 'buffer-section "(buffer-section BUF NAME) — the text of the anchor buffer-outline named NAME, or #f")

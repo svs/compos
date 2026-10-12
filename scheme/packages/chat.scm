@@ -792,17 +792,24 @@
 
 ;; Set a chat's title by renaming its buffer in place.
 (define (chat-title buf title)
-  (let ((name (string-trim title)))
-    (cond ((equal? name "") #f)
-          ;; a chat that already wears this name is titled all the same:
-          ;; the local is what says so, and the auto-titler reads it
-          ((equal? name buf) (buffer-set-local! name 'chat-title name) #t)
-          ((rename-buffer! buf name)
-           ;; a title, once set, is the chat's own: the auto-titler names
-           ;; a chat that has none, and never renames one that has
-           (buffer-set-local! name 'chat-title name)
-           #t)
-          (else #f))))
+  (let ((base (string-trim title)))
+    (if (equal? base "")
+        #f
+        ;; a name another buffer wears takes the next free <N>: a retitle
+        ;; that fails quietly leaves the chat under its default name
+        (let loop ((n 2) (name base))
+          (cond
+            ;; a chat that already wears this name is titled all the same:
+            ;; the local is what says so, and the auto-titler reads it
+            ((equal? name buf) (buffer-set-local! name 'chat-title name) #t)
+            ((rename-buffer! buf name)
+             ;; a title, once set, is the chat's own: the auto-titler names
+             ;; a chat that has none, and never renames one that has
+             (buffer-set-local! name 'chat-title name)
+             #t)
+            ((and (buffer-known? name) (< n 100))
+             (loop (+ n 1) (string-append base "<" (number->string n) ">")))
+            (else #f))))))
 
 (public! 'chat-title
   "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
@@ -1444,8 +1451,17 @@
                              (text (if (and (string? desc)
                                             (not (equal? (string-trim desc) "")))
                                        desc
-                                       (car card))))
-                        (chat-summary-land! buf
+                                       (car card)))
+                             ;; an untitled chat takes its name here, and the
+                             ;; buffer wears it: a title only in the local
+                             ;; leaves the switcher showing *chat:N*
+                             (name (and (not (string? (buffer-local buf 'chat-title)))
+                                        (chat-title--short
+                                          (chat-summary--clip
+                                            (chat-summary--flatten (car card))
+                                            chat-title-max-bytes))))
+                             (b (if (and name (chat-title buf name)) name buf)))
+                        (chat-summary-land! b
                           (chat-summary--flatten
                             (chat-summary--first-sentence text)))))))
                 #t)))))
@@ -1623,12 +1639,11 @@
       (if (equal? (string-trim name) "")
           (begin
             (message "chat-retitle: asking the model")
-            ;; the same two moments, both forced: the name comes from the
-            ;; first prompt again and the line from the newest turn. Only
-            ;; when the card writer is away does the hosted model answer.
-            (or (and (chat-title-first-prompt! buf #t)
-                     (chat-summary-turn! buf))
-                (chat-summary-refresh! buf #t)))
+            ;; forced, with no conditions: the card writer names the chat
+            ;; from every ask it has made, and when it is away or answers
+            ;; nothing the hosted model does. Either way the buffer is
+            ;; renamed, whatever title it had.
+            (chat-summary-refresh! buf #t))
           (chat-title buf name))
       (when after (after)))))
 

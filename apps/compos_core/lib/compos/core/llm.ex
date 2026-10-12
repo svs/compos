@@ -42,7 +42,17 @@ defmodule Compos.Core.LLM do
       when is_binary(requested_model) and is_function(callback, 1) do
     {:ok, _} =
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-        case run_request(prompt, requested_model) do
+        # an exit inside the request (a lane timeout on the key lookup, a
+        # killed pool) must reach the caller: a silent death leaves every
+        # callback waiting forever
+        result =
+          try do
+            run_request(prompt, requested_model)
+          catch
+            :exit, reason -> {:error, "llm request exited: #{inspect(reason)}"}
+          end
+
+        case result do
           {:ok, text} -> callback.(text)
           {:error, msg} when is_function(on_error, 1) -> on_error.(msg)
           {:error, msg} -> Session.message("llm error: #{msg}")
@@ -578,7 +588,9 @@ defmodule Compos.Core.LLM do
             {:error, err_msg(e)}
         end
       else
-        case with_retry(fn -> ReqLLM.generate_text(req_model_arg(spec), ctx, opts) end) do
+        case with_retry(fn ->
+               with_deadline(fn -> ReqLLM.generate_text(req_model_arg(spec), ctx, opts) end)
+             end) do
           {:ok, resp} -> {:ok, from_req_response(resp, spec)}
           {:error, e} -> {:error, err_msg(e)}
         end
@@ -607,6 +619,45 @@ defmodule Compos.Core.LLM do
     end
   end
 
+  # Every model call shares ReqLLM.Finch, whose pools speak HTTP/2 over one
+  # connection per host. A connection that dies without a close (sleep, a
+  # network change) can wedge its pool: the request never errors, the
+  # receive timeout inside the pool never fires, and every later call to
+  # that host waits forever behind it. The deadline lives outside the pool,
+  # so it fires anyway; it then restarts the pool, and the retry connects
+  # afresh. It sits past the receive timeout, so a slow healthy reply
+  # still lands.
+  @deadline_ms 200_000
+
+  defp with_deadline(fun) do
+    timeout = Application.get_env(:compos_core, :llm_deadline_ms, @deadline_ms)
+    task = Task.Supervisor.async_nolink(Compos.Core.TaskSupervisor, fun)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        {:error, %{reason: {:exit, reason}}}
+
+      nil ->
+        reset_pool()
+        {:error, %{reason: :deadline}}
+    end
+  end
+
+  # drop every pooled connection: the restarted Finch connects on demand
+  def reset_pool do
+    Session.message("llm: no reply in time, resetting the model connection pool", "warning")
+
+    with :ok <- Supervisor.terminate_child(ReqLLM.Supervisor, ReqLLM.Finch),
+         {:ok, _} <- Supervisor.restart_child(ReqLLM.Supervisor, ReqLLM.Finch) do
+      :ok
+    else
+      other -> other
+    end
+  end
+
   @retry_statuses [500, 502, 503, 529]
 
   # req_llm reports the status as an integer on one error struct and as a
@@ -627,7 +678,7 @@ defmodule Compos.Core.LLM do
   # once: :pool_not_available while the pool is out of the registry,
   # :disconnected or :read_only when the request reaches it. The first ask
   # after a quiet spell found that gap.
-  @retry_transport [:pool_not_available, :disconnected, :read_only, :connection_closed, :closed]
+  @retry_transport [:pool_not_available, :disconnected, :read_only, :connection_closed, :closed, :deadline]
 
   defp retryable?(%{reason: reason}) when reason in @retry_transport, do: true
   defp retryable?(%{reason: reason}) when is_map(reason), do: retryable?(reason)
@@ -988,6 +1039,9 @@ defmodule Compos.Core.LLM do
   defp numeric(n) when is_number(n), do: n
   defp numeric(_), do: nil
 
+  defp err_msg(%{reason: :deadline}),
+    do: "no reply from the model in #{div(@deadline_ms, 1000)}s; the connection pool was reset"
+
   defp err_msg(%{__exception__: true} = e), do: Exception.message(e)
   defp err_msg(other), do: inspect(other)
 
@@ -1008,7 +1062,9 @@ defmodule Compos.Core.LLM do
     with {:ok, key_opts_list} <- key_opts(spec) do
       opts = key_opts_list ++ req_opts(spec, [])
 
-      case with_retry(fn -> ReqLLM.generate_text(req_model_arg(spec), prompt, opts) end) do
+      case with_retry(fn ->
+             with_deadline(fn -> ReqLLM.generate_text(req_model_arg(spec), prompt, opts) end)
+           end) do
         {:ok, resp} ->
           Compos.Core.LLMUsage.record(
             requested_model,

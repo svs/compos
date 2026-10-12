@@ -293,6 +293,44 @@
 (public! 'skills-scan!
   "(skills-scan!) — rescan priv/skills and ~/.compos/skills into the catalog, and drop every group's skills to rescan on the next ask")
 
+;;; --- the skills a chat sees, as one Dired ----------------------------------
+;;; A chat's skills live in several roots: the catalog's, then its group's.
+;;; Dired lists one directory, so the view is a directory of links, one per
+;;; skill the chat resolves, the group's own winning over the catalog's.
+
+(domain! 'chat)
+(effects! '(write display))
+
+(define (skills-view-dir g)
+  (if g
+      (string-append (group-home-dir g) "/skills-view")
+      (string-append (compos-home) "/skills-view")))
+
+(define (skills-view-render! g)
+  (let* ((set (skills--group g))
+         (entries (if set (car set) *skills*))
+         (dir (skills-view-dir g)))
+    (make-directory! dir)
+    (for-each
+      (lambda (entry)
+        (delete-file! (string-append dir "/"
+                        (if (string-suffix? "/" entry)
+                            (substring entry 0 (- (string-length entry) 1))
+                            entry))))
+      (list-dir dir))
+    (for-each
+      (lambda (s) (make-symlink! (caddr s) (string-append dir "/" (car s))))
+      entries)
+    dir))
+
+(define-command "chat-show-skills" "Open Dired on the skills this chat can load"
+  (lambda ()
+    (let ((chat (llm-preset-target)))
+      (dired-open (skills-view-render! (buffer-group (or chat (current-buffer))))))))
+
+(public! 'skills-view-render!
+  "(skills-view-render! G) — a directory of links to every skill G's chats can load, rebuilt now; #f for the catalog alone")
+
 ;;; --- skills that carry code ----------------------------------------------------
 ;;; A skill may carry its own Scheme: one fenced block in SKILL.md whose
 ;;; info string is scheme run, holding (lambda (args) ...). skill-run runs

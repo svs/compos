@@ -854,10 +854,12 @@
 (define (switch-window-buffer-pick! step &optional mode-only)
   "Offer this window's other buffers in the minibuffer. Each row shows in
 the window as the selection moves; RET keeps it and C-g puts the old one
-back. STEP 1 starts on the newest row, -1 on the oldest."
+back. The list opens on the current buffer; the newest other buffer is
+the next row down. STEP is kept for the callers."
   (let* ((home (active-window))
-         (rows (switch-window-buffers mode-only)))
-    (if (null? rows)
+         (others (switch-window-buffers mode-only))
+         (rows (cons (window-buffer home) others)))
+    (if (null? others)
         (message (if mode-only
                      "No other buffer of this mode in this window"
                      "No other buffer in this window"))
@@ -874,8 +876,6 @@ back. STEP 1 starts on the newest row, -1 on the oldest."
                 (group-current-recalculate!)))
             restore!
             #f "minibuffer")
-          (when (< step 0)
-            (for-each (lambda (_) (minibuffer-next!)) (cdr rows)))
           (mb-select-notify!)))))
 
 (define-command "switch-window-buffer"

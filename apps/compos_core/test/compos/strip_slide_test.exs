@@ -31,8 +31,8 @@ defmodule Compos.StripSlideTest do
                  (layout-target-set! 'two-pane)
                  (window-new-hidden! "zz-lp-c")
                  (select-window! (window-showing "zz-lp-b"))
-                 (global-set-key "<f9>" "focus-right")
-                 (global-set-key "<f10>" "focus-left")
+                 (global-set-key "<f9>" "next-pane")
+                 (global-set-key "<f10>" "previous-pane")
                  """,
                  frame
                )

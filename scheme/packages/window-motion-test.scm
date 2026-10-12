@@ -47,13 +47,13 @@
       (t--wm-done!))))
 
 (deftest 'focus-commands-are-the-motion-by-name
-  "run-command focus-right and focus-left move between the panes, with no key"
+  "run-command next-pane and previous-pane move between the panes, with no key"
   (lambda ()
     (let ((panes (t--wm-setup!)))
-      (run-command "focus-right")
-      (check-equal! (active-window) (cadr panes) "focus-right selects the right pane")
-      (run-command "focus-left")
-      (check-equal! (active-window) (car panes) "focus-left selects the left pane")
+      (run-command "next-pane")
+      (check-equal! (active-window) (cadr panes) "next-pane selects the right pane")
+      (run-command "previous-pane")
+      (check-equal! (active-window) (car panes) "previous-pane selects the left pane")
       (t--wm-done!))))
 
 (deftest 'arrow-chord-spells-emacs-modifiers-as-key-specs
@@ -72,11 +72,11 @@
   "focus-default-keybindings binds each arrow under MODIFIERS to its focus command"
   (lambda ()
     (focus-default-keybindings t--wm-test-mods)
-    (check-equal! (key-binding (arrow-chord t--wm-test-mods "<left>")) "focus-left" "left")
+    (check-equal! (key-binding (arrow-chord t--wm-test-mods "<left>")) "previous-pane" "left")
     (check-equal! (key-binding (arrow-chord t--wm-test-mods "<down>")) "focus-down" "down")
     (window-default-keybindings t--wm-test-mods)
     (check-equal! (key-binding (arrow-chord t--wm-test-mods "<right>"))
-                  "window-right" "the swap installer replaces the same chord")
+                  "window-next-pane" "the swap installer replaces the same chord")
     (for-each (lambda (dir) (global-unset-key (arrow-chord t--wm-test-mods (string-append "<" dir ">"))))
               '("left" "right" "up" "down"))
     (check-false! (key-binding (arrow-chord t--wm-test-mods "<left>")) "the test chord is free again")))

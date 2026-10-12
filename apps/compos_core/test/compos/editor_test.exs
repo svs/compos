@@ -2218,36 +2218,30 @@ defmodule Compos.EditorTest do
       {:ok, _} = Compos.Core.Session.eval(~s{(buffer-kill! "*ro2*")})
     end
 
-    test "s-arrows move between windows, S-arrows walk buffer history", %{buf: _buf} do
+    test "s-arrows walk the panes, C-x arrows walk buffer history", %{buf: _buf} do
       press(["C-x", "3"])
       active = Editor.snapshot().active
       press(["s-<right>"])
       assert Editor.snapshot().active != active
       press(["s-<left>"])
       assert Editor.snapshot().active == active
-      # geometry, not tree order: no window above in a pure h-split
-      press(["s-<up>"])
-      assert Editor.snapshot().active == active
-      # 2x2-ish grid: split the left pane below, then focus down and back
+      # pane order, not geometry: the pane below the left one comes next
       press(["C-x", "2"])
-      press(["s-<down>"])
+      press(["s-<right>"])
       below = Editor.snapshot().active
       refute below == active
-      press(["s-<up>"])
-      assert Editor.snapshot().active == active
-      # from top-left, right must reach the full-height right pane
       press(["s-<right>"])
       refute Editor.snapshot().active in [active, below]
       press(["C-x", "1"])
 
-      # S-<left> = previously used buffer; repeats go deeper, not toggle
+      # C-x <left> = previously used buffer; repeats go deeper, not toggle
       a = fresh_buffer()
       m = fresh_buffer()
-      press(["S-<left>"])
+      press(["C-x", "<left>"])
       assert Editor.current_buffer() == a
-      press(["S-<left>"])
+      press(["C-x", "<left>"])
       refute Editor.current_buffer() in [a, m]
-      press(["S-<right>", "S-<right>"])
+      press(["C-x", "<right>", "C-x", "<right>"])
       assert Editor.current_buffer() == m
 
       # s-S-arrows carry the buffer into the neighbor pane, focus follows

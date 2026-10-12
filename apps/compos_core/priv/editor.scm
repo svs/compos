@@ -5604,8 +5604,10 @@
 (define-keymap! "editing-caret-map")
 (define-key "editing-caret-map" "s-<left>" "beginning-of-line")
 (define-key "editing-caret-map" "s-<right>" "end-of-line")
-;; Cmd-up and Cmd-down always walk the group (groups.scm), in every state.
-(for-each (lambda (k) (keymap-unset! "editing-caret-map" k)) '("s-<up>" "s-<down>"))
+;; In the focus state Cmd-up and Cmd-down walk this window's buffers
+;; (window.scm); in the editing state they go to either end of the buffer.
+(define-key "editing-caret-map" "s-<up>" "beginning-of-buffer")
+(define-key "editing-caret-map" "s-<down>" "end-of-buffer")
 
 (define *editing-landing* '())  ; ((frame window buffer) ...) the last landing of each frame
 
@@ -5742,9 +5744,9 @@
 ;; The directional commands are window commands by name, so a
 ;; redefinition that loses their catalog domain still counts as a landing.
 (define *direction-command-names*
-  '("focus-left" "focus-right" "focus-up" "focus-down"
-    "window-left" "window-right" "window-up" "window-down"
-    "buffer-left" "buffer-right" "buffer-up" "buffer-down"))
+  '("previous-pane" "next-pane" "focus-up" "focus-down"
+    "window-previous-pane" "window-next-pane" "window-up" "window-down"
+    "buffer-previous-pane" "buffer-next-pane" "buffer-up" "buffer-down"))
 
 (define (editing--window-command? cmd)
   (and (string? cmd)
@@ -6248,9 +6250,7 @@
     ;; the layouts go on for ever: these move the panes along the strip
     ("<right>" "layout-forward")
     ("<left>" "layout-backward")))
-;; Cmd-arrows move the focus; Cmd-Shift-arrows swap the two panes
-(global-set-key "S-<left>" "previous-buffer")
-(global-set-key "S-<right>" "next-buffer")
+;; The arrows with Cmd or Shift are the pane motion keys (window.scm)
 (global-set-key "C-x <left>" "previous-buffer")
 (global-set-key "C-x <right>" "next-buffer")
 

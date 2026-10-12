@@ -2986,13 +2986,9 @@ is forgotten and that group falls back to creation order in the switcher."
                          (string-append "This pane prefers " mode)
                          "This pane takes its preferred mode from what it shows"))))))))
 
-;; Two walks. The Cmd-arrows on the vertical axis walk every buffer of
-;; the group: Cmd-down is the next, Cmd-up the one before. C-` walks only
-;; the buffers of this buffer's mode. The horizontal axis moves the focus
-;; (window.scm), so the two axes never argue over a key.
+;; C-` walks the buffers of this buffer's mode in the group. The arrows
+;; belong to window.scm: they walk the panes and this window's buffers.
 (global-set-key "C-`" "group-next-mode-buffer")
-(global-set-key "s-<down>" "group-next-buffer")
-(global-set-key "s-<up>" "group-previous-buffer")
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the

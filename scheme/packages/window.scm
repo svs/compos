@@ -274,7 +274,7 @@
 ;; show NAME in WIN: the ring records it, unless this is a look
 ;;; One buffer, one window. A display of NAME in WIN takes NAME away from
 ;;; every other window of the frame, and each of those reveals what it showed
-;;; before — the same move buffer-left and buffer-right make, done for you.
+;;; before — the same move buffer-previous-pane and buffer-next-pane make, done for you.
 ;;; A preview is a look, not a place, so the peek path never evicts.
 (define (window-eviction-buffer win name)
   (let* ((shown (map cadr (window-list)))
@@ -2689,37 +2689,53 @@ bottom, as a window-rects row; #f past either end."
                    (if (has? 'shift) "S-" "")
                    key)))
 
-(define (install-arrow-keys! modifiers prefix)
+(define (arrow-command family dir)
+  "The command FAMILY (focus, window or buffer) runs on the arrow DIR: left
+and right walk the panes, up and down move by geometry."
+  (let ((pane (cond ((equal? dir "left") "previous-pane")
+                    ((equal? dir "right") "next-pane")
+                    (else #f))))
+    (cond ((not pane) (string-append family "-" dir))
+          ((equal? family "focus") pane)
+          (else (string-append family "-" pane)))))
+
+(define (install-arrow-keys! modifiers family)
   (for-each
     (lambda (dir)
       (global-set-key (arrow-chord modifiers (string-append "<" dir ">"))
-                      (string-append prefix dir)))
+                      (arrow-command family dir)))
     *direction-names*))
 
 (define (focus-default-keybindings &optional modifiers)
-  (install-arrow-keys! modifiers "focus-"))
+  (install-arrow-keys! modifiers "focus"))
 
 ;; default chords: Cmd-Shift for the window and buffer families
 (define (window-default-keybindings &optional modifiers)
-  (install-arrow-keys! (or modifiers '(shift super)) "window-"))
+  (install-arrow-keys! (or modifiers '(shift super)) "window"))
 
 (define (buffer-default-keybindings &optional modifiers)
-  (install-arrow-keys! (or modifiers '(shift super)) "buffer-"))
+  (install-arrow-keys! (or modifiers '(shift super)) "buffer"))
 
 (domain! 'unknown)
 (effects! '(unknown))
 
-;; Cmd-left and Cmd-right move the focus. Cmd-up and Cmd-down do NOT: they
-;; walk the group's buffers in the pane you stand in, and groups.scm binds
-;; them, because the walk is a group's business. One escape hatch, one
-;; axis: whatever the frame looks like, Cmd-down is always the next buffer.
-;; Cmd-Shift-arrows swap the two panes. Cmd-Ctrl-left and Cmd-Ctrl-right
-;; move this buffer to the neighboring pane.
-(global-set-key (arrow-chord 'super "<left>") "focus-left")
-(global-set-key (arrow-chord 'super "<right>") "focus-right")
-(window-default-keybindings '(shift super))
-(global-set-key (arrow-chord '(super control) "<left>") "buffer-left")
-(global-set-key (arrow-chord '(super control) "<right>") "buffer-right")
+;; The motion keys of the focus state. Left and right walk the panes:
+;; Cmd moves the focus, Cmd-Shift moves the window, Shift moves the buffer.
+;; Up and down walk this window's buffers in the minibuffer (switch.scm):
+;; Shift walks all of them, Cmd only those of this mode. The editing state
+;; keeps these keys for CUA motion and selection.
+(for-each
+  (lambda (k) (global-set-key (car k) (cadr k)))
+  '(("s-<left>" "previous-pane")
+    ("s-<right>" "next-pane")
+    ("s-S-<left>" "window-previous-pane")
+    ("s-S-<right>" "window-next-pane")
+    ("S-<left>" "buffer-previous-pane")
+    ("S-<right>" "buffer-next-pane")
+    ("S-<up>" "window-previous-buffer")
+    ("S-<down>" "window-next-buffer")
+    ("s-<up>" "window-previous-mode-buffer")
+    ("s-<down>" "window-next-mode-buffer")))
 
 ;;; --- the public API of this file ----------------------------------------------
 ;;; The catalog scope of each entry is the one it had in editor.scm.
@@ -2803,9 +2819,9 @@ bottom, as a window-rects row; #f past either end."
 (catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
 (category! 'commands)
-(public! 'focus-default-keybindings "(focus-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to focus-left/right/up/down")
-(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-left/right/up/down; the logical windows exchange panes with their complete stacks and focus follows")
-(public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-left/right/up/down; the buffer moves to the neighbor and its previous buffer shows here")
+(public! 'focus-default-keybindings "(focus-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to previous-pane/next-pane and focus-up/down")
+(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-previous-pane/next-pane and window-up/down; the logical windows exchange panes with their complete stacks and focus follows")
+(public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-previous-pane/next-pane and buffer-up/down; the buffer moves to the neighbor and its previous buffer shows here")
 (public! 'arrow-chord "(arrow-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (arrow-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'layout-arranging? "(layout-arranging?) — #t while the layout engine is building the frame; a package that moves windows must stand down")
 (public! 'layout-abort! "(layout-abort!) — clear a layout build left in progress by a failure; a top-level build calls this first")

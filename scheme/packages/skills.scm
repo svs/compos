@@ -189,12 +189,14 @@
                (string-trim (substring s end (string-length s)))))))
 
 (define (skill-expand-input input)
+  ;; a reference, not the text: the agent loads it with (skill NAME), so the
+  ;; instructions never sit in the transcript to be resent every turn
   (let* ((parts (skill-input-split input))
          (s (and parts (assoc (car parts) (skills--here)))))
     (and s
          (string-append
-           "Use the skill " (car s) ". Its instructions:\n\n"
-           (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
+           "Use the skill " (car s) ". Load its instructions with (skill \""
+           (car s) "\") before you act."
            (if (equal? (cadr parts) "")
                ""
                (string-append "\n\nArguments: " (cadr parts)))))))

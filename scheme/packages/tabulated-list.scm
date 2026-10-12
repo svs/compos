@@ -525,8 +525,62 @@
 ;; every term a substring of the row, and a "(" in the input is a
 ;; character, not half of a regexp
 (define (list-match? buf e input &optional ctx)
-  (let ((m (if ctx (nth 7 ctx) (list-opt buf 'match))))
+  (let ((m (if ctx (nth 7 ctx) (list-matcher buf))))
     (if m (m buf e input) (completion-match? (list-row-text buf e ctx) input 'substring))))
+
+;;; A list defines filters: a word that starts with a declared prefix
+;;; matches one field of the row, and the other words match the way the
+;;; list always matched. So `s:open acme` in todos keeps the open tasks
+;;; that say acme. A mode declares them as 'filters, a list of
+;;; (PREFIX FIELD DOC) where FIELD is (buf entry) -> text; anyone adds one
+;;; to any list mode with list-define-filter!, and the last one wins.
+
+;; survives a reload of this file, like *list-modes*
+(define *list-mode-filters* (if (boundp '*list-mode-filters*) *list-mode-filters* '()))
+
+(define (list-mode-filters name)
+  "the filters of list mode NAME as (PREFIX FIELD DOC), the declared ones and the added ones"
+  (let* ((added (let ((e (assoc name *list-mode-filters*))) (if e (cdr e) '())))
+         (declared (or (plist-get (list-mode-opts name) 'filters) '())))
+    (append added (remove (lambda (f) (assoc (car f) added)) declared))))
+
+(define (list-define-filter! mode prefix field &optional doc)
+  "give list mode MODE the filter PREFIX: a word PREFIXtext in the filter matches FIELD (buf entry) -> text"
+  (let* ((name (if (symbol? mode) (symbol->string mode) mode))
+         (e (assoc name *list-mode-filters*))
+         (rest (if e (remove (lambda (f) (equal? (car f) prefix)) (cdr e)) '())))
+    (set! *list-mode-filters*
+          (cons (cons name (cons (list prefix field (or doc "")) rest))
+                (remove (lambda (x) (equal? (car x) name)) *list-mode-filters*)))
+    (list-mode-filters name)))
+
+;; the matcher one draw shares: the mode's own, or the row text, behind
+;; the mode's filters. A list without filters keeps its matcher as it was.
+(define (list-matcher buf)
+  (let ((m (list-opt buf 'match))
+        (fs (let ((all (list-mode-filters (list-mode-of buf))))
+              ;; the longest prefix answers first, so "p:" wins over "p"
+              (map (lambda (k) (assoc (cadr k) all))
+                   (sort (map (lambda (f) (list (- 0 (string-byte-length (car f))) (car f))) all))))))
+    (if (null? fs)
+        m
+        (lambda (buf e input)
+          (let loop ((ws (string-split input " ")) (plain '()))
+            (cond ((null? ws)
+                   (let ((q (string-join (reverse plain) " ")))
+                     (or (equal? q "")
+                         (if m (m buf e q)
+                             (completion-match? (list-row-text buf e) q 'substring)))))
+                  ((equal? (car ws) "") (loop (cdr ws) plain))
+                  (else
+                   (let* ((w (car ws))
+                          (f (find (lambda (f) (string-prefix? (car f) w)) fs)))
+                     (if f
+                         (let ((v (substring-bytes w (string-byte-length (car f)) (string-byte-length w)))
+                               (hay (or ((cadr f) buf e) "")))
+                           (and (or (equal? v "") (completion-match? hay v 'substring))
+                                (loop (cdr ws) plain)))
+                         (loop (cdr ws) (cons w plain)))))))))))
 
 ;; every list gets the "match" kind; the mode's own 'filter fn reads the
 ;; kinds it invented. A list with neither keeps every row.
@@ -1084,7 +1138,7 @@
   (list (list-marks-column? buf) (list-column-lines buf)
         (list-opt buf 'cells) (list-opt buf 'row-cells) (list-opt buf 'render)
         (list-marks buf) (list-opt buf 'key)
-        (list-opt buf 'match) (list-opt buf 'filter)))
+        (list-matcher buf) (list-opt buf 'filter)))
 
 (define (list-ctx-marks? ctx) (car ctx))
 (define (list-ctx-column-lines ctx) (nth 1 ctx))
@@ -2201,7 +2255,7 @@
 (effects! '(unknown))
 (category! 'commands)
 (public! 'define-list-mode!
-  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Read the app-creator skill before writing one: it owns what a list already does for you and what is yours to declare. Set transient to #f for persistent app buffers (default #t). KEYS. Four are TAKEN -- bound on your map after your own keys, so a mode that declares one silently does not get it: / narrows the rows (list-filter), < and > call the optional regroup and resort callbacks, SPC calls the optional mark-command or list-mark. / is the search key everywhere in this editor and it is the search key here. Another nine are INHERITED from list-mode-map and yours to shadow: f also filters, \\ pops the filter, ? describes the mode, n/p walk, m marks, u/U/* unmark and mark-all, x executes the marks, g reverts (most apps shadow g with their own refetch). Give your own verbs the letters none of these use. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default, first match wins; profiles may override columns, cells, footer, and compact, and the chosen profile is cached per width in the list-layout-cache buffer local. A column width of #f takes the rest of the line, so put the widest text last and budget the fixed widths against the narrow, compact and wide turns. Rows are records, not text: keep the parsed value and let cells render it. Every text list exposes c-list/c-item semantic records. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Read the app-creator skill before writing one: it owns what a list already does for you and what is yours to declare. Set transient to #f for persistent app buffers (default #t). KEYS. Four are TAKEN -- bound on your map after your own keys, so a mode that declares one silently does not get it: / narrows the rows (list-filter), < and > call the optional regroup and resort callbacks, SPC calls the optional mark-command or list-mark. / is the search key everywhere in this editor and it is the search key here. Another nine are INHERITED from list-mode-map and yours to shadow: f also filters, \\ pops the filter, ? describes the mode, n/p walk, m marks, u/U/* unmark and mark-all, x executes the marks, g reverts (most apps shadow g with their own refetch). Give your own verbs the letters none of these use. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default, first match wins; profiles may override columns, cells, footer, and compact, and the chosen profile is cached per width in the list-layout-cache buffer local. A column width of #f takes the rest of the line, so put the widest text last and budget the fixed widths against the narrow, compact and wide turns. Rows are records, not text: keep the parsed value and let cells render it. Every text list exposes c-list/c-item semantic records. FILTERS. 'filters is a list of (PREFIX FIELD DOC), FIELD (buf entry) -> text: in the / filter a word PREFIXtext keeps the rows whose FIELD has text, and the other words match as before; list-define-filter! adds one to any mode. Optional composml-root and composml-record callbacks supply domain tags without changing text layout. Optional collection tag and composml (buf entry) callback project string-keyed rows as semantic blocks; the shared list styles field roles and owns navigation."
   'ui)
 
 ;; A list's filters, for a caller that narrows without the prompt: a
@@ -2220,6 +2274,13 @@
 (effects! '(read))
 (public! 'list-filters
   "(list-filters BUF) — the filters narrowing a list buffer, newest first"
+  'ui)
+(public! 'list-mode-filters
+  "(list-mode-filters MODE) — the prefix filters a list mode understands, as (PREFIX FIELD DOC)"
+  'ui)
+(effects! '(write))
+(public! 'list-define-filter!
+  "(list-define-filter! MODE PREFIX FIELD [DOC]) — teach any list mode a filter: in its / filter, a word PREFIXtext keeps the rows whose FIELD (buf entry) -> text has text, e.g. (list-define-filter! \"todo-mode\" \"by:\" (lambda (b e) (plist-get e 'by)) \"filed by\")"
   'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 

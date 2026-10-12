@@ -38,6 +38,7 @@ The list mode in `scheme/packages/tabulated-list.scm` draws every table in the e
 1. `f` narrows on every keystroke; `\` widens by one. The filters stack and persist with the buffer; an open clears the typed query and keeps the mode's own kinds.
 2. Repeating an unchanged query does nothing. `(list-set-query! BUF QUERY #t)` changes the query and fetches its source in one draw. C-x c uses this only when crossing between the recent and full chat scopes; later keys reuse the source. Closing a disposable prompt clears the query without redrawing a table that is about to be killed.
 3. A mode's own filter kinds (`'filter (buf entry f)`) ride the same stack. The telemetry's `t`, `k`, and `s` are such kinds, and the same key again widens.
+4. A list defines filters. `'filters` is a list of `(PREFIX FIELD DOC)`, FIELD `(buf entry) -> text`. In the `/` filter a word that starts with a prefix, `s:open`, keeps the rows whose field holds the rest; the other words match the row as before, and every word must hit. `(list-define-filter! MODE PREFIX FIELD DOC)` adds a filter to any list mode at runtime, and `(list-mode-filters MODE)` lists them. A list without filters keeps its matcher unchanged.
 ## The telemetry list
 
 1. `C-t` shows `*Telemetry*` in the popup, on the right (docs/POPUPS.md). `C-t` on it dismisses it: a popup buffer under it comes back, else the popup closes.

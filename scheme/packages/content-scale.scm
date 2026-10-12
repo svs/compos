@@ -54,15 +54,22 @@
   mode)
 
 ;; A mode without its own levels takes its parent's, and "*" ends the walk.
-(define (content-scale--spec-for mode)
+(define (content-scale--own-spec mode)
   (let loop ((m mode) (seen '()))
-    (cond ((or (not m) (member m seen))
-           (let ((d (assoc "*" *content-scale-specs*))) (if d (cadr d) '())))
+    (cond ((or (not m) (member m seen)) #f)
           ((assoc m *content-scale-specs*) (cadr (assoc m *content-scale-specs*)))
           (else (loop (mode-parent m) (cons m seen))))))
 
+(define (content-scale--spec-for mode)
+  (or (content-scale--own-spec mode)
+      (let ((d (assoc "*" *content-scale-specs*))) (if d (cadr d) '()))))
+
 (define (content-scale-levels buf)
-  (content-scale--spec-for (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local buf 'mode-name)))
+    ;; an anchored page zooms by its parts, unless its mode says otherwise
+    (if (and (anchor-scale-page? buf) (not (content-scale--own-spec mode)))
+        (anchor-scale--page-levels buf)
+        (content-scale--spec-for mode))))
 
 (define (content-scale--entry buf n)
   (let ((hit (filter (lambda (l) (= (car l) n)) (content-scale-levels buf))))
@@ -249,6 +256,9 @@
               (list '())))
      ((eq? kind 'summarize)
       (list '() '() (list (content-scale--summary-view buf (car args) (cadr args) n))))
+     ((eq? kind 'anchors)
+      (anchor-scale-page! buf (car args))
+      (list '() '() '()))
      ((or (eq? kind 'aggregate) (eq? kind 'expand))
       (list '() '() (list (content-scale--view-result ((content-scale--proc (car args)) buf)))))
      (else (list '() '() '())))))
@@ -581,6 +591,251 @@
 
 (add-hook! 'chat-summary-hook 'content-scale--chat-turned!)
 
+;;; --- anchors ---------------------------------------------------------------
+
+;; An anchored page zooms part by part. Each anchor declares its levels,
+;; ((N REDUCTION) ...), and a part that declares none folds at 1. A level
+;; holds until the next declared one, so ((1 fold) (3 elide)) folds at 2.
+;; The page's level sets every part at once; - and + step the part at point.
+;; Levels are kept by anchor name, so a page that redraws keeps its zoom.
+
+(defcustom 'anchor-scale-presets '()
+  "Saved zoom levels of anchored pages: (MODE NAME N ((ANCHOR LEVEL) ...)). An anchor the preset does not name takes the level of the entry named *."
+  'group 'content-scale 'type 'sexp)
+
+(define (anchor-scale-page? buf)
+  (and (buffer-known? buf) (minor-mode-on? buf "anchor-mode") (pair? (anchor-list buf))))
+
+(define (anchor-scale--levels a) (or (anchor-levels a) '((1 fold))))
+
+(define (anchor-scale--max a)
+  (fold (lambda (m l) (max m (car l))) 0 (anchor-scale--levels a)))
+
+(define (anchor-scale-of buf name)
+  (let ((hit (assoc name (or (buffer-local buf 'anchor-scale) '()))))
+    (if hit (cadr hit) 0)))
+
+;; the declared level in force at N: the highest one at or below it
+(define (anchor-scale--reduction a n)
+  (let ((best (fold (lambda (best l)
+                      (if (and (> n 0) (<= (car l) n) (or (not best) (> (car l) (car best)))) l best))
+                    #f (anchor-scale--levels a))))
+    (and best (cadr best))))
+
+(define (anchor-scale--level-name red)
+  (cond ((not red) "open")
+        ((eq? red 'fold) "folded")
+        ((eq? red 'elide) "hidden")
+        ((and (pair? red) (eq? (car red) 'summarize)) (symbol->string (cadr red)))
+        ((and (pair? red) (eq? (car red) 'aggregate)) "card")
+        (else "reduced")))
+
+(define (anchor-scale--text buf a)
+  (with-current-buffer buf (lambda () (buffer-substring (anchor-start a) (anchor-end a)))))
+
+;; What a reduced part shows under its first line, or #f for nothing.
+(define (anchor-scale--gloss buf a red)
+  (cond ((and (pair? red) (eq? (car red) 'summarize))
+         (let* ((text (anchor-scale--text buf a))
+                (hit (summary-cached text (cadr red))))
+           (or hit
+               (begin (summarize text (cadr red)
+                                 (lambda (s) (when (buffer-known? buf) (anchor-scale-redraw! buf))))
+                      "summarizing…"))))
+        ((and (pair? red) (eq? (car red) 'aggregate))
+         ((content-scale--proc (cadr red)) buf a))
+        (else #f)))
+
+;; A text page: folds and glosses under the anchor-scale tag.
+(define (anchor-scale--text! buf)
+  (let loop ((as (anchor-list buf)) (folds '()) (chrome '()))
+    (if (null? as)
+        (begin (fold-set! buf 'anchor-scale (reverse folds))
+               (overlay-set! buf 'anchor-scale (reverse chrome)))
+        (let* ((a (car as))
+               (red (anchor-scale--reduction a (anchor-scale-of buf (anchor-name a))))
+               (part (list (anchor-start a) (anchor-end a)))
+               (r (and red (if (eq? red 'elide)
+                               (content-scale--elide-range buf part)
+                               (content-scale--fold-range buf part))))
+               (gloss (and r (not (eq? red 'elide)) (or (anchor-scale--gloss buf a red) " …"))))
+          (loop (cdr as)
+                (if r (cons r folds) folds)
+                (if gloss (cons (chrome-after (car r) (string-append "  " gloss) "dim") chrome) chrome))))))
+
+;; A block page: the block an anchor spans is the part. Fold keeps its first
+;; child, a gloss goes under it, elide drops it.
+(define (anchor-scale--block-for blk reduced)
+  (let ((lines (and (pair? blk) (plist-get blk 'lines))))
+    (and lines
+         (let loop ((rs reduced))
+           (cond ((null? rs) #f)
+                 ((equal? (car (car rs)) lines) (car rs))
+                 (else (loop (cdr rs))))))))
+
+(define (anchor-scale--gloss-block text)
+  (list 'tag "c-group" 'class "c-prose c-dim scale-gloss" 'text text))
+
+(define (anchor-scale--reduce-block buf blk a red)
+  (if (eq? red 'elide)
+      #f
+      (let* ((kids (or (plist-get blk 'children) '()))
+             (gloss (or (anchor-scale--gloss buf a red) "…"))
+             (head (if (pair? kids) (list (car kids)) '())))
+        (plist-put (plist-put blk 'children (append head (list (anchor-scale--gloss-block gloss))))
+                   'class (string-append (or (plist-get blk 'class) "") " scale-folded")))))
+
+(define (anchor-scale-blocks buf blocks)
+  (let ((reduced (filter (lambda (r) (cadr r))
+                         (map (lambda (a)
+                                (list (anchor--span-lines buf a)
+                                      (anchor-scale--reduction a (anchor-scale-of buf (anchor-name a)))
+                                      a))
+                              (anchor-list buf)))))
+    (if (null? reduced)
+        blocks
+        (let walk ((bs blocks))
+          (filter (lambda (x) x)
+                  (map (lambda (blk)
+                         (let ((hit (anchor-scale--block-for blk reduced)))
+                           (cond (hit (set! reduced (filter (lambda (r) (not (eq? r hit))) reduced))
+                                      (anchor-scale--reduce-block buf blk (caddr hit) (cadr hit)))
+                                 ((and (pair? blk) (pair? (plist-get blk 'children)))
+                                  (plist-put blk 'children (walk (plist-get blk 'children))))
+                                 (else blk))))
+                       bs))))))
+
+(define (anchor-scale-redraw! buf)
+  (when (anchor-scale-page? buf)
+    (if (equal? (buffer-local buf 'render-mode) "blocks")
+        (anchor--mark-blocks! buf (anchor-at buf (buffer-point buf)) #t)
+        (anchor-scale--text! buf))))
+
+(define (anchor-scale-set! buf name n)
+  (let ((a (anchor-find buf name)))
+    (and a
+         (let ((n (max 0 (min n (anchor-scale--max a)))))
+           (buffer-set-local! buf 'anchor-scale
+             (cons (list name n)
+                   (filter (lambda (e) (not (equal? (car e) name)))
+                           (or (buffer-local buf 'anchor-scale) '()))))
+           (anchor-scale-redraw! buf)
+           n))))
+
+;; The page at one level: SPEC is a number for every part, or a preset's map.
+(define (anchor-scale-page! buf spec)
+  (let ((star (and (pair? spec) (assoc "*" spec))))
+    (buffer-set-local! buf 'anchor-scale
+      (map (lambda (a)
+             (let* ((hit (and (pair? spec) (assoc (anchor-name a) spec)))
+                    (n (cond ((number? spec) spec) (hit (cadr hit)) (star (cadr star)) (else 0))))
+               (list (anchor-name a) (max 0 (min n (anchor-scale--max a))))))
+           (anchor-list buf)))
+    (anchor-scale-redraw! buf)))
+
+(define (anchor-scale--presets buf)
+  (filter (lambda (p) (equal? (car p) (buffer-local buf 'mode-name))) anchor-scale-presets))
+
+(define (anchor-scale--level-at presets n)
+  (let ((p (filter (lambda (p) (= (caddr p) n)) presets)))
+    (cond ((pair? p) (list n (string->symbol (cadr (car p))) (list 'anchors (list-ref (car p) 3))))
+          ((= n 1) (list 1 'outline (list 'anchors 1)))
+          (else (list n (string->symbol (format "parts-~a" n)) (list 'anchors n))))))
+
+;; The page's levels: each part at N for every N a part declares, a saved
+;; preset in place of its number, and the summary and card above them.
+(define (anchor-scale--page-levels buf)
+  (let* ((presets (anchor-scale--presets buf))
+         (top (fold (lambda (m a) (max m (anchor-scale--max a))) 1 (anchor-list buf)))
+         (top (fold (lambda (m p) (max m (caddr p))) top presets)))
+    (let loop ((n 1) (acc (list (list (+ top 1) 'summary (list 'summarize 'text 'summary))
+                                (list (+ top 2) 'card (list 'aggregate 'content-scale--card)))))
+      (if (> n top)
+          (reverse (sort acc))
+          (loop (+ n 1) (cons (anchor-scale--level-at presets n) acc))))))
+
+;; level 0 opens every part again
+(define (anchor-scale--page-changed! buf old new)
+  (when (and (= new 0) (anchor-scale-page? buf))
+    (anchor-scale-page! buf 0)))
+
+(add-hook! 'content-scale-change-hook 'anchor-scale--page-changed!)
+
+(define (anchor-scale--step! dir)
+  (let* ((buf (current-buffer))
+         (a (and (anchor-scale-page? buf) (anchor-at buf (buffer-point buf)))))
+    (cond
+     ((not (buffer-read-only? buf)) (run-command "self-insert-command"))
+     ((not a) (content-scale--command-step! dir (if (> dir 0) "Content scale: no level further out"
+                                                   "Content scale: no level further in")))
+     (else
+      (let* ((name (anchor-name a))
+             (now (anchor-scale-of buf name))
+             (ns (sort (cons 0 (map car (anchor-scale--levels a)))))
+             (next (if (> dir 0)
+                       (filter (lambda (x) (> x now)) ns)
+                       (reverse (filter (lambda (x) (< x now)) ns)))))
+        (if (null? next)
+            (message (string-append name (if (> dir 0) ": no level further out" ": fully open")))
+            (let ((n (anchor-scale-set! buf name (car next))))
+              (message (string-append name ": " (anchor-scale--level-name (anchor-scale--reduction a n)))))))))))
+
+(define-command "anchor-scale-decrease" "Show less of the part at point; outside a part, of the page"
+  (lambda () (anchor-scale--step! 1)))
+
+(define-command "anchor-scale-increase" "Show more of the part at point; outside a part, of the page"
+  (lambda () (anchor-scale--step! -1)))
+
+;; the level most parts are at: a part whose name changes from page to page
+;; takes it from a saved level
+(define (anchor-scale--commonest levels)
+  (let ((counts (map (lambda (n) (list n (length (filter (lambda (x) (= x n)) levels)))) levels)))
+    (car (fold (lambda (best c) (if (or (not best) (> (cadr c) (cadr best))) c best)) #f counts))))
+
+;; The zoom each part is at now, kept as a level of this kind of page.
+(define (anchor-scale-save! buf name)
+  (let* ((mode (buffer-local buf 'mode-name))
+         (parts (map (lambda (a) (list (anchor-name a) (anchor-scale-of buf (anchor-name a))))
+                     (anchor-list buf)))
+         (same (lambda (p) (and (equal? (car p) mode) (equal? (cadr p) name))))
+         (old (filter same anchor-scale-presets))
+         (n (if (pair? old)
+                (caddr (car old))
+                (+ 1 (fold (lambda (m l) (if (memq (cadr l) '(summary card)) m (max m (car l))))
+                           0 (anchor-scale--page-levels buf)))))
+         (entry (list mode name n (append parts (list (list "*" (anchor-scale--commonest (map cadr parts))))))))
+    (customize-save! 'anchor-scale-presets
+                     (append (filter (lambda (p) (not (same p))) anchor-scale-presets) (list entry)))
+    (buffer-set-local! buf 'content-scale n)
+    n))
+
+(define-command "anchor-scale-save-level" "Save how this page's parts are zoomed as a named content level"
+  (lambda ()
+    (let ((buf (content-scale-source (current-buffer))))
+      (if (not (anchor-scale-page? buf))
+          (message "This buffer has no anchors")
+          (read-string "Save zoom as level: "
+            (lambda (name)
+              (when (and (string? name) (not (equal? name "")))
+                (message (format "Content level ~a: ~a" (anchor-scale-save! buf name) name)))))))))
+
+(define-command "anchor-scale-forget-level" "Forget a saved content level of this kind of page"
+  (lambda ()
+    (let* ((buf (content-scale-source (current-buffer)))
+           (mode (buffer-local buf 'mode-name))
+           (names (map cadr (anchor-scale--presets buf))))
+      (if (null? names)
+          (message "No saved levels for this kind of page")
+          (completing-read "Forget level: " names
+            (lambda (name)
+              (customize-save! 'anchor-scale-presets
+                (filter (lambda (p) (not (and (equal? (car p) mode) (equal? (cadr p) name))))
+                        anchor-scale-presets))
+              (message (string-append "Forgot " name))))))))
+
+(define-style! 'anchor-scale ".scale-gloss { font-style: italic; }")
+
+
 (effects! '(read))
 (public! 'content-scale-level "(content-scale-level BUF) — BUF's content level; 0 is the text as it is")
 (public! 'content-scale-levels
@@ -588,12 +843,17 @@
 (public! 'content-scale-source "(content-scale-source BUF) — the buffer a content-scale view shows, or BUF itself")
 (public! 'content-scale-paragraphs "(content-scale-paragraphs BUF) — BUF's paragraphs as (START END) byte ranges")
 (public! 'summary-cached "(summary-cached TEXT [STYLE]) — the cached summary of TEXT, or #f; never calls a model")
+(public! 'anchor-scale-page? "(anchor-scale-page? BUF) — #t when BUF zooms by its anchors")
+(public! 'anchor-scale-of "(anchor-scale-of BUF NAME) — the content level of BUF's anchor NAME; 0 is open")
 (effects! '(write))
 (public! 'define-content-scale!
   "(define-content-scale! MODE LEVELS) — declare MODE's content levels; LEVELS is a list of (N NAME REDUCTION ...), N > 0 reduces and N < 0 expands; a REDUCTION is (fold PARTS [MARK]), (elide PARTS), (summarize-parts PARTS STYLE), (summarize SOURCE STYLE), (aggregate FN) or (expand FN); PARTS is 'paragraphs or a procedure, or its name, (BUF) -> ((START END) ...); MODE \"*\" is every mode without its own")
 (public! 'content-scale-set! "(content-scale-set! BUF LEVEL) — show BUF at LEVEL, a number or a level name; #f when its mode has no such level")
 (public! 'content-scale-step! "(content-scale-step! BUF DIR) — one level out for DIR 1, one level in for DIR -1; #f at the edge")
 (public! 'summarize-style! "(summarize-style! STYLE INSTRUCTION) — add or replace a summary style")
+(public! 'anchor-scale-set! "(anchor-scale-set! BUF NAME N) — zoom one anchor of BUF to level N, clamped to what it declares; the level it got")
+(public! 'anchor-scale-page! "(anchor-scale-page! BUF SPEC) — zoom every anchor of BUF: SPEC is a level, or ((NAME LEVEL) ...) with * for the rest")
+(public! 'anchor-scale-save! "(anchor-scale-save! BUF NAME) — keep the zoom of BUF's anchors as content level NAME of its mode; its number")
 (effects! '(read external spend))
 (public! 'summarize
   "(summarize TEXT [STYLE] [K]) — summarize TEXT in STYLE (gist, summary, themes, abstract) with the summarize job's model; cached by content; K gets the text or #f; the answer is the summary on a cache hit, else #f")

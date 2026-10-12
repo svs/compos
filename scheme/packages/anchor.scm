@@ -29,22 +29,25 @@
 
 ;;; --- the record ------------------------------------------------------------
 
-;; (NAME START END KEYMAP DATA). NAME is the handle a redraw comes back
-;; to, START and END are byte offsets with END exclusive, KEYMAP is the
-;; map in force while point is inside, and DATA is the page's own.
+;; (NAME START END KEYMAP DATA LEVELS). NAME is the handle a redraw comes
+;; back to, START and END are byte offsets with END exclusive, KEYMAP is the
+;; map in force while point is inside, DATA is the page's own, and LEVELS
+;; is how the part zooms, ((N REDUCTION) ...), which content-scale reads.
 (define (anchor--norm a)
   (let ((n (length a)))
     (list (list-ref a 0)
           (list-ref a 1)
           (list-ref a 2)
           (and (> n 3) (list-ref a 3))
-          (and (> n 4) (list-ref a 4)))))
+          (and (> n 4) (list-ref a 4))
+          (and (> n 5) (list-ref a 5)))))
 
 (define (anchor-name a) (list-ref a 0))
 (define (anchor-start a) (list-ref a 1))
 (define (anchor-end a) (list-ref a 2))
 (define (anchor-keymap a) (list-ref a 3))
 (define (anchor-data a) (list-ref a 4))
+(define (anchor-levels a) (and (> (length a) 5) (list-ref a 5)))
 
 (define (anchor-list buf)
   (or (and (buffer-known? buf) (buffer-local buf 'anchors)) '()))
@@ -93,10 +96,12 @@
 (define (anchor-set! buf as)
   (buffer-set-local! buf 'anchors (anchor--sorted as))
   (anchor-sync! buf)
+  ;; a zoomed part folds against the new offsets
+  (when (boundp 'anchor-scale-redraw!) ((symbol-value 'anchor-scale-redraw!) buf))
   (anchor-list buf))
 
-(define (anchor-add! buf name start end &optional keymap data)
-  (anchor-set! buf (cons (list name start end keymap data) (anchor-list buf))))
+(define (anchor-add! buf name start end &optional keymap data levels)
+  (anchor-set! buf (cons (list name start end keymap data levels) (anchor-list buf))))
 
 (define (anchor-clear! buf)
   (buffer-set-local! buf 'anchors '())
@@ -149,15 +154,24 @@
                        blk))))
            bs))))
 
-(define (anchor--mark-blocks! buf a)
-  (let ((blocks (buffer-local buf 'render-blocks))
-        (lines (anchor--span-lines buf a))
-        (last (buffer-local buf 'anchor-marked)))
+(define (anchor--mark-blocks! buf a &optional force)
+  ;; The page's own draw is kept as anchor-drawn, and every mark starts from
+  ;; it, so a part content-scale folded away comes back when it unfolds.
+  (let* ((blocks (buffer-local buf 'render-blocks))
+         (last (buffer-local buf 'anchor-marked))
+         (fresh (not (and last (eq? (cdr last) blocks))))
+         (lines (anchor--span-lines buf a))
+         (key (list lines (buffer-local buf 'anchor-scale))))
     (when (and (equal? (buffer-local buf 'render-mode) "blocks") (pair? blocks)
-               (not (and last (eq? (cdr last) blocks) (equal? (car last) lines))))
+               (or fresh force (not (equal? (car last) key))))
+      (when fresh (buffer-set-local! buf 'anchor-drawn blocks))
       ;; the top part is where a page opens: it marks itself, and dims nothing
-      (let ((new (anchor--marked blocks lines (and a (equal? (anchor-start a) (anchor--top buf))))))
-        (buffer-set-local! buf 'anchor-marked (cons lines new))
+      (let* ((marked (anchor--marked (buffer-local buf 'anchor-drawn) lines
+                                     (and a (equal? (anchor-start a) (anchor--top buf)))))
+             (new (if (boundp 'anchor-scale-blocks)
+                      ((symbol-value 'anchor-scale-blocks) buf marked)
+                      marked)))
+        (buffer-set-local! buf 'anchor-marked (cons key new))
         (buffer-set-local! buf 'render-blocks new)))))
 
 (define (anchor--post-command!)
@@ -358,10 +372,14 @@
     ("M-<up>" "anchor-read-previous")
     ("M-down" "anchor-read-next")
     ("M-up" "anchor-read-previous")
-    ("M-g a" "anchor-jump")))
+    ("M-g a" "anchor-jump")
+    ;; zoom the part at point; content-scale owns the commands
+    ("-" "anchor-scale-decrease")
+    ("+" "anchor-scale-increase")
+    ("=" "anchor-scale-increase")))
 
 (mode-doc! "anchor-mode"
-  "The page's parts, one key apart. `TAB` goes to the next anchor and `S-TAB` to the previous one. `M-<down>` and `M-<up>` do too, and page past the last anchor. `M-g a` goes to one by name. The anchor point stands in puts its own keys in front of the buffer's, so the same letter can mean a different thing in each part of the page.")
+  "The page's parts, one key apart. `TAB` goes to the next anchor and `S-TAB` to the previous one. `M-<down>` and `M-<up>` do too, and page past the last anchor. `M-g a` goes to one by name. `-` shows less of the part at point and `+` more, as far as it declares; outside a part they zoom the page. The anchor point stands in puts its own keys in front of the buffer's, so the same letter can mean a different thing in each part of the page.")
 
 (define-command "anchor-mode" "Walk this buffer's anchors, each with its own keys"
   (lambda () (toggle-minor-mode! "anchor-mode")))
@@ -392,9 +410,9 @@
 ;;; --- the surface -----------------------------------------------------------
 
 (public! 'anchor-set!
-  "(anchor-set! BUF ((NAME START END [KEYMAP [DATA]]) ...)) — declare BUF's anchors, replacing the old ones; a page that redraws calls this again")
+  "(anchor-set! BUF ((NAME START END [KEYMAP [DATA [LEVELS]]]) ...)) — declare BUF's anchors, replacing the old ones; a page that redraws calls this again. LEVELS is ((N REDUCTION) ...), REDUCTION fold, elide, (summarize STYLE) or (aggregate FN), FN (BUF ANCHOR) -> text")
 (public! 'anchor-add!
-  "(anchor-add! BUF NAME START END [KEYMAP [DATA]]) — add one anchor to BUF")
+  "(anchor-add! BUF NAME START END [KEYMAP [DATA [LEVELS]]]) — add one anchor to BUF")
 (public! 'anchor-clear! "(anchor-clear! BUF) — BUF has no anchors")
 (public! 'anchor-list "(anchor-list BUF) — BUF's anchors, in the order they appear")
 (public! 'anchor-at "(anchor-at BUF POS) — the innermost anchor holding byte POS, or #f")
@@ -406,6 +424,7 @@
 (public! 'anchor-end "(anchor-end ANCHOR) — the byte after its last")
 (public! 'anchor-keymap "(anchor-keymap ANCHOR) — the keymap in force inside it, or #f")
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
+(public! 'anchor-levels "(anchor-levels ANCHOR) — how it zooms, ((N REDUCTION) ...), or #f for the default fold")
 (public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor")
 (public! 'buffer-outline
   "(buffer-outline BUF) — BUF's parts, read first: its anchors as (NAME FIRST-LINE LAST-LINE); with none, its markdown headings or code definitions")

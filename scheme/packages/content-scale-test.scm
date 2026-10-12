@@ -89,3 +89,59 @@
     (check-equal! (content-scale-level t--cs-buf) 1 "and changes nothing")
     (content-scale-set! t--cs-buf 0)
     (buffer-kill! t--cs-buf)))
+
+(define t--as-buf "zz-anchor-scale")
+
+(define (t--as!)
+  (buffer-set-text! t--as-buf "Header line\nmore header\n\nSkills\nC++ Go Python\nRust\n\nEvidence\nline one\nline two\n" #t)
+  (anchor-set! t--as-buf '(("Header" 0 24) ("Skills" 25 51 #f #f ((1 fold) (2 elide))) ("Evidence" 52 79)))
+  (enable-minor-mode! t--as-buf "anchor-mode")
+  t--as-buf)
+
+(deftest 'anchor-scale-zooms-one-part
+  "a part steps through the levels it declares and no further"
+  (lambda ()
+    (t--as!)
+    (check-equal! (anchor-scale-set! t--as-buf "Skills" 1) 1 "folded")
+    (check-equal! (fold-get t--as-buf 'anchor-scale) '((31 50)) "only Skills folds")
+    (check-equal! (anchor-scale-set! t--as-buf "Skills" 9) 2 "clamped to its last level")
+    (check-equal! (fold-get t--as-buf 'anchor-scale) '((24 50)) "elided")
+    (check-equal! (anchor-scale-set! t--as-buf "Header" 2) 1 "no declaration folds at 1 only")
+    (anchor-set! t--as-buf (anchor-list t--as-buf))
+    (check-equal! (anchor-scale-of t--as-buf "Skills") 2 "a redraw keeps the zoom")
+    (disable-minor-mode! t--as-buf "anchor-mode")
+    (buffer-kill! t--as-buf)))
+
+(deftest 'anchor-scale-page-levels-and-presets
+  "the page level zooms every part, level 0 opens them, a saved level comes back by name"
+  (lambda ()
+    (t--as!)
+    (let ((kept anchor-scale-presets))
+      (check-equal! (map cadr (content-scale-levels t--as-buf)) '(card summary parts-2 outline) "levels from the parts")
+      (content-scale-set! t--as-buf 'outline)
+      (check-equal! (fold-get t--as-buf 'anchor-scale) '((11 23) (31 50) (60 78)) "every part folds")
+      (content-scale-set! t--as-buf 0)
+      (check-equal! (fold-get t--as-buf 'anchor-scale) '() "level 0 opens them")
+      (anchor-scale-set! t--as-buf "Skills" 2)
+      (check-equal! (anchor-scale-save! t--as-buf "zz-triage") 3 "saved above the part levels")
+      (content-scale-set! t--as-buf 0)
+      (content-scale-set! t--as-buf 'zz-triage)
+      (check-equal! (anchor-scale-of t--as-buf "Skills") 2 "the saved level restores it")
+      (customize-save! 'anchor-scale-presets kept))
+    (disable-minor-mode! t--as-buf "anchor-mode")
+    (buffer-kill! t--as-buf)))
+
+(deftest 'anchor-scale-folds-blocks
+  "on a block page a folded part keeps its first child and a gloss"
+  (lambda ()
+    (t--as!)
+    (buffer-set-local! t--as-buf 'anchor-scale '(("Skills" 1)))
+    (let* ((blk (list 'class "c-group" 'lines '(4 6)
+                      'children (list (list 'lines '(4 4) 'text "Skills") (list 'lines '(5 5) 'text "C++"))))
+           (out (car (anchor-scale-blocks t--as-buf (list blk)))))
+      (check-equal! (length (plist-get out 'children)) 2 "heading and gloss")
+      (check-equal! (plist-get (cadr (plist-get out 'children)) 'text) "…" "the gloss"))
+    (buffer-set-local! t--as-buf 'anchor-scale '(("Skills" 2)))
+    (check-equal! (anchor-scale-blocks t--as-buf (list (list 'lines '(4 6)))) '() "elide drops the block")
+    (disable-minor-mode! t--as-buf "anchor-mode")
+    (buffer-kill! t--as-buf)))

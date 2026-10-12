@@ -129,11 +129,11 @@
                             (line-number-at-pos (max (anchor-start a) (- (anchor-end a) 1))))))))
 
 (define (anchor--unclass class)
-  (string-trim (string-join (filter (lambda (c) (not (equal? c "anchor-current")))
+  (string-trim (string-join (filter (lambda (c) (not (member c (list "anchor-current" "anchor-top"))))
                                     (string-split (or class "") " "))
                             " ")))
 
-(define (anchor--marked blocks lines)
+(define (anchor--marked blocks lines &optional top?)
   (let ((done #f))
     (let walk ((bs blocks))
       (map (lambda (blk)
@@ -141,7 +141,7 @@
                  (let* ((class (anchor--unclass (plist-get blk 'class)))
                         (hit (and lines (not done) (equal? (plist-get blk 'lines) lines)))
                         (blk (if (or hit (plist-get blk 'class))
-                                 (plist-put blk 'class (if hit (string-append class " anchor-current") class))
+                                 (plist-put blk 'class (if hit (string-append class (if top? " anchor-current anchor-top" " anchor-current")) class))
                                  blk)))
                    (when hit (set! done #t))
                    (if (pair? (plist-get blk 'children))
@@ -155,7 +155,8 @@
         (last (buffer-local buf 'anchor-marked)))
     (when (and (equal? (buffer-local buf 'render-mode) "blocks") (pair? blocks)
                (not (and last (eq? (cdr last) blocks) (equal? (car last) lines))))
-      (let ((new (anchor--marked blocks lines)))
+      ;; the top part is where a page opens: it marks itself, and dims nothing
+      (let ((new (anchor--marked blocks lines (and a (equal? (anchor-start a) (anchor--top buf))))))
         (buffer-set-local! buf 'anchor-marked (cons lines new))
         (buffer-set-local! buf 'render-blocks new)))))
 
@@ -295,10 +296,15 @@
 ;; Subtle on purpose: an anchor is a section, not a match, so its whole
 ;; range wears this. A theme that names the face wins.
 (defface! 'anchor-current 'inherit 'lazy-highlight)
-;; the same mark on a block page: a tint and a hairline round the block
+;; the same mark on a block page: the part point is in stays as it is, and
+;; the rest of the page steps back, so the eye lands on the part and not on
+;; a box drawn round it. Each level of the page dims what is beside the path
+;; down to the part.
 (define-style! 'anchor "
-.anchor-current { background-image: linear-gradient(color-mix(in srgb, var(--accent-fg) 7%, transparent), color-mix(in srgb, var(--accent-fg) 7%, transparent)); outline: 1px solid color-mix(in srgb, var(--accent-fg) 45%, transparent); outline-offset: 2px; border-radius: 2px; }
+.blocks-scroll :has(.anchor-current:not(.anchor-top)) > :not(.anchor-current):not(:has(.anchor-current)) { opacity: .38; }
+.blocks-scroll :has(.anchor-current) > * { transition: opacity .28s ease; }
 .anchor-current .current:not(.anchor-current) { background: transparent; }
+.anchor-current:is(.c-prose, .c-bullet, .c-meta, .c-title, .c-row).current { background: transparent; }
 ")
 
 (define (anchor-imenu-rows buf)

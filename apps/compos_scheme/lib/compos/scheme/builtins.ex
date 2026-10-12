@@ -381,6 +381,9 @@ defmodule Compos.Scheme.Builtins do
       {"base64-encode", "(base64-encode S) — return S encoded as base64."} => fn [s] ->
         Base.encode64(s)
       end,
+      {"content-hash", "(content-hash S) — return the SHA-256 of S as lowercase hex, a key for content-addressed caches."} => fn [s] ->
+        :crypto.hash(:sha256, s) |> Base.encode16(case: :lower)
+      end,
       # a file read gives raw bytes; text consumers must refuse a binary
       {"string-valid-utf8?", "(string-valid-utf8? S) — return #t if S is valid UTF-8 text."} =>
         fn [s] -> is_binary(s) and String.valid?(s) end,

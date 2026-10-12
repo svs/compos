@@ -161,7 +161,35 @@
     (string-append (or (plist-get spec 'title) (symbol->string (plist-get spec 'name)))
                    " · " (or (plist-get page 'label) ""))))
 
-(define (site-app-header blocks)
+(define (site-app-header buf)
+  ;; the site's navbar, then the section's own status tabs when it has them
+  (let* ((spec (buffer-local buf 'site-app-spec))
+         (current (buffer-local buf 'site-app-page))
+         (nav (string-join
+                (map (lambda (page)
+                       (let ((text (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))))
+                         (if (equal? current (plist-get page 'id))
+                             (string-append "[" text "]")
+                             (string-append " " text " "))))
+                     (site-app-pages spec))
+                " "))
+         (filters (or (buffer-local buf 'site-app-filters) '()))
+         (query (buffer-local buf 'site-app-filter)))
+    (if (null? filters)
+        nav
+        (string-append nav "\n"
+          (string-join
+            (map (lambda (tab)
+                   (let* ((count (plist-get tab 'count))
+                          (text (if (equal? count "") (plist-get tab 'label)
+                                    (string-append (plist-get tab 'label) " " count))))
+                     (if (equal? (plist-get tab 'query) query)
+                         (string-append "[" text "]")
+                         (string-append " " text " "))))
+                 filters)
+            " ")))))
+
+(define (site-app-head-part blocks)
   ;; the page's head, title through the actions, is its top part: the
   ;; header. The tabs are not in it: they are the page's own switch
   (let* ((tabs? (lambda (x) (and (pair? x) (re-match? "\\bc-tabs\\b" (or (plist-get x 'class) "")))))
@@ -648,16 +676,6 @@
   (let ((real (filter pair? blocks)))
     (and (pair? real) (null? (filter (lambda (x) (not (plist-get x 'sa-anchor))) real)))))
 
-(define (site-app-header blocks)
-  ;; the page's head, title through the tabs, is its top part: the header
-  (let* ((real (filter (lambda (x) (and (pair? x) (plist-get x 'lines))) blocks))
-         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'sa-anchor) (plist-get (car bs) 'sa-anchor)) (else (find (cdr bs)))))))
-    (if (null? real)
-        blocks
-        (list (site-app-claim (component 'ui/group (list 'body (site-app-unanchored blocks)))
-                              (apply min (map (lambda (x) (car (plist-get x 'lines))) real))
-                              (apply max (map (lambda (x) (cadr (plist-get x 'lines))) real))
-                              name)))))
 
 (define (site-app-summary blocks &optional name least)
   ;; the loose blocks a run opens with, before its first part, are one part:
@@ -1035,7 +1053,7 @@
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
                  (append
-                   (site-app-header (site-app-head-blocks b data tones tabs active (site-app-action-bar buf)))
+                   (site-app-head-part (site-app-head-blocks b data tones tabs active (site-app-action-bar buf)))
                    (cond ((not section) (list (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
                          ((equal? section 'failed)
                           (let ((t "The site did not answer for this tab. g reads the page again.")) (list (site-app-part b 'ui/empty t (list 'text t) #f))))

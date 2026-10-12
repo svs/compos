@@ -224,15 +224,18 @@
 ;; and is not where you are (the card beside your work), else the next
 ;; window
 (define (scroll-other-window-target)
-  (let ((me (active-window)))
+  (let* ((me (active-window))
+         (wins (window-list))
+         ;; a list scrolls the page it opened beside it, wherever that sits
+         (detail (detail-window (window-buffer me))))
     (or (and (float-open?) (not (equal? (float-window) me)) (float-window))
-        (let ((wins (window-list)))
-          (and (pair? (cdr wins))
-               (let loop ((ws wins))
-                 (cond ((null? ws) (car (car wins)))
-                       ((equal? (car (car ws)) me)
-                        (car (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
-                       (else (loop (cdr ws))))))))))
+        detail
+        (and (pair? (cdr wins))
+             (let loop ((ws wins))
+               (cond ((null? ws) (car (car wins)))
+                     ((equal? (car (car ws)) me)
+                      (car (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
+                     (else (loop (cdr ws)))))))))
 
 ;; A page belongs to the window that scrolls, never to the window the key
 ;; was pressed in: the two can differ in height and in line height.

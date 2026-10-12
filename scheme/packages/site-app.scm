@@ -818,11 +818,12 @@
     (buffer-set-local! buf 'site-app-name name)
     (buffer-set-local! buf 'site-app-row row)
     (when data (buffer-set-local! buf 'site-app-data data))
-    ;; A page's details share one major mode of their own (ats-approval-mode),
-    ;; so mode affinity sends every one of them to the same pane.
+    ;; An app's details share one major mode (ats-detail-mode), so mode affinity
+    ;; sends every one of them to the same pane; the page is a minor mode.
     (let ((mode (or (buffer-local buf 'site-app-detail-mode) "site-app-detail-mode")))
       (unless (equal? (buffer-local buf 'mode-name) mode)
         (with-current-buffer buf (lambda () (set-mode! mode)))))
+    (site-app-detail-minor! buf)
     (site-app-draw! buf)
     (site-app-join-group! buf)
     buf))
@@ -893,13 +894,29 @@
             (site-app-fetch-section! name buf tab url wait page id
               (lambda (tab) (loop (cdr rest) tab))))))))
 
-(define (site-app-detail-mode-name page)
-  (or (plist-get page 'detail-mode) "site-app-detail-mode"))
+(define (site-app-detail-mode-name spec page)
+  ;; one major mode for every detail of the app, so mode affinity sends them all
+  ;; to one pane; else the page's own
+  (or (plist-get spec 'detail-mode) (plist-get page 'detail-mode) "site-app-detail-mode"))
+
+;; the kind of detail a page makes, as a minor mode under the app's one major
+;; mode; it carries the page's own keys
+(define (site-app-detail-minor! buf)
+  (let ((minor (buffer-local buf 'site-app-detail-minor))
+        (spec (site-app-spec (buffer-local buf 'site-app-name))))
+    (for-each (lambda (page)
+                (let ((m (plist-get page 'detail-minor)))
+                  (when (and m (not (equal? m minor)) (minor-mode-on? buf m))
+                    (disable-minor-mode! buf m))))
+              (if spec (site-app-pages spec) '()))
+    (when (and minor (not (minor-mode-on? buf minor)))
+      (enable-minor-mode! buf minor))))
 
 (define (site-app-prepare-detail! name row page)
   (let ((buf (site-app-detail-buffer name row)))
     (unless (buffer-exists? buf) (buffer-create buf))
-    (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name page))
+    (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name (site-app-spec name) page))
+    (buffer-set-local! buf 'site-app-detail-minor (plist-get page 'detail-minor))
     buf))
 
 ;; A detail tab the site can open from its URL (?tab=assessment) is read with a
@@ -1098,10 +1115,13 @@
                          (site-app-detail-actions buf))))))
 
 (define (site-app-bind-action-keys! buf)
-  (let ((mode (buffer-local buf 'site-app-detail-mode)))
+  ;; the page's minor mode holds its button keys, else its major mode does
+  (let* ((minor (buffer-local buf 'site-app-detail-minor))
+         (mode (or minor (buffer-local buf 'site-app-detail-mode)))
+         (keys (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
+                    (site-app-detail-action-keys buf))))
     (when mode
-      (mode-keys! mode (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
-                            (site-app-detail-action-keys buf)))
+      (if minor (minor-mode-keys! minor keys) (mode-keys! mode keys))
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
         (let ((name (buffer-local buf 'site-app-name)))
@@ -1156,11 +1176,20 @@
          (title (or (plist-get spec 'title) (symbol->string name)))
          (pages (site-app-pages spec)))
     (site-app-put! name spec)
+    (let ((major (plist-get spec 'detail-mode)))
+      (when major
+        (define-mode major (lambda () (buffer-set-read-only! (current-buffer) #t)))
+        (mode-parent! major "site-app-detail-mode")))
     (for-each (lambda (page)
-                (let ((mode (plist-get page 'detail-mode)))
+                (let ((mode (plist-get page 'detail-mode))
+                      (minor (plist-get page 'detail-minor)))
                   (when mode
                     (define-mode mode (lambda () (buffer-set-read-only! (current-buffer) #t)))
-                    (mode-parent! mode "site-app-detail-mode"))))
+                    (mode-parent! mode "site-app-detail-mode"))
+                  (when minor
+                    (register-minor-mode! minor (lambda (buf) #t) (lambda (buf) #t))
+                    ;; the map exists before a buffer turns the mode on; keys land in it later
+                    (minor-mode-keys! minor '()))))
               pages)
     ;; Every section is an index of its own: its buffer, its mode, its command.
     (for-each

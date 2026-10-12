@@ -14,7 +14,7 @@
         'sheet (ats-sheet (string-append (symbol->string id) ".xsl"))
         'detail-sheet (ats-sheet "page-detail.xsl")
         'detail-fetch #t
-        'detail-mode mode
+        'detail-minor mode
         'columns columns))
 
 (define *ats-candidates-page*
@@ -26,7 +26,7 @@
         'detail-sheet (ats-sheet "candidate-detail.xsl")
         ;; the candidate's tabs, each one read from its ?tab= URL
         'detail-tab-param "tab"
-        'detail-mode "ats-candidate-mode"
+        'detail-minor "ats-candidate-mode"
         'detail-tabs (map (lambda (id) (list 'id id))
                           '("profile" "suggested" "comms" "meetings" "notes"))
         'columns (list (list 'label "★" 'width 5 'field 'rating 'face "dim")
@@ -45,7 +45,7 @@
         'detail-sheet (ats-sheet "applications-detail.xsl")
         ;; the same tabs as an approval, each one read from its ?tab= URL
         'detail-tab-param "tab"
-        'detail-mode "ats-application-mode"
+        'detail-minor "ats-application-mode"
         'detail-keys (list "a")
         'detail-tabs
         (map (lambda (tab) (list 'id (car tab) 'tag (cadr tab)))
@@ -67,7 +67,7 @@
         'detail-sheet (ats-sheet "approval-detail.xsl")
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
-        'detail-mode "ats-approval-mode"
+        'detail-minor "ats-approval-mode"
         ;; only the happy path has a key: approve; o opens the site for the rest
         'detail-keys (list "a")
         'detail-tabs
@@ -94,6 +94,9 @@
         'base-url "https://svsrecruiting.com"
         'home "/staff/approvals"
         'home-page 'approvals
+        ;; every detail is ats-detail-mode, so they all share a pane; the page it
+        ;; came from is a minor mode (ats-approval-mode, ats-application-mode, ...)
+        'detail-mode "ats-detail-mode"
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; an application is who for what; anything else goes by its name

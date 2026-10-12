@@ -91,6 +91,8 @@ defmodule Compos.Core.Application do
       # fails as "already started"; the daemon does not boot.
       Compos.Core.Workflows,
       Compos.Core.Session,
+      # pings the shared model connections and replaces a silent one
+      Compos.Core.LLMWatchdog,
       # cron: Quantum's scheduler. A due job appends to the log, and
       # cron.scm schedules the jobs as it loads
       Compos.Core.Cron,

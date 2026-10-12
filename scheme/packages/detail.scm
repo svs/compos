@@ -105,9 +105,35 @@
          ;; already where you stand, or already in another window: a display
          ;; never moves a buffer that is on screen
          (shown (if (equal? (window-buffer me) name) me (window-showing-other name me)))
-         (kept (and (not shown) (detail-window o)))
+         ;; a pane you set to prefer this mode beats the remembered one, so
+         ;; window-mode-preference moves where a list opens its rows
+         (pinned (and (not shown)
+                      (find (lambda (w)
+                              (and (not (equal? w me))
+                                   (window-mode-preference w)
+                                   (window-prefers-buffer? w name)))
+                            (display--work-windows))))
+         ;; the last detail of this list still on screen: the next row covers it
+         ;; wherever it went, even when the remembered window shows something else
+         (sibling (and (not shown) (not pinned)
+                       (find (lambda (w)
+                               (and (not (equal? w me))
+                                    (equal? (buffer-local (window-buffer w) 'detail-of) o)))
+                             (display--work-windows))))
+         ;; a pane of the same mode, a detail of another list of the same app:
+         ;; mode affinity beats the window the list remembers
+         (kin (and (not shown) (not pinned) (not sibling)
+                   (find (lambda (w)
+                           (and (not (equal? w me))
+                                (not (equal? (window-buffer w) o))
+                                (window-prefers-buffer? w name)))
+                         (display--work-windows))))
+         (kept (and (not shown) (not pinned) (not sibling) (not kin) (detail-window o)))
          (win (cond
                 (shown shown)
+                (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))
+                (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
+                (kin (window-display! (lambda () (display-buffer-in-window! kin name))))
                 (kept (window-display! (lambda () (display-buffer-in-window! kept name))))
                 (else
                   (or (display-buffer name '(category detail inhibit-same-window #t))

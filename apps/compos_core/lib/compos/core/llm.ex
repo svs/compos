@@ -681,6 +681,13 @@ defmodule Compos.Core.LLM do
   @retry_transport [:pool_not_available, :disconnected, :read_only, :connection_closed, :closed, :deadline]
 
   defp retryable?(%{reason: reason}) when reason in @retry_transport, do: true
+
+  # a request error carries the transport failure as text, "http2 error:
+  # :connection_closed", not as the atom: unread, a dead connection failed
+  # every call at once and never reached the retry
+  defp retryable?(%{reason: reason}) when is_binary(reason),
+    do: Enum.any?(@retry_transport, &String.contains?(reason, inspect(&1)))
+
   defp retryable?(%{reason: reason}) when is_map(reason), do: retryable?(reason)
   defp retryable?(_), do: false
 

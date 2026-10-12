@@ -151,12 +151,27 @@
 (define (skills)
   (map (lambda (s) (list (car s) (cadr s))) (reverse (skills--here))))
 
+;; A group adds to a skill it does not replace: <root>/NAME/ADDENDUM.md in
+;; any of the group's skill roots follows the skill's own text. Without a
+;; SKILL.md beside it the folder registers nothing, so the shared skill keeps
+;; its name and the group's instructions ride along.
+(define (skills--addenda name)
+  (let ((g (buffer-group (current-buffer))))
+    (filter string?
+      (map (lambda (root)
+             (let ((file (string-append root "/" name "/ADDENDUM.md")))
+               (and (file-exists? file) (string-trim (read-file file)))))
+           (skills-group-roots g)))))
+
 (define (skill name)
   (let* ((n (if (symbol? name) (symbol->string name) name))
          (entries (skills--here))
          (s (assoc n entries)))
     (if s
-        (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
+        (string-join
+          (cons (caddr (skills--parse (read-file (string-append (caddr s) "/SKILL.md"))))
+                (skills--addenda n))
+          "\n\n")
         (string-append "no such skill: " n "; available: "
                        (string-join (map car (reverse entries)) ", ")))))
 

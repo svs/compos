@@ -369,6 +369,91 @@
       (define-command (string-append "site-app-tab-" i) (string-append "Open section " i " of this website app")
         (lambda () (site-app-select-page! (- n 1))))))
   '(1 2 3 4 5 6 7 8 9))
+;; ---------------------------------------------------------------- tabs by key
+;; Every page of an app is read-only, so its tabs take plain keys: s opens a menu
+;; of the app's sections, t a menu of this buffer's own tabs (a page's tabs on a
+;; page, the status tabs on a list). In the menu each tab has a letter from its
+;; label, so a tab is two keys away: t then the tab's letter.
+
+(define (site-app-tab-letters labels)
+  ;; each label its first word's initial, else another word's, else any of its
+  ;; letters, else a digit; q is left to quit the menu
+  (let loop ((ls labels) (taken (list "q")) (acc '()))
+    (if (null? ls) (reverse acc)
+        (let* ((label (string-downcase (car ls)))
+               (letters (lambda (s) (filter (lambda (c) (re-match? "^[a-z0-9]$" c))
+                                            (map (lambda (i) (substring s i (+ i 1))) (iota (string-length s))))))
+               (initials (apply append (map (lambda (w) (let ((ls (letters w))) (if (pair? ls) (list (car ls)) '())))
+                                            (string-split label " "))))
+               (choices (append initials (letters label) (map number->string '(1 2 3 4 5 6 7 8 9))))
+               (key (site-app-find (lambda (c) (not (member c taken))) choices)))
+          (loop (cdr ls) (cons key taken) (cons key acc))))))
+
+(define (site-app-tab-suffixes labels actives actions)
+  (let loop ((ks (site-app-tab-letters labels)) (ls labels) (as actives) (fs actions) (acc '()))
+    (if (null? ls) (reverse acc)
+        (loop (cdr ks) (cdr ls) (cdr as) (cdr fs)
+              (cons (transient-suffix (car ks) (if (car as) (string-append (car ls) "  ●") (car ls)) (car fs))
+                    acc)))))
+
+(define (site-app-tab-groups buf)
+  (if (buffer-local buf 'site-app-row)
+      ;; a page: its tabs
+      (let ((tabs (site-app-detail-tabs buf))
+            (active (site-app-detail-active buf)))
+        (list (cons "Tabs of this page"
+                    (site-app-tab-suffixes
+                      (map (lambda (t) (plist-get t 'label)) tabs)
+                      (map (lambda (t) (equal? (plist-get t 'id) active)) tabs)
+                      (map (lambda (t) (lambda () (site-app-detail-select! buf (plist-get t 'id)))) tabs)))))
+      ;; a list: the status tabs its page draws, a menu group for each facet; the
+      ;; letters run across the whole menu, so every tab keeps its own
+      (let* ((filters (or (buffer-local buf 'site-app-filters) '()))
+             (on (buffer-local buf 'site-app-filter))
+             (suffixes (site-app-tab-suffixes
+                         (map (lambda (f) (plist-get f 'label)) filters)
+                         (map (lambda (f) (or (equal? (plist-get f 'active) "yes") (equal? (plist-get f 'query) on))) filters)
+                         (map (lambda (f) (lambda () (site-app-set-filter! buf (plist-get f 'query)))) filters)))
+             ;; a facet goes by the parameter it sets (q_rating=elite is Rating), a tab is Status
+             (group-of (lambda (f)
+                         (let* ((q (or (plist-get f 'query) ""))
+                                (params (cdr (string-split q "&q_")))
+                                (param (and (pair? params) (car (string-split (car (reverse params)) "=")))))
+                           (cond ((not (equal? (plist-get f 'group) "facet")) "Status")
+                                 (param (site-app-capitalize (re-replace "_" (re-replace "^to_" param "") " ")))
+                                 (else "Filters")))))
+             (names (let loop ((fs filters) (acc '()))
+                      (cond ((null? fs) (reverse acc))
+                            ((member (group-of (car fs)) acc) (loop (cdr fs) acc))
+                            (else (loop (cdr fs) (cons (group-of (car fs)) acc)))))))
+        (map (lambda (name)
+               (cons name (let pick ((fs filters) (ss suffixes) (acc '()))
+                            (cond ((null? fs) (reverse acc))
+                                  ((equal? (group-of (car fs)) name) (pick (cdr fs) (cdr ss) (cons (car ss) acc)))
+                                  (else (pick (cdr fs) (cdr ss) acc))))))
+             names))))
+
+(define (site-app-section-groups buf)
+  ;; the sections open in the list's own window, wherever the menu was asked from
+  (let* ((list-buf (or (buffer-local buf 'site-app-list) buf))
+         (spec (buffer-local list-buf 'site-app-spec))
+         (name (plist-get spec 'name))
+         (pages (site-app-pages (site-app-spec name)))
+         (here (buffer-local list-buf 'site-app-page)))
+    (list (cons "Sections"
+                (site-app-tab-suffixes
+                  (map (lambda (p) (plist-get p 'label)) pages)
+                  (map (lambda (p) (equal? (plist-get p 'id) here)) pages)
+                  (map (lambda (p)
+                         (lambda ()
+                           (let ((w (site-app-find (lambda (x) (equal? (cadr x) list-buf)) (window-list))))
+                             (when w (select-window! (car w)))
+                             (site-app-open! name (plist-get p 'id)))))
+                       pages))))))
+
+(transient-define-prefix "site-app-tabs" "Pick one of this buffer's tabs" site-app-tab-groups)
+(transient-define-prefix "site-app-sections" "Pick a section of this website app" site-app-section-groups)
+
 (define-command "site-app-refresh" "Read this website app tab again"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -466,15 +551,29 @@
 
 (define (site-app-detail-keys buf)
   (let ((n (length (site-app-detail-tabs buf))))
-    (append (site-app-detail-action-keys buf)
-            (if (> n 0) (list (list (string-append "1–" (number->string n)) "tabs")) '())
-            (list (list "M-↑↓" "parts")
+    (append (site-app-card-key-labels buf)
+            (site-app-detail-action-keys buf)
+            (map (lambda (k) (list (car k) (caddr k))) (site-app-detail-extra-keys buf))
+            (if (> n 0) (list (list "t" "tabs")) '())
+            (list (list "s" "sections")
+                  (list "M-↑↓" "parts")
                   (list "M-g a" "part by name")
                   (list "f" "fold card")
                   (list "RET" "open link")
                   (list "g" "reload")
                   (list "o" "on the site")
                   (list "q" "quit")))))
+
+;; the page a detail shows, by its minor mode
+(define (site-app-detail-page buf)
+  (let ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+        (minor (buffer-local buf 'site-app-detail-minor)))
+    (and spec minor (site-app-find (lambda (p) (equal? (plist-get p 'detail-minor) minor)) (site-app-pages spec)))))
+
+;; keys a page adds of the app's own, beside its buttons: 'detail-extra-keys ((KEY COMMAND LABEL) ...)
+(define (site-app-detail-extra-keys buf)
+  (let ((page (site-app-detail-page buf)))
+    (or (and page (plist-get page 'detail-extra-keys)) '())))
 
 
 (define site-app-tab-click "site-app-tab:")
@@ -573,7 +672,7 @@
                         (append acc (list (append (cons (plist-get blk 'sa-anchor) (plist-get blk 'lines))
                                                   ;; a part with keys of its own: its keymap, and what they act on
                                                   (if (plist-get blk 'sa-keys)
-                                                      (list (plist-get blk 'sa-keys) (list 'fold (plist-get blk 'sa-fold)))
+                                                      (list (plist-get blk 'sa-keys) (list 'fold (plist-get blk 'sa-fold) 'record (plist-get blk 'sa-record)))
                                                       '()))))
                         acc)))
           (walk (cdr bs) (if (pair? blk) (walk (or (plist-get blk 'children) '()) acc) acc))))))
@@ -846,7 +945,7 @@
                                        (site-app-with-keys (site-app-summary body title 1) "site-app-card-map" fold)))
                              (card (component 'ui/card (list 'title title 'open? open? 'body body)))
                              (claimed (site-app-claim card first (max first (b 'count #f #f)) (and flat? title))))
-                        (loop (cdr rest) 'item (cons (if flat? (append claimed (list 'sa-keys "site-app-card-map" 'sa-fold fold)) claimed)
+                        (loop (cdr rest) 'item (cons (if flat? (append claimed (list 'sa-keys (site-app-card-map-for (plist-get node 'class)) 'sa-fold fold 'sa-record node)) claimed)
                                                      acc)))))))
             ((equal? tag "c-group")
              ;; a run the sheet set apart: the note staff read, or the letter the candidate would
@@ -1334,11 +1433,12 @@
                     (site-app-warm! name list-buf (list-ref rows j) page)))
                 (list (+ i 1) (+ i 2) (+ i 3) (- i 1))))))
 
-(define (site-app-show-detail! list-buf row)
+(define (site-app-show-detail! list-buf row &optional for-page)
+  ;; FOR-PAGE: the page the row belongs to, when the list is not one of the app's sections
   (when row
     (let* ((name (plist-get (buffer-local list-buf 'site-app-spec) 'name))
            (spec (site-app-spec name))
-           (page (site-app-current-page list-buf))
+           (page (or for-page (site-app-current-page list-buf)))
            (made (site-app-prepare-detail! name row page))
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            ;; every item opens on the tab this group last chose, else the first
@@ -1353,6 +1453,7 @@
            (url (site-app-url spec (plist-get row 'href)))
            (gen (site-app-next-gen! name)))
       (buffer-set-local! buf 'site-app-list list-buf)
+      (buffer-set-local! buf 'site-app-for-page for-page)
       (unless fresh
         (buffer-set-local! buf 'site-app-gen gen)
         ;; the old read stays on screen until this one's answers replace it
@@ -1514,7 +1615,7 @@
                                     (and html #t))))))))))))))
 
 (define site-app-action-letters
-  '("a" "b" "c" "d" "e" "f" "h" "i" "j" "k" "l" "m" "n" "p" "r" "s" "t" "u" "v" "w" "x" "y" "z"))
+  '("a" "b" "c" "d" "e" "f" "h" "i" "j" "k" "l" "m" "n" "p" "r" "u" "v" "w" "x" "y" "z"))
 
 (for-each (lambda (k)
             (define-command (string-append "site-app-detail-key-" k)
@@ -1556,8 +1657,9 @@
   ;; the page's minor mode holds its button keys, else its major mode does
   (let* ((minor (buffer-local buf 'site-app-detail-minor))
          (mode (or minor (buffer-local buf 'site-app-detail-mode)))
-         (keys (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
-                    (site-app-detail-action-keys buf))))
+         (keys (append (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
+                            (site-app-detail-action-keys buf))
+                       (map (lambda (k) (list (car k) (cadr k))) (site-app-detail-extra-keys buf)))))
     (when mode
       (if minor (minor-mode-keys! minor keys) (mode-keys! mode keys))
       ;; the index answers the page's button keys too, where it has none of its own
@@ -1593,6 +1695,53 @@
 (define-keymap! "site-app-card-map")
 (define-key "site-app-card-map" "f" "site-app-detail-fold")
 
+;; a kind of card can have keys of its own: the spec's 'card-keys is
+;; ((CLASS ((KEY COMMAND LABEL) ...)) ...), CLASS the class the sheet puts on the
+;; c-item. Each kind gets a map with f folding as on any card, and the keys bar
+;; shows its keys while point is on one
+(define (site-app-card-map-name class) (string-append "site-app-card-map-" class))
+
+(define (site-app-card-kinds)
+  (let* ((buf *site-app-folding*)
+         (spec (and buf (buffer-exists? buf) (site-app-spec (buffer-local buf 'site-app-name)))))
+    (or (and spec (plist-get spec 'card-keys)) '())))
+
+(define (site-app-card-map-for class)
+  (if (and class (assoc class (site-app-card-kinds))) (site-app-card-map-name class) "site-app-card-map"))
+
+(define (site-app-card-keys! spec)
+  (for-each (lambda (kind)
+              (let ((name (site-app-card-map-name (car kind))))
+                (define-keymap! name)
+                (define-key name "f" "site-app-detail-fold")
+                (for-each (lambda (k) (define-key name (car k) (cadr k))) (cadr kind))))
+            (or (plist-get spec 'card-keys) '())))
+
+;; the card point is on: the record its sheet made, or #f
+(define (site-app-card-at buf)
+  (let ((a (anchor-at buf (buffer-point buf))))
+    (and a (anchor-data a) (plist-get (anchor-data a) 'record))))
+
+;; the keys of the card point is on, when its kind has keys of its own
+(define (site-app-card-key-labels buf)
+  (let* ((at (buffer-at-point-map buf))
+         (spec (site-app-spec (buffer-local buf 'site-app-name)))
+         (kind (and at spec (site-app-find (lambda (k) (equal? (site-app-card-map-name (car k)) at))
+                                           (or (plist-get spec 'card-keys) '())))))
+    (if kind (map (lambda (k) (list (car k) (caddr k))) (cadr kind)) '())))
+
+;; the keys bar follows point: on a card with keys of its own it leads with them
+(define (site-app-footer-sync!)
+  (let ((buf (current-buffer)))
+    (when (and (buffer-local buf 'site-app-name) (buffer-local buf 'site-app-data))
+      (let ((at (buffer-at-point-map buf)))
+        (unless (equal? at (buffer-local buf 'site-app-footer-map))
+          (buffer-set-local! buf 'site-app-footer-map at)
+          (buffer-set-local! buf 'footer-line-blocks
+            (list (component 'ui/keys-bar (list 'main (site-app-detail-keys buf))))))))))
+
+(add-hook! 'post-command-hook 'site-app-footer-sync!)
+
 (define-command "site-app-detail-follow" "Open the link at point on the site"
   (lambda ()
     (let* ((buf (current-buffer)) (hit (site-app-detail-link-at buf)))
@@ -1602,7 +1751,10 @@
 (define-command "site-app-detail-reload" "Read this page again from the site"
   (lambda ()
     (let ((buf (current-buffer)))
-      (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row)))))
+      ;; a reload reads now, and the page the detail was opened as
+      (buffer-set-local! buf 'site-app-fetched-at #f)
+      (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row)
+                             (buffer-local buf 'site-app-for-page)))))
 (define-command "site-app-detail-open" "Open this page on the site"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1612,6 +1764,8 @@
 (mode-keys! "site-app-detail-mode"
   (list (list "TAB" "site-app-detail-next-tab")
         (list "S-TAB" "site-app-detail-prev-tab")
+        (list "t" "site-app-tabs")
+        (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
         (list "<up>" "site-app-detail-prev")
         (list "1" "site-app-detail-tab-1")
@@ -1657,6 +1811,7 @@
          (title (or (plist-get spec 'title) (symbol->string name)))
          (pages (site-app-pages spec)))
     (site-app-put! name spec)
+    (site-app-card-keys! spec)
     (let ((major (plist-get spec 'detail-mode)))
       (when major
         (define-mode major (lambda () (buffer-set-read-only! (current-buffer) #t)))
@@ -1695,11 +1850,13 @@
                   'composml site-app-composml
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
-                  'footer (lambda (b) (list (list "M-1–9" "sections") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
+                  'footer (lambda (b) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
                                             (list "/" "state") (list "g" "refresh") (list "q" "quit")))
                   ;; Digits are left free so they reach the page beside the list, as
                   ;; its tab keys; the sections move to M-digit.
                   'keys (append (list (list "RET" "site-app-detail")
+                                      (list "t" "site-app-tabs")
+                                      (list "s" "site-app-sections")
                                       (list "[" "site-app-filter-prev")
                                       (list "]" "site-app-filter-next")
                                       (list "g" "site-app-refresh")

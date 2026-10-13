@@ -121,6 +121,27 @@
               (list 'label "company" 'width 16 'field 'company 'face "dim")
               (list 'label "job" 'width #f 'field 'job))))
 
+(define *ats-jobs-page*
+  (list 'id 'jobs
+        'label "Jobs"
+        'key "5"
+        'path "/staff/jobs"
+        'sheet (ats-sheet "jobs.xsl")
+        'detail-sheet (ats-sheet "job-detail.xsl")
+        ;; the job's tabs, each read from its ?tab= URL. The site's Applications tab
+        ;; shows only its new ones; c opens every stage, and the suggestions, as a list
+        'detail-tab-param "tab"
+        'detail-minor "ats-job-mode"
+        'detail-tabs (map (lambda (id) (list 'id id)) '("overview" "suggestions" "applications" "ai"))
+        'detail-extra-keys (list (list "c" "ats-pipeline" "candidates"))
+        'columns (list (list 'label "job" 'width 30 'field 'name)
+                       (list 'label "company" 'width 16 'field 'company)
+                       (list 'label "new" 'width 4 'field 'new 'face "dim")
+                       (list 'label "rec" 'width 4 'field 'recommended 'face "dim")
+                       (list 'label "acc" 'width 4 'field 'accepted 'face "dim")
+                       (list 'label "app" 'width 4 'field 'applied 'face "dim")
+                       (list 'label "posted" 'width #f 'field 'posted 'face "dim"))))
+
 (define *ats-spec*
   (list 'name 'ats
         'title "ATS"
@@ -132,6 +153,9 @@
         'detail-mode "ats-detail-mode"
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
+        ;; a suggestion card on a job page: recommend the job to them, or open them against it
+        'card-keys (list (list "sa-candidate" (list (list "r" "ats-suggestion-recommend" "recommend")
+                                                    (list "RET" "ats-suggestion-open" "open"))))
         ;; an application is who for what; anything else goes by its name
         'detail-name (lambda (row)
                        (if (equal? (site-app-field row 'candidate) "")
@@ -155,14 +179,7 @@
                   (list 'label "state" 'width 12 'field 'state)
                   (list 'label "jobs" 'width 10 'field 'active 'face "dim")
                   (list 'label "website" 'width #f 'field 'website 'face "dim")))
-          (ats-section 'jobs "Jobs" "5" "/staff/jobs" "ats-job-mode"
-            (list (list 'label "job" 'width 30 'field 'name)
-                  (list 'label "company" 'width 16 'field 'company)
-                  (list 'label "new" 'width 4 'field 'new 'face "dim")
-                  (list 'label "rec" 'width 4 'field 'recommended 'face "dim")
-                  (list 'label "acc" 'width 4 'field 'accepted 'face "dim")
-                  (list 'label "app" 'width 4 'field 'applied 'face "dim")
-                  (list 'label "posted" 'width #f 'field 'posted 'face "dim")))
+          *ats-jobs-page*
           (ats-section 'comms "Comms" "6" "/staff/comms" "ats-message-mode"
             (list (list 'label "from" 'width 26 'field 'name)
                   (list 'label "when" 'width 8 'field 'when 'face "dim")
@@ -177,3 +194,219 @@
 ;;;###autoload
 (define-command "ats" "Open SVS recruiting as a live website app"
   (lambda () (site-app-open! 'ats)))
+
+;; ---------------------------------------------------------------- the pipeline
+;; One job's candidates in one list: its applications stage by stage, then the
+;; suggestions not yet in it. The applications come from the ats-ash MCP, since
+;; the site's Applications tab shows one status at a time and switches it by
+;; button; the suggestions come from the site's board. A row opens as the pair it
+;; is: an application's page, or a suggestion's candidate page read against the job.
+
+(domain! 'web)
+(effects! '(write external display))
+
+(define *ats-pipeline-stages*
+  '("new" "recommended" "accepted" "emailed" "applied" "shortlisted" "offered" "hired"
+    "suggested"
+    "unsuitable" "withdrawn" "unrecommended" "candidate_rejected" "offer_rescinded" "rejected" "closed"))
+
+(define (ats-pipeline-buffer title) (string-append "*ats-pipeline: " title "*"))
+
+;; the applications, each carrying what its suggestion card knows, then the cards
+;; no application took; grouped by stage in pipeline order, the board's order within
+(define (ats-pipeline-merge job title apps cards)
+  (let* ((card-of (lambda (cid) (or (site-app-find (lambda (c) (equal? (plist-get c 'cid) cid)) cards) '())))
+         (taken (map (lambda (a) (plist-get a 'candidate_id)) apps))
+         (rows (append
+                 (map (lambda (a)
+                        (append (list 'key (plist-get a 'id)
+                                      'kind "application"
+                                      'stage (plist-get a 'state)
+                                      'candidate (plist-get a 'candidate_name)
+                                      'cid (plist-get a 'candidate_id)
+                                      'job title
+                                      'href (string-append "/staff/applications/" (plist-get a 'id)))
+                                (card-of (plist-get a 'candidate_id))))
+                      apps)
+                 (map (lambda (c)
+                        (append (list 'key (plist-get c 'cid)
+                                      'stage "suggested"
+                                      'job title
+                                      'href (string-append "/staff/candidates/" (plist-get c 'slug) "?job=" job))
+                                c))
+                      (filter (lambda (c) (not (member (plist-get c 'cid) taken))) cards)))))
+    (append
+      (apply append (map (lambda (stage) (filter (lambda (r) (equal? (plist-get r 'stage) stage)) rows))
+                         *ats-pipeline-stages*))
+      (filter (lambda (r) (not (member (plist-get r 'stage) *ats-pipeline-stages*))) rows))))
+
+;; both reads land in the buffer; the list draws once it holds the two
+(define (ats-pipeline-read! buf)
+  (let* ((job (buffer-local buf 'ats-pipeline-job))
+         (title (buffer-local buf 'ats-pipeline-title))
+         (land! (lambda (key value)
+                  (buffer-set-local! buf key value)
+                  (let ((apps (buffer-local buf 'ats-pipeline-apps))
+                        (cards (buffer-local buf 'ats-pipeline-cards)))
+                    (when (and apps cards)
+                      (buffer-set-local! buf 'ats-pipeline-rows (ats-pipeline-merge job title apps cards))
+                      (buffer-set-local! buf 'list-layout-cache #f)
+                      (list-refresh! buf)
+                      (message (string-append title ": " (number->string (length apps)) " applications, "
+                                              (number->string (length cards)) " suggestions")))))))
+    (buffer-set-local! buf 'ats-pipeline-apps #f)
+    (buffer-set-local! buf 'ats-pipeline-cards #f)
+    (message (string-append "Reading the candidates for " title "..."))
+    (mcp-call! 'ats-ash "listApplications"
+      (json-encode (list 'input (list 'job_id job) 'limit 200))
+      (lambda (ok text)
+        (let ((apps (and ok (string? text) (string-prefix? "[" text) (json-parse text))))
+          (unless apps (message (string-append "ats pipeline: applications failed: " (if (string? text) text ""))))
+          (land! 'ats-pipeline-apps (or apps '())))))
+    (site-app-fetch-html! (site-app-url (site-app-spec 'ats) (string-append "/staff/jobs/" job "?tab=suggestions&fit=all"))
+      (lambda (html)
+        (let ((cards (and html (site-app-parse (ats-sheet "job-suggestions.xsl") html))))
+          (unless (pair? cards) (message "ats pipeline: the suggestions board read nothing"))
+          (land! 'ats-pipeline-cards (if (pair? cards) cards '())))))))
+
+(define (ats-pipeline-rows buf) (or (buffer-local buf 'ats-pipeline-rows) '()))
+(define (ats-pipeline-key buf row) (plist-get row 'key))
+(define (ats-pipeline-title buf) (or (buffer-local buf 'ats-pipeline-title) "Pipeline"))
+
+(define (ats-pipeline-columns buf)
+  (list (list "stage" 12) (list "fit" 10) (list "rating" 7) (list "candidate" 24)
+        (list "exp" 6) (list "ctc" 12) (list "headline" #f)))
+
+(define (ats-pipeline-cells buf row)
+  (let* ((f (lambda (key) (site-app-field row key)))
+         ;; the rating as stars: its whole number filled, padded to five
+         (n (let ((r (f 'rating))) (or (and (> (string-length r) 0) (string->number (substring r 0 1))) 0)))
+         (stars (if (> n 0) (string-append (substring "★★★★★" 0 n) (substring "☆☆☆☆☆" 0 (- 5 n))) "")))
+    (list (list (f 'stage) "dim") (f 'fit) stars (f 'candidate)
+          (list (f 'experience) "dim") (list (f 'ctc) "dim") (f 'headline))))
+
+;; an application opens as an application; a suggestion as its candidate, against the job
+(define (ats-pipeline-open-row! buf row)
+  (when row
+    (site-app-show-detail! buf row
+      (site-app-page (site-app-spec 'ats)
+                     (if (equal? (plist-get row 'kind) "application") 'applications 'candidates)))))
+
+(define (ats-pipeline-show! job title from)
+  (let ((buf (ats-pipeline-buffer title)))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (site-app-join-group! buf)
+    (buffer-set-local! buf 'site-app-spec (site-app-spec 'ats))
+    (buffer-set-local! buf 'ats-pipeline-job job)
+    (buffer-set-local! buf 'ats-pipeline-title title)
+    (unless (buffer-derived-mode? buf "ats-pipeline-mode")
+      (with-current-buffer buf (lambda () (set-mode! "ats-pipeline-mode"))))
+    (if (and from (buffer-exists? from)) (display-buffer-detail! buf from) (switch-to-buffer! buf))
+    (when (null? (ats-pipeline-rows buf)) (ats-pipeline-read! buf))
+    buf))
+
+;; the job at hand: the row of the jobs list, or the job page beside it
+(define (ats-pipeline-job-at buf)
+  (if (buffer-derived-mode? buf "ats-jobs-mode")
+      (let ((row (list-current buf))) (and row (list row buf)))
+      (let ((row (buffer-local buf 'site-app-row)))
+        (and row (string-prefix? "/staff/jobs/" (or (plist-get row 'href) ""))
+             (list row (buffer-local buf 'site-app-list))))))
+
+(define-command "ats-pipeline" "Open the job's candidates: its applications by stage, then its suggestions"
+  (lambda ()
+    (let ((hit (ats-pipeline-job-at (current-buffer))))
+      (if hit
+          (ats-pipeline-show! (plist-get (car hit) 'key) (site-app-field (car hit) 'name) (cadr hit))
+          (message "No job here")))))
+
+(define-command "ats-pipeline-open" "Open the candidate on this row beside the list"
+  (lambda ()
+    (let ((buf (current-buffer))) (ats-pipeline-open-row! buf (list-current buf)))))
+
+(define-command "ats-pipeline-refresh" "Read the job's applications and suggestions again"
+  (lambda () (ats-pipeline-read! (current-buffer))))
+
+(define-command "ats-pipeline-recommend" "Recommend the job to the suggested candidate on this row"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (row (list-current buf))
+           (name (and row (site-app-field row 'candidate))))
+      (cond ((not row) (message "No candidate here"))
+            ((not (equal? (plist-get row 'stage) "suggested"))
+             (message (string-append name " is already " (site-app-field row 'stage))))
+            (else
+             (message (string-append "Recommending " (ats-pipeline-title buf) " to " name "..."))
+             (mcp-call! 'ats-ash "recommendJobToCandidate"
+               (json-encode (list 'input (list 'job_id (buffer-local buf 'ats-pipeline-job)
+                                               'candidate_id (plist-get row 'cid))))
+               (lambda (ok text)
+                 (message (if ok
+                              (string-append "Recommended to " name)
+                              (string-append "Recommend failed for " name ": " (if (string? text) text ""))))
+                 (when ok (ats-pipeline-read! buf)))))))))
+
+(define-list-mode! "ats-pipeline-mode"
+  (list 'doc "One job's candidates: its applications stage by stage, then the suggestions not yet in it. Moving or RET opens the candidate beside the list, an application as its application and a suggestion as its candidate page for this job. r recommends the job to a suggested candidate, / narrows (stage:applied keeps one stage, fit:strong one fit), g rereads, q quits."
+        'transient #f
+        'noun "candidate"
+        'rows ats-pipeline-rows
+        'key ats-pipeline-key
+        'columns ats-pipeline-columns
+        'cells ats-pipeline-cells
+        'title ats-pipeline-title
+        'preview ats-pipeline-open-row!
+        'filters (list (list "stage:" (lambda (buf row) (site-app-field row 'stage)) "the stage: new, recommended, applied, suggested...")
+                       (list "fit:" (lambda (buf row) (site-app-field row 'fit)) "the fit: strong, potential, unfit"))
+        'footer (lambda (b) (list (list "RET" "open") (list "r" "recommend") (list "/" "narrow") (list "g" "refresh") (list "q" "quit")))
+        'keys (list (list "RET" "ats-pipeline-open")
+                    (list "r" "ats-pipeline-recommend")
+                    (list "g" "ats-pipeline-refresh")
+                    (list "q" "quit-window"))))
+
+(when (boundp 'app-detail-keys!)
+  (app-detail-keys! "ats-pipeline-mode" "site-app-detail-mode"))
+
+;; c on the jobs list opens the row's candidates; the job page has it as an extra key
+(define-key (mode-keymap "ats-jobs-mode") "c" "ats-pipeline")
+
+;; ---------------------------------------------------------------- suggestion cards
+;; The job page's Suggestions tab is one card a candidate; these are its keys.
+
+(define (ats-suggestion-at buf)
+  (let ((card (site-app-card-at buf)))
+    (and card (equal? (plist-get card 'class) "sa-candidate") card)))
+
+(define-command "ats-suggestion-open" "Open the suggested candidate against this job"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (card (ats-suggestion-at buf))
+           (job (buffer-local buf 'site-app-row)))
+      (if (not card)
+          (message "No suggestion here")
+          (site-app-show-detail! (buffer-local buf 'site-app-list)
+            (list 'key (plist-get card 'cid)
+                  'candidate (plist-get card 'name)
+                  'job (site-app-field job 'name)
+                  'href (string-append "/staff/candidates/" (plist-get card 'slug) "?job=" (plist-get job 'key)))
+            (site-app-page (site-app-spec 'ats) 'candidates))))))
+
+(define-command "ats-suggestion-recommend" "Recommend this job to the suggested candidate"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (card (ats-suggestion-at buf))
+           (job (buffer-local buf 'site-app-row))
+           (name (and card (plist-get card 'name))))
+      (cond ((not card) (message "No suggestion here"))
+            ((not (equal? (or (plist-get card 'state) "") ""))
+             (message (string-append name " is already " (plist-get card 'state))))
+            (else
+             (message (string-append "Recommending " (site-app-field job 'name) " to " name "..."))
+             (mcp-call! 'ats-ash "recommendJobToCandidate"
+               (json-encode (list 'input (list 'job_id (plist-get job 'key) 'candidate_id (plist-get card 'cid))))
+               (lambda (ok text)
+                 (message (if ok
+                              (string-append "Recommended to " name)
+                              (string-append "Recommend failed for " name ": " (if (string? text) text ""))))
+                 (when (and ok (buffer-exists? buf))
+                   (with-current-buffer buf (lambda () (run-command "site-app-detail-reload")))))))))))

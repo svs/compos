@@ -667,10 +667,14 @@
       (append (or (buffer-local buf 'chat-queued) '()) (list text)))))
 
 (define (agent-pop-queued! buf text)
-  (let ((texts (or (buffer-local buf 'chat-queued) '())))
-    (when (and (not (null? texts)) (equal? (car texts) text))
-      (buffer-set-local! buf 'chat-queued
-        (if (null? (cdr texts)) #f (cdr texts))))))
+  ;; the first row that matches, not only the oldest: one row that never
+  ;; matches must not hold every younger one in the queue
+  (let* ((texts (or (buffer-local buf 'chat-queued) '()))
+         (kept (let loop ((ts texts) (acc '()))
+                 (cond ((null? ts) texts)
+                       ((equal? (car ts) text) (append (reverse acc) (cdr ts)))
+                       (else (loop (cdr ts) (cons (car ts) acc)))))))
+    (buffer-set-local! buf 'chat-queued (if (null? kept) #f kept))))
 
 (define (agent-discard-queued! buf)
   (buffer-set-local! buf 'chat-queued #f)

@@ -445,10 +445,10 @@
                            (chat-history-push! buf input)
                            (chat-history-reset! buf)
                            ;; /NAME args runs a skill from the chat's skills dirs
-                           (let ((result (agent-send-msg! slug
-                                           (or (and (boundp 'skill-expand-input)
-                                                    (skill-expand-input input))
-                                               input))))
+                           (let* ((sent (or (and (boundp 'skill-expand-input)
+                                                 (skill-expand-input input))
+                                            input))
+                                  (result (agent-send-msg! slug sent)))
                              (if (equal? result 'queued)
                                  ;; mid-turn: the message moves up into the
                                  ;; transcript at once, muted, and the input
@@ -461,7 +461,9 @@
                                  ;; steers the oldest row into the turn that
                                  ;; is running, for when waiting is wrong.
                                  (begin
-                                   (agent-echo-queued! slug input)
+                                   ;; the text the runtime holds, so the
+                                   ;; user-msg that delivers it pops this row
+                                   (agent-echo-queued! slug sent)
                                    (chat-clear-input! buf)
                                    (end-of-buffer!)
                                    (message "queued — runs when this turn ends"))

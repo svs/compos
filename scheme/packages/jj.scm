@@ -341,9 +341,13 @@
 ;; holds work, then pushes it; jj still refuses an undescribed change, and
 ;; that is the only gate left.
 (define (jj-tracked-bookmark root)
-  (let ((b (string-trim (jj-sh root
-             "jj bookmark list --tracked --color never -T 'name ++ \"\\n\"' 2>/dev/null | sort -u | head -1"))))
-    (and (not (equal? b "")) b)))
+  ;; No pipe: a piped command leaves the sandbox exemption, and jj needs it.
+  (let ((names (filter (lambda (b) (not (equal? b "")))
+                       (map string-trim
+                            (string-split (jj-sh root
+                              "jj bookmark list --tracked --color never -T 'name ++ \"\\n\"' 2>/dev/null")
+                                          "\n")))))
+    (and (pair? names) (car (sort names)))))
 
 (define-command "jj-push" "Advance the tracked bookmark to the tip and push to git"
   (lambda ()

@@ -92,14 +92,18 @@
 
 (define (agent-sandbox-exempt? cmd)
   "(agent-sandbox-exempt? CMD) — #t when every part of CMD runs a program in agent-sandbox-exempt, or cd, and nothing substitutes a command or redirects into a file"
-  (and (not (re-match? "`|\\$\\(|<\\(|>\\(" cmd))
-       (not (re-match? "(^|[^0-9&>])>>?(?!\\s*(&|/dev/null))" cmd))
-       (let ((progs (filter (lambda (w) (not (equal? w "")))
-                            (map (lambda (part) (car (string-split (string-append (string-trim part) " ") " ")))
-                                 (string-split (re-replace-all "&&|\\|\\||[;|\n]" cmd "\n") "\n")))))
-         (and (pair? progs)
-              (not (null? (filter (lambda (p) (member p agent-sandbox-exempt)) progs)))
-              (null? (filter (lambda (p) (not (or (equal? p "cd") (member p agent-sandbox-exempt)))) progs))))))
+  ;; Quoted text is one argument: a newline or a ; inside a commit message
+  ;; separates no command. Only single quotes also hide a substitution.
+  (let* ((bare (re-replace-all "'[^']*'" cmd "''"))
+         (plain (re-replace-all "\"(\\\\.|[^\"\\\\])*\"" bare "\"\"")))
+    (and (not (re-match? "`|\\$\\(|<\\(|>\\(" bare))
+         (not (re-match? "(^|[^0-9&>])>>?(?!\\s*(&|/dev/null))" plain))
+         (let ((progs (filter (lambda (w) (not (equal? w "")))
+                              (map (lambda (part) (car (string-split (string-append (string-trim part) " ") " ")))
+                                   (string-split (re-replace-all "&&|\\|\\||[;|\n]|(?<![>&])&(?![>&])" plain "\n") "\n")))))
+           (and (pair? progs)
+                (not (null? (filter (lambda (p) (member p agent-sandbox-exempt)) progs)))
+                (null? (filter (lambda (p) (not (or (equal? p "cd") (member p agent-sandbox-exempt)))) progs)))))))
 
 (effects! '(read))
 

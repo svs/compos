@@ -2566,20 +2566,58 @@ bottom, as a window-rects row; #f past either end."
                                  (buffer-known? b) (not (buffer-context-only? b))
                                  (not (float--class? b)) (not (peek-buffer? b))
                                  (window-fill-member? b))) past)))
-    (cond ((not neighbor) (message "No neighboring pane"))
+    (define (reveal-previous!)
+      (switch-to-buffer-here! (car eligible))
+      (set-window-prev-buffers! source
+        (filter (lambda (b) (not (equal? b buf))) past)))
+    (cond ((and (not neighbor) (buffer-move-spare-pane? dir))
+           (cond ((or (not (layout-visible-window? (list source buf)))
+                      (not (window-fill-member? buf)))
+                  (message "Cannot move this buffer into a new pane"))
+                 ((null? eligible) (message "No previous buffer to reveal"))
+                 (else
+                   (let ((i (window-pane-index source)))
+                     (reveal-previous!)
+                     (let ((panes (layout-target-visible-buffers)))
+                       (layout-target-arrange!
+                         (append (take panes (if (equal? dir 'next) (+ i 1) i))
+                                 (list buf)
+                                 (list-tail panes (if (equal? dir 'next) (+ i 1) i)))
+                         buf)
+                       (let ((w (window-showing buf)))
+                         (when w (window-set-point! w point))))))))
+          ((not neighbor) (message "No neighboring pane"))
           ((or (not (window-focusable? (car neighbor)))
                (not (layout-visible-window? neighbor))
                (not (layout-visible-window? (list source buf)))
                (not (window-fill-member? buf)))
            (message "Cannot move this buffer into that pane"))
-          ((null? eligible) (message "No previous buffer to reveal"))
+          ;; Nothing below it: the source pane closes and the buffer moves over.
+          ((null? eligible)
+           (select-window! (car neighbor))
+           (switch-to-buffer-here! buf)
+           (window-set-point! (car neighbor) point)
+           (delete-window-id! source))
           (else
-            (switch-to-buffer-here! (car eligible))
-            (set-window-prev-buffers! source
-              (filter (lambda (b) (not (equal? b buf))) past))
+            (reveal-previous!)
             (select-window! (car neighbor))
             (switch-to-buffer-here! buf)
             (window-set-point! (car neighbor) point)))))
+
+;; At the edge of the row, a layout below its capacity grows a pane there.
+(define (buffer-move-spare-pane? dir)
+  (let* ((target (layout-target))
+         (capacity (and target (layout-target-capacity target))))
+    (and (member dir '(previous next))
+         capacity
+         (< (length (layout-target-visible-buffers)) capacity))))
+
+;; SOURCE's position among the visible work panes.
+(define (window-pane-index source)
+  (let loop ((rows (filter layout-visible-window? (window-list))) (i 0))
+    (cond ((null? rows) 0)
+          ((equal? (car (car rows)) source) i)
+          (else (loop (cdr rows) (+ i 1))))))
 
 (for-each
   (lambda (spec)

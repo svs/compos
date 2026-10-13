@@ -882,20 +882,21 @@
 
 (public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
 
-(define-command "todo-assign" "Hand the task to a new chat in its project's group and show it in the other window; C-u asks for the group"
+(define-command "todo-assign" "Hand the task to a new chat in the group you are in and show it in the other window; C-u asks for the group"
   (lambda ()
     (let ((t (todo--at))
-          (ask? (and (current-prefix-arg) #t)))
+          (ask? (and (current-prefix-arg) #t))
+          (here (group-here)))
       (define (assign! g)
         (let ((chat #f))
           (todo--keep-place! (lambda () (set! chat (todo-assign-chat! (plist-get t 'id) g))))
           (display-buffer-other-window! chat)
           (message (string-append "Assigned to " chat))))
       (cond ((not t) (message "No task at point"))
-            ((or ask? (not (plist-get t 'project)))
+            ((or ask? (not here))
              (group-read-or-create! "Assign to a new chat in group: "
                (lambda (g) (assign! g))))
-            (else (assign! (plist-get t 'project)))))))
+            (else (assign! here))))))
 ;; a card follows its chat: an event on a chat topic redraws the list
 ;; when a window shows it, and marks it stale when none does
 (define (todo--on-chat-event e)

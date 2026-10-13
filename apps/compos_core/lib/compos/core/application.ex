@@ -16,6 +16,7 @@ defmodule Compos.Core.Application do
     # second daemon dies before it can restore or save anything.
     case live_daemon(daemon_socket_path()) do
       nil ->
+        Compos.Core.ErrorFeed.install()
         start_tree()
 
       path ->

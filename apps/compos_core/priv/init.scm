@@ -119,6 +119,9 @@
 (require 'workflows)
 ;; jobs on a clock; the workflow "cron" runs them, so it follows workflows
 (require 'cron)
+;; a chat for every error the daemon logs; its workflow listens to
+;; compos:error, so it follows workflows
+(require 'self-healing)
 (require 'events-demo)
 (require 'events-list)
 (require 'notifications)

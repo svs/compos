@@ -121,9 +121,29 @@
                    (if (member (plist-get tab 'group) groups) groups (append groups (list (plist-get tab 'group)))))
                  '() filters)))))
 
+(define (site-app-stars-segs text confirmed?)
+  ;; a number out of five as five stars: the earned ones gold, solid when a
+  ;; person confirmed the rating and faint when it is only the model's guess
+  (let ((n (string->number text)))
+    (if (not n)
+        (list (list "" text))
+        (let loop ((i 5) (on "") (off ""))
+          (if (= i 0)
+              (list (list (if confirmed? "sa-star-on sa-star-confirmed" "sa-star-on sa-star-guess") on)
+                    (list "sa-star-off" off))
+              (if (<= (- 6 i) (+ n 0.5))
+                  (loop (- i 1) (string-append on "★") off)
+                  (loop (- i 1) on (string-append off "★"))))))))
+
+(define (site-app-avatar-url buf src)
+  (if (string-prefix? "/" src)
+      (string-append (plist-get (buffer-local buf 'site-app-spec) 'base-url) src)
+      src))
+
 (define (site-app-cell buf col row)
-  ;; one cell; a column's 'kind draws it as a status pill, gold stars or a name.
-  ;; A cell draws its segs and text, never nested blocks, so a pill is a seg
+  ;; one cell; a column's 'kind draws it as a status pill, gold stars, an
+  ;; avatar or a name. A cell draws its segs and text, never nested blocks, so
+  ;; a pill is a seg and an avatar is the cell itself
   (let ((text (or (site-app-field row (plist-get col 'field)) ""))
         (kind (plist-get col 'kind))
         (class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")))
@@ -132,7 +152,15 @@
            (let ((tone (site-app-tone-class (plist-get (buffer-local buf 'site-app-spec) 'tones) text)))
              (list 'tag "span" 'class (string-append class " sa-badge-cell")
                    'segs (list (list (if tone (string-append "c-badge sa-pill " tone) "c-badge sa-pill") text)))))
-          ((eq? kind 'stars) (list 'tag "span" 'class (string-append class " sa-stars-cell") 'text text))
+          ((eq? kind 'stars)
+           (let ((confirmed (plist-get col 'confirmed)))
+             (list 'tag "span" 'class (string-append class " sa-stars-cell")
+                   'attrs (if confirmed (list (list "title" (if (equal? (site-app-field row confirmed) "") "rating · unconfirmed" "rating · confirmed"))) '())
+                   'segs (site-app-stars-segs text (or (not confirmed) (not (equal? (site-app-field row confirmed) "")))))))
+          ((eq? kind 'avatar)
+           (list 'tag "img" 'class (string-append class " sa-avatar")
+                 'attrs (list (list "src" (site-app-avatar-url buf text)) (list "alt" "")
+                              (list "loading" "lazy") (list "referrerpolicy" "no-referrer"))))
           ((eq? kind 'name) (list 'tag "span" 'class (string-append class " sa-name-cell") 'text text))
           (else (list 'tag "span" 'class class 'text text)))))
 
@@ -140,20 +168,24 @@
   ;; a row as blocks: one cell per column, on the column widths. Its class
   ;; names the width the fixed columns need with room left for the one that
   ;; takes the rest; the stylesheet moves that one to a line of its own in a
-  ;; narrower window rather than squeezing it into a sliver
-  (let* ((cols (or (plist-get (site-app-current-page buf) 'columns) '()))
+  ;; narrower window rather than squeezing it into a sliver. A page with a
+  ;; 'row (buf row) draws its rows itself
+  (let* ((page (site-app-current-page buf))
+         (cols (or (plist-get page 'columns) '()))
          (fixed (fold (lambda (sum col) (+ sum 1 (or (plist-get col 'width) 0))) 0 cols))
          (need (* 10 (quotient (+ fixed 30 9) 10))))
-    (list 'tag "div" 'class (string-append "sa-row sa-need-" (number->string (min 140 (max 60 need))))
-          'attrs (list (list "style"
-                             (string-append "grid-template-columns:"
-                                            (string-join (map (lambda (col)
-                                                                (let ((w (plist-get col 'width)))
-                                                                  (if w (string-append (number->string w) "ch") "minmax(0,1fr)")))
-                                                              cols)
-                                                         " "))))
-          'children (map (lambda (col) (site-app-cell buf col row))
-                         cols))))
+    (if (plist-get page 'row)
+        ((plist-get page 'row) buf row)
+        (list 'tag "div" 'class (string-append "sa-row sa-need-" (number->string (min 140 (max 60 need))))
+              'attrs (list (list "style"
+                                 (string-append "grid-template-columns:"
+                                                (string-join (map (lambda (col)
+                                                                    (let ((w (plist-get col 'width)))
+                                                                      (if w (string-append (number->string w) "ch") "minmax(0,1fr)")))
+                                                                  cols)
+                                                             " "))))
+              'children (map (lambda (col) (site-app-cell buf col row))
+                             cols)))))
 
 (define (site-app-title buf)
   (let* ((spec (buffer-local buf 'site-app-spec))
@@ -1117,6 +1149,10 @@
 .sa-row { display: grid; column-gap: 1ch; align-items: center; container-type: inline-size; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
 .sa-row > .sa-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sa-stars-cell { color: var(--warn-fg); font-size: 11px; letter-spacing: -1px; }
+.sa-star-confirmed { color: var(--warn-fg); }
+.sa-star-guess { color: transparent; -webkit-text-stroke: 1px var(--warn-fg); }
+.sa-star-off { color: var(--dim-fg); opacity: .3; }
+.sa-row > img.sa-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); justify-self: center; }
 .sa-name-cell { font-weight: 600; color: var(--default-fg); }
 .sa-badge-cell { display: flex; align-items: center; }
 .sa-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

@@ -17,6 +17,34 @@
         'detail-minor mode
         'columns columns))
 
+(define (ats-candidate-row buf row)
+  (let ((field (lambda (key) (or (site-app-field row key) "")))
+        (confirmed? (lambda () (not (equal? (or (site-app-field row 'confirmed) "") "")))))
+    (list 'tag "div" 'class "ats-card"
+          'children
+          (list (list 'tag "div" 'class "ats-card-face"
+                      'children
+                      (list (list 'tag "img" 'class "ats-card-avatar"
+                                  'attrs (list (list "src" (site-app-avatar-url buf (field 'avatar))) (list "alt" "")
+                                               (list "loading" "lazy") (list "referrerpolicy" "no-referrer")))
+                            (list 'tag "span" 'class "sa-stars-cell"
+                                  'attrs (list (list "title" (if (confirmed?) "rating · confirmed" "rating · unconfirmed")))
+                                  'segs (site-app-stars-segs (field 'rating) (confirmed?)))))
+                (list 'tag "div" 'class "ats-card-main"
+                      'children
+                      (list (list 'tag "div" 'class "ats-card-top"
+                                  'segs (list (list "sa-name-cell" (field 'name))
+                                              (list "c-dim" (string-append "   " (field 'experience) "   " (field 'ctc)))))
+                            (list 'tag "div" 'class "ats-card-headline c-dim" 'text (field 'headline))))))))
+
+(define-style! 'ats "
+.semantic-item.ats-card { display: flex; gap: 12px; align-items: center; padding: 6px 0; font-family: var(--font-sans); font-size: 12.5px; }
+.ats-card-face { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; width: 56px; }
+.ats-card-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
+.ats-card-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ats-card-top, .ats-card-headline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+")
+
 (define *ats-candidates-page*
   (list 'id 'candidates
         'label "Candidates"
@@ -29,6 +57,9 @@
         'detail-minor "ats-candidate-mode"
         'detail-tabs (map (lambda (id) (list 'id id))
                           '("profile" "suggested" "comms" "meetings" "notes"))
+        ;; the page draws a card: the face over its stars, then the name and
+        ;; facts over the headline. The columns are the plain-text view
+        'row (lambda (buf row) (ats-candidate-row buf row))
         'columns (list (list 'label "★" 'width 5 'field 'rating 'face "dim")
                        (list 'label "candidate" 'width 24 'field 'name)
                        (list 'label "exp" 'width 6 'field 'experience 'face "dim")

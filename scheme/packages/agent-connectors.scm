@@ -87,6 +87,15 @@ nonstandard install out of the built-in connector catalog."
             "opencode/claude-opus-5" "opencode/claude-haiku-5-5"
             "opencode/gemini-3.1-pro")))
 
+(define-connector! "gemini"
+  ;; @google/gemini-cli speaks ACP behind --experimental-acp. The model
+  ;; rides the command line; the CLI drops _meta, so our prompt sections
+  ;; ride the first turn.
+  '(cmd "gemini --experimental-acp" model-flag "-m "
+    system-in-prompt #t
+    models ("auto" "gemini-3.1-pro-preview" "gemini-3-flash-preview"
+            "gemini-2.5-pro" "gemini-2.5-flash")))
+
 (define-connector! "deepseek"
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
   ;; the whole prefix; the harness keeps one session, so DeepSeek's context
@@ -445,6 +454,8 @@ nonstandard install out of the built-in connector catalog."
            "OpenCode — multi-provider ACP agent")
           ((equal? name "deepseek")
            "DeepSeek Harness — session-cached DeepSeek models")
+          ((equal? name "gemini")
+           "Gemini CLI — Google account or Gemini API key")
           ((equal? name "gemini-nano")
            "Chrome Gemini Nano — local browser inference")
           ((equal? backend "req-llm")

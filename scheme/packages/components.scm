@@ -78,7 +78,22 @@
     (if (not e)
         (list 'error (string-append "no component named " (catalog--string name)))
         (let ((valid (component--validate (car e) props (nth 1 e))))
-          (if (equal? valid #t) ((nth 3 e) props) valid)))))
+          (if (equal? valid #t) (component--anchored ((nth 3 e) props) props) valid)))))
+
+;; Any component can be a stop of anchor-mode: ANCHOR-NAME names it,
+;; ANCHOR-KEYMAP is the keymap in force while point is inside it, and
+;; ANCHOR-DATA is what those keys act on. They ride on the block it makes,
+;; where anchor-blocks reads them; a component that sets one itself wins.
+(define component--anchor-keys '(anchor-name anchor-keymap anchor-data))
+
+(define (component--anchored block props)
+  (if (not (pair? block))
+      block
+      (let loop ((ks component--anchor-keys) (blk block))
+        (cond ((null? ks) blk)
+              ((and (component--has? props (car ks)) (not (plist-get blk (car ks))))
+               (loop (cdr ks) (append blk (list (car ks) (component--get props (car ks))))))
+              (else (loop (cdr ks) blk))))))
 
 (define (describe-component name)
   (let ((e (component-entry name)))
@@ -199,10 +214,11 @@
       (if (component--has? p 'click) (list 'click (component--get p 'click)) '()))))
 
 (defcomponent 'ui/card
-  "A bordered container with an optional heading and body."
+  "A bordered container with an optional heading and body. A titled card is a fold: its anchor-data carries (fold (TITLE OPEN?))."
   '((tag string optional) (title string optional) (open? boolean optional) (click any optional)
     (badge string optional) (body blocks optional) (class string optional)
-    (lines list optional) (mark string optional))
+    (lines list optional) (mark string optional)
+    (anchor-name string optional) (anchor-keymap string optional) (anchor-data list optional))
   '(title "A card" open? #t body ((tag "div" text "hello")))
   (lambda (p)
     (append
@@ -221,7 +237,12 @@
                   '())
               (if (component--get p 'open? #t) (component--get p 'body '()) '())))
       (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
-      (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '()))))
+      (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '())
+      ;; the fold is the card's own: f on it folds and unfolds by its title
+      (if (component--has? p 'title)
+          (list 'anchor-data (append (list 'fold (list (component--get p 'title) (component--get p 'open? #t)))
+                                     (component--get p 'anchor-data '())))
+          '()))))
 
 (defcomponent 'ui/kv
   "Key/value pairs for compact detail and audit views."

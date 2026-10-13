@@ -82,6 +82,23 @@
         #f
         (anchor-list buf)))
 
+;; A page drawn as blocks names its own stops: a block with an anchor-name
+;; and the lines it covers is one, with its anchor-keymap and anchor-data.
+;; The answer is (NAME FIRST-LINE LAST-LINE [KEYMAP DATA]), in page order.
+(effects! '(pure))
+
+(define (anchor-blocks blocks)
+  (let walk ((bs blocks) (acc '()))
+    (if (null? bs) acc
+        (let* ((blk (car bs))
+               (acc (if (and (pair? blk) (plist-get blk 'anchor-name) (plist-get blk 'lines))
+                        (append acc (list (append (cons (plist-get blk 'anchor-name) (plist-get blk 'lines))
+                                                  (if (or (plist-get blk 'anchor-keymap) (plist-get blk 'anchor-data))
+                                                      (list (plist-get blk 'anchor-keymap) (plist-get blk 'anchor-data))
+                                                      '()))))
+                        acc)))
+          (walk (cdr bs) (if (pair? blk) (walk (or (plist-get blk 'children) '()) acc) acc))))))
+
 (effects! '(write))
 
 ;;; --- declaring -------------------------------------------------------------
@@ -107,6 +124,19 @@
   (buffer-set-local! buf 'anchors '())
   (anchor-sync! buf)
   '())
+
+;; the stops BLOCKS name, set on BUF whose text is TEXT: a block's first
+;; line to the end of its last, as bytes
+(define (anchor-set-blocks! buf text blocks)
+  (let* ((starts (let loop ((ls (string-split text "\n")) (at 0) (acc '()))
+                   (if (null? ls) (reverse (cons at acc))
+                       (loop (cdr ls) (+ at (string-byte-length (car ls)) 1) (cons at acc)))))
+         (n (- (length starts) 1))
+         (at (lambda (line) (list-ref starts (max 0 (min n (- line 1)))))))
+    (anchor-set! buf (map (lambda (a)
+                            (append (list (car a) (at (cadr a)) (max (+ 1 (at (cadr a))) (- (at (+ 1 (caddr a))) 1)))
+                                    (list-tail a 3)))
+                          (anchor-blocks blocks)))))
 
 ;;; --- the keymap at point ---------------------------------------------------
 
@@ -414,6 +444,8 @@
 (public! 'anchor-add!
   "(anchor-add! BUF NAME START END [KEYMAP [DATA [LEVELS]]]) — add one anchor to BUF")
 (public! 'anchor-clear! "(anchor-clear! BUF) — BUF has no anchors")
+(public! 'anchor-blocks "(anchor-blocks BLOCKS) — the stops a block tree names: (NAME FIRST-LINE LAST-LINE [KEYMAP DATA]) for each block with anchor-name and lines")
+(public! 'anchor-set-blocks! "(anchor-set-blocks! BUF TEXT BLOCKS) — set BUF's anchors from the stops BLOCKS name, TEXT being BUF's text")
 (public! 'anchor-list "(anchor-list BUF) — BUF's anchors, in the order they appear")
 (public! 'anchor-at "(anchor-at BUF POS) — the innermost anchor holding byte POS, or #f")
 (public! 'anchor-find "(anchor-find BUF NAME) — BUF's anchor called NAME, or #f")

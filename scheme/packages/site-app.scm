@@ -228,7 +228,7 @@
          (head (filter (lambda (x) (not (tabs? x))) blocks))
          (tabs (filter tabs? blocks))
          (real (filter (lambda (x) (and (pair? x) (plist-get x 'lines))) head))
-         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'sa-anchor) (plist-get (car bs) 'sa-anchor)) (else (find (cdr bs)))))))
+         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'anchor-name) (plist-get (car bs) 'anchor-name)) (else (find (cdr bs)))))))
     (if (null? real)
         blocks
         (cons (site-app-claim (component 'ui/group (list 'body (site-app-unanchored head)))
@@ -555,6 +555,7 @@
             (site-app-detail-action-keys buf)
             (map (lambda (k) (list (car k) (caddr k))) (site-app-detail-extra-keys buf))
             (if (> n 0) (list (list "t" "tabs")) '())
+            (if (site-app-detail-stages buf) (list (list "[ ]" "stages") (list "/" "stage")) '())
             (list (list "s" "sections")
                   (list "M-↑↓" "parts")
                   (list "M-g a" "part by name")
@@ -624,6 +625,8 @@
                        (if (pair? profile) (list (plist-get (car profile) 'text)) '()))))
     (filter (lambda (n) (or (not (pair? n))
                             (plist-get n 'children)
+                            ;; a record with no text of its own (a strip of stages) says nothing twice
+                            (not (plist-get n 'text))
                             (and (not (member (plist-get n 'text) said))
                                  ;; a rating alone on its line: the header already shows it
                                  (not (re-match? "^\\s*★+\\s*$" (or (plist-get n 'text) ""))))))
@@ -638,6 +641,7 @@
 
 (define site-app-link-click "site-app-link:")
 (define site-app-act-click "site-app-act:")
+(define site-app-stage-click "site-app-stage:")
 
 (define (site-app-action-bar buf)
   ;; (LABEL KEY KIND IN-APP?): every button the page has, each with its key
@@ -658,39 +662,14 @@
                                    (if (plist-get out 'children)
                                        (plist-put out 'children (site-app-unanchored (plist-get out 'children)))
                                        out)))
-                     ((eq? (car pl) 'sa-anchor) (strip (cddr pl) acc))
+                     ((eq? (car pl) 'anchor-name) (strip (cddr pl) acc))
                      (else (strip (cddr pl) (cons (cadr pl) (cons (car pl) acc))))))
              blk))
        blocks))
 
-(define (site-app-anchors blocks)
-  ;; (NAME FIRST LAST [KEYMAP DATA]) for every block that names itself a stop, in page order
-  (let walk ((bs blocks) (acc '()))
-    (if (null? bs) acc
-        (let* ((blk (car bs))
-               (acc (if (and (pair? blk) (plist-get blk 'sa-anchor) (plist-get blk 'lines))
-                        (append acc (list (append (cons (plist-get blk 'sa-anchor) (plist-get blk 'lines))
-                                                  ;; a part with keys of its own: its keymap, and what they act on
-                                                  (if (plist-get blk 'sa-keys)
-                                                      (list (plist-get blk 'sa-keys) (list 'fold (plist-get blk 'sa-fold) 'record (plist-get blk 'sa-record)))
-                                                      '()))))
-                        acc)))
-          (walk (cdr bs) (if (pair? blk) (walk (or (plist-get blk 'children) '()) acc) acc))))))
-
 (define (site-app-set-anchors! buf text blocks)
-  ;; anchors are byte ranges: a block's first line to the end of its last
-  (let* ((starts (let loop ((ls (string-split text "\n")) (at 0) (acc '()))
-                   (if (null? ls) (reverse (cons at acc))
-                       (loop (cdr ls) (+ at (string-byte-length (car ls)) 1) (cons at acc)))))
-         (n (- (length starts) 1))
-         (at (lambda (line) (list-ref starts (max 0 (min n (- line 1)))))))
-    (anchor-set! buf (map (lambda (a)
-                            (let ((name (car a)))
-                              (append (list name
-                                            (at (cadr a)) (max (+ 1 (at (cadr a))) (- (at (+ 1 (caddr a))) 1)))
-                                      (list-tail a 3))))
-                          (site-app-anchors blocks)))
-    (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))))
+  (anchor-set-blocks! buf text blocks)
+  (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode")))
 
 ;; a word's tone as a class: the spec's 'tones ((REGEX KIND) ...) and gold stars
 (define (site-app-tone-class tones word)
@@ -738,7 +717,7 @@
   (append block (list 'lines (list first last) 'mark "current"
                       'anchor (string-append "sa-" (number->string first) "-" (number->string last)
                                              "-" (car (string-split (string-trim (or (plist-get block 'class) "b")) " "))))
-          (if name (list 'sa-anchor name) '())))
+          (if name (list 'anchor-name name) '())))
 
 (define (site-app-click-props href)
   (if href (list 'click (string-append site-app-link-click href)) '()))
@@ -805,15 +784,15 @@
 
 (define (site-app-all-parts? blocks)
   (let ((real (filter pair? blocks)))
-    (and (pair? real) (null? (filter (lambda (x) (not (plist-get x 'sa-anchor))) real)))))
+    (and (pair? real) (null? (filter (lambda (x) (not (plist-get x 'anchor-name))) real)))))
 
 
 (define (site-app-summary blocks &optional name least)
   ;; the loose blocks a run opens with, before its first part, are one part:
   ;; a tab's Summary (headline, where, tags, profile link), or the opening of
   ;; a card or section whose parts are its own (no part holds another)
-  (let* ((head (site-app-take-while (lambda (x) (and (pair? x) (not (plist-get x 'sa-anchor)) (plist-get x 'lines)
-                                                    (null? (site-app-anchors (or (plist-get x 'children) '())))))
+  (let* ((head (site-app-take-while (lambda (x) (and (pair? x) (not (plist-get x 'anchor-name)) (plist-get x 'lines)
+                                                    (null? (anchor-blocks (or (plist-get x 'children) '())))))
                                     blocks))
          (rest (list-tail blocks (length head))))
     (if (< (length head) (or least 2))
@@ -824,13 +803,13 @@
                               (or name "Summary"))
               rest))))
 
-(define (site-app-with-keys blocks keys fold)
+(define (site-app-with-keys blocks keys fold &optional record)
   ;; the first part of BLOCKS carries KEYS: a card that is no part itself
   ;; is folded from the part it opens with
   (let loop ((bs blocks) (acc '()) (done #f))
     (cond ((null? bs) (reverse acc))
-          ((and (not done) (pair? (car bs)) (plist-get (car bs) 'sa-anchor))
-           (loop (cdr bs) (cons (append (car bs) (list 'sa-keys keys 'sa-fold fold)) acc) #t))
+          ((and (not done) (pair? (car bs)) (plist-get (car bs) 'anchor-name))
+           (loop (cdr bs) (cons (append (car bs) (list 'anchor-keymap keys 'anchor-data (list 'fold fold 'record record))) acc) #t))
           (else (loop (cdr bs) (cons (car bs) acc) done)))))
 
 (define (site-app-sectioned blocks)
@@ -842,10 +821,10 @@
     (cond ((null? bs) (reverse acc))
           ((site-app-rank (car bs))
            (let* ((head (car bs))
-                  (name (plist-get head 'sa-anchor))
+                  (name (plist-get head 'anchor-name))
                   (body (site-app-take-while (lambda (x) (not (site-app-rank x))) (cdr bs)))
                   (inner (cons (car (site-app-unanchored (list head))) body))
-                  (flat? (null? (site-app-anchors body)))
+                  (flat? (null? (anchor-blocks body)))
                   (first (car (plist-get head 'lines)))
                   (last (let span ((xs body) (m first))
                           (if (null? xs) m
@@ -862,6 +841,51 @@
 (define (site-app-open? title default)
   (let ((hit (and *site-app-folding* (assoc title (or (buffer-local *site-app-folding* 'site-app-folds) '())))))
     (if hit (cadr hit) default)))
+
+;; A kind of card can read more of itself from the site when it opens: the
+;; spec's 'card-details is ((CLASS FN) ...), FN taking the card's record to
+;; ((LABEL PATH SHEET) ...). Each read lands under its label, on this page's
+;; 'site-app-card-more as (TITLE LABEL NODES), NODES being 'loading, 'failed
+;; or 'none until the page answers.
+(define (site-app-card-details node)
+  (let* ((buf *site-app-folding*)
+         (spec (and buf (buffer-exists? buf) (site-app-spec (buffer-local buf 'site-app-name))))
+         (hit (and spec (assoc (plist-get node 'class) (or (plist-get spec 'card-details) '())))))
+    (if hit ((cadr hit) node) '())))
+
+(define (site-app-card-put! buf title label value)
+  (buffer-set-local! buf 'site-app-card-more
+    (cons (list title label value)
+          (filter (lambda (e) (not (and (equal? (car e) title) (equal? (cadr e) label))))
+                  (or (buffer-local buf 'site-app-card-more) '())))))
+
+(define (site-app-card-fetch! buf title detail)
+  (site-app-card-put! buf title (car detail) 'loading)
+  (site-app-fetch-html! (site-app-url (site-app-spec (buffer-local buf 'site-app-name)) (cadr detail))
+    (lambda (html)
+      (when (buffer-known? buf)
+        (let* ((data (and html (site-app-parse (caddr detail) html)))
+               (nodes (and data (site-app-real (plist-get data 'section)))))
+          (site-app-card-put! buf title (car detail)
+                              (cond ((not data) 'failed) ((null? nodes) 'none) (else nodes)))
+          (site-app-draw! buf))))))
+
+;; what an open card adds below its own lines: each read under its label,
+;; asked for the first time the card is drawn open
+(define (site-app-card-more node title)
+  (let ((buf *site-app-folding*))
+    (apply append
+      (map (lambda (detail)
+             (let* ((hit (site-app-find (lambda (e) (and (equal? (car e) title) (equal? (cadr e) (car detail))))
+                                        (or (buffer-local buf 'site-app-card-more) '())))
+                    (got (and hit (caddr hit))))
+               (unless hit (site-app-card-fetch! buf title detail))
+               (cons (list 'tag "c-heading" 'text (car detail))
+                     (cond ((pair? got) got)
+                           ((equal? got 'failed) (list (list 'tag "c-field" 'text "The site did not answer. g reads the page again.")))
+                           ((equal? got 'none) (list (list 'tag "c-field" 'text "Nothing here.")))
+                           (else (list (list 'tag "c-field" 'text "Loading…")))))))
+           (site-app-card-details node)))))
 
 ;; A spec's 'detail-moves puts a section of a tab before another: the
 ;; evaluation above the work experience. A section is its heading and what
@@ -934,19 +958,24 @@
                       ;; a card is always a part of the page, named by its title; f on it folds
                       ;; and unfolds it, and a teaser the site keeps folded starts folded
                       (let* ((title (site-app-unlabel (or (plist-get (car kids) 'text) "")))
-                             (open? (site-app-open? title (not (plist-get node 'folded))))
+                             ;; a card that reads more from the site starts folded, and reads it when it opens
+                             (more? (pair? (site-app-card-details node)))
+                             (open? (site-app-open? title (and (not more?) (not (plist-get node 'folded)))))
                              (first (b 'line title (plist-get (car kids) 'href)))
-                             (body (if open? (site-app-node-blocks b (cdr kids) tones) '()))
+                             (body (if open? (site-app-node-blocks b (append (cdr kids) (site-app-card-more node title)) tones) '()))
                              ;; a card with parts of its own is no part: they are, and its fold key
                              ;; rides on the first of them
-                             (flat? (null? (site-app-anchors body)))
+                             (flat? (null? (anchor-blocks body)))
                              (fold (list title open?))
                              (body (if flat? body
-                                       (site-app-with-keys (site-app-summary body title 1) "site-app-card-map" fold)))
-                             (card (component 'ui/card (list 'title title 'open? open? 'body body)))
+                                       (site-app-with-keys (site-app-summary body title 1) (site-app-card-map-for (plist-get node 'class)) fold node)))
+                             (card (component 'ui/card (append (list 'title title 'open? open? 'body body)
+                                                            ;; the card's own keys, and the record they act on
+                                                            (if flat? (list 'anchor-keymap (site-app-card-map-for (plist-get node 'class))
+                                                                            'anchor-data (list 'record node))
+                                                                '()))))
                              (claimed (site-app-claim card first (max first (b 'count #f #f)) (and flat? title))))
-                        (loop (cdr rest) 'item (cons (if flat? (append claimed (list 'sa-keys (site-app-card-map-for (plist-get node 'class)) 'sa-fold fold 'sa-record node)) claimed)
-                                                     acc)))))))
+                        (loop (cdr rest) 'item (cons claimed acc)))))))
             ((equal? tag "c-group")
              ;; a run the sheet set apart: the note staff read, or the letter the candidate would
              (let* ((letter? (equal? (plist-get node 'class) "sa-letter"))
@@ -959,7 +988,7 @@
                     ;; the note reads as one stop; a letter keeps its sections as stops, its
                     ;; opening then one of them
                     (body (if letter? body (site-app-unanchored body)))
-                    (flat? (null? (site-app-anchors body)))
+                    (flat? (null? (anchor-blocks body)))
                     (body (if flat? body (site-app-summary body (string-append "Email · " lead) 1))))
                (loop (cdr rest) 'group
                      (if (and (null? body) (not label)) acc
@@ -969,6 +998,23 @@
                                                first (max first (b 'count #f #f))
                                                (and flat? (if letter? (string-append "Email · " lead) lead)))
                                acc)))))
+            ((equal? tag "c-stages")
+             ;; the stages a tab filters by, as one line of tabs with the one showing
+             ;; marked; [ and ] step through them, / picks one, a click takes it
+             (let ((shown (site-app-stage-shown node)))
+               (if (null? shown)
+                   (loop (cdr rest) prev acc)
+                   (let ((n (b 'line (string-join (map site-app-stage-label shown) "   ") #f)))
+                     (loop (cdr rest) 'stages
+                           (cons (site-app-claim
+                                   (component 'ui/tabs
+                                     (list 'tabs (map (lambda (s) (list (string-append site-app-stage-click (plist-get s 'status))
+                                                                        (site-app-stage-label s)
+                                                                        (and (plist-get s 'active) #t)
+                                                                        ""))
+                                                      shown)))
+                                   n n "Stages")
+                                 acc))))))
             ((equal? tag "c-heading")
              (let* ((count (and next (re-match? "^[0-9]+$" (or (plist-get next 'text) "")) (plist-get next 'text)))
                     (n (b 'line (if count (string-append text " " count) text) href))
@@ -1029,7 +1075,7 @@
              ;; a lead-in names the run under it (Strengths:, Skills match): it starts a part
              (let ((lead (site-app-unlabel text)))
                (loop (cdr rest) text (cons (append (site-app-part b 'ui/prose lead (list 'segs (list (list "c-strong" lead))) #f)
-                                                   (list 'sa-anchor lead 'sa-lead #t))
+                                                   (list 'anchor-name lead 'sa-lead #t))
                                            acc))))
             ((and (equal? tag "c-paragraph") (not href) (re-match? "^[A-Z][A-Za-z /_-]{0,24}: " text))
              ;; Type: evidence-gap, the label set off from what it says
@@ -1137,10 +1183,10 @@
                           (and (pair? b) (plist-get b 'lines)
                                (past? (car (plist-get b 'lines)))
                                (not (re-match? "\\bc-section\\b" (or (plist-get b 'class) "")))
-                               (or (plist-get b 'sa-anchor)
-                                   (null? (site-app-anchors (or (plist-get b 'children) '()))))))
+                               (or (plist-get b 'anchor-name)
+                                   (null? (anchor-blocks (or (plist-get b 'children) '()))))))
                         blocks))
-         (parts (filter past? (map cadr (site-app-anchors blocks))))
+         (parts (filter past? (map cadr (anchor-blocks blocks))))
          (lines (append (list 1) (map (lambda (b) (car (plist-get b 'lines))) loose) parts)))
     (let dedupe ((ls (sort lines)) (acc '()))
       (cond ((null? ls) (reverse acc))
@@ -1232,6 +1278,9 @@
     (cond ((not (and (string? id) (buffer-local buf 'site-app-data))) #f)
           ((string-prefix? site-app-tab-click id)
            (site-app-detail-select! buf (substring id (string-length site-app-tab-click) (string-length id)))
+           #t)
+          ((string-prefix? site-app-stage-click id)
+           (site-app-stage-select! buf (substring id (string-length site-app-stage-click) (string-length id)))
            #t)
           ((string-prefix? site-app-act-click id)
            (let ((key (substring id (string-length site-app-act-click) (string-length id))))
@@ -1691,6 +1740,88 @@
             (let ((back (anchor-find buf (anchor-name a))))
               (when back (goto-char! (anchor-start back)) (anchor-sync! buf))))))))
 
+;; The stages a tab filters its rows by (an application's new, recommended,
+;; ...), as its sheet reads them: (tag c-stages click EVENT value ATTR mark
+;; ACTIVE-CLASS items ((status S count N active BOOL) ...)). The site switches
+;; stage by a live click, so choosing one presses its button in the app's tab
+;; and reads the tab again from what the site then shows.
+(define (site-app-detail-stages buf)
+  (let ((sec (site-app-detail-section buf (site-app-detail-active buf))))
+    (and (pair? sec)
+         (let find ((ns sec))
+           (cond ((null? ns) #f)
+                 ((and (pair? (car ns)) (equal? (plist-get (car ns) 'tag) "c-stages")) (car ns))
+                 ((and (pair? (car ns)) (find (or (plist-get (car ns) 'children) '()))))
+                 (else (find (cdr ns))))))))
+
+(define (site-app-stage-label s)
+  (string-append (string-replace (or (plist-get s 'status) "") "_" " ") " " (or (plist-get s 'count) "")))
+
+;; the stages worth a tab: the one showing, and any with rows
+(define (site-app-stage-shown stages)
+  (filter (lambda (s) (or (plist-get s 'active) (not (equal? (plist-get s 'count) "0"))))
+          (site-app-real (plist-get stages 'items))))
+
+(define (site-app-stage-select! buf status)
+  (let* ((stages (site-app-detail-stages buf))
+         (name (buffer-local buf 'site-app-name))
+         (spec (site-app-spec name))
+         (page (site-app-current-page (buffer-local buf 'site-app-list)))
+         (id (site-app-detail-active buf))
+         (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
+         (param (plist-get page 'detail-tab-param))
+         (tab-url (if param (site-app-with-param url param id) url))
+         (label (string-replace status "_" " ")))
+    (if (not stages)
+        (message "No stages on this tab")
+        (let* ((selector (string-append "button[phx-click='" (plist-get stages 'click) "']["
+                                        (plist-get stages 'value) "='" status "']"))
+               (mark (plist-get stages 'mark))
+               (wait (and mark (string-append selector "." mark))))
+          (message (string-append label "…"))
+          (site-app-live-tab! name tab-url
+            (lambda (tab)
+              (when tab
+                (tab-press tab selector
+                  (lambda (html)
+                    (let ((data (and html (site-app-parse (plist-get page 'detail-sheet) html))))
+                      (if (not data)
+                          (message (string-append label ": the site did not answer"))
+                          (begin
+                            (site-app-detail-put-section! buf id (plist-get data 'section))
+                            (message label)))))
+                  wait))))))))
+
+(define (site-app-stage-step! d)
+  (let* ((buf (current-buffer))
+         (shown (let ((st (site-app-detail-stages buf))) (if st (site-app-stage-shown st) '()))))
+    (if (null? shown)
+        (message "No stages on this tab")
+        (let* ((n (length shown))
+               (i (let loop ((xs shown) (i 0))
+                    (cond ((null? xs) 0) ((plist-get (car xs) 'active) i) (else (loop (cdr xs) (+ i 1))))))
+               (j (+ i d))
+               (j (cond ((< j 0) (- n 1)) ((>= j n) 0) (else j))))
+          (site-app-stage-select! buf (plist-get (nth j shown) 'status))))))
+
+(define-command "site-app-detail-stage-next" "Show this tab's next stage" (lambda () (site-app-stage-step! 1)))
+(define-command "site-app-detail-stage-prev" "Show this tab's previous stage" (lambda () (site-app-stage-step! -1)))
+(define-command "site-app-detail-stage" "Ask for one of this tab's stages and show it"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (st (site-app-detail-stages buf))
+           (items (if st (site-app-real (plist-get st 'items)) '())))
+      (if (null? items)
+          (message "No stages on this tab")
+          (completing-read "Stage: " (map site-app-stage-label items)
+            (lambda (choice)
+              (let ((hit (site-app-find (lambda (s) (equal? (site-app-stage-label s) choice)) items)))
+                (if hit
+                    (site-app-stage-select! buf (plist-get hit 'status))
+                    (message (string-append "No stage " choice)))))
+            'require-match #t)))))
+
+
 ;; a card's own keys, in force while point is on it
 (define-keymap! "site-app-card-map")
 (define-key "site-app-card-map" "f" "site-app-detail-fold")
@@ -1753,6 +1884,8 @@
     (let ((buf (current-buffer)))
       ;; a reload reads now, and the page the detail was opened as
       (buffer-set-local! buf 'site-app-fetched-at #f)
+      ;; and an open card reads its details again
+      (buffer-set-local! buf 'site-app-card-more '())
       (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row)
                              (buffer-local buf 'site-app-for-page)))))
 (define-command "site-app-detail-open" "Open this page on the site"
@@ -1773,6 +1906,9 @@
         (list "3" "site-app-detail-tab-3")
         (list "4" "site-app-detail-tab-4")
         (list "5" "site-app-detail-tab-5")
+        (list "[" "site-app-detail-stage-prev")
+        (list "]" "site-app-detail-stage-next")
+        (list "/" "site-app-detail-stage")
         (list "RET" "site-app-detail-follow")
         (list "g" "site-app-detail-reload")
         (list "o" "site-app-detail-open")

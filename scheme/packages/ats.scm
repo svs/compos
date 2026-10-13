@@ -156,6 +156,13 @@
         ;; a suggestion card on a job page: recommend the job to them, or open them against it
         'card-keys (list (list "sa-candidate" (list (list "r" "ats-suggestion-recommend" "recommend")
                                                     (list "RET" "ats-suggestion-open" "open"))))
+        ;; an application card on a job page reads its assessment and history when it opens
+        'card-details (list (list "sa-application"
+                                  (lambda (card)
+                                    (let ((path (string-append "/staff/applications/" (plist-get card 'aid))))
+                                      (map (lambda (tab) (list (car tab) (string-append path "?tab=" (cadr tab))
+                                                               (ats-sheet "applications-detail.xsl")))
+                                           '(("Assessment" "assessment") ("History" "history")))))))
         ;; an application is who for what; anything else goes by its name
         'detail-name (lambda (row)
                        (if (equal? (site-app-field row 'candidate) "")

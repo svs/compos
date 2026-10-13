@@ -125,7 +125,7 @@
   ;; a number out of five as five stars: the earned ones gold, solid when a
   ;; person confirmed the rating and faint when it is only the model's guess
   (let ((n (string->number text)))
-    (if (not n)
+    (if (not (number? n))
         (list (list "" text))
         (let loop ((i 5) (on "") (off ""))
           (if (= i 0)
@@ -1340,6 +1340,9 @@
            (spec (site-app-spec name))
            (page (site-app-current-page list-buf))
            (made (site-app-prepare-detail! name row page))
+           (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
+           ;; every item opens on the tab this group last chose, else the first
+           (opened (buffer-set-local! made 'site-app-active (site-app-chosen-tab name page list-buf ids)))
            ;; what this page last read draws at once; a read under a minute old stands
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)
@@ -1348,7 +1351,6 @@
            (sheet (plist-get page 'detail-sheet))
            (wait (plist-get page 'detail-wait))
            (url (site-app-url spec (plist-get row 'href)))
-           (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            (gen (site-app-next-gen! name)))
       (buffer-set-local! buf 'site-app-list list-buf)
       (unless fresh
@@ -1356,8 +1358,6 @@
         ;; the old read stays on screen until this one's answers replace it
         (unless cached (buffer-set-local! buf 'site-app-sections '()))
         (buffer-set-local! buf 'site-app-data-gen #f))
-      (unless (buffer-local buf 'site-app-active)
-        (buffer-set-local! buf 'site-app-active (and (pair? ids) (car ids))))
       (display-buffer-detail! buf list-buf)
       (cond
         ((not sheet) #f)
@@ -1386,8 +1386,22 @@
                    (site-app-collect-detail! name buf tab url wait page gen))))))))
       buf)))
 
+(define (site-app-tab-key name page)
+  (string-append "site-app-tab:" (symbol->string name) ":" (let ((id (plist-get page 'id))) (if (symbol? id) (symbol->string id) (or id "")))))
+
+(define (site-app-chosen-tab name page list-buf ids)
+  (let* ((g (and list-buf (buffer-group list-buf)))
+         (chosen (and g (group-setting g (site-app-tab-key name page)))))
+    (cond ((member chosen ids) chosen)
+          ((pair? ids) (car ids))
+          (else #f))))
+
 (define (site-app-detail-select! buf id)
   (buffer-set-local! buf 'site-app-active id)
+  (let* ((list-buf (buffer-local buf 'site-app-list))
+         (g (and list-buf (buffer-group list-buf))))
+    (when g
+      (group-setting-set! g (site-app-tab-key (buffer-local buf 'site-app-name) (site-app-current-page list-buf)) id)))
   (site-app-draw! buf)
   ;; The background collection moved on to another item: fetch this one again.
   (let ((name (buffer-local buf 'site-app-name)))

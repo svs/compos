@@ -4191,7 +4191,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-visible-work-buffers)
   (dedupe-names
-    (filter group-work-buffer?
+    (filter group-membership-buffer?
       (map (lambda (window) (car (cdr window))) (window-list)))))
 
 (define (group-create-and-enter! name buffers layout)

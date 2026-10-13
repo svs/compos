@@ -69,11 +69,11 @@ Selection is the part that should differ. The decision is that a chat is not
 a cua surface: a chat is a conversation with an input, and the Shift chords
 there are worth more as the buffer walk than as a region.
 
-Not enforced yet. Nothing excludes a chat from `cua-mode-map` today, so a chat
-buffer you have typed into is in the editing state, and `S-<left>` extends a
-region there like anywhere else. `editing-state-maps-off!` lets a mode refuse
-one map of the state. chat-mode refuses only `editing-caret-map` today, so
-the exclusion is one more name on that call.
+`editing-state-maps-off!` lets a mode refuse one map of the state, and
+chat-mode refuses both `editing-caret-map` and `cua-mode-map`. A chat you have
+typed into is in the editing state, but `S-<left>` and `S-<right>` still walk
+the panes there, and the window border, which says focus in every chat, is
+true of the Shift chords as well as the Cmd ones.
 
 ## The code
 

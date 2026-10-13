@@ -5652,8 +5652,10 @@
 
 ;; A chat keeps the Cmd-arrows on the window motion, armed or not: it is a
 ;; conversation you type in without pause, and a buffer that never returns
-;; to the movement state would never answer the focus chords again.
-(editing-state-maps-off! "chat-mode" '("editing-caret-map"))
+;; to the movement state would never answer the focus chords again. It is
+;; not a cua surface either: the Shift chords stay the pane walk, so the
+;; window border, which always says focus in a chat, tells the truth.
+(editing-state-maps-off! "chat-mode" '("editing-caret-map" "cua-mode-map"))
 
 ;; The focus key: the key that returns a buffer from the editing state to
 ;; the movement state. ESC and C-g do it everywhere; a mode whose buffers
@@ -6438,7 +6440,7 @@
 (public! 'editing-state-off! "(editing-state-off! BUF) — return BUF to the movement state, where the Cmd-arrows move the focus; keyboard-quit, a window command, and a new landing do this")
 (public! 'mode-focus-key! "(mode-focus-key! MODE KEY) — KEY returns MODE's buffers from the editing state to focus; the title shows it while editing. ESC is the default")
 (public! 'focus-key "(focus-key BUF) — the key that returns BUF from the editing state to focus")
-(public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map, so the Cmd-arrows stay the window motion in a chat")
+(public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map and cua-mode-map, so the Cmd- and Shift-arrows stay the window motion in a chat")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")
 (public! 'define-derived-mode "(define-derived-mode NAME PARENT SETUP) — NAME is PARENT with SETUP on top: PARENT's setup, keymap and hook come first")

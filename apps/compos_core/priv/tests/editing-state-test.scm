@@ -123,7 +123,7 @@
 ;; map: a chat is typed in without pause, so a buffer that held the
 ;; Cmd-arrows while armed would never answer the window motion again.
 (deftest 'a-chat-keeps-the-cmd-arrows-for-the-window-motion
-  "the caret map is in force in a plain buffer and not in a chat"
+  "the caret and cua maps are in force in a plain buffer and not in a chat"
   (lambda ()
     (t--es-setup!)
     (editing--after-command! "forward-char")
@@ -135,7 +135,7 @@
     (check-equal! (editing-state? t--es-a) #t "a chat still enters the editing state")
     (check-equal! (if (member "editing-caret-map" (buffer-minor-maps t--es-a)) #t #f) #f
                   "and keeps the Cmd-arrows on the window motion")
-    (check-equal! (if (member "cua-mode-map" (buffer-minor-maps t--es-a)) #t #f) #t
-                  "the Shift selections still arm there")
+    (check-equal! (if (member "cua-mode-map" (buffer-minor-maps t--es-a)) #t #f) #f
+                  "and the Shift chords on the pane walk")
     (editing-state-off! t--es-a)
     (buffer-kill! t--es-a)))

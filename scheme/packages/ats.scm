@@ -171,22 +171,15 @@
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; a suggestion card on a job page: recommend the job to them, or open them against it
         'card-keys (list (list "sa-candidate" (list (list "r" "ats-suggestion-recommend" "recommend")
-                                                    (list "RET" "ats-suggestion-open" "open"))))
-        ;; an application card on a job page reads its assessment and history when it opens
-        'card-details (list (list "sa-application"
-                                  (lambda (card)
-                                    (let ((path (string-append "/staff/applications/" (plist-get card 'aid))))
-                                      (map (lambda (tab) (list (car tab) (string-append path "?tab=" (cadr tab))
-                                                               (ats-sheet "applications-detail.xsl")))
-                                           '(("Assessment" "assessment") ("History" "history")))))))
+                                                    (list "RET" "ats-suggestion-open" "open")))
+                         ;; an application is a row: RET opens it as its own page beside the list
+                         (list "sa-application" (list (list "RET" "ats-application-open" "open"))))
         ;; an application is who for what; anything else goes by its name
         'detail-name (lambda (row)
                        (if (equal? (site-app-field row 'candidate) "")
                            (site-app-field row 'name)
                            (string-append (site-app-field row 'candidate) " · " (site-app-field row 'job))))
-        ;; sections a detail tab reads in another order: (TAB SECTION BEFORE)
-        'detail-moves '(("candidate" "Notes" "Work Experience"))
-        ;; words the site colours, wherever they appear on a page
+                ;; words the site colours, wherever they appear on a page
         'tones '(("^★+✓?$" warn)
                  ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
@@ -234,17 +227,78 @@
   (defcomponent 'ats/application
     "One application as a card: who (the candidate's photo and name, or the job at the company on a candidate's own page), its state as a badge toned by outcome, the fit, stars and meeting as tags; the body is when it came in and where processing stands, then its buttons. It reads its assessment and history when it opens."
     (nth 1 e) (nth 2 e)
-    (lambda (p)
-      (let ((card (component 'ui/card p)))
-        (plist-put (plist-put card 'tag "application")
-                   'class (string-append (or (plist-get card 'class) "") " ats-application"))))))
+    (lambda (p) (ats-application-card p))))
+
+;; the head of an application: a photo, the name large with its stars, and under it
+;; the state and fit as pills, the meeting and when it came in. The sheet hands the
+;; facts over as the card's face (icon, badge, tags); this lays them out as a row
+(define (ats-application-tone-fit fit)
+  (cond ((re-match? "^(?i)strong" fit) "good") ((re-match? "^(?i)potential" fit) "warn")
+        ((re-match? "^(?i)unfit" fit) "bad") (else "")))
+
+(define (ats-application-card p)
+  (let* ((card (component 'ui/card p))
+         (open? (component--get p 'open? #t))
+         (tags (component--get p 'tags '()))
+         (has (lambda (re) (site-app-find (lambda (t) (re-match? re t)) tags)))
+         (fit (has " fit$"))
+         (stars (has "^[★☆]+$"))
+         (rest (filter (lambda (t) (not (or (equal? t fit) (equal? t stars)))) tags))
+         (pill (lambda (text tone) (list 'tag "span" 'class (string-append "ats-pill " tone) 'text text)))
+         (photo (cond ((component--has? p 'icon)
+                       (list 'tag "img" 'class "ats-app-photo"
+                             'attrs (list (list "src" (component--get p 'icon)) (list "alt" ""))))
+                      ((component--has? p 'letter)
+                       (list 'tag "span" 'class "ats-app-photo ats-app-letter" 'text (component--get p 'letter)))
+                      (else #f)))
+         (head (list 'tag "c-headline" 'class "c-fold-head ats-app-head"
+                     'attrs (list (list "folded" (if open? "false" "true")))
+                     'children
+                     (append
+                       (if photo (list photo) '())
+                       (list (list 'tag "c-group" 'class "ats-app-main"
+                                   'children
+                                   (list (list 'tag "c-group" 'class "ats-app-line"
+                                               'children (append (list (list 'tag "span" 'class "ats-app-name" 'text (component--get p 'title "")))
+                                                                 (if stars (list (list 'tag "span" 'class "ats-app-stars" 'text stars)) '())))
+                                         (list 'tag "c-group" 'class "ats-app-meta"
+                                               'children (append (if (component--has? p 'badge)
+                                                                     (list (pill (component--get p 'badge) (component--get p 'badge-class "")))
+                                                                     '())
+                                                                 (if fit (list (pill fit (ats-application-tone-fit fit))) '())
+                                                                 (map (lambda (t) (list 'tag "span" 'class "ats-app-fact" 'text t)) rest)))))
+                             ;; a row with nothing under it opens beside the list, not in place
+                             (if (null? (component--get p 'body '()))
+                                 (list 'tag "span" 'class "ats-app-caret" 'text "↗")
+                                 (list 'tag "span" 'class "ats-app-caret" 'text (if open? "▾" "▸")))))))
+         (body (if open? (list (list 'tag "c-group" 'class "ats-app-body" 'children (component--get p 'body '()))) '())))
+    (plist-put (plist-put (plist-put card 'tag "application")
+                          'class (string-append "c-card ats-application " (component--get p 'class "")))
+               'children (cons head body))))
 (ats-component-as! 'ats/assessment 'ui/callout "assessment" "A take on a candidate for a job, quick or deep: its verdict as the label, the reasoning as the body.")
 (ats-component-as! 'ats/job-context 'ui/group "job-context" "The job a candidate page is opened against: the job, the assessment and the application.")
 
 (define-style! 'ats-elements "
 :where(work-experiences, work-experience, applications, application, assessment, job-context) { display: block; }
-/* an application's head: the candidate's photo round, a little larger than a logo */
-.ats-application .c-fold-icon { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+/* an application: a row, not a grey bar */
+.c-card.ats-application { border: 1px solid var(--border-bg); margin: 0 0 8px; background: transparent; }
+.ats-application > .ats-app-head { display: flex; align-items: center; gap: 14px; padding: 10px 14px; background: transparent; font-family: var(--font-sans); cursor: pointer; }
+.ats-application > .ats-app-head:hover, .ats-application.current > .ats-app-head { background: var(--hl-line-bg); }
+.ats-app-photo { width: 40px; height: 40px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
+.ats-app-letter { display: inline-grid; place-items: center; font-weight: 700; color: var(--default-bg); background: var(--accent-fg); }
+.ats-app-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; margin: 0; }
+.ats-app-line { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.ats-app-name { font-size: 1.05em; font-weight: 600; color: var(--default-fg); }
+.ats-app-stars { color: var(--warn-fg); font-size: .8em; letter-spacing: 1px; }
+.ats-app-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: .82em; color: var(--dim-fg); }
+.ats-pill { font-family: var(--font-mono); font-size: .85em; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 0 7px; line-height: 1.6; border: 1px solid var(--border-bg); color: var(--dim-fg); }
+.ats-pill.good { color: var(--ok-fg); border-color: var(--ok-fg); }
+.ats-pill.info { color: var(--accent-fg); border-color: var(--accent-fg); }
+.ats-pill.warn { color: var(--warn-fg); border-color: var(--warn-fg); }
+.ats-pill.bad { color: var(--alert-fg); border-color: var(--alert-fg); }
+.ats-app-fact + .ats-app-fact::before, .ats-pill + .ats-app-fact::before { content: '·'; margin-right: 8px; color: var(--border-bg); }
+.ats-app-caret { flex: none; color: var(--dim-fg); }
+.ats-app-body { margin: 0; padding: 4px 14px 12px 68px; }
 ")
 
 (define-site-app *ats-spec*)
@@ -438,6 +492,24 @@
 (define (ats-suggestion-at buf)
   (let ((card (site-app-card-at buf)))
     (and card (equal? (plist-get card 'class) "sa-candidate") card)))
+
+(define (ats-application-at buf)
+  (let ((card (site-app-card-at buf)))
+    (and card (equal? (plist-get card 'class) "sa-application") card)))
+
+(define-command "ats-application-open" "Open the application on this row as its own page beside the list"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (card (ats-application-at buf))
+           (here (buffer-local buf 'site-app-row)))
+      (if (not card)
+          (message "No application here")
+          (site-app-show-detail! (buffer-local buf 'site-app-list)
+            (list 'key (plist-get card 'aid)
+                  'candidate (or (plist-get card 'name) (site-app-field here 'name))
+                  'job (or (plist-get card 'job) (site-app-field here 'name))
+                  'href (string-append "/staff/applications/" (plist-get card 'aid)))
+            (site-app-page (site-app-spec 'ats) 'applications))))))
 
 (define-command "ats-suggestion-open" "Open the suggested candidate against this job"
   (lambda ()

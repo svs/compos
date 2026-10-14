@@ -101,6 +101,7 @@
                           (list 'project self-healing-project
                                 'state (if chat? "todo" "inbox")
                                 'tags "self-healing"
+                                'group (group-ensure-record! self-healing-group)
                                 'source (self-healing--new-source sig e)
                                 'notes (self-healing--notes e (length events))))))
     (when chat? (todo-assign-chat! id self-healing-group))

@@ -706,8 +706,8 @@
               'options (lambda (buf)
                          (let* ((ids (fold (lambda (acc t) (let ((g (plist-get t 'group)))
                                                              (if (or (not g) (member g acc)) acc (cons g acc))))
-                                           (let ((here (group-here))) (if here (list here) '()))
-                                           (todo-list '(all #t))))
+                                           '()
+                                           (todo-list (todo--view-spec buf))))
                                 (live (filter group-name ids)))
                            (sort (map (lambda (g) (list (group-name g) g)) live)))))
         (list 'label "Project" 'kind "project"
@@ -800,23 +800,24 @@
         (todo--when t))))
 
 (define (todo--row-columns buf)
-  ;; the who column takes the room the tags leave, so a chat's id and
-  ;; status show whole
-  (list (list (list "" 2) (list "TODO" #f 'left 'end))
-        (list (list "" 2) (list "STATE" 10) (list "PROJECT" 13) (list "WHEN" 11)
-              (list "TAGS" 20) (list "WHO" #f 'right 'end))
+  ;; nothing is cut: the title, then where the task stands (state, project,
+  ;; the group that filed it, when), then its tags and who holds it; a long
+  ;; title, tag list or status wraps onto more lines
+  (list (list (list "" 2) (list "TODO" #f 'left 'wrap))
+        (list (list "" 2) (list "STATE" 10) (list "PROJECT" 20) (list "GROUP" #f 'left 'end) (list "WHEN" 11))
+        (list (list "" 2) (list "TAGS" 20 'left 'wrap) (list "WHO" #f 'left 'wrap))
         (list (list "" #f 'left 'end))))
 
 (define (todo--row-cells buf t)
-  ;; a card: a state dot and the title, then a state pill, the project,
-  ;; the date and the tags, with a blank line between cards
+  ;; a card: a state dot and the title; the state pill, the project, the
+  ;; group and the date; the tags and who holds it; then a blank line
   (if (todo--sep? t)
       (list (list "" (list (plist-get t 'title) "list-section-name")))
-  (list (list (list "●" (todo--state-face t)) (list (plist-get t 'title) "todo-title"))
-        (list "" (todo--pill t) (list (plist-get t 'project) "todo-project")
-              (todo--when t) (list (todo--tag-text t) "todo-tags")
-              (list (todo--who-status t) "org-meta"))
-        (list ""))))
+      (list (list (list "●" (todo--state-face t)) (list (plist-get t 'title) "todo-title"))
+            (list "" (todo--pill t) (list (plist-get t 'project) "todo-project")
+                  (list (or (group-name (plist-get t 'group)) "") "org-meta") (todo--when t))
+            (list "" (list (todo--tag-text t) "todo-tags") (list (todo--who-status t) "org-meta"))
+            (list ""))))
 
 (define (todo--at) (let ((t (list-current *todo-buffer*))) (and t (not (todo--sep? t)) t)))
 

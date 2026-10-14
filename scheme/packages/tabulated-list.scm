@@ -855,6 +855,52 @@
 ;; A column whose tail says nothing declares 'end instead, and loses the
 ;; end: a subject and a tag list both read from the left, and a middle
 ;; cut through a list of words invents a word that is not there.
+;; the lines S breaks into at width W: at spaces, and inside a word only
+;; when the word alone is wider than W
+(define (list-wrap-chunks s w)
+  (let loop ((words (string-split s " ")) (line "") (out '()))
+    (cond ((null? words) (reverse (if (equal? line "") (if (null? out) (list "") out) (cons line out))))
+          ((equal? (car words) "") (loop (cdr words) line out))
+          (else
+            (let* ((word (car words))
+                   (n (string-length word))
+                   (joined (if (equal? line "") word (string-append line " " word)))
+                   (room (if (equal? line "") w (- w (string-length line) 1))))
+              (cond ((<= (string-length joined) w) (loop (cdr words) joined out))
+                    ;; a word that fits a line of its own starts one
+                    ((<= n w) (loop words "" (cons line out)))
+                    ;; a word wider than any line fills this one and goes on
+                    ((> room 0)
+                     (loop (cons (substring word room n) (cdr words)) ""
+                           (cons (if (equal? line "") (substring word 0 room)
+                                     (string-append line " " (substring word 0 room)))
+                                 out)))
+                    (else (loop words "" (cons line out)))))))))
+
+;; the lines a 'wrap column adds below one line of a row: each one holds
+;; the next piece of every wrapping cell and blanks the other columns
+(define (list-wrap-rest cells cols)
+  (let* ((pieces (let zip ((cs cells) (ks cols) (out '()))
+                   (if (or (null? cs) (null? ks)) (reverse out)
+                       (zip (cdr cs) (cdr ks)
+                            (cons (if (and (equal? (list-col-trim (car ks)) 'wrap) (list-col-width (car ks)))
+                                      (cdr (list-wrap-chunks (list-cell-text (car cs)) (list-col-width (car ks))))
+                                      '())
+                                  out)))))
+         (n (fold (lambda (acc p) (max acc (length p))) 0 pieces)))
+    (let loop ((i 0) (out '()))
+      (if (>= i n) (reverse out)
+          (loop (+ i 1)
+                (cons (let cell ((cs cells) (ps pieces) (acc '()))
+                        (if (or (null? cs) (null? ps)) (reverse acc)
+                            (cell (cdr cs) (cdr ps)
+                                  (cons (if (> (length (car ps)) i)
+                                            (let ((face (list-cell-face (car cs))))
+                                              (if face (list (nth i (car ps)) face) (nth i (car ps))))
+                                            "")
+                                        acc))))
+                      out))))))
+
 (define (list-fit s w trim)
   (cond ((not w) s)
         ((<= (string-length s) w) s)
@@ -867,6 +913,9 @@
          (let ((out (trim s w)))
            (if (> (string-length out) w) (substring out 0 w) out)))
         ((equal? trim 'end) (string-append (substring s 0 (- w 1)) "…"))
+        ;; a wrapping column shows its first line here; list-row-lines
+        ;; lays out the rest below it
+        ((equal? trim 'wrap) (car (list-wrap-chunks s w)))
         (else
           (let* ((keep (- w 1))
                  (head (quotient (+ keep 1) 2))
@@ -1005,10 +1054,8 @@
                                   (number->string (length (list-entries buf)))
                                   " shown, PgDn draws more")
                    meta))
-         (note (if (null? (list-filters buf))
-                   ""
-                   (string-append "narrowed to " (list-filters-text buf)
-                                  " — \\ widens")))
+         ;; the title line already names the filters
+         (note "")
          (text (cond ((equal? note "") meta)
                      ((equal? meta "") note)
                      (else (string-append meta "   ·   " note)))))
@@ -1176,12 +1223,19 @@
                        (pre (if first? head blank))
                        (n (string-byte-length pre)))
                   (loop (cdr cs) (cdr ks) #f
-                        (cons (list (string-trim-right (string-append pre (car laid)))
-                                    (append (if (or (not first?) (equal? mark " ") (equal? mark ""))
-                                                '()
-                                                (list (list 0 (string-byte-length mark) "alert")))
-                                            (list-shift-spans (car (cdr laid)) n)))
-                              out))))))
+                        (append
+                          (reverse
+                            (map (lambda (more)
+                                   (let ((l (list-lay-out more (car ks))))
+                                     (list (string-trim-right (string-append blank (car l)))
+                                           (list-shift-spans (car (cdr l)) (string-byte-length blank)))))
+                                 (list-wrap-rest (car cs) (car ks))))
+                          (cons (list (string-trim-right (string-append pre (car laid)))
+                                      (append (if (or (not first?) (equal? mark " ") (equal? mark ""))
+                                                  '()
+                                                  (list (list 0 (string-byte-length mark) "alert")))
+                                              (list-shift-spans (car (cdr laid)) n)))
+                                out)))))))
         (let ((template (list-text-template buf)))
           (list (list (string-append mark
             (if template

@@ -3,13 +3,13 @@
 ;;; The mode once painted whole buffers on every edit. A 400 KB chat took
 ;;; 1.4 s a paint, and the daemon hung. jit-lock now hands anon one range
 ;;; of drawn lines at a time. These tests hold that a paint touches only
-;;; its range, and that one paint costs one sort.
+;;; its range, and that one paint sorts only its own spans.
 
 (domain! 'testing)
 (effects! '(write))
 
 (deftest 'anon-redacted-drops-common-words-and-keeps-the-rest
-  "a sort-merge against the common words, with no member per span"
+  "a span of a common word goes; the cache size does not set the cost"
   (lambda ()
     (let ((spans '((0 5 "Hello") (6 11 "Alice") (12 17 "Hello") (18 21 "Bob"))))
       (check-equal! (sort (anon--redacted spans '("Hello")))

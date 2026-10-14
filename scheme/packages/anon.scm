@@ -92,18 +92,19 @@
 
 (effects! '(write))
 
-;; The spans to paint. A common word sorts as (WORD 0), just before its
-;; spans (WORD 1 START END), so one pass over one sort drops them. The
-;; dialect has no string<?, and a member per span is quadratic.
+;; The spans to paint. The spans sort by word, so each distinct word asks
+;; the native member one time. A sort-merge against the caches walked
+;; every cached word in Scheme on each paint, and the caches grow without
+;; bound.
 (define (anon--redacted spans common)
-  (let loop ((rows (sort (append (map (lambda (w) (list w 0)) common)
-                                 (map (lambda (s) (list (caddr s) 1 (car s) (cadr s))) spans))))
-             (skip #f) (acc '()))
+  (let loop ((rows (sort (map (lambda (s) (list (caddr s) (car s) (cadr s))) spans)))
+             (word #f) (skip #f) (acc '()))
     (cond ((null? rows) acc)
-          ((equal? (cadr (car rows)) 0) (loop (cdr rows) (car (car rows)) acc))
-          ((equal? (car (car rows)) skip) (loop (cdr rows) skip acc))
-          (else (loop (cdr rows) skip
-                      (cons (list (caddr (car rows)) (list-ref (car rows) 3) "anon-redacted") acc))))))
+          ((not (equal? (car (car rows)) word))
+           (loop rows (car (car rows)) (and (member (car (car rows)) common) #t) acc))
+          (skip (loop (cdr rows) word skip acc))
+          (else (loop (cdr rows) word skip
+                      (cons (list (cadr (car rows)) (caddr (car rows)) "anon-redacted") acc))))))
 
 ;; A block view draws its own tree, not the buffer text, so no overlay
 ;; reaches it. While a buffer has anon-local-mode, the tree a mode writes to
@@ -366,17 +367,18 @@ common words are sorted once per tree, not once per string"
         'purpose 'fast))))
 
 ;; The first span of each word that no cache and no open question knows.
-;; A known word sorts as (WORD 0), before its spans (WORD 1 START END).
+;; The spans sort by word, so each distinct word asks the native member one time.
+(define (anon--known? w)
+  (or (member w anon-proper-nouns) (member w anon-common-words) (member w *anon-pending*)))
+
 (define (anon--fresh spans)
-  (let loop ((rows (sort (append (map (lambda (w) (list w 0))
-                                      (append anon-proper-nouns anon-common-words *anon-pending*))
-                                 (map (lambda (s) (list (caddr s) 1 (car s) (cadr s))) spans))))
+  (let loop ((rows (sort (map (lambda (s) (list (caddr s) (car s) (cadr s))) spans)))
              (seen #f) (acc '()))
     (cond ((null? rows) (reverse acc))
           ((equal? (car (car rows)) seen) (loop (cdr rows) seen acc))
-          ((equal? (cadr (car rows)) 0) (loop (cdr rows) (car (car rows)) acc))
+          ((anon--known? (car (car rows))) (loop (cdr rows) (car (car rows)) acc))
           (else (loop (cdr rows) (car (car rows))
-                      (cons (list (caddr (car rows)) (list-ref (car rows) 3) (car (car rows))) acc))))))
+                      (cons (list (cadr (car rows)) (caddr (car rows)) (car (car rows))) acc))))))
 
 (define (anon--ask-text! text spans)
   "send the words of SPANS in TEXT that no cache and no open question knows to decide"

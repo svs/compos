@@ -3178,7 +3178,7 @@
   ;; from on the way in, so the layout in front of you never changes under
   ;; you and the frame never follows a buffer home (docs/groups.md, "A buffer
   ;; opens in the current group").
-  (when (and (not (buffer-context?)) (not *layout-busy*)
+  (when (and (not (buffer-context?)) (not (layout-arranging?))
              (boundp 'buffer-join-here!))
     (buffer-join-here! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
@@ -3188,10 +3188,10 @@
         ((display-foreign? buf)
          (switch-to-buffer-here! buf)
          buf)
-        ((and (not *layout-busy*) (layout-target)
+        ((and (not (layout-arranging?)) (layout-target)
               (not (float--class? (window-buffer (active-window))))
               (window-display! (lambda () (layout-target-open! buf #t #f)))) buf)
-        ((and (not *layout-busy*) (not (layout-target))
+        ((and (not (layout-arranging?)) (not (layout-target))
               (not (float--class? (window-buffer (active-window))))
               (let ((win (or (window-showing buf)
                              (window-showing-mode (buffer-local buf 'mode-name)))))

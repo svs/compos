@@ -294,7 +294,7 @@
 ;; the only buffer in the editor cannot be in two places and nowhere: when
 ;; there is nothing else to reveal the other window keeps it.
 (define (window-release-duplicates! win name)
-  (unless *layout-busy*
+  (unless (layout-arranging?)
     (for-each
      (lambda (w)
        (let* ((other (car w))
@@ -720,7 +720,7 @@
 ;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
 (define (layout-target-on-change!)
   (layout-target-modeline!)
-  (when (and (layout-target) (not *layout-busy*)
+  (when (and (layout-target) (not (layout-arranging?))
              (not (minibuffer-state)) (not (float-open?)))
     (let ((panes (layout-target-visible-buffers))
           (focus (window-buffer (active-window))))
@@ -1048,7 +1048,7 @@
              (actions (display-buffer-actions-for name a)))
         (window-display!
           (lambda ()
-            (or (and (layout-target) (not *layout-busy*) (pair? actions)
+            (or (and (layout-target) (not (layout-arranging?)) (pair? actions)
                      (not (member (car actions) *display-buffer-outside-layout*))
                      (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
                 (display-buffer-run-actions name a actions)))))))
@@ -1567,6 +1567,11 @@ keeps the buffer you were in and your point.")
 ;; for another layout in the middle of this one.
 (define *layout-busy* #f)
 
+;; *layout-busy* holds #f or the monotonic-ms the flag went up. A build that
+;; dies with no unwind (a heap kill) or two lanes that restore each other's
+;; flag can leave it up; a flag older than this counts as stale and clears.
+(define layout-busy-stale-ms 5000)
+
 ;; Run THUNK with the engine standing down. Desktop restore uses this: it
 ;; rebuilds the exact windows it saved, and a mode setup that runs inside it
 ;; must not arrange the frame a second way.
@@ -1575,7 +1580,11 @@ keeps the buffer you were in and your point.")
 ;; ask this and stand down: the engine is mid-build, it will place every
 ;; declared pane itself, and a split landing inside that build leaves the
 ;; frame neither arrangement.
-(define (layout-arranging?) *layout-busy*)
+(define (layout-arranging?)
+  (cond ((not *layout-busy*) #f)
+        ((and (number? *layout-busy*)
+              (< (- (monotonic-ms) *layout-busy*) layout-busy-stale-ms)) #t)
+        (else (set! *layout-busy* #f) #f)))
 
 ;; This Scheme has no unwind form, so a throw inside a build leaves the
 ;; flag raised and every later arrangement returns early — the frame
@@ -1586,32 +1595,32 @@ keeps the buffer you were in and your point.")
 
 (define (with-layout-suppressed thunk)
   (let ((was *layout-busy*))
-    (set! *layout-busy* #t)
-    (let ((r (thunk)))
-      (set! *layout-busy* was)
-      r)))
+    (set! *layout-busy* (monotonic-ms))
+    (unwind-protect thunk (lambda () (set! *layout-busy* was)))))
 
 ;; Put the frame where SPEC says. The anchor keeps focus: a mode that arranges
 ;; the frame must not move the user out of the buffer they are in.
 (define (apply-layout! anchor spec)
-  (if *layout-busy*
+  (if (layout-arranging?)
       (layout--panes anchor spec)
       (begin
         ;; the flag goes up BEFORE the panes resolve: an ensure pane runs a
         ;; command, that command switches buffers and sets a mode, and a
         ;; mode setup asks the engine for a layout of its own. One
         ;; arrangement at a time, materialising included.
-        (set! *layout-busy* #t)
-        (let ((panes (layout--panes anchor spec))
-              (histories (layout--capture-histories)))
-          (when (pair? panes)
-            (delete-other-windows!)
-            (layout--fill-line! panes (layout--dir spec) (layout--ratio spec))
-            (layout--restore-histories! histories)
-            (let ((w (window-showing anchor)))
-              (when w (select-window! w))))
-          (set! *layout-busy* #f)
-          panes))))
+        (set! *layout-busy* (monotonic-ms))
+        (unwind-protect
+         (lambda ()
+           (let ((panes (layout--panes anchor spec))
+                 (histories (layout--capture-histories)))
+             (when (pair? panes)
+               (delete-other-windows!)
+               (layout--fill-line! panes (layout--dir spec) (layout--ratio spec))
+               (layout--restore-histories! histories)
+               (let ((w (window-showing anchor)))
+                 (when w (select-window! w))))
+             panes))
+         (lambda () (set! *layout-busy* #f))))))
 
  ;; Visible panes keep tree order. Selecting a pane does not promote it.
 (define (layout-visible-buffers)
@@ -1886,11 +1895,13 @@ keeps the buffer you were in and your point.")
 ;; in IDS becomes hidden; it is not deleted.
 (define (layout-arrange-windows! algorithm ids)
   (float-close!)
-  (set! *layout-busy* #t)
-  (let ((ok (window-arrange-line! (layout-split-dir algorithm)
-                                  (layout-first-ratio algorithm (length ids))
-                                  ids)))
-    (set! *layout-busy* #f)
+  (set! *layout-busy* (monotonic-ms))
+  (let ((ok (unwind-protect
+             (lambda ()
+               (window-arrange-line! (layout-split-dir algorithm)
+                                     (layout-first-ratio algorithm (length ids))
+                                     ids))
+             (lambda () (set! *layout-busy* #f)))))
     (when ok
       (window-state-changed!)
       (layout-target-note-slots! (map window-buffer ids)))
@@ -1936,7 +1947,7 @@ keeps the buffer you were in and your point.")
     (cond
       ((not capacity) (message "Unknown window layout") #f)
       ((null? panes) (message "No live buffers to arrange") #f)
-      (*layout-busy* panes)
+      ((layout-arranging?) panes)
       (else
         (let ((ids (let loop ((rest panes) (taken '()))
                      (if (null? rest)
@@ -2141,7 +2152,7 @@ keeps the buffer you were in and your point.")
   (let ((spec (buffer-layout buf)))
     (if (and spec
              (not (layout-target))
-             (not *layout-busy*)
+             (not (layout-arranging?))
              (equal? (window-buffer (active-window)) buf))
         (apply-layout! buf spec)
         #f)))

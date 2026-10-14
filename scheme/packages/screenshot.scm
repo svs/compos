@@ -113,16 +113,14 @@
           'awaitPromise #t 'userGesture #t)
     (lambda (r) r)))
 
-;; a command runs before the page has drawn its prompt away: wait until the
-;; minibuffer layer is gone and the page has painted, then call K
+;; a command runs before the page has drawn its prompt away: ask whether the
+;; minibuffer layer is still up, then call K. The eval bridge answers at
+;; once and never awaits a promise, so this cannot wait for a paint; it
+;; used to await one through Runtime.evaluate, and that call never answered,
+;; so no screenshot was ever written. K runs whatever the page says.
 (define (screenshot--settle k)
-  (tab-cdp (dom--editor-tab) "Runtime.evaluate"
-    (list 'expression
-          (string-append "(async () => { const t = Date.now() + 1500;"
-                         " while (document.querySelector('.mb-modal-layer') && Date.now() < t)"
-                         " await new Promise(r => setTimeout(r, 16));"
-                         " await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); })()")
-          'awaitPromise #t)
+  (tab-eval (dom--editor-tab)
+    "!document.querySelector('.mb-modal-layer')"
     (lambda (r) (k))))
 
 (define (screenshot--capture params path k)

@@ -771,48 +771,66 @@
 (define *spotify-news* '())      ; (ARTIST . stories)
 (define *spotify-asked* '())     ; what has been asked for, so it is asked once
 
+(define (spotify--without x xs) (filter (lambda (y) (not (equal? y x))) xs))
 (define (spotify--cached alist key) (let ((hit (assoc key alist))) (and hit (cdr hit))))
 (define (spotify--now-field k) (or (plist-get *spotify-now* k) ""))
 
 ;; the reader tab reads one page at a time, so the album and the artist are
 ;; read one after the other, and each only once
 (define (spotify--read-page! href sheet k)
-  (site-app-navigate! 'spotify (string-append "https://open.spotify.com" href) spotify--wait
+  ;; an album or an artist page is read once its tracks have drawn: its cards
+  ;; draw first, and a read at the first card misses the popular tracks
+  (site-app-navigate! 'spotify (string-append "https://open.spotify.com" href) "main [data-testid=tracklist-row]"
     (lambda (tab answer) (k (and answer (site-app-parse sheet (plist-get answer 'html)))))))
 
 (define (spotify--ask! key) (if (member key *spotify-asked*) #f (begin (set! *spotify-asked* (cons key *spotify-asked*)) #t)))
 
 (define (spotify--news-of! artist)
+  ;; a web search, off the lane; a failed one may be asked again
   (when (and (not (equal? artist "")) (spotify--ask! (string-append "news:" artist)))
     (task-run!
       (lambda () (mcp-call! 'google-search "search" (json-encode (list 'query (string-append artist " music news") 'num 8))))
-      (lambda (text)
-        (let ((items (and (string? text) (string-prefix? "[" (string-trim text)) (json-parse text))))
-          (set! *spotify-news* (cons (cons artist (if (pair? items) items '())) *spotify-news*))
-          (spotify--now-draw!))))))
+      (lambda (ok text)
+        (let ((items (and ok (string? text) (string-prefix? "[" (string-trim text)) (json-parse text))))
+          (if (not ok)
+              (set! *spotify-asked* (spotify--without (string-append "news:" artist) *spotify-asked*))
+              (set! *spotify-news* (cons (cons artist (if (pair? items) items '())) *spotify-news*)))
+          (spotify--now-draw!)))
+      30000)))
+
+(define *spotify-reading* #f)
 
 (define (spotify--context!)
-  ;; what the page needs that it has not read: the album, then the artist, then the news
+  ;; what the page needs that it has not read: the album, then the artist, then
+  ;; the news. One read at a time: the reader tab has one page, and a second
+  ;; read would take it from under the first. When the chain ends it looks
+  ;; again, for music that moved on while it read
   (let ((album (spotify--now-field 'albumHref))
         (artist (spotify--now-field 'artistHref))
         (artist-name (car (string-split (spotify--now-field 'artists) ","))))
     (spotify--news-of! artist-name)
-    (let ((read-artist
-            (lambda ()
-              (when (and (not (equal? artist "")) (spotify--ask! artist))
-                (spotify--read-page! artist *spotify-artist-sheet*
-                  (lambda (data)
-                    (set! *spotify-artists* (cons (cons artist data) *spotify-artists*))
-                    (unless data (set! *spotify-asked* (delete artist *spotify-asked*)))
-                    (spotify--now-draw!)))))))
-      (if (and (not (equal? album "")) (spotify--ask! album))
-          (spotify--read-page! album *spotify-detail-sheet*
-            (lambda (data)
-              (set! *spotify-albums* (cons (cons album data) *spotify-albums*))
-              (unless data (set! *spotify-asked* (delete album *spotify-asked*)))
-              (spotify--now-draw!)
-              (read-artist)))
-          (read-artist)))))
+    (unless *spotify-reading*
+      (let* ((done (lambda () (set! *spotify-reading* #f) (spotify--now-draw!)))
+             (step (lambda (href sheet store! k)
+                     (spotify--read-page! href sheet
+                       (lambda (data)
+                         (store! data)
+                         (unless data (set! *spotify-asked* (spotify--without href *spotify-asked*)))
+                         (spotify--now-draw!)
+                         (k)))))
+             (read-artist
+               (lambda ()
+                 (if (and (not (equal? artist "")) (spotify--ask! artist))
+                     (step artist *spotify-artist-sheet*
+                           (lambda (data) (set! *spotify-artists* (cons (cons artist data) *spotify-artists*)))
+                           (lambda () (done) (spotify--context!)))
+                     (done)))))
+        (set! *spotify-reading* #t)
+        (if (and (not (equal? album "")) (spotify--ask! album))
+            (step album *spotify-detail-sheet*
+                  (lambda (data) (set! *spotify-albums* (cons (cons album data) *spotify-albums*)))
+                  read-artist)
+            (read-artist))))))
 
 (define (spotify--album-facts href)
   ;; (NAME RELEASED) from the album page's head: the whole date, else the year
@@ -851,7 +869,8 @@
             ((not artist) (list (spotify--quiet (string-append "Reading " name "'s page…"))))
             (else
              (let ((popular (let ((ps (or (plist-get artist 'popular) '()))) (if (> (length ps) 5) (list-head ps 5) ps)))
-                   (tour (filter (lambda (g) (equal? (plist-get g 'artist) name)) (or (plist-get artist 'tour) '())))
+                   (tour (let ((ts (filter (lambda (g) (equal? (plist-get g 'artist) name)) (or (plist-get artist 'tour) '()))))
+                           (if (> (length ts) 6) (list-head ts 6) ts)))
                    (discog (or (plist-get artist 'discog) '())))
                (append
                  (if (null? popular) '()
@@ -859,7 +878,7 @@
                            (map (lambda (t)
                                   (plist-put (component 'spotify/track
                                                (list 'title (plist-get t 'name) 'icon (plist-get t 'art) 'badge (plist-get t 'index)
-                                                     'artists (plist-get t 'plays) 'duration (plist-get t 'duration)
+                                                     'artists (let ((n (or (plist-get t 'plays) ""))) (if (equal? n "") "" (string-append n " plays"))) 'duration (plist-get t 'duration)
                                                      'playing? (equal? (plist-get t 'name) title)))
                                              'click (string-append "spotify-play:" artist-href "|" (or (plist-get t 'play) ""))))
                                 popular)))

@@ -501,10 +501,12 @@
 ;; strong, the rest indented under it.
 
 
-;; Ornament the site draws for looks: Devanagari labels and section numerals.
+;; Ornament the site draws for looks, dropped: the spec's 'ornament is a regex
+;; for such text, read from the spec of the page being drawn.
 (define (site-app-ornament? text)
-  (and (re-match? "[\\x{0900}-\\x{097F}]" text)
-       (not (re-match? "[A-Za-z]" text))))
+  (let* ((spec (and *site-app-folding* (site-app-spec (buffer-local *site-app-folding* 'site-app-name))))
+         (re (and spec (plist-get spec 'ornament))))
+    (and re (re-match? re text) #t)))
 
 (define (site-app-short-field? node)
   (and (equal? (plist-get node 'tag) "c-field")
@@ -535,11 +537,21 @@
 
 
 
-;; The profile's state line ("withdrawn → pending: withdrawn scheduled 2 Sep"):
-;; its first word is where the item stands, and that belongs in the title.
-(define (site-app-state-node data)
-  (site-app-find (lambda (n) (re-match? " → " (or (plist-get n 'text) "")))
-                 (site-app-real (plist-get data 'profile))))
+;; What the header shows, from the page's data. The spec's 'detail-head maps
+;; the data its sheets make to (title S title-href S state S head NODES): head is
+;; the item's own records, an optional rating, its name, then its facts. Without
+;; one the sheet names them itself: title, title_href, state and head.
+(define (site-app-head spec data)
+  (let ((hook (and spec (plist-get spec 'detail-head))))
+    (if hook
+        (hook data)
+        (list 'title (plist-get data 'title) 'title-href (plist-get data 'title_href)
+              'state (plist-get data 'state) 'head (plist-get data 'head)))))
+
+;; the head's rating: its first record, when the spec's 'rating regex matches it
+(define (site-app-rating spec text)
+  (let ((re (and spec (plist-get spec 'rating))))
+    (and re text (re-match? re (string-trim text)) #t)))
 
 ;; The site prints each button's key on the button ("Approve a"). In the app
 ;; the keys live in the keys bar, so a button says only what it does.
@@ -618,18 +630,20 @@
     (unless quiet (site-app-draw! buf))))
 
 
-;; A tab that restates the header (the candidate's stars and name) says it once.
-(define (site-app-drop-repeats section data)
-  (let* ((profile (site-app-real (plist-get data 'profile)))
-         (said (append (list (plist-get data 'candidate))
-                       (if (pair? profile) (list (plist-get (car profile) 'text)) '()))))
+;; A tab that restates the header (the item's rating and name) says it once.
+(define (site-app-drop-repeats section spec data)
+  (let* ((head (site-app-real (plist-get (site-app-head spec data) 'head)))
+         (said (map (lambda (n) (plist-get n 'text))
+                    (if (and (pair? head) (site-app-rating spec (plist-get (car head) 'text)))
+                        (if (pair? (cdr head)) (list (car head) (cadr head)) head)
+                        (if (pair? head) (list (car head)) '())))))
     (filter (lambda (n) (or (not (pair? n))
                             (plist-get n 'children)
                             ;; a record with no text of its own (a strip of stages) says nothing twice
                             (not (plist-get n 'text))
                             (and (not (member (plist-get n 'text) said))
                                  ;; a rating alone on its line: the header already shows it
-                                 (not (re-match? "^\\s*★+\\s*$" (or (plist-get n 'text) ""))))))
+                                 (not (site-app-rating spec (plist-get n 'text))))))
             section)))
 
 
@@ -645,14 +659,17 @@
 
 (define (site-app-action-bar buf)
   ;; (LABEL KEY KIND IN-APP?): every button the page has, each with its key
-  (map (lambda (k)
-         (let ((click (or (plist-get (list-ref k 3) 'click) "")))
-           (list (cadr k) (car k)
-                 (cond ((re-match? "approve" click) "good")
-                       ((re-match? "reject|delete" click) "bad")
-                       (else "plain"))
-                 (caddr k))))
-       (site-app-keyed-actions buf)))
+  ;; a button's kind is the tone the spec's 'tones give a word of its label
+  (let* ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+         (tones (and spec (plist-get spec 'tones))))
+    (map (lambda (k)
+           (let ((tone (site-app-find (lambda (x) x)
+                                      (map (lambda (w) (site-app-tone-class tones w))
+                                           (string-split (cadr k) " ")))))
+             (list (cadr k) (car k)
+                   (if (member tone (list "good" "bad")) tone "plain")
+                   (caddr k))))
+         (site-app-keyed-actions buf))))
 
 (define (site-app-unanchored blocks)
   (map (lambda (blk)
@@ -671,15 +688,13 @@
   (anchor-set-blocks! buf text blocks)
   (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode")))
 
-;; a word's tone as a class: the spec's 'tones ((REGEX KIND) ...) and gold stars
+;; a word's tone as a class: the spec's 'tones ((REGEX KIND) ...)
 (define (site-app-tone-class tones word)
   ;; a component tone: good, warn, bad or info
-  (if (re-match? "^★+$" word)
-      "warn"
-      (let loop ((ts (or tones '())))
-        (cond ((null? ts) #f)
-              ((re-match? (car (car ts)) word) (symbol->string (cadr (car ts))))
-              (else (loop (cdr ts)))))))
+  (let loop ((ts (or tones '())))
+    (cond ((null? ts) #f)
+          ((re-match? (car (car ts)) word) (symbol->string (cadr (car ts))))
+          (else (loop (cdr ts))))))
 
 (define (site-app-toned-segs text base tones)
   (let loop ((words (string-split text " ")) (acc '()) (first #t))
@@ -1096,12 +1111,13 @@
 
 ;; The header, in the page's order: breadcrumbs, the title with where the item
 ;; stands, the candidate, their facts, and the tabs.
-(define (site-app-head-blocks b data tones tabs active &optional actions)
-  (let* ((title (string-append (or (plist-get data 'job) "") " at " (or (plist-get data 'company) "")))
-         (state-node (site-app-state-node data))
-         (state (and state-node (car (string-split (string-trim (plist-get state-node 'text)) " "))))
-         (profile (site-app-kept (plist-get data 'profile)))
-         (stars (and (pair? profile) (re-match? "^★+$" (or (plist-get (car profile) 'text) "")) (car profile)))
+(define (site-app-head-blocks b spec data tabs active &optional actions)
+  (let* ((tones (and spec (plist-get spec 'tones)))
+         (h (site-app-head spec data))
+         (title (or (plist-get h 'title) ""))
+         (state (let ((s (plist-get h 'state))) (and s (not (equal? s "")) s)))
+         (profile (site-app-kept (plist-get h 'head)))
+         (stars (and (pair? profile) (site-app-rating spec (plist-get (car profile) 'text)) (car profile)))
          (rest (if stars (cdr profile) profile))
          (name (and (pair? rest) (car rest)))
          ;; prose and tags under the facts line: a headline, the specialisations
@@ -1109,15 +1125,14 @@
          (extras (filter prose? (if name (cdr rest) rest)))
          (facts (filter (lambda (n) (and (not (equal? (plist-get n 'tag) "c-action"))
                                          (not (prose? n))
-                                         (not (member (plist-get n 'text)
-                                                      (list title (and state-node (plist-get state-node 'text)))))))
+                                         (not (equal? (plist-get n 'text) title))))
                         (if name (cdr rest) rest))))
     ;; no breadcrumbs or position: the list beside the page is the navigation
     (append
-      ;; a page that is no job's (a candidate) has no title row: its name is the heading
-      (if (equal? (or (plist-get data 'job) "") "")
+      ;; a page with no title has no title row: its name is the heading
+      (if (equal? title "")
           '()
-      (let ((n (b 'line (if state (string-append title "  " state) title) (plist-get data 'job_href))))
+      (let ((n (b 'line (if state (string-append title "  " state) title) (plist-get h 'title-href))))
         (list (site-app-claim
                 (component 'ui/title (append (list 'text title)
                                              (if state (list 'badge state 'tone (or (site-app-tone-class tones state) "")) '())))
@@ -1221,21 +1236,21 @@
          (b (site-app-builder))
          (blocks
            (if (not data)
-               (let ((title (string-append (or (site-app-field row 'job) "") " at " (or (site-app-field row 'company) "")))
-                     (name (or (site-app-field row 'candidate) "")))
-                 (list (site-app-part b 'ui/title title (list 'text title) #f)
-                       (site-app-part b 'ui/title name (list 'text name 'level 2) #f)
+               ;; until the page is read, the row's name as the spec's 'detail-name says it
+               (let* ((namer (and spec (plist-get spec 'detail-name)))
+                      (name (or (and namer (namer row)) (site-app-field row 'name) "")))
+                 (list (site-app-part b 'ui/title name (list 'text name) #f)
                        (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
                (let* ((tabs (site-app-detail-tabs buf))
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
                  (append
-                   (site-app-head-part (site-app-head-blocks b data tones tabs active (site-app-action-bar buf)))
+                   (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf)))
                    (cond ((not section) (list (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
                          ((equal? section 'failed)
                           (let ((t "The site did not answer for this tab. g reads the page again.")) (list (site-app-part b 'ui/empty t (list 'text t) #f))))
                          ((null? (site-app-real section)) (list (site-app-part b 'ui/empty "Nothing here." (list 'text "Nothing here.") #f)))
-                         (else (site-app-summary (site-app-node-blocks b (site-app-drop-repeats (site-app-drop-teasers (site-app-moved spec active section)) data) tones)))))))))
+                         (else (site-app-summary (site-app-node-blocks b (site-app-drop-repeats (site-app-drop-teasers (site-app-moved spec active section)) spec data) tones)))))))))
     (let* ((line (car (buffer-line-at-point buf)))
            (text (b 'text #f #f)))
       (buffer-set-text! buf text #t)
@@ -1590,24 +1605,22 @@
 
 ;;; --- actions: a key presses the page's own button in the live tab ---------
 
-;; LiveView ignores a click until its socket joins; this is the mark it sets.
-(define site-app-live-wait "[data-phx-main].phx-connected")
-
+;; A page may show before it takes clicks; the spec's 'ready is the selector
+;; it shows once it does.
 (define (site-app-live-tab! name url k)
-  (site-app-navigate! name url site-app-live-wait
+  (site-app-navigate! name url (plist-get (site-app-spec name) 'ready)
     (lambda (tab answer)
       (if answer (k tab) (begin (message "The site did not open this page") (k #f))))))
 
-(define (site-app-button-selector action)
-  (let ((v (plist-get action 'value)))
-    (string-append "button[phx-click=\"" (plist-get action 'click) "\"]"
-                   (if (and v (not (equal? v ""))) (string-append "[phx-value-id=\"" v "\"]") ""))))
+;; the sheet gives each button the CSS selector that presses it
+(define (site-app-button-selector action) (plist-get action 'selector))
 
 (define (site-app-detail-actions buf)
   (let ((data (buffer-local buf 'site-app-data)))
     (if data
-        (filter (lambda (n) (plist-get n 'click))
-                (append (site-app-real (plist-get data 'actions)) (site-app-real (plist-get data 'profile))))
+        (filter (lambda (n) (plist-get n 'selector))
+                (append (site-app-real (plist-get data 'actions))
+                        (site-app-real (plist-get (site-app-head (site-app-spec (buffer-local buf 'site-app-name)) data) 'head))))
         '())))
 
 ;; after an action: read the page and the list again, the way the site redraws
@@ -1631,7 +1644,7 @@
     (site-app-read-page! name (site-app-current-page list-buf))))
 
 ;; A key finds the button that carries it. The page spec's 'detail-actions maps a
-;; button's event to a handler for the buttons that open a form; a handler gets
+;; button's label to a handler for the buttons that open a form; a handler gets
 ;; ('buf 'action 'selector 'live 'done). Any other button is pressed as it is.
 (define (site-app-detail-act! key)
   (let* ((buf (current-buffer))
@@ -1646,7 +1659,7 @@
                (spec (site-app-spec name))
                (page (site-app-current-page (buffer-local buf 'site-app-list)))
                (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
-               (hit (assoc (plist-get action 'click) (or (plist-get page 'detail-actions) '())))
+               (hit (assoc (site-app-without-key (or (plist-get action 'text) "")) (or (plist-get page 'detail-actions) '())))
                (label (site-app-without-key (or (plist-get action 'text) "")))
                (selector (site-app-button-selector action))
                (live (lambda (k) (site-app-live-tab! name url k)))
@@ -1741,8 +1754,8 @@
               (when back (goto-char! (anchor-start back)) (anchor-sync! buf))))))))
 
 ;; The stages a tab filters its rows by (an application's new, recommended,
-;; ...), as its sheet reads them: (tag c-stages click EVENT value ATTR mark
-;; ACTIVE-CLASS items ((status S count N active BOOL) ...)). The site switches
+;; ...), as its sheet reads them: (tag c-stages mark ACTIVE-CLASS items
+;; ((status S selector CSS count N active BOOL) ...)). The site switches
 ;; stage by a live click, so choosing one presses its button in the app's tab
 ;; and reads the tab again from what the site then shows.
 (define (site-app-detail-stages buf)
@@ -1774,8 +1787,9 @@
          (label (string-replace status "_" " ")))
     (if (not stages)
         (message "No stages on this tab")
-        (let* ((selector (string-append "button[phx-click='" (plist-get stages 'click) "']["
-                                        (plist-get stages 'value) "='" status "']"))
+        (let* ((item (site-app-find (lambda (s) (equal? (plist-get s 'status) status))
+                                    (site-app-real (plist-get stages 'items))))
+               (selector (and item (plist-get item 'selector)))
                (mark (plist-get stages 'mark))
                (wait (and mark (string-append selector "." mark))))
           (message (string-append label "…"))

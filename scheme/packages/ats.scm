@@ -148,6 +148,22 @@
         'base-url "https://svsrecruiting.com"
         'home "/staff/approvals"
         'home-page 'approvals
+        ;; the site is LiveView: it ignores a click until its socket joins, and this is the mark it sets
+        'ready "[data-phx-main].phx-connected"
+        ;; Devanagari labels and section numerals, drawn only for looks
+        'ornament "^[^A-Za-z]*[\\x{0900}-\\x{097F}][^A-Za-z]*$"
+        ;; a rating is a run of stars
+        'rating "^★+$"
+        ;; the header: the job at the company, where the application stands, then the candidate.
+        ;; The state line ("withdrawn → pending: withdrawn scheduled 2 Sep") gives its first word
+        'detail-head (lambda (data)
+                       (let* ((profile (site-app-real (plist-get data 'profile)))
+                              (state-node (site-app-find (lambda (n) (re-match? " → " (or (plist-get n 'text) ""))) profile))
+                              (job (or (plist-get data 'job) "")))
+                         (list 'title (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))
+                               'title-href (plist-get data 'job_href)
+                               'state (and state-node (car (string-split (string-trim (plist-get state-node 'text)) " ")))
+                               'head (filter (lambda (n) (not (equal? n state-node))) profile))))
         ;; every detail is ats-detail-mode, so they all share a pane; the page it
         ;; came from is a minor mode (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
@@ -171,9 +187,10 @@
         ;; sections a detail tab reads in another order: (TAB SECTION BEFORE)
         'detail-moves '(("candidate" "Notes" "Work Experience"))
         ;; words the site colours, wherever they appear on a page
-        'tones '(("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped)$" bad)
+        'tones '(("^★+$" warn)
+                 ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
-                 ("^(?i)(elite|strong|fit|advance|advanced|approved|hired|shortlisted|offer)$" good)
+                 ("^(?i)(elite|strong|fit|advance|advanced|approve|approved|hired|shortlisted|offer)$" good)
                  ("^(?i)(new|applied|create|created)$" info))
         ;; the site's navbar, in its order; M-key switches to a section
         'pages

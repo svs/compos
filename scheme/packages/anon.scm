@@ -50,6 +50,9 @@
 ;; words sent to decide and not yet answered
 (define *anon-pending* '())
 
+;; #t from an answer of decide until the next refresh redacts each view again
+(define *anon-stale* #f)
+
 ;; cached words a paint used since the last prune, most recent first
 (define *anon-touched* '())
 
@@ -179,21 +182,68 @@
              (cons (anon--tree-map f (car tree)) (anon--tree-map f (cdr tree)))))
         (else tree)))
 
+(define (anon--tree-map-until done? f tree)
+  "anon--tree-map, which returns the rest of TREE as it is once DONE? answers #t"
+  (cond ((done?) tree)
+        ((string? tree) (f tree))
+        ((pair? tree)
+         (if (and (symbol? (car tree)) (member (car tree) anon--tree-keys) (pair? (cdr tree)))
+             (cons (car tree) (cons (cadr tree) (anon--tree-map-until done? f (cddr tree))))
+             (let ((a (anon--tree-map-until done? f (car tree))))
+               (cons a (anon--tree-map-until done? f (cdr tree))))))
+        (else tree)))
+
+(define (anon--tree-strings tree)
+  "every text string of TREE, last first, in the order anon--tree-map visits them"
+  (let walk ((t tree) (acc '()))
+    (cond ((string? t) (cons t acc))
+          ((pair? t)
+           (if (and (symbol? (car t)) (member (car t) anon--tree-keys) (pair? (cdr t)))
+               (walk (cddr t) acc)
+               (walk (cdr t) (walk (car t) acc))))
+          (else acc))))
+
 (define (anon--tree-text tree)
   "every text string of TREE, one to a line"
-  (let ((acc '()))
-    (anon--tree-map (lambda (s) (set! acc (cons s acc)) s) tree)
-    (string-join (reverse acc) "\n")))
+  (string-join (reverse (anon--tree-strings tree)) "\n"))
 
+(define (anon--bar-ranges s ranges)
+  "S with a bar of the same width over each (START END) of RANGES, sorted, in byte offsets"
+  (let loop ((rs ranges) (at 0) (acc '()))
+    (if (null? rs)
+        (apply string-append (reverse (cons (substring-bytes s at (string-byte-length s)) acc)))
+        (let ((a (car (car rs))) (b (cadr (car rs))))
+          (loop (cdr rs) b
+                (cons (string-repeat "█" (string-length (substring-bytes s a b)))
+                      (cons (substring-bytes s at a) acc)))))))
+
+;; One scan of the tree's text finds every email, handle and capitalized
+;; run. Each string then takes only the ranges that fall in it, and a
+;; string with none comes back as it was. A scan per string cost 0.9 s
+;; on a chat of 2700 strings.
 (define (anon--redact-tree tree)
-  "TREE with every capitalized word that is not a known common word barred; the
-common words are sorted once per tree, not once per string"
+  "TREE with every email, known handle and capitalized run that is not common barred"
   (let* ((text (anon--tree-text tree))
-         (hide (let loop ((rs (anon--redacted (anon--spans text) anon-common-words)) (acc '()))
-                 (if (null? rs) acc
-                     (let ((w (substring-bytes text (car (car rs)) (cadr (car rs)))))
-                       (loop (cdr rs) (if (member w acc) acc (cons w acc))))))))
-    (anon--tree-map (lambda (s) (anon--redact-string s hide)) tree)))
+         (emails (anon--hard-spans text))
+         (words (anon--outside emails (anon--redacted (anon--spans text) anon-common-words)))
+         (rs (sort (append (map (lambda (e) (list (car e) (cadr e))) emails)
+                           (map (lambda (w) (list (car w) (cadr w))) words))))
+         (pos 0))
+    (if (null? rs)
+        tree
+        (anon--tree-map-until (lambda () (null? rs))
+      (lambda (s)
+        (let ((start pos) (end (+ pos (string-byte-length s))))
+          (set! pos (+ end 1))
+          (let loop ((mine '()))
+            (if (and (pair? rs) (< (car (car rs)) end))
+                (let ((r (car rs)))
+                  (set! rs (cdr rs))
+                  (loop (if (>= (car r) start)
+                            (cons (list (- (car r) start) (- (min (cadr r) end) start)) mine)
+                            mine)))
+                (if (null? mine) s (anon--bar-ranges s (reverse mine)))))))
+      tree))))
 
 (define (anon--view-original buf)
   "the tree the mode wrote last, or #f"
@@ -212,7 +262,11 @@ common words are sorted once per tree, not once per string"
   (set! *anon-writing* #f))
 
 (define (anon--view-plist buf tree)
-  (let ((red (anon--redact-tree tree)))
+  (let* ((saved (buffer-local buf 'anon-render-blocks))
+         ;; the same tree as last time: its redaction stands, unless an answer came since
+         (red (if (and (pair? saved) (not *anon-stale*) (equal? (car saved) tree))
+                  (cadr saved)
+                  (anon--redact-tree tree))))
     (list 'anon-render-blocks (list tree red) 'render-blocks red)))
 
 (define (anon--title-redraw! buf)
@@ -290,13 +344,26 @@ common words are sorted once per tree, not once per string"
           (debounce! (string-append "anon:" buf) 500 anon-ask! buf)))
       (next buf plist)))
 
+;; The title painter names a buffer with buffer-modeline-name, and so does
+;; every other place that shows a buffer as its title, such as the rail of a
+;; walk. While anon-mode is on, the name comes back with its words barred.
+(define (anon--modeline-name next buf)
+  (let ((name (next buf)))
+    (if (and (string? name)
+             (or *anon-global* (minor-mode-on? buf "anon-local-mode"))
+             (pair? (anon--title-hide buf)))
+        (anon--redact-string name (anon--title-hide buf))
+        name)))
+
 (define (anon--advise!)
   (advice-add! 'buffer-set-local! 'around 'anon anon--set-local)
-  (advice-add! 'buffer-set-locals! 'around 'anon anon--set-locals))
+  (advice-add! 'buffer-set-locals! 'around 'anon anon--set-locals)
+  (advice-add! 'buffer-modeline-name 'around 'anon anon--modeline-name))
 
 (define (anon--unadvise!)
   (advice-remove! 'buffer-set-local! 'anon)
-  (advice-remove! 'buffer-set-locals! 'anon))
+  (advice-remove! 'buffer-set-locals! 'anon)
+  (advice-remove! 'buffer-modeline-name 'anon))
 
 ;; jit-lock calls this with whole lines START..END that a window draws. It
 ;; paints those lines and asks decide about their new words. A block view
@@ -330,15 +397,20 @@ common words are sorted once per tree, not once per string"
 ;; New answers change what is barred: every drawn line paints again, and
 ;; every block view redacts again. jit-lock repaints only drawn lines.
 (define (anon--refresh!)
-  (for-each (lambda (b) (jit-lock-refontify! b) (anon-view-redact! b)) (anon--buffers)))
+  (set! *anon-stale* #t)
+  (for-each (lambda (b) (jit-lock-refontify! b) (anon-view-redact! b)) (anon--buffers))
+  (set! *anon-stale* #f))
 
 ;; The caches are LRU. A word a paint uses goes to the front, a new word
 ;; goes in at the front, and a cache keeps its first anon-cache-size words.
 ;; A paint only notes the word: the prune reorders once the paints settle.
 (define (anon--touch! w)
   (unless (member w *anon-touched*)
-    (set! *anon-touched* (cons w *anon-touched*))
-    (debounce! "anon:prune" 10000 anon--prune! #f)))
+    ;; the first touch since a prune sets the timer: a debounce that each
+    ;; touch reset never ran while windows painted
+    (when (null? *anon-touched*)
+      (debounce! "anon:prune" 10000 anon--prune! #f))
+    (set! *anon-touched* (cons w *anon-touched*))))
 
 (define (anon--lru cache touched)
   "CACHE with its words in TOUCHED first, cut to anon-cache-size"
@@ -500,6 +572,7 @@ common words are sorted once per tree, not once per string"
         (begin
           (set! *anon-global* #t)
           (jit-lock-register! 'anon--fontify)
+          (anon--advise!)
           (jit-lock-refontify-all!)
           (anon--on-display!)
           (message "anon-mode enabled")))))

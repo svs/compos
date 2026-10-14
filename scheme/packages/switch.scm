@@ -922,7 +922,9 @@ the next row down. STEP is kept for the callers."
                (start (cadr w)))
           (set! *window-walk* (list win start rows j (list-ref w 4)))
           (client-slide! (json-encode (list 'pane (if (> step 0) "down" "up")
-                                            'win win 'rows rows 'at j)))
+                                            'win win 'rows rows 'at j
+                                            ;; each sheet shows the name the title painter draws
+                                            'labels (map buffer-modeline-name rows))))
           (switch-to-buffer-here! to)
           (set-window-prev-buffers!
            win (if (equal? to start)

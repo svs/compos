@@ -33,4 +33,14 @@ defmodule Compos.InputTest do
 
     assert Buffer.text(name) == "hi"
   end
+
+  test "an event that exits fails its caller only, not Input or the events behind it" do
+    pid = Process.whereis(Input)
+
+    assert catch_exit(Input.run(fn -> exit({:timeout, :lane}) end)) == {:timeout, :lane}
+    assert_raise RuntimeError, fn -> Input.run(fn -> raise "boom" end) end
+
+    assert Input.run(fn -> :next end) == :next
+    assert Process.whereis(Input) == pid
+  end
 end

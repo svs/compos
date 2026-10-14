@@ -46,8 +46,10 @@
     (or (and (pair? d) (plist-get d key)) "")))
 
 (define (self-healing--signature e)
-  (let ((sig (self-healing--data e 'signature)))
-    (if (equal? sig "") (self-healing--data e 'text) sig)))
+  ;; trimmed: the todo file drops the edge spaces of a source, and
+  ;; self-healing--open-for compares sources by prefix
+  (let ((sig (string-trim (self-healing--data e 'signature))))
+    (if (equal? sig "") (first-line (self-healing--data e 'text)) sig)))
 
 (define (self-healing--source sig)
   (string-append self-healing--source-prefix sig))

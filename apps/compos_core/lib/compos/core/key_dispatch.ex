@@ -213,6 +213,11 @@ defmodule Compos.Core.KeyDispatch do
         Editor.set_pending(seq)
         Editor.set_echo(Enum.join(seq, " ") <> "-")
 
+      # the capture stays armed: the next key tries again
+      :failed ->
+        Editor.set_pending([])
+        Editor.set_echo(Enum.join(seq, " ") <> ": editor busy, key dropped")
+
       _ ->
         Editor.set_pending([])
         Editor.set_key_capture(nil)
@@ -326,6 +331,10 @@ defmodule Compos.Core.KeyDispatch do
         Editor.set_pending(seq)
         Editor.set_echo(Enum.join(seq, " ") <> "-")
 
+      :failed ->
+        Editor.set_pending([])
+        Editor.set_echo(Enum.join(seq, " ") <> ": editor busy, key dropped")
+
       :none ->
         Editor.set_pending([])
 
@@ -343,6 +352,10 @@ defmodule Compos.Core.KeyDispatch do
   # walks the ladder for the frame's buffer, ESC read as Meta when
   # nothing binds it (Emacs: ESC x runs M-x). This process is the caller
   # (LiveView, test, RPC), never the Session, so the call is plain.
+  # A lane held past the deadline exits the call; the lane has already
+  # cancelled the job and logged its holder, so the key is dropped here
+  # rather than taking the serial Input process down with it. A failed
+  # lookup is :failed, not :none: an unanswered key must not self-insert.
   defp lookup_esc_meta(seq) do
     case Session.call_named("key-binding-dispatch", [seq], Frame.current(), 5_000, :ui) do
       {:ok, ["command", name]} -> {:command, name}
@@ -350,8 +363,12 @@ defmodule Compos.Core.KeyDispatch do
       {:ok, _} -> :none
       {:error, reason} ->
         Logger.warning("key lookup failed: #{inspect(reason)}")
-        :none
+        :failed
     end
+  catch
+    :exit, {:timeout, _} ->
+      Logger.warning("key lookup timed out: #{Enum.join(seq, " ")}")
+      :failed
   end
 
   # text typed since the popup opened is the popup's query (orderless narrowing)

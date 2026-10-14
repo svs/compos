@@ -82,3 +82,21 @@
         (set! *anon-pending* pending)
         (set! *anon-touched* touched)
         (check-equal! got '("Alice" "Hello") "both cache hits are noted")))))
+
+(deftest 'anon-bars-the-name-the-title-painter-draws
+  "while anon-mode is on, buffer-modeline-name bars the words of the name"
+  (lambda ()
+    (let ((global *anon-global*) (common anon-common-words) (buf "*zz-anon Zelda Quux*"))
+      (buffer-create buf)
+      (set! anon-common-words '())
+      (set! *anon-global* #t)
+      (anon--advise!)
+      (let ((on (buffer-modeline-name buf)))
+        (set! *anon-global* #f)
+        (let ((off (buffer-modeline-name buf)))
+          (set! *anon-global* global)
+          (set! anon-common-words common)
+          (unless global (anon--unadvise!))
+          (buffer-kill! buf)
+          (check-equal! (string-contains? on "Zelda") #f "the name is barred while anon-mode is on")
+          (check-equal! off buf "the name is whole while anon-mode is off"))))))

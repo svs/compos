@@ -523,18 +523,21 @@
       const sheet = kept.get(name) || document.createElement('div');
       if (!sheet.dataset.name) {
         sheet.dataset.name = name;
+        // the label is the name the title painter draws; the name stays the key
+        const text = (walk.labels && walk.labels[i]) || name;
         const file = name.startsWith('/');
-        const parts = file ? name.split('/').filter(Boolean) : [];
+        const parts = file ? text.split('/').filter(Boolean) : [];
         const stack = document.createElement('span');
         stack.className = 'walk-title';
         const label = document.createElement('span');
         label.className = 'walk-name';
-        label.textContent = parts.pop() || name;
+        label.textContent = parts.pop() || text;
         stack.append(label);
         if (file && parts.length) {
           const dir = document.createElement('span');
           dir.className = 'walk-path';
-          dir.textContent = ('/' + parts.join('/')).replace(/^\/(Users|home)\/[^/]+/, '~');
+          const lead = text.startsWith('/') ? '/' : '';
+          dir.textContent = (lead + parts.join('/')).replace(/^\/(Users|home)\/[^/]+/, '~');
           stack.append(dir);
         }
         const count = document.createElement('span');

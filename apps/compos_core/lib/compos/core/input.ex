@@ -23,14 +23,17 @@ defmodule Compos.Core.Input do
   @doc "Route one key event through KeyDispatch, serialized."
   def dispatch(key) when is_binary(key), do: dispatch(nil, key)
 
-  def dispatch(fid, key),
-    do: GenServer.call(__MODULE__, {:input, fid, fn -> KeyDispatch.handle_key(key) end}, :infinity)
+  def dispatch(fid, key), do: run(fid, fn -> KeyDispatch.handle_key(key) end)
 
   @doc "Run any input-event block (mouse, paste, modeline click), serialized."
   def run(fun) when is_function(fun, 0), do: run(nil, fun)
 
-  def run(fid, fun) when is_function(fun, 0),
-    do: GenServer.call(__MODULE__, {:input, fid, fun}, :infinity)
+  def run(fid, fun) when is_function(fun, 0) do
+    case GenServer.call(__MODULE__, {:input, fid, fun}, :infinity) do
+      {:ok, value} -> value
+      {:caught, kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+    end
+  end
 
   @impl true
   def init(_opts), do: {:ok, nil}
@@ -44,6 +47,16 @@ defmodule Compos.Core.Input do
       Frame.clear()
     end
 
-    {:reply, fun.(), state}
+    # An event that raises or exits (a lane call past its deadline) fails
+    # its own caller only. Left uncaught it killed this process and every
+    # event queued behind it, a LiveView mount among them.
+    reply =
+      try do
+        {:ok, fun.()}
+      catch
+        kind, reason -> {:caught, kind, reason, __STACKTRACE__}
+      end
+
+    {:reply, reply, state}
   end
 end

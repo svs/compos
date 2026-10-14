@@ -27,6 +27,10 @@
   "The part before the @ of each email anon barred. It is barred wherever it shows."
   'group 'anon 'type 'sexp)
 
+(defcustom 'anon-cache-size 2000
+  "The words each cache keeps. A cache drops the words it used least recently."
+  'group 'anon 'type 'integer)
+
 (defcustom 'anon-batch-size 40
   "The words one decide call judges."
   'group 'anon 'type 'integer)
@@ -45,6 +49,9 @@
 
 ;; words sent to decide and not yet answered
 (define *anon-pending* '())
+
+;; cached words a paint used since the last prune, most recent first
+(define *anon-touched* '())
 
 (effects! '(pure))
 
@@ -101,7 +108,9 @@
              (word #f) (skip #f) (acc '()))
     (cond ((null? rows) acc)
           ((not (equal? (car (car rows)) word))
-           (loop rows (car (car rows)) (and (member (car (car rows)) common) #t) acc))
+           (let ((hit (and (member (car (car rows)) common) #t)))
+             (when hit (anon--touch! (car (car rows))))
+             (loop rows (car (car rows)) hit acc)))
           (skip (loop (cdr rows) word skip acc))
           (else (loop (cdr rows) word skip
                       (cons (list (cadr (car rows)) (caddr (car rows)) "anon-redacted") acc))))))
@@ -123,10 +132,12 @@
 (define (anon--learn-handle! h)
   (let ((h (string-downcase h)))
     (when (and (>= (string-length h) 4)
-               (not (member h anon--generic-handles))
-               (not (member h anon-handles)))
-      (customize-set! 'anon-handles (cons h anon-handles))
-      (debounce! "anon:save" 2000 anon--save! #f))))
+               (not (member h anon--generic-handles)))
+      (if (member h anon-handles)
+          (anon--touch! h)
+          (begin
+            (customize-set! 'anon-handles (cons h anon-handles))
+            (debounce! "anon:save" 2000 anon--prune! #f))))))
 
 (define (anon--handle-pattern)
   (and (pair? anon-handles)
@@ -141,7 +152,9 @@
               emails)
     (let ((p (anon--handle-pattern)))
       (if p
-          (append emails (anon--outside emails (map (lambda (r) (list (car r) (cadr r) "")) (re-find* p text))))
+          (let ((hits (anon--outside emails (map (lambda (r) (list (car r) (cadr r) "")) (re-find* p text)))))
+            (for-each (lambda (r) (anon--touch! (string-downcase (substring-bytes text (car r) (cadr r))))) hits)
+            (append emails hits))
           emails))))
 
 (define (anon--redact-string s hide)
@@ -319,6 +332,27 @@ common words are sorted once per tree, not once per string"
 (define (anon--refresh!)
   (for-each (lambda (b) (jit-lock-refontify! b) (anon-view-redact! b)) (anon--buffers)))
 
+;; The caches are LRU. A word a paint uses goes to the front, a new word
+;; goes in at the front, and a cache keeps its first anon-cache-size words.
+;; A paint only notes the word: the prune reorders once the paints settle.
+(define (anon--touch! w)
+  (unless (member w *anon-touched*)
+    (set! *anon-touched* (cons w *anon-touched*))
+    (debounce! "anon:prune" 10000 anon--prune! #f)))
+
+(define (anon--lru cache touched)
+  "CACHE with its words in TOUCHED first, cut to anon-cache-size"
+  (let ((front (filter (lambda (w) (member w cache)) touched)))
+    (take (append front (filter (lambda (w) (not (member w front))) cache)) anon-cache-size)))
+
+(define (anon--prune! _)
+  (let ((touched *anon-touched*))
+    (set! *anon-touched* '())
+    (customize-set! 'anon-proper-nouns (anon--lru anon-proper-nouns touched))
+    (customize-set! 'anon-common-words (anon--lru anon-common-words touched))
+    (customize-set! 'anon-handles (anon--lru anon-handles touched))
+    (anon--save! #f)))
+
 ;; the caches reach custom.scm once a burst of answers settles
 (define (anon--save! _)
   (customize-save! 'anon-proper-nouns anon-proper-nouns)
@@ -343,7 +377,7 @@ common words are sorted once per tree, not once per string"
             (customize-set! 'anon-common-words (append common anon-common-words))
             (anon--refresh!))
           (when (or (pair? proper) (pair? common))
-            (debounce! "anon:save" 2000 anon--save! #f))))))
+            (debounce! "anon:save" 2000 anon--prune! #f))))))
 
 (define (anon--asked chunk)
   (let loop ((xs chunk) (i 0) (acc '()))
@@ -369,7 +403,9 @@ common words are sorted once per tree, not once per string"
 ;; The first span of each word that no cache and no open question knows.
 ;; The spans sort by word, so each distinct word asks the native member one time.
 (define (anon--known? w)
-  (or (member w anon-proper-nouns) (member w anon-common-words) (member w *anon-pending*)))
+  (cond ((member w *anon-pending*) #t)
+        ((or (member w anon-proper-nouns) (member w anon-common-words)) (anon--touch! w) #t)
+        (else #f)))
 
 (define (anon--fresh spans)
   (let loop ((rows (sort (map (lambda (s) (list (caddr s) (car s) (cadr s))) spans)))

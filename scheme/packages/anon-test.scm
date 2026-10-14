@@ -55,3 +55,30 @@
       (check-equal! (buffer-overlays buf "anon") '() "the mode off takes every bar away")
       (set! *anon-pending* pending)
       (buffer-kill! buf))))
+
+(deftest 'anon-lru-puts-used-words-first-and-cuts-the-rest
+  "a used word goes to the front; a cache keeps anon-cache-size words"
+  (lambda ()
+    (let ((size anon-cache-size))
+      (set! anon-cache-size 3)
+      (let ((got (anon--lru '("a" "b" "c" "d" "e") '("e" "zz"))))
+        (set! anon-cache-size size)
+        (check-equal! got '("e" "a" "b")
+                      "e moves to the front, zz is not cached, d and e's old place drop")))))
+
+(deftest 'anon-fresh-touches-the-cached-words-it-meets
+  "a cache hit is noted for the next prune; a pending word is not"
+  (lambda ()
+    (let ((proper anon-proper-nouns) (common anon-common-words)
+          (pending *anon-pending*) (touched *anon-touched*))
+      (set! anon-proper-nouns '("Alice"))
+      (set! anon-common-words '("Hello"))
+      (set! *anon-pending* '("Carol"))
+      (set! *anon-touched* '())
+      (anon--fresh '((0 5 "Hello") (6 11 "Alice") (12 17 "Carol")))
+      (let ((got (sort *anon-touched*)))
+        (set! anon-proper-nouns proper)
+        (set! anon-common-words common)
+        (set! *anon-pending* pending)
+        (set! *anon-touched* touched)
+        (check-equal! got '("Alice" "Hello") "both cache hits are noted")))))

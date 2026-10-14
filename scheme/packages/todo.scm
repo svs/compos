@@ -723,9 +723,11 @@
         (todo--when t)))
 
 (define (todo--row-columns buf)
+  ;; the who column takes the room the tags leave, so a chat's id and
+  ;; status show whole
   (list (list (list "" 2) (list "TODO" #f 'left 'end))
         (list (list "" 2) (list "STATE" 10) (list "PROJECT" 13) (list "WHEN" 11)
-              (list "TAGS" #f 'left 'end) (list "WHO" 26 'right))
+              (list "TAGS" 20) (list "WHO" #f 'right 'end))
         (list (list "" #f 'left 'end))))
 
 (define (todo--row-cells buf t)
@@ -861,11 +863,23 @@
           ((equal? who "") status)
           (else (string-append who "  ·  " status)))))
 
+;; a task's chat goes where chats live: the pane already showing one, so
+;; the list and its page stay put. Without a chat pane it takes this window
+(define (todo--show-chat! chat)
+  (let ((id (group-home-of chat)))
+    (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
+  (let ((shown (window-showing chat))
+        (pane (window-showing-mode "chat-mode" #f)))
+    (cond ((and shown (window-exists? shown)) (select-window! shown))
+          (pane (display-buffer-in-window! pane chat) (select-window! pane))
+          (else (switch-to-buffer! chat)))
+    chat))
+
 (define-command "todo-goto-chat" "Go to the chat the task is assigned to"
   (lambda ()
     (let* ((t (todo--at)) (chat (and t (todo--chat-of t))))
       (cond ((not t) (message "No task at point"))
-            (chat (switch-to-buffer-in-group! chat))
+            (chat (todo--show-chat! chat))
             (else (message "The task is not with a live chat"))))))
 
 ;; one task as its own page beside the list. Its chat is the assignee, the
@@ -897,7 +911,7 @@
                               (pair "Priority" (plist-get t 'priority))
                               (pair "Project" (plist-get t 'project))
                               (pair "Chat" (if chat
-                                                 (string-append chat "  ·  w goes there")
+                                                 (string-append chat "  ·  a goes there")
                                                  (plist-get t 'assignee)))
                               (pair "Status" (todo--status t))
                               (pair "Deadline" (plist-get t 'deadline))
@@ -928,7 +942,7 @@
     ;; the page's keys: the same keys bar the list carries
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar
-              (list 'main '(("w" "chat") ("e" "file") ("g" "refresh") ("q" "quit"))))))
+              (list 'main '(("a" "agent") ("e" "file") ("g" "refresh") ("q" "quit"))))))
     (buffer-set-read-only! buf #t)
     buf))
 
@@ -951,9 +965,25 @@
   (lambda ()
     (let* ((t (todo--detail-task (current-buffer))) (chat (and t (todo--chat-of t))))
       (cond ((not t) (message "The task is gone"))
-            (chat (switch-to-buffer-in-group! chat))
+            (chat (todo--show-chat! chat))
             ((plist-get t 'assignee) (message "The task's chat is not live"))
             (else (message "The task is not assigned to a chat"))))))
+
+(define-command "todo-detail-agent" "Go to the agent working this task; start one in the group you are in when none is live"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (t (todo--detail-task buf))
+           (chat (and t (todo--chat-of t)))
+           (here (group-here)))
+      (define (start! g)
+        (let ((new (todo-assign-chat! (plist-get t 'id) g)))
+          (todo--detail-render! buf)
+          (todo--show-chat! new)
+          (message (string-append "Assigned to " new))))
+      (cond ((not t) (message "The task is gone"))
+            (chat (todo--show-chat! chat))
+            (here (start! here))
+            (else (group-read-or-create! "Start an agent in group: " start!))))))
 
 (define-command "todo-detail-visit" "Open the task's file at its heading"
   (lambda ()
@@ -970,17 +1000,17 @@
   (desktop-skip! (current-buffer) 'footer-line-blocks)
   (todo--detail-render! (current-buffer)))
 
-(mode-parent! "todo-detail-mode" "special-mode")
 (define-mode "todo-detail-mode" todo--detail-setup!)
 
 (mode-keys! "todo-detail-mode"
-  '(("w" "todo-detail-goto-chat")
+  '(("a" "todo-detail-agent")
+    ("w" "todo-detail-goto-chat")
     ("e" "todo-detail-visit")
     ("g" "todo-detail-refresh")
     ("q" "quit-window")))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page: state, the chat working it, notes and log. `w` goes to that chat, the one fixing the task, not the one that filed it. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+  "One task as its own page: state, the chat working it, notes and log. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
 
 (define (todo-spawn-chat! group title)
   "(todo-spawn-chat! GROUP TITLE) — file TITLE as a task and hand it to a new chat in GROUP. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"

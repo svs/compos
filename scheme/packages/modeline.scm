@@ -189,11 +189,12 @@
    --win-stack only when it holds more than one, so a lone buffer shows none */
 .dash-persistent .dseg-chat-title::after {
   content: var(--win-stack); flex: none; align-self: center;
-  font-family: var(--font-mono); font-size: 10px; font-weight: 500; line-height: 1;
-  font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--text-dim);
-  padding: 2px 5px; border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 35%, transparent); }
-.window.inactive .dash-persistent .dseg-chat-title::after { color: var(--text-faint); }
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--text-strong);
+  padding: 2px 6px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent); }
+.window.active .dash-persistent .dseg-chat-title::after { color: var(--accent); }
 /* a file's name, with its directory below it: small, muted, ~ for home.
    The two lines sit tight, so the header line grows as little as it can. */
 .dseg-title-stack { display: flex; flex-direction: column; min-width: 0; gap: 0; }

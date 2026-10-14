@@ -169,7 +169,13 @@
                                 (not (equal? (window-buffer w) o))
                                 (window-prefers-buffer? w name)))
                          (display--work-windows))))
-         (kept (and (not shown) (not pinned) (not sibling) (not kin) (detail-window o)))
+         ;; the remembered window only while the layout has no free pane: a
+         ;; layout with room opens a new pane instead of covering what you
+         ;; put in that window since
+         (room (and (layout-target)
+                    (< (length (layout-target-visible-buffers))
+                       (layout-target-capacity (layout-target)))))
+         (kept (and (not shown) (not pinned) (not sibling) (not kin) (not room) (detail-window o)))
          (win (cond
                 (shown shown)
                 (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))

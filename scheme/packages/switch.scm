@@ -882,20 +882,13 @@ the next row down. STEP is kept for the callers."
   "Choose another buffer from this window's title"
   (lambda () (switch-window-buffer-pick! 1)))
 
-(define-command "window-next-buffer"
-  "Walk this window's buffers in the minibuffer, newest first"
-  (lambda () (switch-window-buffer-pick! 1)))
-
-(define-command "window-previous-buffer"
-  "Walk this window's buffers in the minibuffer, oldest first"
-  (lambda () (switch-window-buffer-pick! -1)))
 
 ;; A window is a stack of paper: its buffers, the newest on top. A walk
 ;; goes down or up the stack with no prompt. Each step shows the next
 ;; sheet at once, and the page slides the two sheets past each other and
 ;; shows the stack as a rail on the pane's edge (window-motion.js). The
 ;; order holds while the walk lasts, so each step goes one sheet deeper.
-;; The walk ends when the user lets go of Cmd: the page then runs
+;; The walk ends when the user lets go of Cmd or Shift: the page then runs
 ;; window-walk-end. The window's history is the one a single switch from
 ;; the first buffer to the last would leave.
 (define *window-walk* #f)               ; (WIN START ROWS INDEX PREV)
@@ -932,6 +925,14 @@ the next row down. STEP is kept for the callers."
                    (cons start (filter (lambda (b) (not (or (equal? b to) (equal? b start))))
                                        (list-ref w 4)))))
           (group-current-recalculate!)))))
+
+(define-command "window-next-buffer"
+  "Show the next buffer down this window's stack; hold Shift to keep walking"
+  (lambda () (window-walk! 1 #f)))
+
+(define-command "window-previous-buffer"
+  "Show the next buffer up this window's stack; hold Shift to keep walking"
+  (lambda () (window-walk! -1 #f)))
 
 (define-command "window-next-mode-buffer"
   "Show the next buffer of this mode down this window's stack; hold Cmd to keep walking"

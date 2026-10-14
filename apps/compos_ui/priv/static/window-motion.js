@@ -461,7 +461,7 @@
   // A walk of a window's stack: the token is the walk as JSON, then the
   // daemon's count. The stack shows as a rail of sheets on the pane's
   // edge while Cmd is down; the release ends the walk, here and in the
-  // editor (window-walk-end, through windowMotion.onEnd).
+  // editor (window-walk-end, through windowMotion.onEnd). Shift walks the same way.
   let pending = null;
   let rail = null;
   let meta = false;
@@ -598,9 +598,11 @@
     if (windowMotion.onEnd) windowMotion.onEnd(win);
   }
 
-  window.addEventListener('keydown', (e) => { meta = e.metaKey; }, true);
+  // the walk lasts while the key that steps it is held: Cmd for a walk of
+  // one mode, Shift for the whole stack
+  window.addEventListener('keydown', (e) => { meta = e.metaKey || e.shiftKey; }, true);
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Meta') { meta = false; end(); }
+    if ((e.key === 'Meta' || e.key === 'Shift') && !e.metaKey && !e.shiftKey) { meta = false; end(); }
   }, true);
   window.addEventListener('blur', () => { meta = false; end(); });
 

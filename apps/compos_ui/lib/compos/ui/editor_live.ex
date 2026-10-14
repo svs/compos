@@ -191,6 +191,15 @@ defmodule Compos.Ui.EditorLive do
   # one handler for every click that runs a command: a transcript button
   # sends a command name, the modeline-info segment sends its buffer.
   # The Scheme gate ui-command! holds the whitelist — no policy here.
+  # the release of the modifiers ends a walk of the group tabs
+  def handle_event("group_tab_walk_end", _params, socket) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("run-command", ["group-tab-walk-end"])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("ui_cmd", %{"win" => win} = params, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
       Input.run(socket.assigns.frame, fn ->
@@ -1308,7 +1317,7 @@ defmodule Compos.Ui.EditorLive do
         <img src="/images/compos-logo.png" width="15" height="15" alt="" />compos
       </c-text>
       <c-text class="ml-divider"></c-text>
-      <c-tabs :if={@tabs.tabs != []} class="ml-tabs">
+      <c-tabs :if={@tabs.tabs != []} class="ml-tabs" data-walk={chrome(@state, "tabs-walk", "") != ""}>
         <c-tab
           :for={t <- @tabs.tabs}
           class={"ml-tab #{if t.current, do: "ml-tab-on"}"}
@@ -1442,10 +1451,10 @@ defmodule Compos.Ui.EditorLive do
     do: Map.get(Map.get(state, :chrome) || %{}, key, default)
 
   # The groups the frame modeline offers as tabs. Scheme decides which
-  # ones and how many, and this asks again only when the frame's group or
-  # the buffer order moved: nothing per keystroke.
+  # ones and how many, and this asks again only when the frame's group,
+  # the buffer order or a walk of the tabs moved: nothing per keystroke.
   defp frame_tabs(socket, state) do
-    key = {state.frame_group, Compos.Core.Editor.buffer_mru()}
+    key = {state.frame_group, Compos.Core.Editor.buffer_mru(), chrome(state, "tabs-walk", "")}
 
     if key == socket.assigns[:tabs_key] do
       {socket.assigns[:tabs] || @no_tabs, key}

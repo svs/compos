@@ -2052,7 +2052,8 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-mru-note! value)
   (let ((id (group-resolve-id value)))
-    (when id
+    ;; a walk of the tabs looks at groups; only where it lands counts
+    (when (and id (not (frame-local 'tab-walk)))
       (set! *group-mru*
             (take (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
                     group-mru-limit))
@@ -2105,13 +2106,18 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;;; --- the frame tab rail ---------------------------------------------------
 ;;; The frame modeline carries the groups the frame last stood in, and
-;;; counts the ones it left out. The rail keeps its order: a tab moves
-;;; only when a group the cut left out takes its slot. A tab is one
-;;; click to another context; the count opens the board with the rest.
+;;; counts the ones it left out. By default the most recent group leads,
+;;; so a recent context is one step away; 'held keeps the rail still. A
+;;; tab is one click to another context; the count opens the board with
+;;; the rest.
 
 (defcustom 'frame-tabs-limit 10
   "How many groups the frame modeline shows as tabs. The rest count as one more."
   'group 'groups 'type 'number)
+
+(defcustom 'frame-tabs-order 'mru
+  "The order of the frame tabs: 'mru puts the most recent group first, 'held keeps each tab in its place."
+  'group 'groups 'type 'choice)
 
 (define (frame-tab-rank id mru)
   (let loop ((rest mru) (i 0))
@@ -2134,7 +2140,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; row under the pointer. The order changes only when a group the cut
 ;; left out comes in, and then in one slot only: the coldest tab steps
 ;; aside for it. The frame keeps the order it last showed.
-(define (frame-tab-order here mru)
+(define (frame-tab-order-held here mru)
   (let* ((limit (max 1 frame-tabs-limit))
          ;; a group that is gone leaves the rail, and a rail longer than
          ;; a shrunken limit loses its coldest tabs first
@@ -2161,6 +2167,34 @@ is forgotten and that group falls back to creation order in the switcher."
     (set-frame-local! 'tab-order order)
     order))
 
+;; Most recent first: the group the frame stands in leads, the group it
+;; left last comes next. A walk of tab steps holds the row still, like
+;; alt-tab, so M-S-<right> goes on through the recent groups. The page
+;; ends the walk when the modifiers come up (group-tab-walk-end); a lost
+;; release ends it at the first other command.
+(define (group-tab-walk-commit!)
+  (when (frame-local 'tab-walk)
+    (set-frame-local! 'tab-walk #f)
+    (group-mru-note! (frame-group)))
+  (frame-chrome-set! "tabs-walk" ""))
+
+(define (frame-tab-order-recent here mru)
+  (let ((held (filter (lambda (id) (member id mru))
+                      (or (frame-local 'tab-order) '()))))
+    (if (and (frame-local 'tab-walk)
+             (member (last-command) '("group-tab-left" "group-tab-right"))
+             (member here held))
+        held
+        (let* ((row (if (and here (not (member here mru))) (cons here mru) mru))
+               (order (take row (max 1 frame-tabs-limit))))
+          (set-frame-local! 'tab-order order)
+          order))))
+
+(define (frame-tab-order here mru)
+  (if (eq? frame-tabs-order 'held)
+      (frame-tab-order-held here mru)
+      (frame-tab-order-recent here mru)))
+
 ;; (((ID LABEL CURRENT?) ...) MORE)
 (define (group-tab-step! dir)
   (let* ((here (frame-group))
@@ -2173,6 +2207,9 @@ is forgotten and that group falls back to creation order in the switcher."
                (if (or (< j 0) (>= j (length ids)))
                    #f
                    (let ((to (nth j ids)))
+                     ;; the page sees the walk open, and ends it on release
+                     (set-frame-local! 'tab-walk #t)
+                     (frame-chrome-set! "tabs-walk" "1")
                      (switch-to-group! to)
                      to))))
             (else (find (cdr rest) (+ i 1)))))))
@@ -2182,6 +2219,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define-command "group-tab-right" "Switch to the group shown immediately to the right in the top bar"
   (lambda () (or (group-tab-step! 1) (message "No group to the right"))))
+
+(define-command "group-tab-walk-end" "End a walk of the group tabs: the top bar sorts most recent first again"
+  (lambda () (group-tab-walk-commit!)))
+(catalog-meta! 'command "group-tab-walk-end" 'domain 'buffers 'effects '(write display))
 
 (global-set-key "M-S-<left>" "group-tab-left")
 (global-set-key "M-S-<right>" "group-tab-right")
@@ -2207,6 +2248,10 @@ is forgotten and that group falls back to creation order in the switcher."
             (list "N" (group-display-name g))))))
 
 (define (frame-tabs)
+  ;; a walk whose release never came ends at the first other command
+  (when (and (frame-local 'tab-walk)
+             (not (member (last-command) '("group-tab-left" "group-tab-right"))))
+    (group-tab-walk-commit!))
   (let* ((here (frame-group))
          (mru (group-ids-mru))
          (shown (frame-tab-order here mru)))
@@ -2224,7 +2269,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (else (switch-to-group! id) id))))
 
 (public! 'frame-tabs
-  "(frame-tabs) -> (((ID LABEL CURRENT? SEGMENTS) ...) MORE) — the groups the frame modeline shows as tabs, in the order the rail already had them, and how many the limit left out; SEGMENTS is the rendered name")
+  "(frame-tabs) -> (((ID LABEL CURRENT? SEGMENTS) ...) MORE) — the groups the frame modeline shows as tabs, in the order frame-tabs-order gives, and how many the limit left out; SEGMENTS is the rendered name")
 (public! 'group-name-segments
   "(group-name-segments GROUP) — the spans that draw GROUP's name, from group-name-format")
 (catalog-meta! 'function "group-name-segments" 'domain 'buffers 'effects '(read))

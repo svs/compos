@@ -1643,6 +1643,26 @@
           window.windowMotion.onEnd = (win) =>
             this.pushEvent("ui_cmd", {win: String(win), cmd: "window-walk-end"});
         }
+        // the release of the last modifier ends a walk of the group tabs,
+        // once it has settled: a modifier pressed again in time goes on
+        // with the same walk, so a fumbled release counts no switch
+        const TAB_WALK_SETTLE_MS = 700;
+        const MODS = ["Alt", "Shift", "Meta", "Control"];
+        this.tabWalkT = null;
+        this.tabWalkH = (e) => {
+          if (!MODS.includes(e.key)) return;
+          clearTimeout(this.tabWalkT);
+          this.tabWalkT = null;
+          if (e.type === "keydown") return;
+          if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) return;
+          if (!document.querySelector("c-tabs.ml-tabs[data-walk]")) return;
+          this.tabWalkT = setTimeout(() => {
+            this.tabWalkT = null;
+            if (document.querySelector("c-tabs.ml-tabs[data-walk]")) this.pushEvent("group_tab_walk_end", {});
+          }, TAB_WALK_SETTLE_MS);
+        };
+        window.addEventListener("keydown", this.tabWalkH, true);
+        window.addEventListener("keyup", this.tabWalkH, true);
         this.whichKeyHeld = new Set();
         this.whichKeyQuery = "";
         this.whichKeyFiltering = false;
@@ -3199,6 +3219,9 @@
         window.removeEventListener("unhandledrejection", this.jsErrH);
         window.removeEventListener("keydown", this.handler);
         window.removeEventListener("keyup", this.keyupH);
+        window.removeEventListener("keydown", this.tabWalkH, true);
+        window.removeEventListener("keyup", this.tabWalkH, true);
+        clearTimeout(this.tabWalkT);
         window.removeEventListener("resize", this.resizeH);
         window.removeEventListener("wheel", this.wheelH);
         window.removeEventListener("scroll", this.cscrollH, true);

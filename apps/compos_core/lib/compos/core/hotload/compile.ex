@@ -69,6 +69,16 @@ defmodule Compos.Core.Hotload.Compile do
   """
   @spec swap([String.t()]) :: %{reloaded: [module()], removed: [module()]}
   def swap(ebins) do
+    # Another `mix compile` on this `_build` deletes a stale beam before it
+    # writes the new one. A swap in that gap reads the beam as gone and
+    # unloads a live module: `Compos.Ui.EditorLive.__live__/0` was undef
+    # on 2026-10-14. Mix's build lock keeps the swap out of that gap.
+    if Code.ensure_loaded?(Mix.Project) and Mix.Project.get() != nil,
+      do: Mix.Project.with_build_lock(fn -> swap_now(ebins) end),
+      else: swap_now(ebins)
+  end
+
+  defp swap_now(ebins) do
     ebins = Enum.map(ebins, &Path.expand/1)
 
     reloaded =

@@ -147,23 +147,26 @@
   // a buffer that a neighbour showed crosses to W as one sheet of paper:
   // it keeps its size and its ink, lifts off the old pane, slides over
   // the divider and lands on the buffer W showed before
+  // a slide that starts and stops gently, as a hand moves a sheet
+  const SLIDE = 'cubic-bezier(.45,0,.2,1)';
   function paper(w, a, b, ms) {
     const dx = a.left - b.left;
     const dy = a.top - b.top;
+    const total = ms * 1.3;
     track(w.animate(
       [
         { transform: `translate(${dx}px, ${dy}px)`, zIndex: 3 },
         { transform: 'translate(0px, 0px)', zIndex: 3 }
       ],
-      { duration: ms, easing: EASE }
+      { duration: total, easing: SLIDE }
     ));
     track(w.animate(
       [
-        { boxShadow: '0 0 0 rgba(0,0,0,0)' },
-        { boxShadow: '0 10px 28px rgba(0,0,0,.28)', offset: 0.4 },
+        { boxShadow: '0 2px 6px rgba(0,0,0,.2)' },
+        { boxShadow: '0 12px 30px rgba(0,0,0,.32)', offset: 0.5 },
         { boxShadow: '0 0 0 rgba(0,0,0,0)' }
       ],
-      { duration: ms, easing: 'ease-out' }
+      { duration: total, easing: 'linear' }
     ));
   }
 
@@ -262,7 +265,7 @@
 
   // the old content of a pane, at its old box, goes out along STEP; a
   // STILL one stays under the paper that lands on it
-  function leave(s, o, step, still, full) {
+  function leave(s, o, step, still, full, hold) {
     const box = s.root.getBoundingClientRect();
     const r = o.rect;
     const frame = document.createElement('div');
@@ -289,7 +292,7 @@
         { transform: 'translate(0px, 0px)', opacity: 1 },
         { transform: `translate(${go[0]}px, ${go[1]}px)`, opacity: go[2] }
       ],
-      { duration: s.ms, easing: EASE, fill: 'forwards' }
+      { duration: hold || s.ms, easing: EASE, fill: 'forwards' }
     ), frame);
   }
 
@@ -311,6 +314,15 @@
         enter(p.w, p.rect, parent && toward(parent.rect, p.rect), s.ms);
         return;
       }
+      // a buffer that a neighbour showed crosses to this pane as one
+      // sheet, even when the pane grows into a pane that closed
+      const b = s.after.get(p.id);
+      const src = o.ghost && b && wasAt.get(b);
+      if (src && toward(src, p.rect) && !(s.walk && String(s.walk.win) === p.id)) {
+        paper(p.w, src, p.rect, s.ms);
+        leave(s, o, null, true, false, s.ms * 1.3);
+        return;
+      }
       const moved = reshape(p.w, o.rect, p.rect, s.ms);
       // the selected window went to another pane with its stack: it
       // sweeps there on top, and the stack trails behind it
@@ -326,24 +338,20 @@
         leave(s, o, step, false, true);
         return;
       }
-      const b = s.after.get(p.id);
-      const src = b && wasAt.get(b);
       const dst = o.buffer && isAt.get(o.buffer);
-      if (!moved && src && toward(src, p.rect)) {
-        paper(p.w, src, p.rect, s.ms);
-        leave(s, o, null, true);
-        return;
-      }
-      const step = (src && toward(src, p.rect)) || (dst && toward(p.rect, dst)) || null;
-      if (!moved) enter(p.w, p.rect, step, s.ms);
-      // a buffer that went to a neighbour is on the paper that carries it
+      // a buffer that went to a neighbour leaves on the paper that
+      // carries it; what it uncovers lay under it, and does not move
       if (!moved && dst && toward(p.rect, dst)) return;
+      const step = dst && toward(p.rect, dst);
+      if (!moved) enter(p.w, p.rect, step, s.ms);
       leave(s, o, step);
     });
 
     // a pane that went slides away from the pane that took its place
     s.old.forEach((o, id) => {
       if (ids.has(id) || !o.ghost) return;
+      // its buffer went on in another pane, on the paper that carries it
+      if (o.buffer && isAt.has(o.buffer)) return;
       const heir = now.find((q) => inside(q.rect, center(o.rect)));
       leave(s, o, heir && toward(heir.rect, o.rect));
     });

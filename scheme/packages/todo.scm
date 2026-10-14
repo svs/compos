@@ -709,8 +709,7 @@
                                            (let ((here (group-here))) (if here (list here) '()))
                                            (todo-list '(all #t))))
                                 (live (filter group-name ids)))
-                           (sort (map (lambda (g) (list (group-name g) g)) live)
-                                 (lambda (a b) (string<? (car a) (car b)))))))
+                           (sort (map (lambda (g) (list (group-name g) g)) live)))))
         (list 'label "Project" 'kind "project"
               'options (lambda (buf) (map (lambda (p) (list p p)) (todo-projects))))
         (list 'label "Status" 'kind "status"

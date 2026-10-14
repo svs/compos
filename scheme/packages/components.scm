@@ -177,7 +177,7 @@
                (component--get p 'actions '())))))
 
 (defcomponent 'ui/tabs
-  "One row of choices over the same view, with the current one marked."
+  "One row of choices over the same view, with the current one marked. A tab is (CLICK LABEL [CURRENT? [KEY]]). As a part of the page the row brings its own keys: a tab's KEY takes it, and the arrows step."
   '((tabs list required) (class string optional))
   '(tabs (("history" "history" #t "1") ("job" "job" #f "2")))
   (lambda (p)
@@ -195,7 +195,49 @@
                          'attrs (list (list "current" (if current? "true" "false")))
                          'segs (append (if key (list (list "c-tab-key c-action-key" key)) '())
                                        (list (list "c-tab-label c-action-label" label))))))
-               (component--get p 'tabs '())))))
+               (component--get p 'tabs '()))
+          ;; in force once the row, or a part that holds it, is named
+          'anchor-keymap "tabs-map"
+          'anchor-data (list 'tabs (component--get p 'tabs '())))))
+
+;; The keys of a tabs row: the anchor at point names its tabs, and a key
+;; clicks one the way the mouse does
+(define (tabs--here)
+  (let* ((buf (current-buffer))
+         (a (anchor-at buf (buffer-point buf)))
+         (d (and a (anchor-data a))))
+    (or (and (pair? d) (plist-get d 'tabs)) '())))
+
+(define (tabs--take! tab)
+  (run-hook-with-args-until-success 'block-click (current-buffer) (car tab)))
+
+(define (tabs--key! key)
+  (let loop ((ts (tabs--here)))
+    (cond ((null? ts) (message (string-append "No tab on " key)))
+          ((and (> (length (car ts)) 3) (equal? (nth 3 (car ts)) key)) (tabs--take! (car ts)))
+          (else (loop (cdr ts))))))
+
+(define (tabs--step! d)
+  (let* ((ts (tabs--here))
+         (n (length ts))
+         (i (let loop ((xs ts) (i 0))
+              (cond ((null? xs) 0) ((and (> (length (car xs)) 2) (nth 2 (car xs))) i) (else (loop (cdr xs) (+ i 1)))))))
+    (if (= n 0)
+        (message "No tabs here")
+        (tabs--take! (nth (modulo (+ i d n) n) ts)))))
+
+(define-keymap! "tabs-map")
+(define-command "tabs-next" "Take the next tab of the row at point" (lambda () (tabs--step! 1)))
+(define-command "tabs-prev" "Take the previous tab of the row at point" (lambda () (tabs--step! -1)))
+(define-key "tabs-map" "<right>" "tabs-next")
+(define-key "tabs-map" "<left>" "tabs-prev")
+(for-each (lambda (n)
+            (let ((key (number->string n))
+                  (command (string-append "tabs-key-" (number->string n))))
+              (define-command command (string-append "Take the tab of the row at point keyed " key)
+                (lambda () (tabs--key! key)))
+              (define-key "tabs-map" key command)))
+          '(1 2 3 4 5 6 7 8 9))
 
 (defcomponent 'ui/fold-head
   "A clickable heading with a disclosure caret."

@@ -1435,10 +1435,23 @@
     (list-snap-point! buf)
     (list-update-selection! buf)))
 
+(defcustom 'debounce-delay 250
+  "How long the highlight rests on a row before a list whose preview reads the network fetches it, in milliseconds. A held arrow reaches the row you want before one read goes out. 0 fetches on every move."
+  'group 'list 'type 'number)
+
 (define (list-preview! buf)
+  ;; A mode whose preview reads the network says 'debounce: its preview
+  ;; waits for the highlight to rest, then shows whatever row is current then.
   (let ((f (list-opt buf 'preview))
-        (e (list-current buf)))
-    (when (and f e) (f buf e))))
+        (delay (if (list-opt buf 'debounce) debounce-delay 0)))
+    (if (and f (> delay 0))
+        (debounce! (string-append "list-preview:" buf) delay
+          (lambda (b)
+            (when (buffer-exists? b)
+              (let ((e (list-current b))) (when e (f b e)))))
+          buf)
+        (let ((e (list-current buf)))
+          (when (and f e) (f buf e))))))
 
 ;; the mover may not be in the list: the filter prompt is the current
 ;; buffer while its arrows move the rows of the list behind it

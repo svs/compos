@@ -361,6 +361,7 @@
         ("x" "execute") ("o" "browser") ("g" "sync")
         ("/" "filter") ("q" "quit")))
     'preview (lambda (buf row) (substack-show-detail! row))
+    'debounce #t
     'flags (list (list "d" "D" "unsubscribe" substack--unsubscribe-key! #t))
     'keys '(("RET" "substack-open") ("o" "substack-open-browser")
             ("g" "substack-refresh") ("q" "quit-window"))))
@@ -389,6 +390,7 @@
     'footer (lambda (buf)
       '(("RET" "read") ("o" "browser") ("g" "refresh") ("q" "quit")))
     'preview (lambda (buf post) (substack-show-reader! buf post))
+    'debounce #t
     'keys '(("RET" "substack-open") ("o" "substack-open-browser")
             ("g" "substack-refresh") ("q" "quit-window"))))
 

@@ -1014,22 +1014,30 @@
                                                (and flat? (if letter? (string-append "Email · " lead) lead)))
                                acc)))))
             ((equal? tag "c-stages")
-             ;; the stages a tab filters by, as one line of tabs with the one showing
-             ;; marked; [ and ] step through them, / picks one, a click takes it
+             ;; the stages a tab filters by, as tabs with the one showing marked and
+             ;; a digit each. Under a heading they make one part with it, and that
+             ;; part takes the tabs' keys: a digit takes that stage, the arrows step
              (let ((shown (site-app-stage-shown node)))
                (if (null? shown)
                    (loop (cdr rest) prev acc)
-                   (let ((n (b 'line (string-join (map site-app-stage-label shown) "   ") #f)))
+                   (let* ((keyed (let each ((ss shown) (i 1))
+                                   (if (null? ss) '()
+                                       (cons (list (string-append site-app-stage-click (plist-get (car ss) 'status))
+                                                   (site-app-stage-label (car ss))
+                                                   (and (plist-get (car ss) 'active) #t)
+                                                   (number->string i))
+                                             (each (cdr ss) (+ i 1))))))
+                          (n (b 'line (string-join (map (lambda (t) (string-append (nth 3 t) " " (cadr t))) keyed) "   ") #f))
+                          (tabs (component 'ui/tabs (list 'tabs keyed)))
+                          (head (and (equal? prev 'heading) (pair? acc) (car acc)))
+                          (name (or (and head (plist-get head 'anchor-name)) "Stages"))
+                          (first (if head (car (plist-get head 'lines)) n))
+                          (body (if head (list (car (site-app-unanchored (list head))) tabs) (list tabs))))
                      (loop (cdr rest) 'stages
-                           (cons (site-app-claim
-                                   (component 'ui/tabs
-                                     (list 'tabs (map (lambda (s) (list (string-append site-app-stage-click (plist-get s 'status))
-                                                                        (site-app-stage-label s)
-                                                                        (and (plist-get s 'active) #t)
-                                                                        ""))
-                                                      shown)))
-                                   n n "Stages")
-                                 acc))))))
+                           (cons (append (site-app-claim (component 'ui/group (list 'body body)) first n name)
+                                         (list 'anchor-keymap (plist-get tabs 'anchor-keymap)
+                                               'anchor-data (plist-get tabs 'anchor-data)))
+                                 (if head (cdr acc) acc)))))))
             ((equal? tag "c-heading")
              (let* ((count (and next (re-match? "^[0-9]+$" (or (plist-get next 'text) "")) (plist-get next 'text)))
                     (n (b 'line (if count (string-append text " " count) text) href))
@@ -1246,7 +1254,9 @@
                       (section (site-app-detail-section buf active)))
                  (append
                    (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf)))
-                   (cond ((not section) (list (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
+                   (cond ;; a page with no tabs is all head: nothing waits below it
+                         ((null? tabs) '())
+                         ((not section) (list (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
                          ((equal? section 'failed)
                           (let ((t "The site did not answer for this tab. g reads the page again.")) (list (site-app-part b 'ui/empty t (list 'text t) #f))))
                          ((null? (site-app-real section)) (list (site-app-part b 'ui/empty "Nothing here." (list 'text "Nothing here.") #f)))
@@ -1528,11 +1538,12 @@
         ((not sheet) #f)
         (fresh #f)
         ((plist-get page 'detail-fetch)
-         ;; one plain page with no tabs to press: fetch it, no live tab needed
+         ;; one plain page with no tabs to press: fetch it, no live tab needed.
+         ;; Each item keeps its own page, so only a newer read of this page outdates the answer.
          (site-app-fetch-html! url
            (lambda (html)
              (let ((data (and html (site-app-parse sheet html))))
-               (when (and data (buffer-known? buf) (equal? gen (site-app-gen name)))
+               (when (and data (buffer-known? buf) (equal? gen (buffer-local buf 'site-app-gen)))
                  (site-app-render-detail! name row data))))))
         ((plist-get page 'detail-tab-param)
          (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids)
@@ -1789,22 +1800,25 @@
         (message "No stages on this tab")
         (let* ((item (site-app-find (lambda (s) (equal? (plist-get s 'status) status))
                                     (site-app-real (plist-get stages 'items))))
+               (href (and item (plist-get item 'href)))
                (selector (and item (plist-get item 'selector)))
                (mark (plist-get stages 'mark))
-               (wait (and mark (string-append selector "." mark))))
+               (wait (and mark (string-append selector "." mark)))
+               (file! (lambda (html)
+                        (let ((data (and html (site-app-parse (plist-get page 'detail-sheet) html))))
+                          (if (not data)
+                              (message (string-append label ": the site did not answer"))
+                              (begin
+                                (site-app-detail-put-section! buf id (plist-get data 'section))
+                                (message label)))))))
           (message (string-append label "…"))
-          (site-app-live-tab! name tab-url
-            (lambda (tab)
-              (when tab
-                (tab-press tab selector
-                  (lambda (html)
-                    (let ((data (and html (site-app-parse (plist-get page 'detail-sheet) html))))
-                      (if (not data)
-                          (message (string-append label ": the site did not answer"))
-                          (begin
-                            (site-app-detail-put-section! buf id (plist-get data 'section))
-                            (message label)))))
-                  wait))))))))
+          (if href
+              ;; a stage the site links to is read from its URL, on this tab
+              (let ((stage-url (site-app-url spec href)))
+                (site-app-fetch-html! (if param (site-app-with-param stage-url param id) stage-url) file!))
+              (site-app-live-tab! name tab-url
+                (lambda (tab)
+                  (when tab (tab-press tab selector file! wait)))))))))
 
 (define (site-app-stage-step! d)
   (let* ((buf (current-buffer))
@@ -1887,12 +1901,30 @@
 
 (add-hook! 'post-command-hook 'site-app-footer-sync!)
 
-(define-command "site-app-detail-follow" "Open the link at point on the site"
+(define (site-app-href-page spec href)
+  ;; the page whose items live under HREF's path, when compos can draw them
+  (site-app-find (lambda (page)
+                   (let ((path (plist-get page 'path)))
+                     (and (string? path) (plist-get page 'detail-sheet)
+                          (string-prefix? (string-append path "/") href))))
+                 (site-app-pages spec)))
+
+(define-command "site-app-detail-follow" "Open the link at point: an item compos draws opens beside the list, anything else on the site"
   (lambda ()
-    (let* ((buf (current-buffer)) (hit (site-app-detail-link-at buf)))
-      (if hit
-          (tab-open (site-app-url (site-app-spec (buffer-local buf 'site-app-name)) (caddr hit)))
-          (message "No link here")))))
+    (let* ((buf (current-buffer))
+           (hit (site-app-detail-link-at buf))
+           (href (and hit (caddr hit)))
+           (spec (site-app-spec (buffer-local buf 'site-app-name)))
+           (page (and href spec (site-app-href-page spec href)))
+           (list-buf (buffer-local buf 'site-app-list)))
+      (cond ((not hit) (message "No link here"))
+            ((and page list-buf (buffer-known? list-buf))
+             (let* ((path (car (string-split href "?")))
+                    (key (car (reverse (string-split path "/"))))
+                    (line (car (buffer-line-at-point buf)))
+                    (text (string-trim (list-ref (string-split (buffer-text buf) "\n") (- line 1)))))
+               (site-app-show-detail! list-buf (list 'href href 'key key 'name text) page)))
+            (else (tab-open (site-app-url spec href)))))))
 (define-command "site-app-detail-reload" "Read this page again from the site"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -2000,6 +2032,7 @@
                   'composml site-app-composml
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
+                  'debounce #t
                   'footer (lambda (b) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
                                             (list "/" "state") (list "g" "refresh") (list "q" "quit")))
                   ;; Digits are left free so they reach the page beside the list, as

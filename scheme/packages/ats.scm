@@ -198,11 +198,18 @@
           *ats-approvals-page*
           *ats-candidates-page*
           *ats-applications-page*
-          (ats-section 'companies "Companies" "4" "/staff/companies" "ats-company-mode"
-            (list (list 'label "company" 'width 24 'field 'name)
-                  (list 'label "state" 'width 12 'field 'state)
-                  (list 'label "jobs" 'width 10 'field 'active 'face "dim")
-                  (list 'label "website" 'width #f 'field 'website 'face "dim")))
+          (append
+      ;; a company has tabs of its own, each read from its ?tab= URL; the earlier
+      ;; keys win over the plain page that ats-section reads
+      (list 'detail-sheet (ats-sheet "company-detail.xsl")
+            'detail-fetch #f
+            'detail-tab-param "tab"
+            'detail-tabs (map (lambda (id) (list 'id id)) '("overview" "subscriptions")))
+      (ats-section 'companies "Companies" "4" "/staff/companies" "ats-company-mode"
+                   (list (list 'label "company" 'width 24 'field 'name)
+                         (list 'label "state" 'width 12 'field 'state)
+                         (list 'label "jobs" 'width 10 'field 'active 'face "dim")
+                         (list 'label "website" 'width #f 'field 'website 'face "dim"))))
           *ats-jobs-page*
           (ats-section 'comms "Comms" "6" "/staff/comms" "ats-message-mode"
             (list (list 'label "from" 'width 26 'field 'name)
@@ -380,6 +387,7 @@
         'cells ats-pipeline-cells
         'title ats-pipeline-title
         'preview ats-pipeline-open-row!
+        'debounce #t
         'filters (list (list "stage:" (lambda (buf row) (site-app-field row 'stage)) "the stage: new, recommended, applied, suggested...")
                        (list "fit:" (lambda (buf row) (site-app-field row 'fit)) "the fit: strong, potential, unfit"))
         'footer (lambda (b) (list (list "RET" "open") (list "r" "recommend") (list "/" "narrow") (list "g" "refresh") (list "q" "quit")))

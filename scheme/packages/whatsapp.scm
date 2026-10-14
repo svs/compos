@@ -490,6 +490,7 @@
     'local-filter #t
     'no-marks #t
     'preview (lambda (buf chat) (whatsapp--open-chat! chat #f))
+    'debounce #t
     'key (lambda (buf chat) (plist-get chat 'jid))
     'footer (lambda (buf)
               '(("RET" "read") ("r" "reply") ("/" "filter")

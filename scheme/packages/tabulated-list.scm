@@ -6,6 +6,9 @@
 ;;; define-list-mode!. This file loads first from init.scm, before any
 ;;; package that declares a list.
 
+;; debounce-delay below is a defcustom, and init.scm loads this file before custom
+(require 'custom)
+
 ;;; --- tabulated lists -----------------------------------------------------------
 ;;; Five buffers are the same buffer: dired, ibuffer, *chats*, mcp-hub and
 ;;; notmuch. Each had its own marks, its own filter stack, its own

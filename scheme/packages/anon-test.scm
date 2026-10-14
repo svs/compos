@@ -123,3 +123,19 @@
           (check-equal! hidden tree "the hidden view is the tree its mode wrote")
           (check-equal! (string-contains? (anon--tree-text seen) "Zelda") #f
                         "buffer-shown-hook bars the name in the view written while hidden"))))))
+
+(deftest 'anon-a-write-redacts-only-the-parts-that-changed
+  "the parts equal to the last tree take its redaction; only the new text goes to decide"
+  (lambda ()
+    (let* ((common anon-common-words)
+           (old '((tag "c-transcript" children ((tag "div" text "Alice Smith wrote"))) (tag "c-prompt" text "")))
+           (new '((tag "c-transcript" children ((tag "div" text "Alice Smith wrote"))) (tag "c-prompt" text "Bob Jones typed"))))
+      (set! anon-common-words '())
+      (let ((red (anon--redact-tree old)))
+        (set! *anon-new-text* '())
+        (let* ((got (anon--redact-like new old red))
+               (fresh *anon-new-text*))
+          (set! *anon-new-text* '())
+          (set! anon-common-words common)
+          (check-equal! got (anon--redact-tree new) "the result is the redaction of the whole new tree")
+          (check-equal! fresh '("Bob Jones typed") "only the changed text is new"))))))

@@ -264,13 +264,69 @@
   (ignore-errors (lambda () (buffer-set-locals! buf plist)))
   (set! *anon-writing* #f))
 
+;; A mode writes its whole view again for each change: a chat for each
+;; streamed line, a player for each tick. Most of the tree is the tree it
+;; wrote last time. The walk below takes the saved redaction of each part
+;; that is equal to the part it replaces, and redacts only the parts that
+;; changed: a chat of 70 KB cost 1 s a write when anon redacted it whole.
+;; The text of the changed parts is the text decide has not seen.
+
+;; the text of each part redacted in this walk, last first
+(define *anon-new-text* '())
+
+(define (anon--redact-part tree)
+  (let ((text (anon--tree-text tree)))
+    (unless (equal? text "")
+      (set! *anon-new-text* (cons text *anon-new-text*))))
+  (anon--redact-tree tree))
+
+(define (anon--redact-like new old red)
+  "NEW redacted, with RED, the redaction of OLD, for each part NEW shares with OLD"
+  (cond ((equal? new old) red)
+        ((and (pair? new) (pair? old) (pair? red)) (anon--redact-list new old red))
+        (else (anon--redact-part new))))
+
+;; the elements of NEW beside those of OLD and RED; only elements are
+;; compared, never a whole tail, so a long list costs one pass
+(define (anon--redact-list new old red)
+  (cond ((not (pair? new)) (anon--redact-like new old red))
+        ((not (and (pair? old) (pair? red))) (anon--redact-part new))
+        ((and (symbol? (car new)) (member (car new) anon--tree-keys) (pair? (cdr new)))
+         (if (and (equal? (car old) (car new)) (pair? (cdr old)) (pair? (cdr red)))
+             (cons (car new) (cons (cadr new) (anon--redact-list (cddr new) (cddr old) (cddr red))))
+             (anon--redact-part new)))
+        (else (cons (anon--redact-like (car new) (car old) (car red))
+                    (anon--redact-list (cdr new) (cdr old) (cdr red))))))
+
+;; text decide is to judge, per buffer: ((BUF TEXT ...) ...)
+(define *anon-asks* '())
+
+(define (anon--note-ask! buf texts)
+  (when (pair? texts)
+    (let ((had (assoc buf *anon-asks*)))
+      (set! *anon-asks*
+            (cons (cons buf (append texts (if had (cdr had) '())))
+                  (filter (lambda (e) (not (equal? (car e) buf))) *anon-asks*))))
+    (debounce! (string-append "anon-ask:" buf) 500 anon--ask-noted! buf)))
+
+(define (anon--ask-noted! buf)
+  (let ((e (assoc buf *anon-asks*)))
+    (set! *anon-asks* (filter (lambda (x) (not (equal? (car x) buf))) *anon-asks*))
+    (when (and e (buffer-exists? buf) (anon--shown? buf))
+      (let ((text (string-join (cdr e) "\n")))
+        (when (<= (string-byte-length text) anon-max-bytes)
+          (anon--ask-text! text (anon--spans text)))))))
+
 (define (anon--view-plist buf tree)
-  (let* ((saved (buffer-local buf 'anon-render-blocks))
-         ;; the same tree as last time: its redaction stands, unless an answer came since
-         (red (if (and (pair? saved) (not *anon-stale*) (equal? (car saved) tree))
-                  (cadr saved)
-                  (anon--redact-tree tree))))
-    (list 'anon-render-blocks (list tree red) 'render-blocks red)))
+  (let ((saved (buffer-local buf 'anon-render-blocks)))
+    (set! *anon-new-text* '())
+    ;; an answer of decide changes what is barred: then the whole tree again
+    (let ((red (if (and (pair? saved) (not *anon-stale*))
+                   (anon--redact-like tree (car saved) (cadr saved))
+                   (anon--redact-part tree))))
+      (anon--note-ask! buf *anon-new-text*)
+      (set! *anon-new-text* '())
+      (list 'anon-render-blocks (list tree red) 'render-blocks red))))
 
 (define (anon--title-redraw! buf)
   "rebuild BUF's mode line; its title passes through anon on the way"
@@ -336,9 +392,7 @@
              (loop (cddr xs))))))
 
 (define (anon--intercept! buf plist)
-  (anon--write-view! buf (anon--rewrite buf plist))
-  (when (and (anon--render-key? (car plist)) (anon--shown? buf))
-    (debounce! (string-append "anon:" buf) 500 anon-ask! buf)))
+  (anon--write-view! buf (anon--rewrite buf plist)))
 
 (define (anon--set-local next buf key val)
   (if (and (not *anon-writing*) (anon--watched? (list key val)) (minor-mode-on? buf "anon-local-mode"))
@@ -347,10 +401,7 @@
 
 (define (anon--set-locals next buf plist)
   (if (and (not *anon-writing*) (anon--watched? plist) (minor-mode-on? buf "anon-local-mode"))
-      (begin
-        (anon--intercept! buf plist)
-        (when (and (plist-get plist 'render-blocks) (anon--shown? buf))
-          (debounce! (string-append "anon:" buf) 500 anon-ask! buf)))
+      (anon--intercept! buf plist)
       (next buf plist)))
 
 ;; The title painter names a buffer with buffer-modeline-name, and so does
@@ -552,8 +603,7 @@
 (define (anon--catchup! buf)
   (cond ((not (anon--shown? buf)) #f)
         ((minor-mode-on? buf "anon-local-mode")
-         (anon--view-catchup! buf)
-         (debounce! (string-append "anon:" buf) 500 anon-ask! buf))
+         (anon--view-catchup! buf))
         ((and *anon-global* (anon--eligible? buf))
          (enable-minor-mode! buf "anon-local-mode"))))
 

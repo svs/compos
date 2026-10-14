@@ -786,6 +786,25 @@
 (define-command "anchor-scale-increase" "Show more of the part at point; outside a part, of the page"
   (lambda () (anchor-scale--step! -1)))
 
+;; f: the part at point folded to its first line, or open again
+(define-command "anchor-fold" "Fold the part at point, or open it again"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (a (and (anchor-scale-page? buf) (anchor-at buf (buffer-point buf)))))
+      (cond
+       ((not (buffer-read-only? buf)) (run-command "self-insert-command"))
+       ((not a) (message "No part here"))
+       ;; a page whose parts fold by their own state takes the part back
+       ((let ((h (buffer-local buf 'anchor-fold-handler))) (and (procedure? h) (h buf a))) #t)
+       (else
+        (let* ((name (anchor-name a))
+               (folds (filter (lambda (l) (eq? (cadr l) 'fold)) (anchor-scale--levels a)))
+               (n (anchor-scale-set! buf name
+                    (cond ((> (anchor-scale-of buf name) 0) 0)
+                          ((pair? folds) (car (car folds)))
+                          (else (anchor-scale--max a))))))
+          (message (string-append name (if (= n 0) ": open" ": folded")))))))))
+
 ;; the level most parts are at: a part whose name changes from page to page
 ;; takes it from a saved level
 (define (anchor-scale--commonest levels)

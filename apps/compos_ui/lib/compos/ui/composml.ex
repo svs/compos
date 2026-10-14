@@ -12,7 +12,7 @@ defmodule Compos.Ui.ComposML do
     buffer-name mode position headline statusbar status progress tabs tab field
     label metric key-hints minibuffer completions completion which-key transcript
     message user agent toolcall info summary permission plan tool-call arguments result eval activity prompt input cursor toolbar echo
-    action action-key value group text row card preview empty properties list item message-body question answers hint)
+    action action-key value group text row card preview empty properties list item message-body question answers hint header)
 
   @mail_elements ~w(mailboxes mailbox mailbox-name unread-count message-count
     mail-query mail-threads mail-thread mail-subject mail-date mail-participants
@@ -24,7 +24,8 @@ defmodule Compos.Ui.ComposML do
   @recruiting_elements ~w(applications application candidate
     application-state application-stars application-verdict application-role
     application-applied application-meta application-link application-actions
-    application-event assessment letter)
+    application-event assessment letter
+    work-experiences work-experience job-context)
 
   def domain_elements, do: @mail_elements ++ @recruiting_elements ++ ~w(morg-agenda agenda-day agenda-entry directory file filename size modified permissions vcs-status icon size-bar buffers buffer buffer-list buffer-entry chat-list chat-entry buffer-name buffer-mode buffer-size buffer-state buffer-icon buffer-group buffer-activity chat-name chat-state chat-tokens chat-model symbol-list symbol-entry symbol-name symbol-kind symbol-location agenda-title agenda-time agenda-deadline agenda-scheduled agenda-task-state agenda-tags agenda-source)
 

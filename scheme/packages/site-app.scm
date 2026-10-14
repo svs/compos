@@ -953,6 +953,14 @@
                                (member (plist-get (cadr kids) 'text) seen))))))
             nodes)))
 
+;; a card's head as the sheet dressed it: the logo (or a letter tile), a grade
+;; badge in its tone, and tags
+(define (site-app-card-face node)
+  (let ((has (lambda (k) (let ((v (plist-get node k))) (and v (not (equal? v "")) v)))))
+    (append (if (has 'logo) (list 'icon (has 'logo)) (if (has 'letter) (list 'letter (has 'letter)) '()))
+            (if (has 'tier) (list 'badge (has 'tier) 'badge-class (or (has 'tone) "")) '())
+            (if (pair? (plist-get node 'tags)) (list 'tags (plist-get node 'tags)) '()))))
+
 (define (site-app-node-blocks b nodes tones)
   (let loop ((rest (site-app-kept nodes)) (prev #f) (acc '()))
     (if (null? rest)
@@ -985,6 +993,7 @@
                              (body (if flat? body
                                        (site-app-with-keys (site-app-summary body title 1) (site-app-card-map-for (plist-get node 'class)) fold node)))
                              (card (component 'ui/card (append (list 'title title 'open? open? 'body body)
+                                                            (site-app-card-face node)
                                                             ;; the card's own keys, and the record they act on
                                                             (if flat? (list 'anchor-keymap (site-app-card-map-for (plist-get node 'class))
                                                                             'anchor-data (list 'record node))
@@ -1145,12 +1154,26 @@
                 (component 'ui/title (append (list 'text title)
                                              (if state (list 'badge state 'tone (or (site-app-tone-class tones state) "")) '())))
                 n n title))))
+      ;; the name large, its stars small after it, and the photo beside it when the sheet has one
       (if name
-          (list (site-app-part b 'ui/title (string-append (if stars (string-append (plist-get stars 'text) "  ") "") (plist-get name 'text))
-                               (list 'level 2
-                                     'segs (append (if stars (list (list "c-warn" (plist-get stars 'text)) (list "" "  ")) '())
-                                                   (list (list "" (plist-get name 'text)))))
-                               (plist-get name 'href)))
+          (let* ((n (b 'line (string-append (plist-get name 'text) (if stars (string-append "  " (plist-get stars 'text)) ""))
+                       (plist-get name 'href)))
+                 (heading (component 'ui/title
+                            (append (list 'level 1
+                                          'segs (append (list (list "" (plist-get name 'text)))
+                                                        (if stars (list (list "" "  ") (list "c-warn sa-head-stars" (plist-get stars 'text))) '())))
+                                    (site-app-click-props (plist-get name 'href)))))
+                 (src (let ((a (plist-get name 'avatar))) (and a (not (equal? a "")) a)))
+                 (face (if src
+                           (list 'tag "div" 'class "sa-head-face"
+                                 'children (list (list 'tag "img" 'class "sa-head-avatar"
+                                                       'attrs (list (list "src" (if (string-prefix? "/" src)
+                                                                                     (string-append (or (plist-get spec 'base-url) "") src)
+                                                                                     src))
+                                                                    (list "alt" "") (list "referrerpolicy" "no-referrer")))
+                                                 heading))
+                           heading)))
+            (list (site-app-claim face n n)))
           '())
       (if (null? facts)
           '()
@@ -1266,6 +1289,8 @@
       (buffer-set-text! buf text #t)
       (buffer-goto-line! buf (max 1 (min line (b 'count #f #f))))
       (site-app-set-anchors! buf text blocks))
+    ;; anchor-mode's f hands a card back to the page, which folds it by its own state
+    (buffer-set-local! buf 'anchor-fold-handler site-app-fold-anchor!)
     (buffer-set-local! buf 'site-app-links (b 'links #f #f))
     (buffer-set-local! buf 'site-app-stops (site-app-stops blocks))
     (buffer-set-locals! buf
@@ -1325,6 +1350,10 @@
 .sa-star-confirmed { color: var(--warn-fg); }
 .sa-star-guess { color: transparent; -webkit-text-stroke: 1px var(--warn-fg); }
 .sa-star-off { color: var(--dim-fg); opacity: .3; }
+.sa-head-face { display: flex; gap: 14px; align-items: center; margin: .2em 0 .3em; }
+.sa-head-face > .c-title { margin: 0; }
+.sa-head-avatar { width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
+.sa-head-stars { font-size: .5em; vertical-align: middle; }
 .sa-row > img.sa-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); justify-self: center; }
 .sa-name-cell { font-weight: 600; color: var(--default-fg); }
 .sa-badge-cell { display: flex; align-items: center; }
@@ -1748,21 +1777,26 @@
 (define-command "site-app-detail-tab-5" "Show this page's fifth tab" (lambda () (site-app-detail-nth! 5)))
 (define-command "site-app-detail-next-tab" "Show this page's next tab" (lambda () (site-app-detail-step! 1)))
 (define-command "site-app-detail-prev-tab" "Show this page's previous tab" (lambda () (site-app-detail-step! -1)))
+(define (site-app-fold-anchor! buf a)
+  ;; a card folds by its own state, so the page redraws it shut or open and a
+  ;; card that reads more from the site reads it on opening; #f when A is no card
+  (let ((fold (and a (plist-get (or (anchor-data a) '()) 'fold))))
+    (and fold
+         (let ((title (car fold)) (open? (cadr fold)))
+           (buffer-set-local! buf 'site-app-folds
+             (cons (list title (not open?))
+                   (filter (lambda (f) (not (equal? (car f) title))) (or (buffer-local buf 'site-app-folds) '()))))
+           (site-app-draw! buf)
+           ;; point stays on the card's title
+           (let ((back (anchor-find buf (anchor-name a))))
+             (when back (goto-char! (anchor-start back)) (anchor-sync! buf)))
+           #t))))
+
 (define-command "site-app-detail-fold" "Fold or unfold the card at point"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (a (anchor-at buf (buffer-point buf)))
-           (fold (and a (plist-get (or (anchor-data a) '()) 'fold))))
-      (if (not fold)
-          (message "No card here")
-          (let ((title (car fold)) (open? (cadr fold)))
-            (buffer-set-local! buf 'site-app-folds
-              (cons (list title (not open?))
-                    (filter (lambda (f) (not (equal? (car f) title))) (or (buffer-local buf 'site-app-folds) '()))))
-            (site-app-draw! buf)
-            ;; point stays on the card's title
-            (let ((back (anchor-find buf (anchor-name a))))
-              (when back (goto-char! (anchor-start back)) (anchor-sync! buf))))))))
+    (let ((buf (current-buffer)))
+      (unless (site-app-fold-anchor! buf (anchor-at buf (buffer-point buf)))
+        (message "No card here")))))
 
 ;; The stages a tab filters its rows by (an application's new, recommended,
 ;; ...), as its sheet reads them: (tag c-stages mark ACTIVE-CLASS items
@@ -1852,7 +1886,6 @@
 
 ;; a card's own keys, in force while point is on it
 (define-keymap! "site-app-card-map")
-(define-key "site-app-card-map" "f" "site-app-detail-fold")
 
 ;; a kind of card can have keys of its own: the spec's 'card-keys is
 ;; ((CLASS ((KEY COMMAND LABEL) ...)) ...), CLASS the class the sheet puts on the
@@ -1872,7 +1905,6 @@
   (for-each (lambda (kind)
               (let ((name (site-app-card-map-name (car kind))))
                 (define-keymap! name)
-                (define-key name "f" "site-app-detail-fold")
                 (for-each (lambda (k) (define-key name (car k) (cadr k))) (cadr kind))))
             (or (plist-get spec 'card-keys) '())))
 

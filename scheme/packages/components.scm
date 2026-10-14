@@ -78,7 +78,18 @@
     (if (not e)
         (list 'error (string-append "no component named " (catalog--string name)))
         (let ((valid (component--validate (car e) props (nth 1 e))))
-          (if (equal? valid #t) (component--anchored ((nth 3 e) props) props) valid)))))
+          (if (equal? valid #t)
+              (component--named (component--anchored ((nth 3 e) props) props) name)
+              valid)))))
+
+;; the page source names what drew it: the root block carries component="ui/card"
+(define (component--named block name)
+  (if (not (and (pair? block) (plist-get block 'tag)))
+      block
+      (plist-put block 'attrs
+                 (cons (list "component" (catalog--string name))
+                       (filter (lambda (a) (not (equal? (car a) "component")))
+                               (or (plist-get block 'attrs) '()))))))
 
 ;; Any component can be a stop of anchor-mode: ANCHOR-NAME names it,
 ;; ANCHOR-KEYMAP is the keymap in force while point is inside it, and
@@ -240,25 +251,50 @@
           '(1 2 3 4 5 6 7 8 9))
 
 (defcomponent 'ui/fold-head
-  "A clickable heading with a disclosure caret."
+  "A clickable heading with a disclosure caret. ICON (an image url) or LETTER (a tile) leads the title; BADGE follows it, coloured by BADGE-CLASS, then the TAGS."
   '((title string required) (open? boolean required) (click any optional)
-    (badge string optional))
-  '(title "Details" open? #t click "details")
+    (badge string optional) (badge-class string optional) (icon string optional)
+    (letter string optional) (tags list optional))
+  '(title "SteelEye" open? #t click "details" badge "B" badge-class "info" letter "S" tags ("Fintech" "Big co"))
   (lambda (p)
-    (append
-      (list 'tag "c-headline" 'class "c-fold-head"
-            'attrs (list (list "folded" (if (component--get p 'open? #f) "false" "true")))
-            'segs (append
-                    (list (list "c-caret" (if (component--get p 'open? #f) "▾" "▸"))
-                          (list "c-fold-title" (component--get p 'title "")))
+    (let ((caret (if (component--get p 'open? #f) "▾" "▸"))
+          (rich? (or (component--has? p 'icon) (component--has? p 'letter) (component--has? p 'tags)
+                     (component--has? p 'badge-class))))
+      (append
+        (list 'tag "c-headline" 'class "c-fold-head"
+              'attrs (list (list "folded" (if (component--get p 'open? #f) "false" "true"))))
+        (if rich?
+            ;; a face of its own: drawn as parts, since a seg is text and a logo is not
+            (list 'children
+                  (append
+                    (list (list 'tag "span" 'class "c-caret" 'text caret))
+                    (cond ((component--has? p 'icon)
+                           (list (list 'tag "img" 'class "c-fold-icon"
+                                       'attrs (list (list "src" (component--get p 'icon)) (list "alt" "")
+                                                    (list "referrerpolicy" "no-referrer")))))
+                          ((component--has? p 'letter)
+                           (list (list 'tag "span" 'class "c-fold-letter" 'text (component--get p 'letter))))
+                          (else '()))
+                    (list (list 'tag "span" 'class "c-fold-title" 'text (component--get p 'title "")))
                     (if (component--has? p 'badge)
-                        (list (list "c-fold-badge" (component--get p 'badge))) '())))
-      (if (component--has? p 'click) (list 'click (component--get p 'click)) '()))))
+                        (list (list 'tag "span" 'class (string-append "c-badge c-fold-grade " (component--get p 'badge-class ""))
+                                    'text (component--get p 'badge)))
+                        '())
+                    (map (lambda (t) (list 'tag "span" 'class "c-fold-tag" 'text t))
+                         (component--get p 'tags '()))))
+            (list 'segs (append
+                          (list (list "c-caret" caret)
+                                (list "c-fold-title" (component--get p 'title "")))
+                          (if (component--has? p 'badge)
+                              (list (list "c-fold-badge" (component--get p 'badge))) '()))))
+        (if (component--has? p 'click) (list 'click (component--get p 'click)) '())))))
 
 (defcomponent 'ui/card
-  "A bordered container with an optional heading and body. A titled card is a fold: its anchor-data carries (fold (TITLE OPEN?))."
+  "A bordered container with an optional heading and body. A titled card is a fold: its anchor-data carries (fold (TITLE OPEN?)). BADGE, BADGE-CLASS, ICON, LETTER and TAGS dress the heading as ui/fold-head does."
   '((tag string optional) (title string optional) (open? boolean optional) (click any optional)
-    (badge string optional) (body blocks optional) (class string optional)
+    (badge string optional) (badge-class string optional) (icon string optional)
+    (letter string optional) (tags list optional)
+    (body blocks optional) (class string optional)
     (lines list optional) (mark string optional)
     (anchor-name string optional) (anchor-keymap string optional) (anchor-data list optional))
   '(title "A card" open? #t body ((tag "div" text "hello")))
@@ -274,8 +310,10 @@
                                         'open? (component--get p 'open? #t))
                                   (if (component--has? p 'click)
                                       (list 'click (component--get p 'click)) '())
-                                  (if (component--has? p 'badge)
-                                      (list 'badge (component--get p 'badge)) '()))))
+                                  ;; the head's face: badge, logo or letter, tags
+                                  (apply append
+                                         (map (lambda (k) (if (component--has? p k) (list k (component--get p k)) '()))
+                                              '(badge badge-class icon letter tags))))))
                   '())
               (if (component--get p 'open? #t) (component--get p 'body '()) '())))
       (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
@@ -564,6 +602,15 @@
 .c-card { margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 0; overflow: hidden; }
 .c-card > :not(.c-fold-head) { margin-left: 10px; margin-right: 10px; }
 .c-fold-head { display: flex; gap: 8px; padding: 6px 10px; background: var(--hl-line-bg); cursor: pointer; font-family: var(--font-mono); }
+.c-fold-head > .c-caret, .c-fold-head > .c-fold-title, .c-fold-head > .c-badge, .c-fold-head > .c-fold-tag, .c-fold-head > .c-fold-letter { align-self: center; }
+.c-fold-head > .c-fold-title { font-weight: 600; }
+.c-fold-icon { width: 18px; height: 18px; flex: none; align-self: center; object-fit: contain; border-radius: 2px; background: var(--default-bg); }
+.c-fold-letter { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border-radius: 2px; background: var(--accent-fg); color: var(--default-bg); font-size: 10px; font-weight: 700; }
+/* on the head's tinted ground a badge needs its own: paper, a rule, ink */
+.c-fold-head > .c-fold-grade { font-family: var(--font-mono); font-size: .8em; font-weight: 700; line-height: 1.5; letter-spacing: .04em; padding: 0 6px; color: var(--default-fg); background: var(--default-bg); border: 1px solid var(--dim-fg); }
+.c-fold-head > .c-fold-grade.good { color: var(--ok-fg); border-color: var(--ok-fg); }
+.c-fold-head > .c-fold-grade.info { color: var(--accent-fg); border-color: var(--accent-fg); }
+.c-fold-tag { font-size: .8em; line-height: 1.5; color: var(--default-fg); background: var(--default-bg); border: 1px solid var(--border-bg); padding: 0 6px; }
 .c-caret, .c-dim, .c-kv-key { color: var(--dim-fg); }
 .c-row { padding: 4px 10px; font-family: var(--font-mono); }
 .c-row.current { background: var(--hl-line-bg); }

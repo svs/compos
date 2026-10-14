@@ -2514,7 +2514,7 @@ defmodule Compos.Ui.EditorLive do
   # outside the list draws as a div, an attribute outside it is dropped.
   @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li details summary button
                  svg g path rect circle ellipse line polyline polygon text tspan title img)
-  @block_attrs ~w(path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
+  @block_attrs ~w(component path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
@@ -2634,7 +2634,9 @@ defmodule Compos.Ui.EditorLive do
       anchor: falsy(pget(pl, "anchor")),
       lines: falsy(pget(pl, "lines")),
       mark: falsy(pget(pl, "mark")),
-      click: falsy(pget(pl, "click")),
+      # a part of the page selects on click: an anchored block with no click
+      # of its own hands back its first line (anchor.scm's block-click)
+      click: falsy(pget(pl, "click")) || anchor_click(pl),
       text: falsy(pget(pl, "text")),
       segs: for([c, t | _] <- pget(pl, "segs") || [], do: {c, t}),
       semantic_segs: for([c, t | tags] <- pget(pl, "segs") || [], do: {c, t, if(List.first(tags) in @block_tags, do: List.first(tags), else: "c-text")}),
@@ -2651,6 +2653,13 @@ defmodule Compos.Ui.EditorLive do
       hint: falsy(pget(pl, "hint")),
       file: falsy(pget(pl, "file"))
     }
+  end
+
+  defp anchor_click(pl) do
+    case {falsy(pget(pl, "anchor")), pget(pl, "lines")} do
+      {a, [first | _]} when is_binary(a) and is_integer(first) -> "anchor-line:#{first}"
+      _ -> nil
+    end
   end
 
   defp block_input?(%{input: true}), do: true

@@ -211,6 +211,17 @@
 
 (add-hook! 'post-command-hook 'anchor--post-command!)
 
+;; a click on a part of a block page selects it: the renderer gives an anchored block
+;; that has no click of its own the id anchor-line:N, N its first line
+(add-hook! (list 'block-click 'anchor)
+  (lambda (buf id)
+    (and (string? id) (string-prefix? "anchor-line:" id)
+         (let ((n (string->number (substring id 12 (string-length id)))))
+           (and n
+                (begin (buffer-goto-line! buf n)
+                       (anchor-sync! buf)
+                       #t))))))
+
 (defcustom 'anchor-wrap #t
   "Whether TAB past the last anchor comes back to the first one."
   'group 'anchor 'type 'boolean)
@@ -403,6 +414,7 @@
     ("M-down" "anchor-read-next")
     ("M-up" "anchor-read-previous")
     ("M-g a" "anchor-jump")
+    ("f" "anchor-fold")
     ;; zoom the part at point; content-scale owns the commands
     ("-" "anchor-scale-decrease")
     ("+" "anchor-scale-increase")

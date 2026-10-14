@@ -152,8 +152,8 @@
         'ready "[data-phx-main].phx-connected"
         ;; Devanagari labels and section numerals, drawn only for looks
         'ornament "^[^A-Za-z]*[\\x{0900}-\\x{097F}][^A-Za-z]*$"
-        ;; a rating is a run of stars
-        'rating "^★+$"
+        ;; a rating is a run of stars, ticked when a person confirmed it
+        'rating "^★+✓?$"
         ;; the header: the job at the company, where the application stands, then the candidate.
         ;; The state line ("withdrawn → pending: withdrawn scheduled 2 Sep") gives its first word
         'detail-head (lambda (data)
@@ -187,7 +187,7 @@
         ;; sections a detail tab reads in another order: (TAB SECTION BEFORE)
         'detail-moves '(("candidate" "Notes" "Work Experience"))
         ;; words the site colours, wherever they appear on a page
-        'tones '(("^★+$" warn)
+        'tones '(("^★+✓?$" warn)
                  ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
                  ("^(?i)(elite|strong|fit|advance|advanced|approve|approved|hired|shortlisted|offer)$" good)

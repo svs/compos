@@ -183,7 +183,12 @@ class Conn {
 
 const attached = new Map(); // tabId -> timeout handle
 
+// Firefox has no chrome.debugger. The same sw.js runs there, and every op that
+// wanted CDP falls back to what a content script can do, or says it can't.
+const HAS_CDP = !!chrome.debugger;
+
 async function cdp(tabId, method, params = {}) {
+  if (!HAS_CDP) throw new Error(`${method} needs the debugger, which this browser does not have`);
   if (!attached.has(tabId)) {
     await chrome.debugger.attach({ tabId }, "1.3");
   } else {
@@ -197,6 +202,7 @@ async function cdp(tabId, method, params = {}) {
 }
 
 async function detach(tabId) {
+  if (!HAS_CDP) return;
   const t = attached.get(tabId);
   if (t) clearTimeout(t);
   attached.delete(tabId);
@@ -207,8 +213,58 @@ async function detach(tabId) {
   }
 }
 
-chrome.debugger.onDetach.addListener(({ tabId }) => attached.delete(tabId));
+if (HAS_CDP) chrome.debugger.onDetach.addListener(({ tabId }) => attached.delete(tabId));
 chrome.tabs.onRemoved.addListener((tabId) => attached.delete(tabId));
+
+// Without CDP, input is dispatched from inside the page. These events carry
+// isTrusted:false, so a hardened page may ignore them; most pages don't.
+// Text goes in through execCommand("insertText"), which frameworks such as
+// React see as real typing.
+async function synthetic(tabId, kind, args) {
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (kind, a) => {
+      // CDP's modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8
+      const mods = (m = 0) => ({ altKey: !!(m & 1), ctrlKey: !!(m & 2), metaKey: !!(m & 4), shiftKey: !!(m & 8) });
+      const target = () => document.activeElement || document.body;
+      const key = (type, init) => target().dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, composed: true, ...init }));
+      if (kind === "type") {
+        for (const ch of a.text) {
+          key("keydown", { key: ch });
+          key("keypress", { key: ch });
+          document.execCommand("insertText", false, ch);
+          key("keyup", { key: ch });
+        }
+        return { typed: a.text.length };
+      }
+      if (kind === "key") {
+        const init = { key: a.key || a.text || "", code: a.code || "", keyCode: a.windowsVirtualKeyCode || 0, ...mods(a.modifiers) };
+        key("keydown", init);
+        if (a.text) document.execCommand("insertText", false, a.text);
+        key("keyup", init);
+        return { ok: true };
+      }
+      if (kind === "click") {
+        const el = document.elementFromPoint(a.x, a.y);
+        if (!el) return { error: `nothing at ${a.x},${a.y}` };
+        const button = { left: 0, middle: 1, right: 2 }[a.button] ?? 0;
+        const init = { bubbles: true, cancelable: true, composed: true, clientX: a.x, clientY: a.y, button };
+        el.dispatchEvent(new PointerEvent("pointerdown", init));
+        el.dispatchEvent(new MouseEvent("mousedown", init));
+        if (el.focus) el.focus();
+        el.dispatchEvent(new PointerEvent("pointerup", init));
+        el.dispatchEvent(new MouseEvent("mouseup", init));
+        el.dispatchEvent(new MouseEvent(button === 2 ? "contextmenu" : "click", init));
+        return { clicked: [a.x, a.y] };
+      }
+      return { error: `unknown input ${kind}` };
+    },
+    args: [kind, args],
+  });
+  const r = res?.result;
+  if (r?.error) throw new Error(r.error);
+  return r;
+}
 
 // --- talking to a tab's content script -------------------------------------
 
@@ -566,7 +622,7 @@ const OPS = {
       args: [code]
     });
     const err = res?.result?.error;
-    if (err && /Content Security Policy|unsafe-eval/.test(err)) {
+    if (err && HAS_CDP && /Content Security Policy|unsafe-eval/.test(err)) {
       // a strict-CSP page (the editor's own is one) refuses string eval;
       // the debugger evaluates outside the page's policy entirely
       const r = await cdp(tab, "Runtime.evaluate", {
@@ -594,6 +650,7 @@ const OPS = {
   // trusted input. el.click() and dispatchEvent carry isTrusted:false, which a
   // hardened page can see and ignore; CDP's Input domain does not.
   async type({ tab, text }) {
+    if (!HAS_CDP) return synthetic(tab, "type", { text });
     for (const ch of text) {
       await cdp(tab, "Input.dispatchKeyEvent", { type: "keyDown", text: ch });
       await cdp(tab, "Input.dispatchKeyEvent", { type: "keyUp" });
@@ -602,6 +659,7 @@ const OPS = {
   },
 
   async click({ tab, x, y, button = "left" }) {
+    if (!HAS_CDP) return synthetic(tab, "click", { x, y, button });
     const common = { x, y, button, clickCount: 1 };
     await cdp(tab, "Input.dispatchMouseEvent", { type: "mousePressed", ...common });
     await cdp(tab, "Input.dispatchMouseEvent", { type: "mouseReleased", ...common });
@@ -609,6 +667,7 @@ const OPS = {
   },
 
   async key({ tab, ...params }) {
+    if (!HAS_CDP) return synthetic(tab, "key", params);
     await cdp(tab, "Input.dispatchKeyEvent", { type: "keyDown", ...params });
     await cdp(tab, "Input.dispatchKeyEvent", { type: "keyUp", ...params });
     return { ok: true };
@@ -674,6 +733,21 @@ const OPS = {
   // the usable rectangle of every display: the work area excludes the menu
   // bar and the dock, so a placed window is never under them
   async displays() {
+    // Firefox has no system.display: the screen this window is on is all it knows
+    if (!chrome.system?.display) {
+      return {
+        displays: [
+          {
+            id: "0",
+            primary: true,
+            left: screen.availLeft,
+            top: screen.availTop,
+            width: screen.availWidth,
+            height: screen.availHeight
+          }
+        ]
+      };
+    }
     const ds = await chrome.system.display.getInfo();
     return {
       displays: ds.map((d) => ({
@@ -937,7 +1011,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 // shows this site's chat. The editor finds or makes it; see sidepanel.js.
 // A compos tab gets none: the chat is already there.
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
 /** the connection whose daemon serves this URL, if we hold one */
 function connFor(url) {
@@ -958,6 +1032,12 @@ function composTab(url) {
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id || composTab(tab.url)) return;
   // no await between the click and open(): the panel needs the user gesture
+  if (!chrome.sidePanel) {
+    // Firefox: one sidebar per window, with a panel per tab
+    browser.sidebarAction.setPanel({ tabId: tab.id, panel: chrome.runtime.getURL(`sidepanel.html?tab=${tab.id}`) });
+    browser.sidebarAction.open();
+    return;
+  }
   chrome.sidePanel.setOptions({ tabId: tab.id, path: `sidepanel.html?tab=${tab.id}`, enabled: true });
   chrome.sidePanel.open({ tabId: tab.id });
 });
@@ -976,7 +1056,8 @@ chrome.action.onClicked.addListener((tab) => {
 async function focusOrOpen(conn, windowId) {
   // nothing connected? still go somewhere useful — the default daemon
   const url = conn ? conn.url : DEFAULT_URL;
-  const existing = await chrome.tabs.query({ url: `${url}*` });
+  // a match pattern with a port is Chrome's extension; Firefox rejects it
+  const existing = (await chrome.tabs.query({})).filter((t) => (t.url || "").startsWith(url));
 
   // prefer one already in this window — one window, one compos
   const here = existing.find((t) => t.windowId === windowId) || existing[0];

@@ -229,12 +229,22 @@
 (ats-component-as! 'ats/work-experiences 'ui/group "work-experiences" "A candidate's work history: its heading and one work-experience a job.")
 (ats-component-as! 'ats/work-experience 'ui/card "work-experience" "One job in a work history: the employer's logo, name, tier and tags head it; the role, dates and bullets are its body.")
 (ats-component-as! 'ats/applications 'ui/group "applications" "A candidate's applications, one application a job.")
-(ats-component-as! 'ats/application 'ui/card "application" "One application: the job at the company, its state, fit and meeting; it reads its assessment and history when it opens.")
+(define-element! "application")
+(let ((e (component-entry 'ui/card)))
+  (defcomponent 'ats/application
+    "One application as a card: who (the candidate's photo and name, or the job at the company on a candidate's own page), its state as a badge toned by outcome, the fit, stars and meeting as tags; the body is when it came in and where processing stands, then its buttons. It reads its assessment and history when it opens."
+    (nth 1 e) (nth 2 e)
+    (lambda (p)
+      (let ((card (component 'ui/card p)))
+        (plist-put (plist-put card 'tag "application")
+                   'class (string-append (or (plist-get card 'class) "") " ats-application"))))))
 (ats-component-as! 'ats/assessment 'ui/callout "assessment" "A take on a candidate for a job, quick or deep: its verdict as the label, the reasoning as the body.")
 (ats-component-as! 'ats/job-context 'ui/group "job-context" "The job a candidate page is opened against: the job, the assessment and the application.")
 
 (define-style! 'ats-elements "
 :where(work-experiences, work-experience, applications, application, assessment, job-context) { display: block; }
+/* an application's head: the candidate's photo round, a little larger than a logo */
+.ats-application .c-fold-icon { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
 ")
 
 (define-site-app *ats-spec*)

@@ -21,6 +21,23 @@ of them.
 2. Turn on **Developer mode** (top right)
 3. **Load unpacked** → pick this directory
 
+### Firefox
+
+The same directory loads in Firefox 128 or later.
+
+1. `about:debugging#/runtime/this-firefox`
+2. **Load Temporary Add-on…** → pick `manifest.json`
+3. `about:addons` → compos → **Permissions** → turn on access to all websites. Firefox asks for host permissions separately; without them there is no overlay and no `read`.
+
+A temporary add-on goes away when Firefox quits. To keep it, sign it as an unlisted add-on on addons.mozilla.org, or set `xpinstall.signatures.required` to false in Firefox Developer Edition and install the zipped directory.
+
+What differs in Firefox:
+
+- **No CDP.** `type`, `click` and `key` dispatch events from inside the page. They carry `isTrusted:false`, so a hardened page can ignore them. The raw `cdp` op fails, and `eval` on a strict-CSP page fails instead of falling back to the debugger.
+- **One display.** `displays` reports the screen the browser is on, not every monitor.
+- **The site chat opens in the sidebar**, not Chrome's side panel.
+- **No Gemini Nano.**
+
 ## Getting there
 
 Type **`compos`** in the address bar, then space or Tab. It lists the daemons
@@ -121,6 +138,6 @@ Two mechanisms, deliberately:
   Linux/Windows it collides with cut. Turn key capture off in Options if it
   bites.
 - **`chrome://` pages and the Web Store** run no content scripts, so no overlay
-  and no `read` there. CDP ops still work.
+  and no `read` there. CDP ops still work (in Chrome).
 - **The palette targets one daemon.** With several connected, a tab talks to
   whichever answers first.

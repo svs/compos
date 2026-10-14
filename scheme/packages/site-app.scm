@@ -627,7 +627,23 @@
       (cons (cons id (if (equal? nodes 'failed) 'failed (or nodes '())))
             (filter (lambda (e) (not (equal? (car e) id)))
                     (or (buffer-local buf 'site-app-sections) '()))))
-    (unless quiet (site-app-draw! buf))))
+    (unless quiet (site-app-draw! buf))
+    (site-app-stage-skip-empty! buf id)))
+
+;; a tab that opens on an empty stage while others hold rows (a job's board on
+;; "new [0]" with "recommended [22]") takes the first stage that has rows, once
+(define (site-app-stage-skip-empty! buf id)
+  (when (and (equal? id (site-app-detail-active buf))
+             (not (member id (or (buffer-local buf 'site-app-stage-skipped) '()))))
+    (let* ((st (site-app-detail-stages buf))
+           (items (if st (site-app-real (plist-get st 'items)) '()))
+           (count (lambda (s) (or (string->number (or (plist-get s 'count) "")) 0)))
+           (on (site-app-find (lambda (s) (plist-get s 'active)) items))
+           (full (site-app-find (lambda (s) (> (count s) 0)) items)))
+      (when (and on full (= (count on) 0))
+        (buffer-set-local! buf 'site-app-stage-skipped
+          (cons id (or (buffer-local buf 'site-app-stage-skipped) '())))
+        (site-app-stage-select! buf (plist-get full 'status))))))
 
 
 ;; A tab that restates the header (the item's rating and name) says it once.
@@ -1720,7 +1736,7 @@
       (else
         (let* ((name (buffer-local buf 'site-app-name))
                (spec (site-app-spec name))
-               (page (site-app-current-page (buffer-local buf 'site-app-list)))
+               (page (site-app-detail-page buf))
                (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
                (hit (assoc (site-app-without-key (or (plist-get action 'text) "")) (or (plist-get page 'detail-actions) '())))
                (label (site-app-without-key (or (plist-get action 'text) "")))
@@ -1843,11 +1859,17 @@
   (filter (lambda (s) (or (plist-get s 'active) (not (equal? (plist-get s 'count) "0"))))
           (site-app-real (plist-get stages 'items))))
 
+;; the page a detail was drawn for: the one it was opened as (a job opened from a
+;; company is a jobs page), else the page its list is on
+(define (site-app-detail-page buf)
+  (or (buffer-local buf 'site-app-for-page)
+      (site-app-current-page (buffer-local buf 'site-app-list))))
+
 (define (site-app-stage-select! buf status)
   (let* ((stages (site-app-detail-stages buf))
          (name (buffer-local buf 'site-app-name))
          (spec (site-app-spec name))
-         (page (site-app-current-page (buffer-local buf 'site-app-list)))
+         (page (site-app-detail-page buf))
          (id (site-app-detail-active buf))
          (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
          (param (plist-get page 'detail-tab-param))
@@ -1987,6 +2009,8 @@
       (buffer-set-local! buf 'site-app-fetched-at #f)
       ;; and an open card reads its details again
       (buffer-set-local! buf 'site-app-card-more '())
+      ;; and a tab that opens on an empty stage may skip it again
+      (buffer-set-local! buf 'site-app-stage-skipped '())
       (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row)
                              (buffer-local buf 'site-app-for-page)))))
 (define-command "site-app-detail-open" "Open this page on the site"

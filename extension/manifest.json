@@ -16,7 +16,24 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "sw.js"
+    "service_worker": "sw.js",
+    "scripts": [
+      "sw.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "compos@svs.io",
+      "strict_min_version": "128.0"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "sidebar_action": {
+    "default_title": "compos",
+    "default_panel": "sidepanel.html",
+    "open_at_install": false
   },
   "options_ui": {
     "page": "options.html",

@@ -1526,7 +1526,15 @@ defmodule Compos.Ui.EditorLive do
         do: "--buffer-group-color: #{color}",
         else: nil
 
-    [Map.get(node, :window_style), group_style]
+    # the window's buffer count, for the header line to show beside the
+    # title (modeline.scm reads it); a lone buffer says nothing
+    stack_style =
+      case Map.get(node, :stack) do
+        n when is_integer(n) and n > 1 -> "--win-stack: \"#{n}\""
+        _ -> nil
+      end
+
+    [Map.get(node, :window_style), group_style, stack_style]
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.join("; ")
   end

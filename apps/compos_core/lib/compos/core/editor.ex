@@ -3548,6 +3548,9 @@ defmodule Compos.Core.Editor do
       # extra CSS class on the window div (writing-mode centering etc.)
       highlighted: id in (Map.get(locals, "window-highlight-ids") || []),
       window_class: Map.get(locals, "window-class") || nil,
+      # how many buffers the window holds: the one it shows and the ones
+      # under it. The header line shows it beside the title.
+      stack: 1 + (leaf |> Map.get(:history, []) |> Enum.uniq() |> Enum.count(&(&1 != buffer))),
       # inline style on the window itself. A float hands its share of the
       # frame over this way: the stylesheet cannot read a number out of a
       # display rule, but it can read a custom property.

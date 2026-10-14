@@ -1992,7 +1992,7 @@ defmodule Compos.Core.Session do
       # asking anything. The GUI reads this off the render payload; a browser
       # tab has no render payload, so it reads it here and draws its own.
       {"minibuffer-state",
-       "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, candidates), or #f."} =>
+       "(minibuffer-state) — return the active prompt as a plist (prompt, input, sel, total, legend, tabs, candidates), or #f."} =>
         fn [] ->
           case Editor.snapshot().minibuffer do
             nil ->
@@ -2016,6 +2016,9 @@ defmodule Compos.Core.Session do
                 # the prompt's own key legend, as Scheme wrote it
                 {:sym, "legend"},
                 Map.get(mb, :legend) || [],
+                # its tabs, ((LABEL CURRENT?) ...)
+                {:sym, "tabs"},
+                Enum.map(Map.get(mb, :tabs) || [], fn t -> [t.label, t.current] end),
                 {:sym, "candidates"},
                 Enum.map(Compos.Core.Candidates.rows(mb.list), fn c ->
                   [{:sym, "label"}, c.label, {:sym, "hint"}, c.hint || ""]
@@ -2027,6 +2030,15 @@ defmodule Compos.Core.Session do
        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"panel\", \"minibuffer\", or #f."} =>
         fn [style] ->
           Editor.minibuffer_set_style(if(style in [false, nil], do: nil, else: s(style)))
+          :void
+        end,
+      {"minibuffer-tabs!",
+       "(minibuffer-tabs! TABS) — show tabs over the open prompt's list: ((LABEL CURRENT?) ...), the current one #t; '() removes them."} =>
+        fn [tabs] ->
+          Editor.minibuffer_set_tabs(
+            for([label, current] <- tabs || [], do: %{label: s(label), current: current == true})
+          )
+
           :void
         end,
       {"minibuffer-input!", "(minibuffer-input! INPUT) — set the minibuffer input text."} => fn [

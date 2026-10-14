@@ -1960,6 +1960,21 @@ c-action-key {
 .mb-label-row .transient-legend-key {
   color: var(--accent-fg, #26356b); font-weight: 600; margin-right: 4px;
 }
+/* a prompt with tabs: the tabs stand on the row's bottom rule, the
+   current one open into the list below it, and the arrow keys that
+   move between them sit at the far end */
+.mb-label-row:has(.mb-tabs) {
+  display: flex; align-items: flex-end; gap: 18px;
+  padding-bottom: 0;
+}
+.mb-label-row .mb-tabs {
+  flex: 1 1 auto; margin: 0 0 -1px; padding: 0; border-bottom: none;
+}
+.mb-label-row .mb-tabs .c-tab-on { background: var(--bg); }
+.mb-tabs-hint {
+  padding-bottom: 5px; white-space: nowrap;
+  letter-spacing: 0.02em; text-transform: none;
+}
 /* the names column expands to the longest name in the whole set
    (--mb-label-w, from the core) — marginalia sits immediately
    after it and the column never reflows while narrowing */

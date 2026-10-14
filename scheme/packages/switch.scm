@@ -1008,6 +1008,43 @@ the next row down. STEP is kept for the callers."
             (map (lambda (f) (list (car f) #f #f #f #f #f #f))
                  (filter (lambda (f) (not (assoc (car f) buffers))) (switch-recent-rows))))))
 
+;; C-x b has three tabs over one list: every buffer, the current group's,
+;; and the ones this window showed. The side arrows move between them and
+;; typing filters the tab you are on. Each prompt opens on the same tab.
+(defcustom 'switch-buffer-initial-tab 'group
+  "The tab C-x b opens on: 'all, 'group, or 'window. The left and right arrows move to the others while the prompt is open."
+  'group 'buffers 'type 'choice)
+
+(define *switch-tabs* '((all "All") (group "Group") (window "Window")))
+
+;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...)
+(define (switch-tab-row tab)
+  (map (lambda (t) (list (cadr t) (eq? (car t) tab))) *switch-tabs*))
+
+(define (switch-tab-step tab step)
+  (let* ((keys (map car *switch-tabs*))
+         (n (length keys))
+         (i (let loop ((ks keys) (i 0))
+              (cond ((null? ks) 0) ((eq? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
+    (nth (modulo (+ i step n) n) keys)))
+
+;; a row's groups from the fields it carries: a chat holds one group id,
+;; any other buffer a list. A file that is no buffer is in no group.
+(define (switch-row-in-group? r id)
+  (let ((ids (if (equal? (nth 3 r) "chat-mode") (nth 4 r) (nth 5 r))))
+    (cond ((pair? ids) (and (member id ids) #t))
+          ((string? ids) (equal? ids id))
+          ((nth 3 r) (switch-member? (car r) id))
+          (else #f))))
+
+(define (switch-tab-rows tab rows group win)
+  (cond ((eq? tab 'group)
+         (if group (filter (lambda (r) (switch-row-in-group? r group)) rows) '()))
+        ((eq? tab 'window)
+         (let ((mine (if (and win (window-exists? win)) (window-prev-buffers win) '())))
+           (filter (lambda (r) (member (car r) mine)) rows)))
+        (else rows)))
+
 (define (switch-bare-prompt!)
   (let* ((start (monotonic-ms))
          (home (active-window))
@@ -1029,24 +1066,41 @@ the next row down. STEP is kept for the callers."
          (sleep-woken! (lambda (keep)
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
-    (minibuffer-read-preview "Switch to: " display
-      (lambda (label)
-        (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
-          (if (and target (buffer-known? target) (window-exists? home))
-              (let ((sleeping? (not (buffer-exists? target))))
-                (preview-show target 'here home)
-                (when (and sleeping? (buffer-exists? target))
-                  (restore-buffer-runtime! target)
-                  (set! woken (cons target woken))))
-              (restore!))))
-      (lambda (label)
-        (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
-          (restore!)
-          (when target (ibuffer-pick! target (lambda () #f))
-                       (group-current-recalculate!))
-          (sleep-woken! target)))
-      (lambda () (restore!) (sleep-woken! #f))
-      ibuffer-info "minibuffer")
+    (let* ((tab (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group))
+           ;; DISPLAY and CANDIDATES come in the same order, so one walk
+           ;; keeps the rows of a tab
+           (tab-display (lambda (tab)
+                          (let ((keep (map car (switch-tab-rows tab rows group home))))
+                            (let loop ((ds display) (cs candidates) (out '()))
+                              (if (null? ds)
+                                  (reverse out)
+                                  (loop (cdr ds) (cdr cs)
+                                        (if (member (cadr (car cs)) keep) (cons (car ds) out) out)))))))
+           (on-confirm (lambda (label)
+                         (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+                           (restore!)
+                           (when target (ibuffer-pick! target (lambda () #f))
+                                        (group-current-recalculate!))
+                           (sleep-woken! target)))))
+      (minibuffer-read-preview "Switch to: " (tab-display tab)
+        (lambda (label)
+          (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+            (if (and target (buffer-known? target) (window-exists? home))
+                (let ((sleeping? (not (buffer-exists? target))))
+                  (preview-show target 'here home)
+                  (when (and sleeping? (buffer-exists? target))
+                    (restore-buffer-runtime! target)
+                    (set! woken (cons target woken))))
+                (restore!))))
+        on-confirm
+        (lambda () (restore!) (sleep-woken! #f))
+        ibuffer-info "minibuffer")
+      (minibuffer-tabs! (switch-tab-row tab))
+      (set! *mb-tab-fn* (lambda (step)
+                          (set! tab (switch-tab-step tab step))
+                          (minibuffer-tabs! (switch-tab-row tab))
+                          (minibuffer-preview-candidates! (tab-display tab) on-confirm)
+                          #t)))
     (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))
 
 (define-command "ibuffer-prompt" "Switch to a buffer with the plain minibuffer list"

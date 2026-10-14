@@ -44,3 +44,33 @@
     (t--walk-setup!)
     (window-walk! -1 #t)
     (check-equal! (window-buffer (active-window)) "*zz-walk-a*" "the oldest sheet")))
+
+;;; C-x b tabs: All, Group, Window. A row is (NAME PATH MODIFIED MODE
+;;; GROUP-ID GROUP-IDS GROUP); a recent file has #f in each field.
+
+(define t--tab-rows
+  '(("a.scm" "/a.scm" #f "scheme-mode" #f ("g1") #f)
+    ("*chat:x:1*" #f #f "chat-mode" "g1" #f #f)
+    ("b.md" "/b.md" #f "markdown-mode" #f ("g2") #f)
+    ("/old.txt" #f #f #f #f #f #f)))
+
+(deftest 'the-tab-row-marks-the-tab
+  "the tabs name every view and mark the one you are on"
+  (lambda ()
+    (check-equal! (switch-tab-row 'group) '(("All" #f) ("Group" #t) ("Window" #f)) "group")
+    (check-equal! (switch-tab-row 'all) '(("All" #t) ("Group" #f) ("Window" #f)) "all")))
+
+(deftest 'the-side-arrows-wrap-the-tabs
+  "right from the last tab reaches the first, and left from the first the last"
+  (lambda ()
+    (check-equal! (switch-tab-step 'group 1) 'window "right")
+    (check-equal! (switch-tab-step 'window 1) 'all "right wraps")
+    (check-equal! (switch-tab-step 'all -1) 'window "left wraps")))
+
+(deftest 'a-tab-keeps-its-own-rows
+  "Group keeps the group's buffers and chats, All keeps every row"
+  (lambda ()
+    (check-equal! (map car (switch-tab-rows 'group t--tab-rows "g1" #f)) '("a.scm" "*chat:x:1*") "group")
+    (check-equal! (length (switch-tab-rows 'all t--tab-rows "g1" #f)) 4 "all")
+    (check-equal! (switch-tab-rows 'window t--tab-rows "g1" #f) '() "no window, no history")
+    (check-equal! (switch-tab-rows 'group t--tab-rows #f #f) '() "no group")))

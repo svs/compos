@@ -97,7 +97,12 @@
           (else (loop (cdr ls) (+ i 1))))))
 
 (define (t--sw-open-switcher!) (run-command "ibuffer-prompt"))
-(define (t--sw-open-all!) (run-command "ibuffer-prompt"))
+;; the All tab: the prompt reads the starting tab when it opens
+(define (t--sw-open-all!)
+  (let ((tab switch-buffer-initial-tab))
+    (set! switch-buffer-initial-tab 'all)
+    (run-command "ibuffer-prompt")
+    (set! switch-buffer-initial-tab tab)))
 
 ;; every heading the rows can carry; none of them is a choice
 (define t--sw-headings
@@ -1152,6 +1157,24 @@
     (t--sw-type! t--sw-third)
     (check-true! (member t--sw-third (t--sw-labels)) "the stranger is reachable")
     (check-false! (member t--sw-second (t--sw-labels)) "and the rest are gone")
+    (t--sw-done!)))
+
+(deftest 'the-buffer-prompt-opens-on-the-group-tab
+  "C-x b opens on the group's buffers, and the side arrows move to the other tabs"
+  (lambda ()
+    (t--sw-setup!)
+    (t--sw-three-groups!)
+    (run-command "ibuffer-prompt")
+    (check-equal! (plist-get (minibuffer-state) 'tabs) '(("All" #f) ("Group" #t) ("Window" #f))
+                  "the prompt opens on the group tab")
+    (check-true! (member t--sw-second (t--sw-labels)) "a member is listed")
+    (check-false! (member t--sw-third (t--sw-labels)) "the stranger is not")
+    (t--sw-key! "rail-exit")
+    (check-equal! (plist-get (minibuffer-state) 'tabs) '(("All" #t) ("Group" #f) ("Window" #f))
+                  "left reaches All")
+    (check-true! (member t--sw-third (t--sw-labels)) "and the stranger with it")
+    (t--sw-key! "rail-enter")
+    (check-false! (member t--sw-third (t--sw-labels)) "right comes back to the group")
     (t--sw-done!)))
 
 (deftest 'the-selection-starts-on-the-first-row-and-never-lands-on-a-heading

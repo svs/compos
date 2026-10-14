@@ -298,6 +298,14 @@ defmodule Compos.Core.Editor do
     do: GenServer.call(__MODULE__, {:mb_rail, rail, fid(fid)})
 
   @doc """
+  Set the tabs over the open prompt's list, [%{label:, current:}], or []
+  to remove them. The prompt owns them: it says which tab is on, and the
+  side arrows ask it to move.
+  """
+  def minibuffer_set_tabs(tabs, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_tabs, tabs, fid(fid)})
+
+  @doc """
   Change the open prompt's style, and so its shape, without closing it.
 
   The shape is a property of the prompt, not a different prompt: the same
@@ -1616,6 +1624,16 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  def handle_call({:mb_tabs, tabs, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :tabs, tabs)}), f.id)
+
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
+
   def handle_call({:mb_move_sel, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
@@ -2752,6 +2770,12 @@ defmodule Compos.Core.Editor do
         case Map.get(mb, :rail) do
           %{rows: [_ | _]} = rail -> rail
           _ -> nil
+        end,
+      # the tabs over the list, as the prompt wrote them
+      tabs:
+        case Map.get(mb, :tabs) do
+          tabs when is_list(tabs) -> tabs
+          _ -> []
         end,
       legend:
         case Map.get(mb, :legend) do

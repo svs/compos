@@ -725,12 +725,20 @@
       (begin (*mb-rail-pick* (list-ref *mb-rail-rows* *mb-rail-index*)) #t)
       #f))
 
+;; a prompt with tabs takes the side arrows after the rail: the fn gets
+;; STEP, -1 or 1, and answers #t when it moved the tab. The preview
+;; prompt clears it, so a stale fn never steers the next prompt.
+(define *mb-tab-fn* #f)
+
+(define (mb-tab-step! step)
+  (and *mb-tab-fn* (minibuffer-active?) (*mb-tab-fn* step)))
+
 (define-command "minibuffer-rail-enter"
-  "Move the arrows into the list on the right of the palette"
-  (lambda () (if (mb-rail-enter!) #t (run-command "forward-char"))))
+  "Move the arrows into the list on the right of the palette, or to the next tab"
+  (lambda () (cond ((mb-rail-enter!) #t) ((mb-tab-step! 1) #t) (else (run-command "forward-char")))))
 (define-command "minibuffer-rail-exit"
-  "Leave the list on the right and go back to the candidates"
-  (lambda () (if (mb-rail-exit!) #t (run-command "backward-char"))))
+  "Leave the list on the right and go back to the candidates, or to the previous tab"
+  (lambda () (cond ((mb-rail-exit!) #t) ((mb-tab-step! -1) #t) (else (run-command "backward-char")))))
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
   (lambda () (if (mb-rail-confirm!) #t (minibuffer-confirm!))))
@@ -1179,13 +1187,25 @@
 (define (mb-preview-shortcut-rows cands declared)
   (if declared
     declared
-    (let loop ((xs cands) (n 1) (out '()))
+    ;; a heading is not a choice, so it takes no number
+    (let loop ((xs (filter (lambda (c) (not (and (pair? c) (> (length c) 2)
+                                                 (equal? (nth 2 c) "separator"))))
+                           cands))
+               (n 1) (out '()))
       (if (or (null? xs) (> n 9))
         (reverse out)
         (loop (cdr xs) (+ n 1)
               (cons (list (number->string n)
                           (mb-candidate-name (car xs)))
                     out))))))
+
+;; swap the open preview prompt's candidates; the M-1..M-9 shortcuts
+;; follow them, and the preview follows the new selection
+(define (minibuffer-preview-candidates! cands on-confirm)
+  (let ((rows (mb-preview-shortcut-rows cands #f)))
+    (set! *mb-shortcuts* (mb-preview-shortcuts rows on-confirm))
+    (minibuffer-set-candidates! (mb-preview-shortcut-hint cands rows))
+    (mb-select-notify!)))
 
 (define (mb-preview-shortcuts rows on-confirm)
   (map (lambda (row)
@@ -1222,16 +1242,19 @@
   (let* ((rows (mb-preview-shortcut-rows cands shortcuts))
          (bindings (mb-preview-shortcuts rows on-confirm)))
     (set! *mb-shortcuts* bindings)
+    (set! *mb-tab-fn* #f)
     (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
     (minibuffer-read* prompt (mb-preview-shortcut-hint cands rows)
       (append
         (list (list 'confirm (lambda (v)
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
+                                (set! *mb-tab-fn* #f)
                                 (with-invoking-buffer (lambda () (on-confirm v)))))
               (list 'cancel  (lambda ()
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
+                                (set! *mb-tab-fn* #f)
                                 (with-invoking-buffer on-cancel)))
               (list 'change  (lambda (input) (mb-select-notify!)))
               (list 'match-hint (if match-hint match-hint #f))

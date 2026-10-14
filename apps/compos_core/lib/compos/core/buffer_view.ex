@@ -390,13 +390,18 @@ defmodule Compos.Core.BufferView do
   rope and the flat copy leave the table.
   """
   def text_of(name) when is_binary(name) do
-    spec = [{{name, :"$1"}, [{:is_map_key, :rope, :"$1"}],
-             [[{:map_get, :rope, :"$1"},
-               {:andalso, {:is_map_key, :bin, :"$1"}, {:map_get, :bin, :"$1"}}]]}]
+    # The cached binary is refcounted, so answering it copies nothing; only
+    # select the rope, a tree copied into the caller's heap, when no binary is cached.
+    spec = [
+      {{name, :"$1"},
+       [{:andalso, {:is_map_key, :bin, :"$1"}, {:is_binary, {:map_get, :bin, :"$1"}}}],
+       [{{:bin, {:map_get, :bin, :"$1"}}}]},
+      {{name, :"$1"}, [{:is_map_key, :rope, :"$1"}], [{{:rope, {:map_get, :rope, :"$1"}}}]}
+    ]
 
     case :ets.select(@table, spec) do
-      [[_rope, bin]] when is_binary(bin) -> {:ok, bin}
-      [[rope, _]] -> {:ok, Rope.to_binary(rope)}
+      [{:bin, bin}] -> {:ok, bin}
+      [{:rope, rope}] -> {:ok, Rope.to_binary(rope)}
       [] -> :error
     end
   rescue

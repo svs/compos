@@ -161,4 +161,58 @@ defmodule Compos.LaneTest do
     assert_receive {:DOWN, ^job_monitor, :process, ^job, :killed}, 1_000
     assert Lane.run(lane, fn _ -> {:reply, :fresh} end, 1_000, "fresh") == :fresh
   end
+
+  # A deferred eval answers through eval-resolve! long after the worker moved
+  # on. Its caller still monitors the worker, so an idle retirement in between
+  # failed the call with :normal.
+  test "an idle worker stays while a deferred reply is pending" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    token = make_ref()
+    me = self()
+
+    caller =
+      spawn(fn ->
+        reply =
+          Lane.run(
+            lane,
+            fn from ->
+              Compos.Core.Roots.put({:eval_pending, token}, from)
+              :noreply
+            end,
+            5_000,
+            "deferred"
+          )
+
+        send(me, {:answered, reply})
+      end)
+
+    on_exit(fn -> Compos.Core.Roots.drop({:eval_pending, token}) end)
+
+    [{worker, _}] = wait_registered(lane)
+    ref = Process.monitor(worker)
+    wait_pending(token)
+
+    send(worker, :timeout)
+    refute_receive {:DOWN, ^ref, :process, ^worker, _}, 100
+    assert Process.alive?(caller)
+
+    GenServer.reply(Compos.Core.Roots.take({:eval_pending, token}), :resolved)
+    assert_receive {:answered, :resolved}, 1_000
+
+    send(worker, :timeout)
+    assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+  end
+
+  defp wait_registered(lane) do
+    case Registry.lookup(Compos.Core.LaneRegistry, lane) do
+      [] -> Process.sleep(5) && wait_registered(lane)
+      found -> found
+    end
+  end
+
+  defp wait_pending(token) do
+    if Compos.Core.Roots.get({:eval_pending, token}),
+      do: :ok,
+      else: Process.sleep(5) && wait_pending(token)
+  end
 end

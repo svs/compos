@@ -503,17 +503,17 @@
     'buffer *doppler-buffer*
     'rows doppler--rows
     'key (lambda (buf name) name)
-    'columns (lambda (buf) (list (list "secret" #f) (list "value" 21)))
+    'columns (lambda (buf)
+               (let ((widest (apply max (cons 6 (map string-length (list-entries buf))))))
+                 (list (list "secret" (min 32 (+ widest 2))) (list "value" #f))))
     'cells (lambda (buf name)
              (list name
                    (doppler--elide-value
                      (doppler-secret-value
                        (doppler--project buf) (doppler--config buf) name))))
     'title (lambda (buf)
-             (string-append "Doppler  " (doppler--project buf) "/" (doppler--config buf)))
-    'meta (lambda (buf)
-            (string-append (number->string (length (list-entries buf)))
-                           " secret names; values elided"))
+             (string-append "Doppler  " (doppler--project buf) "/" (doppler--config buf)
+                            "  " (number->string (length (list-entries buf))) " secrets"))
     'total (lambda (buf) (or (buffer-local buf 'doppler-total) 0))
     'footer (lambda (buf)
               '(("RET" "copy") ("+" "add") ("e" "set") ("P" "project")
@@ -545,9 +545,8 @@
 
 (define-style! 'doppler "
 .doppler-title { font-family: var(--font-serif); font-size: 21px; padding: 6px 2px 10px; }
-.doppler-row { display: grid; grid-template-columns: minmax(0, 1fr) 11ch; column-gap: 16px; border-bottom: 1px solid var(--border-bg); cursor: pointer; }
-.doppler-secret-name { overflow: hidden; text-overflow: ellipsis; }
-.doppler-secret-value { justify-self: start; }
+.doppler-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 16px; border-bottom: 1px solid var(--border-bg); cursor: pointer; }
+.doppler-secret-name, .doppler-secret-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .doppler-row:hover { background: var(--hl-line-bg); }
 ")
 

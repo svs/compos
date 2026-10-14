@@ -68,7 +68,9 @@ defmodule Compos.Core.Lane do
     catch
       # The worker idled out between lookup and call: take a fresh one. The
       # replacement call keeps the same job identity and cancellation path.
-      :exit, {:noproc, _} when retries > 0 ->
+      # A worker that retires on its idle timeout as the call arrives exits
+      # :normal before it took the job, so a fresh worker runs it once.
+      :exit, {reason, _} when reason in [:noproc, :normal] and retries > 0 ->
         Process.sleep(1)
 
         call_worker(
@@ -226,7 +228,9 @@ defmodule Compos.Core.Lane do
           {:done, {:reply, value}} -> {:reply, value, key, @idle}
           # The fun claimed the reply slot (eval-defer!): it answers later
           # through GenServer.reply — this worker moves on at once.
-          {:done, :noreply} -> {:noreply, key, @idle}
+          {:done, :noreply} ->
+            Process.put(:compos_lane_deferred, [from | Enum.filter(deferred(), &pending?/1)])
+            {:noreply, key, @idle}
           :cancelled -> {:noreply, key, @idle}
         end
       else
@@ -366,7 +370,29 @@ defmodule Compos.Core.Lane do
     end
 
     @impl true
-    def handle_info(:timeout, key), do: {:stop, :normal, key}
+    # A deferred caller still waits in GenServer.call, which monitors this
+    # worker: retiring now would fail it with :normal. Stay while any reply
+    # this worker handed to eval-resolve! is pending and its caller lives.
+    def handle_info(:timeout, key) do
+      case Enum.filter(deferred(), &pending?/1) do
+        [] ->
+          {:stop, :normal, key}
+
+        waiting ->
+          Process.put(:compos_lane_deferred, waiting)
+          {:noreply, key, @idle}
+      end
+    end
+
     def handle_info(_msg, key), do: {:noreply, key, @idle}
+
+    defp deferred, do: Process.get(:compos_lane_deferred, [])
+
+    defp pending?({caller, _} = from) do
+      table = Compos.Core.Roots.table()
+
+      Process.alive?(caller) and :ets.whereis(table) != :undefined and
+        :ets.match_object(table, {{:eval_pending, :_}, from}) != []
+    end
   end
 end

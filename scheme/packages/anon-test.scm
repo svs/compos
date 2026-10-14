@@ -100,3 +100,26 @@
           (buffer-kill! buf)
           (check-equal! (string-contains? on "Zelda") #f "the name is barred while anon-mode is on")
           (check-equal! off buf "the name is whole while anon-mode is off"))))))
+
+(deftest 'anon-redacts-a-view-only-while-a-window-shows-it
+  "a hidden buffer's view passes as its mode wrote it; showing the buffer bars it"
+  (lambda ()
+    (let ((buf "*zz-anon-view*") (common anon-common-words) (visible anon--visible)
+          (tree '(div "Zelda Quux met here")))
+      (buffer-create buf)
+      (set! anon-common-words '())
+      (buffer-set-local! buf 'render-mode "blocks")
+      (enable-minor-mode! buf "anon-local-mode")
+      (set! anon--visible (lambda () '()))
+      (buffer-set-local! buf 'render-blocks tree)
+      (let ((hidden (buffer-local buf 'render-blocks)))
+        (set! anon--visible (lambda () (list buf)))
+        (run-hook-with-args 'buffer-shown-hook buf)
+        (let ((seen (buffer-local buf 'render-blocks)))
+          (disable-minor-mode! buf "anon-local-mode")
+          (set! anon--visible visible)
+          (set! anon-common-words common)
+          (buffer-kill! buf)
+          (check-equal! hidden tree "the hidden view is the tree its mode wrote")
+          (check-equal! (string-contains? (anon--tree-text seen) "Zelda") #f
+                        "buffer-shown-hook bars the name in the view written while hidden"))))))

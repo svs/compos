@@ -50,6 +50,9 @@
 ;; words sent to decide and not yet answered
 (define *anon-pending* '())
 
+;; anon works only on a buffer a window of a frame with a client shows
+(define (anon--shown? buf) (and (member buf (anon--visible)) #t))
+
 ;; #t from an answer of decide until the next refresh redacts each view again
 (define *anon-stale* #f)
 
@@ -273,12 +276,18 @@
   "rebuild BUF's mode line; its title passes through anon on the way"
   (ignore-errors (lambda () (dashboard--render! buf))))
 
+(define (anon--view-catchup! buf)
+  "redact BUF's block view from what its mode wrote, while a window shows BUF"
+  ;; a hidden view stays as its mode wrote it: buffer-shown-hook redacts it when it is shown
+  (when (and (buffer-exists? buf) (anon--shown? buf))
+    (let ((tree (anon--view-original buf)))
+      (when tree
+        (anon--write-view! buf (anon--view-plist buf tree))))))
+
 (define (anon-view-redact! buf)
   "(anon-view-redact! BUF) - redact BUF's block view and title again from what its mode wrote"
   (when (buffer-exists? buf)
-    (let ((tree (anon--view-original buf)))
-      (when tree
-        (anon--write-view! buf (anon--view-plist buf tree))))
+    (anon--view-catchup! buf)
     ;; the mode counts as on only after its setup returns: redraw after
     (debounce! (string-append "anon-title:" buf) 0 anon--title-redraw! buf)))
 
@@ -311,7 +320,7 @@
   (let ((hide (anon--title-hide buf)))
     (let loop ((xs plist) (acc '()))
       (cond ((or (null? xs) (null? (cdr xs))) (reverse acc))
-            ((and (anon--render-key? (car xs)) (pair? (cadr xs)))
+            ((and (anon--render-key? (car xs)) (pair? (cadr xs)) (anon--shown? buf))
              (loop (cddr xs) (append (reverse (anon--view-plist buf (cadr xs))) acc)))
             ((and (member (anon--key (car xs)) anon--title-keys) (pair? hide))
              (loop (cddr xs)
@@ -328,7 +337,7 @@
 
 (define (anon--intercept! buf plist)
   (anon--write-view! buf (anon--rewrite buf plist))
-  (when (anon--render-key? (car plist))
+  (when (and (anon--render-key? (car plist)) (anon--shown? buf))
     (debounce! (string-append "anon:" buf) 500 anon-ask! buf)))
 
 (define (anon--set-local next buf key val)
@@ -340,7 +349,7 @@
   (if (and (not *anon-writing*) (anon--watched? plist) (minor-mode-on? buf "anon-local-mode"))
       (begin
         (anon--intercept! buf plist)
-        (when (plist-get plist 'render-blocks)
+        (when (and (plist-get plist 'render-blocks) (anon--shown? buf))
           (debounce! (string-append "anon:" buf) 500 anon-ask! buf)))
       (next buf plist)))
 
@@ -498,7 +507,7 @@
 
 (define (anon-ask! buf)
   "(anon-ask! BUF) - send the new words of BUF's name and block view to decide; jit-lock asks for drawn text"
-  (when (and (buffer-exists? buf) (minor-mode-on? buf "anon-local-mode"))
+  (when (and (buffer-exists? buf) (anon--shown? buf) (minor-mode-on? buf "anon-local-mode"))
     (let* ((view (anon--view-original buf))
            (text (string-append buf "\n" (if view (anon--tree-text view) ""))))
       (when (<= (string-byte-length text) anon-max-bytes)
@@ -535,16 +544,24 @@
 ;; anon-mode is on: a buffer gets anon-local-mode when a window shows it
 (define *anon-global* #f)
 
-;; A window that shows a buffer for the first time gives it the mode, so its
-;; name and its block view are redacted too. Text needs no hook: jit-lock
-;; asks for each drawn line.
-(define (anon--on-display!)
-  (when *anon-global*
-    (for-each (lambda (b)
-                (when (and (anon--eligible? b) (not (minor-mode-on? b "anon-local-mode")))
-                  (enable-minor-mode! b "anon-local-mode")))
-              (anon--visible))))
+;; anon works only on the buffers a window shows, and catches a buffer up
+;; when a window shows it, as diff-mode and the mode line do. A buffer new
+;; to anon-mode gets the mode. A buffer with the mode redacts the view its
+;; mode wrote while it was hidden; an unchanged view reuses its last
+;; redaction. Text needs no hook: jit-lock asks for each drawn line.
+(define (anon--catchup! buf)
+  (cond ((not (anon--shown? buf)) #f)
+        ((minor-mode-on? buf "anon-local-mode")
+         (anon--view-catchup! buf)
+         (debounce! (string-append "anon:" buf) 500 anon-ask! buf))
+        ((and *anon-global* (anon--eligible? buf))
+         (enable-minor-mode! buf "anon-local-mode"))))
 
+;; every shown buffer, after any change of the windows
+(define (anon--on-display!)
+  (for-each anon--catchup! (anon--visible)))
+
+(add-hook! 'buffer-shown-hook 'anon--catchup!)
 (add-hook! 'window-configuration-change-hook 'anon--on-display!)
 
 (define (anon-off!)

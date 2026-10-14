@@ -21,9 +21,9 @@
     env (("GEMINI_API_KEY" gemini-api-key))
     install (("gemini" "npm install -g @google/gemini-cli"))
     signin "gemini"
+    ;; the model family it serves: -m passes an id the CLI does not list yet
+    accepts "^(gemini-|auto$)"
     ;; a Google sign-in through `gemini` itself answers for the key
-    signin-files (".gemini/oauth_creds.json")
-    models ("auto" "gemini-4-argon" "gemini-3.1-pro-preview" "gemini-3.8-flash"
-            "gemini-3-flash-preview")))
+    signin-files (".gemini/oauth_creds.json")))
 
 (provide 'connector-gemini)

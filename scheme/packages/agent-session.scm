@@ -7,10 +7,15 @@
 (effects! '(write))
 (category! 'chat)
 
+;; A model is foreign to CNAME when the connector says what it runs (a list
+;; from its agent, or a family) and the model is not among it.
 (define (agent-model-foreign? buf cname m)
-  (let ((declared (append (connector-models cname)
-                          (map car (or (buffer-local buf 'agent-models) '())))))
-    (and m (pair? declared) (not (member m declared)))))
+  (let ((known (or (pair? (connector-models cname))
+                   (pair? (buffer-local buf 'agent-models))
+                   (plist-get (connector-config cname) 'accepts))))
+    (and m known
+         (not (connector-accepts? cname m))
+         (not (assoc m (or (buffer-local buf 'agent-models) '()))))))
 
 (define (agent-model-for-connector buf cname)
   (let ((m0 (buffer-local buf 'agent-model)))

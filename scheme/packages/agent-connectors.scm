@@ -40,6 +40,9 @@ nonstandard install out of the built-in connector catalog."
   ;; @agentclientprotocol/claude-agent-acp ships this executable. Resolve it
   ;; through PATH so npm, pnpm, bun, asdf, and other installers all work.
   '(cmd "claude-agent-acp"
+    ;; the model family it serves; the adapter lists only some of these
+    ;; ids (no [1m] forms), and its list is the menu
+    accepts "^(claude-|opus|sonnet|haiku|default)"
     install (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
              ("claude-agent-acp" "npm install -g @agentclientprotocol/claude-agent-acp"))
     signin "claude"
@@ -61,21 +64,14 @@ nonstandard install out of the built-in connector catalog."
                                       "Task" "Agent" "TodoWrite"
                                       "SlashCommand" "ReportFindings"
                                       "TaskCreate" "TaskUpdate"
-                                      "TaskList" "TaskGet"))))
-    ;; the seed only has to hold until a session reports its own list;
-    ;; llm-models-seen! keeps that answer for the connector, and the picker
-    ;; still offers a model here that the adapter does not list yet
-    models ("default" "claude-opus-5-5[1m]" "opus[1m]" "claude-fable-5-1[1m]" "sonnet" "haiku"
-            "claude-haiku-5-5")))
+                                      "TaskList" "TaskGet"))))))
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"
     description "Codex App Server — ChatGPT subscription"
     install (("codex" "npm install -g @openai/codex"))
     signin "codex login"
-    models ("gpt-6.1-sol" "gpt-6-astra" "gpt-6-sol" "gpt-6-luna"
-            "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-5.5"
-            "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex-spark")))
+    accepts "^(gpt-|o[0-9])"))
 
 (define-connector! "codex-app-server" *codex-app-server-connector*)
 
@@ -83,16 +79,12 @@ nonstandard install out of the built-in connector catalog."
 
 (define-connector! "codex-acp"
   '(hidden #t deprecated "use codex-app-server"
-    cmd "codex-acp" model-flag "-c model="
-    models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
+    cmd "codex-acp" model-flag "-c model=" accepts "^(gpt-|o[0-9])"))
 
 (define-connector! "opencode"
   '(cmd "opencode acp"
     description "OpenCode — multi-provider ACP agent"
-    model-config #t
-    models ("opencode/big-pickle" "opencode/claude-sonnet-5"
-            "opencode/claude-opus-5" "opencode/claude-haiku-5-5"
-            "opencode/gemini-3.1-pro")))
+    model-config #t))
 
 (define-connector! "deepseek"
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
@@ -114,7 +106,7 @@ nonstandard install out of the built-in connector catalog."
     ;; carries the profile patch that turns the harness's own tools and
     ;; prompt off
     sanitize "dsh"
-    models ("deepseek-v4-pro" "deepseek-v4-flash" "deepseek-v4-flash-vision-exp")))
+    accepts "^deepseek-"))
 
 ;; The direct lane needs one key from any provider. Each provider's key is a
 ;; secret setting; 'provider makes llm-key answer from it, and 'model is the
@@ -137,6 +129,9 @@ nonstandard install out of the built-in connector catalog."
   'model "openai:gpt-5.6-luna"
   'key-page "https://platform.openai.com/api-keys")
 
+;; Every connector above reports its models when a session starts, and
+;; connector-models answers from that. These two report nothing, so they
+;; declare their own.
 (define-connector! "api"
   (list 'backend "req-llm"
         'title "Hosted model (your API key)"
@@ -284,10 +279,26 @@ nonstandard install out of the built-in connector catalog."
   (and (member cap (connector-capabilities name)) #t))
 
 (define (connector-models name)
-  (let ((m (plist-get (connector-config name) 'models)))
-    (cond ((procedure? m) (m))
-          (m m)
-          (else '()))))
+  "The models connector NAME runs: the list its agent reported (a session
+   reports it at start, and llm-models-seen! keeps it). A connector whose
+   backend reports nothing (gemini-nano, the catalogued api lane) declares
+   its own, and a declared list also stands in until the first report."
+  (let ((reported (if (boundp 'llm-models-remembered)
+                      (map car (llm-models-remembered name))
+                      '())))
+    (if (pair? reported)
+        reported
+        (let ((m (plist-get (connector-config name) 'models)))
+          (cond ((procedure? m) (m)) (m m) (else '()))))))
+
+;; #t when connector NAME runs model M: its agent lists it, or it matches the
+;; model family the connector declares as 'accepts. The list ages with every
+;; release; the family does not.
+(define (connector-accepts? name m)
+  (and m
+       (or (and (member m (connector-models name)) #t)
+           (let ((re (plist-get (connector-config name) 'accepts)))
+             (and re (re-match? re m) #t)))))
 
 (define (agent-model-env m)
   (list 'env (list (list "ANTHROPIC_MODEL" m)
@@ -466,7 +477,7 @@ nonstandard install out of the built-in connector catalog."
           ;; worktree) and a connector's own declared cwd both still win.
           (conf (append opts (connector-config cname) (agent-config-buffer-cwd opts)))
           (m (or (plist-get conf 'model)
-                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
+                 (and (connector-accepts? cname (llm-model)) (llm-model)))))
      (cond ((not m) conf)
            ((or (equal? (plist-get conf 'backend) "req-llm")
                 (equal? (plist-get conf 'backend) "codex-app-server")

@@ -1769,9 +1769,10 @@ defmodule Compos.AgentTest do
     assert {:ok, ~s["test-conn"]} =
              Session.eval(~s[(buffer-local (agent-buf "a1") 'agent-connector)])
 
-    # model choice is scoped to what the connector declares
-    assert {:ok, models} = Session.eval(~s[(connector-models "claude-code")])
-    assert models =~ "claude-sonnet-5"
+    # model choice is scoped to what the agent reports, and to the family
+    # the connector declares
+    assert {:ok, "#t"} = Session.eval(~s[(connector-accepts? "claude-code" "claude-sonnet-5")])
+    assert {:ok, "#f"} = Session.eval(~s[(connector-accepts? "claude-code" "gpt-6-sol")])
     assert {:ok, "()"} = Session.eval(~s[(connector-models "test-conn")])
     assert {:ok, api_models} = Session.eval(~s[(connector-models "api")])
     assert api_models =~ "openrouter" or api_models =~ "claude"

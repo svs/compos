@@ -313,14 +313,16 @@
   (let ((parts (string-split m ":")))
     (if (> (length parts) 1) (car (cdr parts)) #f)))
 
-;; The name CNAME lists for this model, or #f when that connector does not
-;; have the model at all.
+;; The name CNAME runs this model as, or #f when that connector does not
+;; have the model at all: its agent lists it, or it is of the connector's
+;; declared family (connector-accepts?).
 (define (connector-model-id cname m)
-  (let ((models (if (boundp (quote connector-models)) (connector-models cname) '())))
+  (let ((accepts? (lambda (x) (and (boundp (quote connector-accepts?))
+                                   (connector-accepts? cname x)))))
     (cond ((not m) #f)
-          ((member m models) m)
+          ((accepts? m) m)
           (else (let ((bare (llm--model-bare m)))
-                  (and bare (member bare models) bare))))))
+                  (and bare (accepts? bare) bare))))))
 
 ;; the connector that has this model, or #f. Hidden connectors are
 ;; compatibility names for saved chats; a new session never picks one. The

@@ -31,7 +31,15 @@
   // The axis and the distance of one pane-step. Panes that share one left
   // edge are rows, and the strip moves vertically. One pane moves by the
   // frame's width.
+  // The distance is in the frame's own pixels: a zoomed frame (c-frame's
+  // zoom) measures larger on the screen than a transform inside it moves.
   function step(root, forward, desk) {
+    const s = measure(root, forward, desk);
+    const k = (root.offsetWidth ? root.getBoundingClientRect().width / root.offsetWidth : 1) || 1;
+    return s && { vertical: s.vertical, d: s.d / k };
+  }
+
+  function measure(root, forward, desk) {
     const box = root.getBoundingClientRect();
     if (desk) return { vertical: true, d: box.height };
     const rs = panes(root).map((w) => w.getBoundingClientRect());

@@ -93,6 +93,17 @@
     return g;
   }
 
+  // The frame can be zoomed (c-frame's zoom): the page measures in screen
+  // pixels, but a transform or a left inside it counts in the frame's own.
+  // Every box here is in the frame's pixels.
+  const zoomOf = (el) => (el.offsetWidth ? el.getBoundingClientRect().width / el.offsetWidth : 1) || 1;
+  function unz(r, k) {
+    return {
+      left: r.left / k, top: r.top / k, right: r.right / k, bottom: r.bottom / k,
+      width: r.width / k, height: r.height / k
+    };
+  }
+
   const center = (r) => [r.left + r.width / 2, r.top + r.height / 2];
   const inside = (r, [x, y]) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 
@@ -149,6 +160,21 @@
   // the divider and lands on the buffer W showed before
   // a slide that starts and stops gently, as a hand moves a sheet
   const SLIDE = 'cubic-bezier(.45,0,.2,1)';
+  // W comes from box A to its box B by translation only, SLIDE eased; an
+  // ON-TOP one rides over the panes it crosses
+  function slide(w, a, b, ms, onTop) {
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    const z = onTop ? 3 : 0;
+    track(w.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)`, zIndex: z },
+        { transform: 'translate(0px, 0px)', zIndex: z }
+      ],
+      { duration: ms, easing: SLIDE }
+    ));
+  }
+
   function paper(w, a, b, ms) {
     const dx = a.left - b.left;
     const dy = a.top - b.top;
@@ -207,7 +233,7 @@
   // as many sheets as the room the carry frees under the window shows
   const PILE = 4;
   function tail(s, p, from) {
-    const box = s.root.getBoundingClientRect();
+    const box = unz(s.root.getBoundingClientRect(), s.k);
     const r = p.rect;
     const dx = from.left - r.left;
     const dy = from.top - r.top;
@@ -216,8 +242,8 @@
     const head = p.w.querySelector('.dash-persistent');
     const title = head && head.querySelector('.dseg-chat-title .dseg-v');
     const look = lookOf(head, title);
-    const indent = title ? Math.max(10, title.getBoundingClientRect().left - r.left) : 14;
-    const names = s.move && String(s.move.win) === p.id ? s.move.rows.slice(1, 1 + PILE) : [];
+    const indent = title ? Math.max(10, unz(title.getBoundingClientRect(), s.k).left - r.left) : 14;
+    const names = s.move && s.move.rows[0] === s.after.get(p.id) ? s.move.rows.slice(1, 1 + PILE) : [];
     const ms = s.ms * 1.25;
     const lag = s.ms * 0.12;
     const total = ms + names.length * lag;
@@ -266,7 +292,7 @@
   // the old content of a pane, at its old box, goes out along STEP; a
   // STILL one stays under the paper that lands on it
   function leave(s, o, step, still, full, hold) {
-    const box = s.root.getBoundingClientRect();
+    const box = unz(s.root.getBoundingClientRect(), s.k);
     const r = o.rect;
     const frame = document.createElement('div');
     frame.className = 'motion-ghost';
@@ -297,7 +323,7 @@
   }
 
   function play(s) {
-    const now = panes(s.root).map((w) => ({ w, id: w.dataset.winId, rect: w.getBoundingClientRect() }));
+    const now = panes(s.root).map((w) => ({ w, id: w.dataset.winId, rect: unz(w.getBoundingClientRect(), s.k) }));
     const ids = new Set(now.map((p) => p.id));
     // where each buffer stood before the render, and where it stands now
     const wasAt = new Map();
@@ -314,10 +340,23 @@
         enter(p.w, p.rect, parent && toward(parent.rect, p.rect), s.ms);
         return;
       }
-      // a buffer that a neighbour showed crosses to this pane as one
-      // sheet, even when the pane grows into a pane that closed
       const b = s.after.get(p.id);
       const src = o.ghost && b && wasAt.get(b);
+      // a window moved to the next pane: the panes keep their places and
+      // trade what they show. The one that shows the moved window now
+      // carries it over, lifted, with its stack trailing; the window it
+      // traded with slides in underneath, uncovered as it lifts away
+      if (s.move && src && toward(src, p.rect)) {
+        const carried = b === s.move.rows[0];
+        slide(p.w, src, p.rect, carried ? s.ms * 1.1 : s.ms * 1.25, carried);
+        if (carried) {
+          tail(s, p, src);
+          leave(s, o, null, true, false, s.ms * 1.1);
+        }
+        return;
+      }
+      // a buffer that a neighbour showed crosses to this pane as one
+      // sheet, even when the pane grows into a pane that closed
       if (src && toward(src, p.rect) && !(s.walk && String(s.walk.win) === p.id)) {
         paper(p.w, src, p.rect, s.ms);
         leave(s, o, null, true, false, s.ms * 1.3);
@@ -380,20 +419,21 @@
     if (!ms || !prev || !after) { finish(); return; }
     // measure before the old motion stops: a pane in motion starts from
     // where the eye sees it
+    const k = zoomOf(from);
     const old = new Map();
     panes(from).forEach((w) => {
       const id = w.dataset.winId;
       const buffer = prev.get(id);
       const goes = !after.has(id) || after.get(id) !== buffer;
       old.set(id, {
-        rect: w.getBoundingClientRect(),
+        rect: unz(w.getBoundingClientRect(), k),
         buffer,
         ghost: goes ? copy(w) : null,
         offsets: goes ? scrolls(w) : null
       });
     });
     finish();
-    snap = { root: from, old, after, ms, walk, move };
+    snap = { root: from, old, after, ms, walk, move, k };
   }
 
   // after each patch; a render during the motion removes the copies,
@@ -446,13 +486,16 @@
   function drawRail(walk) {
     const pane = document.querySelector(`c-window.window[data-win-id="${walk.win}"]`);
     if (!pane) return;
-    const p = pane.getBoundingClientRect();
+    // the rail hangs on the body, outside the zoomed frame: it takes the
+    // frame's zoom, so its type is the title's size, and counts in its pixels
+    const k = zoomOf(pane);
+    const p = unz(pane.getBoundingClientRect(), k);
     const head = pane.querySelector('.dash-persistent');
     const title = head && head.querySelector('.dseg-chat-title .dseg-v');
     const look = lookOf(head, title);
-    const h = head ? head.getBoundingClientRect() : { bottom: p.top };
-    const t = title ? title.getBoundingClientRect() : { left: p.left + 12 };
-    const seg = title ? title.closest('.dseg-chat-title').getBoundingClientRect() : t;
+    const h = head ? unz(head.getBoundingClientRect(), k) : { bottom: p.top };
+    const t = title ? unz(title.getBoundingClientRect(), k) : { left: p.left + 12 };
+    const seg = title ? unz(title.closest('.dseg-chat-title').getBoundingClientRect(), k) : t;
     if (!rail) {
       rail = document.createElement('div');
       rail.className = 'walk-rail';
@@ -460,6 +503,7 @@
       document.body.appendChild(rail);
     }
     rail.dataset.win = walk.win;
+    rail.style.zoom = k;
     // the dropdown is as wide as its longest name, so every name shows
     // whole; only a pane too narrow for it cuts one short
     const width = Math.max(RAIL_WIDTH, (seg.width || 0) + 28);

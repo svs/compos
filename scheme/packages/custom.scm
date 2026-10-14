@@ -48,7 +48,11 @@
 (define (describe-variable-data name)
   (let ((rec (assoc name *custom-vars*)))
     (append (list 'name name
-                  'value (if (boundp name) (symbol-value name) 'unbound))
+                  ;; a secret never prints: describe and apropos answer set or unset
+                  'value (cond ((not (boundp name)) 'unbound)
+                               ((and rec (equal? (plist-get (cadr rec) 'type) 'secret))
+                                (if (symbol-value name) 'set 'unset))
+                               (else (symbol-value name))))
             (if rec (cadr rec) '()))))
 
 (define (customize-apropos pattern)

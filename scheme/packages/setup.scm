@@ -185,6 +185,23 @@
                 (car words))
                (else (loop (cdr words)))))))))
 
+(define (setup--connector-signed-in? config)
+  "#t when an ACP connector can sign in. A connector whose env names a key
+   global is signed in when that global is set, when the environment already
+   carries the variable, or when one of its signin-files (relative to HOME)
+   exists. A connector without key globals signs in on its own."
+  (let ((keys (filter (lambda (p) (symbol? (cadr p))) (or (plist-get config 'env) '()))))
+    (or (null? keys)
+        (= (length (agent-env-resolve keys)) (length keys))
+        (let loop ((ks keys))
+          (cond ((null? ks) #t)
+                ((getenv (car (car ks))) (loop (cdr ks)))
+                (else #f)))
+        (let loop ((fs (or (plist-get config 'signin-files) '())))
+          (cond ((null? fs) #f)
+                ((file-exists? (string-append (getenv "HOME") "/" (car fs))) #t)
+                (else (loop (cdr fs))))))))
+
 (define (setup-inference-scan)
   "Every declared connector with what this machine can actually run it.
    (NAME KIND AVAILABLE? DETAIL). Declaration is not availability: a connector
@@ -205,11 +222,13 @@
               (let ((key? (setup--any-llm-key?)))
                 (list name "hosted" key?
                       (if key? "a key is registered" "needs an API key"))))
+             ((not (setup--cmd-available? cmd))
+              (list name "acp" #f (string-append "not installed: " (setup--cmd-label cmd))))
+             ((setup--connector-signed-in? config)
+              (list name "acp" #t "ready"))
+             ;; installed and not signed in: the fifth field asks for a key
              (else
-              (let ((ok? (setup--cmd-available? cmd)))
-                (list name "acp" ok?
-                      (if ok? "ready"
-                          (string-append "not installed: " (setup--cmd-label cmd)))))))))
+              (list name "acp" #f "installed; needs a key or a sign-in" #t)))))
        (connector-names)))
 
 (define (setup-inference-available)
@@ -447,7 +466,8 @@
         ("[Create an OpenRouter key](https://openrouter.ai/settings/keys)"
          "A hosted model. Then run `M-x setup-bot` again.")
         ("`M-x setup-install-claude`" "Install Claude Code and its ACP adapter.")
-        ("`M-x setup-install-codex`" "Install the Codex CLI.")))
+        ("`M-x setup-install-codex`" "Install the Codex CLI.")
+        ("`M-x setup-install-gemini`" "Install the Gemini CLI. Then add a Gemini key in `M-x setup`.")))
     "\n## Secret backends\n\n"
     "The key chain reads environment variables, `~/.compos` key files, then Doppler. "
     "The setup bot never prints secret values.\n\n"
@@ -616,7 +636,11 @@
     ("codex"
      connector "codex-app-server"
      steps (("codex" "npm install -g @openai/codex"))
-     signin "codex login")))
+     signin "codex login")
+    ("gemini"
+     connector "gemini"
+     steps (("gemini" "npm install -g @google/gemini-cli"))
+     signin "gemini")))
 
 (define (setup--agent-install name)
   (let ((row (assoc name *setup-agent-installs*)))
@@ -676,6 +700,10 @@
 (define-command "setup-install-codex"
   "Install the Codex CLI in a terminal buffer"
   (lambda () (setup-install-agent! "codex")))
+
+(define-command "setup-install-gemini"
+  "Install the Gemini CLI in a terminal buffer"
+  (lambda () (setup-install-agent! "gemini")))
 
 (effects! '(read write external))
 

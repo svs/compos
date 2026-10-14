@@ -93,7 +93,11 @@ nonstandard install out of the built-in connector catalog."
   ;; ride the first turn.
   '(cmd "gemini --experimental-acp" model-flag "-m "
     system-in-prompt #t
-    models ("auto" "gemini-3.1-pro-preview" "gemini-3-flash-preview"
+    ;; the key comes from the user's secrets.scm; a Google sign-in
+    ;; through `gemini` itself also works
+    env (("GEMINI_API_KEY" *gemini-api-key*))
+    signin-files (".gemini/oauth_creds.json")
+    models ("auto" "gemini-4-argon" "gemini-3.1-pro-preview" "gemini-3-flash-preview"
             "gemini-2.5-pro" "gemini-2.5-flash")))
 
 (define-connector! "deepseek"
@@ -412,32 +416,48 @@ nonstandard install out of the built-in connector catalog."
         (list 'cwd (buffer-directory buf))
         '())))
 
+;; an env value that is a symbol names a global the user's config sets
+;; (secrets.scm sets *gemini-api-key*); it is read when the thread
+;; starts, and a pair whose global is unbound or #f drops out
+(define (agent-env-resolve env)
+  (let loop ((ps env) (acc '()))
+    (if (null? ps)
+        (reverse acc)
+        (let* ((v (car (cdr (car ps))))
+               (v (if (symbol? v) (and (boundp v) (symbol-value v)) v)))
+          (loop (cdr ps) (if (string? v) (cons (list (car (car ps)) v) acc) acc))))))
+
+(define (agent-config-env-resolve conf)
+  (let ((env (plist-get conf 'env)))
+    (if env (append (list 'env (agent-env-resolve env)) conf) conf)))
+
 (define (agent-resolve-config* opts)
-  (let* ((cname (or (plist-get opts 'connector) *default-connector*))
-         ;; A thread works where its buffer works. The ACP and Codex lanes are
-         ;; told their cwd once, at session/new, and until now nobody told them
-         ;; at all: every session ran in the daemon's own directory. This says
-         ;; it LAST, so an explicit 'cwd in the attach opts (an isolated
-         ;; worktree) and a connector's own declared cwd both still win.
-         (conf (append opts (connector-config cname) (agent-config-buffer-cwd opts)))
-         (m (or (plist-get conf 'model)
-                (and (member (llm-model) (connector-models cname)) (llm-model)))))
-    (cond ((not m) conf)
-          ((or (equal? (plist-get conf 'backend) "req-llm")
-               (equal? (plist-get conf 'backend) "codex-app-server")
-               (plist-get conf 'model-config))
-           ;; direct, native, and session-config lanes carry the model in
-           ;; protocol config, not adapter command-line wiring
-           (append (list 'model m) conf))
-          ((plist-get conf 'model-flag)
-           ;; value must be quoted TOML — codex ignores the bare form
-           (append (list 'model m
-                         'cmd (string-append (plist-get conf 'cmd) " "
-                                             (plist-get conf 'model-flag)
-                                             "\"" m "\""))
-                   conf))
-          ((plist-get conf 'env) conf)           ; explicit env wins
-          (else (append (list 'model m) conf (agent-model-env m))))))
+  (agent-config-env-resolve
+   (let* ((cname (or (plist-get opts 'connector) *default-connector*))
+          ;; A thread works where its buffer works. The ACP and Codex lanes are
+          ;; told their cwd once, at session/new, and until now nobody told them
+          ;; at all: every session ran in the daemon's own directory. This says
+          ;; it LAST, so an explicit 'cwd in the attach opts (an isolated
+          ;; worktree) and a connector's own declared cwd both still win.
+          (conf (append opts (connector-config cname) (agent-config-buffer-cwd opts)))
+          (m (or (plist-get conf 'model)
+                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
+     (cond ((not m) conf)
+           ((or (equal? (plist-get conf 'backend) "req-llm")
+                (equal? (plist-get conf 'backend) "codex-app-server")
+                (plist-get conf 'model-config))
+            ;; direct, native, and session-config lanes carry the model in
+            ;; protocol config, not adapter command-line wiring
+            (append (list 'model m) conf))
+           ((plist-get conf 'model-flag)
+            ;; value must be quoted TOML — codex ignores the bare form
+            (append (list 'model m
+                          'cmd (string-append (plist-get conf 'cmd) " "
+                                              (plist-get conf 'model-flag)
+                                              "\"" m "\""))
+                    conf))
+           ((plist-get conf 'env) conf)           ; explicit env wins
+           (else (append (list 'model m) conf (agent-model-env m)))))))
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))

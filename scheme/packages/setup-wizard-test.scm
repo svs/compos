@@ -28,6 +28,18 @@
                         name)))
       '(wizard/steps wizard/choice wizard/nav))))
 
+(deftest 'an-acp-key-global-signs-the-connector-in
+  "a connector whose env names a key global is signed in when the global is set or a signin file exists"
+  (lambda ()
+    (check-true! (setup--connector-signed-in? '(cmd "x")) "no key globals")
+    (check-false! (setup--connector-signed-in?
+                    '(env (("ZZ_NO_SUCH_KEY" *zz-no-such-key*)) signin-files (".zz-none")))
+                  "an unset global and no file")
+    (set-symbol-value! '*zz-test-key* "k")
+    (check-true! (setup--connector-signed-in? '(env (("ZZ_NO_SUCH_KEY" *zz-test-key*))))
+                 "a set global")
+    (unbind-global! '*zz-test-key*)))
+
 (deftest 'a-connector-card-offers-the-button-that-fits
   "ready offers use, an installable agent offers install, a hosted model offers a key"
   (lambda ()
@@ -41,6 +53,12 @@
       (check-equal! (map car (setup-wizard--card-actions
                                '("codex-app-server" "acp" #f "not installed")))
                     '("wizard:install:codex") "codex")
+      (check-equal! (map car (setup-wizard--card-actions
+                               '("gemini" "acp" #f "not installed")))
+                    '("wizard:install:gemini") "gemini, not installed")
+      (check-equal! (map car (setup-wizard--card-actions
+                               '("gemini" "acp" #f "needs a key" #t)))
+                    '("wizard:key") "gemini, installed with no key")
       (check-equal! (map car (setup-wizard--card-actions '("api" "hosted" #f "no key")))
                     '("wizard:key") "a hosted model")
       (set! *default-connector* "opencode")
@@ -86,13 +104,15 @@
     (check-equal! (setup--scheme-string "a\"b\\c") "\"a\\\"b\\\\c\"" "a key is a safe literal")))
 
 (deftest 'every-key-provider-has-a-page-and-a-model
-  "each hosted key choice names its provider, variable, key page, and model"
+  "each key choice names its provider, variable, key page, and model, and at most a connector"
   (lambda ()
     (for-each
       (lambda (e)
-        (check-equal! (length e) 5 (car e))
+        (check-true! (member (length e) '(5 6)) (car e))
         (check-true! (string-prefix? "https://" (list-ref e 3)) "the key page")
-        (check-true! (string-prefix? "*" (list-ref e 2)) "a variable name"))
+        (check-true! (string-prefix? "*" (list-ref e 2)) "a variable name")
+        (when (= (length e) 6)
+          (check-true! (member (list-ref e 5) (connector-names)) "a known connector")))
       *setup-key-providers*)))
 
 (deftest 'the-home-page-is-setup-until-setup-is-done

@@ -107,7 +107,7 @@
 
 ;; The install command for a connector that setup can install, or #f.
 (define *setup-wizard-installs*
-  '(("claude-code" "claude") ("codex-app-server" "codex")))
+  '(("claude-code" "claude") ("codex-app-server" "codex") ("gemini" "gemini")))
 
 (define (setup-wizard--install-for name)
   (let ((e (assoc name *setup-wizard-installs*)))
@@ -128,6 +128,9 @@
        (append use (list (list "wizard:key" (if ready? "Change the key" "Add a key")))))
       (default? '())
       (ready? use)
+      ;; installed, and the agent waits for a key
+      ((and (> (length row) 4) (list-ref row 4))
+       (list (list "wizard:key" "Add a key")))
       ((setup-wizard--install-for name)
        (list (list (string-append "wizard:install:" (setup-wizard--install-for name))
                    "Install")))
@@ -245,13 +248,16 @@
 ;; mode 600. ~/.compos/ai-config.scm loads that file at boot and registers
 ;; the key, and the wizard registers it now as well, so no restart is due.
 (define *setup-key-providers*
-  ;; (LABEL PROVIDER VARIABLE KEY-PAGE MODEL)
+  ;; (LABEL PROVIDER VARIABLE KEY-PAGE MODEL [CONNECTOR]); with a CONNECTOR
+  ;; the key goes to that agent through its env, not to the direct API lane
   '(("OpenRouter — one key for every model (recommended)" "openrouter" "*openrouter-api-key*"
      "https://openrouter.ai/settings/keys" "openrouter:anthropic/claude-sonnet-5")
     ("Anthropic — Claude models" "anthropic" "*anthropic-api-key*"
      "https://console.anthropic.com/settings/keys" "claude-sonnet-5")
     ("OpenAI — GPT models" "openai" "*openai-api-key*"
-     "https://platform.openai.com/api-keys" "openai:gpt-5.6-luna")))
+     "https://platform.openai.com/api-keys" "openai:gpt-5.6-luna")
+    ("Gemini — the Gemini CLI agent" "gemini" "*gemini-api-key*"
+     "https://aistudio.google.com/apikey" "auto" "gemini")))
 
 (define (setup--config-file name) (string-append (compos-config-dir) "/" name))
 
@@ -280,28 +286,37 @@
     (set-file-mode! path "600")))
 
 ;; ai-config.scm loads secrets.scm once and registers each provider once.
-(define (setup--ensure-ai-config! provider var)
+(define (setup--ensure-secrets-load!)
   (let* ((path (setup--config-file "ai-config.scm"))
          (old (or (read-file path) ";;; ai-config.scm --- models and keys. Compos loads this file at boot.\n"))
-         (load-line "(load \"secrets.scm\")")
-         (with-load (if (string-contains? old load-line) old
-                        (string-append (string-trim old) "\n" load-line "\n")))
+         (load-line "(load \"secrets.scm\")"))
+    (unless (string-contains? old load-line)
+      (write-file! path (string-append (string-trim old) "\n" load-line "\n")))
+    path))
+
+(define (setup--ensure-ai-config! provider var)
+  (let* ((path (setup--ensure-secrets-load!))
+         (old (read-file path))
          (register-line (string-append "(register-llm-key! \"" provider "\" " var ")")))
-    (write-file! path (if (string-contains? with-load register-line) with-load
-                          (string-append with-load register-line "\n")))))
+    (unless (string-contains? old register-line)
+      (write-file! path (string-append old register-line "\n")))))
 
 (define (setup--use-key! entry value-form key buf)
-  (let ((provider (list-ref entry 1))
-        (var (list-ref entry 2))
-        (model (list-ref entry 4)))
+  (let* ((provider (list-ref entry 1))
+         (var (list-ref entry 2))
+         (model (list-ref entry 4))
+         (connector (if (> (length entry) 5) (list-ref entry 5) "api")))
     (setup--write-secret! var value-form)
-    (setup--ensure-ai-config! provider var)
+    (if (equal? connector "api")
+        (setup--ensure-ai-config! provider var)
+        (setup--ensure-secrets-load!))
     (eval-string-safe (string-append "(define " var " " value-form ")"))
-    (register-llm-key! provider key)
-    (customize-save! 'setup-default-connector "api")
-    (set! *default-connector* "api")
+    (when (equal? connector "api") (register-llm-key! provider key))
+    (customize-save! 'setup-default-connector connector)
+    (set! *default-connector* connector)
     (set-llm-model! model)
-    (message (string-append "Setup: " var " is in ~/.compos/secrets.scm; new chats use " model))
+    (message (string-append "Setup: " var " is in ~/.compos/secrets.scm; new chats use "
+                            (if (equal? connector "api") model connector)))
     (when (buffer-exists? buf) (setup-wizard-redraw! buf))))
 
 (define (setup-store-key! entry key buf)

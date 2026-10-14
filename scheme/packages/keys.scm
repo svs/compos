@@ -86,10 +86,14 @@
     value))
 
 ;; A provider id -> the resolved key VALUE, or #f when unregistered. Elixir
-;; asks this by provider and passes the value on.
+;; asks this by provider and passes the value on. A registered key wins; else
+;; the secret setting that declares 'provider PROVIDER answers.
 (define (llm-key provider)
   (let ((e (assoc provider *llm-keys*)))
-    (if e (cadr e) #f)))
+    (if e
+        (cadr e)
+        (let ((s (secret-for-provider provider)))
+          (and s (secret-value s))))))
 
 ;; Explicit provider -> the address its requests go to, when that is not the
 ;; provider's own cloud. A self-hosted OpenAI-compatible server is the same
@@ -124,6 +128,53 @@
 (define (key-cached-names)
   (map car *key-cache*))
 
+;;; --- secret settings ----------------------------------------------------------
+;;; A package declares each secret it needs as a setting of type secret:
+;;;
+;;;   (defcustom 'gemini-api-key #f "The Gemini API key."
+;;;     'type 'secret 'group 'gemini 'env "GEMINI_API_KEY"
+;;;     'key-page "https://aistudio.google.com/apikey")
+;;;
+;;; secrets.scm sets the value with a call into the secret's tool,
+;;; (define gemini-api-key (doppler-secret-get "compos" "dev" "GEMINI_API_KEY")),
+;;; so the key itself stays in the tool. Unset, the key chain answers for
+;;; 'env. 'provider names the direct-API provider the key serves, and
+;;; llm-key answers from it. Setup reads these declarations to know what to
+;;; ask for; nothing else lists the secrets.
+
+(define (secret-setting? name)
+  (and (symbol? name)
+       (let ((rec (assoc name *custom-vars*)))
+         (and rec (equal? (plist-get (cadr rec) 'type) 'secret)))))
+
+;; every declared secret setting, in declaration order
+(define (secret-settings)
+  (reverse (map car (filter (lambda (rec) (equal? (plist-get (cadr rec) 'type) 'secret))
+                            *custom-vars*))))
+
+;; a declaration property of the secret NAME: 'doc 'env 'key-page 'provider 'model
+(define (secret-prop name key)
+  (let ((rec (assoc name *custom-vars*)))
+    (and rec (plist-get (cadr rec) key))))
+
+;; the value of the secret NAME, or #f: the setting, else the chain for 'env
+(define (secret-value name)
+  (let ((v (and (boundp name) (symbol-value name))))
+    (if (and (string? v) (not (equal? v "")))
+        v
+        (let ((env (secret-prop name 'env)))
+          (and env (key-get env))))))
+
+(define (secret-set? name)
+  (and (secret-value name) #t))
+
+;; the secret setting that serves the direct-API PROVIDER, or #f
+(define (secret-for-provider provider)
+  (let loop ((ss (secret-settings)))
+    (cond ((null? ss) #f)
+          ((equal? (secret-prop (car ss) 'provider) provider) (car ss))
+          (else (loop (cdr ss))))))
+
 ;;; --- references ---------------------------------------------------------------
 
 ;; "@EXA_API_KEY" -> the key; anything else passes through. A reference
@@ -139,6 +190,8 @@
          (fold (lambda (acc part) (string-append acc (key-resolve part))) "" v))
         ((and (string? v) (string-prefix? "@" v))
          (or (key-get (substring v 1 (string-length v))) ""))
+        ;; a secret setting by name: 'Authorization (list "Bearer " ats-ash-token)
+        ((secret-setting? v) (or (secret-value v) ""))
         (else v)))
 
 ;; every value of a plist, keys untouched: (K "@VAR" K2 "plain") shapes
@@ -179,43 +232,13 @@
                           (else v))
                     (spec-resolve (cddr spec) fields))))))
 
-;;; --- secret backends ----------------------------------------------------------
-;;; One function per secret tool. Each answers the secret as a string, or #f.
-;;; secrets.scm names a key by one of these calls, so the value stays in the
-;;; tool and every boot reads the current one.
-
-(domain! 'secrets)
-(effects! '(read external execute))
-
-;; TEXT as one shell word: inside single quotes, with each quote closed,
-;; escaped, and opened again.
-(define (secret--shell-word text)
-  (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
-
-;; The output of CMD trimmed, or #f when it printed nothing.
-(define (secret-command cmd)
-  (let ((out (string-trim (shell-command->string (string-append cmd " 2>/dev/null")))))
-    (if (equal? out "") #f out)))
-
-;; 1Password: REF is a secret reference, op://VAULT/ITEM/FIELD.
-(define (op-secret-get ref)
-  (secret-command (string-append "op read " (secret--shell-word ref))))
-
-;; The macOS Keychain: a generic password by its service, and by account
-;; when one is given.
-(define (keychain-secret-get service &optional account)
-  (secret-command
-    (string-append "security find-generic-password -w -s " (secret--shell-word service)
-                   (if (and account (not (equal? account "")))
-                       (string-append " -a " (secret--shell-word account))
-                       ""))))
-
-;; The Linux Secret Service: the secret stored with the attribute
-;; service=SERVICE (secret-tool store --label=... service SERVICE).
-(define (secret-tool-get service)
-  (secret-command (string-append "secret-tool lookup service " (secret--shell-word service))))
-
 (category! 'secrets)
+(public! 'secret-settings
+  "(secret-settings) — the names of every declared secret setting (defcustom 'type 'secret)")
+(public! 'secret-set?
+  "(secret-set? NAME) — #t when the secret setting NAME has a value, from the setting or the key chain")
+(public! 'secret-prop
+  "(secret-prop NAME KEY) — a declaration property of the secret NAME: 'doc 'env 'key-page 'provider 'model")
 (public! 'spec-resolve
   "(spec-resolve SPEC FIELDS) — resolve the \"@VAR\" references in a config spec; FIELDS names each secret-bearing key as 'value, 'plist, or 'each")
 (public! 'key-resolve
@@ -234,11 +257,3 @@
   "(llm-base-url PROVIDER) — the address a provider's requests go to, or #f for the provider's own")
 (public! 'register-llm-base-url!
   "(register-llm-base-url! PROVIDER VALUE) — send a provider's requests to a self-hosted OpenAI-compatible server")
-(public! 'secret-command
-  "(secret-command CMD) — the trimmed output of the shell command CMD, or #f; a key from any tool")
-(public! 'op-secret-get
-  "(op-secret-get \"op://VAULT/ITEM/FIELD\") — a 1Password secret, through op read")
-(public! 'keychain-secret-get
-  "(keychain-secret-get SERVICE [ACCOUNT]) — a macOS Keychain generic password")
-(public! 'secret-tool-get
-  "(secret-tool-get SERVICE) — a Linux Secret Service secret stored with service=SERVICE")

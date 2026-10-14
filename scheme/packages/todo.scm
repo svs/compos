@@ -868,6 +868,120 @@
             (chat (switch-to-buffer-in-group! chat))
             (else (message "The task is not with a live chat"))))))
 
+;; one task as its own page beside the list. Its chat is the assignee, the
+;; chat that works the task, never the one that filed it
+(define *todo-detail-buffer* "*Todo*")
+
+(define (todo--detail-task buf)
+  (let ((id (buffer-local buf 'todo-id)))
+    (and id (todo-get id))))
+
+(define (todo--detail-blocks t)
+  (let* ((chat (todo--chat-of t))
+         (logs (or (plist-get t 'log) '()))
+         (notes (plist-get t 'notes))
+         (pair (lambda (k v) (if (todo--blank? v) '() (list (list k v))))))
+    (list
+      (component 'ui/page
+        (list 'body
+          (append
+            (list
+              (component 'ui/group
+                (list 'title (plist-get t 'title)
+                      'body
+                      (list
+                        (component 'ui/kv
+                          (list 'pairs
+                            (append
+                              (pair "State" (plist-get t 'state))
+                              (pair "Priority" (plist-get t 'priority))
+                              (pair "Project" (plist-get t 'project))
+                              (pair "Chat" (if chat
+                                                 (string-append chat "  ·  w goes there")
+                                                 (plist-get t 'assignee)))
+                              (pair "Status" (todo--status t))
+                              (pair "Deadline" (plist-get t 'deadline))
+                              (pair "Scheduled" (plist-get t 'scheduled))
+                              (pair "Tags" (let ((tags (plist-get t 'tags))) (if (pair? tags) (string-join tags " ") "")))
+                              (pair "Filed by" (plist-get t 'by))
+                              (pair "Source" (plist-get t 'source))
+                              (pair "Created" (plist-get t 'created))
+                              (pair "Id" (plist-get t 'id)))))))))
+            (if (todo--blank? notes)
+                '()
+                (list (component 'ui/group (list 'title "Notes" 'body (list (component 'ui/quote (list 'text notes)))))))
+            (if (null? logs)
+                '()
+                (list (component 'ui/group
+                        (list 'title "Log"
+                              'body (map (lambda (l) (component 'ui/bullet (list 'text l))) (reverse logs))))))))))))
+
+(define (todo--detail-render! buf)
+  (let ((t (todo--detail-task buf)))
+    (buffer-set-read-only! buf #f)
+    (buffer-set-text! buf (if t (plist-get t 'title) "") #t)
+    (buffer-set-local! buf 'render-mode "blocks")
+    (buffer-set-local! buf 'render-blocks
+      (if t
+          (todo--detail-blocks t)
+          (list (component 'ui/empty (list 'text "The task is gone")))))
+    ;; the page's keys: the same keys bar the list carries
+    (buffer-set-local! buf 'footer-line-blocks
+      (list (component 'ui/keys-bar
+              (list 'main '(("w" "chat") ("e" "file") ("g" "refresh") ("q" "quit"))))))
+    (buffer-set-read-only! buf #t)
+    buf))
+
+(define (todo-show-detail! id)
+  (let ((buf *todo-detail-buffer*))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (buffer-set-local! buf 'todo-id id)
+    (unless (buffer-derived-mode? buf "todo-detail-mode")
+      (with-current-buffer buf (lambda () (set-mode! "todo-detail-mode"))))
+    (todo--detail-render! buf)
+    (display-buffer-detail! buf *todo-buffer*)
+    buf))
+
+(define-command "todo-show" "Show the task as its own page beside the list"
+  (lambda ()
+    (let ((t (todo--at)))
+      (if t (todo-show-detail! (plist-get t 'id)) (message "No task at point")))))
+
+(define-command "todo-detail-goto-chat" "Go to the chat working this task"
+  (lambda ()
+    (let* ((t (todo--detail-task (current-buffer))) (chat (and t (todo--chat-of t))))
+      (cond ((not t) (message "The task is gone"))
+            (chat (switch-to-buffer-in-group! chat))
+            ((plist-get t 'assignee) (message "The task's chat is not live"))
+            (else (message "The task is not assigned to a chat"))))))
+
+(define-command "todo-detail-visit" "Open the task's file at its heading"
+  (lambda ()
+    (let ((t (todo--detail-task (current-buffer))))
+      (if t
+          (begin (visit (plist-get t 'file)) (goto-char! (plist-get t 'pos)))
+          (message "The task is gone")))))
+
+(define-command "todo-detail-refresh" "Read the task again"
+  (lambda () (todo--detail-render! (current-buffer))))
+
+(define (todo--detail-setup!)
+  (desktop-skip! (current-buffer) 'render-blocks)
+  (desktop-skip! (current-buffer) 'footer-line-blocks)
+  (todo--detail-render! (current-buffer)))
+
+(mode-parent! "todo-detail-mode" "special-mode")
+(define-mode "todo-detail-mode" todo--detail-setup!)
+
+(mode-keys! "todo-detail-mode"
+  '(("w" "todo-detail-goto-chat")
+    ("e" "todo-detail-visit")
+    ("g" "todo-detail-refresh")
+    ("q" "quit-window")))
+
+(mode-doc! "todo-detail-mode"
+  "One task as its own page: state, the chat working it, notes and log. `w` goes to that chat, the one fixing the task, not the one that filed it. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+
 (define (todo-spawn-chat! group title)
   "(todo-spawn-chat! GROUP TITLE) — file TITLE as a task and hand it to a new chat in GROUP. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
   (let* ((g (or (group-resolve-id group) (group-ensure-record! group)))
@@ -989,11 +1103,12 @@
     'render (lambda (buf t) (plist-get t 'title))
     'match todo--match
     'footer (lambda (buf)
-              '(("RET" "open") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
+              '(("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
                 ("a" "assign") ("D" "deadline") ("P" "project") ("!" "priority")
                 ("c" "capture") ("v" "view") ("F" "project") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
-    'keys '(("RET" "todo-visit")
+    'keys '(("RET" "todo-show")
+            ("e" "todo-visit")
             ("t" "todo-accept")
             ("d" "todo-mark-done")
             ("x" "todo-mark-cancelled")
@@ -1011,7 +1126,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed. `>` cycles the order: urgency, deadline, created (newest first). `F` shows one project, picked from a list. `/` filters by words: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed. `>` cycles the order: urgency, deadline, created (newest first). `F` shows one project, picked from a list. `/` filters by words: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 (define-command "todo" "Show the shared todo list"
   (lambda ()

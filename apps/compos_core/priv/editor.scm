@@ -1224,8 +1224,10 @@
                        (cond ((null? xs) #f)
                              ((equal? name (car (cdr (car xs)))) (car (car xs)))
                              (else (loop (cdr xs)))))))
+           ;; the key goes last: a prompt that matches on its annotation
+           ;; reads the first fields as kinds, and the mode must stay first
            (if (and hit (pair? cand))
-             (list name (string-append "M-" hit "  " (car (cdr cand))))
+             (list name (string-append (car (cdr cand)) "  M-" hit))
              cand)))
        cands))
 

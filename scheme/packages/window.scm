@@ -2639,15 +2639,29 @@ bottom, as a window-rects row; #f past either end."
   '(("buffer-previous-pane" previous) ("buffer-next-pane" next)
     ("buffer-up" up) ("buffer-down" down)))
 
+;; The buffers a moving window carries, the shown one first, at most six:
+;; the page draws one trailing sheet for each one under the shown one.
+(define (window-swap--stack win)
+  (let* ((here (window-buffer win))
+         (rows (cons here (filter (lambda (b) (and (buffer-known? b) (not (equal? b here))))
+                                  (window-prev-buffers win)))))
+    (if (> (length rows) 6) (list-head rows 6) rows)))
+
 ;; Move this logical window into the directional neighbor's pane and follow it.
 ;; The neighboring logical window moves into this pane; both complete stacks stay whole.
 ;; (window-left/right/up/down — the window family)
 (define (window-swap! dir)
   "Move this logical window to the neighboring pane, carrying its complete stack and state."
-  (let ((nb (window-in-direction dir)))
+  (let ((nb (window-in-direction dir))
+        (win (active-window)))
     (if nb
-        (if (window-swap-id! (active-window) (car nb))
-            (chat-snap-to-input!)
+        (if (window-swap-id! win (car nb))
+            (begin
+              ;; the page sweeps the window over with its stack trailing,
+              ;; one sheet per buffer under the shown one, each with its name
+              (client-slide! (json-encode (list 'move (symbol->string dir) 'win win
+                                                'rows (window-swap--stack win))))
+              (chat-snap-to-input!))
             (message "Could not move window"))
         (message (string-append "No window " (symbol->string dir))))))
 

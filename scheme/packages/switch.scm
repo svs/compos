@@ -1094,7 +1094,9 @@ the next row down. STEP is kept for the callers."
                 (restore!))))
         on-confirm
         (lambda () (restore!) (sleep-woken! #f))
-        ibuffer-info "minibuffer")
+        ;; a modified buffer's annotation leads with *, so match three
+        ;; fields to keep its mode and group in reach
+        (if ibuffer-info 3 #t) "minibuffer")
       (minibuffer-tabs! (switch-tab-row tab))
       (set! *mb-tab-fn* (lambda (step)
                           (set! tab (switch-tab-step tab step))

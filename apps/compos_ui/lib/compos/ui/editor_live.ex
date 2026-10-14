@@ -1178,7 +1178,7 @@ defmodule Compos.Ui.EditorLive do
               <%= case {Map.get(@state.minibuffer, :tabs, []), Map.get(@state.minibuffer, :legend, [])} do %>
                 <% {[_ | _] = tabs, _} -> %>
                   <c-tabs class="c-tabs mb-tabs">
-                    <c-tab :for={t <- tabs} class={"c-tab \#{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}>{t.label}</c-tab>
+                    <c-tab :for={t <- tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}>{t.label}</c-tab>
                   </c-tabs>
                   <c-text class="mb-tabs-hint"><c-action-key class="transient-legend-key">← →</c-action-key> tab</c-text>
                 <% {_, [_ | _] = legend} -> %>

@@ -167,6 +167,99 @@
     ));
   }
 
+  // the moving window rides over the panes it crosses, lifted off the
+  // desk: it shrinks a little toward its top left while it travels, so
+  // the pile under it has room to show below it inside the frame
+  const CARRY = 0.88;
+  const carried = [
+    { scale: '1', transformOrigin: '0 0' },
+    { scale: `${CARRY}`, transformOrigin: '0 0', offset: 0.18 },
+    { scale: `${CARRY}`, transformOrigin: '0 0', offset: 0.72 },
+    { scale: '1', transformOrigin: '0 0' }
+  ];
+  function lift(w, total) {
+    track(w.animate(
+      [{ zIndex: 3 }, { zIndex: 3 }],
+      { duration: total, easing: 'linear' }
+    ));
+    track(w.animate(carried, { duration: total, easing: 'ease-in-out' }));
+    track(w.animate(
+      [
+        { boxShadow: '0 0 0 rgba(0,0,0,0)' },
+        { boxShadow: '0 14px 34px rgba(0,0,0,.35)', offset: 0.2 },
+        { boxShadow: '0 14px 34px rgba(0,0,0,.35)', offset: 0.7 },
+        { boxShadow: '0 0 0 rgba(0,0,0,0)' }
+      ],
+      { duration: total, easing: 'ease-out' }
+    ));
+  }
+
+  // The buffers under a moving window, as the editor sent them with the
+  // move: one sheet of its paper for each, nudged out behind its travel
+  // and below it, its name in the strip that shows under the sheet above,
+  // so the window reads as the top of its pile. Each sheet starts a
+  // little later than the one above it, so the pile sweeps across with
+  // its tail lagging, then folds back under the window where it lands.
+  const BAND = 20;
+  // as many sheets as the room the carry frees under the window shows
+  const PILE = 4;
+  function tail(s, p, from) {
+    const box = s.root.getBoundingClientRect();
+    const r = p.rect;
+    const dx = from.left - r.left;
+    const dy = from.top - r.top;
+    const [sx] = toward(from, r) || [0, 0];
+    const c = getComputedStyle(p.w);
+    const head = p.w.querySelector('.dash-persistent');
+    const title = head && head.querySelector('.dseg-chat-title .dseg-v');
+    const look = lookOf(head, title);
+    const indent = title ? Math.max(10, title.getBoundingClientRect().left - r.left) : 14;
+    const names = s.move && String(s.move.win) === p.id ? s.move.rows.slice(1, 1 + PILE) : [];
+    const ms = s.ms * 1.25;
+    const lag = s.ms * 0.12;
+    const total = ms + names.length * lag;
+    lift(p.w, total);
+    if (!names.length) return;
+    for (let k = names.length; k >= 1; k--) {
+      const sheet = document.createElement('div');
+      sheet.className = 'motion-ghost motion-tail';
+      sheet.setAttribute('aria-hidden', 'true');
+      Object.assign(sheet.style, {
+        position: 'absolute', pointerEvents: 'none', zIndex: '2',
+        left: `${r.left - box.left - s.root.clientLeft}px`,
+        top: `${r.top - box.top - s.root.clientTop}px`,
+        width: `${r.width}px`, height: `${r.height}px`,
+        background: c.backgroundColor, border: `1px solid ${c.borderTopColor}`,
+        borderRadius: c.borderRadius, boxSizing: 'border-box',
+        boxShadow: '0 8px 22px rgba(0, 0, 0, .28)', transformOrigin: '0 0'
+      });
+      const label = document.createElement('div');
+      label.className = 'motion-tail-name';
+      const name = names[k - 1];
+      label.textContent = name.startsWith('/') ? name.split('/').filter(Boolean).pop() : name;
+      Object.assign(label.style, { height: `${BAND}px`, paddingLeft: `${indent}px` },
+        look ? { ...look.name, color: look.ink } : {});
+      sheet.appendChild(label);
+      s.root.appendChild(sheet);
+      sheet._motion = { root: s.root, ghost: sheet, offsets: [] };
+      ghosts.push(sheet);
+      const nx = -sx * 10 * k;
+      const ny = BAND * k;
+      track(sheet.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)`, opacity: 0 },
+          { transform: `translate(${dx + nx}px, ${dy + ny}px)`, opacity: 1, offset: 0.12 },
+          { transform: `translate(${nx}px, ${ny}px)`, opacity: 1, offset: 0.78 },
+          { transform: 'translate(0px, 0px)', opacity: 0 }
+        ],
+        { duration: ms, delay: k * lag, easing: EASE, fill: 'backwards' }
+      ), sheet);
+      // it shrinks with the window, about the same corner, so it stays
+      // under it
+      track(sheet.animate(carried, { duration: total, easing: 'ease-in-out' }));
+    }
+  }
+
   // the old content of a pane, at its old box, goes out along STEP; a
   // STILL one stays under the paper that lands on it
   function leave(s, o, step, still, full) {
@@ -219,6 +312,9 @@
         return;
       }
       const moved = reshape(p.w, o.rect, p.rect, s.ms);
+      // the selected window went to another pane with its stack: it
+      // sweeps there on top, and the stack trails behind it
+      if (moved && !o.ghost && p.w.classList.contains('active')) tail(s, p, o.rect);
       if (!o.ghost) return;
       // a new buffer: it comes from the pane that showed it, or the old
       // one goes to the pane that shows it now
@@ -259,12 +355,16 @@
     if (from.tagName !== 'C-WINDOWS') return;
     const token = to.getAttribute('data-slide');
     const fresh = token && token !== from.getAttribute('data-slide');
-    const walk = fresh && token.startsWith('{') ? parseWalk(token) : null;
+    // a JSON token is a walk of a stack ('pane') or a window that moves
+    // with its stack ('move')
+    const sent = fresh && token.startsWith('{') ? parseWalk(token) : null;
+    const walk = sent && sent.pane ? sent : null;
+    const move = sent && sent.move ? sent : null;
     if (walk) pending = walk;
     const was = from.getAttribute('data-panes');
     const next = to.getAttribute('data-panes');
     if (!was || !next || was === next) return;
-    if (fresh && !walk) return;
+    if (fresh && !walk && !move) return;
     if (from.querySelector('.listing-peek')) return;
     const ms = duration();
     const prev = parse(was);
@@ -285,7 +385,7 @@
       });
     });
     finish();
-    snap = { root: from, old, after, ms, walk };
+    snap = { root: from, old, after, ms, walk, move };
   }
 
   // after each patch; a render during the motion removes the copies,

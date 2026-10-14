@@ -197,7 +197,7 @@
     ("chat-mode.scm" "*llm-config-history*")
     ("chat-mode.scm" "*llm-bundles*")
     ("chat-mode.scm" "*llm-connector-models*")
-    ("editor.scm" "*minibuffer-history*")
+    ("minibuffer.scm" "*minibuffer-history*")
     ("groups.scm" "*group-records*")
     ("groups.scm" "*group-next-id*")
     ("groups.scm" "*group-graveyard*")

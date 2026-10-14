@@ -2081,7 +2081,7 @@ c-action-key {
   font-weight: 500; color: var(--dim-fg, #8a857a);
 }
 .mb-panel:not(.palette) .mb-input { font-size: 1em; }
-/* A plain completion prompt IS the minibuffer (editor.scm,
+/* A plain completion prompt IS the minibuffer (minibuffer.scm,
    minibuffer-read*): the bottom rows of the frame, in the flow.
    It takes its height from the window tree, which shrinks by
    exactly that much and keeps every pane readable — it covers

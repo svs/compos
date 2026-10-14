@@ -47,10 +47,10 @@
 (define *todo-states* '("inbox" "todo" "doing" "waiting" "review" "done" "cancelled"))
 (define *todo-closed* '("done" "cancelled"))
 ;; the #+ lines, in the order they are written
-(define *todo-fields* '(id state assignee priority source parent depends created by))
+(define *todo-fields* '(id state assignee priority source parent depends created by group))
 ;; what todo-update may change
 (define *todo-settable*
-  '(title state project assignee priority deadline scheduled tags source parent depends notes))
+  '(title state project assignee priority deadline scheduled tags source parent depends notes group))
 
 ;;; --- small helpers -----------------------------------------------------------
 
@@ -449,8 +449,23 @@
 
 (effects! '(write))
 
+;; the group that files a task: the agent's chat, else the buffer it runs in,
+;; else the group in front. Assigning starts the chat there, so the task gets
+;; that group's config.
+(define (todo--origin-group who)
+  (let* ((slug (and (string? who) (string-prefix? "agent:" who) (substring who 6 (string-length who))))
+         (info (and slug (agent-info slug)))
+         (chat (and info (plist-get info 'buffer))))
+    (or (and chat (group-resolve-id (buffer-group chat)))
+        (group-resolve-id (buffer-group (current-buffer)))
+        (group-here))))
+
+;; the group to assign a task in: the one that filed it, while it lives
+(define (todo--home-group t)
+  (group-resolve-id (plist-get t 'group)))
+
 (define (todo-create title &optional props)
-  "(todo-create TITLE [PROPS]) — file a task; return its id. PROPS: project, state (default inbox), assignee, priority, deadline, scheduled, tags, source, parent, depends, notes, by. A source already filed is not filed twice: that task's id comes back."
+  "(todo-create TITLE [PROPS]) — file a task; return its id. PROPS: project, state (default inbox), assignee, priority, deadline, scheduled, tags, source, parent, depends, notes, by, group (default: the group of the chat or buffer that files it; assigning starts the chat there). A source already filed is not filed twice: that task's id comes back."
   (let* ((props (or props '()))
          (src (plist-get props 'source))
          (dup (and (not (todo--blank? src))
@@ -458,6 +473,7 @@
     (if dup
         (plist-get dup 'id)
         (let* ((who (or (plist-get props 'by) todo-user))
+               (group (or (group-resolve-id (plist-get props 'group)) (todo--origin-group who)))
                (id (todo--new-id))
                (t (list 'id id
                         'title (string-join (todo--words (string-join (split-lines title) " ")) " ")
@@ -472,6 +488,7 @@
                         'depends (todo--ids (plist-get props 'depends))
                         'created (todo--now)
                         'by who
+                        'group group
                         'notes (or (plist-get props 'notes) "")
                         'extra '()
                         'log (list (todo--log-line who "created")))))
@@ -600,7 +617,8 @@
         (list "working" '(state "doing"))
         (list "mine" 'mine)
         (list "overdue" '(overdue #t))
-        (list "closed" '(state ("done" "cancelled")))))
+        (list "closed" '(state ("done" "cancelled")))
+        (list "all" '(all #t))))
 
 (define (todo--view buf) (or (buffer-local buf 'todo-view) "open"))
 
@@ -641,7 +659,65 @@
          (reverse (map cadr (sort (map (lambda (t) (list (or (plist-get t 'created) "") t)) ts)))))
         (else ts)))
 
-(define (todo--rows buf) (list-keep buf (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf))))
+(define (todo--rows buf)
+  (list-keep buf (todo--sections buf (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf)))))
+
+;;; `<` cycles what a section is; a section heading is a row of kind sep
+(define *todo-groupings* '("none" "group" "project" "status"))
+
+(define (todo--grouping buf) (or (buffer-local buf 'todo-grouping) "none"))
+
+(define (todo--sep? t) (equal? (plist-get t 'kind) "sep"))
+
+(define (todo--section-of buf t)
+  (let ((g (todo--grouping buf)))
+    (cond ((equal? g "group") (or (group-name (plist-get t 'group)) "no group"))
+          ((equal? g "project") (plist-get t 'project))
+          (else (plist-get t 'state)))))
+
+(define (todo--sections buf ts)
+  ;; sections come in the order of their first task, so the most urgent leads
+  (if (equal? (todo--grouping buf) "none")
+      ts
+      (let* ((names (fold (lambda (acc t) (let ((n (todo--section-of buf t))) (if (member n acc) acc (append acc (list n)))))
+                          '() ts)))
+        (apply append
+          (map (lambda (n)
+                 (cons (list 'kind "sep" 'id (string-append "sep:" n) 'title n)
+                       (filter (lambda (t) (equal? (todo--section-of buf t) n)) ts)))
+               names)))))
+
+(define (todo--regroup! buf)
+  (let* ((g (todo--grouping buf))
+         (next (nth (modulo (+ 1 (todo--rank g *todo-groupings*)) (length *todo-groupings*)) *todo-groupings*)))
+    (buffer-set-local! buf 'todo-grouping next)
+    (list-refresh! buf)
+    (message (string-append "Todos grouped by " next))))
+
+;;; `/` picks a group, a project or a status from tabs
+(define (todo--filter buf t f)
+  (let ((k (car f)) (v (car (cdr f))))
+    (cond ((equal? k "group") (equal? (plist-get t 'group) v))
+          ((equal? k "project") (equal? (plist-get t 'project) v))
+          (else #t))))
+
+(define *todo-facets*
+  (list (list 'label "Group" 'kind "group"
+              'options (lambda (buf)
+                         (let* ((ids (fold (lambda (acc t) (let ((g (plist-get t 'group)))
+                                                             (if (or (not g) (member g acc)) acc (cons g acc))))
+                                           (let ((here (group-here))) (if here (list here) '()))
+                                           (todo-list '(all #t))))
+                                (live (filter group-name ids)))
+                           (sort (map (lambda (g) (list (group-name g) g)) live)
+                                 (lambda (a b) (string<? (car a) (car b)))))))
+        (list 'label "Project" 'kind "project"
+              'options (lambda (buf) (map (lambda (p) (list p p)) (todo-projects))))
+        (list 'label "Status" 'kind "status"
+              'options (lambda (buf) (map (lambda (v) (list (car v) (car v)))
+                                          (remove (lambda (v) (equal? (car v) "all")) *todo-views*)))
+              'get (lambda (buf) (let ((v (todo--view buf))) (if (equal? v "all") #f v)))
+              'set (lambda (buf v) (buffer-set-local! buf 'todo-view (or v "all"))))))
 
 (define (todo--due t)
   (let ((d (plist-get t 'deadline)))
@@ -715,12 +791,14 @@
         (list "DUE" 12)))
 
 (define (todo--cells buf t)
+  (if (todo--sep? t)
+      (list "" "" (list (plist-get t 'title) "list-section-name") "" "" "")
   (list (todo--pill t)
         (list (or (plist-get t 'priority) "") "org-priority")
         (list (plist-get t 'title) "todo-title")
         (list (plist-get t 'project) "todo-project")
         (list (todo--who-status t) "org-meta")
-        (todo--when t)))
+        (todo--when t))))
 
 (define (todo--row-columns buf)
   ;; the who column takes the room the tags leave, so a chat's id and
@@ -733,13 +811,15 @@
 (define (todo--row-cells buf t)
   ;; a card: a state dot and the title, then a state pill, the project,
   ;; the date and the tags, with a blank line between cards
+  (if (todo--sep? t)
+      (list (list "" (list (plist-get t 'title) "list-section-name")))
   (list (list (list "●" (todo--state-face t)) (list (plist-get t 'title) "todo-title"))
         (list "" (todo--pill t) (list (plist-get t 'project) "todo-project")
               (todo--when t) (list (todo--tag-text t) "todo-tags")
               (list (todo--who-status t) "org-meta"))
-        (list "")))
+        (list ""))))
 
-(define (todo--at) (list-current *todo-buffer*))
+(define (todo--at) (let ((t (list-current *todo-buffer*))) (and t (not (todo--sep? t)) t)))
 
 (define (todo--keep-place! f)
   "run F, which may change the task at point, and redraw. A task whose state changes moves in the urgency order; point stays where the reader was, on the task that followed it, so working down the inbox does not lose the place"
@@ -918,6 +998,7 @@
                               (pair "Scheduled" (plist-get t 'scheduled))
                               (pair "Tags" (let ((tags (plist-get t 'tags))) (if (pair? tags) (string-join tags " ") "")))
                               (pair "Filed by" (plist-get t 'by))
+                              (pair "Group" (group-name (plist-get t 'group)))
                               (pair "Source" (plist-get t 'source))
                               (pair "Created" (plist-get t 'created))
                               (pair "Id" (plist-get t 'id)))))))))
@@ -969,12 +1050,12 @@
             ((plist-get t 'assignee) (message "The task's chat is not live"))
             (else (message "The task is not assigned to a chat"))))))
 
-(define-command "todo-detail-agent" "Go to the agent working this task; start one in the group you are in when none is live"
+(define-command "todo-detail-agent" "Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live"
   (lambda ()
     (let* ((buf (current-buffer))
            (t (todo--detail-task buf))
            (chat (and t (todo--chat-of t)))
-           (here (group-here)))
+           (here (or (and t (todo--home-group t)) (group-here))))
       (define (start! g)
         (let ((new (todo-assign-chat! (plist-get t 'id) g)))
           (todo--detail-render! buf)
@@ -1017,7 +1098,7 @@
   (let* ((g (or (group-resolve-id group) (group-ensure-record! group)))
          (name (group-name g))
          (id (todo-create title (list 'project (if (member name (todo-projects)) name todo-default-project)
-                                      'state "todo")))
+                                      'state "todo" 'group g)))
          (first? (not (group-primary-chat g)))
          (chat (todo-assign-chat! id g)))
     ;; a group made here has no chat yet: this one becomes its chat pane
@@ -1026,11 +1107,11 @@
 
 (public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
 
-(define-command "todo-assign" "Hand the task to a new chat in the group you are in and show it in the other window; C-u asks for the group"
+(define-command "todo-assign" "Hand the task to a new chat in the group that filed it, else the group you are in, and show it in the other window; C-u asks for the group"
   (lambda ()
-    (let ((t (todo--at))
-          (ask? (and (current-prefix-arg) #t))
-          (here (group-here)))
+    (let* ((t (todo--at))
+           (ask? (and (current-prefix-arg) #t))
+           (here (or (and t (todo--home-group t)) (group-here))))
       (define (assign! g)
         (let ((chat #f))
           (todo--keep-place! (lambda () (set! chat (todo-assign-chat! (plist-get t 'id) g))))
@@ -1093,13 +1174,10 @@
 
 (define-command "todo-filter-project" "Show one project's tasks: pick it from the list; all shows every project"
   (lambda ()
-    (let* ((buf *todo-buffer*)
-           (rest (filter (lambda (w) (not (or (equal? w "") (string-prefix? "p:" w))))
-                         (string-split (list-query buf) " "))))
+    (let ((buf *todo-buffer*))
       (completing-read "Project: " (cons "all" (todo-projects))
         (lambda (p)
-          (list-set-query! buf (string-join (if (member p '("" "all")) rest (append rest (list (string-append "p:" p)))) " "))
-          (list-refresh! buf))
+          (list-facet-set! buf (list-facet buf "project") (if (member p '("" "all")) #f p)))
         'default "all"))))
 
 (define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
@@ -1132,10 +1210,15 @@
     'rows todo--rows
     'render (lambda (buf t) (plist-get t 'title))
     'match todo--match
+    'filter todo--filter
+    'facets *todo-facets*
+    'regroup todo--regroup!
+    'separator? (lambda (buf t) (todo--sep? t))
+    'section? (lambda (buf t) (todo--sep? t))
     'footer (lambda (buf)
               '(("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
                 ("a" "assign") ("D" "deadline") ("P" "project") ("!" "priority")
-                ("c" "capture") ("v" "view") ("F" "project") (">" "sort") ("g" "refresh") ("q" "quit")))
+                ("c" "capture") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     'keys '(("RET" "todo-show")
             ("e" "todo-visit")
@@ -1156,13 +1239,15 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed. `>` cycles the order: urgency, deadline, created (newest first). `F` shows one project, picked from a list. `/` filters by words: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed, all. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 (define-command "todo" "Show the shared todo list"
   (lambda ()
     (buffer-create *todo-buffer*)
     (switch-to-buffer! *todo-buffer*)
     (set-mode! "todo-mode")
+    ;; it opens on the group you are in; / picks another one, or All
+    (list-facet-set! *todo-buffer* (list-facet *todo-buffer* "group") (group-here))
     *todo-buffer*))
 
 ;;; --- the prompt --------------------------------------------------------------

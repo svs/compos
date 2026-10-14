@@ -963,7 +963,10 @@
   (string-join (map (lambda (f)
                       (if (equal? (car f) "match")
                           (string-append "/" (car (cdr f)))
-                          (string-append (car f) ":" (car (cdr f)))))
+                          (if (list-facet buf (car f))
+                              (string-append (plist-get (list-facet buf (car f)) 'label) ": "
+                                             (list-facet-display buf (car f) (car (cdr f))))
+                              (string-append (car f) ":" (car (cdr f))))))
                     (reverse (list-filters buf)))
                " "))
 
@@ -1587,9 +1590,7 @@
 ;; stacking a second one on top of it. Every keystroke narrows, every
 ;; DEL widens, and an empty input means no query at all. C-g closes
 ;; the entry while keeping its query; the filter-pop command removes it.
-(define-command "list-filter"
-  "Narrow this list to the rows that match what you type"
-  (lambda ()
+(define (list-filter-live!)
     (let* ((buf (current-buffer))
            (input (list-query buf))
            (delay (or (list-opt buf 'filter-delay-ms) 0))
@@ -1628,7 +1629,76 @@
               (list 'cancel done)
               (list 'style "filter")))
       (set! *mb-list-flush* flush)
-      (unless (equal? input "") (minibuffer-input! input)))))
+      (unless (equal? input "") (minibuffer-input! input))))
+
+;;; Facets. A list may declare 'facets: a list of plists, each one a tab of
+;;; the filter prompt. 'label names the tab, 'kind the filter it sets,
+;;; 'options (buf) gives its choices as (DISPLAY VALUE). Every tab leads
+;;; with All, the value #f, which drops the facet. A facet that is not a
+;;; filter brings 'get (buf) and 'set (buf value) of its own.
+(define (list-facets buf) (or (list-opt buf 'facets) '()))
+
+(define (list-facet buf kind)
+  (let ((hit (filter (lambda (f) (equal? (plist-get f 'kind) kind)) (list-facets buf))))
+    (and (pair? hit) (car hit))))
+
+(define (list-facet-options buf facet)
+  (cons (list "All" #f) ((plist-get facet 'options) buf)))
+
+(define (list-facet-value buf facet)
+  (let ((get (plist-get facet 'get)))
+    (if get
+        (get buf)
+        (let ((f (assoc (plist-get facet 'kind) (list-filters buf))))
+          (and f (car (cdr f)))))))
+
+(define (list-facet-set! buf facet value)
+  "set FACET of list BUF to VALUE; #f drops it"
+  (let ((set (plist-get facet 'set))
+        (kind (plist-get facet 'kind)))
+    (if set
+        (begin (set buf value) (list-refresh! buf) (list-goto-first-entry buf))
+        (list-set-filters! buf (append (if value (list (list kind value)) '())
+                                       (remove (lambda (f) (equal? (car f) kind)) (list-filters buf)))))))
+
+(define (list-facet-display buf kind value)
+  "the DISPLAY of VALUE among the options of facet KIND, else VALUE"
+  (let* ((facet (list-facet buf kind))
+         (hit (and facet (filter (lambda (o) (equal? (cadr o) value)) (list-facet-options buf facet)))))
+    (if (pair? hit) (car (car hit)) value)))
+
+(define (list-facet-prompt! buf)
+  (let* ((facets (list-facets buf))
+         (tab 0)
+         (facet (lambda () (nth tab facets)))
+         (cands (lambda ()
+                  (let ((now (list-facet-value buf (facet))))
+                    (map (lambda (o) (list (car o) (if (equal? (cadr o) now) "current" "")))
+                         (list-facet-options buf (facet))))))
+         (row (lambda () (let loop ((fs facets) (i 0) (out '()))
+                           (if (null? fs) (reverse out)
+                               (loop (cdr fs) (+ i 1) (cons (list (plist-get (car fs) 'label) (= i tab)) out))))))
+         (on-confirm (lambda (label)
+                       (let ((hit (assoc label (list-facet-options buf (facet)))))
+                         (cond (hit (list-facet-set! buf (facet) (cadr hit)))
+                               ((not (equal? (string-trim label) ""))
+                                (list-set-query! buf (string-trim label))
+                                (list-goto-first-entry buf)))))))
+    (minibuffer-read-preview *list-filter-prompt* (cands)
+      (lambda (label) #f) on-confirm (lambda () #f) #f "minibuffer")
+    (minibuffer-tabs! (row))
+    (set! *mb-tab-fn* (lambda (step)
+                        (set! tab (modulo (+ tab step) (length facets)))
+                        (minibuffer-tabs! (row))
+                        (minibuffer-preview-candidates! (cands) on-confirm)
+                        #t))))
+
+(define-command "list-filter"
+  "Narrow this list: pick a facet from the tabs when the list has them, else the rows that match what you type"
+  (lambda ()
+    (if (pair? (list-facets (current-buffer)))
+        (list-facet-prompt! (current-buffer))
+        (list-filter-live!))))
 
 (define (list-cycle-declared! option absent)
   (let* ((buf (current-buffer))

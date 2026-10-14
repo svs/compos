@@ -24,8 +24,7 @@ defmodule Compos.Ui.ComposML do
   @recruiting_elements ~w(applications application candidate
     application-state application-stars application-verdict application-role
     application-applied application-meta application-link application-actions
-    application-event assessment letter
-    work-experiences work-experience job-context)
+    application-event assessment letter)
 
   def domain_elements, do: @mail_elements ++ @recruiting_elements ++ ~w(morg-agenda agenda-day agenda-entry directory file filename size modified permissions vcs-status icon size-bar buffers buffer buffer-list buffer-entry chat-list chat-entry buffer-name buffer-mode buffer-size buffer-state buffer-icon buffer-group buffer-activity chat-name chat-state chat-tokens chat-model symbol-list symbol-entry symbol-name symbol-kind symbol-location agenda-title agenda-time agenda-deadline agenda-scheduled agenda-task-state agenda-tags agenda-source)
 

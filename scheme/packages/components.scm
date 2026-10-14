@@ -516,10 +516,10 @@
 
 (defcomponent 'ui/callout
   "A box set apart from the page, with a small label: TONE note for an aside, paper for a letter."
-  '((label string optional) (tone string optional) (body blocks optional))
+  '((label string optional) (tone string optional) (body blocks optional) (tag string optional))
   '(label "Internal note" tone "note" body ((tag "c-group" class "c-prose" text "Not sent.")))
   (lambda (p)
-    (list 'tag "c-group"
+    (list 'tag (component--get p 'tag "c-group")
           'class (string-append "c-callout c-callout-" (component--get p 'tone "note"))
           'children (append (if (component--has? p 'label)
                                 (list (list 'tag "c-group" 'class "c-callout-label" 'text (component--get p 'label)))

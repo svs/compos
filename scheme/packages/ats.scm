@@ -217,6 +217,26 @@
                   (list 'label "via" 'width 9 'field 'channel 'face "dim")
                   (list 'label "subject" 'width #f 'field 'subject))))))
 
+;; the ATS's own words for what its pages hold. A page's sheet names the component
+;; a record is ("component": "ats/work-experience"); each is a core component drawn
+;; under the ATS's element, so the page source reads <work-experience>, not <c-card>
+(define (ats-component-as! name base element doc)
+  (define-element! element)
+  (let ((e (component-entry base)))
+    (defcomponent name doc (nth 1 e) (nth 2 e)
+      (lambda (p) (plist-put (component base p) 'tag element)))))
+
+(ats-component-as! 'ats/work-experiences 'ui/group "work-experiences" "A candidate's work history: its heading and one work-experience a job.")
+(ats-component-as! 'ats/work-experience 'ui/card "work-experience" "One job in a work history: the employer's logo, name, tier and tags head it; the role, dates and bullets are its body.")
+(ats-component-as! 'ats/applications 'ui/group "applications" "A candidate's applications, one application a job.")
+(ats-component-as! 'ats/application 'ui/card "application" "One application: the job at the company, its state, fit and meeting; it reads its assessment and history when it opens.")
+(ats-component-as! 'ats/assessment 'ui/callout "assessment" "A take on a candidate for a job, quick or deep: its verdict as the label, the reasoning as the body.")
+(ats-component-as! 'ats/job-context 'ui/group "job-context" "The job a candidate page is opened against: the job, the assessment and the application.")
+
+(define-style! 'ats-elements "
+:where(work-experiences, work-experience, applications, application, assessment, job-context) { display: block; }
+")
+
 (define-site-app *ats-spec*)
 
 (domain! 'web)

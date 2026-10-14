@@ -52,7 +52,7 @@
 .semantic-document-section > *, .semantic-document-section mail-attachment { display: block; }
 .semantic-document pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 
-:where(c-message-body, c-question, c-answers, c-hint) { display: block; }
+:where(c-message-body, c-question, c-answers, c-hint, c-header) { display: block; }
 :where(c-message-body, c-question, c-answers, c-hint)[hidden] { display: none; }
 
 :where(c-row, c-card, morg-agenda, agenda-day, agenda-entry) { display: block; }

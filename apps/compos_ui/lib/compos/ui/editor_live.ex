@@ -2627,7 +2627,8 @@ defmodule Compos.Ui.EditorLive do
     tag = pget(pl, "tag") || "div"
 
     %{
-      tag: if(tag in @block_tags, do: tag, else: "div"),
+      # a package's own elements (define-element!) draw as themselves too
+      tag: if(tag in @block_tags or MapSet.member?(Compos.Core.SchemeAPI.block_elements(), tag), do: tag, else: "div"),
       direct: pget(pl, "layout") == "columns",
       fields: for([a, b, field] <- pget(pl, "fields") || [], is_integer(a) and is_integer(b) and a < b, do: {a, b, block_view(field)}),
       class: pget(pl, "class") || "",

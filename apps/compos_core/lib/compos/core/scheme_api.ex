@@ -3222,9 +3222,30 @@ defmodule Compos.Core.SchemeAPI do
         fn [handler] ->
           Roots.put({:block_click_handler}, handler)
           :void
+        end,
+      # a package's own words for what a block view draws: <work-experience>,
+      # <application>. The renderer draws a tag it does not know as a div, so
+      # a package names its elements here and its view keeps them.
+      {"define-element!",
+       "(define-element! NAME) — let block views draw NAME as an element of its own, a package's semantic tag such as work-experience."} =>
+        fn [name] ->
+          if is_binary(name) and Regex.match?(~r/\A[a-z][a-z0-9]*(-[a-z0-9]+)*\z/, name) and
+               name not in ~w(script style iframe object embed form input textarea select link meta base frame frameset) do
+            :persistent_term.put(
+              {:compos, :block_elements},
+              MapSet.put(block_elements(), name)
+            )
+
+            true
+          else
+            false
+          end
         end
     }
   end
+
+  @doc "The element names packages registered with define-element!."
+  def block_elements, do: :persistent_term.get({:compos, :block_elements}, MapSet.new())
 
   @doc """
   Run the registered block click handler. The UI calls this: it holds a

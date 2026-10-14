@@ -231,7 +231,7 @@
          (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'anchor-name) (plist-get (car bs) 'anchor-name)) (else (find (cdr bs)))))))
     (if (null? real)
         blocks
-        (cons (site-app-claim (component 'ui/group (list 'body (site-app-unanchored head)))
+        (cons (site-app-claim (component 'ui/group (list 'tag "c-header" 'body (site-app-unanchored head)))
                               (apply min (map (lambda (x) (car (plist-get x 'lines))) real))
                               (apply max (map (lambda (x) (cadr (plist-get x 'lines))) real))
                               name)
@@ -697,14 +697,24 @@
           (else (loop (cdr ts))))))
 
 (define (site-app-toned-segs text base tones)
+  ;; the words a tone names stand out; every run of plain words between them is
+  ;; one seg, so a paragraph draws as one text node and not a span a word
   (let loop ((words (string-split text " ")) (acc '()) (first #t))
     (if (null? words)
         (reverse acc)
-        (let ((acc (if first acc (cons (list base " ") acc))))
+        (let* ((tone (site-app-tone-class tones (car words)))
+               (class (if tone (string-append "c-" tone) base))
+               (word (if first (car words) (string-append " " (car words)))))
           (loop (cdr words)
-                (cons (list (let ((tone (site-app-tone-class tones (car words)))) (if tone (string-append "c-" tone) base))
-                            (car words))
-                      acc)
+                (cond ((and (pair? acc) (equal? (car (car acc)) class) (equal? class base))
+                       (cons (list class (string-append (cadr (car acc)) word)) (cdr acc)))
+                      ((and (not first) (not (equal? class base)))
+                       ;; the space before a toned word stays plain
+                       (cons (list class (car words))
+                             (if (and (pair? acc) (equal? (car (car acc)) base))
+                                 (cons (list base (string-append (cadr (car acc)) " ")) (cdr acc))
+                                 (cons (list base " ") acc))))
+                      (else (cons (list class word) acc)))
                 #f)))))
 
 (define (site-app-one-line text) (string-join (string-split (or text "") "\n") " "))
@@ -846,7 +856,8 @@
                               (let ((ls (and (pair? (car xs)) (plist-get (car xs) 'lines))))
                                 (span (cdr xs) (if ls (max m (cadr ls)) m)))))))
              (loop (list-tail (cdr bs) (length body))
-                   (cons (site-app-claim (component 'ui/group (list 'body (if flat? inner (site-app-summary inner name 2))))
+                   (cons (site-app-claim (component (or (plist-get head 'sa-kind) 'ui/group)
+                                                    (list 'body (if flat? inner (site-app-summary inner name 2))))
                                          first last (and flat? name))
                          acc))))
           (else (loop (cdr bs) (cons (car bs) acc))))))
@@ -955,6 +966,13 @@
 
 ;; a card's head as the sheet dressed it: the logo (or a letter tile), a grade
 ;; badge in its tone, and tags
+;; the component a record is drawn with: the one the sheet names when a package
+;; registered it (ats/work-experience), else DEFAULT
+(define (site-app-node-kind node default)
+  (let* ((c (plist-get node 'component))
+         (k (and (string? c) (not (equal? c "")) (string->symbol c))))
+    (if (and k (component-entry k)) k default)))
+
 (define (site-app-card-face node)
   (let ((has (lambda (k) (let ((v (plist-get node k))) (and v (not (equal? v "")) v)))))
     (append (if (has 'logo) (list 'icon (has 'logo)) (if (has 'letter) (list 'letter (has 'letter)) '()))
@@ -992,7 +1010,8 @@
                              (fold (list title open?))
                              (body (if flat? body
                                        (site-app-with-keys (site-app-summary body title 1) (site-app-card-map-for (plist-get node 'class)) fold node)))
-                             (card (component 'ui/card (append (list 'title title 'open? open? 'body body)
+                             (card (component (site-app-node-kind node 'ui/card)
+                                              (append (list 'title title 'open? open? 'body body)
                                                             (site-app-card-face node)
                                                             ;; the card's own keys, and the record they act on
                                                             (if flat? (list 'anchor-keymap (site-app-card-map-for (plist-get node 'class))
@@ -1016,7 +1035,7 @@
                     (body (if flat? body (site-app-summary body (string-append "Email · " lead) 1))))
                (loop (cdr rest) 'group
                      (if (and (null? body) (not label)) acc
-                         (cons (site-app-claim (component 'ui/callout
+                         (cons (site-app-claim (component (site-app-node-kind node 'ui/callout)
                                                  (append (list 'tone (if letter? "paper" "note") 'body body)
                                                          (if label (list 'label label) '())))
                                                first (max first (b 'count #f #f))
@@ -1052,7 +1071,11 @@
                     (n (b 'line (if count (string-append text " " count) text) href))
                     (block (component 'ui/section (append (list 'title text)
                                                           (if count (list 'count (string->number count)) '())))))
-               (loop (if count (cddr rest) (cdr rest)) 'heading (cons (site-app-claim block n n text) acc))))
+               (loop (if count (cddr rest) (cdr rest)) 'heading
+                     (cons (append (site-app-claim block n n text)
+                                   ;; the component the section it heads is drawn as, when the sheet names one
+                                   (list 'sa-kind (site-app-node-kind node 'ui/group)))
+                           acc))))
             ((and (site-app-short-field? node) next (site-app-short-field? next))
              (let* ((run (site-app-take-while site-app-short-field? rest))
                     (texts (map (lambda (x) (let ((t (string-trim (plist-get x 'text))))

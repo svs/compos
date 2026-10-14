@@ -182,6 +182,15 @@
                 (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
                 (kin (window-display! (lambda () (display-buffer-in-window! kin name))))
                 (kept (window-display! (lambda () (display-buffer-in-window! kept name))))
+                ;; the list's own pane is the only work pane: the chain would end
+                ;; on same-window and cover the list, so the detail opens beside it
+                ((not (find (lambda (w) (and (not (equal? w me)) (not (equal? (window-buffer w) o))))
+                            (display--work-windows)))
+                 (let* ((ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me))
+                        (nw (split-window-in! ow 'h)))
+                   (if nw
+                       (window-display! (lambda () (display-buffer-in-window! nw name)))
+                       (display-buffer name '(category detail inhibit-same-window #t)))))
                 (else
                   (or (display-buffer name '(category detail inhibit-same-window #t))
                       ;; nowhere to go: one window, or a target layout that

@@ -102,21 +102,17 @@ defmodule Compos.SpotifyTest do
     assert url =~ "open.spotify.com"
   end
 
-  test "search sends the query to the player's own page and raises the tab" do
+  test "search reads the results into the app's Search section" do
     stub_socket()
     eval!(~s[(run-command "spotify-search")])
     eval!(~s[(minibuffer-input! "miles davis")])
     eval!("(minibuffer-confirm!)")
 
-    assert_receive {:frame, %{"op" => "tabs", "id" => id}}
-    answer_tabs(id)
+    # the section's path follows the query, one encoded path segment
+    assert eval!(~s[(spotify--section-path (site-app-page (site-app-spec 'spotify) 'results))]) ==
+             "/search/miles%20davis"
 
-    assert_receive {:frame, %{"op" => "eval", "tab" => 9, "code" => code}}
-    assert code =~ "open.spotify.com/search/"
-    # the query travels as JSON, so a quote in a song title cannot break out
-    assert code =~ ~s("miles davis")
-
-    assert_receive {:frame, %{"op" => "activate", "tab" => 9}}
+    assert eval!(~s[(buffer-exists? "*spotify-results*")])
   end
 
   # The tool is what the assistant holds. It waits for the page, so each test

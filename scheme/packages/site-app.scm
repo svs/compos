@@ -92,12 +92,15 @@
       (equal? (plist-get tab 'active) "yes")))
 
 (define (site-app-composml-head buf head)
-  ;; the site's navbar, then the section's status tabs, each a row of tabs
+  ;; the site's navbar, then the section's status tabs, each a row of tabs.
+  ;; An app's 'list-head (buf) puts blocks of its own above them
   (let* ((spec (buffer-local buf 'site-app-spec))
          (current (buffer-local buf 'site-app-page))
          (filters (or (buffer-local buf 'site-app-filters) '()))
-         (query (buffer-local buf 'site-app-filter)))
+         (query (buffer-local buf 'site-app-filter))
+         (own (plist-get spec 'list-head)))
     (append
+      (if own (own buf) '())
       (list (component 'ui/tabs
               (list 'class "sa-sections"
                     'tabs (map (lambda (page)
@@ -250,13 +253,20 @@
 (define (site-app-html! name tab page k)
   ;; The site renders its pages whole before any script runs, so a plain fetch
   ;; through the extension (your cookies, no tab) reads them. The live tab is
-  ;; kept for what only a live page can do: pressing its buttons.
-  (let* ((url (site-app-url (site-app-spec name) (plist-get page 'path)))
+  ;; kept for what only a live page can do: pressing its buttons. A 'live page
+  ;; draws itself in the browser, so it is read from the live tab once its
+  ;; 'wait selector shows. A page's 'path may be a thunk, for a path that moves
+  (let* ((spec (site-app-spec name))
+         (path (plist-get page 'path))
+         (url (site-app-url spec (if (procedure? path) (path) path)))
          (query (buffer-local (site-app-page-buffer name (plist-get page 'id)) 'site-app-filter)))
-    (site-app-fetch-html! (if (and (string? query) (> (string-length query) 0))
-                              (string-append url "?" query)
-                              url)
-                          k)))
+    (if (plist-get page 'live)
+        (site-app-navigate! name url (or (plist-get page 'wait) (plist-get spec 'ready))
+          (lambda (tab answer) (k (and answer (plist-get answer 'html)))))
+        (site-app-fetch-html! (if (and (string? query) (> (string-length query) 0))
+                                  (string-append url "?" query)
+                                  url)
+                              k))))
 
 (define (site-app-fill! name page html)
   (let* ((buf (site-app-page-buffer name (plist-get page 'id)))
@@ -288,11 +298,14 @@
           (message "The site did not answer")))))
 
 (define (site-app-find-tab! name k)
+  ;; the reader tab lives in its own window, so it is looked for in every
+  ;; window: a look in this frame's alone never found it, and opened another
   (let ((spec (site-app-spec name))
         (remembered (site-app-tab name)))
-    (tabs-here
-      (lambda (tabs)
-        (let ((live (and remembered
+    (chrome-call "tabs" '()
+      (lambda (reply)
+        (let* ((tabs (or (plist-get reply 'tabs) '()))
+               (live (and remembered
                          (site-app-find
                            (lambda (tab) (equal? (plist-get tab 'id) remembered))
                            tabs))))

@@ -28,41 +28,34 @@
                         name)))
       '(wizard/steps wizard/choice wizard/nav))))
 
-(deftest 'an-acp-key-global-signs-the-connector-in
-  "a connector whose env names a key global is signed in when the global is set or a signin file exists"
+(deftest 'a-sign-in-file-answers-for-the-secrets
+  "a connector whose sign-in left its file needs no key"
   (lambda ()
-    (check-true! (setup--connector-signed-in? '(cmd "x")) "no key globals")
-    (check-false! (setup--connector-signed-in?
-                    '(env (("ZZ_NO_SUCH_KEY" *zz-no-such-key*)) signin-files (".zz-none")))
-                  "an unset global and no file")
-    (set-symbol-value! '*zz-test-key* "k")
-    (check-true! (setup--connector-signed-in? '(env (("ZZ_NO_SUCH_KEY" *zz-test-key*))))
-                 "a set global")
-    (unbind-global! '*zz-test-key*)))
+    (check-false! (setup--signed-in-by-file? '(signin-files (".zz-none"))) "no file")
+    (check-true! (setup--signed-in-by-file? '(signin-files ("."))) "a file that exists")))
 
 (deftest 'a-connector-card-offers-the-button-that-fits
-  "ready offers use, an installable agent offers install, a hosted model offers a key"
+  "the first unmet requirement picks the button: install, or a key; ready offers use"
   (lambda ()
     (let ((old *default-connector*))
       (set! *default-connector* "zz-other")
-      (check-equal! (map car (setup-wizard--card-actions '("opencode" "acp" #t "ready")))
+      (check-equal! (map car (setup-wizard--card-actions '("opencode" "acp" #t "ready" #f)))
                     '("wizard:use:opencode") "a ready connector")
       (check-equal! (map car (setup-wizard--card-actions
-                               '("claude-code" "acp" #f "not installed")))
-                    '("wizard:install:claude") "claude")
+                               (list "claude-code" "acp" #f "not installed"
+                                     (list 'kind 'program 'install '(("claude" "x")) 'met #f))))
+                    '("wizard:install:claude-code") "an installable agent")
+      (check-equal! (setup-wizard--card-actions
+                      (list "zz-agent" "acp" #f "not installed" (list 'kind 'program 'met #f)))
+                    '() "no install steps, no button")
       (check-equal! (map car (setup-wizard--card-actions
-                               '("codex-app-server" "acp" #f "not installed")))
-                    '("wizard:install:codex") "codex")
-      (check-equal! (map car (setup-wizard--card-actions
-                               '("gemini" "acp" #f "not installed")))
-                    '("wizard:install:gemini") "gemini, not installed")
-      (check-equal! (map car (setup-wizard--card-actions
-                               '("gemini" "acp" #f "needs a key" #t)))
-                    '("wizard:key") "gemini, installed with no key")
-      (check-equal! (map car (setup-wizard--card-actions '("api" "hosted" #f "no key")))
-                    '("wizard:key") "a hosted model")
+                               (list "gemini" "acp" #f "needs a key"
+                                     (list 'kind 'secret 'secret 'gemini-api-key 'met #f))))
+                    '("wizard:key:gemini") "an installed agent with no key")
+      (check-equal! (map car (setup-wizard--card-actions '("api" "hosted" #f "no key" #f)))
+                    '("wizard:key:api") "a hosted model")
       (set! *default-connector* "opencode")
-      (check-equal! (setup-wizard--card-actions '("opencode" "acp" #t "ready")) '()
+      (check-equal! (setup-wizard--card-actions '("opencode" "acp" #t "ready" #f)) '()
                     "the default needs no button")
       (set! *default-connector* old))))
 
@@ -103,17 +96,18 @@
                      "(define *c* \"3\")" "appended when absent")
     (check-equal! (setup--scheme-string "a\"b\\c") "\"a\\\"b\\\\c\"" "a key is a safe literal")))
 
-(deftest 'every-key-provider-has-a-page-and-a-model
-  "each key choice names its provider, variable, key page, and model, and at most a connector"
+(deftest 'every-secret-setting-names-where-it-comes-from
+  "each declared secret has a doc and an env name, and a provider key a page and a model"
   (lambda ()
     (for-each
-      (lambda (e)
-        (check-true! (member (length e) '(5 6)) (car e))
-        (check-true! (string-prefix? "https://" (list-ref e 3)) "the key page")
-        (check-true! (string-prefix? "*" (list-ref e 2)) "a variable name")
-        (when (= (length e) 6)
-          (check-true! (member (list-ref e 5) (connector-names)) "a known connector")))
-      *setup-key-providers*)))
+      (lambda (s)
+        (check-true! (string? (secret-prop s 'doc)) s)
+        (check-true! (string? (secret-prop s 'env)) s)
+        (when (secret-prop s 'provider)
+          (check-true! (string-prefix? "https://" (secret-prop s 'key-page)) s)
+          (check-true! (string? (secret-prop s 'model)) s)))
+      (secret-settings))
+    (check-true! (memq 'gemini-api-key (secret-settings)) "the gemini package declares its key")))
 
 (deftest 'the-home-page-is-setup-until-setup-is-done
   "before a connector is chosen the home page is the wizard"
@@ -157,8 +151,8 @@
   (lambda ()
     (let ((saved *default-connector*))
       (set! *default-connector* "api")
-      (check-equal! (setup-wizard--card-actions '("api" "hosted" #t "a key"))
-                    '(("wizard:key" "Change the key")) "the default card")
+      (check-equal! (setup-wizard--card-actions '("api" "hosted" #t "a key" #f))
+                    '(("wizard:key:api" "Change the key")) "the default card")
       (set! *default-connector* saved))))
 
 (deftest 'desktop-clear-leaves-one-window-on-the-home-page

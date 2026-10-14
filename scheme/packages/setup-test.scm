@@ -14,7 +14,7 @@
       (check-contains! report "Doppler" "the secret policy")
       (check-contains! report "M-x" "the teaching path")
       (check-contains! report "](#inference)" "the inference anchor")
-      (check-contains! report "https://openrouter.ai/settings/keys" "the key link")
+      (check-contains! report "**api**" "every declared connector has a row")
       (check-false! (string-contains? report "sk-") "no API key prefix"))))
 
 (deftest 'setup-knows-the-gemini-nano-connector
@@ -119,42 +119,49 @@
                     "the next launch may try again")
       (define-command "setup-welcome" "Open the welcome page" original))))
 
-(deftest 'openrouter-enablement-selects-the-api-lane
-  "a stored key turns on hosted inference without exposing the value"
+(deftest 'a-provider-secret-answers-the-direct-lane
+  "llm-key answers from the secret setting that names the provider, and picks no connector"
   (lambda ()
     (let ((old-cache *key-cache*)
           (old-keys *llm-keys*)
-          (old-connector *default-connector*)
-          (old-model (llm-model)))
+          (old-connector *default-connector*))
+      (set! *llm-keys* '())
       (set! *key-cache* (cons '("OPENROUTER_API_KEY" "zz-test-key") *key-cache*))
-      (check-true! (setup-openrouter-enable!) "the provider enables")
-      (check-equal! *default-connector* "api" "the direct connector")
-      (check-equal! (llm-model) setup-openrouter-model "the routed model")
+      (set! *default-connector* "claude-code")
+      (check-equal! (secret-for-provider "openrouter") 'openrouter-api-key "the declared secret")
+      (check-equal! (llm-key "openrouter") "zz-test-key" "the key, through the setting")
+      (check-true! (setup--any-llm-key?) "the direct lane has a key")
+      (check-equal! *default-connector* "claude-code" "the connector is untouched")
       (set! *key-cache* old-cache)
       (set! *llm-keys* old-keys)
-      (set! *default-connector* old-connector)
-      (set-llm-model! old-model))))
+      (set! *default-connector* old-connector))))
 
 ;; The bug this guards: setup.scm registered the stored key by calling
 ;; setup-openrouter-enable! at load time. Every boot and every reload of
 ;; the file then set *default-connector* to "api". A chat spawned after
 ;; that rode the metered lane, and no ACP thread could start.
-(deftest 'a-stored-key-registers-without-choosing-the-connector
-  "registration is mechanism; the connector stays the user's choice"
+(deftest 'a-connector-asks-for-its-unset-secret
+  "a secret setting in a connector's env is a requirement until it has a value"
   (lambda ()
-    (let ((old-cache *key-cache*)
-          (old-keys *llm-keys*)
-          (old-connector *default-connector*)
-          (old-model (llm-model)))
-      (set! *key-cache* (cons '("OPENROUTER_API_KEY" "zz-test-key") *key-cache*))
-      (set! *default-connector* "claude-code")
-      (check-true! (setup-openrouter-register!) "the key registers")
-      (check-equal! *default-connector* "claude-code" "the connector is untouched")
-      (check-equal! (llm-model) old-model "the model is untouched")
-      (set! *key-cache* old-cache)
-      (set! *llm-keys* old-keys)
-      (set! *default-connector* old-connector)
-      (set-llm-model! old-model))))
+    (let ((old-connectors *agent-connectors*)
+          (old-vars *custom-vars*))
+      (defcustom 'zz-setup-test-key #f "A test key." 'type 'secret 'env "ZZ_SETUP_TEST_KEY")
+      (set! *agent-connectors*
+        '(("zz-keyed" (cmd "sh" env (("ZZ_SETUP_TEST_KEY" zz-setup-test-key))))))
+      (let ((need (find (lambda (r) (equal? (plist-get r 'kind) 'secret))
+                        (setup-connector-requirements "zz-keyed"))))
+        (check-equal! (plist-get need 'secret) 'zz-setup-test-key "the declared secret")
+        (check-false! (plist-get need 'met) "unset, it is a question")
+        (check-contains! (list-ref (assoc "zz-keyed" (setup-inference-scan)) 3)
+                         "ZZ_SETUP_TEST_KEY" "the card names it"))
+      (set-symbol-value! 'zz-setup-test-key "zz-value")
+      (check-true! (null? (setup--unmet (setup-connector-requirements "zz-keyed")))
+                   "set, nothing is missing")
+      (check-equal! (agent-env-resolve '(("ZZ_SETUP_TEST_KEY" zz-setup-test-key)))
+                    '(("ZZ_SETUP_TEST_KEY" "zz-value")) "the agent gets the value")
+      (unbind-global! 'zz-setup-test-key)
+      (set! *custom-vars* old-vars)
+      (set! *agent-connectors* old-connectors))))
 
 ;; Boot must leave the ACP default in place. setup.scm loads before this
 ;; test runs, so this reads the value its load-time form produced.
@@ -211,11 +218,10 @@
 
 ;;; --- install a coding agent ----------------------------------------------------
 
-(deftest 'the-agent-install-commands-exist
-  "setup names one install command for each coding agent"
+(deftest 'the-agent-install-command-exists
+  "one command installs the agent of any connector that declares install steps"
   (lambda ()
-    (check-true! (member "setup-install-claude" (command-names)) "claude")
-    (check-true! (member "setup-install-codex" (command-names)) "codex")))
+    (check-true! (member "setup-install-connector" (command-names)) "the command")))
 
 (define (setup-test--with-present present fn)
   (let ((old setup--program-present?))
@@ -228,19 +234,19 @@
   "a program already on PATH is not installed again"
   (lambda ()
     (check-equal! (map car (setup-test--with-present '()
-                             (lambda () (setup-agent-missing-steps "claude"))))
+                             (lambda () (setup-agent-missing-steps "claude-code"))))
                   '("claude" "claude-agent-acp") "a bare machine needs both")
     (check-equal! (map car (setup-test--with-present '("claude")
-                             (lambda () (setup-agent-missing-steps "claude"))))
+                             (lambda () (setup-agent-missing-steps "claude-code"))))
                   '("claude-agent-acp") "the CLI is present; the adapter is not")
     (check-equal! (map car (setup-test--with-present '()
-                             (lambda () (setup-agent-missing-steps "codex"))))
+                             (lambda () (setup-agent-missing-steps "codex-app-server"))))
                   '("codex") "codex")))
 
 (deftest 'an-agent-install-script-installs-then-names-the-sign-in
   "the script runs each step, names the sign-in command, and leaves a shell"
   (lambda ()
-    (let ((script (setup-agent-install-script "codex"
+    (let ((script (setup-agent-install-script "codex-app-server"
                     '(("codex" "npm install -g @openai/codex")))))
       (check-contains! script "npm install -g @openai/codex" "the step")
       (check-contains! script "codex login" "the sign-in command")
@@ -250,18 +256,18 @@
   "nothing runs when every program is present"
   (lambda ()
     (check-false! (setup-test--with-present '("claude" "claude-agent-acp" "npm")
-                    (lambda () (setup-install-agent! "claude")))
+                    (lambda () (setup-install-agent! "claude-code")))
                   "no install")
-    (check-false! (buffer-exists? (setup-agent-install-buffer "claude"))
+    (check-false! (buffer-exists? (setup-agent-install-buffer "claude-code"))
                   "no terminal buffer")))
 
 (deftest 'an-npm-install-without-npm-starts-no-terminal
   "a missing npm stops the install before a terminal opens"
   (lambda ()
     (check-false! (setup-test--with-present '()
-                    (lambda () (setup-install-agent! "codex")))
+                    (lambda () (setup-install-agent! "codex-app-server")))
                   "no install")
-    (check-false! (buffer-exists? (setup-agent-install-buffer "codex"))
+    (check-false! (buffer-exists? (setup-agent-install-buffer "codex-app-server"))
                   "no terminal buffer")))
 
 ;;; --- the pages read as web pages -----------------------------------------------

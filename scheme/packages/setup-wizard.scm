@@ -105,48 +105,36 @@
 (define (setup-wizard-step buf)
   (or (buffer-local buf 'setup-wizard-step) "model"))
 
-;; The install command for a connector that setup can install, or #f.
-(define *setup-wizard-installs*
-  '(("claude-code" "claude") ("codex-app-server" "codex") ("gemini" "gemini")))
-
-(define (setup-wizard--install-for name)
-  (let ((e (assoc name *setup-wizard-installs*)))
-    (and e (cadr e))))
-
-;; The buttons of one connector card. ROW is (NAME KIND READY? DETAIL). The
-;; hosted card always offers its key: a set key can be replaced.
+;; The buttons of one connector card. ROW is (NAME KIND READY? DETAIL NEXT),
+;; NEXT the first unmet requirement (setup.scm). The hosted card always
+;; offers its key: a set key can be replaced.
 (define (setup-wizard--card-actions row)
   (let* ((name (list-ref row 0))
          (kind (list-ref row 1))
          (ready? (list-ref row 2))
+         (next (and (> (length row) 4) (list-ref row 4)))
          (default? (equal? name *default-connector*))
+         (key (string-append "wizard:key:" name))
          (use (if (and ready? (not default?))
                   (list (list (string-append "wizard:use:" name) "Use this"))
                   '())))
     (cond
       ((equal? kind "hosted")
-       (append use (list (list "wizard:key" (if ready? "Change the key" "Add a key")))))
+       (append use (list (list key (if ready? "Change the key" "Add a key")))))
       (default? '())
       (ready? use)
-      ;; installed, and the agent waits for a key
-      ((and (> (length row) 4) (list-ref row 4))
-       (list (list "wizard:key" "Add a key")))
-      ((setup-wizard--install-for name)
-       (list (list (string-append "wizard:install:" (setup-wizard--install-for name))
-                   "Install")))
+      ((not next) '())
+      ((memq (plist-get next 'kind) '(secret one-secret)) (list (list key "Add a key")))
+      ((pair? (plist-get next 'install))
+       (list (list (string-append "wizard:install:" name) "Install")))
       (else '()))))
 
-;; The hosted connector reads as what it is: your own key for a hosted
-;; model. Its scan row only says "api".
+;; A connector may name its card: the hosted lane reads as what it is.
 (define (setup-wizard--card-title name)
-  (if (equal? name "api") "Hosted model (your API key)" name))
+  (or (plist-get (connector-config name) 'title) name))
 
 (define (setup-wizard--card-detail row)
-  (if (equal? (list-ref row 0) "api")
-      (if (list-ref row 2)
-          "A key is stored. Chats use it directly, with no agent program."
-          "Use a key from OpenRouter, Anthropic, or OpenAI. No agent program is needed.")
-      (string-append (list-ref row 1) " · " (list-ref row 3))))
+  (string-append (connector-description (list-ref row 0)) " · " (list-ref row 3)))
 
 (define (setup-wizard--card row)
   (let* ((name (list-ref row 0))
@@ -239,25 +227,18 @@
 (define (setup-open-learning-space!)
   (run-command "onboarding"))
 
-;; A hosted key, all in the editor: pick the provider, then where the key
-;; is: a secret tool (Doppler, 1Password, the Keychain, the Secret Service),
-;; a command, or a paste. A tool asks its own names, and secrets.scm keeps
-;; the lookup, so the value stays in the tool. The key lives where a user's
-;; keys live:
-;; (define *openrouter-api-key* "...") in ~/.compos/secrets.scm,
-;; mode 600. ~/.compos/ai-config.scm loads that file at boot and registers
-;; the key, and the wizard registers it now as well, so no restart is due.
-(define *setup-key-providers*
-  ;; (LABEL PROVIDER VARIABLE KEY-PAGE MODEL [CONNECTOR]); with a CONNECTOR
-  ;; the key goes to that agent through its env, not to the direct API lane
-  '(("OpenRouter — one key for every model (recommended)" "openrouter" "*openrouter-api-key*"
-     "https://openrouter.ai/settings/keys" "openrouter:anthropic/claude-sonnet-5")
-    ("Anthropic — Claude models" "anthropic" "*anthropic-api-key*"
-     "https://console.anthropic.com/settings/keys" "claude-sonnet-5")
-    ("OpenAI — GPT models" "openai" "*openai-api-key*"
-     "https://platform.openai.com/api-keys" "openai:gpt-5.6-luna")
-    ("Gemini — the Gemini CLI agent" "gemini" "*gemini-api-key*"
-     "https://aistudio.google.com/apikey" "auto" "gemini")))
+;; A secret, all in the editor. The secrets are settings of type secret
+;; (keys.scm), so the question comes from the declaration: its doc, its
+;; env name, and its key page. Then: where is the key? A secret tool
+;; (Doppler, 1Password, the Keychain, the Secret Service), a command, or a
+;; paste. A tool asks its own names, and secrets.scm keeps the lookup, so the
+;; value stays in the tool. The key lives where a user's keys live:
+;; (define gemini-api-key ...) in ~/.compos/secrets.scm, mode 600.
+;; ~/.compos/ai-config.scm loads that file at boot, and the wizard defines
+;; it now as well, so no restart is due.
+;;
+;; Each step takes the secret S and CTX, a plist: 'connector the connector
+;; that asked, 'done the thunk that runs after the answer or the refusal.
 
 (define (setup--config-file name) (string-append (compos-config-dir) "/" name))
 
@@ -294,58 +275,67 @@
       (write-file! path (string-append (string-trim old) "\n" load-line "\n")))
     path))
 
-(define (setup--ensure-ai-config! provider var)
-  (let* ((path (setup--ensure-secrets-load!))
-         (old (read-file path))
-         (register-line (string-append "(register-llm-key! \"" provider "\" " var ")")))
-    (unless (string-contains? old register-line)
-      (write-file! path (string-append old register-line "\n")))))
+(define (setup--ctx-done ctx)
+  (let ((done (plist-get ctx 'done)))
+    (when (procedure? done) (done))))
 
-(define (setup--use-key! entry value-form key buf)
-  (let* ((provider (list-ref entry 1))
-         (var (list-ref entry 2))
-         (model (list-ref entry 4))
-         (connector (if (> (length entry) 5) (list-ref entry 5) "api")))
+;; the name a secret goes by in a tool: its env name, else its own
+(define (setup--secret-hint s)
+  (or (secret-prop s 'env) (symbol->string s)))
+
+;; Keep VALUE-FORM for the secret S, define it now, and make the connector
+;; that asked the default once nothing else is missing. A provider key also
+;; picks the model its declaration names.
+(define (setup--use-key! s ctx value-form key)
+  (let ((var (symbol->string s))
+        (connector (plist-get ctx 'connector))
+        (provider (secret-prop s 'provider))
+        (model (secret-prop s 'model)))
     (setup--write-secret! var value-form)
-    (if (equal? connector "api")
-        (setup--ensure-ai-config! provider var)
-        (setup--ensure-secrets-load!))
+    (setup--ensure-secrets-load!)
     (eval-string-safe (string-append "(define " var " " value-form ")"))
-    (when (equal? connector "api") (register-llm-key! provider key))
-    (customize-save! 'setup-default-connector connector)
-    (set! *default-connector* connector)
-    (set-llm-model! model)
-    (message (string-append "Setup: " var " is in ~/.compos/secrets.scm; new chats use "
-                            (if (equal? connector "api") model connector)))
-    (when (buffer-exists? buf) (setup-wizard-redraw! buf))))
+    ;; a key registered earlier would win over the setting; replace it too
+    (when provider (register-llm-key! provider key))
+    (if (and connector (null? (setup--unmet (setup-connector-requirements connector))))
+        (begin
+          (customize-save! 'setup-default-connector connector)
+          (set! *default-connector* connector)
+          (when model (set-llm-model! model))
+          (message (string-append "Setup: " var " is in ~/.compos/secrets.scm; new chats use "
+                                  (or model connector))))
+        (message (string-append "Setup: " var " is in ~/.compos/secrets.scm")))
+    (setup--ctx-done ctx)))
 
-(define (setup-store-key! entry key buf)
+(define (setup-store-key! s ctx key)
   (let ((key (string-trim key)))
     (if (equal? key "")
-        (message "Setup: the key was empty; nothing changed")
-        (setup--use-key! entry (setup--scheme-string key) key buf))))
+        (begin (message "Setup: the key was empty; nothing changed") (setup--ctx-done ctx))
+        (setup--use-key! s ctx (setup--scheme-string key) key))))
 
-(define (setup-key-paste! entry buf)
-  (unless setup-bot-silent-mode (tab-open (list-ref entry 3)))
-  (minibuffer-read (string-append "Paste your " (list-ref entry 1)
-                                  " API key (the key page is open in a tab): ")
-                   '()
-    (lambda (key) (setup-store-key! entry key buf))))
+(define (setup-key-paste! s ctx)
+  (let ((page (secret-prop s 'key-page)))
+    (when (and page (not setup-bot-silent-mode)) (tab-open page))
+    (minibuffer-read (string-append "Paste " (setup--secret-hint s)
+                                    (if page " (the key page is open in a tab): " ": "))
+                     '()
+      (lambda (key) (setup-store-key! s ctx key)))))
 
 ;; FORM is the Scheme call that reads the key from a secret tool. It runs
 ;; once now: a lookup that answers nothing is not written to secrets.scm.
-(define (setup-key-from-form! entry form buf)
+(define (setup-key-from-form! s ctx form)
   (let* ((r (eval-string-safe form))
          (key (and (pair? r) (equal? (car r) 'ok) (cadr r))))
     (if (and (string? key) (not (equal? key "")))
-        (setup--use-key! entry form key buf)
-        (message (string-append "Setup: " form " gave no key; check the names and try again")))))
+        (setup--use-key! s ctx form key)
+        (begin
+          (message (string-append "Setup: " form " gave no key; check the names and try again"))
+          (setup--ctx-done ctx)))))
 
 (define (setup--ask prompt choices k)
   (minibuffer-read prompt choices (lambda (v) (k (string-trim v)))))
 
-(define (setup-key-doppler! entry buf)
-  (let ((wanted (string-upcase (string-append (list-ref entry 1) "_API_KEY"))))
+(define (setup-key-doppler! s ctx)
+  (let ((wanted (setup--secret-hint s)))
     (setup--ask "Doppler project: " (doppler--project-candidates)
       (lambda (project)
         (setup--ask "Doppler config: " (doppler--config-candidates project)
@@ -356,50 +346,47 @@
                                 names)))
               (setup--ask "Doppler secret: " ordered
                 (lambda (name)
-                  (setup-key-from-form! entry
+                  (setup-key-from-form! s ctx
                     (string-append "(doppler-secret-get " (setup--scheme-string project) " "
                                    (setup--scheme-string config) " "
-                                   (setup--scheme-string name) ")")
-                    buf))))))))))
+                                   (setup--scheme-string name) ")")))))))))))
 
-(define (setup-key-1password! entry buf)
+(define (setup-key-1password! s ctx)
   (setup--ask "1Password vault: " '("Private")
     (lambda (vault)
-      (setup--ask "1Password item: " (list (list-ref entry 1))
+      (setup--ask "1Password item: " (list (symbol->string s))
         (lambda (item)
           (setup--ask "1Password field: " '("credential" "password")
             (lambda (field)
-              (setup-key-from-form! entry
+              (setup-key-from-form! s ctx
                 (string-append "(op-secret-get "
                                (setup--scheme-string (string-append "op://" vault "/" item "/" field))
-                               ")")
-                buf))))))))
+                               ")")))))))))
 
-(define (setup-key-keychain! entry buf)
-  (setup--ask "Keychain service: " (list (string-append (list-ref entry 1) "-api-key"))
+(define (setup-key-keychain! s ctx)
+  (setup--ask "Keychain service: " (list (symbol->string s))
     (lambda (service)
       (setup--ask "Keychain account (RET for any): " '("")
         (lambda (account)
-          (setup-key-from-form! entry
+          (setup-key-from-form! s ctx
             (string-append "(keychain-secret-get " (setup--scheme-string service)
                            (if (equal? account "") "" (string-append " " (setup--scheme-string account)))
-                           ")")
-            buf))))))
+                           ")")))))))
 
-(define (setup-key-secret-tool! entry buf)
-  (setup--ask "Secret Service service name: " (list (string-append (list-ref entry 1) "-api-key"))
+(define (setup-key-secret-tool! s ctx)
+  (setup--ask "Secret Service service name: " (list (symbol->string s))
     (lambda (service)
-      (setup-key-from-form! entry
-        (string-append "(secret-tool-get " (setup--scheme-string service) ")") buf))))
+      (setup-key-from-form! s ctx
+        (string-append "(secret-tool-get " (setup--scheme-string service) ")")))))
 
-(define (setup-key-command! entry buf)
+(define (setup-key-command! s ctx)
   (setup--ask "Shell command that prints the key: " '()
     (lambda (cmd)
-      (setup-key-from-form! entry
-        (string-append "(secret-command " (setup--scheme-string cmd) ")") buf))))
+      (setup-key-from-form! s ctx
+        (string-append "(secret-command " (setup--scheme-string cmd) ")")))))
 
 ;; (LABEL PROGRAM ASK): a backend appears when its program is installed.
-;; "A command" and "Paste the key" need no program.
+;; A command and a paste need no program.
 (define *setup-key-backends*
   (list (list "Doppler" "doppler" setup-key-doppler!)
         (list "1Password" "op" setup-key-1password!)
@@ -412,26 +399,45 @@
   (filter (lambda (b) (or (not (cadr b)) (setup--program-present? (cadr b))))
           *setup-key-backends*))
 
-(define (setup-wizard-add-key! buf)
-  (minibuffer-read "Which provider is the key from? " (map car *setup-key-providers*)
-    (lambda (label)
-      (let ((entry (assoc label *setup-key-providers*))
-            (backends (setup-key-backends-here)))
-        (if (not entry)
-            (message "Setup: no key added")
-            (minibuffer-read "Where is the key? " (map car backends)
-              (lambda (where)
-                (let ((b (assoc where backends)))
-                  (if b
-                      ((caddr b) entry buf)
-                      (message "Setup: no key added"))))))))))
+;; Ask for the secret S on behalf of CONNECTOR, then DONE.
+(define (setup-ask-secret! s connector done)
+  (let ((backends (setup-key-backends-here))
+        (ctx (list 'connector connector 'done done)))
+    (minibuffer-read (string-append "Where is " (setup--secret-hint s) "? ") (map car backends)
+      (lambda (where)
+        (let ((b (assoc where backends)))
+          (if b
+              ((caddr b) s ctx)
+              (begin (message "Setup: no key added") (setup--ctx-done ctx))))))))
+
+;; The key button of a card asks for the connector's own secrets: one is
+;; asked at once, more offer a choice.
+(define (setup-wizard-add-key! buf connector)
+  (let* ((reqs (filter (lambda (r) (memq (plist-get r 'kind) '(secret one-secret)))
+                       (setup-connector-requirements connector)))
+         (ss (apply append (map (lambda (r) (if (plist-get r 'secret)
+                                                (list (plist-get r 'secret))
+                                                (plist-get r 'secrets)))
+                                reqs)))
+         (done (lambda () (when (buffer-exists? buf) (setup-wizard-redraw! buf)))))
+    (cond
+      ((null? ss) (message (string-append "Setup: " connector " declares no key")))
+      ((null? (cdr ss)) (setup-ask-secret! (car ss) connector done))
+      (else
+       (minibuffer-read "Which key? " (map setup-secret-label ss)
+         (lambda (label)
+           (let ((s (find (lambda (s) (equal? (setup-secret-label s) label)) ss)))
+             (if s
+                 (setup-ask-secret! s connector done)
+                 (message "Setup: no key added")))))))))
 
 (define (setup-wizard-click buf id)
   (cond
     ((equal? id "wizard:next") (setup-wizard-go! buf "learn") #t)
     ((equal? id "wizard:back") (setup-wizard-go! buf "model") #t)
     ((equal? id "wizard:rescan") (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
-    ((equal? id "wizard:key") (setup-wizard-add-key! buf) #t)
+    ((string-prefix? "wizard:key:" id)
+     (setup-wizard-add-key! buf (substring-bytes id 11 (string-byte-length id))) #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((string-prefix? "wizard:use:" id)
      (setup-wizard-use! buf (substring-bytes id 11 (string-byte-length id))) #t)

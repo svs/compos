@@ -40,6 +40,9 @@ nonstandard install out of the built-in connector catalog."
   ;; @agentclientprotocol/claude-agent-acp ships this executable. Resolve it
   ;; through PATH so npm, pnpm, bun, asdf, and other installers all work.
   '(cmd "claude-agent-acp"
+    install (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
+             ("claude-agent-acp" "npm install -g @agentclientprotocol/claude-agent-acp"))
+    signin "claude"
     ;; The editor names every tool through MCP and writes the whole
     ;; system prompt, so the adapter's own tools have no place in an
     ;; editor thread: everything goes through Scheme. settingSources and
@@ -67,6 +70,9 @@ nonstandard install out of the built-in connector catalog."
 
 (define *codex-app-server-connector*
   '(backend "codex-app-server" cmd "codex app-server"
+    description "Codex App Server — ChatGPT subscription"
+    install (("codex" "npm install -g @openai/codex"))
+    signin "codex login"
     models ("gpt-6.1-sol" "gpt-6-astra" "gpt-6-sol" "gpt-6-luna"
             "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-5.5"
             "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex-spark")))
@@ -82,23 +88,11 @@ nonstandard install out of the built-in connector catalog."
 
 (define-connector! "opencode"
   '(cmd "opencode acp"
+    description "OpenCode — multi-provider ACP agent"
     model-config #t
     models ("opencode/big-pickle" "opencode/claude-sonnet-5"
             "opencode/claude-opus-5" "opencode/claude-haiku-5-5"
             "opencode/gemini-3.1-pro")))
-
-(define-connector! "gemini"
-  ;; @google/gemini-cli speaks ACP behind --experimental-acp. The model
-  ;; rides the command line; the CLI drops _meta, so our prompt sections
-  ;; ride the first turn.
-  '(cmd "gemini --experimental-acp" model-flag "-m "
-    system-in-prompt #t
-    ;; the key comes from the user's secrets.scm; a Google sign-in
-    ;; through `gemini` itself also works
-    env (("GEMINI_API_KEY" *gemini-api-key*))
-    signin-files (".gemini/oauth_creds.json")
-    models ("auto" "gemini-4-argon" "gemini-3.1-pro-preview" "gemini-3-flash-preview"
-            "gemini-2.5-pro" "gemini-2.5-flash")))
 
 (define-connector! "deepseek"
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
@@ -110,6 +104,7 @@ nonstandard install out of the built-in connector catalog."
   ;; docs/dsh-acp-steering.patch after every install, or blank RET only ever
   ;; queues on this lane.
   '(cmd "dsh --profile acp"
+    description "DeepSeek Harness — session-cached DeepSeek models"
     ;; the session reports model and reasoning effort as ACP config
     ;; options, so the model rides in protocol config, not the command line
     model-config #t
@@ -121,8 +116,31 @@ nonstandard install out of the built-in connector catalog."
     sanitize "dsh"
     models ("deepseek-v4-pro" "deepseek-v4-flash" "deepseek-v4-flash-vision-exp")))
 
+;; The direct lane needs one key from any provider. Each provider's key is a
+;; secret setting; 'provider makes llm-key answer from it, and 'model is the
+;; model a first run picks with it.
+(defcustom 'openrouter-api-key #f
+  "OpenRouter: one key for every model."
+  'type 'secret 'group 'llm 'env "OPENROUTER_API_KEY" 'provider "openrouter"
+  'model "openrouter:anthropic/claude-sonnet-5"
+  'key-page "https://openrouter.ai/settings/keys")
+
+(defcustom 'anthropic-api-key #f
+  "Anthropic: Claude models."
+  'type 'secret 'group 'llm 'env "ANTHROPIC_API_KEY" 'provider "anthropic"
+  'model "claude-sonnet-5"
+  'key-page "https://console.anthropic.com/settings/keys")
+
+(defcustom 'openai-api-key #f
+  "OpenAI: GPT models."
+  'type 'secret 'group 'llm 'env "OPENAI_API_KEY" 'provider "openai"
+  'model "openai:gpt-5.6-luna"
+  'key-page "https://platform.openai.com/api-keys")
+
 (define-connector! "api"
   (list 'backend "req-llm"
+        'title "Hosted model (your API key)"
+        'description "direct API — metered, cached, cheap lane"
         ;; User choices stay first as favorites; ReqLLM contributes every
         ;; chat model whose provider is configured on this machine, and the
         ;; live catalog contributes what the providers shipped since the
@@ -130,7 +148,12 @@ nonstandard install out of the built-in connector catalog."
         'models (lambda () (llm-catalogued-models))))
 
 (define-connector! "gemini-nano"
-  '(backend "chrome-gemini-nano" models ("gemini-nano")))
+  '(backend "chrome-gemini-nano" models ("gemini-nano")
+    description "Chrome Gemini Nano — local browser inference"))
+
+;; one package per connector: each declares its command, install steps,
+;; sign-in and secrets
+(require 'connector-gemini "connectors/gemini.scm")
 
 ;;; --- the live model catalog ---------------------------------------------------
 ;;; LLMDB ships a snapshot of what each provider offers, and a snapshot
@@ -416,15 +439,17 @@ nonstandard install out of the built-in connector catalog."
         (list 'cwd (buffer-directory buf))
         '())))
 
-;; an env value that is a symbol names a global the user's config sets
-;; (secrets.scm sets *gemini-api-key*); it is read when the thread
-;; starts, and a pair whose global is unbound or #f drops out
+;; an env value that is a symbol names a secret setting (keys.scm) or a
+;; global the user's config sets; it is read when the thread starts, and a
+;; pair whose value is unset drops out
 (define (agent-env-resolve env)
   (let loop ((ps env) (acc '()))
     (if (null? ps)
         (reverse acc)
         (let* ((v (car (cdr (car ps))))
-               (v (if (symbol? v) (and (boundp v) (symbol-value v)) v)))
+               (v (cond ((not (symbol? v)) v)
+                        ((secret-setting? v) (secret-value v))
+                        (else (and (boundp v) (symbol-value v))))))
           (loop (cdr ps) (if (string? v) (cons (list (car (car ps)) v) acc) acc))))))
 
 (define (agent-config-env-resolve conf)
@@ -469,21 +494,9 @@ nonstandard install out of the built-in connector catalog."
                   (cons (car (car cs)) acc))))))
 
 (define (connector-description name)
-  (let ((backend (or (plist-get (connector-config name) 'backend) "acp")))
-    (cond ((equal? name "opencode")
-           "OpenCode — multi-provider ACP agent")
-          ((equal? name "deepseek")
-           "DeepSeek Harness — session-cached DeepSeek models")
-          ((equal? name "gemini")
-           "Gemini CLI — Google account or Gemini API key")
-          ((equal? name "gemini-nano")
-           "Chrome Gemini Nano — local browser inference")
-          ((equal? backend "req-llm")
-           "direct API — metered, cached, cheap lane")
-          ((equal? backend "codex-app-server")
-           "Codex App Server — ChatGPT subscription")
-          (else
-           "ACP agent — subscription or external adapter"))))
+  (let ((config (connector-config name)))
+    (or (plist-get config 'description)
+        "ACP agent — subscription or external adapter")))
 
 (define (agent-update-modeline! buf)
   ;; Chat buffers keep the bottom modeline free of LLM configuration.

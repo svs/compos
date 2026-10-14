@@ -14,16 +14,11 @@
   "Keep setup prompts active, but never create, display, or replace an editor window."
   'group 'setup 'type 'boolean)
 
-(defcustom 'setup-openrouter-model "openrouter:anthropic/claude-sonnet-5"
-  "The hosted model selected after OpenRouter setup."
-  'group 'setup 'type 'string)
-
 (defcustom 'setup-default-connector ""
   "The connector first-run setup chose. Empty leaves the built-in default."
   'group 'setup)
 
 (define *setup-buffer* "*setup*")
-(define setup-openrouter-keys-url "https://openrouter.ai/settings/keys")
 
 (define *setup-secret-backends*
   '(("Doppler" "doppler" "doppler login")
@@ -156,15 +151,15 @@
                   #f)
                  (else (loop (cdr words))))))))
 
-(define *setup-llm-providers*
-  '("anthropic" "openai" "openrouter" "google" "deepseek" "groq" "xai"))
+;; the secret settings that serve a direct-API provider (keys.scm)
+(define (setup--provider-secrets)
+  (filter (lambda (s) (secret-prop s 'provider)) (secret-settings)))
 
 (define (setup--any-llm-key?)
-  "#t when the key chain resolves a key for any provider the editor knows."
-  (let loop ((ps *setup-llm-providers*))
-         (cond ((null? ps) #f)
-               ((let ((k (llm-key (car ps)))) (and k (not (equal? k "")))) #t)
-               (else (loop (cdr ps))))))
+  "#t when the direct lane has a key: a registered one, or a provider's secret setting."
+  (and (or (find (lambda (e) (let ((v (cadr e))) (and (string? v) (not (equal? v ""))))) *llm-keys*)
+           (find secret-set? (setup--provider-secrets)))
+       #t))
 
 (define *setup-interpreters* '("node" "python" "python3" "ruby" "bun" "deno" "env"))
 
@@ -185,51 +180,146 @@
                 (car words))
                (else (loop (cdr words)))))))))
 
-(define (setup--connector-signed-in? config)
-  "#t when an ACP connector can sign in. A connector whose env names a key
-   global is signed in when that global is set, when the environment already
-   carries the variable, or when one of its signin-files (relative to HOME)
-   exists. A connector without key globals signs in on its own."
-  (let ((keys (filter (lambda (p) (symbol? (cadr p))) (or (plist-get config 'env) '()))))
-    (or (null? keys)
-        (= (length (agent-env-resolve keys)) (length keys))
-        (let loop ((ks keys))
-          (cond ((null? ks) #t)
-                ((getenv (car (car ks))) (loop (cdr ks)))
-                (else #f)))
-        (let loop ((fs (or (plist-get config 'signin-files) '())))
-          (cond ((null? fs) #f)
-                ((file-exists? (string-append (getenv "HOME") "/" (car fs))) #t)
-                (else (loop (cdr fs))))))))
+;;; --- requirements ----------------------------------------------------------------
+;;; Setup keeps no list of what to ask. Each connector declares its needs in
+;;; its own config, and each secret is a setting of type secret (keys.scm):
+;;;
+;;;   cmd           the program it runs; missing, it needs installing
+;;;   install       ((PROGRAM COMMAND) ...), the steps that install it
+;;;   signin        the command the user runs once to sign in
+;;;   env           ((VAR SECRET) ...); an unset secret setting is a question
+;;;   signin-files  files under HOME that a finished sign-in leaves; one
+;;;                 present answers for the secrets
+;;;
+;;; A direct-API connector (backend req-llm) needs one key from any
+;;; provider. An MCP server needs every secret setting its spec names.
+;;;
+;;; A requirement is a plist: 'kind (program, secret or one-secret), 'owner,
+;;; 'met, and 'program 'install, or 'secret, or 'secrets.
+
+(define (setup--connector-secrets config)
+  (filter secret-setting? (map cadr (or (plist-get config 'env) '()))))
+
+(define (setup--signed-in-by-file? config)
+  (let loop ((fs (or (plist-get config 'signin-files) '())))
+    (cond ((null? fs) #f)
+          ((file-exists? (string-append (getenv "HOME") "/" (car fs))) #t)
+          (else (loop (cdr fs))))))
+
+(define (setup-connector-requirements name)
+  (let* ((config (connector-config name))
+         (backend (plist-get config 'backend))
+         (cmd (plist-get config 'cmd)))
+    (cond
+      ((equal? backend "chrome-gemini-nano") '())
+      ((equal? backend "req-llm")
+       (list (list 'kind 'one-secret 'owner name 'met (setup--any-llm-key?)
+                   'secrets (setup--provider-secrets))))
+      (else
+       (let ((signed-in (setup--signed-in-by-file? config)))
+         (cons (list 'kind 'program 'owner name 'met (setup--cmd-available? cmd)
+                     'program (setup--cmd-label cmd) 'install (plist-get config 'install))
+               (map (lambda (s)
+                      (list 'kind 'secret 'owner name 'secret s
+                            'met (or signed-in (secret-set? s))))
+                    (setup--connector-secrets config))))))))
+
+;; the secret settings anywhere in an MCP spec
+(define (setup--spec-secrets v)
+  (cond ((secret-setting? v) (list v))
+        ((pair? v) (append (setup--spec-secrets (car v)) (setup--spec-secrets (cdr v))))
+        (else '())))
+
+(define (setup-mcp-requirements)
+  (apply append
+    (map (lambda (e)
+           (map (lambda (s)
+                  (list 'kind 'secret 'owner (symbol->string (car e)) 'secret s
+                        'met (secret-set? s)))
+                (setup--spec-secrets (cadr e))))
+         (if (boundp '*mcp-registry*) *mcp-registry* '()))))
+
+(define (setup-requirements)
+  "Every declared need of every connector and MCP server."
+  (append (apply append (map setup-connector-requirements (connector-names)))
+          (setup-mcp-requirements)))
+
+(define (setup--unmet reqs)
+  (filter (lambda (r) (not (plist-get r 'met))) reqs))
+
+(define (setup-secret-label s)
+  (or (secret-prop s 'doc) (symbol->string s)))
+
+;; what a card or report says about an unmet requirement
+(define (setup--requirement-label r)
+  (let ((kind (plist-get r 'kind)))
+    (cond
+      ((equal? kind 'program) (string-append "not installed: " (plist-get r 'program)))
+      ((equal? kind 'secret)
+       (string-append "needs " (or (secret-prop (plist-get r 'secret) 'env)
+                                    (symbol->string (plist-get r 'secret)))
+                      (if (pair? (plist-get (connector-config (plist-get r 'owner)) 'signin-files))
+                          " or a sign-in" "")))
+      (else "needs an API key"))))
 
 (define (setup-inference-scan)
   "Every declared connector with what this machine can actually run it.
-   (NAME KIND AVAILABLE? DETAIL). Declaration is not availability: a connector
-   that is declared and cannot run is the thing a first run has to say out loud.
-   DETAIL carries the missing program, because that is the only case that asks
-   the user to do something."
+   (NAME KIND READY? DETAIL NEXT). NEXT is the first unmet requirement, or
+   false. Declaration is not availability: a connector that is declared and
+   cannot run is the thing a first run has to say out loud."
   (map (lambda (name)
-         (let* ((config (connector-config name))
-                (backend (plist-get config 'backend))
-                (cmd (plist-get config 'cmd)))
+         (let* ((backend (plist-get (connector-config name) 'backend))
+                (kind (cond ((equal? backend "chrome-gemini-nano") "local")
+                            ((equal? backend "req-llm") "hosted")
+                            (else "acp")))
+                (unmet (setup--unmet (setup-connector-requirements name))))
            (cond
-             ((equal? backend "chrome-gemini-nano")
+             ((equal? kind "local")
               (let ((ready? (and (setup--connector-ready? name) #t)))
-                (list name "local" ready?
+                (list name kind ready?
                       (if ready? "connector loaded; test browser Prompt API support"
-                          "needs a Chrome with the Prompt API"))))
-             ((equal? backend "req-llm")
-              (let ((key? (setup--any-llm-key?)))
-                (list name "hosted" key?
-                      (if key? "a key is registered" "needs an API key"))))
-             ((not (setup--cmd-available? cmd))
-              (list name "acp" #f (string-append "not installed: " (setup--cmd-label cmd))))
-             ((setup--connector-signed-in? config)
-              (list name "acp" #t "ready"))
-             ;; installed and not signed in: the fifth field asks for a key
+                          "needs a Chrome with the Prompt API")
+                      #f)))
+             ((null? unmet)
+              (list name kind #t (if (equal? kind "hosted") "a key is registered" "ready") #f))
              (else
-              (list name "acp" #f "installed; needs a key or a sign-in" #t)))))
+              (list name kind #f (setup--requirement-label (car unmet)) (car unmet))))))
        (connector-names)))
+
+;; Answer the first unmet requirement of connector NAME, then K. With none
+;; left, NAME becomes the default. A question that stays unanswered goes on
+;; to K rather than asking again.
+(define (setup-satisfy! name k)
+  (let ((unmet (setup--unmet (setup-connector-requirements name))))
+    (if (null? unmet)
+        (begin
+          (customize-save! 'setup-default-connector name)
+          (set! *default-connector* name)
+          (message (string-append "Setup: new chats use " name))
+          (k))
+        (let* ((r (car unmet))
+               (kind (plist-get r 'kind))
+               (again (lambda ()
+                        (if (equal? (setup--unmet (setup-connector-requirements name)) unmet)
+                            (k)
+                            (setup-satisfy! name k)))))
+          (cond
+            ((equal? kind 'program)
+             (if (pair? (plist-get r 'install))
+                 (begin
+                   (setup-install-agent! name)
+                   (message (string-append "Setup: installing " (plist-get r 'program)
+                                           "; run M-x setup-bot again when it is done")))
+                 (message (string-append "Setup: install " (plist-get r 'program) " first")))
+             (k))
+            ((equal? kind 'secret)
+             (setup-ask-secret! (plist-get r 'secret) name again))
+            (else
+             (let ((ss (plist-get r 'secrets)))
+               (minibuffer-read "Which key? " (map setup-secret-label ss)
+                 (lambda (label)
+                   (let ((s (find (lambda (s) (equal? (setup-secret-label s) label)) ss)))
+                     (if s (setup-ask-secret! s name again) (k))))))))))))
 
 (define (setup-inference-available)
   "The connector names this machine can run now."
@@ -328,62 +418,6 @@
       (setup--show-doppler!)
       (setup--secret-help! name)))
 
-;; Registration is mechanism: the key becomes usable. Selection is policy:
-;; which connector a chat rides is the user's choice. The two are separate
-;; calls, so boot can do the first without doing the second.
-(define (setup-openrouter-register!)
-  "Register the stored OpenRouter key. Do not select a connector."
-  (let ((key (key-get "OPENROUTER_API_KEY")))
-    (if key
-        (begin (register-llm-key! "openrouter" key) #t)
-        #f)))
-
-(define (setup-openrouter-enable!)
-  "Register the stored OpenRouter key and select hosted inference."
-  (if (setup-openrouter-register!)
-      (begin
-        (set! *default-connector* "api")
-        (set-llm-model! setup-openrouter-model)
-        (message "OpenRouter is ready as the default inference provider")
-        #t)
-      (begin (message "OPENROUTER_API_KEY is not available") #f)))
-
-(define (setup--store-openrouter-key! destination key)
-  (cond
-    ((equal? (string-trim key) "")
-     (message "OpenRouter key was empty") #f)
-    ((equal? destination "Doppler")
-     (if (doppler-secret-set! key-doppler-project key-doppler-config
-                              "OPENROUTER_API_KEY" key)
-         (begin
-           (doppler-forget!)
-           (key-forget! "OPENROUTER_API_KEY")
-           (setup-openrouter-enable!))
-         (begin (message "Doppler did not store OPENROUTER_API_KEY") #f)))
-    (else
-      (let ((path (string-append (compos-config-dir) "/openrouter-key")))
-        (write-file! path (string-append (string-trim key) "\n"))
-        (set-file-mode! path "600")
-        (key-forget! "OPENROUTER_API_KEY")
-        (setup-openrouter-enable!)))))
-
-(define (setup--openrouter-storage-options)
-  (if (setup--program-present? "doppler")
-      '("Doppler" "Local key file")
-      '("Local key file")))
-
-(define (setup--ask-openrouter-key destination)
-  (unless setup-bot-silent-mode (tab-open setup-openrouter-keys-url))
-  (minibuffer-read "Paste OPENROUTER_API_KEY: " '()
-    (lambda (key)
-      (setup--store-openrouter-key! destination key)
-      (setup--ask-connectors))))
-
-(define (setup--configure-openrouter)
-  (minibuffer-read "Store OPENROUTER_API_KEY in: "
-    (setup--openrouter-storage-options)
-    setup--ask-openrouter-key))
-
 (define (setup--finish!)
   (message "Setup is ready. Run M-x setup-bot whenever you want to revisit it."))
 
@@ -427,16 +461,15 @@
   (y-or-n "Would you like to connect mail or Spotify now?"
     setup--choose-connector setup--ask-lesson))
 
-(define (setup--ask-gemini)
-  (y-or-n "Use local Gemini Nano as the bootstrap inference provider?"
-    (lambda () (setup-provider-bootstrap!) (setup--ask-connectors))
-    setup--ask-connectors))
-
+;; The connectors declare what they need, so the bot asks only what is
+;; missing for the one the user picks.
 (define (setup--ask-provider)
-  (if (key-get "OPENROUTER_API_KEY")
-      (begin (setup-openrouter-enable!) (setup--ask-connectors))
-      (y-or-n "Configure OpenRouter for hosted inference now?"
-        setup--configure-openrouter setup--ask-gemini)))
+  (let ((names (connector-names)))
+    (minibuffer-read "Which connector should new chats use? " (append names '("Skip"))
+      (lambda (choice)
+        (if (member choice names)
+            (setup-satisfy! choice setup--ask-connectors)
+            (setup--ask-connectors))))))
 
 (define (setup--choose-secret-backend)
   (let ((names (map car
@@ -460,14 +493,19 @@
     "[Connectors](#connectors) · [Lessons](#next-lessons)\n\n"
     "---\n\n"
     "## Inference\n\n"
-    "Gemini Nano is the bootstrap connector. It runs through the Chrome Prompt API.\n\n"
-    (setup--table '("Do this" "Why")
-      '(("`M-x setup-bootstrap-gemini`" "Select Gemini Nano as the default connector.")
-        ("[Create an OpenRouter key](https://openrouter.ai/settings/keys)"
-         "A hosted model. Then run `M-x setup-bot` again.")
-        ("`M-x setup-install-claude`" "Install Claude Code and its ACP adapter.")
-        ("`M-x setup-install-codex`" "Install the Codex CLI.")
-        ("`M-x setup-install-gemini`" "Install the Gemini CLI. Then add a Gemini key in `M-x setup`.")))
+    "Each connector declares what it needs. `M-x setup` asks for what is missing.\n\n"
+    (setup--table '("" "Connector" "State" "Next step")
+      (map (lambda (row)
+             (let ((next (list-ref row 4)))
+               (list (setup--state (list-ref row 2))
+                     (string-append "**" (car row) "**")
+                     (list-ref row 3)
+                     (cond ((not next) "")
+                           ((pair? (plist-get next 'install)) "`M-x setup-install-connector`")
+                           ((equal? (plist-get next 'kind) 'program)
+                            (string-append "install `" (plist-get next 'program) "`"))
+                           (else "add a key in `M-x setup`")))))
+           (setup-inference-scan)))
     "\n## Secret backends\n\n"
     "The key chain reads environment variables, `~/.compos` key files, then Doppler. "
     "The setup bot never prints secret values.\n\n"
@@ -624,32 +662,20 @@
 
 ;;; --- install a coding agent -----------------------------------------------------
 
-;; One row per agent: the steps install each program that is missing, in
-;; order, and SIGNIN is the command the user runs once after the install.
-;; The npm packages resolve through PATH, so the connectors find them.
-(define *setup-agent-installs*
-  '(("claude"
-     connector "claude-code"
-     steps (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
-            ("claude-agent-acp" "npm install -g @agentclientprotocol/claude-agent-acp"))
-     signin "claude")
-    ("codex"
-     connector "codex-app-server"
-     steps (("codex" "npm install -g @openai/codex"))
-     signin "codex login")
-    ("gemini"
-     connector "gemini"
-     steps (("gemini" "npm install -g @google/gemini-cli"))
-     signin "gemini")))
+;; A connector declares its install: 'install is ((PROGRAM COMMAND) ...), the
+;; steps that install each program that is missing, in order, and 'signin is
+;; the command the user runs once after the install. The npm packages resolve
+;; through PATH, so the connectors find them.
 
+;; the config of connector NAME when it declares install steps, else #f
 (define (setup--agent-install name)
-  (let ((row (assoc name *setup-agent-installs*)))
-    (and row (cdr row))))
+  (let ((config (connector-config name)))
+    (and (pair? (plist-get config 'install)) config)))
 
 (define (setup-agent-missing-steps name)
-  "The (PROGRAM COMMAND) steps of agent NAME whose program is not on PATH."
+  "The (PROGRAM COMMAND) steps of connector NAME whose program is not on PATH."
   (filter (lambda (step) (not (setup--program-present? (car step))))
-          (plist-get (setup--agent-install name) 'steps)))
+          (or (plist-get (setup--agent-install name) 'install) '())))
 
 (define (setup--steps-need-npm? steps)
   (and (find (lambda (step) (string-prefix? "npm " (cadr step))) steps) #t))
@@ -693,17 +719,13 @@
 
 (effects! '(write execute external))
 
-(define-command "setup-install-claude"
-  "Install Claude Code and its ACP adapter in a terminal buffer"
-  (lambda () (setup-install-agent! "claude")))
-
-(define-command "setup-install-codex"
-  "Install the Codex CLI in a terminal buffer"
-  (lambda () (setup-install-agent! "codex")))
-
-(define-command "setup-install-gemini"
-  "Install the Gemini CLI in a terminal buffer"
-  (lambda () (setup-install-agent! "gemini")))
+(define-command "setup-install-connector"
+  "Install the agent program of a connector in a terminal buffer"
+  (lambda ()
+    (let ((names (filter (lambda (n) (pair? (setup-agent-missing-steps n))) (connector-names))))
+      (if (null? names)
+          (message "Setup: every agent with install steps is installed")
+          (minibuffer-read "Install the agent for: " names setup-install-agent!)))))
 
 (effects! '(read write external))
 
@@ -791,10 +813,10 @@
   "(setup-connectors) — readiness of the bootstrap connectors")
 (public! 'setup-provider-bootstrap!
   "(setup-provider-bootstrap!) — select Gemini Nano as the default connector")
-(public! 'setup-openrouter-register!
-  "(setup-openrouter-register!) — register the stored OpenRouter key; leave the connector alone")
-(public! 'setup-openrouter-enable!
-  "(setup-openrouter-enable!) — register the stored OpenRouter key and select hosted inference")
+(public! 'setup-requirements
+  "(setup-requirements) — every declared need of every connector and MCP server, as plists: kind, owner, met, and program/install or secret/secrets")
+(public! 'setup-satisfy!
+  "(setup-satisfy! CONNECTOR K) — ask for the connector's first unmet need, then K; with none left the connector becomes the default")
 (public! 'setup-find-file-other-window!
   "(setup-find-file-other-window! PATH) — visit PATH only in another window; silent mode does nothing")
 (public! 'find-file-other-window!
@@ -802,11 +824,3 @@
 (public! 'bot-show-document-other-window!
   "(bot-show-document-other-window! BUFFER TITLE MARKDOWN SILENT?) — show bot documentation only in another window")
 (public! 'setup-report "(setup-report) — secret-free first-run setup report")
-
-;; A key installed by an earlier setup run stays usable after every reload.
-;; This registers the key only. It does not select the connector: the user
-;; owns that choice, `customize` keeps it in custom.scm, and a load-time
-;; set! overwrites the choice on every boot and on every reload of this
-;; file. Run `M-x setup-bot`, or (setup-openrouter-enable!), to select the
-;; hosted lane.
-(setup-openrouter-register!)

@@ -201,6 +201,8 @@ The engine draws the vocabulary, the same way on every site:
 
 **The spec** (`site.scm` beside the sheets) names the site, its URL patterns and the sheet for each, and the keys: which `<nav>` link is the home, and which `<action>` label takes which letter.
 
+**Site-specific stuff stays in the app, never in `site-app.scm`.** `site-app.scm` is only the generic plumbing that connects an app with the website backing it: the live tab, sheets, lists, details, keys, actions. Anything that knows about one site goes in that site's own app (`ats.scm` for svsrecruiting.com) as spec settings and hooks: its field names, its words and their tones, its header layout, its rating marks, its ornaments, its buttons. The same goes for the web framework the site happens to be built with: the app drives a real browser, so it clicks CSS selectors the sheet emits and waits for the ready mark the spec names. It never builds `phx-*` or other framework attributes itself. When the engine needs a site fact, add a spec key with a neutral default; do not hardcode a site's words in the engine.
+
 **Writing a sheet.** Read the page from the live tab, run `xslt-discover` with `xslt-discover-depth` raised, find the record anchor (see the four ways it goes wrong below), and write the sheet by hand. `xslt-learn` makes subtractive sheets for reading; it cannot make records. Prefer `data-testid`, ids and ARIA roles over classes. When the site is the user's own and hard to read, fix the site: add `data-testid` to rows and buttons, and make tabs and filters real links.
 
 **Checking a spec.** Keep a saved copy of each page kind with the counts its sheet must find, and check the live site against them. A redesign then shows up as a failed check, not as an empty list.

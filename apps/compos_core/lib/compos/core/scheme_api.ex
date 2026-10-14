@@ -1928,7 +1928,7 @@ defmodule Compos.Core.SchemeAPI do
         )
       end,
       {"client-slide!",
-       "(client-slide! DIR) — ask this frame's client to slide its panes on the next render; DIR is \"forward\" or \"backward\"."} =>
+       "(client-slide! DIR) — ask this frame's client to slide its panes on the next render; DIR is \"forward\" or \"backward\" along the strip, or \"down\" or \"up\" for the whole desk on a group switch."} =>
         fn [dir] ->
           Editor.slide(to_string(dir))
           :void

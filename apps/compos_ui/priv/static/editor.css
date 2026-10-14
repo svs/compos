@@ -229,7 +229,6 @@ body {
 .split.v { flex-direction: column; }
 .split-child {
   display: flex; min-width: 0; min-height: 0;
-  transition: flex-grow var(--chrome-anim, 0ms) ease-out;
 }
 .split-child > * { flex: 1; min-width: 0; min-height: 0; }
 /* A float (the card, a shaped prompt) stays in the window tree, so
@@ -318,6 +317,56 @@ body {
   background: var(--surface-pane);
 }
 .window.inactive .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
+/* the lift of the selected window moves to the next one, so the eye
+   follows the focus; a split or a delete moves in window-motion.js */
+.window {
+  transition: box-shadow var(--chrome-motion, 0ms) ease-out,
+    background-color var(--chrome-motion, 0ms) ease-out;
+}
+/* the stack of a window while Cmd walks it (window-motion.js): a
+   dropdown that hangs from the buffer title in the header line. The
+   page dresses it from the drawn header (its paper, its rule) and each
+   row from the drawn title (its font and ink), so it is the header's
+   own menu in every theme; a row's name starts where the title's does */
+.walk-rail {
+  position: fixed; z-index: 40; pointer-events: none;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-sizing: border-box; padding: 4px 0; width: max-content;
+  background: var(--surface-chrome, var(--paper-bg, #efeadf));
+  border: 1px solid var(--border-bg, #cbc4b1); border-top: none;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .32), 0 4px 10px rgba(0, 0, 0, .18);
+  transform-origin: top center;
+  animation: walk-rail-in var(--chrome-motion, 0ms) cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes walk-rail-in {
+  from { opacity: 0; transform: scaleY(.92) translateY(-4px); }
+}
+.walk-sheet {
+  position: relative; box-sizing: border-box; flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px 4px var(--walk-indent, 14px);
+  transition: background-color var(--chrome-motion, 0ms) ease-out;
+}
+.walk-sheet::before {
+  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px;
+  background: transparent;
+  transition: background-color var(--chrome-motion, 0ms) ease-out;
+}
+.walk-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0;
+  opacity: calc(1 - var(--d) * .12);
+  transition: opacity var(--chrome-motion, 0ms) ease-out; }
+.walk-name, .walk-path {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.walk-count {
+  flex: none; font: 10px/1 var(--font-mono, ui-monospace);
+  letter-spacing: .04em; color: var(--text-dim, #b3ac9c);
+}
+.walk-sheet.current {
+  background: color-mix(in srgb, var(--accent, #8f9cdb) 12%, transparent);
+}
+.walk-sheet.current::before { background: var(--accent, var(--accent-fg, #8f9cdb)); }
 .window.active {
   --surface-pane: var(--paper-bg, #efeadf);
   --surface-chrome: var(--paper-bg, #efeadf);

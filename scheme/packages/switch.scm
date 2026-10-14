@@ -890,18 +890,63 @@ the next row down. STEP is kept for the callers."
   "Walk this window's buffers in the minibuffer, oldest first"
   (lambda () (switch-window-buffer-pick! -1)))
 
+;; A window is a stack of paper: its buffers, the newest on top. A walk
+;; goes down or up the stack with no prompt. Each step shows the next
+;; sheet at once, and the page slides the two sheets past each other and
+;; shows the stack as a rail on the pane's edge (window-motion.js). The
+;; order holds while the walk lasts, so each step goes one sheet deeper.
+;; The walk ends when the user lets go of Cmd: the page then runs
+;; window-walk-end. The window's history is the one a single switch from
+;; the first buffer to the last would leave.
+(define *window-walk* #f)               ; (WIN START ROWS INDEX PREV)
+
+(define (window-walk-live? w win)
+  (and w (equal? (car w) win)
+       (equal? (window-buffer win) (list-ref (list-ref w 2) (list-ref w 3)))))
+
+(define (window-walk! step mode-only)
+  (let* ((win (active-window))
+         (w (if (window-walk-live? *window-walk* win)
+                *window-walk*
+                (let ((here (window-buffer win)))
+                  (list win here (cons here (switch-window-buffers mode-only)) 0
+                        (window-prev-buffers win)))))
+         (rows (list-ref w 2))
+         (n (length rows)))
+    (if (< n 2)
+        (message (if mode-only
+                     "No other buffer of this mode in this window"
+                     "No other buffer in this window"))
+        (let* ((j (modulo (+ (list-ref w 3) step) n))
+               (to (list-ref rows j))
+               (start (cadr w)))
+          (set! *window-walk* (list win start rows j (list-ref w 4)))
+          (client-slide! (json-encode (list 'pane (if (> step 0) "down" "up")
+                                            'win win 'rows rows 'at j)))
+          (switch-to-buffer-here! to)
+          (set-window-prev-buffers!
+           win (if (equal? to start)
+                   (list-ref w 4)
+                   (cons start (filter (lambda (b) (not (or (equal? b to) (equal? b start))))
+                                       (list-ref w 4)))))
+          (group-current-recalculate!)))))
+
 (define-command "window-next-mode-buffer"
-  "Walk this window's buffers of this mode in the minibuffer, newest first"
-  (lambda () (switch-window-buffer-pick! 1 #t)))
+  "Show the next buffer of this mode down this window's stack; hold Cmd to keep walking"
+  (lambda () (window-walk! 1 #t)))
 
 (define-command "window-previous-mode-buffer"
-  "Walk this window's buffers of this mode in the minibuffer, oldest first"
-  (lambda () (switch-window-buffer-pick! -1 #t)))
+  "Show the next buffer of this mode up this window's stack; hold Cmd to keep walking"
+  (lambda () (window-walk! -1 #t)))
+
+(define-command "window-walk-end"
+  "End a walk of the window's stack: the next walk starts on top again"
+  (lambda () (set! *window-walk* #f)))
 
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("window-next-buffer" "window-previous-buffer"
-    "window-next-mode-buffer" "window-previous-mode-buffer"))
+    "window-next-mode-buffer" "window-previous-mode-buffer" "window-walk-end"))
 
 ;; While the walk is open, the keys that opened it move the selection.
 (for-each

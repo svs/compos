@@ -3749,10 +3749,6 @@
             (buffer-set-local! (current-buffer) 'line-numbers "off")
             (message "Line numbers disabled"))))))
 
-;; window split/resize animations — CSS falls back to 140ms when the
-;; chrome face doesn't say otherwise; this flips it to 0ms and back
-(define *window-animations* #t)
-
 (define-command "back-to-indentation" "Move point to the first non-space on this line"
   (lambda ()
     (beginning-of-line!)
@@ -5962,7 +5958,8 @@
         ;; the modeline's name is the dashboard's click target
         ((equal? cmd "modeline-expand") (run-command cmd))
         ;; the header line's theme word opens the theme picker
-        ((member cmd '("dismiss-buffer" "listing-peek-dismiss" "load-theme"))
+        ;; a release of Cmd ends a walk of the window's stack
+        ((member cmd '("dismiss-buffer" "listing-peek-dismiss" "load-theme" "window-walk-end"))
          (run-command cmd))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))

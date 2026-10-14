@@ -1126,7 +1126,8 @@ defmodule Compos.Ui.EditorLive do
       <.frame_echo state={@state} />
       <.frame_notices state={@state} />
       <.frame_keycast state={@state} />
-      <c-windows class="windows" role="main" data-slide={assigns[:slide]}>
+      <c-windows class="windows" role="main" data-slide={assigns[:slide]}
+        data-panes={motion_panes(@state)}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
       <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil}
@@ -1684,6 +1685,51 @@ defmodule Compos.Ui.EditorLive do
         }
     end
   end
+
+  # The panes as window-motion.js sees them: the shape of the tree and
+  # the buffer of each window. A change in this string is a change the
+  # user sees move. A float (a peek, a popup) is not a pane. A prompt
+  # previews its rows in a window, and a preview does not move: the
+  # attribute is absent while a minibuffer is open, and a window that a
+  # list previews in (highlighted) has no buffer here.
+  defp motion_panes(%{minibuffer: mb}) when mb != nil, do: nil
+
+  defp motion_panes(%{tree: tree}) do
+    {shape, panes} = motion_shape(tree)
+    Jason.encode!(%{shape: shape, panes: panes})
+  end
+
+  defp motion_panes(_), do: nil
+
+  defp motion_shape(%{type: :split, children: [a, b]} = node) do
+    cond do
+      motion_float?(a) ->
+        motion_shape(b)
+
+      motion_float?(b) ->
+        motion_shape(a)
+
+      true ->
+        {sa, pa} = motion_shape(a)
+        {sb, pb} = motion_shape(b)
+        ratio = round((Map.get(node, :ratio) || 0.5) * 1000)
+        {"#{node.dir}#{ratio}(#{sa},#{sb})", pa ++ pb}
+    end
+  end
+
+  defp motion_shape(%{type: :leaf} = node) do
+    buffer = if Map.get(node, :highlighted, false), do: "", else: node.buffer
+    {to_string(node.id), [[to_string(node.id), buffer]]}
+  end
+
+  defp motion_shape(_), do: {"", []}
+
+  defp motion_float?(%{type: :leaf} = node) do
+    class = Map.get(node, :window_class) || ""
+    String.contains?(class, "popup") or String.contains?(class, "listing-peek")
+  end
+
+  defp motion_float?(_), do: false
 
   defp tree(%{node: %{type: :split}} = assigns) do
     assigns = assign(assigns, ratio: Map.get(assigns.node, :ratio, 0.5))

@@ -1638,6 +1638,11 @@
         Telem.attach(this);
         this.handleEvent("navigate", ({url}) => window.location.assign(url));
         keysHook = this;
+        // the release of Cmd ends a walk of a window's stack
+        if (window.windowMotion) {
+          window.windowMotion.onEnd = (win) =>
+            this.pushEvent("ui_cmd", {win: String(win), cmd: "window-walk-end"});
+        }
         this.whichKeyHeld = new Set();
         this.whichKeyQuery = "";
         this.whichKeyFiltering = false;
@@ -3220,13 +3225,16 @@
   const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
   const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
     hooks: Hooks,
-    // strip-slide.js copies the old panes before a strip scroll replaces them
+    // strip-slide.js copies the old panes before a strip scroll replaces
+    // them; window-motion.js measures them before a tree change moves them
     dom: {
       onBeforeElUpdated: (from, to) => {
         if (window.stripSlide) window.stripSlide.before(from, to);
+        if (window.windowMotion) window.windowMotion.before(from, to);
       },
       onPatchEnd: () => {
         if (window.stripSlide) window.stripSlide.after();
+        if (window.windowMotion) window.windowMotion.after();
         // a patch puts the daemon's rows back; paint the pending ops again
         composPredict.afterPatch();
       }

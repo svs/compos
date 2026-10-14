@@ -1569,6 +1569,16 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; are merely looking at -- and save layouts under that answer.
 (define *group-look-active* #f)
 
+;; The groups stack in the order of their tabs, so a switch moves the
+;; whole desk: to a later tab it goes down, to an earlier one up. A
+;; group without a tab is new, and comes from below.
+(define (group-slide-direction from to)
+  (let walk ((ids (map car (car (frame-tabs)))))
+    (cond ((null? ids) "down")
+          ((equal? (car ids) to) (if (member from (cdr ids)) "up" "down"))
+          ((equal? (car ids) from) "down")
+          (else (walk (cdr ids))))))
+
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
     (if (not id)
@@ -1578,7 +1588,11 @@ is forgotten and that group falls back to creation order in the switcher."
           (group-adopt-here! id)
           (set! *group-current-inhibit* #t)
           (let ((from (frame-group)))
-            (when (and from (not (equal? from id))) (group-frame-leave! from)))
+            (when (and from (not (equal? from id)))
+              ;; a switch the switcher previewed is on screen already
+              (unless (group-preview-shown? id)
+                (client-slide! (group-slide-direction from id)))
+              (group-frame-leave! from)))
           (layout-target-set! #f)
           (set-frame-local! 'current-group id)
           ;; An explicit switch moves an active pin. The frame stays pinned,

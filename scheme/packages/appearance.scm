@@ -145,6 +145,25 @@
 (add-hook! 'theme-change-hook 'appearance--anim-apply!)
 (appearance--anim-apply!)
 
+;; The motion of the desk: a split, a delete, a swap, a buffer that takes
+;; a window, a strip scroll and a group switch move on screen, so the
+;; user sees what went where (window-motion.js, strip-slide.js). It reads
+;; --chrome-motion, the 'chrome face's motion attribute. It is apart from
+;; ui-animation: that one is the decoration, this one is the map. Zero is
+;; off, and the system's reduced-motion setting turns it off too.
+(define (motion-css ms) (string-append (number->string ms) "ms"))
+
+(defcustom 'window-motion-duration 180
+  "Milliseconds a window, a buffer or a group takes to move to its new place. 0 turns the motion off."
+  'group 'appearance 'type 'integer
+  'set (lambda (ms)
+         (set-face-attribute! 'chrome 'motion (motion-css ms))))
+
+(define (appearance--motion-apply!)
+  (set-face-attribute! 'chrome 'motion (motion-css window-motion-duration)))
+(add-hook! 'theme-change-hook 'appearance--motion-apply!)
+(appearance--motion-apply!)
+
 ;; The size of buffer text is the default face's size. 13px was the
 ;; design size and 20.8px was the reading size, which was too large: every
 ;; buffer that wanted to be read carried a negative text-scale to undo it.

@@ -1,0 +1,454 @@
+// The motion of the panes. A render that changes the window tree (a
+// split, a delete, a swap, a resize, a buffer that takes a window) moves
+// each pane from where it was to where it is, so the user sees what went
+// where. The daemon marks c-windows with data-panes: the shape of the
+// tree and the buffer of each window. Only a change in that string costs
+// anything here; any other render passes two attribute reads.
+//
+// A pane that stays moves and resizes from its old box. A new pane slides
+// into its place out of the pane it split from. A pane that goes leaves a
+// copy that slides away from the pane that takes its place. A window that
+// shows a new buffer slides the new text in from the pane that showed it
+// before, and the old text out the other way.
+//
+// A strip scroll and a group switch move the whole desk instead
+// (strip-slide.js): a render that carries a new data-slide is theirs.
+(() => {
+  const EASE = 'cubic-bezier(.2,.7,.2,1)';
+  // how far a pane or a buffer travels in or out, as a part of its size
+  const TRAVEL = 0.35;
+  let snap = null;
+  let ghosts = [];
+  let anims = [];
+
+  // the duration the setting asks for (--chrome-motion); 0 is off
+  function duration() {
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return 0;
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--chrome-motion').trim();
+    const n = parseFloat(v);
+    if (!(n > 0)) return 0;
+    return v.endsWith('ms') ? n : n * 1000;
+  }
+
+  // the tiled panes; a peek or a popup floats and does not move
+  const panes = (root) =>
+    [...root.querySelectorAll('c-window.window')].filter(
+      (w) =>
+        !w.closest('.strip-ghost, .motion-ghost') &&
+        !w.classList.contains('listing-peek') &&
+        ![...w.classList].some((c) => c.startsWith('popup'))
+    );
+
+  // window id -> buffer, from data-panes
+  function parse(sig) {
+    try {
+      return new Map(JSON.parse(sig).panes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function finish() {
+    anims.forEach((a) => a.cancel());
+    ghosts.forEach((g) => g.remove());
+    anims = [];
+    ghosts = [];
+  }
+
+  function track(anim, ghost) {
+    anims.push(anim);
+    anim.onfinish = () => {
+      anims = anims.filter((a) => a !== anim);
+      if (ghost) {
+        ghosts = ghosts.filter((g) => g !== ghost);
+        ghost.remove();
+      }
+    };
+  }
+
+  // the scroll offsets inside a pane, by element index, so the copy
+  // shows the buffer at the place the user left it
+  function scrolls(el) {
+    const out = [];
+    el.querySelectorAll('*').forEach((e, i) => {
+      if (e.scrollTop || e.scrollLeft) out.push([i, e.scrollTop, e.scrollLeft]);
+    });
+    return out;
+  }
+
+  function restore(el, offsets) {
+    const all = el.querySelectorAll('*');
+    offsets.forEach(([i, top, left]) => {
+      const e = all[i];
+      if (e) { e.scrollTop = top; e.scrollLeft = left; }
+    });
+  }
+
+  function copy(w) {
+    const g = w.cloneNode(true);
+    ['id', 'phx-hook', 'data-win-id', 'data-buffer', 'buffer'].forEach((a) => g.removeAttribute(a));
+    g.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
+    g.querySelectorAll('[phx-hook]').forEach((e) => e.removeAttribute('phx-hook'));
+    g.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+    return g;
+  }
+
+  const center = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+  const inside = (r, [x, y]) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+
+  // the unit step from box A to box B on the axis they differ most on
+  function toward(a, b) {
+    const [ax, ay] = center(a);
+    const [bx, by] = center(b);
+    const dx = bx - ax;
+    const dy = by - ay;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return null;
+    return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+  }
+
+  // a translation that keeps the visible area on the element's own box
+  const clip = (dx, dy) => `inset(${-dy}px ${dx}px ${dy}px ${-dx}px)`;
+
+  // W's content comes in along STEP, inside its own box; with no step it
+  // rises from below. A FULL one travels the whole box and does not fade:
+  // it is the next sheet of the stack
+  function enter(w, rect, step, ms, full) {
+    const [sx, sy] = step || [0, -1];
+    const t = full ? 1 : TRAVEL;
+    const dx = -sx * t * rect.width;
+    const dy = -sy * t * rect.height;
+    track(w.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)`, clipPath: clip(dx, dy), opacity: full ? 1 : 0 },
+        { transform: 'translate(0px, 0px)', clipPath: clip(0, 0), opacity: 1 }
+      ],
+      { duration: ms, easing: EASE }
+    ));
+  }
+
+  // W stays, and moves and resizes from box A to box B
+  function reshape(w, a, b, ms) {
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 &&
+        Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1) return false;
+    const sx = a.width / b.width;
+    const sy = a.height / b.height;
+    track(w.animate(
+      [
+        { transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
+        { transformOrigin: '0 0', transform: 'none' }
+      ],
+      { duration: ms, easing: EASE }
+    ));
+    return true;
+  }
+
+  // a buffer that a neighbour showed crosses to W as one sheet of paper:
+  // it keeps its size and its ink, lifts off the old pane, slides over
+  // the divider and lands on the buffer W showed before
+  function paper(w, a, b, ms) {
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    track(w.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)`, zIndex: 3 },
+        { transform: 'translate(0px, 0px)', zIndex: 3 }
+      ],
+      { duration: ms, easing: EASE }
+    ));
+    track(w.animate(
+      [
+        { boxShadow: '0 0 0 rgba(0,0,0,0)' },
+        { boxShadow: '0 10px 28px rgba(0,0,0,.28)', offset: 0.4 },
+        { boxShadow: '0 0 0 rgba(0,0,0,0)' }
+      ],
+      { duration: ms, easing: 'ease-out' }
+    ));
+  }
+
+  // the old content of a pane, at its old box, goes out along STEP; a
+  // STILL one stays under the paper that lands on it
+  function leave(s, o, step, still, full) {
+    const box = s.root.getBoundingClientRect();
+    const r = o.rect;
+    const frame = document.createElement('div');
+    frame.className = 'motion-ghost';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.inert = true;
+    Object.assign(frame.style, {
+      position: 'absolute', overflow: 'hidden', pointerEvents: 'none', zIndex: still ? '1' : '2',
+      left: `${r.left - box.left - s.root.clientLeft}px`,
+      top: `${r.top - box.top - s.root.clientTop}px`,
+      width: `${r.width}px`, height: `${r.height}px`
+    });
+    Object.assign(o.ghost.style, { position: 'absolute', inset: '0' });
+    frame.appendChild(o.ghost);
+    s.root.appendChild(frame);
+    restore(o.ghost, o.offsets);
+    frame._motion = { root: s.root, ghost: o.ghost, offsets: o.offsets };
+    ghosts.push(frame);
+    const [sx, sy] = step || [0, -1];
+    const t = full ? 1 : TRAVEL;
+    const go = still ? [0, 0, 1] : [sx * t * r.width, sy * t * r.height, full ? 1 : 0];
+    track(o.ghost.animate(
+      [
+        { transform: 'translate(0px, 0px)', opacity: 1 },
+        { transform: `translate(${go[0]}px, ${go[1]}px)`, opacity: go[2] }
+      ],
+      { duration: s.ms, easing: EASE, fill: 'forwards' }
+    ), frame);
+  }
+
+  function play(s) {
+    const now = panes(s.root).map((w) => ({ w, id: w.dataset.winId, rect: w.getBoundingClientRect() }));
+    const ids = new Set(now.map((p) => p.id));
+    // where each buffer stood before the render, and where it stands now
+    const wasAt = new Map();
+    s.old.forEach((o) => { if (o.buffer) wasAt.set(o.buffer, o.rect); });
+    const isAt = new Map();
+    now.forEach((p) => { const b = s.after.get(p.id); if (b) isAt.set(b, p.rect); });
+
+    now.forEach((p) => {
+      const o = s.old.get(p.id);
+      if (!o) {
+        // a new pane comes out of the pane whose place it took
+        const c = center(p.rect);
+        const parent = now.find((q) => q !== p && s.old.has(q.id) && inside(s.old.get(q.id).rect, c));
+        enter(p.w, p.rect, parent && toward(parent.rect, p.rect), s.ms);
+        return;
+      }
+      const moved = reshape(p.w, o.rect, p.rect, s.ms);
+      if (!o.ghost) return;
+      // a new buffer: it comes from the pane that showed it, or the old
+      // one goes to the pane that shows it now
+      // a walk of this window's stack: the two sheets pass each other,
+      // down the stack the next one rises from below
+      if (!moved && s.walk && String(s.walk.win) === p.id) {
+        const step = s.walk.pane === 'up' ? [0, 1] : [0, -1];
+        enter(p.w, p.rect, step, s.ms, true);
+        leave(s, o, step, false, true);
+        return;
+      }
+      const b = s.after.get(p.id);
+      const src = b && wasAt.get(b);
+      const dst = o.buffer && isAt.get(o.buffer);
+      if (!moved && src && toward(src, p.rect)) {
+        paper(p.w, src, p.rect, s.ms);
+        leave(s, o, null, true);
+        return;
+      }
+      const step = (src && toward(src, p.rect)) || (dst && toward(p.rect, dst)) || null;
+      if (!moved) enter(p.w, p.rect, step, s.ms);
+      // a buffer that went to a neighbour is on the paper that carries it
+      if (!moved && dst && toward(p.rect, dst)) return;
+      leave(s, o, step);
+    });
+
+    // a pane that went slides away from the pane that took its place
+    s.old.forEach((o, id) => {
+      if (ids.has(id) || !o.ghost) return;
+      const heir = now.find((q) => inside(q.rect, center(o.rect)));
+      leave(s, o, heir && toward(heir.rect, o.rect));
+    });
+  }
+
+  // LiveView calls this for each element it updates, before the update.
+  // It must stay cheap: every render passes here.
+  function before(from, to) {
+    if (from.tagName !== 'C-WINDOWS') return;
+    const token = to.getAttribute('data-slide');
+    const fresh = token && token !== from.getAttribute('data-slide');
+    const walk = fresh && token.startsWith('{') ? parseWalk(token) : null;
+    if (walk) pending = walk;
+    const was = from.getAttribute('data-panes');
+    const next = to.getAttribute('data-panes');
+    if (!was || !next || was === next) return;
+    if (fresh && !walk) return;
+    if (from.querySelector('.listing-peek')) return;
+    const ms = duration();
+    const prev = parse(was);
+    const after = parse(next);
+    if (!ms || !prev || !after) { finish(); return; }
+    // measure before the old motion stops: a pane in motion starts from
+    // where the eye sees it
+    const old = new Map();
+    panes(from).forEach((w) => {
+      const id = w.dataset.winId;
+      const buffer = prev.get(id);
+      const goes = !after.has(id) || after.get(id) !== buffer;
+      old.set(id, {
+        rect: w.getBoundingClientRect(),
+        buffer,
+        ghost: goes ? copy(w) : null,
+        offsets: goes ? scrolls(w) : null
+      });
+    });
+    finish();
+    snap = { root: from, old, after, ms, walk };
+  }
+
+  // after each patch; a render during the motion removes the copies,
+  // because the server does not know them, so they go back
+  function after() {
+    if (pending) {
+      const w = pending;
+      pending = null;
+      drawRail(w);
+    }
+    if (snap) {
+      const s = snap;
+      snap = null;
+      if (s.root.isConnected) play(s);
+      return;
+    }
+    ghosts.forEach((g) => {
+      const m = g._motion;
+      if (g.isConnected || !m.root.isConnected) return;
+      m.root.appendChild(g);
+      restore(m.ghost, m.offsets);
+    });
+  }
+
+  // A walk of a window's stack: the token is the walk as JSON, then the
+  // daemon's count. The stack shows as a rail of sheets on the pane's
+  // edge while Cmd is down; the release ends the walk, here and in the
+  // editor (window-walk-end, through windowMotion.onEnd).
+  let pending = null;
+  let rail = null;
+  let meta = false;
+  let lapse = null;
+
+  function parseWalk(token) {
+    try {
+      return JSON.parse(token.slice(0, token.lastIndexOf(':')));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const SHOWN = 9;
+  const RAIL_WIDTH = 260;
+
+  // The rail hangs from the buffer title in the pane's header line:
+  // the stack drops down out of the name it replaces, every sheet one
+  // width, its name set as the title is, so the names line up like the
+  // edges of a pile of paper. A sheet keeps its element between steps,
+  // so it glides to its new place.
+  function drawRail(walk) {
+    const pane = document.querySelector(`c-window.window[data-win-id="${walk.win}"]`);
+    if (!pane) return;
+    const p = pane.getBoundingClientRect();
+    const head = pane.querySelector('.dash-persistent');
+    const title = head && head.querySelector('.dseg-chat-title .dseg-v');
+    const look = lookOf(head, title);
+    const h = head ? head.getBoundingClientRect() : { bottom: p.top };
+    const t = title ? title.getBoundingClientRect() : { left: p.left + 12 };
+    const seg = title ? title.closest('.dseg-chat-title').getBoundingClientRect() : t;
+    if (!rail) {
+      rail = document.createElement('div');
+      rail.className = 'walk-rail';
+      rail.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(rail);
+    }
+    rail.dataset.win = walk.win;
+    // the dropdown is as wide as its longest name, so every name shows
+    // whole; only a pane too narrow for it cuts one short
+    const width = Math.max(RAIL_WIDTH, (seg.width || 0) + 28);
+    const room = p.width - 16;
+    const left = Math.max(p.left + 8, Math.min(seg.left - 14, p.right - 8 - Math.min(width, room)));
+    Object.assign(rail.style, {
+      left: `${left}px`, minWidth: `${Math.min(width, room)}px`, maxWidth: `${p.right - 8 - left}px`,
+      top: `${h.bottom - 1}px`, maxHeight: `${p.bottom - h.bottom - 8}px`
+    });
+    rail.style.setProperty('--walk-indent', `${Math.max(10, t.left - left)}px`);
+    if (look) Object.assign(rail.style, { background: look.paper, borderColor: look.edge });
+    const half = Math.floor(SHOWN / 2);
+    const from = Math.max(0, Math.min(walk.at - half, walk.rows.length - SHOWN));
+    const kept = new Map([...rail.children].map((s) => [s.dataset.name, s]));
+    rail.replaceChildren(...walk.rows.slice(from, from + SHOWN).map((name, k) => {
+      const i = from + k;
+      const sheet = kept.get(name) || document.createElement('div');
+      if (!sheet.dataset.name) {
+        sheet.dataset.name = name;
+        const file = name.startsWith('/');
+        const parts = file ? name.split('/').filter(Boolean) : [];
+        const stack = document.createElement('span');
+        stack.className = 'walk-title';
+        const label = document.createElement('span');
+        label.className = 'walk-name';
+        label.textContent = parts.pop() || name;
+        stack.append(label);
+        if (file && parts.length) {
+          const dir = document.createElement('span');
+          dir.className = 'walk-path';
+          dir.textContent = ('/' + parts.join('/')).replace(/^\/(Users|home)\/[^/]+/, '~');
+          stack.append(dir);
+        }
+        const count = document.createElement('span');
+        count.className = 'walk-count';
+        sheet.append(stack, count);
+      }
+      sheet.className = i === walk.at ? 'walk-sheet current' : 'walk-sheet';
+      dress(sheet, look, i === walk.at);
+      sheet.style.setProperty('--d', Math.abs(i - walk.at));
+      sheet.lastChild.textContent = i === walk.at ? `${i + 1}/${walk.rows.length}` : '';
+      return sheet;
+    }));
+    // a walk with no Cmd held (M-x) ends a moment after its step
+    clearTimeout(lapse);
+    if (!meta) lapse = setTimeout(end, 1200);
+  }
+
+  // The sheets take the title's look from the page, not from a copy in
+  // the CSS: the theme sets the header line, so only the drawn title
+  // knows its font, its ink and its paper.
+  const FONT = ['fontFamily', 'fontWeight', 'fontSize', 'lineHeight', 'letterSpacing', 'textTransform'];
+
+  function fontOf(el) {
+    if (!el) return null;
+    const c = getComputedStyle(el);
+    const f = {};
+    FONT.forEach((k) => { f[k] = c[k]; });
+    f.color = c.color;
+    return f;
+  }
+
+  function lookOf(head, title) {
+    if (!head || !title) return null;
+    const h = getComputedStyle(head);
+    const name = fontOf(title.querySelector('.dseg-strong') || title);
+    const other = document.querySelector('.window.inactive .dash-persistent .dseg-chat-title .dseg-v');
+    return {
+      name, path: fontOf(head.querySelector('.dseg-chat-title .dseg-path')),
+      ink: other ? fontOf(other.querySelector('.dseg-strong') || other).color : h.color,
+      paper: h.backgroundColor, edge: h.borderBottomColor
+    };
+  }
+
+  function dress(sheet, look, current) {
+    if (!look) return;
+    const label = sheet.querySelector('.walk-name');
+    Object.assign(label.style, look.name, { color: current ? look.name.color : look.ink });
+    const dir = sheet.querySelector('.walk-path');
+    if (dir && look.path) Object.assign(dir.style, look.path);
+  }
+
+  function end() {
+    clearTimeout(lapse);
+    if (!rail) return;
+    const win = rail.dataset.win;
+    rail.remove();
+    rail = null;
+    if (windowMotion.onEnd) windowMotion.onEnd(win);
+  }
+
+  window.addEventListener('keydown', (e) => { meta = e.metaKey; }, true);
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Meta') { meta = false; end(); }
+  }, true);
+  window.addEventListener('blur', () => { meta = false; end(); });
+
+  const windowMotion = { before, after, onEnd: null };
+  window.windowMotion = windowMotion;
+})();

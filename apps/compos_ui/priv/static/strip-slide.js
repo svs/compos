@@ -7,12 +7,20 @@
 // two slide together. The pane that leaves goes out one side, the pane
 // that arrives comes in the other, and a pane on both sides stays where
 // the eye is. The user sees which buffer left and which buffer arrived.
+//
+// A group switch marks "down:N" or "up:N": the groups stack in the
+// order of their tabs, and the whole desk moves by the frame's height.
 (() => {
-  const DURATION = 220;
   let current = null;
 
-  const reduced = () =>
-    window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // the duration the setting asks for (--chrome-motion); 0 is off
+  function duration() {
+    if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return 0;
+    const v = getComputedStyle(document.documentElement).getPropertyValue("--chrome-motion").trim();
+    const n = parseFloat(v);
+    if (!(n > 0)) return 0;
+    return v.endsWith("ms") ? n : n * 1000;
+  }
 
   // the panes in screen order; a peek floats and does not scroll
   const panes = (root) =>
@@ -23,8 +31,9 @@
   // The axis and the distance of one pane-step. Panes that share one left
   // edge are rows, and the strip moves vertically. One pane moves by the
   // frame's width.
-  function step(root, forward) {
+  function step(root, forward, desk) {
     const box = root.getBoundingClientRect();
+    if (desk) return { vertical: true, d: box.height };
     const rs = panes(root).map((w) => w.getBoundingClientRect());
     if (rs.length === 0) return null;
     const vertical = rs.length > 1 && rs.every((r) => Math.abs(r.left - rs[0].left) < 1);
@@ -75,7 +84,7 @@
     });
   }
 
-  function run(root, ghost, offsets, forward, s) {
+  function run(root, ghost, offsets, forward, s, ms) {
     const d = forward ? s.d : -s.d;
     const t = (v) => (s.vertical ? `translateY(${v}px)` : `translateX(${v}px)`);
     // the copy stands one step behind the new panes, in the old place
@@ -90,7 +99,7 @@
         { transform: t(d), clipPath: clip(d) },
         { transform: t(0), clipPath: clip(0) }
       ],
-      { duration: DURATION, easing: "cubic-bezier(.2,.7,.2,1)" }
+      { duration: ms, easing: "cubic-bezier(.2,.7,.2,1)" }
     );
     current = { anim, ghost, root, offsets };
     anim.onfinish = () => { if (current && current.anim === anim) finish(); };
@@ -102,17 +111,21 @@
     if (from.tagName !== "C-WINDOWS") return;
     const token = to.getAttribute("data-slide");
     if (!token || token === from.getAttribute("data-slide")) return;
+    // a walk of one window's stack is window-motion.js's
+    if (token.startsWith("{")) return;
     finish();
-    if (reduced()) return;
-    const forward = !token.startsWith("backward");
-    const s = step(from, forward);
+    const ms = duration();
+    if (!ms) return;
+    const forward = !token.startsWith("backward") && !token.startsWith("up");
+    const desk = token.startsWith("up") || token.startsWith("down");
+    const s = step(from, forward, desk);
     if (!s) return;
     const ghost = ghostOf(from);
     const offsets = scrolls(from);
     // the patch is synchronous: the microtask sees the new panes, and the
     // browser paints no frame between the patch and the slide
     queueMicrotask(() => {
-      if (from.isConnected) run(from, ghost, offsets, forward, s);
+      if (from.isConnected) run(from, ghost, offsets, forward, s, ms);
     });
   }
 

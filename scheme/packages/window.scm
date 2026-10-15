@@ -562,6 +562,46 @@
                              ((symbol? target) (symbol->string target))
                              (else target)))))
 
+;; The ring in ring order: a filled box for each window on screen, a hollow
+;; one for each waiting off it; nothing when the layout shows them all. The
+;; header draws the ml-ring segment right after the group tabs.
+(define (layout-ring-dots)
+  (let ((panes (layout-pane-windows)))
+    (if (null? (layout-hidden-windows))
+        ""
+        (apply string-append (map (lambda (w) (if (member w panes) "■" "□")) (layout-ring-order))))))
+
+;; Every window of the ring in ring order: the walk's strip while it still
+;; names exactly the live windows, else the panes and then the hidden ones.
+(define (layout-ring-order)
+  (let* ((live (append (layout-pane-windows) (layout-hidden-windows)))
+         (strip (layout-strip)))
+    (if (and (= (length strip) (length live))
+             (null? (filter (lambda (w) (not (member w live))) strip)))
+        strip
+        live)))
+
+;; Walk the ring the shortest way until WIN is on screen, then select it.
+(define (layout-ring-show! win)
+  (let* ((algorithm (layout-target))
+         (capacity (and algorithm (layout-capacity algorithm)))
+         (order (layout-ring-order))
+         (n (length order))
+         (i (and (member win order) (- n (length (member win order))))))
+    (cond ((not i) #f)
+          ((or (not capacity) (member win (layout-pane-windows)))
+           (select-window! win) win)
+          (else
+            (let* ((start (if (equal? order (layout-strip)) (layout-offset) 0))
+                   (ahead (modulo (- i start) n))
+                   (offset (if (<= (- ahead (- capacity 1)) (- n ahead))
+                               (+ start (- ahead (- capacity 1)))
+                               i)))
+              (layout-strip-set! order offset)
+              (layout-arrange-windows! algorithm (layout-strip-run capacity))
+              (select-window! win)
+              win)))))
+
 (define (layout-target-modeline-shown)
   (let ((entry (assq 'layout-value *global-mode-string*)))
     (and entry (pair? (cadr entry)) (cadr (cadr entry)))))
@@ -570,7 +610,13 @@
   (let ((text (layout-target-modeline-text)))
     (unless (equal? text (layout-target-modeline-shown))
       (global-mode-string-set! 'layout-label '("ml-segment ml-strong" "layout"))
-      (global-mode-string-set! 'layout-value (list "ml-segment ml-tight" text)))))
+      (global-mode-string-set! 'layout-value (list "ml-segment ml-tight" text))))
+  (let ((ring (if (layout-target) (layout-ring-dots) ""))
+        (shown (assq 'layout-ring *global-mode-string*)))
+    (cond ((and (equal? ring "") shown) (global-mode-string-remove! 'layout-ring))
+          ((equal? ring "") #f)
+          ((not (and shown (equal? (cadr shown) (list "ml-segment ml-ring" ring))))
+           (global-mode-string-set! 'layout-ring (list "ml-segment ml-ring" ring))))))
 
 ;; A target is a layout and a capacity, not a frozen accidental tree.
 (define (layout-target-capacity target) (layout-capacity target))
@@ -732,6 +778,8 @@
           (layout-target-arrange! panes focus))))))
 
 (add-hook! 'window-configuration-change-hook 'layout-target-on-change!)
+;; A walk along the ring changes no pane count, so the dots follow the state.
+(add-hook! 'window-state-change-hook 'layout-target-modeline!)
 
 (define (display--keep-shape actions)
   (if (layout-target)
@@ -2621,12 +2669,25 @@ bottom, as a window-rects row; #f past either end."
            (select-window! (car neighbor))
            (switch-to-buffer-here! buf)
            (window-set-point! (car neighbor) point)
-           (delete-window-id! source))
+           (buffer-move-close-source! source))
           (else
             (reveal-previous!)
             (select-window! (car neighbor))
             (switch-to-buffer-here! buf)
             (window-set-point! (car neighbor) point)))))
+
+;; The emptied pane closes; when the ring holds more windows than the layout
+;; shows, the next one in the ring takes the freed pane.
+(define (buffer-move-close-source! source)
+  (let* ((algorithm (layout-target))
+         (capacity (and algorithm (layout-capacity algorithm)))
+         (strip (if capacity (layout-strip-current capacity) '()))
+         (panes (filter (lambda (w) (not (equal? w source))) (layout-pane-windows)))
+         (rest (filter (lambda (w) (not (equal? w source))) strip)))
+    (delete-window-id! source)
+    (when (and (pair? panes) (> (length rest) (length panes)) (member (car panes) rest))
+      (layout-strip-set! rest (- (length rest) (length (member (car panes) rest))))
+      (layout-arrange-windows! algorithm (layout-strip-run capacity)))))
 
 ;; A full layout gives the buffer a new window in the ring and walks to it.
 (define (buffer-move-into-ring! dir source buf point reveal-previous!)

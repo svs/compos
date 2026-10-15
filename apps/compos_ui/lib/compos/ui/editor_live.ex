@@ -1332,11 +1332,24 @@ defmodule Compos.Ui.EditorLive do
           phx-click="frame_tab"
         >{@tabs.more} more</c-tab>
       </c-tabs>
+      <c-text :for={{c, t} <- ring_segments(@state.modeline_extra)} class={c} title="window ring: filled panes on screen, hollow ones waiting">{t}</c-text>
       <c-text class="ml-rule"></c-text>
-      <c-text :if={@state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
+      <c-text :if={extra_segments(@state.modeline_extra) not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- extra_segments(@state.modeline_extra)} class={c}>{t}</c-text><% end %></c-text>
     </c-statusbar>
     """
   end
+
+  # The window ring segment of global-mode-string draws after the group tabs;
+  # the rest of the frame's facts stay at the right end.
+  defp ring_segments(extra) when is_list(extra),
+    do: Enum.filter(extra, fn {c, _} -> String.contains?(c, "ml-ring") end)
+
+  defp ring_segments(_), do: []
+
+  defp extra_segments(extra) when is_list(extra),
+    do: Enum.reject(extra, fn {c, _} -> String.contains?(c, "ml-ring") end)
+
+  defp extra_segments(extra), do: extra
 
   # The echo area is the frame's own bar and holds only what passes: the
   # message, a rule, then the keys that matter where you are standing. It

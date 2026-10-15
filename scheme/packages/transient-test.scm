@@ -330,6 +330,26 @@
       (set! *llm-bundles* saved)
       (buffer-kill! buf))))
 
+(deftest 'llm-default-bundle-holds-a-whole-config
+  "A default saved without a preset lands on a new chat, and a preset equal to it says default"
+  (lambda ()
+    (let ((saved *llm-bundles*)
+          (default llm-default-bundle)
+          (buf (test-buffer! "zz-llm-default-config" "")))
+      (set! *llm-bundles* '())
+      (set! llm-default-bundle '(connector "api" model "m7" effort "low"))
+      (check-true! (and (llm-default-bundle-apply! buf) #t)
+                   "the saved config applies")
+      (check-equal! (buffer-local buf 'agent-model) "m7"
+                    "the model comes from the config")
+      (llm-bundle-save! "zz-same" '(connector "api" model "m7" effort "low"))
+      (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
+                    "zz-same · default"
+                    "a preset equal to the default says so")
+      (set! llm-default-bundle default)
+      (set! *llm-bundles* saved)
+      (buffer-kill! buf))))
+
 (deftest 'transient-rows-can-skip-the-cursor-and-add-flags
   "A row with 'cursor 'skip keeps its key but never the cursor; 'flags-fn adds classes"
   (lambda ()

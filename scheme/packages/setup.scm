@@ -18,6 +18,14 @@
   "The connector first-run setup chose. Empty leaves the built-in default."
   'group 'setup)
 
+(define (setup--save-default! connector &optional model)
+  ;; the connector alone is not what a new chat starts with: an older
+  ;; llm-default-bundle would still win, so the choice becomes that too
+  (when (boundp 'llm-default-save!)
+    (llm-default-save! (if model
+                           (list 'connector connector 'model model)
+                           (list 'connector connector)))))
+
 (define *setup-buffer* "*setup*")
 
 (define *setup-secret-backends*
@@ -295,6 +303,7 @@
         (begin
           (customize-save! 'setup-default-connector name)
           (set! *default-connector* name)
+          (setup--save-default! name)
           (message (string-append "Setup: new chats use " name))
           (k))
         (let* ((r (car unmet))

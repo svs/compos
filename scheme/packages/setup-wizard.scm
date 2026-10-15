@@ -220,6 +220,7 @@
 (define (setup-wizard-use! buf name)
   (customize-save! 'setup-default-connector name)
   (set! *default-connector* name)
+  (setup--save-default! name)
   (message (string-append "Setup: new chats use " name))
   (setup-wizard-redraw! buf))
 
@@ -301,6 +302,7 @@
           (customize-save! 'setup-default-connector connector)
           (set! *default-connector* connector)
           (when model (set-llm-model! model))
+          (setup--save-default! connector model)
           (message (string-append "Setup: " var " is in ~/.compos/secrets.scm; new chats use "
                                   (or model connector))))
         (message (string-append "Setup: " var " is in ~/.compos/secrets.scm")))

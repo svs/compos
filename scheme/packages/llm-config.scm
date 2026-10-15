@@ -868,19 +868,23 @@
               (message (string-append "preset " name " deleted"))))
           (lambda () #f)))))
 
-;;; The bundle a new chat starts with. It is a setting like any other, so it
-;;; lands in custom.scm, survives a restart, and can be edited by hand. ""
-;;; means no default: a new chat keeps whatever it inherits.
+;;; The setup a new chat starts with, unless its group names one. It is a
+;;; whole config, so it needs no preset: M-d in the box and the setup wizard
+;;; both save it. A preset's name still reads, for an older custom.scm. It is
+;;; a setting like any other, so it lands in custom.scm, survives a restart,
+;;; and can be edited by hand. "" means no default: a new chat keeps whatever
+;;; it inherits.
 (defgroup 'llm "The language model a chat talks to.")
 
 (defcustom 'llm-default-bundle ""
-  "The saved bundle every new chat starts with. Empty means no default."
-  'group 'llm 'type 'string)
+  "The config every new chat starts with, unless its group names one. Empty means no default."
+  'group 'llm)
 
-(define (llm-default-bundle-record)
-  (and (string? llm-default-bundle)
-       (not (equal? llm-default-bundle ""))
-       (llm-bundle-named llm-default-bundle)))
+(define (llm-default-bundle-record) (llm-bundle-resolve llm-default-bundle))
+
+(define (llm-default-save! b)
+  ;; B, a whole config or a part of one, is now what new chats start with
+  (customize-save! 'llm-default-bundle b))
 
 ;;; --- model presets --------------------------------------------------------
 ;;; A bundle is a whole chat setup, and a person picks it at C-c b. A preset
@@ -969,6 +973,8 @@
   "(llm-default-bundle-apply! BUF [GROUP]) — put the group's 'llm bundle, else llm-default-bundle, on a new chat; #f when neither names one")
 (public! 'llm-group-bundle
   "(llm-group-bundle G) — G's 'llm setting as a bundle: it names a preset or is one; #f when unset")
+(public! 'llm-default-save!
+  "(llm-default-save! B) — make config B what every new chat starts with, unless its group names one")
 
 (define-command "group-llm" "Choose the preset this group's new chats start with"
   (lambda ()
@@ -986,16 +992,20 @@
                                               (or v "the global default")
                                               " (group.scm)"))))))))))))
 
-(define-command "llm-config-save-default" "Make the box's preset the default for new chats"
+(define (llm-config--default-setup)
+  ;; the default as a whole setup, or #f when there is none
+  (let ((d (llm-default-bundle-record)))
+    (and d (llm-config--fill d (llm-config--live)))))
+
+(define (llm-config--default? b)
+  (let ((d (llm-config--default-setup)))
+    (and d (llm-config--same? (llm-config--fill b (llm-config--live)) d))))
+
+(define-command "llm-config-save-default" "Make the box's config the default for new chats"
   (lambda ()
-    (let ((name (llm-config--source-name)))
-      (cond ((not (string? name)) (message "the box came from no preset — S saves it first"))
-            ((pair? (llm-config--drift))
-             (message (string-append "the box changed " name " — s saves it first")))
-            (else
-              (customize-save! 'llm-default-bundle name)
-              (llm-config--refresh!)
-              (message (string-append "new chats start with " name)))))))
+    (llm-default-save! (llm-config--box))
+    (llm-config--refresh!)
+    (message "new chats start with this config")))
 
 ;;; --- the menu -------------------------------------------------------------------
 ;;; Two columns. The left column is the presets: the cursor moves through
@@ -1149,7 +1159,7 @@
            (transient-suffix ""
              (string-append name
                (if (llm-config--dirty? name) "*" "")
-               (if (equal? name llm-default-bundle) " · default" ""))
+               (if (llm-config--default? b) " · default" ""))
              (lambda () (llm-config--choose! name))
              'transient 'stay 'bundle b
              'flags-fn (lambda (_scope) (llm-config--shown-flag name))
@@ -1267,7 +1277,10 @@
 (define (llm-config--legend _buf)
   (let* ((name (llm-config--source-name))
          (drift? (pair? (llm-config--drift)))
-         (sel (llm-config--selected-name)))
+         (sel (llm-config--selected-name))
+         (default-key (if (llm-config--default? (llm-config--box))
+                          '()
+                          (list (list "M-d" "default for new chats")))))
     (append
       (if (llm-config--on-left?)
           (append
@@ -1276,14 +1289,13 @@
             (if (and name drift?) (list (list "M-u" (string-append "update " name))) '())
             (list (list "M-s" "save as…") (list "M-n" "new preset"))
             (if name (list (list "M-k" "delete…")) '())
-            (if (and name (not drift?) (not (equal? name llm-default-bundle)))
-                (list (list "M-d" "default for new chats"))
-                '()))
+            default-key)
           (append
             (list (list "←" "back to presets"))
             (if (and name drift?) (list (list "s" (string-append "update " name))) '())
             (list (list "S" "save as…"))
-            (if drift? (list (list "u" "undo changes")) '())))
+            (if drift? (list (list "u" "undo changes")) '())
+            default-key))
       (list (list "ESC C-g" (string-append "apply " (or sel "this chat")
                                            (if (llm-config--dirty? sel) "*" "")
                                            " + close"))))))

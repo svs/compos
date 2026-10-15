@@ -301,13 +301,7 @@ is forgotten and that group falls back to creation order in the switcher."
                     (filter (lambda (id) (not (member id ids))) *mode-group-ids*))
           (set! *mode-group-ids* ids))))))
 
-;; buffer-goto-group: stand in a group that holds this buffer -- its own
-;; group, or a pseudo group (Last chats, its mode) that holds it now.
-(define (buffer-goto-group-ids b)
-  (let ((own (or (group-context-memberships b) '())))
-    (append own (filter (lambda (id) (not (member id own)))
-                        (buffer-pseudo-group-ids b)))))
-
+;; buffer-goto-group: stand in this buffer's own group; pseudo groups never count.
 (define (buffer-goto-group! b id)
   (unless (equal? id (frame-group)) (switch-to-group! id))
   (let ((w (window-showing b)))
@@ -317,18 +311,13 @@ is forgotten and that group falls back to creation order in the switcher."
   id)
 
 (define-command "buffer-goto-group"
-  "Stand in a group that holds this buffer: its own, or a pseudo group"
+  "Stand in this buffer's own group and focus the buffer there"
   (lambda ()
     (let* ((b (current-buffer))
-           (ids (buffer-goto-group-ids b)))
-      (cond ((null? ids) (message (string-append b " is in no group")))
-            ((null? (cdr ids)) (buffer-goto-group! b (car ids)))
-            (else
-              (completing-read "Group: " (map group-name ids)
-                (lambda (name)
-                  (let ((id (and name (group-resolve-id name))))
-                    (when id (buffer-goto-group! b id))))
-                'require-match #t))))))
+           (id (group-home-of b)))
+      (if id
+          (buffer-goto-group! b id)
+          (message (string-append b " is in no group"))))))
 
 (define (group-record-by-id id)
   (if (pseudo-group-id? id)
@@ -4986,6 +4975,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (define-key "ctl-x-map" "g" "group-switch")
 
   (define-key "buffer-group-map" "C-g" "group-switch-last")
+  (define-key "buffer-group-map" "g" "buffer-goto-group")
   (define-key "buffer-group-map" "b" "group-members")
   (define-key "buffer-group-map" "l" "groups")
   (define-key "buffer-group-map" "s" "tile-all")
@@ -5083,7 +5073,6 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'last-chats "(last-chats) -> the chats you used most recently, most recent first")
 (public! 'mode-group-buffers "(mode-group-buffers MODE) -> the buffers in MODE, most recent first")
 (public! 'mode-groups-refresh! "(mode-groups-refresh!) -- bring the mode groups up to the buffer list")
-(public! 'buffer-goto-group-ids "(buffer-goto-group-ids B) -> every group that holds B, its own first")
 (public! 'buffer-goto-group! "(buffer-goto-group! B G) -- stand in G, then focus B there")
 (public! 'group-buffers-as "(group-buffers-as GROUP ROLE) -> buffers with that group-relative role")
 (public! 'group-buffer-as "(group-buffer-as GROUP ROLE) -> most recent buffer with ROLE, or #f")
@@ -5126,7 +5115,6 @@ is forgotten and that group falls back to creation order in the switcher."
 (catalog-meta! 'function "last-chats" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "mode-group-buffers" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "mode-groups-refresh!" 'domain 'buffers 'effects '(write))
-(catalog-meta! 'function "buffer-goto-group-ids" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-goto-group!" 'domain 'buffers 'effects '(write display))
 (catalog-meta! 'command "buffer-goto-group" 'domain 'groups 'effects '(write display))
 (catalog-meta! 'function "group-counts" 'domain 'buffers 'effects '(read))

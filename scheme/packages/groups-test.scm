@@ -347,8 +347,6 @@
       (check-true! (and (member a (group-buffers "mode: zztest"))
                         (member b (group-buffers "mode: zztest")) #t)
                    "the buffers in that mode")
-      (check-true! (and (member "pseudo:mode--zztest" (buffer-goto-group-ids a)) #t)
-                   "buffer-goto-group offers it")
       (buffer-kill! b)
       (check-false! (member "mode: zztest" (pseudo-group-names))
                     "one buffer left is no group")

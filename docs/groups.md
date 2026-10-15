@@ -602,7 +602,7 @@ Every major mode that two or more buffers share is a pseudo group too, named for
 
 ### Going to a buffer's group
 
-`M-x buffer-goto-group` stands in a group that holds the current buffer and focuses the buffer there. It offers the buffer's own group first, then every pseudo group that holds it now — `Last chats`, its mode group. With one choice it goes straight there; with more it asks. `(buffer-goto-group-ids B)` lists the choices, and `(buffer-goto-group! B G)` goes.
+`C-x C-g g` (`buffer-goto-group`) stands in the current buffer's own group and focuses the buffer there. Pseudo groups never count. `(buffer-goto-group! B G)` goes.
 
 ## Persistence
 

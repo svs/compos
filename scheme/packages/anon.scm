@@ -41,8 +41,10 @@
 
 (defface! 'anon-redacted 'fg "var(--default-fg)" 'bg "var(--default-fg)" 'priority 100)
 
-;; a capitalized word: an uppercase letter, then letters
-(define anon--word-pattern "\\p{Lu}[\\p{L}\\p{M}]*(?:[ \\t]+\\p{Lu}[\\p{L}\\p{M}]*)*")
+;; a capitalized word: an uppercase letter, then letters. It stands alone:
+;; capitals inside an identifier or an id, as in toolu_01DyVkHSu4g, are no word.
+;; One space joins the words of a name; more is layout, as in a tab strip
+(define anon--word-pattern "(?<![\\p{L}\\p{N}_])\\p{Lu}[\\p{L}\\p{M}]*(?: \\p{Lu}[\\p{L}\\p{M}]*)*(?![\\p{L}\\p{M}\\p{N}_])")
 
 ;; one capitalized word of a run
 (define anon--one-word-pattern "\\p{Lu}[\\p{L}\\p{M}]*")
@@ -151,7 +153,7 @@
           (anon--touch! h)
           (begin
             (customize-set! 'anon-handles (cons h anon-handles))
-            (debounce! "anon:save" 2000 anon--prune! #f))))))
+            (debounce! "anon:prune" 2000 anon--prune! #f))))))
 
 (define (anon--name-parts)
   "the words of the known names, four letters or more, lowercased"
@@ -176,22 +178,25 @@
                       ")(?![\\p{L}\\p{N}_])")))
 
 ;; a name the decide called proper bars in any case: a page may print it lowercased
-(define *anon-name-pattern* (list #f #f))
+(define *anon-name-pattern* (list #f #f #f))
 
 (define (anon--name-pattern)
   "one case-blind pattern for every known name and each word of a name of two or more"
   ;; a one-word guess such as Jobs stays case-bound: lowercased it is a common word
-  (if (eq? (car *anon-name-pattern*) anon-proper-nouns)
+  ;; a part that is a known common word bars nothing alone: History of a misjudged run
+  (if (and (eq? (car *anon-name-pattern*) anon-proper-nouns)
+           (eq? (caddr *anon-name-pattern*) anon-common-words))
       (cadr *anon-name-pattern*)
       (let* ((parts (apply append (map (lambda (n) (let ((ps (string-split n " "))) (if (pair? (cdr ps)) ps '())))
                                        anon-proper-nouns)))
              (full (filter (lambda (n) (pair? (cdr (string-split n " ")))) anon-proper-nouns))
-             (ws (append full (filter (lambda (w) (>= (string-length w) 3)) parts)))
+             (ws (append full (filter (lambda (w) (and (>= (string-length w) 3) (not (member w anon-common-words))))
+                                      parts)))
              (p (and (pair? ws)
                      (string-append "(?i)(?<![\\p{L}\\p{N}_])(?:"
                                     (string-join (map regexp-quote ws) "|")
                                     ")(?![\\p{L}\\p{N}_])"))))
-        (set! *anon-name-pattern* (list anon-proper-nouns p))
+        (set! *anon-name-pattern* (list anon-proper-nouns p anon-common-words))
         p)))
 
 (define (anon--hard-spans text)
@@ -533,10 +538,28 @@
 
 ;; New answers change what is barred: every drawn line paints again, and
 ;; every block view redacts again. jit-lock repaints only drawn lines.
-(define (anon--refresh!)
-  (set! *anon-stale* #t)
-  (for-each (lambda (b) (jit-lock-refontify! b) (anon-view-redact! b)) (anon--buffers))
-  (set! *anon-stale* #f))
+;; Only a shown buffer repaints: a hidden one is marked stale, and
+;; anon--catchup! repaints it whole when a window shows it again. Given
+;; WORDS, the words an answer unbarred, a shown buffer whose text and view
+;; hold none of them stays as it is.
+(define (anon--holds-any? buf words)
+  (let ((view (anon--view-original buf)))
+    (let ((texts (list buf (buffer-text buf) (if view (anon--tree-text view) ""))))
+      (let loop ((ws words))
+        (and (pair? ws)
+             (or (let any ((ts texts))
+                   (and (pair? ts) (or (string-contains? (car ts) (car ws)) (any (cdr ts)))))
+                 (loop (cdr ws))))))))
+
+(define (anon--refresh! &optional words)
+  (let ((shown (anon--visible)))
+    (set! *anon-stale* #t)
+    (for-each (lambda (b)
+                (cond ((not (member b shown)) (buffer-set-local! b 'anon-stale #t))
+                      ((or (not words) (anon--holds-any? b words))
+                       (jit-lock-refontify! b) (anon-view-redact! b))))
+              (anon--buffers))
+    (set! *anon-stale* #f)))
 
 ;; The caches are LRU. A word a paint uses goes to the front, a new word
 ;; goes in at the front, and a cache keeps its first anon-cache-size words.
@@ -559,10 +582,10 @@
     (set! *anon-touched* '())
     (customize-set! 'anon-proper-nouns (anon--lru anon-proper-nouns touched))
     (customize-set! 'anon-common-words (anon--lru anon-common-words touched))
-    (customize-set! 'anon-handles (anon--lru anon-handles touched))
-    (anon--save! #f)))
+    (customize-set! 'anon-handles (anon--lru anon-handles touched))))
 
-;; the caches reach custom.scm once a burst of answers settles
+;; the caches reach custom.scm when anon turns off. A write of custom.scm is a
+;; hot reload, and a reload rebuilds every visible buffer: the screen flashes
 (define (anon--save! _)
   (customize-save! 'anon-proper-nouns anon-proper-nouns)
   (customize-save! 'anon-common-words anon-common-words)
@@ -584,9 +607,9 @@
             (customize-set! 'anon-proper-nouns (append proper anon-proper-nouns)))
           (when (pair? common)
             (customize-set! 'anon-common-words (append common anon-common-words))
-            (anon--refresh!))
+            (anon--refresh! common))
           (when (or (pair? proper) (pair? common))
-            (debounce! "anon:save" 2000 anon--prune! #f))))))
+            (debounce! "anon:prune" 2000 anon--prune! #f))))))
 
 (define (anon--asked chunk)
   (let loop ((xs chunk) (i 0) (acc '()))
@@ -679,6 +702,12 @@
 ;; redaction. Text needs no hook: jit-lock asks for each drawn line.
 (define (anon--catchup! buf)
   (cond ((not (anon--shown? buf)) #f)
+        ((and (minor-mode-on? buf "anon-local-mode") (buffer-local buf 'anon-stale))
+         (buffer-set-local! buf 'anon-stale #f)
+         (set! *anon-stale* #t)
+         (jit-lock-refontify! buf)
+         (anon--view-catchup! buf)
+         (set! *anon-stale* #f))
         ((minor-mode-on? buf "anon-local-mode")
          (anon--view-catchup! buf))
         ((and *anon-global* (anon--eligible? buf))
@@ -704,7 +733,9 @@
   ;; anon-mode paints drawn lines of a buffer before the buffer gets the mode
   (for-each (lambda (b) (overlay-clear! b 'anon)) (buffer-list))
   (jit-lock-unregister! 'anon--fontify)
-  (anon--unadvise!))
+  (anon--unadvise!)
+  (anon--prune! #f)
+  (anon--save! #f))
 
 ;; One command, and it answers what the user sees: anon on anywhere means
 ;; this turns it off everywhere. The flag alone could say off while a

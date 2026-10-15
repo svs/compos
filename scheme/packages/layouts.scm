@@ -46,6 +46,10 @@
   "The first pane's share of the frame in the two-pane layout: a fraction between 0.3 and 0.9."
   'group 'windows 'type 'number)
 
+(defcustom 'window-layout-columns 3
+  "How many panes the columns layout shows; more windows wait in its ring."
+  'group 'windows 'type 'integer)
+
 ;; The two-chat layout reads this one.
 (defcustom 'window-layout-chat-ratio 0.25
   "The chat pane's share of the frame in the two-chat layout, such as 0.25. The other two panes share the rest equally."

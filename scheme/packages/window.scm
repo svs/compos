@@ -39,6 +39,9 @@
 ;; editor.scm loads before custom.scm; layouts.scm makes it a custom.
 ;; It is the first pane's share of the frame.
 (define window-layout-main-ratio (- 1 *window-third*))
+;; The columns layout shows this many panes of its ring; layouts.scm makes
+;; it a setting.
+(define window-layout-columns 3)
 
 ;; The layout a frame keeps as its target until the person frees it; a
 ;; plain define here too, a custom in layouts.scm.
@@ -1775,7 +1778,9 @@ keeps the buffer you were in and your point.")
 ;; the panes a layout holds
 (define (layout-capacity algorithm)
   (cond ((equal? algorithm 'single) 1)
-        ((member algorithm '(columns two-chat)) 3)
+        ((equal? algorithm 'columns)
+         (if (and (integer? window-layout-columns) (> window-layout-columns 0)) window-layout-columns 3))
+        ((equal? algorithm 'two-chat) 3)
         ((member algorithm *window-layout-algorithms*) 2)
         (else #f)))
 
@@ -1812,7 +1817,7 @@ keeps the buffer you were in and your point.")
 ;; the commands that continue a walk
 (define *layout-walk-commands*
   '("previous-pane" "next-pane" "focus-up" "focus-down"
-    "layout-forward" "layout-backward"))
+    "layout-forward" "layout-backward" "buffer-next-pane" "buffer-previous-pane"))
 
 (define (layout-strip) (or (frame-local 'layout-strip) '()))
 (define (layout-offset) (or (frame-local 'layout-offset) 0))
@@ -2072,7 +2077,7 @@ keeps the buffer you were in and your point.")
         '(("single" "one window")
           ("two-pane" "2/3 + 1/3 side by side")
           ("halves" "two equal panes side by side")
-          ("columns" "3 equal columns")
+          ("columns" "equal columns, a window ring wider than the frame")
           ("rows" "two equal panes, stacked")
           ("two-chat" "2 + chat: two equal panes and a narrow chat")
           ("free" "no target: a display may split a window"))
@@ -2597,6 +2602,14 @@ bottom, as a window-rects row; #f past either end."
                          buf)
                        (let ((w (window-showing buf)))
                          (when w (window-set-point! w point))))))))
+          ;; The layout is full: the buffer takes a new window in the ring and
+          ;; the layout walks one window along to show it.
+          ((and (not neighbor) (member dir '(previous next)) (layout-target))
+           (cond ((or (not (layout-visible-window? (list source buf)))
+                      (not (window-fill-member? buf)))
+                  (message "Cannot move this buffer into a new pane"))
+                 ((null? eligible) (message "No previous buffer to reveal"))
+                 (else (buffer-move-into-ring! dir source buf point reveal-previous!))))
           ((not neighbor) (message "No neighboring pane"))
           ((or (not (window-focusable? (car neighbor)))
                (not (layout-visible-window? neighbor))
@@ -2614,6 +2627,24 @@ bottom, as a window-rects row; #f past either end."
             (select-window! (car neighbor))
             (switch-to-buffer-here! buf)
             (window-set-point! (car neighbor) point)))))
+
+;; A full layout gives the buffer a new window in the ring and walks to it.
+(define (buffer-move-into-ring! dir source buf point reveal-previous!)
+  (let* ((algorithm (layout-target))
+         (capacity (layout-capacity algorithm))
+         (panes (layout-pane-windows))
+         (at (if (equal? dir 'next) (+ (window-pane-index source) 1) (window-pane-index source)))
+         (fresh (and capacity (window-new-hidden! buf))))
+    (if (not fresh)
+        (message "Cannot move this buffer into a new pane")
+        (let ((others (filter (lambda (w) (and (not (member w panes)) (not (equal? w fresh))))
+                              (layout-hidden-windows))))
+          (reveal-previous!)
+          (layout-strip-set! (append (take panes at) (list fresh) (list-tail panes at) others)
+                             (if (equal? dir 'next) (max 0 (- (+ at 1) capacity)) at))
+          (layout-arrange-windows! algorithm (layout-strip-run capacity))
+          (select-window! fresh)
+          (window-set-point! fresh point)))))
 
 ;; At the edge of the row, a layout below its capacity grows a pane there.
 (define (buffer-move-spare-pane? dir)

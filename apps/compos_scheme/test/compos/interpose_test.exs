@@ -68,6 +68,25 @@ defmodule Compos.InterposeTest do
     assert value == 14
   end
 
+  test "redefining a shared global does not copy its old value into the heap" do
+    big = Enum.to_list(1..2_000_000)
+    {_, interp} = evaluate(Scheme.new(), "(define big 0)")
+    interp = Scheme.flush(interp)
+    Env.define(interp.store, interp.global, "big", big)
+
+    # 2M conses are 32 MB; the limit is 8 MB, so one copy of the old value kills
+    {pid, ref} =
+      :erlang.spawn_opt(
+        fn ->
+          for _ <- 1..3, do: Scheme.eval_string(interp, "(define big 1)")
+        end,
+        [:monitor, max_heap_size: %{size: 1_000_000, kill: true, error_logger: false}]
+      )
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+    assert {:ok, 1, _} = Scheme.eval_string(interp, "big")
+  end
+
   test "primitive refresh replaces the original without losing or nesting its wrapper" do
     interp = Scheme.new(primitives: %{"host" => fn [n] -> n + 1 end})
     interp = wrap(interp, "host", "(lambda (original args) (* 2 (apply original args)))")

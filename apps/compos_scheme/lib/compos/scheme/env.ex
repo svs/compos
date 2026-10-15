@@ -212,9 +212,20 @@ defmodule Compos.Scheme.Env do
         Map.get(vars, name)
 
       _ ->
-        case :ets.lookup(tid, {:var, ref, name}) do
-          [{_, value}] -> value
-          [] -> nil
+        # Copy the old value out of ETS only when it is interposed: that is
+        # all define needs to know. A full lookup copied every global into
+        # the heap on each define or set!, so a load that grew *tests* one
+        # deftest at a time copied the whole list each time and passed the
+        # 1024 MB heap limit (2026-10-15).
+        case :ets.select_count(tid, [{{{:var, ref, name}, {:interposed, :_, :_}}, [], [true]}]) do
+          0 ->
+            nil
+
+          _ ->
+            case :ets.lookup(tid, {:var, ref, name}) do
+              [{_, value}] -> value
+              [] -> nil
+            end
         end
     end
   end

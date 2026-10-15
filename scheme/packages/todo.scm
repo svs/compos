@@ -796,7 +796,7 @@
         (list (or (plist-get t 'priority) "") "org-priority")
         (list (plist-get t 'title) "todo-title")
         (list (plist-get t 'project) "todo-project")
-        (list (todo--who-status t) "org-meta")
+        (list (todo--who-status t) (if (todo--stalled? t) "todo-overdue" "org-meta"))
         (todo--when t))))
 
 (define (todo--row-columns buf)
@@ -816,7 +816,7 @@
       (list (list (list "●" (todo--state-face t)) (list (plist-get t 'title) "todo-title"))
             (list "" (todo--pill t) (list (plist-get t 'project) "todo-project")
                   (list (or (group-name (plist-get t 'group)) "") "org-meta") (todo--when t))
-            (list "" (list (todo--tag-text t) "todo-tags") (list (todo--who-status t) "org-meta"))
+            (list "" (list (todo--tag-text t) "todo-tags") (list (todo--who-status t) (if (todo--stalled? t) "todo-overdue" "org-meta")))
             (list ""))))
 
 (define (todo--at) (let ((t (list-current *todo-buffer*))) (and t (not (todo--sep? t)) t)))
@@ -924,14 +924,25 @@
 
 ;; a card says how its chat is doing. The event log's chat-status view
 ;; knows it; the todo file does not hold it.
+;; a task a chat holds has stalled when it is still in doing but the chat
+;; is not working on it: the turn ended, or the chat is gone, without a
+;; review, wait or done
+(define (todo--stalled? t)
+  (let ((a (plist-get t 'assignee)))
+    (and (equal? (plist-get t 'state) "doing")
+         (string? a) (string-prefix? "chat:" a)
+         (let ((row (event-view-get 'chat-status a)))
+           (not (and row (member (plist-get row 'status) '(running starting))))))))
+
 (define (todo--status t)
   (let* ((a (plist-get t 'assignee))
          (row (and (string? a) (event-view-get 'chat-status a))))
     (if (not row)
-        ""
+        (if (todo--stalled? t) "stalled · chat gone" "")
         (let ((status (plist-get row 'status))
               (stop (plist-get row 'stop-reason)))
-          (string-append (if status (chats-state-label status) "turn ended")
+          (string-append (if (todo--stalled? t) "stalled · " "")
+                         (if status (chats-state-label status) "turn ended")
                          (if (and stop (not (agent-turn-end-normal? stop)))
                              (string-append " (" stop ")")
                              "")
@@ -1162,6 +1173,26 @@
         (let ((id (todo-create s (list 'state "todo"))))
           (when (buffer-exists? *todo-buffer*) (list-refresh! *todo-buffer*))
           (message (string-append "Filed " id)))))))
+
+;; a chat files its own card: the task is the chat's, in doing, so the
+;; board can tell a chat that finished from one that stopped halfway
+(define-command "chat-todo" "File a task for this chat: assigned to it, in doing, titled after it"
+  (lambda ()
+    (let* ((chat (current-buffer))
+           (who (and (chat-buffer? chat) (chat-stable-id! chat)))
+           (held (and who (todo-list (list 'assignee who)))))
+      (cond ((not who) (message "Not a chat"))
+            ((pair? held) (message (string-append "This chat holds " (plist-get (car held) 'id))))
+            (else
+             (read-string "Task: "
+               (lambda (s)
+                 (let* ((g (buffer-group chat))
+                        (name (and g (group-name g)))
+                        (id (todo-create s (list 'project (if (member name (todo-projects)) name todo-default-project)
+                                                 'state "doing" 'assignee who 'group g))))
+                   (when (buffer-exists? *todo-buffer*) (list-refresh! *todo-buffer*))
+                   (message (string-append "Filed " id))))
+               'initial chat))))))
 
 (define-command "todo-next-view" "Cycle the view: open, inbox, review, working, mine, overdue, closed"
   (lambda ()

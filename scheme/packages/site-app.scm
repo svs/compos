@@ -674,9 +674,23 @@
     (set! *site-app-gens* (alist-put *site-app-gens* name gen))
     gen))
 
+
+;; a page's composed tabs ('detail-composed): each drawn from the sections of its
+;; other tabs ('from), by its 'build, and read from no URL. They come first, on 0
+(define (site-app-composed-tabs buf)
+  (let ((page (or (buffer-local buf 'site-app-for-page) (site-app-detail-page buf))))
+    (or (and page (plist-get page 'detail-composed)) '())))
+
+(define (site-app-composed-tab buf id)
+  (site-app-find (lambda (t) (equal? (plist-get t 'id) id)) (site-app-composed-tabs buf)))
+
 (define (site-app-detail-tabs buf)
   (let ((data (buffer-local buf 'site-app-data)))
-    (if data (site-app-real (plist-get data 'tabs)) '())))
+    (if data
+        (append (map (lambda (t) (list 'id (plist-get t 'id) 'label (plist-get t 'label) 'composed #t))
+                     (site-app-composed-tabs buf))
+                (site-app-real (plist-get data 'tabs)))
+        '())))
 
 (define (site-app-detail-active buf)
   (or (buffer-local buf 'site-app-active)
@@ -684,8 +698,14 @@
         (and hit (plist-get hit 'id)))))
 
 (define (site-app-detail-section buf id)
-  (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
-    (and hit (cdr hit))))
+  (let ((composed (site-app-composed-tab buf id)))
+    (if composed
+        ;; loading until every tab it draws from has answered; a failed one adds nothing
+        (and (not (member #f (map (lambda (src) (site-app-detail-section buf src)) (plist-get composed 'from))))
+             ((plist-get composed 'build)
+              (lambda (src) (let ((s (site-app-detail-section buf src))) (if (equal? s 'failed) '() s)))))
+        (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
+          (and hit (cdr hit))))))
 
 (define (site-app-detail-put-section! buf id nodes &optional quiet)
   (when (buffer-known? buf)
@@ -1306,7 +1326,10 @@
           (let ((n (b 'line (string-join (map (lambda (t) (site-app-capitalize (plist-get t 'label))) tabs) "   ") #f)))
             (list (site-app-claim
                     (component 'ui/tabs
-                      (list 'tabs (let loop ((ts tabs) (i 1) (acc '()))
+                      ;; keys as site-app-detail-nth! takes them: the site's tabs from 1, composed ones before
+                      (list 'tabs (let loop ((ts tabs)
+                                             (i (- 1 (length (filter (lambda (t) (plist-get t 'composed)) tabs))))
+                                             (acc '()))
                                     (if (null? ts) (reverse acc)
                                         (loop (cdr ts) (+ i 1)
                                               (cons (list (string-append site-app-tab-click (plist-get (car ts) 'id))
@@ -1660,7 +1683,11 @@
            (made (site-app-prepare-detail! name row page))
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            ;; every item opens on the tab this group last chose, else the first
-           (opened (buffer-set-local! made 'site-app-active (site-app-chosen-tab name page list-buf ids)))
+           ;; a page's 'detail-default tab wins over the one the group last chose
+           (opened (buffer-set-local! made 'site-app-active
+                     (or (plist-get page 'detail-default)
+                         (site-app-chosen-tab name page list-buf
+                       (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-composed) '())) ids)))))
            ;; what this page last read draws at once; a read under a minute old stands
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)
@@ -1735,15 +1762,21 @@
              (gen (site-app-next-gen! name)))
         (buffer-set-local! buf 'site-app-gen gen)
         (if (plist-get page 'detail-tab-param)
-            (site-app-fetch-tab! name buf (buffer-local buf 'site-app-row) url page id gen)
+            ;; a composed tab reads the tabs it draws from
+            (for-each (lambda (src) (site-app-fetch-tab! name buf (buffer-local buf 'site-app-row) url page src gen))
+                      (let ((composed (site-app-composed-tab buf id)))
+                        (if composed (plist-get composed 'from) (list id))))
             (site-app-navigate! name url wait
               (lambda (tab answer)
                 (when answer (site-app-collect-detail! name buf tab url wait page gen)))))))))
 
 (define (site-app-detail-nth! n)
-  (let* ((buf (current-buffer)) (tabs (site-app-detail-tabs buf)))
-    (when (and (> n 0) (<= n (length tabs)))
-      (site-app-detail-select! buf (plist-get (list-ref tabs (- n 1)) 'id)))))
+  ;; 1 is the site's first tab; 0 reaches back to the composed tab before it
+  (let* ((buf (current-buffer))
+         (tabs (site-app-detail-tabs buf))
+         (i (+ n (length (site-app-composed-tabs buf)) -1)))
+    (when (and (>= i 0) (< i (length tabs)))
+      (site-app-detail-select! buf (plist-get (list-ref tabs i) 'id)))))
 
 (define (site-app-detail-step! d)
   (let* ((buf (current-buffer))
@@ -1752,9 +1785,9 @@
          (n (length tabs)))
     (when (> n 0)
       (let loop ((ts tabs) (i 0))
-        (cond ((null? ts) (site-app-detail-nth! 1))
+        (cond ((null? ts) (site-app-detail-select! buf (plist-get (car tabs) 'id)))
               ((equal? (plist-get (car ts) 'id) active)
-               (site-app-detail-nth! (+ 1 (modulo (+ i d) n))))
+               (site-app-detail-select! buf (plist-get (list-ref tabs (modulo (+ i d) n)) 'id)))
               (else (loop (cdr ts) (+ i 1))))))))
 
 
@@ -1884,6 +1917,7 @@
           (for-each (lambda (page) (app-detail-keys! (site-app-page-mode name (plist-get page 'id)) mode))
                     (site-app-pages (site-app-spec name))))))))
 
+(define-command "site-app-detail-tab-0" "Show this page's composed tab" (lambda () (site-app-detail-nth! 0)))
 (define-command "site-app-detail-tab-1" "Show this page's first tab" (lambda () (site-app-detail-nth! 1)))
 (define-command "site-app-detail-tab-2" "Show this page's second tab" (lambda () (site-app-detail-nth! 2)))
 (define-command "site-app-detail-tab-3" "Show this page's third tab" (lambda () (site-app-detail-nth! 3)))
@@ -2101,6 +2135,7 @@
         (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
         (list "<up>" "site-app-detail-prev")
+        (list "0" "site-app-detail-tab-0")
         (list "1" "site-app-detail-tab-1")
         (list "2" "site-app-detail-tab-2")
         (list "3" "site-app-detail-tab-3")

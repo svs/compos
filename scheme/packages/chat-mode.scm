@@ -564,10 +564,19 @@
 
 ;; the document's chat, made and attached when it is missing or its
 ;; session is gone (a restart brings the buffer back, not the session)
+;; the document's chat as it is named now: a chat takes a title and its name
+;; changes, so it is found by the document it is the companion of
+(define (llm-mode--companion-existing buf)
+  (let ((n (buffer-local buf 'llm-companion)))
+    (if (and n (buffer-exists? n))
+        n
+        (find (lambda (c) (equal? (buffer-local c 'chat-companion-of) buf))
+              (filter chat-buffer? (buffer-list))))))
+
 (define (llm-mode--companion! buf &optional model)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
   ;; document chose its own model or connector
-  (let* ((name (or (buffer-local buf 'llm-companion) (llm-mode--companion-name buf)))
+  (let* ((name (or (llm-mode--companion-existing buf) (llm-mode--companion-name buf)))
          (g (buffer-group buf))
          (bundle (and g (boundp 'llm-group-bundle) (llm-group-bundle g)))
          (bundle-model (and bundle (let ((m (llm-bundle-model bundle))) (if (equal? m "default") #f m))))
@@ -592,6 +601,11 @@
               (when pm (buffer-set-local! name 'chat-permission-mode pm)))))
       (buffer-set-local! name 'chat-companion-of buf)
       (chat-task-init! name buf))
+    ;; the chat is in its document's group, set before the agent attaches so
+    ;; nothing starts a group of its own for it. A chat keeps its group in
+    ;; 'group-id; buffer-group reads 'group-ids until the chat is in chat-mode
+    (when (and g (not (equal? (buffer-local name 'group-id) g)))
+      (chat-set-group! name g))
     (buffer-set-local! buf 'llm-companion name)
     (let ((slug (buffer-local name 'agent-slug)))
       (unless (and slug (member slug (agent-list))
@@ -665,7 +679,7 @@
 
 ;; a page that takes no text, an app page, talks in its chat: M-o pops it up
 (define (llm-companion-open! buf)
-  (let* ((new? (not (buffer-exists? (or (buffer-local buf 'llm-companion) (llm-mode--companion-name buf)))))
+  (let* ((new? (not (llm-mode--companion-existing buf)))
          (chat (llm-mode--companion! buf (buffer-llm-model buf)))
          (opening (and new? (chat-opening-prompt buf))))
     (pop-to-buffer chat)

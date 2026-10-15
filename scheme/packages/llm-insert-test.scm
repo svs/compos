@@ -336,6 +336,7 @@
     (define-mode "zz-open-base-mode" (lambda () #t))
     (define-mode "zz-open-mode" (lambda () #t))
     (mode-parent! "zz-open-mode" "zz-open-base-mode")
+    (set! *chat-openings* (alist-delete (alist-delete *chat-openings* "zz-open-mode") "zz-open-base-mode"))
     (mode-chat-opening! "zz-open-base-mode" "base")
     (let ((doc (t--li-doc! "zz-doc-opening" "hello\n")))
       (with-current-buffer doc (lambda () (set-mode! "zz-open-mode")))

@@ -45,6 +45,34 @@
 .ats-card-top, .ats-card-headline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 ")
 
+;; the Brief tab of an application: the newest internal assessment note from its
+;; history, then the work experience from its candidate tab
+(define (ats-brief-note nodes)
+  (let loop ((ns (site-app-real nodes)))
+    (and (pair? ns)
+         (or (and (equal? (plist-get (car ns) 'class) "sa-note") (car ns))
+             (ats-brief-note (plist-get (car ns) 'children))
+             (loop (cdr ns))))))
+
+(define (ats-brief-work nodes)
+  (let ((from (let skip ((ns (site-app-real nodes)))
+                (cond ((null? ns) '())
+                      ((and (equal? (plist-get (car ns) 'tag) "c-heading")
+                            (equal? (plist-get (car ns) 'text) "Work Experience")) ns)
+                      (else (skip (cdr ns)))))))
+    (if (null? from)
+        '()
+        (cons (car from) (let take ((ns (cdr from)))
+                           (if (and (pair? ns) (equal? (plist-get (car ns) 'tag) "c-item"))
+                               (cons (car ns) (take (cdr ns)))
+                               '()))))))
+
+(define *ats-brief-tab*
+  (list 'id "brief" 'label "brief" 'from '("history" "candidate")
+        'build (lambda (section)
+                 (let ((note (ats-brief-note (section "history"))))
+                   (append (if note (list note) '()) (ats-brief-work (section "candidate")))))))
+
 (define *ats-candidates-page*
   (list 'id 'candidates
         'label "Candidates"
@@ -78,6 +106,8 @@
         'detail-tab-param "tab"
         'detail-kind "ats-application-mode"
         'detail-keys (list "a")
+        'detail-composed (list *ats-brief-tab*)
+        'detail-default "brief"
         'detail-tabs
         (map (lambda (tab) (list 'id (car tab) 'tag (cadr tab)))
              '(("history" "c-application-history")
@@ -103,6 +133,8 @@
         'detail-kind "ats-approval-mode"
         ;; only the happy path has a key: approve; o opens the site for the rest
         'detail-keys (list "a")
+        'detail-composed (list *ats-brief-tab*)
+        'detail-default "brief"
         'detail-tabs
         (map (lambda (tab)
                (let ((button (string-append "#approvals-show-root nav.brut-tabs button[phx-value-tab=\"" (car tab) "\"]")))

@@ -73,7 +73,8 @@
 (define (mode-list--blank? q) (equal? (string-trim q) ""))
 
 (define (mode-list-scope mode buf)
-  (let ((all (mode-list-buffers mode))
+  ;; the tab filters before the limit, so a group's chats are its recent ones
+  (let ((all (ibuffer-tab-filter buf (mode-list-buffers mode)))
         (limit (mode-list-opt mode 'recent-limit)))
     (if (and limit (mode-list--blank? (list-query buf)))
         (take all (limit))
@@ -295,7 +296,7 @@
   (let ((view (mode-list-view! mode)))
     (buffer-set-local! view 'mode-list-of mode)
     (apply ibuffer-view! (cons view (mode-list-opt mode 'defaults '(sort recent grouping none))))
-    (ibuffer-open! (mode-list-scope-name mode) view (mode-list-mode-name mode))
+    (ibuffer-open! (mode-list-scope-name mode) view (mode-list-mode-name mode) #f '(tabs #t))
     (when (and (string? query) (not (mode-list--blank? query)))
       (list-set-query! view (string-trim query) #t)
       (ibuffer-goto-first-row! view))

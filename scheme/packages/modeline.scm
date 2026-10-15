@@ -162,7 +162,11 @@
    it, and the title keeps growing to fill the top row. */
 .dash-persistent { flex-wrap: nowrap; column-gap: 16px; }
 .dash-persistent:has(.dseg-meta) { flex-wrap: wrap; row-gap: 4px; }
-.dseg-fill, .dseg-verbosity, .dash-state-mark, .dseg-action { order: 1; }
+.dseg-fill, .dseg-verbosity, .dseg-tabs, .dash-state-mark, .dseg-action { order: 1; }
+/* a list's tabs in the header line: the bar's own look, without the rule
+   and the gap it keeps when it heads a page */
+.dseg-tabs { display: inline-flex; align-items: baseline; gap: .8em; flex: none; }
+.dseg-tabs .c-tabs { flex-wrap: nowrap; margin: 0; padding: 0; border-bottom: 0; }
 .dseg-meta { order: 2; flex: 0 1 100%; display: flex; align-items: baseline;
              gap: 16px; min-width: 0; }
 .dash-persistent .dseg,
@@ -922,12 +926,18 @@
                             'attrs (list (list "title" (string-append "show " level)))))
                     '("info" "log" "debug"))))))
 
+;; what the buffer asks its header line to carry: a list's tabs. They sit
+;; at the tail, where a chat keeps its verbosity switch.
+(define (dash--header-blocks buf)
+  (let ((blocks (buffer-local buf 'header-line-blocks)))
+    (and (pair? blocks) (list 'tag "div" 'class "dseg-tabs" 'children blocks))))
+
 ;; the hairline that carries the eye from the title to the tail
 (define (dash--fill) (list 'tag "div" 'class "dseg-fill"))
 
 (define (dash--assemble-headline top meta narrow? buf)
   (let ((tail (filter (lambda (b) b)
-                      (list (dash--fill) (dash--verbosity buf)
+                      (list (dash--fill) (dash--verbosity buf) (dash--header-blocks buf)
                             (dash--state-mark buf) (dash--switcher buf)))))
     (if narrow?
         (append

@@ -422,7 +422,9 @@
 ;; declares / in its own keys does not get it -- these go on last.
 (define (list-mode-standard-keys! name)
   (let ((opts (list-mode-opts name)))
-    (define-key (mode-keymap name) "/" "list-filter")
+    (unless (pair? (filter (lambda (k) (or (equal? (car k) "/") (string-prefix? "/ " (car k))))
+                           (or (plist-get opts 'keys) '())))
+      (define-key (mode-keymap name) "/" "list-filter"))
     (define-key (mode-keymap name) "<" "list-cycle-grouping")
     (define-key (mode-keymap name) ">" "list-cycle-sorting")
     ;; SPC toggles: a marked row loses its mark, any other row gets one,
@@ -753,6 +755,8 @@
 ;;;                                       component by default
 ;;;   'preview  (buf entry)                 what moving the highlight shows
 ;;;   'compact  #t                          merge title and meta; omit rules
+;;;   'head-blocks (buf) -> (BLOCK ...) or #f  blocks the window's header
+;;;                      line carries at its tail: ui/tabs
 ;;;   'layouts  ordered profile plists. A profile can override view options.
 ;;;             min-cols and max-cols select by measured text width.
 ;;;             A final (default #t ...) profile supplies the fallback.
@@ -2204,7 +2208,13 @@
           (desktop-skip! buf 'footer-line-blocks)
           (let ((blocks (list-keys-bar-blocks buf)))
             (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
-              (buffer-set-local! buf 'footer-line-blocks blocks)))))
+              (buffer-set-local! buf 'footer-line-blocks blocks)))
+          ;; and the head's blocks ride the window's header line: its tabs
+          (desktop-skip! buf 'header-line-blocks)
+          (let ((blocks (let ((f (list-opt buf 'head-blocks))) (and f (f buf)))))
+            (unless (equal? blocks (buffer-local buf 'header-line-blocks))
+              (buffer-set-local! buf 'header-line-blocks blocks)
+              (dashboard--sync! buf)))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         ;; Restore the buffer's point without moving every window that

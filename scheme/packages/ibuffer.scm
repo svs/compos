@@ -516,16 +516,77 @@
 ;; the raw scope, unfiltered: the batched table filters on the snapshot it
 ;; builds, so it reads the names here and applies ibuffer-row? from data it
 ;; already holds instead of asking every buffer twice
+;; C-x C-b and the mode lists carry the tabs of C-x b: every buffer, the
+;; current group's, and the ones the window showed before the list. The
+;; side arrows step through them; a view without 'ibuffer-tab has none.
+(define (ibuffer-tab buf) (buffer-local buf 'ibuffer-tab))
+
+(define (ibuffer-tab-keep? buf name)
+  (let ((tab (ibuffer-tab buf)))
+    (cond ((equal? tab 'group)
+           (let ((g (frame-group))) (and g (switch-member? name g))))
+          ((equal? tab 'window)
+           (let ((w (buffer-local buf 'ibuffer-tab-window)))
+             (and w (window-exists? w) (member name (window-prev-buffers w)) #t)))
+          (else #t))))
+
+(define (ibuffer-tab-filter buf names)
+  (if (member (ibuffer-tab buf) '(group window))
+      (filter (lambda (n) (or (not (string? n)) (ibuffer-tab-keep? buf n))) names)
+      names))
+
+;; each opening starts on the tab C-x b opens on
+(define (ibuffer-tabs-start! buf from)
+  (buffer-set-local! buf 'ibuffer-tab
+    (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group))
+  (buffer-set-local! buf 'ibuffer-tab-window from)
+  ;; the tabs are the scope now: no narrowing left over from before them
+  (buffer-set-local! buf 'ibuffer-narrow-group #f))
+
+(define (ibuffer-tab-step! buf step)
+  (buffer-set-locals! buf (list 'ibuffer-tab (switch-tab-step (ibuffer-tab buf) step)
+                                'ibuffer-narrow-group #f))
+  (ibuffer-refresh! buf)
+  (ibuffer-goto-first-row! buf))
+
+;; the tabs as ui/tabs in the window's header line; a click is the same
+;; move as the arrow
+(define (ibuffer-tab-blocks buf)
+  (let ((tab (ibuffer-tab buf)))
+    (and tab
+         (list (component 'ui/tabs
+                 (list 'class "ibuffer-tabs"
+                       'tabs (map (lambda (t)
+                                    (list (string-append "ibuffer-tab-" (symbol->string (car t)))
+                                          (cadr t) (equal? (car t) tab)))
+                                  *switch-tabs*)))
+               (list 'tag "span" 'text "← → switch tabs"
+                     'attrs '(("style" "font-family:var(--font-mono);font-size:.85em;color:var(--dim-fg,#8a857a)")))))))
+
+(add-hook! (list 'block-click 'ibuffer-tabs)
+  (lambda (buf id)
+    (and (string? id)
+         (string-prefix? "ibuffer-tab-" id)
+         (buffer-exists? buf)
+         (ibuffer-tab buf)
+         (let ((tab (string->symbol (substring id 12 (string-length id)))))
+           (and (assoc tab *switch-tabs*)
+                (begin (buffer-set-local! buf 'ibuffer-tab tab)
+                       (ibuffer-refresh! buf)
+                       (ibuffer-goto-first-row! buf)
+                       #t))))))
+
 (define (ibuffer-scope-names buf)
   (let ((scope (buffer-local buf 'ibuffer-scope)))
-    (cond ((equal? scope #f) (buffer-list-mru))
-          ((symbol? scope)
-           (let ((v (assoc scope *ibuffer-buffer-scopes*))
-                 (s (assoc scope *ibuffer-scopes*)))
-             (cond (v ((cadr v) buf))
-                   (s ((cadr s)))
-                   (else '()))))
-          (else scope))))
+    (ibuffer-tab-filter buf
+      (cond ((equal? scope #f) (buffer-list-mru))
+            ((symbol? scope)
+             (let ((v (assoc scope *ibuffer-buffer-scopes*))
+                   (s (assoc scope *ibuffer-scopes*)))
+               (cond (v ((cadr v) buf))
+                     (s ((cadr s)))
+                     (else '()))))
+            (else scope)))))
 
 (define *ibuffer-source-rows* '())
 (define *ibuffer-source-sort* #f)
@@ -630,6 +691,19 @@
     ;; Folding changes only their visibility; do not refetch or sort them.
     (buffer-set-local! buf 'list-source-entries
       (ibuffer-fold-source (list-source-entries buf) key folded?))
+    (list-filter-forget! buf)
+    (list-render! buf 'view)))
+
+;; every section at once: folds them all, or opens them all when they
+;; already are, as org's S-TAB cycles the whole outline
+(define (ibuffer-toggle-fold-all! &optional buf)
+  (let* ((buf (or buf (ibuffer-view)))
+         (keys (map ibuffer-heading-key (filter ibuffer-heading? (list-source-entries buf))))
+         (folded? (not (null? (filter (lambda (k) (not (ibuffer-folded? k buf))) keys)))))
+    (buffer-set-local! buf 'ibuffer-collapsed (if folded? keys '()))
+    (buffer-set-local! buf 'list-source-entries
+      (fold (lambda (rows k) (ibuffer-fold-source rows k folded?))
+            (list-source-entries buf) keys))
     (list-filter-forget! buf)
     (list-render! buf 'view)))
 
@@ -1341,8 +1415,7 @@
            (let ((rendered (line buf n 0 0))
                  (scope (buffer-local buf 'ibuffer-narrow-group)))
              (if scope
-                 (list (string-append (car rendered) " · group: " (cadr scope)
-                                      " · C-x n w widens")
+                 (list (string-append (car rendered) " · group: " (cadr scope))
                        (cadr rendered))
                  rendered)))
           ((ibuffer-heading? (car rows))
@@ -1366,7 +1439,7 @@
     ("d" "flag") ("x" "execute") ("k" "kill") ("K" "kill group")
     ("g" "refresh") ("<" "group") (">" "sort") ("TAB" "fold")
     ("M-↓/↑" "next/previous group") ("G" "add to group")
-    ("C-x n n/w" "narrow/widen") ("f" "filter") ("q" "quit") ("?" "all bindings")))
+    ("f" "filter") ("/" "filter by…") ("q" "quit") ("?" "all bindings")))
 
 ;; Searchable marginalia is a snapshot of the list source. Query changes
 ;; reuse it instead of asking every buffer process for the same fields.
@@ -1468,6 +1541,93 @@
             ((string? (car rest)) (list-goto-index! buf i))
             (else (loop (+ i 1) (cdr rest)))))))
 (define (ibuffer-filter-push! f &optional buf) (list-filter-push! (or buf (ibuffer-view)) f))
+
+;;; --- / filters, as Emacs ibuffer has them -----------------------------------
+;;; / m mode, / M derived mode, / n name, / f filename, / F directory,
+;;; / . extension, / c contents, / * starred, / v visiting a file, / i
+;;; modified. They stack on the list's filter stack; / ! negates the top
+;;; one, / | joins the top two with or, / p pops one and / / drops them
+;;; all. The regexes fold case, as case-fold-search does.
+
+(define (ibuffer-row-path n)
+  (or (buffer-path n) (and (string-prefix? "/" n) n)))
+
+(define (ibuffer-dir-of p)
+  (let ((i (string-rindex p "/"))) (if i (substring p 0 i) "")))
+
+(define (ibuffer-re? pat s) (and (string? s) (re-match? (string-append "(?i)" pat) s)))
+
+(define (ibuffer-regex-ok? pat)
+  (equal? (car (eval-string-safe (format "(re-match? ~s \"\")" pat))) 'ok))
+
+(define (ibuffer-filter-label f) (string-append (car f) ":" (cadr f)))
+
+(define (ibuffer-filter-row? buf e f)
+  (if (not (string? e)) #t
+      (let ((kind (car f)) (arg (cadr f)))
+        (cond ((equal? kind "mode") (equal? (or (buffer-local e 'mode-name) "") arg))
+              ((equal? kind "derived") (and (buffer-derived-mode? e arg) #t))
+              ((equal? kind "name") (ibuffer-re? arg e))
+              ((equal? kind "file") (ibuffer-re? arg (ibuffer-row-path e)))
+              ((equal? kind "dir") (let ((p (ibuffer-row-path e))) (and p (ibuffer-re? arg (ibuffer-dir-of p)))))
+              ((equal? kind "ext") (let ((p (ibuffer-row-path e))) (and p (string-suffix? (string-append "." arg) p) #t)))
+              ((equal? kind "content") (and (member e (nth 2 f)) #t))
+              ((equal? kind "starred") (string-prefix? "*" e))
+              ((equal? kind "visiting") (and (buffer-path e) #t))
+              ((equal? kind "modified") (and (buffer-path e) (buffer-modified? e) #t))
+              ((equal? kind "not") (not (list-filter-match? buf e (nth 2 f))))
+              ((equal? kind "or") (or (list-filter-match? buf e (nth 2 f))
+                                        (list-filter-match? buf e (nth 3 f))))
+              (else #t)))))
+
+(define (ibuffer-filter-add! buf f)
+  (list-filter-push! buf f)
+  (list-goto-first-entry buf)
+  (message (string-append "Filter: " (list-filters-text buf))))
+
+(define (ibuffer-filter-rows buf) (filter string? (list-source-entries buf)))
+
+(define (ibuffer-read-regex! what k)
+  (let ((buf (current-buffer)))
+    (read-string (string-append "Filter by " what " (regexp): ")
+      (lambda (pat)
+        (cond ((or (not (string? pat)) (equal? pat "")) #f)
+              ((not (ibuffer-regex-ok? pat)) (message (string-append "Bad regexp: " pat)))
+              (else (k buf pat)))))))
+
+(define (ibuffer-read-mode! k)
+  (let* ((buf (current-buffer))
+         (modes (let loop ((ns (ibuffer-filter-rows buf)) (out '()))
+                  (if (null? ns) (sort out string<?)
+                      (let ((m (buffer-local (car ns) 'mode-name)))
+                        (loop (cdr ns) (if (and (string? m) (not (member m out))) (cons m out) out))))))
+         (here (let ((r (list-current buf))) (and (string? r) (buffer-local r 'mode-name)))))
+    (completing-read "Filter by mode: " modes
+      (lambda (m) (when (and (string? m) (not (equal? m ""))) (k buf m)))
+      'default (or here ""))))
+
+;; the rows whose text matches: a loaded buffer is read where it lives,
+;; unsaved changes and all; a sleeping file is read off the disk by one
+;; ripgrep over all of them, in a task, so the lane never waits on it
+(define (ibuffer-content-hits! buf pat k)
+  (let* ((rows (ibuffer-filter-rows buf))
+         (live (filter (lambda (n) (and (buffer-exists? n) (ibuffer-re? pat (buffer-text n)))) rows))
+         (asleep (filter (lambda (n) (and (not (buffer-exists? n))
+                                          (let ((p (ibuffer-row-path n))) (and p (file-exists? p)))))
+                         rows)))
+    (if (null? asleep)
+        (k live)
+        (task-run!
+          (lambda ()
+            (let ((out (shell-command->string
+                         (string-append project-ripgrep-program " -l -i --no-messages -e " (sh-quote pat) " --"
+                                        (apply string-append
+                                          (map (lambda (n) (string-append " " (sh-quote (ibuffer-row-path n)))) asleep)))
+                         "/")))
+              (filter (lambda (f) (not (equal? f ""))) (string-split out "\n"))))
+          (lambda (ok? files)
+            (k (append live
+                       (if ok? (filter (lambda (n) (member (ibuffer-row-path n) files)) asleep) '()))))))))
 
 ;; the heading of the section the highlight is in: the row itself when it
 ;; is a heading, else the nearest heading above it
@@ -1610,7 +1770,7 @@
           ;; has none of its source state. Setups can clear text or fetch data.
           (for-each (lambda (key) (buffer-set-local! copy key #f))
             '(agent-blocks agent-saved-mark render-records render-text-root
-              footer-line-blocks))
+              header-line-blocks footer-line-blocks))
           (for-each (lambda (key)
             (buffer-set-local! copy key (buffer-local target key)))
             '(mode-name render-mode render-blocks render-root render-records render-text-root preview-renderer
@@ -1797,6 +1957,9 @@
                                              (cons "ibuffer-pretty-mode" *ibuffer-view-modes*))
                                      #t)))
          (_opts (buffer-set-local! buf 'ibuffer-render-options (or options '())))
+         (_tabs (if (plist-get (or options '()) 'tabs)
+                    (ibuffer-tabs-start! buf from)
+                    (buffer-set-local! buf 'ibuffer-tab #f)))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
          (_h (ibuffer-goto-first-row! buf))
@@ -2027,7 +2190,19 @@
         (else (message "no buffer here"))))
 
 (define-command "ibuffer" "List buffers by group in a buffer"
-  (lambda () (ibuffer-open! #f #f #f #f '(pretty #f info #t group-by group))))
+  (lambda () (ibuffer-open! #f #f #f #f '(pretty #f info #t group-by group tabs #t))))
+
+(define-command "ibuffer-tab-next" "Show the next tab of the list: all, group, window"
+  (lambda ()
+    (if (ibuffer-tab (current-buffer))
+        (ibuffer-tab-step! (current-buffer) 1)
+        (run-command "forward-char"))))
+
+(define-command "ibuffer-tab-prev" "Show the previous tab of the list: all, group, window"
+  (lambda ()
+    (if (ibuffer-tab (current-buffer))
+        (ibuffer-tab-step! (current-buffer) -1)
+        (run-command "backward-char"))))
 
 (define-command "ibuffer-pretty" "List buffers with the pretty table presentation"
   (lambda () (ibuffer-open! #f #f "ibuffer-pretty-mode" #f '(pretty #t))))
@@ -2069,6 +2244,75 @@
       (if row
           (ibuffer-toggle-fold! (ibuffer-heading-key row))
           (message "no section here")))))
+
+(define-command "ibuffer-toggle-all-filter-groups"
+  "Fold every section, or open them all when all are folded"
+  (lambda () (ibuffer-toggle-fold-all!)))
+
+(define-command "ibuffer-filter-by-mode" "Keep the buffers in one major mode"
+  (lambda () (ibuffer-read-mode! (lambda (buf m) (ibuffer-filter-add! buf (list "mode" m))))))
+
+(define-command "ibuffer-filter-by-derived-mode" "Keep the buffers in a mode or a mode derived from it"
+  (lambda () (ibuffer-read-mode! (lambda (buf m) (ibuffer-filter-add! buf (list "derived" m))))))
+
+(define-command "ibuffer-filter-by-name" "Keep the buffers whose name matches a regexp"
+  (lambda () (ibuffer-read-regex! "name" (lambda (buf p) (ibuffer-filter-add! buf (list "name" p))))))
+
+(define-command "ibuffer-filter-by-filename" "Keep the buffers whose file name matches a regexp"
+  (lambda () (ibuffer-read-regex! "filename" (lambda (buf p) (ibuffer-filter-add! buf (list "file" p))))))
+
+(define-command "ibuffer-filter-by-directory" "Keep the buffers whose directory matches a regexp"
+  (lambda () (ibuffer-read-regex! "directory" (lambda (buf p) (ibuffer-filter-add! buf (list "dir" p))))))
+
+(define-command "ibuffer-filter-by-file-extension" "Keep the buffers whose file has an extension"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (read-string "Filter by extension: "
+        (lambda (x)
+          (when (and (string? x) (not (equal? x "")))
+            (ibuffer-filter-add! buf (list "ext" (if (string-prefix? "." x) (substring x 1 (string-length x)) x)))))))))
+
+(define-command "ibuffer-filter-by-content" "Keep the buffers whose text matches a regexp; a sleeping file is searched with ripgrep"
+  (lambda ()
+    (ibuffer-read-regex! "content"
+      (lambda (buf p)
+        (message "Searching the buffers...")
+        (ibuffer-content-hits! buf p
+          (lambda (hits) (ibuffer-filter-add! buf (list "content" p hits))))))))
+
+(define-command "ibuffer-filter-by-starred-name" "Keep the buffers whose name starts with *"
+  (lambda () (ibuffer-filter-add! (current-buffer) (list "starred" "*"))))
+
+(define-command "ibuffer-filter-by-visiting-file" "Keep the buffers that visit a file"
+  (lambda () (ibuffer-filter-add! (current-buffer) (list "visiting" "file"))))
+
+(define-command "ibuffer-filter-by-modified" "Keep the file buffers with unsaved changes"
+  (lambda () (ibuffer-filter-add! (current-buffer) (list "modified" "unsaved"))))
+
+(define-command "ibuffer-negate-filter" "Turn the newest filter into its opposite"
+  (lambda ()
+    (let* ((buf (current-buffer)) (fs (list-filters buf)))
+      (if (null? fs) (message "no filter")
+          (begin (buffer-set-local! buf 'list-filters (cdr fs))
+                 (ibuffer-filter-add! buf (list "not" (ibuffer-filter-label (car fs)) (car fs))))))))
+
+(define-command "ibuffer-or-filter" "Join the two newest filters: keep a buffer either one keeps"
+  (lambda ()
+    (let* ((buf (current-buffer)) (fs (list-filters buf)))
+      (if (< (length fs) 2) (message "or needs two filters")
+          (let ((a (cadr fs)) (b (car fs)))
+            (buffer-set-local! buf 'list-filters (cddr fs))
+            (ibuffer-filter-add! buf (list "or" (string-append (ibuffer-filter-label a) " | " (ibuffer-filter-label b)) a b)))))))
+
+(define-command "ibuffer-pop-filter" "Drop the newest filter"
+  (lambda () (run-command "list-filter-pop")))
+
+(define-command "ibuffer-filter-disable" "Drop every filter"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (list-filter-clear! buf)
+      (list-goto-first-entry buf)
+      (message "Filters off"))))
 
 (define-command "ibuffer-toggle-sorting-mode"
   "Cycle the order inside a section: name, recent, size"
@@ -2333,7 +2577,7 @@
            "TAB folds the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. f narrows the table by name, mode, or path, "
-           "and \\ widens it. C-x n n narrows to the group at point; C-x n w shows all groups. "
+           "and \\ widens it. / filters as Emacs ibuffer does: / m mode, / n name, / f filename, / F directory, / . extension, / c contents (regexps fold case), / ! negates the newest filter, / | ors the two newest, / p pops one and / / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all, group, window. "
            "SPC marks one row, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
@@ -2432,7 +2676,18 @@
                               (begin (buffer-kill! b) #t)))))
     'noun "buffer"
     'preview (lambda (buf b) (ibuffer-preview! buf b))
+    'head-blocks (lambda (buf) (ibuffer-tab-blocks buf))
+    'filter (lambda (buf e f) (ibuffer-filter-row? buf e f))
     'keys '(("M-<down>" "ibuffer-next-group") ("M-<up>" "ibuffer-previous-group")
+            ("<right>" "ibuffer-tab-next") ("<left>" "ibuffer-tab-prev")
+            ;; Emacs ibuffer's / filters; f stays the live filter
+            ("/ m" "ibuffer-filter-by-mode") ("/ M" "ibuffer-filter-by-derived-mode")
+            ("/ n" "ibuffer-filter-by-name") ("/ f" "ibuffer-filter-by-filename")
+            ("/ F" "ibuffer-filter-by-directory") ("/ ." "ibuffer-filter-by-file-extension")
+            ("/ c" "ibuffer-filter-by-content") ("/ *" "ibuffer-filter-by-starred-name")
+            ("/ v" "ibuffer-filter-by-visiting-file") ("/ i" "ibuffer-filter-by-modified")
+            ("/ !" "ibuffer-negate-filter") ("/ |" "ibuffer-or-filter")
+            ("/ p" "ibuffer-pop-filter") ("/ /" "ibuffer-filter-disable")
             ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")
@@ -2441,9 +2696,8 @@
             ;; the owner's ruling (2026-09-19): p turns the row preview off
             ;; and on; C-p and <up> still move to the row above
             ("p" "ibuffer-toggle-preview")
-            ("C-x n n" "ibuffer-narrow-group") ("C-x n w" "ibuffer-widen-group")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")
-            ("TAB" "ibuffer-toggle-filter-group")
+            ("TAB" "ibuffer-toggle-filter-group") ("S-TAB" "ibuffer-toggle-all-filter-groups")
             ("G" "group-add") ("g" "ibuffer-refresh")
             ("q" "ibuffer-quit"))
     ;; line movement steps over the headings and previews the row

@@ -2009,7 +2009,7 @@
       (clear-local-map! buf)
       ;; Semantic projections belong to the old mode; the new setup rebuilds them.
       (for-each (lambda (key) (buffer-set-local! buf key #f))
-                '(render-root render-text-root render-records footer-line-blocks)))
+                '(render-root render-text-root render-records header-line-blocks footer-line-blocks)))
     (define-keymap! (mode-keymap name))
     (use-local-map! buf (mode-keymap name))
     (buffer-set-local! buf 'mode-name name)

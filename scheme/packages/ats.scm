@@ -66,49 +66,6 @@
                        (list 'label "ctc" 'width 12 'field 'ctc 'face "dim")
                        (list 'label "headline" 'width #f 'field 'headline))))
 
-(define (ats-brief-notes nodes)
-  ;; every staff note in the history, newest first
-  (apply append
-         (map (lambda (n)
-                (if (equal? (plist-get n 'class) "sa-note")
-                    (list n)
-                    (ats-brief-notes (site-app-real (or (plist-get n 'children) '())))))
-              (site-app-real nodes))))
-
-(define (ats-brief-company text)
-  ;; "M MakeMyTrip B Travel Tech Leader Big co": the logo letter, the name, then its tier and tags
-  (let ((m (re-match "^(?:[A-Z] )?(.+?) [A-F] " text)))
-    (if m (cadr m) text)))
-
-(define (ats-brief-jobs nodes)
-  ;; the cards under the Work Experience heading, each as title · company
-  (let loop ((ns (site-app-real nodes)) (in? #f) (acc '()))
-    (cond ((null? ns) (reverse acc))
-          ((equal? (plist-get (car ns) 'tag) "c-heading")
-           (loop (cdr ns) (equal? (plist-get (car ns) 'text) "Work Experience") acc))
-          ((and in? (equal? (plist-get (car ns) 'tag) "c-item"))
-           (let ((fs (site-app-real (plist-get (car ns) 'children))))
-             (loop (cdr ns) in?
-                   (if (< (length fs) 2) acc
-                       (cons (list 'tag "c-list-item"
-                                   'text (string-append (plist-get (cadr fs) 'text) " · " (ats-brief-company (plist-get (car fs) 'text))))
-                             acc)))))
-          (else (loop (cdr ns) in? acc)))))
-
-(define (ats-brief-section buf)
-  ;; tab 0: the latest assessment from the history, and the candidate's jobs
-  (let ((history (site-app-detail-section buf "history"))
-        (candidate (site-app-detail-section buf "candidate")))
-    (and (or (pair? history) (pair? candidate))
-         (let ((notes (if (pair? history) (ats-brief-notes history) '()))
-               (jobs (if (pair? candidate) (ats-brief-jobs candidate) '())))
-           (append (list #f (list 'tag "c-heading" 'text "Assessment"))
-                   (if (pair? notes) (list (car notes)) (list (list 'tag "c-field" 'text "No assessment yet.")))
-                   (list (list 'tag "c-heading" 'text "Work Experience"))
-                   (if (pair? jobs) jobs (list (list 'tag "c-field" 'text "No work experience listed."))))))))
-
-(define *ats-brief-tab* (list 'id "brief" 'label "brief" 'key "0" 'build ats-brief-section))
-
 (define *ats-applications-page*
   (list 'id 'applications
         'label "Applications"
@@ -121,7 +78,6 @@
         'detail-tab-param "tab"
         'detail-kind "ats-application-mode"
         'detail-keys (list "a")
-        'derived-tabs (list *ats-brief-tab*)
         'detail-tabs
         (map (lambda (tab) (list 'id (car tab) 'tag (cadr tab)))
              '(("history" "c-application-history")
@@ -147,7 +103,6 @@
         'detail-kind "ats-approval-mode"
         ;; only the happy path has a key: approve; o opens the site for the rest
         'detail-keys (list "a")
-        'derived-tabs (list *ats-brief-tab*)
         'detail-tabs
         (map (lambda (tab)
                (let ((button (string-append "#approvals-show-root nav.brut-tabs button[phx-value-tab=\"" (car tab) "\"]")))

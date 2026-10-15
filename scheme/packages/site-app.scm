@@ -676,20 +676,7 @@
 
 (define (site-app-detail-tabs buf)
   (let ((data (buffer-local buf 'site-app-data)))
-    (if data (append (site-app-derived-tabs buf) (site-app-real (plist-get data 'tabs))) '())))
-
-;; a page's 'derived-tabs are tabs the app draws itself from the sections the
-;; site's tabs read: (id ID label LABEL key KEY build (lambda (buf) NODES-or-#f))
-(define (site-app-derived-specs buf)
-  (let ((page (and (buffer-local buf 'site-app-row) (site-app-detail-page buf))))
-    (or (and page (plist-get page 'derived-tabs)) '())))
-
-(define (site-app-derived-tabs buf)
-  (map (lambda (t) (list 'id (plist-get t 'id) 'label (plist-get t 'label) 'key (plist-get t 'key) 'derived #t))
-       (site-app-derived-specs buf)))
-
-(define (site-app-derived-tab buf id)
-  (site-app-find (lambda (t) (equal? (plist-get t 'id) id)) (site-app-derived-specs buf)))
+    (if data (site-app-real (plist-get data 'tabs)) '())))
 
 (define (site-app-detail-active buf)
   (or (buffer-local buf 'site-app-active)
@@ -697,11 +684,8 @@
         (and hit (plist-get hit 'id)))))
 
 (define (site-app-detail-section buf id)
-  (let ((derived (site-app-derived-tab buf id)))
-    (if derived
-        ((plist-get derived 'build) buf)
-        (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
-          (and hit (cdr hit))))))
+  (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
+    (and hit (cdr hit))))
 
 (define (site-app-detail-put-section! buf id nodes &optional quiet)
   (when (buffer-known? buf)
@@ -1324,12 +1308,11 @@
                     (component 'ui/tabs
                       (list 'tabs (let loop ((ts tabs) (i 1) (acc '()))
                                     (if (null? ts) (reverse acc)
-                                        (loop (cdr ts) (if (plist-get (car ts) 'derived) i (+ i 1))
+                                        (loop (cdr ts) (+ i 1)
                                               (cons (list (string-append site-app-tab-click (plist-get (car ts) 'id))
                                                           (site-app-capitalize (plist-get (car ts) 'label))
                                                           (equal? (plist-get (car ts) 'id) active)
-                                                          ;; a tab the page draws itself keeps its own key; the site's count from 1
-                                                          (or (plist-get (car ts) 'key) (number->string i)))
+                                                          (number->string i))
                                                     acc))))))
                     n n)))))))
 
@@ -1677,10 +1660,7 @@
            (made (site-app-prepare-detail! name row page))
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            ;; every item opens on the tab this group last chose, else the first
-           (opened (buffer-set-local! made 'site-app-active
-                     (site-app-chosen-tab name page list-buf
-                       ;; a tab the page draws itself comes first: it is the default
-                       (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'derived-tabs) '())) ids))))
+           (opened (buffer-set-local! made 'site-app-active (site-app-chosen-tab name page list-buf ids)))
            ;; what this page last read draws at once; a read under a minute old stands
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)
@@ -1746,7 +1726,6 @@
   ;; The background collection moved on to another item: fetch this one again.
   (let ((name (buffer-local buf 'site-app-name)))
     (when (and (not (site-app-detail-section buf id))
-               (not (site-app-derived-tab buf id))
                (not (equal? (buffer-local buf 'site-app-gen) (site-app-gen name))))
       (let* ((list-buf (buffer-local buf 'site-app-list))
              (spec (site-app-spec name))
@@ -1762,16 +1741,9 @@
                 (when answer (site-app-collect-detail! name buf tab url wait page gen)))))))))
 
 (define (site-app-detail-nth! n)
-  ;; the site's tabs count from 1; a derived tab goes by its own key
-  (let* ((buf (current-buffer))
-         (tabs (filter (lambda (t) (not (plist-get t 'derived))) (site-app-detail-tabs buf))))
+  (let* ((buf (current-buffer)) (tabs (site-app-detail-tabs buf)))
     (when (and (> n 0) (<= n (length tabs)))
       (site-app-detail-select! buf (plist-get (list-ref tabs (- n 1)) 'id)))))
-
-(define (site-app-detail-key! key)
-  (let* ((buf (current-buffer))
-         (hit (site-app-find (lambda (t) (equal? (plist-get t 'key) key)) (site-app-detail-tabs buf))))
-    (when hit (site-app-detail-select! buf (plist-get hit 'id)))))
 
 (define (site-app-detail-step! d)
   (let* ((buf (current-buffer))
@@ -1780,9 +1752,9 @@
          (n (length tabs)))
     (when (> n 0)
       (let loop ((ts tabs) (i 0))
-        (cond ((null? ts) (site-app-detail-select! buf (plist-get (car tabs) 'id)))
+        (cond ((null? ts) (site-app-detail-nth! 1))
               ((equal? (plist-get (car ts) 'id) active)
-               (site-app-detail-select! buf (plist-get (list-ref tabs (modulo (+ i d) n)) 'id)))
+               (site-app-detail-nth! (+ 1 (modulo (+ i d) n))))
               (else (loop (cdr ts) (+ i 1))))))))
 
 
@@ -1912,7 +1884,6 @@
           (for-each (lambda (page) (app-detail-keys! (site-app-page-mode name (plist-get page 'id)) mode))
                     (site-app-pages (site-app-spec name))))))))
 
-(define-command "site-app-detail-tab-0" "Show the tab this page draws itself, keyed 0" (lambda () (site-app-detail-key! "0")))
 (define-command "site-app-detail-tab-1" "Show this page's first tab" (lambda () (site-app-detail-nth! 1)))
 (define-command "site-app-detail-tab-2" "Show this page's second tab" (lambda () (site-app-detail-nth! 2)))
 (define-command "site-app-detail-tab-3" "Show this page's third tab" (lambda () (site-app-detail-nth! 3)))
@@ -2130,7 +2101,6 @@
         (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
         (list "<up>" "site-app-detail-prev")
-        (list "0" "site-app-detail-tab-0")
         (list "1" "site-app-detail-tab-1")
         (list "2" "site-app-detail-tab-2")
         (list "3" "site-app-detail-tab-3")

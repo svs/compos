@@ -35,6 +35,13 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(fold + 0 '(1 2 3))") == 6
   end
 
+  test "cons onto a non-list names the tail instead of a clause error" do
+    assert run("(cons 1 '(2))") == [1, 2]
+
+    assert {:error, message} = Scheme.eval_string(Scheme.new(), "(cons 'k #f)")
+    assert message =~ "cons: the tail must be a list, not #f"
+  end
+
   test "assoc returns the first pair with the key and skips non-pairs" do
     assert run("(assoc 2 '((1 a) (2 b) (2 c)))") == [2, {:sym, "b"}]
     assert run("(assoc 'k '(x (k 1)))") == [{:sym, "k"}, 1]

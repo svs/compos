@@ -25,7 +25,7 @@
 (define *recording-lines* '())   ; log lines, newest first
 (define *recording-last* #f)     ; the last logged snapshot
 (define *recording-t0* #f)       ; monotonic-ms when the recording began
-(define *recording-frames* '())  ; (OFFSET-MS . FILE), newest first
+(define *recording-frames* '())  ; (OFFSET-MS FILE), newest first
 (define *recording-task* #f)     ; the task taking frames, or #f
 (define *recording-video* #f)    ; the video of the last recording
 
@@ -129,7 +129,7 @@
                (browser-call "eval"
                  (list 'tab (chrome--tab-id (dom--editor-tab))
                        'code "innerWidth + 'x' + innerHeight")
-                 (lambda (r) (k (and (list? r) (plist-get r 'value)))))))))
+                 (lambda (r) (k (and (pair? r) (plist-get r 'value)))))))))
     (and (string? v)
          (let ((parts (string-split v "x")))
            (and (= (length parts) 2)
@@ -151,9 +151,9 @@
     k))
 
 (define (recording--frame-data reply)
-  (and (list? reply)
+  (and (pair? reply)
        (let ((result (plist-get reply 'result)))
-         (and (list? result)
+         (and (pair? result)
               (let ((data (plist-get result 'data)))
                 (and (string? data) data))))))
 
@@ -170,7 +170,7 @@
                  (let ((file (string-append dir "/" (recording--pad n) ".jpg")))
                    (write-file! file (base64-decode data))
                    (set! *recording-frames*
-                     (cons (cons (- (monotonic-ms) *recording-t0*) file)
+                     (cons (list (- (monotonic-ms) *recording-t0*) file)
                            *recording-frames*))
                    (loop (+ n 1))))
                 (else
@@ -195,14 +195,14 @@
         (string-append "ffconcat version 1.0\n"
                        (string-join (reverse acc) "")
                        (if (pair? frames)
-                           (string-append "file '" (cdr (car (reverse frames))) "'\n")
+                           (string-append "file '" (cadr (car (reverse frames))) "'\n")
                            ""))
         (let* ((row (car rows))
                (next (if (null? (cdr rows)) #f (car (cdr rows))))
                (ms (if next (- (car next) (car row)) last-ms)))
           (loop (cdr rows)
                 (if next ms last-ms)
-                (cons (string-append "file '" (cdr row) "'\nduration "
+                (cons (string-append "file '" (cadr row) "'\nduration "
                                      (recording--seconds ms) "\n")
                       acc))))))
 
@@ -221,9 +221,9 @@
                          ",scale=trunc(iw/2)*2:trunc(ih/2)*2' -c:v libx264 -crf 18"
                          " -pix_fmt yuv420p '" video "' 2>&1 && echo RECORDING-OK")
           (recording--frames-dir path)))
-      (lambda (out)
+      (lambda (ok? out)
         (set! *recording-encoding* #f)
-        (if (and (string? out) (string-suffix? "RECORDING-OK\n" out))
+        (if (and ok? (string? out) (string-suffix? "RECORDING-OK\n" out))
             (begin (set! *recording-video* video)
                    (message (string-append "Recording video: " video)))
             (message (string-append "recording: ffmpeg failed: "

@@ -303,18 +303,65 @@ async function windowExists(windowId) {
 }
 
 // the reader's own window: minimized, made once, reused — snapshots
-// load their tabs here so the user's tab strip never changes
+// load their tabs here so the user's tab strip never changes. The window and
+// the tabs opened in it are kept in local storage, so they outlive a restart
+// of the browser or the extension. A window that holds a tab the reader did
+// not open is the user's now (they restored it and worked in it): it is never
+// used again, and the reader makes a fresh one.
+async function readerTabs() {
+  return (await chrome.storage.local.get("readerTabs")).readerTabs || [];
+}
+
+async function isReaderWindow(id) {
+  try {
+    const w = await chrome.windows.get(id, { populate: true });
+    const ours = await readerTabs();
+    return w.tabs.every((t) => ours.includes(t.id) || t.url === "about:blank");
+  } catch {
+    return false;
+  }
+}
+
+// Chrome on macOS may open a window maximized whatever create asks, so the
+// reader's window is minimized again each time it is used
+async function minimized(id) {
+  try {
+    const w = await chrome.windows.get(id);
+    if (w.state !== "minimized") await chrome.windows.update(id, { state: "minimized" });
+  } catch {}
+  return id;
+}
+
 async function readerWindow() {
-  const stored = await chrome.storage.session.get("readerWin");
-  if (stored.readerWin && (await windowExists(stored.readerWin))) return stored.readerWin;
+  const stored = await chrome.storage.local.get("readerWin");
+  if (stored.readerWin && (await isReaderWindow(stored.readerWin))) return minimized(stored.readerWin);
   const w = await chrome.windows.create({
     url: "about:blank",
     state: "minimized",
     focused: false,
   });
-  await chrome.storage.session.set({ readerWin: w.id });
-  return w.id;
+  await chrome.storage.local.set({ readerWin: w.id });
+  return minimized(w.id);
 }
+
+// a reader tab's window goes back out of sight whenever the reader uses it
+async function keepHidden(tab) {
+  if (!(await readerTabs()).includes(tab)) return;
+  try {
+    await minimized((await chrome.tabs.get(tab)).windowId);
+  } catch {}
+}
+
+async function noteReaderTab(id) {
+  const ours = await readerTabs();
+  if (!ours.includes(id)) await chrome.storage.local.set({ readerTabs: [...ours, id] });
+}
+
+// a reader tab that closes is forgotten
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const ours = await readerTabs();
+  if (ours.includes(tabId)) await chrome.storage.local.set({ readerTabs: ours.filter((t) => t !== tabId) });
+});
 
 // what travels as text; everything else travels as bytes
 const TEXT_TYPE = /^text\/|xml|json|javascript|x-sh$/;
@@ -527,6 +574,7 @@ const OPS = {
   // Navigate the app's persistent background tab and answer only when the
   // rendered page is ready. The tab stays where it is and never takes focus.
   async navigate({ tab, url, wait }) {
+    await keepHidden(tab);
     await chrome.tabs.update(tab, { url, active: false });
     await waitTabComplete(tab);
     await waitRendered(tab, wait || null);
@@ -539,6 +587,7 @@ const OPS = {
   // until the server's patch lands, and applies the patch in one task, so the
   // first mutation after the mark clears (and WAIT matches) is the finished page.
   async press({ tab, selector, wait, cap = 10000 }) {
+    await keepHidden(tab);
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab },
       func: (sel, wait, cap) =>
@@ -695,6 +744,7 @@ const OPS = {
     const create = { url, active: !background && active !== false };
     if (reader) {
       const t = await chrome.tabs.create({ ...create, active: false, windowId: await readerWindow() });
+      await noteReaderTab(t.id);
       return { tab: t.id, window: t.windowId };
     }
     // AFTER is the tab of the frame that asked: two frames can share a

@@ -114,9 +114,16 @@ defmodule Compos.Scheme.Builtins do
       {"sort", "(sort LST) — return LST sorted in ascending term order."} => fn [l] ->
         Enum.sort(l)
       end,
-      {"cons", "(cons H T) — prepend H to the list T; T must be a list."} => fn [h, t]
-                                                                                when is_list(t) ->
-        [h | t]
+      # lists are BEAM lists, so there is no dotted pair; a reload hook that
+      # wrote (cons KEY VAL) failed with a bare FunctionClauseError
+      {"cons", "(cons H T) — prepend H to the list T; T must be a list."} => fn
+        [h, t] when is_list(t) ->
+          [h | t]
+
+        [_, t] ->
+          raise Eval.Error,
+            message:
+              "cons: the tail must be a list, not #{Printer.print(t)}; there are no dotted pairs, use (list H T)"
       end,
       {"car", "(car LST) — return the first element of LST."} => fn [[h | _]] -> h end,
       {"cdr", "(cdr LST) — return LST without its first element."} => fn [[_ | t]] -> t end,

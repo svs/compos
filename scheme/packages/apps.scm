@@ -71,6 +71,22 @@
 ;; EXTRA names panes that are not the app's — the group's chat is the
 ;; usual one — and they go first, so the reader's own column stays on the
 ;; left. Answers the panes it tiled, or #f when the app has no window.
+;; An app with a home of its own: a group named for it, made the first time.
+;; Its buffers always belong there, whatever other group you also put them
+;; in, and calling the app takes you there.
+(define (app-group title)
+  (let ((rec (group-record-by-name title)))
+    (if rec (car rec) (group-record-create! title))))
+
+(define (app-join-group! buf title)
+  (let ((id (app-group title)))
+    (when (and id (buffer-exists? buf) (not (buffer-in-group? buf id)))
+      (buffer-add-group! buf id))
+    id))
+
+(public! 'app-group "(app-group TITLE) — the id of the app's own group, named TITLE; made the first time")
+(public! 'app-join-group! "(app-join-group! BUF TITLE) — BUF joins the app's own group; answers its id")
+
 (define (app-layout! id &optional extra)
   (let* ((extras (filter buffer-known? (or extra '())))
          (mine (filter (lambda (buf) (not (member buf extras)))

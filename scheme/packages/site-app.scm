@@ -7,7 +7,18 @@
 (effects! '(read))
 
 (define *site-apps* '())
-(define *site-app-tabs* '())
+;; each app's one hidden reader tab, kept on disk so a restart reuses it
+;; instead of opening another in the browser
+(define *site-app-tabs-file* (string-append (compos-home) "/site-app-tabs.json"))
+
+(define (site-app-tabs-load)
+  (let ((text (and (file-exists? *site-app-tabs-file*) (read-file *site-app-tabs-file*))))
+    (if (and (string? text) (> (string-length text) 2))
+        (map (lambda (e) (list (string->symbol (car e)) (cadr e)))
+             (filter (lambda (e) (and (pair? e) (string? (car e)) (number? (cadr e)))) (json-parse text)))
+        '())))
+
+(define *site-app-tabs* (site-app-tabs-load))
 
 (define (site-app-find pred xs)
   (let loop ((rest xs))
@@ -25,7 +36,11 @@
   (let ((hit (assoc name *site-app-tabs*))) (and hit (cadr hit))))
 
 (define (site-app-note-tab! name tab)
-  (set! *site-app-tabs* (alist-put *site-app-tabs* name tab)) tab)
+  (set! *site-app-tabs* (alist-put *site-app-tabs* name tab))
+  (write-file! *site-app-tabs-file*
+    (json-encode (map (lambda (e) (list (symbol->string (car e)) (cadr e)))
+                      (filter (lambda (e) (number? (cadr e))) *site-app-tabs*))))
+  tab)
 
 ;; The app's tab is disposable. When Chrome says it navigated away or closed,
 ;; drop it and let the next call open a fresh background tab.
@@ -242,10 +257,17 @@
 
 (define (site-app-rows buf) (or (buffer-local buf 'site-app-rows) '()))
 
-(define (site-app-join-group! buf)
-  (let ((group (frame-group)))
-    (when (and group (not (buffer-in-group? buf group)))
-      (buffer-add-group! buf group)))
+(define (site-app-join-group! buf &optional name)
+  ;; an app whose spec says 'own-group lives in a group of its own, named for
+  ;; it; any other joins the group of the frame it opened in
+  (let* ((nm (or name (buffer-local buf 'site-app-name)
+                 (let ((sp (buffer-local buf 'site-app-spec))) (and sp (plist-get sp 'name)))))
+         (spec (and nm (site-app-spec nm))))
+    (if (and spec (plist-get spec 'own-group))
+        (app-join-group! buf (or (plist-get spec 'title) (symbol->string nm)))
+        (let ((group (frame-group)))
+          (when (and group (not (buffer-in-group? buf group)))
+            (buffer-add-group! buf group)))))
   buf)
 
 (effects! '(write external))
@@ -285,6 +307,8 @@
           (when (and on (not (plist-get on 'group))) (buffer-set-local! buf 'site-app-filter (plist-get on 'query)))
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf)
+          ;; a page's 'after-fill (BUF ROWS) hears every read, to keep it
+          (let ((after (plist-get page 'after-fill))) (when after (after buf rows)))
           (message (string-append (number->string (length rows))
                                   " " (string-downcase (plist-get page 'label))
                                   (if on (string-append " · " (plist-get on 'label)) "")))))
@@ -481,11 +505,13 @@
          (buf (site-app-page-buffer name pid))
          (mode (site-app-page-mode name pid)))
     (unless (buffer-exists? buf) (buffer-create buf))
-    (site-app-join-group! buf)
+    (site-app-join-group! buf name)
     (buffer-set-local! buf 'site-app-spec spec)
     (buffer-set-local! buf 'site-app-page pid)
     (unless (buffer-derived-mode? buf mode)
       (with-current-buffer buf (lambda () (set-mode! mode))))
+    ;; an app with a group of its own is opened there
+    (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
     (switch-to-buffer! buf)
     (when (null? (site-app-rows buf))
       (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page))))
@@ -1450,6 +1476,12 @@
 
 
 (define (site-app-navigate! name url wait k)
+  ;; an app that reads its pages its own way says so with 'navigate (NAME URL
+  ;; WAIT K), K getting (TAB ANSWER) as here; it can fall back to this one
+  (let ((own (plist-get (site-app-spec name) 'navigate)))
+    (if own (own name url wait k) (site-app-navigate-direct! name url wait k))))
+
+(define (site-app-navigate-direct! name url wait k)
   (site-app-find-tab! name
     (lambda (tab)
       (tab-navigate tab url

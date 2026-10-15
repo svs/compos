@@ -5,7 +5,8 @@
 ;;; nothing. recording-end! appends the end mark and closes the log.
 ;;; The tests call the functions and the hook entry point directly; the
 ;;; editor's asynchronous notification path only re-runs the same
-;;; deduplication.
+;;; deduplication. Frames stay off: they need the browser, and the video
+;;; list they feed ffmpeg is checked as text.
 
 (domain! 'testing)
 (effects! '(write))
@@ -17,9 +18,16 @@
                 (string-split text "\n"))
         '())))
 
+(define (t--without-frames thunk)
+  (let ((was recording-frames))
+    (set! recording-frames #f)
+    (thunk)
+    (set! recording-frames was)))
+
 (deftest 'recording-logs-only-on-change
   "the log gains an entry per visible change and ignores repeats"
   (lambda ()
+   (t--without-frames (lambda ()
     (let ((path (string-append (compos-home) "/recordings/zz-rec-test.jsonl"))
           (shown (test-buffer! "*zz-rec-shown*" ""))
           (origin (current-buffer)))
@@ -54,14 +62,32 @@
       (check-equal! (length (t--rec-lines path)) 4
                     "a closed recording logs nothing")
       (check-false! (recording-end!) "a second end returns #f")
-      (buffer-kill! shown))))
+      (buffer-kill! shown))))))
 
 (deftest 'recording-start-twice-keeps-the-first
   "a second start does not replace the running recording"
   (lambda ()
+   (t--without-frames (lambda ()
     (let ((path (string-append (compos-home) "/recordings/zz-rec-twice.jsonl")))
       (recording-start! path)
       (check-false! (recording-start! "/tmp/zz-rec-other.jsonl")
                     "a second start returns #f")
       (check-equal! (recording-path) path "the first log file stays")
-      (recording-end!))))
+      (recording-end!))))))
+
+(deftest 'recording-concat-holds-each-frame-until-the-next
+  "the ffconcat list gives each frame the time until the next, and the last one twice"
+  (lambda ()
+    (check-equal! (recording--concat-text '())
+                  "ffconcat version 1.0\n"
+                  "no frames make an empty list")
+    (check-equal! (recording--concat-text (list (list 0 "/r/000000.jpg") (list 150 "/r/000001.jpg") (list 400 "/r/000002.jpg")))
+                  (string-append "ffconcat version 1.0\n"
+                                 "file '/r/000000.jpg'\nduration 0.15\n"
+                                 "file '/r/000001.jpg'\nduration 0.25\n"
+                                 "file '/r/000002.jpg'\nduration 0.25\n"
+                                 "file '/r/000002.jpg'\n")
+                  "each frame lasts until the next; the last repeats the gap before it and stands again")
+    (check-equal! (recording--frames-dir "/r/12.jsonl") "/r/12-frames" "frames sit beside the log")
+    (check-equal! (recording--video-path "/r/12.jsonl") "/r/12.mp4" "the video sits beside the log")
+    (check-equal! (recording--pad 7) "000007" "frame names sort as numbers")))

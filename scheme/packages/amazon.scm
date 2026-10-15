@@ -134,7 +134,8 @@
 (effects! '(write display))
 
 (define (amazon-home-group!)
-  (frame-group))
+  ;; Amazon lives in a group of its own; calling it goes there
+  (app-group "Amazon"))
 
 (define (amazon-join-group! buf)
   (when (and buf (buffer-exists? buf))
@@ -1326,6 +1327,7 @@
 ;;; One page of a search. FIRST? opens the app around the listing -- the group,
 ;;; the mode, the layout; paging with n and p only swaps the rows underneath.
 (define (amazon-open-page! query page first?)
+  (when first? (frame-tab! (amazon-home-group!)))
   (unless (buffer-exists? *amazon-buffer*) (buffer-create *amazon-buffer*))
   (amazon-join-group! *amazon-buffer*)
   (buffer-set-local! *amazon-buffer* 'amazon-query query)

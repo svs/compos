@@ -565,9 +565,18 @@
 ;; the document's chat, made and attached when it is missing or its
 ;; session is gone (a restart brings the buffer back, not the session)
 (define (llm-mode--companion! buf &optional model)
+  ;; a new chat starts as its group's chats do: the group's bundle, unless the
+  ;; document chose its own model or connector
   (let* ((name (or (buffer-local buf 'llm-companion) (llm-mode--companion-name buf)))
-         (connector (buffer-llm-connector buf))
-         (model (or model (buffer-llm-model buf)))
+         (g (buffer-group buf))
+         (bundle (and g (boundp 'llm-group-bundle) (llm-group-bundle g)))
+         (bundle-model (and bundle (let ((m (llm-bundle-model bundle))) (if (equal? m "default") #f m))))
+         (connector (or (buffer-local buf 'llm-connector)
+                        (and bundle (llm-bundle-connector bundle))
+                        (buffer-llm-connector buf)))
+         (model (cond ((buffer-local buf 'llm-model))
+                      (bundle bundle-model)
+                      (else (or model (buffer-llm-model buf)))))
          (opts (or (buffer-local buf 'llm-companion-opts) '())))
     (unless (buffer-exists? name)
       (buffer-create name)
@@ -575,9 +584,12 @@
         (when dir
           (buffer-set-local! name 'default-directory dir)
           (buffer-set-local! name 'chat-directory dir)))
-      (buffer-set-local! name 'chat-presets (chat-presets-of buf))
-      (let ((pm (buffer-local buf 'chat-permission-mode)))
-        (when pm (buffer-set-local! name 'chat-permission-mode pm)))
+      (if bundle
+          (llm-default-bundle-apply! name g)
+          (begin
+            (buffer-set-local! name 'chat-presets (chat-presets-of buf))
+            (let ((pm (buffer-local buf 'chat-permission-mode)))
+              (when pm (buffer-set-local! name 'chat-permission-mode pm)))))
       (buffer-set-local! name 'chat-companion-of buf)
       (chat-task-init! name buf))
     (buffer-set-local! buf 'llm-companion name)
@@ -588,6 +600,7 @@
     ;; a quiet chat like any spawn: its mode on its own buffer, no window moves
     (unless (equal? (buffer-local name 'mode-name) "chat-mode")
       (with-current-buffer name (lambda () (set-mode! "chat-mode"))))
+    (chat-take-modes! name buf)
     (buffer-set-local! name 'inline-target buf)
     (buffer-set-local! buf 'llm-session-id (buffer-local name 'agent-slug))
     name))
@@ -608,6 +621,83 @@
       (if (and name (buffer-exists? name))
           (display-buffer-other-window! name)
           (message "This document has no chat yet: M-o starts one")))))
+
+;;; --- what a chat takes from its source -----------------------------------------
+;;; A chat made for a buffer knows that buffer, and takes the chat part of its
+;;; modes: the major mode, its parents, and its minor modes. A mode declares
+;;; that part with mode-chat-setup!; the part adds prompts, skills and
+;;; components to the chat. No keymap comes along: a chat has its own keys.
+
+(domain! 'chat)
+(effects! '(write))
+
+(define (mode-chat-setup! mode proc) (mode-put! mode 'chat-setup proc))
+
+;; the source's modes, the root parent first, then its minor modes
+(define (chat-source-modes src)
+  (let loop ((m (buffer-local src 'mode-name)) (acc '()))
+    (if (and m (not (member m acc)))
+        (loop (mode-get m 'parent) (cons m acc))
+        (append acc (or (buffer-local src 'minor-modes) '())))))
+
+(define (chat-source-prompt src)
+  (string-append
+    "This chat is the companion of the buffer " (string-append "\"" src "\"")
+    " (" (or (buffer-local src 'mode-name) "no mode") "). "
+    "It is the chat's subject: \"this\" means it. Read it with "
+    "(buffer-outline " (string-append "\"" src "\"") ") before anything else."))
+
+;; the chat's source modes, set up on CHAT; answers the modes that took part
+(define (chat-take-modes! chat src)
+  (let ((facets (filter (lambda (m) (mode-get m 'chat-setup)) (chat-source-modes src))))
+    (buffer-set-local! chat 'chat-facets facets)
+    (prompt-part-set! chat "chat-source" (chat-source-prompt src))
+    (for-each (lambda (m) ((mode-get m 'chat-setup) chat src)) facets)
+    facets))
+
+;; a restored chat takes its source's modes again
+(define (chat--source-modes-hook!)
+  (let ((src (buffer-local (current-buffer) 'chat-companion-of)))
+    (when (and src (buffer-exists? src))
+      (chat-take-modes! (current-buffer) src))))
+
+(add-hook! 'chat-mode-hook 'chat--source-modes-hook!)
+
+;; a page that takes no text, an app page, talks in its chat: M-o pops it up
+(define (llm-companion-open! buf)
+  (let* ((new? (not (buffer-exists? (or (buffer-local buf 'llm-companion) (llm-mode--companion-name buf)))))
+         (chat (llm-mode--companion! buf (buffer-llm-model buf)))
+         (opening (and new? (chat-opening-prompt buf))))
+    (pop-to-buffer chat)
+    (when opening (agent-continue! chat opening))
+    chat))
+
+;; the first thing a new chat for a buffer asks: the most specific of its
+;; modes that has one, a minor mode before the major mode and its parents
+;; kept across a reload of this file: other packages filled it
+(define *chat-openings* (if (boundp '*chat-openings*) *chat-openings* '()))
+
+(define (mode-chat-opening! mode text) (set! *chat-openings* (alist-put *chat-openings* mode text)))
+
+(define (chat-opening-prompt src)
+  (let loop ((modes (reverse (chat-source-modes src))))
+    (if (null? modes) #f
+        (let ((hit (assoc (car modes) *chat-openings*)))
+          (if hit
+              (let ((o (cadr hit))) (if (procedure? o) (o src) o))
+              (loop (cdr modes)))))))
+
+(public! 'mode-chat-opening!
+  "(mode-chat-opening! MODE TEXT) — TEXT, or (TEXT SOURCE), is the first prompt of a new chat made for a buffer in MODE")
+(public! 'chat-opening-prompt
+  "(chat-opening-prompt SOURCE) — the opening prompt SOURCE's modes give a new chat, or #f")
+
+(public! 'mode-chat-setup!
+  "(mode-chat-setup! MODE PROC) — PROC (CHAT SOURCE) sets up a chat made for a buffer in MODE")
+(public! 'chat-take-modes!
+  "(chat-take-modes! CHAT SOURCE) — CHAT knows SOURCE and takes its modes' chat parts; answers those modes")
+
+(effects! '(unknown))
 
 (define (llm-mode--last-response-range buf)
   (let loop ((ranges (llm-mode--response-ranges buf)) (latest #f))
@@ -1008,9 +1098,9 @@
 
 (define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes"
   (lambda ()
-    (if (current-prefix-arg)
-        (transient-setup "llm-send-to" (current-buffer))
-        (llm-send-at-point! (current-buffer) (point)))))
+    (cond ((current-prefix-arg) (transient-setup "llm-send-to" (current-buffer)))
+          ((buffer-read-only? (current-buffer)) (llm-companion-open! (current-buffer)))
+          (else (llm-send-at-point! (current-buffer) (point))))))
 
 (global-set-key "M-o" "llm-send-buffer")
 (global-set-key "C-c m" "llm-set-model")

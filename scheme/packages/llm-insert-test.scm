@@ -14,6 +14,12 @@
 
 (define (t--li-done!) (when (buffer-known? t--li-buf) (buffer-kill! t--li-buf)))
 
+;; a document in no group, so no group's LLM setup reaches its chat
+(define (t--li-doc! name text)
+  (test-buffer! name text)
+  (buffer-set-local! name 'group-ids '())
+  name)
+
 (deftest 'a-reply-follows-the-block-point-is-in
   "the answer is a block of its own, below the one that asked"
   (lambda ()
@@ -283,7 +289,7 @@
 (deftest 'm-o-talks-through-a-hidden-chat-of-its-own
   "one chat per document, named after it, made on the first send and not shown"
   (lambda ()
-    (let ((doc (test-buffer! "zz-doc-companion.md" "hello\n")))
+    (let ((doc (t--li-doc! "zz-doc-companion.md" "hello\n")))
       (buffer-set-local! doc 'llm-connector "api")
       (buffer-set-local! doc 'llm-companion-opts '(backend "stub" script ()))
       (let ((c (llm-mode--companion! doc)))
@@ -302,11 +308,47 @@
         (buffer-kill! c)
         (buffer-kill! doc)))))
 
+(deftest 'a-documents-chat-takes-its-modes-chat-parts
+  "the chat knows its source and takes the chat part of its mode, the parents and its minor modes"
+  (lambda ()
+    (define-mode "zz-facet-base-mode" (lambda () #t))
+    (define-mode "zz-facet-mode" (lambda () #t))
+    (mode-parent! "zz-facet-mode" "zz-facet-base-mode")
+    (mode-chat-setup! "zz-facet-base-mode" (lambda (chat src) (prompt-part-set! chat "zz-base" src)))
+    (mode-chat-setup! "zz-facet-mode" (lambda (chat src) (prompt-part-set! chat "zz-own" "own")))
+    (let ((doc (t--li-doc! "zz-doc-facets" "hello\n")))
+      (with-current-buffer doc (lambda () (set-mode! "zz-facet-mode")))
+      (buffer-set-local! doc 'llm-connector "api")
+      (buffer-set-local! doc 'llm-companion-opts '(backend "stub" script ()))
+      (let* ((c (llm-mode--companion! doc))
+             (parts (map car (prompt-buffer-parts c))))
+        (check-equal! (buffer-local c 'mode-name) "chat-mode" "it stays a chat, with a chat's keys")
+        (check-equal! (buffer-local c 'chat-facets) '("zz-facet-base-mode" "zz-facet-mode") "the parent first")
+        (check-true! (and (member "chat-source" parts) #t) "it knows its source")
+        (check-true! (and (member "zz-base" parts) (member "zz-own" parts) #t) "and takes each mode's part")
+        (llm-session-close! (buffer-local c 'agent-slug))
+        (buffer-kill! c)
+        (buffer-kill! doc)))))
+
+(deftest 'a-new-chat-opens-with-its-most-specific-modes-prompt
+  "the mode's own opening beats its parent's; one may be made from the source"
+  (lambda ()
+    (define-mode "zz-open-base-mode" (lambda () #t))
+    (define-mode "zz-open-mode" (lambda () #t))
+    (mode-parent! "zz-open-mode" "zz-open-base-mode")
+    (mode-chat-opening! "zz-open-base-mode" "base")
+    (let ((doc (t--li-doc! "zz-doc-opening" "hello\n")))
+      (with-current-buffer doc (lambda () (set-mode! "zz-open-mode")))
+      (check-equal! (chat-opening-prompt doc) "base" "the parent's, when the mode has none")
+      (mode-chat-opening! "zz-open-mode" (lambda (src) (string-append "about " src)))
+      (check-equal! (chat-opening-prompt doc) "about zz-doc-opening" "the mode's own, made from the source")
+      (buffer-kill! doc))))
+
 (deftest 'm-o-lands-the-reply-in-the-document-and-the-hidden-chat-records-it
   "one transport end to end: the stub's chunk streams into the document at
    the response block, and the document's chat holds the turn"
   (lambda ()
-    (let ((doc (test-buffer! "zz-doc-roundtrip.md" "Say hi.\n")))
+    (let ((doc (t--li-doc! "zz-doc-roundtrip.md" "Say hi.\n")))
       (buffer-set-local! doc 'llm-connector "api")
       (buffer-set-local! doc 'llm-companion-opts
         '(backend "stub" script (((type chunk text "hi there.")))))
@@ -332,7 +374,7 @@
 (deftest 'c-u-m-o-opens-the-send-menu
   "the prefix asks where the reply goes; a bare M-o never asks"
   (lambda ()
-    (let ((doc (test-buffer! "zz-doc-menu.md" "Say hi.\n")))
+    (let ((doc (t--li-doc! "zz-doc-menu.md" "Say hi.\n")))
       (with-current-buffer doc
         (lambda ()
           (set-prefix-arg! '(4))
@@ -352,7 +394,7 @@
 (deftest 'the-chat-target-shows-the-chat-and-leaves-the-document-alone
   "the reply arrives in the document's chat, shown in the other window"
   (lambda ()
-    (let ((doc (test-buffer! "zz-doc-chat-target.md" "Say hi.\n")))
+    (let ((doc (t--li-doc! "zz-doc-chat-target.md" "Say hi.\n")))
       (buffer-set-local! doc 'llm-connector "api")
       (buffer-set-local! doc 'llm-companion-opts
         '(backend "stub" script (((type chunk text "hi there.")))))
@@ -371,7 +413,7 @@
 (deftest 'the-new-document-target-carries-the-prompt-and-the-reply
   "a document of its own holds the prompt and the reply, with a chat of its own"
   (lambda ()
-    (let ((doc (test-buffer! "zz-doc-new-target.md" "Say hi.\n")))
+    (let ((doc (t--li-doc! "zz-doc-new-target.md" "Say hi.\n")))
       (buffer-set-local! doc 'llm-connector "api")
       (buffer-set-local! doc 'llm-companion-opts
         '(backend "stub" script (((type chunk text "hi there.")))))

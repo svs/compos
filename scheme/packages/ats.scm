@@ -544,3 +544,18 @@
                               (string-append "Recommend failed for " name ": " (if (string? text) text ""))))
                  (when (and ok (buffer-exists? buf))
                    (with-current-buffer buf (lambda () (run-command "site-app-detail-reload")))))))))))
+
+;; A chat made for an ATS page works the case on it, as svs would
+(mode-chat-setup! "ats-detail-mode"
+  (lambda (chat src)
+    (prompt-part-set! chat "ats-case"
+      (string-append
+        "This chat works one case in svs's recruiting ATS (svsrecruiting.com). "
+        "Read and change it with the ats-ash MCP tools (mcp-find \"ats-ash ...\"); "
+        "the page's buttons are the same actions. Show a message to a candidate or client before it goes out."))))
+
+;; what a new chat for an ATS page asks first; the page's own kind wins
+(mode-chat-opening! "ats-detail-mode"
+  "Brief me on this case: where it stands, what's open, and the next step you'd take.")
+(mode-chat-opening! "ats-approval-mode"
+  "This approval is waiting on me. What's proposed, would you approve it, and why?")

@@ -633,6 +633,33 @@
 
 (mode-parent! "site-app-detail-mode" "special-mode")
 
+;; A chat made for a detail page is about the thing it shows: its title, where it
+;; lives on the site, its row's fields and the parts to read. Facts, never the
+;; drawn screen.
+(require 'chat-mode)
+
+(define (site-app-chat-facts src)
+  (let* ((spec (site-app-spec (buffer-local src 'site-app-name)))
+         (data (or (buffer-local src 'site-app-data) '()))
+         (row (or (buffer-local src 'site-app-row) '()))
+         (href (plist-get row 'href))
+         (fields (let loop ((r row) (acc '()))
+                   (if (or (null? r) (null? (cdr r))) (reverse acc)
+                       (loop (cddr r)
+                             (if (and (string? (cadr r)) (not (equal? (cadr r) "")) (not (memq (car r) '(href key))))
+                                 (cons (string-append "- " (symbol->string (car r)) ": " (cadr r)) acc)
+                                 acc))))))
+    (string-join
+      (append (list (string-append "The page is " (or (plist-get data 'title) src) "."))
+              (if (and spec href) (list (string-append "On the site: " (plist-get spec 'base-url) href)) '())
+              fields
+              (list (string-append "Its parts, by (buffer-section \"" src "\" NAME): "
+                                   (string-join (map car (or (buffer-local src 'site-app-sections) '())) ", "))))
+      "\n")))
+
+(mode-chat-setup! "site-app-detail-mode"
+  (lambda (chat src) (prompt-part-set! chat "site-app-facts" (site-app-chat-facts src))))
+
 
 
 

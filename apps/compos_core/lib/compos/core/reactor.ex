@@ -123,8 +123,16 @@ defmodule Compos.Core.Reactor do
   # running Reactor still holds rules that were built before the key existed,
   # and a KeyError here would take every rule in the editor down with it.
   defp note_failure(state, id, rule, changes, error) do
+    case buffer_name(rule.buffer_ref) do
+      # the buffer died while the handler ran (a kill mid-paint): any call
+      # into it exits :noproc. That is the rule's end, not a failure.
+      nil -> drop_rule(state, id, rule)
+      name -> note_failure(state, id, rule, changes, error, name)
+    end
+  end
+
+  defp note_failure(state, id, rule, changes, error, name) do
     failures = Map.get(rule, :failures, 0) + 1
-    name = buffer_name(rule.buffer_ref) || inspect(rule.buffer_ref)
 
     rule =
       rule

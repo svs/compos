@@ -222,6 +222,33 @@ defmodule Compos.CoreTest do
       refute Enum.any?(Reactor.rules(), &(&1.id == id)), "the dead buffer's rule is gone"
     end
 
+    # llm-mode painted overlays on a buffer killed while the paint ran: the
+    # call exited :noproc and the rule logged a failure and retried.
+    test "a buffer killed while its handler runs ends the rule without an error" do
+      name = uniq("killed-mid-handler")
+      {:ok, _} = Core.create_buffer(name)
+
+      {:ok, id} =
+        Reactor.on_change(
+          name,
+          :any,
+          fn _ ->
+            :ok = Core.kill_buffer(name)
+            Buffer.append(name, "too late")
+          end,
+          eager: true
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Buffer.append(name, "one line\n")
+          wait_for(fn -> not Enum.any?(Reactor.rules(), &(&1.id == id)) end)
+        end)
+
+      refute Enum.any?(Reactor.rules(), &(&1.id == id)), "the dead buffer's rule is gone"
+      refute log =~ "reactor rule #{id}"
+    end
+
     test "ignores agent-sourced edits by default (loop prevention)" do
       name = uniq("loop")
       {:ok, _} = Core.create_buffer(name)

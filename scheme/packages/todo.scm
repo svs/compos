@@ -841,17 +841,36 @@
         (todo--keep-place! (lambda () (f t)))
         (message "No task at point"))))
 
+(define (todo--marked-tasks)
+  "the marked tasks the list shows, in list order"
+  (let ((keys (list-marked *todo-buffer* *list-mark-char*)))
+    (filter (lambda (t) (and (not (todo--sep? t)) (member (plist-get t 'id) keys)))
+            (list-entries *todo-buffer*))))
+
+(define (todo--with-tasks verb f)
+  "run F on each marked task once the reader says yes to VERB, else on the task at point"
+  (let ((ts (todo--marked-tasks)))
+    (if (pair? ts)
+        (yes-or-no? (string-append verb " " (number->string (length ts)) " marked tasks? ")
+          (lambda (ok)
+            (when ok
+              (todo--keep-place!
+                (lambda ()
+                  (list-clear-marks! *todo-buffer*)
+                  (for-each f ts))))))
+        (todo--with-row f))))
+
 (define (todo--set-at! k v)
-  (todo--with-row (lambda (t) (todo-update (plist-get t 'id) (list k v)))))
+  (todo--with-tasks (string-append "Set the " (symbol->string k) " to " v " for")
+    (lambda (t) (todo-update (plist-get t 'id) (list k v)))))
 
 (define (todo--ask-at! prompt k)
-  (let ((t (todo--at)))
-    (if t
-        (read-string prompt
-          (lambda (s)
-            (todo-update (plist-get t 'id) (list k s))
-            (list-refresh! *todo-buffer*)))
-        (message "No task at point"))))
+  (if (or (todo--at) (pair? (todo--marked-tasks)))
+      (read-string prompt
+        (lambda (s)
+          (todo--with-tasks (string-append "Set the " (symbol->string k) " of")
+            (lambda (t) (todo-update (plist-get t 'id) (list k s))))))
+      (message "No task at point")))
 
 (define-command "todo-visit" "Open the task's file at its heading"
   (lambda ()
@@ -873,7 +892,7 @@
 
 (define-command "todo-cycle-priority" "Cycle the task's priority: A, B, C, none"
   (lambda ()
-    (todo--with-row
+    (todo--with-tasks "Cycle the priority of"
       (lambda (t)
         (let ((p (plist-get t 'priority)))
           (todo-update (plist-get t 'id)
@@ -1118,21 +1137,36 @@
 
 (public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
 
-(define-command "todo-assign" "Hand the task to a new chat in the group that filed it, else the group you are in, and show it in the other window; C-u asks for the group"
+(define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task shows its chat in the other window; C-u asks for the group"
   (lambda ()
     (let* ((t (todo--at))
+           (marked (todo--marked-tasks))
            (ask? (and (current-prefix-arg) #t))
            (here (or (and t (todo--home-group t)) (group-here))))
-      (define (assign! g)
+      (define (assign! t g)
         (let ((chat #f))
           (todo--keep-place! (lambda () (set! chat (todo-assign-chat! (plist-get t 'id) g))))
+          chat))
+      (define (assign-one! g)
+        (let ((chat (assign! t g)))
           (display-buffer-other-window! chat)
           (message (string-append "Assigned to " chat))))
-      (cond ((not t) (message "No task at point"))
+      (define (assign-marked! g)
+        (list-clear-marks! *todo-buffer*)
+        (for-each (lambda (m) (assign! m (or g (todo--home-group m) (group-here)))) marked)
+        (message (string-append "Assigned " (number->string (length marked)) " tasks to new chats")))
+      (cond ((pair? marked)
+             (yes-or-no? (string-append "Assign " (number->string (length marked)) " marked tasks to new chats? ")
+               (lambda (ok)
+                 (when ok
+                   (if (or ask? (not (group-here)))
+                       (group-read-or-create! "Assign to new chats in group: " assign-marked!)
+                       (assign-marked! #f))))))
+            ((not t) (message "No task at point"))
             ((or ask? (not here))
              (group-read-or-create! "Assign to a new chat in group: "
-               (lambda (g) (assign! g))))
-            (else (assign! here))))))
+               (lambda (g) (assign-one! g))))
+            (else (assign-one! here))))))
 ;; a card follows its chat: an event on a chat topic redraws the list
 ;; when a window shows it, and marks it stale when none does
 (define (todo--on-chat-event e)
@@ -1153,15 +1187,15 @@
 
 (define-command "todo-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w"
   (lambda () (todo--ask-at! "Deadline: " 'deadline)))
-(define-command "todo-set-project" "Move the task to another project; a new name makes a new project"
+(define-command "todo-set-project" "Move the task, or the marked tasks, to another project; a new name makes a new project"
   (lambda ()
     (let ((t (todo--at)))
-      (if t
+      (if (or t (pair? (todo--marked-tasks)))
           (completing-read "Project: " (todo-projects)
             (lambda (s)
-              (todo-update (plist-get t 'id) (list 'project s))
-              (list-refresh! *todo-buffer*))
-            'default (or (plist-get t 'project) ""))
+              (todo--with-tasks (string-append "Move to " s ":")
+                (lambda (t) (todo-update (plist-get t 'id) (list 'project s)))))
+            'default (or (and t (plist-get t 'project)) ""))
           (message "No task at point")))))
 (define-command "todo-add-note" "Add a note to the task"
   (lambda () (todo--ask-at! "Note: " 'note)))
@@ -1270,7 +1304,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed, all. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed, all. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 (define-command "todo" "Show the shared todo list"
   (lambda ()

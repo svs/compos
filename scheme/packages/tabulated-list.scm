@@ -303,6 +303,14 @@
                           ((equal? (list-mark-of buf (car es)) *list-mark-char*)
                            (loop (cdr es)))
                           (else #f))))))
+      ;; the marks become the rows the filter shows: a mark left on a row
+      ;; it hides would ride along unseen into the next command
+      (unless all-marked?
+        (let ((shown (map (lambda (e) (list-key buf e)) markable)))
+          (buffer-set-local! buf 'list-marks
+            (filter (lambda (m) (or (member (car m) shown)
+                                    (not (equal? (car (cdr m)) *list-mark-char*))))
+                    (list-marks buf)))))
       (for-each (lambda (e)
                   (list-mark! buf e (if all-marked? #f *list-mark-char*)))
                 markable)

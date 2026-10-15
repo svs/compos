@@ -954,11 +954,16 @@
     (and id (llm-bundle-resolve (group-setting id 'llm)))))
 
 (define (llm-default-bundle-apply! buf &optional g)
+  ;; the group's own defaults are the user's choice, so they apply even when
+  ;; an agent starts the chat (a todo handed to a new chat): only presets
+  ;; beyond them stay the user's act, as mcp-refuse-agent! keeps them
   (let ((b (or (llm-group-bundle (or g (buffer-group buf)))
                (llm-default-bundle-record))))
-    (cond ((not b) #f)
-          ((buffer-local buf 'agent-slug) (llm-bundle-apply! buf b))
-          (else (llm-default--seed! buf b)))))
+    (with-edit-author "group-default"
+      (lambda ()
+        (cond ((not b) #f)
+              ((buffer-local buf 'agent-slug) (llm-bundle-apply! buf b))
+              (else (llm-default--seed! buf b)))))))
 
 (public! 'llm-default-bundle-apply!
   "(llm-default-bundle-apply! BUF [GROUP]) — put the group's 'llm bundle, else llm-default-bundle, on a new chat; #f when neither names one")

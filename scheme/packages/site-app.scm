@@ -619,8 +619,8 @@
 ;; the page a detail shows, by its minor mode
 (define (site-app-detail-page buf)
   (let ((spec (site-app-spec (buffer-local buf 'site-app-name)))
-        (minor (buffer-local buf 'site-app-detail-minor)))
-    (and spec minor (site-app-find (lambda (p) (equal? (plist-get p 'detail-minor) minor)) (site-app-pages spec)))))
+        (kind (buffer-local buf 'site-app-detail-kind)))
+    (and spec kind (site-app-find (lambda (p) (equal? (plist-get p 'detail-kind) kind)) (site-app-pages spec)))))
 
 ;; keys a page adds of the app's own, beside its buttons: 'detail-extra-keys ((KEY COMMAND LABEL) ...)
 (define (site-app-detail-extra-keys buf)
@@ -1480,12 +1480,20 @@
     (buffer-set-local! buf 'site-app-name name)
     (buffer-set-local! buf 'site-app-row row)
     (when data (buffer-set-local! buf 'site-app-data data))
-    ;; An app's details share one major mode (ats-detail-mode), so mode affinity
-    ;; sends every one of them to the same pane; the page is a minor mode.
-    (let ((mode (or (buffer-local buf 'site-app-detail-mode) "site-app-detail-mode")))
+    ;; a page saved before kinds were modes kept its kind as a minor mode
+    (let ((old (buffer-local buf 'site-app-detail-minor)))
+      (when old
+        (buffer-set-local! buf 'site-app-detail-kind old)
+        (buffer-set-local! buf 'site-app-detail-minor #f)))
+    (let ((minors (buffer-local buf 'minor-modes)))
+      (when (pair? minors)
+        (buffer-set-local! buf 'minor-modes (filter (lambda (m) (not (equal? (mode-get m 'kind) 'major))) minors))))
+    ;; The page's kind is its major mode, derived from the app's detail mode. The
+    ;; app's details are one family, so the next row of any list takes their pane.
+    (let ((mode (site-app-detail-major buf)))
+      (buffer-set-local! buf 'detail-family (or (buffer-local buf 'site-app-detail-mode) "site-app-detail-mode"))
       (unless (equal? (buffer-local buf 'mode-name) mode)
         (with-current-buffer buf (lambda () (set-mode! mode)))))
-    (site-app-detail-minor! buf)
     (site-app-draw! buf)
     (site-app-join-group! buf)
     buf))
@@ -1569,22 +1577,18 @@
 
 ;; the kind of detail a page makes, as a minor mode under the app's one major
 ;; mode; it carries the page's own keys
-(define (site-app-detail-minor! buf)
-  (let ((minor (buffer-local buf 'site-app-detail-minor))
-        (spec (site-app-spec (buffer-local buf 'site-app-name))))
-    (for-each (lambda (page)
-                (let ((m (plist-get page 'detail-minor)))
-                  (when (and m (not (equal? m minor)) (minor-mode-on? buf m))
-                    (disable-minor-mode! buf m))))
-              (if spec (site-app-pages spec) '()))
-    (when (and minor (not (minor-mode-on? buf minor)))
-      (enable-minor-mode! buf minor))))
+;; the page's major mode: its kind (ats-approval-mode), else the app's detail mode
+(define (site-app-detail-major buf)
+  (or (buffer-local buf 'site-app-detail-kind)
+      (buffer-local buf 'site-app-detail-mode)
+      "site-app-detail-mode"))
 
 (define (site-app-prepare-detail! name row page)
   (let ((buf (site-app-detail-buffer name row)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name (site-app-spec name) page))
-    (buffer-set-local! buf 'site-app-detail-minor (plist-get page 'detail-minor))
+    (buffer-set-local! buf 'site-app-detail-kind (plist-get page 'detail-kind))
+    (buffer-set-local! buf 'detail-family (site-app-detail-mode-name (site-app-spec name) page))
     buf))
 
 ;; A detail tab the site can open from its URL (?tab=assessment) is read with a
@@ -1867,14 +1871,13 @@
        (site-app-keyed-actions buf)))
 
 (define (site-app-bind-action-keys! buf)
-  ;; the page's minor mode holds its button keys, else its major mode does
-  (let* ((minor (buffer-local buf 'site-app-detail-minor))
-         (mode (or minor (buffer-local buf 'site-app-detail-mode)))
+  ;; the page's own mode holds its button keys
+  (let* ((mode (site-app-detail-major buf))
          (keys (append (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
                             (site-app-detail-action-keys buf))
                        (map (lambda (k) (list (car k) (cadr k))) (site-app-detail-extra-keys buf)))))
     (when mode
-      (if minor (minor-mode-keys! minor keys) (mode-keys! mode keys))
+      (mode-keys! mode keys)
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
         (let ((name (buffer-local buf 'site-app-name)))
@@ -2139,10 +2142,18 @@
     (let ((buf (current-buffer)))
       (site-app-show-detail! buf (list-current buf)))))
 
+;; the row's page and the chat of its own, as M-o on the page
+(define-command "site-app-agent" "Open the chat of this row's page, as M-o does on the page"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (page (site-app-show-detail! buf (list-current buf))))
+      (when page (llm-companion-open! page)))))
+
 (define (define-site-app spec)
   (let* ((name (plist-get spec 'name))
          (title (or (plist-get spec 'title) (symbol->string name)))
-         (pages (site-app-pages spec)))
+         (pages (site-app-pages spec))
+         (list-keys (or (plist-get spec 'list-keys) '())))
     (site-app-put! name spec)
     (site-app-card-keys! spec)
     (let ((major (plist-get spec 'detail-mode)))
@@ -2151,14 +2162,14 @@
         (mode-parent! major "site-app-detail-mode")))
     (for-each (lambda (page)
                 (let ((mode (plist-get page 'detail-mode))
-                      (minor (plist-get page 'detail-minor)))
+                      (kind (plist-get page 'detail-kind)))
                   (when mode
                     (define-mode mode (lambda () (buffer-set-read-only! (current-buffer) #t)))
                     (mode-parent! mode "site-app-detail-mode"))
-                  (when minor
-                    (register-minor-mode! minor (lambda (buf) #t) (lambda (buf) #t))
-                    ;; the map exists before a buffer turns the mode on; keys land in it later
-                    (minor-mode-keys! minor '()))))
+                  ;; the page's kind derives from the app's detail mode: an approval
+                  ;; page is an ATS page is a site-app page, most specific last
+                  (when kind
+                    (define-derived-mode kind (site-app-detail-mode-name spec page) (lambda () #t)))))
               pages)
     ;; Every section is an index of its own: its buffer, its mode, its command.
     (for-each
@@ -2184,8 +2195,8 @@
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
                   'debounce #t
-                  'footer (lambda (b) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
-                                            (list "/" "state") (list "g" "refresh") (list "q" "quit")))
+                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
+                                            (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
                   ;; Digits are left free so they reach the page beside the list, as
                   ;; its tab keys; the sections move to M-digit.
                   'keys (append (list (list "RET" "site-app-detail")
@@ -2198,6 +2209,8 @@
                                       (list "M-<down>" "site-app-detail-anchor-next")
                                       (list "M-<up>" "site-app-detail-anchor-prev")
                                       (list "q" "quit-window"))
+                                ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
+                                (map (lambda (k) (list (car k) (cadr k))) list-keys)
                                 (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
                                                        (string-append "site-app-tab-" (plist-get p 'key))))
                                      pages))))

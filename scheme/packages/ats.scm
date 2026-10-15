@@ -14,7 +14,7 @@
         'sheet (ats-sheet (string-append (symbol->string id) ".xsl"))
         'detail-sheet (ats-sheet "page-detail.xsl")
         'detail-fetch #t
-        'detail-minor mode
+        'detail-kind mode
         'columns columns))
 
 (define (ats-candidate-row buf row)
@@ -54,7 +54,7 @@
         'detail-sheet (ats-sheet "candidate-detail.xsl")
         ;; the candidate's tabs, each one read from its ?tab= URL
         'detail-tab-param "tab"
-        'detail-minor "ats-candidate-mode"
+        'detail-kind "ats-candidate-mode"
         'detail-tabs (map (lambda (id) (list 'id id))
                           '("profile" "suggested" "comms" "meetings" "notes"))
         ;; the page draws a card: the face over its stars, then the name and
@@ -76,7 +76,7 @@
         'detail-sheet (ats-sheet "applications-detail.xsl")
         ;; the same tabs as an approval, each one read from its ?tab= URL
         'detail-tab-param "tab"
-        'detail-minor "ats-application-mode"
+        'detail-kind "ats-application-mode"
         'detail-keys (list "a")
         'detail-tabs
         (map (lambda (tab) (list 'id (car tab) 'tag (cadr tab)))
@@ -100,7 +100,7 @@
         'tabs-sheet (ats-sheet "approvals-tabs.xsl")
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
-        'detail-minor "ats-approval-mode"
+        'detail-kind "ats-approval-mode"
         ;; only the happy path has a key: approve; o opens the site for the rest
         'detail-keys (list "a")
         'detail-tabs
@@ -131,7 +131,7 @@
         ;; the job's tabs, each read from its ?tab= URL. The site's Applications tab
         ;; shows only its new ones; c opens every stage, and the suggestions, as a list
         'detail-tab-param "tab"
-        'detail-minor "ats-job-mode"
+        'detail-kind "ats-job-mode"
         'detail-tabs (map (lambda (id) (list 'id id)) '("overview" "suggestions" "applications" "ai"))
         'detail-extra-keys (list (list "c" "ats-pipeline" "candidates"))
         'columns (list (list 'label "job" 'width 30 'field 'name)
@@ -164,9 +164,11 @@
                                'title-href (plist-get data 'job_href)
                                'state (and state-node (car (string-split (string-trim (plist-get state-node 'text)) " ")))
                                'head (filter (lambda (n) (not (equal? n state-node))) profile))))
-        ;; every detail is ats-detail-mode, so they all share a pane; the page it
-        ;; came from is a minor mode (ats-approval-mode, ats-application-mode, ...)
+        ;; every detail derives from ats-detail-mode and they share a pane; each
+        ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
+        ;; a on a row: the chat of that case, as M-o on its page
+        'list-keys (list (list "a" "site-app-agent" "agent"))
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; a suggestion card on a job page: recommend the job to them, or open them against it

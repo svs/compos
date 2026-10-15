@@ -140,6 +140,11 @@
 ;; show NAME in the window OWNER opens its rows into, keep that window for
 ;; the next row, and select nothing: point stays in the list. OWNER names
 ;; the list, and defaults to the buffer that is asking.
+;; two details of one family (an app's pages of different kinds) share a pane
+(define (detail-kin? a b)
+  (let ((fa (buffer-local a 'detail-family)))
+    (and fa (equal? fa (buffer-local b 'detail-family)))))
+
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
          (me (active-window))
@@ -167,7 +172,8 @@
                    (find (lambda (w)
                            (and (not (equal? w me))
                                 (not (equal? (window-buffer w) o))
-                                (window-prefers-buffer? w name)))
+                                (or (window-prefers-buffer? w name)
+                                    (detail-kin? (window-buffer w) name))))
                          (display--work-windows))))
          ;; the remembered window only while the layout has no free pane: a
          ;; layout with room opens a new pane instead of covering what you

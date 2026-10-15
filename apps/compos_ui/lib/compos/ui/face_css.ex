@@ -138,6 +138,8 @@ defmodule Compos.Ui.FaceCSS do
       "family" -> "font-family:var(--#{face}-family);"
       "size" -> "font-size:var(--#{face}-size);"
       "decoration" -> "text-decoration:var(--#{face}-decoration);"
+      # a hairline drawn inside the span, so an outlined pill keeps its width
+      "box" -> "box-shadow:inset 0 0 0 1px var(--#{face}-box);"
       _ -> nil
     end
   end

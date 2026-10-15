@@ -736,18 +736,25 @@
     "  ·  "))
 
 ;; each state wears a tinted pill; the dot before the title shares its colour
-(defface! 'todo-title 'weight "600")
-(defface! 'todo-project 'inherit 'accent)
-(defface! 'todo-tags 'fg "#8a857a")
-(defface! 'todo-date 'fg "#26356b")
-(defface! 'todo-overdue 'fg "#a83a2b" 'weight "700")
-(defface! 'todo-state-review 'fg "#a03020" 'bg "rgba(160, 48, 32, 0.12)" 'weight "600")
-(defface! 'todo-state-doing 'fg "#7a5a1a" 'bg "rgba(194, 138, 44, 0.16)" 'weight "600")
-(defface! 'todo-state-todo 'fg "#26356b" 'bg "rgba(38, 53, 107, 0.10)" 'weight "600")
-(defface! 'todo-state-inbox 'fg "#676257" 'bg "rgba(138, 133, 122, 0.14)" 'weight "600")
-(defface! 'todo-state-waiting 'fg "#5a3a7a" 'bg "rgba(90, 58, 122, 0.12)" 'weight "600")
-(defface! 'todo-state-done 'fg "#2e6b45" 'bg "rgba(46, 107, 69, 0.12)" 'weight "600")
-(defface! 'todo-state-cancelled 'fg "#8a857a" 'decoration "line-through")
+(defface! 'todo-title 'family "var(--font-sans)" 'size "1.12em" 'weight "500" 'fg "var(--default-fg)")
+;; the wide table keeps one font, so its columns stay in line
+(defface! 'todo-row-title 'weight "600")
+(defface! 'todo-heading 'family "var(--font-sans)" 'size "1.6em" 'weight "700" 'fg "var(--default-fg)")
+(defface! 'todo-check 'fg "var(--dim-fg)")
+;; the group that filed the task wears an outline, not a fill
+(defface! 'todo-group 'fg "var(--faint-fg)" 'box "color-mix(in srgb, var(--faint-fg) 55%, transparent)")
+(defface! 'todo-project 'fg "var(--accent-fg)" 'bg "color-mix(in srgb, var(--accent-fg) 16%, transparent)")
+(defface! 'todo-tags 'fg "var(--dim-fg)")
+(defface! 'todo-date 'fg "var(--faint-fg)")
+(defface! 'todo-overdue 'fg "#e0556b" 'weight "700")
+;; a state's hue tints its pill and mixes into the text, so it reads on a dark theme and a light one
+(defface! 'todo-state-review 'fg "color-mix(in srgb, #e0556b 75%, var(--default-fg))" 'bg "color-mix(in srgb, #e0556b 20%, transparent)" 'weight "600")
+(defface! 'todo-state-doing 'fg "color-mix(in srgb, #e0a040 75%, var(--default-fg))" 'bg "color-mix(in srgb, #e0a040 20%, transparent)" 'weight "600")
+(defface! 'todo-state-todo 'fg "color-mix(in srgb, #6b8cff 75%, var(--default-fg))" 'bg "color-mix(in srgb, #6b8cff 20%, transparent)" 'weight "600")
+(defface! 'todo-state-inbox 'fg "var(--default-fg)" 'bg "color-mix(in srgb, var(--faint-fg) 22%, transparent)" 'weight "600")
+(defface! 'todo-state-waiting 'fg "color-mix(in srgb, #a07ad0 75%, var(--default-fg))" 'bg "color-mix(in srgb, #a07ad0 20%, transparent)" 'weight "600")
+(defface! 'todo-state-done 'fg "color-mix(in srgb, #4fa36b 75%, var(--default-fg))" 'bg "color-mix(in srgb, #4fa36b 20%, transparent)" 'weight "600")
+(defface! 'todo-state-cancelled 'fg "var(--faint-fg)" 'decoration "line-through")
 
 (define (todo--state-face t)
   (let ((f (string-append "todo-state-" (or (plist-get t 'state) "inbox"))))
@@ -794,30 +801,56 @@
       (list "" "" (list (plist-get t 'title) "list-section-name") "" "" "")
   (list (todo--pill t)
         (list (or (plist-get t 'priority) "") "org-priority")
-        (list (plist-get t 'title) "todo-title")
+        (list (plist-get t 'title) "todo-row-title")
         (list (plist-get t 'project) "todo-project")
         (list (todo--who-status t) (if (todo--stalled? t) "todo-overdue" "org-meta"))
         (todo--when t))))
 
+(define (todo--chips parts)
+  ;; one cell of pills: PARTS are (TEXT FACE), or "" for none. Answers the
+  ;; text and its spans, (OFFSET LENGTH FACE), for a cell to carry.
+  (let loop ((ps (filter pair? parts)) (text "") (spans '()))
+    (if (null? ps)
+        (list text (reverse spans))
+        (let* ((pre (if (equal? text "") "" " "))
+               (at (+ (string-byte-length text) (string-byte-length pre)))
+               (s (car (car ps))))
+          (loop (cdr ps) (string-append text pre s)
+                (cons (list at (string-byte-length s) (cadr (car ps))) spans))))))
+
+(define (todo--chip s face) (if (todo--blank? s) "" (list (string-append " " s " ") face)))
+
+(define (todo--tags-width buf)
+  ;; the tags sit flush right, as wide as the widest of them
+  (max 1 (min 40 (apply max (cons 0 (map (lambda (t) (string-length (todo--tag-text t)))
+                                         (list-entries buf)))))))
+
 (define (todo--row-columns buf)
-  ;; nothing is cut: the title, then where the task stands (state, project,
-  ;; the group that filed it, when), then its tags and who holds it; a long
-  ;; title, tag list or status wraps onto more lines
+  ;; a card: a box and the title, which wraps; then the pills on the left
+  ;; and the tags flush right; then a blank line
   (list (list (list "" 2) (list "TODO" #f 'left 'wrap))
-        (list (list "" 2) (list "STATE" 10) (list "PROJECT" 20) (list "GROUP" #f 'left 'end) (list "WHEN" 11))
-        (list (list "" 2) (list "TAGS" 20 'left 'wrap) (list "WHO" #f 'left 'wrap))
+        (list (list "" 2) (list "META" #f 'left 'end) (list "TAGS" (todo--tags-width buf) 'right))
         (list (list "" #f 'left 'end))))
 
 (define (todo--row-cells buf t)
-  ;; a card: a state dot and the title; the state pill, the project, the
-  ;; group and the date; the tags and who holds it; then a blank line
+  ;; a card: a box and the title; the state, priority, project and group as
+  ;; pills, then the date and who holds it; the tags on the right
   (if (todo--sep? t)
       (list (list "" (list (plist-get t 'title) "list-section-name")))
-      (list (list (list "●" (todo--state-face t)) (list (plist-get t 'title) "todo-title"))
-            (list "" (todo--pill t) (list (plist-get t 'project) "todo-project")
-                  (list (or (group-name (plist-get t 'group)) "") "org-meta") (todo--when t))
-            (list "" (list (todo--tag-text t) "todo-tags") (list (todo--who-status t) (if (todo--stalled? t) "todo-overdue" "org-meta")))
-            (list ""))))
+      (let* ((closed? (member (plist-get t 'state) *todo-closed*))
+             (who (todo--who-status t))
+             (due (todo--when t))
+             (meta (todo--chips
+                     (list (todo--pill t)
+                           (todo--chip (plist-get t 'priority) "org-priority")
+                           (todo--chip (plist-get t 'project) "todo-project")
+                           (todo--chip (group-name (plist-get t 'group)) "todo-group")
+                           (if (pair? due) (list (string-append " " (car due)) (cadr due)) "")
+                           (if (equal? who "") ""
+                               (list (string-append " " who) (if (todo--stalled? t) "todo-overdue" "org-meta")))))))
+        (list (list (list (if closed? "☑" "☐") "todo-check") (list (plist-get t 'title) "todo-title"))
+              (list "" meta (list (todo--tag-text t) "todo-tags"))
+              (list "")))))
 
 (define (todo--at) (let ((t (list-current *todo-buffer*))) (and t (not (todo--sep? t)) t)))
 
@@ -1259,7 +1292,10 @@
 (define-list-mode! "todo-mode"
   (list
     'buffer *todo-buffer*
-    'title (lambda (buf) (string-append "Todos · " (todo--view buf) " · by " (todo--sort-by buf)))
+    'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))
+    'title-spans (lambda (buf)
+                   (let ((rest (string-append (todo--view buf) " · by " (todo--sort-by buf))))
+                     (list (list 0 5 "todo-heading") (list 8 (string-byte-length rest) "dim"))))
     'layouts (list (list 'name 'wide
                          'min-cols todo-wide-cols
                          'columns todo--wide-columns

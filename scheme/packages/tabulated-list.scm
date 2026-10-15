@@ -986,9 +986,15 @@
           (loop (cdr cs) (cdr ks)
                 (string-append text padded
                                (if (null? (cdr ks)) "" *list-gap*))
-                (if face
-                    (cons (list start (string-byte-length fitted) face) spans)
-                    spans)
+                ;; a face is one name for the whole cell, or the cell's own
+                ;; spans, (OFFSET LENGTH FACE) in its text: several pills in
+                ;; one cell. A cell the width trimmed loses them.
+                (cond ((not face) spans)
+                      ((pair? face)
+                       (if (equal? fitted (list-cell-text (car cs)))
+                           (append (reverse (list-shift-spans face start)) spans)
+                           spans))
+                      (else (cons (list start (string-byte-length fitted) face) spans)))
                 (if fields? (cons (list start (string-byte-length fitted)) fields) fields))))))
 
 (define (list-shift-spans spans n)
@@ -1035,18 +1041,21 @@
                " "))
 
 (define (list-title-line buf w)
+  ;; 'title-spans may colour the title: (OFFSET LENGTH FACE) in its text
   (let* ((title (list-say buf 'title))
+         (own (let ((f (list-opt buf 'title-spans))) (if f (or (f buf) '()) '())))
          (chip (list-chip buf)))
     (if (equal? chip "")
-        (list title '())
+        (list title own)
         (let* ((gap (max 1 (- w (string-length title) (string-length chip))))
                (text (string-append title (string-repeat " " gap) chip)))
           ;; the chip shows only while the list is narrowed, and it wears
           ;; the same colour as the note under it: one colour says "you
           ;; are not seeing everything"
           (list text
-                (list (list (- (string-byte-length text) (string-byte-length chip))
-                            (string-byte-length chip) "warn")))))))
+                (append own
+                        (list (list (- (string-byte-length text) (string-byte-length chip))
+                                    (string-byte-length chip) "warn"))))))))
 
 (define (list-label-line buf cols)
   (let* ((labels (map (lambda (c) (list (string-upcase (car c)) "faint")) cols))

@@ -601,10 +601,9 @@
               (when pm (buffer-set-local! name 'chat-permission-mode pm)))))
       (buffer-set-local! name 'chat-companion-of buf)
       (chat-task-init! name buf))
-    ;; the chat is in its document's group, set before the agent attaches so
-    ;; nothing starts a group of its own for it. A chat keeps its group in
-    ;; 'group-id; buffer-group reads 'group-ids until the chat is in chat-mode
-    (when (and g (not (equal? (buffer-local name 'group-id) g)))
+    ;; the chat is in its document's group, not the frame's, set before the
+    ;; agent attaches so nothing starts a group of its own for it
+    (when (and g (not (equal? (buffer-group name) g)))
       (chat-set-group! name g))
     (buffer-set-local! buf 'llm-companion name)
     (let ((slug (buffer-local name 'agent-slug)))

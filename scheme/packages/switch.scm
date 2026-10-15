@@ -115,27 +115,19 @@
 ;; group records, and over four hundred rows it held the Session for
 ;; seconds. A legacy 'group tag names the group, so only it resolves.
 (define (switch-member? name id)
-  (let ((raw (if (chat-buffer? name)
-                 (buffer-local name 'group-id)
-                 (buffer-local name 'group-ids))))
-    (cond ((pair? raw) (and (member id raw) #t))
-          ((string? raw) (equal? raw id))
-          (else
-           (let ((legacy (and (not (chat-buffer? name)) (buffer-local name 'group))))
-             (and (string? legacy) (equal? (group-resolve-id legacy) id)))))))
+  (and (member id (switch-memberships name)) #t))
 
-;; the group ids a row's buffer holds, read from its own locals the way
-;; switch-member? reads them: no resolve per row
+;; the buffer's group as its locals hold it: 'group-id, else the list or the
+;; name from before it. No resolve per row, but the legacy name
 (define (switch-memberships name)
-  (let ((raw (if (chat-buffer? name)
-                 (buffer-local name 'group-id)
-                 (buffer-local name 'group-ids))))
-    (cond ((pair? raw) raw)
-          ((string? raw) (list raw))
+  (let ((held (buffer-local name 'group-id))
+        (ids (buffer-local name 'group-ids)))
+    (cond ((string? held) (list held))
+          ((pair? ids) (list (car ids)))
           (else
-           (let ((legacy (and (not (chat-buffer? name)) (buffer-local name 'group))))
-             (let ((id (and (string? legacy) (group-resolve-id legacy))))
-               (if id (list id) '())))))))
+           (let* ((legacy (buffer-local name 'group))
+                  (id (and (string? legacy) (group-resolve-id legacy))))
+             (if id (list id) '()))))))
 
 ;; the pool in sections, the ibuffer way: this group's buffers, then
 ;; every other group's buffers under the group's name, then the buffers

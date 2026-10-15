@@ -1565,7 +1565,7 @@
 (define (ibuffer-filter-row? buf e f)
   (if (not (string? e)) #t
       (let ((kind (car f)) (arg (cadr f)))
-        (cond ((equal? kind "mode") (equal? (or (buffer-local e 'mode-name) "") arg))
+        (cond ((equal? kind "mode") (equal? (or (buffer-local e 'mode-name) "Fundamental") arg))
               ((equal? kind "derived") (and (buffer-derived-mode? e arg) #t))
               ((equal? kind "name") (ibuffer-re? arg e))
               ((equal? kind "file") (ibuffer-re? arg (ibuffer-row-path e)))
@@ -1598,10 +1598,10 @@
 (define (ibuffer-read-mode! k)
   (let* ((buf (current-buffer))
          (modes (let loop ((ns (ibuffer-filter-rows buf)) (out '()))
-                  (if (null? ns) (sort out string<?)
-                      (let ((m (buffer-local (car ns) 'mode-name)))
+                  (if (null? ns) (sort out)
+                      (let ((m (or (buffer-local (car ns) 'mode-name) "Fundamental")))
                         (loop (cdr ns) (if (and (string? m) (not (member m out))) (cons m out) out))))))
-         (here (let ((r (list-current buf))) (and (string? r) (buffer-local r 'mode-name)))))
+         (here (let ((r (list-current buf))) (and (string? r) (or (buffer-local r 'mode-name) "Fundamental")))))
     (completing-read "Filter by mode: " modes
       (lambda (m) (when (and (string? m) (not (equal? m ""))) (k buf m)))
       'default (or here ""))))

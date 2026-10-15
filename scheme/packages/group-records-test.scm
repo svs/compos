@@ -362,7 +362,7 @@
            (b "*zz-gs-migrate-b*"))
       (buffer-set-local! a 'group-ids (list name))
       (group-ids)
-      (check-equal! (buffer-local a 'group-ids) (list id) "the first walk rewrote the name to the id")
+      (check-equal! (buffer-local a 'group-id) id "the first walk folded the name into the id")
       (check-equal! (buffer-local a 'modeline-groups) (list name) "the first walk set the modeline segment")
       (check-true! (member a *group-migrated-buffers*) "the buffer is on the migrated list")
       ;; the walk skips a migrated buffer: a name put back by hand stays
@@ -373,7 +373,7 @@
       (test-buffer! b "")
       (buffer-set-local! b 'group-ids (list name))
       (group-ids)
-      (check-equal! (buffer-local b 'group-ids) (list id) "the newcomer got the id")
+      (check-equal! (buffer-local b 'group-id) id "the newcomer got the id")
       (t--gs-kill! a b)
       (group-ids)
       (check-false! (member a *group-migrated-buffers*) "a killed buffer leaves the list")

@@ -125,13 +125,14 @@ defmodule Compos.Core.BufferRows do
     ArgumentError -> []
   end
 
-  # The group a buffer's locals name: a chat by its `group-id`, any other
-  # buffer by its one `group-ids` entry. A row only Scheme can settle
-  # (several ids, a legacy `group` or `companion-of`) is "slow".
-  defp group_key(mode, gid, gids, legacy, companion) do
+  # The group a buffer's locals name: every buffer, a chat or not, keeps it
+  # in `group-id`. A row from before it with one `group-ids` entry names that
+  # one. A row only Scheme can settle (several ids, a legacy `group` or
+  # `companion-of`) is "slow"; Scheme folds it into `group-id` on its read.
+  defp group_key(_mode, gid, gids, legacy, companion) do
     cond do
+      is_binary(gid) -> gid
       set?(legacy) or set?(companion) -> "slow"
-      mode == "chat-mode" -> if is_binary(gid), do: gid
       is_list(gids) and length(gids) > 1 -> "slow"
       match?([id] when is_binary(id), gids) -> hd(gids)
       true -> nil

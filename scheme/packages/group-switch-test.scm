@@ -53,6 +53,7 @@
   ;; returns resolving IDs, so removing through that accessor leaves stale
   ;; raw IDs behind. Reused per-second IDs then make a later fixture a member.
   (for-each (lambda (b)
+              (buffer-set-local! b 'group-id #f)
               (buffer-set-local! b 'group-ids '())
               (buffer-set-local! b 'group #f)
               (buffer-set-local! b 'group-inherited #f)

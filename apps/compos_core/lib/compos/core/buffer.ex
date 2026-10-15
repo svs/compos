@@ -3413,15 +3413,12 @@ defmodule Compos.Core.Buffer do
 
   # groups.scm owns the policy; the buffer-local is the mechanism, and this
   # reads it without asking Scheme, because a mutation cannot call back in.
-  # groups.scm owns the policy; the buffer-local is the mechanism, and this
-  # reads it without asking Scheme, because a mutation cannot call back in.
   #
-  # A chat holds one `group-id`. A work buffer holds a `group-ids` list, and
-  # `buffer-group` in groups.scm prefers whichever of them the frame is
-  # currently showing. A record must not depend on which frame someone was
-  # looking at, so the first id is the answer here.
+  # Every buffer, a chat or not, holds its one group in `group-id`. A buffer
+  # not read since that change may still hold the older `group-ids` list,
+  # whose first id is its group.
   #
-  # `group` is the local both of those replaced. `buffer-add-group!` sets it to
+  # `group` is the local before both. `buffer-add-group!` sets it to
   # false on every join, so a buffer that still carries a string there has not
   # been touched since the migration.
   defp buffer_group(state) do

@@ -17,6 +17,7 @@
 ;; a document in no group, so no group's LLM setup reaches its chat
 (define (t--li-doc! name text)
   (test-buffer! name text)
+  (buffer-set-local! name 'group-id #f)
   (buffer-set-local! name 'group-ids '())
   name)
 

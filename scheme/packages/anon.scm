@@ -3,7 +3,7 @@
 ;;; Every capitalized word on the lines a window draws is painted as a
 ;;; bar. jit-lock hands anon only those lines, so a hidden buffer and the
 ;;; off-screen part of a large buffer cost nothing. decide says which
-;;; words name a person or a company, and the others come back into view.
+;;; words name a person, and the others come back into view.
 ;;; Both answers are cached, so a word asks the model one time. The text is untouched:
 ;;; this keeps names out of a recording, it is not a security boundary.
 ;;;
@@ -84,6 +84,14 @@
   (filter (lambda (s) (null? (filter (lambda (e) (and (<= (car e) (car s)) (<= (cadr s) (cadr e)))) emails)))
           spans))
 
+(define (anon--merge rs)
+  "sorted (START END) ranges with each overlap joined: a handle inside a run is one bar"
+  (let loop ((rs rs) (acc '()))
+    (cond ((null? rs) (reverse acc))
+          ((and (pair? acc) (<= (car (car rs)) (cadr (car acc))))
+           (loop (cdr rs) (cons (list (car (car acc)) (max (cadr (car acc)) (cadr (car rs)))) (cdr acc))))
+          (else (loop (cdr rs) (cons (list (car (car rs)) (cadr (car rs))) acc))))))
+
 (define (anon--context text start end)
   "the text around one word: 100 bytes on each side"
   (substring-bytes text (max 0 (- start 100)) (min (string-byte-length text) (+ end 100))))
@@ -97,8 +105,8 @@
 
 (define (anon--question word context)
   (decide-noul
-    (string-append "Is '" word "' a person's name or a company's name here, or does it "
-                   "contain one? The name of a product, service, technology, place or project is not, even when a company makes it: AWS, GitHub, Kubernetes and Postgres are not. "
+    (string-append "Is '" word "' a person's name here, or does it contain one? "
+                   "The name of a company, product, service, technology, place or project is not: OpenAI, AWS, GitHub, Kubernetes and Postgres are not. "
                    "Words capitalized only because they start a sentence or a heading are not. "
                    "Context: "
                    context)))
@@ -145,29 +153,71 @@
             (customize-set! 'anon-handles (cons h anon-handles))
             (debounce! "anon:save" 2000 anon--prune! #f))))))
 
+(define (anon--name-parts)
+  "the words of the known names, four letters or more, lowercased"
+  (filter (lambda (w) (>= (string-length w) 4))
+          (map string-downcase (apply append (map (lambda (n) (string-split n " ")) anon-proper-nouns)))))
+
+(define (anon--learn-name-handles! text)
+  "learn as a handle each lowercase token with a digit, dot or underscore that holds a known name"
+  (let ((parts (anon--name-parts)))
+    (when (pair? parts)
+      (for-each (lambda (r)
+                  (let ((tok (substring-bytes text (car r) (cadr r))))
+                    (when (and (pair? (re-find* "[0-9._]" tok))
+                               (pair? (filter (lambda (p) (string-contains? tok p)) parts)))
+                      (anon--learn-handle! tok))))
+                (re-find* "(?<![\\p{L}\\p{N}_@.])[a-z0-9][a-z0-9._-]*[a-z0-9](?![\\p{L}\\p{N}_@])" text)))))
+
 (define (anon--handle-pattern)
   (and (pair? anon-handles)
        (string-append "(?i)(?<![\\p{L}\\p{N}_])(?:"
                       (string-join (map regexp-quote anon-handles) "|")
                       ")(?![\\p{L}\\p{N}_])")))
 
+;; a name the decide called proper bars in any case: a page may print it lowercased
+(define *anon-name-pattern* (list #f #f))
+
+(define (anon--name-pattern)
+  "one case-blind pattern for every known name and each word of a name of two or more"
+  ;; a one-word guess such as Jobs stays case-bound: lowercased it is a common word
+  (if (eq? (car *anon-name-pattern*) anon-proper-nouns)
+      (cadr *anon-name-pattern*)
+      (let* ((parts (apply append (map (lambda (n) (let ((ps (string-split n " "))) (if (pair? (cdr ps)) ps '())))
+                                       anon-proper-nouns)))
+             (full (filter (lambda (n) (pair? (cdr (string-split n " ")))) anon-proper-nouns))
+             (ws (append full (filter (lambda (w) (>= (string-length w) 3)) parts)))
+             (p (and (pair? ws)
+                     (string-append "(?i)(?<![\\p{L}\\p{N}_])(?:"
+                                    (string-join (map regexp-quote ws) "|")
+                                    ")(?![\\p{L}\\p{N}_])"))))
+        (set! *anon-name-pattern* (list anon-proper-nouns p))
+        p)))
+
 (define (anon--hard-spans text)
   "(START END \"\") for each email in TEXT and each known handle outside one"
   (let ((emails (anon--emails text)))
+    (anon--learn-name-handles! text)
     (for-each (lambda (e) (anon--learn-handle! (car (string-split (substring-bytes text (car e) (cadr e)) "@"))))
               emails)
     (let ((p (anon--handle-pattern)))
       (if p
           (let ((hits (anon--outside emails (map (lambda (r) (list (car r) (cadr r) "")) (re-find* p text)))))
             (for-each (lambda (r) (anon--touch! (string-downcase (substring-bytes text (car r) (cadr r))))) hits)
-            (append emails hits))
-          emails))))
+            (append emails hits (anon--name-hits text emails)))
+          (append emails (anon--name-hits text emails))))))
+
+(define (anon--name-hits text emails)
+  (let ((p (anon--name-pattern)))
+    (if p
+        (anon--outside emails (map (lambda (r) (list (car r) (cadr r) "")) (re-find* p text)))
+        '())))
 
 (define (anon--redact-string s hide)
   "S with a bar of the same width over each email and each word in HIDE"
   (let* ((emails (anon--hard-spans s))
          (words (anon--outside emails (filter (lambda (sp) (member (caddr sp) hide)) (anon--spans s)))))
-    (let loop ((rs (reverse (sort (append emails words)))) (acc s))
+    (let loop ((rs (reverse (anon--merge (sort (map (lambda (r) (list (car r) (cadr r))) (append emails words)))))) (acc s))
       (if (null? rs)
           acc
           (let ((a (car (car rs))) (b (cadr (car rs))))
@@ -212,13 +262,17 @@
 
 (define (anon--bar-ranges s ranges)
   "S with a bar of the same width over each (START END) of RANGES, sorted, in byte offsets"
+  ;; ranges can overlap (two spans that start at one byte): a range bars only
+  ;; what the one before it left
   (let loop ((rs ranges) (at 0) (acc '()))
     (if (null? rs)
         (apply string-append (reverse (cons (substring-bytes s at (string-byte-length s)) acc)))
-        (let ((a (car (car rs))) (b (cadr (car rs))))
-          (loop (cdr rs) b
-                (cons (string-repeat "█" (string-length (substring-bytes s a b)))
-                      (cons (substring-bytes s at a) acc)))))))
+        (let ((a (max at (car (car rs)))) (b (cadr (car rs))))
+          (if (<= b a)
+              (loop (cdr rs) at acc)
+              (loop (cdr rs) b
+                    (cons (string-repeat "█" (string-length (substring-bytes s a b)))
+                          (cons (substring-bytes s at a) acc))))))))
 
 ;; One scan of the tree's text finds every email, handle and capitalized
 ;; run. Each string then takes only the ranges that fall in it, and a
@@ -229,8 +283,8 @@
   (let* ((text (anon--tree-text tree))
          (emails (anon--hard-spans text))
          (words (anon--outside emails (anon--redacted (anon--spans text) anon-common-words)))
-         (rs (sort (append (map (lambda (e) (list (car e) (cadr e))) emails)
-                           (map (lambda (w) (list (car w) (cadr w))) words))))
+         (rs (anon--merge (sort (append (map (lambda (e) (list (car e) (cadr e))) emails)
+                                         (map (lambda (w) (list (car w) (cadr w))) words)))))
          (pos 0))
     (if (null? rs)
         tree
@@ -254,7 +308,19 @@
         (saved (buffer-local buf 'anon-render-blocks)))
     (cond ((not (and (pair? cur) (equal? (buffer-local buf 'render-mode) "blocks"))) #f)
           ((and (pair? saved) (equal? cur (cadr saved))) (car saved))
+          ((pair? saved) (anon--unredact cur (cadr saved) (car saved)))
           (else cur))))
+
+;; a mode may build its next tree from the one it shows, the redacted one: each
+;; part of that tree that is still as anon wrote it goes back to the original,
+;; or the bars become the original and never lift
+(define (anon--unredact new red orig)
+  "NEW with each part it shares with RED, the redaction of ORIG, as ORIG has it"
+  (cond ((equal? new red) orig)
+        ((and (pair? new) (pair? red) (pair? orig))
+         (cons (anon--unredact (car new) (car red) (car orig))
+               (anon--unredact (cdr new) (cdr red) (cdr orig))))
+        (else new)))
 
 (define *anon-writing* #f)
 
@@ -318,7 +384,8 @@
           (anon--ask-text! text (anon--spans text)))))))
 
 (define (anon--view-plist buf tree)
-  (let ((saved (buffer-local buf 'anon-render-blocks)))
+  (let* ((saved (buffer-local buf 'anon-render-blocks))
+         (tree (if (pair? saved) (anon--unredact tree (cadr saved) (car saved)) tree)))
     (set! *anon-new-text* '())
     ;; an answer of decide changes what is barred: then the whole tree again
     (let ((red (if (and (pair? saved) (not *anon-stale*))
@@ -395,6 +462,16 @@
   (anon--write-view! buf (anon--rewrite buf plist)))
 
 (define (anon--set-local next buf key val)
+  (cond
+    ;; anchor keeps the page it marks as anchor-drawn and marks from it ever
+    ;; after: it gets the original, so its marks reach anon unredacted
+    ((and (eq? key 'anchor-drawn) (pair? val) (minor-mode-on? buf "anon-local-mode")
+          (pair? (buffer-local buf 'anon-render-blocks)))
+     (let ((saved (buffer-local buf 'anon-render-blocks)))
+       (next buf key (anon--unredact val (cadr saved) (car saved)))))
+    (else (anon--set-local-1 next buf key val))))
+
+(define (anon--set-local-1 next buf key val)
   (if (and (not *anon-writing*) (anon--watched? (list key val)) (minor-mode-on? buf "anon-local-mode"))
       (anon--intercept! buf (list key val))
       (next buf key val)))
@@ -525,7 +602,7 @@
     (let* ((asked (anon--asked (car chunks)))
            (questions (apply append (map (lambda (a) (list (car a) (anon--question (cadr a) (caddr a))))
                                          asked))))
-      (decide-async "Decide which capitalized words name a person or a company." questions
+      (decide-async "Decide which capitalized words name a person." questions
         (lambda (reply)
           (anon--learn! (or (plist-get reply 'answers) '())
                         (map (lambda (a) (list (car a) (cadr a))) asked))

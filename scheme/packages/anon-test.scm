@@ -139,3 +139,25 @@
           (set! anon-common-words common)
           (check-equal! got (anon--redact-tree new) "the result is the redaction of the whole new tree")
           (check-equal! fresh '("Bob Jones typed") "only the changed text is new"))))))
+
+(deftest 'anon-unredact-gives-back-the-original-of-a-redacted-tree
+  "a tree built from the redacted one gets its original text back, not the bars"
+  (lambda ()
+    (let ((orig '(div (span "Approve") (span "Ann Lee")))
+          (red '(div (span "███████") (span "███████"))))
+      (check-equal! (anon--unredact red red orig) orig "the redacted tree is the original")
+      (check-equal! (anon--unredact '(div class "x" (span "███████")) red orig)
+                    '(div class "x" (span "███████"))
+                    "a part that does not line up stays as it came"))))
+
+(deftest 'anon-learns-a-handle-that-holds-a-known-name
+  "a lowercase token with a digit, dot or underscore that holds a name is a handle"
+  (lambda ()
+    (let ((nouns anon-proper-nouns) (handles anon-handles))
+      (customize-set! 'anon-proper-nouns '("Zyxwa Quorbel"))
+      (customize-set! 'anon-handles '())
+      (anon--learn-name-handles! "by zyxwaquorbel07 and zyxwa, jobs.page")
+      (let ((got anon-handles))
+        (customize-set! 'anon-proper-nouns nouns)
+        (customize-set! 'anon-handles handles)
+        (check-equal! got '("zyxwaquorbel07") "only the token with a digit that holds the name")))))

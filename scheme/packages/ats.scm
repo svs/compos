@@ -35,7 +35,7 @@
                       (list (list 'tag "div" 'class "ats-card-top"
                                   'segs (list (list "sa-name-cell" (field 'name))
                                               (list "c-dim" (string-append "   " (field 'experience) "   " (field 'ctc)))))
-                            (list 'tag "div" 'class "ats-card-headline c-dim" 'text (field 'headline))))))))
+                            (list 'tag "div" 'class "ats-card-headline" 'text (field 'headline))))))))
 
 (define-style! 'ats "
 .semantic-item.ats-card { display: flex; gap: 12px; align-items: center; padding: 6px 0; font-family: var(--font-sans); font-size: 12.5px; }
@@ -199,8 +199,8 @@
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
-        ;; a on a row: the chat of that case, as M-o on its page
-        'list-keys (list (list "a" "site-app-agent" "agent"))
+        ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
+        'list-keys (list (list "M-o" "site-app-agent" "agent"))
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; a suggestion card on a job page: recommend the job to them, or open them against it
@@ -276,7 +276,7 @@
          (tags (component--get p 'tags '()))
          (has (lambda (re) (site-app-find (lambda (t) (re-match? re t)) tags)))
          (fit (has " fit$"))
-         (stars (has "^[★☆]+$"))
+         (stars (has "^★+✓?$"))
          (rest (filter (lambda (t) (not (or (equal? t fit) (equal? t stars)))) tags))
          (pill (lambda (text tone) (list 'tag "span" 'class (string-append "ats-pill " tone) 'text text)))
          (photo (cond ((component--has? p 'icon)
@@ -294,7 +294,7 @@
                                    'children
                                    (list (list 'tag "c-group" 'class "ats-app-line"
                                                'children (append (list (list 'tag "span" 'class "ats-app-name" 'text (component--get p 'title "")))
-                                                                 (if stars (list (list 'tag "span" 'class "ats-app-stars" 'text stars)) '())))
+                                                                 (if stars (list (list 'tag "span" 'class "ats-app-stars" 'segs (site-app-stars-segs stars))) '())))
                                          (list 'tag "c-group" 'class "ats-app-meta"
                                                'children (append (if (component--has? p 'badge)
                                                                      (list (pill (component--get p 'badge) (component--get p 'badge-class "")))
@@ -323,7 +323,7 @@
 .ats-app-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; margin: 0; }
 .ats-app-line { display: flex; align-items: baseline; gap: 10px; margin: 0; }
 .ats-app-name { font-size: 1.05em; font-weight: 600; color: var(--default-fg); }
-.ats-app-stars { color: var(--warn-fg); font-size: .8em; letter-spacing: 1px; }
+.ats-app-stars { font-size: .8em; }
 .ats-app-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: .82em; color: var(--dim-fg); }
 .ats-pill { font-family: var(--font-mono); font-size: .85em; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 0 7px; line-height: 1.6; border: 1px solid var(--border-bg); color: var(--dim-fg); }
 .ats-pill.good { color: var(--ok-fg); border-color: var(--ok-fg); }
@@ -428,9 +428,8 @@
 
 (define (ats-pipeline-cells buf row)
   (let* ((f (lambda (key) (site-app-field row key)))
-         ;; the rating as stars: its whole number filled, padded to five
-         (n (let ((r (f 'rating))) (or (and (> (string-length r) 0) (string->number (substring r 0 1))) 0)))
-         (stars (if (> n 0) (string-append (substring "★★★★★" 0 n) (substring "☆☆☆☆☆" 0 (- 5 n))) "")))
+         ;; the rating as the one star component draws it: filled once met, hollow until then
+         (stars (list (site-app-stars-string (f 'rating)) "warn")))
     (list (list (f 'stage) "dim") (f 'fit) stars (f 'candidate)
           (list (f 'experience) "dim") (list (f 'ctc) "dim") (f 'headline))))
 

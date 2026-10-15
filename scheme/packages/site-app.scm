@@ -139,19 +139,36 @@
                    (if (member (plist-get tab 'group) groups) groups (append groups (list (plist-get tab 'group)))))
                  '() filters)))))
 
-(define (site-app-stars-segs text confirmed?)
-  ;; a number out of five as five stars: the earned ones gold, solid when a
-  ;; person confirmed the rating and faint when it is only the model's guess
-  (let ((n (string->number text)))
-    (if (not (number? n))
-        (list (list "" text))
-        (let loop ((i 5) (on "") (off ""))
-          (if (= i 0)
-              (list (list (if confirmed? "sa-star-on sa-star-confirmed" "sa-star-on sa-star-guess") on)
-                    (list "sa-star-off" off))
-              (if (<= (- 6 i) (+ n 0.5))
-                  (loop (- i 1) (string-append on "★") off)
-                  (loop (- i 1) on (string-append off "★"))))))))
+(define (site-app-stars text &optional confirmed?)
+  ;; a rating in any shape the sheets give it, "4", "3.5", "★★★" or "★★★✓",
+  ;; as (N MET?): its whole stars, and whether a person met the candidate and
+  ;; so confirmed it. A trailing ✓ is the sheets' mark for confirmed. #f when
+  ;; the text is no rating
+  (let* ((t (string-trim (or text "")))
+         (met? (or confirmed? (re-match? "✓$" t)))
+         (glyphs (re-match? "^★+ ?✓?$" t))
+         (n (if glyphs
+                (- (length (string-split t "★")) 1)
+                (let ((x (string->number t)))
+                  (and (number? x)
+                       (let loop ((i 0)) (if (and (< i 5) (<= (+ i 1) (+ x 0.5))) (loop (+ i 1)) i)))))))
+    (and n (> n 0) (list n met?))))
+
+(define (site-app-stars-string text &optional confirmed?)
+  ;; the one way a rating draws: a star a point, filled once met, hollow until then
+  (let ((r (site-app-stars text confirmed?)))
+    (if (not r)
+        ""
+        (let loop ((i (car r)) (s ""))
+          (if (= i 0) s (loop (- i 1) (string-append s (if (cadr r) "★" "☆"))))))))
+
+(define (site-app-stars-segs text &optional confirmed?)
+  ;; the rating as one gold seg; anything that is no rating stays as it is
+  (let ((r (site-app-stars text confirmed?)))
+    (if r
+        (list (list (if (cadr r) "sa-stars sa-stars-met" "sa-stars sa-stars-guess")
+                    (site-app-stars-string text confirmed?)))
+        (list (list "" (or text ""))))))
 
 (define (site-app-avatar-url buf src)
   (if (string-prefix? "/" src)
@@ -173,8 +190,7 @@
           ((eq? kind 'stars)
            (let ((confirmed (plist-get col 'confirmed)))
              (list 'tag "span" 'class (string-append class " sa-stars-cell")
-                   'attrs (if confirmed (list (list "title" (if (equal? (site-app-field row confirmed) "") "rating · unconfirmed" "rating · confirmed"))) '())
-                   'segs (site-app-stars-segs text (or (not confirmed) (not (equal? (site-app-field row confirmed) "")))))))
+                   'segs (site-app-stars-segs text (and confirmed (not (equal? (site-app-field row confirmed) "")))))))
           ((eq? kind 'avatar)
            (list 'tag "img" 'class (string-append class " sa-avatar")
                  'attrs (list (list "src" (site-app-avatar-url buf text)) (list "alt" "")
@@ -804,15 +820,18 @@
   (let loop ((words (string-split text " ")) (acc '()) (first #t))
     (if (null? words)
         (reverse acc)
-        (let* ((tone (site-app-tone-class tones (car words)))
-               (class (if tone (string-append "c-" tone) base))
-               (word (if first (car words) (string-append " " (car words)))))
+        (let* ((stars (and (re-match? "^★+✓?$" (car words)) (site-app-stars (car words))))
+               (tone (and (not stars) (site-app-tone-class tones (car words))))
+               ;; a rating is a word too: it draws as the one star component
+               (class (cond (stars (car (car (site-app-stars-segs (car words))))) (tone (string-append "c-" tone)) (else base)))
+               (shown (if stars (site-app-stars-string (car words)) (car words)))
+               (word (if first shown (string-append " " shown))))
           (loop (cdr words)
                 (cond ((and (pair? acc) (equal? (car (car acc)) class) (equal? class base))
                        (cons (list class (string-append (cadr (car acc)) word)) (cdr acc)))
                       ((and (not first) (not (equal? class base)))
                        ;; the space before a toned word stays plain
-                       (cons (list class (car words))
+                       (cons (list class shown)
                              (if (and (pair? acc) (equal? (car (car acc)) base))
                                  (cons (list base (string-append (cadr (car acc)) " ")) (cdr acc))
                                  (cons (list base " ") acc))))
@@ -1281,12 +1300,12 @@
                 n n title))))
       ;; the name large, its stars small after it, and the photo beside it when the sheet has one
       (if name
-          (let* ((n (b 'line (string-append (plist-get name 'text) (if stars (string-append "  " (plist-get stars 'text)) ""))
+          (let* ((n (b 'line (string-append (plist-get name 'text) (if stars (string-append "  " (site-app-stars-string (plist-get stars 'text))) ""))
                        (plist-get name 'href)))
                  (heading (component 'ui/title
                             (append (list 'level 1
                                           'segs (append (list (list "" (plist-get name 'text)))
-                                                        (if stars (list (list "" "  ") (list "c-warn sa-head-stars" (plist-get stars 'text))) '())))
+                                                        (if stars (cons (list "" "  ") (map (lambda (s) (list (string-append (car s) " sa-head-stars") (cadr s))) (site-app-stars-segs (plist-get stars 'text)))) '())))
                                     (site-app-click-props (plist-get name 'href)))))
                  (src (let ((a (plist-get name 'avatar))) (and a (not (equal? a "")) a)))
                  (face (if src
@@ -1474,10 +1493,9 @@
 (define-style! 'site-app "
 .sa-row { display: grid; column-gap: 1ch; align-items: center; container-type: inline-size; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
 .sa-row > .sa-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.sa-stars-cell { color: var(--warn-fg); font-size: 11px; letter-spacing: -1px; }
-.sa-star-confirmed { color: var(--warn-fg); }
-.sa-star-guess { color: transparent; -webkit-text-stroke: 1px var(--warn-fg); }
-.sa-star-off { color: var(--dim-fg); opacity: .3; }
+.sa-stars-cell { font-size: 11px; }
+/* one rating everywhere: gold stars, filled once met, hollow until then */
+.sa-stars { color: var(--warn-fg); letter-spacing: -1px; white-space: nowrap; }
 .sa-head-face { display: flex; gap: 14px; align-items: center; margin: .2em 0 .3em; }
 .sa-head-face > .c-title { margin: 0; }
 .sa-head-avatar { width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }

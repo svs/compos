@@ -290,6 +290,7 @@
         (check-equal! c "*chat:zz-doc-companion.md*" "named after the document")
         (check-true! (buffer-exists? c) "it exists")
         (check-false! (window-showing c) "and stays hidden")
+        (check-equal! (buffer-local c 'mode-name) "chat-mode" "it is a chat")
         (check-equal! (buffer-local doc 'llm-companion) c "the document knows its chat")
         (check-equal! (buffer-local c 'inline-target) doc "the chat knows its document")
         (check-equal! (buffer-local c 'chat-companion-of) doc "as identity")

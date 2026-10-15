@@ -1613,7 +1613,8 @@
   (let* ((rows (ibuffer-filter-rows buf))
          (live (filter (lambda (n) (and (buffer-exists? n) (ibuffer-re? pat (buffer-text n)))) rows))
          (asleep (filter (lambda (n) (and (not (buffer-exists? n))
-                                          (let ((p (ibuffer-row-path n))) (and p (file-exists? p)))))
+                                          ;; a directory row is dired's: its text is a listing, not a file
+                                          (let ((p (ibuffer-row-path n))) (and p (file-exists? p) (not (file-directory? p))))))
                          rows)))
     (if (null? asleep)
         (k live)
@@ -2249,6 +2250,16 @@
   "Fold every section, or open them all when all are folded"
   (lambda () (ibuffer-toggle-fold-all!)))
 
+(define-keymap! "ibuffer-filter-map")
+(for-each (lambda (p) (define-key "ibuffer-filter-map" (car p) (cadr p)))
+  '(("m" "ibuffer-filter-by-mode") ("M" "ibuffer-filter-by-derived-mode")
+    ("n" "ibuffer-filter-by-name") ("f" "ibuffer-filter-by-filename")
+    ("F" "ibuffer-filter-by-directory") ("." "ibuffer-filter-by-file-extension")
+    ("c" "ibuffer-filter-by-content") ("*" "ibuffer-filter-by-starred-name")
+    ("v" "ibuffer-filter-by-visiting-file") ("i" "ibuffer-filter-by-modified")
+    ("!" "ibuffer-negate-filter") ("|" "ibuffer-or-filter")
+    ("p" "ibuffer-pop-filter") ("/" "ibuffer-filter-disable")))
+
 (define-command "ibuffer-filter-by-mode" "Keep the buffers in one major mode"
   (lambda () (ibuffer-read-mode! (lambda (buf m) (ibuffer-filter-add! buf (list "mode" m))))))
 
@@ -2680,14 +2691,8 @@
     'filter (lambda (buf e f) (ibuffer-filter-row? buf e f))
     'keys '(("M-<down>" "ibuffer-next-group") ("M-<up>" "ibuffer-previous-group")
             ("<right>" "ibuffer-tab-next") ("<left>" "ibuffer-tab-prev")
-            ;; Emacs ibuffer's / filters; f stays the live filter
-            ("/ m" "ibuffer-filter-by-mode") ("/ M" "ibuffer-filter-by-derived-mode")
-            ("/ n" "ibuffer-filter-by-name") ("/ f" "ibuffer-filter-by-filename")
-            ("/ F" "ibuffer-filter-by-directory") ("/ ." "ibuffer-filter-by-file-extension")
-            ("/ c" "ibuffer-filter-by-content") ("/ *" "ibuffer-filter-by-starred-name")
-            ("/ v" "ibuffer-filter-by-visiting-file") ("/ i" "ibuffer-filter-by-modified")
-            ("/ !" "ibuffer-negate-filter") ("/ |" "ibuffer-or-filter")
-            ("/ p" "ibuffer-pop-filter") ("/ /" "ibuffer-filter-disable")
+            ;; Emacs ibuffer's / filters, a prefix map; f stays the live filter
+            ("/" (keymap "ibuffer-filter-map"))
             ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-peek-open-other") ("s-RET" "listing-peek-open-other")

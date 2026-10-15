@@ -585,6 +585,9 @@
       (unless (and slug (member slug (agent-list))
                    (not (equal? (agent-status slug) 'dead)))
         (chat-attach-agent! name connector model opts)))
+    ;; a quiet chat like any spawn: its mode on its own buffer, no window moves
+    (unless (equal? (buffer-local name 'mode-name) "chat-mode")
+      (with-current-buffer name (lambda () (set-mode! "chat-mode"))))
     (buffer-set-local! name 'inline-target buf)
     (buffer-set-local! buf 'llm-session-id (buffer-local name 'agent-slug))
     name))

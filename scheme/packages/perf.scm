@@ -14,6 +14,8 @@
 ;;; five times slower and samples nothing; a shown buffer samples every
 ;;; perf-tick-ms. A killed buffer ends the chain.
 
+(require 'format)
+
 (domain! 'diagnostics)
 (effects! '(read))
 
@@ -69,24 +71,17 @@
 (define (perf--clamp v)
   (max 0 (min 100 v)))
 
-;; PART as a whole percent of WHOLE, 0 when WHOLE is 0
-(define (perf--pct part whole)
-  (if (> whole 0) (quotient (* 100 part) whole) 0))
-
 ;; every value as a percent of the largest, so a chart fills its height
 (define (perf--scale xs)
   (let ((top (max 1 (perf--max xs))))
-    (map (lambda (v) (perf--pct v top)) xs)))
+    (map (lambda (v) (percent-of v top)) xs)))
 
 ;; N tenths as "12.3"
 (define (perf--tenths n)
   (string-append (number->string (quotient n 10)) "." (number->string (modulo n 10))))
 
-(define (perf--bytes b)
-  (cond ((>= b 1073741824) (string-append (perf--tenths (quotient (* 10 b) 1073741824)) " GiB"))
-        ((>= b 1048576) (string-append (number->string (quotient b 1048576)) " MiB"))
-        ((>= b 1024) (string-append (number->string (quotient b 1024)) " KiB"))
-        (else (string-append (number->string b) " B"))))
+;; bytes in the binary units the VM counts in, one decimal
+(define (perf--bytes b) (format-bytes b 'iec 1))
 
 ;; 1234567 -> "1.2M", 12345 -> "12.3k", 999 -> "999"
 (define (perf--count n)
@@ -422,7 +417,7 @@
     (perf--txt "perf-ring-sub" sub)))
 
 (define (perf--segment label bytes total class)
-  (list label bytes (perf--pct bytes total) class))
+  (list label bytes (percent-of bytes total) class))
 
 (define (perf--memory-panel s)
   (let* ((mem (perf--get s 'memory '()))
@@ -445,10 +440,10 @@
     (perf--panel 3 "Fig. 2" "Memory"
       (list (perf--txt "" (perf--bytes total)))
       (perf--div "perf-rings"
-        (perf--ring "processes" (perf--pct procs total) (perf--bytes procs) "perf-user")
-        (perf--ring "binaries" (perf--pct bin total) (perf--bytes bin) "perf-sys")
-        (perf--ring "host" (perf--pct host-used (max 1 host-total)) (perf--bytes host-used)
-                    (if (> (perf--pct host-used (max 1 host-total)) 90) "perf-io" "perf-ok")))
+        (perf--ring "processes" (percent-of procs total) (perf--bytes procs) "perf-user")
+        (perf--ring "binaries" (percent-of bin total) (perf--bytes bin) "perf-sys")
+        (perf--ring "host" (percent-of host-used (max 1 host-total)) (perf--bytes host-used)
+                    (if (> (percent-of host-used (max 1 host-total)) 90) "perf-io" "perf-ok")))
       (perf--div "perf-segbar"
         (map (lambda (seg)
                (list 'tag "div" 'class (string-append "perf-seg " (nth 3 seg))
@@ -473,8 +468,8 @@
       (perf--div "perf-chart"
         (perf--svg n ""
           (perf--hline 50)
-          (perf--path (perf--path-mirror (map (lambda (v) (perf--pct v top)) in) #t) "perf-in")
-          (perf--path (perf--path-mirror (map (lambda (v) (perf--pct v top)) out) #f) "perf-out"))
+          (perf--path (perf--path-mirror (map (lambda (v) (percent-of v top)) in) #t) "perf-in")
+          (perf--path (perf--path-mirror (map (lambda (v) (percent-of v top)) out) #f) "perf-out"))
         (perf--txt "perf-corner perf-corner-tr" (string-append "±" (perf--bytes top) "/s")))
       (perf--div "perf-stats4"
         (perf--stat "ports" (number->string (perf--get s 'port-count 0)) "")
@@ -1013,7 +1008,7 @@
                       (list "%b" (perf--bytes (perf--get mem 'binary 0)))
                       (list "%e" (perf--bytes (perf--get mem 'ets 0)))
                       (list "%n" (number->string (perf--get sample 'process-count 0)))
-                      (list "%h" (string-append (number->string (perf--pct host-used (max 1 host-total))) "%"))
+                      (list "%h" (format-percent host-used (max 1 host-total)))
                       (list "%c" (string-append (number->string (perf--get os 'cpu-util 0)) "%")))))
     (fold (lambda (text pair) (string-join (string-split text (car pair)) (cadr pair)))
           format pairs)))

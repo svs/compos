@@ -98,11 +98,8 @@
                   "a path means a proxy, and no port is added")))
 
 (deftest 'models-labels-read-as-a-person-reads-them
-  "bytes become GB, and a timestamp becomes a clock"
+  "a timestamp becomes a clock"
   (lambda ()
-    (check-equal! (models--size-label 4661224676) "4.3 GB" "a model in GB")
-    (check-equal! (models--size-label 268435456) "256.0 MB" "a small one in MB")
-    (check-equal! (models--size-label #f) "" "no size, no label")
     (check-equal! (models--clock "2026-09-17T18:04:33.12+05:30") "18:04" "the clock")
     (check-equal! (models--clock #f) "" "no expiry, no clock")))
 

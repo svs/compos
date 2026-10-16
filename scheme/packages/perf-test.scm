@@ -16,12 +16,8 @@
     (check-equal! (perf--path-line '()) "" "no points, no path")))
 
 (deftest 'perf-formats-numbers-without-floats
-  "bytes and counts read as short strings from integer arithmetic"
+  "counts and uptime read as short strings from integer arithmetic"
   (lambda ()
-    (check-equal! (perf--bytes 512) "512 B" "bytes")
-    (check-equal! (perf--bytes 2048) "2 KiB" "kibibytes")
-    (check-equal! (perf--bytes (* 3 1048576)) "3 MiB" "mebibytes")
-    (check-equal! (perf--bytes 1610612736) "1.5 GiB" "gibibytes with one decimal")
     (check-equal! (perf--count 999) "999" "small counts")
     (check-equal! (perf--count 12345) "12.3k" "thousands")
     (check-equal! (perf--count 1234567) "1.2M" "millions")

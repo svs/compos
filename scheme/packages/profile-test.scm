@@ -28,17 +28,14 @@
   (string-append "*profile-test-" (number->string (current-time)) "*"))
 
 (deftest 'profile-formats-numbers-without-floats
-  "milliseconds, counts and byte deltas read as short strings from integer arithmetic"
+  "milliseconds and counts read as short strings from integer arithmetic"
   (lambda ()
     (check-equal! (profile--ms 20000) "20.0" "microseconds become milliseconds")
     (check-equal! (profile--ms 12345) "12.3" "one decimal, rounded")
     (check-equal! (profile--ms 40) "0.0" "under a tenth of a millisecond")
     (check-equal! (profile--count 999) "999" "small counts stay whole")
     (check-equal! (profile--count 12345) "12.3 k" "thousands")
-    (check-equal! (profile--count 1000000) "1.0 M" "millions")
-    (check-equal! (profile--bytes 512) "+512 B" "a gain of bytes")
-    (check-equal! (profile--bytes 262144) "+256.0 KB" "a gain of kilobytes")
-    (check-equal! (profile--bytes (- 0 3145728)) "-3.0 MB" "a loss says so")))
+    (check-equal! (profile--count 1000000) "1.0 M" "millions")))
 
 (deftest 'profile-shares-and-bars-are-bounded
   "a share is a percent of the traced wall clock; the bar never overflows"

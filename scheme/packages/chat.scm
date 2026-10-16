@@ -19,6 +19,8 @@
 ;;;; Desktop restore runs after every package loads, so a restored chat
 ;;;; finds these definitions in place.
 
+(require 'format)
+
 (category! 'chat)
 (domain! 'chat)
 (effects! '(read))
@@ -544,8 +546,7 @@
         (fresh (or (plist-get total 'input) 0)))
     (if (= (+ read fresh) 0)
         #f
-        (string-append
-          (number->string (quotient (* 100 read) (+ read fresh))) "%"))))
+        (format-percent read (+ read fresh)))))
 
 ;;; --- the direct lane's turn context ---------------------------------------------
 ;;; Backend.ReqLLM pulls this fresh at every turn start: the transcript

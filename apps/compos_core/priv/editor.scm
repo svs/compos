@@ -663,6 +663,49 @@
             (loop (+ i 1))
             (message "No further undo information"))))))
 
+;;; --- registries ---------------------------------------------------------------
+;;; One name-to-value table for everything that keeps one: a mode's facts,
+;;; a keyed hook's functions, an annotator per category, and in the
+;;; packages an endpoint's spec, a database, a GraphQL endpoint, a webhook,
+;;; a fence kind. A table is named by any value equal? compares, a symbol
+;;; or a list. Registering a name again replaces its value in place, so a
+;;; package reload never stacks a second row; a new name goes last, so a
+;;; listing reads in the order of registration. The table survives a
+;;; reload of this file: a bare define would put every mode back to zero.
+
+(define *registries* (if (boundp '*registries*) *registries* '()))   ; ((TABLE ((NAME VALUE) ...)) ...)
+
+(define (registry--entries table) (or (alist-get *registries* table) '()))
+
+(define (registry--set! table entries)
+  (set! *registries* (alist-put *registries* table entries)))
+
+;; (registry-register! TABLE NAME VALUE): NAME holds VALUE in TABLE; the
+;; same NAME replaces in place. Answers NAME.
+(define (registry-register! table name value)
+  (let ((entries (registry--entries table)))
+    (registry--set! table
+      (if (assoc name entries)
+          (map (lambda (e) (if (equal? (car e) name) (list name value) e)) entries)
+          (append entries (list (list name value)))))
+    name))
+
+;; (registry-lookup TABLE NAME [DEFAULT]): the value under NAME, or DEFAULT
+(define (registry-lookup table name &optional default)
+  (let ((e (assoc name (registry--entries table))))
+    (if e (cadr e) default)))
+
+;; (registry-forget! TABLE NAME): drop NAME; #t when it was there
+(define (registry-forget! table name)
+  (let ((entries (registry--entries table)))
+    (and (assoc name entries)
+         (begin (registry--set! table (alist-delete entries name)) #t))))
+
+;; (registry-list TABLE): every (NAME VALUE), in the order of registration
+(define (registry-list table) (registry--entries table))
+
+(define (registry-names table) (map car (registry--entries table)))
+
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 ;;; A hook is a name and a list of functions. add-hook! puts a function on
 ;;; the list once. Give it the NAME of a function, quoted: the name is
@@ -686,7 +729,6 @@
 
 (define *hooks* '())                    ; ((HOOK FN ...) ...)
 (define *local-hooks* '())              ; ((BUFFER (HOOK FN ...) ...) ...)
-(define *keyed-hooks* '())              ; ((HOOK ((KEY FN) ...)) ...)
 
 (define (hook--alist-get alist key)
   (let ((e (assoc key alist))) (if e (cdr e) '())))
@@ -723,16 +765,15 @@
 (define (hook--remove fns fn)
   (filter (lambda (f) (not (equal? f fn))) fns))
 
-(define (hook--keyed hook) (or (alist-get *keyed-hooks* hook) '()))
+;; the keyed functions of HOOK are the registry table (hook HOOK): one
+;; function per key, the same key replaces, oldest key first
+(define (hook--keyed hook) (registry-list (list 'hook hook)))
 
-(define (hook--set-keyed! hook entries)
-  (set! *keyed-hooks* (alist-put *keyed-hooks* hook entries)))
-
-(define (hook-keys hook) (map car (hook--keyed hook)))
+(define (hook-keys hook) (registry-names (list 'hook hook)))
 
 (define (add-hook! hook fn &optional at-end local)
   (cond ((pair? hook)
-         (hook--set-keyed! (car hook) (alist-put (hook--keyed (car hook)) (cadr hook) fn)))
+         (registry-register! (list 'hook (car hook)) (cadr hook) fn))
         (local
          (let ((buf (current-buffer)))
            (hook--set-local! buf hook (hook--add (hook--local buf hook) fn at-end))))
@@ -742,7 +783,7 @@
 ;; a keyed hook needs no FN: the key names what goes
 (define (remove-hook! hook &optional fn local)
   (cond ((pair? hook)
-         (hook--set-keyed! (car hook) (alist-delete (hook--keyed (car hook)) (cadr hook))))
+         (registry-forget! (list 'hook (car hook)) (cadr hook)))
         (local
          (let ((buf (current-buffer)))
            (hook--set-local! buf hook (hook--remove (hook--local buf hook) fn))))
@@ -753,10 +794,10 @@
 ;; then the keyed; a keyed name answers with its one function
 (define (hook-functions hook)
   (if (pair? hook)
-      (let ((fn (alist-get (hook--keyed (car hook)) (cadr hook))))
+      (let ((fn (registry-lookup (list 'hook (car hook)) (cadr hook))))
         (if fn (list fn) '()))
       (append (hook--local (current-buffer) hook) (hook--global hook)
-              (map cadr (hook--keyed hook)))))
+              (map cadr (reverse (hook--keyed hook))))))
 
 (define (run-hook-with-args hook &rest args)
   (for-each (lambda (f)
@@ -1007,12 +1048,11 @@
 (define (candidate-face-for category name)
   (run-hook-with-args-until-success 'candidate-face category name))
 
-;; the annotator of CATEGORY is the keyed hook (marginalia CATEGORY)
-(define (marginalia! category fn) (add-hook! (list 'marginalia category) fn))
+;; the annotator of CATEGORY is the registry table marginalia: one per
+;; category, and the same category replaces
+(define (marginalia! category fn) (registry-register! 'marginalia category fn))
 
-(define (marginalia-for category)
-  (let ((fs (hook-functions (list 'marginalia category))))
-    (and (pair? fs) (car fs))))
+(define (marginalia-for category) (registry-lookup 'marginalia category))
 
 ;; one candidate's fields — a single string is a list of one
 (define (marginalia-row f n)
@@ -1768,17 +1808,16 @@
 
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
-;;; One table holds every fact about every mode, major and minor:
-;;; ((NAME PLIST) ...). mode-put! writes one fact, mode-get reads the
-;;; mode's own fact, and mode-inherited reads the nearest ancestor's.
+;;; The registry table mode holds every fact about every mode, major and
+;;; minor, a plist under the name. mode-put! writes one fact, mode-get
+;;; reads the mode's own fact, and mode-inherited reads the nearest
+;;; ancestor's.
 ;;; The facts: 'kind (major or minor), 'setup, 'teardown, 'keymap,
 ;;; 'parent, 'doc, 'icon, 'link-syntax, 'layout, 'headline, 'dismissible.
 ;;; A package may state a fact before the mode is defined; define-mode
 ;;; keeps it.
 
-(define *modes* '())
-
-(define (mode-entry name) (or (alist-get *modes* name) '()))
+(define (mode-entry name) (or (registry-lookup 'mode name) '()))
 (define (mode-get name key) (and name (plist-get (mode-entry name) key)))
 
 ;; the mode's own fact, or the nearest ancestor's. The walk carries what
@@ -1795,7 +1834,7 @@
 (define (mode-keymap name) (string-append name "-map"))
 
 (define (mode-put! name key val)
-  (set! *modes* (alist-put *modes* name (plist-put (mode-entry name) key val)))
+  (registry-register! 'mode name (plist-put (mode-entry name) key val))
   (cond ((equal? key 'parent)
          ;; the child's map falls back to the parent's
          (keymap-parent! (mode-keymap name) (mode-keymap val)))
@@ -1803,7 +1842,7 @@
   name)
 
 (define (mode-forget! name)
-  (set! *modes* (alist-delete *modes* name)))
+  (registry-forget! 'mode name))
 
 ;; (define-mode NAME SETUP 'parent P 'doc D 'icon I ...): every fact in
 ;; the same form. 'minor #t makes a minor mode: SETUP and 'teardown take
@@ -2439,7 +2478,7 @@
   (sort (map car (filter (lambda (e)
                            (let ((k (plist-get (cadr e) 'kind)))
                              (and k (or (not kind) (equal? k kind)))))
-                         *modes*))))
+                         (registry-list 'mode)))))
 
 ;; Put the current buffer in the mode NAME. This is the same toggle the
 ;; modeline click and the mode's own M-x command run, so a major mode
@@ -5852,6 +5891,11 @@
 (public! 'run-hook-with-args-until-success "(run-hook-with-args-until-success 'name-hook ARG ...) — run until one answers a true value; that value")
 (public! 'run-hook-with-args-until-failure "(run-hook-with-args-until-failure 'name-hook ARG ...) — run until one answers #f; #t when none did")
 (public! 'hook-functions "(hook-functions 'name-hook) — the functions the hook runs here, local then global")
+(public! 'registry-register! "(registry-register! TABLE NAME VALUE) — NAME holds VALUE in the table; the same NAME replaces in place, a new one goes last")
+(public! 'registry-lookup "(registry-lookup TABLE NAME [DEFAULT]) — the value under NAME, or DEFAULT")
+(public! 'registry-forget! "(registry-forget! TABLE NAME) — drop NAME from the table; #t when it was there")
+(public! 'registry-list "(registry-list TABLE) — every (NAME VALUE) of the table, in the order of registration")
+(public! 'registry-names "(registry-names TABLE) — every NAME of the table, in the order of registration")
 (public! 'add-paste-hook! "(add-paste-hook! MODE NAME FN) — for a major or minor MODE, register named FN(kind data mime); #t consumes the paste")
 (public! 'remove-paste-hook! "(remove-paste-hook! MODE NAME) — remove a named paste handler")
 (public! 'frame-attached! "(frame-attached!) — a client attached this frame; runs frame-attach-hook so per-frame display state is pushed again")

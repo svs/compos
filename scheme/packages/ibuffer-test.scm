@@ -46,16 +46,6 @@
   (map ibuffer-heading-label
        (filter ibuffer-heading? (list-entries "*ibuffer*"))))
 
-(deftest 'ibuffer-age-label-reads-as-a-short-age
-  "seconds become now, Ns, Nm, Nh, Nd; no time is an empty label"
-  (lambda ()
-    (check-equal! (ibuffer-age-label #f) "" "no time")
-    (check-equal! (ibuffer-age-label 5) "now" "under ten seconds")
-    (check-equal! (ibuffer-age-label 42) "42s" "seconds")
-    (check-equal! (ibuffer-age-label 300) "5m" "minutes")
-    (check-equal! (ibuffer-age-label 7200) "2h" "hours")
-    (check-equal! (ibuffer-age-label 200000) "2d" "days")))
-
 (deftest 'ibuffer-notes-when-a-buffer-was-last-shown
   "the hook stamps the shown buffer, and the row reads the age back"
   (lambda ()

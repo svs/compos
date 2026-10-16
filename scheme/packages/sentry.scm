@@ -7,6 +7,8 @@
 ;;; M-x sentry opens unresolved production issues. RET shows a structured detail view.
 ;;; The issue view keeps complete raw JSON behind a collapsed disclosure.
 
+(require 'format)
+
 (domain! 'sentry)
 (effects! '(write))
 
@@ -55,10 +57,7 @@
   (string-replace (string-replace (sentry--text text) "\\" "\\\\") "\"" "\\\""))
 
 (define (sentry--truncate text width)
-  (let ((value (sentry--text text)))
-    (if (> (string-length value) width)
-        (string-append (substring value 0 (- width 1)) "…")
-        value)))
+  (format-elide (sentry--text text) width 'end))
 
 ;; Sentry titles and culprit strings can contain addresses. The package shows
 ;; neither event payloads nor user objects, and masks common address forms here.
@@ -333,17 +332,14 @@
   buf)
 
 (define (sentry--age-label iso)
-  ;; ISO-8601 UTC as an age: "now", "5m", "2h", "26d"
+  ;; ISO-8601 UTC as an age: "now", "42s", "5m", "2h", "26d"
   (if (not (and (string? iso) (>= (string-length iso) 16)))
       ""
       (let* ((n (lambda (a z) (string->number (substring iso a z))))
              (secs (- (parts->time (n 0 4) (n 5 7) (n 8 10) (n 11 13) (n 14 16))
                       (parts->time 1970 1 1 0 0)))
-             (age (max 0 (- (current-time) secs))))
-        (cond ((< age 60) "now")
-              ((< age 3600) (string-append (number->string (quotient age 60)) "m"))
-              ((< age 86400) (string-append (number->string (quotient age 3600)) "h"))
-              (else (string-append (number->string (quotient age 86400)) "d"))))))
+             (age (- (current-time) secs)))
+        (format-age age))))
 
 (define (sentry--issue-cells buf issue)
   ;; two lines: the title owns the first, the level is the bar beside it

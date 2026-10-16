@@ -36,6 +36,8 @@
 ;;; decide.scm - is still in the list, with the word that says nothing is
 ;;; holding it up.
 
+(require 'format)
+
 (domain! 'llm)
 (effects! '(read external))
 
@@ -516,18 +518,8 @@
 
 ;;; --- the list ---------------------------------------------------------------------
 
-;; integer arithmetic all the way: a float prints its own rounding error
-(define (models--scaled bytes unit suffix)
-  (let* ((tenths (quotient (* 10 bytes) unit))
-         (whole (quotient tenths 10))
-         (frac (remainder tenths 10)))
-    (string-append (number->string whole) "." (number->string frac) suffix)))
-
-(define (models--size-label bytes)
-  (cond ((not (number? bytes)) "")
-        ((>= bytes 1073741824) (models--scaled bytes 1073741824 " GB"))
-        ((>= bytes 1048576) (models--scaled bytes 1048576 " MB"))
-        (else (string-append (number->string bytes) " B"))))
+;; "4.3 GB", "256.0 MB"; no size, no label
+(define (models--size-label bytes) (format-bytes bytes 'si 1))
 
 (define (models--state e)
   (if (not (plist-get e 'loaded))

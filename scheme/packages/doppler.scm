@@ -10,6 +10,8 @@
 ;;; (--only-names), and dp-secret-get is a separate, explicit call so a
 ;;; value only ever shows up when someone asks for that exact secret.
 
+(require 'format)
+
 (domain! 'secrets)
 (effects! '(write))
 
@@ -288,14 +290,12 @@
   ;; row below it was off by a line, so the arrows moved to the wrong row.
   (let ((value (and (string? raw)
                     (string-replace (string-replace raw "\r" " ") "\n" " "))))
-  (if (string? value)
-      (let* ((n (string-length value))
-             (side (min 10 (quotient (- n 5) 2))))
-        (if (< side 4)
-            "••••"
-            (string-append (substring value 0 side) "…"
-                           (substring value (- n side) n))))
-      "••••")))
+    (if (string? value)
+        (let ((side (min 10 (quotient (- (string-length value) 5) 2))))
+          (if (< side 4)
+              "••••"
+              (format-elide value (+ 1 (* 2 side)))))
+        "••••")))
 
 (define (doppler--row-block buf name i first-line)
   ;; FIRST-LINE is the 1-based text line of row 0: one past the header.

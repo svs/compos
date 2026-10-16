@@ -31,6 +31,8 @@
 ;;; the prompt is the same rows in the minibuffer, the table is the same
 ;;; rows in a window.
 
+(require 'format)
+
 (domain! 'buffers)
 (effects! '(read))
 
@@ -234,32 +236,15 @@
 
 (define (ibuffer-seen-at b) (buffer-last-seen b))
 
-(define (ibuffer-age-label age)
-  (cond ((not age) "")
-        ((< age 10) "now")
-        ((< age 60) (string-append (number->string age) "s"))
-        ((< age 3600) (string-append (number->string (quotient age 60)) "m"))
-        ((< age 86400) (string-append (number->string (quotient age 3600)) "h"))
-        (else (string-append (number->string (quotient age 86400)) "d"))))
+;; the age column; events-list, notifications and the chat list call this
+;; name too, so it stays as the door to format-age
+(define (ibuffer-age-label age) (format-age age))
 
 (define (ibuffer-last-label b)
   (let ((t (ibuffer-seen-at b)))
-    (ibuffer-age-label (and t (- (current-time) t)))))
+    (format-age (and t (- (current-time) t)))))
 
 ;;; --- the buffer kind and the file kind ----------------------------------------
-
-(define (ibuffer-human-unit n unit suffix)
-  (let* ((tenths (quotient (+ (* n 10) (quotient unit 2)) unit))
-         (whole (quotient tenths 10))
-         (tenth (remainder tenths 10)))
-    (string-append (number->string whole) "." (number->string tenth) suffix)))
-
-;; a size reads the way dired writes one: a unit and one decimal, so
-;; 1.4M and 56.3k rather than 1M and 56k
-(define (ibuffer-human n)
-  (cond ((>= n 1048576) (ibuffer-human-unit n 1048576 "M"))
-        ((>= n 1024) (ibuffer-human-unit n 1024 "k"))
-        (else (number->string n))))
 
 (define (ibuffer-short-mode b)
   (let* ((mode (or (buffer-local b 'mode-name) "Fundamental"))
@@ -301,7 +286,7 @@
 
 (define (ibuffer-file-age b)
   (let ((t (ignore-errors (lambda () (file-mtime b)))))
-    (ibuffer-age-label (and (number? t) (- (current-time) t)))))
+    (format-age (and (number? t) (- (current-time) t)))))
 
 ;; A row's colour says its state, never its identity. Two states earn a
 ;; mark: a file with edits nobody saved, and a buffer whose process runs.
@@ -937,7 +922,7 @@
 
 (define (ibuffer-size-label b)
   (let ((n (ibuffer-row-size b)))
-    (if (number? n) (ibuffer-human n) "")))
+    (if (number? n) (format-bytes n 'short 1) "")))
 
 (define (ibuffer-noun buf n)
   (let ((noun (or (list-opt buf 'noun) "buffer")))
@@ -2830,7 +2815,7 @@
           (list (if (nth 4 row) "* " ". ") "ibuffer-info ibuffer-modified f-warn" #f 'end "")
           (list (nth 1 row) "ibuffer-name" 38 'middle "")
           (list (let ((size (nth 7 row)))
-                  (if (number? size) (ibuffer-human size) (or size "")))
+                  (if (number? size) (format-bytes size 'short 1) (or size "")))
                 "ibuffer-info ibuffer-size f-dim" 8 'end "  ")
           (list (nth 2 row) "ibuffer-info ibuffer-mode f-dim" 24 'middle "  ")
           (list (let ((path (nth 5 row)))

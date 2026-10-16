@@ -19,6 +19,8 @@
 ;;; is the text reading of a page — `o` hands the page itself to the
 ;;; real renderer.
 
+(require 'format)
+
 (domain! 'web)
 (effects! '(read external))
 
@@ -429,16 +431,9 @@
 (define (web--mime-note url type file)
   (string-append "# " (web--download-name url) "\n\n"
                  "`" (if (equal? type "") "unknown type" type) "`, "
-                 (web--size-label (file-size file)) "\n\n"
+                 (format-bytes (or (file-size file) 0)) "\n\n"
                  "No reader for this type. Press `d` to save it, "
                  "or `o` to open it in the browser.\n"))
-
-;; bytes -> "512 B", "8 KB", "1 MB"
-(define (web--size-label bytes)
-  (let ((n (or bytes 0)))
-    (cond ((< n 1024) (string-append (number->string n) " B"))
-          ((< n 1048576) (string-append (number->string (quotient n 1024)) " KB"))
-          (else (string-append (number->string (quotient n 1048576)) " MB")))))
 
 ;;; --- fetching -------------------------------------------------------------------
 ;;; The browser fetches, not curl: the user's cookies and Chrome's http
@@ -908,14 +903,9 @@
   (web--history-write!
     (filter (lambda (e) (not (equal? (car e) url))) (web--history))))
 
-;; seconds -> "just now", "5m ago", "2h ago", "3d ago"; "" for no time
+;; a time -> "just now", "5m ago", "2h ago", "3d ago"; "" for no time
 (define (web--age-label time)
-  (let ((age (and (number? time) (> time 0) (- (current-time) time))))
-    (cond ((not age) "")
-          ((< age 60) "just now")
-          ((< age 3600) (string-append (number->string (quotient age 60)) "m ago"))
-          ((< age 86400) (string-append (number->string (quotient age 3600)) "h ago"))
-          (else (string-append (number->string (quotient age 86400)) "d ago")))))
+  (format-age (and (number? time) (> time 0) (- (current-time) time)) 'ago))
 
 ;; the page's title: its first heading, else its first line of text
 (define (web--title md)

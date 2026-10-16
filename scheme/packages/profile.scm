@@ -18,6 +18,8 @@
 ;;; the counters in Compos.Core.Profiler; this package owns when to arm,
 ;;; what the report says, and where it shows.
 
+(require 'format)
+
 (domain! 'diagnostics)
 (effects! '(read))
 
@@ -173,13 +175,7 @@
         (else (number->string n))))
 
 ;; a delta: the sign is the point of it
-(define (profile--bytes n)
-  (let* ((down (< n 0))
-         (a (if down (- 0 n) n))
-         (s (cond ((>= a 1048576) (string-append (profile--tenths (quotient (* a 10) 1048576)) " MB"))
-                  ((>= a 1024) (string-append (profile--tenths (quotient (* a 10) 1024)) " KB"))
-                  (else (string-append (number->string a) " B")))))
-    (string-append (if down "-" "+") s)))
+(define (profile--bytes n) (format-bytes n 'si 1 #t))
 
 (define (profile--share part whole)
   (if (<= whole 0) 0 (min 100 (quotient (* part 100) whole))))

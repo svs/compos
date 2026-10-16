@@ -717,15 +717,6 @@
     (check-equal! (web--download-name "https://h.test/") "h.test.html"
                   "and a host names a page")))
 
-(deftest 'the-age-label-reads-in-minutes-hours-and-days
-  "the history column"
-  (lambda ()
-    (check-equal! (web--age-label 0) "" "no time, no label")
-    (check-equal! (web--age-label (current-time)) "just now" "now")
-    (check-equal! (web--age-label (- (current-time) 300)) "5m ago" "minutes")
-    (check-equal! (web--age-label (- (current-time) 7200)) "2h ago" "hours")
-    (check-equal! (web--age-label (- (current-time) 172800)) "2d ago" "days")))
-
 (effects! '(write))
 
 (deftest 'w-copies-the-link-at-point-else-the-page

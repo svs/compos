@@ -1,13 +1,11 @@
 ;;; keys-test.scm --- the secret provider is the chain's third step.
 
 (define (t--keys-with-provider provider thunk)
-  (let ((before secret-provider))
-    (customize-set! 'secret-provider provider)
-    (key-forget-all!)
-    (let ((out (thunk)))
-      (customize-set! 'secret-provider before)
-      (key-forget-all!)
-      out)))
+  (unwind-protect
+    (lambda ()
+      (with-custom 'secret-provider provider
+        (lambda () (key-forget-all!) (thunk))))
+    (lambda () (key-forget-all!))))
 
 (deftest 'the-secret-provider-answers-after-the-environment-and-the-files
   "a name the environment and the key files do not hold reaches the provider"

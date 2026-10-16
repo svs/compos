@@ -84,19 +84,6 @@
           (append (llm-mode--kind-ranges buf 'llm-prompt)
                   (llm-mode--kind-ranges buf 'llm-response))))
 
-(define (llm-mode--legacy-response-ranges buf)
-  (let ((legacy (or (buffer-local buf 'llm-legacy-responses)
-                    (if (null? (llm-mode--kind-ranges buf 'llm-response))
-                        (or (buffer-local buf 'llm-responses) '())
-                        '())))
-        (turns (llm-mode--addressable-turn-ranges buf)))
-    (filter
-      (lambda (range)
-        (and (number? (car range)) (number? (cadr range))
-             (< (car range) (cadr range))
-             (not (llm-mode--range-overlaps-any? range turns))))
-      legacy)))
-
 (define (llm-mode--visible-response-ranges buf)
   (map (lambda (record)
          (list (plist-get record 'start) (plist-get record 'end)))
@@ -107,9 +94,10 @@
                 (< (plist-get record 'start) (plist-get record 'end))))
          (llm-mode--addressable-kind buf 'llm-response))))
 
+;; a response lives in its block; migrations.scm turns an old desktop's
+;; range list into blocks once
 (define (llm-mode--response-ranges buf)
-  (append (llm-mode--legacy-response-ranges buf)
-          (llm-mode--visible-response-ranges buf)))
+  (llm-mode--visible-response-ranges buf))
 (define (llm-mode--thinking-chrome buf)
   (map
     (lambda (record)
@@ -131,22 +119,11 @@
   (overlay-set! buf 'llm-mode-thinking (llm-mode--thinking-chrome buf)))
 
 (define (llm-mode--sync-ranges! buf)
-  ;; Addressable markers are the source of truth for new turns. Legacy
-  ;; desktops still mirror their overlay ranges until their first new send.
+  ;; the blocks are the source of truth; the range local mirrors them for
+  ;; the clients that read it
   (when (minor-mode-on? buf "llm-mode")
-    (if (pair? (llm-mode--kind-ranges buf 'llm-response))
-        (begin
-          (buffer-set-local! buf 'llm-responses
-            (llm-mode--response-ranges buf))
-          (llm-mode--paint! buf))
-        (let ((tracked
-                (filter (lambda (ov) (equal? (caddr ov) "llm-response"))
-                        (buffer-overlays buf))))
-          (when (or (pair? tracked)
-                    (not (buffer-local buf 'llm-responses))
-                    (null? (buffer-local buf 'llm-responses)))
-            (buffer-set-local! buf 'llm-responses
-              (map (lambda (ov) (list (car ov) (cadr ov))) tracked)))))))
+    (buffer-set-local! buf 'llm-responses (llm-mode--response-ranges buf))
+    (llm-mode--paint! buf)))
 
 (define (llm-mode--agent-write? buf source)
   (let ((inline (buffer-local buf 'llm-session-id)))
@@ -171,12 +148,6 @@
         (when (and (member (plist-get result 'state) '(complete failed cancelled))
                    (llm-mode--change-touches-result?
                      result pos inserted deleted))
-          ;; Freeze the compatibility layer before retiring the native turn.
-          ;; Otherwise the now-stale llm-responses mirror can be mistaken for
-          ;; an old desktop's legacy overlay and repaint the edited result.
-          (unless (buffer-local buf 'llm-legacy-responses)
-            (buffer-set-local! buf 'llm-legacy-responses
-              (llm-mode--legacy-response-ranges buf)))
           (let ((response-id (plist-get result 'parent)))
             (block-retire-children! buf (plist-get result 'id))
             (block-set-state! buf (plist-get result 'id) 'deleted)
@@ -256,11 +227,7 @@
             (block-set-state! buf id 'cancelled)
             (when result-id (block-set-state! buf result-id 'cancelled))
             (when prompt-id (block-set-state! buf prompt-id 'complete)))))
-      (llm-mode--addressable-kind buf 'llm-response))
-    (let ((saved (buffer-local buf 'llm-legacy-responses)))
-      (when saved
-        (buffer-set-local! buf 'llm-legacy-responses
-          (llm-mode--legacy-response-ranges buf))))))
+      (llm-mode--addressable-kind buf 'llm-response))))
 
 (define (llm-mode--apply! buf)
   (llm-mode--heal-orphaned-turns! buf)
@@ -818,10 +785,6 @@
 ;; result block before the request starts. Only the final result owns text.
 (define (llm-mode--begin-turn! buf pos insert-at &optional model)
   (let* ((prompt-range (llm-mode--block-range-at buf pos))
-         (_legacy
-           (when (not (buffer-local buf 'llm-legacy-responses))
-             (buffer-set-local! buf 'llm-legacy-responses
-               (or (buffer-local buf 'llm-responses) '()))))
          ;; Validate/claim the prompt before touching the document. Insertion at
          ;; its end advances the marker, so reset it to exclude the separator.
          (prompt-id
@@ -1670,8 +1633,8 @@
     group-config-loaded))
 
 ;; what was SAID — survives restart and save; reset clears it
-;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
-;; on setup and clears it, and it stays listed so a reset cannot leave one
+;; ('chat-turns is the pre-record shape: migrations.scm reads it once on
+;; restore and clears it, and it stays listed so a reset cannot leave one
 ;; behind for the migration to read again)
 (define chat-conversation-locals
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
@@ -1828,13 +1791,6 @@
              (let ((offered (map car (or (buffer-local buf 'agent-models) '()))))
                (and (pair? offered) (member model offered)))))))
 
-;; a transcript from before the mark was a buffer-local: it sits at the
-;; marker's last occurrence
-(define (chat-legacy-mark buf)
-  (let loop ((ms (re-find* *chat-input-marker* (buffer-text buf)))
-             (last (buffer-size buf)))
-    (if (null? ms) last (loop (cdr ms) (car (car ms))))))
-
 ;; ONE attach. A chat that never had a runtime and a chat whose runtime
 ;; died are the same situation: put a fresh thread on the chat's OWN
 ;; connector — identity survives resets, restarts, and the runtime sweep,
@@ -1844,7 +1800,7 @@
 ;; seeding from a different test.
 (define (chat-attach! buf)
   (let* ((cname (or (buffer-local buf 'agent-connector) "api"))
-         (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
+         (mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
     ;; a fresh ACP session starts empty and has to be seeded; the api lane
@@ -2399,7 +2355,7 @@
 ;; the prefix of a user line in the transcript. RET writes it in front of
 ;; the sent message; the live input carries no marker bytes at all, so no
 ;; edit can damage the input boundary. A chat saved before this change
-;; still holds the marker at its mark; chat-input-migrate! removes it.
+;; still holds the marker at its mark; migrations.scm removes it once.
 (define *chat-input-marker* "\n>>> you: ")
 
 ;; the mark never points past the end: an edit the local did not see
@@ -2441,28 +2397,6 @@
 (define (chat-input-start buf)
   (min (+ (chat-mark buf) (or (buffer-local buf 'agent-marker-bytes) 0))
        (buffer-size buf)))
-
-;; a chat from before the marker left the live input still carries the
-;; marker bytes at its mark: remove them, keep the draft after them, and
-;; record that the input starts at the mark. A chat with the marker in
-;; its text and no mark gets its mark from the last marker first. The
-;; migration pass runs this once per buffer (migrations.scm); a chat in
-;; the new layout is left as it is.
-(define (chat-input-migrate! buf)
-  (let ((mb (string-byte-length *chat-input-marker*)))
-    (when (and (not (buffer-local buf 'agent-saved-mark))
-               (pair? (re-find* *chat-input-marker* (buffer-text buf))))
-      (buffer-set-local! buf 'agent-saved-mark (chat-legacy-mark buf)))
-    (when (buffer-local buf 'agent-saved-mark)
-      (let ((size (buffer-size buf))
-            (m (chat-mark buf)))
-        (when (and (<= (+ m mb) size)
-                   (equal? (substring-bytes (buffer-text buf) m (+ m mb))
-                           *chat-input-marker*))
-          (buffer-delete-range! buf m mb))
-        ;; the local cannot sit past the end after the delete
-        (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
-        (buffer-set-local! buf 'agent-marker-bytes 0)))))
 
 ;; (START END) of the LIVE input — what RET sends
 (define (chat-input-region buf)
@@ -2616,28 +2550,3 @@
 
 (global-set-key "C-c RET" "chat-companion-ask")
 
-;;; --- the one-shot migrations of a chat ---------------------------------------
-;;; Each names a shape an older desktop can carry; migrations.scm runs
-;;; them once per buffer on restore, before the mode setup, and deletes
-;;; them at the cut-off.
-
-;; pre-group companions carried a 'companion-of pointer: both ends get
-;; the 'group tag
-(define (chat-companion-of-migrate! buf)
-  (let ((doc (buffer-local buf 'companion-of)))
-    (when (and doc (not (buffer-local buf 'group)))
-      (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
-                   doc)))
-        (buffer-set-local! buf 'group g)
-        (when (and (buffer-exists? doc)
-                   (not (buffer-local doc 'group)))
-          (buffer-set-local! doc 'group g))))))
-
-;; by name, in a lambda: chat.scm defines chat-record-migrate! after this
-;; file loads, and a reload must reach the new definition
-(define-buffer-migration! 'chat-record "2026-08-20"
-  (lambda (buf) (chat-record-migrate! buf)))
-(define-buffer-migration! 'chat-companion-group "2026-08-20"
-  (lambda (buf) (chat-companion-of-migrate! buf)))
-(define-buffer-migration! 'chat-input-marker "2026-09-05"
-  (lambda (buf) (chat-input-migrate! buf)))

@@ -276,17 +276,6 @@
       (customize-set! 'writing-measure "120ch")
       (t--wr-done! buf))))
 
-(deftest 'restore-minor-modes-re-runs-the-writing-setup-once
-  "the reload path: setup runs again and adds no second hook"
-  (lambda ()
-    (let ((buf (t--wr-write! "zz-writing-restore" "some prose\n")))
-      (restore-minor-modes! buf)
-      (check-equal! (length (filter (lambda (h) (equal? (car h) buf)) *writing-hooks*)) 1
-                    "one hook, not two")
-      (check-equal! (buffer-local buf 'window-class) "writing" "the look is back")
-      (check-equal! (buffer-local buf 'modeline-info) "2 words · 1 min" "and the count")
-      (t--wr-done! buf))))
-
 (deftest 'the-word-count-is-recomputed-from-the-buffer
   "the counter and its label are Scheme; the delivery is the one exception"
   (lambda ()
@@ -343,21 +332,6 @@
       (check-true! (buffer-local buf 'preview-rows) "and the rows are on")
       (check-true! (buffer-local buf 'visual-line-mode) "with visual lines")
       (check-false! (buffer-local buf 'group) "and no group: that is write's job")
-      (t--wr-done! buf))))
-
-(deftest 'writing-mode-reapply-keeps-a-disabled-preview-off
-  "writing setup respects the preview mode state after first entry"
-  (lambda ()
-    (let ((buf (test-buffer! "zz-writing-source.md" "one two three\n")))
-      (with-current-buffer buf
-        (lambda ()
-          (run-command "writing-mode")
-          (run-command "preview-mode")
-          (check-false! (minor-mode-on? buf "preview-mode")
-                        "the user chose source view")
-          (restore-minor-modes! buf)
-          (check-false! (buffer-local buf 'render-mode)
-                        "mode reapply preserves source view")))
       (t--wr-done! buf))))
 
 (deftest 'the-writing-selection-commands-extend-the-region

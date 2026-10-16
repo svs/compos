@@ -83,14 +83,14 @@
 (deftest 'a-home-sanitized-false-leaves-the-config-alone
   "the sweep is a setting, and off means off, for codex and for dsh"
   (lambda ()
-    (customize-set! 'codex-home-sanitized #f)
-    (check-false! (plist-get (codex-config-with-env '(backend "codex-app-server")) 'env)
-                  "codex: no environment is added")
-    (customize-set! 'codex-home-sanitized #t)
-    (customize-set! 'dsh-home-sanitized #f)
-    (check-false! (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)
-                  "dsh: no environment is added")
-    (customize-set! 'dsh-home-sanitized #t)))
+    (with-custom 'codex-home-sanitized #f
+      (lambda ()
+        (check-false! (plist-get (codex-config-with-env '(backend "codex-app-server")) 'env)
+                      "codex: no environment is added")))
+    (with-custom 'dsh-home-sanitized #f
+      (lambda ()
+        (check-false! (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)
+                      "dsh: no environment is added")))))
 
 (deftest 'the-dsh-profile-patch-turns-the-harnesss-own-tools-off
   "the editor names every tool through MCP, so the harness adds none"
@@ -154,30 +154,30 @@
 (deftest 'a-group-skill-reaches-only-the-groups-chats
   "<group-home>/skills joins the index and (skill NAME) inside the group, and nowhere else"
   (lambda ()
-    (let* ((id (group-record-create! "zz-skills-group"))
-           (file (string-append (group-home-dir id) "/skills/zz-group-skill/SKILL.md"))
-           (inside "*zz-skills-inside*")
-           (outside "*zz-skills-outside*"))
-      (write-file! file
-                   "---\nname: zz-group-skill\ndescription: A group skill.\n---\n\nThe group's own.\n")
-      (skills-scan!)
-      (buffer-create inside)
-      (buffer-add-group! inside id)
-      (buffer-create outside)
-      (check-contains! (skills-note-for inside #f) "zz-group-skill" "the group's index names it")
-      (check-contains! (skills-note-for inside #f) "code-editing" "beside the global skills")
-      (check-false! (string-contains? (skills-note-for outside #f) "zz-group-skill")
-                    "another buffer's index does not")
-      (check-contains! (with-current-buffer inside (lambda () (skill "zz-group-skill")))
-                       "The group's own." "the body inside the group")
-      (check-contains! (with-current-buffer outside (lambda () (skill "zz-group-skill")))
-                       "no such skill" "and a miss outside it")
-      (check-false! (assoc "zz-group-skill" *skills*) "the global catalog stays as it was")
-      (buffer-kill! inside)
-      (buffer-kill! outside)
-      (delete-file! file)
-      (group-record-delete! id)
-      (skills-scan!))))
+    (with-fresh-group "zz-skills-group"
+      (lambda (id)
+        (let ((file (string-append (group-home-dir id) "/skills/zz-group-skill/SKILL.md"))
+              (inside "*zz-skills-inside*")
+              (outside "*zz-skills-outside*"))
+          (write-file! file
+                       "---\nname: zz-group-skill\ndescription: A group skill.\n---\n\nThe group's own.\n")
+          (skills-scan!)
+          (buffer-create inside)
+          (buffer-add-group! inside id)
+          (buffer-create outside)
+          (check-contains! (skills-note-for inside #f) "zz-group-skill" "the group's index names it")
+          (check-contains! (skills-note-for inside #f) "code-editing" "beside the global skills")
+          (check-false! (string-contains? (skills-note-for outside #f) "zz-group-skill")
+                        "another buffer's index does not")
+          (check-contains! (with-current-buffer inside (lambda () (skill "zz-group-skill")))
+                           "The group's own." "the body inside the group")
+          (check-contains! (with-current-buffer outside (lambda () (skill "zz-group-skill")))
+                           "no such skill" "and a miss outside it")
+          (check-false! (assoc "zz-group-skill" *skills*) "the global catalog stays as it was")
+          (buffer-kill! inside)
+          (buffer-kill! outside)
+          (delete-file! file))))
+    (skills-scan!)))
 
 (deftest 'the-sweep-keeps-codexs-own-state-dirs-and-still-drops-a-stale-skill
   "codex writes under .system, which carries no SKILL.md of its own"

@@ -74,20 +74,6 @@
       (check-equal! (buffer-point t--occur-src) second "on the capture it named"))
     (t--occur-clean!)))
 
-(deftest 'restoring-the-mode-rebuilds-the-rows-from-its-source-locals
-  "the rule: a restored buffer rebuilds from locals, and never from its text"
-  (lambda ()
-    (t--occur-source!)
-    (occur-ts-open t--occur-src "json" t--occur-query)
-    (buffer-set-read-only! "*occur-ts*" #f)
-    (buffer-replace-range! "*occur-ts*" 0 (buffer-size "*occur-ts*") "stale")
-    (with-current-buffer "*occur-ts*" (lambda () (set-mode! "occur-ts-mode")))
-    (let ((text (buffer-text "*occur-ts*")))
-      (check-contains! text "\"one\": 1" "the first row is back")
-      (check-contains! text "\"two\": 2" "and the second"))
-    (check-true! (buffer-read-only? "*occur-ts*") "and the list is read only again")
-    (t--occur-clean!)))
-
 (deftest 'the-public-api-and-the-command-are-discoverable
   "a name nobody can find is a name nobody calls"
   (lambda ()

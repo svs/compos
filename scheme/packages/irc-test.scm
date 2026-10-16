@@ -323,15 +323,3 @@ buffer it belongs to, and your own line stays yours."
     (set! irc-show-time #f)
     (t--irc-clean! "t")))
 
-(deftest 'irc-mode-paints-a-restored-transcript
-  "The mode setup paints the transcript again from the 'irc-paint local."
-  (lambda ()
-    (t--irc-fake! "t")
-    (let ((buf (irc-buffer! "t" "#x")))
-      (irc-display buf (irc-said "oskarw" "one"))
-      (let ((before (buffer-overlays buf)))
-        (overlay-clear! buf 'all)
-        (check-false! (member (car before) (buffer-overlays buf)) "the paint is gone")
-        (with-current-buffer buf (lambda () (set-mode! "irc-mode")))
-        (check-true! (member (car before) (buffer-overlays buf)) "and the setup brings it back")))
-    (t--irc-clean! "t")))

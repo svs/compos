@@ -771,6 +771,24 @@
 
 (define (hook-keys hook) (registry-names (list 'hook hook)))
 
+;; One-shot carry-over for a kernel reload. The keyed functions lived in
+;; *keyed-hooks*, ((HOOK ((KEY FN) ...)) ...), until 2026-10-16. A reload
+;; of this file into a running daemon redefines the readers above to the
+;; registry while the old store still holds every listener, and nothing
+;; runs until somebody moves them. Move them here, oldest key first so
+;; the run order stays, and empty the old store so a second load does
+;; not move them again. A store a kernel reload moves needs this.
+(define (hook--carry-keyed!)
+  (when (and (boundp '*keyed-hooks*) (pair? (symbol-value '*keyed-hooks*)))
+    (for-each
+      (lambda (h)
+        (for-each (lambda (e) (registry-register! (list 'hook (car h)) (car e) (cadr e)))
+                  (reverse (cadr h))))
+      (symbol-value '*keyed-hooks*))
+    (set-symbol-value! '*keyed-hooks* '())))
+
+(hook--carry-keyed!)
+
 (define (add-hook! hook fn &optional at-end local)
   (cond ((pair? hook)
          (registry-register! (list 'hook (car hook)) (cadr hook) fn))

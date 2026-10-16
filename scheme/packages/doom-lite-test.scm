@@ -258,17 +258,3 @@
                     (length *doom-lite-monster-cells*) "every monster stands again")
       (doom-lite-test-end! buf))))
 
-(deftest 'the-mode-setup-draws-the-game-the-locals-hold
-  "a game in progress survives the mode setup, as it must survive a restart"
-  (lambda ()
-    (let ((buf (doom-lite-test-start!)))
-      (buffer-set-locals! buf
-        (list 'doom-lite-px (doom-lite--cell->fp 10) 'doom-lite-py (doom-lite--cell->fp 6)
-              'doom-lite-health 42 'doom-lite-ammo 7 'doom-lite-kills 3))
-      ;; the setup fn is what a restart runs; it must not start a new game
-      (doom-lite--setup! buf)
-      (check-equal! (buffer-local buf 'doom-lite-health) 42 "the health it held is still there")
-      (check-equal! (buffer-local buf 'doom-lite-ammo) 7 "and the shells")
-      (check-true! (string-contains? (buffer-text buf) "health 42")
-                   "and the drawn text shows them")
-      (doom-lite-test-end! buf))))

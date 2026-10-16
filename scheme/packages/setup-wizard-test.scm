@@ -71,21 +71,6 @@
       (set! *default-connector* old)
       (buffer-kill! buf))))
 
-;; The step is a buffer local, and the mode setup draws from it: a
-;; restored wizard comes back on the step the user left.
-(deftest 'the-wizard-step-survives-a-mode-rerun
-  "next moves to the learning step, and a mode rerun keeps it"
-  (lambda ()
-    (let ((buf (setup-wizard! "model")))
-      (setup-wizard-click buf "wizard:next")
-      (check-equal! (setup-wizard-step buf) "learn" "next")
-      (with-current-buffer buf (lambda () (set-mode! "setup-wizard-mode")))
-      (check-contains! (t--wiz-text (buffer-local buf 'render-blocks)) "Start learning"
-                       "the redrawn step")
-      (setup-wizard-click buf "wizard:back")
-      (check-equal! (setup-wizard-step buf) "model" "back")
-      (buffer-kill! buf))))
-
 (deftest 'a-secret-define-replaces-the-old-one
   "writing a key replaces the variable's define and keeps the other lines"
   (lambda ()

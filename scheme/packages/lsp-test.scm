@@ -55,13 +55,13 @@
 (deftest 'lsp-auto-start-off-attaches-nothing
   "the setting is read before a server is reached, not after"
   (lambda ()
-    (customize-set! 'lsp-auto-start #f)
-    (let ((before (length (lsp-connections))))
-      (with-current-buffer (test-buffer! "zz-lsp-gate.rb" "puts 1\n")
-        (lambda () (lsp--maybe-attach!)))
-      (check-equal! (length (lsp-connections)) before "no server was started")
-      (check-false! (minor-mode-on? "zz-lsp-gate.rb" "lsp-mode") "and nothing attached"))
-    (customize-set! 'lsp-auto-start #t)
+    (with-custom 'lsp-auto-start #f
+      (lambda ()
+        (let ((before (length (lsp-connections))))
+          (with-current-buffer (test-buffer! "zz-lsp-gate.rb" "puts 1\n")
+            (lambda () (lsp--maybe-attach!)))
+          (check-equal! (length (lsp-connections)) before "no server was started")
+          (check-false! (minor-mode-on? "zz-lsp-gate.rb" "lsp-mode") "and nothing attached"))))
     (buffer-kill! "zz-lsp-gate.rb")))
 
 (deftest 'elixir-ls-registers-with-dialyzer-off

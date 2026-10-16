@@ -89,3 +89,23 @@
     (check-equal! (annotate 'zz-registry-cat (list "q")) '(("q" "second")) "the second annotator replaces the first")
     (registry-forget! 'marginalia 'zz-registry-cat)
     (check-equal! (annotate 'zz-registry-cat (list "q")) '("q") "no annotator: the names come back plain")))
+
+(deftest 'a-kernel-reload-carries-the-old-keyed-hook-store-into-the-registry
+  "the listeners a running daemon held before the move run after it, once, and the old store empties"
+  (lambda ()
+    (set-symbol-value! '*keyed-hooks*
+      (list (list 'zz-registry-carry
+                  (list (list "newer" (lambda (x) 'newer))
+                        (list "older" (lambda (x) 'older))))))
+    (hook--carry-keyed!)
+    (check-equal! (hook-keys 'zz-registry-carry) '("older" "newer") "both keys came over, oldest first")
+    (check-equal! (map (lambda (f) (f 'x)) (hook-functions 'zz-registry-carry)) '(newer older)
+                  "and the run order is the one the old store had, newest key first")
+    (check-equal! (symbol-value '*keyed-hooks*) '() "the old store is empty")
+    (registry-register! (list 'hook 'zz-registry-carry) "older" (lambda (x) 'kept))
+    (hook--carry-keyed!)
+    (check-equal! ((car (hook-functions '(zz-registry-carry "older"))) 'x) 'kept
+                  "an empty old store moves nothing a second time")
+    (remove-hook! '(zz-registry-carry "older"))
+    (remove-hook! '(zz-registry-carry "newer"))
+    (check-equal! (hook-keys 'zz-registry-carry) '() "clean")))

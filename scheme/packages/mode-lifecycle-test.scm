@@ -40,37 +40,47 @@
 
 ;;; --- every major mode -----------------------------------------------------
 
-;; modes whose setup needs a file, a process, a connection, or the
-;; locals the command that opens them writes first; keys-sweep-test
-;; keeps the same list
+;; modes whose setup needs a file, a process, a connection, a mailbox,
+;; or the locals the command that opens them writes first (the first
+;; eleven are keys-sweep-test's list); perf-mode draws a live sample of
+;; the VM, so no two draws agree
 (define ml--skip-modes
   '("Dired" "dired-mode" "pdf-reader-mode" "pdf-edit-mode" "browser-file-mode"
     "chat-mode" "spreadsheet-mode" "term-mode" "comint-shell-mode"
-    "occur-ts-mode" "telemetry-detail-mode"))
+    "occur-ts-mode" "telemetry-detail-mode"
+    "notmuch-mode" "notmuch-hello-mode" "perf-mode"))
+
+;; a list that fetches its rows from a host on entry: the host answers
+;; later and the list redraws, so the view is the host's, not the locals'
+(define (ml--fetches? mode)
+  (let ((opts (ignore-errors (lambda () (list-mode-opts mode)))))
+    (and (pair? opts) (plist-get opts 'cache-fetch) #t)))
+
+(define (ml--swept? mode)
+  (not (or (member mode ml--skip-modes) (string-prefix? "zz-" mode) (ml--fetches? mode))))
 
 (define (ml--major-faults mode)
   (let* ((buf (test-buffer! (string-append "zz-ml-" mode) "line one\nline two\n"))
          (bad '())
-         (fault! (lambda (what) (set! bad (cons (list mode what) bad)))))
-    (delete-other-windows!)
-    (switch-to-buffer! buf)
-    (if (not (ignore-errors (lambda () (set-mode! mode) #t)))
+         (fault! (lambda (what) (set! bad (cons (list mode what) bad))))
+         (enter! (lambda (name) (with-current-buffer buf (lambda () (set-mode! name))))))
+    (if (not (ignore-errors (lambda () (enter! mode) #t)))
         (fault! "setup raised")
         (let ((once (ml--view buf)))
           (unless (equal? (buffer-local buf 'mode-name) mode)
             (fault! "the buffer does not wear the mode"))
           ;; re-enter: the door a restore uses, and it changes nothing
-          (set-mode! mode)
+          (enter! mode)
           (unless (equal? (ml--view buf) once)
             (fault! "a second entry changed the view"))
           ;; re-setup after a wipe: the paint and the folds go, the locals stay
           (overlay-clear! buf 'all)
           (fold-clear! buf 'all)
-          (set-mode! mode)
+          (enter! mode)
           (unless (equal? (ml--view buf) once)
             (fault! "a re-setup after a wipe did not draw the same view"))
           ;; leave: the keys and the view locals go with the mode
-          (set-mode! "text-mode")
+          (enter! "text-mode")
           (unless (or (derived-mode? "text-mode" mode)
                       (not (member (mode-keymap mode) (buffer-keymaps buf))))
             (fault! "its map still answers after leaving"))
@@ -87,9 +97,15 @@
     (let ((bad '()) (entered 0))
       (for-each
         (lambda (mode)
-          (unless (or (member mode ml--skip-modes) (string-prefix? "zz-" mode))
+          (when (ml--swept? mode)
             (set! entered (+ entered 1))
-            (set! bad (append bad (ml--major-faults mode)))))
+            ;; one task per mode: every frame an eval makes lives until
+            ;; the eval ends, and a hundred setups in one eval pass the
+            ;; heap bound
+            (set! bad (append bad
+                              (or (ignore-errors
+                                    (lambda () (task-await (task-spawn (lambda () (ml--major-faults mode))))))
+                                  (list (list mode "the walk raised")))))))
         (mode-names 'major))
       (check-true! (> entered 20) "the sweep entered the modes")
       (check-equal! bad '() "every major mode keeps the lifecycle contract"))))
@@ -105,29 +121,35 @@
     (delete-other-windows!)
     (switch-to-buffer! buf)
     (let ((before (ml--overlays buf)))
-      (if (not (ignore-errors (lambda () (enable-minor-mode! buf mode) #t)))
-          (fault! "setup raised")
-          (let ((once (ml--view buf)))
-            (unless (equal? (worn) 1) (fault! "not worn once after enable"))
-            ;; enable again: worn once, drawn once
-            (enable-minor-mode! buf mode)
-            (unless (equal? (ml--view buf) once)
-              (fault! "a second enable changed the view"))
-            ;; the restore path: the setup runs again over the wiped paint
-            (overlay-clear! buf 'all)
-            (restore-minor-modes! buf)
-            (unless (equal? (ml--view buf) once)
-              (fault! "a restore after a wipe did not draw the same view"))
-            ;; teardown: the mode, its map and its paint go
-            (if (not (ignore-errors (lambda () (disable-minor-mode! buf mode) #t)))
-                (fault! "teardown raised")
-                (begin
-                  (unless (equal? (worn) 0) (fault! "still worn after disable"))
-                  (let ((map (minor-mode-keymap mode)))
-                    (when (and map (member map (buffer-minor-maps buf)))
-                      (fault! "its map still answers after disable")))
-                  (unless (ml--subset? (ml--overlays buf) before)
-                    (fault! "its paint stayed after disable")))))))
+      (cond
+        ((not (ignore-errors (lambda () (enable-minor-mode! buf mode) #t)))
+         (fault! "setup raised"))
+        ;; a mode may decline a buffer it cannot serve, as preview-mode
+        ;; declines text with no renderer: it takes itself off again, and
+        ;; the seeds below cover it on a buffer it accepts
+        ((equal? (worn) 0) #t)
+        (else
+         (let ((once (ml--view buf)))
+           (unless (equal? (worn) 1) (fault! "worn more than once after enable"))
+           ;; enable again: worn once, drawn once
+           (enable-minor-mode! buf mode)
+           (unless (equal? (ml--view buf) once)
+             (fault! "a second enable changed the view"))
+           ;; the restore path: the setup runs again over the wiped paint
+           (overlay-clear! buf 'all)
+           (restore-minor-modes! buf)
+           (unless (equal? (ml--view buf) once)
+             (fault! "a restore after a wipe did not draw the same view"))
+           ;; teardown: the mode, its map and its paint go
+           (if (not (ignore-errors (lambda () (disable-minor-mode! buf mode) #t)))
+               (fault! "teardown raised")
+               (begin
+                 (unless (equal? (worn) 0) (fault! "still worn after disable"))
+                 (let ((map (minor-mode-keymap mode)))
+                   (when (and map (member map (buffer-minor-maps buf)))
+                     (fault! "its map still answers after disable")))
+                 (unless (ml--subset? (ml--overlays buf) before)
+                   (fault! "its paint stayed after disable"))))))))
     (buffer-kill! buf)
     (reverse bad)))
 

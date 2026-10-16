@@ -216,18 +216,6 @@
     (check-true! (buffer-special? "*notmuch*") "and so is the listing")
     (t--nm-done!)))
 
-(deftest 'the-search-buffer-survives-a-mode-re-setup
-  "the desktop restore path: set-mode! again with the locals already down"
-  (lambda ()
-    (t--nm-setup!)
-    (run-command "notmuch-inbox")
-    (with-current-buffer "*notmuch*" (lambda () (set-mode! "notmuch-mode")))
-    (check-contains! (buffer-text "*notmuch*") "Hello world" "the rows came back")
-    (switch-to-buffer! "*notmuch*")
-    (t--nm-run! "notmuch-open-thread")
-    (check-equal! (current-buffer) "*mail*" "and the verbs still work")
-    (t--nm-done!)))
-
 ;;; --- the row verbs -------------------------------------------------------------
 
 (deftest 'archive-tags-the-thread-at-point

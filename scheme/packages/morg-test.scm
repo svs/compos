@@ -235,20 +235,6 @@
     (check-equal! (buffer-hidden t--morg-buf) '((4 24)) "moved by one byte")
     (t--morg-done!)))
 
-(deftest 'the-mode-setup-re-derives-folds-from-the-surviving-local
-  "a restart drops hidden ranges and keeps locals"
-  (lambda ()
-    (t--morg! t--morg-fixture 0)
-    (t--morg-run! "morg-cycle")
-    (check-equal! (buffer-hidden t--morg-buf) '((3 23)) "the fold")
-
-    ;; simulate the restart: the ranges go, the local stays
-    (fold-set! t--morg-buf 'morg '())
-    (check-equal! (buffer-hidden t--morg-buf) '() "the ranges are gone")
-    (with-current-buffer t--morg-buf (lambda () (set-mode! "morg-mode")))
-    (check-equal! (buffer-hidden t--morg-buf) '((3 23)) "and the setup rebuilt them")
-    (t--morg-done!)))
-
 (deftest 'a-selection-over-a-fold-lifts-the-hidden-text
   "a folded heading or fence stands for its body: copy, paste, cut and the OS clipboard all take the whole subtree"
   (lambda ()

@@ -77,6 +77,17 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 | a-page-opens-in-the-frame-group-when-the-window-has-none-and-cycles-views | passes alone; fails when the feeds tests run first (test pollution) |
 | membership-answers-the-id, modeline-memberships-follow-the-buffer, llm-config-session-is-the-groups-most-recent-chat, a-summary-is-always-a-string, applying-a-bundle-applies-all-of-it, a-bundle-remembers-disabled-prompt-sections | pass alone; fail after other files leave a group behind (test pollution) |
 
+## A store moved by a kernel reload
+
+When a kernel section moves its state from one global to another (the
+keyed hooks moved from `*keyed-hooks*` to the registry table `(hook HOOK)`
+on 2026-10-16), a hot reload of editor.scm into a running daemon leaves
+the old global full and the new readers empty: every listener is silent
+until the entries are moved, and no test sees it, since a fresh test
+daemon never held the old store. Ship a one-shot carry-over beside the
+new readers, as `hook--carry-keyed!` does: move the entries when the old
+global is bound and non-empty, then empty it. docs/HOOKS.md has the rule.
+
 ## Faster ways to ask
 
 `mix test --failed` reruns what failed last time (`_build/test/lib/<app>/.mix/.mix_test_failures`).

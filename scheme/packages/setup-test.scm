@@ -61,12 +61,11 @@
 (deftest 'silent-setup-does-not-change-the-window-setup
   "a silent bot can explain a step without displaying its document"
   (lambda ()
-    (let ((before (window-list))
-          (old setup-bot-silent-mode))
-      (set! setup-bot-silent-mode #t)
-      (setup--show-document! "silent test" "# Silent\n")
-      (check-equal! (window-list) before "the window list")
-      (set! setup-bot-silent-mode old))))
+    (let ((before (window-list)))
+      (with-stub 'setup-bot-silent-mode #t
+        (lambda ()
+          (setup--show-document! "silent test" "# Silent\n")
+          (check-equal! (window-list) before "the window list"))))))
 
 (deftest 'the-setup-surface-registers-links-and-other-window-file-opening
   "bots can discover the window-safe command and setup documents own their links"
@@ -84,16 +83,15 @@
 (deftest 'setup-ai-link-route-opens-a-guide-at-its-start
   "the setup link route opens the AI guide in a readable help buffer"
   (lambda ()
-    (let ((old setup-bot-silent-mode))
-      (set! setup-bot-silent-mode #f)
-      (buffer-set-local! *setup-buffer* 'help-title "not the AI guide")
-      (setup--follow-link "ai")
-      (check-equal! (buffer-local *setup-buffer* 'help-title) "Start with AI"
-                    "the guide is open")
-      (check-equal! (buffer-point *setup-buffer*) 0 "the guide starts at its title")
-      (check-true! (window-showing *setup-buffer*) "the guide is visible")
-      (set! setup-bot-silent-mode old)
-      (delete-other-windows!))))
+    (with-stub 'setup-bot-silent-mode #f
+      (lambda ()
+        (buffer-set-local! *setup-buffer* 'help-title "not the AI guide")
+        (setup--follow-link "ai")
+        (check-equal! (buffer-local *setup-buffer* 'help-title) "Start with AI"
+                      "the guide is open")
+        (check-equal! (buffer-point *setup-buffer*) 0 "the guide starts at its title")
+        (check-true! (window-showing *setup-buffer*) "the guide is visible")))
+    (delete-other-windows!)))
 
 (deftest 'welcome-marker-makes-first-frame-policy-idempotent
   "every profile sees Welcome once without legacy-state detection"
@@ -122,19 +120,15 @@
 (deftest 'a-provider-secret-answers-the-direct-lane
   "llm-key answers from the secret setting that names the provider, and picks no connector"
   (lambda ()
-    (let ((old-cache *key-cache*)
-          (old-keys *llm-keys*)
-          (old-connector *default-connector*))
-      (set! *llm-keys* '())
-      (set! *key-cache* (cons '("OPENROUTER_API_KEY" "zz-test-key") *key-cache*))
-      (set! *default-connector* "claude-code")
-      (check-equal! (secret-for-provider "openrouter") 'openrouter-api-key "the declared secret")
-      (check-equal! (llm-key "openrouter") "zz-test-key" "the key, through the setting")
-      (check-true! (setup--any-llm-key?) "the direct lane has a key")
-      (check-equal! *default-connector* "claude-code" "the connector is untouched")
-      (set! *key-cache* old-cache)
-      (set! *llm-keys* old-keys)
-      (set! *default-connector* old-connector))))
+    (with-stubs
+      (list (list '*llm-keys* '())
+            (list '*key-cache* (cons '("OPENROUTER_API_KEY" "zz-test-key") *key-cache*))
+            (list '*default-connector* "claude-code"))
+      (lambda ()
+        (check-equal! (secret-for-provider "openrouter") 'openrouter-api-key "the declared secret")
+        (check-equal! (llm-key "openrouter") "zz-test-key" "the key, through the setting")
+        (check-true! (setup--any-llm-key?) "the direct lane has a key")
+        (check-equal! *default-connector* "claude-code" "the connector is untouched")))))
 
 ;; The bug this guards: setup.scm registered the stored key by calling
 ;; setup-openrouter-enable! at load time. Every boot and every reload of
@@ -143,25 +137,24 @@
 (deftest 'a-connector-asks-for-its-unset-secret
   "a secret setting in a connector's env is a requirement until it has a value"
   (lambda ()
-    (let ((old-connectors *agent-connectors*)
-          (old-vars *custom-vars*))
-      (defcustom 'zz-setup-test-key #f "A test key." 'type 'secret 'env "ZZ_SETUP_TEST_KEY")
-      (set! *agent-connectors*
-        '(("zz-keyed" (cmd "sh" env (("ZZ_SETUP_TEST_KEY" zz-setup-test-key))))))
-      (let ((need (find (lambda (r) (equal? (plist-get r 'kind) 'secret))
-                        (setup-connector-requirements "zz-keyed"))))
-        (check-equal! (plist-get need 'secret) 'zz-setup-test-key "the declared secret")
-        (check-false! (plist-get need 'met) "unset, it is a question")
-        (check-contains! (list-ref (assoc "zz-keyed" (setup-inference-scan)) 3)
-                         "ZZ_SETUP_TEST_KEY" "the card names it"))
-      (set-symbol-value! 'zz-setup-test-key "zz-value")
-      (check-true! (null? (setup--unmet (setup-connector-requirements "zz-keyed")))
-                   "set, nothing is missing")
-      (check-equal! (agent-env-resolve '(("ZZ_SETUP_TEST_KEY" zz-setup-test-key)))
-                    '(("ZZ_SETUP_TEST_KEY" "zz-value")) "the agent gets the value")
-      (unbind-global! 'zz-setup-test-key)
-      (set! *custom-vars* old-vars)
-      (set! *agent-connectors* old-connectors))))
+    (with-stubs
+      (list (list '*custom-vars* *custom-vars*)
+            (list '*agent-connectors*
+                  '(("zz-keyed" (cmd "sh" env (("ZZ_SETUP_TEST_KEY" zz-setup-test-key)))))))
+      (lambda ()
+        (defcustom 'zz-setup-test-key #f "A test key." 'type 'secret 'env "ZZ_SETUP_TEST_KEY")
+        (let ((need (find (lambda (r) (equal? (plist-get r 'kind) 'secret))
+                          (setup-connector-requirements "zz-keyed"))))
+          (check-equal! (plist-get need 'secret) 'zz-setup-test-key "the declared secret")
+          (check-false! (plist-get need 'met) "unset, it is a question")
+          (check-contains! (list-ref (assoc "zz-keyed" (setup-inference-scan)) 3)
+                           "ZZ_SETUP_TEST_KEY" "the card names it"))
+        (set-symbol-value! 'zz-setup-test-key "zz-value")
+        (check-true! (null? (setup--unmet (setup-connector-requirements "zz-keyed")))
+                     "set, nothing is missing")
+        (check-equal! (agent-env-resolve '(("ZZ_SETUP_TEST_KEY" zz-setup-test-key)))
+                      '(("ZZ_SETUP_TEST_KEY" "zz-value")) "the agent gets the value")
+        (unbind-global! 'zz-setup-test-key)))))
 
 ;; Boot must leave the ACP default in place. setup.scm loads before this
 ;; test runs, so this reads the value its load-time form produced.
@@ -186,44 +179,37 @@
 (deftest 'agent-connector-command-has-a-per-user-override
   "a nonstandard adapter install can replace one connector command"
   (lambda ()
-    (let ((old agent-connector-command-overrides))
-      (set! agent-connector-command-overrides
-        '(("deepseek" "zz-dsh --profile acp")))
-      (check-equal!
-        (plist-get (agent-resolve-config '(connector "deepseek")) 'cmd)
-        "zz-dsh --profile acp"
-        "the configured command")
-      (set! agent-connector-command-overrides old))))
+    (with-stub 'agent-connector-command-overrides
+      '(("deepseek" "zz-dsh --profile acp"))
+      (lambda ()
+        (check-equal!
+          (plist-get (agent-resolve-config '(connector "deepseek")) 'cmd)
+          "zz-dsh --profile acp"
+          "the configured command")))))
 
 (deftest 'setup-never-restores-an-unavailable-default
   "missing connectors stay visible in the scan but cannot become the default"
   (lambda ()
-    (let ((old-connectors *agent-connectors*)
-          (old-saved setup-default-connector)
-          (old-default *default-connector*))
-      (set! *agent-connectors*
-        '(("zz-missing" (cmd "zz-compos-missing-adapter"))
-          ("gemini-nano" (backend "chrome-gemini-nano"))))
-      (set! setup-default-connector "zz-missing")
-      (set! *default-connector* "zz-missing")
-      (let ((missing (assoc "zz-missing" (setup-inference-scan))))
-        (check-true! missing "the missing connector is reported")
-        (check-false! (list-ref missing 2) "the missing connector is unavailable"))
-      (setup-apply-default-connector!)
-      (check-equal! *default-connector* "gemini-nano"
-                    "the first runnable connector is the fallback")
-      (set! *agent-connectors* old-connectors)
-      (set! setup-default-connector old-saved)
-      (set! *default-connector* old-default))))
+    (with-stubs
+      (list (list '*agent-connectors*
+                  '(("zz-missing" (cmd "zz-compos-missing-adapter"))
+                    ("gemini-nano" (backend "chrome-gemini-nano"))))
+            (list 'setup-default-connector "zz-missing")
+            (list '*default-connector* "zz-missing"))
+      (lambda ()
+        (let ((missing (assoc "zz-missing" (setup-inference-scan))))
+          (check-true! missing "the missing connector is reported")
+          (check-false! (list-ref missing 2) "the missing connector is unavailable"))
+        (setup-apply-default-connector!)
+        (check-equal! *default-connector* "gemini-nano"
+                      "the first runnable connector is the fallback")))))
 
 ;;; --- install a coding agent ----------------------------------------------------
 
 (define (setup-test--with-present present fn)
-  (let ((old setup--program-present?))
-    (set! setup--program-present? (lambda (program) (and (member program present) #t)))
-    (let ((result (fn)))
-      (set! setup--program-present? old)
-      result)))
+  (with-stub 'setup--program-present?
+    (lambda (program) (and (member program present) #t))
+    fn))
 
 (deftest 'an-agent-install-runs-only-the-missing-steps
   "a program already on PATH is not installed again"
@@ -270,14 +256,13 @@
 (deftest 'a-setup-page-opens-rendered
   "a setup document opens in preview-mode, not as Markdown source"
   (lambda ()
-    (let ((here (current-buffer))
-          (old setup-bot-silent-mode))
-      (set! setup-bot-silent-mode #f)
-      (when (buffer-exists? *setup-buffer*) (buffer-kill! *setup-buffer*))
-      (run-command "setup-welcome")
-      (check-true! (minor-mode-on? *setup-buffer* "preview-mode") "preview-mode is on")
-      (check-equal! (buffer-local *setup-buffer* 'preview-renderer) "markdown" "the renderer")
-      (set! setup-bot-silent-mode old)
+    (let ((here (current-buffer)))
+      (with-stub 'setup-bot-silent-mode #f
+        (lambda ()
+          (when (buffer-exists? *setup-buffer*) (buffer-kill! *setup-buffer*))
+          (run-command "setup-welcome")
+          (check-true! (minor-mode-on? *setup-buffer* "preview-mode") "preview-mode is on")
+          (check-equal! (buffer-local *setup-buffer* 'preview-renderer) "markdown" "the renderer")))
       (buffer-kill! *setup-buffer*)
       (switch-to-buffer! here))))
 

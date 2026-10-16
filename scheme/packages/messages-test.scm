@@ -7,19 +7,20 @@
   "message records its level, source buffer, and source group"
   (lambda ()
     (messages-clear!)
-    (let* ((buf "*messages-test-source*")
-           (group (group-record-create! "messages-test-group")))
-      (buffer-create buf)
-      (buffer-add-group! buf group)
-      (with-current-buffer buf
-        (lambda () (message "structured warning" 'warning)))
-      (let ((row (car (messages-events))))
-        (check-equal! (plist-get row 'level) "warning" "the row keeps its level")
-        (check-equal! (plist-get row 'source) buf "the row keeps its source buffer")
-        (check-equal! (plist-get row 'group) "messages-test-group"
-                      "the row keeps its source group"))
-      (buffer-kill! buf)
-      (group-dissolve! group))))
+    (with-fresh-group "messages-test-group"
+      (lambda (group)
+        (let ((buf "*messages-test-source*"))
+          (buffer-create buf)
+          (buffer-add-group! buf group)
+          (with-current-buffer buf
+            (lambda () (message "structured warning" 'warning)))
+          (let ((row (car (messages-events))))
+            (check-equal! (plist-get row 'level) "warning" "the row keeps its level")
+            (check-equal! (plist-get row 'source) buf "the row keeps its source buffer")
+            (check-equal! (plist-get row 'group) "messages-test-group"
+                          "the row keeps its source group"))
+          (buffer-kill! buf)
+          (group-dissolve! group))))))
 
 (deftest 'view-messages-builds-the-emacs-named-list
   "view-messages gives most space to the colored message"

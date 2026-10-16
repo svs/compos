@@ -202,6 +202,7 @@ defmodule Compos.PresetTest do
         (buffer-append! "#{buf}" "q\n\nanswer\nnext")
         (buffer-set-local! "#{buf}" 'llm-connector "codex-app-server")
         (buffer-set-local! "#{buf}" 'llm-responses '((3 9)))
+        (migrate-buffer! "#{buf}")
         (buffer-set-local! "#{buf}" 'test-wire
           (llm-mode--wire-text "#{buf}" (buffer-text "#{buf}"))))])
 

@@ -176,11 +176,9 @@
 (deftest 'the-repl-can-be-turned-off
   "with chat-scheme-input #f every input is a message again"
   (lambda ()
-    (let ((saved chat-scheme-input))
-      (customize-set! 'chat-scheme-input #f)
-      (check-false! (chat-scheme-input? "(+ 1 2)") "nothing runs locally")
-      (customize-set! 'chat-scheme-input saved)
-      (check-true! (chat-scheme-input? "(+ 1 2)") "and it comes back"))))
+    (with-custom 'chat-scheme-input #f
+      (lambda () (check-false! (chat-scheme-input? "(+ 1 2)") "nothing runs locally")))
+    (check-true! (chat-scheme-input? "(+ 1 2)") "and it comes back")))
 
 (deftest 'prompt-history-belongs-to-its-chat
   "a chat is its own session: the chat next door reaches none of it"

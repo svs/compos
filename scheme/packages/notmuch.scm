@@ -114,16 +114,12 @@ when a message has no text/plain part." 'group 'notmuch)
                            " ) and " filter)))))
 
 (define (nm--query-base-of buf)
-  (let ((base (buffer-local buf 'notmuch-query-base)))
-    (if base
-        base
-        ;; Migrate a buffer saved before the query stack became authoritative.
-        (let ((legacy (or (buffer-local buf 'notmuch-query)
-                          notmuch-default-query)))
-          (buffer-set-local! buf 'notmuch-query-base legacy)
-          (buffer-set-local! buf 'notmuch-query-filters '())
-          (buffer-set-local! buf 'notmuch-query #f)
-          legacy))))
+  (or (buffer-local buf 'notmuch-query-base)
+      ;; a buffer with no base yet searches the default
+      (let ((base notmuch-default-query))
+        (buffer-set-local! buf 'notmuch-query-base base)
+        (buffer-set-local! buf 'notmuch-query-filters '())
+        base)))
 
 (define (nm--query-filters-of buf)
   (or (buffer-local buf 'notmuch-query-filters) '()))
@@ -136,9 +132,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (buffer-set-local! buf 'notmuch-selection #f)
   (buffer-set-local! buf 'notmuch-query-base query)
   (buffer-set-local! buf 'notmuch-query-filters '())
-  (buffer-set-local! buf 'notmuch-query-positions '())
-  ;; Keep a restored legacy local inert. The stack now owns the query.
-  (buffer-set-local! buf 'notmuch-query #f))
+  (buffer-set-local! buf 'notmuch-query-positions '()))
 
 (define (nm--query-push! buf term)
   (buffer-set-local! buf 'notmuch-selection #f)

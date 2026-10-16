@@ -241,20 +241,6 @@
         (customize-set! 'code-model saved)
         (t--cm-off! scratch)))))
 
-(deftest 'restore-minor-modes-re-runs-the-code-setup-once
-  "the reload path rebuilds the workspace from the surviving locals"
-  (lambda ()
-    (let ((buf (t--cm-on!)))
-      (buffer-set-local! buf 'chat-presets '(compos project))
-      (restore-minor-modes! buf)
-      (let ((modes (buffer-local buf 'minor-modes)))
-        (check-true! (member "code-mode" modes) "code-mode is back")
-        (check-true! (member "llm-mode" modes) "and llm-mode with it")
-        (check-equal! (length modes) 2 "and nothing else"))
-      (check-true! (buffer-group buf) "the group is back")
-      (check-equal! (buffer-local buf 'modeline-info) "code · compos" "and the modeline"))
-    (t--cm-off!)))
-
 
 ;;; --- the worktree prompt ---------------------------------------------------------
 

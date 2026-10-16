@@ -213,28 +213,6 @@
 
 ;;; --- the cache ----------------------------------------------------------------
 
-(deftest 'a-wake-redraws-the-saved-page-without-fetching
-  "the mode setup re-runs on restore and on preview"
-  (lambda ()
-    (let ((fetches 0))
-      (t--web-with-fetch
-        (lambda (url want k)
-          (set! fetches (+ fetches 1))
-          (k (list want "hello [x](https://a.test/)\n" #f)))
-        (lambda ()
-          (let ((buf (browse "https://site.test/")))
-            (check-equal! fetches 1 "the first open fetches")
-
-            (with-current-buffer buf (lambda () (set-mode! "browse-mode")))
-            (check-equal! fetches 1 "a fresh page wakes without a fetch")
-            (check-contains! (buffer-text buf) "hello" "and still reads")
-
-            ;; past the TTL the wake refetches
-            (buffer-set-local! buf 'cache-time (- (current-time) 999999))
-            (with-current-buffer buf (lambda () (set-mode! "browse-mode")))
-            (check-equal! fetches 2 "a stale page fetches again")))))
-    (t--web-kill-tabs!)))
-
 (deftest 'a-failed-refetch-keeps-the-page
   "the copy we hold serves; an empty view is worse than an old one"
   (lambda ()
@@ -653,20 +631,19 @@
 ;;; --- the history file -----------------------------------------------------------
 
 (deftest 'the-history-file-keeps-url-title-and-time-newest-first
-  "one line per page; a forgotten page is gone; the old shape still reads"
+  "one line per page; a forgotten page is gone"
   (lambda ()
     (t--web-with-fetch
       (lambda (url want k) (k (list want (t--web-pages url) #f)))
       (lambda ()
-        (write-file! *web-visited-file* "https://old.test/a Old page\n")
+        (write-file! *web-visited-file* "https://old.test/a\t0\tOld page\n")
         (browse "https://site.test/index.html")
         (let ((rows (web--history)))
           (check-equal! (car (car rows)) "https://site.test/index.html" "newest first")
           (check-equal! (nth 1 (car rows)) "Front page" "with its title")
           (check-true! (> (nth 2 (car rows)) 0) "and its time")
           (check-equal! (nth 1 rows) (list "https://old.test/a" "Old page" 0)
-                        "an old line reads with no time"))
-        (check-contains! (read-file *web-visited-file*) "\t" "the file rewrites in the new shape")
+                        "the earlier page follows"))
         (web--forget-visit! "https://site.test/index.html")
         (check-false! (assoc "https://site.test/index.html" (web--history))
                       "the page is forgotten")

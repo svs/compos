@@ -28,6 +28,23 @@ loads.
 A local hook lives on the current buffer and runs before the global
 list. The local table lives in Scheme, keyed by buffer name.
 
+A keyed hook, `(add-hook! '(block-click diff) FN)`, holds one function
+per key, and the same key replaces, so a reload stacks nothing. Since
+2026-10-16 the keyed functions live in the registry table `(hook HOOK)`,
+with the mode table, the annotators and every package registry
+(`registry-register!`, `registry-lookup`, `registry-forget!`,
+`registry-list`). Before that they lived in `*keyed-hooks*`.
+
+A store that a kernel reload moves needs a one-shot carry-over beside
+the new readers: a reload of editor.scm into a running daemon redefines
+the readers to the new store while the old global still holds every
+entry, and until something moves them nothing runs. On 2026-10-16 that
+emptied agent-turn-end, block-click, preview-link, display-action and
+context-provider at once. `hook--carry-keyed!` is the pattern: when the
+old global is bound and non-empty, register each entry into the new
+store, then set the old global to `'()` so a second load moves nothing
+twice. registry-test.scm checks it.
+
 ## The hooks the editor runs
 
 | hook | arguments | when |

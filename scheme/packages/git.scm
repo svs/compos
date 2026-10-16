@@ -151,39 +151,8 @@
         'stage-file git--stage-file
         'stage-hunk git--stage-hunk))
 
-;; legacy: buffers saved before the backend split carry 'git-* locals and
-;; the mode names "git-diff" / "git-show" — upgrade and hand over
-(define (git--upgrade-locals! buf)
-  (unless (buffer-local buf 'diff-backend)
-    (buffer-set-local! buf 'diff-backend "git")
-    (when (buffer-local buf 'git-root)
-      (buffer-set-local! buf 'diff-root (buffer-local buf 'git-root)))
-    (buffer-set-local! buf 'diff-scope (or (buffer-local buf 'git-prefix) ""))
-    (when (buffer-local buf 'git-watch)
-      (buffer-set-local! buf 'diff-watch #t))))
-
-(mode-icon! "git-diff" "")
-
-(define-mode "git-diff"
-  (lambda ()
-    (git--upgrade-locals! (current-buffer))
-    (set-mode! "diff-mode")))
-
-(mode-icon! "git-show" "")
-
-(define-mode "git-show"
-  (lambda ()
-    (git--upgrade-locals! (current-buffer))
-    (set-mode! "diff-show")))
-
-;; Both are compatibility shims, not modes you use. A desktop file written
-;; before the diff-backend split names them and carries the old `git-*`
-;; locals. The shim rewrites those locals and hands the buffer over. The
-;; `git-diff` COMMAND goes straight to diff-mode and never comes here.
-(mode-doc! "git-diff"
-  "An old name for `diff-mode`. The mode rewrites the locals of a buffer saved before the diff backends, then changes to `diff-mode`.")
-(mode-doc! "git-show"
-  "An old name for `diff-show`. The mode rewrites the locals of a buffer saved before the diff backends, then changes to `diff-show`.")
+;; a diff saved under the old mode names git-diff and git-show, with its
+;; 'git-* locals, is handed to the git backend once by migrations.scm
 
 ;; The directory the diff is about. The current buffer's directory when it
 ;; sits in a repository; otherwise the most recent buffer that does — M-x

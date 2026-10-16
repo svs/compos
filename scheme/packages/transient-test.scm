@@ -6,38 +6,36 @@
 (deftest 'llm-config-history-keeps-recent-distinct-setups
   "The LLM selector history is newest-first, distinct, and bounded"
   (lambda ()
-    (let ((saved *llm-config-history*))
-      (set! *llm-config-history* '())
-      (llm-config-remember! '(connector "api" model "default" effort "default"))
-      (llm-config-remember!
-        '(connector "codex-app-server" model "gpt-5.6-terra" effort "high"))
-      (llm-config-remember! '(connector "api" model "default" effort "default"))
-      (check-equal!
-        (map llm-bundle-connector *llm-config-history*)
-        '("api" "codex-app-server")
-        "a repeated setup moves to the front without a duplicate")
-      (set! *llm-config-history*
-        (map (lambda (c) (list 'connector c 'model "m" 'effort "e"))
-             '("c1" "c2" "c3" "c4" "c5" "c6" "c7" "c8" "c9" "c10")))
-      (llm-config-remember! '(connector "c11" model "m" effort "e"))
-      (check-equal! (length *llm-config-history*) llm-config-history-limit
-                    "a new setup drops the oldest entry")
-      (check-false! (member "c10" (map llm-bundle-connector *llm-config-history*))
-                    "the history removes its oldest entry")
-      (set! *llm-config-history* saved))))
+    (with-stub '*llm-config-history* '()
+      (lambda ()
+        (llm-config-remember! '(connector "api" model "default" effort "default"))
+        (llm-config-remember!
+          '(connector "codex-app-server" model "gpt-5.6-terra" effort "high"))
+        (llm-config-remember! '(connector "api" model "default" effort "default"))
+        (check-equal!
+          (map llm-bundle-connector *llm-config-history*)
+          '("api" "codex-app-server")
+          "a repeated setup moves to the front without a duplicate")
+        (set! *llm-config-history*
+          (map (lambda (c) (list 'connector c 'model "m" 'effort "e"))
+               '("c1" "c2" "c3" "c4" "c5" "c6" "c7" "c8" "c9" "c10")))
+        (llm-config-remember! '(connector "c11" model "m" effort "e"))
+        (check-equal! (length *llm-config-history*) llm-config-history-limit
+                      "a new setup drops the oldest entry")
+        (check-false! (member "c10" (map llm-bundle-connector *llm-config-history*))
+                      "the history removes its oldest entry")))))
 
 (deftest 'llm-config-history-separates-setups-by-their-tools
   "Two setups that differ only in their presets are two recent choices"
   (lambda ()
-    (let ((saved *llm-config-history*))
-      (set! *llm-config-history* '())
-      (llm-config-remember!
-        '(connector "api" model "default" effort "default" presets (compos)))
-      (llm-config-remember!
-        '(connector "api" model "default" effort "default" presets (compos web)))
-      (check-equal! (length *llm-config-history*) 2
-                    "the tool surface is part of what a choice IS")
-      (set! *llm-config-history* saved))))
+    (with-stub '*llm-config-history* '()
+      (lambda ()
+        (llm-config-remember!
+          '(connector "api" model "default" effort "default" presets (compos)))
+        (llm-config-remember!
+          '(connector "api" model "default" effort "default" presets (compos web)))
+        (check-equal! (length *llm-config-history*) 2
+                      "the tool surface is part of what a choice IS")))))
 
 (deftest 'llm-config-history-reads-its-old-three-part-entries
   "A history saved before presets still recalls what it did record"
@@ -69,44 +67,43 @@
 (deftest 'llm-bundles-are-named-and-replaceable
   "A named bundle is saved by name, replaced by name, and forgotten by name"
   (lambda ()
-    (let ((saved *llm-bundles*))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-work" '(connector "api" model "m1" effort "high"))
-      (llm-bundle-save! "zz-read" '(connector "claude-code" model "haiku"))
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
-                    "the first bundle gets the first free key")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
-                    "the next bundle gets a different key")
-      (set! *llm-bundles* (llm-bundles-assign-keys (reverse *llm-bundles*)))
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
-                    "loading persisted bundles preserves their keys")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
-                    "persisted keys do not depend on list order")
-      (set! *llm-bundles*
-        (llm-bundles-assign-keys
-          (map (lambda (b) (llm-bundle-put b 'key "A")) *llm-bundles*)))
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
-                    "an upper-case key from the first menu is reassigned")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
-                    "in list order")
-      (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m1"
-                    "a bundle answers to its name")
-      (llm-bundle-save! "zz-work" '(connector "api" model "m2" effort "high"))
-      (check-equal! (length *llm-bundles*) 2
-                    "saving over a name replaces that bundle")
-      (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m2"
-                    "the newer setup is the one kept")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
-                    "updating and moving a bundle never changes its key")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
-                    "reordering another bundle never changes this key")
-      (llm-bundle-forget! "zz-work")
-      (check-false! (llm-bundle-named "zz-work") "a forgotten bundle is gone")
-      (check-true! (and (llm-bundle-named "zz-read") #t)
-                   "and the others are not")
-      (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
-                    "forgetting another bundle does not compact this key")
-      (set! *llm-bundles* saved))))
+    (with-stub '*llm-bundles* '()
+      (lambda ()
+        (llm-bundle-save! "zz-work" '(connector "api" model "m1" effort "high"))
+        (llm-bundle-save! "zz-read" '(connector "claude-code" model "haiku"))
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                      "the first bundle gets the first free key")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                      "the next bundle gets a different key")
+        (set! *llm-bundles* (llm-bundles-assign-keys (reverse *llm-bundles*)))
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                      "loading persisted bundles preserves their keys")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                      "persisted keys do not depend on list order")
+        (set! *llm-bundles*
+          (llm-bundles-assign-keys
+            (map (lambda (b) (llm-bundle-put b 'key "A")) *llm-bundles*)))
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                      "an upper-case key from the first menu is reassigned")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                      "in list order")
+        (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m1"
+                      "a bundle answers to its name")
+        (llm-bundle-save! "zz-work" '(connector "api" model "m2" effort "high"))
+        (check-equal! (length *llm-bundles*) 2
+                      "saving over a name replaces that bundle")
+        (check-equal! (llm-bundle-model (llm-bundle-named "zz-work")) "m2"
+                      "the newer setup is the one kept")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-work")) "a"
+                      "updating and moving a bundle never changes its key")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                      "reordering another bundle never changes this key")
+        (llm-bundle-forget! "zz-work")
+        (check-false! (llm-bundle-named "zz-work") "a forgotten bundle is gone")
+        (check-true! (and (llm-bundle-named "zz-read") #t)
+                     "and the others are not")
+        (check-equal! (llm-bundle-key (llm-bundle-named "zz-read")) "b"
+                      "forgetting another bundle does not compact this key")))))
 
 ;;; C-c b is one pane: the presets, the box, and the save actions. These
 ;;; tests drive the menu through its commands on a plain buffer, whose
@@ -137,218 +134,204 @@
 (deftest 'llm-config-menu-is-presets-left-config-right
   "C-c b: the presets in the left column, the config of the chosen one in the right"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (more (frame-local 'llm-config-more))
-          (buf (llm-config-test--buf "zz-llm-config-groups" "m1")))
-      (set! *llm-bundles* '())
-      (set-frame-local! 'llm-config-more #f)
-      (llm-bundle-save! "zz-review" '(connector "api" model "m" effort "high"))
-      (llm-config--setup! buf)
-      (let* ((groups (llm-config--groups buf))
-             (presets (cdr (assoc "Presets" groups))))
-        (check-equal! (map (lambda (i) (plist-get i 'description)) presets)
-                      '("this chat" "zz-review")
-                      "a chat on no preset is a row of its own, then the presets")
-        (check-equal! (map (lambda (i) (plist-get i 'key)) presets) '("" "")
-                      "a preset takes no key: typing filters the list")
-        (check-equal! (car (cadr groups)) "this chat · config"
-                      "the right column says whose config it shows")
-        (check-equal! (map (lambda (i) (plist-get i 'key)) (cdr (cadr groups)))
-                      '("b" "m" "e" "p" "+")
-                      "the config holds backend, model, effort, tools, and more")
-        (check-equal! (llm-config--columns buf)
-                      '(("Presets") ("this chat · config" "More"))
-                      "presets on the left, the config on the right"))
-      (set-frame-local! 'llm-config-more #t)
-      (check-true! (and (assoc "More" (llm-config--groups buf)) #t)
-                   "+ shows the third tier")
-      (set-frame-local! 'llm-config-more more)
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stub '*llm-bundles* '()
+      (lambda ()
+        (let ((more (frame-local 'llm-config-more))
+              (buf (llm-config-test--buf "zz-llm-config-groups" "m1")))
+          (set-frame-local! 'llm-config-more #f)
+          (llm-bundle-save! "zz-review" '(connector "api" model "m" effort "high"))
+          (llm-config--setup! buf)
+          (let* ((groups (llm-config--groups buf))
+                 (presets (cdr (assoc "Presets" groups))))
+            (check-equal! (map (lambda (i) (plist-get i 'description)) presets)
+                          '("this chat" "zz-review")
+                          "a chat on no preset is a row of its own, then the presets")
+            (check-equal! (map (lambda (i) (plist-get i 'key)) presets) '("" "")
+                          "a preset takes no key: typing filters the list")
+            (check-equal! (car (cadr groups)) "this chat · config"
+                          "the right column says whose config it shows")
+            (check-equal! (map (lambda (i) (plist-get i 'key)) (cdr (cadr groups)))
+                          '("b" "m" "e" "p" "+")
+                          "the config holds backend, model, effort, tools, and more")
+            (check-equal! (llm-config--columns buf)
+                          '(("Presets") ("this chat · config" "More"))
+                          "presets on the left, the config on the right"))
+          (set-frame-local! 'llm-config-more #t)
+          (check-true! (and (assoc "More" (llm-config--groups buf)) #t)
+                       "+ shows the third tier")
+          (set-frame-local! 'llm-config-more more)
+          (buffer-kill! buf))))))
 
 (deftest 'llm-config-field-edit-changes-only-the-box
   "A field edit changes the config on screen, shows the old value, and leaves the chat alone"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (buf (llm-config-test--buf "zz-llm-config-box" "m1")))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-base" (llm-config-combination buf))
-      (llm-config--setup! buf)
-      (check-equal! (llm-config--source-name) "zz-base"
-                    "the menu opens on the preset the chat equals")
-      (check-equal! (llm-config--subtitle buf) "selected: zz-base · ESC gives it to the chat"
-                    "the status line names the selection")
-      (llm-config--box-set! 'model "m9")
-      (check-equal! (buffer-local buf 'llm-model) "m1"
-                    "the chat keeps its model while the menu is open")
-      (check-equal! (llm-config--field-value 'model) "m1 → m9"
-                    "the row shows the saved value and the new one")
-      (check-equal! ((plist-get (llm-config-test--key "m" buf) 'flags-fn) buf) "drift"
-                    "and carries the drift flag")
-      (check-contains! (llm-config--subtitle buf) "zz-base*"
-                       "the status line says the selection has unsaved changes")
-      (check-equal! (llm-config--config-title) "zz-base* · config"
-                    "and so does the config column")
-      (check-equal! (plist-get (llm-config-test--named "zz-base" buf) 'description) "zz-base*"
-                    "the preset row says it has unsaved changes")
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stub '*llm-bundles* '()
+      (lambda ()
+        (let ((buf (llm-config-test--buf "zz-llm-config-box" "m1")))
+          (llm-bundle-save! "zz-base" (llm-config-combination buf))
+          (llm-config--setup! buf)
+          (check-equal! (llm-config--source-name) "zz-base"
+                        "the menu opens on the preset the chat equals")
+          (check-equal! (llm-config--subtitle buf) "selected: zz-base · ESC gives it to the chat"
+                        "the status line names the selection")
+          (llm-config--box-set! 'model "m9")
+          (check-equal! (buffer-local buf 'llm-model) "m1"
+                        "the chat keeps its model while the menu is open")
+          (check-equal! (llm-config--field-value 'model) "m1 → m9"
+                        "the row shows the saved value and the new one")
+          (check-equal! ((plist-get (llm-config-test--key "m" buf) 'flags-fn) buf) "drift"
+                        "and carries the drift flag")
+          (check-contains! (llm-config--subtitle buf) "zz-base*"
+                           "the status line says the selection has unsaved changes")
+          (check-equal! (llm-config--config-title) "zz-base* · config"
+                        "and so does the config column")
+          (check-equal! (plist-get (llm-config-test--named "zz-base" buf) 'description) "zz-base*"
+                        "the preset row says it has unsaved changes")
+          (buffer-kill! buf))))))
 
 (deftest 'llm-config-esc-and-c-g-both-apply-the-selection
   "Closing the menu gives the selected config to the chat, by ESC or by C-g"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (history *llm-config-history*)
-          (buf (llm-config-test--buf "zz-llm-config-close" "m1")))
-      (set! *llm-bundles* '())
-      (with-current-buffer buf
-        (lambda ()
-          (transient-setup "llm-configure" buf)
-          (llm-config--box-set! 'model "m2")
-          (run-command "transient-cancel-one")))
-      (check-equal! (buffer-local buf 'llm-model) "m2" "C-g applies the selection")
-      (check-false! (transient--active) "and closes the menu")
-      (with-current-buffer buf
-        (lambda ()
-          (transient-setup "llm-configure" buf)
-          (llm-config--box-set! 'model "m3")
-          (run-command "transient-quit-one")))
-      (check-equal! (buffer-local buf 'llm-model) "m3" "ESC applies it too")
-      (check-false! (frame-local 'llm-config-box) "and the box is gone")
-      (set! *llm-bundles* saved)
-      (set! *llm-config-history* history)
-      (buffer-kill! buf))))
+    (with-stubs (list (list '*llm-bundles* '())
+                      (list '*llm-config-history* *llm-config-history*))
+      (lambda ()
+        (let ((buf (llm-config-test--buf "zz-llm-config-close" "m1")))
+          (with-current-buffer buf
+            (lambda ()
+              (transient-setup "llm-configure" buf)
+              (llm-config--box-set! 'model "m2")
+              (run-command "transient-cancel-one")))
+          (check-equal! (buffer-local buf 'llm-model) "m2" "C-g applies the selection")
+          (check-false! (transient--active) "and closes the menu")
+          (with-current-buffer buf
+            (lambda ()
+              (transient-setup "llm-configure" buf)
+              (llm-config--box-set! 'model "m3")
+              (run-command "transient-quit-one")))
+          (check-equal! (buffer-local buf 'llm-model) "m3" "ESC applies it too")
+          (check-false! (frame-local 'llm-config-box) "and the box is gone")
+          (buffer-kill! buf))))))
 
 (deftest 'llm-config-cursor-shows-a-preset-and-keeps-its-draft
   "The cursor on a preset shows its config; an edit stays with that preset; s overwrites it"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (buf (llm-config-test--buf "zz-llm-config-load" "m1")))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-other" '(connector "api" model "m2" effort "default"))
-      (llm-config--setup! buf)
-      (check-false! (llm-config--source-name) "no preset equals the chat")
-      (llm-config--on-select buf (llm-config-test--named "zz-other" buf))
-      (check-equal! (llm-config--box-get 'model) "m2" "the cursor shows the preset's config")
-      (check-false! (llm-config--selected-name) "and selects nothing")
-      (llm-config--box-set! 'effort "high")
-      (llm-config--on-select buf (llm-config-test--named "this chat" buf))
-      (check-equal! (llm-config--box-get 'model) "m1" "the chat's own row shows the chat")
-      (llm-config--on-select buf (llm-config-test--named "zz-other" buf))
-      (check-equal! (llm-config--box-get 'effort) "high"
-                    "coming back to the preset finds its unsaved edit")
-      (run-command "llm-config-revert")
-      (check-equal! (llm-config--box-get 'effort) "default" "u undoes the edit")
-      (llm-config--box-set! 'effort "high")
-      (run-command "llm-config-save-into")
-      (check-equal! (llm-bundle-effort (llm-bundle-named "zz-other")) "high"
-                    "s overwrites the preset")
-      (set-frame-local! 'llm-config-box #f)
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stub '*llm-bundles* '()
+      (lambda ()
+        (let ((buf (llm-config-test--buf "zz-llm-config-load" "m1")))
+          (llm-bundle-save! "zz-other" '(connector "api" model "m2" effort "default"))
+          (llm-config--setup! buf)
+          (check-false! (llm-config--source-name) "no preset equals the chat")
+          (llm-config--on-select buf (llm-config-test--named "zz-other" buf))
+          (check-equal! (llm-config--box-get 'model) "m2" "the cursor shows the preset's config")
+          (check-false! (llm-config--selected-name) "and selects nothing")
+          (llm-config--box-set! 'effort "high")
+          (llm-config--on-select buf (llm-config-test--named "this chat" buf))
+          (check-equal! (llm-config--box-get 'model) "m1" "the chat's own row shows the chat")
+          (llm-config--on-select buf (llm-config-test--named "zz-other" buf))
+          (check-equal! (llm-config--box-get 'effort) "high"
+                        "coming back to the preset finds its unsaved edit")
+          (run-command "llm-config-revert")
+          (check-equal! (llm-config--box-get 'effort) "default" "u undoes the edit")
+          (llm-config--box-set! 'effort "high")
+          (run-command "llm-config-save-into")
+          (check-equal! (llm-bundle-effort (llm-bundle-named "zz-other")) "high"
+                        "s overwrites the preset")
+          (set-frame-local! 'llm-config-box #f)
+          (buffer-kill! buf))))))
 
 (deftest 'llm-config-ret-selects-and-esc-applies-the-selection
   "RET on a preset selects it; ESC gives the selected config to the chat, not the one under the cursor"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (history *llm-config-history*)
-          (buf (llm-config-test--buf "zz-llm-config-select" "m1")))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-a" '(connector "api" model "ma" effort "default"))
-      (llm-bundle-save! "zz-b" '(connector "api" model "mb" effort "default"))
-      (with-current-buffer buf
-        (lambda ()
-          (transient-setup "llm-configure" buf)
-          ((plist-get (llm-config-test--named "zz-a" buf) 'command))
-          (check-equal! (llm-config--selected-name) "zz-a" "RET selects the row")
-          (check-equal! ((plist-get (llm-config-test--named "zz-a" buf) 'value-fn) buf) "selected"
-                        "and the row says selected")
-          (llm-config--on-select buf (llm-config-test--named "zz-b" buf))
-          (run-command "transient-quit-one")))
-      (check-equal! (buffer-local buf 'llm-model) "ma"
-                    "ESC applies the selected preset, not the one under the cursor")
-      (set! *llm-bundles* saved)
-      (set! *llm-config-history* history)
-      (buffer-kill! buf))))
+    (with-stubs (list (list '*llm-bundles* '())
+                      (list '*llm-config-history* *llm-config-history*))
+      (lambda ()
+        (let ((buf (llm-config-test--buf "zz-llm-config-select" "m1")))
+          (llm-bundle-save! "zz-a" '(connector "api" model "ma" effort "default"))
+          (llm-bundle-save! "zz-b" '(connector "api" model "mb" effort "default"))
+          (with-current-buffer buf
+            (lambda ()
+              (transient-setup "llm-configure" buf)
+              ((plist-get (llm-config-test--named "zz-a" buf) 'command))
+              (check-equal! (llm-config--selected-name) "zz-a" "RET selects the row")
+              (check-equal! ((plist-get (llm-config-test--named "zz-a" buf) 'value-fn) buf) "selected"
+                            "and the row says selected")
+              (llm-config--on-select buf (llm-config-test--named "zz-b" buf))
+              (run-command "transient-quit-one")))
+          (check-equal! (buffer-local buf 'llm-model) "ma"
+                        "ESC applies the selected preset, not the one under the cursor")
+          (buffer-kill! buf))))))
 
 (deftest 'llm-config-typing-filters-the-presets
   "In the preset column a printable key filters the list; DEL takes it back"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (buf (llm-config-test--buf "zz-llm-config-filter" "m1")))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-coding" '(connector "api" model "ma"))
-      (llm-bundle-save! "zz-writing" '(connector "api" model "mb"))
-      (with-current-buffer buf
-        (lambda ()
-          (transient-setup "llm-configure" buf)
-          (check-equal! (transient-dispatch-key "d")
-                        (list "command" (llm-config--filter-command "d"))
-                        "on the preset column a letter types into the filter")
-          (run-command (llm-config--filter-command "d"))
-          (check-equal! (map (lambda (i) (plist-get i 'description))
-                             (cdr (car (llm-config--groups buf))))
-                        '("zz-coding")
-                        "the list keeps the names that hold the filter")
-          (check-equal! (car (car (llm-config--groups buf))) "Presets · d"
-                        "and the column title shows it")
-          (run-command "llm-config-filter-back")
-          (check-equal! (length (cdr (car (llm-config--groups buf)))) 3
-                        "DEL takes the character back")
-          (run-command "transient-column-right")
-          (check-equal! (transient-dispatch-key "m")
-                        (list "command" "transient:llm-configure:m")
-                        "in the config column the letters are the fields")
-          (run-command "transient-cancel-one")))
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stub '*llm-bundles* '()
+      (lambda ()
+        (let ((buf (llm-config-test--buf "zz-llm-config-filter" "m1")))
+          (llm-bundle-save! "zz-coding" '(connector "api" model "ma"))
+          (llm-bundle-save! "zz-writing" '(connector "api" model "mb"))
+          (with-current-buffer buf
+            (lambda ()
+              (transient-setup "llm-configure" buf)
+              (check-equal! (transient-dispatch-key "d")
+                            (list "command" (llm-config--filter-command "d"))
+                            "on the preset column a letter types into the filter")
+              (run-command (llm-config--filter-command "d"))
+              (check-equal! (map (lambda (i) (plist-get i 'description))
+                                 (cdr (car (llm-config--groups buf))))
+                            '("zz-coding")
+                            "the list keeps the names that hold the filter")
+              (check-equal! (car (car (llm-config--groups buf))) "Presets · d"
+                            "and the column title shows it")
+              (run-command "llm-config-filter-back")
+              (check-equal! (length (cdr (car (llm-config--groups buf)))) 3
+                            "DEL takes the character back")
+              (run-command "transient-column-right")
+              (check-equal! (transient-dispatch-key "m")
+                            (list "command" "transient:llm-configure:m")
+                            "in the config column the letters are the fields")
+              (run-command "transient-cancel-one")))
+          (buffer-kill! buf))))))
 
 (deftest 'llm-default-bundle-seeds-a-new-chat
   "The bundle named in custom.scm lands on a chat that has no session yet"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (default llm-default-bundle)
-          (buf (test-buffer! "zz-llm-default" "")))
-      (set! *llm-bundles* '())
-      (llm-bundle-save! "zz-coding" '(connector "api" model "m9" effort "high"))
-      (set! llm-default-bundle "zz-coding")
-      (check-true! (and (llm-default-bundle-apply! buf) #t)
-                   "the named default applies")
-      (check-equal! (buffer-local buf 'agent-connector) "api"
-                    "the connector comes from the bundle")
-      (check-equal! (buffer-local buf 'agent-model) "m9"
-                    "the model comes from the bundle")
-      (check-equal! (buffer-local buf 'agent-effort) "high"
-                    "the effort comes from the bundle")
-      (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
-                    "zz-coding · default"
-                    "and the menu row says which preset new chats start with")
-      (set! llm-default-bundle "")
-      (check-false! (llm-default-bundle-apply! buf)
-                    "no name, nothing to apply")
-      (set! llm-default-bundle default)
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stubs (list (list '*llm-bundles* '())
+                      (list 'llm-default-bundle "zz-coding"))
+      (lambda ()
+        (let ((buf (test-buffer! "zz-llm-default" "")))
+          (llm-bundle-save! "zz-coding" '(connector "api" model "m9" effort "high"))
+          (check-true! (and (llm-default-bundle-apply! buf) #t)
+                       "the named default applies")
+          (check-equal! (buffer-local buf 'agent-connector) "api"
+                        "the connector comes from the bundle")
+          (check-equal! (buffer-local buf 'agent-model) "m9"
+                        "the model comes from the bundle")
+          (check-equal! (buffer-local buf 'agent-effort) "high"
+                        "the effort comes from the bundle")
+          (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
+                        "zz-coding · default"
+                        "and the menu row says which preset new chats start with")
+          (set! llm-default-bundle "")
+          (check-false! (llm-default-bundle-apply! buf)
+                        "no name, nothing to apply")
+          (buffer-kill! buf))))))
 
 (deftest 'llm-default-bundle-holds-a-whole-config
   "A default saved without a preset lands on a new chat, and a preset equal to it says default"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (default llm-default-bundle)
-          (buf (test-buffer! "zz-llm-default-config" "")))
-      (set! *llm-bundles* '())
-      (set! llm-default-bundle '(connector "api" model "m7" effort "low"))
-      (check-true! (and (llm-default-bundle-apply! buf) #t)
-                   "the saved config applies")
-      (check-equal! (buffer-local buf 'agent-model) "m7"
-                    "the model comes from the config")
-      (llm-bundle-save! "zz-same" '(connector "api" model "m7" effort "low"))
-      (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
-                    "zz-same · default"
-                    "a preset equal to the default says so")
-      (set! llm-default-bundle default)
-      (set! *llm-bundles* saved)
-      (buffer-kill! buf))))
+    (with-stubs (list (list '*llm-bundles* '())
+                      (list 'llm-default-bundle '(connector "api" model "m7" effort "low")))
+      (lambda ()
+        (let ((buf (test-buffer! "zz-llm-default-config" "")))
+          (check-true! (and (llm-default-bundle-apply! buf) #t)
+                       "the saved config applies")
+          (check-equal! (buffer-local buf 'agent-model) "m7"
+                        "the model comes from the config")
+          (llm-bundle-save! "zz-same" '(connector "api" model "m7" effort "low"))
+          (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
+                        "zz-same · default"
+                        "a preset equal to the default says so")
+          (buffer-kill! buf))))))
 
 (deftest 'transient-rows-can-skip-the-cursor-and-add-flags
   "A row with 'cursor 'skip keeps its key but never the cursor; 'flags-fn adds classes"

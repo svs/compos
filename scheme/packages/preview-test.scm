@@ -291,23 +291,6 @@
                         "reload leaves edit permission alone")))
       (buffer-kill! buf))))
 
-(deftest 'preview-mode-reapply-preserves-the-last-choice
-  "reload rebuilds an enabled preview and leaves a disabled preview off"
-  (lambda ()
-    (let ((buf (test-buffer! "zz-preview-reapply.html" "<p>hi</p>\n")))
-      (with-current-buffer buf
-        (lambda ()
-          (run-command "preview-mode")
-          (buffer-set-local! buf 'render-mode #f)
-          (restore-minor-modes! buf)
-          (check-equal! (buffer-local buf 'render-mode) "html"
-                        "reapply rebuilds the enabled preview")
-          (run-command "preview-mode")
-          (restore-minor-modes! buf)
-          (check-false! (buffer-local buf 'render-mode)
-                        "reapply leaves the disabled preview off")))
-      (buffer-kill! buf))))
-
 (deftest 'an-html-page-renders-as-html
   "an .html file takes the html renderer, not the markdown one"
   (lambda ()

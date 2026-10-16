@@ -72,3 +72,58 @@
 (define (t--lm-open!)
   (list-mode-show! "zz-list-contract-mode")
   (list-goto-first-entry t--lm-buf))
+
+(deftest 'a-move-previews-the-row-beside-the-list-and-takes-no-focus
+  "list-move-in! hands the row it lands on to the mode's preview; the row shows in another window, the list keeps its window and the selection, the recency ring does not move, no popup opens, and the next look takes the last look's window"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (t--lm-open!)
+        (let ((me (active-window))
+              (before (buffer-list-mru)))
+          (check-equal! (window-buffer me) t--lm-buf "the list has the selected window")
+          (list-move-in! t--lm-buf 1)
+          (check-equal! (car t--lm-previewed) "*zz-lc-b*" "the move previews the row it lands on")
+          (let ((slot (window-showing "*zz-lc-b*")))
+            (check-true! (and slot #t) "the row's buffer is on screen")
+            (check-false! (equal? slot me) "in another window, never the list's")
+            (check-equal! (active-window) me "the selection stayed on the list")
+            (check-equal! (window-buffer me) t--lm-buf "and the list kept its window")
+            (check-false! (float-open?) "no popup was opened")
+            (check-equal! (buffer-list-mru) before "a look is not a use: the ring did not move")
+            (let ((windows (length (window-list))))
+              (list-move-in! t--lm-buf 1)
+              (check-equal! (car t--lm-previewed) "*zz-lc-c*" "the next move previews the next row")
+              (check-equal! (window-showing "*zz-lc-c*") slot "in the window the last look had")
+              (check-false! (window-showing "*zz-lc-b*") "the last look is gone")
+              (check-equal! (length (window-list)) windows "and no window was added")
+              (check-equal! (active-window) me "the selection still rests on the list"))))))))
+
+(deftest 'q-takes-the-look-before-it-takes-the-list
+  "quit-window in the list dismisses the previewed row and leaves the list in hand; quit-window again leaves the list"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (t--lm-open!)
+        (list-move-in! t--lm-buf 1)
+        (check-true! (and (window-showing "*zz-lc-b*") #t) "a look is on screen")
+        (run-command "quit-window")
+        (check-false! (window-showing "*zz-lc-b*") "q took the look")
+        (check-true! (buffer-known? "*zz-lc-b*") "and the buffer, which was yours, stays")
+        (check-equal! (current-buffer) t--lm-buf "and left the list in hand")
+        (run-command "quit-window")
+        (check-false! (equal? (current-buffer) t--lm-buf) "q again leaves the list")))))
+
+(deftest 'a-visit-after-a-look-lands-in-the-looks-window
+  "the display chain reuses the window that shows the row: a visit lands there, the selection follows it, and the list keeps its own window"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (t--lm-open!)
+        (let ((me (active-window)))
+          (list-move-in! t--lm-buf 1)
+          (let ((slot (window-showing "*zz-lc-b*")))
+            (pop-to-buffer "*zz-lc-b*")
+            (check-equal! (current-buffer) "*zz-lc-b*" "the row is the buffer in hand")
+            (check-equal! (active-window) slot "in the window that showed the look")
+            (check-equal! (window-buffer me) t--lm-buf "and the list's window keeps the list")))))))

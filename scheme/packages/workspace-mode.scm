@@ -92,3 +92,72 @@
 (define (workspace-mode--scratch! spec buf)
   (when (and (plist-get spec 'scratch) (boundp 'scratch-refresh-llm!))
     (scratch-refresh-llm! buf)))
+
+(define (workspace-mode--restore! name buf)
+  (let* ((spec (workspace-mode--spec name))
+         (key (plist-get spec 'saved))
+         (alist (or (buffer-local buf key) '()))
+         (saved (workspace-mode--lookup alist)))
+    ((plist-get spec 'teardown) buf saved)
+    (for-each
+      (lambda (e)
+        (let ((k (workspace-mode--key e)))
+          (buffer-set-local! buf k
+            (if (assoc k alist) (saved k) (workspace-mode--default e)))))
+      (plist-get spec 'locals))
+    (for-each
+      (lambda (m)
+        (unless (saved (string->symbol m))
+          (when (minor-mode-on? buf m) (disable-minor-mode! buf m))))
+      (plist-get spec 'modes))
+    (buffer-set-local! buf key #f)
+    ((plist-get spec 'after) buf saved)
+    (workspace-mode--scratch! spec buf)))
+
+(define (workspace-mode--refuse! name buf)
+  (let ((spec (workspace-mode--spec name)))
+    (when (buffer-local buf (plist-get spec 'saved))
+      (workspace-mode--restore! name buf))
+    (buffer-set-local! buf 'minor-modes
+      (remove (lambda (n) (equal? n name))
+              (or (buffer-local buf 'minor-modes) '())))))
+
+;; The one funnel for enable, refresh and desktop restore. The snapshot is
+;; taken once: a re-run finds it in place and must not save the mode's own
+;; values over the user's.
+(define (workspace-mode-apply! name buf)
+  (let ((spec (workspace-mode--spec name)))
+    (if (not ((plist-get spec 'accepts?) buf))
+        (workspace-mode--refuse! name buf)
+        (let* ((key (plist-get spec 'saved))
+               (entering? (not (buffer-local buf key))))
+          (when entering?
+            (buffer-set-local! buf key (workspace-mode--snapshot spec buf)))
+          ((plist-get spec 'setup) buf entering?)
+          (workspace-mode--scratch! spec buf)))))
+
+(define (define-workspace-mode! name &rest opts)
+  (let ((spec
+          (list 'saved (workspace-mode--opt opts 'saved
+                         (string->symbol (string-append name "-saved")))
+                'locals (workspace-mode--opt opts 'locals '())
+                'modes (workspace-mode--opt opts 'modes '())
+                'remember (workspace-mode--opt opts 'remember '())
+                'accepts? (workspace-mode--opt opts 'accepts? (lambda (buf) #t))
+                'setup (workspace-mode--opt opts 'setup (lambda (buf entering?) #t))
+                'teardown (workspace-mode--opt opts 'teardown (lambda (buf saved) #t))
+                'after (workspace-mode--opt opts 'after (lambda (buf saved) #t))
+                'scratch (workspace-mode--opt opts 'scratch #f))))
+    (register-minor-mode! name
+      (lambda (buf) (workspace-mode-apply! name buf))
+      (lambda (buf) (workspace-mode--restore! name buf)))
+    (mode-put! name 'workspace spec)
+    name))
+
+(category! 'buffers)
+(public! 'define-workspace-mode!
+  "(define-workspace-mode! NAME OPTS...) — register a minor mode that saves the locals it declares, gives them back on exit, pushes its presets to the scratch, and re-runs its setup on restore without saving twice")
+(public! 'workspace-mode-apply!
+  "(workspace-mode-apply! NAME BUF) — run workspace mode NAME's setup on BUF again, keeping what the first enable saved")
+(public! 'workspace-mode-saved
+  "(workspace-mode-saved NAME BUF KEY) — what workspace mode NAME found in BUF under KEY before it changed it, or #f")

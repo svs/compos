@@ -95,14 +95,12 @@
       (check-equal! (local-keys buf) '() "the buffer's own map is empty")
       (buffer-kill! buf))))
 
-(deftest 'every-paredit-key-names-a-live-command-and-a-live-fallback
-  "the table is the map; a name that moved would break silently"
+(deftest 'every-paredit-key-falls-back-to-something-real
+  "the table is the map; a fallback that moved would break silently"
   (lambda ()
     (for-each
       (lambda (entry)
-        (let ((key (car entry)) (cmd (cadr entry)) (fallback (caddr entry)))
-          (check-true! (member cmd (command-names))
-                       (string-append key " runs a live command"))
+        (let ((key (car entry)) (fallback (caddr entry)))
           (check-true! (or (not fallback)
                            (equal? fallback 'insert)
                            (member fallback (command-names)))

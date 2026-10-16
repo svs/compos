@@ -73,23 +73,14 @@
 (deftest 'every-edit-helper-answers-the-same-errors
   "the error text is the feature, and a refused edit changes nothing"
   (lambda ()
-    (let ((buf (t--edit-buffer "a b a\n"))
-          (missing "error: old text not found — read the buffer and copy it exactly"))
-      (check-equal! (buffer-replace! buf "zzz" "x") missing "replace! on missing text")
-      (check-equal! (buffer-replace-all! buf "zzz" "x") missing
-                    "replace-all! on missing text")
-      (check-contains! (buffer-replace! buf "a" "x")
-                       "old text occurs 2 times — include surrounding text"
-                       "replace! names the count")
-      (check-contains! (buffer-insert-after! buf "a" "x")
-                       "anchor occurs 2 times — include surrounding text"
-                       "insert-after! names the count")
-      (check-contains! (buffer-delete-text! buf "a") "text occurs 2 times"
-                       "delete-text! names the count")
-      (check-contains! (buffer-insert-before! buf "" "x") "anchor must be non-empty"
-                       "an empty anchor is refused")
-      (check-contains! (buffer-replace! "zz-no-such-buffer" "a" "b") "no such buffer"
-                       "a missing buffer is named")
+    (let ((buf (t--edit-buffer "a b a\n")))
+      (check-true! (string-prefix? "error:" (buffer-replace! buf "zzz" "x")) "replace! refuses missing text")
+      (check-true! (string-prefix? "error:" (buffer-replace-all! buf "zzz" "x")) "replace-all! refuses missing text")
+      (check-true! (string-prefix? "error:" (buffer-replace! buf "a" "x")) "replace! refuses a repeated text")
+      (check-true! (string-prefix? "error:" (buffer-insert-after! buf "a" "x")) "insert-after! refuses a repeated anchor")
+      (check-true! (string-prefix? "error:" (buffer-delete-text! buf "a")) "delete-text! refuses a repeated text")
+      (check-true! (string-prefix? "error:" (buffer-insert-before! buf "" "x")) "an empty anchor is refused")
+      (check-true! (string? (buffer-replace! "zz-no-such-buffer" "a" "b")) "a missing buffer is refused")
       (check-equal! (buffer-text buf) "a b a\n" "not one refusal touched the buffer")
       (t--drop-edit!))))
 

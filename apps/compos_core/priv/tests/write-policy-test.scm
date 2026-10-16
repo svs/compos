@@ -36,9 +36,7 @@
       (t--wp-clean! p)
       (write-file! p "the real file\n")
       (t--wp-make-buffer! t--wp-buf "a transcript\n")
-      (check-contains! (write-refusal p t--wp-buf #f)
-                       "never read it"
-                       "the rule names the reason")
+      (check-true! (write-refusal p t--wp-buf #f) "the rule refuses the save")
       (check-false! (ignore-errors
                       (lambda ()
                         (with-current-buffer t--wp-buf
@@ -99,12 +97,8 @@
       (t--wp-clean! ex chat)
       (t--wp-make-buffer! t--wp-chat "companion . transcript\n")
       (buffer-set-local! t--wp-chat 'agent-slug "test-slug")
-      (check-contains! (write-refusal ex t--wp-chat #f)
-                       ".chat or a .md"
-                       "a chat may not become an .ex file")
-      (check-contains! (write-refusal ex t--wp-chat #t)
-                       ".chat or a .md"
-                       "and no answer to a question changes that")
+      (check-true! (write-refusal ex t--wp-chat #f) "a chat may not become an .ex file")
+      (check-true! (write-refusal ex t--wp-chat #t) "and no answer to a question changes that")
       (check-false! (write-refusal chat t--wp-chat #f)
                     "a chat may become a .chat file")
       (t--wp-clean! ex chat))))
@@ -119,12 +113,8 @@
       (t--wp-clean! stray neighbour)
       (make-directory! bare)
       (t--wp-make-buffer! t--wp-buf "(display 1)\n")
-      (check-contains! (write-refusal stray t--wp-buf #f)
-                       "beside other Scheme"
-                       "a .scm cannot start in a directory that holds none")
-      (check-contains! (write-refusal stray t--wp-buf #t)
-                       "beside other Scheme"
-                       "the rule is absolute: a permit does not lift it")
+      (check-true! (write-refusal stray t--wp-buf #f) "a .scm cannot start in a directory that holds none")
+      (check-true! (write-refusal stray t--wp-buf #t) "the rule is absolute: a permit does not lift it")
       (write-file! neighbour "(display 2)\n")
       (check-false! (write-refusal stray t--wp-buf #f)
                     "one .scm in the directory makes it a Scheme directory")

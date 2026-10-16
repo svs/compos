@@ -34,7 +34,7 @@
   (switch-to-buffer-here! "zz-wr-a")
   (set-window-restore! (active-window) #f))
 
-(define (t--wr-done!)
+(define (t--wc-done!)
   (delete-other-windows!)
   (switch-to-buffer-here! "*scratch*")
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
@@ -56,7 +56,7 @@
       (check-true! (window-preview-end! w) "the end of the look answers #t")
       (check-equal! (window-buffer w) "zz-wr-a" "and puts a back")
       (check-false! (window-restore w) "the record goes with the look"))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 (deftest 'a-visit-commits-a-look-and-a-kill-ends-it
   "a visit keeps the looked-at buffer with the covered one first in history; a kill of the look shows the covered buffer"
@@ -71,7 +71,7 @@
       (buffer-kill! "zz-wr-c")
       (check-equal! (window-buffer w) "zz-wr-b" "a kill of the look shows what it covered")
       (check-false! (window-restore w) "and the record goes"))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 (deftest 'a-display-record-applies-only-while-the-window-shows-its-buffer
   "set-window-restore! names the buffer shown; a switch away drops it; window-tree carries it"
@@ -88,7 +88,7 @@
       (check-false! (window-restore (active-window)) "a window on another buffer has no record")
       (set-window-owner! (active-window) 99999)
       (check-false! (window-owner (active-window)) "an owner names a live window or nothing"))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 (deftest 'quit-window-reads-the-leaf
   "window-quit-restore! deletes a window the display made and puts back a buffer it covered"
@@ -106,7 +106,7 @@
         (set-window-restore! w '(window #f #f))
         (check-true! (window-quit-restore! w) "quit undoes the display")
         (check-equal! (length (window-list)) 1 "and deletes the window it made")))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 ;;; the preview verb: one look per frame, no MRU, no focus, no winner
 
@@ -129,7 +129,7 @@
       (preview-end #t)
       (check-equal! (window-buffer w) "zz-wr-b" "keep commits the look")
       (check-equal! (car (window-prev-buffers w)) "zz-wr-a" "as a visit"))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 (deftest 'a-look-in-another-window-is-owned-and-goes-with-its-end
   "preview-show other shows in a window the invoking one owns; preview-end #f removes it"
@@ -147,7 +147,7 @@
         (preview-end #f)
         (check-false! (window-exists? w) "the end deletes the window the look made")
         (check-equal! (window-buffer me) "zz-wr-a" "and the reader's window is as it was")))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 (deftest 'a-definition-peek-is-the-frames-look
   "the definition shows beside the reader, and the reader keeps focus"
@@ -157,7 +157,7 @@
       (let ((w (peek--show! "zz-name" '(buffer "zz-wr-b" 0))))
         (check-equal! (window-buffer w) "zz-wr-b" "the definition shows beside")
         (check-equal! (active-window) me "the reader stays")))
-    (t--wr-done!)))
+    (t--wc-done!)))
 
 ;;; the frame return stack
 
@@ -185,4 +185,4 @@
         (check-equal! (length (window-list)) 2 "and keeps what is on screen")
         (check-false! (arrangement-for 'zz-test) "the entry is gone")))
     (layout-target-set! #f)
-    (t--wr-done!)))
+    (t--wc-done!)))

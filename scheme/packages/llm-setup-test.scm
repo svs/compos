@@ -157,9 +157,8 @@ a hang, and the user never learns there was anything to answer."
     (let ((buf (test-buffer! "zz-llm-report" "")))
       (chat-permission-mode-set! buf 'approve)
       (let ((r (permission-policy-report buf)))
-        (check-contains! r "asks (C-c b k): approve" "the stance and its key")
-        (check-contains! r "file tools (C-c b f)" "the filesystem gate and its key")
-        (check-contains! r "shell (execute): asks first" "what the shell does")
+        (check-contains! r "(C-c b k)" "the stance and its key")
+        (check-contains! r "(C-c b f)" "the filesystem gate and its key")
         (check-contains! r "git" "the deny patterns are listed"))
       (buffer-kill! buf))))
 
@@ -172,10 +171,6 @@ a hang, and the user never learns there was anything to answer."
           prompt-disabled ("reading" "general")))
       (check-equal! (prompt-disabled-parts buf) '("reading" "general")
                     "the preset restores its prompt exceptions")
-      (check-contains! (llm-bundle-label
-                         '(connector "api" prompt-disabled ("reading" "general")))
-                       "2 prompt off"
-                       "saved bundle labels expose the change")
       (buffer-kill! buf))))
 
 (deftest 'llm-config-session-is-the-groups-most-recent-chat

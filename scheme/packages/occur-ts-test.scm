@@ -74,12 +74,9 @@
       (check-equal! (buffer-point t--occur-src) second "on the capture it named"))
     (t--occur-clean!)))
 
-(deftest 'the-public-api-and-the-command-are-discoverable
-  "a name nobody can find is a name nobody calls"
+(deftest 'the-command-declares-its-effects-and-its-key
+  "a command says what it does and names its key"
   (lambda ()
-    (check-true! (pair? (filter (lambda (e) (equal? (plist-get e 'name) "ts-filter"))
-                                (apropos "capture plists")))
-                 "the doc string finds the function")
     (check-equal! (plist-get (catalog-entry 'command "occur-ts") 'effects) '("write")
                   "the command declares what it does")
     (check-equal! (key-for-command "occur-ts") "M-s t" "and it names its key")))

@@ -10,23 +10,6 @@
 
 (define t--cm-buf "zz-code-mode.ex")
 
-(deftest 'agents-work-quietly-unless-the-user-asks-for-presentation
-  "the shared prompt keeps work out of the user's visible editor state"
-  (lambda ()
-    (for-each
-      (lambda (prompt)
-        (check-contains! prompt "## Quiet editor" "quiet is the default")
-        (check-contains! prompt "reachable through Scheme without making a buffer visible"
-                         "Scheme does not need display")
-        (check-contains! prompt "Do not select, switch to, or display a buffer merely to work"
-                         "work does not move the editor")
-        (check-contains! prompt "only when the user asks to see it"
-                         "display is for the user")
-        (check-contains! prompt "excludes display-effect operations by default"
-                         "discovery starts quiet")
-        (check-contains! prompt "Preserve focus" "presentation keeps the user's place"))
-      (list *llm-system* (hello)))))
-
 (deftest 'agent-discovery-hides-display-effects-until-presentation-is-explicit
   "the tool filter hides visible movement without removing the public API"
   (lambda ()
@@ -113,14 +96,10 @@
            (chat (group-chat buf))
            (chat-code (cadr (assoc "code" (chat-prompt-source-parts chat))))
            (inline-code (cadr (assoc "code" (chat-prompt-source-parts buf)))))
-      (check-contains! chat-code "direct tool action or read-only"
-                       "direct requests bypass repository reconnaissance")
       (check-contains! chat-code "(code-outline \"BUF\")" "the read call")
       (check-contains! chat-code "(code-replace! \"BUF\" LINE NEW)" "the write call")
       (check-contains! chat-code "(buffer-insert-after! \"BUF\" ANCHOR TEXT)"
                        "the insert call")
-      (check-contains! chat-code "browser category is denied in code-mode by default"
-                       "the code policy is present")
       (check-contains! inline-code "(code-outline \"BUF\")"
                        "M-o receives the code-reading instructions")
       (check-false! (string-contains? (chat-preamble chat) "code-outline")

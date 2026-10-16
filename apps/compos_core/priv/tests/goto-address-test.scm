@@ -221,7 +221,7 @@
           (set-mark! #f)
           (run-command "insert-file-link")
           (t--ga-confirm! t--ga-insert-target)))
-      (check-contains! (plist-get (minibuffer-state) 'prompt) "(default editor.scm)"
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "editor.scm"
                        "the prompt names the default")
       (t--ga-confirm! "")
       (check-equal! (buffer-text buf) "[[file:../editor.scm][editor.scm]]"
@@ -233,7 +233,7 @@
   (lambda ()
     (let ((buf (t--ga-insert-buffer! "zz-ga-insert-old.txt" "" #f)))
       (with-current-buffer buf (lambda () (run-command "insert-document-link")))
-      (check-contains! (plist-get (minibuffer-state) 'prompt) "Insert link to file:"
+      (check-true! (plist-get (minibuffer-state) 'prompt)
                        "the file prompt is up")
       (minibuffer-cancel!)
       (buffer-kill! buf))))

@@ -137,7 +137,7 @@ defmodule Compos.GroupSwitchCommandTest do
     end
   end
 
-  test "grouped filenames carry their group face in minibuffer candidates", %{
+  test "grouped buffers wear their group color in the ibuffer sections", %{
     first: first,
     second: second
   } do
@@ -154,9 +154,10 @@ defmodule Compos.GroupSwitchCommandTest do
     """)
 
     expected = eval!(~s[(group-color-face "#{here}")]) |> Jason.decode!()
-    candidate = Enum.find(Editor.render_state().minibuffer.candidates, &(&1.label == second))
+    face =
+      eval!(~s[(nth 3 (car (filter (lambda (b) (equal? (nth 1 b) "group:\#{here}")) (ibuffer-group-buckets (list "\#{first}" "\#{second}") "\#{here}" ibuffer-group-of))))]) |> Jason.decode!()
 
-    assert candidate.face == expected
+    assert face == expected
   end
 
   test "C-x C-g runs find-file-in-new-group" do

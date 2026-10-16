@@ -8,7 +8,19 @@
 
 (define *handheld-test-fired* '())
 
-(define (handheld-test-reset!) (set! *handheld-test-fired* '()))
+(define (handheld-test-scene thunk)
+  (with-frame
+    (lambda (frame)
+      (with-fresh-group "zz-handheld-second"
+        (lambda (gid)
+          (with-stub '*handheld-test-fired* '()
+            (lambda ()
+              (unwind-protect
+                (lambda () (thunk))
+                (lambda ()
+                  (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
+                            '("zz-handheld-tab" "zz-handheld-keys" "zz-handheld-recent" "zz-handheld-search" "zz-handheld-chip" "zz-handheld-chips-plain" "zz-handheld-chips-chat" "zz-handheld-rail"))
+                  (for-each global-unset-key '("<f9> h" "<f9> a" "<f9> b" "<f9> r" "<f9> s" "<f9> c")))))))))))
 
 (define (handheld-test-fired? tag) (member tag *handheld-test-fired*))
 
@@ -32,98 +44,101 @@
 (deftest 'the-chord-register-presses-the-keys-it-names
   "compose a dummy chord and the command bound to it runs"
   (lambda ()
-    (handheld-test-reset!)
-    (global-set-key "<f9> h" "handheld-test-dummy")
-    (check-equal! (handheld-compose! "<f9> h") 'keys "the composer used the chord register")
-    (check-true! (wait-until (lambda () (handheld-test-fired? 'dummy)) 3000 20)
-                 "and the bound command ran")
-    (global-unset-key "<f9> h")))
+    (handheld-test-scene
+      (lambda ()
+        (global-set-key "<f9> h" "handheld-test-dummy")
+        (check-equal! (handheld-compose! "<f9> h") 'keys "the composer used the chord register")
+        (check-true! (wait-until (lambda () (handheld-test-fired? 'dummy)) 3000 20)
+                     "and the bound command ran")))))
 
 (deftest 'the-command-register-runs-the-named-command
   "M-x NAME runs NAME at once; an unknown name is refused"
   (lambda ()
-    (handheld-test-reset!)
-    (check-equal! (handheld-compose! "M-x handheld-test-dummy") 'command "a known name runs")
-    (check-true! (handheld-test-fired? 'dummy) "and the command ran")
-    (check-equal! (handheld-compose! "M-x handheld-no-such-command") 'unknown "an unknown name is refused")))
+    (handheld-test-scene
+      (lambda ()
+        (check-equal! (handheld-compose! "M-x handheld-test-dummy") 'command "a known name runs")
+        (check-true! (handheld-test-fired? 'dummy) "and the command ran")
+        (check-equal! (handheld-compose! "M-x handheld-no-such-command") 'unknown "an unknown name is refused")))))
 
 (deftest 'the-tab-rail-is-the-groups-and-a-tap-lands-in-the-chat
   "a buffer's group is on the rail; the tap switches to it and shows its chat"
   (lambda ()
-    (let* ((buf (test-buffer! "zz-handheld-tab" "one\ntwo\n"))
-           (g (begin (delete-other-windows!) (switch-to-buffer! buf) (group-ensure! buf))))
-      (check-true! g "the buffer founded a group")
-      (let ((row (assoc g (handheld-tabs g))))
-        (check-true! row "the rail names the group")
-        (check-equal! (nth 2 row) "group" "every tab is a group")
-        (check-equal! (nth 3 row) #t "and the current one is flagged"))
-      ;; founding the group put the frame in it, so this tap is on the
-      ;; current group: the buffers come up as a prompt
-      (check-equal! (handheld-tab! g) g "a tap on the current group answers the group")
-      (check-true! (minibuffer-active?) "and opens its buffers as a prompt")
-      (run-command "minibuffer-cancel")
-      ;; a second group takes the frame away; the tap on the first is a switch
-      (let ((g2 (or (group-resolve-id "zz-handheld-second")
-                    (group-record-create! "zz-handheld-second"))))
-        (switch-to-group! g2)
-        (check-true! (and g2 (not (equal? g2 g)) (equal? (frame-group) g2))
-                     "the frame stands in a second group")
-        (let ((chat (handheld-tab! g)))
-          (check-true! (and chat (chat-buffer? chat)) "the tap on another group lands in its chat")
-          (check-equal! (current-buffer) chat "and that chat is current")
-          (check-equal! (frame-group) g "and the frame stands in the group")))
-      (check-equal! (handheld-tab-hold! g) g "a hold answers the group")
-      (check-true! (minibuffer-active?) "and opens the prompt too")
-      (run-command "minibuffer-cancel")
-      (check-false! (minibuffer-active?) "C-g closes it"))))
+    (handheld-test-scene
+      (lambda ()
+        (let* ((buf (test-buffer! "zz-handheld-tab" "one\ntwo\n"))
+               (g (begin (delete-other-windows!) (switch-to-buffer! buf) (group-ensure! buf))))
+          (check-true! g "the buffer founded a group")
+          (let ((row (assoc g (handheld-tabs g))))
+            (check-true! row "the rail names the group")
+            (check-equal! (nth 2 row) "group" "every tab is a group")
+            (check-equal! (nth 3 row) #t "and the current one is flagged"))
+          ;; founding the group put the frame in it, so this tap is on the
+          ;; current group: the buffers come up as a prompt
+          (check-equal! (handheld-tab! g) g "a tap on the current group answers the group")
+          (check-true! (minibuffer-active?) "and opens its buffers as a prompt")
+          (run-command "minibuffer-cancel")
+          ;; a second group takes the frame away; the tap on the first is a switch
+          (let ((g2 (or (group-resolve-id "zz-handheld-second")
+                        (group-record-create! "zz-handheld-second"))))
+            (switch-to-group! g2)
+            (check-true! (and g2 (not (equal? g2 g)) (equal? (frame-group) g2))
+                         "the frame stands in a second group")
+            (let ((chat (handheld-tab! g)))
+              (check-true! (and chat (chat-buffer? chat)) "the tap on another group lands in its chat")
+              (check-equal! (current-buffer) chat "and that chat is current")
+              (check-equal! (frame-group) g "and the frame stands in the group")))
+          (check-equal! (handheld-tab-hold! g) g "a hold answers the group")
+          (check-true! (minibuffer-active?) "and opens the prompt too")
+          (run-command "minibuffer-cancel")
+          (check-false! (minibuffer-active?) "C-g closes it"))))))
 
 (deftest 'the-keys-panel-places-every-binding-in-its-section
   "a single key sits in its family, a sequence under its prefix; a local key wins"
   (lambda ()
-    (check-equal! (handheld-key-place "q") '("plain" "q") "a bare key is plain")
-    (check-equal! (handheld-key-place "C-f") '("C-" "C-f") "a control key is in C-")
-    (check-equal! (handheld-key-place "M-x") '("M-" "M-x") "a meta key is in M-")
-    (check-equal! (handheld-key-place "<f9> a n") '("<f9>" "a n") "a sequence sits under its first key")
-    (let ((buf (test-buffer! "zz-handheld-keys" "")))
-      (delete-other-windows!)
-      (switch-to-buffer! buf)
-      (global-set-key "<f9> a" "handheld-test-dummy")
-      (global-set-key "<f9> b" "keyboard-quit")
-      (local-set-key* buf "<f9> a" "keyboard-quit")
-      (let* ((panel (handheld-keys buf))
-             (sec (assoc "<f9>" panel))
-             (rows (and sec (car (cdr sec)))))
-        (check-true! sec "the prefix this test bound is a section")
-        (check-equal! (car (cdr (assoc "a" rows))) "keyboard-quit" "the local binding wins over the global one")
-        (check-equal! (car (cdr (assoc "b" rows))) "keyboard-quit" "and the global one is there too")
-        (check-equal! (nth 3 (assoc "a" rows)) 0 "a letter ranks first")
-        (check-true! (assoc "plain" panel) "plain keys have a section")
-        (check-false! (assoc "self-insert-command" (map (lambda (r) (list (car (cdr r)))) (car (cdr (assoc "plain" panel)))))
-                      "self-insert is not listed"))
-      (local-unset-key* buf "<f9> a")
-      (global-unset-key "<f9> a")
-      (global-unset-key "<f9> b"))))
+    (handheld-test-scene
+      (lambda ()
+        (check-equal! (handheld-key-place "q") '("plain" "q") "a bare key is plain")
+        (check-equal! (handheld-key-place "C-f") '("C-" "C-f") "a control key is in C-")
+        (check-equal! (handheld-key-place "M-x") '("M-" "M-x") "a meta key is in M-")
+        (check-equal! (handheld-key-place "<f9> a n") '("<f9>" "a n") "a sequence sits under its first key")
+        (let ((buf (test-buffer! "zz-handheld-keys" "")))
+          (delete-other-windows!)
+          (switch-to-buffer! buf)
+          (global-set-key "<f9> a" "handheld-test-dummy")
+          (global-set-key "<f9> b" "keyboard-quit")
+          (local-set-key* buf "<f9> a" "keyboard-quit")
+          (let* ((panel (handheld-keys buf))
+                 (sec (assoc "<f9>" panel))
+                 (rows (and sec (car (cdr sec)))))
+            (check-true! sec "the prefix this test bound is a section")
+            (check-equal! (car (cdr (assoc "a" rows))) "keyboard-quit" "the local binding wins over the global one")
+            (check-equal! (car (cdr (assoc "b" rows))) "keyboard-quit" "and the global one is there too")
+            (check-equal! (nth 3 (assoc "a" rows)) 0 "a letter ranks first")
+            (check-true! (assoc "plain" panel) "plain keys have a section")
+            (check-false! (assoc "self-insert-command" (map (lambda (r) (list (car (cdr r)))) (car (cdr (assoc "plain" panel)))))
+                          "self-insert is not listed")))))))
 
 (deftest 'recents-lead-the-panel-and-a-recent-row-runs-by-name
   "a command the phone ran comes first under recent, with the key that reaches it"
   (lambda ()
-    (handheld-test-reset!)
-    (let ((buf (test-buffer! "zz-handheld-recent" "")))
-      (delete-other-windows!)
-      (switch-to-buffer! buf)
-      (global-set-key "<f9> r" "handheld-test-dummy")
-      (check-true! (handheld-run-command! "handheld-test-dummy") "a known name runs")
-      (check-true! (handheld-test-fired? 'dummy) "and the command ran")
-      (let* ((panel (handheld-keys buf))
-             (recent (assoc "recent" panel)))
-        (check-true! recent "the panel has a recent section")
-        (check-equal! (car (car panel)) "recent" "and it comes first")
-        (check-equal! (car (car (cdr recent))) '("<f9> r" "handheld-test-dummy" "Test command: record that it ran" 0)
-                      "the newest command leads, with the key that reaches it"))
-      (global-unset-key "<f9> r")
-      (check-equal! (car (car (car (cdr (assoc "recent" (handheld-keys buf)))))) "M-x"
-                    "an unbound recent shows M-x")
-      (check-false! (handheld-run-command! "handheld-no-such-command") "an unknown name is refused"))))
+    (handheld-test-scene
+      (lambda ()
+        (let ((buf (test-buffer! "zz-handheld-recent" "")))
+          (delete-other-windows!)
+          (switch-to-buffer! buf)
+          (global-set-key "<f9> r" "handheld-test-dummy")
+          (check-true! (handheld-run-command! "handheld-test-dummy") "a known name runs")
+          (check-true! (handheld-test-fired? 'dummy) "and the command ran")
+          (let* ((panel (handheld-keys buf))
+                 (recent (assoc "recent" panel)))
+            (check-true! recent "the panel has a recent section")
+            (check-equal! (car (car panel)) "recent" "and it comes first")
+            (check-equal! (car (car (cdr recent))) '("<f9> r" "handheld-test-dummy" "Test command: record that it ran" 0)
+                          "the newest command leads, with the key that reaches it"))
+          (global-unset-key "<f9> r")
+          (check-equal! (car (car (car (cdr (assoc "recent" (handheld-keys buf)))))) "M-x"
+                        "an unbound recent shows M-x")
+          (check-false! (handheld-run-command! "handheld-no-such-command") "an unknown name is refused"))))))
 
 (deftest 'typing-in-the-panel-searches-every-command
   "a term finds a command by name, key, or doc, bound or not; a bound row leads with its key"
@@ -150,7 +165,7 @@
                         "handheld-test-dummy" "a key is a term too")
           (let ((rows (handheld-search buf "quit")))
             (check-true! (pair? rows) "quit names commands")
-            (check-true! (<= (length rows) *handheld-search-max*) "the list is capped"))))))))
+            (check-true! (<= (length rows) *handheld-search-max*) "the list is capped")))))))
 
 (deftest 'a-chip-teaches-the-key-bound-to-its-command
   "a chip carries the chord bound to its command, or M-x when nothing binds it"

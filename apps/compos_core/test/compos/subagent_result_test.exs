@@ -118,7 +118,7 @@ defmodule Compos.SubagentResultTest do
 
     # the turn-end hook runs on the :ui lane after the render; the record
     # says done once it ran
-    assert eventually(fn -> eval!(~s[(plist-get (subagent-result "#{c}") 'status)]) == "done" end)
+    assert eventually(fn -> eval!(~s[(plist-get (subagent-result "#{c}") 'status)]) == "stopped" end)
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'stop-reason)]) == ~s["end_turn"]
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'text)]) == ~s["the answer is 42."]
     assert eval!(~s[(plist-get (subagent-result "#{c}") 'buffer)]) == ~s["#{chat_buf(c)}"]
@@ -179,7 +179,7 @@ defmodule Compos.SubagentResultTest do
         """)
       )
 
-    assert eventually(fn -> eval!(~s[(subagent-done? "#{c}")]) == "#t" end)
+    assert eventually(fn -> eval!(~s[(subagent-stopped? "#{c}")]) == "#t" end)
     Process.sleep(200)
 
     refute Buffer.text(chat_buf(p)) =~ "[subagent"
@@ -199,7 +199,7 @@ defmodule Compos.SubagentResultTest do
            """) == "waiting"
 
     eval!(~s[(agent-continue! "#{a}" "go")])
-    assert eventually(fn -> eval!(~s[(subagent-done? "#{a}")]) == "#t" end)
+    assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
 
     # one of two is not enough
     assert eval!("(if (equal? zz-wait-results 'pending) 1 0)") == "1"
@@ -210,12 +210,12 @@ defmodule Compos.SubagentResultTest do
     assert eval!("(map (lambda (r) (plist-get r 'text)) zz-wait-results)") ==
              ~s[("one." "two.")]
 
-    assert eval!("(map (lambda (r) (plist-get r 'status)) zz-wait-results)") == "(done done)"
+    assert eval!("(map (lambda (r) (plist-get r 'status)) zz-wait-results)") == "(stopped stopped)"
   end
 
   test "subagent-wait answers at once when the children have already finished" do
     a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
-    assert eventually(fn -> eval!(~s[(subagent-done? "#{a}")]) == "#t" end)
+    assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
 
     eval!("(define zz-wait-results 'pending)")
 
@@ -224,5 +224,19 @@ defmodule Compos.SubagentResultTest do
            """) == "done"
 
     assert eval!("(map (lambda (r) (plist-get r 'text)) zz-wait-results)") == ~s[("one.")]
+  end
+
+  test "done is set by the orchestrator, and a new turn clears it" do
+    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
+    assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
+    assert eval!(~s[(subagent-done? "#{a}")]) == "#f"
+
+    assert eval!(~s[(subagent-mark-done! "#{a}" "checked")]) == "done"
+    assert eval!(~s[(subagent-done? "#{a}")]) == "#t"
+    assert eval!(~s[(plist-get (subagent-result "#{a}") 'result)]) == ~s["checked"]
+
+    eval!(~s[(agent-continue! "#{a}" "again")])
+    assert eventually(fn -> eval!(~s[(plist-get (subagent-result "#{a}") 'status)]) == "stopped" end)
+    assert eval!(~s[(subagent-done? "#{a}")]) == "#f"
   end
 end

@@ -404,6 +404,6 @@ defmodule Compos.GroupSwitchCommandTest do
     # No group is genuinely ungrouped even while the frame stays here.
     eval!(~s{(buffer-move-to-group! "#{third}" #f)})
     by_buffer = Editor.render_state().tree |> leaves() |> Map.new(&{&1.buffer, &1})
-    assert by_buffer[third].group_color == nil
+    refute by_buffer[third].group_color
   end
 end

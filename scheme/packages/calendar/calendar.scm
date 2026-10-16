@@ -1183,3 +1183,103 @@
 ;; The sources are read at load, so a reload or a restart never leaves the
 ;; verbs with an empty source list.
 (calendar-config-load!)
+
+;;; --- one event as a component ---------------------------------------------
+;;; A chat reply draws one with a component fence. Its buttons are the
+;;; actions declared here: the reply gives the event, never the command.
+
+(domain! 'ui)
+(effects! '(pure))
+
+(define calendar--month-abbrevs
+  '("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
+
+(define (calendar--stamp? s)
+  (and (string? s) (>= (string-length s) 16)
+       (string->number (substring s 0 4)) (string->number (substring s 5 7))
+       (string->number (substring s 8 10)) #t))
+
+;; END is a time on START's day or a whole stamp; #f when there is none
+(define (calendar--event-end p)
+  (let ((start (component--get p 'start "")) (end (component--get p 'end #f)))
+    (cond ((not (string? end)) #f)
+          ((and (<= (string-length end) 5) (calendar--stamp? start))
+           (string-append (substring start 0 10) " " end))
+          (else end))))
+
+(define (calendar--event-url p)
+  (let ((link (component--get p 'link #f)) (where (component--get p 'where #f)))
+    (cond ((string? link) link)
+          ((and (string? where) (string-prefix? "http" where)) where)
+          (else #f))))
+
+(defcomponent 'calendar/event
+  "One calendar entry: the day as a calendar leaf, then the title, the time, where it is and who comes. In a chat, j joins the call and a adds it to your calendar."
+  '((title string required "what the meeting is, as the invite would name it")
+    (start string required "local start, \"YYYY-MM-DD HH:MM\"")
+    (end string optional "local end: \"HH:MM\" on the same day, or a whole \"YYYY-MM-DD HH:MM\"; an hour when absent")
+    (where string optional "a room, an address, or the name of the call")
+    (link string optional "the call or invite URL that Join opens")
+    (who list optional "the people coming, as strings, the organiser first")
+    (note string optional "one line under it: the agenda, or what to bring"))
+  '(title "Interview: Priya × Emergent" start "2026-10-20 15:00" end "15:45"
+    where "Google Meet" link "https://meet.google.com/abc-defg-hij"
+    who ("Priya Nair" "Madhav" "svs") note "Systems design round, 45 minutes")
+  (lambda (p)
+    (let* ((start (component--get p 'start ""))
+           (timed (calendar--stamp? start))
+           (end (calendar--event-end p))
+           (month (if timed (nth (- (string->number (substring start 5 7)) 1) calendar--month-abbrevs) ""))
+           (day (if timed (number->string (string->number (substring start 8 10))) ""))
+           (at (if timed
+                   (string-append (calendar--day-label (substring start 0 10)) " · " (substring start 11 16)
+                                  (if (calendar--stamp? end) (string-append "–" (substring end 11 16)) ""))
+                   start))
+           (line (lambda (class text) (list 'tag "c-text" 'class class 'text text))))
+      (list 'tag "c-card" 'class "c-card calendar-event"
+            'children
+            (list (list 'tag "c-group" 'class "calendar-leaf"
+                        'children (list (line "calendar-leaf-month" month) (line "calendar-leaf-day" day)))
+                  (list 'tag "c-group" 'class "calendar-event-main"
+                        'children
+                        (append
+                          (list (line "calendar-event-title" (component--get p 'title ""))
+                                (line "calendar-event-when" at))
+                          (if (component--has? p 'where) (list (line "calendar-event-where" (component--get p 'where))) '())
+                          (if (component--has? p 'who) (list (component 'ui/chips (list 'items (component--get p 'who)))) '())
+                          (if (component--has? p 'note) (list (line "calendar-event-note" (component--get p 'note))) '()))))))))
+
+(component-chat! 'calendar/event)
+
+(effects! '(write external))
+
+(component-actions! 'calendar/event
+  (list (list 'join "Join" "j" '(display external)
+              (lambda (p)
+                (let ((url (calendar--event-url p)))
+                  (if url (tab-open url) (message "calendar: this event has no link")))))
+        (list 'add "Add to calendar" "a" '(write external)
+              (lambda (p)
+                (let* ((start (component--get p 'start ""))
+                       (made (calendar-add! 'title (component--get p 'title "")
+                                            'start start
+                                            'end (or (calendar--event-end p) (calendar--plus-minutes start 60))
+                                            'location (or (calendar--event-url p) (component--get p 'where #f))
+                                            'notes (component--get p 'note #f))))
+                  (if made
+                      (begin (calendar-sync!)
+                             (message (string-append "calendar: added \"" (component--get p 'title "") "\"")))
+                      (message "calendar: the event was not created")))))))
+
+(define-style! 'calendar-event "
+.calendar-event { display: flex; gap: 14px; align-items: flex-start; padding: 10px 12px; max-width: 64ch; }
+.c-card.calendar-event > * { margin: 0; }
+.calendar-leaf { display: flex; flex-direction: column; align-items: center; min-width: 46px; border: 1px solid var(--border-bg); flex: none; }
+.calendar-leaf-month { width: 100%; text-align: center; background: #a03020; color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 1px 0; }
+.calendar-leaf-day { font-family: var(--font-serif, ui-serif, Georgia, serif); font-size: 20px; font-weight: 700; padding: 2px 0 4px; }
+.calendar-event-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.calendar-event-title { font-family: var(--font-sans); font-weight: 600; }
+.calendar-event-when { font-family: var(--font-mono); font-size: .85em; color: var(--accent-fg); }
+.calendar-event-where, .calendar-event-note { font-family: var(--font-sans); font-size: .9em; color: var(--dim-fg); }
+.calendar-event .c-chips { margin: 4px 0 0; }
+")

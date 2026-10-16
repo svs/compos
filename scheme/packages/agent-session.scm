@@ -136,9 +136,12 @@
   (let* ((force (or (buffer-local buf 'editor-context-source)
                     (buffer-local buf 'agent-seed-context)))
          (pre (editor-context-preamble buf)))
-    (if (and (not force) (equal? pre (buffer-local buf 'editor-context-sent)))
-        ""
-        (begin (buffer-set-local! buf 'editor-context-sent pre) pre))))
+    (string-append
+      (if (and (not force) (equal? pre (buffer-local buf 'editor-context-sent)))
+          ""
+          (begin (buffer-set-local! buf 'editor-context-sent pre) pre))
+      ;; the component fences the last reply could not draw
+      (chat-component-report buf))))
 
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
@@ -1243,7 +1246,7 @@
 
 (define (subagent-todo-set! buf line target)
   (let loop ((n 0))
-    (let ((state (morg-toggle-todo-at! buf (line-start-position line))))
+    (let ((state (morg-toggle-todo-at! buf (with-current-buffer buf (lambda () (line-start-position line))))))
       (cond ((equal? state target) state)
             ((>= n 2) #f)
             (else (loop (+ n 1)))))))
@@ -1397,7 +1400,9 @@
   (subagent-notify-parent! slug ok? stop-reason)
   (subagent-waiters-note! slug))
 
-(add-hook! (list 'agent-turn-end "subagents") subagent-turn-end!)
+;; by name, not by value: a reload then reaches the new procedure
+(add-hook! (list 'agent-turn-end "subagents")
+  (lambda (slug stop-reason ok?) (subagent-turn-end! slug stop-reason ok?)))
 
 (category! 'chat)
 

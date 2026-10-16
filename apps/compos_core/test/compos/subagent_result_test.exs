@@ -226,8 +226,18 @@ defmodule Compos.SubagentResultTest do
     assert eval!("(map (lambda (r) (plist-get r 'text)) zz-wait-results)") == ~s[("one.")]
   end
 
+  defp spawn_child(p, text) do
+    slug(eval!("""
+    (with-edit-author "agent:#{p}"
+      (lambda ()
+        (execute* "go" '(backend "stub" script (((type chunk text "#{text}")))))))
+    """))
+  end
+
   test "a finished turn is logged on the child's edge, with its stop reason and RESULT line" do
-    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "work done.\\n\\nRESULT: 3 files changed")))))]))
+    p = slug(eval!(~s[(execute* "" '(backend "stub" script (())))]))
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(p)) end)
+    a = spawn_child(p, "work done.\n\nRESULT: 3 files changed")
 
     assert eventually(fn -> eval!(~s[(length (subagent-log "#{a}"))]) == "1" end)
     assert eval!(~s[(map cadr (subagent-log "#{a}"))]) == "(turn-end)"
@@ -235,7 +245,9 @@ defmodule Compos.SubagentResultTest do
   end
 
   test "a verdict of again sends its message and starts a new turn" do
-    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
+    p = slug(eval!(~s[(execute* "" '(backend "stub" script (())))]))
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(p)) end)
+    a = spawn_child(p, "one.")
     assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
 
     eval!(~s[(subagent-verdict! "#{a}" 'again "need more" '(message "say more"))])
@@ -245,7 +257,9 @@ defmodule Compos.SubagentResultTest do
   end
 
   test "a done verdict is durable: a later turn does not clear it" do
-    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
+    p = slug(eval!(~s[(execute* "" '(backend "stub" script (())))]))
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(p)) end)
+    a = spawn_child(p, "one.")
     assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
     assert eval!(~s[(subagent-done? "#{a}")]) == "#f"
 

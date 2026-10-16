@@ -616,6 +616,9 @@
     (list 'tag "c-group" 'class "c-chips"
           'children (map (lambda (t) (component 'ui/badge (list 'text t))) (component--get p 'items)))))
 
+;; the ones whose props are plain data, so a chat reply may draw them
+(for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/chips))
+
 (define *component-gallery-buffer* "*Components*")
 
 (define (component-gallery-blocks)
@@ -771,6 +774,14 @@
 (public! 'component "(component NAME PROPS) — instantiate a registered UI component")
 (effects! '(read))
 (public! 'describe-component "(describe-component NAME) — a component's props, example and owner, or #f")
+(public! 'component-check "(component-check NAME PROPS) — what is wrong with PROPS for NAME, as sentences; () when they fit")
+(public! 'component-chat? "(component-chat? NAME) — #t when a chat reply may draw NAME")
+(public! 'chat-components "(chat-components) — the components a chat reply may draw, as (NAME DOC)")
+(public! 'component-actions "(component-actions NAME) — NAME's actions as (NAME LABEL KEY EFFECTS FN), the default first")
+(effects! '(write))
+(public! 'component-chat! "(component-chat! NAME) — let a chat reply draw NAME; its props must all be data")
+(public! 'component-actions! "(component-actions! NAME ACTIONS) — declare NAME's actions, each (NAME LABEL KEY EFFECTS FN), the default first")
+(effects! '(read))
 (effects! '(read external spend))
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")
 

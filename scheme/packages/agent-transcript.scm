@@ -841,10 +841,7 @@
              (chat-view--subagent-notice text)
              (chat-view--user "user" "ag-user" text))))
       ((equal? kind "queued") (chat-view--user "queued" "ag-user ag-queued" (chat-view--user-text buf b)))
-      ((equal? kind "prose")
-       (list 'tag "c-agent" 'class "ag-prose"
-             'attrs '(("author" "assistant") ("kind" "prose"))
-             'range (list s e) 'format "markdown"))
+      ((equal? kind "prose") (chat-view--prose buf s e))
       ((equal? kind "thought")
        (list 'tag "details" 'class "ag-thought"
              'children (list (list 'tag "summary" 'text "thought")
@@ -896,6 +893,193 @@
 
 ;; The memo per buffer: (RAW OPEN VIEWS SIG). RAW is 'agent-blocks as last
 ;; built (newest first), VIEWS their views in the same order.
+;;; --- components in a reply --------------------------------------------------
+;;; A reply draws a component with a fence: ```component NAME, the props as
+;;; Scheme data, then ```. The transcript keeps the text, so a saved chat and
+;;; the plain view keep it too. Only chat components draw (component-chat?),
+;;; and their buttons are the actions the component declares.
+
+;; how many backticks a line opens with, after its indent
+(define (chat-component--ticks line)
+  (let ((t (string-trim line)))
+    (let loop ((i 0))
+      (if (and (< i (string-length t)) (equal? (substring t i (+ i 1)) "`"))
+          (loop (+ i 1))
+          i))))
+
+;; TEXT's parts in order: (prose S E) and (component S E NAME BODY), S and E
+;; bytes counted from BASE. A fence inside another fence is an example and
+;; stays prose; so does one the reply has not closed yet.
+(define (chat-component--parts text base)
+  (let ((end (+ base (string-byte-length text))))
+    (let loop ((ls (string-split text "\n")) (pos base) (start base)
+               (outer #f) (open #f) (body '()) (out '()))
+      (if (null? ls)
+          (reverse (if (< start end) (cons (list 'prose start end) out) out))
+          (let* ((l (car ls))
+                 (next (min end (+ pos (string-byte-length l) 1)))
+                 (n (chat-component--ticks l))
+                 (t (string-trim l))
+                 (closing? (and (>= n 3) (= n (string-length t)))))
+            (cond
+              (open
+               (if closing?
+                   (loop (cdr ls) next next #f #f '()
+                         (cons (list 'component (car open) next (cadr open)
+                                     (string-join (reverse body) "\n"))
+                               out))
+                   (loop (cdr ls) next start #f open (cons l body) out)))
+              (outer
+               (loop (cdr ls) next start (if (and closing? (>= n outer)) #f outer) #f '() out))
+              ((and (= n 3) (string-prefix? "```component " t))
+               (loop (cdr ls) next pos #f
+                     (list pos (string-trim (substring t 13 (string-length t)))) '()
+                     (if (< start pos) (cons (list 'prose start pos) out) out)))
+              ((>= n 3) (loop (cdr ls) next start n #f '() out))
+              (else (loop (cdr ls) next start #f #f '() out))))))))
+
+;; a fence's props: one list, or the bare pairs; 'unreadable when the body
+;; is not Scheme data
+(define (chat-component--props body)
+  (let ((forms (ignore-errors (lambda () (scheme-read body)))))
+    (cond ((not (or (null? forms) (pair? forms))) 'unreadable)
+          ((and (= (length forms) 1) (pair? (car forms)) (equal? (car (car forms)) 'quote))
+           (cadr (car forms)))
+          ((and (= (length forms) 1) (or (null? (car forms)) (pair? (car forms)))) (car forms))
+          (else forms))))
+
+(define (chat-component--problems name props)
+  (cond ((not (component-chat? name))
+         (list (string-append name " is not a chat component; (chat-components) lists them")))
+        ((equal? props 'unreadable) (list "the props do not read as Scheme data"))
+        (else (component-check name props))))
+
+;; its actions as buttons: the default keyed M-RET, the rest by their key
+;; in the C-c C-o menu
+(define (chat-component--actions-row name at)
+  (let ((acts (component-actions name)))
+    (if (null? acts)
+        '()
+        (list (component 'ui/actions
+                (list 'class "ag-component-actions"
+                      'actions
+                      (let loop ((as acts) (first #t) (out '()))
+                        (if (null? as)
+                            (reverse out)
+                            (loop (cdr as) #f
+                                  (cons (list (string-append "chat-comp:" (number->string at) ":"
+                                                             (symbol->string (car (car as))))
+                                              (cadr (car as))
+                                              (if first "M-RET" (nth 2 (car as))))
+                                        out))))))))))
+
+(define (chat-component--view part)
+  (let* ((at (nth 1 part)) (name (nth 3 part)) (body (nth 4 part))
+         (props (chat-component--props body))
+         (problems (chat-component--problems name props))
+         (drawn (and (null? problems) (ignore-errors (lambda () (component name props))))))
+    (if (and (pair? drawn) (not (equal? (car drawn) 'error)))
+        (list 'tag "c-group" 'class "ag-component"
+              'attrs (list (list "kind" "component") (list "component" name))
+              'children (cons drawn (chat-component--actions-row name at)))
+        (list 'tag "c-group" 'class "ag-component ag-component-error"
+              'children
+              (list (component 'ui/callout
+                      (list 'label (string-append name " did not draw") 'tone "note"
+                            'body (append (map (lambda (p) (component 'ui/bullet (list 'text p)))
+                                               (if (null? problems)
+                                                   (list "its renderer failed on these props")
+                                                   problems))
+                                          (list (component 'ui/quote (list 'text body)))))))))))
+
+;; a reply's prose: one markdown range, or, when it holds component
+;; fences, its prose ranges with the components between them
+(define (chat-view--prose buf s e)
+  (let* ((text (chat-view--slice buf s e))
+         (parts (and (string-contains? text "```component ") (chat-component--parts text s)))
+         (head (list 'tag "c-agent" 'class "ag-prose"
+                     'attrs '(("author" "assistant") ("kind" "prose")))))
+    (if (not (and parts (find (lambda (p) (equal? (car p) 'component)) parts)))
+        (append head (list 'range (list s e) 'format "markdown"))
+        (append head
+                (list 'children
+                      (map (lambda (p)
+                             (if (equal? (car p) 'prose)
+                                 (list 'tag "c-group" 'class "ag-prose-part"
+                                       'range (list (nth 1 p) (nth 2 p)) 'format "markdown")
+                                 (chat-component--view p)))
+                           parts))))))
+
+;; the component fences of one transcript block, oldest first
+(define (chat-component--in-block buf b)
+  (if (not (equal? (nth 2 b) "prose"))
+      '()
+      (let ((text (chat-view--slice buf (nth 0 b) (nth 1 b))))
+        (if (string-contains? text "```component ")
+            (filter (lambda (p) (equal? (car p) 'component)) (chat-component--parts text (nth 0 b)))
+            '()))))
+
+;; the drawn block at index I of the whole transcript, oldest first
+(define (chat-view--block-at-index buf i)
+  (let ((m (chat-view--memo buf)))
+    (and m (integer? i)
+         (let ((drawn (reverse (filter (lambda (rv) (cadr rv)) (chat-view--zip (nth 0 m) (nth 2 m))))))
+           (and (>= i 0) (< i (length drawn)) (car (nth i drawn)))))))
+
+;; the fence M-RET and C-c C-o act on: the first in the block M-up/M-down
+;; stepped to, else the newest in the chat
+(define (chat-component--target buf)
+  (let ((stepped (chat-view--block-at-index buf (buffer-local buf 'chat-view-nav))))
+    (if stepped
+        (let ((ps (chat-component--in-block buf stepped))) (and (pair? ps) (car ps)))
+        (let loop ((bs (agent-blocks buf)))
+          (if (null? bs)
+              #f
+              (let ((ps (chat-component--in-block buf (car bs))))
+                (if (pair? ps) (car (reverse ps)) (loop (cdr bs)))))))))
+
+(define (chat-component--fence-at buf at)
+  (let loop ((bs (agent-blocks buf)))
+    (cond ((null? bs) #f)
+          ((and (<= (nth 0 (car bs)) at) (< at (nth 1 (car bs))) (equal? (nth 2 (car bs)) "prose"))
+           (find (lambda (p) (= (nth 1 p) at)) (chat-component--in-block buf (car bs))))
+          (else (loop (cdr bs))))))
+
+;; what the last reply drew wrong, as one line for the model's next turn:
+;; its fences that did not draw, each once; empty when they all drew
+(define (chat-component-report buf)
+  (let* ((bs (let skip ((bs (agent-blocks buf)))
+               (if (and (pair? bs) (member (nth 2 (car bs)) '("user" "queued"))) (skip (cdr bs)) bs)))
+         (reply (let grab ((bs bs) (out '()))
+                  (if (or (null? bs) (equal? (nth 2 (car bs)) "user")) out (grab (cdr bs) (cons (car bs) out)))))
+         (bad (apply append
+                     (map (lambda (b)
+                            (apply append
+                                   (map (lambda (p)
+                                          (let ((ps (chat-component--problems (nth 3 p) (chat-component--props (nth 4 p)))))
+                                            (if (null? ps) '() (list (list (nth 1 p) (string-join ps "; "))))))
+                                        (chat-component--in-block buf b))))
+                          reply)))
+         (seen (or (buffer-local buf 'chat-component-reported) '()))
+         (fresh (filter (lambda (x) (not (member (car x) seen))) bad)))
+    (if (null? fresh)
+        ""
+        (begin
+          (buffer-set-local! buf 'chat-component-reported (append (map car fresh) seen))
+          (string-append "[Component fences in your last reply that did not draw: "
+                         (string-join (map cadr fresh) " | ")
+                         ". Check props with (component-check 'NAME PROPS) before you write a fence.]\n")))))
+
+;; the block M-up/M-down stepped to wears ag-selected; I counts the drawn
+;; views, #f when nothing is stepped to
+(define (chat-view--mark-selected views i)
+  (if (not (and (integer? i) (>= i 0) (< i (length views))))
+      views
+      (append (take views i)
+              (let ((v (nth i views)))
+                (list (plist-put v 'class (string-append (or (plist-get v 'class) "") " ag-selected"))))
+              (list-tail views (+ i 1)))))
+
 (define *chat-view-memo* '())
 
 (define (chat-view--memo buf)
@@ -1046,6 +1230,7 @@
            (sig (list raw open verbosity queued activity
                       (buffer-local buf 'chat-view-reveal)
                       (buffer-local buf 'chat-follow-off)
+                      (buffer-local buf 'chat-view-nav)
                       chat-view-window-bytes))
            (m (chat-view--memo buf)))
       (unless (and m (equal? (nth 3 m) sig)
@@ -1056,7 +1241,10 @@
           (buffer-set-locals! buf
             (list 'render-root '(tag "c-buffer" class "agent-view")
                   'render-input "agent-saved-mark"
-                  'render-blocks (chat-view-tree buf (reverse (filter (lambda (v) v) (car win)))
+                  'render-blocks (chat-view-tree buf (chat-view--mark-selected
+                                                   (reverse (filter (lambda (v) v) (car win)))
+                                                   (let ((nav (buffer-local buf 'chat-view-nav)))
+                                                     (and (integer? nav) (- nav (cadr win)))))
                                                  verbosity queued activity (cadr win)))))))))
 
 ;; the clicks the tree carries: a tool card, a permission verb, an answer
@@ -1088,6 +1276,13 @@
            (agent-answer-question! (nth 4 q) (nth 3 q)
                                    (nth (string->number (cadr parts)) (or (nth 6 q) '()))))
          (chat-view-sync! buf)
+         #t))
+      ((string-prefix? "chat-comp:" id)
+       (let* ((rest (string-split (substring-bytes id 10 (string-byte-length id)) ":"))
+              (part (chat-component--fence-at buf (string->number (car rest)))))
+         (if part
+             (chat-component-run! buf part (string->symbol (cadr rest)))
+             (message "That component is no longer in the chat"))
          #t))
       (else #f))))
 
@@ -1126,7 +1321,8 @@
             (buffer-set-local! buf 'chat-view-nav target)
             (buffer-set-local! buf 'follow-place (list #t 0 target 0))
             (let ((seq (buffer-local buf 'follow-seq)))
-              (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))))))
+              (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0))))
+            (chat-view-sync! buf))))))
 
 (define-command "chat-previous-block" "Show the previous block of this chat at the top"
   (lambda () (chat-view-step! (current-buffer) -1)))
@@ -1141,6 +1337,60 @@
 
 ;; typing answers at the bottom, so a key that types brings the view back,
 ;; unless the reader asked the view to stay
+;; An action runs with the props the fence holds now. Effects past read,
+;; display and external ask first.
+(define (chat-component--asks? effects)
+  (pair? (filter (lambda (e) (not (member e '(pure read display external)))) effects)))
+
+(define (chat-component-run! buf part action)
+  (let* ((name (nth 3 part))
+         (props (chat-component--props (nth 4 part)))
+         (a (find (lambda (a) (equal? (car a) action)) (component-actions name))))
+    (cond ((pair? (chat-component--problems name props))
+           (message (string-append name " did not draw, so its actions are off")))
+          ((not a) (message (string-append name " has no action " (value->string action))))
+          ((chat-component--asks? (nth 3 a))
+           (y-or-n (string-append (cadr a) " — " (component--get props 'title name) "? ")
+                   (lambda () ((nth 4 a) props))))
+          (else ((nth 4 a) props)))))
+
+(define (chat-component--here)
+  (let* ((buf (current-buffer)) (part (chat-component--target buf)))
+    (cond ((not part) (message "No component in this chat") #f)
+          ((null? (component-actions (nth 3 part)))
+           (message (string-append (nth 3 part) " has no actions")) #f)
+          (else part))))
+
+(define-command "chat-component-default" "Run the default action of the component M-up/M-down stepped to, else of the newest one"
+  (lambda ()
+    (let ((part (chat-component--here)))
+      (when part
+        (chat-component-run! (current-buffer) part (car (car (component-actions (nth 3 part)))))))))
+
+(define-command "chat-component-actions" "Choose an action of the component M-up/M-down stepped to, else of the newest one"
+  (lambda ()
+    (let* ((buf (current-buffer)) (part (chat-component--here)))
+      (when part
+        (let* ((acts (component-actions (nth 3 part)))
+               (label (lambda (a) (string-append (nth 2 a) "  " (cadr a)))))
+          (completing-read (string-append (nth 3 part) ": ") (map label acts)
+            (lambda (choice)
+              (let ((a (find (lambda (a) (equal? (label a) choice)) acts)))
+                (when a (chat-component-run! buf part (car a)))))))))))
+
+(define-key "chat-mode-map" "M-RET" "chat-component-default")
+(define-key "chat-mode-map" "C-c C-o" "chat-component-actions")
+
+(when (boundp 'define-fence-kind!)
+  (define-fence-kind! "component"
+    "A UI component: the info names it, the body is its props as Scheme data. A chat draws it in place; (chat-components) lists the ones it draws."))
+
+(define-style! 'chat-components "
+.ag-component { margin: .5em 0 .8em; }
+.ag-component > .ag-component-actions { padding: 6px 0 0; }
+.ag-selected .ag-component > :first-child { outline: 1px solid var(--accent-fg); outline-offset: 2px; }
+")
+
 (define (chat-view-type-follows!)
   (let ((buf (current-buffer)))
     (when (and (chat-rich-view? buf)

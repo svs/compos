@@ -1032,7 +1032,7 @@ the next row down. STEP is kept for the callers."
   ;; buffers WIN showed before, every other buffer by recent use, HERE,
   ;; then the recent files. A row is (NAME PATH MODIFIED MODE GROUP-ID
   ;; GROUP); a file that is no buffer has #f for each.
-  (let* ((all (filter (lambda (r) (not (and (nth 6 r) (nth 7 r))))
+  (let* ((all (filter (lambda (r) (or (equal? (car r) here) (not (and (nth 6 r) (nth 7 r)))))
                       (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
                                                'fields '(path modified mode group-id group
                                                          live preview-opened))))))

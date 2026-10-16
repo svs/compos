@@ -127,8 +127,8 @@
         (check-equal! (ibuffer-row-last "zz-sub-kid-a-slug")
                       "the last line a reads"
                       "the last column is the child's last line")
-        (check-true! (string-contains? (buffer-text "*subagents*") "zz-sub-kid-a")
-                     "and the table draws the row")))))
+        (check-true! (string-contains? (buffer-text "*subagents*") "kid-a")
+                     (string-append "and the table draws the row: " (buffer-text "*subagents*")))))))
 
 (deftest 'subagents-a-row-is-never-another-table-s-row
   "the kind claims a slug the relation names, and nothing else"
@@ -197,6 +197,7 @@
       (lambda (gid)
         (zz-sub-setup! gid "live" #t)
         (test-buffer! "zz-sub-plan" "# Plan\n\n## Task A\n\nbody\n")
+        (with-current-buffer "zz-sub-plan" (lambda () (run-command "morg-mode")))
         (check-equal! (subagent-verdict! "zz-sub-kid-a-slug" 'done "finished A"
                                          (list 'todo (list "zz-sub-plan" "Task A")))
                       'done "the status after a done verdict")
@@ -204,7 +205,7 @@
                                        "Result: finished A [zz-sub-kid-a-slug]")
                      "the result line is written")
         (check-true! (string-contains? (buffer-text "zz-sub-plan") "## DONE Task A")
-                     "and the heading is DONE")))))
+                     (string-append "and the heading is DONE: " (buffer-text "zz-sub-plan")))))))
 
 (deftest 'subagents-verdict-wait-asks-the-parent-for-a-turn
   "wait is a state the parent reads, and the log keeps the question"

@@ -155,7 +155,7 @@ I want to start from a project or directory
 - One command flips to the previous group of this frame.
 - **Command:** `switch-last`.
 
-#### I want this buffer in another group too
+#### I want this buffer in another group
 
 - The buffer joins that group and leaves this one: a buffer is in one group at a time.
 - I remain in this group.
@@ -213,7 +213,7 @@ I want to start from a project or directory
 - No group and no project: I name a new group and the buffer seeds it.
 - **Command:** `C-RET` in the switcher (`buffer-context-switch!`).
 
-#### I want to change this buffer's groups by hand
+#### I want to change this buffer's group by hand
 
 - Put it in a group: `group-add` or `group-move`. Both replace its old group. Drop it: `remove-group-from-buffer`.
 - These work when the frame has no destination too.
@@ -508,6 +508,8 @@ One pool answers which buffers may fill a window in this frame: `window-fill-buf
 
 Rule 1 is what returns a peek to the previous state. Nothing else is needed.
 
+The choice is one pure function, `window-fill-decide SNAPSHOT POOL`. The snapshot holds the window's restore record, its history, the buffers other windows show, the dying buffer, and whether other windows exist. The answer is `(restore B)`, `(show B)`, `(delete)` or `(blank)`. `window-fill-snapshot` reads the snapshot and `window-fill-apply!` acts on the answer. Every fill site asks this one function: kill, `q`, a peek quit, a move, and the group restore that clears foreign buffers out of the windows. window-fill-test holds the table of cases.
+
 ### Frames
 
 The destination is per frame. Two frames can show two groups, or one group with two layouts. The `previous` slot is per frame.
@@ -552,7 +554,7 @@ Every group has one scratch buffer named `*scratch:NAME*`.
 - It is the buffer of last resort for window fill inside the group.
 - Its content persists with the group. A restored group with a missing scratch buffer gets a new empty one.
 
-## Multi-membership
+## One group per buffer
 
 A buffer is in one group at a time. Joining a group is leaving the old one. A desktop from the days of many memberships keeps the first group each buffer joined.
 

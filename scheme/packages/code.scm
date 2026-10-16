@@ -63,9 +63,12 @@
 (define (code--backend buf)
   (let ((cached (buffer-local buf 'code-backend)))
     (if (or (not cached)
+            ;; "indent" is a fallback, not a verdict: the mode may come
+            ;; late, or the tree may parse after the first look
             (and (equal? cached "indent")
-                 (not (buffer-local buf 'mode-name))
-                 (buffer-path buf)))
+                 (or (buffer-local buf 'ts-lang)
+                     (and (not (buffer-local buf 'mode-name))
+                          (buffer-path buf)))))
         (begin (code--pick-backend! buf)
                (buffer-local buf 'code-backend))
         cached)))

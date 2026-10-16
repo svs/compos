@@ -522,8 +522,11 @@
 
 ;; each opening starts on the tab C-x b opens on
 (define (ibuffer-tabs-start! buf from)
-  (buffer-set-local! buf 'ibuffer-tab
-    (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group))
+  ;; a frame outside every group has no Group tab to show: it would list
+  ;; nothing, so the list opens on All
+  (let ((tab (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group)))
+    (buffer-set-local! buf 'ibuffer-tab
+      (if (and (equal? tab 'group) (not (frame-group))) 'all tab)))
   (buffer-set-local! buf 'ibuffer-tab-window from)
   ;; the tabs are the scope now: no narrowing left over from before them
   (buffer-set-local! buf 'ibuffer-narrow-group #f))

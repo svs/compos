@@ -1264,14 +1264,16 @@
 (define (subagent-wake-text slug ok? stop-reason)
   (let* ((said (or (subagent-last-assistant slug) ""))
          (long? (> (string-byte-length said) *subagent-wake-limit*))
-         (body (if long? (substring-bytes said 0 *subagent-wake-limit*) said)))
+         ;; a long reply keeps its end: the result is the last thing said
+         (n (string-byte-length said))
+         (body (if long? (substring-bytes said (- n *subagent-wake-limit*) n) said)))
     (string-append
       "[subagent " slug
       (if ok? " finished its turn" (string-append " ended with " stop-reason))
       "]\n"
       (if (equal? (string-trim body) "")
           ""
-          (string-append body (if long? "\n[...]" "") "\n"))
+          (string-append (if long? "[...]\n" "") body "\n"))
       "The whole result is "
       (string-append "(subagent-result " (value->string slug) ")"))))
 

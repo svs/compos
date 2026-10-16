@@ -1308,20 +1308,20 @@ is forgotten and that group falls back to creation order in the switcher."
               (set-window-restore! win #f)))
           (unless (buffer-in-group? buf id)
             (set! clean #f)
-            (let ((hidden
-                    (filter (lambda (candidate)
-                              (not (member candidate shown)))
-                            pool)))
-              (begin
-                (cond ((pair? hidden)
-                       (window-set-buffer! win (car hidden))
-                       (set! shown (cons (car hidden) shown)))
-                      ;; sealed: with no member to show, the pane goes
-                      ;; rather than show a foreign buffer
-                      ((> (length (window-list)) 1)
-                       (delete-window-id! win))
-                      (else
-                       (window-set-buffer! win (car pool)))))))))
+            ;; the fill rule picks; sealed: with no member to show, the
+            ;; pane goes rather than show a foreign buffer
+            (let* ((action (window-fill-decide
+                             (list 'shown shown
+                                   'others (> (length (window-list)) 1))
+                             pool))
+                   (what (car action)))
+              (cond ((equal? what 'show)
+                     (window-set-buffer! win (cadr action))
+                     (set! shown (cons (cadr action) shown)))
+                    ((equal? what 'delete)
+                     (delete-window-id! win))
+                    (else
+                     (window-set-buffer! win (car pool))))))))
       (window-list))
     clean))
 

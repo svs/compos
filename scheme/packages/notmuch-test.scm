@@ -350,9 +350,16 @@
       (check-contains! ctx "thread:0001" "the open thread")
       (check-contains! ctx "id:m1" "and the message in it"))
 
-    ;; a buffer with no provider contributes nothing
+    ;; a buffer with no provider still gets its line: name, mode and line
     (switch-to-buffer! "*scratch*")
-    (check-equal! (editor-context-preamble "*zz-nm-chat*") "" "no provider, no preamble")
+    (let ((pre (editor-context-preamble "*zz-nm-chat*")))
+      (check-contains! pre "- *scratch* (" "the snapshot names it")
+      (check-contains! pre ", line " "and its line"))
+    ;; with the snapshot off, only providers speak
+    (let ((was editor-context-snapshot))
+      (set! editor-context-snapshot #f)
+      (check-equal! (editor-context-preamble "*zz-nm-chat*") "" "no provider, no preamble")
+      (set! editor-context-snapshot was))
     (t--nm-done!)))
 
 (deftest 'the-provider-reads-the-list-buffers-own-point

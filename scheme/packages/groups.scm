@@ -4197,15 +4197,18 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; ask the group without leaving the current buffer: the minibuffer prompt
 ;; becomes a group-chat turn, point stays put, the reply lands on the right
 (define (group-ask! g)
+  (let ((src (current-buffer)) (pos (point)))
   (minibuffer-read (string-append "Ask " (group-display-name g) ": ") (history-items 'companion-ask)
     (lambda (prompt)
       (history-push! 'companion-ask prompt)
       (let ((back (active-window)))
         (group-chat-show! g)
+        ;; the chat may now cover SRC; the send names it first anyway
+        (buffer-set-local! (current-buffer) 'editor-context-source (list src pos))
         (insert! prompt)
         (run-command "agent-send")
         (when (window-exists? back)
-          (select-window! back))))))
+          (select-window! back)))))))
 
 ;; the group a joining buffer gets by default: the group the frame
 ;; stands in, else the most recent group in history. The buffer's own

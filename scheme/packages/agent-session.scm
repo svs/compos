@@ -171,6 +171,11 @@
             raw images))
         (llm-session-send! slug msg raw images))))
 
+;; editor-context-preamble (editor.scm) reads this; editor.scm loads first
+(defcustom 'editor-context-snapshot #t
+  "Start each chat send with one line for every visible buffer: its name, mode and line at point. Set #f to send only what mode providers add."
+  'group 'chat 'type 'boolean)
+
 ;; #f means TEXT already left the runtime's queue (it was promoted into
 ;; the running turn as steering) between the row rendering and the key
 ;; that asked to remove it.

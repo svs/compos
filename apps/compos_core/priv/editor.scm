@@ -2813,10 +2813,13 @@
 (define (symbol-at-point) (symbol-at-point-in *symbol-chars*))
 
 ;;; --- context providers --------------------------------------------------------
-;;; A mode can explain what the user is looking at: (register-context-provider!
-;;; "notmuch-mode" fn) where fn takes the buffer name and returns a short
-;;; description or #f. agent-send prepends the visible windows'
-;;; contexts, so "this" in a chat means the thing selected in the other window.
+;;; Every chat and agent send says what the user is looking at: one line for
+;;; each visible buffer, the last focused first, with its mode and the line
+;;; its window shows point on. Only the name rides, never the text, so
+;;; "this" in a chat means the thing in the other window and the agent reads
+;;; it itself. A mode adds what a line cannot say with
+;;; (register-context-provider! "notmuch-mode" fn), where fn takes the
+;;; buffer name and returns a short description or #f.
 
 ;; the provider of a mode is the keyed hook (context-provider MODE)
 (define (register-context-provider! mode fn)
@@ -2826,18 +2829,36 @@
   (run-hook-with-args-until-success
     (list 'context-provider (or (buffer-local buf 'mode-name) "")) buf))
 
-;; contexts of every visible buffer except EXCLUDE (the chat itself),
-;; deduped; "" when no provider speaks up
-(define (editor-context exclude)
+;; the snapshot is on unless editor-context-snapshot is #f; then only the
+;; providers speak. agent-session defines the setting, which loads later.
+(define (editor-context-snapshot?)
+  (not (and (boundp 'editor-context-snapshot) (not editor-context-snapshot))))
+
+;; BUF as one line: its name, its mode and the line POS is on, then what
+;; its mode's provider adds; with the snapshot off, the provider's text or #f
+(define (editor-context-line buf pos)
+  (let ((ctx (buffer-context buf)))
+    (if (not (editor-context-snapshot?))
+        ctx
+        (let ((line (and pos (with-current-buffer buf (lambda () (line-number-at-pos pos))))))
+          (string-append "- " buf " (" (or (buffer-local buf 'mode-name) "fundamental-mode") ")"
+                         (if line (string-append ", line " (number->string line)) "")
+                         (if ctx (string-append ": " ctx) ""))))))
+
+;; one line for every visible buffer except EXCLUDE (the chat itself) and
+;; SKIP, deduped, the last focused first; "" when none has a line
+(define (editor-context exclude &optional skip)
   (let loop ((ws (window-list)) (seen '()) (acc '()))
     (if (null? ws)
-        (string-join (reverse acc) "\n")
-        (let ((buf (cadr (car ws))))
-          (if (or (equal? buf exclude) (member buf seen))
+        (string-join (map cadr (sort acc)) "\n")
+        (let ((win (car (car ws))) (buf (cadr (car ws))))
+          (if (or (equal? buf exclude) (equal? buf skip) (member buf seen))
               (loop (cdr ws) seen acc)
-              (let ((ctx (buffer-context buf)))
+              (let ((line (editor-context-line buf (window-point win))))
                 (loop (cdr ws) (cons buf seen)
-                      (if ctx (cons ctx acc) acc))))))))
+                      (if line
+                          (cons (list (- (or (buffer-last-seen buf) 0)) line) acc)
+                          acc))))))))
 
 ;;; --- targets & actions (embark) -----------------------------------------------
 ;;; The thing at point is a typed TARGET: (type id label). Modes register
@@ -2887,14 +2908,23 @@
 (public! 'register-actions! "(register-actions! 'type '((name fn)...)) — verbs for a target type; C-. and the act tool use them")
 (public! 'target-at "(target-at BUF) — the typed target at BUF's point, or #f")
 
-;; the paragraph chat/agent sends prepend when a context provider fires
+;; the paragraph chat/agent sends prepend. A command that asks the chat
+;; EXCLUDE from another buffer (C-c RET) leaves (BUF POS) in its local
+;; editor-context-source; that buffer goes first, for this one send.
 (define (editor-context-preamble exclude)
-  (let ((ctx (editor-context exclude)))
+  (let* ((src (and (buffer-exists? exclude) (buffer-local exclude 'editor-context-source)))
+         (src (and src (buffer-exists? (car src)) src))
+         (asked (and src (editor-context-line (car src) (cadr src))))
+         (rest (editor-context exclude (and src (car src))))
+         (ctx (cond ((and asked (equal? rest "")) (string-append asked " (asked from here)"))
+                    (asked (string-append asked " (asked from here)\n" rest))
+                    (else rest))))
+    (when src (buffer-set-local! exclude 'editor-context-source #f))
     (if (equal? ctx "")
         ""
         (string-append
-          "[Editor context — what the user is looking at right now:\n" ctx
-          "\nWhen the user says \"this\" they mean the item above.]\n\n"))))
+          "[Editor context — what the user is looking at right now, the last focused first:\n" ctx
+          "\nWhen the user says \"this\" they mean the first item above.]\n\n"))))
 
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
@@ -5677,7 +5707,7 @@
 (catalog-meta! 'function "buffer-line-at-point" 'domain 'editing 'effects '(read))
 (public! 'json-parse "(json-parse STR) — JSON to Scheme: objects become plists with symbol keys, null becomes #f; #f on bad input")
 (public! 'register-context-provider! "(register-context-provider! MODE FN) — FN buf -> description of what the user is looking at, or #f; chat/agent sends prepend it")
-(public! 'editor-context "(editor-context EXCLUDE-BUF) — visible-window contexts from registered providers, \"\" if none")
+(public! 'editor-context "(editor-context EXCLUDE-BUF [SKIP]) — one line per visible buffer: name, mode, line at point and what its provider adds, the last focused first; \"\" if none")
 (public! 'goto-char! "(goto-char! BYTE-POS)")
 (public! 'set-mb-redirect! "(set-mb-redirect! BOOL) — #f makes current-buffer ignore an active minibuffer, so a preview hook can act on the invoking buffer; restore to #t after")
 (public! 'line-start-position "(line-start-position LINE) — 1-based line's start byte offset, O(log n)")

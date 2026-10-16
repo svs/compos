@@ -1161,9 +1161,8 @@
 (domain! 'chat)
 (effects! '(read))
 
-;; how much of a child's own words ride in a free-text wake. Past this the
-;; parent is pointed at subagent-result instead of being flooded.
-(define *subagent-wake-limit* 4000)
+;; how much of a reply the log keeps when it has no RESULT paragraph
+(define *subagent-log-tail* 400)
 
 (define (subagent-live-buffer chat)
   (let* ((slug (subagent-slug chat))
@@ -1194,37 +1193,124 @@
                   #f)
                  (else (loop (cdr rs))))))))
 
+(define *subagent-logs-setting* 'subagent-logs)
+
+(define (subagent-edge-group slug)
+  (let ((found (subagent-parent-slot-of slug)))
+    (and found (car found))))
+
+(define (subagent-logs g)
+  (let ((held (group-setting g *subagent-logs-setting*)))
+    (if (pair? held) held '())))
+
+(define (subagent-log-entries slug)
+  (let* ((g (subagent-edge-group slug))
+         (row (and g (assoc slug (subagent-logs g)))))
+    (if row (cdr row) '())))
+
+(define (subagent-log-append! slug kind text)
+  (let ((g (subagent-edge-group slug)))
+    (when g
+      (let ((others (filter (lambda (row) (not (equal? (car row) slug)))
+                            (subagent-logs g)))
+            (entry (list (current-time) kind text)))
+        (group-setting-set! g *subagent-logs-setting*
+          (append others
+                  (list (cons slug (append (subagent-log-entries slug) (list entry))))))))))
+
+(define (subagent-result-paragraph text)
+  (let ((paras (filter (lambda (p) (string-prefix? "RESULT:" p))
+                       (map string-trim (string-split text "\n\n")))))
+    (and (pair? paras) (car (reverse paras)))))
+
+(define (subagent-log-paragraph slug)
+  (let* ((said (or (subagent-last-assistant slug) ""))
+         (n (string-byte-length said)))
+    (or (subagent-result-paragraph said)
+        (if (> n *subagent-log-tail*)
+            (substring-bytes said (- n *subagent-log-tail*) n)
+            said))))
+
+(define (subagent-verdict-of slug)
+  (let loop ((es (reverse (subagent-log-entries slug))))
+    (cond ((null? es) #f)
+          ((eq? (nth 1 (car es)) 'verdict)
+           (let* ((text (nth 2 (car es)))
+                  (cut (string-index text ": ")))
+             (list (substring-bytes text 0 cut)
+                   (substring-bytes text (+ cut 2) (string-byte-length text)))))
+          (else (loop (cdr es))))))
+
+(define (subagent-todo-set! buf line target)
+  (let loop ((n 0))
+    (let ((state (morg-toggle-todo-at! buf (line-start-position line))))
+      (cond ((equal? state target) state)
+            ((>= n 2) #f)
+            (else (loop (+ n 1)))))))
+
+(define (subagent-todo-note! buf line slug verdict summary)
+  (markdown-insert-after! buf line
+    (string-append "Result: " summary " [" slug "]"))
+  (subagent-todo-set! buf line (if (eq? verdict 'done) "DONE" "TODO")))
+
+(define (subagent-verdict! child verdict summary &optional opts)
+  (let* ((slug (subagent-slug child))
+         (opts (or opts '()))
+         (todo (plist-get opts 'todo))
+         (reply (plist-get opts 'message))
+         (hits (and todo (markdown-find (car todo) (cadr todo)))))
+    (unless (memq verdict '(done again wait))
+      (error "subagent-verdict!: VERDICT is done, again, or wait" verdict))
+    (unless (subagent-edge-group slug)
+      (error "subagent-verdict!: no spawn edge for" slug))
+    (when (and todo (null? hits))
+      (error "subagent-verdict!: no heading" (cadr todo)))
+    (when (and (eq? verdict 'again) (not reply))
+      (error "subagent-verdict!: again needs 'message"))
+    (subagent-log-append! slug 'verdict
+      (string-append (symbol->string verdict) ": " summary))
+    (when todo
+      (subagent-todo-note! (car todo) (car (car hits)) slug verdict summary))
+    (when (eq? verdict 'again)
+      (agent-continue! slug reply))
+    (subagent-status-of slug)))
+
+(define (subagent-log chat)
+  (subagent-log-entries (subagent-slug chat)))
+
 ;; THE reply shape. A plist, because one caller reads one field and a list
 ;; view reads another:
 ;;   'slug        the child's durable id
 ;;   'buffer      its chat buffer, or #f when the chat is gone
 ;;   'status      running | stopped | done | idle | gone
 ;;   'stop-reason the backend's own word for how the last turn ended
-;;   'result      what the orchestrator recorded with subagent-mark-done!, or #f
+;;   'result      what the orchestrator recorded with subagent-verdict! 'done, or #f
 ;;   'text        the child's last assistant message, empty when it said nothing
 (define (subagent-result chat)
   (let* ((slug (subagent-slug chat))
          (buf (subagent-live-buffer chat))
-         (done (and buf (buffer-local buf 'subagent-done)))
-         (ended (and buf (buffer-local buf 'subagent-turn-end))))
+         (ended (and buf (buffer-local buf 'subagent-turn-end)))
+         (verdict (subagent-verdict-of slug)))
     (list 'slug slug
           'buffer buf
           'status (subagent-status-of chat)
           'stop-reason (and ended (nth 0 ended))
-          'result (and done (nth 0 done))
+          'result (and verdict (equal? (car verdict) "done") (cadr verdict))
           'text (or (subagent-last-assistant chat) ""))))
 
 ;; CHATS is one chat or a list of them; the answers come back in that order.
 (define (subagent-collect chats)
   (map subagent-result (if (pair? chats) chats (list chats))))
 
-;; A turn end is only stopped; done is set by the orchestrator via subagent-mark-done!.
+;; A turn end is only stopped; done and wait come from subagent-verdict!, and a later turn end leaves them.
 (define (subagent-status-of chat)
   (let* ((slug (subagent-slug chat))
-         (buf (subagent-live-buffer chat)))
+         (buf (subagent-live-buffer chat))
+         (said (let ((v (subagent-verdict-of slug))) (and v (car v)))))
     (cond ((not buf) 'gone)
           ((subagent-running? slug) 'running)
-          ((buffer-local buf 'subagent-done) 'done)
+          ((equal? said "done") 'done)
+          ((equal? said "wait") 'wait)
           ((buffer-local buf 'subagent-turn-end) 'stopped)
           (else 'idle))))
 
@@ -1232,12 +1318,10 @@
   (eq? (subagent-status-of chat) 'done))
 
 (define (subagent-stopped? chat)
-  (and (memq (subagent-status-of chat) '(stopped done gone)) #t))
+  (and (memq (subagent-status-of chat) '(stopped wait done gone)) #t))
 
 (define (subagent-mark-done! chat result)
-  (let ((buf (subagent-live-buffer chat)))
-    (when buf (buffer-set-local! buf 'subagent-done (list result))))
-  (subagent-status-of chat))
+  (subagent-verdict! chat 'done result))
 
 (effects! '(write))
 
@@ -1284,20 +1368,14 @@
 ;;; --- the wake -----------------------------------------------------------------
 
 (define (subagent-wake-text slug ok? stop-reason)
-  (let* ((said (or (subagent-last-assistant slug) ""))
-         (long? (> (string-byte-length said) *subagent-wake-limit*))
-         ;; a long reply keeps its end: the result is the last thing said
-         (n (string-byte-length said))
-         (body (if long? (substring-bytes said (- n *subagent-wake-limit*) n) said)))
+  (let* ((result (subagent-result-paragraph (or (subagent-last-assistant slug) "")))
+         (head (and result (car (string-split result "\n")))))
     (string-append
       "[subagent " slug
       (if ok? " finished its turn" (string-append " ended with " stop-reason))
       "]\n"
-      (if (equal? (string-trim body) "")
-          ""
-          (string-append (if long? "[...]\n" "") body "\n"))
-      "The whole result is "
-      (string-append "(subagent-result " (value->string slug) ")"))))
+      (if head (string-append head "\n") "")
+      "The log: (subagent-log " (value->string slug) ")")))
 
 (define (subagent-notify-parent! slug ok? stop-reason)
   (let* ((buf (subagent-live-buffer slug))
@@ -1313,8 +1391,9 @@
 (define (subagent-turn-end! slug stop-reason ok?)
   (let ((buf (subagent-live-buffer slug)))
     (when buf
-      (buffer-set-local! buf 'subagent-turn-end (list stop-reason ok?))
-      (buffer-set-local! buf 'subagent-done #f)))
+      (buffer-set-local! buf 'subagent-turn-end (list stop-reason ok?))))
+  (subagent-log-append! slug 'turn-end
+    (string-append stop-reason ": " (subagent-log-paragraph slug)))
   (subagent-notify-parent! slug ok? stop-reason)
   (subagent-waiters-note! slug))
 
@@ -1346,6 +1425,10 @@
 (catalog-meta! 'function "subagent-mark-done!" 'domain 'chat 'effects '(write))
 (catalog-meta! 'function "subagent-status-of" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-last-assistant" 'domain 'chat 'effects '(read))
+(public! 'subagent-log "(subagent-log CHILD) - the edge log of a spawned chat, oldest first: (TIME KIND TEXT) entries, KIND turn-end or verdict")
+(public! 'subagent-verdict! "(subagent-verdict! CHILD VERDICT SUMMARY [OPTS]) - VERDICT is done, again, or wait; OPTS: 'todo (BUF HEADING) writes a Result line and keyword, 'message TEXT goes to the child on again")
+(catalog-meta! 'function "subagent-log" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-verdict!" 'domain 'chat 'effects '(write))
 
 
 (category! 'chat)

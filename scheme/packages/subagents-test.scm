@@ -30,7 +30,8 @@
   ;; the list arms the ibuffer transient frame; give it back before the list dies
   (transient-frame-exit! 'ibuffer)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
-            '("zz-sub-parent" "zz-sub-kid-a" "zz-sub-kid-b" "*subagents*"))
+            '("zz-sub-parent" "zz-sub-kid-a" "zz-sub-kid-b" "*subagents*" "zz-sub-plan"
+            "*subagent-log:zz-sub-kid-a-slug*" "*subagent-log:zz-sub-kid-b-slug*"))
   (delete-other-windows!))
 
 ;; one parent, two children, in that spawn order. PARENT? makes the
@@ -172,3 +173,79 @@
                         "the child takes the chat-mode window")
           (check-equal! (window-buffer (active-window)) "*subagents*"
                         "and the table keeps the focus"))))))
+
+(deftest 'subagents-log-outlives-the-child-buffer
+  "the edge log is in the group record, so a killed child keeps its verdict"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (subagent-verdict! "zz-sub-kid-a-slug" 'done "finished A")
+        (buffer-kill! "zz-sub-kid-a")
+        (subagents-index-rebuild!)
+        (check-equal! (map cadr (subagent-log "zz-sub-kid-a-slug")) '(verdict)
+                      "the verdict is logged on the edge")
+        (check-equal! (subagent-verdict-of "zz-sub-kid-a-slug") '("done" "finished A")
+                      "and it still reads as done")
+        (check-equal! (subagent-status-of "zz-sub-kid-a-slug") 'gone
+                      "with the buffer gone, the status says so")))))
+
+(deftest 'subagents-verdict-done-writes-the-plan-line
+  "a done verdict with 'todo writes the result under the heading and sets DONE"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (test-buffer! "zz-sub-plan" "# Plan\n\n## Task A\n\nbody\n")
+        (check-equal! (subagent-verdict! "zz-sub-kid-a-slug" 'done "finished A"
+                                         (list 'todo (list "zz-sub-plan" "Task A")))
+                      'done "the status after a done verdict")
+        (check-true! (string-contains? (buffer-text "zz-sub-plan")
+                                       "Result: finished A [zz-sub-kid-a-slug]")
+                     "the result line is written")
+        (check-true! (string-contains? (buffer-text "zz-sub-plan") "## DONE Task A")
+                     "and the heading is DONE")))))
+
+(deftest 'subagents-verdict-wait-asks-the-parent-for-a-turn
+  "wait is a state the parent reads, and the log keeps the question"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (check-equal! (subagent-verdict! "zz-sub-kid-b-slug" 'wait "which one?") 'wait
+                      "the status is wait")
+        (run-command "subagents")
+        (check-equal! (ibuffer-row-label "zz-sub-kid-b-slug") "your turn"
+                      "the state column asks for the parent's turn")
+        (check-equal! (subagents-last-line "zz-sub-kid-b-slug") "wait: which one?"
+                      "the last column is the latest log entry")))))
+
+(deftest 'subagents-verdict-refuses-what-it-cannot-do
+  "a bad verdict, a missing message, or a missing heading logs nothing"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (test-buffer! "zz-sub-plan" "## Task A\n")
+        (check-true! (not (ignore-errors (lambda () (subagent-verdict! "zz-sub-kid-a-slug" 'maybe "x"))))
+                     "VERDICT is checked")
+        (check-true! (not (ignore-errors (lambda () (subagent-verdict! "zz-sub-kid-a-slug" 'again "x"))))
+                     "again needs a message")
+        (check-true! (not (ignore-errors (lambda ()
+                             (subagent-verdict! "zz-sub-kid-a-slug" 'done "x"
+                                                (list 'todo (list "zz-sub-plan" "Task Z"))))))
+                     "a heading that is not there is an error")
+        (check-equal! (subagent-log "zz-sub-kid-a-slug") '() "and none of them was logged")))))
+
+(deftest 'subagents-show-log-shows-one-child
+  "the log command shows the chosen child's entries in a plain buffer"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (subagent-verdict! "zz-sub-kid-b-slug" 'wait "which one?")
+        (run-command "subagents")
+        (list-goto-index! "*subagents*" 1)
+        (run-command "subagents-show-log")
+        (check-true! (string-contains? (buffer-text "*subagent-log:zz-sub-kid-b-slug*") "which one?")
+                     "the entry is in the log buffer")))))

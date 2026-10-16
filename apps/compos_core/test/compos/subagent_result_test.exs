@@ -142,7 +142,7 @@ defmodule Compos.SubagentResultTest do
     assert eval!(~s[(plist-get (subagent-result "#{s}") 'text)]) == ~s[""]
   end
 
-  test "'notify #t wakes the parent with free text" do
+  test "'notify #t wakes the parent with the header and the log" do
     # the parent needs a turn of its own to answer the wake with
     p = slug(eval!(~s[(execute* "" '(backend "stub" script (())))]))
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(p)) end)
@@ -161,8 +161,8 @@ defmodule Compos.SubagentResultTest do
            "the parent was never woken: #{Buffer.text(chat_buf(p))}"
 
     parent_text = Buffer.text(chat_buf(p))
-    assert parent_text =~ "child says hi."
-    assert parent_text =~ "(subagent-result \"#{c}\")"
+    refute parent_text =~ "child says hi."
+    assert parent_text =~ "(subagent-log \"#{c}\")"
   end
 
   test "without 'notify the parent is never woken" do
@@ -226,7 +226,25 @@ defmodule Compos.SubagentResultTest do
     assert eval!("(map (lambda (r) (plist-get r 'text)) zz-wait-results)") == ~s[("one.")]
   end
 
-  test "done is set by the orchestrator, and a new turn clears it" do
+  test "a finished turn is logged on the child's edge, with its stop reason and RESULT line" do
+    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "work done.\\n\\nRESULT: 3 files changed")))))]))
+
+    assert eventually(fn -> eval!(~s[(length (subagent-log "#{a}"))]) == "1" end)
+    assert eval!(~s[(map cadr (subagent-log "#{a}"))]) == "(turn-end)"
+    assert eval!(~s[(caddr (car (subagent-log "#{a}")))]) == ~s["end_turn: RESULT: 3 files changed"]
+  end
+
+  test "a verdict of again sends its message and starts a new turn" do
+    a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
+    assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
+
+    eval!(~s[(subagent-verdict! "#{a}" 'again "need more" '(message "say more"))])
+    assert eventually(fn -> eval!(~s[(length (subagent-log "#{a}"))]) == "3" end)
+    assert eval!(~s[(caddr (cadr (subagent-log "#{a}")))]) == ~s["again: need more"]
+    assert eventually(fn -> Buffer.text(chat_buf(a)) =~ "say more" end)
+  end
+
+  test "a done verdict is durable: a later turn does not clear it" do
     a = slug(eval!(~s[(execute* "go" '(backend "stub" script (((type chunk text "one.")))))]))
     assert eventually(fn -> eval!(~s[(subagent-stopped? "#{a}")]) == "#t" end)
     assert eval!(~s[(subagent-done? "#{a}")]) == "#f"
@@ -236,7 +254,8 @@ defmodule Compos.SubagentResultTest do
     assert eval!(~s[(plist-get (subagent-result "#{a}") 'result)]) == ~s["checked"]
 
     eval!(~s[(agent-continue! "#{a}" "again")])
-    assert eventually(fn -> eval!(~s[(plist-get (subagent-result "#{a}") 'status)]) == "stopped" end)
-    assert eval!(~s[(subagent-done? "#{a}")]) == "#f"
+    assert eventually(fn -> eval!(~s[(length (subagent-log "#{a}"))]) == "3" end)
+    assert eval!(~s[(subagent-done? "#{a}")]) == "#t"
+    assert eval!(~s[(plist-get (subagent-result "#{a}") 'result)]) == ~s["checked"]
   end
 end

@@ -49,8 +49,10 @@
                       "the filename face follows the group")
         (check-equal! (nth 4 candidate) face
                       "a minibuffer candidate carries the filename face")
-        (check-equal! (list-cell-face (nth 2 (ibuffer-cell-head #f buf))) face
-                      "ibuffer uses the filename face")
+        (let ((section (car (filter (lambda (b) (equal? (nth 1 b) (string-append "group:" left)))
+                                    (ibuffer-group-buckets (list buf) left ibuffer-group-of)))))
+          (check-equal! (nth 3 section) (group-color-face left)
+                        "the ibuffer section of the group wears the group's accent"))
         (check-equal! (list-cell-face (nth 1 (switch-cells #f candidate))) face
                       "the modal switcher uses the filename face"))
       (buffer-move-to-group! buf #f)

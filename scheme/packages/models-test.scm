@@ -72,7 +72,9 @@
             (lambda ()
               (when (buffer-exists? *models-buffer*) (buffer-kill! *models-buffer*))
               (when (buffer-exists? *models-detail-buffer*)
-                (buffer-kill! *models-detail-buffer*)))))))))
+                (buffer-kill! *models-detail-buffer*))
+              (for-each (lambda (name) (registry-forget! 'endpoint name))
+                        '("t-models-daemon" "t-models-other" "t-laya")))))))))
 
 
 

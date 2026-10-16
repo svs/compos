@@ -107,13 +107,17 @@
 (define (subagents-state-label s)
   (cond ((equal? s 'done) "done")
         ((equal? s 'gone) "gone")
+        ((equal? s 'wait) "your turn")
         (else (chats-state-label s))))
 
 (define (subagents-glyph s)
-  (if (equal? s 'done) "+" (agent-status-glyph s)))
+  (cond ((equal? s 'done) "+")
+        ((equal? s 'wait) (agent-status-glyph 'needs_attention))
+        (else (agent-status-glyph s))))
 
 (define (subagents-dot-face s)
   (cond ((equal? s 'done) "accent")
+        ((equal? s 'wait) (chats-state-face 'needs_attention))
         ((member s '(stopped gone)) "chat-stopped")
         (else (chats-state-face s))))
 
@@ -146,11 +150,15 @@
                         subagents-last-line-width 'end))))))
 
 (define (subagents-last-line child)
-  (if (equal? (car *subagents-last-memo*) child)
-      (nth 1 *subagents-last-memo*)
-      (let ((line (subagents-last-line--read child)))
-        (set! *subagents-last-memo* (list child line))
-        line)))
+  (let ((entries (subagent-log child)))
+    (cond ((pair? entries)
+           (list-fit (car (string-split (nth 2 (car (reverse entries))) "\n"))
+                     subagents-last-line-width 'end))
+          ((equal? (car *subagents-last-memo*) child) (nth 1 *subagents-last-memo*))
+          (else
+           (let ((line (subagents-last-line--read child)))
+             (set! *subagents-last-memo* (list child line))
+             line)))))
 
 (ibuffer-kind! 'subagent
   (list 'when? (lambda (b) (subagents-row? b))
@@ -213,7 +221,7 @@
              "the child said. States: running (a turn is in flight), your "
              "turn (it needs you), idle (no turn has ended yet), stopped "
              "(the last turn ended), done (the orchestrator marked it with "
-             "subagent-mark-done!), gone (its buffer is gone). The rows come "
+             "subagent-verdict! 'done), gone (its buffer is gone). The rows come "
              "from the relation itself, so a parent that has been killed "
              "still lists its children and wears (killed) beside its name. "
              "RET shows the chat of the row in the chat window, or the other "
@@ -276,6 +284,28 @@
 
 (effects! '(read))
 
+(define (subagents-log-text child)
+  (let ((entries (subagent-log child)))
+    (if (null? entries)
+        "no log yet\n"
+        (string-join
+          (map (lambda (e)
+                 (string-append (format-time (nth 0 e) "%H:%M:%S") "  "
+                                (symbol->string (nth 1 e)) "  " (nth 2 e)))
+               entries)
+          "\n"))))
+
+(define-command "subagents-show-log"
+  "Show the edge log of the spawned chat at point in its own buffer"
+  (lambda ()
+    (let ((row (list-current *subagents-buffer*)))
+      (if (not (subagents-row? row))
+          (message "no spawned chat here")
+          (let ((name (string-append "*subagent-log:" row "*")))
+            (buffer-set-text! name (subagents-log-text row))
+            (display-buffer-other-window! name)
+            (message name))))))
+
 (define-command "subagents-refresh" "Read the spawn edges again"
   (lambda ()
     (ibuffer-refresh! *subagents-buffer*)
@@ -301,3 +331,4 @@
 (catalog-meta! 'command "subagents" 'domain 'chat 'effects '(read display))
 (catalog-meta! 'command "subagents-visit" 'domain 'chat 'effects '(read display))
 (catalog-meta! 'command "subagents-refresh" 'domain 'chat 'effects '(read))
+(catalog-meta! 'command "subagents-show-log" 'domain 'chat 'effects '(read display))

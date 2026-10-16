@@ -49,8 +49,8 @@
           (buffer-kill! work)
           (delete-file! path))))))
 
-(deftest 'interactive-find-file-groups-only-a-new-buffer
-  "new work joins the current group but reopening live work preserves membership"
+(deftest 'interactive-find-file-joins-the-current-group
+  "a new or reopened buffer joins the current group (the ruling of 2026-09-22)"
   (lambda ()
     (with-fresh-group "zz-find-current"
       (lambda (current)
@@ -70,10 +70,10 @@
 
               (find-file-read current)
               (t--fgc-confirm! live-path)
-              (check-true! (buffer-in-group? live-path other)
-                           "the live buffer keeps its existing group")
-              (check-false! (buffer-in-group? live-path current)
-                            "reopening does not silently add it to current-group")
+              (check-true! (buffer-in-group? live-path current)
+                           "a reopened buffer joins current-group")
+              (check-false! (buffer-in-group? live-path other)
+                            "and leaves the group it was in")
 
               (buffer-kill! new-path)
               (buffer-kill! live-path)

@@ -69,11 +69,15 @@
 (define (ibp-my-candidates)
   (filter (lambda (b) (member b *ibp-bufs*)) (ibp-candidates)))
 
+;; the plain list opens on the group tab by default, which hides the stranger; these tests read the All tab
+(define (ibp-open-plain!)
+  (with-custom 'switch-buffer-initial-tab 'all (lambda () (run-command "ibuffer-prompt"))))
+
 (deftest 'the-buffer-prompt-is-the-plain-minibuffer-list
   "ibuffer-prompt opens a candidate prompt over the pool: no table, no dock, no headings"
   (lambda ()
     (ibp-setup!)
-    (run-command "ibuffer-prompt")
+    (ibp-open-plain!)
     (check-false! (float-open?) "no popup")
     (check-false! (buffer-known? " *buffers*") "no table")
     (check-equal! (plist-get (minibuffer-state) 'prompt) "Switch to: " "the prompt line is open")
@@ -125,7 +129,7 @@
   (lambda ()
     (ibp-setup!)
     (let ((home (active-window)))
-      (run-command "ibuffer-prompt")
+      (ibp-open-plain!)
       (minibuffer-change! "zz-ibp-")
       (check-equal! (ibp-candidates) '("*zz-ibp-b*" "*zz-ibp-c*" "*zz-ibp-a*") "three candidates match")
       (check-equal! (plist-get (minibuffer-state) 'sel) 0 "the selection starts on the first")

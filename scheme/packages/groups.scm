@@ -3605,19 +3605,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; The pane's own history wins, then hidden group work, then existing companions.
 (define (group-kill-previous-member group name win frame)
-  (let ((elsewhere (map cadr
-                    (filter (lambda (row)
-                              (and (equal? (caddr row) frame)
-                                   (not (equal? (car row) win))))
-                            (window-list-all)))))
-    (let loop ((bs (dedupe-names
-                    (append (window-prev-buffers win) (group-fill-buffers group)))))
-      (cond ((null? bs) #f)
-            ((and (not (equal? (car bs) name))
-                  (not (member (car bs) elsewhere))
-                  (fill-candidate? (car bs))
-                  (buffer-in-group? (car bs) group)) (car bs))
-            (else (loop (cdr bs)))))))
+  (let ((action (window-fill-decide
+                  (window-fill-snapshot win name 'restore #f 'others #f)
+                  (group-fill-buffers group))))
+    (and (equal? (car action) 'show) (cadr action))))
 
 ;; what a killed buffer's window may show in its group: a member of the
 ;; group, one of the group's chats, or the group's scratch — never a

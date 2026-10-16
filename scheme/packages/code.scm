@@ -1260,14 +1260,12 @@
       (chat-presets-of buf)
       (or (buffer-local buf 'chat-presets) '())))
 
-;; Only the FIRST enable saves state and moves the chat. The setup re-runs
-;; on desktop restore, and a re-run must not undo a model the user chose
-;; while the mode was on.
+;; Only the FIRST enable moves the chat. The setup re-runs on desktop
+;; restore, and a re-run must not undo a model the user chose while the
+;; mode was on.
 (define (code-agent--setup! buf entering?)
   (when (boundp (quote prompt-part-set!))
     (prompt-part-set! buf "code-agent" (code-agent-system-note buf)))
-  ;; Only the FIRST enable moves the chat. The setup re-runs on restore,
-  ;; and a re-run must not undo a model the user chose since.
   (when entering?
     ;; the chat gains the coding tool presets, like a code-mode buffer does.
     ;; Only a preset the chat does not already receive is a change: every

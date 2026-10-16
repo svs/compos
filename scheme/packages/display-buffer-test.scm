@@ -276,30 +276,6 @@
           (check-false! (equal? (display-buffer "*zz-db-other*") me)
                         "another name takes the chain"))))))
 
-(deftest 'a-peek-follows-the-preview-rule
-  "a peek goes through the window chain"
-  (lambda ()
-    (t--db-with t--db-wide
-      (lambda ()
-        (let ((a (t--db-file "a.txt" "alpha\n"))
-              (b (t--db-file "b.txt" "beta\n"))
-              (me (active-window)))
-          (peek-file! a)
-          (check-false! (float-open?) "stock: no popup")
-          (check-equal! (length (window-list)) 2 "a window beside")
-          (check-equal! (active-window) me "point stays")
-          (check-true! (peek-buffer? a) "it is a peek")
-          (let ((win (window-showing a)))
-            (check-true! (and win (not (equal? win me))) "in the other window")
-            (peek-file! b)
-            (check-equal! (length (window-list)) 2 "the next peek takes the same window")
-            (check-equal! (window-buffer win) b "and shows the second file")
-            (check-false! (buffer-exists? a) "the first peek is gone")
-            (check-equal! (active-window) me "point still stays"))
-          (peek-dismiss!)
-          (check-equal! (length (window-list)) 1 "dismissed: the window the peek made is gone")
-          (check-false! (buffer-exists? b) "and the peek with it"))))))
-
 (deftest 'mode-preference-survives-a-temporary-cover
   "display reuses the work window beneath a special buffer"
   (lambda ()

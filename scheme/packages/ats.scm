@@ -201,11 +201,6 @@
         'detail-mode "ats-detail-mode"
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
         'list-keys (list (list "M-o" "site-app-agent" "agent"))
-        ;; M-O on a list: each top row's own chat reads its case; the orchestrator,
-        ;; on Sonnet, archives the answered ones and reports in one table
-        'bulk (list 'size 2 'model "claude-sonnet-5-5"
-                    'rules "Read it with the ats-ash MCP tools. Do not approve, reject, edit, send or schedule anything. Answer in at most five lines; the first says approve, reject, edit or unsure, and the last is the case's link on svsrecruiting.com."
-                    'report "a table of case, what's proposed, your call, why in one line, and the link the case gave")
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; a suggestion card on a job page: recommend the job to them, or open them against it
@@ -341,6 +336,53 @@
 ")
 
 (define-site-app *ats-spec*)
+
+;; M-O in the approvals list: the top approvals go to one orchestrator chat,
+;; which spawns a subagent per approval and compiles their answers in one table
+(define (ats-approval-review-ask id)
+  (string-append
+    "Review pending approval " id " in the ATS. Its page is already open in the buffer " (or (ats-case-buffer id) "?")
+    ": read it with (ats-approval-text \"" id "\"). Do not list or search the approvals queue, and do not use the ats-ash tools to read it.\n\n"
+    "An approval is a move Vidura proposes for an application, such as new → withdrawn or accepted → applied, usually with an email to the candidate or the client. "
+    "Judge whether SVS should approve it: is the move right for this candidate against the job's must-haves, and is the email accurate about the candidate, without overclaiming and without facts from an old CV?\n\n"
+    "Do not approve, reject, edit, send or schedule anything. Answer in at most five lines. The first says approve, reject, edit or unsure; then what's proposed and why; "
+    "the last is this link: https://svsrecruiting.com/staff/approvals/" id))
+
+(define (ats-approvals-review-prompt ids)
+  (let ((n (number->string (length ids)))
+        (q "\""))
+    (string-append
+      "You orchestrate the review of " n " pending approvals in the ATS. Their ids: " (string-join ids ", ") ".\n\n"
+      "1. Now spawn one subagent per approval with this single eval, then end your turn. You review none yourself.\n"
+      "(for-each (lambda (id) (execute* (ats-approval-review-ask id) (list 'title (ats-case-buffer id) 'notify #t))) (list "
+      (string-join (map (lambda (id) (string-append q id q)) ids) " ") "))\n"
+      "(execute* PROMPT OPTS) starts a subagent chat and returns at once; 'notify #t wakes you when it answers. "
+      "(ats-approval-review-ask ID) is that approval's prompt: it points the subagent at the page already open in a buffer.\n\n"
+      "2. Each answer wakes you. Until all " n " have answered, end your turn without a reply.\n\n"
+      "3. When all have answered, mark every one that answered in one eval: (subagent-verdict! SLUG 'done ONE-LINE). "
+      "That stops it and archives its chat with its history. Leave one that is stuck or asks something.\n\n"
+      "4. Then reply once: a table of candidate and job, what's proposed, the subagent's call, why in one line, and the link it gave. "
+      "After it, list the subagents you left open.")))
+
+(define-command "ats-approvals-review" "Hand the top approvals to one orchestrator chat, which spawns a subagent per approval"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (rows (let loop ((es (filter (lambda (e) (list-selectable? buf e)) (list-entries buf))) (acc '()))
+                   (if (or (null? es) (>= (length acc) 10))
+                       (reverse acc)
+                       (loop (cdr es) (cons (car es) acc)))))
+           ;; each approval's page opens without showing, so its subagent reads the buffer
+           (ids (filter (lambda (id) id)
+                        (map (lambda (row) (let ((p (site-app-show-detail! buf row #f #t))) (and p (ats-case-id p)))) rows))))
+      (if (null? ids)
+          (message "no approvals here")
+          (let ((orch (subagent-live-buffer
+                        (execute* (ats-approvals-review-prompt ids)
+                                  (list 'title (string-append "Review: " (number->string (length ids)) " approvals")
+                                        'model "claude-sonnet-5-5")))))
+            (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
+(catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
+(define-key (mode-keymap "ats-approvals-mode") "M-O" "ats-approvals-review")
 
 (domain! 'web)
 (effects! '(write external display))
@@ -601,9 +643,11 @@
     (and (pair? hit) (car hit))))
 (define (ats-case-text id)
   (let ((b (ats-case-buffer id))) (and b (buffer-text b))))
-(define (ats-case-handle src)
-  (string-append " Case id " (or (ats-case-id src) "?") ": its page is already open in the buffer " src
-    ", so read it with (ats-case-text \"" (or (ats-case-id src) "") "\") and do not list or search the queue."))
+(define (ats-approval-buffer id) (ats-case-buffer id))
+(define (ats-approval-text id) (ats-case-text id))
+(define (ats-case-handle src noun reader)
+  (string-append " " noun " id " (or (ats-case-id src) "?") ": its page is already open in the buffer " src
+    ", so read it with (" reader " \"" (or (ats-case-id src) "") "\") and do not list or search the lists."))
 (define (ats-row-label row fallback)
   (let* ((src fallback)
          (who (or (plist-get row 'candidate) ""))
@@ -616,7 +660,7 @@
 (mode-chat-title! "ats-detail-mode" ats-case-label)
 (mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"
-  (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src))))
+  (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"
-  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src))))
+  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text"))))
 

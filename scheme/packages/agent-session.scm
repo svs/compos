@@ -1500,17 +1500,28 @@
 ;; cases over itself: it evals (bulk-handover! SLUG), which spawns the children.
 (define (bulk-agents! bufs opts)
   (let* ((title (or (plist-get opts 'title) "Orchestrate"))
-         (g (or (plist-get opts 'group) (buffer-group (current-buffer))))
-         (job (number->string (monotonic-ms)))
-         (slug (execute* (string-append
-                           "You orchestrate " (number->string (length bufs)) " cases. "
-                           "Your first and only step now: eval (bulk-handover! \"" job "\") in one eval. "
-                           "It starts one chat per case and returns at once. Then end your turn; "
-                           "the answers reach you as one message when every chat has answered.")
-                         (list 'title title 'model (plist-get opts 'model)))))
-    ;; the editor lane is ours until we return, so the turn cannot ask for the job before it is filed
-    (set! *bulk-jobs* (cons (list job bufs opts g slug) *bulk-jobs*))
-    (subagent-live-buffer slug)))
+         (noun (or (plist-get opts 'noun) "items"))
+         (rules (plist-get opts 'rules))
+         (q "\"")
+         (ids (map (lambda (b) (or (ats-case-id b) b)) bufs))
+         (n (number->string (length bufs))))
+    ;; the orchestrator spawns the subagents itself; its prompt carries the ids and the exact code
+    (subagent-live-buffer
+      (execute* (string-append
+                  "You orchestrate " n " " noun ". You review none of them yourself. Their ids: " (string-join ids ", ") ".\n\n"
+                  "1. Now spawn one subagent per id with this single eval, then end your turn:\n"
+                  "(for-each (lambda (id) (execute* (string-append (chat-opening-prompt (ats-case-buffer id))"
+                  (if (string? rules) (string-append " " q " " rules q) "")
+                  ") (list 'title (ats-case-buffer id) 'notify #t))) (list "
+                  (string-join (map (lambda (id) (string-append q id q)) ids) " ") "))\n"
+                  "(execute* PROMPT OPTS) starts a subagent chat with PROMPT and returns its slug at once; 'notify #t wakes you each time one answers. "
+                  "(ats-case-buffer ID) is the buffer holding that approval's page, and (chat-opening-prompt BUF) is its prompt, with the id and how to read the page.\n\n"
+                  "2. Each answer wakes you. Until all " n " have answered, end your turn and say nothing.\n\n"
+                  "3. When all have answered, mark every one that answered in one eval: (subagent-verdict! SLUG 'done ONE-LINE). "
+                  "That stops it and archives its chat with its history. Leave one that is stuck or asks something.\n\n"
+                  "4. Then reply once: " (or (plist-get opts 'report) "a table of id, your call, why in one line")
+                  ". After it, list the subagents you left open.")
+                (list 'title title 'model (plist-get opts 'model))))))
 
 (define (bulk-handover! job-id)
   (let* ((job (assoc job-id *bulk-jobs*))

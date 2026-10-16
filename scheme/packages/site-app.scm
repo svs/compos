@@ -2226,6 +2226,7 @@
                         (list 'title (string-append "Orchestrate: " (number->string (length pages)) " "
                                                     (or (and page (plist-get page 'label)) "cases"))
                               'model (plist-get bulk 'model)
+                              'noun (string-downcase (or (and page (plist-get page 'label)) "items"))
                               'rules (plist-get bulk 'rules)
                               'report (plist-get bulk 'report)))))
             (when orch
@@ -2278,7 +2279,7 @@
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
                   'debounce #t
-                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts") (list "M-O" "agents")
+                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
                                             (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
                   ;; Digits are left free so they reach the page beside the list, as
                   ;; its tab keys; the sections move to M-digit.
@@ -2291,8 +2292,6 @@
                                       ;; the page beside the list, part by part, without leaving the row
                                       (list "M-<down>" "site-app-detail-anchor-next")
                                       (list "M-<up>" "site-app-detail-anchor-prev")
-                                      ;; the top rows, each to its page's own chat, with one orchestrator
-                                      (list "M-O" "site-app-bulk-agents")
                                       (list "q" "quit-window"))
                                 ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
                                 (map (lambda (k) (list (car k) (cadr k))) list-keys)

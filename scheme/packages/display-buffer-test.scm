@@ -42,9 +42,6 @@
                         (buffer-list)))))))
     (lambda ()
       (set! *peek-recent* '())
-      (layout-target-set! #f)
-      (set-frame-local! 'pinned-group #f)
-      (set-frame-local! 'current-group #f)
       (switch-to-buffer! "*scratch*")
       (run-command "delete-other-windows"))))
 

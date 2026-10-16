@@ -1352,7 +1352,7 @@
 
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
 
-(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\" directory \"/repo/\" notify #t)) — spawn with config; notify #t wakes the spawning chat when a turn of the new one ends")
+(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\" directory \"/repo/\" title \"Name\" notify #t)) — spawn with config; title names the chat at once; notify #t wakes the spawning chat when a turn of the new one ends")
 
 (define (execute prompt) (execute* prompt '()))
 

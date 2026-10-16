@@ -1190,8 +1190,9 @@
 ;; view reads another:
 ;;   'slug        the child's durable id
 ;;   'buffer      its chat buffer, or #f when the chat is gone
-;;   'status      running | done | failed | idle | gone
+;;   'status      running | stopped | done | idle | gone
 ;;   'stop-reason the backend's own word for how the last turn ended
+;;   'result      what the orchestrator recorded with subagent-mark-done!, or #f
 ;;   'text        the child's last assistant message, empty when it said nothing
 (define (subagent-result chat)
   (let* ((slug (subagent-slug chat))
@@ -1314,19 +1315,28 @@
 (category! 'chat)
 
 (public! 'subagent-result
-  "(subagent-result CHAT) -> a plist of 'slug 'buffer 'status 'stop-reason 'text, read from CHAT's own transcript; it costs the reader no LLM turn")
+  "(subagent-result CHAT) -> a plist of 'slug 'buffer 'status 'stop-reason 'result 'text, read from CHAT's own transcript; it costs the reader no LLM turn")
 (public! 'subagent-collect
   "(subagent-collect CHATS) -> one subagent-result per chat, in the order given; CHATS is one chat or a list")
 (public! 'subagent-wait
   "(subagent-wait CHATS K) - call K with (subagent-collect CHATS) once every one of them has reached a turn end; returns 'done or 'waiting and never blocks")
 (public! 'subagent-done?
-  "(subagent-done? CHAT) -> #t when CHAT has finished a turn or is gone")
+  "(subagent-done? CHAT) -> #t when the orchestrator marked CHAT done")
+(public! 'subagent-stopped?
+  "(subagent-stopped? CHAT) -> #t when CHAT's last turn ended, or it is done or gone")
+(public! 'subagent-mark-done!
+  "(subagent-mark-done! CHAT RESULT) -> the status after marking CHAT done")
+(public! 'subagent-status-of
+  "(subagent-status-of CHAT) -> gone | running | done | stopped | idle")
 (public! 'subagent-last-assistant
   "(subagent-last-assistant CHAT) -> the text of CHAT's last assistant message, or #f")
 (catalog-meta! 'function "subagent-result" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-collect" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-wait" 'domain 'chat 'effects '(write))
 (catalog-meta! 'function "subagent-done?" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-stopped?" 'domain 'chat 'effects '(read))
+(catalog-meta! 'function "subagent-mark-done!" 'domain 'chat 'effects '(write))
+(catalog-meta! 'function "subagent-status-of" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-last-assistant" 'domain 'chat 'effects '(read))
 
 

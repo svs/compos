@@ -27,6 +27,8 @@
   name)
 
 (define (zz-sub-clear!)
+  ;; the list arms the ibuffer transient frame; give it back before the list dies
+  (transient-frame-exit! 'ibuffer)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             '("zz-sub-parent" "zz-sub-kid-a" "zz-sub-kid-b" "*subagents*"))
   (delete-other-windows!))

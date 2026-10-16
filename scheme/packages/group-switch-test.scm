@@ -1962,10 +1962,12 @@
       (switch-to-group! id)
       (check-equal! (group-frame-owner id) (selected-frame) "entering it adopts it")
       (check-true! (member id (group-ids-mru)) "and this frame lists it now"))
-    ;; the entry made the group's chat; a later test must not find it
+    (t--sw-done!)
+    ;; the entry made the group's chat; a later test must not find it. The
+    ;; sweep runs after the group is gone: a kill while the group lives
+    ;; lets the kill repair make the chat again.
     (for-each (lambda (b) (when (string-prefix? "*chat:zz-sw-orphan" b) (buffer-kill! b)))
-              (buffer-list))
-    (t--sw-done!)))
+              (buffer-list))))
 
 (deftest 'every-completed-window-change-saves-the-groups-layout
   "the owner's ruling: a group's layout is saved on each change; an arrival records nothing"

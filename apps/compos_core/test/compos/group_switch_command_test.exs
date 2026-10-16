@@ -137,7 +137,7 @@ defmodule Compos.GroupSwitchCommandTest do
     end
   end
 
-  test "grouped buffers wear their group color in the ibuffer sections", %{
+    test "grouped buffers wear their group color in the ibuffer sections", %{
     first: first,
     second: second
   } do
@@ -149,16 +149,18 @@ defmodule Compos.GroupSwitchCommandTest do
       (buffer-add-group! "#{second}" "#{here}")
       (set-frame-local! 'current-group "#{here}")
       (frame-group-label-refresh!)
-      (switch-to-buffer! "#{first}")
-      (run-command "ibuffer-prompt"))
+      (switch-to-buffer! "#{first}"))
     """)
 
     expected = eval!(~s[(group-color-face "#{here}")]) |> Jason.decode!()
+
     face =
-      eval!(~s[(nth 3 (car (filter (lambda (b) (equal? (nth 1 b) "group:\#{here}")) (ibuffer-group-buckets (list "\#{first}" "\#{second}") "\#{here}" ibuffer-group-of))))]) |> Jason.decode!()
+      eval!(~s[(nth 3 (car (ibuffer-group-buckets (list "#{first}" "#{second}") "#{here}" ibuffer-group-of)))])
+      |> Jason.decode!()
 
     assert face == expected
   end
+
 
   test "C-x C-g runs find-file-in-new-group" do
     eval!(~s{(global-set-key "C-x C-g" "find-file-in-new-group")})
@@ -231,7 +233,11 @@ defmodule Compos.GroupSwitchCommandTest do
       |> Jason.decode!()
       |> String.split(" | ")
 
-    assert hint == "2 buffers"
+    members =
+      eval!(~s[(string-join (group-members-in (group-members-index) "#{group}") " | ")])
+      |> Jason.decode!()
+
+    assert hint == "2 buffers", "group members: #{members}"
     assert kind == "container"
 
     refute facts =~ "lib/code.scm"

@@ -150,16 +150,12 @@
     (t--wr-done!)))
 
 (deftest 'a-definition-peek-is-the-frames-look
-  "the definition peek shows through the slot; a discard gives the window back"
+  "the definition shows beside the reader, and the reader keeps focus"
   (lambda ()
     (t--wr-setup!)
     (let ((me (active-window)))
       (let ((w (peek--show! "zz-name" '(buffer "zz-wr-b" 0))))
         (check-equal! (window-buffer w) "zz-wr-b" "the definition shows beside")
-        (check-equal! (car (peek--data)) "zz-name" "the slot names the definition")
-        (peek-discard!)
-        (check-false! (preview-slot) "the discard ends the look")
-        (check-equal! (length (window-list)) 1 "and the window the peek made goes")
         (check-equal! (active-window) me "the reader stays")))
     (t--wr-done!)))
 

@@ -116,6 +116,82 @@
                 'props (nth 1 e) 'example (nth 2 e)
                 'effects '("pure"))))))
 
+;; A schema row is (NAME TYPE required|optional [DOC]). DOC says what the
+;; prop holds, for whoever writes props without reading the renderer.
+(define (component--schema-type row) (if (> (length row) 1) (nth 1 row) 'any))
+(define (component--schema-doc row) (if (> (length row) 3) (nth 3 row) #f))
+
+(define (component--type-ok? type v)
+  (cond ((equal? type 'string) (string? v))
+        ((equal? type 'boolean) (or (eq? v #t) (eq? v #f)))
+        ((equal? type 'number) (number? v))
+        ((equal? type 'list) (or (null? v) (pair? v)))
+        ((equal? type 'symbol) (symbol? v))
+        (else #t)))
+
+;; The strict check, for props somebody else wrote: every key declared,
+;; every value of its declared type, every required one there. component
+;; itself checks only the required ones, so a caller may pass extras.
+(define (component-check name props)
+  (let ((e (component-entry name)))
+    (cond
+      ((not e) (list (string-append "no component named " (catalog--string name))))
+      ((not (or (null? props) (pair? props))) (list "props must be a list: (KEY VALUE ...)"))
+      ((= 1 (modulo (length props) 2)) (list "props must pair every key with a value"))
+      (else
+       (let ((q (car e)) (schema (nth 1 e)))
+         (let loop ((xs props) (out '()))
+           (if (null? xs)
+               (append (reverse out)
+                       (map (lambda (r) (string-append q " requires " (symbol->string (car r))))
+                            (filter (lambda (r) (and (component--schema-required? r)
+                                                     (not (component--has? props (car r)))))
+                                    schema)))
+               (let* ((k (car xs))
+                      (r (and (symbol? k) (find (lambda (r) (equal? (car r) k)) schema))))
+                 (loop (cddr xs)
+                       (cond ((not r) (cons (string-append q " has no prop " (value->string k)) out))
+                             ((not (component--type-ok? (component--schema-type r) (cadr xs)))
+                              (cons (string-append q " prop " (symbol->string k) " must be a "
+                                                   (symbol->string (component--schema-type r)))
+                                    out))
+                             (else out)))))))))))
+
+;; A chat draws only the components that say a reply may name them: their
+;; props are data, so no prop may be raw blocks or a click. Their buttons
+;; are the actions the component declares, never a command the reply names.
+(define *chat-components* (if (boundp '*chat-components*) *chat-components* '()))
+
+(define (component-chat! name)
+  (let* ((e (component-entry name))
+         (bad (and e (filter (lambda (r) (member (component--schema-type r) '(blocks any))) (nth 1 e)))))
+    (cond ((not e) (error (string-append "component-chat!: no component named " (catalog--string name))))
+          ((pair? bad) (error (string-append "component-chat!: " (car e) " takes "
+                                             (symbol->string (car (car bad))) ", which is not data")))
+          (else (unless (member (car e) *chat-components*)
+                  (set! *chat-components* (append *chat-components* (list (car e)))))
+                (car e)))))
+
+(define (component-chat? name)
+  (and (member (component--qualified name) *chat-components*) #t))
+
+(define (chat-components)
+  (map (lambda (q) (list q (catalog--get (catalog-entry 'component q) 'doc))) *chat-components*))
+
+;; An action is (NAME LABEL KEY EFFECTS FN); FN gets the props. The first
+;; is the default. Effects past read, display and external ask first.
+(define *component-actions* (if (boundp '*component-actions*) *component-actions* '()))
+
+(define (component-actions! name actions)
+  (let ((q (component--qualified name)))
+    (set! *component-actions*
+      (cons (list q actions) (remove (lambda (e) (equal? (car e) q)) *component-actions*)))
+    q))
+
+(define (component-actions name)
+  (let ((hit (assoc (component--qualified name) *component-actions*)))
+    (if hit (cadr hit) '())))
+
 (define (apropos-components query &rest filters)
   (apply apropos (cons query (append (list 'kind 'component) filters))))
 

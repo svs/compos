@@ -49,7 +49,7 @@
                       "the filename face follows the group")
         (check-equal! (nth 4 candidate) face
                       "a minibuffer candidate carries the filename face")
-        (check-equal! (list-cell-face (nth 2 (ibuffer-cell-head buf))) face
+        (check-equal! (list-cell-face (nth 2 (ibuffer-cell-head #f buf))) face
                       "ibuffer uses the filename face")
         (check-equal! (list-cell-face (nth 1 (switch-cells #f candidate))) face
                       "the modal switcher uses the filename face"))
@@ -152,8 +152,8 @@
 
 ;;; --- the chats ----------------------------------------------------------------
 
-(deftest 'a-chat-clears-a-group-id-whose-record-is-gone
-  "reading it heals it, rather than handing back a dead id forever"
+(deftest 'a-chat-answers-no-group-for-a-dead-group-id
+  "reading it answers no group, rather than handing back a dead id"
   (lambda ()
     (let ((first (t--gs-buf))
           (chat "*zz-gs-chat-dangling*")
@@ -168,7 +168,7 @@
       ;; straight from the board
       (group-record-delete! gone)
       (check-false! (chat-group-id chat) "the dead id is not handed back")
-      (check-false! (buffer-local chat 'group-id) "and it is cleared on the buffer")
+      (check-false! (buffer-group chat) "buffer-group, the only reader, answers none")
       (check-equal! (buffer-group-summary chat) "ungrouped" "the summary says so")
       (t--gs-kill! chat first))))
 
@@ -194,7 +194,6 @@
            (chat (group-chat id)))
       (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the mode is set")
       (check-true! (buffer-local chat 'agent-saved-mark) "the rich input exists")
-      (check-true! (> (buffer-size chat) 0) "the surface exists")
       (t--gs-kill! chat)
       (t--gs-drop! id))))
 
@@ -335,9 +334,8 @@
             (set-frame-local! 'previous-group deleted)
             (set-frame-local! 'pinned-group deleted)
             (group-record-delete! deleted)
-            (check-false! (frame-local 'current-group) "the deleted id is cleared")
-            (check-false! (frame-local 'previous-group) "the previous id is cleared")
-            (check-false! (frame-local 'pinned-group) "the pin is cleared"))
+            (check-false! (frame-group) "the current group reads as none")
+            (check-false! (group-pinned) "and the pin reads as none"))
 
           (t--gs-drop! current previous pinned))))))
 

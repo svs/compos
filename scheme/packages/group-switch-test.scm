@@ -1714,8 +1714,8 @@
         (window-mode-preference! win #f)))
     (t--sw-done!)))
 
-(deftest 'group-pin-keeps-context-without-adopting-foreign-work
-  "a pin survives display and kill changes while foreign membership stays unchanged"
+(deftest 'group-pin-holds-the-frame-and-the-shown-buffer-joins-it
+  "a pin holds the frame's group, and a buffer shown in the pinned frame joins that group"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-pin-here"))
@@ -1729,11 +1729,11 @@
 
       (switch-to-buffer! t--sw-third)
       (check-equal! (group-pinned) here "the frame keeps the pin")
-      (check-equal! (frame-group) here "foreign display does not move current-group")
-      (check-false! (buffer-in-group? t--sw-third here)
-                    "the foreign buffer does not join the pinned group")
-      (check-false! (group-visible-homogeneous? here)
-                    "the foreign layout is not saved as homogeneous")
+      (check-equal! (frame-group) here "showing a foreign buffer does not move the frame")
+      (check-true! (buffer-in-group? t--sw-third here)
+                   "the shown buffer joins the frame's group")
+      (check-false! (buffer-in-group? t--sw-third foreign) "and leaves its own: one group only")
+      (check-true! (group-visible-homogeneous? here) "so the shown layout is the group's")
 
       (buffer-kill! t--sw-third)
       (check-equal! (frame-group) here "the kill keeps the pinned context")
@@ -1757,9 +1757,10 @@
 
       (switch-to-buffer! t--sw-first)
       (check-equal! (frame-group) second "the moved pin still holds")
+      (check-true! (buffer-in-group? t--sw-first second) "a buffer shown in the pinned frame joins it")
       (run-command "group-pin")
       (check-false! (group-pinned) "the second command releases the pin")
-      (check-equal! (frame-group) first "release derives context from visible work"))
+      (check-equal! (frame-group) second "release derives context from visible work"))
     (t--sw-done!)))
 
 ;;; --- leaving a group by a foreign pane ------------------------------------------

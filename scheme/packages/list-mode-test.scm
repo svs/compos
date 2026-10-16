@@ -127,3 +127,27 @@
             (check-equal! (current-buffer) "*zz-lc-b*" "the row is the buffer in hand")
             (check-equal! (active-window) slot "in the window that showed the look")
             (check-equal! (window-buffer me) t--lm-buf "and the list's window keeps the list")))))))
+
+(deftest 'the-row-at-point-is-read-with-the-lists-own-point
+  "list-current slices the list with the list's point, not the current buffer's; an undrawn list answers #f instead of raising"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (t--lm-open!)
+        (list-goto-index! t--lm-buf 1)
+        (check-equal! (list-current t--lm-buf) "*zz-lc-b*" "point rests on the second row")
+        (test-buffer! "*zz-lc-big*" "")
+        (buffer-append! "*zz-lc-big*" (string-repeat "x" 100000))
+        (switch-to-buffer! "*zz-lc-big*")
+        (end-of-buffer!)
+        (check-equal! (list-current t--lm-buf) "*zz-lc-b*"
+                      "asked from a buffer whose point is far past the list's end, the list answers its own row")
+        (check-equal! (list-key-at-pos t--lm-buf (buffer-point t--lm-buf)) "*zz-lc-b*"
+                      "and a position in the list names the row that holds it")
+        (buffer-create "*zz-lc-unpointed*")
+        (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at "*zz-lc-unpointed*" 0))))
+                      (list 'ok 0) "an empty buffer sits on the first entry line")
+        (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at "*zz-lc-unpointed*" 3))))
+                      (list 'ok #f) "and under a header it is above the entries")
+        (check-equal! (ignore-errors (lambda () (list 'ok (list-current "*zz-lc-unpointed*"))))
+                      (list 'ok #f) "so it has no row, rather than raising")))))

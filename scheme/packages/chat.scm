@@ -319,16 +319,6 @@
                (message (string-append "compacting " (number->string n)
                                        " earlier turns…"))))))))
 
-;; a chat saved before the record existed carries (role text) pairs — read
-;; them once, as text turns, and drop the old local
-(define (chat-record-migrate! buf)
-  (let ((old (buffer-local buf 'chat-turns)))
-    (when (and old (null? (chat-record buf)))
-      (buffer-set-local! buf 'chat-wire-turns
-        (map (lambda (t) (list 'role (car t) 'blocks (list (list "text" (car (cdr t))))))
-             old))
-      (buffer-set-local! buf 'chat-turns #f))))
-
 ;;; --- healing the record ----------------------------------------------------------
 ;;; A tool call and its result are one unit on the wire. The provider
 ;;; rejects a result whose call it cannot see, and it rejects a call whose

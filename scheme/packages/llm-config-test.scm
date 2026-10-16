@@ -57,24 +57,22 @@
 (deftest 'llm-config-quit-skips-a-chat-that-died
   "ESC on the menu does not write to a chat that was killed while it was open"
   (lambda ()
-    (let ((saved *llm-bundles*)
-          (history *llm-config-history*)
-          (buf (test-buffer! "zz-llm-config-dead" "")))
-      (buffer-set-local! buf 'llm-connector "api")
-      (buffer-set-local! buf 'llm-model "m1")
-      (set! *llm-bundles* '())
-      (with-current-buffer buf
-        (lambda ()
-          (transient-setup "llm-configure" buf)
-          (llm-config--box-set! 'model "m2")
-          (llm-config--box-set! 'permission "approve")))
-      (buffer-kill! buf)
-      (run-command "transient-quit-one")
-      (check-false! (transient--active) "the menu closes")
-      (check-false! (frame-local 'llm-config-box) "and the box is gone")
-      (check-false! (buffer-exists? buf) "and the chat stays dead")
-      (set! *llm-bundles* saved)
-      (set! *llm-config-history* history))))
+    (with-stubs (list (list '*llm-bundles* '())
+                      (list '*llm-config-history* *llm-config-history*))
+      (lambda ()
+        (let ((buf (test-buffer! "zz-llm-config-dead" "")))
+          (buffer-set-local! buf 'llm-connector "api")
+          (buffer-set-local! buf 'llm-model "m1")
+          (with-current-buffer buf
+            (lambda ()
+              (transient-setup "llm-configure" buf)
+              (llm-config--box-set! 'model "m2")
+              (llm-config--box-set! 'permission "approve")))
+          (buffer-kill! buf)
+          (run-command "transient-quit-one")
+          (check-false! (transient--active) "the menu closes")
+          (check-false! (frame-local 'llm-config-box) "and the box is gone")
+          (check-false! (buffer-exists? buf) "and the chat stays dead"))))))
 
 (deftest 'llm-bundle-apply-ignores-a-dead-buffer
   "a bundle applied to a buffer that does not exist changes nothing"

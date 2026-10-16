@@ -58,10 +58,9 @@
 (deftest 'needle-answers-without-the-rung-it-prefers
   "a machine that never built the shallow rung still routes, 20 ms slower"
   (lambda ()
-    (let ((held needle-ladder))
-      (set! needle-ladder "/no/such/rung.cact")
-      (check-true! (needle-available?)
-                   "a missing rung is not what makes needle unavailable")
-      (check-true! (member "NEEDLE_WEIGHTS" (map value->string (plist-get (needle-spec) 'env)))
-                   "the spec still names it, and the daemon falls back when it is absent")
-      (set! needle-ladder held))))
+    (with-stub 'needle-ladder "/no/such/rung.cact"
+      (lambda ()
+        (check-true! (needle-available?)
+                     "a missing rung is not what makes needle unavailable")
+        (check-true! (member "NEEDLE_WEIGHTS" (map value->string (plist-get (needle-spec) 'env)))
+                     "the spec still names it, and the daemon falls back when it is absent")))))

@@ -64,14 +64,6 @@
 ;; ESC belongs to the programs in the terminal (vim, less, the line editor)
 (mode-focus-key! "term-mode" "C-g")
 
-;; an old desktop names a terminal buffer's mode shell-mode; term-mode is
-;; the one name (migrations.scm runs this once per buffer)
-(define (shell-mode-name-migrate! buf)
-  (when (equal? (buffer-local buf 'mode-name) "shell-mode")
-    (buffer-set-local! buf 'mode-name "term-mode")))
-(define-buffer-migration! 'shell-mode-name "2026-09-01"
-  (lambda (buf) (shell-mode-name-migrate! buf)))
-
 (mode-doc! "term-mode"
   "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, `C-g`, the focus key the title shows, or a window command takes the keyboard back. `ESC` stays the terminal's.")
 

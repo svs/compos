@@ -40,10 +40,9 @@
         (list-goto-index! t--lrro-buf 1)
         (let ((orig buffer-set-read-only!)
               (flips 0))
-          (set! buffer-set-read-only!
-            (lambda (buf value) (set! flips (+ flips 1)) (orig buf value)))
-          (list-refresh! t--lrro-buf)
-          (set! buffer-set-read-only! orig)
+          (with-stub 'buffer-set-read-only!
+            (lambda (buf value) (set! flips (+ flips 1)) (orig buf value))
+            (lambda () (list-refresh! t--lrro-buf)))
           (check-equal! flips 0 "the redraw does not touch the read-only flag")
           (check-true! (buffer-read-only? t--lrro-buf) "the list is read-only after the redraw")
           (check-contains! (buffer-text t--lrro-buf) "gamma" "the redraw wrote the rows")

@@ -333,3 +333,19 @@
     (check-false! (member "*zz-chats-b*" (chats-test-names))
                   "and . again puts it away")
     (chats-test-reset!)))
+
+(deftest 'a-spawned-chat-sits-under-its-spawner
+  "a chat that another chat spawned follows it in the list, indented"
+  (lambda ()
+    (with-stub 'subagent-live-buffer (lambda (p) (and (buffer-known? p) p))
+      (lambda ()
+        (chats-test-open! 'none 'name)
+        (buffer-set-local! "*zz-chats-c*" 'subagent-parent "*zz-chats-a*")
+        (list-refresh! *chat-list*)
+        (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-c*" "*zz-chats-b*")
+                      "the child follows its parent, ahead of the name order")
+        (check-true! (string-prefix? "└" (cadr (ibuffer-row-name "*zz-chats-c*")))
+                     "and its name is indented")
+        (check-equal! (cadr (ibuffer-row-name "*zz-chats-b*")) "*zz-chats-b*"
+                      "a chat with no spawner is not")))
+    (chats-test-reset!)))

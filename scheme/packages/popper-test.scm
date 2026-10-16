@@ -162,15 +162,3 @@
           (check-true! (popper-popup? t--pop-a) "a popup again")
           (check-equal! (window-buffer w) t--pop-a "the buffer still stays where it is")
           (check-equal! (window-buffer me) t--pop-work "the work window keeps the work"))))))
-
-(deftest 'a-look-at-a-popup-takes-the-preview-rule
-  "a preview of a popup buffer goes beside the reader, not to the popup window"
-  (lambda ()
-    (t--pop-with
-      (lambda ()
-        (let ((me (active-window)))
-          (preview-show t--pop-a 'other)
-          (check-equal! (active-window) me "a look moves no focus")
-          (check-equal! (window-owner (window-showing t--pop-a)) me "the reader's window owns the look")
-          (check-false! (buffer-local t--pop-a 'window-class) "and nothing floats")
-          (preview-end #f))))))

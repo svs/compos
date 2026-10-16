@@ -829,7 +829,8 @@
 ;; child whose buffer is gone does not count
 (define (dash--child-counts buf)
   (let* ((kids (if (chat-buffer? buf)
-                   (filter subagent-live-buffer (subagent-children buf))
+                   (filter (lambda (c) (or (subagent-live-buffer c) (subagent-archived-path c)))
+                           (subagent-children buf))
                    '()))
          (labels (map (lambda (c) (subagents-state-label (subagents-status c))) kids)))
     (filter (lambda (row) (> (cadr row) 0))

@@ -1276,7 +1276,47 @@
       (subagent-todo-note! (car todo) (car (car hits)) slug verdict summary))
     (when (eq? verdict 'again)
       (agent-continue! slug reply))
+    (when (eq? verdict 'done)
+      (subagent-archive! slug))
     (subagent-status-of slug)))
+
+;; A child marked done is put away: its runtime stops, its buffer goes, its
+;; file stays. The path rides on the edge log so chat-open-children can
+;; bring it back.
+(define (subagent-archive! slug)
+  (let ((buf (subagent-live-buffer slug)))
+    (when buf
+      (when (boundp 'chat-log-save!) (ignore-errors (lambda () (chat-log-save! buf))))
+      (let ((path (ignore-errors (lambda () (chat-log-path buf)))))
+        (when (string? path) (subagent-log-append! slug 'archived path)))
+      (agents-archive! buf))))
+
+(define (subagent-archived-path chat)
+  (let loop ((es (reverse (subagent-log-entries (subagent-slug chat)))))
+    (cond ((null? es) #f)
+          ((eq? (nth 1 (car es)) 'archived) (nth 2 (car es)))
+          (else (loop (cdr es))))))
+
+;; Every child of CHAT as a buffer: an archived one is read back as the chat
+;; list reads a saved chat; its header brings the parent link back.
+(define (chat-open-children &optional chat)
+  (let* ((parent (or chat (current-buffer))) (g (frame-group)))
+    (filter (lambda (b) b)
+      (map (lambda (c)
+             (or (subagent-live-buffer c)
+                 (let ((path (subagent-archived-path c)))
+                   (and path
+                        (let* ((buf (visit-in-group path g))
+                               (title (and buf (buffer-local buf 'chat-title))))
+                          (when (and (string? title) (not (equal? title "")))
+                            (chat-title buf title))
+                          buf)))))
+           (subagent-children parent)))))
+
+(define-command "chat-open-children" "Read the archived children of this chat back, under it"
+  (lambda ()
+    (let ((bs (chat-open-children)))
+      (message (string-append (number->string (length bs)) " children open")))))
 
 (define (subagent-log chat)
   (subagent-log-entries (subagent-slug chat)))
@@ -1310,9 +1350,9 @@
   (let* ((slug (subagent-slug chat))
          (buf (subagent-live-buffer chat))
          (said (let ((v (subagent-verdict-of slug))) (and v (car v)))))
-    (cond ((not buf) 'gone)
+    (cond ((equal? said "done") 'done)
+          ((not buf) 'gone)
           ((subagent-running? slug) 'running)
-          ((equal? said "done") 'done)
           ((equal? said "wait") 'wait)
           ((buffer-local buf 'subagent-turn-end) 'stopped)
           (else 'idle))))
@@ -1416,6 +1456,12 @@
   "(subagent-done? CHAT) -> #t when the orchestrator marked CHAT done")
 (public! 'subagent-stopped?
   "(subagent-stopped? CHAT) -> #t when CHAT's last turn ended, or it is done or gone")
+(public! 'chat-open-children
+  "(chat-open-children [CHAT]) -> the children of CHAT as buffers, the archived ones read back under CHAT")
+(catalog-meta! 'function "chat-open-children" 'domain 'chat 'effects '(write display))
+(public! 'bulk-handover!
+  "(bulk-handover! JOB) -> start the chats of an orchestrator's job; the answers reach the orchestrator as one message")
+(catalog-meta! 'function "bulk-handover!" 'domain 'chat 'effects '(write spend))
 (public! 'subagent-mark-done!
   "(subagent-mark-done! CHAT RESULT) -> the status after marking CHAT done")
 (public! 'subagent-status-of
@@ -1434,8 +1480,8 @@
 (define (bulk-agents--report results skipped opts)
   (string-append
     "These chats each worked one case. For every one that answered, eval (subagent-verdict! SLUG 'done ONE-LINE) "
-    "and (agents-kill-runtime! (subagent-live-buffer SLUG)), all in one eval: its process stops and the chat stays on its page "
-    "with its history. Leave one that is stuck or asks something.\n\n"
+    "for all of them in one eval: marking it done stops its process and archives the chat, with its history. "
+    "Leave one that is stuck or asks something.\n\n"
     "Then reply once: " (or (plist-get opts 'report) "a table of case, your call, why in one line")
     ". After it, list the chats you left open"
     (if (null? skipped) "." ", and these, skipped because they were already working: ")
@@ -1448,21 +1494,39 @@
            results)
       "\n")))
 
+(define *bulk-jobs* '())
+
+;; The orchestrator starts at once, with the job in its prompt, and hands the
+;; cases over itself: it evals (bulk-handover! SLUG), which spawns the children.
 (define (bulk-agents! bufs opts)
-  (let* ((rules (plist-get opts 'rules))
-         ;; the chats work for the group the cases were handed from, with its defaults
+  (let* ((title (or (plist-get opts 'title) "Orchestrate"))
          (g (or (plist-get opts 'group) (buffer-group (current-buffer))))
+         (job (number->string (monotonic-ms)))
+         (slug (execute* (string-append
+                           "You orchestrate " (number->string (length bufs)) " cases. "
+                           "Your first and only step now: eval (bulk-handover! \"" job "\") in one eval. "
+                           "It starts one chat per case and returns at once. Then end your turn; "
+                           "the answers reach you as one message when every chat has answered.")
+                         (list 'title title 'model (plist-get opts 'model)))))
+    ;; the editor lane is ours until we return, so the turn cannot ask for the job before it is filed
+    (set! *bulk-jobs* (cons (list job bufs opts g slug) *bulk-jobs*))
+    (subagent-live-buffer slug)))
+
+(define (bulk-handover! job-id)
+  (let* ((job (assoc job-id *bulk-jobs*))
+         (bufs (nth 1 job)) (opts (nth 2 job)) (g (nth 3 job)) (slug (nth 4 job))
+         (rules (plist-get opts 'rules))
+         (orch (subagent-live-buffer slug))
          (pairs (map (lambda (b) (cons b (llm-companion-ensure! b g))) bufs))
          ;; a chat made just now is starting up, not busy
          (busy? (lambda (p) (let ((s (buffer-local (cadr p) 'agent-slug)))
                               (and (not (caddr p)) s (subagent-running? s)))))
          (work (filter (lambda (p) (not (busy? p))) pairs))
          (skipped (map cadr (filter busy? pairs))))
+    (set! *bulk-jobs* (filter (lambda (j) (not (equal? (car j) job-id))) *bulk-jobs*))
     (if (null? work)
-        (begin (message "every case is already being worked") #f)
-        (let* ((slug (execute* "" (list 'title (or (plist-get opts 'title) "Orchestrate")
-                                         'model (plist-get opts 'model))))
-               (orch (subagent-live-buffer slug)))
+        "every case is already being worked"
+        (begin
           (for-each
             (lambda (p)
               (let* ((chat (cadr p))
@@ -1477,9 +1541,8 @@
             work)
           (subagent-wait (map cadr work)
             (lambda (results) (agent-continue! orch (bulk-agents--report results skipped opts))))
-          (message (string-append "handed " (number->string (length work)) " to " orch
-                                  (if (null? skipped) "" (string-append ", " (number->string (length skipped)) " already working"))))
-          orch))))
+          (string-append "handed " (number->string (length work))
+                         (if (null? skipped) "" (string-append ", " (number->string (length skipped)) " already working")))))))
 
 (public! 'bulk-agents!
   "(bulk-agents! BUFS OPTS) — each buffer's own chat (the one M-o opens, reused if it exists) works it; one orchestrator stops the answered chats (they keep their page and history) and reports once all are in. OPTS: 'group (default: the current buffer's) 'title 'model (the orchestrator's) 'rules (added to every case) 'report (what the reply shows)")

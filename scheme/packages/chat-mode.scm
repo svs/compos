@@ -1457,7 +1457,7 @@
 (define (chat-header-string v)
   (if (symbol? v) (symbol->string v) v))
 
-(define *chat-header-strings* '(connector model effort title summary directory))
+(define *chat-header-strings* '(connector model effort title summary directory slug companion-of))
 
 (define (chat-header-line buf)
   (string-append *chat-file-header* " (connector "
@@ -1478,6 +1478,12 @@
       (if (and (string? s) (not (equal? s "")))
           (string-append " summary " (value->string s))
           ""))
+    ;; who this chat is: its spawn slug and the page it is the companion of,
+    ;; so an archived chat comes back linked to its parent and its page
+    (let ((sl (buffer-local buf 'agent-slug)))
+      (if (string? sl) (string-append " slug " (value->string sl)) ""))
+    (let ((p (buffer-local buf 'chat-companion-of)))
+      (if (string? p) (string-append " companion-of " (value->string p)) ""))
     " permission-mode "
     (symbol->string (if (boundp (quote chat-permission-mode))
                         (chat-permission-mode buf)
@@ -1571,7 +1577,11 @@
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary)
-          (directory chat-directory)))
+          (directory chat-directory) (slug agent-slug)
+          (companion-of chat-companion-of)))
+      (let ((slug (buffer-local buf 'agent-slug)))
+        (when (and (string? slug) (boundp 'subagent-cache-rebuild!))
+          (subagent-cache-rebuild! slug)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
              (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))

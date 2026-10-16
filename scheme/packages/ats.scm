@@ -203,7 +203,7 @@
         'list-keys (list (list "M-o" "site-app-agent" "agent"))
         ;; M-O on a list: each top row's own chat reads its case; the orchestrator,
         ;; on Sonnet, archives the answered ones and reports in one table
-        'bulk (list 'model "claude-sonnet-5-5"
+        'bulk (list 'size 2 'model "claude-sonnet-5-5"
                     'rules "Read it with the ats-ash MCP tools. Do not approve, reject, edit, send or schedule anything. Answer in at most five lines; the first says approve, reject, edit or unsure, and the last is the case's link on svsrecruiting.com."
                     'report "a table of case, what's proposed, your call, why in one line, and the link the case gave")
         ;; the status, stage or scope tabs a section's page draws above its rows
@@ -589,12 +589,21 @@
     (prompt-part-set! chat "ats-case"
       (string-append
         "This chat works one case in svs's recruiting ATS (svsrecruiting.com). "
-        "Read and change it with the ats-ash MCP tools (mcp-find \"ats-ash ...\"); "
+        "Its page is a companion buffer (ats-case-text ID reads it); use the ats-ash MCP tools (mcp-find \"ats-ash ...\") only to change it or for what the page lacks; "
         "the page's buttons are the same actions. Show a message to a candidate or client before it goes out."))))
 
 ;; what a new chat for an ATS page asks first; the page's own kind wins
 ;; a case chat says whose case it is: "Approval: Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
 (define (ats-case-label src) (ats-row-label (or (buffer-local src 'site-app-row) '()) src))
+(define (ats-case-id src) (plist-get (or (buffer-local src 'site-app-row) '()) 'key))
+(define (ats-case-buffer id)
+  (let ((hit (filter (lambda (b) (equal? (ats-case-id b) id)) (buffer-list))))
+    (and (pair? hit) (car hit))))
+(define (ats-case-text id)
+  (let ((b (ats-case-buffer id))) (and b (buffer-text b))))
+(define (ats-case-handle src)
+  (string-append " Case id " (or (ats-case-id src) "?") ": its page is already open in the buffer " src
+    ", so read it with (ats-case-text \"" (or (ats-case-id src) "") "\") and do not list or search the queue."))
 (define (ats-row-label row fallback)
   (let* ((src fallback)
          (who (or (plist-get row 'candidate) ""))
@@ -607,7 +616,7 @@
 (mode-chat-title! "ats-detail-mode" ats-case-label)
 (mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"
-  (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take.")))
+  (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src))))
 (mode-chat-opening! "ats-approval-mode"
-  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?")))
+  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src))))
 

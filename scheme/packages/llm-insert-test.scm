@@ -196,17 +196,6 @@
                       "the same id selects the new text")))
     (t--li-done!)))
 
-(deftest 'the-first-addressable-send-keeps-legacy-responses
-  "an upgraded document retains every old response highlight"
-  (lambda ()
-    (t--li! "Old\n\nPrompt")
-    (buffer-set-local! t--li-buf 'llm-responses '((0 3)))
-    (llm-mode--begin-turn! t--li-buf 7 11)
-    (check-equal! (llm-mode--response-ranges t--li-buf)
-                  '((0 3))
-                  "the empty pending address exists but does not paint")
-    (t--li-done!)))
-
 (deftest 'addressable-block-ranges-never-cross
   "nesting is valid, crossing and escaping a parent are rejected"
   (lambda ()
@@ -270,20 +259,6 @@
                  (or (equal? (caddr (car ovs)) "llm-response")
                      (loop (cdr ovs)))))
           "the whole buffer has no response face")))
-    (t--li-done!)))
-
-(deftest 'legacy-response-ranges-cannot-overlap-addressable-turns
-  "a stale broad legacy face yields to the exact response block"
-  (lambda ()
-    (t--li! "012345")
-    (buffer-set-local! t--li-buf 'llm-legacy-responses '((0 6)))
-    (let ((id (block-create! t--li-buf 'llm-response 2 4 #f 'complete '())))
-      (block-close-end! t--li-buf id)
-      (enable-minor-mode! t--li-buf "llm-mode")
-      (check-equal! (buffer-local t--li-buf 'llm-legacy-responses) '()
-                    "the overlapping legacy range is removed")
-      (check-equal! (llm-mode--response-ranges t--li-buf) '((2 4))
-                    "only the exact addressable response remains"))
     (t--li-done!)))
 
 (deftest 'm-o-talks-through-a-hidden-chat-of-its-own

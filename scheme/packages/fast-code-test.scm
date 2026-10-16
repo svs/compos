@@ -12,14 +12,11 @@
   "(define (zz-fast-filtered! dir text) \"open DIR showing only the entries holding TEXT\" (list-filter-push! (dired-open dir) (list \"match\" text)))\n(zz-fast-filtered! \"~/src\" \".scm\")")
 
 (define (t--fast-with-store! thunk)
-  (let ((saved-path *fast-learned-path*)
-        (saved *fast-learned*))
-    (set! *fast-learned-path* "/tmp/zz-fast-learned-test.scm")
-    (set! *fast-learned* '())
-    (thunk)
-    (for-each (lambda (n) (fast-forget! n)) (fast-learned-names))
-    (set! *fast-learned-path* saved-path)
-    (set! *fast-learned* saved)))
+  (with-stubs (list (list '*fast-learned-path* "/tmp/zz-fast-learned-test.scm")
+                    (list '*fast-learned* '()))
+    (lambda ()
+      (thunk)
+      (for-each (lambda (n) (fast-forget! n)) (fast-learned-names)))))
 
 (deftest 'an-answer-must-read-and-name-nothing-unbound
   "an invented name is refused, not run"

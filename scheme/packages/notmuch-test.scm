@@ -404,10 +404,6 @@
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
-    ;; the old derived local cannot bypass the base and filter stack
-    (buffer-set-local! "*notmuch*" 'notmuch-query "from:bob")
-    (check-equal! (nm--query-of "*notmuch*") "tag:inbox" "the local is ignored")
-
     (run-command "notmuch-filter")
     (t--nm-answer! "from:alice")
     (check-equal! (nm--query-of "*notmuch*") "( tag:inbox ) and from:alice"

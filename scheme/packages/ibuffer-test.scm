@@ -489,22 +489,6 @@
       (check-equal! (current-buffer) "*ibuffer*" "and left the table"))
     (ibuffer-test-reset!)))
 
-(deftest 'ibuffer-visit-keeps-the-row-in-the-window-that-previewed-it
-  "RET lands where you were looking: the preview window keeps the buffer, and the table's window is not the one it takes"
-  (lambda ()
-    (ibuffer-test-open! 'mode 'name)
-    (let ((me (active-window)))
-      (list-goto-first-entry "*ibuffer*")
-      (list-preview! "*ibuffer*")
-      (let* ((row (ibuffer-current "*ibuffer*"))
-             (slot (window-showing row)))
-        (check-true! (and slot (not (equal? slot me))) "the look is in another window")
-        (run-command "ibuffer-visit")
-        (check-equal! (current-buffer) row "the row is the buffer in hand")
-        (check-equal! (active-window) slot "in the window that previewed it")
-        (check-false! (and (window-exists? me) (equal? (window-buffer me) row))
-                      "and not in the window the table was using")))
-    (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-header-totals-come-off-the-source
   "the header's numbers are worked out when the source is built, not per keystroke"

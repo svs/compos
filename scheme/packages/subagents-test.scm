@@ -119,7 +119,7 @@
         (check-equal! (ibuffer-row-title "zz-sub-kid-a-slug")
                       "zz-sub-parent > zz-sub-kid-a"
                       "the name column is the edge: parent, then child")
-        (check-equal! (ibuffer-row-label "zz-sub-kid-a-slug") "stopped"
+        (check-equal! (ibuffer-row-label "zz-sub-kid-a-slug") "idle"
                       "the state column is the child's runtime state")
         (check-equal! (ibuffer-row-last "zz-sub-kid-a-slug")
                       "the last line a reads"
@@ -153,3 +153,20 @@
                      "the child shows in a window")
         (check-equal! (window-buffer (active-window)) "*subagents*"
                       "and the table keeps the focus")))))
+
+(deftest 'subagents-ret-prefers-the-chat-mode-window
+  "RET shows the child in the window that prefers chat-mode, never the table's"
+  (lambda ()
+    (zz-sub-scene
+      (lambda (gid)
+        (zz-sub-setup! gid "live" #t)
+        (run-command "subagents")
+        (split-window! 'h 0.5)
+        (let ((chat-win (get-other-window)))
+          (window-set-buffer! chat-win "zz-sub-parent")
+          (list-goto-index! "*subagents*" 0)
+          (run-command "subagents-visit")
+          (check-equal! (window-showing "zz-sub-kid-a") chat-win
+                        "the child takes the chat-mode window")
+          (check-equal! (window-buffer (active-window)) "*subagents*"
+                        "and the table keeps the focus"))))))

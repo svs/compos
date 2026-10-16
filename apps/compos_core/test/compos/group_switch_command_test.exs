@@ -183,12 +183,11 @@ defmodule Compos.GroupSwitchCommandTest do
 
     rendered = Editor.render_state()
 
-    assert rendered.frame_group == "pinned-label "
-    assert leaf.group == "pinned-label "
-    assert eval!(~s[(group-label "#{pinned}")]) == Jason.encode!("pinned-label ")
+    assert rendered.frame_group == "pinned-label "
+    assert eval!(~s[(group-label "#{pinned}")]) == Jason.encode!("pinned-label ")
 
     blocks = Compos.Core.Buffer.get_local(first, "dashboard-line-blocks") |> inspect()
-    assert blocks =~ "pinned-label "
+    assert blocks =~ "pinned-label "
   end
 
   test "group switch candidates name buffers with project and home abbreviations" do

@@ -98,7 +98,24 @@
     (string-append (subagents-label p)
                    (if (subagents-parent-lost? child) " (killed)" ""))))
 
-(define (subagents-status child) (agent-status child))
+(define (subagents-status child)
+  (let ((s (subagent-status-of child)))
+    (if (and (equal? s 'running) (equal? (agent-status child) 'needs_attention))
+        'needs_attention
+        s)))
+
+(define (subagents-state-label s)
+  (cond ((equal? s 'done) "done")
+        ((equal? s 'gone) "gone")
+        (else (chats-state-label s))))
+
+(define (subagents-glyph s)
+  (if (equal? s 'done) "+" (agent-status-glyph s)))
+
+(define (subagents-dot-face s)
+  (cond ((equal? s 'done) "accent")
+        ((member s '(stopped gone)) "chat-stopped")
+        (else (chats-state-face s))))
 
 ;; the name column is the edge itself: the parent, dim, then the child
 (define (subagents-name child)
@@ -139,14 +156,14 @@
   (list 'when? (lambda (b) (subagents-row? b))
         'dot (lambda (c)
                (let ((s (subagents-status c)))
-                 (list (agent-status-glyph s) (chats-state-face s))))
+                 (list (subagents-glyph s) (subagents-dot-face s))))
         'name (lambda (c) (subagents-name c))
         'size (lambda (c) #f)
-        'label (lambda (c) (chats-state-label (subagents-status c)))
+        'label (lambda (c) (subagents-state-label (subagents-status c)))
         'last (lambda (c) (subagents-last-line c))
         'match (lambda (c)
                  (string-append (subagents-parent-label c) " "
-                                (chats-state-label (subagents-status c)) " "
+                                (subagents-state-label (subagents-status c)) " "
                                 (subagents-last-line c)))
         'face (lambda (c)
                 (if (equal? (subagents-status c) 'needs_attention)
@@ -193,10 +210,14 @@
       'doc (string-append
              "Every spawn edge, one row each: the parent chat, the child "
              "it spawned, what the child is doing now, and the last line "
-             "the child said. The rows come from the relation itself, so "
-             "a parent that has been killed still lists its children and "
-             "wears (killed) beside its name. RET shows the chat of the "
-             "row in the other window and leaves the point where it is. "
+             "the child said. States: running (a turn is in flight), your "
+             "turn (it needs you), idle (no turn has ended yet), stopped "
+             "(the last turn ended), done (the orchestrator marked it with "
+             "subagent-mark-done!), gone (its buffer is gone). The rows come "
+             "from the relation itself, so a parent that has been killed "
+             "still lists its children and wears (killed) beside its name. "
+             "RET shows the chat of the row in the chat window, or the other "
+             "window, and leaves the point and focus in the list. "
              "g reads the edges again, / narrows, and q quits.")
       'buffer *subagents-buffer*
       'category 'chat
@@ -230,17 +251,25 @@
   "List every spawned chat: parent, child, status, and the child's last line"
   (lambda () (subagents-open!)))
 
-;; RET shows the child in the other window. It never takes the point and
-;; never opens a popup: the table stays where it is.
+;; The chat goes to the pane that prefers its mode, else the other window.
+;; The list keeps focus and point.
+(define (subagents-show! b)
+  (let* ((list-win (active-window))
+         (pane (or (window-showing-mode (buffer-local b 'mode-name) list-win)
+                   (window-showing b))))
+    (if (and pane (not (equal? pane list-win)))
+        (window-set-buffer! pane b)
+        (display-buffer-other-window! b))))
+
 (define-command "subagents-visit"
-  "Show the chat of the row at point in the other window"
+  "Show the chat of the row at point in the chat window, else the other window"
   (lambda ()
     (let ((row (list-current *subagents-buffer*)))
       (if (not (subagents-row? row))
           (message "no spawned chat here")
           (let ((b (subagents-chat-buffer row)))
             (if b
-                (begin (display-buffer-other-window! b)
+                (begin (subagents-show! b)
                        (message (string-append "showing " b)))
                 (message (string-append (subagents-label row)
                                         " has no buffer any more"))))))))

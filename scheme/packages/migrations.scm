@@ -111,3 +111,79 @@
   (unless *home-migrated?*
     (set! *home-migrated?* #t)
     (migrate-home!)))
+
+;;; --- the chat ----------------------------------------------------------------------
+
+;; a chat saved before the record existed carries (role text) pairs: read
+;; them once, as text turns, and drop the old local
+(define-buffer-migration! 'chat-record "2026-08-20"
+  (lambda (buf)
+    (let ((old (buffer-local buf 'chat-turns)))
+      (when (and old (null? (chat-record buf)))
+        (buffer-set-local! buf 'chat-wire-turns
+          (map (lambda (t) (list 'role (car t) 'blocks (list (list "text" (car (cdr t))))))
+               old))
+        (buffer-set-local! buf 'chat-turns #f)))))
+
+;; pre-group companions carried a 'companion-of pointer: both ends get the
+;; 'group tag, which groups.scm folds into a record on its first read
+(define-buffer-migration! 'chat-companion-group "2026-08-20"
+  (lambda (buf)
+    (let ((doc (buffer-local buf 'companion-of)))
+      (when (and doc (not (buffer-local buf 'group)))
+        (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
+                     doc)))
+          (buffer-set-local! buf 'group g)
+          (when (and (buffer-exists? doc)
+                     (not (buffer-local doc 'group)))
+            (buffer-set-local! doc 'group g)))))))
+
+;; a transcript from before the mark was a buffer-local: the mark sits at
+;; the marker's last occurrence
+(define (migration--chat-marker-mark buf)
+  (let loop ((ms (re-find* *chat-input-marker* (buffer-text buf)))
+             (last (buffer-size buf)))
+    (if (null? ms) last (loop (cdr ms) (car (car ms))))))
+
+;; a chat from before the marker left the live input still carries the
+;; marker bytes at its mark: remove them, keep the draft after them, and
+;; record that the input starts at the mark. A chat with the marker in
+;; its text and no mark gets its mark from the last marker first. A chat
+;; in the new layout is left as it is.
+(define-buffer-migration! 'chat-input-marker "2026-09-05"
+  (lambda (buf)
+    (let ((mb (string-byte-length *chat-input-marker*)))
+      (when (and (not (buffer-local buf 'agent-saved-mark))
+                 (pair? (re-find* *chat-input-marker* (buffer-text buf))))
+        (buffer-set-local! buf 'agent-saved-mark (migration--chat-marker-mark buf)))
+      (when (buffer-local buf 'agent-saved-mark)
+        (let ((size (buffer-size buf))
+              (m (chat-mark buf)))
+          (when (and (<= (+ m mb) size)
+                     (equal? (substring-bytes (buffer-text buf) m (+ m mb))
+                             *chat-input-marker*))
+            (buffer-delete-range! buf m mb))
+          ;; the local cannot sit past the end after the delete
+          (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
+          (buffer-set-local! buf 'agent-marker-bytes 0))))))
+
+;;; --- the terminal ------------------------------------------------------------------
+
+;; an old desktop names a terminal buffer's mode shell-mode; term-mode is
+;; the one name
+(define-buffer-migration! 'shell-mode-name "2026-09-01"
+  (lambda (buf)
+    (when (equal? (buffer-local buf 'mode-name) "shell-mode")
+      (buffer-set-local! buf 'mode-name "term-mode"))))
+
+;;; --- the groups --------------------------------------------------------------------
+
+;; a desktop from the days a buffer held several groups carries a
+;; 'group-ids list: its first id becomes the buffer's one group
+(define-buffer-migration! 'group-ids-to-group-id "2026-10-16"
+  (lambda (buf)
+    (let ((ids (buffer-local buf 'group-ids)))
+      (when (pair? ids)
+        (unless (buffer-local buf 'group-id)
+          (buffer-set-local! buf 'group-id (car ids)))
+        (buffer-set-local! buf 'group-ids #f)))))

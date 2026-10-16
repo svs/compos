@@ -596,8 +596,9 @@
     (map car rows)))
 
 (define (ibuffer-show-hidden? buf)
-  ;; #t when the list shows its context-only buffers too
-  (equal? (buffer-local buf 'ibuffer-show-hidden) #t))
+  ;; #t when a hidden:on filter is in force, as dired's dot filter is: the
+  ;; list shows its context-only buffers too
+  (and (assoc "hidden" (list-filters buf)) #t))
 
 ;; The number the chip reads as "N of M". Working M out again means
 ;; asking every buffer in the scope five questions, and the scope cannot
@@ -2958,12 +2959,19 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
       (ibuffer-table-redraw!))))
 
 (define-command "ibuffer-toggle-hidden" "Show the hidden buffers in this list too, or put them away"
+  ;; the switch is a filter, hidden:on, the way dired-filter-dotfiles keeps
+  ;; its dot filter: it reads in the filter line, / p pops it, / / drops it
   (lambda ()
     (let* ((buf (or (mb-list-target) (current-buffer)))
-           (show? (not (ibuffer-show-hidden? buf))))
-      (buffer-set-local! buf 'ibuffer-show-hidden show?)
+           (fs (list-filters buf)))
+      (if (assoc "hidden" fs)
+          (buffer-set-local! buf 'list-filters
+            (filter (lambda (f) (not (equal? (car f) "hidden"))) fs))
+          (list-filter-push! buf (list "hidden" "on")))
+      ;; the filter changes what the source reads, so the rows are read again
       (list-refresh! buf)
-      (message (if show? "Hidden buffers shown" "Hidden buffers put away")))))
+      (list-goto-first-entry buf)
+      (message (string-append "Filter: " (list-filters-text buf))))))
 (define-command "ibuffer-toggle-pretty" "Toggle this list's formatting and report redraw milliseconds"
   (lambda ()
     (let* ((buf (or (mb-list-target) (current-buffer)))

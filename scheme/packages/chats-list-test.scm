@@ -472,6 +472,8 @@
     (with-current-buffer *chat-list* (lambda () (run-command "ibuffer-toggle-hidden")))
     (check-true! (and (member "*zz-chats-b*" (chats-test-names)) #t)
                  "after . the hidden chat is listed")
+    (check-true! (and (assoc "hidden" (list-filters *chat-list*)) #t)
+                 "the switch is a filter, as dired's dot filter is")
     (with-current-buffer *chat-list* (lambda () (run-command "ibuffer-toggle-hidden")))
     (check-false! (member "*zz-chats-b*" (chats-test-names))
                   "and . again puts it away")

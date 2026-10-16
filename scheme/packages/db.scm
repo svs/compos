@@ -14,15 +14,12 @@
 
 ;;; --- registry ----------------------------------------------------------------
 
-(define *db-registry* '())        ; ((name spec) ...)
-
+;; the registry table db: a spec under the name a caller gave it
 (define (db-register! name spec)
-  (set! *db-registry* (alist-put *db-registry* name spec))
-  name)
+  (registry-register! 'db name spec))
 
 (define (db-spec name)
-  (let ((e (assoc name *db-registry*)))
-    (and e (cadr e))))
+  (registry-lookup 'db name))
 
 ;; Which fields of a database spec may carry a "@VAR" reference. A
 ;; password belongs in the key chain, never in a config file.

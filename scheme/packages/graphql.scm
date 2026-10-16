@@ -56,31 +56,35 @@
 ;;; An endpoint is a name, a URL and headers. The headers hold references,
 ;;; not secrets, so the registry stays safe to print.
 
-(define *graphql-endpoints* '())        ; ((name url headers doc) ...)
+;; the registry table graphql: (url headers doc) under the name
 
 (define (graphql-register! name url &rest opts)
-  (set! *graphql-endpoints*
-    (cons (list name url
-                (or (plist-get opts 'headers) '())
-                (or (plist-get opts 'doc) ""))
-          (remove (lambda (e) (equal? (car e) name)) *graphql-endpoints*)))
-  name)
+  (registry-register! 'graphql name
+    (list url
+          (or (plist-get opts 'headers) '())
+          (or (plist-get opts 'doc) ""))))
 
 (define (graphql-forget! name)
-  (set! *graphql-endpoints*
-    (remove (lambda (e) (equal? (car e) name)) *graphql-endpoints*))
+  (registry-forget! 'graphql name)
   (graphql-schema-forget! name)
   name)
 
-(define (graphql--endpoint name) (assoc name *graphql-endpoints*))
+;; one endpoint as (name url headers doc), or #f
+(define (graphql--endpoint name)
+  (let ((v (registry-lookup 'graphql name)))
+    (and v (cons name v))))
+
+;; every endpoint in that shape, in the order of registration
+(define (graphql--endpoints)
+  (map (lambda (e) (cons (car e) (cadr e))) (registry-list 'graphql)))
 
 (define (graphql-endpoints)
-  (if (null? *graphql-endpoints*)
+  (if (null? (graphql--endpoints))
       "no GraphQL endpoints — register one with (graphql-register! 'name URL)"
       (fold (lambda (acc e)
               (string-append acc (graphql--text (car e)) "  " (cadr e)
                              (graphql--dash (nth 3 e)) "\n"))
-            "" (reverse *graphql-endpoints*))))
+            "" (graphql--endpoints))))
 
 ;;; --- the wire -----------------------------------------------------------------
 
@@ -521,10 +525,10 @@
 ;;;###autoload
 (define-command "graphql-query" "Run a GraphQL query against a registered endpoint"
   (lambda ()
-    (if (null? *graphql-endpoints*)
+    (if (null? (graphql--endpoints))
         (message "no GraphQL endpoints — register one with (graphql-register! 'name URL)")
         (minibuffer-read "Endpoint: "
-          (map (lambda (e) (graphql--text (car e))) *graphql-endpoints*)
+          (map (lambda (e) (graphql--text (car e))) (graphql--endpoints))
           (lambda (ep)
             (minibuffer-read "Query: " '()
               (lambda (q) (graphql-run (string->symbol ep) q))))))))

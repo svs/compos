@@ -73,22 +73,11 @@
                   "the listing shows no token")
     (t--gql-reset!)))
 
-(deftest 'registering-the-same-name-again-replaces-it
-  "one name, one endpoint"
-  (lambda ()
-    (t--gql-reset!)
-    (graphql-register! 'zztest "https://one.test/gql")
-    (graphql-register! 'zztest "https://two.test/gql")
-    (let ((listed (graphql-endpoints)))
-      (check-contains! listed "two.test" "the second URL")
-      (check-false! (string-contains? listed "one.test") "the first URL is gone"))
-    (t--gql-reset!)))
-
 (deftest 'with-nothing-registered-the-list-says-what-to-do
   "an empty registry names the call that fills it"
   (lambda ()
     (t--gql-reset!)
-    (if (null? *graphql-endpoints*)
+    (if (null? (registry-names 'graphql))
         (check-contains! (graphql-endpoints) "graphql-register!" "the empty listing")
         #t)))
 

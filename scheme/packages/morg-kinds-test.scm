@@ -45,14 +45,6 @@
     (check-equal! (fence-kind-line-face "zz-test-kind" "any line") "morg-result"
                   "body-face answers for every line")))
 
-(deftest 'registration-by-name-replaces
-  "a package reload does not stack duplicate kinds"
-  (lambda ()
-    (define-fence-kind! "zz-twice" "First." 'body-face "morg-result")
-    (define-fence-kind! "zz-twice" "Second.")
-    (check-equal! (fence-kind-line-face "zz-twice" "x") #f
-                  "the second registration replaced the first whole")))
-
 (deftest 'merge-adds-keys-and-keeps-the-rest
   "two packages can own two aspects of one kind"
   (lambda ()

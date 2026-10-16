@@ -35,8 +35,7 @@
   "Start the webhook server when this package loads."
   'group 'webhooks 'type 'boolean)
 
-;; NAME -> the endpoint plist: name path methods token peers handler
-(define *webhooks* '())
+;; the registry table webhook: NAME -> the endpoint plist: name path methods token peers handler
 ;; the server's detail plist while it runs, else #f
 (define *webhooks-server* #f)
 
@@ -79,12 +78,12 @@
 
 (define (webhook-get name)
   "(webhook-get NAME) — the endpoint plist named NAME, or #f"
-  (let ((hit (assoc name *webhooks*))) (and hit (cdr hit))))
+  (registry-lookup 'webhook name))
 
 (define (webhook-list)
   "(webhook-list) — every endpoint as (NAME METHODS PATH)"
-  (map (lambda (e) (list (car e) (plist-get (cdr e) 'methods) (plist-get (cdr e) 'path)))
-       *webhooks*))
+  (map (lambda (e) (list (car e) (plist-get (cadr e) 'methods) (plist-get (cadr e) 'path)))
+       (registry-list 'webhook)))
 
 (define (webhook-url name)
   "(webhook-url NAME) — the URL of endpoint NAME on the running server, or #f"
@@ -111,8 +110,8 @@
 (define (webhooks--handle request)
   "(webhooks--handle REQUEST) — route one request to its endpoint and answer the response"
   (let* ((path (plist-get request 'path))
-         (hit (filter (lambda (e) (equal? (plist-get (cdr e) 'path) path)) *webhooks*))
-         (hook (and (pair? hit) (cdr (car hit)))))
+         (hit (filter (lambda (e) (equal? (plist-get (cadr e) 'path) path)) (registry-list 'webhook)))
+         (hook (and (pair? hit) (cadr (car hit)))))
     (cond ((not hook) (webhooks--reply 404 "not found"))
           ((not (member (plist-get request 'method) (plist-get hook 'methods)))
            (webhooks--reply 405 "method not allowed"))
@@ -138,19 +137,15 @@
                      'peers (plist-get opts 'peers)
                      'handler handler))
          (clash (filter (lambda (e) (and (not (equal? (car e) name))
-                                         (equal? (plist-get (cdr e) 'path) (plist-get hook 'path))))
-                        *webhooks*)))
+                                         (equal? (plist-get (cadr e) 'path) (plist-get hook 'path))))
+                        (registry-list 'webhook))))
     (if (pair? clash)
         (error (string-append "webhook " (car (car clash)) " already takes " (plist-get hook 'path)))
-        (begin (set! *webhooks* (append (filter (lambda (e) (not (equal? (car e) name))) *webhooks*)
-                                         (list (cons name hook))))
-               name))))
+        (registry-register! 'webhook name hook))))
 
 (define (webhook-remove! name)
   "(webhook-remove! NAME) — drop endpoint NAME; #t when it was there"
-  (let ((had (and (webhook-get name) #t)))
-    (set! *webhooks* (filter (lambda (e) (not (equal? (car e) name))) *webhooks*))
-    had))
+  (registry-forget! 'webhook name))
 
 (define *webhook-workflows* '())  ; (NAME HANDLER): the handler symbol of the workflow on webhook:NAME
 
@@ -208,7 +203,7 @@
 (define-command "webhooks-list" "Say every webhook endpoint and where it listens"
   (lambda ()
     (message
-     (if (null? *webhooks*)
+     (if (null? (registry-names 'webhook))
          "no webhooks defined"
          (string-join
           (map (lambda (row)
@@ -272,9 +267,9 @@
 
 (define-command "webhook-delete" "Remove a webhook endpoint and forget it"
   (lambda ()
-    (if (null? *webhooks*)
+    (if (null? (registry-names 'webhook))
         (message "no webhooks defined")
-        (completing-read "Delete webhook: " (map car *webhooks*)
+        (completing-read "Delete webhook: " (registry-names 'webhook)
           (lambda (name) (when name (webhooks--delete! name)))
           'require-match #t))))
 
@@ -314,7 +309,7 @@
               (list (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)) "default")))))
 
 (define (webhooks--meta buf)
-  (string-append (number->string (length *webhooks*)) " endpoints · "
+  (string-append (number->string (length (registry-names 'webhook))) " endpoints · "
                  (if (webhooks-running?)
                      (string-append "listening on " webhooks-host ":" (number->string webhooks-port))
                      "server stopped, s starts it")))
@@ -415,7 +410,7 @@
            "/ narrows, and q quits.")
     'buffer *webhooks-buffer*
     'transient #f
-    'rows (lambda (buf) (map car *webhooks*))
+    'rows (lambda (buf) (registry-names 'webhook))
     'columns (lambda (buf)
                (list (list "webhook" 16) (list "path" 22) (list "methods" 10)
                      (list "token" 6) (list "last request" 17) (list "workflow" #f)))

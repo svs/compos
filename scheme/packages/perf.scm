@@ -80,8 +80,10 @@
 (define (perf--tenths n)
   (string-append (number->string (quotient n 10)) "." (number->string (modulo n 10))))
 
-;; bytes in the binary units the VM counts in, one decimal
-(define (perf--bytes b) (format-bytes b 'iec 1))
+;; bytes in the binary units the VM counts in; a tenth only above a
+;; gibibyte, where a whole unit is too coarse
+(define (perf--bytes b)
+  (format-bytes b 'iec (if (>= b 1073741824) 1 0)))
 
 ;; 1234567 -> "1.2M", 12345 -> "12.3k", 999 -> "999"
 (define (perf--count n)

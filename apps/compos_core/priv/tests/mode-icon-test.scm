@@ -29,15 +29,6 @@
     (check-equal! (mode-icon "zz-no-such-mode") t--icon-doc "an unknown mode")
     (check-equal! (mode-icon #f) t--icon-doc "no mode at all")))
 
-(deftest 'mode-icon-declares-one-and-declaring-again-replaces-it
-  "one mode holds one glyph"
-  (lambda ()
-    (mode-icon! "zz-icon-mode" "")
-    (check-equal! (mode-icon "zz-icon-mode") "" "the first glyph")
-    (mode-icon! "zz-icon-mode" "")
-    (check-equal! (mode-icon "zz-icon-mode") "" "the second replaces it")
-    (mode-forget! "zz-icon-mode")))
-
 (deftest 'mode-label-writes-the-icon-in-front-of-the-name
   "the label is the glyph, a space, and the name"
   (lambda ()

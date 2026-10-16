@@ -15,22 +15,18 @@
 
 ;;; --- registry ----------------------------------------------------------------
 
-;; ((name spec) ...) — a spec a caller registered under a name, so a
+;; The registry table endpoint: — a spec a caller registered under a name, so a
 ;; reconnect repeats it and nobody stores connection details twice.
-(define *endpoint-registry* '())
-
 (define (endpoint-register! name spec)
-  (set! *endpoint-registry* (alist-put *endpoint-registry* name spec))
-  name)
+  (registry-register! 'endpoint name spec))
 
 (define (endpoint-spec name)
-  (let ((e (assoc name *endpoint-registry*)))
-    (and e (cadr e))))
+  (registry-lookup 'endpoint name))
 
 ;; Every name a package registered. A package that manages the programs
 ;; behind these connections - the model list is one - reads the registry
 ;; here instead of keeping a second list of its own.
-(define (endpoint-names) (map car *endpoint-registry*))
+(define (endpoint-names) (registry-names 'endpoint))
 
 (define (endpoint-connected? name)
   (let ((d (conn-detail 'endpoint name)))

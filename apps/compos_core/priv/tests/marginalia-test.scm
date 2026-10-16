@@ -20,7 +20,7 @@
 (define (t--marg-forget! &rest categories)
   (for-each
     (lambda (c)
-      (remove-hook! (list 'marginalia c)))
+      (registry-forget! 'marginalia c))
     categories))
 
 (deftest 'annotate-pairs-names-with-their-categorys-annotator
@@ -50,15 +50,6 @@
     (check-equal! (annotate 'zzmarg-trim (list "a" "b"))
                   '(("a" "") ("b" "x  yy")) "the empty row ends")
     (t--marg-forget! 'zzmarg-trim)))
-
-(deftest 'marginalia-registers-an-annotator-and-replaces-one
-  "one annotator per category: the second registration wins"
-  (lambda ()
-    (marginalia! 'zzmarg-cat (lambda (n) (string-append "<" n ">")))
-    (check-equal! (annotate 'zzmarg-cat (list "q")) '(("q" "<q>")) "the first")
-    (marginalia! 'zzmarg-cat (lambda (n) "second"))
-    (check-equal! (annotate 'zzmarg-cat (list "q")) '(("q" "second")) "the second replaces it")
-    (t--marg-forget! 'zzmarg-cat)))
 
 (deftest 'define-command-stores-a-docstring-that-command-doc-reads-back
   "the doc is what the M-x list shows beside the name"

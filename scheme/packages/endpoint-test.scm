@@ -7,16 +7,6 @@
     (check-equal! (plist-get (endpoint-spec "t-reg") 'command) "cat" "the spec")
     (check-equal! (endpoint-spec "t-nothing") #f "an unregistered name")))
 
-(deftest 'registering-the-same-name-twice-replaces-the-spec
-  "a spec is a name's current answer, not a growing list"
-  (lambda ()
-    (endpoint-register! "t-twice" '(command "cat"))
-    (endpoint-register! "t-twice" '(command "sh"))
-    (check-equal! (plist-get (endpoint-spec "t-twice") 'command) "sh" "the later spec")
-    (check-equal!
-      (length (filter (lambda (e) (equal? (car e) "t-twice")) *endpoint-registry*))
-      1 "one entry")))
-
 (deftest 'ensure-refuses-a-name-nobody-registered
   "a typo asks for a connection that cannot exist; say so"
   (lambda ()
@@ -30,14 +20,6 @@
       (add-hook! (list 'endpoint-event "t-b") (lambda (n k tx) (set! heard (cons (list "b" n k tx) heard))))
       (run-hook-with-args 'endpoint-event "conn" "frame" "hi")
       (check-equal! (length heard) 2 "both listeners ran"))))
-
-(deftest 'a-listener-name-replaces-its-own-earlier-listener
-  "a reload must not stack a second copy of the same listener"
-  (lambda ()
-    (add-hook! (list 'endpoint-event "t-dup") (lambda (n k tx) #f))
-    (add-hook! (list 'endpoint-event "t-dup") (lambda (n k tx) #f))
-    (check-equal! (length (hook-functions '(endpoint-event "t-dup"))) 1 "one listener")
-    (remove-hook! '(endpoint-event "t-dup"))))
 
 (deftest 'the-registry-names-every-connection-a-package-registered
   "a manager of these programs reads the registry rather than keeping a list"

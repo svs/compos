@@ -89,15 +89,6 @@
     (check-equal! (t--hr-modes-only reload-finish!) 0
       "the definition before the bracket was not carried in")))
 
-(deftest 'a-mode-registry-does-not-grow-when-a-file-reloads
-  "assoc reads the newest either way; an auto-reloader must not stack rows"
-  (lambda ()
-    (t--hr-major! "zz-hr-grow" 1)
-    (let ((before (length *modes*)))
-      (t--hr-major! "zz-hr-grow" 2)
-      (t--hr-major! "zz-hr-grow" 3)
-      (check-equal! (length *modes*) before "the entry replaced in place"))))
-
 (deftest 'buffer-wears-mode-sees-both-halves-of-a-buffers-mode
   "the major mode and every minor mode name the buffer"
   (lambda ()

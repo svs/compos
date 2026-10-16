@@ -38,6 +38,24 @@
           ((member (car xs) big) (loop (cdr xs)))
           (else #f))))
 
+;; a walk must leave the frame as it found it: the windows, the group,
+;; and the buffer in the active window; else the files after this one
+;; start from a frame some mode arranged
+(define (ml--frame-kept thunk)
+  (let ((tree (window-tree)) (group (frame-group)) (here (current-buffer))
+        (target (layout-target)) (freed (frame-local 'layout-freed)))
+    (let ((r (thunk)))
+      (cond ((and group (not (equal? (frame-group) group))) (frame-tab! group))
+            ((and (not group) (frame-group) (buffer-known? "*scratch*"))
+             (switch-to-buffer! "*scratch*")))
+      ;; a mode that chose a target layout would arrange every later frame
+      (unless (equal? (layout-target) target) (layout-target-set! target))
+      (set-frame-local! 'layout-freed freed)
+      (ignore-errors (lambda () (window-tree-set! tree)))
+      (when (and (buffer-known? here) (not (equal? (current-buffer) here)))
+        (switch-to-buffer! here))
+      r)))
+
 ;;; --- every major mode -----------------------------------------------------
 
 ;; modes whose setup needs a file, a process, a connection, a mailbox,
@@ -58,6 +76,11 @@
 
 (define (ml--swept? mode)
   (not (or (member mode ml--skip-modes) (string-prefix? "zz-" mode) (ml--fetches? mode))))
+
+;; ML_SKIP=major,minor,seeds,MODE,... leaves parts of the sweep out, to
+;; attribute a failure in a later file to one walk or one seed
+(define ml--skip-set (string-split (or (getenv "ML_SKIP") "") ","))
+(define (ml--skipped? part) (and (member part ml--skip-set) #t))
 
 (define (ml--major-faults mode)
   (let* ((buf (test-buffer! (string-append "zz-ml-" mode) "line one\nline two\n"))
@@ -97,14 +120,14 @@
     (let ((bad '()) (entered 0))
       (for-each
         (lambda (mode)
-          (when (ml--swept? mode)
+          (when (and (not (ml--skipped? "major")) (ml--swept? mode))
             (set! entered (+ entered 1))
             ;; one task per mode: every frame an eval makes lives until
             ;; the eval ends, and a hundred setups in one eval pass the
             ;; heap bound
             (set! bad (append bad
                               (or (ignore-errors
-                                    (lambda () (task-await (task-spawn (lambda () (ml--major-faults mode))))))
+                                    (lambda () (ml--frame-kept (lambda () (task-await (task-spawn (lambda () (ml--major-faults mode))))))))
                                   (list (list mode "the walk raised")))))))
         (mode-names 'major))
       (check-true! (> entered 20) "the sweep entered the modes")
@@ -118,8 +141,6 @@
          (fault! (lambda (what) (set! bad (cons (list mode what) bad))))
          (worn (lambda () (length (filter (lambda (m) (equal? m mode))
                                           (or (buffer-local buf 'minor-modes) '()))))))
-    (delete-other-windows!)
-    (switch-to-buffer! buf)
     (let ((before (ml--overlays buf)))
       (cond
         ((not (ignore-errors (lambda () (enable-minor-mode! buf mode) #t)))
@@ -159,8 +180,8 @@
     (let ((bad '()))
       (for-each
         (lambda (mode)
-          (unless (string-prefix? "zz-" mode)
-            (set! bad (append bad (ml--minor-faults mode)))))
+          (unless (or (ml--skipped? "minor") (string-prefix? "zz-" mode))
+            (set! bad (append bad (ml--frame-kept (lambda () (ml--minor-faults mode)))))))
         (mode-names 'minor))
       (check-equal! bad '() "every minor mode keeps the lifecycle contract"))))
 
@@ -340,9 +361,14 @@
                     (when (buffer-known? buf) (buffer-kill! buf))
                     (when (buffer-known? here) (switch-to-buffer! here)))))))
 
-;; setup wizard: the step is a local, and the setup draws from it
+;; setup wizard: the step is a local, and the setup draws from it. The
+;; buffer is made by hand: setup-wizard! would also choose the columns
+;; layout for every frame after this one.
 (define (ml--seed-setup-wizard)
-  (let ((buf (setup-wizard! "model")))
+  (let ((buf *setup-wizard-buffer*))
+    (unless (buffer-exists? buf) (buffer-create buf) (buffer-append! buf "Setup\n"))
+    (buffer-set-local! buf 'setup-wizard-step "model")
+    (with-current-buffer buf (lambda () (set-mode! "setup-wizard-mode")))
     (setup-wizard-click buf "wizard:next")
     (list 'buf buf
           'probe (lambda ()
@@ -463,7 +489,9 @@
   (lambda ()
     (let ((bad '()))
       (for-each
-        (lambda (e) (set! bad (append bad (ml--seed-faults (car e) (cadr e)))))
+        (lambda (e)
+          (unless (or (ml--skipped? "seeds") (ml--skipped? (car e)))
+            (set! bad (append bad (ml--frame-kept (lambda () (ml--seed-faults (car e) (cadr e))))))))
         ml--seeds)
       (check-equal! bad '() "every seeded mode rebuilds from its locals"))))
 
@@ -534,9 +562,14 @@
 (deftest 'a-reload-rebuilds-the-buffers-you-can-see-unless-the-refresh-is-off
   "a setup fn calls helpers the same save can change without touching define-mode; a session whose setup is expensive opts out"
   (lambda ()
+   (ml--frame-kept (lambda ()
     (ml--major! "zz-ml-hr-visible" 1)
     (test-buffer! ml--hr-a "alpha\n")
     (with-current-buffer ml--hr-a (lambda () (set-mode! "zz-ml-hr-visible")))
+    ;; the visible half rebuilds every window's buffer, hidden ones too:
+    ;; show this one alone, and give the frame back after
+    (delete-other-windows!)
+    (window-hidden-clear!)
     (switch-to-buffer! ml--hr-a)
     (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 1 "the mode set the buffer up once")
 
@@ -551,4 +584,4 @@
     (reload-begin!)
     (ml--modes-only reload-finish!)
     (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 2 "the refresh ran with the switch off")
-    (buffer-kill! ml--hr-a)))
+    (buffer-kill! ml--hr-a)))))

@@ -1748,6 +1748,101 @@ keeps the buffer you were in and your point.")
 (define (window-fill-buffers)
   (filter fill-candidate? (window-fill-source)))
 
+;;; --- the fill rule: what fills a window ---------------------------------
+;;; One pure function answers what fills a window, from a snapshot of the
+;;; window and the pool. Every site that empties a pane or adds one asks
+;;; it and applies the answer: the window a kill empties, the buffer q
+;;; falls to, the pane a moved buffer leaves, the window a split makes,
+;;; the columns of a layout. Before it, seven sites each kept their own
+;;; precedence and their own eligibility.
+;;;
+;;; SNAPSHOT is a plist:
+;;;   restore   what a display did to the window, (KIND BUF POINT) or #f
+;;;   previous  the window's own past, most recent first
+;;;   shown     what the other windows of the frame show
+;;;   dying     the buffer leaving the window, or #f
+;;;   others    #t when the window may go: another window keeps the frame
+;;;   refill    #f when the pool only says who is eligible and fills
+;;;             nothing itself; #t (the default) when it fills the window
+;;;             after the window's own past
+;;; POOL is window-fill-buffers, or the pool of the window's own group.
+;;;
+;;; A buffer is eligible when the pool holds it and it is not the dying
+;;; one. The past and the pool never show what another window shows; a
+;;; covered buffer comes back even when another window shows it (Q20).
+;;; The answer, in order:
+;;;   (delete)       the display made the window and another one remains
+;;;   (restore BUF)  the display covered BUF, and BUF is eligible
+;;;   (show BUF)     the first eligible buffer of the window's past
+;;;   (show BUF)     the first eligible buffer of the pool, when refill
+;;;   (delete)       nothing to show, and another window remains
+;;;   (blank)        nothing to show: the caller's blank, or nothing
+(domain! 'windows)
+(effects! '(pure))
+(define (window-fill-decide snapshot pool)
+  (let* ((restore (plist-get snapshot 'restore))
+         (previous (or (plist-get snapshot 'previous) '()))
+         (shown (or (plist-get snapshot 'shown) '()))
+         (dying (plist-get snapshot 'dying))
+         (others (plist-get snapshot 'others))
+         (refill (let ((m (memq 'refill snapshot))) (if m (cadr m) #t)))
+         (eligible? (lambda (b) (and (member b pool) (not (equal? b dying)) #t)))
+         (free? (lambda (b) (and (eligible? b) (not (member b shown)))))
+         (kind (and (pair? restore) (car restore)))
+         (covered (and (pair? restore) (pair? (cdr restore)) (cadr restore)))
+         (past (find free? previous))
+         (next (and refill (find free? pool))))
+    (cond ((and (equal? kind 'window) others) '(delete))
+          ((and (equal? kind 'other) covered (eligible? covered)) (list 'restore covered))
+          (past (list 'show past))
+          (next (list 'show next))
+          (others '(delete))
+          (else '(blank)))))
+
+;; the buffers the other windows of WIN's frame show
+(domain! 'windows)
+(effects! '(read))
+(define (window-fill-shown-elsewhere win)
+  (let ((frame (frame-of-window win)))
+    (map cadr
+         (filter (lambda (row)
+                   (and (equal? (caddr row) frame) (not (equal? (car row) win))))
+                 (window-list-all)))))
+
+;; the live snapshot of WIN for window-fill-decide: its restore record,
+;; its past, what the frame's other windows show, and whether another
+;; window keeps the frame. DYING is the buffer leaving the window. MORE
+;; overrides a key: 'restore #f ignores the record, 'others #f keeps the
+;; window, 'refill #f keeps the pool out.
+(define (window-fill-snapshot win dying &rest more)
+  (append more
+          (list 'restore (window-restore win)
+                'previous (window-prev-buffers win)
+                'shown (window-fill-shown-elsewhere win)
+                'dying dying
+                'others (and (or (layout-displaced-by win) (other-window-id win)) #t))))
+
+;; apply ACTION, an answer of window-fill-decide, to WIN. #t when the
+;; window changed: (blank) leaves it as it is, and so does a (delete) no
+;; other window can absorb.
+(domain! 'windows)
+(effects! '(write display))
+(define (window-fill-apply! win action)
+  (let ((what (car action)))
+    (cond ((member what '(restore show))
+           (window-set-buffer! win (cadr action))
+           (window-state-changed!)
+           #t)
+          ((equal? what 'delete)
+           (cond ((layout-give-back! win) #t)
+                 ((other-window-id win)
+                  (if (equal? win (active-window)) (delete-window!) (delete-window-id! win))
+                  #t)
+                 (else #f)))
+          (else #f))))
+(domain! 'files)
+(effects! '(read))
+
 ;; The blank pane: the buffer a layout shows in a pane the pool cannot
 ;; fill. editor.scm knows no groups, so the base answer is none, and a
 ;; layout stays short; scratch.scm sets the source to the group's scratch

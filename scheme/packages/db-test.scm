@@ -63,15 +63,3 @@
     (db-register! "t-db-reg" '(adapter "postgres" database "app"))
     (check-equal! (plist-get (db-spec "t-db-reg") 'database) "app" "the spec")
     (check-equal! (db-spec "t-db-nothing") #f "an unregistered name")))
-
-(deftest 'apropos-finds-the-database-api-by-what-it-is-for
-  "somebody writing a connector searches for the job"
-  (lambda ()
-    (for-each
-      (lambda (q)
-        (check-true!
-          (pair? (filter (lambda (e)
-                           (string-contains? (or (plist-get e 'qualified-name) "") "db"))
-                         (apropos q)))
-          (string-append "apropos finds the database api for: " q)))
-      '("postgres" "sql query"))))

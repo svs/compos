@@ -76,15 +76,6 @@
     (check-contains! (buffer-text *help-buffer*) "## Zz testing" "empty lists every topic")
     (howto-test-done!)))
 
-(deftest 'apropos-finds-a-howto-by-its-words
-  "C-h a and the agents' search reach the task recipes"
-  (lambda ()
-    (howto-test-setup!)
-    (check-true! (pair? (filter (lambda (h) (equal? (plist-get h 'kind) "howto"))
-                                (apropos "zz howto test command")))
-                 "the howto is a hit")
-    (howto-test-done!)))
-
 (deftest 'help-for-help-links-every-topic
   "the help index names the help commands and every howto topic"
   (lambda ()

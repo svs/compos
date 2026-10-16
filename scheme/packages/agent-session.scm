@@ -1400,6 +1400,12 @@
         (lambda ()
           (set-mode! "chat-mode")
           (end-of-buffer!)))
+      ;; 'title names the chat at spawn, before the prompt: the chat has its
+      ;; name from the first moment, and the first-prompt titler leaves a
+      ;; titled chat alone
+      (let ((title (plist-get opts 'title)))
+        (when (and (string? title) (boundp 'chat-title))
+          (chat-title buf title)))
       ;; the spawner in scope, if there is one: the chat that owns this
       ;; eval. With no parent in scope nothing is recorded and the spawn
       ;; is what it always was.

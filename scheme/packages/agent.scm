@@ -436,6 +436,10 @@
       ;; turn-end event itself never arrives. Nothing polls and nothing
       ;; reconciles on a timer -- the runtime announces, the view listens.
       ((equal? type 'status)
+       ;; the spawner's header line counts its children by state
+       (let* ((parent (and (boundp 'subagent-parent) (subagent-parent slug)))
+              (pbuf (and parent (subagent-live-buffer parent))))
+         (when pbuf (dashboard--sync! pbuf)))
        (unless (member (plist-get e 'status) *agent-working-statuses*)
          (chat-activity! buf #f)
          (buffer-set-local! buf 'chat-turn-active #f)

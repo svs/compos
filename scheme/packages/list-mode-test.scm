@@ -151,3 +151,46 @@
                       (list 'ok #f) "and under a header it is above the entries")
         (check-equal! (ignore-errors (lambda () (list 'ok (list-current "*zz-lc-unpointed*"))))
                       (list 'ok #f) "so it has no row, rather than raising")))))
+
+(deftest 'a-listing-card-floats-over-the-lists-own-window
+  "listing-preview! floats a read-only copy of the row over the list: its own window, the neighbour untouched, the frame's group unmoved; q takes the card before the list, and dismissing gives the neighbour back"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (when (group-record-by-name "zz-lc-group")
+          (group-record-delete! (group-record-by-name "zz-lc-group")))
+        (let ((g (group-record-create! "zz-lc-group")))
+          (buffer-add-group! "*zz-lc-c*" g)
+          (test-buffer! "*zz-lc-side*" "work beside the list")
+          (t--lm-open!)
+          (run-command "delete-other-windows")
+          (let ((home (active-window))
+                (group (frame-group)))
+            (split-window! 'h 0.5)
+            (other-window!)
+            (switch-to-buffer-here! "*zz-lc-side*")
+            (select-window! home)
+            (let ((side (other-window-id home)))
+              (check-equal! (window-buffer home) t--lm-buf "the list stands in its window")
+              (listing-preview! t--lm-buf "*zz-lc-c*")
+              (check-true! (float-open?) "a card is floated")
+              (check-equal! (buffer-local (float-buffer) 'listing-preview-source) "*zz-lc-c*"
+                            "and it reads the row")
+              (check-true! (buffer-read-only? (float-buffer)) "the card is a look, read-only")
+              (check-false! (member (float-window) (list home side))
+                            "the card is its own window, neither the list's nor the neighbour's")
+              (check-equal! (window-buffer side) "*zz-lc-side*"
+                            "the window beside the list keeps what it was showing")
+              (check-equal! (active-window) home "the selection stayed on the list")
+              (check-equal! (frame-group) group
+                            "a card is a copy: the frame did not follow the row into its group")
+              (run-command "quit-window")
+              (check-false! (float-open?) "q takes the card first")
+              (check-equal! (current-buffer) t--lm-buf "and leaves the list standing")
+              (listing-preview! t--lm-buf "*zz-lc-b*")
+              (check-true! (float-open?) "the next row floats a card again")
+              (listing-preview-dismiss! t--lm-buf)
+              (check-false! (float-open?) "dismissing takes the card down")
+              (check-equal! (window-buffer side) "*zz-lc-side*"
+                            "and gives the neighbour back untouched")))
+          (group-record-delete! g))))))

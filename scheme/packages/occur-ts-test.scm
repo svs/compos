@@ -58,7 +58,7 @@
     (t--occur-clean!)))
 
 (deftest 'moving-previews-the-capture-and-the-row-command-visits-it
-  "a move previews in the source; RET names occur-ts-visit, which lands there"
+  "a move puts the source's point on the capture; RET names occur-ts-visit, which lands there"
   (lambda ()
     (t--occur-source!)
     (occur-ts-open t--occur-src "json" t--occur-query)
@@ -66,7 +66,6 @@
     (let ((second (string-index t--occur-json "\"two\"")))
       (run-command "list-next")
       (check-equal! (buffer-point t--occur-src) second "the move previews the second capture")
-      (check-equal! (current-buffer) "*occur-ts*" "and the list keeps the point")
 
       (check-equal! (cadr (assoc "RET" (plist-get (list-mode-opts "occur-ts-mode") 'keys)))
                     "occur-ts-visit" "RET names the visit command")

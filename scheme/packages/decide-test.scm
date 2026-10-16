@@ -11,44 +11,42 @@
 (define t--decide-seen '())
 
 ;; a backend that answers nothing and records what it was handed
-(define (t--decide-stub!)
+(define (t--decide-with-stub thunk)
   (set! t--decide-seen '())
-  (set! decide--call-laya
-    (lambda (state questions model timeout)
-      (set! t--decide-seen (list 'laya state model timeout))
-      '(answers () usage (0 0 laya))))
-  (set! decide--call-jev
-    (lambda (state questions model timeout)
-      (set! t--decide-seen (list 'jev state model timeout))
-      '(answers () usage (0 0 jev)))))
+  (with-stubs
+    (list (list 'decide--call-laya
+                (lambda (state questions model timeout)
+                  (set! t--decide-seen (list 'laya state model timeout))
+                  '(answers () usage (0 0 laya))))
+          (list 'decide--call-jev
+                (lambda (state questions model timeout)
+                  (set! t--decide-seen (list 'jev state model timeout))
+                  '(answers () usage (0 0 jev)))))
+    thunk))
 
 (deftest 'decide-the-options-a-caller-passes-arrive
   "a rest parameter this interpreter does not read is every option lost"
   (lambda ()
-    (let ((held-laya decide--call-laya)
-          (held-jev decide--call-jev))
-      (t--decide-stub!)
-      (decide "a passage" '(q (type "noul" instructions "is it?")) 'backend 'laya)
-      (check-equal! (nth 0 t--decide-seen) 'laya "the backend a caller named")
-      (decide "a passage" '(q (type "noul" instructions "is it?"))
-              'backend 'laya 'timeout 7)
-      (check-equal! (nth 3 t--decide-seen) 7 "and the timeout beside it")
-      (decide "a passage" '(q (type "noul" instructions "is it?")) 'backend 'jev)
-      (check-equal! (nth 0 t--decide-seen) 'jev "another backend, the same way")
-      (set! decide--call-laya held-laya)
-      (set! decide--call-jev held-jev))))
+    (t--decide-with-stub
+      (lambda ()
+        (decide "a passage" '(q (type "noul" instructions "is it?")) 'backend 'laya)
+        (check-equal! (nth 0 t--decide-seen) 'laya "the backend a caller named")
+        (decide "a passage" '(q (type "noul" instructions "is it?"))
+                'backend 'laya 'timeout 7)
+        (check-equal! (nth 3 t--decide-seen) 7 "and the timeout beside it")
+        (decide "a passage" '(q (type "noul" instructions "is it?")) 'backend 'jev)
+        (check-equal! (nth 0 t--decide-seen) 'jev "another backend, the same way")))))
 
 (deftest 'decide-a-backend-is-called-and-not-returned
   "the dispatch table answers (NAME FN), and the function is the second"
   (lambda ()
-    (let ((held decide--call-laya))
-      (t--decide-stub!)
-      (let ((answer (decide "a passage" '(q (type "noul" instructions "is it?"))
-                            'backend 'laya)))
-        (check-true! (pair? answer) "a call answers a result")
-        (check-equal! (nth 2 (plist-get answer 'usage)) 'laya
-                      "and the usage names the backend that wrote it"))
-      (set! decide--call-laya held))))
+    (t--decide-with-stub
+      (lambda ()
+        (let ((answer (decide "a passage" '(q (type "noul" instructions "is it?"))
+                              'backend 'laya)))
+          (check-true! (pair? answer) "a call answers a result")
+          (check-equal! (nth 2 (plist-get answer 'usage)) 'laya
+                        "and the usage names the backend that wrote it"))))))
 
 (deftest 'decide-a-laya-answer-reads-as-one-row-a-question
   "the daemon answers JSON, so an answer is a plist and not an alist"
@@ -79,13 +77,12 @@
 (deftest 'decide-shell-gate-follows-the-policy
   "a recognised kind gets what decide-shell-policy says; a build passes, a read is refused"
   (lambda ()
-    (let ((seen decide--shell-seen))
-      (set! decide--shell-seen
-            (list (list "zz-build" 'build) (list "zz-read" 'read) (list "zz-edit" 'edit)))
-      (check-equal! (decide-shell-verdict "zz-build") #f "a build runs")
-      (check-equal! (decide-shell-verdict "zz-read") (decide-refusal 'read) "a read is refused")
-      (check-equal! (decide-shell-verdict "zz-edit") (decide-refusal 'edit) "an edit is refused")
-      (set! decide--shell-seen seen))))
+    (with-stub 'decide--shell-seen
+      (list (list "zz-build" 'build) (list "zz-read" 'read) (list "zz-edit" 'edit))
+      (lambda ()
+        (check-equal! (decide-shell-verdict "zz-build") #f "a build runs")
+        (check-equal! (decide-shell-verdict "zz-read") (decide-refusal 'read) "a read is refused")
+        (check-equal! (decide-shell-verdict "zz-edit") (decide-refusal 'edit) "an edit is refused")))))
 
 (deftest 'decide-shell-gate-asks-then-lets-the-approved-payload-through
   "an ask kind asks; unapproved it refuses, approved it runs, and only that payload"
@@ -116,14 +113,13 @@
 (deftest 'decide-allow-git-silences-only-git
   "with decide-allow-git on, git verbs stop asking and the rest still ask"
   (lambda ()
-    (let ((was decide-allow-git))
-      (set! decide-allow-git #f)
-      (check-equal! (and (permission-denied-verb? "git merge --ff-only main") #t) #t "git merge asks by default")
-      (set! decide-allow-git #t)
-      (check-equal! (permission-denied-verb? "git merge --ff-only main") #f "git merge runs when allowed")
-      (check-equal! (permission-denied-verb? "git push origin main") #f "so does a push")
-      (check-equal! (and (permission-denied-verb? "sendmail bob") #t) #t "mail still asks")
-      (set! decide-allow-git was))))
+    (with-stub 'decide-allow-git #f
+      (lambda ()
+        (check-equal! (and (permission-denied-verb? "git merge --ff-only main") #t) #t "git merge asks by default")
+        (set! decide-allow-git #t)
+        (check-equal! (permission-denied-verb? "git merge --ff-only main") #f "git merge runs when allowed")
+        (check-equal! (permission-denied-verb? "git push origin main") #f "so does a push")
+        (check-equal! (and (permission-denied-verb? "sendmail bob") #t) #t "mail still asks")))))
 
 (deftest 'decide-refusal-words
   "every refusal says what to do next"

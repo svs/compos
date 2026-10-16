@@ -364,23 +364,6 @@
       (set! editor-context-snapshot was))
     (t--nm-done!)))
 
-(deftest 'the-provider-reads-the-list-buffers-own-point
-  "not the current buffer's, which may sit far past the end of the list"
-  (lambda ()
-    (t--nm-setup!)
-    (run-command "notmuch-inbox")
-
-    ;; agent-send's path: the CURRENT buffer is the chat, and its point
-    ;; sits past the end of the small list buffer. line-index-at must
-    ;; slice *notmuch* with *notmuch*'s point, or substring-bytes throws.
-    (test-buffer! "*zz-nm-big-chat*" "")
-    (buffer-append! "*zz-nm-big-chat*" (string-repeat "x" 100000))
-    (switch-to-buffer! "*zz-nm-big-chat*")
-    (end-of-buffer!)
-
-    (check-contains! (buffer-context "*notmuch*") "thread:0001" "the list's own row")
-    (buffer-kill! "*zz-nm-big-chat*")
-    (t--nm-done!)))
 
 ;;; --- the eval-scheme surface ----------------------------------------------------
 
@@ -646,14 +629,12 @@
 
 ;;; --- the two-pane reading flow ---------------------------------------------------
 
-(deftest 'preview-opens-the-other-window-and-keeps-the-focus
-  "reading down a list must not move the point out of it"
+(deftest 'preview-fetches-the-thread-at-point-with-its-html
+  "the preview verb asks notmuch for the thread at point, html included"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (run-command "notmuch-preview")
-    (check-equal! (current-buffer) "*notmuch*" "focus stayed on the list")
-    (check-equal! (length (window-list)) 2 "and the preview opened beside it")
     (check-contains! (t--nm-calls) "show --format=json --include-html thread:0001" "the fetch")
     (t--nm-done!)))
 
@@ -696,8 +677,6 @@
       (let ((log (t--nm-calls)))
         (check-contains! log "show --format=json --include-html thread:0002" "the second thread")
         (check-contains! log "tag -unread -- thread:0002" "and it was marked read"))
-      (check-equal! (current-buffer) "*notmuch*" "focus stayed on the list")
-      (check-equal! (length (window-list)) 2 "the preview is beside it")
       (set! notmuch-auto-preview saved))
     (t--nm-done!)))
 

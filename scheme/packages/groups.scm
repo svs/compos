@@ -3582,10 +3582,8 @@ is forgotten and that group falls back to creation order in the switcher."
     (when restoring (restore-buffer-runtime! name))))
 
 (define (group-kill-plain-replacement name)
-  (let loop ((bs (window-fill-buffers)))
-    (cond ((null? bs) #f)
-          ((and (not (equal? (car bs) name)) (buffer-known? (car bs))) (car bs))
-          (else (loop (cdr bs))))))
+  (let ((action (window-fill-decide (list 'dying name) (window-fill-buffers))))
+    (and (equal? (car action) 'show) (cadr action))))
 
 ;; the group's most recent chat other than NAME, still alive
 (define (group-kill-last-chat group name)
@@ -3711,15 +3709,20 @@ is forgotten and that group falls back to creation order in the switcher."
               (group (caddr place)))
           (when (and group (not (group-dying? group)))
             (let* ((member (group-kill-previous-member group name win frame))
+                   ;; the chat is the pool of last resort: it takes the place
+                   ;; unless another window of this frame already shows it
+                   ;; (two windows on one chat looked like a window that would
+                   ;; not close); then the window goes, and a lone window
+                   ;; shows the chat twice rather than nothing
                    (blank (and (not member) (group-kill-blank group name)))
-                   ;; the chat another window of this frame already shows is
-                   ;; no stand-in: two windows on one chat looked like a
-                   ;; window that would not close
-                   (shown? (and blank (group-kill-shown-elsewhere? blank win frame)))
-                   (next (or member (and (not shown?) blank))))
-              (cond (next (group-kill-show! win next))
-                    ((> (group-kill-frame-window-count frame) 1)
-                     (delete-window-id! win))
+                   (action (if member
+                               (list 'show member)
+                               (window-fill-decide
+                                 (window-fill-snapshot win name 'restore #f 'previous '()
+                                   'others (> (group-kill-frame-window-count frame) 1))
+                                 (if blank (list blank) '())))))
+              (cond ((equal? (car action) 'show) (group-kill-show! win (cadr action)))
+                    ((equal? (car action) 'delete) (delete-window-id! win))
                     (blank (window-set-buffer! win blank)))))))
       places)
     (layout-strip-forget! name)
@@ -3745,11 +3748,14 @@ is forgotten and that group falls back to creation order in the switcher."
                          (compos-home!)))
                       ((group-kill-keeper? shown group) #t)
                       (else
-                        (let ((blank (and (not (group-dying? group))
-                                          (group-kill-blank group name))))
-                          (cond (blank (group-kill-show! win blank))
-                                ((> (group-kill-frame-window-count frame) 1)
-                                 (delete-window-id! win))
+                        (let* ((blank (and (not (group-dying? group))
+                                           (group-kill-blank group name)))
+                               (action (window-fill-decide
+                                         (window-fill-snapshot win name 'restore #f 'previous '()
+                                           'others (> (group-kill-frame-window-count frame) 1))
+                                         (if blank (list blank) '()))))
+                          (cond ((equal? (car action) 'show) (group-kill-show! win (cadr action)))
+                                ((equal? (car action) 'delete) (delete-window-id! win))
                                 (else
                                   (unless (buffer-exists? "*scratch*") (buffer-create "*scratch*"))
                                   (window-set-buffer! win "*scratch*"))))))))))

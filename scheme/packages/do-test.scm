@@ -113,12 +113,12 @@
 (deftest 'the-do-memory-reset-accepts-any-value
   "the do-memory global keeps a list and turns anything else into an empty list"
   (lambda ()
-    (let ((put (caddr (assoc 'do-memory *desktop-globals*)))
-          (saved *do-memory*))
-      (put '(("open mail" "notmuch")))
-      (check-equal! *do-memory* '(("open mail" "notmuch")) "a list stays")
-      (put #f)
-      (check-equal! *do-memory* '() "anything else is empty")
-      (put '())
-      (check-equal! *do-memory* '() "the empty list stays")
-      (set! *do-memory* saved))))
+    (let ((put (caddr (assoc 'do-memory *desktop-globals*))))
+      (with-stub '*do-memory* *do-memory*
+        (lambda ()
+          (put '(("open mail" "notmuch")))
+          (check-equal! *do-memory* '(("open mail" "notmuch")) "a list stays")
+          (put #f)
+          (check-equal! *do-memory* '() "anything else is empty")
+          (put '())
+          (check-equal! *do-memory* '() "the empty list stays"))))))

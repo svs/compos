@@ -280,19 +280,10 @@
 ;;; before — the same move buffer-previous-pane and buffer-next-pane make, done for you.
 ;;; A preview is a look, not a place, so the peek path never evicts.
 (define (window-eviction-buffer win name)
-  (let* ((shown (map cadr (window-list)))
-         (ok? (lambda (b)
-                (and b (not (equal? b name)) (buffer-known? b)
-                     (not (buffer-context-only? b))
-                     (not (float--class? b))
-                     (not (peek-buffer? b))
-                     (window-fill-member? b)
-                     (not (member b shown)))))
-         (past (filter ok? (window-prev-buffers win)))
-         (rest (filter ok? (window-fill-buffers))))
-    (cond ((pair? past) (car past))
-          ((pair? rest) (car rest))
-          (else #f))))
+  (let ((action (window-fill-decide
+                  (window-fill-snapshot win name 'restore #f 'others #f)
+                  (window-fill-buffers))))
+    (and (equal? (car action) 'show) (cadr action))))
 
 ;; the only buffer in the editor cannot be in two places and nowhere: when
 ;; there is nothing else to reveal the other window keeps it.
@@ -829,21 +820,19 @@
 ;; showed. #t when something was undone. The last window is never deleted.
 (define (window-quit-restore! win)
   (let ((rec (and (window-exists? win) (window-restore win))))
-    (unless (and rec (equal? (car rec) 'preview)) (set-window-restore! win #f))
     (cond ((not rec) #f)
           ((equal? (car rec) 'preview) (window-preview-end! win))
-          ((and (equal? (car rec) 'window) (layout-give-back! win)) #t)
-          ((and (equal? (car rec) 'window) (pair? (cdr (window-list))))
-           (if (equal? win (active-window))
-               (delete-window!)
-               (delete-window-id! win))
-           #t)
-          ((and (equal? (car rec) 'other) (cadr rec)
-                (fill-candidate? (cadr rec)) (window-fill-member? (cadr rec)))
-           (window-set-buffer! win (cadr rec))
-           (window-state-changed!)
-           #t)
-          (else #f))))
+          (else
+            (set-window-restore! win #f)
+            ;; undo the display only: the window it made goes, the buffer it
+            ;; covered comes back. Nothing fills from the past or the pool.
+            (window-fill-apply! win
+              (window-fill-decide
+                (window-fill-snapshot win #f 'restore rec 'previous '() 'refill #f
+                  'others (and (equal? (car rec) 'window)
+                               (or (layout-displaced-by win) (other-window-id win))
+                               #t))
+                (window-fill-buffers)))))))
 
 ;;; geometry, from the selected window's measure and the fractional rects
 
@@ -1435,6 +1424,12 @@ keeps the buffer you were in and your point.")
 
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
+(public! 'window-fill-decide
+  "(window-fill-decide SNAPSHOT POOL) — the one rule for what fills a window: (delete), (restore BUF), (show BUF) or (blank) from a snapshot plist (restore previous shown dying others refill) and the pool; pure")
+(public! 'window-fill-snapshot
+  "(window-fill-snapshot WIN DYING &rest MORE) — the live snapshot of WIN for window-fill-decide; MORE overrides keys")
+(public! 'window-fill-apply!
+  "(window-fill-apply! WIN ACTION) — apply an answer of window-fill-decide to WIN; #t when the window changed")
 (public! 'window-fill-blank
   "(window-fill-blank) — context scratch fallback, or #f; fixed target layouts leave spare capacity empty")
 (public! 'buffer-special?
@@ -1885,12 +1880,15 @@ keeps the buffer you were in and your point.")
   (let ((fitted (layout--fit buffers capacity)))
     (if (>= (length fitted) capacity)
         fitted
-        (let loop ((rest (layout-unheld (filter window-fill-primary? (window-fill-buffers))))
-                   (result fitted))
-          (cond ((>= (length result) capacity) result)
-                ((null? rest) result)
-                ((member (car rest) result) (loop (cdr rest) result))
-                (else (loop (cdr rest) (append result (list (car rest))))))))))
+        ;; each spare pane asks the one rule, with the panes so far as shown
+        (let ((pool (layout-unheld (filter window-fill-primary? (window-fill-buffers)))))
+          (let loop ((result fitted))
+            (if (>= (length result) capacity)
+                result
+                (let ((action (window-fill-decide (list 'shown result) pool)))
+                  (if (equal? (car action) 'show)
+                      (loop (append result (list (cadr action))))
+                      result))))))))
 
 ;; Validate each requested pane without removing duplicate buffer names.
 (define (layout--known-buffers buffers)
@@ -2115,11 +2113,13 @@ keeps the buffer you were in and your point.")
          (hidden (map window-buffer-any (layout-hidden-windows)))
          (work (if (frame-group) (layout-unheld (window-fill-buffers)) '())))
     ;; Existing panes keep their buffers, including deliberate duplicates,
-    ;; transient lists and visible non-members. Only hidden fillers are filtered.
-    (let loop ((rest (append hidden work)) (out (reverse visible)))
-      (cond ((null? rest) (reverse out))
-            ((member (car rest) out) (loop (cdr rest) out))
-            (else (loop (cdr rest) (cons (car rest) out)))))))
+    ;; transient lists and visible non-members. Each further pane asks the
+    ;; one rule: a hidden window's buffer first, then unheld work.
+    (let loop ((out (reverse visible)))
+      (let ((action (window-fill-decide (list 'shown out) (append hidden work))))
+        (if (equal? (car action) 'show)
+            (loop (cons (cadr action) out))
+            (reverse out))))))
 
 ;; Apply ALGORITHM to the frame. This is the top of a layout change, so the
 ;; next walk reads the ring again from the new panes.
@@ -2341,16 +2341,16 @@ keeps the buffer you were in and your point.")
       ;; is what it was. In a split the split closes; alone, the window
       ;; falls to the next buffer.
       ((peek-buffer? (current-buffer))
-        (let ((cur (current-buffer)))
-          (cond ((window-quit-restore! (active-window)) #t)
-                ((other-window-id (active-window))
-                 (delete-window!))
-                (else
-                 (let loop ((bs (window-fill-buffers)))
-                   (cond ((null? bs) #t)
-                         ((and (not (equal? (car bs) cur)) (buffer-exists? (car bs)))
-                          (switch-to-buffer! (car bs)))
-                         (else (loop (cdr bs)))))))
+        (let* ((cur (current-buffer))
+               (win (active-window))
+               (rec (window-restore win)))
+          (if (and rec (equal? (car rec) 'preview))
+              (window-quit-restore! win)
+              (begin
+                (set-window-restore! win #f)
+                (window-fill-apply! win
+                  (window-fill-decide (window-fill-snapshot win cur 'restore rec)
+                                      (window-fill-buffers)))))
           (peek-drop! cur)))
       ;; from any other buffer, a peek on screen goes first: q in the
       ;; listing that peeked takes the look, then the listing
@@ -2574,12 +2574,12 @@ keeps the buffer you were in and your point.")
 
 (define (split-window-with-other-buffer! direction)
   (let* ((before (map car (window-list)))
-         (shown (map cadr (window-list)))
-         (candidates (filter (lambda (b) (not (member b shown))) (window-fill-buffers))))
+         (action (window-fill-decide (list 'shown (map cadr (window-list)))
+                                     (window-fill-buffers))))
     (split-window! direction)
     (let ((created (layout--new-window before)))
-      (when (and created (pair? candidates))
-        (display-buffer-in-window! created (car candidates)))
+      (when (and created (equal? (car action) 'show))
+        (display-buffer-in-window! created (cadr action)))
       created)))
 
 (define-command "split-window-below" "Split the window in two, one above the other"

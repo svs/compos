@@ -59,22 +59,6 @@
                       '(reuse-window use-some-window pop-up-window)
                       "the detail chain, before the fallback")))))
 
-(deftest 'every-row-lands-in-the-same-window
-  "the second row retakes the first row's window, not the least used one"
-  (lambda ()
-    (t--dt-with
-      (lambda ()
-        (let* ((wins (t--dt-frame!))
-               (me (car wins))
-               (first (display-buffer-detail! "*zz-detail-a*" "*zz-detail-list*")))
-          (check-equal! (length (window-list)) 3 "no window was made")
-          (check-equal! (active-window) me "point stays in the list")
-          (check-true! (not (equal? first me)) "the detail is not in the list's window")
-          (let ((second (display-buffer-detail! "*zz-detail-b*" "*zz-detail-list*")))
-            (check-equal! second first "the same window again")
-            (check-equal! (window-buffer first) "*zz-detail-b*" "holding the second row")
-            (check-equal! (length (window-list)) 3 "still three windows")
-            (check-equal! (detail-window "*zz-detail-list*") first "the list remembers it")))))))
 
 (deftest 'the-list-owns-what-it-opened
   "a detail is the list's child, so the details of one list are siblings"

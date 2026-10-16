@@ -92,6 +92,61 @@
 ;; restart.
 (define (test-forget-catalog! kind name)
   (catalog-forget! (string->symbol kind) name))
+;;; --- fixtures ----------------------------------------------------------------
+;;; A test that changes shared state puts it back, also when a check raises
+;;; half way: the next test reads the same globals, and the live editor
+;;; reaches the world through them. Each fixture wraps THUNK in
+;;; unwind-protect, so the undo runs on an error too and the error goes on.
+
+;; NAME is a global, quoted; VALUE replaces it for the thunk. A name that
+;; had no binding is unbound again after.
+(define (with-stub name value thunk)
+  (let ((bound (boundp name))
+        (old (and (boundp name) (symbol-value name))))
+    (set-symbol-value! name value)
+    (unwind-protect thunk
+      (lambda ()
+        (if bound (set-symbol-value! name old) (unbind-global! name))))))
+
+;; PAIRS is ((NAME VALUE) ...), each as with-stub takes them
+(define (with-stubs pairs thunk)
+  (if (null? pairs)
+      (thunk)
+      (with-stub (car (car pairs)) (cadr (car pairs))
+        (lambda () (with-stubs (cdr pairs) thunk)))))
+
+;; a customize variable: the setter runs on the way in and on the way out,
+;; so a setting with side effects undoes them too
+(define (with-custom name value thunk)
+  (let ((old (symbol-value name)))
+    (customize-set! name value)
+    (unwind-protect thunk (lambda () (customize-set! name old)))))
+
+(define (with-customs pairs thunk)
+  (if (null? pairs)
+      (thunk)
+      (with-custom (car (car pairs)) (cadr (car pairs))
+        (lambda () (with-customs (cdr pairs) thunk)))))
+
+;; a group record NAME that no earlier run left behind; FN gets its id, and
+;; the record goes when FN returns, even when FN dissolved it already
+(define (with-fresh-group name fn)
+  (let ((stale (group-resolve-id name)))
+    (when stale (group-record-delete! stale)))
+  (let ((id (group-record-create! name)))
+    (unwind-protect (lambda () (fn id))
+      (lambda () (group-record-delete! id)))))
+
+;; a frame of the test's own, selected while FN runs with its id; the
+;; frame the test stood in is selected again after, and the new one goes
+(define (with-frame fn)
+  (let ((home (selected-frame))
+        (frame (make-frame!)))
+    (select-frame! frame)
+    (unwind-protect (lambda () (fn frame))
+      (lambda ()
+        (select-frame! home)
+        (delete-frame! frame)))))
 
 (define (test-fail! text)
   (set! *test-failures* (append *test-failures* (list text))))
@@ -335,6 +390,18 @@
   "(test-self-check) — prove the checks can fail; answers the failures three bad assertions record")
 (public! 'test-forget-catalog!
   "(test-forget-catalog! KIND NAME) — drop a test's catalog entry; the M-x name stays until a restart")
+(public! 'with-stub
+  "(with-stub 'NAME VALUE THUNK) — run THUNK with the global NAME set to VALUE; the old value comes back after, also on an error")
+(public! 'with-stubs
+  "(with-stubs ((NAME VALUE) ...) THUNK) — with-stub for several globals at once")
+(public! 'with-custom
+  "(with-custom 'NAME VALUE THUNK) — run THUNK with the customize variable NAME set to VALUE through its setter; the old value comes back after, also on an error")
+(public! 'with-customs
+  "(with-customs ((NAME VALUE) ...) THUNK) — with-custom for several settings at once")
+(public! 'with-fresh-group
+  "(with-fresh-group NAME FN) — make a group record NAME, stale copies deleted first, and call (FN ID); the record goes after, also on an error")
+(public! 'with-frame
+  "(with-frame FN) — make and select a frame, call (FN ID), then come back to the old frame and delete the new one, also on an error")
 (public! 'load-tests-once! "(load-tests-once!) — load every test file the first time only; answers the test count")
 (public! 'reload-tests! "(reload-tests!) — forget the loaded kernel suite and read priv/tests again")
 (public! 'load-tests! "(load-tests!) — load the kernel's tests, every .scm under priv/tests; answers the test count")

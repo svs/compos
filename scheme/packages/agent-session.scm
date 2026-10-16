@@ -129,6 +129,17 @@
 
 (add-paste-hook! "chat-mode" 'chat-image chat-image-paste!)
 
+;; The editor context block rides only when it says something new: when it
+;; differs from the block this chat sent last, when C-c RET named a source, or
+;; when a fresh session has seen no block yet.
+(define (agent-editor-context buf)
+  (let* ((force (or (buffer-local buf 'editor-context-source)
+                    (buffer-local buf 'agent-seed-context)))
+         (pre (editor-context-preamble buf)))
+    (if (and (not force) (equal? pre (buffer-local buf 'editor-context-sent)))
+        ""
+        (begin (buffer-set-local! buf 'editor-context-sent pre) pre))))
+
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
          ;; a one-shot note - a skill body a mode pushed - rides the next
@@ -147,7 +158,7 @@
          ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (editor-context-preamble buf) (chat-fast-note buf) raw image-note)))
+                (agent-editor-context buf) (chat-fast-note buf) raw image-note)))
     (buffer-set-local! buf 'chat-note-once #f)
     (buffer-set-local! buf 'chat-fast-runs '())
     (buffer-set-local! buf 'chat-pending-images '())

@@ -53,7 +53,7 @@
   (set! notmuch-html-renderer "cat")
   (switch-to-buffer! "*scratch*")
   (for-each (lambda (b)
-              (when (or (equal? b "*notmuch*")
+              (when (or (equal? b "*notmuch*") (equal? b "*mailboxes*")
                         (string-prefix? "*mail" b)
                         (equal? b "*compose*"))
                 (buffer-kill! b)))
@@ -124,8 +124,8 @@
       (check-equal! (length auth) 1 "the author is on another")
       (check-false! (string-contains? (car subj) "Alice") "the two do not share a line")
       (check-contains! (car subj) "Today 06:50" "the date rides with the subject")
-      ;; the column has the room here, so both tags read under their names
-      (check-contains! (car auth) "inbox unread" "the tags ride with the author"))
+      ;; inbox and unread are hidden tags, so this row draws none
+      (check-false! (string-contains? (car auth) "inbox") "a hidden tag stays off the row"))
     ;; a row is two lines, and one move is one thread
     (t--nm-run! "notmuch-next")
     (check-equal! (nm--th-subject (nm--thread-at "*notmuch*")) "Quarterly report"
@@ -140,8 +140,8 @@
     (check-equal! (nm--short-tag "sent") "sent" "and a short one is itself")
     (let ((tags '("attachment" "important" "inbox" "personal" "sent")))
       (check-equal! (nm--tags-text (list "0001" "s" "a" tags "d"))
-                    "attachment important inbox personal sent"
-                    "every tag reads, none of them goes")
+                    "attachment important personal sent"
+                    "every tag reads but a hidden one")
       ;; the column takes what the busiest row needs
       (check-equal! (nm--fit-tags "attachment important inbox personal sent" 40)
                     "attachment important inbox personal sent"
@@ -317,11 +317,11 @@
     (t--nm-setup!)
     (let ((work (string-append (compos-home) "/zz-nm-work.txt")))
       (write-file! work "work\n")
-      (visit work)
+      ;; visit loads quietly; you were working in it, so show it
+      (switch-to-buffer! (visit work))
       (run-command "notmuch")
       (run-command "notmuch-inbox")
       (t--nm-run! "notmuch-open-thread")
-
       (run-command "notmuch-quit")
       (check-false! (buffer-exists? "*notmuch*") "the listing is gone")
       (check-false! (buffer-exists? "*mailboxes*") "the mailboxes are gone")
@@ -350,7 +350,9 @@
       (check-contains! ctx "thread:0001" "the open thread")
       (check-contains! ctx "id:m1" "and the message in it"))
 
-    ;; a buffer with no provider still gets its line: name, mode and line
+    ;; a buffer with no provider still gets its line: name, mode and line.
+    ;; close mail first, so no mail view is left to provide a line
+    (run-command "notmuch-quit")
     (switch-to-buffer! "*scratch*")
     (let ((pre (editor-context-preamble "*zz-nm-chat*")))
       (check-contains! pre "- *scratch* (" "the snapshot names it")
@@ -601,7 +603,7 @@
     (t--nm-done!)))
 
 (deftest 'mark-all-then-archive-marked-asks-before-it-acts
-  "archive applies to the full filtered query and clears selection"
+  "archive applies to the full filtered query and keeps the selection"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
@@ -611,7 +613,8 @@
     (run-command "notmuch-archive-marked")
     (t--nm-answer! "yes")
     (check-contains! (t--nm-calls) "tag -inbox -- ( ( tag:inbox ) and from:alice )" "archive query")
-    (check-equal! (nm--any-marked? "*notmuch*") #f "selection cleared")
+    ;; the marked thread ids stay valid when their tags change
+    (check-true! (nm--any-marked? "*notmuch*") "the selection stays across the refresh")
     (t--nm-done!)))
 
 (deftest 'embark-acts-on-the-email-at-point

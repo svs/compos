@@ -821,12 +821,16 @@ when a message has no text/plain part." 'group 'notmuch)
     ;; land on real work: any buffer that is not one of the mail app's own.
     ;; The app id names them wherever they are, so no group has to, and mail
     ;; now shares the group of whatever you were doing when you opened it.
-    (let ((others (filter (lambda (b)
-                            (and (not (member b (nm--view-buffers)))
-                                 (not (equal? (app-id b) *nm-app-id*))))
-                          (buffer-list-mru))))
+    ;; Work still on screen beside the mail comes first, then the most recent.
+    (let* ((work? (lambda (b)
+                    (and (not (member b (nm--view-buffers)))
+                         (not (equal? (app-id b) *nm-app-id*)))))
+           (shown (filter work? (map cadr (window-list))))
+           (others (filter work? (buffer-list-mru))))
       (delete-other-windows!)
-      (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
+      (switch-to-buffer! (cond ((pair? shown) (car shown))
+                               ((pair? others) (car others))
+                               (else "*scratch*")))
       (for-each buffer-kill! (nm--view-buffers))
       (message "Mail closed"))))
 

@@ -1196,30 +1196,39 @@
 (define (subagent-result chat)
   (let* ((slug (subagent-slug chat))
          (buf (subagent-live-buffer chat))
+         (done (and buf (buffer-local buf 'subagent-done)))
          (ended (and buf (buffer-local buf 'subagent-turn-end))))
     (list 'slug slug
           'buffer buf
-          'status (cond ((not buf) 'gone)
-                        ((subagent-running? slug) 'running)
-                        ((not ended) 'idle)
-                        ((nth 1 ended) 'done)
-                        (else 'failed))
+          'status (subagent-status-of chat)
           'stop-reason (and ended (nth 0 ended))
+          'result (and done (nth 0 done))
           'text (or (subagent-last-assistant chat) ""))))
 
 ;; CHATS is one chat or a list of them; the answers come back in that order.
 (define (subagent-collect chats)
   (map subagent-result (if (pair? chats) chats (list chats))))
 
-;; #t when CHAT will not reach another turn end on its own: it finished one,
-;; or it is gone. A chat that never ran a turn is NOT done -- nothing has
-;; happened to it yet.
+;; A turn end is only stopped; done is set by the orchestrator via subagent-mark-done!.
+(define (subagent-status-of chat)
+  (let* ((slug (subagent-slug chat))
+         (buf (subagent-live-buffer chat)))
+    (cond ((not buf) 'gone)
+          ((subagent-running? slug) 'running)
+          ((buffer-local buf 'subagent-done) 'done)
+          ((buffer-local buf 'subagent-turn-end) 'stopped)
+          (else 'idle))))
+
 (define (subagent-done? chat)
+  (eq? (subagent-status-of chat) 'done))
+
+(define (subagent-stopped? chat)
+  (and (memq (subagent-status-of chat) '(stopped done gone)) #t))
+
+(define (subagent-mark-done! chat result)
   (let ((buf (subagent-live-buffer chat)))
-    (cond ((not buf) #t)
-          ((subagent-running? chat) #f)
-          ((buffer-local buf 'subagent-turn-end) #t)
-          (else #f))))
+    (when buf (buffer-set-local! buf 'subagent-done (list result))))
+  (subagent-status-of chat))
 
 (effects! '(write))
 
@@ -1256,7 +1265,7 @@
 ;; turn end. Answers at once when they all have. -> 'done or 'waiting.
 (define (subagent-wait chats k)
   (let* ((all (map subagent-slug (if (pair? chats) chats (list chats))))
-         (pending (filter (lambda (s) (not (subagent-done? s))) all)))
+         (pending (filter (lambda (s) (not (subagent-stopped? s))) all)))
     (if (null? pending)
         (begin (k (subagent-collect all)) 'done)
         (begin
@@ -1295,7 +1304,8 @@
 (define (subagent-turn-end! slug stop-reason ok?)
   (let ((buf (subagent-live-buffer slug)))
     (when buf
-      (buffer-set-local! buf 'subagent-turn-end (list stop-reason ok?))))
+      (buffer-set-local! buf 'subagent-turn-end (list stop-reason ok?))
+      (buffer-set-local! buf 'subagent-done #f)))
   (subagent-notify-parent! slug ok? stop-reason)
   (subagent-waiters-note! slug))
 

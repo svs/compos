@@ -115,19 +115,16 @@
 ;; group records, and over four hundred rows it held the Session for
 ;; seconds. A legacy 'group tag names the group, so only it resolves.
 (define (switch-member? name id)
-  (and (member id (switch-memberships name)) #t))
+  (equal? id (switch-group name)))
 
 ;; the buffer's group as its locals hold it: 'group-id, else the list or the
 ;; name from before it. No resolve per row, but the legacy name
-(define (switch-memberships name)
-  (let ((held (buffer-local name 'group-id))
-        (ids (buffer-local name 'group-ids)))
-    (cond ((string? held) (list held))
-          ((pair? ids) (list (car ids)))
-          (else
-           (let* ((legacy (buffer-local name 'group))
-                  (id (and (string? legacy) (group-resolve-id legacy))))
-             (if id (list id) '()))))))
+(define (switch-group name)
+  (let ((held (buffer-local name 'group-id)))
+    (if (string? held)
+        held
+        (let ((legacy (buffer-local name 'group)))
+          (and (string? legacy) (group-resolve-id legacy))))))
 
 ;; the pool in sections, the ibuffer way: this group's buffers, then
 ;; every other group's buffers under the group's name, then the buffers
@@ -144,7 +141,7 @@
       (fold (lambda (out bucket)
               (append out (switch-section (car bucket) (nth 2 bucket))))
             '()
-            (ibuffer-group-buckets bufs id (lambda (c) (switch-memberships (car c)))))
+            (ibuffer-group-buckets bufs id (lambda (c) (switch-group (car c)))))
       (switch-section (if id "other groups" "groups") cards)
       (switch-section "recent" (switch-recent-rows)))))
 
@@ -971,12 +968,10 @@ the next row down. STEP is kept for the callers."
         (let* ((candidate (car cs))
                (r (if (and (pair? rs) (equal? (car (car rs)) (cadr candidate)))
                       (car rs)
-                      (or (assoc (cadr candidate) rows) (list (cadr candidate) #f #f #f #f #f #f))))
+                      (or (assoc (cadr candidate) rows) (list (cadr candidate) #f #f #f #f #f))))
                (mode (or (nth 3 r) ""))
-               (ids (if (equal? mode "chat-mode") (nth 4 r) (or (nth 5 r) (nth 6 r))))
-               (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
-               (group (string-join (map (lambda (id)
-                        (let ((g (assoc id groups))) (if g (cadr g) id))) ids) ", "))
+               (id (let ((held (or (nth 4 r) (nth 5 r)))) (and (string? held) held)))
+               (group (if id (let ((g (assoc id groups))) (if g (cadr g) id)) ""))
                (parts (filter (lambda (s) (not (equal? s "")))
                         (list (if (and (nth 1 r) (nth 2 r)) "*" "") mode group))))
           (loop (cdr cs) (if (pair? rs) (cdr rs) rs)
@@ -986,12 +981,12 @@ the next row down. STEP is kept for the callers."
   ;; switch-prompt-buffers' order from one read of the buffer rows: the
   ;; buffers WIN showed before, every other buffer by recent use, HERE,
   ;; then the recent files. A row is (NAME PATH MODIFIED MODE GROUP-ID
-  ;; GROUP-IDS GROUP); a file that is no buffer has #f for each.
-  (let* ((all (filter (lambda (r) (not (and (nth 7 r) (nth 8 r))))
+  ;; GROUP); a file that is no buffer has #f for each.
+  (let* ((all (filter (lambda (r) (not (and (nth 6 r) (nth 7 r))))
                       (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
-                                               'fields '(path modified mode group-id group-ids group
+                                               'fields '(path modified mode group-id group
                                                          live preview-opened))))))
-         (row-of (lambda (r) (list-head r 7)))
+         (row-of (lambda (r) (list-head r 6)))
          (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
          (led (filter (lambda (r) r)
                       (map (lambda (n) (and (not (equal? n here)) (assoc n all))) mine)))
@@ -1000,7 +995,7 @@ the next row down. STEP is kept for the callers."
          (self (let ((r (assoc here all))) (if r (list r) '())))
          (buffers (map row-of (append led rest self))))
     (append buffers
-            (map (lambda (f) (list (car f) #f #f #f #f #f #f))
+            (map (lambda (f) (list (car f) #f #f #f #f #f))
                  (filter (lambda (f) (not (assoc (car f) buffers))) (switch-recent-rows))))))
 
 ;; C-x b has three tabs over one list: every buffer, the current group's,
@@ -1023,12 +1018,11 @@ the next row down. STEP is kept for the callers."
               (cond ((null? ks) 0) ((eq? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
     (nth (modulo (+ i step n) n) keys)))
 
-;; a row's groups from the fields it carries: a chat holds one group id,
-;; any other buffer a list. A file that is no buffer is in no group.
+;; a row's group from the fields it carries: every buffer holds one group
+;; id. A file that is no buffer is in no group.
 (define (switch-row-in-group? r id)
-  (let ((ids (if (equal? (nth 3 r) "chat-mode") (nth 4 r) (nth 5 r))))
-    (cond ((pair? ids) (and (member id ids) #t))
-          ((string? ids) (equal? ids id))
+  (let ((held (nth 4 r)))
+    (cond ((string? held) (equal? held id))
           ((nth 3 r) (switch-member? (car r) id))
           (else #f))))
 

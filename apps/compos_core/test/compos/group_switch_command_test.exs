@@ -122,7 +122,7 @@ defmodule Compos.GroupSwitchCommandTest do
     Session.run_command("zz-headline-move")
 
     for buffer <- [first, second] do
-      assert eval!(~s{(map group-label (dashboard--group-ids "#{buffer}"))}) =~ "headline-dest",
+      assert eval!(~s{(group-label (dashboard--group "#{buffer}"))}) =~ "headline-dest",
              "#{buffer} did not move"
 
       unless Enum.any?(leaves(Editor.render_state().tree), &(&1.buffer == buffer)) do

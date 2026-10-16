@@ -467,8 +467,8 @@
 (define (ibuffer-row-group-label b)
   (if (buffer-known? b) (group-label (buffer-group b)) ""))
 
-(define (ibuffer-memberships b)
-  (if (buffer-known? b) (group-buffer-memberships b) '()))
+(define (ibuffer-group-of b)
+  (if (buffer-known? b) (buffer-group b) #f))
 
 ;;; --- the source ---------------------------------------------------------------
 
@@ -793,15 +793,15 @@
 ;;; other groups by name, then the rows no group claims. A row belongs to
 ;;; one bucket. The current group wins; otherwise the first group by name
 ;;; owns the row. A bucket is (LABEL KEY MEMBERS FACE); an empty one is
-;;; left out. MEMBERSHIPS-OF answers a row's group ids. The C-x b prompt
+;;; left out. GROUP-OF answers a row's group. The C-x b prompt
 ;;; reads the same buckets, so the two surfaces section alike.
 
-(define (ibuffer-memberships-many rows memberships-of)
-  ;; every row's groups, in order. The buffer rows give each row's group
+(define (ibuffer-groups-many rows group-of)
+  ;; every row's group, in order. The buffer rows give each row's group
   ;; key in one read; a key that is a group's own id is the answer,
-  ;; and anything else (a name, a stale id, a legacy row) asks MEMBERSHIPS-OF.
+  ;; and anything else (a name, a stale id, a legacy row) asks GROUP-OF.
   ;; A row that is no buffer name, or a daemon with no index, asks it too.
-  (let ((keys (and (eq? memberships-of ibuffer-memberships)
+  (let ((keys (and (eq? group-of ibuffer-group-of)
                    (null? (filter (lambda (r) (not (string? r))) rows))
                    ;; a row that is no buffer has no key: it asks
                    (let ((got (cadr (buffer-rows (list 'names rows 'hidden #t 'context-only #t
@@ -809,17 +809,17 @@
                      (map (lambda (r) (let ((hit (assoc r got))) (if hit (cadr hit) 'ask))) rows))))
         (records *group-records*))
     (if (not keys)
-        (map memberships-of rows)
+        (map group-of rows)
         (let walk ((rs rows) (ks keys) (out '()))
           (if (null? rs)
               (reverse out)
               (walk (cdr rs) (cdr ks)
-                    (cons (cond ((not (car ks)) '())
-                                ((and (string? (car ks)) (assoc (car ks) records)) (list (car ks)))
-                                (else (memberships-of (car rs))))
+                    (cons (cond ((not (car ks)) #f)
+                                ((and (string? (car ks)) (assoc (car ks) records)) (car ks))
+                                (else (group-of (car rs))))
                           out)))))))
 
-(define (ibuffer-group-buckets rows current memberships-of &optional order)
+(define (ibuffer-group-buckets rows current group-of &optional order)
   ;; ORDER 'recent puts the other groups most recently used first; any
   ;; other ORDER puts them by name
   (let* ((others (lambda (ids) (filter (lambda (id) (not (equal? id current))) ids)))
@@ -834,19 +834,17 @@
          ;; every group asking whether the row is in it
          (ranks (let number ((gs ordered) (i 0) (out '()))
                   (if (null? gs) out (number (cdr gs) (+ i 1) (cons (list (car gs) i) out)))))
-         (rank-in (lambda (ms)
-                    (fold (lambda (best id)
-                            (let ((r (assoc id ranks)))
-                              (if (and r (< (cadr r) best)) (cadr r) best)))
-                          last ms)))
+         (rank-of (lambda (id)
+                    (let ((r (and id (assoc id ranks))))
+                      (if r (cadr r) last))))
          ;; one sort by (section, arrival) puts every row where it belongs
          ;; and keeps the order it came in. Filtering the rows once per
          ;; group walked 300 rows 50 times on an open of the switcher.
-         (placed (sort (let mark ((rs rows) (ms (ibuffer-memberships-many rows memberships-of))
+         (placed (sort (let mark ((rs rows) (gs (ibuffer-groups-many rows group-of))
                                   (i 0) (out '()))
                          (if (null? rs) out
-                           (mark (cdr rs) (cdr ms) (+ i 1)
-                                 (cons (list (rank-in (car ms)) i (car rs)) out))))))
+                           (mark (cdr rs) (cdr gs) (+ i 1)
+                                 (cons (list (rank-of (car gs)) i (car rs)) out))))))
          (runs (let walk ((ps placed) (out '()))
                  (if (null? ps) (reverse out)
                    (let ((r (car (car ps))))
@@ -878,7 +876,7 @@
   (apply append
     (map (lambda (bucket)
            (ibuffer-section buf (car bucket) (nth 1 bucket) (nth 2 bucket) (nth 3 bucket)))
-         (ibuffer-group-buckets rows current ibuffer-memberships (ibuffer-sort buf)))))
+         (ibuffer-group-buckets rows current ibuffer-group-of (ibuffer-sort buf)))))
 
 ;; the rows bucketed by a key fn, one section per key, keys by name;
 ;; LAST names the key that goes at the end whatever its name
@@ -2417,13 +2415,6 @@
     (list "go"
           (lambda (id)
             (ibuffer-pick! id (lambda () (run-command "quit-window")) 'other)))
-    (list "add here"
-          (ibuffer-act
-            (lambda (targets)
-              (let ((id (group-here)))
-                (if id
-                    (group-add-buffers-to! targets id)
-                    (message "There is no group here"))))))
     (list "move here" (ibuffer-act group-move-buffers-here!))
     ;; the two that ask for a group are the commands themselves: they
     ;; read the same marks the table shows
@@ -2594,8 +2585,8 @@
            "rows for killing, and x executes the flags. G puts the targets "
            "in a group, and K kills the group at point. RET enters the "
            "group of the row and focuses its buffer. C-. offers the "
-           "verbs with no key: add here, move here, remove here, add to "
-           "group, move to group, save. g refreshes, and q quits.")
+           "verbs with no key: move here, remove here, add to "
+           "group, move to group, save. A buffer is in one group, so moving is joining. g refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows buf))
@@ -2784,7 +2775,7 @@
   (let* ((current (frame-group))
          (groups (ibuffer-table-group-labels))
          (raw (buffer-read-many names '(path modified size)
-                 '(mode-name chat-title chat-summary group-id group-ids group context-only)))
+                 '(mode-name chat-title chat-summary group-id group context-only)))
          ;; the snapshot applies ibuffer-row? from the data this one call
          ;; already read, so opening the table is one pass over the scope,
          ;; not a per-buffer filter and then another pass
@@ -2793,7 +2784,7 @@
                                (and (not (string-prefix? " " name))
                                     (not (assoc name *ibuffer-views*))
                                     (not (member mode *ibuffer-view-modes*))
-                                    (not (nth 10 r))
+                                    (not (nth 9 r))
                                     (ibuffer-workspace-path? path))))
                            raw))
          (rows
@@ -2806,15 +2797,12 @@
                                      ((string? summary) summary)
                                      (else name))
                                (if path (abbreviate-file-name path) name)))
-                    (ids (if chat? (nth 7 r) (or (nth 8 r) (nth 9 r))))
-                    (ids (cond ((string? ids) (list ids)) ((pair? ids) ids) (else '())))
-                    (group (string-join
-                             (map (lambda (id) (let ((g (assoc id groups)))
-                                                 (if g (cadr g) id))) ids) ", ")))
+                    (id (let ((held (or (nth 7 r) (nth 8 r)))) (and (string? held) held)))
+                    (group (if id (let ((g (assoc id groups))) (if g (cadr g) id)) "")))
                ;; NAME TITLE MODE GROUP MODIFIED PATH GROUP-ID SIZE. The template and
                ;; matcher consume only this value, never a live buffer.
                (list name label mode group (and path (nth 2 r)) (or path "")
-                     (if (member current ids) current (if (pair? ids) (car ids) #f))
+                     id
                      (or (nth 3 r) 0)))) eligible)))
     (set! *ibuffer-table-snapshots*
       (take (cons (cons buf rows)
@@ -3034,4 +3022,4 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys replace the template's by key, and add the rest")
 (public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW CLOSE!)")
 (public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE! [WHERE]) — open a row: WHERE 'other keeps it in the window that previewed it, else the window the table leaves; CLOSE! closes the table")
-(public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT MEMBERSHIPS-OF [ORDER]) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name (ORDER 'recent: most recently used first), ungrouped")
+(public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT GROUP-OF [ORDER]) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name (ORDER 'recent: most recently used first), ungrouped")

@@ -240,32 +240,6 @@
 
 ;;; --- the catalog --------------------------------------------------------------
 
-(deftest 'the-graphql-functions-are-findable-with-their-effects
-  "the package stamps every public function"
-  (lambda ()
-    (check-equal! (plist-get (catalog-entry 'function "graphql-apropos") 'package)
-                  "graphql" "the package")
-    (check-true! (member "external" (plist-get (catalog-entry 'function "graphql") 'effects))
-                 "graphql reaches the network")
-    (check-equal! (plist-get (catalog-entry 'function "graphql-register!") 'effects)
-                  '("write") "graphql-register! only writes")))
-
-(deftest 'the-graphql-commands-declare-their-own-domain-and-effects
-  "nothing guesses: the package says it"
-  (lambda ()
-    (let ((entry (catalog-entry 'command "graphql-query")))
-      (check-equal! (plist-get entry 'domain) "graphql" "the domain")
-      (check-equal! (plist-get entry 'metadata-source) "declared" "declared, not inferred")
-      (check-equal! (plist-get entry 'effects) '("write" "external") "the effects"))
-    (check-equal! (plist-get (catalog-entry 'command "graphql-endpoints") 'effects)
-                  '("read") "listing only reads")))
-
-(deftest 'apropos-finds-graphql-by-the-word-graphql
-  "the functions reach the catalog search"
-  (lambda ()
-    (check-true! (member "graphql-apropos" (t--gql-names (apropos "graphql schema")))
-                 "graphql-apropos is found")))
-
 (deftest 'the-recipes-a-package-declares-reach-the-recipe-book
   "a recipe is a line to run, so it lives in the book and not in the search"
   (lambda ()

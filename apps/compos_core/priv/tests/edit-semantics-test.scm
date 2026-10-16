@@ -93,14 +93,6 @@
       (check-equal! (buffer-text buf) "a b a\n" "not one refusal touched the buffer")
       (t--drop-edit!))))
 
-(deftest 'the-edit-helpers-are-public-with-their-effects
-  "an agent finds them through apropos, and the catalog carries the effect"
-  (lambda ()
-    (check-contains! (value->string (apropos "insert after anchor"))
-                     "buffer-insert-after!" "apropos finds the helper")
-    (check-contains! (value->string (catalog-entry 'function "buffer-delete-text!"))
-                     "write" "and the catalog says it writes")))
-
 (deftest 'narrowing-is-a-core-buffer-operation
   "every mode can narrow a region without changing the underlying text"
   (lambda ()

@@ -2490,10 +2490,10 @@ them the address is live, so a purge never follows one."
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
     ;; the thread view is the same app as the index, so it carries the same
-    ;; app id and joins the group the index is in. Membership is 'group-ids
+    ;; app id and joins the group the index is in. Membership is 'group-id
     ;; and joining is buffer-add-group!: writing the legacy 'group local here
     ;; left the view ungrouped, because the reader clears that local the
-    ;; moment a buffer has real memberships.
+    ;; moment a buffer has a real group.
     (nm--join-group! buf 'detail)
     ;; render into the buffer and into no window at all. Placement belongs
     ;; to the caller (nm--show-pane!): a switch here takes whichever window

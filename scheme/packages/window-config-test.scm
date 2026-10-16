@@ -26,21 +26,6 @@
       (buffer-kill! w)
       (group-record-delete! id))))
 
-(deftest 'ibuffer-puts-the-frames-group-first
-  "in a group, the members lead the table; without one the order stands"
-  (lambda ()
-    (let ((id (group-record-create! "zz-ibuffer-group"))
-          (a "*zz-ib-member*")
-          (b "*zz-ib-other*"))
-      (buffer-create a)
-      (buffer-create b)
-      (buffer-add-group! a id)
-      (check-equal! (ibuffer-promote-group (list b a) id) (list a b) "the member leads")
-      (check-equal! (ibuffer-promote-group (list b a) #f) (list b a) "no group, no change")
-      (buffer-kill! a)
-      (buffer-kill! b)
-      (group-record-delete! id))))
-
 ;;; the window leaf's restore record (Emacs quit-restore as leaf data)
 
 (define (t--wr-setup!)

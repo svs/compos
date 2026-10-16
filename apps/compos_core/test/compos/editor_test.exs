@@ -53,8 +53,7 @@ defmodule Compos.EditorTest do
   end
 
   # The group a buffer belongs to, as an ID, or nil. The legacy 'group
-  # buffer-local no longer answers: a work buffer holds 'group-ids and a
-  # chat holds one 'group-id.
+  # buffer-local no longer answers: every buffer holds one 'group-id.
   defp buffer_group(name) do
     {:ok, quoted} = Compos.Core.Session.eval(~s{(buffer-group "#{name}")})
     if quoted == "#f", do: nil, else: String.trim(quoted, "\"")

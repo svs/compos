@@ -269,7 +269,7 @@ defmodule Compos.IbufferPickerTest do
   test "group name icons are resolved in the snapshot" do
     assert eval!(~S"""
       (let* ((id (group-record-create! ":group: Picker icons")))
-        (buffer-set-local! "*picker-target*" 'group-ids (list id))
+        (buffer-set-local! "*picker-target*" 'group-id id)
         (ibuffer-table-load! "*picker-home*" '("*picker-target*"))
         (let ((label (nth 3 (ibuffer-table-data "*picker-home*" "*picker-target*"))))
           (group-record-delete! id)

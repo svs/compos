@@ -330,7 +330,7 @@ Showing a buffer that already exists puts it in the current group. This covers `
 
 ### Agents without a frame
 
-A chat that is not shown on any frame uses the chat's own groups. With several groups, the most recently added one applies. With no group, the buffers the agent creates stay ungrouped.
+A chat that is not shown on any frame uses the chat's own group. With no group, the buffers the agent creates stay ungrouped.
 
 ### No destination
 
@@ -608,7 +608,7 @@ Every major mode that two or more buffers share is a pseudo group too, named for
 
 `desktop.etf` stores, per group: ID, name, its members, per-frame layouts, and scratch content. Per frame: `destination` and `previous`.
 
-Restore heals: it drops panes whose buffers are gone, deduplicates memberships, rejects a malformed layout, recreates a missing scratch buffer, and isolates a failure to one group. Restore never resurrects a killed buffer.
+Restore heals: it drops panes whose buffers are gone, folds an old membership list into the one group, rejects a malformed layout, recreates a missing scratch buffer, and isolates a failure to one group. Restore never resurrects a killed buffer.
 
 Rename and restart never change a group's ID.
 
@@ -654,7 +654,7 @@ The frame stands in the group its windows show. The rules:
 
 1. The current group is the group every work window's buffer shares. A window whose buffer is in no group makes the answer "no group". A window whose buffer is transient (a listing, a prompt) says nothing.
 2. A popup window says nothing. A listing, the messages buffer, or the telemetry floating over the group's panes is a visit, not a place. Opening and closing a popup changes no group.
-3. When several groups are shared by every window, the frame keeps its current one if it is among them, else the most recent of them.
+3. A buffer is in one group, so every window either shows that one group or does not; there is nothing to choose between.
 4. A pinned frame keeps its pinned group through every window change.
 5. The derivation runs after every change of the frame's windows or their buffers, whoever made the change. The editor calls `window-configuration-changed!` (Emacs `window-configuration-change-hook`) from its one commit point; a command, a kill that drops a window onto its next buffer, and an agent all reach it. The window commands also run it before they return, so their modeline is right at once.
 6. A pane that shows an ungrouped buffer leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved. A switch never makes such a pane out of a buffer that can join: the buffer joins the group first (see "A buffer opens in the current group"). A switch to an ungrouped buffer, or to a chat of another group, makes one. A layout, a swap, or a restore can still put one in a pane.
@@ -708,7 +708,7 @@ WhatsApp exposes this choice as `whatsapp-group`, `"*WhatsApp*"` by default. The
 (run-command "whatsapp")
 ```
 
-WhatsApp reuses its existing scene layout. Its buffers join the destination without losing existing memberships.
+WhatsApp reuses its existing scene layout. Its buffers move to the destination: a buffer is in one group.
 
 ## Same-mode window preference
 

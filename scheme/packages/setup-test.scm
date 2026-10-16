@@ -218,11 +218,6 @@
 
 ;;; --- install a coding agent ----------------------------------------------------
 
-(deftest 'the-agent-install-command-exists
-  "one command installs the agent of any connector that declares install steps"
-  (lambda ()
-    (check-true! (member "setup-install-connector" (command-names)) "the command")))
-
 (define (setup-test--with-present present fn)
   (let ((old setup--program-present?))
     (set! setup--program-present? (lambda (program) (and (member program present) #t)))

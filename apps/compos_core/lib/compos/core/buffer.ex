@@ -3414,17 +3414,14 @@ defmodule Compos.Core.Buffer do
   # groups.scm owns the policy; the buffer-local is the mechanism, and this
   # reads it without asking Scheme, because a mutation cannot call back in.
   #
-  # Every buffer, a chat or not, holds its one group in `group-id`. A buffer
-  # not read since that change may still hold the older `group-ids` list,
-  # whose first id is its group.
+  # Every buffer, a chat or not, holds its one group in `group-id`.
   #
-  # `group` is the local before both. `buffer-add-group!` sets it to
+  # `group` is the local before it. `buffer-add-group!` sets it to
   # false on every join, so a buffer that still carries a string there has not
   # been touched since the migration.
   defp buffer_group(state) do
     case state.locals do
       %{"group-id" => id} when is_binary(id) -> id
-      %{"group-ids" => [id | _]} when is_binary(id) -> id
       %{"group" => name} when is_binary(name) -> name
       _ -> nil
     end

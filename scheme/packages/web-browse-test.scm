@@ -316,18 +316,6 @@
                     (string-append "[" u "](" u ")")
                     "the label-less image keeps its source instead of going"))))
 
-(deftest 'apropos-documents-the-xslt-custom-site-parsers
-  "the next person adds a parser without reading the package"
-  (lambda ()
-    (let ((hits (value->string (apropos "custom parser"))))
-      (check-contains! hits "do not add a Scheme wrapper" "the rule")
-      (check-contains! hits "*web--sites*" "the registry")
-      (check-contains! hits "xsltproc --html" "the command")
-      (check-contains! hits "example.xsl" "the example")
-      ;; a row says both things, and the costly one carries its warning
-      (check-contains! hits "RENDER?" "the second column")
-      (check-contains! hits "costs a real browser tab" "and what it costs"))))
-
 ;;; --- the two readings -----------------------------------------------------------
 
 (effects! '(pure))

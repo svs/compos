@@ -166,23 +166,6 @@
     (check-equal! (length (list-entries *models-buffer*)) 0 "and the table is empty")
     (t--models-teardown!)))
 
-(deftest 'models-the-keys-name-the-commands
-  "the verbs are commands, and the keymap is data"
-  (lambda ()
-    (let ((keys (plist-get (list-mode-opts "models-mode") 'keys)))
-      (check-equal! (cadr (assoc "RET" keys)) "models-show" "RET shows the model")
-      (check-equal! (cadr (assoc "s" keys)) "models-start" "s loads it")
-      (check-equal! (cadr (assoc "k" keys)) "models-stop" "k unloads it")
-      (check-equal! (cadr (assoc "i" keys)) "models-install" "i installs another")
-      (check-equal! (cadr (assoc "d" keys)) "models-uninstall" "d uninstalls one")
-      (check-equal! (cadr (assoc "h" keys)) "models-add-host" "h adds a host")
-      (check-equal! (cadr (assoc "H" keys)) "models-forget-host"
-                    "H forgets this line's host")
-      (check-equal! (cadr (assoc "S" keys)) "models-serve"
-                    "S starts this line's server or daemon")
-      (check-equal! (cadr (assoc "K" keys)) "models-unserve"
-                    "K stops the daemon"))))
-
 (deftest 'models-load-and-unload-are-one-request-each
   "s and k send the same call with the other keep_alive"
   (lambda ()

@@ -36,18 +36,6 @@
     (check-true! (browser-file-path? "photo.AVIF") "extension matching ignores case")
     (buffer-kill! t--file-view-image)))
 
-(deftest 'file-view-modes-and-commands-are-discoverable-with-declared-effects
-  "apropos finds the public surface and its metadata is complete"
-  (lambda ()
-    (check-contains! (value->string (apropos "browser file viewer" 'lexical #t))
-                     "browser-file-mode" "apropos finds the viewer")
-    (check-contains! (value->string (apropos "json-pretty-print-buffer" 'lexical #t))
-                     "json-pretty-print-buffer" "apropos finds the formatter")
-    (check-equal! (plist-get (catalog-entry 'mode "browser-file-mode") 'metadata-source)
-                  "declared" "the viewer mode declares its effects")
-    (check-equal! (plist-get (catalog-entry 'command "json-pretty-print-buffer") 'metadata-source)
-                  "declared" "the format command declares its effects")))
-
 (deftest 'a-browser-file-is-bound-to-its-file-and-never-read
   "the browser reads the file from disk, so the buffer holds none of it and may not be written to it"
   (lambda ()

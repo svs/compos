@@ -249,60 +249,39 @@
     (check-equal! (buffer-hidden t--morg-buf) '((3 23)) "and the setup rebuilt them")
     (t--morg-done!)))
 
-(deftest 'copying-a-selected-folded-heading-lifts-the-whole-subtree
-  "the visible heading represents its hidden body and child"
+(deftest 'a-selection-over-a-fold-lifts-the-hidden-text
+  "a folded heading or fence stands for its body: copy, paste, cut and the OS clipboard all take the whole subtree"
   (lambda ()
-    (t--morg! t--morg-fixture 0)
-    (t--morg-run! "morg-cycle")
-    (with-current-buffer t--morg-buf
-      (lambda ()
-        (set-mark! 0)
-        (goto-char! 3)))
-
-    (t--morg-run! "copy-region-as-kill")
-    (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n"
-                  "the hidden subtree is copied")
-    (check-equal! (buffer-text t--morg-buf) t--morg-fixture
-                  "copy does not edit the buffer")
-    (t--morg-done!)))
-
-(deftest 'copying-and-pasting-a-folded-heading-reproduces-the-whole-subtree
-  "the hidden body and child survive the complete copy-paste path"
-  (lambda ()
-    (t--morg! t--morg-fixture 0)
-    (t--morg-run! "morg-cycle")
-    (with-current-buffer t--morg-buf
-      (lambda ()
-        (set-mark! 0)
-        (goto-char! 3)))
-
-    (t--morg-run! "copy-region-as-kill")
-    (with-current-buffer t--morg-buf
-      (lambda () (end-of-buffer!)))
-    (t--morg-run! "yank")
-
-    (check-equal! (buffer-text t--morg-buf)
-                  (string-append t--morg-fixture
-                                 "# a\nbody\n## child\ncbody\n")
-                  "paste reproduces the complete folded subtree")
-    (t--morg-done!)))
-
-(deftest 'cutting-a-selected-folded-heading-lifts-the-whole-subtree
-  "one cut removes the heading, body, and child"
-  (lambda ()
-    (t--morg! t--morg-fixture 0)
-    (t--morg-run! "morg-cycle")
-    (with-current-buffer t--morg-buf
-      (lambda ()
-        (set-mark! 0)
-        (goto-char! 3)))
-
-    (t--morg-run! "kill-region")
-    (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n"
-                  "the hidden subtree is on the kill ring")
-    (check-equal! (buffer-text t--morg-buf) "# b\ntail\n"
-                  "the complete subtree is gone")
-    (check-equal! (buffer-hidden t--morg-buf) '() "its stale fold is gone")
+    (let ((select-folded! (lambda (text end)
+                            ;; a fresh buffer each time: morg-cycle toggles, so a
+                            ;; stale fold would unfold the heading instead
+                            (t--morg-done!)
+                            (t--morg! text 0)
+                            (t--morg-run! "morg-cycle")
+                            (with-current-buffer t--morg-buf
+                              (lambda () (set-mark! 0) (goto-char! end))))))
+      (select-folded! t--morg-fixture 3)
+      (t--morg-run! "copy-region-as-kill")
+      (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n" "copy lifts the hidden subtree")
+      (check-equal! (buffer-text t--morg-buf) t--morg-fixture "and edits nothing")
+      (with-current-buffer t--morg-buf (lambda () (end-of-buffer!)))
+      (t--morg-run! "yank")
+      (check-equal! (buffer-text t--morg-buf)
+                    (string-append t--morg-fixture "# a\nbody\n## child\ncbody\n")
+                    "paste reproduces the complete folded subtree")
+      (select-folded! t--morg-fixture 3)
+      (with-current-buffer t--morg-buf
+        (lambda ()
+          (check-equal! (clipboard-copy) "# a\nbody\n## child\ncbody\n"
+                        "system copy receives the hidden subtree")))
+      (select-folded! t--morg-fixture 3)
+      (t--morg-run! "kill-region")
+      (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n" "cut puts the hidden subtree on the kill ring")
+      (check-equal! (buffer-text t--morg-buf) "# b\ntail\n" "and the complete subtree is gone")
+      (check-equal! (buffer-hidden t--morg-buf) '() "its stale fold is gone")
+      (select-folded! "```elixir\n1 + 1\n```\n# next\n" 9)
+      (t--morg-run! "copy-region-as-kill")
+      (check-equal! (kill-top) "```elixir\n1 + 1\n```\n" "a folded fence is copied whole"))
     (t--morg-done!)))
 
 (deftest 'copying-part-of-a-folded-line-keeps-the-literal-region
@@ -317,34 +296,6 @@
 
     (t--morg-run! "copy-region-as-kill")
     (check-equal! (kill-top) "a" "only the selected title text is copied")
-    (t--morg-done!)))
-
-(deftest 'copying-a-selected-folded-fence-lifts-the-whole-block
-  "a folded code opener represents the body and closing fence"
-  (lambda ()
-    (t--morg! "```elixir\n1 + 1\n```\n# next\n" 0)
-    (t--morg-run! "morg-cycle")
-    (with-current-buffer t--morg-buf
-      (lambda ()
-        (set-mark! 0)
-        (goto-char! 9)))
-
-    (t--morg-run! "copy-region-as-kill")
-    (check-equal! (kill-top) "```elixir\n1 + 1\n```\n"
-                  "the complete fenced block is copied")
-    (t--morg-done!)))
-
-(deftest 'system-copy-lifts-a-selected-folded-heading
-  "the OS clipboard path uses the same structural region"
-  (lambda ()
-    (t--morg! t--morg-fixture 0)
-    (t--morg-run! "morg-cycle")
-    (with-current-buffer t--morg-buf
-      (lambda ()
-        (set-mark! 0)
-        (goto-char! 3)
-        (check-equal! (clipboard-copy) "# a\nbody\n## child\ncbody\n"
-                      "system copy receives the hidden subtree")))
     (t--morg-done!)))
 
 ;;; --- TODO state ---------------------------------------------------------------
@@ -722,16 +673,24 @@
     (t--morg-done!)))
 
 (deftest 'one-block-runs-once-at-a-time
-  "a second start while the first still runs is refused"
+  "a second start while the first still runs is refused, for a shell block and a Scheme block alike"
   (lambda ()
     (t--babel-later!)
     (t--morg! "```sh\necho hi\n```\n" 7)
     (t--morg-run! "morg-babel")
     (check-equal! (car (morg-babel-execute t--morg-buf 7)) 'error
-                  "the second start is an error")
+                  "sh: the second start is an error")
     (t--babel-answer! "hi\n")
     (check-equal! (car (morg-babel-execute t--morg-buf 7)) 'pending
-                  "and the block runs again once the first run ends")
+                  "sh: and the block runs again once the first run ends")
+    (t--babel-restore!)
+    (t--babel-scheme-later!)
+    (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
+    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'pending
+                  "scheme: the first run starts")
+    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'error
+                  "scheme: the second run is refused")
+    (t--babel-scheme-answer!)
     (t--babel-restore!)
     (t--morg-done!)))
 
@@ -769,19 +728,6 @@
     (check-equal! (buffer-text t--morg-buf)
                   "```scheme\n(+ 1 2)\n```\n```result-scheme\n3\n```\n"
                   "the task result replaced running")
-    (t--babel-restore!)
-    (t--morg-done!)))
-
-(deftest 'a-scheme-block-runs-once-at-a-time
-  "the second run cannot start while the Scheme task runs"
-  (lambda ()
-    (t--babel-scheme-later!)
-    (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
-    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'pending
-                  "the first run starts")
-    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'error
-                  "the second run is refused")
-    (t--babel-scheme-answer!)
     (t--babel-restore!)
     (t--morg-done!)))
 
@@ -833,11 +779,14 @@
     (t--morg-done!)))
 
 (deftest 'a-result-block-is-not-runnable
-  "output is not source"
+  "output is not source, whatever kind of result it is"
   (lambda ()
     (t--morg! "```result\nold\n```\n" 11)
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf) "```result\nold\n```\n" "nothing ran")
+    (t--morg! "```result-csv\nname,value\n```\n" 18)
+    (check-equal! (car (morg-babel-execute t--morg-buf 18)) 'error
+                  "a CSV preview does not ask for a runner")
     (t--morg-done!)))
 
 (deftest 'a-csv-block-previews-its-existing-tangle-file
@@ -882,14 +831,6 @@
                        "```result-csv\nname,value\none,1\n```\n"
                        "the preview uses two body lines")
       (t--morg-done!))))
-
-(deftest 'a-csv-result-block-is-not-runnable
-  "a preview is output, not another CSV source block"
-  (lambda ()
-    (t--morg! "```result-csv\nname,value\n```\n" 18)
-    (check-equal! (car (morg-babel-execute t--morg-buf 18)) 'error
-                  "the result does not ask for a runner")
-    (t--morg-done!)))
 
 (deftest 'tangle-writes-marked-blocks-relative-to-the-morg-file
   "one file from two blocks, and a block marked no is skipped"

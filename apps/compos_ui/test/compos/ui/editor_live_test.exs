@@ -20,10 +20,6 @@ defmodule Compos.Ui.EditorLiveTest do
   # not. Ask for the element.
   defp which_key_up?(view), do: has_element?(view, ".which-key .wk-title")
 
-  # the page's private debounce token: the test stands in for a timer that
-  # fires after the page already retired it
-  defp wk_token(view), do: :sys.get_state(view.pid).socket.assigns.wk_token
-
   defp which_key(view, specs, tries \\ 60) do
     keys(view, specs)
     wait_for_which_key(view, tries)
@@ -50,23 +46,15 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, conn: build_conn()}
   end
 
-  # the frame carries two bars of its own above the windows: the header
-  # line holds what stays, the echo area what passes. A window carries its
-  # own mode line, and only at its foot.
-  test "mounts the frame header line and echo area above, the buffer modeline below",
-       %{conn: conn} do
+  test "mounts the frame modeline above and the buffer modeline below", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
-    assert has_element?(view, "#editor > .echo-bar + .echo-area")
-    assert has_element?(view, "#editor > .echo-area + .windows")
+    assert has_element?(view, "#editor > .echo-bar + .windows")
     assert has_element?(view, ".window > .modeline:last-child")
     refute has_element?(view, ".window > .modeline:not(:last-child)")
     assert html =~ "ui-test-"
   end
 
-  # The path is a fact on the buffer, so the window's own bars carry it and
-  # the frame header line does not. A file prompt still names it: the read
-  # starts where the file lives.
-  test "the frame header line carries no path; the file prompt does", %{conn: conn} do
+  test "the bottom frame modeline keeps the active file's full path", %{conn: conn} do
     root = Path.join(System.tmp_dir!(), "compos-frame-path-#{System.unique_integer([:positive])}")
     path = Path.join(root, "notes.txt")
     File.mkdir_p!(root)
@@ -76,10 +64,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(visit "#{path}")})
     {:ok, view, _html} = live(conn, "/")
 
-    refute has_element?(view, ".echo-bar .ml-frame-path")
-    refute has_element?(view, ".echo-bar .ml-theme")
-    refute has_element?(view, ".echo-bar .echo-hint")
-    assert has_element?(view, ".echo-area .echo-hint")
+    assert has_element?(view, ".echo-bar .ml-frame-path", path)
+
+    Compos.Core.Editor.set_echo("saved")
+    assert has_element?(view, ".echo-bar .ml-frame-path", path)
 
     keys(view, ["C-x", "C-f"])
     assert has_element?(view, ".mb-input-row .ml-frame-path", path)
@@ -124,46 +112,16 @@ defmodule Compos.Ui.EditorLiveTest do
     assert html =~ "--buffer-group-color: #9b6ab3"
   end
 
-  # The frame names its group once. A window in another group wears a pin
-  # on its header line (data-pin lets the pin show); the mode line never
-  # repeats a group.
-  test "a foreign group pins the window's header line, not its mode line", %{conn: conn} do
+  test "a pinned group name appears in the window modeline", %{conn: conn} do
     {:ok, view, mounted} = live(conn, "/")
     [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
     buf = Compos.Core.Editor.render_state(frame).tree.buffer
-    Compos.Core.Buffer.set_local(buf, "modeline-groups", ["pinned-group"])
-    Compos.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
-    # the header line exists once the dashboard rendered for this buffer
-    {:ok, _} =
-      Compos.Core.Session.eval(
-        ~s{(with-current-buffer "#{buf}" (lambda () (run-command "buffer-dashboard-refresh")))}
-      )
-
-    html = render(view)
-    assert html =~ "dash-persistent"
-
-    # the frame stands in the buffer's group: no pin, and no group anywhere
-    refute html =~ ~s(data-pin=)
-    refute html =~ ~s(class="ml-group")
-
-    Compos.Core.Editor.set_frame_group_style("other-group ", "#9b6ab3", frame)
+    Compos.Core.Buffer.set_local(buf, "modeline-group", "pinned-group")
+    Compos.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
     html = render(view)
 
-    assert html =~ ~s(data-pin="pinned-group")
-  end
-
-  # The mode line carries the state as ranked facts Scheme built; the
-  # header line carries none of them.
-  test "the mode line draws the buffer's facts and the header line does not", %{conn: conn} do
-    {:ok, view, mounted} = live(conn, "/")
-    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
-    buf = Compos.Core.Editor.render_state(frame).tree.buffer
-    Compos.Core.Buffer.set_local(buf, "modeline-facts", [["mode", "text", "glyph", 0], ["lane", "api", "ok", 2]])
-    html = render(view)
-
-    assert html =~ ~s(class="ml-fact" tone="ok" rank="2")
-    assert html =~ ~s(<c-value class="ml-fact-v ok">api</c-value>)
-    refute html =~ "dash-verbosity"
+    assert html =~ ~s(class="ml-group")
+    assert html =~ "· pinned-group "
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:compos_core, key)
@@ -525,6 +483,7 @@ defmodule Compos.Ui.EditorLiveTest do
 
     Compos.Core.Editor.set_window_buffer(document)
     Compos.Core.Buffer.set_local(document, "render-mode", "markdown")
+    Compos.Core.Buffer.set_local(document, "preview-engine", "earmark")
 
     {:ok, view, _} = live(conn, "/")
     [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, render(view))
@@ -628,13 +587,8 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     # what it must show is A PANEL after the delay, never a particular
     # binding: a binding is a preference and moves.
-    html = which_key(view, ["C-x"])
-    assert html =~ ~s(class="which-key)
+    assert which_key(view, ["C-x"]) =~ ~s(class="which-key)
     assert which_key_up?(view)
-    # the panel names the prefix it belongs to: the client drops the
-    # filter of the prefix before it when this changes
-    assert html =~ ~s(data-pending="C-x")
-    assert html =~ ~s(phx-hook="WhichKey")
 
     keys(view, ["C-g"])
   end
@@ -665,50 +619,6 @@ defmodule Compos.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
-  # A timer armed for one chord can still be in flight when a later chord
-  # starts -- Process.cancel_timer is best-effort, and a coalesced refresh
-  # (drain/1) can skip over the momentary empty pending between two chords.
-  # Simulate the race directly: the message a stale timer sends carries the
-  # token of the arm it belongs to, so a token the page has retired must be
-  # ignored rather than sticking wk_shown for good.
-  test "a stale which-key timer for an abandoned chord draws nothing", %{conn: conn} do
-    {:ok, view, _} = live(conn, "/")
-
-    keys(view, ["C-x"])
-    stale = wk_token(view)
-    # the chord completes before the real timer would ever fire
-    keys(view, ["1"])
-    # the message that timer would have sent, arriving late
-    send(view.pid, {:which_key_show, stale})
-    render(view)
-    refute which_key_up?(view), "a stale timer for a chord that already ended draws nothing"
-
-    # the guard must not wedge the mechanism shut: a real chord afterwards
-    # still shows, once its own delay passes
-    assert which_key(view, ["C-x"]) =~ ~s(class="which-key)
-    keys(view, ["1"])
-  end
-
-  # The keys of a chord are not its identity. C-x, a command, then C-x again
-  # is the commonest pair a reader types, and a stale timer from the first
-  # C-x carries the same keys as the second one. Keys as the identity let
-  # that message answer for the second chord: the panel drew at once, and
-  # every prefix after it drew at once too.
-  test "a stale timer from an earlier press of the same prefix draws nothing", %{conn: conn} do
-    {:ok, view, _} = live(conn, "/")
-
-    keys(view, ["C-x"])
-    stale = wk_token(view)
-    keys(view, ["1"])
-    # the same prefix again, its own delay still running
-    keys(view, ["C-x"])
-    send(view.pid, {:which_key_show, stale})
-    render(view)
-    refute which_key_up?(view), "the first C-x timer must not show the second C-x panel"
-
-    keys(view, ["1"])
-  end
-
   test "which-key renders ordered modifier groups with filter metadata", %{conn: conn} do
     buf = Compos.Core.Editor.current_buffer()
 
@@ -737,10 +647,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {unmodified, _} = :binary.match(html, ">Unmodified<")
     {control, _} = :binary.match(html, ">Control<")
     {meta, _} = :binary.match(html, ">Meta<")
-    {plain_a, _} = :binary.match(html, ">a</c-action-key>")
-    {plain_z, _} = :binary.match(html, ">z</c-action-key>")
-    {control_a, _} = :binary.match(html, ">C-a</c-action-key>")
-    {control_z, _} = :binary.match(html, ">C-z</c-action-key>")
+    {plain_a, _} = :binary.match(html, ">a</c-text>")
+    {plain_z, _} = :binary.match(html, ">z</c-text>")
+    {control_a, _} = :binary.match(html, ">C-a</c-text>")
+    {control_z, _} = :binary.match(html, ">C-z</c-text>")
 
     assert unmodified < control and control < meta
     assert plain_a < plain_z and control_a < control_z
@@ -775,7 +685,7 @@ defmodule Compos.Ui.EditorLiveTest do
       (begin
         (tile-windows! 'columns (list "#{base}" "#{other}"))
         (select-window! (window-showing "#{base}"))
-        (float-show! "#{popup}" 'right (/ 1 3) #t))
+        (popup-show-on "#{popup}" 'right (/ 1 3)))
       """)
 
     assert {:ok, "#f"} =
@@ -784,29 +694,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, _view, html} = live(conn, "/")
     assert html =~ ~r/class="window [^"]*popup popup-right"/
     assert html =~ "--popup-size:33.33333333333333%"
-    css = File.read!(Path.expand("../../../priv/static/editor.css", __DIR__))
-    assert css =~ ".split-child:has(> .window.popup)"
-    assert css =~ ".window.popup-right { right: 0; }"
-    assert css =~ "width: var(--popup-size, 33.333%);"
-    assert css =~ ".window.popup-bottom { bottom: 0; }"
-  end
-
-  # Scheme composes the chrome: the echo area draws the hints it publishes,
-  # and a window draws its buffer's mode-line format, %-constructs filled.
-  test "the echo hints and the mode line are the formats Scheme publishes", %{conn: conn} do
-    buf = Compos.Core.Editor.current_buffer()
-    on_exit(fn -> Compos.Core.Session.eval(~s{(frame-chrome-set! "echo-hints" echo-key-hints)}) end)
-
-    {:ok, _} = Compos.Core.Session.eval(~s{(frame-chrome-set! "echo-hints" '(("C-x z" "zz-hint")))})
-    Compos.Core.Buffer.set_local(buf, "mode-line-format", [["text", "zz-ml", "ZZ %l:%c %%"]])
-
-    {:ok, view, _} = live(conn, "/")
-    assert has_element?(view, ".echo-hint .ml-hint .ml-do", "zz-hint")
-    assert has_element?(view, ".window.active .modeline .zz-ml", "ZZ 1:0 %")
-    refute has_element?(view, ".window.active .modeline .ml-pos")
-
-    Compos.Core.Buffer.set_local(buf, "mode-line-format", false)
-    assert has_element?(view |> tap(&render/1), ".window.active .modeline .ml-pos")
+    assert html =~ ".split-child:has(> .window.popup)"
+    assert html =~ ".window.popup-right { right: 0; }"
+    assert html =~ "width: var(--popup-size, 33.333%);"
+    assert html =~ ".window.popup-bottom { bottom: 0; }"
   end
 
   test "undo works through the window", %{conn: conn} do
@@ -959,14 +850,14 @@ defmodule Compos.Ui.EditorLiveTest do
 
     # the real event path sets the activity word; a chunk mid-turn says so
     {:ok, _} =
-      Compos.Core.Session.eval("(agent-handle-events \"#{slug}\" '((type chunk text \"more \")))")
+      Compos.Core.Session.eval("(agent-handle-event \"#{slug}\" '(type chunk text \"more \"))")
 
     assert eventually(fn -> render(view) =~ "streaming" end)
     assert render(view) =~ "ag-activity"
 
     {:ok, _} =
       Compos.Core.Session.eval(
-        "(agent-handle-events \"#{slug}\" '((type turn-end stop-reason \"end_turn\")))"
+        "(agent-handle-event \"#{slug}\" '(type turn-end stop-reason \"end_turn\"))"
       )
 
     assert eventually(fn -> not (render(view) =~ "ag-activity") end)

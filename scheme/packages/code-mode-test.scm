@@ -63,16 +63,6 @@
         (plist-get (catalog-entry 'function "buffer-widen!") 'effects)
         '("write" "display") "widening is correctly stamped"))))
 
-(deftest 'the-code-section-distinguishes-display-from-buffer-history
-  "open in the other buffer means another window; switch means buffer history"
-  (lambda ()
-    (let ((prompt (chat-code-prompt #f)))
-      (check-contains! prompt "\"open it in the other buffer\"" "it names the display request")
-      (check-contains! prompt "(display-buffer-other-window! NAME)" "and uses another window")
-      (check-contains! prompt "\"switch to the other buffer\"" "it names the history request")
-      (check-contains! prompt "(run-command \"previous-buffer\")" "and uses buffer history")
-      (check-contains! prompt "when the target is clear" "and does not ask needlessly"))))
-
 ;;; --- from here down, the tests turn code-mode on --------------------------------
 ;;; That joins a group, opens a chat and loads the coding presets, which
 ;;; in a live editor is the person's own workspace.

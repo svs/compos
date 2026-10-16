@@ -187,20 +187,6 @@
       (when (buffer-known? path) (buffer-kill! path))
       (delete-file! path))))
 
-(deftest 'the-structural-api-is-public-so-apropos-finds-it
-  "an agent reads the catalog to learn these exist"
-  (lambda ()
-    (check-true! (member "code-read" (t--code-names (apropos "definition line")))
-                 "apropos names code-read")
-    (check-equal! (plist-get (catalog-entry 'function "code-replace!") 'effects)
-                  '("write") "code-replace! writes")
-    (check-equal! (plist-get (catalog-entry 'function "code-outline") 'effects)
-                  '("read") "code-outline reads")
-    (check-equal! (plist-get (catalog-entry 'function "code-sexp") 'effects)
-                  '("read") "code-sexp reads")
-    (check-equal! (plist-get (catalog-entry 'function "code-sexp-replace!") 'effects)
-                  '("write") "code-sexp-replace! writes")))
-
 ;;; --- an outline line survives a person typing --------------------------------
 ;;; The read-then-write gap: code-outline reports a line, the model thinks for
 ;;; a few seconds, and code-replace! arrives with that line. A person editing

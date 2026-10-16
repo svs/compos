@@ -1649,7 +1649,7 @@
 ;; 'render-mode is the chat's chosen VIEW ("blocks" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-id modeline-groups chat-id group-meta group-layout group-noise
+  '(group group-id modeline-group chat-id group-meta group-layout group-noise
     ;; the last name the chat DERIVED from its group: a name the person
     ;; typed does not match it, and that is what makes a manual rename stick
     chat-derived-name

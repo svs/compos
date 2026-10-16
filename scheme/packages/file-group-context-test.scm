@@ -14,8 +14,8 @@
 (define (t--fgc-cancel!)
   (run-command "minibuffer-cancel"))
 
-(deftest 'an-explicit-file-group-adds-membership-without-moving-the-file
-  "an existing file can join another group while it keeps its first group"
+(deftest 'an-explicit-file-group-moves-the-file-there
+  "a buffer is in one group: a visit with a destination moves a live file, it does not add a membership (ruling 2026-10-16)"
   (lambda ()
     (let* ((path "/tmp/compos-zz-file-context.txt")
            (first (group-record-create! "zz-file-context-first"))
@@ -23,8 +23,9 @@
       (write-file! path "context\n")
       (visit path first)
       (visit path second)
-      (check-true! (buffer-in-group? path first) "the first membership remains")
-      (check-true! (buffer-in-group? path second) "the second membership joins it")
+      (check-false! (buffer-in-group? path first) "the first membership is gone")
+      (check-true! (buffer-in-group? path second) "the file is in the destination")
+      (check-equal! (buffer-group path) second "and in nothing else")
       (buffer-kill! path)
       (delete-file! path)
       (group-record-delete! first)
@@ -92,7 +93,7 @@
       (minibuffer-change! path)
       (t--fgc-cancel!)
       (check-false! (buffer-known? path) "the cancelled file has no buffer")
-      (check-equal! (buffer-group-ids work) (list group)
+      (check-equal! (buffer-group work) group
                     "the existing membership stays unchanged")
       (check-equal! (frame-group) group "the visible context stays unchanged")
       (buffer-kill! work)
@@ -110,7 +111,7 @@
       (find-file-read group)
       (t--fgc-confirm! path)
       (check-false! (buffer-known? path) "the failed file has no buffer")
-      (check-equal! (buffer-group-ids work) (list group)
+      (check-equal! (buffer-group work) group
                     "the existing membership stays unchanged")
       (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
       (buffer-kill! work)
@@ -133,8 +134,8 @@
         (delete-file! path)
         (group-record-delete! id)))))
 
-(deftest 'find-file-in-new-group-keeps-live-file-memberships
-  "a live file joins the new group without leaving its existing group"
+(deftest 'find-file-in-new-group-moves-a-live-file-there
+  "a live file moves to the new group; a buffer is in one group (ruling 2026-10-16)"
   (lambda ()
     (let* ((path "/tmp/compos-zz-live-file-new-group.txt")
            (old (group-record-create! "zz-live-file-old-group")))
@@ -144,11 +145,15 @@
       (t--fgc-confirm! path)
       (t--fgc-confirm! "zz-live-file-new-group")
       (let ((new (group-resolve-id "zz-live-file-new-group")))
-        (check-true! (buffer-in-group? path old) "the old membership remains")
-        (check-true! (buffer-in-group? path new) "the new membership is added")
+        (check-false! (buffer-in-group? path old) "the old membership is gone")
+        (check-true! (buffer-in-group? path new) "the file is in the new group")
         (check-equal! (frame-group) new "the new group is entered")
         (buffer-kill! path)
         (delete-file! path)
+        ;; the group's chat would otherwise outlive the record and become
+        ;; the current buffer of a later test
+        (when (buffer-known? "*chat:zz-live-file-new-group*")
+          (buffer-kill! "*chat:zz-live-file-new-group*"))
         (group-record-delete! old)
         (group-record-delete! new)))))
 

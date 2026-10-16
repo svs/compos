@@ -1258,6 +1258,10 @@
         s.scrollTop = want;
         requestAnimationFrame(() => { this.placing = false; });
       },
+      // chat-follow-mode off (the ag-nofollow class): new output keeps
+      // the view where it is, even at the tail. A follow token (M->)
+      // still places the view once.
+      follows() { return !this.el.classList.contains("ag-nofollow"); },
       // A transcript keeps growing for a moment after a page
       // load: fonts land, images decode, late patches arrive.
       // Each one moves the place under the reader, so hold the
@@ -1308,7 +1312,7 @@
           this.place();
           return;
         }
-        if (this.stick) { this.place(); return; }
+        if (this.stick && this.follows()) { this.place(); return; }
         // A reader who left the tail keeps the block at the top of
         // their view where it was. The transcript window draws
         // earlier blocks above it on a reveal, and without this the
@@ -1328,7 +1332,7 @@
       beforeUpdate() {
         this.pin = null;
         const s = this.scroller;
-        if (this.stick || !s || !s.isConnected || s.clientHeight === 0) return;
+        if ((this.stick && this.follows()) || !s || !s.isConnected || s.clientHeight === 0) return;
         const r = s.getBoundingClientRect();
         const hit = document.elementFromPoint(r.left + r.width / 2, Math.max(r.top, 0) + 2);
         let block = hit && hit.closest && hit.closest("[data-index]");

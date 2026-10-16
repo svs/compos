@@ -302,77 +302,43 @@
                    "the composed code section stays compact")
       (t--prompt-cleanup chat))))
 
-(deftest 'a-direct-prompt-snapshot-follows-a-rename-during-composition
-  "the snapshot follows identity, even when another buffer reuses the name"
+(deftest 'a-prompt-snapshot-follows-a-rename-during-composition
+  "direct, ACP and freeze: the snapshot follows identity, even when another buffer reuses the name"
   (lambda ()
     (for-each
-      (lambda (reuse?)
-        (let* ((chat (t--prompt-chat "*prompt-rename-direct*" "api"))
-               (renamed "*prompt-renamed-direct*")
-               (source chat-live-system-prompt-parts)
-               (parts '(("identity" "rename test"))))
-          (set! chat-live-system-prompt-parts
-            (lambda (&rest args)
-              ;; Restore the source before the tested call can fail.
-              (set! chat-live-system-prompt-parts source)
-              (rename-buffer! chat renamed)
-              (when reuse? (test-buffer! chat "replacement"))
-              parts))
-          (check-equal! (chat-system-prompt-parts chat #t) parts "composition succeeds")
-          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
-                        parts "the original conversation owns its snapshot")
-          (check-false! (chat-prompt-snapshot chat)
-                        "the old name gets no snapshot")
-          (t--prompt-cleanup chat renamed)))
-      '(#f #t))))
-
-(deftest 'a-acp-prompt-snapshot-follows-a-rename-during-composition
-  "the snapshot follows identity, even when another buffer reuses the name"
-  (lambda ()
-    (for-each
-      (lambda (reuse?)
-        (let* ((chat (t--prompt-chat "*prompt-rename-acp*" "api"))
-               (renamed "*prompt-renamed-acp*")
-               (source agent-live-system-prompt-parts)
-               (parts '(("identity" "rename test"))))
-          (set! agent-live-system-prompt-parts
-            (lambda (&rest args)
-              ;; Restore the source before the tested call can fail.
-              (set! agent-live-system-prompt-parts source)
-              (rename-buffer! chat renamed)
-              (when reuse? (test-buffer! chat "replacement"))
-              parts))
-          (check-equal! (agent-system-prompt-parts (list 'buffer chat)) parts "composition succeeds")
-          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
-                        parts "the original conversation owns its snapshot")
-          (check-false! (chat-prompt-snapshot chat)
-                        "the old name gets no snapshot")
-          (t--prompt-cleanup chat renamed)))
-      '(#f #t))))
-
-(deftest 'a-freeze-prompt-snapshot-follows-a-rename-during-composition
-  "the snapshot follows identity, even when another buffer reuses the name"
-  (lambda ()
-    (for-each
-      (lambda (reuse?)
-        (let* ((chat (t--prompt-chat "*prompt-rename-freeze*" "api"))
-               (renamed "*prompt-renamed-freeze*")
-               (source chat-prompt-live-parts)
-               (parts '(("identity" "rename test"))))
-          (set! chat-prompt-live-parts
-            (lambda (&rest args)
-              ;; Restore the source before the tested call can fail.
-              (set! chat-prompt-live-parts source)
-              (rename-buffer! chat renamed)
-              (when reuse? (test-buffer! chat "replacement"))
-              parts))
-          (check-equal! (chat-prompt-freeze! chat) parts "composition succeeds")
-          (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts)
-                        parts "the original conversation owns its snapshot")
-          (check-false! (chat-prompt-snapshot chat)
-                        "the old name gets no snapshot")
-          (t--prompt-cleanup chat renamed)))
-      '(#f #t))))
+      (lambda (lane)
+        (let ((suffix (nth 0 lane)) (source (nth 1 lane))
+              (install! (nth 2 lane)) (compose (nth 3 lane)))
+          (for-each
+            (lambda (reuse?)
+              (let* ((chat (t--prompt-chat (string-append "*prompt-rename-" suffix "*") "api"))
+                     (renamed (string-append "*prompt-renamed-" suffix "*"))
+                     (parts '(("identity" "rename test"))))
+                (install!
+                  (lambda (&rest args)
+                    ;; Restore the source before the tested call can fail.
+                    (install! source)
+                    (rename-buffer! chat renamed)
+                    (when reuse? (test-buffer! chat "replacement"))
+                    parts))
+                (check-equal! (compose chat) parts
+                              (string-append suffix ": composition succeeds"))
+                (check-equal! (plist-get (chat-prompt-snapshot renamed) 'parts) parts
+                              (string-append suffix ": the original conversation owns its snapshot"))
+                (check-false! (chat-prompt-snapshot chat)
+                              (string-append suffix ": the old name gets no snapshot"))
+                (t--prompt-cleanup chat renamed)))
+            '(#f #t))))
+      (list
+        (list "direct" chat-live-system-prompt-parts
+              (lambda (v) (set! chat-live-system-prompt-parts v))
+              (lambda (chat) (chat-system-prompt-parts chat #t)))
+        (list "acp" agent-live-system-prompt-parts
+              (lambda (v) (set! agent-live-system-prompt-parts v))
+              (lambda (chat) (agent-system-prompt-parts (list 'buffer chat))))
+        (list "freeze" chat-prompt-live-parts
+              (lambda (v) (set! chat-prompt-live-parts v))
+              (lambda (chat) (chat-prompt-freeze! chat)))))))
 
 (deftest 'chat-thread-context-keeps-its-buffer-through-a-rename
   "record, tools, and prompt still belong to the conversation after healing"

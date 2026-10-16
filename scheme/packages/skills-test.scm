@@ -55,39 +55,42 @@
     (check-contains! (chat-tool-system "*zz-sk-chat*") "SKILLS" "the section")
     (buffer-kill! "*zz-sk-chat*")))
 
-(deftest 'codex-config-with-env-points-at-the-sanitized-home
-  "codex reads our skills, and never our keys"
+(deftest 'a-harness-config-with-env-points-at-the-sanitized-home
+  "codex and dsh read our skills from a home the editor owns, and never our keys"
   (lambda ()
     (let ((env (plist-get (codex-config-with-env '(backend "codex-app-server")) 'env)))
-      (check-true! (assoc "CODEX_HOME" env) "the home is named")
-      (check-equal! (assoc "OPENAI_API_KEY" env) '("OPENAI_API_KEY" #f) "the key is scrubbed"))
+      (check-true! (assoc "CODEX_HOME" env) "codex: the home is named")
+      (check-equal! (assoc "OPENAI_API_KEY" env) '("OPENAI_API_KEY" #f) "codex: the key is scrubbed"))
     (check-true! (file-exists? (string-append (codex-home) "/skills/code-editing/SKILL.md"))
-                 "the skill is rendered into the home")))
+                 "codex: the skill is rendered into the home")
+    (let ((env (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)))
+      (check-true! (assoc "DSH_HOME" env) "dsh: the home is named"))
+    (check-true! (file-exists? (string-append (dsh-home) "/skills/code-editing/SKILL.md"))
+                 "dsh: the skill is rendered into the home")
+    (check-true! (file-exists? (string-append (dsh-home) "/profiles/acp/package.json"))
+                 "dsh: the editor owns the profile")))
 
-(deftest 'agent-resolve-config-gives-every-codex-thread-the-sanitized-env
-  "one resolution point, so no thread misses it"
+(deftest 'agent-resolve-config-gives-every-harness-thread-the-sanitized-env
+  "one resolution point, so no codex or dsh thread misses it"
   (lambda ()
     (check-true! (assoc "CODEX_HOME"
                         (plist-get (agent-resolve-config '(connector "codex-app-server")) 'env))
-                 "the home is named")))
+                 "codex: the home is named")
+    (check-true! (assoc "DSH_HOME"
+                        (plist-get (agent-resolve-config '(connector "deepseek")) 'env))
+                 "dsh: the home is named")))
 
-(deftest 'codex-home-sanitized-false-leaves-the-config-alone
-  "the sweep is a setting, and off means off"
+(deftest 'a-home-sanitized-false-leaves-the-config-alone
+  "the sweep is a setting, and off means off, for codex and for dsh"
   (lambda ()
     (customize-set! 'codex-home-sanitized #f)
     (check-false! (plist-get (codex-config-with-env '(backend "codex-app-server")) 'env)
-                  "no environment is added")
-    (customize-set! 'codex-home-sanitized #t)))
-
-(deftest 'dsh-config-with-env-points-at-the-sanitized-home
-  "the harness reads our skills and our key, and never the user's ~/.dsh"
-  (lambda ()
-    (let ((env (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)))
-      (check-true! (assoc "DSH_HOME" env) "the home is named"))
-    (check-true! (file-exists? (string-append (dsh-home) "/skills/code-editing/SKILL.md"))
-                 "the skill is rendered into the home")
-    (check-true! (file-exists? (string-append (dsh-home) "/profiles/acp/package.json"))
-                 "the editor owns the profile")))
+                  "codex: no environment is added")
+    (customize-set! 'codex-home-sanitized #t)
+    (customize-set! 'dsh-home-sanitized #f)
+    (check-false! (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)
+                  "dsh: no environment is added")
+    (customize-set! 'dsh-home-sanitized #t)))
 
 (deftest 'the-dsh-profile-patch-turns-the-harnesss-own-tools-off
   "the editor names every tool through MCP, so the harness adds none"
@@ -100,21 +103,6 @@
           (check-contains! patch (string-append "- id: " id "\n  disabled: true")
                            (string-append id " is off")))
         dsh-disabled-plugins))))
-
-(deftest 'agent-resolve-config-gives-every-harness-thread-the-sanitized-env
-  "one resolution point, so no thread misses it"
-  (lambda ()
-    (check-true! (assoc "DSH_HOME"
-                        (plist-get (agent-resolve-config '(connector "deepseek")) 'env))
-                 "the home is named")))
-
-(deftest 'dsh-home-sanitized-false-leaves-the-config-alone
-  "the sweep is a setting, and off means off"
-  (lambda ()
-    (customize-set! 'dsh-home-sanitized #f)
-    (check-false! (plist-get (dsh-config-with-env '(sanitize "dsh")) 'env)
-                  "no environment is added")
-    (customize-set! 'dsh-home-sanitized #t)))
 
 (deftest 'the-api-lane-keeps-its-own-environment
   "only the codex lane reads a codex home"

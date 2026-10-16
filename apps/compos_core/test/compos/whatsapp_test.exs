@@ -97,8 +97,8 @@ defmodule Compos.WhatsappTest do
     """)
 
     assert eval!("(frame-group)") == "#f"
-    assert eval!(~S|(buffer-group-ids "*WhatsApp*")|) == "()"
-    assert eval!(~S|(buffer-group-ids "*WhatsApp conversation*")|) == "()"
+    assert eval!(~S|(buffer-group "*WhatsApp*")|) == "#f"
+    assert eval!(~S|(buffer-group "*WhatsApp conversation*")|) == "#f"
   end
 
   test "filter narrows WhatsApp chats locally" do

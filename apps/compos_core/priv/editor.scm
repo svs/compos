@@ -4372,9 +4372,8 @@
          ;; A directory answers to one buffer name whatever the prompt
          ;; spelled: file completion offers "/dir/" and Dired names the
          ;; buffer "/dir". Reading existence from the raw path calls a
-         ;; live buffer new, and a new buffer MOVES to the destination
-         ;; group instead of joining it, which silently drops the
-         ;; memberships it already had.
+         ;; live buffer new, and a new buffer takes the other path into
+         ;; its group (visit-apply-group!).
          (existing (or (buffer-known? path)
                        (and (boundp (quote dired-normalize-dir))
                             (file-directory? path)
@@ -4386,8 +4385,9 @@
              ((file-too-big? path) (message (file-too-big-message path)) #f)
              (else
                (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
-                 ;; An explicit destination joins before display. The derived
-                 ;; current group therefore never sees a half-placed buffer.
+                 ;; An explicit destination is joined before display, and a
+                 ;; buffer holds one group, so a live buffer moves there. The
+                 ;; derived current group never sees a half-placed buffer.
                  (visit-apply-group! file-buffer group existing)
                  (switch-to-buffer! file-buffer)
                  (auto-mode path)
@@ -4400,7 +4400,8 @@
                (not (agent-edit-author? (current-edit-author))))
       (buffer-promote! buf))
     ;; A named destination overrides the inherited frame group for new work.
-    ;; Existing work adds the destination without losing its memberships.
+    ;; A buffer belongs to one group, so existing work moves to the
+    ;; destination (ruling 2026-10-16).
     (visit-apply-group! buf group existing)
     buf))
 

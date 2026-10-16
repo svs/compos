@@ -39,8 +39,7 @@
     (buffer-add-group! "*zz-ibp-a*" one)
     (buffer-add-group! "*zz-ibp-b*" one)
     (buffer-add-group! "*zz-ibp-c*" two)
-    ;; shown through the mechanism a layout uses: a switch to a buffer of
-    ;; another group would enter that group
+    ;; shown through the mechanism a layout uses, which places without joining
     (switch-to-buffer-here! "*zz-ibp-c*")
     (switch-to-buffer-here! "*zz-ibp-b*")
     (switch-to-buffer-here! "*zz-ibp-a*")
@@ -137,8 +136,8 @@
       (check-equal! (window-buffer home) "*zz-ibp-a*" "cancel gives the window its buffer back"))
     (ibp-reset!)))
 
-(deftest 'confirm-takes-the-row-and-enters-its-group
-  "RET switches to the highlighted candidate; a buffer of another group enters that group (the ruling of 2026-09-19)"
+(deftest 'confirm-takes-the-row-and-brings-it-here
+  "RET switches to the highlighted candidate; a buffer of another group joins this one and the frame stays (the ruling of 2026-09-22)"
   (lambda ()
     (let ((groups (ibp-setup!)))
       (run-command "ibuffer-prompt")
@@ -147,7 +146,8 @@
       (check-false! (minibuffer-state) "the prompt is closed")
       (check-false! (float-open?) "nothing floats")
       (check-equal! (current-buffer) "*zz-ibp-c*" "the row is the current buffer")
-      (check-equal! (frame-group) (cadr groups) "the frame entered the buffer's group"))
+      (check-equal! (frame-group) (car groups) "the frame stands where it stood")
+      (check-true! (buffer-in-group? "*zz-ibp-c*" (car groups)) "and the buffer joined this group"))
     (ibp-reset!)))
 
 (deftest 'confirm-in-the-table-takes-the-row-and-closes-the-dock

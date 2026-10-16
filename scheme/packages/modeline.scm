@@ -335,35 +335,24 @@
               (dash--row "state" (dash--state buf)))))))
 
 (define (dash--group buf)
-  (let* ((ids (if (chat-buffer? buf)
-                  (let ((g (chat-group-id buf))) (if g (list g) '()))
-                  (buffer-group-ids buf)))
-         (current (frame-local 'current-group))
-         (primary (cond ((and current (member current ids)) current)
-                        ((pair? ids) (car ids))
-                        (else #f))))
-    (if (null? ids)
+  (let ((id (if (chat-buffer? buf) (chat-group-id buf) (buffer-group buf))))
+    (if (not id)
         (dash--section "group"
           (list (dash--row "group" "none" "dim")
                 (dash--row "join" "C-c g" "dim")))
-        (dash--section (if (null? (cdr ids)) "group" "groups")
+        (dash--section "group"
           (append
             ;; C-x ? is the unabridged counterpart to the compact modeline:
-            ;; every membership is named, with the frame's current one first.
+            ;; the buffer's one group, named
             (list (list 'tag "div" 'class "dash-chips"
-                        'children
-                        (map (lambda (g) (dash--chip (group-label g)))
-                             (if (and current (member current ids))
-                                 (cons current
-                                       (remove (lambda (g) (equal? g current)) ids))
-                                 ids))))
+                        'children (list (dash--chip (group-label id)))))
             ;; the members are the group list's work (M-x group-members),
             ;; not this panel's: the panel says where HERE stands
             (list (dash--row "members"
-                             (number->string (length (group-buffers-mru primary))))
-                  (dash--row "companion" (group-noise primary))
-                  (dash--row "layout" (if (group-layout primary) "saved" "default")))
-            (let ((m (group-meta primary)))
+                             (number->string (length (group-buffers-mru id))))
+                  (dash--row "companion" (group-noise id))
+                  (dash--row "layout" (if (group-layout id) "saved" "default")))
+            (let ((m (group-meta id)))
               (if m (list (dash--row "about" m)) '())))))))
 
 ;; the ledger, folded by day: today's cost and the total come from the
@@ -597,10 +586,8 @@
               #t)
              (else #f))))
 
-(define (dashboard--group-ids buf)
-  (if (chat-buffer? buf)
-      (let ((g (chat-group-id buf))) (if g (list g) '()))
-      (buffer-group-ids buf)))
+(define (dashboard--group buf)
+  (if (chat-buffer? buf) (chat-group-id buf) (buffer-group buf)))
 
 (define (dashboard--mode-name name)
   (let ((s (if (symbol? name) (symbol->string name) name)))
@@ -614,14 +601,12 @@
 ;; once for both the line and the blocks, because the read walks the
 ;; saved bundles against the live setup
 (define (dashboard-one-line buf &optional preset-cell)
-  (let* ((ids (dashboard--group-ids buf))
+  (let* ((id (dashboard--group buf))
          (modes (cons (or (buffer-local buf 'mode-name) "Fundamental")
                       (or (buffer-local buf 'minor-modes) '())))
          (mode-text (string-join (map dashboard--mode-name modes) " · "))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
-         (groups (if (pair? ids)
-                     (string-join (map group-label ids) " · ")
-                     "none")))
+         (groups (if id (group-label id) "none")))
     (string-append "mode " mode-text
                    "   state " (dash--state buf)
                    "   groups " groups
@@ -665,15 +650,10 @@
 
 ;; the last group is where you are; the ones before it are the path
 (define (dash--group-segs buf)
-  (let ((labels (map group-label (dashboard--group-ids buf))))
-    (if (null? labels)
-        '()
-        (let loop ((rest labels) (out '()))
-          (if (null? (cdr rest))
-              (reverse (cons (list "dseg-strong dseg-group-current" (car rest)) out))
-              (loop (cdr rest)
-                    (cons (list "f-faint" " / ")
-                          (cons (list "f-dim" (car rest)) out))))))))
+  (let ((id (dashboard--group buf)))
+    (if id
+        (list (list "dseg-strong dseg-group-current" (group-label id)))
+        '())))
 
 ;; The group owns the top-left corner of the headline: a filled badge in the
 ;; group's own colour, flush with the window's left edge, ahead of everything
@@ -1255,7 +1235,7 @@
           ;; the modes card names every map that answers here, and the
           ;; editing state adds and drops maps as you type
           (buffer-minor-maps buf)
-          (dashboard--group-ids buf)
+          (dashboard--group buf)
           (frame-local 'current-group)
           (buffer-local buf 'agent-model)
           (buffer-local buf 'agent-connector)

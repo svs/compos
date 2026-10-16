@@ -10,8 +10,9 @@
 
 ;;; --- durable group records and buffer-local membership -------------------------
 ;;; Every buffer keeps its one group in 'group-id. Work buffers add 'group-roles,
-;;; chats one 'chat-id. The older 'group-ids list and the 'group and
-;;; 'companion-of names migrate on the first membership read.
+;;; chats one 'chat-id. The older 'group and 'companion-of names migrate on
+;;; the first membership read; a 'group-ids list from an old desktop is folded
+;;; into 'group-id by a one-shot migration on restore (migrations.scm).
 ;;; Group records persist independently, including empty and chatless groups.
 ;;; (group-buffers g) derives live membership from buffer-local identity.
 
@@ -114,8 +115,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (buffer-color-group buf)
   (if (chat-buffer? buf)
       (chat-group-id buf)
-      (let ((ids (buffer-group-ids buf)))
-        (and (pair? ids) (car ids)))))
+      (buffer-group buf)))
 
 (define (buffer-filename-face buf)
   (let ((group (buffer-color-group buf)))
@@ -503,7 +503,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; Every membership is an id now, and a buffer can hold one whose record
 ;; is gone — a restart restores the buffer locals, and the records ride a
 ;; different lane. Founding a group from it puts "grp:1787432485:1" in the
-;; C-c g list and on the reader's screen. buffer-group-ids already drops
+;; C-c g list and on the reader's screen. buffer-group already drops
 ;; such an id on read; the write path must refuse it the same way.
 (define (group-ensure-record! value)
   (or (group-resolve-id value)
@@ -781,9 +781,8 @@ is forgotten and that group falls back to creation order in the switcher."
     (when (and record (not (group-record-primary-chat-id record)))
       (group-record-update! id 'primary-chat-id (chat-stable-id! b)))))
 
-;; Every buffer, a chat or not, keeps its ONE group in 'group-id. The fields
-;; before it are read once and folded in: 'group-ids, the list from the days a
-;; buffer had many, and the older 'group and 'companion-of names.
+;; Every buffer, a chat or not, keeps its ONE group in 'group-id. The older
+;; 'group and 'companion-of names are read once and folded in.
 ;;
 ;; The id a buffer holds may outlive the record. A read must never erase the membership: the record table can be
 ;; transiently wrong (a reload window, a stale lane view, a restore in
@@ -791,14 +790,19 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; An id that does not resolve is inert — the read answers #f and the
 ;; local keeps the id. Only group-kill! and group-dissolve! clear
 ;; members, and they sweep explicitly.
-;; write a buffer's one group. A work buffer mirrors it into 'group-ids, the
-;; field the kernel's group index (buffer_rows.ex) read before 'group-id; the
-;; mirror is never read here
+;; write a buffer's one group
 (define (buffer-group-store! b id &optional more)
-  (buffer-set-locals! b
-    (append (list 'group-id id
-                  'group-ids (if (and id (not (chat-buffer? b))) (list id) '()))
-            (or more '()))))
+  (buffer-set-locals! b (append (list 'group-id id) (or more '()))))
+
+;; A desktop from the days a buffer held several groups carries a 'group-ids
+;; list. Its first id becomes the buffer's one group, once, on restore.
+(define-buffer-migration! 'group-ids-to-group-id "2026-10-16"
+  (lambda (buf)
+    (let ((ids (buffer-local buf 'group-ids)))
+      (when (pair? ids)
+        (unless (buffer-local buf 'group-id)
+          (buffer-set-local! buf 'group-id (car ids)))
+        (buffer-set-local! buf 'group-ids #f)))))
 
 (define (buffer-group-id-of b)
   (let ((held (buffer-local b 'group-id)))
@@ -808,16 +812,6 @@ is forgotten and that group falls back to creation order in the switcher."
           (when (and valid (not (equal? valid held)))
             (buffer-set-local! b 'group-id valid))
           valid))
-      ((pair? (buffer-local b 'group-ids))
-        ;; its first group that resolves. The list is folded in only when every
-        ;; id resolved: a transient failure must not erase a membership.
-        ;; Kill and dissolve sweep explicitly.
-        (let* ((ids (buffer-local b 'group-ids))
-               (resolved (filter (lambda (x) x) (map group-resolve-id ids)))
-               (id (and (pair? resolved) (car resolved))))
-          (when (and id (equal? (length resolved) (length ids)))
-            (buffer-group-store! b id (list 'group #f 'companion-of #f)))
-          id))
       (else
         (let ((legacy (or (buffer-local b 'group) (buffer-local b 'companion-of))))
           (and legacy
@@ -830,14 +824,6 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; the groups a work buffer is in, as a list of the one; a chat answers none
 ;; here, its group is chat-group-id's
-(define (buffer-group-ids b)
-  (if (chat-buffer? b)
-      '()
-      (let ((id (buffer-group-id-of b)))
-        (if id (list id) '()))))
-
-(define (buffer-groups b) (buffer-group-ids b))
-
 (define (buffer-group b)
   ;; one group, in one field, whatever the buffer is
   (buffer-group-id-of b))
@@ -848,32 +834,25 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; gone, and group-name answers #f for that id — so drop the nameless
 ;; ones rather than pass them on.
 (define (buffer-group-summary b)
-  (let ((names (if (chat-buffer? b)
-                   (let ((id (chat-group-id b)))
-                     (if id (list (group-display-label id)) '()))
-                   (map group-display-label (buffer-group-ids b)))))
-    (let ((known (filter string? names)))
-      (if (pair? known) (string-join known ", ") "ungrouped"))))
+  (let ((id (buffer-color-group b)))
+    (let ((name (and id (group-display-label id))))
+      (if (string? name) name "ungrouped"))))
 
 ;; Names and the primary membership color are cached for the render path.
 ;; The compact label is frame-relative. The color always belongs to the buffer.
 (define (buffer-modeline-group-refresh! b)
-  (let ((names (if (chat-buffer? b)
-                   (let ((id (chat-group-id b)))
-                     (if id (list (group-name id)) '()))
-                   (map group-name (buffer-group-ids b)))))
-    (let* ((known (filter string? names))
-           (group (buffer-color-group b))
-           (record (and group (group-record-by-id group)))
-           (color (and record (group-color-hex (group-record-color record)))))
-      (unless (equal? (buffer-local b 'modeline-groups) known)
-        (buffer-set-local! b 'modeline-groups known))
-      (unless (equal? (buffer-local b 'modeline-group-color) color)
-        (buffer-set-local! b 'modeline-group-color color))
-      known)))
+  (let* ((group (buffer-color-group b))
+         (name (let ((n (and group (group-name group)))) (and (string? n) n)))
+         (record (and group (group-record-by-id group)))
+         (color (and record (group-color-hex (group-record-color record)))))
+    (unless (equal? (buffer-local b 'modeline-group) name)
+      (buffer-set-local! b 'modeline-group name))
+    (unless (equal? (buffer-local b 'modeline-group-color) color)
+      (buffer-set-local! b 'modeline-group-color color))
+    name))
 
 ;; A membership change rewrites the headline too: its group segment reads
-;; the buffer's own memberships. post-command! syncs the buffer the
+;; the buffer's own group. post-command! syncs the buffer the
 ;; command ran in and no other, and a move takes every marked buffer at
 ;; once — the rest kept drawing the group they had just left. The sweep
 ;; above stays out of this: it runs over every buffer there is, and a
@@ -912,19 +891,13 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (buffer-in-group? b value)
   (let ((id (group-resolve-id value)))
-    (if (and id
-             (if (chat-buffer? b)
-                 (equal? (chat-group-id b) id)
-                 (member id (buffer-group-ids b))))
-        #t
-        #f)))
+    (and id (equal? (buffer-color-group b) id))))
 
 (define (chat-set-group! b value)
   (let ((id (and value (group-ensure-record! value))))
     ;; Publish ownership atomically; readers never see half a move.
     (buffer-set-locals! b
-      (list 'group-id id 'group-ids '() 'group-roles '()
-            'group #f 'companion-of #f))
+      (list 'group-id id 'group-roles '() 'group #f 'companion-of #f))
     (buffer-group-display-refresh! b)
     (group-current-recalculate!)
     ;; the group's shared config is the chat's starting setup: what the
@@ -1250,7 +1223,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-layout-set! g (window-tree) (layout-target)))
 
 ;; A saved layout names its buffers, because a name IS the buffer handle
-;; here. Membership escapes renames by riding the buffer ('group-ids), but
+;; here. Membership escapes renames by riding the buffer ('group-id), but
 ;; a layout points the other way: the group holds it, so the group must
 ;; hear the rename. rename-buffer! already tells every owner of name-keyed
 ;; state; this makes the group records one of them.
@@ -1601,41 +1574,40 @@ is forgotten and that group falls back to creation order in the switcher."
             (when current (set-frame-local! 'current-group #f))
             #f))))
 
-(define (group-context-memberships buf)
-  (cond ((chat-buffer? buf)
-         (let ((id (chat-group-id buf))) (if id (list id) '())))
-        ((buffer-special? buf) #f)
-        ((group-work-buffer? buf) (buffer-group-ids buf))
-        (else #f)))
+(define (group-context-group buf)
+  ;; the group a pane shows: a chat's own, a work buffer's one group, or #f
+  ;; for a work buffer in none. A special view takes no part and answers
+  ;; 'outside.
+  (cond ((chat-buffer? buf) (chat-group-id buf))
+        ((buffer-special? buf) 'outside)
+        ((group-work-buffer? buf) (buffer-group buf))
+        (else 'outside)))
 
 ;; A float is a visit, not a place: a card or a prompt's table floating
 ;; over the group's panes says nothing about the group the frame is in.
-(define (group-visible-membership-rows)
+(define (group-visible-groups)
+  ;; the group of every pane that takes part, in window order
   (let ((float (float-window)))
-    (filter (lambda (ids) ids)
+    (filter (lambda (g) (not (eq? g 'outside)))
             (map (lambda (window)
                    (if (or (equal? (car window) float)
                            (float--class? (car (cdr window))))
-                       #f
-                       (group-context-memberships (car (cdr window)))))
+                       'outside
+                       (group-context-group (car (cdr window)))))
                  (window-list)))))
 
-(define (group-common-memberships rows)
-  (if (null? rows)
-      #f
-      (fold (lambda (common ids)
-              (filter (lambda (id) (member id ids)) common))
-            (car rows)
-            (cdr rows))))
+(define (group-visible-common rows)
+  ;; #f when no pane takes part; the one group every pane shows; else 'none
+  (cond ((null? rows) #f)
+        ((and (car rows)
+              (null? (filter (lambda (g) (not (equal? g (car rows)))) (cdr rows))))
+         (car rows))
+        (else 'none)))
 
 (define (group-current-choice common current)
   (cond ((not common) current)
-        ((null? common) #f)
-        ((and current (member current common)) current)
-        (else
-          (let ((recent (filter (lambda (id) (member id common))
-                                (group-ids-mru))))
-            (if (pair? recent) (car recent) (car common))))))
+        ((eq? common 'none) #f)
+        (else common)))
 
 ;; #t when ID is a pseudo group and every pane shows a member of it
 (define (group-pseudo-here? id)
@@ -1660,7 +1632,7 @@ is forgotten and that group falls back to creation order in the switcher."
         (for-each (lambda (row) (buffer-promote! (cadr row))) (window-list))
         (unless *group-current-inhibit*
           (let* ((pinned (group-pinned))
-                 (rows (group-visible-membership-rows))
+                 (rows (group-visible-groups))
                  (current (frame-group))
                  (next (cond (pinned pinned)
                              ;; A pseudo group holds the frame while its
@@ -1668,7 +1640,7 @@ is forgotten and that group falls back to creation order in the switcher."
                              ;; no mark, so the rows above cannot see it.
                              ((group-pseudo-here? current) current)
                              (else (group-current-choice
-                                     (group-common-memberships rows) current)))))
+                                     (group-visible-common rows) current)))))
             (unless (equal? next current)
               ;; Leaving a group because a pane shows a foreign buffer saves the
               ;; layout as it is, foreign pane and all (docs/groups.md, Save):
@@ -1704,10 +1676,8 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the group to enter for B: the one at hand when B is a member of it,
 ;; else B's first membership, else #f
 (define (group-home-of b)
-  (let ((here (group-here))
-        (ids (group-context-memberships b)))
-    (and (pair? ids)
-         (if (and here (member here ids)) here (car ids)))))
+  (let ((g (group-context-group b)))
+    (and (not (eq? g 'outside)) g)))
 
 ;; An explicit pick goes to the pane that prefers its mode, else this one.
 ;; Nothing swaps: the panes stay where they are.
@@ -1750,8 +1720,8 @@ is forgotten and that group falls back to creation order in the switcher."
          (not (group-pinned))
          (not *group-current-inhibit*)
          (not (float--class? buf))
-         (let ((ids (group-context-memberships buf)))
-           (and ids (not (member id ids)) #t)))))
+         (let ((g (group-context-group buf)))
+           (and (not (eq? g 'outside)) (not (equal? g id)))))))
 
 ;; through the name, so a reload of the predicate reaches the seam
 (set! display-foreign? (lambda (name) (group-foreign-buffer? name)))
@@ -1803,7 +1773,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (and id
          (buffer-known? buf)
          (not (chat-buffer? buf))
-         (group-context-memberships buf)
+         (not (eq? (group-context-group buf) 'outside))
          (not (buffer-in-group? buf id))
          (buffer-add-group! buf id))))
 
@@ -1851,9 +1821,7 @@ is forgotten and that group falls back to creation order in the switcher."
          ;; A pin preserves context, not homogeneity. Do not save a layout
          ;; that contains foreign work merely because the frame is pinned.
          (or (not pinned)
-             (let ((common (group-common-memberships
-                             (group-visible-membership-rows))))
-               (and common (member id common)))))))
+             (equal? (group-visible-common (group-visible-groups)) id)))))
 
 ;; The one place a group's saved layout is written: every completed window
 ;; change (the owner's ruling, 2026-09-19: "group layouts should be saved on
@@ -2066,9 +2034,8 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; orders the answer; it truncates, so it never decides membership.
 (define (active-groups)
   (let ((open (fold (lambda (out b)
-                      (fold (lambda (out id) (if (member id out) out (cons id out)))
-                            out
-                            (if (buffer-known? b) (buffer-group-ids b) '())))
+                      (let ((id (and (buffer-known? b) (buffer-group b))))
+                        (if (or (not id) (member id out)) out (cons id out))))
                     '()
                     (buffer-list))))
     (filter (lambda (id) (member id open)) (group-ids-mru))))
@@ -2250,11 +2217,6 @@ is forgotten and that group falls back to creation order in the switcher."
   "(frame-tab! GROUP) — stand in GROUP; returns its id, or #f when no group answers to it")
 (catalog-meta! 'function "frame-tab!" 'domain 'buffers 'effects '(write display))
 
-(define (group-buffer-memberships buf)
-  (if (chat-buffer? buf)
-      (let ((id (chat-group-id buf))) (if id (list id) '()))
-      (buffer-group-ids buf)))
-
 ;; A homogeneous frame already shows the group where the user stands.
 ;; In a mixed frame, put the selected foreign buffer's groups before the
 ;; remaining MRU groups so one RET enters its context.
@@ -2262,11 +2224,11 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((current (frame-group))
          (recent (filter (lambda (id) (not (equal? id current)))
                          (group-ids-mru)))
-         (mine (group-buffer-memberships (current-buffer))))
+         (mine (buffer-group (current-buffer))))
     (if (group-visible-homogeneous? current)
         recent
-        (append (filter (lambda (id) (member id mine)) recent)
-                (filter (lambda (id) (not (member id mine))) recent)))))
+        (append (filter (lambda (id) (equal? id mine)) recent)
+                (filter (lambda (id) (not (equal? id mine))) recent)))))
 
 ;; a seed buffer is a work buffer of yours: a special listing (the
 ;; telemetry, ibuffer) seeds nothing. The switcher's new-group action
@@ -2304,7 +2266,7 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; buffer rows bucketed by the group key their locals hold, so this
   ;; resolves one key per group, not one buffer at a time. An alias key,
   ;; a stale id or a legacy row (key "slow") goes through
-  ;; group-buffer-memberships, which migrates it. A context-only buffer
+  ;; buffer-group, which migrates it. A context-only buffer
   ;; is in no group.
   (let* ((buckets (car (or rows (group-buffer-rows))))
          (records *group-records*)
@@ -2323,8 +2285,8 @@ is forgotten and that group falls back to creation order in the switcher."
                 ((and (not (equal? key "slow")) (not valid)) #f)
                 (else
                   (for-each (lambda (b)
-                              (for-each (lambda (id) (set! extra (cons (list id b) extra)))
-                                        (group-buffer-memberships b)))
+                              (let ((id (buffer-group b)))
+                                (when id (set! extra (cons (list id b) extra)))))
                             (cdr bucket))))))
       buckets)
     ;; the rare rows the slow path settled join their group's cell
@@ -2341,9 +2303,9 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; one metadata snapshot of every buffer, not three buffer-local reads a
   ;; buffer: with hundreds of buffers the per-buffer reads were most of the
   ;; group switcher's wait. A row that still needs a write (a legacy key, a
-  ;; stale id) takes group-buffer-memberships, which migrates it.
+  ;; stale id) takes buffer-group, which migrates it.
   (let* ((rows (buffer-read-many names '()
-                 '("context-only" "mode-name" "group-id" "group-ids" "group" "companion-of")))
+                 '("context-only" "mode-name" "group-id" "group" "companion-of")))
          (resolved '())
          (resolve (lambda (id)
                     (let ((hit (assoc id resolved)))
@@ -2352,29 +2314,22 @@ is forgotten and that group falls back to creation order in the switcher."
                           (let ((valid (group-resolve-id id)))
                             (set! resolved (cons (list id valid) resolved))
                             valid)))))
-         (memberships
+         (group-of
            (lambda (row)
              (let ((buf (car row))
                    (mode (list-ref row 2))
                    (held (list-ref row 3))
-                   (ids (list-ref row 4))
-                   (legacy (or (list-ref row 5) (list-ref row 6))))
+                   (legacy (or (list-ref row 4) (list-ref row 5))))
                ;; every buffer's one group is 'group-id; a chat without one
                ;; and the older fields take the slow read, which migrates them
                (cond ((or held (equal? mode "chat-mode"))
                       (let ((valid (and held (resolve held))))
-                        (cond ((and valid (equal? valid held)) (list valid))
+                        (cond ((and valid (equal? valid held)) valid)
                               ;; a deleted group: no member, and nothing to write
-                              ((and held (not valid)) '())
-                              (else (group-buffer-memberships buf)))))
-                     ((and (pair? ids) (not legacy)
-                           (null? (filter resolve ids)))
-                      '())
-                     ((and (pair? ids) (null? (cdr ids)) (not legacy)
-                           (equal? (resolve (car ids)) (car ids)))
-                      ids)
-                     ((or (pair? ids) legacy) (group-buffer-memberships buf))
-                     (else '()))))))
+                              ((and held (not valid)) #f)
+                              (else (buffer-group buf)))))
+                     (legacy (buffer-group buf))
+                     (else #f))))))
     (let* ((live (filter (lambda (row) (not (equal? (cadr row) #t))) rows))
            ;; (ID N BUF): sorted by id, and by N within one id, so each group
            ;; keeps its buffers in list order without a list rebuild a buffer
@@ -2383,8 +2338,8 @@ is forgotten and that group falls back to creation order in the switcher."
                      (if (null? rows)
                          out
                          (walk (cdr rows) (+ n 1)
-                               (fold (lambda (out id) (cons (list id n (car (car rows))) out))
-                                     out (memberships (car rows)))))))))
+                               (let ((id (group-of (car rows))))
+                                 (if id (cons (list id n (car (car rows))) out) out))))))))
       (let group ((triples (reverse triples)) (index '()))
         (cond ((null? triples) index)
               ((and (pair? index) (equal? (car (car index)) (car (car triples))))
@@ -2464,9 +2419,9 @@ is forgotten and that group falls back to creation order in the switcher."
          (away (cadr split))
          (recent (append (filter (lambda (id) (not (equal? id current))) all)
                          (filter (lambda (id) (equal? id current)) all)))
-         (mine (group-buffer-memberships (current-buffer)))
-         (mine-recent (filter (lambda (id) (member id mine)) recent))
-         (others (filter (lambda (id) (not (member id mine))) recent))
+         (mine (buffer-group (current-buffer)))
+         (mine-recent (filter (lambda (id) (equal? id mine)) recent))
+         (others (filter (lambda (id) (not (equal? id mine))) recent))
          (seen '())
          (rows '())
          (candidate
@@ -3514,9 +3469,9 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; test is then membership in ID's own handful of aliases -- its id, its
   ;; name, its origin -- rather than group-resolve-id re-scanning every
   ;; group record for every buffer. A stale id resolves to nothing, so it
-  ;; simply fails to match. Several ids, the legacy locals, anything the
-  ;; cheap read cannot settle: those few fall through to
-  ;; group-buffer-memberships, which also migrates and prunes them.
+  ;; simply fails to match. The legacy locals, anything the cheap read
+  ;; cannot settle: those few fall through to buffer-group, which also
+  ;; migrates them.
   (if (not id)
       '()
       (let* ((record (group-record-by-id id))
@@ -3525,24 +3480,20 @@ is forgotten and that group falls back to creation order in the switcher."
                                     (and record (group-record-name record))
                                     (and record (group-record-origin record)))))
              (mine? (lambda (s) (and s (member s aliases) #t)))
-             (slow? (lambda (b) (and (member id (group-buffer-memberships b)) #t))))
+             (slow? (lambda (b) (equal? id (buffer-group b)))))
         (map car
              (filter
                (lambda (row)
                  (let ((b (list-ref row 0))
-                       (mode (list-ref row 1))
                        (gid (list-ref row 2))
-                       (gids (list-ref row 3))
-                       (legacy (or (list-ref row 4) (list-ref row 5))))
+                       (legacy (or (list-ref row 3) (list-ref row 4))))
                    (cond (legacy (slow? b))
                          ;; every buffer's one group, a chat or not
                          ((string? gid) (mine? gid))
-                         ((not (pair? gids)) #f)   ; absent reads as #f, not ()
-                         ((null? (cdr gids)) (mine? (car gids)))
-                         (else (slow? b)))))
+                         (else #f))))
                (buffer-read-many
                  (group-index-candidates names aliases) '()
-                 '("mode-name" "group-id" "group-ids" "group" "companion-of")))))))
+                 '("mode-name" "group-id" "group" "companion-of")))))))
 
 (define (group-index-candidates names keys)
   ;; the buffer rows carry the group key each buffer's locals name, so the
@@ -3700,11 +3651,11 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; frame out first, and the window falls to the next buffer.
 (define (group-kill-window-group frame name)
   (or (group-resolve-id (frame-local-in frame 'current-group))
-      (let loop ((ids (or (group-context-memberships name) '())))
-        (cond ((null? ids) #f)
-              ((and (group-resolve-id (car ids)) (not (group-dying? (car ids))))
-               (group-resolve-id (car ids)))
-              (else (loop (cdr ids)))))))
+      (let ((g (group-context-group name)))
+        (and (string? g)
+             (group-resolve-id g)
+             (not (group-dying? g))
+             (group-resolve-id g)))))
 
 ;; What a group window shows in place of NAME when no member is left: the
 ;; group's chat. A scratch is no stand-in; it is made for nobody.
@@ -3851,9 +3802,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (for-each
         (lambda (buf)
           (unless (member buf *group-migrated-buffers*)
-            (if (chat-buffer? buf)
-                (chat-group-id buf)
-                (buffer-group-ids buf))
+            (buffer-group buf)
             (buffer-modeline-group-refresh! buf)))
         live)
       (set! *group-migrated-buffers* live)))
@@ -3901,7 +3850,7 @@ is forgotten and that group falls back to creation order in the switcher."
              rows)
         (list (string-append "-- " (number->string (length rows)) " groups, "
                              (number->string (apply + (map car rows)))
-                             " memberships")))
+                             " buffers")))
       "\n")))
 
 ;; a buffer with no group founds one named after itself
@@ -4413,28 +4362,28 @@ is forgotten and that group falls back to creation order in the switcher."
     (and (string? root) (not (equal? root "")) root)))
 
 (define (group-buffer-context-switch! buf)
-  (let ((ids (group-buffer-memberships buf))
+  (let ((id (buffer-group buf))
         (root (group--project-root-of buf)))
     (cond
       ;; A project is a context that already exists. Enter it under the
       ;; root's name and take the project's other open buffers along.
       ;; Only a buffer with no project has to invent a name.
-      ((and (null? ids) root)
+      ((and (not id) root)
        (let ((id (group-ensure-record! root)))
          (for-each
            (lambda (x)
              (when (and (group-work-buffer? x)
-                        (null? (group-buffer-memberships x))
+                        (not (buffer-group x))
                         (equal? (group--project-root-of x) root))
                (buffer-add-group! x id)))
            (buffer-list))
          (switch-buffer-to-group! buf id)))
-      ((null? ids)
+      ((not id)
        (group-read-new-name "Start a group with this buffer: "
          (lambda (name) (group-create-with-buffer! name buf #f))))
       ;; A buffer belongs to ONE group, so there is never a group to
       ;; choose between. This used to be the system's only prompt.
-      (else (switch-buffer-to-group! buf (car ids))))))
+      (else (switch-buffer-to-group! buf id)))))
 
 (set! buffer-context-switch! group-buffer-context-switch!)
 
@@ -4599,7 +4548,7 @@ is forgotten and that group falls back to creation order in the switcher."
                   ((member buf eligible) (loop (cdr rows) #t))
                   ((buffer-in-group? buf id) (loop (cdr rows) moving))
                   ((not (group-membership-buffer? buf)) (loop (cdr rows) moving))
-                  ((null? (group-context-memberships buf)) (loop (cdr rows) moving))
+                  ((not (buffer-group buf)) (loop (cdr rows) moving))
                   (else #f)))))))
 
 ;; Enter ID without touching one window. The frame already shows the
@@ -4783,55 +4732,28 @@ is forgotten and that group falls back to creation order in the switcher."
                     (switch-to-buffer! name))))))))))
 (catalog-meta! 'command "pull-buffer-here" 'domain 'buffers 'effects '(write))
 
-(define (buffer-family-remove-groups! buf ids)
-  (for-each
-    (lambda (id)
-      (for-each
-        (lambda (member)
-          (when (buffer-in-group? member id)
-            (buffer-remove-group! member id)))
-        (group-membership-targets buf)))
-    ids)
-  (when (pair? ids) (run-hooks 'group-membership-hook))
-  (message
-    (if (null? ids)
-        "No group memberships changed"
-        (string-append "Removed " (number->string (length ids))
-                       " group membership"
-                       (if (= (length ids) 1) "" "s"))))
-  ids)
-
-(define (buffer-remove-candidates ids pending)
-  (map
-    (lambda (id)
-      (list (group-name id)
-            (if (member id pending)
-                "remove on C-g · RET keeps"
-                "keep · RET removes")))
-    ids))
-
-(define (buffer-remove-read! buf ids pending)
-  (minibuffer-read* "Toggle group removal (C-g applies): "
-    (buffer-remove-candidates ids pending)
-    (list
-      (list 'confirm
-        (lambda (name)
-          (let ((id (group-resolve-id name)))
-            (buffer-remove-read!
-              buf ids
-              (if (and id (member id pending))
-                  (remove (lambda (held) (equal? held id)) pending)
-                  (if id (append pending (list id)) pending))))))
-      (list 'cancel (lambda () (buffer-family-remove-groups! buf pending)))
-      (list 'style #f))))
+(define (buffer-family-remove-group! buf id)
+  (let ((members (filter (lambda (member) (buffer-in-group? member id))
+                         (group-membership-targets buf))))
+    (for-each (lambda (member) (buffer-remove-group! member id)) members)
+    (when (pair? members) (run-hooks 'group-membership-hook))
+    (message
+      (if (null? members)
+          "No buffer left the group"
+          (string-append "Removed " (number->string (length members))
+                         " buffer" (if (= (length members) 1) "" "s")
+                         " from " (group-display-name id))))
+    members))
 
 (define-command "remove-group-from-buffer"
-  "Toggle this buffer out of the groups it belongs to; C-g applies"
+  "Take this buffer out of its group; y removes, n keeps"
   (lambda ()
     (let* ((buf (current-buffer))
-           (ids (group-buffer-memberships buf)))
-      (cond ((null? ids) (message "The buffer is not in a group"))
-            (else (buffer-remove-read! buf ids '()))))))
+           (id (buffer-group buf)))
+      (if (not id)
+          (message "The buffer is not in a group")
+          (y-or-n (string-append "Remove " buf " from " (group-display-name id) "? ")
+                  (lambda () (buffer-family-remove-group! buf id)))))))
 
 ;; The other direction. One group is named by where the command runs, and
 ;; the buffers are the rows. A chat is a row like any other. A group
@@ -4854,7 +4776,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (when (pair? names) (run-hooks 'group-membership-hook))
   (message
     (if (null? names)
-        "No group memberships changed"
+        "No buffer left the group"
         (string-append "Removed " (number->string (length names))
                        " buffer" (if (= (length names) 1) "" "s")
                        " from " (group-display-name g))))
@@ -5008,7 +4930,6 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
-(public! 'buffer-group-ids "(buffer-group-ids NAME) -> work memberships")
 (public! 'buffer-context-only? "(buffer-context-only? NAME) — #t when NAME belongs to context but stays out of user buffer lists")
 (public! 'buffer-context-only! "(buffer-context-only! NAME) — keep NAME as editable context without listing it")
 (public! 'buffer-promote! "(buffer-promote! NAME) — make a context-only buffer user-switchable")

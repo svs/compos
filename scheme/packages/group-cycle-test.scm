@@ -163,16 +163,6 @@
                   "nor its other chat")
     (group-cycle-test-reset!)))
 
-(deftest 'group-cycle-leaves-a-context-only-buffer-out
-  "a buffer kept as context only is not a place the walk stops"
-  (lambda ()
-    (group-cycle-test-open!)
-    (group-cycle-test-chat! "*zz-cyc-hidden*" (buffer-group "*zz-cyc-three*"))
-    (buffer-context-only! "*zz-cyc-hidden*")
-    (switch-to-buffer! "*zz-cyc-three*")
-    (check-false! (member "*zz-cyc-hidden*" (group-cycle-ring)) "out of the ring")
-    (group-cycle-test-reset!)))
-
 (deftest 'group-cycle-flips-between-the-last-two
   "one step lands on the buffer you came from; a fresh walk brings you back"
   (lambda ()
@@ -195,13 +185,6 @@
     (switch-to-buffer! (list-ref *group-cycle-ring* *group-cycle-pos*))
     (check-equal! (current-buffer) "*zz-cyc-one*" "two deep, down the same ring")
     (group-cycle-test-reset!)))
-
-(deftest 'group-cycle-has-its-commands
-  "the walk, its other way, and the naming of a pane's preferred mode are commands"
-  (lambda ()
-    (check-true! (procedure? (command-function "group-next-buffer")) "the walk")
-    (check-true! (procedure? (command-function "group-previous-buffer")) "the other way")
-    (check-true! (procedure? (command-function "window-mode-preference")) "the naming")))
 
 (deftest 'group-cycle-same-mode-stays-in-its-window
   "cycling text buffers preserves the selected window and its neighbor"

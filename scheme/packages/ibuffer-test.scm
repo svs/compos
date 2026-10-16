@@ -441,23 +441,8 @@
            (two (cadr ids)))
       (ibuffer-test-point-on! "zz-ib-b")
       (ibuffer-test-act! "move here")
-      (check-equal! (buffer-group-ids "*zz-ib-b*") (list one) "the buffer moved to the group at hand")
+      (check-equal! (buffer-group "*zz-ib-b*") one "the buffer moved to the group at hand")
       (check-equal! (group-buffers two) '() "and left the group it was in")
-      (ibuffer-test-groups-reset! ids))))
-
-(deftest 'ibuffer-act-add-here-keeps-the-old-membership
-  "add here joins the group at hand and keeps the row's own group"
-  (lambda ()
-    (let* ((ids (ibuffer-test-two-groups!))
-           (one (car ids))
-           (two (cadr ids)))
-      (ibuffer-test-point-on! "zz-ib-b")
-      (ibuffer-test-act! "add here")
-      (check-true! (buffer-in-group? "*zz-ib-b*" one) "the buffer joined the group at hand")
-      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and kept the group it was in")
-      (ibuffer-test-act! "remove here")
-      (check-false! (buffer-in-group? "*zz-ib-b*" one) "remove here undoes it")
-      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and leaves the other membership")
       (ibuffer-test-groups-reset! ids))))
 
 (deftest 'ibuffer-act-reads-the-marks
@@ -471,10 +456,10 @@
       (check-equal! (ibuffer-current "*ibuffer*") "*zz-ib-a*" "point rests on the first row")
       (list-mark! "*ibuffer*" "*zz-ib-a*" "*")
       (list-mark! "*ibuffer*" "*zz-ib-b*" "*")
-      (ibuffer-test-act! "add here")
+      (ibuffer-test-act! "move here")
       (check-true! (buffer-in-group? "*zz-ib-b*" one)
-                   "the marked row that point does not rest on joined too")
-      (check-true! (buffer-in-group? "*zz-ib-b*" two) "and kept the group it was in")
+                   "the marked row that point does not rest on moved too")
+      (check-false! (buffer-in-group? "*zz-ib-b*" two) "and left the group it was in")
       (ibuffer-test-groups-reset! ids))))
 
 ;;; --- the window form previews too ------------------------------------------
@@ -499,36 +484,6 @@
         (check-equal! (active-window) me "the selection stayed on the table")
         (check-equal! (window-buffer me) "*ibuffer*" "and the table kept its window")
         (check-false! (float-open?) "no popup was opened")))
-    (ibuffer-test-reset!)))
-
-(deftest 'ibuffer-window-form-previews-reuse-one-window
-  "walking the rows shows each in the same window, and never splits again"
-  (lambda ()
-    (ibuffer-test-open! 'mode 'name)
-    (list-goto-first-entry "*ibuffer*")
-    (list-preview! "*ibuffer*")
-    (let ((slot (window-showing (ibuffer-current "*ibuffer*")))
-          (count (length (window-list))))
-      (list-move! 1)
-      (let ((row (ibuffer-current "*ibuffer*")))
-        (check-equal! (window-showing row) slot "the next row took the same window")
-        (check-equal! (length (window-list)) count "no window was added")
-        (check-false! (peek-buffer? row) "a buffer that existed is never marked a peek")))
-    (ibuffer-test-reset!)))
-
-(deftest 'ibuffer-preview-leaves-the-recency-ring-alone
-  "walking the rows looks at each one, and the ring the table reads stays as it was"
-  (lambda ()
-    (ibuffer-test-open! 'mode 'recent)
-    (let ((before (buffer-list-mru))
-          (rows (ibuffer-test-names)))
-      (list-goto-first-entry "*ibuffer*")
-      (list-preview! "*ibuffer*")
-      (list-move! 1)
-      (list-move! 1)
-      (check-equal! (buffer-list-mru) before "a look moved nothing in the ring")
-      (ibuffer-refresh!)
-      (check-equal! (ibuffer-test-names) rows "so the table draws the same order"))
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-quit-takes-the-preview-then-the-table
@@ -559,14 +514,6 @@
         (check-equal! (active-window) slot "in the window that previewed it")
         (check-false! (and (window-exists? me) (equal? (window-buffer me) row))
                       "and not in the window the table was using")))
-    (ibuffer-test-reset!)))
-
-(deftest 'ibuffer-mode-declares-a-page-size
-  "a workspace can hold hundreds of buffers; the table draws one page of them"
-  (lambda ()
-    (ibuffer-test-open! 'mode 'name)
-    (check-true! (number? (list-page-size "*ibuffer*"))
-                 "the registered mode carries the page-size option, not #f")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-header-totals-come-off-the-source

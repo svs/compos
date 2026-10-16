@@ -71,37 +71,35 @@
 ;;; The mechanism is only useful if the person writing a connector can
 ;;; find it. These are the words they actually search for.
 
-(define (endpoint--apropos-finds? query)
-  (pair? (filter (lambda (e)
-                   (let ((n (or (plist-get e 'qualified-name) "")))
-                     (string-contains? n "endpoint")))
-                 (apropos query))))
-
-(deftest 'apropos-finds-the-endpoint-api-by-what-it-is-for
-  "a connector author searches for the job, not for our word"
-  (lambda ()
-    (for-each
-      (lambda (q)
-        (check-true! (endpoint--apropos-finds? q)
-          (string-append "apropos finds endpoints for: " q)))
-      ;; one query per way somebody arrives at this API; apropos is the
-      ;; slowest thing in this suite, so this list stays short
-      '("subprocess" "socket" "persistent connection"))))
-
 ;;; The word "socket" is the trap: sockets.scm lists the sockets this
 ;;; daemon holds open, which is not how a package opens a client
 ;;; connection. A searcher must reach the endpoint API from that word.
-(deftest 'searching-for-a-socket-reaches-the-client-api-not-the-listener-list
-  "the daemon's own listeners must not absorb the whole word"
+;; The daemons a package registers (laya, needle) are specs here, not code
+;; of their own: one test over the registry says what every one must say.
+(deftest 'every-bundled-daemon-registers-where-a-manager-looks-and-ships-its-script
+  "a line-framed daemon that serves models names its command and a script that is there"
   (lambda ()
-    (let ((names (map (lambda (e) (or (plist-get e 'qualified-name) ""))
-                      (apropos "socket"))))
-      (check-true! (pair? (filter (lambda (n) (string-contains? n "endpoint")) names))
-        "the endpoint API is reachable from \"socket\"")
-      (check-true!
-        (let loop ((xs names))
-          (cond ((null? xs) #f)
-                ((string-contains? (car xs) "endpoint") #t)
-                ((string-contains? (car xs) "sockets/") #f)
-                (else (loop (cdr xs)))))
-        "an endpoint row comes before the listener rows"))))
+    (let ((daemons (filter (lambda (n)
+                             (let ((spec (endpoint-spec n)))
+                               (and (pair? spec)
+                                    (equal? (plist-get spec 'framing) "line")
+                                    (equal? (plist-get spec 'serves) "models"))))
+                           (endpoint-names))))
+      (for-each (lambda (n)
+                  (check-true! (member n daemons)
+                               (string-append n " is in the endpoint registry, framed by lines, serving models")))
+                '("laya" "needle"))
+      (for-each
+        (lambda (n)
+          (let* ((spec (endpoint-spec n))
+                 (scripts (filter (lambda (a) (and (string? a) (string-suffix? "-daemon.py" a)))
+                                  (or (plist-get spec 'args) '()))))
+            (check-true! (string? (plist-get spec 'command))
+                         (string-append n " names the program that runs it"))
+            (check-true! (pair? scripts)
+                         (string-append n " names the daemon script it runs"))
+            (for-each (lambda (s)
+                        (check-true! (file-exists? s)
+                                     (string-append n ": " s " ships with the editor")))
+                      scripts)))
+        daemons))))

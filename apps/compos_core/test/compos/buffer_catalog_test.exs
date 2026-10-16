@@ -61,7 +61,7 @@ defmodule Compos.BufferCatalogTest do
       sleeping("catalog", fn name ->
         Buffer.append(name, "row facts", source: :editor)
         Buffer.set_local(name, "mode-name", "text-mode")
-        Buffer.set_local(name, "group-ids", ["g1"])
+        Buffer.set_local(name, "group-id", "g1")
       end)
 
     reads =
@@ -70,7 +70,7 @@ defmodule Compos.BufferCatalogTest do
         assert Buffer.path(name) == nil
         assert Buffer.modified?(name) == true
         assert Buffer.get_local(name, "mode-name") == "text-mode"
-        assert Buffer.get_local(name, "group-ids") == ["g1"]
+        assert Buffer.get_local(name, "group-id") == "g1"
         assert Buffer.get_local(name, "no-such-local") == nil
       end)
 

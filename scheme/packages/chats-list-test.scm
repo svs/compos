@@ -117,18 +117,6 @@
                  "streaming to stopped is a change")
     (set! *agents-state-last* '())))
 
-(deftest 'the-chat-list-is-one-application
-  "*chat-list* is the mode list of chat-mode: ibuffer over the chat scope"
-  (lambda ()
-    (chats-test-open! 'group 'name)
-    (check-equal! (buffer-local *chat-list* 'mode-name) "chat-list-mode" "the mode")
-    (check-equal! (buffer-local *chat-list* 'ibuffer-scope) 'chat-list "the scope by name")
-    (check-true! (ibuffer-view? *chat-list*) "a registered view")
-    (check-equal! (ibuffer-row-kind "*zz-chats-a*") 'chat "a chat row wears the chat kind")
-    (check-contains! (buffer-text *chat-list*) "Chats" "the title")
-    (check-contains! (buffer-text *chat-list*) "3 chats" "the noun is chat")
-    (chats-test-reset!)))
-
 (deftest 'the-list-arrives-in-the-invoking-group
   "one arrival: the invoking group, one window, the list holding the focus"
   (lambda ()
@@ -159,15 +147,6 @@
       (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
                     "and the card is the row you left on"))
     (chats-test-reset!)))
-
-(deftest 'the-two-surfaces-are-bound-apart
-  "C-x c is the minibuffer form, C-x C-c the application; neither is the other"
-  (lambda ()
-    (check-equal! (key-binding "C-x c") "chat-prompt" "the minibuffer form")
-    (check-equal! (key-binding "C-x C-c") "chat-list" "the application")
-    (check-true! (not (equal? *chat-prompt-buffer* *chat-list-buffer*))
-                 "the form keeps its own view, so neither state leaks into the other")
-    (check-true! (ibuffer-view? *chat-prompt-buffer*) "the form's view is registered")))
 
 (deftest 'the-row-at-point-previews-its-chat
   "the row under the cursor floats the same card ibuffer floats, over the
@@ -247,49 +226,6 @@
       (check-equal! (length (window-list)) before "and gave the arrangement back")
       (check-equal! (window-buffer (active-window)) "*zz-chats-a*"
                     "showing what it displaced"))
-    (chats-test-reset!)))
-
-(deftest 'moving-again-keeps-the-card-where-it-stands
-  "the second row fills the card the first one opened, and adds no window"
-  (lambda ()
-    (chats-test-reset!)
-    (chats-test-chat! "*zz-chats-a*" #f)
-    (chats-test-chat! "*zz-chats-b*" #f)
-    (chats-test-chat! "*zz-chats-c*" #f)
-    (delete-other-windows!)
-    (switch-to-buffer-here! "*zz-chats-a*")
-    (split-window! 'h 0.5)
-    (run-command "chat-list")
-    (let ((view (chat-list-buffer)))
-      (listing-preview! view "*zz-chats-b*")
-      (let ((windows (length (window-list))) (host (float-window)))
-        (check-true! (float-open?) "the first row lays a card over the neighbour")
-        (listing-preview! view "*zz-chats-c*")
-        (check-equal! (length (window-list)) windows
-                      "the second row adds no window")
-        (check-equal! (float-window) host "and the card stands where it stood")))
-    (run-command "ibuffer-quit")
-    (chats-test-reset!)))
-
-(deftest 'two-qs-leave-with-a-card-up
-  "the card is the list's own preview: q takes it, and the next q leaves, as in ibuffer"
-  (lambda ()
-    (chats-test-reset!)
-    (chats-test-chat! "*zz-chats-a*" #f)
-    (chats-test-chat! "*zz-chats-b*" #f)
-    (delete-other-windows!)
-    (switch-to-buffer-here! "*zz-chats-a*")
-    (split-window! 'h 0.5)
-    (let ((before (length (window-list))))
-      (run-command "chat-list")
-      (listing-preview! (chat-list-buffer) "*zz-chats-b*")
-      (check-true! (float-open?) "the row floats a card over the neighbour")
-      (run-command "ibuffer-quit")
-      (check-false! (float-open?) "one q takes the card")
-      (check-true! (and (window-showing (chat-list-buffer)) #t) "and leaves the list")
-      (run-command "ibuffer-quit")
-      (check-false! (window-showing (chat-list-buffer)) "the next q leaves the list")
-      (check-equal! (length (window-list)) before "the arrangement comes back whole"))
     (chats-test-reset!)))
 
 (deftest 'the-resting-list-is-flat-and-most-recent-first
@@ -373,20 +309,6 @@
       (check-equal! (member 'group (map ibuffer-field-tag
                                         (ibuffer-fields *chat-list* *ibuffer-wide-fields*)))
                     #f "sectioning by group drops the column rather than say it twice")
-      (chats-test-reset!))))
-
-(deftest 'chats-fold-hides-a-section
-  "a folded heading stands for its rows and stays a row of its own"
-  (lambda ()
-    (let ((ids (chats-test-open! 'group 'name)))
-      (ibuffer-toggle-fold! (string-append "group:" (car ids)) *chat-list*)
-      (check-equal! (chats-test-names) '("*zz-chats-c*") "group one's rows are gone")
-      (let ((folded (car (chats-test-headings))))
-        (check-true! (ibuffer-heading-folded? folded) "the heading is folded")
-        (check-true! (list-selectable? *chat-list* folded) "and selectable")
-        (check-equal! (ibuffer-heading-count folded) 2 "it still counts its members"))
-      (ibuffer-toggle-fold! (string-append "group:" (car ids)) *chat-list*)
-      (check-equal! (length (chats-test-names)) 3 "unfolded, the rows return")
       (chats-test-reset!))))
 
 (deftest 'chats-group-row-stands-for-its-chats

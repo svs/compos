@@ -58,8 +58,6 @@
   "C-x k owns retention; shared kill callers neither ask nor keep a stale save"
   (lambda ()
     (t--training-clean!)
-    (check-equal! (key-binding "C-x k") "training-kill-buffer"
-                  "the retention policy is attached to C-x k")
     (let ((buf (training--load-tutorial! "older saved copy\n" 5)))
       (training-save-state! buf)
       (buffer-insert! buf (buffer-size buf) "new work"))

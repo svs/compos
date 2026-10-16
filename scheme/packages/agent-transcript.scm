@@ -910,15 +910,20 @@
 ;; takes blocks up to PER bytes and at least one block, so a block larger
 ;; than the budget cannot stop a reveal.
 (define (chat-view--window-count raw per pages)
-  (let loop ((r raw) (bytes 0) (in-page 0) (page 0) (n 0))
+  ;; a block's size runs to the start of the block after it at most: a
+  ;; tool that finishes after a later call began closes at the mark, so
+  ;; its own range also spans that later card and the two would count twice
+  (let loop ((r raw) (newer #f) (bytes 0) (in-page 0) (page 0) (n 0))
     (cond
       ((null? r) n)
       ((> page pages) n)
       (else
-       (let ((next (+ bytes (max 0 (- (nth 1 (car r)) (nth 0 (car r)))))))
+       (let* ((b (car r))
+              (end (if newer (min (nth 1 b) newer) (nth 1 b)))
+              (next (+ bytes (max 0 (- end (nth 0 b))))))
          (if (and (> in-page 0) (> next per))
-             (loop r 0 0 (+ page 1) n)
-             (loop (cdr r) next (+ in-page 1) page (+ n 1))))))))
+             (loop r newer 0 0 (+ page 1) n)
+             (loop (cdr r) (nth 0 b) next (+ in-page 1) page (+ n 1))))))))
 
 ;; the drawn views and the count of hidden views, both from newest-first lists
 (define (chat-view--window buf raw views)
@@ -957,7 +962,8 @@
 
 (define (chat-view-tree buf children verbosity queued activity hidden)
   (append
-    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity)
+    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity
+                                                   (if (buffer-local buf 'chat-follow-off) " ag-nofollow" ""))
                 'isolate #t 'follow #t 'anchor "transcript"
                 'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
                 ;; the first drawn block keeps its index in the whole
@@ -1022,6 +1028,7 @@
            (activity (chat-activity-live buf))
            (sig (list raw open verbosity queued activity
                       (buffer-local buf 'chat-view-reveal)
+                      (buffer-local buf 'chat-follow-off)
                       chat-view-window-bytes))
            (m (chat-view--memo buf)))
       (unless (and m (equal? (nth 3 m) sig)
@@ -1067,6 +1074,90 @@
          #t))
       (else #f))))
 
-(define (chat-view--mode-hook!) (chat-view-sync! (current-buffer)))
+;; Block motion. The view keeps the reader's place apart from point
+;; ('follow-place: a block index and an offset), so a step moves that
+;; place, and a block behind the earlier row is revealed first.
+;; 'chat-view-nav is the block the last step went to; a view that follows
+;; the bottom again has no step to go on from.
+(define (chat-view--counts buf)
+  ;; (HIDDEN TOTAL): the views behind the earlier row, and all of them
+  (let* ((rb (buffer-local buf 'render-blocks))
+         (root (and (pair? rb) (car rb)))
+         (kids (or (and root (plist-get root 'children)) '()))
+         (row? (and (pair? kids) (equal? (plist-get (car kids) 'class) "ag-earlier")))
+         (hidden (if row? (+ 1 (or (plist-get root 'index-base) 0)) 0)))
+    (list hidden (+ hidden (length kids) (if row? -1 0)))))
+
+(define (chat-view-step! buf delta)
+  (when (chat-rich-view? buf)
+    (chat-view-sync! buf)
+    (let* ((total (cadr (chat-view--counts buf)))
+           (fp (buffer-local buf 'follow-place))
+           (cur (and (pair? fp) (car fp) (buffer-local buf 'chat-view-nav)))
+           (target (+ (if (integer? cur) cur total) delta)))
+      (if (>= target total)
+          (begin
+            (buffer-set-local! buf 'chat-view-nav #f)
+            (chat-follow-again! buf))
+          (let ((target (max 0 target)))
+            (let loop ((n (length (agent-blocks buf))))
+              (when (and (> n 0) (< target (car (chat-view--counts buf))))
+                (buffer-set-local! buf 'chat-view-reveal
+                  (+ 1 (or (buffer-local buf 'chat-view-reveal) 0)))
+                (chat-view-sync! buf)
+                (loop (- n 1))))
+            (buffer-set-local! buf 'chat-view-nav target)
+            (buffer-set-local! buf 'follow-place (list #t 0 target 0))
+            (let ((seq (buffer-local buf 'follow-seq)))
+              (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))))))
+
+(define-command "chat-previous-block" "Show the previous block of this chat at the top"
+  (lambda () (chat-view-step! (current-buffer) -1)))
+
+(define-command "chat-next-block" "Show the next block of this chat at the top; past the newest, follow the bottom"
+  (lambda () (chat-view-step! (current-buffer) 1)))
+
+(define-key "chat-mode-map" "M-<up>" "chat-previous-block")
+(define-key "chat-mode-map" "M-<down>" "chat-next-block")
+
+;; typing answers at the bottom, so a key that types brings the view back,
+;; unless the reader asked the view to stay
+(define (chat-view-type-follows!)
+  (let ((buf (current-buffer)))
+    (when (and (chat-rich-view? buf)
+               (not (buffer-local buf 'chat-follow-off))
+               (member (editing--command-name) chat-view-input-commands)
+               (let ((fp (buffer-local buf 'follow-place))) (and (pair? fp) (car fp))))
+      (buffer-set-local! buf 'chat-view-nav #f)
+      (chat-follow-again! buf))))
+
+(add-hook! 'post-command-hook 'chat-view-type-follows!)
+
+;; chat-follow-mode: new output scrolls into view while the reader is at
+;; the bottom. It is on in every chat; off, the view stays where it is
+;; until the reader moves it (M->, a block step, a scroll).
+(register-minor-mode! "chat-follow-mode"
+  (lambda (buf) (buffer-set-local! buf 'chat-follow-off #f) (chat-view-sync! buf))
+  (lambda (buf) (buffer-set-local! buf 'chat-follow-off #t) (chat-view-sync! buf)))
+
+(define-command "chat-follow-mode" "Toggle whether new output in this chat scrolls into view"
+  (lambda ()
+    (message (if (toggle-minor-mode! "chat-follow-mode")
+                 "chat-follow-mode enabled: new output scrolls into view"
+                 "chat-follow-mode disabled: the view stays where it is"))))
+
+(define (chat-follow-mode-default! buf)
+  (unless (minor-mode-on? buf "chat-follow-mode")
+    (enable-minor-mode! buf "chat-follow-mode")))
+
+(define (chat-view--mode-hook!)
+  (chat-follow-mode-default! (current-buffer))
+  (chat-view-sync! (current-buffer)))
 
 (add-hook! 'chat-mode-hook 'chat-view--mode-hook!)
+
+;; the chats that were open before the mode existed get it too
+(for-each (lambda (b)
+            (when (buffer-derived-mode? b "chat-mode")
+              (chat-follow-mode-default! b)))
+          (buffer-list))

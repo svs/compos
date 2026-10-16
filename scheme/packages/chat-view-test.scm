@@ -220,3 +220,52 @@
                                    'text)
                         "Show earlier blocks (1 hidden)" "the 20-byte block draws after one reveal")))
       (buffer-kill! buf))))
+
+(deftest 'chat-view-budget-counts-overlapping-blocks-once
+  "a block whose range runs over a later one counts only up to that block's start"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-overlap*")))
+      ;; a tool that closed after the later calls began spans them all
+      (buffer-set-local! buf 'agent-blocks
+        '((26 34 "tool" "t1" "Read: a.txt" "read" "done" 32 1400)
+          (6 26 "prose")
+          (0 34 "user" "hello")))
+      (chat-view-test--with-window 35
+        (lambda ()
+          (chat-view-sync! buf)
+          (check-equal! (chat-view-test--drawn buf) '("ag-user" "ag-prose" #f)
+                        "34 real bytes fit a budget of 35")))
+      (buffer-kill! buf))))
+
+(deftest 'chat-view-block-steps-move-the-place-and-reveal
+  "a step up places the view on the block before, revealing it first; a step past the newest follows the bottom"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-step*")))
+      (chat-view-test--with-window 15
+        (lambda ()
+          (chat-view-sync! buf)
+          (check-equal! (chat-view--counts buf) '(2 3) "two blocks hidden of three")
+          (chat-view-step! buf -1)
+          (check-equal! (buffer-local buf 'follow-place) '(#t 0 2 0) "the first step goes to the newest block")
+          (chat-view-step! buf -1)
+          (check-equal! (buffer-local buf 'follow-place) '(#t 0 1 0) "the next goes to the block before")
+          (check-equal! (car (chat-view--counts buf)) 1 "which is drawn now")
+          (chat-view-step! buf 1)
+          (chat-view-step! buf 1)
+          (check-equal! (buffer-local buf 'follow-place) #f "past the newest the view follows the bottom")))
+      (buffer-kill! buf))))
+
+(deftest 'chat-view-follow-mode-off-marks-the-transcript
+  "chat-follow-mode off draws the transcript with ag-nofollow, and on draws it without"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-follow*"))
+          (nofollow? (lambda (buf)
+                       (string-contains? (plist-get (car (buffer-local buf 'render-blocks)) 'class)
+                                         "ag-nofollow"))))
+      (enable-minor-mode! buf "chat-follow-mode")
+      (check-false! (nofollow? buf) "on: the view follows")
+      (disable-minor-mode! buf "chat-follow-mode")
+      (check-true! (nofollow? buf) "off: the view stays")
+      (enable-minor-mode! buf "chat-follow-mode")
+      (check-false! (nofollow? buf) "on again")
+      (buffer-kill! buf))))

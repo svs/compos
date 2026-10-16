@@ -3488,7 +3488,7 @@ defmodule Compos.Core.Editor do
       footer_line_blocks: Map.get(locals, "footer-line-blocks"),
       # the pin: the buffer's group only when it is not the frame's. The
       # frame names its group once; a window in that group does not repeat it.
-      pin: modeline_pin(Map.get(locals, "modeline-groups"), frame_group),
+      pin: modeline_pin(Map.get(locals, "modeline-group"), frame_group),
       # Scheme selects the buffer-owned group that supplies its color.
       # The frame group remains separate context for the bottom bar.
       group_color: Map.get(locals, "modeline-group-color"),

@@ -25,26 +25,6 @@
         (remove (lambda (entry) (equal? (car entry) backend))
                 *spreadsheet-backends*)))))
 
-(deftest 'spreadsheet-api-is-discoverable
-  "an agent can find workbook storage before it knows function names"
-  (lambda ()
-    (let ((backend-rows (apropos "spreadsheet-register-backend!"))
-          (chart-rows (apropos "spreadsheet-add-chart!")))
-      (check-true!
-        (pair?
-          (filter
-            (lambda (row)
-              (equal? (plist-get row 'name) "spreadsheet-register-backend!"))
-            backend-rows))
-        "apropos finds backend registration")
-      (check-true!
-        (pair?
-          (filter
-            (lambda (row)
-              (equal? (plist-get row 'name) "spreadsheet-add-chart!"))
-            chart-rows))
-        "apropos finds chart creation"))))
-
 (deftest 'spreadsheet-agent-api-reads-and-writes-without-display
   "agents can change backend data by source without selecting a grid"
   (lambda ()

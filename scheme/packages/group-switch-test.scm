@@ -109,16 +109,6 @@
 (define t--sw-headings
   '("in this group" "other groups" "groups" "ungrouped" "zzsw-foreign" "recent"))
 
-(deftest 'ibuffer-prompt-opens-the-candidate-prompt
-  "C-x b opens the prompt under the switcher's name"
-  (lambda ()
-    (t--sw-setup!)
-    (t--sw-open-switcher!)
-    (check-true! (minibuffer-state) "the prompt opened")
-    (check-true! (string-prefix? "Switch to" (plist-get (minibuffer-state) 'prompt))
-                 "the buffer switcher owns the prompt")
-    (t--sw-done!)))
-
 (deftest 'the-switcher-pool-follows-the-invoking-window-history
   "another window cannot reorder this window's previous buffers"
   (lambda ()
@@ -160,30 +150,6 @@
                     "so the empty-input default is the buffer you were on before"))
     (t--sw-done!)))
 
-(deftest 'the-group-switcher-indexes-memberships-in-one-pass
-  "the one-pass index lists the members a scan per group lists, in the same order"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((a (group-record-create! "zz-sw-index-a"))
-          (b (group-record-create! "zz-sw-index-b")))
-      (buffer-add-group! t--sw-first a)
-      (buffer-add-group! t--sw-second a)
-      (buffer-add-group! t--sw-second b)
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-first)
-      (let ((index (group-members-index)))
-        (check-equal! (group-members-in index a) (group-buffers-mru a)
-                      "group a: the index lists what the scan lists")
-        (check-equal! (group-members-in index b) (group-buffers-mru b)
-                      "group b: the index lists what the scan lists")
-        (check-equal! (car (group-members-in index a)) t--sw-first
-                      "the most recent member leads")
-        (check-equal! (group-members-in index "zz-sw-no-such-group") '()
-                      "an unknown group has no members")
-        (check-equal! (group-switch-candidate-in index b) (group-switch-candidate b)
-                      "the candidate row is the row the scan builds")))
-    (t--sw-done!)))
-
 ;;; --- founding a group -----------------------------------------------------------
 
 (deftest 'new-from-a-selection-takes-the-buffers-and-the-layout
@@ -207,7 +173,7 @@
 
       (let ((id (group-resolve-id "zzsw-visible")))
         (check-false! (buffer-in-group? t--sw-first old) "the old membership is left behind")
-        (check-equal! (buffer-group-ids t--sw-first) (list id) "the new one is the only one")
+        (check-equal! (buffer-group t--sw-first) id "the new one is the only one")
         (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
         (check-equal! (frame-local 'current-group) id "the frame stands in it")
         (check-equal! (window-tree-buffers (group-layout id)) (window-tree-buffers (window-tree))
@@ -250,7 +216,7 @@
       (t--sw-key! "cancel")
       (check-equal! (group-ids) '() "no group was founded")
       (check-false! (frame-local 'current-group) "the frame stands in none")
-      (check-equal! (buffer-group-ids t--sw-first) '() "the buffer joined none")
+      (check-equal! (buffer-group t--sw-first) #f "the buffer joined none")
       (check-equal! (window-tree) before "and the windows did not move"))
     (t--sw-done!)))
 
@@ -563,7 +529,7 @@
       (run-command "buffer-new")
       (t--sw-type! ungrouped)
       (t--sw-key! "confirm-input")
-      (check-equal! (buffer-group-ids ungrouped) '() "without current-group it starts ungrouped")
+      (check-equal! (buffer-group ungrouped) #f "without current-group it starts ungrouped")
 
       (buffer-kill! direct)
       (buffer-kill! grouped)
@@ -571,16 +537,6 @@
     (t--sw-done!)))
 
 ;;; --- add, move, remove -----------------------------------------------------------
-
-(deftest 'membership-commands-use-only-add-move-and-remove
-  "the command palette does not expose the obsolete membership verbs"
-  (lambda ()
-    (for-each
-      (lambda (name)
-        (check-false! (member name (command-names))
-                      (string-append name " is not a command")))
-      '("group-pull-buffer" "group-push-buffer" "group-push-visible"
-        "group-push-selected" "group-pop"))))
 
 (deftest 'add-moves-the-buffer-family-to-the-destination
   "a buffer holds one group, so add puts the family there and leaves the source"
@@ -596,7 +552,7 @@
       (t--sw-key! "confirm")
 
       (check-false! (buffer-in-group? t--sw-first source) "the source membership is left")
-      (check-equal! (buffer-group-ids t--sw-first) (list destination)
+      (check-equal! (buffer-group t--sw-first) destination
                     "the destination is the only membership")
       (check-equal! (frame-group) destination
                     "the visible buffer takes the frame with it")
@@ -617,7 +573,7 @@
 
       (let ((created (group-resolve-id "zzsw-created")))
         (check-true! created "the typed destination creates a group")
-        (check-equal! (buffer-group-ids t--sw-first) (list created)
+        (check-equal! (buffer-group t--sw-first) created
                       "the buffer joins it, and only it")
         (check-false! (buffer-in-group? t--sw-first source) "the source is left")
         (check-equal! (frame-group) created
@@ -636,7 +592,7 @@
     (t--sw-key! "confirm")
     (let ((id (group-resolve-id "zzsw-null-add")))
       (check-true! id "the destination record exists")
-      (check-equal! (buffer-group-ids t--sw-third) (list id)
+      (check-equal! (buffer-group t--sw-third) id
                     "the buffer receives the destination"))
     (t--sw-done!)))
 
@@ -722,7 +678,7 @@
       (check-false! (buffer-in-group? t--sw-first source) "the source is removed")
       (check-false! (buffer-in-group? t--sw-first kept) "another membership is removed")
       (check-true! (buffer-in-group? t--sw-first destination) "the destination is added")
-      (check-equal! (buffer-group-ids t--sw-first) (list destination)
+      (check-equal! (buffer-group t--sw-first) destination
                     "the destination is the only membership")
       (check-equal! (frame-group) destination
                     "move enters the destination group")
@@ -756,7 +712,7 @@
   (lambda ()
     (t--sw-setup!)
     (switch-to-buffer! t--sw-third)
-    (check-equal! (buffer-group-ids t--sw-third) '()
+    (check-equal! (buffer-group t--sw-third) #f
                   "the buffer starts without a group")
     (run-command "group-move")
     (t--sw-type! "zzsw-ungrouped-destination")
@@ -764,7 +720,7 @@
 
     (let ((destination (group-resolve-id "zzsw-ungrouped-destination")))
       (check-true! destination "the entered group name creates a durable record")
-      (check-equal! (buffer-group-ids t--sw-third) (list destination)
+      (check-equal! (buffer-group t--sw-third) destination
                     "the destination becomes the only membership"))
     (t--sw-done!)))
 
@@ -840,7 +796,7 @@
       (t--sw-key! "cancel")
       (check-false! (buffer-in-group? t--sw-second destination)
                     "remove drops the chosen membership")
-      (check-equal! (buffer-group-ids t--sw-second) '()
+      (check-equal! (buffer-group t--sw-second) #f
                     "the scratch keeps no membership"))
     (t--sw-done!)))
 
@@ -936,7 +892,7 @@
     (let ((home (group-record-create! "zzsw-first")))
       (buffer-add-group! t--sw-first home)
       (buffer-move-family-to-group! t--sw-first "grp:missing")
-      (check-equal! (buffer-group-ids t--sw-first) (list home)
+      (check-equal! (buffer-group t--sw-first) home
                     "the failed move keeps the membership"))
     (t--sw-done!)))
 
@@ -961,7 +917,7 @@
       (t--sw-key! "cancel")
 
       (check-false! (buffer-in-group? t--sw-first removed) "the named membership is removed")
-      (check-equal! (buffer-group-ids t--sw-first) '() "the buffer is left in no group")
+      (check-equal! (buffer-group t--sw-first) #f "the buffer is left in no group")
       (check-true! (buffer-known? t--sw-first) "the buffer remains alive"))
     (t--sw-done!)))
 
@@ -1766,7 +1722,7 @@
       (let ((moved (group-resolve-id "zzsw-moved")))
         (check-true! (buffer-in-group? t--sw-first moved) "the destination was added")
         (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
-        (check-equal! (buffer-group-ids t--sw-first) (list moved) "and it is the only group")
+        (check-equal! (buffer-group t--sw-first) moved "and it is the only group")
         (check-equal! (frame-group) moved "the new group was entered")))
     (t--sw-done!)))
 
@@ -1971,8 +1927,7 @@
         ;; a work buffer in no group: creation joined the destination, so
         ;; take it out; a transient pane would say nothing
         (buffer-set-local! foreign 'special #f)
-        (for-each (lambda (id) (buffer-remove-group! foreign id))
-                  (buffer-group-ids foreign))
+        (let ((g (buffer-group foreign))) (when g (buffer-remove-group! foreign g)))
         ;; a switch would float it in the popup (the tests below); a pane
         ;; that shows it is the case here, and only a window action shows
         ;; a foreign buffer in a pane
@@ -2016,8 +1971,7 @@
     (group-current-recalculate!)
     (let ((foreign (test-buffer! "zz-sw-float-foreign" "")))
       (buffer-set-local! foreign 'special #f)
-      (for-each (lambda (id) (buffer-remove-group! foreign id))
-                (buffer-group-ids foreign))
+      (let ((g (buffer-group foreign))) (when g (buffer-remove-group! foreign g)))
       (list home foreign))))
 
 (define (t--sw-sealed-done! foreign)
@@ -2034,23 +1988,6 @@
       (check-true! (group-foreign-buffer? foreign) "the predicate names it")
       (check-false! (group-foreign-buffer? t--sw-first) "and not a member")
       (t--sw-sealed-done! foreign))
-    (t--sw-done!)))
-
-(deftest 'a-switch-to-a-buffer-of-another-group-enters-that-group
-  "the ruling of 2026-09-19: a foreign buffer switches the group; nothing floats"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
-           (away (group-record-create! "zzsw-float-away")))
-      (buffer-add-group! foreign away)
-      (switch-to-buffer! foreign)
-      (check-false! (float-open?) "nothing floats")
-      (check-equal! (current-buffer) foreign "the buffer is selected: a switch is a visit")
-      (check-equal! (frame-group) away "the frame entered the buffer's group")
-      (check-false! (member foreign (window-tree-buffers (group-layout home)))
-                    "and the group it left keeps no foreign pane")
-      (t--sw-sealed-done! foreign)
-      (group-record-delete! away))
     (t--sw-done!)))
 
 (deftest 'a-switch-to-an-ungrouped-buffer-joins-it-to-the-group

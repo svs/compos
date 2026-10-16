@@ -1,42 +1,12 @@
 ;;; needle-test.scm --- packages/needle.scm: the on-device tool caller.
 ;;;
 ;;; Nothing here starts the daemon or answers a question. What this
-;;; package owns is where the daemon is registered, what its spec says,
-;;; which catalog rows it is allowed to offer, and which band a reply
-;;; falls in.
+;;; package owns is which catalog rows it is allowed to offer and which
+;;; band a reply falls in. Its registration and its script are checked
+;;; with every bundled daemon's, in endpoint-test.scm.
 
 (domain! 'testing)
 (effects! '(read))
-
-(deftest 'needle-registers-its-daemon-where-a-manager-looks
-  "the endpoint registry is the one place a long-lived program is named"
-  (lambda ()
-    (let ((spec (endpoint-spec "needle")))
-      (check-true! (pair? spec) "the daemon is in the endpoint registry")
-      (check-equal! (plist-get spec 'framing) "line"
-                    "one JSON line a request, one a reply")
-      (check-equal! (plist-get spec 'serves) "models"
-                    "and it says it serves models, which is how the list finds it")
-      (check-equal! (plist-get spec 'command) needle-uv
-                    "uv installs the engine's package and runs it")
-      (check-true! (member (needle-script) (plist-get spec 'args))
-                   "running the daemon that ships beside this package"))))
-
-(deftest 'needle-the-daemon-ships-with-the-editor
-  "a spec naming a script nobody installed is a daemon that never starts"
-  (lambda ()
-    (check-true! (file-exists? (needle-script)) "the daemon script is there")
-    (check-true! (string-suffix? "needle-daemon.py" (needle-script)) "under its own name")))
-
-(deftest 'needle-says-whether-this-machine-can-run-it
-  "a caller asks this before it offers the on-device route"
-  (lambda ()
-    (let ((held needle-uv))
-      (set! needle-uv "/no/such/uv")
-      (check-false! (needle-available?) "no uv, no needle")
-      (set! needle-uv held)
-      (check-equal! (needle-available?) (file-exists? needle-uv)
-                    "and with one, needle is as available as its uv"))))
 
 (deftest 'needle-offers-only-what-a-call-can-name
   "five slots, and a key or a mode in one of them is a slot spent on nothing"

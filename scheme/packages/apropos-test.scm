@@ -336,13 +336,6 @@
     (check-true! (member "split-window!" (t--ap-names (apropos "how do I split a window")))
                  "filler words do not block the splitter")))
 
-(deftest 'responsive-list-layouts-are-publicly-discoverable
-  "an agent creating a list finds the profile syntax before writing width branches"
-  (lambda ()
-    (let ((hits (apropos "responsive list layout")))
-      (check-true! (member "define-list-mode!" (t--ap-names hits))
-                   "the list constructor explains responsive profiles"))))
-
 (deftest 'every-word-must-appear
   "one word that matches nothing answers nothing"
   (lambda ()

@@ -168,6 +168,6 @@
           (id (group-record-create! "zz-ov-plain")))
       (buffer-add-group! buf id)
       (group-dissolve! id)
-      (check-equal! (buffer-group-ids buf) '() "the buffer is in no group")
+      (check-equal! (buffer-group buf) #f "the buffer is in no group")
       (check-false! (group-resolve-id "zz-ov-plain") "the record is gone")
       (buffer-kill! buf))))

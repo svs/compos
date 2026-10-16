@@ -62,7 +62,7 @@ defmodule Compos.StoreScanBench do
         {:ok, ^name} = Compos.Core.create_buffer(name)
         Buffer.append(name, text(i), source: :editor)
         Buffer.set_local(name, "mode-name", "text-mode")
-        Buffer.set_local(name, "group-ids", ["bench"])
+        Buffer.set_local(name, "group-id", "bench")
         id = Buffer.id(name)
         evict(name)
         id

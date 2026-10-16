@@ -91,7 +91,7 @@ defmodule Compos.Core.BufferRows do
     body =
       [:"$1", get.(:path), get.(:size), get.(:modified), live,
        local.("mode-name"), local.("context-only"), local.("list-title"),
-       local.("chat-title"), local.("last-seen"), local.("group-id"), local.("group-ids"),
+       local.("chat-title"), local.("last-seen"), local.("group-id"),
        local.("group"), local.("companion-of")] ++ Enum.map(extra, local)
 
     uses =
@@ -101,7 +101,7 @@ defmodule Compos.Core.BufferRows do
 
     BufferView.table()
     |> :ets.select([{{:"$1", m}, [{:is_binary, :"$1"}], [body]}])
-    |> Enum.map(fn [name, path, size, modified, live, mode, ctx, title, chat_title, seen, gid, gids,
+    |> Enum.map(fn [name, path, size, modified, live, mode, ctx, title, chat_title, seen, gid,
                     legacy, companion | rest] ->
       use = Map.get(uses, name, %{})
 
@@ -116,7 +116,7 @@ defmodule Compos.Core.BufferRows do
         "title" => title_of(name, title, chat_title),
         "used" => Map.get(use, :used) || (is_number(seen) && round(seen * 1000)) || 0,
         "windows" => Map.get(use, :windows, []),
-        "group" => group_key(mode, gid, gids, legacy, companion),
+        "group" => group_key(mode, gid, legacy, companion),
         "extra" => extra |> Enum.zip(Enum.map(rest, &BufferView.big_value/1)) |> Map.new()
       }
     end)
@@ -126,15 +126,12 @@ defmodule Compos.Core.BufferRows do
   end
 
   # The group a buffer's locals name: every buffer, a chat or not, keeps it
-  # in `group-id`. A row from before it with one `group-ids` entry names that
-  # one. A row only Scheme can settle (several ids, a legacy `group` or
+  # in `group-id`. A row only Scheme can settle (a legacy `group` or
   # `companion-of`) is "slow"; Scheme folds it into `group-id` on its read.
-  defp group_key(_mode, gid, gids, legacy, companion) do
+  defp group_key(_mode, gid, legacy, companion) do
     cond do
       is_binary(gid) -> gid
       set?(legacy) or set?(companion) -> "slow"
-      is_list(gids) and length(gids) > 1 -> "slow"
-      match?([id] when is_binary(id), gids) -> hd(gids)
       true -> nil
     end
   end

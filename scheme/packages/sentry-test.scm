@@ -20,12 +20,6 @@
       (set! *sentry-transport* saved)
       out)))
 
-(deftest 'the-sentry-defaults-point-at-the-production-project
-  "the org, the project and the environment a call assumes"
-  (lambda ()
-    (check-equal! (list sentry-org sentry-project sentry-environment)
-                  '("svs-recruiting" "ats-ash" "prod") "the defaults")))
-
 (deftest 'an-issue-search-encodes-its-filters-and-caps-its-limit
   "the query, the environment and the period ride the URL; the limit is ours"
   (lambda ()

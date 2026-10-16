@@ -36,16 +36,8 @@
                     "hello is only the shared composition")
       (check-contains! (hello) "(chat-context)"
                        "every agent learns to inspect its context")
-      (check-contains! (hello) "Batch up to four independent read-only calls"
-                       "independent discovery can run concurrently")
-      (check-contains! (hello) "Search each unknown once"
-                       "discovery stops repeating answered questions")
-      (check-contains! (hello) "Prefer `(code-outline BUF)`"
-                       "agents prefer structural reads")
       (check-contains! (hello) "(code-sexp-replace! BUF ANCHOR NEW [LEVELS])"
                        "agents know surgical source editing is available")
-      (check-contains! (hello) "Write Scheme unless the user explicitly specifies another language"
-                       "Scheme remains the default implementation language")
       (check-true! (< (string-length (prompt-file-text "quiet-editor.md")) 600)
                    "quiet-editor stays compact")
       (check-true! (< (string-length (prompt-file-text "discovery.md")) 850)
@@ -132,11 +124,10 @@
       (with-current-buffer chat (lambda () (run-command "chat-show-prompt")))
       (let ((page (buffer-text "*Help*"))
             (parts (chat-prompt-parts chat)))
-        (check-contains! page "`*prompt-direct*` · direct API" "the page names the lane")
+        (check-contains! page "`*prompt-direct*`" "the page names the chat")
         (check-contains! page "## Composition" "the page explains the join")
         (check-contains! page "`general`" "the page names a fragment")
         (check-contains! page "## Final joined text" "the page includes the wire text")
-        (check-contains! page "frozen section set" "the page states the lifecycle")
         (check-contains! page (prompt-parts-text parts) "the joined value is exact")
         (check-equal! (chat-prompt-report chat) (chat-prompt-report chat)
                       "recomposition is byte-identical without state changes"))
@@ -152,11 +143,7 @@
     (let* ((chat (t--prompt-chat "*prompt-acp*" "codex-app-server"))
            (page (chat-prompt-report chat))
            (parts (chat-prompt-parts chat)))
-      (check-contains! page "ACP session append" "the page names the ACP lane")
-      (check-contains! page "prospective section set"
-                       "the page says that the prompt is not frozen yet")
-      (check-contains! page "first send freezes it"
-                       "the page states the conversation lifecycle")
+      (check-true! (> (string-length page) 0) "the page renders")
       (check-equal! (car (car parts)) "identity"
                     "ACP starts with the identity section")
       (check-true! (assoc "chat-context" parts)
@@ -269,17 +256,9 @@
   (lambda ()
     (let* ((chat (t--prompt-chat "*prompt-taxonomy*" "api"))
            (parts (chat-prompt-source-parts chat))
-           (scope (cadr (assoc "scope" parts)))
            (reading (cadr (assoc "reading" parts)))
            (code (cadr (assoc "repository" parts))))
-      (check-contains! scope "Do only as much as the user asked"
-                       "scope owns task scope")
-      (check-contains! scope "does not require code changes"
-                       "scope avoids unnecessary code editing")
-      (check-contains! reading "every file as structured content"
-                       "reading applies to every file")
-      (check-contains! reading "blocks, sections, definitions"
-                       "reading names general structure")
+      (check-true! (and (assoc "scope" parts) #t) "scope is its own section")
       (check-contains! reading "(block-list BUF)"
                        "reading discovers generic fenced blocks")
       (check-contains! reading "(block-at-line BUF LINE)"

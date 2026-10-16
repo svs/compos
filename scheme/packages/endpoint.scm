@@ -15,7 +15,7 @@
 
 ;;; --- registry ----------------------------------------------------------------
 
-;; The registry table endpoint: — a spec a caller registered under a name, so a
+;; The registry table endpoint: a spec a caller registered under a name, so a
 ;; reconnect repeats it and nobody stores connection details twice.
 (define (endpoint-register! name spec)
   (registry-register! 'endpoint name spec))

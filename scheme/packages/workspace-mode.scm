@@ -156,8 +156,8 @@
 
 (category! 'buffers)
 (public! 'define-workspace-mode!
-  "(define-workspace-mode! NAME OPTS...) — register a minor mode that saves the locals it declares, gives them back on exit, pushes its presets to the scratch, and re-runs its setup on restore without saving twice")
+  "(define-workspace-mode! NAME OPTS...) - register a minor mode that saves the locals it declares, gives them back on exit, pushes its presets to the scratch, and re-runs its setup on restore without saving twice")
 (public! 'workspace-mode-apply!
-  "(workspace-mode-apply! NAME BUF) — run workspace mode NAME's setup on BUF again, keeping what the first enable saved")
+  "(workspace-mode-apply! NAME BUF) - run workspace mode NAME's setup on BUF again, keeping what the first enable saved")
 (public! 'workspace-mode-saved
-  "(workspace-mode-saved NAME BUF KEY) — what workspace mode NAME found in BUF under KEY before it changed it, or #f")
+  "(workspace-mode-saved NAME BUF KEY) - what workspace mode NAME found in BUF under KEY before it changed it, or #f")

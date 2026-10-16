@@ -254,3 +254,101 @@
                                    #f 'complete '()))))))
           ranges))
       (buffer-set-local! buf 'llm-legacy-responses #f))))
+
+;;; --- the scratch -------------------------------------------------------------------
+
+;; writing-mode owned scratch buffers once: the document held a
+;; 'writing-scratch pointer or its scratch was named *writing:DOC*, and
+;; the scratch carried writing's presentation. The pointer becomes
+;; 'scratch-buffer, the one a scratch command reads, and the scratch loses
+;; the old presentation so that scratch-mode's own is the last word.
+;; Either side completes the pair, whichever restores second.
+(define-buffer-migration! 'writing-scratch "2026-10-16"
+  (lambda (buf)
+    (let* ((saved (buffer-local buf 'writing-scratch))
+           (derived (string-append "*writing:" buf "*"))
+           (scratch (cond ((and saved (buffer-exists? saved)) saved)
+                          ((buffer-exists? derived) derived)
+                          (else #f))))
+      (when (and scratch (not (buffer-local buf 'scratch-buffer)))
+        (buffer-set-local! buf 'scratch-buffer scratch))
+      (when saved (buffer-set-local! buf 'writing-scratch #f)))
+    (when (and (string-prefix? "*writing:" buf) (string-suffix? "*" buf))
+      (let ((owner (substring-bytes buf 9 (- (string-byte-length buf) 1))))
+        (when (and (buffer-exists? owner)
+                   (not (buffer-local owner 'scratch-buffer)))
+          (buffer-set-local! owner 'scratch-buffer buf)))
+      (when (minor-mode-on? buf "writing-mode")
+        (disable-minor-mode! buf "writing-mode"))
+      (buffer-set-local! buf 'render-mode #f)
+      (buffer-set-local! buf 'preview-renderer #f)
+      (buffer-set-local! buf 'visual-line-mode #f))))
+
+;;; --- the browse history ------------------------------------------------------------
+
+;; the visited pages were <compos-home>/web-visited, one URL-space-TITLE
+;; line each; they are <compos-home>/web-history, one URL-tab-TIME-tab-TITLE
+;; line each. The old file reads once into the new shape, and a line
+;; with no tab in either file is the old shape and gets no time.
+(define (migration--web-history-line line)
+  (let ((l (string-trim line)))
+    (cond ((equal? l "") #f)
+          ((string-contains? l "\t") l)
+          (else
+            (let ((sp (string-index l " ")))
+              (if sp
+                  (string-append (substring-bytes l 0 sp) "\t0\t"
+                                 (string-trim (substring-bytes l (+ sp 1) (string-byte-length l))))
+                  (string-append l "\t0\t")))))))
+
+(define-home-migration! 'web-visited-to-history "2026-10-16"
+  (lambda ()
+    (let* ((new *web-visited-file*)
+           (old (string-append (parent-dir new) "/web-visited"))
+           (text (or (read-file new) (read-file old))))
+      (when (string? text)
+        (write-file! new
+          (string-append
+            (string-join
+              (filter string? (map migration--web-history-line (string-split text "\n")))
+              "\n")
+            "\n"))))))
+
+;;; --- the annotations ---------------------------------------------------------------
+
+;; a file inside a project kept its annotations in <compos-home>/annotations
+;; once; they live in <root>/.compos/annotations now. Each home store whose
+;; file sits in a project is copied there, unless the project has one.
+(define-home-migration! 'annotations-into-projects "2026-10-16"
+  (lambda ()
+    (let ((dir (string-append (compos-home) "/annotations")))
+      (when (file-exists? dir)
+        (for-each
+          (lambda (name)
+            (ignore-errors
+              (lambda ()
+                (when (string-suffix? ".scm" name)
+                  (let* ((source (string-append dir "/" name))
+                         (rel (string-join
+                                (string-split
+                                  (substring-bytes name 0 (- (string-byte-length name) 4))
+                                  "%2F")
+                                "/"))
+                         (target (annotate--store-file (string-append "/" rel))))
+                    (when (and target
+                               (not (equal? target source))
+                               (not (file-exists? target)))
+                      (write-file! target (or (read-file source) "()"))))))))
+          (list-dir dir))))))
+
+(effects! '(read))
+(define-command "list-migrations" "Show the registered one-shot migrations and their dates"
+  (lambda ()
+    (let ((all (append *buffer-migrations* *home-migrations*)))
+      (message
+        (if (null? all)
+            "No migrations are registered"
+            (string-join
+              (map (lambda (m) (string-append (symbol->string (car m)) " since " (car (cdr m))))
+                   all)
+              "; "))))))

@@ -940,6 +940,8 @@
 ;;;
 ;;; M-x code-mode toggles. Knobs live in the 'code customize group.
 
+(require 'workspace-mode)
+
 (domain! 'code)
 (effects! '(write))
 
@@ -949,7 +951,7 @@
 (define (code-mode--refresh! _v)
   (for-each
     (lambda (buf)
-      (when (minor-mode-on? buf "code-mode") (code-mode--apply! buf)))
+      (when (minor-mode-on? buf "code-mode") (workspace-mode-apply! "code-mode" buf)))
     (buffer-list)))
 
 (defcustom 'code-presets '(compos)
@@ -993,15 +995,11 @@
       code-instructions
       ""))
 
-(define (code-mode--saved buf key)
-  (let ((hit (assoc key (or (buffer-local buf 'code-mode-saved) '()))))
-    (and hit (cadr hit))))
-
 (define (code-mode--presets buf)
   ;; Rebuild from the pre-code-mode value on every refresh. Removing a preset
   ;; from code-presets then takes effect at once, instead of leaving behind
   ;; the value the previous refresh installed.
-  (let ((base (or (code-mode--saved buf 'chat-presets) '())))
+  (let ((base (or (workspace-mode-saved "code-mode" buf 'chat-presets) '())))
     (append code-presets
             (filter (lambda (preset) (not (member preset code-presets))) base))))
 
@@ -1069,26 +1067,16 @@
           (string-append " · "
                          (string-join (map symbol->string presets) " "))))))
 
-(define (code-mode--apply! buf)
-  ;; remember what we clobber, once — the saved alist persists, and the
-  ;; restore path re-runs this fn, which must not re-save code-mode's own
-  ;; values over the user's
-  (unless (buffer-local buf 'code-mode-saved)
-    (buffer-set-local! buf 'code-mode-saved
-      (list (list 'group (or (buffer-local buf 'group) #f))
-            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))
-            (list 'llm-model (or (buffer-local buf 'llm-model) #f))
-            (list 'modeline-info (or (buffer-local buf 'modeline-info) #f))
-            (list 'llm-mode-on (minor-mode-on? buf "llm-mode")))))
+(define (code-mode--setup! buf entering?)
   ;; the group is the agent's surface: it names these buffers in the chat's
   ;; system prompt, and `C-c g` adds any file the change touches from outside
   (buffer-set-local! buf 'group (code-mode--group buf))
   (buffer-set-local! buf 'chat-presets (code-mode--presets buf))
   ;; an empty setting means the editor's default, so clearing it must give the
-  ;; buffer its own model back — the same rebuild-from-base rule as the presets
+  ;; buffer its own model back - the same rebuild-from-base rule as the presets
   (buffer-set-local! buf 'llm-model
     (if (equal? code-model "")
-        (code-mode--saved buf 'llm-model)
+        (workspace-mode-saved "code-mode" buf 'llm-model)
         code-model))
   ;; "loads the presets" means the servers they name connect now, not on the
   ;; first question. The compos tools are native to this process, so
@@ -1098,26 +1086,19 @@
   ;; llm-mode owns in-buffer prompting: M-o here sends the source file, and
   ;; M-o in the scratch sends the conversation.
   (enable-minor-mode! buf "llm-mode")
-  ;; A scratch that is already open inherited the presets this buffer held
-  ;; BEFORE the mode, so push the new ones to it.
-  (when (boundp (quote scratch-refresh-llm!))
-    (scratch-refresh-llm! buf))
   (buffer-set-local! buf 'modeline-info (code-mode--label buf))
   (when (boundp (quote workspace-llm-defaults-note!))
     (workspace-llm-defaults-note! buf)))
 
-(define (code-mode--teardown! buf)
-  (buffer-set-local! buf 'group (code-mode--saved buf 'group))
-  (buffer-set-local! buf 'chat-presets (code-mode--saved buf 'chat-presets))
-  (buffer-set-local! buf 'llm-model (code-mode--saved buf 'llm-model))
-  (buffer-set-local! buf 'modeline-info (code-mode--saved buf 'modeline-info))
-  (unless (code-mode--saved buf 'llm-mode-on)
-    (disable-minor-mode! buf "llm-mode"))
-  (when (boundp (quote scratch-refresh-llm!))
-    (scratch-refresh-llm! buf))
-  (buffer-set-local! buf 'code-mode-saved #f))
-
-(register-minor-mode! "code-mode" code-mode--apply! code-mode--teardown!)
+;; The workspace definer remembers these locals on the first enable, gives
+;; them back on exit, pushes the presets to an open scratch, and re-runs
+;; the setup on restore. llm-mode is turned off on exit only when the mode
+;; found it off: it restores what it found, not what it would have set.
+(define-workspace-mode! "code-mode"
+  'locals '(group chat-presets llm-model modeline-info)
+  'modes '("llm-mode")
+  'scratch #t
+  'setup code-mode--setup!)
 
 (define (code-mode--enable! buf use-worktree)
   (buffer-set-local! buf 'workspace-isolation-choice

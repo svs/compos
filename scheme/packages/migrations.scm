@@ -319,9 +319,11 @@
 ;; a file inside a project kept its annotations in <compos-home>/annotations
 ;; once; they live in <root>/.compos/annotations now. Each home store whose
 ;; file sits in a project is copied there, unless the project has one.
+(define *migration-annotations-dir* #f) ; a test points it at a directory of its own
 (define-home-migration! 'annotations-into-projects "2026-10-16"
   (lambda ()
-    (let ((dir (string-append (compos-home) "/annotations")))
+    (let ((dir (or *migration-annotations-dir*
+                   (string-append (compos-home) "/annotations"))))
       (when (file-exists? dir)
         (for-each
           (lambda (name)

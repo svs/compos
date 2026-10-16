@@ -197,3 +197,59 @@
       (check-equal! (nm--query-of buf) "tag:inbox" "the old derived local cannot bypass the base")
       (check-false! (buffer-local buf 'notmuch-query) "and it is gone")
       (t--mg-done!))))
+
+;;; --- the inline LLM ----------------------------------------------------------------
+
+(deftest 'the-llm-responses-migration-makes-each-old-range-a-block
+  "an upgraded document keeps every old response highlight, as a block, through its first send"
+  (lambda ()
+    (let ((buf (t--mg! "Old\n\nPrompt")))
+      (buffer-set-local! buf 'llm-responses '((0 3)))
+      (migrate-buffer! buf)
+      (let ((blocks (llm-mode--addressable-kind buf 'llm-response)))
+        (check-equal! (length blocks) 1 "one block for the one range")
+        (check-equal! (plist-get (car blocks) 'state) 'complete "a complete response"))
+      (check-equal! (llm-mode--response-ranges buf) '((0 3)) "the reader paints it from the block")
+      (llm-mode--begin-turn! buf 7 11)
+      (check-equal! (llm-mode--response-ranges buf) '((0 3))
+                    "the empty pending address exists but does not paint")
+      (t--mg-done!))))
+
+(deftest 'a-stale-old-range-over-a-block-goes
+  "a broad old face frozen at the first send yields to the exact response block"
+  (lambda ()
+    (let ((buf (t--mg! "012345")))
+      (buffer-set-local! buf 'llm-legacy-responses '((0 6)))
+      (let ((id (block-create! buf 'llm-response 2 4 #f 'complete '())))
+        (block-close-end! buf id))
+      (migrate-buffer! buf)
+      (check-false! (buffer-local buf 'llm-legacy-responses) "the frozen mirror is gone")
+      (check-equal! (llm-mode--response-ranges buf) '((2 4))
+                    "only the exact addressable response remains")
+      (t--mg-done!))))
+
+;;; --- the scratch -------------------------------------------------------------------
+
+(deftest 'the-writing-scratch-migration-points-the-document-at-its-scratch
+  "either side completes the pair, and the scratch loses writing's presentation"
+  (lambda ()
+    (let ((doc (test-buffer! "zz-mg-doc" "text\n"))
+          (scratch (test-buffer! "*writing:zz-mg-doc*" "# notes\n")))
+      (buffer-set-local! doc 'migrations #f)
+      (buffer-set-local! scratch 'migrations #f)
+      (buffer-set-local! doc 'scratch-buffer #f)
+      (buffer-set-local! doc 'writing-scratch scratch)
+      (buffer-set-local! scratch 'render-mode "markdown")
+      (buffer-set-local! scratch 'preview-renderer "markdown")
+      (buffer-set-local! scratch 'visual-line-mode #t)
+      (migrate-buffer! doc)
+      (check-equal! (buffer-local doc 'scratch-buffer) scratch "the document points at its scratch")
+      (check-false! (buffer-local doc 'writing-scratch) "the old pointer is gone")
+      (buffer-set-local! doc 'scratch-buffer #f)
+      (migrate-buffer! scratch)
+      (check-equal! (buffer-local doc 'scratch-buffer) scratch "the scratch's side completes the pair too")
+      (check-false! (buffer-local scratch 'render-mode) "writing's presentation is gone")
+      (check-false! (buffer-local scratch 'preview-renderer) "all of it")
+      (check-false! (buffer-local scratch 'visual-line-mode) "so scratch-mode's own is the last word")
+      (buffer-kill! scratch)
+      (buffer-kill! doc))))

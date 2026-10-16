@@ -39,14 +39,11 @@
 
 ;;; --- the registry ------------------------------------------------------------
 
-;; (NAME . PLIST), one entry per kind. Registration by name replaces the
-;; old entry, so a package reload does not stack duplicates.
-(define *fence-kinds* '())
-
+;; The registry table fence-kind: the PLIST under the kind's name.
+;; Registration by name replaces the old entry, so a package reload does
+;; not stack duplicates.
 (define (fence-kind--put! name plist)
-  (set! *fence-kinds*
-    (cons (cons name plist)
-          (remove (lambda (e) (equal? (car e) name)) *fence-kinds*)))
+  (registry-register! 'fence-kind name plist)
   (fence-kind--push-run-langs!))
 
 ;; The rendered page offers the run key by language. The registry owns
@@ -54,16 +51,15 @@
 (define (fence-kind--push-run-langs!)
   (preview-run-langs!
     (fold (lambda (acc e)
-            (if (and (fence-kind--value (cdr e) 'run #f)
-                     (not (equal? (fence-kind--value (cdr e) 'runnable 'yes) #f)))
+            (if (and (fence-kind--value (cadr e) 'run #f)
+                     (not (equal? (fence-kind--value (cadr e) 'runnable 'yes) #f)))
                 (cons (car e) acc)
                 acc))
           '()
-          *fence-kinds*)))
+          (registry-list 'fence-kind))))
 
 (define (fence-kind name)
-  (let ((e (assoc (string-downcase name) *fence-kinds*)))
-    (and e (cdr e))))
+  (registry-lookup 'fence-kind (string-downcase name)))
 
 (define (fence-kind--value plist key default)
   (cond ((or (null? plist) (null? (cdr plist))) default)

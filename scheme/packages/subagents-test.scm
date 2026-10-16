@@ -7,13 +7,18 @@
 (domain! 'testing)
 (effects! '(write))
 
-(define *zz-sub-group* #f)
 
-(define (zz-sub-group!)
-  (if (and *zz-sub-group* (member *zz-sub-group* (group-ids)))
-      *zz-sub-group*
-      (begin (set! *zz-sub-group* (group-record-create! "zz-subagents-test"))
-             *zz-sub-group*)))
+
+(define (zz-sub-scene thunk)
+  (with-frame
+    (lambda (frame)
+      (with-fresh-group "zz-subagents-test"
+        (lambda (gid)
+          (unwind-protect
+            (lambda ()
+              (zz-sub-clear!)
+              (thunk gid))
+            zz-sub-clear!))))))
 
 (define (zz-sub-chat! name slug text)
   (test-buffer! name text)
@@ -21,17 +26,15 @@
   (buffer-set-local! name 'mode-name "chat-mode")
   name)
 
-(define (zz-sub-reset!)
-  (group-setting-set! (zz-sub-group!) 'subagents '())
+(define (zz-sub-clear!)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             '("zz-sub-parent" "zz-sub-kid-a" "zz-sub-kid-b" "*subagents*"))
   (delete-other-windows!))
 
 ;; one parent, two children, in that spawn order. PARENT? makes the
 ;; parent's own chat buffer; a killed parent has none.
-(define (zz-sub-setup! state parent?)
-  (zz-sub-reset!)
-  (group-setting-set! (zz-sub-group!) 'subagents
+(define (zz-sub-setup! gid state parent?)
+  (group-setting-set! gid 'subagents
     (list (list "zz-sub-parent-slug" state
                 "zz-sub-kid-a-slug" "zz-sub-kid-b-slug")))
   (when parent?

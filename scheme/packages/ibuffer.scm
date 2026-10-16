@@ -336,7 +336,12 @@
 ;;; --- what a row shows: the kind's answer, else the buffer's ------------------
 
 (define (ibuffer-row-dot b) (ibuffer-ask b 'dot ibuffer-buffer-dot))
-(define (ibuffer-row-name b) (ibuffer-ask b 'name ibuffer-buffer-name))
+(define (ibuffer-row-name b)
+  (let ((parts (ibuffer-ask b 'name ibuffer-buffer-name))
+        (depth (ibuffer-row-depth b)))
+    (if (and (> depth 0) (pair? parts) (pair? (cdr parts)) (string? (cadr parts)))
+        (list (car parts) (string-append (ibuffer-nest-indent depth) (cadr parts)))
+        parts)))
 (define (ibuffer-row-size b) (ibuffer-ask b 'size ibuffer-buffer-size))
 (define (ibuffer-row-label b) (ibuffer-ask b 'label ibuffer-buffer-label))
 (define (ibuffer-row-last b) (ibuffer-ask b 'last ibuffer-buffer-last))
@@ -731,6 +736,35 @@
   (map cadr (sort (map (lambda (row) (list (- 0 (or (ibuffer-row-size row) 0)) row))
                        rows))))
 
+;; Nesting: a row whose parent is listed follows it, indented, in the
+;; order the view sorts. The parent is the kind's 'parent, else the buffer's
+;; dismissal parent; a child whose parent is not listed stays where it sorts.
+(define (ibuffer-buffer-parent b) (and (buffer-known? b) (buffer-parent b)))
+(define (ibuffer-row-parent b) (ibuffer-ask b 'parent ibuffer-buffer-parent))
+(define *ibuffer-row-depths* '())
+(define (ibuffer-row-depth b)
+  (let ((d (and (string? b) (assoc b *ibuffer-row-depths*)))) (if d (cadr d) 0)))
+(define (ibuffer-nest rows)
+  (let* ((pairs (map (lambda (r) (list r (and (string? r) (ibuffer-row-parent r)))) rows))
+         (listed? (lambda (p) (and (string? p) (assoc p pairs) #t))))
+    (if (not (find (lambda (pr) (listed? (cadr pr))) pairs))
+        rows
+        (let ((out '()) (seen '()))
+          (define (walk r depth)
+            (unless (member r seen)
+              (set! seen (cons r seen))
+              (set! out (cons r out))
+              (when (> depth 0)
+                (set! *ibuffer-row-depths* (cons (list r depth) *ibuffer-row-depths*)))
+              (for-each (lambda (pr) (when (equal? (cadr pr) r) (walk (car pr) (+ depth 1))))
+                        pairs)))
+          (for-each (lambda (pr) (unless (listed? (cadr pr)) (walk (car pr) 0))) pairs)
+          ;; a cycle leaves rows no root reaches: they keep their place
+          (for-each (lambda (pr) (walk (car pr) 0)) pairs)
+          (reverse out)))))
+(define (ibuffer-nest-indent depth)
+  (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
+
 (define (ibuffer-sort-rows buf rows)
   (let ((mode (ibuffer-sort buf)))
     (cond ((equal? mode 'size) (ibuffer-sort-sizes rows))
@@ -779,7 +813,7 @@
 (define (ibuffer-section buf label key members face &optional as-is?)
   (if (null? members)
       '()
-      (let ((ordered (if as-is? members (ibuffer-sort-rows buf members))))
+      (let ((ordered (ibuffer-nest (if as-is? members (ibuffer-sort-rows buf members)))))
         (if (ibuffer-folded? key buf)
             (list (ibuffer-heading label key "folded" ordered face))
             (cons (ibuffer-heading label key "separator" ordered face) ordered)))))
@@ -902,6 +936,7 @@
 ;; redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows buf)
   (ibuffer-columns-clear!)
+  (set! *ibuffer-row-depths* '())
   (ibuffer-title-memo-clear!)
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
@@ -914,7 +949,7 @@
           ;; 'none says the table is one list: no heading, no section, the
           ;; rows in the view's own order. The switch prompts read this way
           ;; -- what you want is the buffer you used last, not its group.
-          ((equal? grouping 'none) (ibuffer-sort-rows buf rows))
+          ((equal? grouping 'none) (ibuffer-nest (ibuffer-sort-rows buf rows)))
           (else (ibuffer-group-sections
                   buf rows (frame-group))))))
 
@@ -3027,7 +3062,7 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-set-grouping! "(ibuffer-set-grouping! MODE [BUF]) — section the table by 'group, 'mode, or 'directory")
 (public! 'ibuffer-toggle-fold! "(ibuffer-toggle-fold! KEY [BUF]) — fold or unfold the section KEY names")
 (public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")
-(public! 'ibuffer-kind! "(ibuffer-kind! NAME PLIST) — register a row kind: 'when? 'dot 'name 'size 'label 'last 'match 'face 'modified? fns of a row")
+(public! 'ibuffer-kind! "(ibuffer-kind! NAME PLIST) — register a row kind: 'when? 'dot 'name 'size 'label 'last 'match 'face 'modified? 'parent fns of a row; a row follows its listed parent, indented")
 (public! 'ibuffer-scope! "(ibuffer-scope! NAME THUNK) — register a named scope; a view's 'ibuffer-scope local names it")
 (public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort, 'grouping, and 'footer fn")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys replace the template's by key, and add the rest")

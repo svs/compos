@@ -1544,13 +1544,6 @@
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary)
           (directory chat-directory)))
-      ;; A chat wears its title, not its file name. chat-restore renamed
-      ;; the buffer itself; every other door into an archived conversation
-      ;; -- the desktop, the chats list, plain find-file -- left it named
-      ;; after the .chat path, so the modeline said the path.
-      (let ((title (buffer-local buf 'chat-title)))
-        (when (and (string? title) (not (equal? (string-trim title) "")))
-          (rename-buffer! buf title)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
              (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))
@@ -1594,7 +1587,21 @@
                (not (chat-stateless? buf))))
         ;; the rewrite is presentation, not an edit the user made
         (buffer-mark-saved! buf))
-      #t)))
+      ;; A chat wears its title, not its file name. chat-restore renamed
+      ;; the buffer itself; every other door into an archived conversation
+      ;; -- the desktop, the chats list, plain find-file -- left it named
+      ;; after the .chat path, so the modeline said the path. The rename
+      ;; waits until the mode is set: the setup and the mode hooks after it
+      ;; still address the buffer by its path, and renaming under them
+      ;; left a raw file with the chat's name.
+      (let ((title (buffer-local buf 'chat-title)))
+        (when (and (string? title) (not (equal? (string-trim title) "")))
+          (debounce! (string-append "chat-title:" buf) 250
+                     (lambda (old)
+                       (when (and (buffer-known? old) (not (buffer-known? title)))
+                         (rename-buffer! old title)))
+                     buf)))
+      buf)))
 
 ;;; --- what a chat is made of -----------------------------------------------------
 ;;; The reset/restore bug class (a stale 'agent-queued deadlocking RET, a

@@ -294,7 +294,11 @@
         'match (lambda (b) (chats-metadata-text b))
         'face (lambda (b)
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
-        'modified? (lambda (b) #f)))
+        'modified? (lambda (b) #f)
+        ;; a spawned chat sits under the chat that spawned it
+        'parent (lambda (b)
+                  (let ((p (buffer-local b 'subagent-parent)))
+                    (and p (subagent-live-buffer p))))))
 
 ;; a saved conversation is a file no buffer holds
 (ibuffer-kind! 'archived
@@ -841,7 +845,13 @@
     'extra-rows (lambda (buf)
                   (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t))
     'text (lambda (b) (chat-list--read-text b))
-    'visit-row (lambda (path) (visit-in-group path (group-here)) (end-of-buffer!))
+    ;; only a saved conversation is a file: a row whose chat was killed
+    ;; since the list was drawn names no file, and visiting its title
+    ;; made an empty file buffer in its place
+    'visit-row (lambda (path)
+                 (if (and (string-prefix? "/" path) (file-exists? path))
+                     (begin (visit-in-group path (group-here)) (end-of-buffer!))
+                     (message (string-append path " is gone; g reads the chats again"))))
     'after-visit (lambda (b) (end-of-buffer!))
     'opts
       (list

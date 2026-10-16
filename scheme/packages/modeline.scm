@@ -823,12 +823,32 @@
                   (cons (dash--seg-rule)
                         (cons (car rest) (loop (cdr rest)))))))))
 
+(define *dash-child-states* '("your turn" "starting" "streaming" "idle" "stopped" "done"))
+
+;; a chat's children by state, "2 streaming · 1 your turn · 3 done"; a
+;; child whose buffer is gone does not count
+(define (dash--child-counts buf)
+  (let* ((kids (if (chat-buffer? buf)
+                   (filter subagent-live-buffer (subagent-children buf))
+                   '()))
+         (labels (map (lambda (c) (subagents-state-label (subagents-status c))) kids)))
+    (filter (lambda (row) (> (cadr row) 0))
+            (map (lambda (l) (list l (length (filter (lambda (x) (equal? x l)) labels))))
+                 *dash-child-states*))))
+
 (define (dash--children-seg buf)
-  (let ((n (if (boundp 'buffer-lineage-children) (length (buffer-lineage-children buf)) 0)))
-    (and (> n 0)
-         (dash--seg #f (list (list "f-dim" (string-append (number->string n)
-                                                           (if (= n 1) " child" " children"))))
-                    'left "dseg-inline dseg-children"))))
+  (let ((rows (if (boundp 'subagents-status) (dash--child-counts buf) '())))
+    (and (pair? rows)
+         (dash--seg #f
+           (let loop ((rs rows) (acc '()))
+             (if (null? rs)
+                 (reverse acc)
+                 (loop (cdr rs)
+                       (cons (list (if (equal? (car (car rs)) "your turn") "bn-strong" "f-dim")
+                                   (string-append (number->string (cadr (car rs))) " " (car (car rs))
+                                                  (if (null? (cdr rs)) "" " · ")))
+                             acc))))
+           'left "dseg-inline dseg-children"))))
 
 (define (dashboard-line-blocks buf &optional preset-cell)
   (let* ((vcs (dash--vcs buf))

@@ -751,6 +751,19 @@
         'children (list (chat-view--label "YOU")
                         (list 'tag "c-message-body" 'class "ag-user-text" 'text text))))
 
+;; a child's turn-end notice folds like a thought: its header line is the
+;; summary, and the reply it carries opens on demand
+(define (chat-view--subagent-notice? text)
+  (and (string? text) (string-prefix? "[subagent " text)))
+
+(define (chat-view--subagent-notice text)
+  (let ((lines (string-split text "\n")))
+    (list 'tag "details" 'class "ag-thought ag-subagent"
+          'attrs '(("author" "user") ("kind" "subagent"))
+          'children (list (list 'tag "summary" 'text (car lines))
+                          (list 'tag "c-message-body" 'class "ag-user-text"
+                                'text (string-join (cdr lines) "\n"))))))
+
 (define (chat-view--user-text buf b)
   (if (and (> (length b) 3) (string? (nth 3 b)))
       (nth 3 b)
@@ -822,7 +835,11 @@
 (define (chat-view-block buf b open-cards)
   (let ((s (nth 0 b)) (e (nth 1 b)) (kind (nth 2 b)))
     (cond
-      ((equal? kind "user") (chat-view--user "user" "ag-user" (chat-view--user-text buf b)))
+      ((equal? kind "user")
+       (let ((text (chat-view--user-text buf b)))
+         (if (chat-view--subagent-notice? text)
+             (chat-view--subagent-notice text)
+             (chat-view--user "user" "ag-user" text))))
       ((equal? kind "queued") (chat-view--user "queued" "ag-user ag-queued" (chat-view--user-text buf b)))
       ((equal? kind "prose")
        (list 'tag "c-agent" 'class "ag-prose"

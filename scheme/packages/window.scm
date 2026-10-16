@@ -2720,20 +2720,24 @@ bottom, as a window-rects row; #f past either end."
          (buf (window-buffer source))
          (point (window-point source))
          (past (window-prev-buffers source))
-         (eligible (filter (lambda (b)
-                            (and (not (equal? b buf))
-                                 (buffer-known? b) (not (buffer-context-only? b))
-                                 (not (float--class? b)) (not (peek-buffer? b))
-                                 (window-fill-member? b))) past)))
+         ;; what fills the pane the buffer leaves: the one rule, with the
+         ;; neighbor's buffer free since the moved buffer takes its place
+         (action (window-fill-decide
+                   (window-fill-snapshot source buf 'others #f
+                     'shown (filter (lambda (b)
+                                      (not (and neighbor (equal? b (window-buffer (car neighbor))))))
+                                    (window-fill-shown-elsewhere source)))
+                   (window-fill-buffers)))
+         (reveal (and (member (car action) '(show restore)) (cadr action))))
     (define (reveal-previous!)
-      (switch-to-buffer-here! (car eligible))
+      (switch-to-buffer-here! reveal)
       (set-window-prev-buffers! source
         (filter (lambda (b) (not (equal? b buf))) past)))
     (cond ((and (not neighbor) (buffer-move-spare-pane? dir))
            (cond ((or (not (layout-visible-window? (list source buf)))
                       (not (window-fill-member? buf)))
                   (message "Cannot move this buffer into a new pane"))
-                 ((null? eligible) (message "No previous buffer to reveal"))
+                 ((not reveal) (message "No previous buffer to reveal"))
                  (else
                    (let ((i (window-pane-index source)))
                      (reveal-previous!)
@@ -2751,7 +2755,7 @@ bottom, as a window-rects row; #f past either end."
            (cond ((or (not (layout-visible-window? (list source buf)))
                       (not (window-fill-member? buf)))
                   (message "Cannot move this buffer into a new pane"))
-                 ((null? eligible) (message "No previous buffer to reveal"))
+                 ((not reveal) (message "No previous buffer to reveal"))
                  (else (buffer-move-into-ring! dir source buf point reveal-previous!))))
           ((not neighbor) (message "No neighboring pane"))
           ((or (not (window-focusable? (car neighbor)))
@@ -2760,7 +2764,7 @@ bottom, as a window-rects row; #f past either end."
                (not (window-fill-member? buf)))
            (message "Cannot move this buffer into that pane"))
           ;; Nothing below it: the source pane closes and the buffer moves over.
-          ((null? eligible)
+          ((not reveal)
            (select-window! (car neighbor))
            (switch-to-buffer-here! buf)
            (window-set-point! (car neighbor) point)

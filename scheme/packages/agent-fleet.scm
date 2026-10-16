@@ -854,7 +854,8 @@
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "
                "answer a permission, r gives a title, k kills, a archives, D deletes, "
-               "+ starts a chat, g reads the "
+               "+ starts a chat, . shows the hidden chats too, the ones an agent "
+               "started for itself, and puts them away again, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
         'title (lambda (buf) "Chats")
@@ -865,7 +866,8 @@
         'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh")
-                ("+" "agent-open")))))
+                ("+" "agent-open")
+                ("." "ibuffer-toggle-hidden")))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
 

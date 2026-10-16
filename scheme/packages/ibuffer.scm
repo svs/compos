@@ -594,6 +594,8 @@
   ;; one read of the buffer rows: ibuffer-row? over each row's path, mode
   ;; and context-only, in the order the view sorts. The rows stay for the
   ;; kinds and the name ranks of this draw, so neither reads them again.
+  ;; A context-only buffer, an agent's own work, stays out until the list
+  ;; is asked to show the hidden ones (ibuffer-toggle-hidden).
   (let* ((sort-by (if (equal? (ibuffer-sort buf) 'size) 'size
                       (if (equal? (ibuffer-sort buf) 'recent) 'recent 'name)))
          (rows (filter (lambda (r)
@@ -601,11 +603,16 @@
                        (cadr (buffer-rows (list 'names (filter string? (ibuffer-scope-names buf))
                                                 'exclude-names (map car *ibuffer-views*)
                                                 'exclude-modes *ibuffer-view-modes*
+                                                'context-only (ibuffer-show-hidden? buf)
                                                 'sort sort-by
                                                 'fields '(mode path)))))))
     (set! *ibuffer-source-rows* rows)
     (set! *ibuffer-source-sort* sort-by)
     (map car rows)))
+
+(define (ibuffer-show-hidden? buf)
+  ;; #t when the list shows its context-only buffers too
+  (equal? (buffer-local buf 'ibuffer-show-hidden) #t))
 
 ;; The number the chip reads as "N of M". Working M out again means
 ;; asking every buffer in the scope five questions, and the scope cannot
@@ -2964,6 +2971,14 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
     (let ((buf (or (mb-list-target) (current-buffer))))
       (ibuffer-set-render-option! buf 'info (not (ibuffer-info? buf)))
       (ibuffer-table-redraw!))))
+
+(define-command "ibuffer-toggle-hidden" "Show the hidden buffers in this list too, or put them away"
+  (lambda ()
+    (let* ((buf (or (mb-list-target) (current-buffer)))
+           (show? (not (ibuffer-show-hidden? buf))))
+      (buffer-set-local! buf 'ibuffer-show-hidden show?)
+      (list-refresh! buf)
+      (message (if show? "Hidden buffers shown" "Hidden buffers put away")))))
 (define-command "ibuffer-toggle-pretty" "Toggle this list's formatting and report redraw milliseconds"
   (lambda ()
     (let* ((buf (or (mb-list-target) (current-buffer)))

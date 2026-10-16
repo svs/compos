@@ -391,17 +391,17 @@
 (public! 'test-forget-catalog!
   "(test-forget-catalog! KIND NAME) — drop a test's catalog entry; the M-x name stays until a restart")
 (public! 'with-stub
-  "(with-stub 'NAME VALUE THUNK) — run THUNK with the global NAME set to VALUE; the old value comes back after, also on an error")
+  "(with-stub 'NAME VALUE THUNK) - run THUNK with the global NAME set to VALUE; the old value comes back after, also on an error")
 (public! 'with-stubs
-  "(with-stubs ((NAME VALUE) ...) THUNK) — with-stub for several globals at once")
+  "(with-stubs ((NAME VALUE) ...) THUNK) - with-stub for several globals at once")
 (public! 'with-custom
-  "(with-custom 'NAME VALUE THUNK) — run THUNK with the customize variable NAME set to VALUE through its setter; the old value comes back after, also on an error")
+  "(with-custom 'NAME VALUE THUNK) - run THUNK with the customize variable NAME set to VALUE through its setter; the old value comes back after, also on an error")
 (public! 'with-customs
-  "(with-customs ((NAME VALUE) ...) THUNK) — with-custom for several settings at once")
+  "(with-customs ((NAME VALUE) ...) THUNK) - with-custom for several settings at once")
 (public! 'with-fresh-group
-  "(with-fresh-group NAME FN) — make a group record NAME, stale copies deleted first, and call (FN ID); the record goes after, also on an error")
+  "(with-fresh-group NAME FN) - make a group record NAME, stale copies deleted first, and call (FN ID); the record goes after, also on an error")
 (public! 'with-frame
-  "(with-frame FN) — make and select a frame, call (FN ID), then come back to the old frame and delete the new one, also on an error")
+  "(with-frame FN) - make and select a frame, call (FN ID), then come back to the old frame and delete the new one, also on an error")
 (public! 'load-tests-once! "(load-tests-once!) — load every test file the first time only; answers the test count")
 (public! 'reload-tests! "(reload-tests!) — forget the loaded kernel suite and read priv/tests again")
 (public! 'load-tests! "(load-tests!) — load the kernel's tests, every .scm under priv/tests; answers the test count")

@@ -460,3 +460,19 @@
                     (list 'ok #f)
                     "so it has no row, rather than raising")
       (buffer-kill! buf))))
+
+(deftest 'dot-shows-the-hidden-chats-and-puts-them-away
+  "a context-only chat, an agent's own, is out of the list until . asks for it"
+  (lambda ()
+    (chats-test-open! 'none 'name)
+    (buffer-context-only! "*zz-chats-b*")
+    (list-refresh! *chat-list*)
+    (check-false! (member "*zz-chats-b*" (chats-test-names))
+                  "at rest the hidden chat is not listed")
+    (with-current-buffer *chat-list* (lambda () (run-command "ibuffer-toggle-hidden")))
+    (check-true! (and (member "*zz-chats-b*" (chats-test-names)) #t)
+                 "after . the hidden chat is listed")
+    (with-current-buffer *chat-list* (lambda () (run-command "ibuffer-toggle-hidden")))
+    (check-false! (member "*zz-chats-b*" (chats-test-names))
+                  "and . again puts it away")
+    (chats-test-reset!)))

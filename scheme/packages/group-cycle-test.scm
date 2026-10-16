@@ -20,20 +20,18 @@
             *group-cycle-test-bufs*))
 
 (define (group-cycle-scene thunk)
-  (with-frame
-    (lambda (frame)
-      (with-stubs (list (list '*group-cycle-pos* 0) (list '*group-cycle-ring* '()))
-        (lambda ()
-          (with-fresh-group "zz-cyc-here"
-            (lambda (here)
-              (with-fresh-group "zz-cyc-there"
-                (lambda (there)
-                  (unwind-protect
-                    (lambda () (thunk))
-                    group-cycle-test-clear!))))))))))
+  (with-frame (lambda (frame) (group-cycle-groups-scene thunk))))
 
-(define (group-cycle-windows-scene thunk)
-  (group-cycle-scene (lambda () (with-frame-windows thunk))))
+(define (group-cycle-groups-scene thunk)
+  (with-stubs (list (list '*group-cycle-pos* 0) (list '*group-cycle-ring* '()))
+    (lambda ()
+      (with-fresh-group "zz-cyc-here"
+        (lambda (here)
+          (with-fresh-group "zz-cyc-there"
+            (lambda (there)
+              (unwind-protect
+                (lambda () (thunk))
+                group-cycle-test-clear!))))))))
 
 (define (group-cycle-test-chat! name group-id)
   (test-buffer! name "")
@@ -204,7 +202,7 @@
 (deftest 'group-cycle-same-mode-stays-in-its-window
   "cycling text buffers preserves the selected window and its neighbor"
   (lambda ()
-    (group-cycle-windows-scene
+    (group-cycle-groups-scene
       (lambda ()
         (group-cycle-test-open!)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
@@ -236,7 +234,7 @@
 (deftest 'mode-consolidate-gathers-history-and-preserves-unrelated-work
   "matching buffers move to one window; unrelated histories and foreign groups stay"
   (lambda ()
-    (group-cycle-windows-scene
+    (group-cycle-groups-scene
       (lambda ()
         (let* ((windows (group-consolidate-test-open!))
                (destination (car windows))
@@ -276,7 +274,7 @@
 (deftest 'mode-consolidate-keeps-the-other-stack-invisible-at-target-capacity
   "an invisible window keeps the other stack without changing the visible target"
   (lambda ()
-    (group-cycle-windows-scene
+    (group-cycle-groups-scene
       (lambda ()
         (group-cycle-test-open!)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")

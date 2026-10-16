@@ -201,6 +201,11 @@
         'detail-mode "ats-detail-mode"
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
         'list-keys (list (list "M-o" "site-app-agent" "agent"))
+        ;; M-O on a list: each top row's own chat reads its case; the orchestrator,
+        ;; on Sonnet, archives the answered ones and reports in one table
+        'bulk (list 'model "claude-sonnet-5-5"
+                    'rules "Read it with the ats-ash MCP tools. Do not approve, reject, edit, send or schedule anything. Answer in at most five lines; the first says approve, reject, edit or unsure, and the last is the case's link on svsrecruiting.com."
+                    'report "a table of case, what's proposed, your call, why in one line, and the link the case gave")
         ;; the status, stage or scope tabs a section's page draws above its rows
         'tabs-sheet (ats-sheet "tabs.xsl")
         ;; a suggestion card on a job page: recommend the job to them, or open them against it
@@ -588,7 +593,21 @@
         "the page's buttons are the same actions. Show a message to a candidate or client before it goes out."))))
 
 ;; what a new chat for an ATS page asks first; the page's own kind wins
+;; a case chat says whose case it is: "Approval: Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
+(define (ats-case-label src) (ats-row-label (or (buffer-local src 'site-app-row) '()) src))
+(define (ats-row-label row fallback)
+  (let* ((src fallback)
+         (who (or (plist-get row 'candidate) ""))
+         (job (or (plist-get row 'job) ""))
+         (co (or (plist-get row 'company) "")))
+    (cond ((equal? who "") src)
+          ((equal? job "") who)
+          ((equal? co "") (string-append who " (" job ")"))
+          (else (string-append who " (" job " @ " co ")")))))
+(mode-chat-title! "ats-detail-mode" ats-case-label)
+(mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"
-  "Brief me on this case: where it stands, what's open, and the next step you'd take.")
+  (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take.")))
 (mode-chat-opening! "ats-approval-mode"
-  "This approval is waiting on me. What's proposed, would you approve it, and why?")
+  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?")))
+

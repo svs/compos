@@ -1692,8 +1692,9 @@
                     (site-app-warm! name list-buf (list-ref rows j) page)))
                 (list (+ i 1) (+ i 2) (+ i 3) (- i 1))))))
 
-(define (site-app-show-detail! list-buf row &optional for-page)
-  ;; FOR-PAGE: the page the row belongs to, when the list is not one of the app's sections
+(define (site-app-show-detail! list-buf row &optional for-page quiet)
+  ;; FOR-PAGE: the page the row belongs to, when the list is not one of the app's sections.
+  ;; QUIET makes the page without showing it, and reads it only when that needs no live tab.
   (when row
     (let* ((name (plist-get (buffer-local list-buf 'site-app-spec) 'name))
            (spec (site-app-spec name))
@@ -1722,7 +1723,7 @@
         ;; the old read stays on screen until this one's answers replace it
         (unless cached (buffer-set-local! buf 'site-app-sections '()))
         (buffer-set-local! buf 'site-app-data-gen #f))
-      (display-buffer-detail! buf list-buf)
+      (unless quiet (display-buffer-detail! buf list-buf))
       (cond
         ((not sheet) #f)
         (fresh #f)
@@ -1736,7 +1737,9 @@
                  (site-app-render-detail! name row data))))))
         ((plist-get page 'detail-tab-param)
          (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids)
-         (site-app-warm-around! name list-buf row page))
+         (unless quiet (site-app-warm-around! name list-buf row page)))
+        ;; the live tab reads one page at a time; a quiet page waits for its chat to read it
+        (quiet #f)
         (else
          ;; no tab URLs: load the page in the live tab and press each tab
          (site-app-navigate! name url wait
@@ -2202,6 +2205,33 @@
            (page (site-app-show-detail! buf (list-current buf))))
       (when page (llm-companion-open! page)))))
 
+;; M-O: the top rows of the list, each worked by its page's own chat, the one
+;; M-o opens, with one orchestrator to report. The app's 'bulk plist tunes it:
+;; 'size (10), 'model for the orchestrator, 'rules for every case, 'report.
+(define-command "site-app-bulk-agents" "Hand the top rows to their pages' own chats, with one orchestrator to report"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (spec (site-app-spec (plist-get (buffer-local buf 'site-app-spec) 'name)))
+           (bulk (or (plist-get spec 'bulk) '()))
+           (size (or (plist-get bulk 'size) 10))
+           (rows (let loop ((es (filter (lambda (e) (list-selectable? buf e)) (list-entries buf))) (acc '()))
+                   (if (or (null? es) (>= (length acc) size))
+                       (reverse acc)
+                       (loop (cdr es) (cons (car es) acc)))))
+           (page (site-app-current-page buf))
+           (pages (filter (lambda (p) p) (map (lambda (row) (site-app-show-detail! buf row #f #t)) rows))))
+      (if (null? pages)
+          (message "no rows here")
+          (let ((orch (bulk-agents! pages
+                        (list 'title (string-append "Orchestrate: " (number->string (length pages)) " "
+                                                    (or (and page (plist-get page 'label)) "cases"))
+                              'model (plist-get bulk 'model)
+                              'rules (plist-get bulk 'rules)
+                              'report (plist-get bulk 'report)))))
+            (when orch
+              (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))))
+(catalog-meta! 'command "site-app-bulk-agents" 'domain 'chat 'effects '(write spend display))
+
 (define (define-site-app spec)
   (let* ((name (plist-get spec 'name))
          (title (or (plist-get spec 'title) (symbol->string name)))
@@ -2248,7 +2278,7 @@
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
                   'debounce #t
-                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
+                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts") (list "M-O" "agents")
                                             (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
                   ;; Digits are left free so they reach the page beside the list, as
                   ;; its tab keys; the sections move to M-digit.
@@ -2261,6 +2291,8 @@
                                       ;; the page beside the list, part by part, without leaving the row
                                       (list "M-<down>" "site-app-detail-anchor-next")
                                       (list "M-<up>" "site-app-detail-anchor-prev")
+                                      ;; the top rows, each to its page's own chat, with one orchestrator
+                                      (list "M-O" "site-app-bulk-agents")
                                       (list "q" "quit-window"))
                                 ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
                                 (map (lambda (k) (list (car k) (cadr k))) list-keys)

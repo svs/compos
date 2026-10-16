@@ -61,7 +61,8 @@
     if (e.altKey) {
       // Option-Space arrives as a no-break space in some engines
       if (e.code === "Space") return "SPC";
-      if (e.code.startsWith("Key")) return e.code.slice(3).toLowerCase();
+      // Option-Shift-O is M-O, as in Emacs, not M-o
+      if (e.code.startsWith("Key")) return e.shiftKey ? e.code.slice(3).toUpperCase() : e.code.slice(3).toLowerCase();
       if (e.code.startsWith("Digit")) return e.code.slice(5);
       if (CODE_CHARS[e.code]) return CODE_CHARS[e.code][e.shiftKey ? 1 : 0];
     }

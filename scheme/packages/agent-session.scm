@@ -1425,6 +1425,65 @@
 (catalog-meta! 'function "subagent-result" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-collect" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-wait" 'domain 'chat 'effects '(write))
+
+;; Bulk handover. Each buffer's own chat, the one M-o opens, works that buffer,
+;; and is reused when it exists, so a case keeps one chat and its history
+;; however often it is handed over; a chat mid-turn is left alone. An answered
+;; chat stops its process but stays, and the next handover wakes it. One orchestrator reports: it is
+;; woken once, when every case is in, so it spends a single turn.
+(define (bulk-agents--report results skipped opts)
+  (string-append
+    "These chats each worked one case. For every one that answered, eval (subagent-verdict! SLUG 'done ONE-LINE) "
+    "and (agents-kill-runtime! (subagent-live-buffer SLUG)), all in one eval: its process stops and the chat stays on its page "
+    "with its history. Leave one that is stuck or asks something.\n\n"
+    "Then reply once: " (or (plist-get opts 'report) "a table of case, your call, why in one line")
+    ". After it, list the chats you left open"
+    (if (null? skipped) "." ", and these, skipped because they were already working: ")
+    (string-join skipped ", ")
+    "\n\n"
+    (string-join
+      (map (lambda (r)
+             (string-append "- " (or (plist-get r 'buffer) "?") " (" (or (plist-get r 'slug) "?") "): "
+                            (let ((t (plist-get r 'text))) (if (equal? t "") "(no answer)" t))))
+           results)
+      "\n")))
+
+(define (bulk-agents! bufs opts)
+  (let* ((rules (plist-get opts 'rules))
+         ;; the chats work for the group the cases were handed from, with its defaults
+         (g (or (plist-get opts 'group) (buffer-group (current-buffer))))
+         (pairs (map (lambda (b) (cons b (llm-companion-ensure! b g))) bufs))
+         ;; a chat made just now is starting up, not busy
+         (busy? (lambda (p) (let ((s (buffer-local (cadr p) 'agent-slug)))
+                              (and (not (caddr p)) s (subagent-running? s)))))
+         (work (filter (lambda (p) (not (busy? p))) pairs))
+         (skipped (map cadr (filter busy? pairs))))
+    (if (null? work)
+        (begin (message "every case is already being worked") #f)
+        (let* ((slug (execute* "" (list 'title (or (plist-get opts 'title) "Orchestrate")
+                                         'model (plist-get opts 'model))))
+               (orch (subagent-live-buffer slug)))
+          (for-each
+            (lambda (p)
+              (let* ((chat (cadr p))
+                     (ask (or (chat-opening-prompt (car p))
+                              "Brief me on this: where it stands, what's open, and the next step you'd take.")))
+                (subagent-record! slug chat)
+                ;; an earlier turn's end, or an earlier run's done, must not count as this one's
+                (buffer-set-local! chat 'subagent-turn-end #f)
+                (when (subagent-verdict-of (subagent-slug chat))
+                  (subagent-log-append! (subagent-slug chat) 'verdict "again: handed over again"))
+                (agent-continue! chat (if (string? rules) (string-append ask "\n\n" rules) ask))))
+            work)
+          (subagent-wait (map cadr work)
+            (lambda (results) (agent-continue! orch (bulk-agents--report results skipped opts))))
+          (message (string-append "handed " (number->string (length work)) " to " orch
+                                  (if (null? skipped) "" (string-append ", " (number->string (length skipped)) " already working"))))
+          orch))))
+
+(public! 'bulk-agents!
+  "(bulk-agents! BUFS OPTS) — each buffer's own chat (the one M-o opens, reused if it exists) works it; one orchestrator stops the answered chats (they keep their page and history) and reports once all are in. OPTS: 'group (default: the current buffer's) 'title 'model (the orchestrator's) 'rules (added to every case) 'report (what the reply shows)")
+(catalog-meta! 'function "bulk-agents!" 'domain 'chat 'effects '(write spend))
 (catalog-meta! 'function "subagent-done?" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-stopped?" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-mark-done!" 'domain 'chat 'effects '(write))
@@ -1448,7 +1507,9 @@
   ;; agent-next-slug only names the buffer now; the session slug is the
   ;; chat's durable id, assigned by chat-attach-agent!
   (let* ((name (agent-next-slug))
-         (buf (agent-chat-buffer name)))
+         (buf (agent-chat-buffer name))
+         ;; read before buffer-create, which makes the new chat current
+         (spawner-group (buffer-group (current-buffer))))
     (buffer-create buf)
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins
@@ -1476,10 +1537,21 @@
     ;; with (subagent-result SLUG) and spends nothing.
     (when (plist-get opts 'notify)
       (buffer-set-local! buf 'subagent-notify #t))
+    ;; the group's own defaults (its 'llm bundle: presets, permission,
+    ;; connector, model) land first, as on any new chat in the group; an
+    ;; explicit opt still wins. The chat joins its group later, so the
+    ;; spawner's group stands in for it here.
+    (let ((g (or (buffer-group buf) spawner-group)))
+     (when (and g (boundp 'llm-default-bundle-apply!))
+      (llm-default-bundle-apply! buf g)
+      (let ((ps (plist-get opts 'presets)))
+        (when ps (buffer-set-local! buf 'chat-presets ps)))
+      (let ((pm (plist-get opts 'permission-mode)))
+        (when pm (buffer-set-local! buf 'chat-permission-mode pm)))))
     (chat-task-init! buf name)
     (let ((slug (chat-attach-agent! buf
-                  (or (plist-get opts 'connector) *default-connector*)
-                  (plist-get opts 'model)
+                  (or (plist-get opts 'connector) (buffer-local buf 'agent-connector) *default-connector*)
+                  (or (plist-get opts 'model) (buffer-local buf 'agent-model))
                   opts)))
       ;; a spawn is quiet: the child gets its mode on its own buffer, and no
       ;; window, point or focus of the spawner's moves. Interactive callers

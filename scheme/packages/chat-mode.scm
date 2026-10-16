@@ -540,11 +540,12 @@
         (find (lambda (c) (equal? (buffer-local c 'chat-companion-of) buf))
               (filter chat-buffer? (buffer-list))))))
 
-(define (llm-mode--companion! buf &optional model)
+(define (llm-mode--companion! buf &optional model group)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
-  ;; document chose its own model or connector
+  ;; document chose its own model or connector. GROUP, when given, is the chat's
+  ;; group in place of the document's.
   (let* ((name (or (llm-mode--companion-existing buf) (llm-mode--companion-name buf)))
-         (g (buffer-group buf))
+         (g (or group (buffer-group buf)))
          (bundle (and g (boundp 'llm-group-bundle) (llm-group-bundle g)))
          (bundle-model (and bundle (let ((m (llm-bundle-model bundle))) (if (equal? m "default") #f m))))
          (connector (or (buffer-local buf 'llm-connector)
@@ -644,13 +645,27 @@
 (add-hook! 'chat-mode-hook 'chat--source-modes-hook!)
 
 ;; a page that takes no text, an app page, talks in its chat: M-o pops it up
-(define (llm-companion-open! buf)
+(define (llm-companion-ensure! buf &optional group)
+  ;; BUF's chat, the one M-o opens, made quietly when it has none: (CHAT NEW?).
+  ;; Nothing shows and nothing is sent. GROUP puts the chat in that group.
   (let* ((new? (not (llm-mode--companion-existing buf)))
-         (chat (llm-mode--companion! buf (buffer-llm-model buf)))
-         (opening (and new? (chat-opening-prompt buf))))
+         (made (llm-mode--companion! buf (buffer-llm-model buf) group))
+         ;; a mode that names its chats names this one before it speaks, so no title is guessed from the opening
+         (title (and new? (chat-mode-title buf)))
+         (chat (or (and title (chat-title made title) (llm-mode--companion-existing buf)) made)))
+    (list chat new?)))
+
+(define (llm-companion-open! buf)
+  (let* ((got (llm-companion-ensure! buf))
+         (chat (car got))
+         (opening (and (cadr got) (chat-opening-prompt buf))))
     (pop-to-buffer chat)
     (when opening (agent-continue! chat opening))
     chat))
+
+(public! 'llm-companion-ensure!
+  "(llm-companion-ensure! BUF [GROUP]) — BUF's own chat, the one M-o opens, made and titled quietly when it has none: (CHAT NEW?); shows nothing, sends nothing")
+(catalog-meta! 'function "llm-companion-ensure!" 'domain 'chat 'effects '(write))
 
 ;; the first thing a new chat for a buffer asks: the most specific of its
 ;; modes that has one, a minor mode before the major mode and its parents
@@ -659,16 +674,29 @@
 
 (define (mode-chat-opening! mode text) (set! *chat-openings* (alist-put *chat-openings* mode text)))
 
-(define (chat-opening-prompt src)
+(define (chat-mode-pick src table)
   (let loop ((modes (reverse (chat-source-modes src))))
     (if (null? modes) #f
-        (let ((hit (assoc (car modes) *chat-openings*)))
+        (let ((hit (assoc (car modes) table)))
           (if hit
               (let ((o (cadr hit))) (if (procedure? o) (o src) o))
               (loop (cdr modes)))))))
 
+(define (chat-opening-prompt src) (chat-mode-pick src *chat-openings*))
+
+;; the title a new chat for a buffer takes, the same way: the most specific of its modes that names one
+(define *chat-titles* (if (boundp '*chat-titles*) *chat-titles* '()))
+
+(define (mode-chat-title! mode text) (set! *chat-titles* (alist-put *chat-titles* mode text)))
+
+(define (chat-mode-title src) (chat-mode-pick src *chat-titles*))
+
 (public! 'mode-chat-opening!
   "(mode-chat-opening! MODE TEXT) — TEXT, or (TEXT SOURCE), is the first prompt of a new chat made for a buffer in MODE")
+(public! 'mode-chat-title!
+  "(mode-chat-title! MODE TEXT) — TEXT, or (TEXT SOURCE), is the title of a new chat made for a buffer in MODE")
+(public! 'chat-mode-title
+  "(chat-mode-title SOURCE) — the title SOURCE's modes give a new chat, or #f")
 (public! 'chat-opening-prompt
   "(chat-opening-prompt SOURCE) — the opening prompt SOURCE's modes give a new chat, or #f")
 

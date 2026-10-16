@@ -45,13 +45,12 @@
 (deftest 'a-chat-is-named-for-its-group
   "the group's label is the chat's name, and a path label reads as its file"
   (lambda ()
-    (let ((id (group-record-create! "zzname-plain")))
-      (check-equal! (group-chat-name id) "*chat:zzname-plain*" "a plain label")
-      (t--rn-drop! id))
-    (let ((id (group-record-create! "/zz/deep/notes.md")))
-      (check-equal! (group-chat-name id) "*chat:notes.md*"
-                    "a path label reads as the file, not the path")
-      (t--rn-drop! id))))
+    (with-fresh-group "zzname-plain"
+      (lambda (id) (check-equal! (group-chat-name id) "*chat:zzname-plain*" "a plain label")))
+    (with-fresh-group "/zz/deep/notes.md"
+      (lambda (id)
+        (check-equal! (group-chat-name id) "*chat:notes.md*"
+                      "a path label reads as the file, not the path")))))
 
 (deftest 'renaming-a-group-renames-its-chat
   "the chat is named for the group, so it follows the group"
@@ -182,21 +181,21 @@
   "chat-retitle! takes the typed title; a blank answer takes the model path"
   (lambda ()
     (let ((buf "*zz-retitle*") (named "*zz-retitle-named*")
-          (asked #f) (after 0)
-          (saved chat-summary-refresh!))
+          (asked #f) (after 0))
       (t--rn-kill! buf named)
       (buffer-create buf)
-      (set! chat-summary-refresh! (lambda (b &optional force?) (set! asked (list b force?)) #t))
-      (chat-retitle! buf (lambda () (set! after (+ after 1))))
-      (minibuffer-input! "   ")
-      (run-command "minibuffer-confirm-input")
-      (check-equal! asked (list buf #t) "a blank answer asks the model, forced")
-      (check-true! (buffer-known? buf) "and the name stays until the model answers")
-      (chat-retitle! buf (lambda () (set! after (+ after 1))))
-      (minibuffer-input! named)
-      (run-command "minibuffer-confirm-input")
-      (check-true! (buffer-known? named) "a typed answer is the new name")
-      (check-equal! (buffer-local named 'chat-title) named "and it is the chat's title")
-      (check-equal! after 2 "the caller hears each answer")
-      (set! chat-summary-refresh! saved)
+      (with-stub 'chat-summary-refresh!
+        (lambda (b &optional force?) (set! asked (list b force?)) #t)
+        (lambda ()
+          (chat-retitle! buf (lambda () (set! after (+ after 1))))
+          (minibuffer-input! "   ")
+          (run-command "minibuffer-confirm-input")
+          (check-equal! asked (list buf #t) "a blank answer asks the model, forced")
+          (check-true! (buffer-known? buf) "and the name stays until the model answers")
+          (chat-retitle! buf (lambda () (set! after (+ after 1))))
+          (minibuffer-input! named)
+          (run-command "minibuffer-confirm-input")
+          (check-true! (buffer-known? named) "a typed answer is the new name")
+          (check-equal! (buffer-local named 'chat-title) named "and it is the chat's title")
+          (check-equal! after 2 "the caller hears each answer")))
       (t--rn-kill! buf named))))

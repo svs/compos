@@ -152,11 +152,7 @@
 ;; The transcript window. The test chat's blocks hold 6, 20 and 8 bytes,
 ;; oldest first. A budget of 15 draws only the newest block.
 (define (chat-view-test--with-window bytes thunk)
-  (let ((was chat-view-window-bytes))
-    (set! chat-view-window-bytes bytes)
-    (let ((r (thunk)))
-      (set! chat-view-window-bytes was)
-      r)))
+  (with-stub 'chat-view-window-bytes bytes thunk))
 
 (define (chat-view-test--drawn buf)
   (map (lambda (r) (plist-get r 'class))

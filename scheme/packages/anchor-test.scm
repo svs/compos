@@ -64,14 +64,13 @@
 (deftest 'anchor-walk-stops-without-wrap
   "anchor-wrap #f leaves point where it is at the end"
   (lambda ()
-    (let ((saved anchor-wrap))
-      (set! anchor-wrap #f)
-      (t--anchor-with
-        (lambda ()
-          (goto-char! 39)
-          (check-false! (run-command "anchor-next") "no next anchor")
-          (check-equal! (buffer-point *t-anchor-buf*) 39 "and point did not move")))
-      (set! anchor-wrap saved))))
+    (with-stub 'anchor-wrap #f
+      (lambda ()
+        (t--anchor-with
+          (lambda ()
+            (goto-char! 39)
+            (check-false! (run-command "anchor-next") "no next anchor")
+            (check-equal! (buffer-point *t-anchor-buf*) 39 "and point did not move")))))))
 
 (deftest 'the-anchor-at-point-owns-the-keys
   "the anchor's keymap is in force inside it and gone outside it"

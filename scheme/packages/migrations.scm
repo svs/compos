@@ -187,3 +187,70 @@
         (unless (buffer-local buf 'group-id)
           (buffer-set-local! buf 'group-id (car ids)))
         (buffer-set-local! buf 'group-ids #f)))))
+
+;;; --- the diff ----------------------------------------------------------------------
+
+;; a diff saved before the backend split names its mode git-diff or
+;; git-show and carries 'git-* locals: the git backend and its 'diff-*
+;; locals take over, and the mode takes its current name
+(define-buffer-migration! 'git-diff-backend "2026-10-16"
+  (lambda (buf)
+    (let ((mode (buffer-local buf 'mode-name)))
+      (when (member mode '("git-diff" "git-show"))
+        (unless (buffer-local buf 'diff-backend)
+          (buffer-set-local! buf 'diff-backend "git")
+          (when (buffer-local buf 'git-root)
+            (buffer-set-local! buf 'diff-root (buffer-local buf 'git-root)))
+          (buffer-set-local! buf 'diff-scope (or (buffer-local buf 'git-prefix) ""))
+          (when (buffer-local buf 'git-watch)
+            (buffer-set-local! buf 'diff-watch #t)))
+        (buffer-set-local! buf 'git-root #f)
+        (buffer-set-local! buf 'git-prefix #f)
+        (buffer-set-local! buf 'git-watch #f)
+        (buffer-set-local! buf 'mode-name
+          (if (equal? mode "git-diff") "diff-mode" "diff-show"))))))
+
+;;; --- the mail ----------------------------------------------------------------------
+
+;; a search saved before the query stack carries one derived
+;; 'notmuch-query: it becomes the base with no filters
+(define-buffer-migration! 'notmuch-query-stack "2026-10-16"
+  (lambda (buf)
+    (let ((old (buffer-local buf 'notmuch-query)))
+      (when old
+        (unless (buffer-local buf 'notmuch-query-base)
+          (buffer-set-local! buf 'notmuch-query-base old)
+          (buffer-set-local! buf 'notmuch-query-filters '()))
+        (buffer-set-local! buf 'notmuch-query #f)))))
+
+;;; --- the inline LLM ----------------------------------------------------------------
+
+;; a document saved before addressable blocks carries its M-o responses as
+;; (START END) ranges: 'llm-responses mirrored the painted overlays, and
+;; 'llm-legacy-responses froze that mirror at the first addressable send.
+;; Each range becomes one complete llm-response block, so the block
+;; records are the one place a response lives. A range over a block that
+;; already exists is stale and goes; the mirror stays, written from the
+;; blocks from now on.
+(define-buffer-migration! 'llm-responses-to-blocks "2026-10-16"
+  (lambda (buf)
+    (let* ((blocks (llm-mode--addressable-kind buf 'llm-response))
+           (turns (llm-mode--addressable-turn-ranges buf))
+           (ranges (or (buffer-local buf 'llm-legacy-responses)
+                       (if (null? blocks) (buffer-local buf 'llm-responses) '())))
+           (size (buffer-size buf)))
+      (when (pair? ranges)
+        (for-each
+          (lambda (range)
+            (when (and (pair? range)
+                       (number? (car range)) (number? (cadr range))
+                       (<= 0 (car range)) (< (car range) (cadr range))
+                       (<= (cadr range) size)
+                       (not (llm-mode--range-overlaps-any? range turns)))
+              (ignore-errors
+                (lambda ()
+                  (block-close-end! buf
+                    (block-create! buf 'llm-response (car range) (cadr range)
+                                   #f 'complete '()))))))
+          ranges))
+      (buffer-set-local! buf 'llm-legacy-responses #f))))

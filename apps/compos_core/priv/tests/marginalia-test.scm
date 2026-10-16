@@ -62,7 +62,6 @@
     (test-forget-catalog! "command" "zzmarg-frob")
     (test-forget-catalog! "command" "zzmarg-plain")))
 
-
 ;;; --- the prompts -----------------------------------------------------------------
 
 (define (t--marg-hint label)

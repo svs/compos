@@ -1177,10 +1177,14 @@
 (define (subagent-last-assistant chat)
   (let ((buf (subagent-live-buffer chat)))
     (and buf
-         (let loop ((ts (reverse (chat-turns buf))))
-           (cond ((null? ts) #f)
-                 ((equal? (car (car ts)) "assistant") (nth 1 (car ts)))
-                 (else (loop (cdr ts))))))))
+         ;; newest first; stop at the user's words that began this turn, so an older reply never answers
+         (let loop ((rs (chat-record buf)))
+           (cond ((null? rs) #f)
+                 ((equal? (plist-get (car rs) 'role) "assistant") (chat-turn-display (car rs)))
+                 ((and (equal? (plist-get (car rs) 'role) "user")
+                       (not (equal? (chat-turn-display (car rs)) "")))
+                  #f)
+                 (else (loop (cdr rs))))))))
 
 ;; THE reply shape. A plist, because one caller reads one field and a list
 ;; view reads another:

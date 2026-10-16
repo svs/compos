@@ -1,4 +1,8 @@
-;;; migrations-test.scm --- one-shot buffer migrations run once and stamp.
+;;; migrations-test.scm --- every old shape converts once, and the reader sees the new one.
+;;;
+;;; The two registries run what a buffer or a home has not seen and stamp
+;;; it. Each registered migration has one test here: the old shape goes
+;;; in, the current shape comes out, and the package's reader answers it.
 
 (domain! 'testing)
 (effects! '(write))
@@ -11,6 +15,31 @@
   t--mg-buf)
 
 (define (t--mg-done!) (when (buffer-known? t--mg-buf) (buffer-kill! t--mg-buf)))
+
+;; a home of the test's own: the stamp file, the browse history and the
+;; annotation store live there, and the person's own are put back after
+(define t--mg-dir "/tmp/zz-migrations-home")
+
+(define (t--mg-home! thunk)
+  (let ((held-stamp *home-migrations-file*)
+        (held-visited *web-visited-file*)
+        (held-annotations *migration-annotations-dir*))
+    (shell-command->string (string-append "rm -rf " t--mg-dir))
+    (make-directory! t--mg-dir)
+    (set! *home-migrations-file* (string-append t--mg-dir "/migrations"))
+    (set! *web-visited-file* (string-append t--mg-dir "/web-history"))
+    (set! *migration-annotations-dir* (string-append t--mg-dir "/annotations"))
+    (thunk)
+    (set! *home-migrations-file* held-stamp)
+    (set! *web-visited-file* held-visited)
+    (set! *migration-annotations-dir* held-annotations)
+    (shell-command->string (string-append "rm -rf " t--mg-dir))))
+
+;; the registered body of one home migration, run outside the stamp
+(define (t--mg-home-run! name)
+  ((car (cdr (cdr (assoc name *home-migrations*))))))
+
+;;; --- the registries --------------------------------------------------------------
 
 (deftest 'a-migration-runs-once-per-buffer-and-is-stamped
   "the pass runs what the buffer has not seen; a second pass runs nothing"
@@ -33,6 +62,28 @@
       (check-equal! runs 1 "still once")
       (set! *buffer-migrations* held)
       (t--mg-done!))))
+
+(deftest 'a-home-migration-runs-once-per-home-and-is-stamped
+  "the stamp file holds the names; a second pass runs nothing"
+  (lambda ()
+    (t--mg-home!
+      (lambda ()
+        (let ((runs 0)
+              (held *home-migrations*))
+          (set! *home-migrations* '())
+          (define-home-migration! 'zz-home-count "2026-10-16"
+            (lambda () (set! runs (+ runs 1))))
+          (define-home-migration! 'zz-home-throws "2026-10-16"
+            (lambda () (error "a migration that fails")))
+          (check-equal! (migrate-home!) '(zz-home-count zz-home-throws) "both ran")
+          (check-equal! runs 1 "once")
+          (check-equal! (home-migrations-done) '(zz-home-count zz-home-throws)
+                        "the stamp file names them, the failure too")
+          (check-equal! (migrate-home!) '() "the second pass runs nothing")
+          (check-equal! runs 1 "still once")
+          (set! *home-migrations* held))))))
+
+;;; --- the chat ----------------------------------------------------------------------
 
 (deftest 'the-chat-record-migration-reads-the-old-turn-pairs-once
   "'chat-turns becomes the record and the old local goes"
@@ -68,6 +119,8 @@
       (check-equal! (buffer-local doc 'group) doc "and the document names it too")
       (buffer-kill! doc)
       (t--mg-done!))))
+
+;;; --- the terminal ------------------------------------------------------------------
 
 (deftest 'the-shell-mode-migration-renames-the-mode
   "an old desktop says shell-mode; the buffer wakes as term-mode"

@@ -240,28 +240,24 @@
 (deftest 'semantic-search-embeds-the-users-task-without-an-instruction-prefix
   "the query vector represents the task, because catalog vectors already describe editor APIs"
   (lambda ()
-    (let ((old-search *apropos--embedding-search*)
-          (old-key llm-key)
-          (seen #f))
-      (set! *apropos--embedding-search*
-        (lambda (query texts key limit eligible gen cached-only)
-          (set! seen query)
-          '()))
-      (set! llm-key (lambda (provider) "test-key"))
-      (apropos--semantic-hits "read csv file" (apropos--rows-cached) '())
-      (set! *apropos--embedding-search* old-search)
-      (set! llm-key old-key)
+    (let ((seen #f))
+      (with-stubs
+        (list (list '*apropos--embedding-search*
+                    (lambda (query texts key limit eligible gen cached-only)
+                      (set! seen query)
+                      '()))
+              (list 'llm-key (lambda (provider) "test-key")))
+        (lambda ()
+          (apropos--semantic-hits "read csv file" (apropos--rows-cached) '())))
       (check-equal! seen "read csv file"
                     "the embedding receives only the user's task"))))
 
 (deftest 'catalog-registration-notifies-the-embedding-lifecycle
   "the authoritative catalog write names the complete changed entry"
   (lambda ()
-    (let ((old-hook apropos-catalog-changed!)
-          (seen #f))
-      (set! apropos-catalog-changed! (lambda (entry) (set! seen entry)))
-      (catalog-register! 'function "zz-embedding-notice" "A changed entry")
-      (set! apropos-catalog-changed! old-hook)
+    (let ((seen #f))
+      (with-stub 'apropos-catalog-changed! (lambda (entry) (set! seen entry))
+        (lambda () (catalog-register! 'function "zz-embedding-notice" "A changed entry")))
       (check-equal! (plist-get seen 'name) "zz-embedding-notice"
                     "registration sends the completed entry")
       (test-forget-catalog! "function" "zz-embedding-notice"))))
@@ -269,32 +265,26 @@
 (deftest 'reload-batches-catalog-embedding-synchronization
   "catalog writes during one reload schedule one background reconciliation"
   (lambda ()
-    (let ((old-schedule apropos--schedule-embedding-sync!)
-          (old-reloading *reloading?*)
-          (old-pending *apropos--embedding-sync-pending*)
-          (scheduled 0))
-      (set! apropos--schedule-embedding-sync!
-        (lambda () (set! scheduled (+ scheduled 1))))
-      (set! *apropos--embedding-sync-pending* #f)
-      (set! *reloading?* #t)
-      (apropos-catalog-changed! '(kind "function" name "one"))
-      (apropos-catalog-changed! '(kind "function" name "two"))
-      (check-equal! scheduled 0 "the reload does not start a partial batch")
-      (set! *reloading?* #f)
-      (apropos-reload-finished!)
-      (check-equal! scheduled 1 "reload completion schedules one batch")
-      (set! apropos--schedule-embedding-sync! old-schedule)
-      (set! *reloading?* old-reloading)
-      (set! *apropos--embedding-sync-pending* old-pending))))
+    (let ((scheduled 0))
+      (with-stubs
+        (list (list 'apropos--schedule-embedding-sync!
+                    (lambda () (set! scheduled (+ scheduled 1))))
+              (list '*apropos--embedding-sync-pending* #f)
+              (list '*reloading?* #t))
+        (lambda ()
+          (apropos-catalog-changed! '(kind "function" name "one"))
+          (apropos-catalog-changed! '(kind "function" name "two"))
+          (check-equal! scheduled 0 "the reload does not start a partial batch")
+          (set! *reloading?* #f)
+          (apropos-reload-finished!)
+          (check-equal! scheduled 1 "reload completion schedules one batch"))))))
 
 (deftest 'embedding-rebuild-explains-a-missing-key
   "a manual rebuild clears the cache and reports why it cannot refill"
   (lambda ()
-    (let ((old-key llm-key))
-      (set! llm-key (lambda (provider) #f))
-      (let ((result (apropos-rebuild-embeddings!)))
-        (set! llm-key old-key)
-        (check-contains! result "no OpenAI key" "the result explains the empty cache")))))
+    (let ((result (with-stub 'llm-key (lambda (provider) #f)
+                    (lambda () (apropos-rebuild-embeddings!)))))
+      (check-contains! result "no OpenAI key" "the result explains the empty cache"))))
 
 (deftest 'literal-results-rank-before-semantic-results
   "a direct vocabulary match stays ahead of a vector result"
@@ -528,22 +518,20 @@
 (deftest 'a-waiting-caller-buys-the-query-vector-now
   "a cold query embeds on the spot instead of warming for an ask that never comes"
   (lambda ()
-    (let ((old-search *apropos--embedding-search*)
-          (old-key llm-key)
-          (cached-only-asks 0)
+    (let ((cached-only-asks 0)
           (network-asks 0))
-      (set! llm-key (lambda (provider) "test-key"))
       ;; the index answers #f for a query it has no vector for, exactly as
       ;; the primitive does, and scores it when the caller pays for one
-      (set! *apropos--embedding-search*
-        (lambda (query texts key limit eligible gen cached-only)
-          (if cached-only
-              (begin (set! cached-only-asks (+ cached-only-asks 1)) #f)
-              (begin (set! network-asks (+ network-asks 1))
-                     (list (list 0 0.94))))))
-      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #t)))
-        (set! *apropos--embedding-search* old-search)
-        (set! llm-key old-key)
+      (let ((hits (with-stubs
+                    (list (list 'llm-key (lambda (provider) "test-key"))
+                          (list '*apropos--embedding-search*
+                                (lambda (query texts key limit eligible gen cached-only)
+                                  (if cached-only
+                                      (begin (set! cached-only-asks (+ cached-only-asks 1)) #f)
+                                      (begin (set! network-asks (+ network-asks 1))
+                                             (list (list 0 0.94)))))))
+                    (lambda ()
+                      (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #t)))))
         (check-true! (pair? hits) "the first ask answers")
         (check-equal! (plist-get (car hits) 'note) "semantic match" "from the vector lane")
         (check-true! (> network-asks 0) "and it paid for the vector")))))
@@ -551,18 +539,16 @@
 (deftest 'a-typing-caller-never-waits-for-the-network
   "'wait #f warms a cold query off-lane and answers from the catalog"
   (lambda ()
-    (let ((old-search *apropos--embedding-search*)
-          (old-key llm-key)
-          (network-asks 0))
-      (set! llm-key (lambda (provider) "test-key"))
-      (set! *apropos--embedding-search*
-        (lambda (query texts key limit eligible gen cached-only)
-          (if cached-only
-              #f
-              (begin (set! network-asks (+ network-asks 1)) (list (list 0 0.94))))))
-      (let ((hits (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #f)))
-        (set! *apropos--embedding-search* old-search)
-        (set! llm-key old-key)
+    (let ((network-asks 0))
+      (let ((hits (with-stubs
+                    (list (list 'llm-key (lambda (provider) "test-key"))
+                          (list '*apropos--embedding-search*
+                                (lambda (query texts key limit eligible gen cached-only)
+                                  (if cached-only
+                                      #f
+                                      (begin (set! network-asks (+ network-asks 1)) (list (list 0 0.94)))))))
+                    (lambda ()
+                      (apropos--semantic-hits "zz cold query" (apropos--rows-cached) '() #f)))))
         (check-equal! hits '() "the catalog answers alone")
         (check-equal! network-asks 0 "and nothing waited for OpenAI")))))
 

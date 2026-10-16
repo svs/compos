@@ -194,3 +194,33 @@
               (check-equal! (window-buffer side) "*zz-lc-side*"
                             "and gives the neighbour back untouched")))
           (group-record-delete! g))))))
+
+(deftest 'a-layout-profile-is-chosen-by-width-and-answers-before-the-mode
+  "the first profile whose bounds hold the width wins, a default profile catches the rest, a profile named narrow takes the narrow bound, and list-opt reads the profile's key before the mode's"
+  (lambda ()
+    (t--lm-with
+      (lambda ()
+        (t--lm-open!)
+        (let ((layouts (plist-get (list-mode-opts "zz-list-contract-mode") 'layouts)))
+          (check-equal! (plist-get (list-select-layout t--lm-buf layouts 40) 'name) 'narrow
+                        "a narrow window takes the narrow profile")
+          (check-equal! (plist-get (list-select-layout t--lm-buf layouts 50) 'name) 'narrow
+                        "the bound is inclusive")
+          (check-equal! (plist-get (list-select-layout t--lm-buf layouts 120) 'name) 'wide
+                        "a wide window falls to the default")
+          (check-equal! (list-select-layout t--lm-buf (list t--lm-narrow) 120) '()
+                        "no profile fits: the mode's own options answer")
+          (let ((named (list 'name 'narrow 'columns (lambda (buf) '()))))
+            (check-true! (list-layout-match? t--lm-buf named (- narrow-cols 1))
+                         "a profile named narrow with no bound stops at the narrow width")
+            (check-false! (list-layout-match? t--lm-buf named narrow-cols)
+                          "and not one column past it"))
+          (buffer-set-local! t--lm-buf 'list-layout-cache (list (list-view-width t--lm-buf) t--lm-narrow))
+          (check-equal! (length ((list-opt t--lm-buf 'columns) t--lm-buf)) 1
+                        "the active profile's columns answer")
+          (check-equal! ((list-opt t--lm-buf 'footer) t--lm-buf) '(("q" "quit")) "and its footer")
+          (check-equal! ((list-opt t--lm-buf 'title) t--lm-buf) "Contract"
+                        "a key the profile lacks falls to the mode")
+          (buffer-set-local! t--lm-buf 'list-layout-cache (list (list-view-width t--lm-buf) t--lm-wide))
+          (check-equal! (length ((list-opt t--lm-buf 'columns) t--lm-buf)) 2
+                        "the wide profile's columns answer in a wide window"))))))

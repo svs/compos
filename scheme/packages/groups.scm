@@ -2033,8 +2033,10 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; every open buffer, and each buffer knows its groups. The MRU only
 ;; orders the answer; it truncates, so it never decides membership.
 (define (active-groups)
+  ;; a group is active while a WORK buffer of it is open: its chat alone
+  ;; does not keep it active
   (let ((open (fold (lambda (out b)
-                      (let ((id (and (buffer-known? b) (buffer-group b))))
+                      (let ((id (and (buffer-known? b) (not (chat-buffer? b)) (buffer-group b))))
                         (if (or (not id) (member id out)) out (cons id out))))
                     '()
                     (buffer-list))))
@@ -4752,7 +4754,7 @@ is forgotten and that group falls back to creation order in the switcher."
            (id (buffer-group buf)))
       (if (not id)
           (message "The buffer is not in a group")
-          (y-or-n (string-append "Remove " buf " from " (group-display-name id) "? ")
+          (y-or-n (string-append "Remove " buf " from " (group-display-name id) "?")
                   (lambda () (buffer-family-remove-group! buf id)))))))
 
 ;; The other direction. One group is named by where the command runs, and

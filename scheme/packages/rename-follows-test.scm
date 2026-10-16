@@ -2,7 +2,7 @@
 ;;;
 ;;; A buffer name IS the buffer handle here, so anything that points AT a
 ;;; buffer must hear a rename. Membership escapes this: it rides the buffer
-;;; as 'group-ids, and a stable group id never moves. A layout is the other
+;;; as 'group-id, and a stable group id never moves. A layout is the other
 ;;; direction — the group holds it and names the buffers in it — so the
 ;;; group must subscribe to rename-buffer!.
 ;;;

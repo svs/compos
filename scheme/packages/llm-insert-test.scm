@@ -18,7 +18,6 @@
 (define (t--li-doc! name text)
   (test-buffer! name text)
   (buffer-set-local! name 'group-id #f)
-  (buffer-set-local! name 'group-ids '())
   name)
 
 (deftest 'a-reply-follows-the-block-point-is-in

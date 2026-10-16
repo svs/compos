@@ -3303,21 +3303,15 @@ defmodule Compos.Core.Editor do
   # whose buffer is in that group wears no pin; a window from another group
   # wears that group's name. CURRENT is the frame's label, which may carry
   # a decoration after the name.
-  defp modeline_pin(groups, current) when is_list(groups) do
-    names = Enum.filter(groups, &is_binary/1)
-
+  defp modeline_pin(group, current) when is_binary(group) do
     here? =
-      current in names or
-        (is_binary(current) and Enum.any?(names, &String.starts_with?(current, &1 <> " ")))
+      current == group or
+        (is_binary(current) and String.starts_with?(current, group <> " "))
 
-    cond do
-      names == [] or here? -> nil
-      length(names) == 1 -> hd(names)
-      true -> "#{hd(names)} (#{length(names) - 1} more)"
-    end
+    if here?, do: nil, else: group
   end
 
-  defp modeline_pin(_groups, _current), do: nil
+  defp modeline_pin(_group, _current), do: nil
 
   # exists? then call still races a dying buffer (registry entries linger);
   # a dead buffer renders empty instead of crashing the Editor

@@ -22,7 +22,7 @@
           (b (t--group "owner-b")))
       (buffer-add-group-as! buf a 'source)
       (buffer-add-group! buf b)
-      (check-equal! (buffer-group-ids buf) (list b) "only the destination owns the buffer")
+      (check-equal! (buffer-group buf) b "only the destination owns the buffer")
       (check-equal! (buffer-local buf 'group-id) b "storage also holds one owner")
       (check-false! (buffer-in-group? buf a) "the former owner loses membership immediately")
       (check-false! (buffer-group-role buf a) "the former role does not survive the move")
@@ -30,8 +30,8 @@
       (t--drop! a)
       (t--drop! b))))
 
-(deftest 'legacy-multiple-memberships-normalize-to-one-owner
-  "old desktop memberships retain the first owner when all records resolve"
+(deftest 'an-old-group-ids-list-folds-into-group-id-on-restore
+  "a desktop from the days of many memberships: the first id is the buffer's group, and the list goes"
   (lambda ()
     (let ((buf (test-buffer! "*zztest-legacy-owners*" ""))
           (a (t--group "legacy-owner-a"))
@@ -39,9 +39,10 @@
       ;; a buffer from before 'group-id: a new one already holds the frame's group
       (buffer-set-local! buf 'group-id #f)
       (buffer-set-local! buf 'group-ids (list a b))
-      (check-equal! (buffer-group-ids buf) (list a) "the first legacy owner is retained")
-      (check-equal! (buffer-local buf 'group-id) a "the old storage folds into group-id")
-      (check-equal! (buffer-local buf 'group-ids) (list a) "the list keeps only the mirror of it")
+      (migrate-buffer! buf)
+      (check-equal! (buffer-local buf 'group-id) a "the first legacy owner is the group")
+      (check-false! (buffer-local buf 'group-ids) "the list is gone")
+      (check-equal! (buffer-group buf) a "and the reader answers it")
       (check-false! (buffer-in-group? buf b) "no second membership remains")
       (buffer-kill! buf)
       (t--drop! a)
@@ -138,21 +139,21 @@
       (t--drop! id))))
 
 (deftest 'membership-answers-the-id
-  "a work buffer holds ids, and buffer-group answers one"
+  "a work buffer holds one id, and buffer-group answers it"
   (lambda ()
     (let ((id (t--group "member"))
           (buf "*zztest-member*"))
       (buffer-create buf)
-      (check-equal! (buffer-group-ids buf) '() "a fresh buffer belongs to nothing")
+      (check-equal! (buffer-group buf) #f "a fresh buffer belongs to nothing")
       (buffer-add-group! buf id)
       (check-equal! (buffer-group buf) id "buffer-group answers the id")
       (check-true! (buffer-in-group? buf id) "the buffer is in the group")
       (check-true! (buffer-in-group? buf "zztest-member")
                    "the name finds the membership too")
       (buffer-add-group! buf id)
-      (check-equal! (length (buffer-group-ids buf)) 1 "joining twice adds one membership")
+      (check-equal! (buffer-group buf) id "joining twice is one membership")
       (buffer-remove-group! buf id)
-      (check-equal! (buffer-group-ids buf) '() "leaving clears it")
+      (check-equal! (buffer-group buf) #f "leaving clears it")
       (buffer-kill! buf)
       (t--drop! id))))
 
@@ -186,7 +187,7 @@
                    "a lost record still answers a string")
       (buffer-kill! buf))))
 
-(deftest 'modeline-memberships-follow-the-buffer
+(deftest 'the-modeline-group-follows-the-buffer
   "the render cache holds the one group this buffer is in"
   (lambda ()
     (let ((buf "*zztest-modeline-groups*")
@@ -194,19 +195,19 @@
           (two (t--group "modeline-two")))
       (buffer-create buf)
       (buffer-modeline-group-refresh! buf)
-      (check-equal! (buffer-local buf 'modeline-groups) '()
-                    "an ungrouped buffer carries no modeline membership")
+      (check-equal! (buffer-local buf 'modeline-group) #f
+                    "an ungrouped buffer carries no modeline group")
       (buffer-add-group! buf one)
-      (check-equal! (buffer-local buf 'modeline-groups) '("zztest-modeline-one")
+      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-one"
                     "the membership carries its name")
       (buffer-add-group! buf two)
-      (check-equal! (buffer-local buf 'modeline-groups) '("zztest-modeline-two")
+      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-two"
                     "joining a group is leaving the last one")
       (group-rename! two "zztest-modeline-renamed")
-      (check-equal! (buffer-local buf 'modeline-groups) '("zztest-modeline-renamed")
+      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-renamed"
                     "renaming a group refreshes its member label")
       (buffer-remove-group! buf two)
-      (check-equal! (buffer-local buf 'modeline-groups) '()
+      (check-equal! (buffer-local buf 'modeline-group) #f
                     "leaving takes the name with it")
       (buffer-kill! buf)
       (t--drop! one)
@@ -310,7 +311,7 @@
           (id (t--pseudo! "join")))
       (group-add-buffers-to! (list buf) id)
       (check-false! (buffer-in-group? buf id) "the buffer did not join")
-      (check-equal! (buffer-group-ids buf) '() "and it holds no membership at all")
+      (check-equal! (buffer-group buf) #f "and it holds no membership at all")
       (undefine-pseudo-group! id)
       (buffer-kill! buf))))
 

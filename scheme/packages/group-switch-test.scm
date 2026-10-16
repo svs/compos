@@ -49,12 +49,11 @@
               (when (or (string-prefix? "*scratch:zzsw" b) (string-prefix? "*chat:zzsw" b))
                 (buffer-kill! b)))
             (buffer-list))
-  ;; The record table is deliberately empty here. buffer-group-ids only
-  ;; returns resolving IDs, so removing through that accessor leaves stale
-  ;; raw IDs behind. Reused per-second IDs then make a later fixture a member.
+  ;; The record table is deliberately empty here. buffer-group only
+  ;; answers a resolving id, so removing through that accessor leaves a stale
+  ;; raw id behind. Reused per-second IDs then make a later fixture a member.
   (for-each (lambda (b)
               (buffer-set-local! b 'group-id #f)
-              (buffer-set-local! b 'group-ids '())
               (buffer-set-local! b 'group #f)
               (buffer-set-local! b 'group-inherited #f)
               (buffer-set-local! b 'companion-of #f))
@@ -661,7 +660,7 @@
                     "the switcher marks are consumed"))
     (t--sw-done!)))
 
-(deftest 'move-replaces-existing-memberships-with-the-destination
+(deftest 'move-puts-the-buffer-in-the-destination
   "move needs one destination, leaves the buffer in only that group, and enters it"
   (lambda ()
     (t--sw-setup!)
@@ -791,11 +790,9 @@
       (check-false! (buffer-in-group? t--sw-second other)
                     "the scratch leaves its second group")
       (run-command "remove-group-from-buffer")
-      (t--sw-type! "zzsw-scratch-away")
-      (t--sw-key! "confirm")
-      (t--sw-key! "cancel")
+      (t--sw-type! "y")
       (check-false! (buffer-in-group? t--sw-second destination)
-                    "remove drops the chosen membership")
+                    "remove drops the membership")
       (check-equal! (buffer-group t--sw-second) #f
                     "the scratch keeps no membership"))
     (t--sw-done!)))
@@ -836,9 +833,7 @@
       (buffer-add-group! t--sw-first source)
       (switch-to-buffer! chat)
       (run-command "remove-group-from-buffer")
-      (t--sw-type! "zzsw-chat-drop")
-      (t--sw-key! "confirm")
-      (t--sw-key! "cancel")
+      (t--sw-type! "y")
       (check-false! (chat-group-id chat) "the chat holds no group")
       (check-true! (buffer-in-group? t--sw-first source)
                    "the group keeps its work buffer")
@@ -905,18 +900,10 @@
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group removed)
       (run-command "remove-group-from-buffer")
-
-      (check-equal! (plist-get (minibuffer-state) 'prompt)
-                    "Toggle group removal (C-g applies): "
-                    "the membership opens the picker")
-      (t--sw-type! "zzsw-removed")
-      (t--sw-key! "confirm")
-      (check-true! (minibuffer-state) "the picker stays open after a toggle")
-      (check-true! (buffer-in-group? t--sw-first removed)
-                   "a toggle does not change membership before close")
-      (t--sw-key! "cancel")
-
-      (check-false! (buffer-in-group? t--sw-first removed) "the named membership is removed")
+      (check-true! (string-prefix? "Remove " (plist-get (minibuffer-state) 'prompt))
+                   "the command asks")
+      (t--sw-type! "y")
+      (check-false! (buffer-in-group? t--sw-first removed) "the membership is removed")
       (check-equal! (buffer-group t--sw-first) #f "the buffer is left in no group")
       (check-true! (buffer-known? t--sw-first) "the buffer remains alive"))
     (t--sw-done!)))
@@ -930,59 +917,27 @@
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
       (run-command "remove-group-from-buffer")
-      (check-equal! (plist-get (minibuffer-state) 'prompt)
-                    "Toggle group removal (C-g applies): "
-                    "the command asks before it removes")
-      (t--sw-type! "zzsw-null-remove")
-      (t--sw-key! "confirm")
-      (check-true! (minibuffer-state) "the picker remains active")
+      (check-true! (string-prefix? "Remove " (plist-get (minibuffer-state) 'prompt))
+                   "the command asks before it removes")
       (check-true! (buffer-in-group? t--sw-first removed)
-                   "the selection remains pending until close")
-      (t--sw-key! "cancel")
+                   "asking changes nothing")
+      (t--sw-type! "y")
       (check-false! (buffer-in-group? t--sw-first removed)
-                    "the selected membership is removed"))
+                    "y removes the membership"))
     (t--sw-done!)))
 
-(deftest 'remove-picker-can-clear-a-pending-removal
-  "selecting the same membership again keeps it when C-g applies the changes"
+(deftest 'remove-answered-no-keeps-the-group
+  "n closes the question and the buffer stays where it was"
   (lambda ()
     (t--sw-setup!)
     (let ((first (group-record-create! "zzsw-toggle-first")))
       (buffer-add-group! t--sw-first first)
       (switch-to-buffer! t--sw-first)
       (run-command "remove-group-from-buffer")
-      (t--sw-type! "zzsw-toggle-first")
-      (t--sw-key! "confirm")
+      (t--sw-type! "n")
+      (check-false! (minibuffer-state) "n closes the question")
       (check-true! (buffer-in-group? t--sw-first first)
-                   "the first selection is only pending")
-      (t--sw-type! "zzsw-toggle-first")
-      (t--sw-key! "confirm")
-      (t--sw-key! "cancel")
-      (check-false! (minibuffer-state) "C-g exits the picker")
-      (check-true! (buffer-in-group? t--sw-first first)
-                   "the second selection clears the pending removal"))
-    (t--sw-done!)))
-
-(deftest 'remove-group-from-buffer-opens-the-staged-picker-for-one-membership
-  "the compatibility command never removes the only membership immediately"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((only (group-record-create! "zzsw-only-remove")))
-      (buffer-add-group! t--sw-first only)
-      (switch-to-buffer! t--sw-first)
-      (run-command "remove-group-from-buffer")
-      (check-equal! (plist-get (minibuffer-state) 'prompt)
-                    "Toggle group removal (C-g applies): "
-                    "the selector opens for one membership")
-      (check-true! (buffer-in-group? t--sw-first only)
-                   "opening the selector changes nothing")
-      (t--sw-type! "zzsw-only-remove")
-      (t--sw-key! "confirm")
-      (check-true! (buffer-in-group? t--sw-first only)
-                   "selecting the membership only stages removal")
-      (t--sw-key! "cancel")
-      (check-false! (buffer-in-group? t--sw-first only)
-                    "C-g applies the staged removal"))
+                   "and the buffer keeps its group"))
     (t--sw-done!)))
 
 (deftest 'membership-commands-include-the-explicit-buffer-family
@@ -1015,13 +970,9 @@
 
       (set-frame-local! 'current-group moved)
       (run-command "remove-group-from-buffer")
-      (t--sw-type! "zzsw-family-moved")
-      (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first moved)
-                   "remove stays pending for the document")
-      (check-true! (buffer-in-group? t--sw-second moved)
-                   "remove stays pending for the companion")
-      (t--sw-key! "cancel")
+                   "asking changes nothing for the document")
+      (t--sw-type! "y")
       (check-false! (buffer-in-group? t--sw-first moved) "remove changes the document")
       (check-false! (buffer-in-group? t--sw-second moved) "remove changes the scratch buffer"))
     (t--sw-done!)))
@@ -1707,7 +1658,7 @@
     (t--sw-done!)))
 
 (deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
-  "the explicit action replaces memberships with the new group"
+  "the explicit action puts the buffer in the new group"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source")))

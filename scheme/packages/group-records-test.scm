@@ -83,7 +83,7 @@
       (buffer-remove-group! buf left)
       (check-false! (buffer-in-group? buf left) "the removed one is gone")
       (check-true! (buffer-in-group? buf right) "the other one stays")
-      (check-equal! (length (buffer-group-ids buf)) 1 "one membership is left")
+      (check-equal! (buffer-group buf) right "one group is left")
       (t--gs-drop! left right)
       (t--gs-kill! buf))))
 
@@ -119,8 +119,7 @@
             (chat-id (chat-group-id chat)))
         (check-equal! work-id chat-id "both name the same record")
         (check-equal! (- (t--gs-count) before) 1 "and it is one new record")
-        (check-equal! (length (buffer-group-ids work)) 1 "the work buffer is a member")
-        (check-equal! (length (buffer-group-ids chat)) 0 "the chat is not a member, it belongs")
+        (check-equal! (buffer-group work) work-id "the work buffer is in the group")
         (t--gs-drop! work-id))
       (t--gs-kill! chat work))))
 
@@ -184,7 +183,6 @@
       (check-equal! (chat-group-id second) id "and so does the second")
       (check-equal! (buffer-group-role first id) "chat" "a group chat has the chat role")
       (check-equal! (group-primary-chat id) second "the newest is the primary one")
-      (check-equal! (length (buffer-group-ids first)) 0 "a chat belongs, it is not a member")
       (check-equal! (length (filter chat-buffer? (group-buffers id))) 2 "the group owns both")
       (t--gs-kill! first second)
       (t--gs-drop! id))))
@@ -225,7 +223,7 @@
 
 ;;; --- dissolve and layout ------------------------------------------------------
 
-(deftest 'dissolve-keeps-buffers-and-their-other-memberships
+(deftest 'dissolve-keeps-the-buffer-and-the-group-it-moved-to
   "dissolving a group is not deleting what was in it"
   (lambda ()
     (let ((first (t--gs-buf))
@@ -235,7 +233,7 @@
       (buffer-add-group! first kept)
       (group-dissolve! dissolved)
       (check-true! (buffer-known? first) "the buffer is still there")
-      (check-equal! (buffer-group-ids first) (list kept) "and keeps its other membership")
+      (check-equal! (buffer-group first) kept "and keeps the group it moved to")
       (check-false! (group-resolve-id dissolved) "the dissolved group is gone")
       (t--gs-drop! kept)
       (t--gs-kill! first))))
@@ -354,24 +352,26 @@
 ;;; --- the migration walk ----------------------------------------------------------
 
 (deftest 'group-migrate-live-normalizes-each-buffer-once-and-every-newcomer
-  "a buffer holding a group NAME gets the id on the first walk; a buffer born after that walk gets it on the next"
+  "a buffer holding a legacy group NAME gets the id on the first walk; a buffer born after that walk gets it on the next"
   (lambda ()
     (let* ((id (group-record-create! "zz-migrate-walk"))
            (name (group-name id))
            (a (test-buffer! "*zz-gs-migrate-a*" ""))
            (b "*zz-gs-migrate-b*"))
-      (buffer-set-local! a 'group-ids (list name))
+      (buffer-set-local! a 'group-id #f)
+      (buffer-set-local! a 'group name)
       (group-ids)
       (check-equal! (buffer-local a 'group-id) id "the first walk folded the name into the id")
-      (check-equal! (buffer-local a 'modeline-groups) (list name) "the first walk set the modeline segment")
+      (check-equal! (buffer-local a 'modeline-group) name "the first walk set the modeline segment")
       (check-true! (member a *group-migrated-buffers*) "the buffer is on the migrated list")
       ;; the walk skips a migrated buffer: a name put back by hand stays
-      (buffer-set-local! a 'group-ids (list name))
+      (buffer-set-local! a 'group name)
       (group-ids)
-      (check-equal! (buffer-local a 'group-ids) (list name) "a second walk does not touch a migrated buffer")
+      (check-equal! (buffer-local a 'group) name "a second walk does not touch a migrated buffer")
       ;; a newcomer is migrated on the next walk
       (test-buffer! b "")
-      (buffer-set-local! b 'group-ids (list name))
+      (buffer-set-local! b 'group-id #f)
+      (buffer-set-local! b 'group name)
       (group-ids)
       (check-equal! (buffer-local b 'group-id) id "the newcomer got the id")
       (t--gs-kill! a b)

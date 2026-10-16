@@ -49,10 +49,11 @@
 ;;; GROUP-ID GROUP-IDS GROUP); a recent file has #f in each field.
 
 (define t--tab-rows
-  '(("a.scm" "/a.scm" #f "scheme-mode" #f ("g1") #f)
-    ("*chat:x:1*" #f #f "chat-mode" "g1" #f #f)
-    ("b.md" "/b.md" #f "markdown-mode" #f ("g2") #f)
-    ("/old.txt" #f #f #f #f #f #f)))
+  ;; (NAME PATH MODIFIED MODE GROUP-ID GROUP): every buffer holds one group id
+  '(("a.scm" "/a.scm" #f "scheme-mode" "g1" #f)
+    ("*chat:x:1*" #f #f "chat-mode" "g1" #f)
+    ("b.md" "/b.md" #f "markdown-mode" "g2" #f)
+    ("/old.txt" #f #f #f #f #f)))
 
 (deftest 'the-tab-row-marks-the-tab
   "the tabs name every view and mark the one you are on"

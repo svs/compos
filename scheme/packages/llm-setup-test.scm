@@ -190,7 +190,7 @@ a hang, and the user never learns there was anything to answer."
       (buffer-set-local! chat 'mode-name "chat-mode")
       (buffer-set-local! chat 'group-id id)
       (test-buffer! work "")
-      (buffer-set-local! work 'group-ids (list id))
+      (buffer-set-local! work 'group-id id)
       (test-buffer! lone "")
       (switch-to-buffer! chat)
       (switch-to-buffer! was)

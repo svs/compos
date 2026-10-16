@@ -252,34 +252,26 @@ defmodule Compos.GroupSwitchCommandTest do
     assert_receive {:editor_change, :scheme_state}
   end
 
-  test "buffer-remove-from-group applies pending removals on C-g", %{first: first} do
+  test "remove-group-from-buffer asks before it removes, and y removes", %{first: first} do
     remove = group_id("remove-on-close")
-    keep = group_id("keep-on-close")
 
     eval!("""
     (begin
       (buffer-add-group! "#{first}" "#{remove}")
-      (buffer-add-group! "#{first}" "#{keep}")
       (switch-to-buffer! "#{first}")
-      (run-command "remove-group-from-buffer")
-      (minibuffer-change! "remove-on-close"))
+      (run-command "remove-group-from-buffer"))
     """)
 
-    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
-
-    KeyDispatch.handle_key("RET")
+    assert Editor.render_state().minibuffer.prompt =~ ~r/^Remove /
     assert eval!(~s[(buffer-in-group? "#{first}" "#{remove}")]) == "#t"
-    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
 
-    KeyDispatch.handle_key("C-g")
+    KeyDispatch.handle_key("y")
     assert eval!(~s[(buffer-in-group? "#{first}" "#{remove}")]) == "#f"
-    assert eval!(~s[(buffer-in-group? "#{first}" "#{keep}")]) == "#t"
+    assert eval!(~s[(buffer-group "#{first}")]) == "#f"
     assert Editor.render_state().minibuffer == nil
   end
 
-  test "remove-group-from-buffer stages the only membership before C-g applies it", %{
-    first: first
-  } do
+  test "remove-group-from-buffer answered n keeps the group", %{first: first} do
     only = group_id("remove-only-on-close")
 
     eval!("""
@@ -289,15 +281,9 @@ defmodule Compos.GroupSwitchCommandTest do
       (run-command "remove-group-from-buffer"))
     """)
 
-    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
+    assert Editor.render_state().minibuffer.prompt =~ ~r/^Remove /
+    KeyDispatch.handle_key("n")
     assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#t"
-
-    eval!(~s[(minibuffer-change! "remove-only-on-close")])
-    KeyDispatch.handle_key("RET")
-    assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#t"
-
-    KeyDispatch.handle_key("C-g")
-    assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#f"
     assert Editor.render_state().minibuffer == nil
   end
 
@@ -370,47 +356,43 @@ defmodule Compos.GroupSwitchCommandTest do
     assert eval!(~s[(buffer-filename-face "#{second}")]) == Jason.encode!(docs_face)
   end
 
-  test "modelines compact this buffer's memberships relative to the frame group", %{
+  test "modelines pin this buffer's group when it is not the frame's", %{
     first: first,
     second: second,
     third: third
   } do
     here = group_id("modeline-here")
     other = group_id("modeline-other")
-    extra = group_id("modeline-extra")
 
     eval!("""
     (begin
-      (buffer-add-group! "#{first}" "#{here}")
       (buffer-add-group! "#{first}" "#{other}")
-      (buffer-add-group! "#{first}" "#{extra}")
       (buffer-add-group! "#{second}" "#{other}")
-      (buffer-add-group! "#{second}" "#{extra}")
-      (buffer-add-group! "#{third}" "#{other}")
-      (set-frame-local! 'current-group "#{here}")
-      (frame-group-label-refresh!)
+      (buffer-add-group! "#{third}" "#{here}")
       (delete-other-windows!)
-      ;; the panes take buffers of other groups as a layout would: a
-      ;; switch would float them in the popup (sealed groups)
+      ;; the panes take buffers of other groups as a layout would
       (switch-to-buffer-here! "#{first}")
       (split-window! 'h)
       (other-window!)
       (switch-to-buffer-here! "#{second}")
       (split-window! 'v)
       (other-window!)
-      (switch-to-buffer-here! "#{third}"))
+      (switch-to-buffer-here! "#{third}")
+      (set-frame-local! 'current-group "#{here}")
+      (frame-group-label-refresh!))
     """)
 
     rendered = Editor.render_state()
     by_buffer = rendered.tree |> leaves() |> Map.new(&{&1.buffer, &1})
 
-    assert by_buffer[first].group == "modeline-other (2 more)"
-    assert by_buffer[second].group == "modeline-other (1 more)"
-    assert by_buffer[third].group == "modeline-other"
-    assert rendered.frame_group == "modeline-other"
+    # a pane in another group wears that group's name; one in the frame's wears none
+    assert by_buffer[first].group == "modeline-other"
+    assert by_buffer[second].group == "modeline-other"
+    assert by_buffer[third].group == nil
+    assert rendered.frame_group == "modeline-here"
     assert rendered.frame_group_color =~ ~r/^#[0-9a-f]{6}$/i
 
-    # C-x ? is the expanded, lossless view: it names every membership.
+    # C-x ? is the expanded view: it names the buffer's one group.
     eval!(~s{(select-window! (window-showing "#{first}"))})
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("?")
@@ -420,11 +402,10 @@ defmodule Compos.GroupSwitchCommandTest do
       |> Compos.Core.Buffer.get_local("modeline-dash-blocks")
       |> inspect(limit: :infinity, printable_limit: :infinity)
 
-    assert blocks =~ "modeline-here"
     assert blocks =~ "modeline-other"
-    assert blocks =~ "modeline-extra"
+    refute blocks =~ "modeline-here"
 
-    # Zero memberships is genuinely ungrouped even while the frame stays here.
+    # No group is genuinely ungrouped even while the frame stays here.
     eval!(~s{(buffer-move-to-group! "#{third}" #f)})
     by_buffer = Editor.render_state().tree |> leaves() |> Map.new(&{&1.buffer, &1})
     assert by_buffer[third].group == nil

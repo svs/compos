@@ -1263,19 +1263,12 @@
 ;; Only the FIRST enable saves state and moves the chat. The setup re-runs
 ;; on desktop restore, and a re-run must not undo a model the user chose
 ;; while the mode was on.
-(define (code-agent--apply! buf)
+(define (code-agent--setup! buf entering?)
   (when (boundp (quote prompt-part-set!))
     (prompt-part-set! buf "code-agent" (code-agent-system-note buf)))
-  (unless (buffer-local buf 'code-agent-saved)
-    ;; 'pinned records whether this enable took the chat's LLM identity. The
-    ;; teardown restores that identity only when the enable took it, so a
-    ;; mode that changed nothing never restarts a session on the way out.
-    (buffer-set-local! buf 'code-agent-saved
-      (list (list 'pinned (code-agent--pins?))
-            (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
-            (list 'agent-model (or (buffer-local buf 'agent-model) #f))
-            (list 'agent-effort (or (buffer-local buf 'agent-effort) #f))
-            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))))
+  ;; Only the FIRST enable moves the chat. The setup re-runs on restore,
+  ;; and a re-run must not undo a model the user chose since.
+  (when entering?
     ;; the chat gains the coding tool presets, like a code-mode buffer does.
     ;; Only a preset the chat does not already receive is a change: every
     ;; chat receives compos, and marking a fresh chat dirty for it makes the
@@ -1315,35 +1308,33 @@
   "(code-agent-system-note BUF) — the standing code-editing instructions for a code-agent-mode chat")
 (effects! '(write))
 
-(define (code-agent--saved buf key)
-  (let ((hit (assoc key (or (buffer-local buf 'code-agent-saved) '()))))
-    (and hit (cadr hit))))
+;; 'pinned records whether the enable took the chat's LLM identity. The exit
+;; gives that identity back only when the enable took it, so a mode that
+;; changed nothing never restarts a session on the way out.
+(define (code-agent--unpin! buf saved)
+  (when (saved 'pinned)
+    (let ((slug (buffer-local buf 'agent-slug)))
+      (if (and slug (not (equal? (agent-status slug) 'dead)))
+          (chat-switch! buf
+                        (or (saved 'agent-connector) *default-connector*)
+                        (or (saved 'agent-model) "")
+                        (or (saved 'agent-effort) "default"))
+          (begin
+            (buffer-set-local! buf 'agent-connector (saved 'agent-connector))
+            (buffer-set-local! buf 'agent-model (saved 'agent-model))
+            (buffer-set-local! buf 'agent-effort (saved 'agent-effort)))))))
 
-(define (code-agent--teardown! buf)
-  (when (boundp (quote prompt-part-remove!))
-    (prompt-part-remove! buf "code-agent"))
-  (let ((conn (code-agent--saved buf 'agent-connector))
-        (model (code-agent--saved buf 'agent-model))
-        (effort (code-agent--saved buf 'agent-effort))
-        (presets (code-agent--saved buf 'chat-presets))
-        (pinned (code-agent--saved buf 'pinned)))
-    (buffer-set-local! buf 'code-agent-switch-pending #f)
-    (buffer-set-local! buf 'code-agent-saved #f)
-    (buffer-set-local! buf 'chat-presets presets)
-    (when pinned
-      (let ((slug (buffer-local buf 'agent-slug)))
-        (if (and slug (not (equal? (agent-status slug) 'dead)))
-            (chat-switch! buf (or conn *default-connector*) (or model "")
-                          (or effort "default"))
-            (begin
-              (buffer-set-local! buf 'agent-connector conn)
-              (buffer-set-local! buf 'agent-model model)
-              (buffer-set-local! buf 'agent-effort effort)))))))
-
-(register-minor-mode!
-  "code-agent-mode"
-  (lambda (buf) (code-agent--apply! buf))
-  (lambda (buf) (code-agent--teardown! buf)))
+(define-workspace-mode! "code-agent-mode"
+  'saved 'code-agent-saved
+  'locals '(chat-presets)
+  'remember (list 'agent-connector 'agent-model 'agent-effort
+                  (list 'pinned (lambda (buf) (code-agent--pins?))))
+  'setup code-agent--setup!
+  'teardown (lambda (buf saved)
+              (when (boundp (quote prompt-part-remove!))
+                (prompt-part-remove! buf "code-agent"))
+              (buffer-set-local! buf 'code-agent-switch-pending #f))
+  'after code-agent--unpin!)
 
 ;; Every chat is an agent surface. Its mode setup installs the matching prompt
 ;; fragment and connector policy before the first turn.

@@ -58,6 +58,13 @@ The proxy starts consecutive read-only calls together. An unknown or write
 call waits for earlier reads and blocks later reads until it finishes.
 Read-only handlers use shared-world `SchemeTask` processes inside the daemon.
 
+`eval-scheme` declares `(write execute)`, so every round that holds one runs
+serially, and Claude Code serializes it before the proxy sees it.
+`eval-scheme-read` declares `(read)`. Before it evaluates anything, it reads
+the payload and refuses it unless every name is a plain special form, a local,
+a listed computing builtin, a global variable, or a function the catalog
+declares pure, read or external. `define` and `set!` always refuse.
+
 The runtime also applies one global admission limit across agents. The default
 is at least four and at most sixteen active Scheme reads. Extra work waits in a
 queue. Four agents therefore cannot create an unbounded number of evaluators.

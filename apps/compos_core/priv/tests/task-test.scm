@@ -53,3 +53,17 @@
         '("buffer read" "code read" "replace code" "apropos"))
       '(#t #t #t #t)
       "all concurrent searches return hits")))
+
+(deftest 'eval-scheme-read-runs-only-declared-reads
+  "the read-only eval refuses a write, a definition and code that does not read"
+  (lambda ()
+    (check-false! (eval-read-refusal "(map (lambda (b) (buffer-text b)) (list \"x\"))")
+                  "a declared read inside a lambda runs")
+    (check-true! (string? (eval-read-refusal "(map buffer-kill! '(\"x\"))"))
+                 "a write passed as a value refuses")
+    (check-true! (string? (eval-read-refusal "((lambda (set!) (set! x 1)) 1)"))
+                 "set! refuses even as a parameter name")
+    (check-true! (string? (eval-read-refusal "(buffer-text \"x\""))
+                 "code that does not read refuses")
+    (check-true! (llm-tool-read-only? "eval-scheme-read")
+                 "the tool declares read, so a round of them runs together")))

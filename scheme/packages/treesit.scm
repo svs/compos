@@ -111,3 +111,39 @@
 (set! *auto-mode-alist*
   (cons '(".composml" "composml-mode")
         (remove (lambda (entry) (equal? (car entry) ".composml")) *auto-mode-alist*)))
+
+;; Python, shell, Go and C read structurally once their grammar is in;
+;; until then they outline by indentation, the way ruby and js do.
+(define-derived-mode "python-mode" "prog-mode" (ts-mode "python"))
+(define-derived-mode "sh-mode" "prog-mode" (ts-mode "bash"))
+(define-derived-mode "go-mode" "prog-mode" (ts-mode "go"))
+(define-derived-mode "c-mode" "prog-mode" (ts-mode "c"))
+(set! *auto-mode-alist*
+  (append (remove (lambda (entry) (member (car entry) '(".py" ".sh" ".bash" ".go" ".c" ".h")))
+                  *auto-mode-alist*)
+          '((".py" "python-mode") (".sh" "sh-mode") (".bash" "sh-mode")
+            (".go" "go-mode") (".c" "c-mode") (".h" "c-mode"))))
+
+;; A reader that meets a mode whose grammar is not loaded installs it and
+;; waits, so it gets the tree and not the indentation fallback. The install
+;; gives no word when it ends, so the wait watches ts-langs; it belongs on
+;; the reader's own lane or task, never the ui lane. Each language is tried
+;; once a session, so a grammar that does not build costs one wait, not one
+;; per read.
+(define *ts-install-tried* '())
+
+(define (ts-ensure-grammar! lang &optional seconds)
+  (cond ((not (string? lang)) #f)
+        ((member lang (ts-langs)) #t)
+        ((or (member lang *ts-install-tried*) (not (assoc lang *ts-known-grammars*))) #f)
+        (else
+         (set! *ts-install-tried* (cons lang *ts-install-tried*))
+         (ts-install-grammar! lang (ts-known-url lang))
+         (wait-until (lambda () (member lang (ts-langs))) (* 1000 (or seconds 180)) 250)
+         (and (member lang (ts-langs)) #t))))
+
+(effects! '(read))
+(public! 'ts-langs "(ts-langs) — the names of the loaded tree-sitter languages")
+(public! 'ts-installed-grammars "(ts-installed-grammars) — the names of the installed tree-sitter grammars")
+(effects! '(write external execute))
+(public! 'ts-ensure-grammar! "(ts-ensure-grammar! LANG [SECONDS]) — #t once LANG's grammar is loaded: a known grammar not loaded yet is installed and waited for, once a session")

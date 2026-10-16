@@ -444,10 +444,42 @@
            (markdown-outline buf))
           (else (code-outline buf)))))
 
-(define (buffer-section buf name)
-  ;; the text of one anchor, by the name buffer-outline gave
-  (let ((a (anchor-find buf name)))
-    (and a (with-current-buffer buf (lambda () (buffer-substring (anchor-start a) (anchor-end a)))))))
+(define (buffer-section buf key)
+  ;; one part, by the name or the line buffer-outline gave
+  (cond ((number? key)
+         (if (or (buffer-derived-mode? buf "markdown-mode") (buffer-derived-mode? buf "morg-mode"))
+             (markdown-read buf key)
+             (code-read buf key)))
+        (else
+         (let ((a (anchor-find buf key)))
+           (and a (with-current-buffer buf (lambda () (buffer-substring (anchor-start a) (anchor-end a)))))))))
+
+(define (anchor--with-file path f)
+  ;; F on a buffer that holds PATH: its live buffer, else a hidden copy
+  ;; in the file's mode that is killed after, so reading leaves nothing
+  (if (buffer-exists? path)
+      (f path)
+      (let ((b (string-append " *outline " (number->string (monotonic-ms)) " " path)))
+        (buffer-create b)
+        (unwind-protect
+          (lambda ()
+            (buffer-append! b (or (read-file path) ""))
+            (let ((mode (auto-mode-for-buffer b path)))
+              (when mode
+                (with-current-buffer b (lambda () (set-mode! mode)))
+                ;; a grammar the mode names and nobody installed: install
+                ;; it, and set the mode again so the copy parses with it
+                (let ((lang (buffer-local b 'ts-lang)))
+                  (when (and lang (not (member lang (ts-langs))) (ts-ensure-grammar! lang))
+                    (with-current-buffer b (lambda () (set-mode! mode)))))))
+            (f b))
+          (lambda () (buffer-kill! b))))))
+
+(define (file-outline path)
+  (anchor--with-file path buffer-outline))
+
+(define (file-section path key)
+  (anchor--with-file path (lambda (b) (buffer-section b key))))
 
 ;;; --- the surface -----------------------------------------------------------
 
@@ -470,6 +502,11 @@
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
 (public! 'anchor-levels "(anchor-levels ANCHOR) — how it zooms, ((N REDUCTION) ...), or #f for the default fold")
 (public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor")
+
+(domain! 'navigation)
+(effects! '(read))
 (public! 'buffer-outline
   "(buffer-outline BUF) — BUF's parts, read first: its anchors as (NAME FIRST-LINE LAST-LINE); with none, its markdown headings or code definitions")
-(public! 'buffer-section "(buffer-section BUF NAME) — the text of the anchor buffer-outline named NAME, or #f")
+(public! 'buffer-section "(buffer-section BUF KEY) — one part: KEY a NAME buffer-outline gave answers that anchor's text, a LINE answers the heading's section or the definition there; #f when none")
+(public! 'file-outline "(file-outline PATH) — buffer-outline of the file at PATH, opening no buffer: read many at once with chat-parallel-map")
+(public! 'file-section "(file-section PATH LINE) — buffer-section of the file at PATH, opening no buffer")

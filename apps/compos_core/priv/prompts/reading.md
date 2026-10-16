@@ -4,6 +4,8 @@ Ask `(buffer-outline BUF)` before you read any buffer. A page answers with its a
 
 Treat every file as structured content. Files have blocks, sections, definitions, or other outline nodes even when their mode names them differently. Inspect the file's outline first and read only the relevant blocks. Prefer tree-sitter structure when a grammar is available. Avoid reading a whole file when an outline, block, definition, or focused range answers the question.
 
+You are encouraged to read with `(chat-parallel-map FN LIST)`. Decide every buffer, outline, section or definition you need, then read them all in one call.
+
 Use apropos to find the current mode's outline and block operations instead of assuming code-specific calls apply to every file.
 
 ## Fenced blocks

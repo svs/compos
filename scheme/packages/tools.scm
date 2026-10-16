@@ -199,6 +199,146 @@
   ;; arbitrary code: the payload decides what it does, the policy scans it
   '(write execute))
 
+;; eval-scheme is a write, so a round that holds one runs alone, and Claude
+;; Code serializes it before the proxy sees it. eval-scheme-read declares
+;; (read) and runs only code whose every name is declared pure or read, so
+;; a round of them runs together. It reads the payload before it runs any of
+;; it: a name it cannot vouch for refuses the whole call.
+(define *eval-read-forms*
+  '(quote if begin let let* and or cond when unless lambda else))
+
+;; Uncatalogued builtins that only compute. with-current-buffer is declared
+;; a write for what its thunk does, and the thunk is checked here.
+(define *eval-read-builtins*
+  '(car cdr cons list append reverse length list-ref cadr cddr caddr
+    map filter remove for-each fold assoc assq member memq sort iota take
+    not null? pair? string? symbol? number? procedure? equal? eq?
+    + - * / = < > <= >= min max abs
+    string-append substring string-length string-index string-contains?
+    string-prefix? string-suffix? string-split string-join string-trim
+    string-downcase string-upcase string=? symbol->string string->symbol
+    number->string string->number value->string plist-get json-parse
+    split-lines first-line with-current-buffer list-tail list-head))
+
+(define (eval-read--names x)
+  "every symbol in the read payload X, quoted data left out"
+  (cond ((symbol? x) (list x))
+        ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        (else (apply append (map eval-read--names x)))))
+
+(define (eval-read--params p)
+  (cond ((symbol? p) (list p))
+        ((pair? p) (filter symbol? p))
+        (else '())))
+
+(define (eval-read--binders x)
+  "every name a lambda or a let in the read payload X binds"
+  (cond ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        ((and (equal? (car x) 'lambda) (pair? (cdr x)))
+         (append (eval-read--params (cadr x))
+                 (apply append (map eval-read--binders (cddr x)))))
+        ((and (member (car x) '(let let*)) (pair? (cdr x)))
+         (let* ((named (symbol? (cadr x)))
+                (bindings (if named (and (pair? (cddr x)) (caddr x)) (cadr x))))
+           (append (if named (list (cadr x)) '())
+                   (if (pair? bindings)
+                       (map (lambda (b) (if (pair? b) (car b) b)) bindings)
+                       '())
+                   (apply append (map eval-read--binders (cdr x))))))
+        (else (apply append (map eval-read--binders x)))))
+
+(define (eval-read--effects names)
+  "(NAME EFFECTS) for each of NAMES the catalog declares, in one pass"
+  (let loop ((es *catalog*) (out '()))
+    (if (null? es)
+        out
+        (let ((e (car es)))
+          (loop (cdr es)
+                (if (and (equal? (plist-get e 'kind) "function")
+                         (member (plist-get e 'name) names)
+                         (not (assoc (plist-get e 'name) out)))
+                    (cons (list (plist-get e 'name) (plist-get e 'effects)) out)
+                    out))))))
+
+(define (eval-read--reads? effects)
+  (and (pair? effects)
+       (null? (remove (lambda (f) (member f '("pure" "read" "external"))) effects))))
+
+(define (eval-read-refusal code &optional on-unstamped)
+  "#f when CODE only reads, else why not; ON-UNSTAMPED gets a name the catalog has no effects for and answers a task id"
+  (let ((forms (ignore-errors (lambda () (scheme-read code)))))
+    (if (not (pair? forms))
+        "the code does not read"
+        (let* ((locals (remove (lambda (s) (member s '(define set!)))
+                               (eval-read--binders forms)))
+               (globals (filter (lambda (s)
+                                  (not (or (member s *eval-read-forms*)
+                                           (member s *eval-read-builtins*)
+                                           (member s locals))))
+                                (eval-read--names forms)))
+               (unbound (filter (lambda (s) (not (boundp s))) globals))
+               (fns (filter (lambda (s) (and (boundp s) (procedure? (symbol-value s)))) globals))
+               (effects (eval-read--effects (map symbol->string fns)))
+               (writes (filter (lambda (s)
+                                 (not (eval-read--reads?
+                                        (let ((e (assoc (symbol->string s) effects)))
+                                          (and e (cadr e))))))
+                               fns)))
+          (cond ((pair? unbound)
+                 (string-append (symbol->string (car unbound))
+                                " is unbound, or syntax eval-scheme-read does not allow. A guessed name: find the real one with (apropos \"words\"). Syntax: run the code with eval-scheme."))
+                ((pair? writes)
+                 (let* ((n (symbol->string (car writes)))
+                        (e (assoc n effects))
+                        (stamp (and e (cadr e))))
+                   (if (or (not (pair? stamp)) (member "unknown" stamp))
+                       (let ((id (and on-unstamped (on-unstamped n))))
+                         (string-append n " has no effects stamp"
+                                        (if id (string-append " (filed " id " to stamp it)") "")))
+                       (string-append n " is not declared pure or read"))))
+                (else #f))))))
+
+;; A function with no stamp is a gap, not a verdict: file it once for
+;; self-healing to stamp, and answer the task's id. A closed task keeps its
+;; source for ever, so a second gap after one was closed gets a fresh source.
+(define (eval-read--file-unstamped! name)
+  (let* ((src (string-append "compos:unstamped " name))
+         (open (todo-list (list 'source src))))
+    (if (pair? open)
+        (plist-get (car open) 'id)
+        (let* ((all (todo-list (list 'all #t 'source src)))
+               (src (if (pair? all) (string-append src " #" (number->string (length all))) src))
+               (healing? (boundp 'self-healing-project))
+               (chat? (and healing? (< (self-healing--running) self-healing-max-chats)))
+               (id (todo-create (string-append "Stamp the effects of " name)
+                     (append
+                       (list 'project (if healing? self-healing-project "compos")
+                             'state (if chat? "todo" "inbox")
+                             'tags "self-healing"
+                             'source src
+                             'notes (string-append "eval-scheme-read refused " name
+                                      " because the catalog declares no effects for it. Find its definition and read what it does. Declare its effects where it is made public: an effects! line before its public!, or catalog-meta! after it when the stamp in force there is wrong for it alone, or a public! with effects! for a builtin that has none. Save, check (eval-read-refusal \"(" name " ...)\") no longer names it, then close the task."))
+                       (if healing? (list 'group (group-ensure-record! self-healing-group)) '())))))
+          (when chat? (todo-assign-chat! id self-healing-group))
+          id))))
+
+(define-tool! 'eval-scheme-read
+  "Evaluate read-only Scheme in the live editor: buffer-text, code-read, markdown-read, outlines, lookups. Several in one turn run at the same time; eval-scheme always runs alone. Every name the code uses must be declared pure or read, and nothing may define or set!. Anything else is refused with the name that failed; run that code with eval-scheme."
+  (list (list 'code "string" "Scheme source that only reads"))
+  (lambda (args)
+    (let* ((code (or (plist-get args 'code) ""))
+           (why (eval-read-refusal code eval-read--file-unstamped!)))
+      (if why
+          (string-append "refused: " why ". Use eval-scheme for this code.")
+          (let ((r (with-current-buffer (current-buffer)
+                     (lambda () (eval-string-safe code)))))
+            (if (equal? (car r) 'ok)
+                (value->string (cadr r))
+                (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))))
+  '(read))
+
 ;; Emacs-grade introspection: most of the editor is userland Scheme, and
 ;; closures carry their AST — so a function's real source is one call away.
 (define (describe-function name)

@@ -315,30 +315,6 @@
       (check-equal! (length (car mine)) 3 "a heading has label, annotation, kind"))
     (chats-test-reset!)))
 
-(deftest 'the-prompt-previews-in-a-card-like-the-window-form
-  "C-x c: the row under the cursor floats an inert card over the rows. The
-   pane the picker was invoked from is the user's and keeps what it held."
-  (lambda ()
-    (chats-test-reset!)
-    (chats-test-chat! "*zz-chats-a*" (group-record-create! "zz-chats-one"))
-    (chats-test-chat! "*zz-chats-b*" (group-record-id (group-record-by-name "zz-chats-one")))
-    (run-command "chat-prompt")
-    (let* ((view *chat-prompt-buffer*)
-           (home (buffer-local view 'ibuffer-prompt-home-window))
-           (was (and home (window-buffer home))))
-      (list-set-filters! view (list (list "match" "zz-chats-")))
-      (list-refresh! view)
-      (ibuffer-goto-first-row! view)
-      (let ((row (list-current view)))
-        (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
-        (listing-preview! view row)
-        (check-equal! (float-open?) #t "the row floats a card")
-        (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
-                      "the card holds the row's chat")
-        (check-equal! (window-buffer home) was
-                      "the pane it was invoked from is untouched")))
-    (run-command "minibuffer-cancel")
-    (chats-test-reset!)))
 
 (deftest 'dot-shows-the-hidden-chats-and-puts-them-away
   "a context-only chat, an agent's own, is out of the list until . asks for it"

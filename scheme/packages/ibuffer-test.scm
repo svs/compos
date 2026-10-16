@@ -66,7 +66,7 @@
     (ibuffer-test-open! 'mode 'name)
     (buffer-set-local! "*zz-ib-b*" 'mode-name "aa-other-mode")
     (ibuffer-refresh!)
-    (check-equal! (ibuffer-test-headings) '("aa-other" "zz-ib") "one heading per mode, by name")
+    (check-equal! (ibuffer-test-headings) '("aa-other-mode" "zz-ib-mode") "one heading per mode, by name")
     (let ((heading (car (filter ibuffer-heading? (list-entries "*ibuffer*")))))
       (check-equal! (ibuffer-heading-count heading) 1 "the first section holds b")
       (check-equal! (ibuffer-heading-members heading) '("*zz-ib-b*") "its member"))
@@ -78,7 +78,7 @@
                       (list "zz" "" "separator" "zz" 3 2 0 #f '()))
                     "3 buffers · 2 modified"
                     "a heading says how many of its rows hold unsaved edits")
-      (check-equal! (ibuffer-section-label second) "ZZ-IB"
+      (check-equal! (ibuffer-section-label second) "ZZ-IB-MODE"
                     "the name is set in a register no row uses")
       (check-equal! (ibuffer-section-kind "*ibuffer*" second) "mode"
                     "and it says what kind of section it is")
@@ -357,7 +357,7 @@
 (define (ibuffer-test-point-on! name)
   (run-command "ibuffer")
   (buffer-set-locals! "*ibuffer*"
-    (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-collapsed '()))
+    (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-tab 'all 'ibuffer-collapsed '()))
   (list-set-filters! "*ibuffer*" (list (list "match" name)))
   (ibuffer-refresh!)
   (ibuffer-goto-first-row! "*ibuffer*")

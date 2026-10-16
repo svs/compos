@@ -823,6 +823,13 @@
                   (cons (dash--seg-rule)
                         (cons (car rest) (loop (cdr rest)))))))))
 
+(define (dash--children-seg buf)
+  (let ((n (if (boundp 'buffer-lineage-children) (length (buffer-lineage-children buf)) 0)))
+    (and (> n 0)
+         (dash--seg #f (list (list "f-dim" (string-append (number->string n)
+                                                           (if (= n 1) " child" " children"))))
+                    'left "dseg-inline dseg-children"))))
+
 (define (dashboard-line-blocks buf &optional preset-cell)
   (let* ((vcs (dash--vcs buf))
          ;; every buffer names itself: a chat's own title when it wrote one,
@@ -859,7 +866,10 @@
                                (mode-own-icon (buffer-local buf 'mode-name))
                                (cadr file))))
                      (if (and vcs (not (dash--summary buf)))
-                         (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
+                         (list (list 'wide (dash--wide-seg "jj" vcs))) '())
+                     ;; a chat that spawned chats counts them; M-<down> walks them
+                     (let ((kids (dash--children-seg buf)))
+                       (if kids (list (list 'wide kids)) '())))))
          (width (buffer-cols buf))
          (keep (dash--headline-keep buf width))
          ;; KEEP says which segments survive a narrow window; NARROW? says

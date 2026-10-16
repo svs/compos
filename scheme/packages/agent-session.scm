@@ -1103,6 +1103,8 @@
                               kids (list cslug))))
                   (subagent-cache-rebuild! pslug)
                   (subagent-cache-rebuild! cslug)
+                  ;; the parent counts its children in its header line
+                  (when (boundp 'dashboard--sync!) (dashboard--sync! buf))
                   home))))))
 
 ;; The kill seam (groups.scm group-buffer-kill-repair) calls this for
@@ -1111,11 +1113,17 @@
 ;; running, and the state records that the parent is gone.
 (define (subagent-chat-killed! name)
   (let* ((slug (and (string? name) (buffer-exists? name) (agent-slug-of name)))
-         (found (and slug (subagent-slot-of slug))))
+         (found (and slug (subagent-slot-of slug)))
+         (parent (and slug (subagent-parent slug)))
+         (pbuf (and parent (subagent-live-buffer parent))))
     (when found
       (let ((slot (nth 1 found)))
         (subagent-slot-put! (car found)
-          (append (list slug "gone") (subagent-slot-children slot)))))))
+          (append (list slug "gone") (subagent-slot-children slot)))))
+    ;; the parent counts its children in its header line, and the child is
+    ;; still here while it dies: count again once the kill is done
+    (when (and pbuf (boundp 'dashboard--sync!))
+      (task-run! (lambda () #t) (lambda (ok? v) (dashboard--sync! pbuf))))))
 
 (category! 'chat)
 

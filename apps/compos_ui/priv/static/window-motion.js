@@ -599,10 +599,12 @@
   }
 
   // the walk lasts while the key that steps it is held: Cmd for a walk of
-  // one mode, Shift for the whole stack
-  window.addEventListener('keydown', (e) => { meta = e.metaKey || e.shiftKey; }, true);
+  // one mode, Shift for the whole stack, Alt for a chat and its child chats
+  window.addEventListener('keydown', (e) => { meta = e.metaKey || e.shiftKey || e.altKey; }, true);
   window.addEventListener('keyup', (e) => {
-    if ((e.key === 'Meta' || e.key === 'Shift') && !e.metaKey && !e.shiftKey) { meta = false; end(); }
+    if ((e.key === 'Meta' || e.key === 'Shift' || e.key === 'Alt') && !e.metaKey && !e.shiftKey && !e.altKey) {
+      meta = false; end();
+    }
   }, true);
   window.addEventListener('blur', () => { meta = false; end(); });
 

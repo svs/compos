@@ -5881,6 +5881,8 @@
 (public! 'mode-parent! "(mode-parent! NAME PARENT) — record that NAME is built from PARENT")
 (public! 'derived-mode? "(derived-mode? MODE NAME) — #t when MODE is NAME or descends from it")
 (public! 'buffer-derived-mode? "(buffer-derived-mode? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
+(catalog-meta! 'function "derived-mode?" 'effects '(pure))
+(catalog-meta! 'function "buffer-derived-mode?" 'effects '(read))
 (public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")
 (public! 'annotate "(annotate CATEGORY NAMES) — NAMES as (LABEL HINT) candidates, through CATEGORY's annotator; NAMES unchanged when nothing registered one")

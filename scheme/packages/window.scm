@@ -3030,6 +3030,7 @@ and right walk the panes, up and down move by geometry."
   "(window-showing-mode MODE [EXCEPT]) — the work window preferring or showing MODE, or #f")
 (public! 'get-visible-buffers
   "(get-visible-buffers) — the buffers in the user's frame windows, most recently visited first")
+(catalog-meta! 'function "get-visible-buffers" 'effects '(read))
 (effects! '(write display))
 (public! 'get-other-window
   "(get-other-window) — the window to show a buffer in for the user, never the active one; below the target layout's capacity the layout gains a pane")

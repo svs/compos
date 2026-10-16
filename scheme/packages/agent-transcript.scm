@@ -1117,8 +1117,10 @@
 (define-command "chat-next-block" "Show the next block of this chat at the top; past the newest, follow the bottom"
   (lambda () (chat-view-step! (current-buffer) 1)))
 
-(define-key "chat-mode-map" "M-<up>" "chat-previous-block")
-(define-key "chat-mode-map" "M-<down>" "chat-next-block")
+;; a chat that spawned chats, or was spawned by one, walks that family on
+;; M-<up>/M-<down> (switch.scm); any other chat steps by block
+(define-key "chat-mode-map" "M-<up>" "window-previous-child-chat")
+(define-key "chat-mode-map" "M-<down>" "window-next-child-chat")
 
 ;; typing answers at the bottom, so a key that types brings the view back,
 ;; unless the reader asked the view to stay

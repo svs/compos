@@ -891,14 +891,17 @@ the next row down. STEP is kept for the callers."
          (w (if (window-walk-live? *window-walk* win)
                 *window-walk*
                 (let ((here (window-buffer win)))
-                  (list win here (cons here (switch-window-buffers mode-only)) 0
+                  (list win here (cons here (if (equal? mode-only 'lineage)
+                                                (window-lineage-rows here)
+                                                (switch-window-buffers mode-only)))
+                        0
                         (window-prev-buffers win)))))
          (rows (list-ref w 2))
          (n (length rows)))
     (if (< n 2)
-        (message (if mode-only
-                     "No other buffer of this mode in this window"
-                     "No other buffer in this window"))
+        (message (cond ((equal? mode-only 'lineage) "No parent or child buffer here")
+                       (mode-only "No other buffer of this mode in this window")
+                       (else "No other buffer in this window")))
         (let* ((j (modulo (+ (list-ref w 3) step) n))
                (to (list-ref rows j))
                (start (cadr w)))
@@ -939,6 +942,53 @@ the next row down. STEP is kept for the callers."
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("window-next-buffer" "window-previous-buffer"
     "window-next-mode-buffer" "window-previous-mode-buffer" "window-walk-end"))
+
+;; A chat's lineage is the chat that spawned it and the chats it spawned
+;; (agent-session.scm). M-<down> walks it the way S-<down> walks the
+;; window's stack: the parent first, then its children, oldest first. A
+;; chat with no lineage keeps the key's old meaning, the fallback. Only
+;; spawn edges count: a listing's detail pages are its dismissal children
+;; too, and M-<down> beside a listing must still scroll the page.
+(define (buffer-lineage-parent buf)
+  (and (chat-buffer? buf)
+       (let ((p (subagent-parent buf)))
+         (and p (subagent-live-buffer p)))))
+
+(define (buffer-lineage-children buf)
+  (if (chat-buffer? buf)
+      (filter (lambda (b) b) (map subagent-live-buffer (subagent-children buf)))
+      '()))
+
+;; the lineage as the walk's rows: the ring of parent and children, turned
+;; so that HERE leads, without HERE
+(define (window-lineage-rows here)
+  (let* ((root (or (buffer-lineage-parent here) here))
+         (ring (cons root (buffer-lineage-children root))))
+    (let loop ((xs ring) (before '()))
+      (cond ((null? xs) (remove (lambda (b) (equal? b here)) ring))
+            ((equal? (car xs) here) (append (cdr xs) (reverse before)))
+            (else (loop (cdr xs) (cons (car xs) before)))))))
+
+(define (window-lineage-walk! step fallback)
+  (let ((win (active-window)))
+    (if (or (window-walk-live? *window-walk* win)
+            (pair? (window-lineage-rows (window-buffer win))))
+        (window-walk! step 'lineage)
+        (run-command fallback))))
+
+(define-command "window-next-child-chat"
+  "Show the next of this chat's parent and child chats; hold Alt to keep walking. Without any, show the next block"
+  (lambda () (window-lineage-walk! 1 "chat-next-block")))
+
+(define-command "window-previous-child-chat"
+  "Show the previous of this chat's parent and child chats; hold Alt to keep walking. Without any, show the previous block"
+  (lambda () (window-lineage-walk! -1 "chat-previous-block")))
+
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("window-next-child-chat" "window-previous-child-chat"))
+(public! 'buffer-lineage-children "(buffer-lineage-children BUF) — the live chats BUF spawned, oldest first; () for a buffer that is not a chat")
+(catalog-meta! 'function "buffer-lineage-children" 'domain 'buffers 'effects '(read))
 
 ;; While the walk is open, the keys that opened it move the selection.
 (for-each

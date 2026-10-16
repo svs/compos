@@ -366,6 +366,9 @@
 
 (public! 'block-body
   "(block-body BLOCK) — the text between BLOCK's fences; a block without both fences is returned whole")
+(for-each (lambda (n) (catalog-meta! 'function n 'effects '(read)))
+  '("block-list" "block-at" "block-at-line" "block-text"))
+(catalog-meta! 'function "block-body" 'effects '(pure))
 
 (public! 'block-records
   "(block-records BUF) — the durable addressable block records in BUF")

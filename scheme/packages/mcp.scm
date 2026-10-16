@@ -529,6 +529,8 @@
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")
 (public! 'mcp-find "(mcp-find \"words|words\" ['name]) — search MCP tools; gives (SERVER TOOL DESC)")
 (public! 'mcp-tool-schema "(mcp-tool-schema 'name TOOL) — that tool's JSON argument schema")
+(for-each (lambda (n) (catalog-meta! 'function n 'effects '(read external)))
+  '("mcp-tools" "mcp-find" "mcp-tool-schema"))
 (public! 'mcp-system-note "(mcp-system-note) — the line that tells a model which MCP servers exist")
 
 ;; Which servers exist is user config, not core: declare them with

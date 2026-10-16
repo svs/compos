@@ -293,11 +293,14 @@
                  (let* ((n (symbol->string (car writes)))
                         (e (assoc n effects))
                         (stamp (and e (cadr e))))
-                   (if (or (not (pair? stamp)) (member "unknown" stamp))
+                   (cond
+                     ((string-contains? n "--")
+                      (string-append n " is private to its package and declares no effects"))
+                     ((or (not (pair? stamp)) (member "unknown" stamp))
                        (let ((id (and on-unstamped (on-unstamped n))))
                          (string-append n " has no effects stamp"
-                                        (if id (string-append " (filed " id " to stamp it)") "")))
-                       (string-append n " is not declared pure or read"))))
+                                        (if id (string-append " (filed " id " to stamp it)") ""))))
+                     (else (string-append n " is not declared pure or read")))))
                 (else #f))))))
 
 ;; A function with no stamp is a gap, not a verdict: file it once for

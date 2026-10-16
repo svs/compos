@@ -778,7 +778,9 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
 (public! 'project-search-matches
   "(project-search-matches ROOT PATTERN) -> search project text files as (PATH:LINE PATH LINE TEXT) matches")
-(catalog-meta! 'function "project-search-matches" 'domain 'project 'effects '(read execute))
+;; both run git or rg over the project's files and change nothing: reads
+(catalog-meta! 'function "project-files" 'domain 'project 'effects '(read))
+(catalog-meta! 'function "project-search-matches" 'domain 'project 'effects '(read))
 (public! 'grep
   "(grep PATTERN [ROOT]) -> search the project for PATTERN as (PATH:LINE PATH LINE TEXT) matches; ROOT defaults to this buffer's project")
 (catalog-meta! 'function "grep" 'domain 'project 'effects '(read execute))

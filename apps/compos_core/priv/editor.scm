@@ -2650,6 +2650,15 @@
 ;; A mechanism that puts a buffer in a window it chose — a layout, a
 ;; swap, a restore, a borrowed window — calls switch-to-buffer-here!.
 (define (switch-to-buffer! buf)
+  ;; An agent on the frame's real windows (with-frame-windows) does not put
+  ;; its work in the selected window. window.scm owns the rule. Restored
+  ;; 2026-10-17: 9b0cc4ad dropped it with unrelated pending work.
+  (if (and (not (buffer-context?)) (boundp 'display-buffer-agent-refuses?)
+           (display-buffer-agent-refuses? buf '()))
+      (begin (display-buffer-agent-refusal buf) #f)
+      (switch-to-buffer--show! buf)))
+
+(define (switch-to-buffer--show! buf)
   ;; A user visit promotes quiet file loads before deciding target eligibility.
   ;; Logical and agent buffer switches remain headless.
   (when (and (not (buffer-context?)) (boundp 'buffer-promote!)
@@ -4440,6 +4449,11 @@
              ((remote-path? path) (remote-visit path))
              ((file-directory? path) (dired-open path))
              ((file-too-big? path) (message (file-too-big-message path)) #f)
+             ;; An agent on the frame's real windows loads the file and
+             ;; shows nothing. It shows the buffer in the other window.
+             ((and (not (buffer-context?))
+                   (agent-edit-author? (current-edit-author)))
+              (visit-quietly path group))
              (else
                (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
                  ;; An explicit destination is joined before display, and a

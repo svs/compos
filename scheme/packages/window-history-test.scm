@@ -62,26 +62,6 @@
       (check-equal! (window-buffer win) t--wh-c "and shows the buffer it showed before d"))
     (t--wh-done!)))
 
-(deftest 'a-refill-never-shows-what-another-window-shows
-  "the pane's past leads with a buffer the other window shows: the next one takes the place"
-  (lambda ()
-    (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
-    (layout-target-set! #f)
-    (delete-other-windows!)
-    (switch-to-buffer! t--wh-b)
-    (switch-to-buffer! t--wh-a)
-    (split-window! 'h 0.5)
-    (other-window!)
-    ;; the right window: d after a, so its past is (a b ...) and a is on the left
-    (switch-to-buffer! t--wh-d)
-    (let ((win (active-window)))
-      (check-equal! (car (window-prev-buffers win)) t--wh-a "the pane's past leads with a")
-      (buffer-kill! t--wh-d)
-      (check-equal! (length (window-list)) 2 "the window stays")
-      (check-equal! (window-buffer win) t--wh-b "a is on the left already, so b takes the place")
-      (check-false! (equal? (window-buffer win) t--wh-a) "not a twice"))
-    (t--wh-done!)))
-
 (deftest 'a-pane-a-tile-leaves-out-becomes-a-hidden-window
   "tile b with e: the pane on d does not die; it is hidden, with d and its past"
   (lambda ()

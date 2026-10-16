@@ -567,13 +567,12 @@
       (disable-minor-mode! buf "paredit-mode")
       (buffer-kill! buf))
 
-    (let ((saved paredit-in-scheme-mode))
-      (set! paredit-in-scheme-mode #f)
-      (let ((buf (test-buffer! "zz-paredit-scheme2" "")))
-        (with-current-buffer buf (lambda () (set-mode! "scheme-mode")))
-        (check-false! (minor-mode-on? buf "paredit-mode") "the setting turns it off")
-        (buffer-kill! buf))
-      (set! paredit-in-scheme-mode saved))))
+    (with-stub 'paredit-in-scheme-mode #f
+      (lambda ()
+        (let ((buf (test-buffer! "zz-paredit-scheme2" "")))
+          (with-current-buffer buf (lambda () (set-mode! "scheme-mode")))
+          (check-false! (minor-mode-on? buf "paredit-mode") "the setting turns it off")
+          (buffer-kill! buf))))))
 
 ;;; --- the window and the scan state cache --------------------------------------
 ;;; A command reads a window of bytes around point, not the whole
@@ -597,14 +596,13 @@
       (check-equal! (par-close w 5) 8 "its closer")
       (check-equal! (par--end w) 19 "the window ends at the buffer end")
       (check-false! (par--ch w 19) "no byte past it")
-      (let ((saved paredit-scan-limit))
-        (set! paredit-scan-limit 1024)
-        (let* ((big (t--par! (t--par-big-text) 60000))
-               (w2 (par--window big 60000)))
-          (check-equal! (par--start w2) (- 60000 1024) "the window starts a limit before point")
-          (check-false! (par--ch w2 0) "the buffer start is outside it")
-          (check-equal! (par--ch w2 60000) (substring-bytes (buffer-text big) 60000 60001) "point is inside"))
-        (set! paredit-scan-limit saved))
+      (with-stub 'paredit-scan-limit 1024
+        (lambda ()
+          (let* ((big (t--par! (t--par-big-text) 60000))
+                 (w2 (par--window big 60000)))
+            (check-equal! (par--start w2) (- 60000 1024) "the window starts a limit before point")
+            (check-false! (par--ch w2 0) "the buffer start is outside it")
+            (check-equal! (par--ch w2 60000) (substring-bytes (buffer-text big) 60000 60001) "point is inside"))))
       (t--par-done!))))
 
 (deftest 'show-paren-lights-the-pair-in-a-large-buffer-through-a-window

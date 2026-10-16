@@ -331,53 +331,26 @@
     (switch-to-buffer! t--sw-second)
     id))
 
-(deftest 'a-killed-buffers-window-shows-the-member-it-showed-before
-  "the window stays and refills from its own past, most recent member first"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((id (t--sw-kill-frame! "zzsw-kill-member"))
-           (win (active-window)))
-      (buffer-add-group! t--sw-third id)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-second)
-      (check-equal! (car (window-prev-buffers win)) t--sw-third "the window showed third before")
-      (buffer-kill! t--sw-second)
-      (check-equal! (length (window-list)) 2 "the window stays")
-      (check-true! (window-exists? win) "the same window")
-      (check-equal! (window-buffer win) t--sw-third "and shows the member it showed before")
-      (check-equal! (active-window) win "the selection stays in it")
-      (let ((chat (group-chat id)))
-        (when (buffer-known? chat) (buffer-kill! chat))))
-    (t--sw-done!)))
-
-(deftest 'a-killed-buffers-window-shows-the-groups-last-chat
-  "the window's past leads with the member the other window shows, so the group's chat takes the place"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((id (t--sw-kill-frame! "zzsw-kill-chat"))
-           (chat (group-chat id))
-           (win (active-window)))
-      (check-equal! (window-buffer win) t--sw-second "the window shows the victim")
-      (check-equal! (car (window-prev-buffers win)) t--sw-first
-                    "its past leads with first, which the left window shows")
-      (buffer-kill! t--sw-second)
-      (check-equal! (length (window-list)) 2 "the window stays")
-      (check-true! (window-exists? win) "the same window")
-      (check-equal! (window-buffer win) chat "and shows the group's chat")
-      (check-equal! (active-window) win "the selection stays in it")
-      (when (buffer-known? chat) (buffer-kill! chat)))
-    (t--sw-done!)))
-
-(deftest 'a-killed-buffers-window-shows-the-group-chat-without-a-member
-  "no member left: the group's chat takes the place, never a scratch or a foreign buffer"
+(deftest 'a-kill-applies-the-fill-decision-to-the-groups-window
+  "the window stays: it shows the member it showed before, and with no member left the group's chat, never a scratch or a foreign buffer"
   (lambda ()
     (t--sw-setup!)
     (let ((foreign "zz-sw-foreign"))
       (test-buffer! foreign "")
-      (let* ((id (t--sw-kill-frame! "zzsw-kill-scratch"))
+      (let* ((id (t--sw-kill-frame! "zzsw-kill-member"))
              (win (active-window)))
+        (buffer-add-group! t--sw-third id)
+        (switch-to-buffer! t--sw-third)
+        (switch-to-buffer! t--sw-second)
+        (check-equal! (car (window-prev-buffers win)) t--sw-third "the window showed third before")
         (buffer-kill! t--sw-second)
         (check-equal! (length (window-list)) 2 "the window stays")
+        (check-true! (window-exists? win) "the same window")
+        (check-equal! (window-buffer win) t--sw-third "and shows the member it showed before")
+        (check-equal! (active-window) win "the selection stays in it")
+        ;; no member left: first is on the left, so the blank is the chat
+        (buffer-kill! t--sw-third)
+        (check-equal! (length (window-list)) 2 "the window still stays")
         (let ((shown (window-buffer win)))
           (check-false! (group-scratch-buffer? shown) "not a scratch")
           (check-true! (and (chat-buffer? shown) (equal? (chat-group-id shown) id))
@@ -385,20 +358,6 @@
           (check-false! (equal? shown foreign) "not the foreign buffer")
           (when (buffer-known? shown) (buffer-kill! shown))))
       (buffer-kill! foreign))
-    (t--sw-done!)))
-
-(deftest 'a-killed-buffer-in-a-dying-group-closes-its-window
-  "a group with no chat and no scratch left gives the window up"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((id (t--sw-kill-frame! "zzsw-kill-dying"))
-           (win (active-window)))
-      (set! *group-dying* id)
-      (buffer-kill! t--sw-second)
-      (set! *group-dying* #f)
-      (check-equal! (length (window-list)) 1 "the window closed")
-      (check-false! (window-exists? win) "that window")
-      (check-equal! (current-buffer) t--sw-first "the other window remains"))
     (t--sw-done!)))
 
 (deftest 'a-killed-group-revives-with-the-members-that-still-exist
@@ -1677,34 +1636,6 @@
         (check-equal! (frame-group) moved "the new group was entered")))
     (t--sw-done!)))
 
-(deftest 'killing-a-visible-group-buffer-never-shows-a-foreign-buffer
-  "a grouped frame replaces a killed member from that group only"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here"))
-          (foreign (group-record-create! "zzsw-foreign")))
-      ;; the panes are laid out before any group exists: a switch in a
-      ;; group makes the buffer join it, and third must stay foreign
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-second)
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second here)
-      (buffer-add-group! t--sw-third foreign)
-      (set-frame-local! 'current-group here)
-
-      (buffer-kill! t--sw-second)
-
-      (check-false! (member t--sw-third (map cadr (window-list)))
-                    "the foreign MRU buffer stayed hidden")
-      (for-each
-        (lambda (row)
-          (check-true! (buffer-in-group? (cadr row) here)
-                       "every visible replacement belongs to the current group"))
-        (window-list)))
-    (t--sw-done!)))
-
 (deftest 'a-frame-without-a-group-refills-a-killed-member-from-its-group
   "a frame that lost its group never takes the killed pane's foreign history"
   (lambda ()
@@ -1781,29 +1712,6 @@
         (check-true! (member t--sw-second (window-prev-buffers win))
                      "and the pane keeps it in its history")
         (window-mode-preference! win #f)))
-    (t--sw-done!)))
-
-(deftest 'a-pinned-empty-group-lands-on-its-chat-after-the-final-kill
-  "the group chat is the total fallback when no live member remains"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-empty-pinned")))
-      (buffer-add-group! t--sw-first here)
-      (set-frame-local! 'current-group here)
-      (set-frame-local! 'pinned-group here)
-
-      (buffer-kill! t--sw-first)
-
-      (let ((fallback (current-buffer)))
-        (check-equal! fallback (group-chat here)
-                      "the empty pinned group lands on its chat")
-        (check-true! (chat-buffer? fallback)
-                     "the fallback is a live chat buffer")
-        (check-equal! (chat-group-id fallback) here
-                      "the fallback belongs to the pinned group")
-        (set-frame-local! 'pinned-group #f)
-        (set-frame-local! 'current-group #f)
-        (buffer-kill! fallback)))
     (t--sw-done!)))
 
 (deftest 'group-pin-keeps-context-without-adopting-foreign-work

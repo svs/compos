@@ -14,11 +14,7 @@
 ;; test reads the same ones, and the live editor reaches the network
 ;; through them.
 (define (t--sentry-with-transport fetch thunk)
-  (let ((saved *sentry-transport*))
-    (set! *sentry-transport* fetch)
-    (let ((out (thunk)))
-      (set! *sentry-transport* saved)
-      out)))
+  (with-stub '*sentry-transport* fetch thunk))
 
 (deftest 'an-issue-search-encodes-its-filters-and-caps-its-limit
   "the query, the environment and the period ride the URL; the limit is ours"

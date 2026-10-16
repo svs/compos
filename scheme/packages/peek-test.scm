@@ -54,25 +54,24 @@
     (t--peek-with
       (lambda ()
         (let* ((small (t--peek-file "small.txt" "alpha\n"))
-               (big (t--peek-file "big.txt" (string-repeat "x" 4096)))
-               (saved peek-max-file-size))
-          (set! peek-max-file-size 2048)
-          (peek-file! small)
-          (check-true! (peek-buffer? small) "a file under the cap is looked at")
-          (check-false! (peek-file! big) "a file over the cap answers #f")
-          (check-false! (buffer-known? big) "and nothing opened it")
-          (check-true! (peek-buffer? small) "the last look is still on screen")
-          ;; the cap is a look's, not a visit's: RET opens whatever it names
-          (visit big)
-          (check-true! (buffer-known? big) "a visit the reader asked for still opens it")
-          (buffer-kill! big)
-          ;; a buffer that is open already costs nothing more to show
-          (find-file big)
-          (check-false! (peek-too-big? big) "an open buffer is never too big")
-          (set! peek-max-file-size 0)
-          (check-false! (peek-too-big? (t--peek-file "big2.txt" (string-repeat "x" 4096)))
-                        "0 removes the cap")
-          (set! peek-max-file-size saved))))))
+               (big (t--peek-file "big.txt" (string-repeat "x" 4096))))
+          (with-stub 'peek-max-file-size 2048
+            (lambda ()
+              (peek-file! small)
+              (check-true! (peek-buffer? small) "a file under the cap is looked at")
+              (check-false! (peek-file! big) "a file over the cap answers #f")
+              (check-false! (buffer-known? big) "and nothing opened it")
+              (check-true! (peek-buffer? small) "the last look is still on screen")
+              ;; the cap is a look's, not a visit's: RET opens whatever it names
+              (visit big)
+              (check-true! (buffer-known? big) "a visit the reader asked for still opens it")
+              (buffer-kill! big)
+              ;; a buffer that is open already costs nothing more to show
+              (find-file big)
+              (check-false! (peek-too-big? big) "an open buffer is never too big")
+              (set! peek-max-file-size 0)
+              (check-false! (peek-too-big? (t--peek-file "big2.txt" (string-repeat "x" 4096)))
+                            "0 removes the cap"))))))))
 
 (deftest 'the-next-peek-replaces-the-last-and-kills-what-peek-made
   "one peek at a time; a buffer that existed before is only shown"
@@ -307,27 +306,26 @@
     (when (boundp 'web--tab-for!)
       (t--peek-with
         (lambda ()
-          (let ((saved *web-fetch*))
-            (set! *web-fetch*
-              (lambda (url want k)
-                (k (list want
-                         (if (string-contains? url "second")
-                             "# Second\n\nback [home](https://peek.test/)\n"
-                             "# First\n\nsee [second](https://peek.test/second.html)\n")
-                         #f))))
-            (let* ((a (browse "https://peek.test/index.html"))
-                   (l (web--link-after a 0)))
-              (goto-char! (car l))
-              (run-command "browse-follow-other-window")
-              (let ((b (web--buffer-for "https://peek.test/second.html")))
-                (check-true! (peek-buffer? b) "the linked page is a peek")
-                (check-equal! (current-buffer) a "the reader stays")
+          (with-stub '*web-fetch*
+            (lambda (url want k)
+              (k (list want
+                       (if (string-contains? url "second")
+                           "# Second\n\nback [home](https://peek.test/)\n"
+                           "# First\n\nsee [second](https://peek.test/second.html)\n")
+                       #f)))
+            (lambda ()
+              (let* ((a (browse "https://peek.test/index.html"))
+                     (l (web--link-after a 0)))
+                (goto-char! (car l))
                 (run-command "browse-follow-other-window")
-                (check-false! (peek-buffer? b) "the same link again keeps it")
-                (check-equal! (current-buffer) b "and goes there")
-                (buffer-kill! b))
-              (buffer-kill! a))
-            (set! *web-fetch* saved)))))))
+                (let ((b (web--buffer-for "https://peek.test/second.html")))
+                  (check-true! (peek-buffer? b) "the linked page is a peek")
+                  (check-equal! (current-buffer) a "the reader stays")
+                  (run-command "browse-follow-other-window")
+                  (check-false! (peek-buffer? b) "the same link again keeps it")
+                  (check-equal! (current-buffer) b "and goes there")
+                  (buffer-kill! b))
+                (buffer-kill! a)))))))))
 
 (deftest 'a-shown-peek-follows-the-dired-highlight
   "no look until RET; then the file under the rested highlight replaces the peek"

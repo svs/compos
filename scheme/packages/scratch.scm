@@ -27,24 +27,12 @@
                    (if group (group-display-name group) owner)
                    "*")))
 
-(define (scratch--legacy owner)
-  ;; Writing mode used to own scratch buffers.  Adopt either its persisted
-  ;; pointer or its deterministic old name so existing prose is never copied,
-  ;; renamed, or lost during the move to the global command.
-  (let ((saved (buffer-local owner 'writing-scratch))
-        (derived (string-append "*writing:" owner "*")))
-    (cond ((and saved (buffer-exists? saved)) saved)
-          ((buffer-exists? derived) derived)
-          (else #f))))
-
 (define (scratch--for owner)
   (let* ((group (buffer-group owner))
          (shared (and group (group-buffer-as group 'scratch)))
-         (saved (buffer-local owner 'scratch-buffer))
-         (legacy (scratch--legacy owner)))
+         (saved (buffer-local owner 'scratch-buffer)))
     (cond ((and shared (buffer-exists? shared)) shared)
           ((and saved (buffer-exists? saved)) saved)
-          (legacy legacy)
           (else (scratch--name owner)))))
 
 (define (scratch--inherit-llm! owner scratch)
@@ -100,24 +88,12 @@
     (with-current-buffer scratch (lambda () (set-mode! "scratch-mode")))))
 
 (define (scratch--prepare! owner scratch)
-  (let ((existed (buffer-exists? scratch)))
+  (begin
     (unless (buffer-exists? scratch)
       (buffer-create scratch)
       (buffer-append! scratch
         (string-append "# Scratch — " (scratch--label owner) "\n\n")))
-    (let* ((group (or (buffer-group owner) (group-ensure! owner)))
-           (legacy?
-             (and existed
-                  (not (equal? (buffer-group-role scratch group) "scratch")))))
-      ;; A legacy writing scratch exists outside the group. Its old presentation goes
-      ;; before scratch-mode runs, so morg's own presentation is the last word.
-      ;; A new scratch is not legacy: this must not strip morg's setup.
-      (when legacy?
-        (when (minor-mode-on? scratch "writing-mode")
-          (disable-minor-mode! scratch "writing-mode"))
-        (buffer-set-local! scratch 'render-mode #f)
-        (buffer-set-local! scratch 'preview-renderer #f)
-        (buffer-set-local! scratch 'visual-line-mode #f))
+    (let ((group (or (buffer-group owner) (group-ensure! owner))))
       ;; set-mode! is current-buffer based, and a mode belongs to the buffer,
       ;; not to a window: give a new scratch its mode without displaying it.
       (scratch--set-mode! scratch)

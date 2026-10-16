@@ -162,14 +162,13 @@
                     'allow-always "the editor's own tools keep working")
 
       ;; the setting is the whole escape hatch
-      (let ((was agent-filesystem-tools))
-        (set! agent-filesystem-tools "ask")
-        (check-equal! (permit? buf "Write" "edit" "{}") 'ask
-                      "ask puts the write in front of the user")
-        (set! agent-filesystem-tools "allow")
-        (check-equal! (permit? buf "Write" "edit" "{}") 'allow-always
-                      "allow hands the filesystem back")
-        (set! agent-filesystem-tools was))
+      (with-stub 'agent-filesystem-tools "ask"
+        (lambda ()
+          (check-equal! (permit? buf "Write" "edit" "{}") 'ask
+                        "ask puts the write in front of the user")
+          (set! agent-filesystem-tools "allow")
+          (check-equal! (permit? buf "Write" "edit" "{}") 'allow-always
+                        "allow hands the filesystem back")))
       (buffer-kill! buf))))
 
 (deftest 'git-that-overwrites-the-work-tree-asks-first

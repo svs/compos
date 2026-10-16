@@ -116,12 +116,12 @@
 (deftest 'profile-arms-and-disarms-by-name
   "M-x profile waits for one command; M-x profile-cancel stops waiting"
   (lambda ()
-    (let ((was *profile-armed*))
-      (run-command "profile")
-      (check-true! (profile-armed?) "armed")
-      (run-command "profile-cancel")
-      (check-true! (not (profile-armed?)) "disarmed")
-      (set! *profile-armed* was))))
+    (with-stub '*profile-armed* *profile-armed*
+      (lambda ()
+        (run-command "profile")
+        (check-true! (profile-armed?) "armed")
+        (run-command "profile-cancel")
+        (check-true! (not (profile-armed?)) "disarmed")))))
 
 (deftest 'profile-site-counters-do-not-count-themselves
   "an armed fold or remove counts its call site once and returns the builtin's value"

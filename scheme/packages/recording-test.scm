@@ -19,10 +19,7 @@
         '())))
 
 (define (t--without-frames thunk)
-  (let ((was recording-frames))
-    (set! recording-frames #f)
-    (thunk)
-    (set! recording-frames was)))
+  (with-stub 'recording-frames #f thunk))
 
 (deftest 'recording-logs-only-on-change
   "the log gains an entry per visible change and ignores repeats"

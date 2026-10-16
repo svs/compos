@@ -843,36 +843,26 @@
 ;;; Every rendered page remembers itself in ONE file that outlives the
 ;;; session: a "URL <TAB> TIME <TAB> TITLE" line per page, newest first.
 ;;; The browse prompt completes over it, the title matches what you
-;;; type, and `H` lists it. A line with no tab is the old "URL TITLE"
-;;; shape; it reads with no time and rewrites in the new shape.
+;;; type, and `H` lists it. One URL-tab-TIME-tab-TITLE line per page;
+;;; migrations.scm reads the old visited file into it once.
 
 (define *web-visited-file* (string-append (compos-home) "/web-history"))
-(define *web-visited-legacy-file* (string-append (compos-home) "/web-visited"))
 (define *web-visited-max* 500)
 
 ;; one line -> (URL TITLE TIME), or #f for a blank line
 (define (web--history-entry line)
   (let ((l (string-trim line)))
-    (cond ((equal? l "") #f)
-          ((string-contains? l "\t")
-           (let* ((parts (string-split l "\t"))
-                  (time (and (> (length parts) 1) (string->number (nth 1 parts)))))
-             (list (car parts)
-                   (if (> (length parts) 2) (string-trim (nth 2 parts)) "")
-                   (if (number? time) time 0))))
-          (else
-            (let ((sp (string-index l " ")))
-              (if sp
-                  (list (substring-bytes l 0 sp)
-                        (substring-bytes l (+ sp 1) (string-byte-length l))
-                        0)
-                  (list l "" 0)))))))
+    (if (equal? l "")
+        #f
+        (let* ((parts (string-split l "\t"))
+               (time (and (> (length parts) 1) (string->number (nth 1 parts)))))
+          (list (car parts)
+                (if (> (length parts) 2) (string-trim (nth 2 parts)) "")
+                (if (number? time) time 0))))))
 
-;; the history, newest first: (URL TITLE TIME) rows. The new file wins;
-;; before its first write the old visited file still answers.
+;; the history, newest first: (URL TITLE TIME) rows
 (define (web--history)
-  (let ((text (or (read-file *web-visited-file*)
-                  (read-file *web-visited-legacy-file*))))
+  (let ((text (read-file *web-visited-file*)))
     (if (string? text)
         (filter pair? (map web--history-entry (string-split text "\n")))
         '())))

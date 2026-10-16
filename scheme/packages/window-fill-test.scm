@@ -1,4 +1,5 @@
-;;; window-fill-test.scm --- one pool answers which buffers may fill a window here.
+;;; window-fill-test.scm --- one pool answers which buffers may fill a window
+;;; here, and one pure rule (window-fill-decide) answers which one does.
 
 (domain! 'testing)
 (effects! '(write display))
@@ -25,14 +26,106 @@
       (group-record-delete! id))))
 
 (deftest 'a-peek-and-a-popup-are-not-fill-candidates
-  "a look and a floating buffer never fill a window"
+  "a look, a floating buffer, a view and a context-only buffer never fill a window"
   (lambda ()
     (buffer-create "*zz-fill-popup*")
     (buffer-set-local! "*zz-fill-popup*" 'window-class "popup popup-right")
     (check-false! (fill-candidate? "*zz-fill-popup*") "the popup's buffer")
     (check-false! (fill-candidate? " *zz-hidden*") "a hidden name")
+    (buffer-create "*zz-fill-view*")
+    (buffer-set-local! "*zz-fill-view*" 'special #t)
+    (check-false! (fill-candidate? "*zz-fill-view*") "a view of something else")
+    (buffer-create "*zz-fill-background*")
+    (buffer-context-only! "*zz-fill-background*")
+    (check-false! (fill-candidate? "*zz-fill-background*") "a context-only buffer")
     (buffer-create "*zz-fill-ordinary*")
     (check-true! (fill-candidate? "*zz-fill-ordinary*") "an ordinary buffer")
     (buffer-kill! "*zz-fill-ordinary*")
+    (buffer-kill! "*zz-fill-background*")
+    (buffer-kill! "*zz-fill-view*")
     (buffer-set-local! "*zz-fill-popup*" 'window-class #f)
     (buffer-kill! "*zz-fill-popup*")))
+
+(deftest 'the-fill-rule-is-one-table-of-precedence-and-eligibility
+  "window-fill-decide answers from the snapshot and the pool alone: a covered buffer first, then the window's past, then the pool, then the window goes, else blank; eligible is in the pool, not dying, and for a show not shown elsewhere"
+  (lambda ()
+    (let ((pool '("a" "b" "c")))
+      (for-each
+        (lambda (row)
+          (check-equal! (window-fill-decide (car row) pool) (cadr row) (caddr row)))
+        (list
+          ;; precedence
+          (list '(restore (window #f #f) previous ("a") others #t) '(delete)
+                "the window a display made goes before anything shows in it")
+          (list '(restore (window #f #f) previous ("a") others #f) '(show "a")
+                "the last window stays and falls to its past")
+          (list '(restore (other "b" 0) previous ("a") shown ("b")) '(restore "b")
+                "a covered buffer comes back even when another window shows it")
+          (list '(previous ("c" "a")) '(show "c")
+                "the window's own past, most recent first, before the pool")
+          (list '(previous ()) '(show "a")
+                "no past: the pool, most recent first")
+          (list '(shown ("a" "b" "c") others #t) '(delete)
+                "nothing to show: the window goes when another remains")
+          (list '(shown ("a" "b" "c")) '(blank)
+                "nothing to show and alone: blank")
+          (list '() '(show "a")
+                "an empty snapshot is a new pane: it takes the pool's first")
+          ;; eligibility
+          (list '(restore (other "z" 0) previous ("a")) '(show "a")
+                "a covered buffer outside the pool is forgotten")
+          (list '(restore (other "b" 0) dying "b" previous ("a")) '(show "a")
+                "a covered buffer that is dying is forgotten")
+          (list '(previous ("z" "a")) '(show "a")
+                "a past buffer outside the pool is skipped")
+          (list '(previous ("c") dying "c") '(show "a")
+                "the dying buffer never fills its own window")
+          (list '(previous ("c") shown ("c")) '(show "a")
+                "the past never shows what another window shows")
+          (list '(shown ("a" "b")) '(show "c")
+                "the pool skips what another window shows")
+          ;; refill off: the pool only says who is eligible
+          (list '(previous ("c") refill #f) '(show "c")
+                "refill off: the past still fills, judged by the pool")
+          (list '(previous ("z") refill #f others #t) '(delete)
+                "refill off: the pool fills nothing, so the window goes")
+          (list '(previous ("z") refill #f) '(blank)
+                "refill off and alone: blank")))
+      (check-equal! (window-fill-decide '(previous ("a")) '()) '(blank)
+                    "an empty pool fills nothing"))))
+
+(deftest 'a-split-shows-the-pool-member-no-pane-shows
+  "split-window-with-other-buffer! applies the decision: the new pane takes the first member no pane shows"
+  (lambda ()
+    (let ((id (group-record-create! "zz-fill-split"))
+          (a "*zz-fill-split-a*") (b "*zz-fill-split-b*"))
+      (buffer-create a) (buffer-create b)
+      (buffer-add-group! a id) (buffer-add-group! b id)
+      (switch-to-group! id)
+      (delete-other-windows!)
+      (window-hidden-clear!)
+      (switch-to-buffer! a)
+      (let ((created (split-window-with-other-buffer! 'h)))
+        (check-true! (and created #t) "a window was made")
+        (check-equal! (and created (window-buffer created)) b
+                      "and it shows the member no pane showed"))
+      (delete-other-windows!)
+      (switch-to-buffer! "*scratch*")
+      (buffer-kill! a) (buffer-kill! b)
+      (group-record-delete! id))))
+
+(deftest 'a-plain-replacement-is-the-pools-first-other-buffer
+  "group-kill-plain-replacement applies the decision: the first of the pool that is not the dying buffer"
+  (lambda ()
+    (let ((id (group-record-create! "zz-fill-plain"))
+          (a "*zz-fill-plain-a*") (b "*zz-fill-plain-b*"))
+      (buffer-create a) (buffer-create b)
+      (buffer-add-group! a id) (buffer-add-group! b id)
+      (switch-to-group! id)
+      (delete-other-windows!)
+      (switch-to-buffer! a)
+      (check-equal! (group-kill-plain-replacement a) b "the pool's first other member")
+      (check-equal! (group-kill-plain-replacement b) a "and the other way round")
+      (switch-to-buffer! "*scratch*")
+      (buffer-kill! a) (buffer-kill! b)
+      (group-record-delete! id))))

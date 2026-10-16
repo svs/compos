@@ -292,12 +292,7 @@
     (if (number? n) n 0)))
 
 (define (annotate--store-load! buf)
-  ;; a store saved before the project move still loads; the next save
-  ;; writes the project location
-  (let* ((primary (annotate--store-file buf))
-         (path (if (and primary (file-exists? primary))
-                   primary
-                   (annotate--home-store-file buf))))
+  (let ((path (annotate--store-file buf)))
     (when (and path (file-exists? path) (null? (buffer-annotations buf)))
       ;; scheme-read returns the list of top-level forms; the file holds
       ;; ONE form, the annotation list
@@ -313,10 +308,8 @@
 ;; a file that carries annotations opens with them showing
 (define (annotate--find-file-hook!)
     (let* ((buf (current-buffer))
-           (path (annotate--store-file buf))
-           (legacy (annotate--home-store-file buf)))
-      (when (and (or (and path (file-exists? path))
-                     (and legacy (file-exists? legacy)))
+           (path (annotate--store-file buf)))
+      (when (and path (file-exists? path)
                  (not (minor-mode-on? buf "annotate-mode")))
         (enable-minor-mode! buf "annotate-mode"))))
 

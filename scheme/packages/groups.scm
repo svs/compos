@@ -3613,15 +3613,6 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-dying? group)
   (and *group-dying* (equal? (group-resolve-id group) *group-dying*)))
 
-;; #t when a window of FRAME other than WIN shows BUF
-(define (group-kill-shown-elsewhere? buf win frame)
-  (and (find (lambda (row)
-               (and (equal? (caddr row) frame)
-                    (not (equal? (car row) win))
-                    (equal? (cadr row) buf)))
-             (window-list-all))
-       #t))
-
 ;; how many windows FRAME has
 (define (group-kill-frame-window-count frame)
   (length (filter (lambda (row) (equal? (caddr row) frame)) (window-list-all))))

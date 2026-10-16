@@ -134,22 +134,6 @@
     (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c") "opening visible work does not duplicate it")
     (check-equal! (current-buffer) "zz-lp-a" "existing pane receives focus"))))
 
-(deftest 'group-refill-uses-hidden-members-before-chat-and-keeps-geometry
-  "a pane with no usable history falls to hidden group work before a chat or scratch"
-  (lp-journey (lambda ()
-    (lp-start!)
-    (lp-buffer! "b") (lp-buffer! "c")
-    (tile-windows! 'two-pane '("zz-lp-a" "zz-lp-b"))
-    (layout-target-set! 'two-pane)
-    (select-window! (window-showing "zz-lp-b"))
-    (set-window-prev-buffers! (active-window) '())
-    (lp-snapshot! 'before-kill)
-    (buffer-kill! "zz-lp-b")
-    (lp-snapshot! 'after-kill)
-    (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c") "hidden member precedes chat fallback")
-    (check-equal! (current-buffer) "zz-lp-c" "focus stays in the repaired pane")
-    (lp-rect! "zz-lp-c" (/ 2 3) 0 (/ 1 3) 1))))
-
 (deftest 'group-switch-restores-its-own-target
   "a new group has no inherited target and returning restores the previous target"
   (lp-journey (lambda ()
@@ -211,26 +195,6 @@
     (lp-rect! "zz-lp-a" 0 0 (/ 1 3) 1)
     (lp-rect! "zz-lp-b" (/ 1 3) 0 (/ 1 3) 1)
     (lp-rect! "zz-lp-d" (/ 2 3) 0 (/ 1 3) 1))))
-
-(deftest 'target-candidates-exclude-foreign-transient-and-background-only-buffers
-  "layout filling and kill history use eligible members of the current group"
-  (lp-journey (lambda ()
-    (lp-start!)
-    (let ((group (frame-group)))
-      (lp-buffer! "foreign")
-      (buffer-remove-group! "zz-lp-foreign" group)
-      (lp-buffer! "background") (buffer-context-only! "zz-lp-background")
-      (lp-buffer! "transient") (buffer-set-local! "zz-lp-transient" 'special #t)
-      (lp-buffer! "b") (lp-buffer! "c")
-      (run-command "window-layout-two-pane")
-      (lp-snapshot! 'filtered-layout)
-      (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-b") "only normal group work fills")
-      (let ((win (window-showing "zz-lp-b")))
-        (set-window-prev-buffers! win '("zz-lp-foreign" "zz-lp-background" "zz-lp-transient"))
-        (buffer-kill! "zz-lp-b"))
-      (lp-snapshot! 'filtered-history)
-      (check-equal! (lp-buffers) '("zz-lp-a" "zz-lp-c") "history uses the same eligibility")
-      (check-equal! (frame-group) group "the group stays sealed")))))
 
 (deftest 'background-buffer-context-does-not-grow-a-target-layout
   "logical switches stay headless even when their current buffer is also visible"

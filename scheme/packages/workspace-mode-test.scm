@@ -75,3 +75,70 @@
                     '((setup #t) (teardown "mode-a" "kept") (after "mine" computed))
                     "teardown sees the mode's values, after sees the buffer's own")
       (buffer-kill! buf))))
+
+(deftest 'a-re-run-keeps-the-first-snapshot-and-the-users-later-choice
+  "restore-minor-modes! and a second enable run the setup again without saving twice"
+  (lambda ()
+    (t--ws-modes!)
+    (let ((buf (t--ws-buffer! "zz-ws-rerun")))
+      (buffer-set-local! buf 'zz-ws-a "mine")
+      (enable-minor-mode! buf "zz-ws-mode")
+      (buffer-set-local! buf 'zz-ws-a "user-a")
+      (buffer-set-local! buf 'zz-ws-pick "user")
+      (restore-minor-modes! buf)
+      (check-equal! (buffer-local buf 'zz-ws-a) "mode-a" "the setup ran again")
+      (check-equal! (workspace-mode-saved "zz-ws-mode" buf 'zz-ws-a) "mine"
+                    "over the first snapshot, not a second one")
+      (check-equal! (buffer-local buf 'zz-ws-pick) "user" "a choice the setup makes once stands")
+      (enable-minor-mode! buf "zz-ws-mode")
+      (check-equal! (map cadr (filter (lambda (e) (equal? (car e) 'setup)) *t--ws-log*))
+                    '(#t #f #f)
+                    "only the first run enters")
+      (disable-minor-mode! buf "zz-ws-mode")
+      (check-equal! (buffer-local buf 'zz-ws-a) "mine"
+                    "and the exit gives back what the first enable found")
+      (buffer-kill! buf))))
+
+(deftest 'the-presets-land-on-the-scratch-and-leave-with-the-mode
+  "'scratch #t: an open scratch takes the model and presets after setup and after exit"
+  (lambda ()
+    (define-workspace-mode! "zz-ws-llm-mode"
+      'locals '(chat-presets llm-model)
+      'scratch #t
+      'setup (lambda (buf entering?)
+               (buffer-set-local! buf 'chat-presets '(zz))
+               (buffer-set-local! buf 'llm-model "zz:model")))
+    (let* ((buf (t--ws-buffer! "zz-ws-doc"))
+           (scratch (scratch--for buf)))
+      (when (buffer-known? scratch) (buffer-kill! scratch))
+      (test-buffer! scratch "")
+      (buffer-set-local! buf 'chat-presets '(own))
+      (check-false! (buffer-local scratch 'chat-presets) "no presets before the mode")
+      (enable-minor-mode! buf "zz-ws-llm-mode")
+      (check-equal! (buffer-local scratch 'chat-presets) '(zz) "the open scratch picked them up")
+      (check-equal! (buffer-local scratch 'llm-model) "zz:model" "and the model")
+      (disable-minor-mode! buf "zz-ws-llm-mode")
+      (check-equal! (buffer-local buf 'chat-presets) '(own) "the buffer has its own back")
+      (check-equal! (buffer-local scratch 'chat-presets) '(own) "and the scratch follows")
+      (check-false! (buffer-local scratch 'llm-model) "with no model")
+      (buffer-kill! scratch)
+      (buffer-kill! buf))))
+
+(deftest 'a-refused-buffer-gives-back-a-stale-save-and-drops-the-mode
+  "a desktop written before the guard has the mode already applied"
+  (lambda ()
+    (t--ws-modes!)
+    (let ((buf (t--ws-buffer! "zz-ws-refused")))
+      (buffer-set-local! buf 'zz-ws-refuse #t)
+      (buffer-set-local! buf 'zz-ws-a "stale")
+      (buffer-set-local! buf 'minor-modes '("zz-ws-mode"))
+      (buffer-set-local! buf 'zz-ws-mode-saved '((zz-ws-a "old")))
+      (restore-minor-modes! buf)
+      (check-equal! (buffer-local buf 'minor-modes) '() "the stale entry is gone")
+      (check-equal! (buffer-local buf 'zz-ws-a) "old" "the saved value came back")
+      (check-false! (buffer-local buf 'zz-ws-mode-saved) "and nothing is left to restore")
+      (check-false! (assoc 'setup *t--ws-log*) "the setup never ran")
+      (enable-minor-mode! buf "zz-ws-mode")
+      (check-equal! (buffer-local buf 'minor-modes) '() "a plain enable is refused too")
+      (check-equal! (buffer-local buf 'zz-ws-a) "old" "and changes nothing")
+      (buffer-kill! buf))))

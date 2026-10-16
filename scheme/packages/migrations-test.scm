@@ -253,3 +253,43 @@
       (check-false! (buffer-local scratch 'visual-line-mode) "so scratch-mode's own is the last word")
       (buffer-kill! scratch)
       (buffer-kill! doc))))
+
+;;; --- the home ----------------------------------------------------------------------
+
+(deftest 'the-web-history-migration-reads-the-old-file-into-the-new-shape
+  "the old visited file and an old line in the new file read once with no time"
+  (lambda ()
+    (t--mg-home!
+      (lambda ()
+        (write-file! (string-append t--mg-dir "/web-visited") "https://old.test/a Old page\n")
+        (t--mg-home-run! 'web-visited-to-history)
+        (check-equal! (read-file *web-visited-file*) "https://old.test/a\t0\tOld page\n"
+                      "the old file is the new file, in the new shape")
+        (check-equal! (web--history) '(("https://old.test/a" "Old page" 0))
+                      "and the reader answers it with no time")
+        (write-file! *web-visited-file* "https://x.test/b B page\nhttps://y.test/c\t5\tC\n")
+        (t--mg-home-run! 'web-visited-to-history)
+        (check-equal! (read-file *web-visited-file*)
+                      "https://x.test/b\t0\tB page\nhttps://y.test/c\t5\tC\n"
+                      "an old line in the new file rewrites; a new line stays")))))
+
+(deftest 'the-annotations-migration-copies-a-project-files-store-into-the-project
+  "a home store whose file sits in a project lands in the project; one already there stays"
+  (lambda ()
+    (t--mg-home!
+      (lambda ()
+        (let* ((root (string-append t--mg-dir "/proj"))
+               (store (string-append t--mg-dir "/annotations"))
+               (rel (substring-bytes root 1 (string-byte-length root)))
+               (name (string-append (annotate--encode (string-append rel "/src/x.txt")) ".scm"))
+               (target (string-append root "/.compos/annotations/src%2Fx.txt.scm")))
+          (make-directory! (string-append root "/.git"))
+          (make-directory! (string-append root "/src"))
+          (write-file! (string-append root "/src/x.txt") "x\n")
+          (make-directory! store)
+          (write-file! (string-append store "/" name) (value->string (list (list 'id "a1"))))
+          (t--mg-home-run! 'annotations-into-projects)
+          (check-contains! (or (read-file target) "") "a1" "the store is in the project")
+          (write-file! target (value->string (list (list 'id "b2"))))
+          (t--mg-home-run! 'annotations-into-projects)
+          (check-contains! (or (read-file target) "") "b2" "a store already there stays"))))))

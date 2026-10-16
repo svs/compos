@@ -8,6 +8,8 @@
 ;;; M-x writing-mode toggles composition. M-x writing-layout opens the
 ;;; companion workspace. `write` composes both. Knobs live in 'writing.
 
+(require 'workspace-mode)
+
 (domain! 'writing)
 (effects! '(write))
 
@@ -18,7 +20,7 @@
   (for-each
     (lambda (buf)
       (when (minor-mode-on? buf "writing-mode")
-        (writing--apply! buf))
+        (workspace-mode-apply! "writing-mode" buf))
       (when (minor-mode-on? buf "writing-layout")
         (writing--layout-apply! buf)))
     (buffer-list)))
@@ -253,39 +255,8 @@
 
 ;;; --- enable / disable -----------------------------------------------------------
 
-(define (writing--saved buf key)
-  (let ((hit (assoc key (or (buffer-local buf 'writing-saved) '()))))
-    (if hit (cadr hit) #f)))
-
-(define (writing--apply! buf)
-  ;; This fn is the one funnel for enable, refresh, and desktop restore.
-  ;; A chat renders its transcript, not a markdown preview (preview-mode
-  ;; has the same rule). A chat buffer refuses the mode: restore the
-  ;; locals that a past enable changed, then drop the mode from
-  ;; 'minor-modes so a stale desktop entry heals on the next restore.
-  (if (equal? (buffer-local buf 'mode-name) "chat-mode")
-      (begin
-        (when (buffer-local buf 'writing-saved)
-          (writing--teardown! buf))
-        (buffer-set-local! buf 'minor-modes
-          (remove (lambda (n) (equal? n "writing-mode"))
-                  (or (buffer-local buf 'minor-modes) '()))))
-      (writing--present! buf)))
-
-(define (writing--present! buf)
+(define (writing--present! buf entering?)
   (preview-heal! buf)
-  ;; remember what we clobber, once — the saved alist persists, and the
-  ;; restore path re-runs this fn, which must not re-save writing's own look
-  (let ((entering? (not (buffer-local buf 'writing-saved))))
-  (when entering?
-    (buffer-set-local! buf 'writing-saved
-      (list (list 'face-remap (or (buffer-local buf 'face-remap) '()))
-            (list 'style (or (buffer-local buf 'style) #f))
-            (list 'line-numbers (or (buffer-local buf 'line-numbers) #f))
-            (list 'render-mode (or (buffer-local buf 'render-mode) #f))
-            (list 'preview-renderer (or (buffer-local buf 'preview-renderer) #f))
-            (list 'preview-mode (minor-mode-on? buf "preview-mode"))
-            (list 'visual-line-mode (or (buffer-local buf 'visual-line-mode) #f)))))
   ;; writing-mode changes the current buffer's presentation only. It never
   ;; creates a group, scratch, LLM session, or window layout.
   ;; The preview is the writing surface. Markdown remains the buffer text,
@@ -310,53 +281,46 @@
   (face-remap-in! buf 'writing (list 'measure writing-measure))
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-local! buf 'window-class "writing")
-  
-  
   ;; Platform-native prose movement. With visual-line-mode on, the line
   ;; commands read the wrap map the client measured and stop at the
   ;; visual row; without one they stop at the source line.
-  
-  
-  
   (writing--ensure-hook! buf)
-  (writing--update-count! buf))
+  (writing--update-count! buf)
   ;; last word: the rows agree with the mode list, and the drawn page keeps
   ;; its own look over writing's typography
   (preview-heal! buf)
   (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
     (preview--rows-look! buf)))
 
-(define (writing--teardown! buf)
-  (let ((preview-was-on? (writing--saved buf 'preview-mode))
-        (saved-render (writing--saved buf 'render-mode)))
-  (writing--remove-hook! buf)
-  (buffer-set-local! buf 'face-remap (or (writing--saved buf 'face-remap) '()))
-  (buffer-set-local! buf 'style (writing--saved buf 'style))
+;; What the definer does not give back itself: the look it derived, and
+;; the view the preview draws.
+(define (writing--restore-look! buf saved)
   ;; the saved remap predates a scale set while writing; the local wins
   (text-scale-sync! buf)
-  (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
-  (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
-  (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))
-  (unless (writing--saved buf 'visual-line-mode)
-    (buffer-set-local! buf 'minor-modes
-      (remove (lambda (n) (equal? n "visual-line-mode"))
-              (or (buffer-local buf 'minor-modes) '()))))
   (buffer-set-local! buf 'window-class #f)
   (buffer-set-local! buf 'modeline-info #f)
-  (buffer-set-local! buf 'writing-saved #f)
-  (if preview-was-on?
-      (begin
-        (unless (minor-mode-on? buf "preview-mode")
-          (enable-minor-mode! buf "preview-mode"))
-        (preview-mode--apply! buf))
-      (when (minor-mode-on? buf "preview-mode")
-        (disable-minor-mode! buf "preview-mode")))
+  ;; a preview that stayed on redraws with the renderer it got back
+  (when (minor-mode-on? buf "preview-mode")
+    (preview-mode--apply! buf))
   ;; Membership restores first because its setup and teardown derive this
   ;; local. The saved presentation remains authoritative after they run.
   ;; "rows" is a renderer name, never a render mode: a stale save of it is #f
-  (buffer-set-local! buf 'render-mode (if (equal? saved-render "rows") #f saved-render))))
+  (let ((render (saved 'render-mode)))
+    (buffer-set-local! buf 'render-mode (if (equal? render "rows") #f render))))
 
-(register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
+;; The definer is the one funnel for enable, refresh, and desktop restore.
+;; A chat renders its transcript, not a markdown preview (preview-mode has
+;; the same rule), so a chat buffer refuses the mode: what a past enable
+;; changed comes back, and the stale entry leaves 'minor-modes.
+(define-workspace-mode! "writing-mode"
+  'saved 'writing-saved
+  'accepts? (lambda (buf) (not (equal? (buffer-local buf 'mode-name) "chat-mode")))
+  'locals '((face-remap ()) style line-numbers preview-renderer)
+  'modes '("preview-mode" "visual-line-mode")
+  'remember '(render-mode)
+  'setup writing--present!
+  'teardown (lambda (buf saved) (writing--remove-hook! buf))
+  'after writing--restore-look!)
 
 ;; The Shift selections are cua-mode's, in every buffer and gated on the
 ;; editing state, so writing-mode does not bind them: a writing buffer you

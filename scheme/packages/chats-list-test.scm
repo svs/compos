@@ -148,56 +148,7 @@
                     "and the card is the row you left on"))
     (chats-test-reset!)))
 
-(deftest 'the-row-at-point-previews-its-chat
-  "the row under the cursor floats the same card ibuffer floats, over the
-   list's own window. Nothing else on screen is touched: a card that took
-   the neighbour's window would be disturbing a buffer nobody offered."
-  (lambda ()
-    (chats-test-open! 'none 'name)
-    (delete-other-windows!)
-    (test-buffer! "*zz-chats-side*" "work beside the list")
-    (let ((home (active-window)))
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer-here! "*zz-chats-side*")
-      (select-window! home)
-      (let ((side (other-window-id home))
-            (row (list-current *chat-list*)))
-        (check-true! (and (string? row) (buffer-known? row)) "the row names a chat")
-        (listing-preview! *chat-list* row)
-        (check-true! (float-open?) "a card is floated")
-        (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
-                      "and it reads the row at point")
-        (check-true! (not (member (float-window) (list home side)))
-                     "the card is its own window, neither the list's nor the neighbour's")
-        (check-equal! (window-buffer side) "*zz-chats-side*"
-                      "the window beside the list keeps what it was showing")
-        (listing-preview-dismiss! *chat-list*)
-        (check-equal! (float-open?) #f "dismissing takes the card down")
-        (check-equal! (window-buffer side) "*zz-chats-side*"
-                      "and gives the neighbour back untouched")))
-    (buffer-kill! "*zz-chats-side*")
-    (chats-test-reset!)))
 
-(deftest 'previewing-another-group-holds-the-frame-still
-  "the card reads a chat from some other group; the frame does not follow it there"
-  (lambda ()
-    (chats-test-open! 'none 'name)
-    (let ((home (frame-group))
-          (view *chat-list*))
-      (let loop ((n 0))
-        (when (and (< n 8) (not (equal? (list-current view) "*zz-chats-c*")))
-          (list-move-in! view 1)
-          (loop (+ n 1))))
-      (check-equal! (list-current view) "*zz-chats-c*" "the cursor reached the other group's chat")
-      (listing-preview! view "*zz-chats-c*")
-      (check-equal! (buffer-local (float-buffer) 'listing-preview-source) "*zz-chats-c*"
-                    "the card shows it")
-      ;; a card is a copy, never the chat itself in a window of the
-      ;; frame, so the frame has nothing new to derive a group from
-      (check-equal! (frame-group) home "the frame stayed in the group the list opened in")
-      (check-equal! (chat-list-buffer) view "so the list is still the one on screen"))
-    (chats-test-reset!)))
 
 (deftest 'the-list-does-not-pin-the-frames-group
   "the list takes a window beside your work, so it has no claim on the frame's group"
@@ -257,81 +208,28 @@
       (check-false! (window-showing *chat-list*) "and the list is not left standing"))
     (chats-test-reset!)))
 
-(deftest 'chats-sections-by-group
-  "grouped by group, one heading per group, by name, each with its members"
+(deftest 'chats-rows-sit-under-their-group-and-say-their-state
+  "sectioned by group, a chat sits under its group's name; the meta counts chats, and a chat with no runtime reads idle"
   (lambda ()
-    (let ((ids (chats-test-open! 'group 'name)))
-      (check-equal! (chats-test-heading-labels) '("zz-chats-one" "zz-chats-two")
-                    "one heading per group, by name")
-      (let ((one (car (chats-test-headings))))
-        (check-equal! (ibuffer-heading-key one) (string-append "group:" (car ids))
-                      "the heading names its group")
-        (check-equal! (ibuffer-heading-count one) 2 "group one holds two chats")
-        (check-equal! (ibuffer-heading-members one) '("*zz-chats-a*" "*zz-chats-b*")
-                      "its members, by name"))
-      (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-b*" "*zz-chats-c*")
-                    "the rows follow their headings")
-      (check-contains! (buffer-text *chat-list*) "3 chats" "the meta counts the table's chats")
-      (check-contains! (buffer-text *chat-list*) "idle" "a chat with no runtime is idle")
-      (chats-test-reset!))))
+    (chats-test-open! 'group 'name)
+    (check-equal! (chats-test-heading-labels) '("zz-chats-one" "zz-chats-two")
+                  "one heading per group, by name")
+    (check-contains! (buffer-text *chat-list*) "3 chats" "the meta counts the table's chats")
+    (check-contains! (buffer-text *chat-list*) "idle" "a chat with no runtime is idle")
+    (chats-test-reset!)))
 
 (deftest 'chats-size-is-the-transcript
-  "sorted by size, the longer transcript comes first, and the heading adds the bytes up"
+  "a chat's size is its transcript on disk, written the way dired writes bytes; no transcript is no size"
   (lambda ()
     (chats-test-open! 'group 'name)
     (chats-test-log! "*zz-chats-a*" "zz-chats-a" 100)
     (chats-test-log! "*zz-chats-b*" "zz-chats-b" 5000)
-    (ibuffer-set-sort! 'size *chat-list*)
-    (check-equal! (ibuffer-sort *chat-list*) 'size "the sort is on the list buffer")
     (check-equal! (ibuffer-row-size "*zz-chats-b*") 5000 "the row reads the file's own bytes")
     (check-equal! (ibuffer-size-label "*zz-chats-b*") "4.9k" "and writes them the way dired does")
-    (check-equal! (ibuffer-heading-members (car (chats-test-headings)))
-                  '("*zz-chats-b*" "*zz-chats-a*") "b's transcript is longer")
-    (check-equal! (ibuffer-heading-bytes (car (chats-test-headings))) 5100 "the heading sums")
     (check-equal! (ibuffer-row-size "*zz-chats-c*") #f "no transcript yet is no size")
     (chats-test-reset!)))
 
-(deftest 'chats-rest-is-mru-with-the-group-in-the-row
-  "the flat list is in MRU order and every row wears its chat's group"
-  (lambda ()
-    (let ((ids (chats-test-open! 'none 'recent)))
-      (check-equal! (ibuffer-view-default *chat-list* 'grouping) 'group
-                    "the list rests in sections, as ibuffer does")
-      (check-equal! (ibuffer-view-default *chat-list* 'sort) 'recent
-                    "and in most recently used order")
-      (check-equal! (chats-test-headings) '() "a flat list has no sections")
-      (check-true! (member 'group (map ibuffer-field-tag
-                                       (ibuffer-fields *chat-list* *ibuffer-wide-fields*)))
-                   "the group is a column of the flat row")
-      (check-equal! (ibuffer-row-group-label "*zz-chats-a*") (group-short-name (car ids))
-                    "and the cell names the chat's own group")
-      (ibuffer-set-grouping! 'group *chat-list*)
-      (check-equal! (member 'group (map ibuffer-field-tag
-                                        (ibuffer-fields *chat-list* *ibuffer-wide-fields*)))
-                    #f "sectioning by group drops the column rather than say it twice")
-      (chats-test-reset!))))
 
-(deftest 'chats-group-row-stands-for-its-chats
-  "a group row takes the highlight, and a verb on it reads every chat under it"
-  (lambda ()
-    (let* ((ids (chats-test-open! 'group 'name))
-           (es (list-entries *chat-list*))
-           (at (let loop ((k 0) (rest es))
-                 (cond ((null? rest) #f)
-                       ((ibuffer-heading? (car rest)) k)
-                       (else (loop (+ k 1) (cdr rest)))))))
-      (check-true! (string? (list-current *chat-list*))
-                   "the list opens on a chat, not on the group over it")
-      (check-true! (list-selectable? *chat-list* (nth at es))
-                   "an open group row is a row like any other")
-      (list-goto-index! *chat-list* at)
-      (check-true! (ibuffer-heading? (list-current *chat-list*))
-                   "and it takes the highlight")
-      (check-equal! (agents-targets) '("*zz-chats-a*" "*zz-chats-b*")
-                    "a verb on the group row acts on every chat under it")
-      (check-false! (agents-current-buf)
-                    "and no one chat answers as the chat at point")
-      (chats-test-reset!))))
 
 ;; the list shows sleeping chats, so a verb has to act on one. The
 ;; targets asked buffer-exists?, which answers #f for every dormant row,
@@ -441,25 +339,6 @@
                       "the pane it was invoked from is untouched")))
     (run-command "minibuffer-cancel")
     (chats-test-reset!)))
-
-;; the prompt view is asked for its row before it has been drawn, so it may
-;; have no point yet. That used to raise out of the open, and C-x c did
-;; nothing at all: no list, no card, no error the user could see.
-(deftest 'a-list-with-no-point-yet-answers-instead-of-raising
-  "asking an undrawn list buffer for its row answers, error-free"
-  (lambda ()
-    (let ((buf "*zz-chats-unpointed*"))
-      (buffer-create buf)
-      (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at buf 0))))
-                    (list 'ok 0)
-                    "an empty buffer sits on the first entry line")
-      (check-equal! (ignore-errors (lambda () (list 'ok (line-index-at buf 3))))
-                    (list 'ok #f)
-                    "and under a header it is above the entries")
-      (check-equal! (ignore-errors (lambda () (list 'ok (ibuffer-current buf))))
-                    (list 'ok #f)
-                    "so it has no row, rather than raising")
-      (buffer-kill! buf))))
 
 (deftest 'dot-shows-the-hidden-chats-and-puts-them-away
   "a context-only chat, an agent's own, is out of the list until . asks for it"

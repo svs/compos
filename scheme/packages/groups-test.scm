@@ -30,24 +30,6 @@
       (t--drop! a)
       (t--drop! b))))
 
-(deftest 'an-old-group-ids-list-folds-into-group-id-on-restore
-  "a desktop from the days of many memberships: the first id is the buffer's group, and the list goes"
-  (lambda ()
-    (let ((buf (test-buffer! "*zztest-legacy-owners*" ""))
-          (a (t--group "legacy-owner-a"))
-          (b (t--group "legacy-owner-b")))
-      ;; a buffer from before 'group-id: a new one already holds the frame's group
-      (buffer-set-local! buf 'group-id #f)
-      (buffer-set-local! buf 'group-ids (list a b))
-      (migrate-buffer! buf)
-      (check-equal! (buffer-local buf 'group-id) a "the first legacy owner is the group")
-      (check-false! (buffer-local buf 'group-ids) "the list is gone")
-      (check-equal! (buffer-group buf) a "and the reader answers it")
-      (check-false! (buffer-in-group? buf b) "no second membership remains")
-      (buffer-kill! buf)
-      (t--drop! a)
-      (t--drop! b))))
-
 (deftest 'group-rename-keeps-the-id
   "a rename moves the display name and leaves the identity alone"
   (lambda ()

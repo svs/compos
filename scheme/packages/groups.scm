@@ -794,16 +794,6 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (buffer-group-store! b id &optional more)
   (buffer-set-locals! b (append (list 'group-id id) (or more '()))))
 
-;; A desktop from the days a buffer held several groups carries a 'group-ids
-;; list. Its first id becomes the buffer's one group, once, on restore.
-(define-buffer-migration! 'group-ids-to-group-id "2026-10-16"
-  (lambda (buf)
-    (let ((ids (buffer-local buf 'group-ids)))
-      (when (pair? ids)
-        (unless (buffer-local buf 'group-id)
-          (buffer-set-local! buf 'group-id (car ids)))
-        (buffer-set-local! buf 'group-ids #f)))))
-
 (define (buffer-group-id-of b)
   (let ((held (buffer-local b 'group-id)))
     (cond

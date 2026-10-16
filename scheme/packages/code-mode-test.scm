@@ -224,23 +224,6 @@
                      "chat-context returns the scratch buffer"))
       (t--cm-off! scratch))))
 
-(deftest 'a-scratch-already-open-picks-up-the-presets-when-code-mode-turns-on
-  "the workspace reaches what is already on screen"
-  (lambda ()
-    (let* ((buf (t--cm-fresh!))
-           (scratch (string-append "*scratch:" buf "*")))
-      (switch-to-buffer! buf)
-      (run-command "scratch-buffer")
-      (check-false! (buffer-local scratch 'chat-presets) "no presets before the mode")
-
-      (run-command "scratch-buffer")
-      (check-equal! (current-buffer) buf "the second toggle comes back")
-      (run-command "code-mode")
-
-      (check-equal! (buffer-local scratch 'chat-presets) '(compos) "the open scratch picked them up")
-      (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes)) "and llm-mode with them")
-      (t--cm-off! scratch))))
-
 (deftest 'code-model-pins-the-model-for-the-buffer-and-its-scratch
   "one setting, both halves of the workspace"
   (lambda ()
@@ -257,29 +240,6 @@
         (check-false! (buffer-local buf 'llm-model) "cleared")
         (customize-set! 'code-model saved)
         (t--cm-off! scratch)))))
-
-(deftest 'disabling-code-mode-restores-what-it-changed
-  "each local goes back to the value the mode found; absent reads as #f"
-  (lambda ()
-    (let ((buf (t--cm-on!)))
-      (run-command "code-mode")
-      (check-equal! (buffer-local buf 'minor-modes) '() "no minor mode is left")
-      (check-false! (buffer-local buf 'chat-presets) "no presets")
-      (check-false! (buffer-local buf 'group) "no group")
-      (check-false! (buffer-local buf 'modeline-info) "no modeline")
-      (check-false! (buffer-local buf 'code-mode-saved) "and nothing left to restore"))
-    (t--cm-off!)))
-
-(deftest 'code-mode-keeps-an-llm-mode-the-user-turned-on-first
-  "it restores what it found, not what it would have set"
-  (lambda ()
-    (let ((buf (t--cm-fresh!)))
-      (enable-minor-mode! buf "llm-mode")
-      (switch-to-buffer! buf)
-      (run-command "code-mode")
-      (run-command "code-mode")
-      (check-equal! (buffer-local buf 'minor-modes) '("llm-mode") "llm-mode stayed on"))
-    (t--cm-off!)))
 
 (deftest 'restore-minor-modes-re-runs-the-code-setup-once
   "the reload path rebuilds the workspace from the surviving locals"

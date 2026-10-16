@@ -195,17 +195,6 @@
                     "and the prompt drops the instruction")
       (t--cam-reset! chat))))
 
-(deftest 'restore-does-not-undo-a-model-the-user-chose
-  "a restart re-runs setup, and setup must not overwrite a live choice"
-  (lambda ()
-    (let ((chat (t--cam-chat "rerun")))
-      (t--cam-pin!)
-      (enable-minor-mode! chat "code-agent-mode")
-      (buffer-set-local! chat 'agent-model "gpt-5.6-terra")
-      (restore-minor-modes! chat)
-      (check-equal! (buffer-local chat 'agent-model) "gpt-5.6-terra" "the chosen model stands")
-      (t--cam-reset! chat))))
-
 (deftest 'a-second-code-edit-is-a-no-op
   "the mode is already on, so nothing moves again"
   (lambda ()

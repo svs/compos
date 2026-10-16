@@ -130,3 +130,70 @@
       (migrate-buffer! buf)
       (check-equal! (buffer-local buf 'mode-name) "term-mode" "renamed")
       (t--mg-done!))))
+
+;;; --- the groups --------------------------------------------------------------------
+
+(deftest 'an-old-group-ids-list-folds-into-group-id-on-restore
+  "a desktop from the days of many memberships: the first id is the buffer's group, and the list goes"
+  (lambda ()
+    (let ((buf (t--mg! ""))
+          (a (group-record-create! "zztest-legacy-owner-a"))
+          (b (group-record-create! "zztest-legacy-owner-b")))
+      ;; a buffer from before 'group-id: a new one already holds the frame's group
+      (buffer-set-local! buf 'group-id #f)
+      (buffer-set-local! buf 'group-ids (list a b))
+      (migrate-buffer! buf)
+      (check-equal! (buffer-local buf 'group-id) a "the first legacy owner is the group")
+      (check-false! (buffer-local buf 'group-ids) "the list is gone")
+      (check-equal! (buffer-group buf) a "and the reader answers it")
+      (check-false! (buffer-in-group? buf b) "no second membership remains")
+      (t--mg-done!)
+      (group-record-delete! a)
+      (group-record-delete! b))))
+
+;;; --- the diff ----------------------------------------------------------------------
+
+(deftest 'the-git-diff-migration-hands-the-buffer-to-the-diff-backend
+  "the old mode names and git locals become the git backend's diff locals"
+  (lambda ()
+    (let ((buf (t--mg! "")))
+      (buffer-set-local! buf 'mode-name "git-diff")
+      (buffer-set-local! buf 'git-root "/tmp/zz-repo")
+      (buffer-set-local! buf 'git-prefix "sub")
+      (buffer-set-local! buf 'git-watch #t)
+      (migrate-buffer! buf)
+      (check-equal! (buffer-local buf 'mode-name) "diff-mode" "the mode has its current name")
+      (check-equal! (buffer-local buf 'diff-backend) "git" "the backend is git")
+      (check-equal! (buffer-local buf 'diff-root) "/tmp/zz-repo" "the root moved")
+      (check-equal! (buffer-local buf 'diff-scope) "sub" "the prefix is the scope")
+      (check-equal! (buffer-local buf 'diff-watch) #t "the watch moved")
+      (check-false! (buffer-local buf 'git-root) "the old locals are gone")
+      (check-false! (buffer-local buf 'git-prefix) "all of them")
+      (t--mg-done!))
+    (let ((buf (t--mg! "")))
+      (buffer-set-local! buf 'mode-name "git-show")
+      (migrate-buffer! buf)
+      (check-equal! (buffer-local buf 'mode-name) "diff-show" "git-show is diff-show")
+      (check-equal! (buffer-local buf 'diff-scope) "" "no prefix is the whole tree")
+      (t--mg-done!))))
+
+;;; --- the mail ----------------------------------------------------------------------
+
+(deftest 'the-notmuch-query-migration-makes-the-old-local-the-base
+  "one derived query becomes the base with no filters; a buffer with a base only drops the old local"
+  (lambda ()
+    (let ((buf (t--mg! "")))
+      (buffer-set-local! buf 'notmuch-query "from:bob")
+      (migrate-buffer! buf)
+      (check-equal! (buffer-local buf 'notmuch-query-base) "from:bob" "the base")
+      (check-equal! (buffer-local buf 'notmuch-query-filters) '() "no filters")
+      (check-false! (buffer-local buf 'notmuch-query) "the old local is gone")
+      (check-equal! (nm--query-of buf) "from:bob" "and the reader answers it")
+      (t--mg-done!))
+    (let ((buf (t--mg! "")))
+      (buffer-set-local! buf 'notmuch-query-base "tag:inbox")
+      (buffer-set-local! buf 'notmuch-query "from:bob")
+      (migrate-buffer! buf)
+      (check-equal! (nm--query-of buf) "tag:inbox" "the old derived local cannot bypass the base")
+      (check-false! (buffer-local buf 'notmuch-query) "and it is gone")
+      (t--mg-done!))))

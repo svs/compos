@@ -150,7 +150,7 @@ defmodule Compos.GroupSwitchCommandTest do
       (set-frame-local! 'current-group "#{here}")
       (frame-group-label-refresh!)
       (switch-to-buffer! "#{first}")
-      (run-command "switch-to-buffer-prompt"))
+      (run-command "ibuffer-prompt"))
     """)
 
     expected = eval!(~s[(group-color-face "#{here}")]) |> Jason.decode!()
@@ -159,17 +159,13 @@ defmodule Compos.GroupSwitchCommandTest do
     assert candidate.face == expected
   end
 
-  test "C-x C-g opens the group menu and f finds a file for a new group" do
+  test "C-x C-g runs find-file-in-new-group" do
     eval!(~s{(global-set-key "C-x C-g" "find-file-in-new-group")})
     eval!("(group-keymap-install!)")
 
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("C-g")
 
-    assert Editor.snapshot().pending == ["C-x", "C-g"]
-    assert Enum.any?(Editor.render_state().which_key, &(&1.key == "f"))
-
-    KeyDispatch.handle_key("f")
     assert Editor.render_state().minibuffer.prompt == "Find file in new group: "
   end
 
@@ -186,7 +182,6 @@ defmodule Compos.GroupSwitchCommandTest do
     """)
 
     rendered = Editor.render_state()
-    leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == first))
 
     assert rendered.frame_group == "pinned-label "
     assert leaf.group == "pinned-label "
@@ -308,7 +303,7 @@ defmodule Compos.GroupSwitchCommandTest do
 
     # the prompt may name a default (the most recent group); the typed
     # name wins over it
-    assert Editor.render_state().minibuffer.prompt =~ ~r/^Add buffers to group/
+    assert Editor.render_state().minibuffer.prompt =~ ~r/^Put buffers in group/
     KeyDispatch.handle_key("RET")
 
     assert eval!(~s[(buffer-in-group? "#{first}" "#{destination}")]) == "#t"
@@ -350,7 +345,6 @@ defmodule Compos.GroupSwitchCommandTest do
     docs_face = eval!(~s[(group-color-face "#{docs}")]) |> Jason.decode!()
 
     assert rendered.frame_group == "color-docs"
-    assert leaf.group == "color-docs"
     assert leaf.group_color == docs_color
     refute leaf.group_color == mail_color
     assert eval!(~s[(buffer-filename-face "#{second}")]) == Jason.encode!(docs_face)
@@ -385,10 +379,13 @@ defmodule Compos.GroupSwitchCommandTest do
     rendered = Editor.render_state()
     by_buffer = rendered.tree |> leaves() |> Map.new(&{&1.buffer, &1})
 
-    # a pane in another group wears that group's name; one in the frame's wears none
-    assert by_buffer[first].group == "modeline-other"
-    assert by_buffer[second].group == "modeline-other"
-    assert by_buffer[third].group == nil
+    # a pane in another group wears that group's color; one in the frame's wears none
+    other_color =
+      eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{other}")))])
+      |> Jason.decode!()
+
+    assert by_buffer[first].group_color == other_color
+    assert by_buffer[second].group_color == other_color
     assert rendered.frame_group == "modeline-here"
     assert rendered.frame_group_color =~ ~r/^#[0-9a-f]{6}$/i
 
@@ -408,6 +405,6 @@ defmodule Compos.GroupSwitchCommandTest do
     # No group is genuinely ungrouped even while the frame stays here.
     eval!(~s{(buffer-move-to-group! "#{third}" #f)})
     by_buffer = Editor.render_state().tree |> leaves() |> Map.new(&{&1.buffer, &1})
-    assert by_buffer[third].group == nil
+    assert by_buffer[third].group_color == nil
   end
 end

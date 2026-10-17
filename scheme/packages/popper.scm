@@ -6,8 +6,9 @@
 ;;; mode matches too), and a procedure takes the name and answers.
 ;;;
 ;;; A display of a popup goes through display-buffer. The rule here sends
-;;; it to the popup window: the one window across the bottom of the frame
-;;; that popper made. The frame local 'popper-window names that window.
+;;; it to the popup window: the one window along one edge of the frame
+;;; that popper made. popper-side names the edge, and a buffer moved with
+;;; C-M-<arrow> keeps its own edge. The frame local 'popper-window names that window.
 ;;; Popper changes no other window. A popup buffer that the reader shows
 ;;; in a work window stays there. A display from code does not move the
 ;;; focus. popper-toggle and popper-cycle select the popup window, and a
@@ -36,6 +37,27 @@
 
 ;; the share of the frame a new popup window takes (popper-window-height)
 (define popper-window-height (/ 1 3))
+
+(defcustom 'popper-side "bottom"
+  "The edge of the frame a popup opens on: \"bottom\", \"top\", \"left\" or \"right\". A popup moved with C-M-<arrow> keeps its own edge."
+  'group 'windows 'type 'string)
+
+;; BUF's edge: the one it was moved to, else popper-side
+(define (popper--side buf)
+  (let ((own (buffer-local buf 'popper-side)))
+    (string->symbol (if own (symbol->string own) popper-side))))
+
+;; BUF's share of the frame: its own 'popper-size, else popper-window-height
+(define (popper--size buf)
+  (or (buffer-local buf 'popper-size) popper-window-height))
+
+;; a new popup window for BUF along its edge
+(define (popper--split buf)
+  (let ((side (popper--side buf)) (size (popper--size buf)))
+    (cond ((equal? side 'left) (split-root! 'h size #t))
+          ((equal? side 'top) (split-root! 'v size #t))
+          ((equal? side 'right) (split-root! 'h (- 1 size)))
+          (else (split-root! 'v (- 1 size))))))
 
 ;; the list's answer for BUF
 (define (popper--reference? buf)
@@ -83,13 +105,13 @@
        (not (plist-get alist 'category))
        (popper-popup? name)))
 
-;; popper-display-popup-at-bottom: the popup window, else a new window
-;; across the bottom of the frame. A popup display of NAME covers the
-;; popup there, and the close shows that popup again.
+;; popper-display-popup-at-bottom, on any edge: the popup window, else a
+;; new window along NAME's edge of the frame. A popup display of NAME
+;; covers the popup there, and the close shows that popup again.
 (define-display-action! 'popper-bottom
   (lambda (name alist)
     (let* ((own (popper-window))
-           (win (or own (split-root! 'v (- 1 popper-window-height)))))
+           (win (or own (popper--split name))))
       (when win
         (unless own
           (set-frame-local! 'popper-window win)
@@ -179,9 +201,46 @@
 (global-set-key "M-`" "popper-cycle")
 (global-set-key "C-M-`" "popper-toggle-type")
 
+;; Move the popup on screen to another edge. The popup window closes and
+;; opens again on SIDE; the buffer keeps SIDE for its next display. The
+;; focus stays where it was. The old popup.scm used M-<arrow>, which
+;; browse and morg take for landmarks.
+(define (popper-move! side)
+  (let ((w (popper-window)))
+    (if (not w)
+        (message "No popup")
+        (let ((buf (window-buffer w))
+              (me (active-window)))
+          (buffer-set-local! buf 'popper-side side)
+          (let ((back (frame-local 'popper-return)))
+            (delete-window-id! w)
+            (set-frame-local! 'popper-window #f)
+            (let ((stay (if (equal? me w) #f me)))
+              (when (and stay (assoc stay (window-list))) (select-window! stay))
+              (let ((nw (display-buffer buf)))
+                (when back (set-frame-local! 'popper-return back))
+                (when (and nw (not stay)) (select-window! nw)))))
+          (message (string-append "Popup on the " (symbol->string side)))))))
+
+(define-command "popper-move-left" "Move the popup to the left edge of the frame"
+  (lambda () (popper-move! 'left)))
+(define-command "popper-move-right" "Move the popup to the right edge of the frame"
+  (lambda () (popper-move! 'right)))
+(define-command "popper-move-up" "Move the popup to the top edge of the frame"
+  (lambda () (popper-move! 'top)))
+(define-command "popper-move-down" "Move the popup to the bottom edge of the frame"
+  (lambda () (popper-move! 'bottom)))
+
+(global-set-key "C-M-<left>" "popper-move-left")
+(global-set-key "C-M-<right>" "popper-move-right")
+(global-set-key "C-M-<up>" "popper-move-up")
+(global-set-key "C-M-<down>" "popper-move-down")
+
 (catalog-meta! 'command "popper-toggle" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'command "popper-cycle" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'command "popper-toggle-type" 'domain 'windows 'effects '(write display))
+(for-each (lambda (c) (catalog-meta! 'command c 'domain 'windows 'effects '(write display)))
+          '("popper-move-left" "popper-move-right" "popper-move-up" "popper-move-down"))
 
 (public! 'popper-popup?
   "(popper-popup? NAME) — #t when NAME is a popup: its own status, else popper-reference-buffers")

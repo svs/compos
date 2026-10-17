@@ -20,7 +20,7 @@ A display of a popup goes through `display-buffer`. popper.scm adds one display 
 
 1. A window that shows the popup already takes it.
 2. Else the window of the latest popup on screen takes it. The new popup covers the old one.
-3. Else the frame's root splits, and a new window across the bottom of the frame takes it. It gets one third of the frame.
+3. Else the frame's root splits, and a new window along the popup's edge of the frame takes it. The edge is the buffer-local `popper-side` (set by the move commands), else the custom `popper-side`, `"bottom"` by default. The window gets the buffer-local `popper-size`, else one third of the frame.
 
 The popup window then has the selection, as in popper. It is an ordinary window with normal focus. Every window command reaches it.
 
@@ -34,6 +34,7 @@ The layout does not tile a popup window. `window-work-buffer?` answers false for
 |---|---|---|
 | `popper-toggle` | none (M-x) | Closes the popup on screen. With no popup on screen, it shows the latest popup again. |
 | `popper-cycle` | `` M-` `` | Shows another popup in the popup window. It shows the popup used least recently, so each press reaches a different popup. With no popup on screen, it shows the latest popup. |
+| `popper-move-left`, `-right`, `-up`, `-down` | `C-M-<arrow>` | Moves the popup on screen to that edge of the frame. The buffer keeps the edge for its next display. The focus stays where it was. |
 | `popper-toggle-type` | `` C-M-` `` | Makes the current popup an ordinary buffer: its popup window closes, and the display chain shows it in a work window. Makes any other buffer a popup: its window shows the buffer it showed before, and the buffer shows at the bottom. |
 
 The keys are the keys that the popper README suggests, except `` C-` ``. That key runs `group-next-mode-buffer`, so `popper-toggle` has no key.

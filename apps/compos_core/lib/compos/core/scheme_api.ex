@@ -2296,10 +2296,11 @@ defmodule Compos.Core.SchemeAPI do
       # a dock is a pane of the FRAME, not of a window: it spans the frame
       # and the windows above it shrink by its share
       {"split-root!",
-       "(split-root! DIR [RATIO]) — split the FRAME 'h or 'v at RATIO; the new window spans the frame and every other window shrinks. Returns the new window."} =>
+       "(split-root! DIR [RATIO FIRST?]) — split the FRAME 'h or 'v at RATIO, the first pane's share; the new window spans the frame and every other window shrinks. FIRST? puts the new window first: on the left, or on top. Returns the new window."} =>
         fn
           [dir] -> Editor.split_root(dir_atom(dir))
           [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
+          [dir, ratio, first?] -> Editor.split_root(dir_atom(dir), ratio / 1, nil, first? == true)
         end,
       {"delete-window!", "(delete-window!) — delete the active window; return #t on success."} =>
         fn [] -> Editor.delete_window() == :ok end,

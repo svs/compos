@@ -460,8 +460,9 @@ defmodule Compos.Core.Editor do
   Deleting the new window puts the tree back: one half of a root split
   left alone becomes the root again.
   """
-  def split_root(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid)})
+  @doc "FIRST? puts the new window before the old tree: left of it, or above it."
+  def split_root(dir, ratio \\ 0.5, fid \\ nil, first? \\ false) when dir in [:h, :v],
+    do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid), first?})
 
   def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
@@ -1961,7 +1962,7 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
-  def handle_call({:split_root, dir, ratio, fid}, _from, state) do
+  def handle_call({:split_root, dir, ratio, fid, first?}, _from, state) do
     f = frame(state, fid)
     seed = find_leaf(f.tree, f.active) || first_leaf(f.tree)
 
@@ -1974,7 +1975,8 @@ defmodule Compos.Core.Editor do
       manual: false
     }
 
-    tree = %{type: :split, dir: dir, ratio: ratio, children: [f.tree, new_leaf]}
+    children = if first?, do: [new_leaf, f.tree], else: [f.tree, new_leaf]
+    tree = %{type: :split, dir: dir, ratio: ratio, children: children}
 
     changed(
       new_leaf.id,

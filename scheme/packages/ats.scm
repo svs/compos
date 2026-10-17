@@ -667,3 +667,31 @@
 (mode-chat-opening! "ats-approval-mode"
   (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text"))))
 
+(domain! 'web)
+(effects! '(write external display))
+;; an approval resolved off its page moves the view on, as a press of a on the page
+;; does: the shown page of ID gives way to the next row; with none shown, the list rereads
+(define (ats-approval-resolved! id note)
+  (let* ((bs (filter (lambda (b) (equal? (ats-case-id b) id)) (buffer-list)))
+         (seen (filter (lambda (b) (member b (get-visible-buffers))) bs))
+         (b (cond ((pair? seen) (car seen)) ((pair? bs) (car bs)) (else #f)))
+         (l "*ats-approvals*"))
+    (cond (b (site-app-detail-after! b note #t))
+          ((buffer-known? l)
+           (message note)
+           (site-app-read-page! "ats" (site-app-current-page l)))
+          (else (message note)))))
+
+;; approve or reject approval ID through the ATS, then move the view on; NOTE is the why
+(define (ats-approval-resolve! id approve? &optional note)
+  (let ((tool (if approve? "approveJobApplicationEvent" "rejectJobApplicationEvent"))
+        (verb (if approve? "Approved" "Rejected")))
+    (mcp-call! 'ats-ash tool
+      (json-encode (list 'id id 'input (list 'resolution_note (or note verb))))
+      (lambda (ok text)
+        (if ok
+            (ats-approval-resolved! id verb)
+            (message (string-append verb " failed: " (if (string? text) text ""))))))))
+(define (ats-approve! id &optional note) (ats-approval-resolve! id #t note))
+(define (ats-reject! id &optional note) (ats-approval-resolve! id #f note))
+

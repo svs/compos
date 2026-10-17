@@ -1846,7 +1846,12 @@
          (row (buffer-local buf 'site-app-row))
          (es (list-entries list-buf))
          (i (let loop ((rs es) (i 0))
-              (cond ((null? rs) #f) ((equal? (car rs) row) i) (else (loop (cdr rs) (+ i 1))))))
+              ;; a reread row may differ in its timestamps, so its key names it
+              (cond ((null? rs) #f)
+                    ((or (equal? (car rs) row)
+                         (and (plist-get row 'key) (equal? (plist-get (car rs) 'key) (plist-get row 'key))))
+                     i)
+                    (else (loop (cdr rs) (+ i 1))))))
          (j (and advance i (cond ((< (+ i 1) (length es)) (+ i 1)) ((> i 0) (- i 1)) (else #f)))))
     (cond
       (j (list-goto-index! list-buf j)

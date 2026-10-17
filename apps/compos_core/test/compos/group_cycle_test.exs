@@ -57,7 +57,7 @@ defmodule Compos.GroupCycleTest do
                )
 
       KeyDispatch.handle_key(frame, "<f9>")
-      assert {:ok, "3"} = Session.eval("(length (window-list))", frame)
+      assert {:ok, "2"} = Session.eval("(length (window-list))", frame)
       assert {:ok, "#f"} = Session.eval(~s|(window-showing "*zz-cyc-work-b*")|, frame)
       assert {:ok, "\"*zz-cyc-work-a*\""} = Session.eval("(current-buffer)", frame)
     after

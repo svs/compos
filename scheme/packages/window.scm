@@ -962,6 +962,46 @@
   (or (buffer-local buf 'window-preference-cover)
       (buffer-derived-mode? buf "help-mode")))
 
+;; A buffer's levels, widest first: what mode-consolidate gathers by and
+;; mode-zoom walks. A buffer an app claims is the app, then its role,
+;; then its mode. Any other buffer reads its mode's name, whose first word
+;; is its app: spotify-detail-mode is spotify, then spotify-detail.
+(effects! '(pure))
+
+(define (mode-lineage mode)
+  (if (not (string? mode))
+      '()
+      (let* ((stem (if (string-suffix? "-mode" mode)
+                       (substring mode 0 (- (string-length mode) 5))
+                       mode))
+             (words (string-split stem "-")))
+        (let loop ((n 1) (acc '()))
+          (if (> n (length words))
+              (reverse acc)
+              (loop (+ n 1) (cons (string-join (take words n) "-") acc)))))))
+
+(effects! '(read))
+
+(define (buffer-lineage buf)
+  (let ((mode (and (buffer-known? buf) (buffer-local buf 'mode-name)))
+        (app (and (boundp 'app-id) (app-id buf))))
+    (if app
+        (let* ((r (app-role buf))
+               (role (string-append app "/" (if (symbol? r) (symbol->string r) (or r "aux")))))
+          (list app role (string-append role "/" (or mode ""))))
+        (mode-lineage mode))))
+
+;; BUF's level one below ZOOM, its widest with no zoom; #f when BUF is not
+;; inside ZOOM. The deepest level is its own.
+(define (buffer-kin buf zoom)
+  (let ((lineage (buffer-lineage buf)))
+    (cond ((null? lineage) #f)
+          ((not zoom) (car lineage))
+          (else (let ((tail (member zoom lineage)))
+                  (and tail (if (pair? (cdr tail)) (cadr tail) zoom)))))))
+
+(effects! '(write display))
+
 (define (window-preferred-mode win)
   (or (window-mode-preference win)
       (let loop ((buffers (cons (window-buffer win) (window-prev-buffers win))))
@@ -973,7 +1013,9 @@
 
 (define (window-prefers-buffer? win buf)
   (let ((mode (window-preferred-mode win)))
-    (and (string? mode) (buffer-derived-mode? buf mode))))
+    (and (string? mode)
+         (or (buffer-derived-mode? buf mode)
+             (and (member mode (buffer-lineage buf)) #t)))))
 
 ;; The selected window comes first, so a command that opens one thing still
 ;; opens it where you are: you are already in the window of its mode.
@@ -990,7 +1032,9 @@
          (define (fits? w)
            (and (not (equal? w except))
                 (or (equal? (window-preferred-mode w) mode)
-                    (equal? (window-mode w) mode))))
+                    (equal? (window-mode w) mode)
+                    ;; a pane that holds a level holds every mode under it
+                    (and (member (window-preferred-mode w) (mode-lineage mode)) #t))))
          (if (and (member me work) (fits? me))
              me
              (let loop ((ws work))
@@ -3022,6 +3066,12 @@ and right walk the panes, up and down move by geometry."
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
 (public! 'window-mode
   "(window-mode WIN) — the major mode of the buffer WIN shows, or #f")
+(public! 'mode-lineage
+  "(mode-lineage MODE) — MODE's levels, widest first, from its name: spotify-detail-mode is (\"spotify\" \"spotify-detail\")")
+(public! 'buffer-lineage
+  "(buffer-lineage BUF) — BUF's levels, widest first: an app's buffer is its app, role and mode, any other its mode-lineage")
+(public! 'buffer-kin
+  "(buffer-kin BUF ZOOM) — BUF's level one below ZOOM, its widest when ZOOM is #f; #f outside ZOOM")
 (public! 'window-preferred-mode
   "(window-preferred-mode WIN) — explicit cycle mode, else the nearest work buffer's mode beneath temporary covers")
 (public! 'window-prefers-buffer?

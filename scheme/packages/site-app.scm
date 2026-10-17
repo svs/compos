@@ -1504,6 +1504,11 @@
 .sa-name-cell { font-weight: 600; color: var(--default-fg); }
 .sa-badge-cell { display: flex; align-items: center; }
 .sa-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* a toned pill keeps its tone: good, warn, bad, info from the spec's 'tones */
+.sa-pill.c-badge.good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
+.sa-pill.c-badge.warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
+.sa-pill.c-badge.bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
+.sa-pill.c-badge.info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
 @container (max-width: 60ch) { .sa-need-60 > .sa-cell:last-child { grid-column: 1 / -1; } }
 @container (max-width: 70ch) { .sa-need-70 > .sa-cell:last-child { grid-column: 1 / -1; } }
 @container (max-width: 80ch) { .sa-need-80 > .sa-cell:last-child { grid-column: 1 / -1; } }
@@ -1855,6 +1860,9 @@
 ;; A key finds the button that carries it. The page spec's 'detail-actions maps a
 ;; button's label to a handler for the buttons that open a form; a handler gets
 ;; ('buf 'action 'selector 'live 'done). Any other button is pressed as it is.
+;; the apps with a button press in flight on their tab
+(define *site-app-pressing* '())
+
 (define (site-app-detail-act! key)
   (let* ((buf (current-buffer))
          (keyed (assoc key (site-app-keyed-actions buf)))
@@ -1875,15 +1883,22 @@
                (done (lambda (note &optional advance) (site-app-detail-after! buf note advance))))
           (if hit
               ((cadr hit) (list 'buf buf 'action action 'selector selector 'live live 'done done))
-              (begin
-                (message (string-append label "…"))
-                (live (lambda (tab)
-                        (when tab
-                          (tab-press tab selector
-                            (lambda (html)
-                              (done (if html (string-append label ": done")
-                                        (string-append label ": the site did not answer"))
-                                    (and html #t))))))))))))))
+              ;; one press at a time per app: they share one tab, and a second
+              ;; navigation pulls the page from under the first ("Frame with ID 0 was removed")
+              (if (member name *site-app-pressing*)
+                  (message (string-append label ": wait, the last press is still on the site"))
+                  (let ((free! (lambda () (set! *site-app-pressing* (filter (lambda (n) (not (equal? n name))) *site-app-pressing*)))))
+                    (set! *site-app-pressing* (cons name *site-app-pressing*))
+                    (message (string-append label "…"))
+                    (live (lambda (tab)
+                            (if (not tab)
+                                (free!)
+                                (tab-press tab selector
+                                  (lambda (html)
+                                    (free!)
+                                    (done (if html (string-append label ": done")
+                                              (string-append label ": the site did not answer"))
+                                          (and html #t)))))))))))))))
 
 (define site-app-action-letters
   '("a" "b" "c" "d" "e" "f" "h" "i" "j" "k" "l" "m" "n" "p" "r" "u" "v" "w" "x" "y" "z"))

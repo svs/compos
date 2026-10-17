@@ -38,11 +38,17 @@
 (define (web--buffer? b)
   (equal? (buffer-local b 'mode-name) "browse-mode"))
 
+;; a document is its URL without the #fragment: the sections of one page
+;; are places in one buffer, not pages of their own
+(define (web--sans-fragment url)
+  (car (string-split url "#")))
+
 (define (web--buffer-for url)
   (let loop ((bs (buffer-list-mru)))
     (cond ((null? bs) #f)
           ((and (web--buffer? (car bs))
-                (equal? (buffer-local (car bs) 'browse-url) url))
+                (let ((here (buffer-local (car bs) 'browse-url)))
+                  (and here (equal? (web--sans-fragment here) (web--sans-fragment url)))))
            (car bs))
           (else (loop (cdr bs))))))
 (define *web-cache-ttl* 600)
@@ -1326,12 +1332,111 @@
     ;; the arrow says which way it stands: ▸ and ▾ are the same width
     (buffer-replace-range! buf (+ s 1) 3 (if open? "▸" "▾"))))
 
+;; Where a URL's #fragment starts reading: the link a heading carries to
+;; itself (Racket's docs, Sphinx), else the heading whose words spell the
+;; fragment (GitHub, Wikipedia). Point lands on that line, so the arrows
+;; read on from the part you asked for.
+(define (web--slug-words s)
+  (let ((w (re-replace-all "[^a-z0-9]+" (string-downcase s) "-")))
+    (re-replace-all "^-+|-+$" w "")))
+
+(define (web--line-start md pos)
+  (let ((nl (string-rindex (substring-bytes md 0 pos) "\n")))
+    (if nl (+ nl 1) 0)))
+
+;; point to POS in BUF and in every window that shows it: a window you are
+;; not in keeps its own point, and the buffer's alone would not move it
+(define (web--goto-everywhere! buf pos)
+  (buffer-goto! buf pos)
+  (for-each (lambda (w) (when (equal? (window-buffer w) buf) (window-set-point! w pos)))
+            (map car (window-list)))
+  (buffer-windows-follow-point! buf))
+
+(define (web--fragment-pos md links url)
+  (let* ((parts (and url (string-split url "#")))
+         (raw (and parts (pair? (cdr parts)) (cadr parts))))
+    (and raw (not (equal? raw ""))
+         (let* ((frag (url-decode raw))
+                ;; read the text, not the links: a target in parentheses,
+                ;; #(part._skills), is not one the link reader takes
+                (self (or (string-index md (string-append "](#" frag ")"))
+                          (string-index md (string-append "](#" raw ")"))))
+                (want (web--slug-words frag))
+                (heading (and (not self)
+                              (find (lambda (r)
+                                      (let ((line (substring-bytes md (car r) (cadr r))))
+                                        (equal? (web--slug-words (re-replace-all "\\]\\([^)]*\\)|[#\\[]" line "")) want)))
+                                    (re-find* "(?m)^#{1,6} .*$" md)))))
+           (cond (self (web--line-start md self))
+                 (heading (car heading))
+                 (else #f))))))
+
+;; A page that is mostly links into its own site is an index: a contents
+;; page, an archive, a listing. Its links open beside it as children
+;; (index.scm), and N and P on the page you opened walk to the next link.
+;; An article with a menu stays an article: the link text must be most of
+;; the page, and most links must stay on the site.
+(define *web-index-spec*
+  '(next "browse-next-link" prev "browse-prev-link" open "browse-follow-other-window"))
+
+(define (web--index-page? md links)
+  (let* ((own (filter (lambda (l) (let ((u (caddr l))) (and (not (string-prefix? "#" u))
+                                                          (not (re-match? "^[a-z]+:" u)))))
+                      links))
+         (label (apply + (map (lambda (l) (- (cadr l) (car l))) links)))
+         (urls (apply + (map (lambda (l) (+ 4 (string-byte-length (caddr l)))) links)))
+         (text (- (string-byte-length md) urls)))
+    (and (>= (length own) 12)
+         (> text 0)
+         (>= (* 2 label) text))))
+
+(define (web--index-sync! buf md links)
+  ;; i on the page decides for it, and the decision outlives a refetch
+  (unless (buffer-local buf 'browse-index-pinned)
+    (index-set! buf (if (web--index-page? md links) *web-index-spec* 'none))))
+
+;; the page URL opens is SOURCE's child, in the one window SOURCE opens its
+;; links into; a click on a rendered page comes here too (preview.scm)
+;; URL is a section of the document BUF already shows: go there, without a
+;; fetch. #f when URL is another document, or BUF has no text yet.
+(define (browse-goto-fragment! buf url)
+  (let ((here (buffer-local buf 'browse-url)))
+    (and here (> (buffer-size buf) 0)
+         (equal? (web--sans-fragment here) (web--sans-fragment url))
+         (begin
+           (buffer-set-local! buf 'browse-url url)
+           (web--update-modeline! buf)
+           (web--goto-everywhere! buf (or (web--fragment-pos (buffer-text buf) '() url) 0))
+           buf))))
+
+(define (browse-beside! url source)
+  (let ((name (web--tab-for! url)))
+    ;; shown first, so the window it lands in moves to the section too
+    (display-buffer-detail! name source)
+    (browse-goto-fragment! name url)
+    name))
+
+(public! 'browse-goto-fragment!
+  "(browse-goto-fragment! BUF URL) — when URL is a #section of the page BUF shows, move there without a fetch; else #f")
+(public! 'browse-beside!
+  "(browse-beside! URL SOURCE) — open URL beside the browse page SOURCE, as its child in the one window SOURCE opens links into")
+
+(define-command "browse-index-toggle" "Treat this page as an index of links that open beside it, or as a page"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (on (minor-mode-on? buf "index-mode")))
+      (buffer-set-local! buf 'browse-index-pinned #t)
+      (index-set! buf (if on 'none *web-index-spec*))
+      (message (if on "browse: a page" "browse: an index; RET opens a link beside it")))))
+
 (define (web--render! buf md)
   (let* ((t0 (monotonic-ms))
          (url (buffer-local buf 'browse-url))
          (md (if url (web--absolute-images md url) md))
-         ;; the calm reading folds what is left of the site's furniture
-         (folded (if (equal? (buffer-local buf 'browse-reading) "calm")
+         ;; the calm reading folds what is left of the site's furniture; an
+         ;; index's runs of links are its contents, not furniture
+         (folded (if (and (equal? (buffer-local buf 'browse-reading) "calm")
+                          (not (web--index-page? md (web--markdown-links md))))
                      (web--chrome-fold md)
                      (list md '())))
          (md (car folded))
@@ -1345,13 +1450,13 @@
     ;; Canonical Markdown stays in the buffer. preview-mode owns rendering;
     ;; web-links only keeps source positions for TAB, n/p and RET.
     (buffer-set-local! buf 'web-links links)
+    (web--index-sync! buf md links)
     (overlay-clear! buf 'web)
     (web--apply-meta-faces! buf)
     (web--apply-separator-faces! buf)
     (let ((p (buffer-local buf 'browse-restore-point)))
       (buffer-set-local! buf 'browse-restore-point #f)
-      (buffer-goto! buf (min (or p 0) (buffer-size buf)))
-      (buffer-windows-follow-point! buf))
+      (web--goto-everywhere! buf (min (or p (web--fragment-pos md links url) 0) (buffer-size buf))))
     ;; a page that came by l, r or g while the page itself shows: the
     ;; window follows it there
     (if (web--page? buf) (web--page-show! buf) (web--update-modeline! buf))
@@ -1612,9 +1717,10 @@
           (let ((url (web--resolve (car (cdr (cdr l)))
                                    (or (buffer-local buf 'browse-url) ""))))
             ;; an image is not text: the browser renders it
-            (if (web--image-url? url)
-                (web--open-image! url)
-                (web--goto-url! buf url #t))))))))
+            (cond ((web--image-url? url) (web--open-image! url))
+                  ;; an index keeps its place: the link opens beside it
+                  ((minor-mode-on? buf "index-mode") (run-command "browse-follow-other-window"))
+                  (else (web--goto-url! buf url #t)))))))))
 
 ;; Cmd-RET, the browser reflex: the link at point opens as its own tab
 (define-command "browse-follow-new-tab" "Open the link at point in a new tab"
@@ -1873,7 +1979,7 @@ whole document. R cycles calm, full and the page itself.")
 ;; only when a key that is not motion needs it (app.js, Reading).
 (register-minor-mode! "reading-mode" (lambda (buf) #t) (lambda (buf) #t))
 (mode-doc! "reading-mode"
-  "Read a rendered page without the server's point. Down and Up (n, p, TAB, S-TAB) step through the links, outlined, and RET follows the marked one; a link more than a screen away scrolls a screen instead. C-n and C-p scroll a line, SPC and S-SPC a screen. M-<down> and M-<up> step through the paragraphs and dim the rest. ESC clears the marks.")
+  "Read a rendered page without the server's point. Down and Up (TAB, S-TAB) step through the links, outlined, and RET follows the marked one; a link more than a screen away scrolls a screen instead. n and p go from section to section, each heading set at the top. } and { step through the paragraphs, centred, a long one a screen at a time, and mark the paragraph's first link. C-n and C-p scroll a line, SPC and S-SPC a screen. The Meta and Shift arrows stay the editor's: M-<down> and M-<up> scroll the other window. ESC clears the marks.")
 (define-command "reading-mode" "Toggle client-side reading motion on this page"
   (lambda () (toggle-minor-mode! "reading-mode")))
 
@@ -1885,7 +1991,7 @@ whole document. R cycles calm, full and the page itself.")
 ;; the link's page beside this one: the tab opens in another window and
 ;; point stays here, so the reader keeps their place in the page
 (define-command "browse-follow-other-window"
-  "Open the link at point in another window; point stays here"
+  "Open the link at point beside this page, as its child; point stays here"
   (lambda ()
     (let* ((buf (current-buffer))
            (l (web--link-at buf (point))))
@@ -1895,7 +2001,7 @@ whole document. R cycles calm, full and the page itself.")
                                    (or (buffer-local buf 'browse-url) ""))))
             (if (web--image-url? url)
                 (web--open-image! url)
-                (web--show-tab-other-window! url)))))))
+                (browse-beside! url buf)))))))
 
 ;; the link at point, else the page: eww's `w` does the same
 (define (web--url-at-point buf)
@@ -2069,6 +2175,25 @@ whole document. R cycles calm, full and the page itself.")
 (public! 'browse-cycle-view
   "(run-command \"browse-cycle-view\") — cycle rendered monospace, rendered serif, and Markdown source")
 
+;; M-g i on a page is its sections: the headings, as their words, without
+;; the link a heading carries to itself or its pilcrow
+(define (web--imenu-rows buf)
+  (let ((md (buffer-text buf)))
+    (map (lambda (r)
+           (let* ((line (substring-bytes md (car r) (cadr r)))
+                  (level (string-length (car (string-split line " "))))
+                  (words (re-replace-all "\\]\\([^)]*\\)+|[\\[#]|🔗|¶" line "")))
+             (list (length (string-split (substring-bytes md 0 (car r)) "\n"))
+                   "heading"
+                   (string-append (apply string-append (map (lambda (_) "  ") (iota (max 0 (- level 2))))) (string-trim words))
+                   "")))
+         (re-find* "(?m)^#{1,6} .*$" md))))
+
+;; the keys card in the window's corner, as a list carries one
+(define *web-keys-bar*
+  '(("↑ ↓" "link") ("{ }" "paragraph") ("n p" "section") ("RET" "open")
+    ("M-↑ ↓" "other window") ("R" "reading") ("i" "index") ("M-g i" "sections") ("q" "quit")))
+
 (define (web--install-keys! buf)
   
   
@@ -2111,6 +2236,10 @@ whole document. R cycles calm, full and the page itself.")
                 (preview-heal! buf)
                 (enable-minor-mode! buf "preview-mode"))))
       (web--install-keys! buf)
+      (buffer-set-local! buf 'imenu-index-function 'web--imenu-rows)
+      (desktop-skip! buf 'footer-line-blocks)
+      (buffer-set-local! buf 'footer-line-blocks
+        (list (component 'ui/keys-bar (list 'main *web-keys-bar*))))
       (unless (minor-mode-on? buf "reading-mode") (enable-minor-mode! buf "reading-mode"))
       (web--apply-meta-faces! buf)
       (web--apply-separator-faces! buf)
@@ -2118,23 +2247,30 @@ whole document. R cycles calm, full and the page itself.")
       (web--update-modeline! buf)
       (cache-wake! buf))))
 
+;; Pages are ordinary buffers: q quits the window, no dismissal.
+(mode-put! "browse-mode" 'dismissible 'never)
+
 (mode-keys! "browse-mode"
   '(
     ("RET" "browse-follow")
     ("s-RET" "browse-follow-new-tab")
     ("M-RET" "browse-follow-other-window")
     ("TAB" "browse-next-link")
-    ("n" "browse-next-link")
-    ("p" "browse-prev-link")
+    ;; n and p go from section to section; the arrows and TAB step links
+    ("n" "morg-next-heading")
+    ("p" "morg-previous-heading")
     ("l" "browse-back")
     ("r" "browse-hard-refresh")
     ("M-<left>" "browse-back")
     ("M-<right>" "browse-forward")
-    ;; A page is read the way any document is read: from one landmark to
-    ;; the next. morg already walks headings, paragraphs, blocks and links
-    ;; over Markdown text, and a browse page is Markdown text.
-    ("M-<up>" "morg-previous-landmark")
-    ("M-<down>" "morg-next-landmark")
+    ;; reading-mode steps sections, paragraphs and links in the page; the
+    ;; paragraph keys reach here only with it off, and morg walks the
+    ;; landmarks of the Markdown instead
+    ("{" "morg-previous-landmark")
+    ("}" "morg-next-landmark")
+    ;; the Meta arrows are the editor's: the window beside this one
+    ("M-<up>" "scroll-other-window-down")
+    ("M-<down>" "scroll-other-window")
     ("u" "browse-up")
     ("t" "browse-top")
     ("g" "browse-refresh")
@@ -2149,6 +2285,7 @@ whole document. R cycles calm, full and the page itself.")
     ("M-n" "browse-next-tab")
     ("M-p" "browse-prev-tab")
     ("R" "browse-toggle-reading")
+    ("i" "browse-index-toggle")
     ("C-c C-v" "browse-cycle-view")
     ("q" "quit-window")))
 
@@ -2157,10 +2294,13 @@ whole document. R cycles calm, full and the page itself.")
 the article alone; full shows the whole document. R cycles calm,
 full and the page itself, live in this window, where the site
 allows it, without fetching again; calm-mode turns calm on and off. RET follows the link at point,
-s-RET opens it as its own tab, and M-RET peeks it beside this window:
-the next M-RET replaces the peek, and M-RET on the same link keeps
-it. TAB and n/p walk the links, and M-<up> and M-<down> walk
-every landmark: heading, paragraph, block and link. l and M-<left>
+s-RET opens it as its own tab, and M-RET opens it beside this page as
+its child: every link the page opens takes that one window. A page that
+is mostly links into its site is an index: RET opens beside it too, and
+on the page you opened N and P walk the index's links and ^ goes back
+to it. i decides whether this page is an index. Down and Up and TAB go from link to link, } and { from paragraph to
+paragraph, and n and p from section to section; M-g i lists the
+sections. M-<down> and M-<up> scroll the other window. l and M-<left>
 go back, r and M-<right> go forward, and both return to the line
 you left. u goes to the parent path, t to the site root. g asks
 where to go: RET refetches this page, a visited site or a fresh URL
@@ -2208,7 +2348,7 @@ the tabs. C-s searches to any link.")
         (begin
           (when group (buffer-add-group! existing group))
           existing)
-        (let ((name (string-append "*browse:" (web--slug url) "*")))
+        (let ((name (string-append "*browse:" (web--slug (web--sans-fragment url)) "*")))
           (buffer-create name)
           (when group (buffer-add-group! name group))
           (with-current-buffer name (lambda () (set-mode! "browse-mode")))

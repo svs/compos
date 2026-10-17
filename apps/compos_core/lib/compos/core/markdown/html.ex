@@ -1386,6 +1386,12 @@ defmodule Compos.Core.Markdown.Html do
        source shows one blank line between paragraphs, and so does the page. */
     .gap{height:1.7em}
     .bl{height:1.7em}
+    /* A heading belongs to what follows it: the gap above it is wider than a
+       paragraph's, and the gap under it narrower, so a section reads as one
+       block and not as a title floating between two. */
+    .gap:has(+ h1),.gap:has(+ h2){height:2.6em}
+    .gap:has(+ h3),.gap:has(+ h4){height:2.2em}
+    h1+.gap,h2+.gap,h3+.gap,h4+.gap{height:.6em}
     /* whitespace-mode. Every mark is a pseudo-element painted over the
        character the author typed, so the text keeps its own bytes and the
        page does not reflow when the marks come on. */

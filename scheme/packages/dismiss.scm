@@ -38,18 +38,25 @@
   (equal? buf *mb-list-buffer*))
 
 (define (dismiss--declared-mode? buf)
-  (and (mode-inherited (buffer-local buf 'mode-name) 'dismissible) #t))
+  (eq? (mode-inherited (buffer-local buf 'mode-name) 'dismissible) #t))
+
+;; A mode that puts 'dismissible 'never keeps plain buffers: no child-first q.
+(define (dismiss--refused-mode? buf)
+  (eq? (mode-inherited (buffer-local buf 'mode-name) 'dismissible) 'never))
 
 (define (buffer-dismissible? buf)
   (and (buffer-known? buf) (buffer-read-only? buf)
        (not (minibuffer-buffer? buf))
        (not (dismiss--prompt-surface? buf))
        (let ((cmd (dismiss--normal-command buf)))
-         (or (dismiss--declared-mode? buf)
-             (buffer-parent buf) (pair? (buffer-children buf))
-             (member cmd '("quit-window" "dired-quit" "collect-quit"
-                           "switch-quit" "overview-quit" "notmuch-back"
-                           "notmuch-quit" "peek-dismiss"))))
+         ;; a parent or a child always dismisses; a refusing mode only
+         ;; drops the guess that a read-only page wants it
+         (or (buffer-parent buf) (pair? (buffer-children buf))
+             (and (not (dismiss--refused-mode? buf))
+                  (or (dismiss--declared-mode? buf)
+                      (member cmd '("quit-window" "dired-quit" "collect-quit"
+                                    "switch-quit" "overview-quit" "notmuch-back"
+                                    "notmuch-quit" "peek-dismiss"))))))
        #t))
 
 (public! 'buffer-parent "(buffer-parent BUF) — BUF's live dismissal parent, or #f")

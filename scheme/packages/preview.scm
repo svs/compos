@@ -447,7 +447,12 @@
             (or (string-prefix? "http://" href)
                 (string-prefix? "https://" href)
                 (not (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href))))
-       (browse (url-resolve href (buffer-local source 'browse-url))))
+       (let ((url (url-resolve href (buffer-local source 'browse-url))))
+         ;; an index keeps its place: the link opens beside it, as its child
+         (cond ((and (boundp 'browse-goto-fragment!) (browse-goto-fragment! source url)) #t)
+               ((and (minor-mode-on? source "index-mode") (boundp 'browse-beside!))
+                (browse-beside! url source))
+               (else (browse url)))))
       ((and (or (string-prefix? "http://" href)
                 (string-prefix? "https://" href))
             (boundp 'browse))

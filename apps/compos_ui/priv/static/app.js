@@ -315,22 +315,25 @@
 
   // Reading. A rendered page the reader only reads (data-reading) keeps
   // its motion in the browser: a key that only moves the eye never
-  // waits on the server. Three levels, each a step and a mark:
+  // waits on the server. A step and a mark at every level:
   //   lines       C-n/C-p: scroll one line; SPC, S-SPC, C-v, M-v: one screen
-  //   points      Down/Up, n/p, TAB/S-TAB: the next link, outlined; RET
-  //               follows it
-  //   paragraphs  M-Down/M-Up: the next paragraph, the rest dimmed
-  // Point is the server's, and it hears where the reader is only when
-  // a key that is not motion needs it: the key goes after a goto to the
-  // marked point, else the marked paragraph, else the top of the view.
+  //   points      Down/Up, TAB/S-TAB: the next link, outlined; RET follows it
+  //   paragraphs  } and {: the next paragraph, and its first link
+  //   sections    n/p: the next heading, set at the top of the view
+  // A plain arrow goes one link at a time; the jumps are letters.
+  // The Meta and Shift arrows are not reading: they reach the editor, which
+  // scrolls the other window and moves buffers between panes with them.
+  // The reader's place is the browser's. The editor hears it before a link
+  // is followed and before any key that is not motion; a move alone costs
+  // no round trip:
+  // a goto to the marked point, else the marked paragraph, else the top of
+  // the view.
   const READ_BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, table, dt, dd";
   const READ_CSS = `
     body.reading .pt { display: none !important; }
-    body.reading-focus [data-rb] { transition: opacity .2s ease; }
-    body.reading-focus [data-rb]:not(.reading-para) { opacity: .45; }
     .reading-para { border-radius: 3px;
-      background: color-mix(in srgb, currentColor 5%, transparent);
-      box-shadow: 0 0 0 .4em color-mix(in srgb, currentColor 5%, transparent); }
+      background: color-mix(in srgb, currentColor 10%, transparent);
+      box-shadow: 0 0 0 .4em color-mix(in srgb, currentColor 10%, transparent); }
     .reading-poi { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
   `;
   // the keys that begin a chord: the key after one is the chord's, not ours
@@ -357,15 +360,25 @@
       if (cls === "reading-para") d.body.classList.toggle("reading-focus", !!el);
     },
     // the innermost blocks that hold text: a list item's paragraph, not the item
+    // A page's paragraphs and links are found once: a redraw replaces the
+    // body, and a new body is a new page to read. Finding them on every key
+    // walked the whole document each time.
     blocks(d) {
+      if (this.blocksOf === d.body) return this.blockList;
       const all = Array.from(d.body.querySelectorAll(READ_BLOCKS))
         .filter(el => !el.querySelector(READ_BLOCKS) && !isChrome(el) && el.textContent.trim() !== "");
       all.forEach(el => { el.dataset.rb = "1"; });
+      this.blocksOf = d.body;
+      this.blockList = all;
       return all;
     },
     pois(d) {
-      return Array.from(d.body.querySelectorAll("a[href]"))
-        .filter(a => !isChrome(a) && a.getClientRects().length && a.textContent.trim() !== "");
+      if (this.poisOf !== d.body) {
+        this.poisOf = d.body;
+        this.poiList = Array.from(d.body.querySelectorAll("a[href]"))
+          .filter(a => !isChrome(a) && a.textContent.trim() !== "");
+      }
+      return this.poiList.filter(a => a.getClientRects().length);
     },
     // where the eye rests: a third of the way down the view
     eye(f) { return f.clientHeight / 3; },
@@ -386,6 +399,18 @@
       const m = 16;
       const dy = r.top < m ? r.top - m
         : r.bottom > h - m ? Math.min(r.bottom - (h - m), r.top - m) : 0;
+      if (dy) this.scroller(this.doc(f)).scrollTop += dy;
+    },
+    // a stepped-to paragraph sits in the middle of the view, as near as the
+    // page's ends allow; one taller than the view shows its near edge, and
+    // the next steps read on to its far one
+    center(f, el, dir) {
+      const r = el.getBoundingClientRect();
+      const h = f.clientHeight;
+      const m = 16;
+      const dy = r.height > h - 2 * m
+        ? (dir > 0 ? r.top - m : r.bottom - (h - m))
+        : (r.top + r.bottom) / 2 - h / 2;
       if (dy) this.scroller(this.doc(f)).scrollTop += dy;
     },
     // the element of LIST after (DIR 1) or before (DIR -1) the marked
@@ -450,10 +475,47 @@
       if (spec === "C-p") { this.scroll(f, -line); return moved(); }
       if ((plain && e.key === " " && !e.shiftKey) || spec === "C-v") { this.scroll(f, page); return moved(); }
       if ((plain && e.key === " " && e.shiftKey) || spec === "M-v") { this.scroll(f, -page); return moved(); }
-      const poiDir = plain && ((e.key === "ArrowDown" && !e.shiftKey) || e.key === "n" || (e.key === "Tab" && !e.shiftKey)) ? 1
-        : plain && ((e.key === "ArrowUp" && !e.shiftKey) || e.key === "p" || (e.key === "Tab" && e.shiftKey)) ? -1 : 0;
+      // n and p: from section to section, each heading set at the top. A
+      // heading the page's end keeps from the top is passed by the next
+      // press, so the step never sticks on it. (C-Down and C-Up belong to
+      // macOS.)
+      const secDir = plain && e.key === "n" ? 1 : plain && e.key === "p" ? -1 : 0;
+      if (secDir) {
+        const m = 16;
+        const heads = this.blocks(d).filter(el => /^H[1-6]$/.test(el.tagName));
+        const cur = this.marked(d, "reading-para");
+        let i = secDir > 0
+          ? heads.findIndex(el => el.getBoundingClientRect().top > m + 1)
+          : heads.findLastIndex(el => el.getBoundingClientRect().top < m - 1);
+        if (i >= 0 && heads[i] === cur) i += secDir;
+        const head = i >= 0 ? heads[i] || null : null;
+        if (head) {
+          this.mark(d, "reading-para", head);
+          // the section's first link is where Down and RET go on from: the
+          // heading's own, else the first one before the next heading
+          const nextHead = heads[i + 1];
+          this.mark(d, "reading-poi", this.pois(d).find(l => head.contains(l)
+            || ((head.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)
+                && !(nextHead && (nextHead.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)))) || null);
+          this.scroller(d).scrollTop += head.getBoundingClientRect().top - m;
+        } else if (secDir < 0) {
+          this.scroller(d).scrollTop = 0;
+        } else {
+          this.scroll(f, page);
+        }
+        return moved();
+      }
+      const poiDir = plain && ((e.key === "ArrowDown" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) ? 1
+        : plain && ((e.key === "ArrowUp" && !e.shiftKey) || (e.key === "Tab" && e.shiftKey)) ? -1 : 0;
       if (poiDir) {
-        const a = this.next(f, this.pois(d), "reading-poi", poiDir);
+        // a marked paragraph with no link marked: go on from the paragraph
+        const para = this.marked(d, "reading-para");
+        const links = this.pois(d);
+        const a = para && !this.marked(d, "reading-poi")
+          ? (poiDir > 0
+              ? links.find(l => !para.contains(l) && (para.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING))
+              : links.filter(l => para.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_PRECEDING).pop()) || null
+          : this.next(f, links, "reading-poi", poiDir);
         // a link more than a screen away would skip the text before it
         // unread: the step reads that screen first
         const r = a && a.getBoundingClientRect();
@@ -469,24 +531,33 @@
         }
         return moved();
       }
-      const paraDir = e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowDown" ? 1
-        : e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowUp" ? -1 : 0;
+      const paraDir = plain && e.key === "}" ? 1 : plain && e.key === "{" ? -1 : 0;
       if (paraDir) {
-        // a marked paragraph taller than the view is read to its end
-        // before the step leaves it
+        // paragraphs and screens are one run of stops, and a step takes the
+        // next: a marked paragraph whose far edge is off the view is read a
+        // screen at a time, else the next paragraph is marked and centred
+        const blocks = this.blocks(d);
+        const h = f.clientHeight;
+        const m = 16;
         const cur = this.marked(d, "reading-para");
         const cr = cur && cur.getBoundingClientRect();
-        const m = 16;
         const rest = !cr ? 0
-          : paraDir > 0 ? Math.min(page, cr.bottom - (f.clientHeight - m))
+          : paraDir > 0 ? Math.min(page, cr.bottom - (h - m))
           : Math.max(-page, cr.top - m);
-        if (paraDir * rest > 0) { this.scroller(d).scrollTop += rest; return moved(); }
-        const p = this.next(f, this.blocks(d), "reading-para", paraDir);
+        // a pixel of rounding is not text left to read
+        if (paraDir * rest > 1) { this.scroller(d).scrollTop += rest; return moved(); }
+        const i = cur ? blocks.indexOf(cur) : -1;
+        // nothing marked: the first paragraph past the middle of the view
+        const p = i >= 0 ? blocks[i + paraDir] || null
+          : paraDir > 0 ? blocks.find(el => el.getBoundingClientRect().top > h / 2) || null
+          : blocks.slice().reverse().find(el => el.getBoundingClientRect().bottom < h / 2) || null;
         if (p) {
           this.mark(d, "reading-para", p);
-          const poi = this.marked(d, "reading-poi");
-          if (poi && !p.contains(poi)) this.mark(d, "reading-poi", null);
-          this.showBlock(f, p);
+          // the paragraph's first link is where Down and RET go on from
+          this.mark(d, "reading-poi", this.pois(d).find(l => p.contains(l)) || null);
+          this.center(f, p, paraDir);
+        } else {
+          this.scroll(f, paraDir * page);
         }
         return moved();
       }
@@ -497,9 +568,11 @@
           if (href.startsWith("#")) {
             const id = decodeURIComponent(href.slice(1));
             const t = d.getElementById(id) || d.querySelector('[name="' + CSS.escape(id) + '"]');
-            if (t) { this.mark(d, "reading-poi", null); this.show(f, t); }
-            return moved();
+            if (t) { this.mark(d, "reading-poi", null); this.show(f, t); return moved(); }
+            // a page drawn from Markdown keeps no ids: the editor finds the section
           }
+          // the editor learns where the reader is before the link moves it on
+          this.sync(f, hook);
           hook.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
             win: parseInt(f.dataset.win, 10), href: href
           });
@@ -1018,9 +1091,19 @@
         const s = this.scroller();
         if (!s) return;
         const want = parseInt(this.el.dataset.ctop || "0", 10);
-        // a 2px slack stops the applied value from fighting the
-        // wheel report that follows it
-        if (Math.abs(s.scrollTop - want) > 2) s.scrollTop = want;
+        // The reader's scroll wins. The stored offset applies when the
+        // editor asks for a new one, or the window shows another buffer,
+        // and not on every redraw: a redraw between a scroll and its report
+        // put the page back where it had been. The editor's echo of the
+        // reader's own report asks for nothing.
+        const buf = this.el.closest("c-preview")?.getAttribute("buffer");
+        if (buf !== this.lastBuf) { this.lastBuf = buf; this.lastCtop = undefined; }
+        if (want !== this.lastCtop) {
+          this.lastCtop = want;
+          // a 2px slack stops the applied value from fighting the
+          // wheel report that follows it
+          if (want !== this.sentTop && Math.abs(s.scrollTop - want) > 2) s.scrollTop = want;
+        }
         this.follow();
       },
       // an edit in a markdown preview lands at point, and the
@@ -1054,11 +1137,20 @@
             const marker = current && current.querySelector(".pt");
             const scroll = this.scroller();
             if (!marker || !scroll) return;
-            const r = marker.getBoundingClientRect();
+            // reading hides the caret: measure the run that holds it
+            const box = marker.getClientRects().length ? marker : marker.parentElement;
+            const r = box.getBoundingClientRect();
             const h = this.el.clientHeight;
             const edge = Math.min(48, h / 8);
 
             if (r.top >= edge && r.bottom <= h - edge) return;
+            // point that lands on a heading off the page is a jump to its
+            // section, and a section starts at the top
+            const heading = box.closest("h1,h2,h3,h4,h5,h6");
+            if (heading) {
+              scroll.scrollTop = Math.max(0, scroll.scrollTop + heading.getBoundingClientRect().top - edge);
+              return;
+            }
 
             scroll.scrollTop = Math.max(
               0,
@@ -1136,7 +1228,15 @@
             const a = t && t.closest && t.closest("a[href]");
             if (!a) return null;
             const href = a.getAttribute("href") || "";
-            return (href === "" || href.startsWith("#")) ? null : href;
+            if (href === "") return null;
+            // the browser scrolls to an id the page still has; a page drawn
+            // from Markdown keeps none, and the editor finds the section
+            if (href.startsWith("#")) {
+              let id = href.slice(1);
+              try { id = decodeURIComponent(id); } catch (_) {}
+              return d.getElementById(id) ? null : href;
+            }
+            return href;
           };
           // the click only cancels the navigation: the mousedown
           // below already sent the link, because moving point
@@ -1263,6 +1363,7 @@
           this.timer = setTimeout(() => {
             const s = this.scroller();
             if (!s) return;
+            this.sentTop = Math.round(s.scrollTop);
             this.pushEvent("cscroll", {
               win: parseInt(this.el.dataset.win, 10),
               top: Math.round(s.scrollTop)

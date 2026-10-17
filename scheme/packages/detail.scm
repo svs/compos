@@ -151,9 +151,12 @@
          ;; already where you stand, or already in another window: a display
          ;; never moves a buffer that is on screen
          (shown (if (equal? (window-buffer me) name) me (window-showing-other name me)))
+         ;; you stand in one of this list's children: its sibling takes your
+         ;; window, so walking the list from a detail stays where you are
+         (here (and (not shown) (equal? (buffer-local (window-buffer me) 'detail-of) o) me))
          ;; a pane you set to prefer this mode beats the remembered one, so
          ;; window-mode-preference moves where a list opens its rows
-         (pinned (and (not shown)
+         (pinned (and (not shown) (not here)
                       (find (lambda (w)
                               (and (not (equal? w me))
                                    (window-mode-preference w)
@@ -161,14 +164,14 @@
                             (display--work-windows))))
          ;; the last detail of this list still on screen: the next row covers it
          ;; wherever it went, even when the remembered window shows something else
-         (sibling (and (not shown) (not pinned)
+         (sibling (and (not shown) (not here) (not pinned)
                        (find (lambda (w)
                                (and (not (equal? w me))
                                     (equal? (buffer-local (window-buffer w) 'detail-of) o)))
                              (display--work-windows))))
          ;; a pane of the same mode, a detail of another list of the same app:
          ;; mode affinity beats the window the list remembers
-         (kin (and (not shown) (not pinned) (not sibling)
+         (kin (and (not shown) (not here) (not pinned) (not sibling)
                    (find (lambda (w)
                            (and (not (equal? w me))
                                 (not (equal? (window-buffer w) o))
@@ -181,9 +184,10 @@
          (room (and (layout-target)
                     (< (length (layout-target-visible-buffers))
                        (layout-target-capacity (layout-target)))))
-         (kept (and (not shown) (not pinned) (not sibling) (not kin) (not room) (detail-window o)))
+         (kept (and (not shown) (not here) (not pinned) (not sibling) (not kin) (not room) (detail-window o)))
          (win (cond
                 (shown shown)
+                (here (window-display! (lambda () (display-buffer-in-window! here name))))
                 (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))
                 (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
                 (kin (window-display! (lambda () (display-buffer-in-window! kin name))))
@@ -301,7 +305,9 @@
 ;; while you stand in a detail, the way chat-mode shadows it in a chat
 (register-minor-mode! "detail-mode" (lambda (buf) #t) (lambda (buf) #t))
 (minor-mode-keys! "detail-mode"
-  '(("C-`" "detail-next") ("C-M-`" "detail-previous") ("M-RET" "detail-keep")))
+  '(("C-`" "detail-next") ("C-M-`" "detail-previous") ("M-RET" "detail-keep")
+    ;; the list's own items, from here (index.scm)
+    ("N" "index-next-item") ("P" "index-previous-item") ("^" "index-up")))
 
 (public! 'display-buffer-detail!
   "(display-buffer-detail! NAME [OWNER]) — show NAME in the one window the list OWNER opens its rows into, keep that window for the next row, and select nothing")

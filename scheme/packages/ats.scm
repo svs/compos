@@ -562,6 +562,9 @@
 
 (when (boundp 'app-detail-keys!)
   (app-detail-keys! "ats-pipeline-mode" "site-app-detail-mode"))
+;; a candidate's page walks the pipeline: N and P open the next and previous candidate
+(when (boundp 'index-declare!)
+  (index-declare! "ats-pipeline-mode" 'next "list-next" 'prev "list-prev" 'open "ats-pipeline-open"))
 
 ;; c on the jobs list opens the row's candidates; the job page has it as an extra key
 (define-key (mode-keymap "ats-jobs-mode") "c" "ats-pipeline")

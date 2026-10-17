@@ -2319,6 +2319,9 @@
           ;; adjacent detail, just as they do when focus is on the detail itself.
           (when (boundp 'app-detail-keys!)
             (app-detail-keys! mode "site-app-detail-mode"))
+          ;; its pages walk it: N and P on a page open the next and previous row
+          (when (boundp 'index-declare!)
+            (index-declare! mode 'next "list-next" 'prev "list-prev" 'open "site-app-detail"))
           (define-command command (string-append "Open " title " " (plist-get page 'label))
             (lambda () (site-app-open! name id)))))
       pages)

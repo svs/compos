@@ -61,6 +61,8 @@
 ; the detail window: an app registers how it names a kept detail at load,
 ; so this comes before every app that opens rows into one
 (require 'detail)
+; an index opens its items as details; a list mode declares one at load
+(require 'index)
 (require 'preview)
 (require 'file-view)
 ; completion-at-point: agent-session.scm (under agent.scm) runs the chat

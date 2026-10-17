@@ -7,6 +7,16 @@
 
 (define *cells* '())
 
+(domain! 'ui)
+(effects! '(read))
+
+(define (cell-ref name) (let ((e (cell--entry name))) (and e (cadr e))))
+
+(define (cell-watchers name) (let ((e (cell--entry name))) (if e (map car (caddr e)) '())))
+
+(domain! 'ui)
+(effects! '(write))
+
 (define (cell--entry name) (assq name *cells*))
 
 (define (cell--put! name value watchers)

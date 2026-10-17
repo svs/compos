@@ -13,6 +13,7 @@
 
 (package! 'spotify)
 (require 'site-app)
+(require 'cell)
 
 (domain! 'spotify)
 (effects! '(write))
@@ -283,6 +284,16 @@
   ;; a cover in the bar is 64px; the same image comes at 640
   (if (string? src) (re-replace-all "00004851|00001e02" src "0000b273") ""))
 
+(define (spotify--progress class pos dur)
+  (let* ((total (spotify--seconds dur))
+         (pct (if (> total 0) (min 100 (quotient (* 100 (spotify--seconds pos)) total)) 0)))
+    (list 'tag "div" 'class class
+          'children (list (spotify--text "sp-dur" pos)
+                          (list 'tag "span" 'class "sp-bar"
+                                'children (list (list 'tag "span" 'class "sp-bar-fill"
+                                                      'attrs (list (list "style" (string-append "width:" (number->string pct) "%"))))))
+                          (spotify--text "sp-dur" dur)))))
+
 (defcomponent 'spotify/np-hero
   "The head of the Now Playing page: the cover large on a blur of itself, whether it plays, the title, the artists, the album and its release, a progress bar and the controls. A click on the album is CLICK."
   '((title string required) (artists string optional) (art string optional) (album string optional)
@@ -293,8 +304,6 @@
     (let* ((art (component--get p 'art ""))
            (pos (component--get p 'position ""))
            (dur (component--get p 'duration ""))
-           (total (spotify--seconds dur))
-           (pct (if (> total 0) (min 100 (quotient (* 100 (spotify--seconds pos)) total)) 0))
            (playing? (component--get p 'playing? #f))
            (liked? (component--get p 'liked? #f))
            (album (component--get p 'album ""))
@@ -315,12 +324,7 @@
                                           'children (append (list (spotify--text "sp-np-album-name" album))
                                                             (if (equal? released "") '()
                                                                 (list (spotify--text "sp-np-released" released)))))))
-                          (list (list 'tag "div" 'class "sp-np-progress"
-                                      'children (list (spotify--text "sp-dur" pos)
-                                                      (list 'tag "span" 'class "sp-bar"
-                                                            'children (list (list 'tag "span" 'class "sp-bar-fill"
-                                                                                  'attrs (list (list "style" (string-append "width:" (number->string pct) "%"))))))
-                                                      (spotify--text "sp-dur" dur)))
+                          (list (cell-part 'spotify/progress (spotify--progress "sp-np-progress" pos dur))
                                 (component 'ui/actions
                                   (list 'class "sp-np-controls"
                                         'actions (spotify--controls p #t)))))))))))
@@ -548,9 +552,13 @@
                    (not (equal? (plist-get now 'artistHref) (plist-get *spotify-now* 'artistHref))))))
     (set! *spotify-now* now)
     (for-each (lambda (b) (buffer-set-local! b 'list-layout-cache #f) (list-refresh! b)) (spotify--list-buffers))
-    (when (and (boundp 'spotify--now-draw!) (buffer-exists? *spotify-now-buffer*))
-      (spotify--now-draw!)
-      (when moved (spotify--context!)))))
+    (cell-set! 'spotify/track (spotify--track-of now))
+    (cell-set! 'spotify/position (spotify--position-of now))
+    (when (and moved (boundp 'spotify--now-draw!) (buffer-exists? *spotify-now-buffer*))
+      (spotify--context!))))
+
+(define (spotify--track-of now) (plist-put now 'position ""))
+(define (spotify--position-of now) (list (or (plist-get now 'position) "") (or (plist-get now 'duration) "")))
 
 (define (spotify--quiet-eval code k)
   ;; the player if it is open, else K gets #f: a refresh never opens a tab
@@ -1259,7 +1267,7 @@
                           (spotify--now-blocks)))
              (line (car (buffer-line-at-point buf)))
              (text (b 'text #f #f))
-             (key (list text *spotify-now*)))
+             (key (list text (spotify--track-of *spotify-now*))))
         (unless (equal? key (buffer-local buf 'spotify-now-key))
           (buffer-set-local! buf 'spotify-now-key key)
           (buffer-set-text! buf text #t)
@@ -1270,6 +1278,13 @@
                   'render-blocks (list (component 'ui/page (list 'body blocks)))))
           (site-app-set-anchors! buf text blocks)
           (anchor-sync! buf))))))
+
+(cell-define! 'spotify/track '())
+(cell-define! 'spotify/position '("" ""))
+(cell-watch! 'spotify/track 'spotify-now-page
+  (lambda (track old) (when (buffer-exists? *spotify-now-buffer*) (spotify--now-draw!))))
+(cell-part-bind! *spotify-now-buffer* 'spotify/progress '(spotify/position)
+  (lambda () (let ((p (cell-ref 'spotify/position))) (spotify--progress "sp-np-progress" (car p) (cadr p)))))
 
 (define-command "spotify-now-act" "Play the track at point, or open the release, concert or story there"
   (lambda ()

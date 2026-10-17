@@ -313,6 +313,217 @@
     return !!(el && el.closest && el.closest("[data-chrome], .code-block-head, .tweet"));
   }
 
+  // Reading. A rendered page the reader only reads (data-reading) keeps
+  // its motion in the browser: a key that only moves the eye never
+  // waits on the server. Three levels, each a step and a mark:
+  //   lines       C-n/C-p: scroll one line; SPC, S-SPC, C-v, M-v: one screen
+  //   points      Down/Up, n/p, TAB/S-TAB: the next link, outlined; RET
+  //               follows it
+  //   paragraphs  M-Down/M-Up: the next paragraph, the rest dimmed
+  // Point is the server's, and it hears where the reader is only when
+  // a key that is not motion needs it: the key goes after a goto to the
+  // marked point, else the marked paragraph, else the top of the view.
+  const READ_BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, table, dt, dd";
+  const READ_CSS = `
+    body.reading .pt { display: none !important; }
+    body.reading-focus [data-rb] { transition: opacity .2s ease; }
+    body.reading-focus [data-rb]:not(.reading-para) { opacity: .45; }
+    .reading-para { border-radius: 3px;
+      background: color-mix(in srgb, currentColor 5%, transparent);
+      box-shadow: 0 0 0 .4em color-mix(in srgb, currentColor 5%, transparent); }
+    .reading-poi { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
+  `;
+  // the keys that begin a chord: the key after one is the chord's, not ours
+  const READ_PREFIX = ["C-x", "C-c", "C-h", "Escape"];
+  const Reading = {
+    frame() {
+      return document.querySelector('.window.active iframe.html-preview[data-reading="true"]');
+    },
+    doc(f) { try { return f.contentDocument; } catch (_) { return null; } },
+    ready(d) {
+      if (!d.getElementById("reading-css")) {
+        const s = d.createElement("style");
+        s.id = "reading-css";
+        s.textContent = READ_CSS;
+        (d.head || d.documentElement).appendChild(s);
+      }
+      d.body.classList.add("reading");
+    },
+    scroller(d) { return d.scrollingElement || d.documentElement; },
+    marked(d, cls) { return d.querySelector("." + cls); },
+    mark(d, cls, el) {
+      d.querySelectorAll("." + cls).forEach(x => x.classList.remove(cls));
+      if (el) el.classList.add(cls);
+      if (cls === "reading-para") d.body.classList.toggle("reading-focus", !!el);
+    },
+    // the innermost blocks that hold text: a list item's paragraph, not the item
+    blocks(d) {
+      const all = Array.from(d.body.querySelectorAll(READ_BLOCKS))
+        .filter(el => !el.querySelector(READ_BLOCKS) && !isChrome(el) && el.textContent.trim() !== "");
+      all.forEach(el => { el.dataset.rb = "1"; });
+      return all;
+    },
+    pois(d) {
+      return Array.from(d.body.querySelectorAll("a[href]"))
+        .filter(a => !isChrome(a) && a.getClientRects().length && a.textContent.trim() !== "");
+    },
+    // where the eye rests: a third of the way down the view
+    eye(f) { return f.clientHeight / 3; },
+    show(f, el) {
+      const r = el.getBoundingClientRect();
+      const h = f.clientHeight;
+      const edge = Math.min(48, h / 8);
+      if (r.top >= edge && r.bottom <= h - edge) return;
+      const s = this.scroller(this.doc(f));
+      s.scrollTop = Math.max(0, s.scrollTop + r.top - h / 3);
+    },
+    // a step's target comes into view whole, and the page moves no more
+    // than that: up until all of it shows, or until its top reaches the
+    // top of the view, whichever comes first; one above comes down to the top
+    showBlock(f, el) {
+      const r = el.getBoundingClientRect();
+      const h = f.clientHeight;
+      const m = 16;
+      const dy = r.top < m ? r.top - m
+        : r.bottom > h - m ? Math.min(r.bottom - (h - m), r.top - m) : 0;
+      if (dy) this.scroller(this.doc(f)).scrollTop += dy;
+    },
+    // the element of LIST after (DIR 1) or before (DIR -1) the marked
+    // one; with none marked, the first from the eye in that direction
+    next(f, list, cls, dir) {
+      const cur = this.marked(this.doc(f), cls);
+      const i = cur ? list.indexOf(cur) : -1;
+      if (i >= 0) return list[i + dir] || null;
+      const y = this.eye(f);
+      const j = list.findIndex(el => el.getBoundingClientRect().bottom > y);
+      if (j < 0) return dir > 0 ? null : list[list.length - 1] || null;
+      return dir > 0 ? list[j] : list[j - 1] || list[j];
+    },
+    // the block the eye is on, for a mark that follows the scroll
+    blockAtEye(f, list) {
+      const y = this.eye(f);
+      return list.find(el => el.getBoundingClientRect().bottom > y) || list[list.length - 1] || null;
+    },
+    scroll(f, dy) {
+      const d = this.doc(f);
+      this.scroller(d).scrollTop += dy;
+      if (this.marked(d, "reading-para")) this.mark(d, "reading-para", this.blockAtEye(f, this.blocks(d)));
+      const poi = this.marked(d, "reading-poi");
+      if (poi) {
+        const r = poi.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > f.clientHeight) this.mark(d, "reading-poi", null);
+      }
+    },
+    lineHeight(d) {
+      const lh = parseFloat(getComputedStyle(d.body).lineHeight);
+      return Number.isFinite(lh) ? lh : 24;
+    },
+    // the source byte the reader is at: the marked point or paragraph,
+    // else the first run at the top of the view
+    spot(f) {
+      const d = this.doc(f);
+      const el = this.marked(d, "reading-poi") || this.marked(d, "reading-para");
+      const runs = el ? [el.querySelector("span.s[data-s]")]
+        : Array.from(d.querySelectorAll("span.s[data-s]"));
+      const run = runs.find(r => r && (el || r.getBoundingClientRect().bottom > 0));
+      const at = run ? parseInt(run.dataset.s, 10) : NaN;
+      return Number.isFinite(at) ? at : null;
+    },
+    // HOOK is the Keys hook. Answers true when the key was reading motion.
+    key(e, hook) {
+      const f = this.frame();
+      const d = f && this.doc(f);
+      if (!d || !d.body) return false;
+      if (document.querySelector(".mb-panel, .which-key, .transient-panel, .cap-pop")) return false;
+      const spec = (e.ctrlKey ? "C-" : "") + (e.altKey ? "M-" : "") + e.key;
+      const chord = this._prefixAt && performance.now() - this._prefixAt < 2000;
+      if (!["Control", "Meta", "Alt", "Shift"].includes(e.key)) {
+        this._prefixAt = READ_PREFIX.includes(spec) ? performance.now() : 0;
+      }
+      if (chord) return this.sync(f, hook);
+      this.ready(d);
+      const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+      const line = this.lineHeight(d);
+      const page = f.clientHeight * 0.9;
+      const moved = () => { this.dirty = true; return true; };
+      if (spec === "C-n") { this.scroll(f, line); return moved(); }
+      if (spec === "C-p") { this.scroll(f, -line); return moved(); }
+      if ((plain && e.key === " " && !e.shiftKey) || spec === "C-v") { this.scroll(f, page); return moved(); }
+      if ((plain && e.key === " " && e.shiftKey) || spec === "M-v") { this.scroll(f, -page); return moved(); }
+      const poiDir = plain && ((e.key === "ArrowDown" && !e.shiftKey) || e.key === "n" || (e.key === "Tab" && !e.shiftKey)) ? 1
+        : plain && ((e.key === "ArrowUp" && !e.shiftKey) || e.key === "p" || (e.key === "Tab" && e.shiftKey)) ? -1 : 0;
+      if (poiDir) {
+        const a = this.next(f, this.pois(d), "reading-poi", poiDir);
+        // a link more than a screen away would skip the text before it
+        // unread: the step reads that screen first
+        const r = a && a.getBoundingClientRect();
+        if (!a || r.top > f.clientHeight * 1.9 || r.bottom < -f.clientHeight * 0.9) {
+          this.scroll(f, poiDir * page);
+        } else {
+          this.mark(d, "reading-poi", a);
+          if (this.marked(d, "reading-para")) {
+            this.blocks(d);
+            this.mark(d, "reading-para", a.closest("[data-rb]"));
+          }
+          this.showBlock(f, a);
+        }
+        return moved();
+      }
+      const paraDir = e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowDown" ? 1
+        : e.altKey && !e.ctrlKey && !e.metaKey && e.key === "ArrowUp" ? -1 : 0;
+      if (paraDir) {
+        // a marked paragraph taller than the view is read to its end
+        // before the step leaves it
+        const cur = this.marked(d, "reading-para");
+        const cr = cur && cur.getBoundingClientRect();
+        const m = 16;
+        const rest = !cr ? 0
+          : paraDir > 0 ? Math.min(page, cr.bottom - (f.clientHeight - m))
+          : Math.max(-page, cr.top - m);
+        if (paraDir * rest > 0) { this.scroller(d).scrollTop += rest; return moved(); }
+        const p = this.next(f, this.blocks(d), "reading-para", paraDir);
+        if (p) {
+          this.mark(d, "reading-para", p);
+          const poi = this.marked(d, "reading-poi");
+          if (poi && !p.contains(poi)) this.mark(d, "reading-poi", null);
+          this.showBlock(f, p);
+        }
+        return moved();
+      }
+      if (plain && e.key === "Enter") {
+        const a = this.marked(d, "reading-poi");
+        const href = a && a.getAttribute("href");
+        if (href) {
+          if (href.startsWith("#")) {
+            const id = decodeURIComponent(href.slice(1));
+            const t = d.getElementById(id) || d.querySelector('[name="' + CSS.escape(id) + '"]');
+            if (t) { this.mark(d, "reading-poi", null); this.show(f, t); }
+            return moved();
+          }
+          hook.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
+            win: parseInt(f.dataset.win, 10), href: href
+          });
+          return true;
+        }
+      }
+      if (e.key === "Escape" || spec === "C-g") {
+        this.mark(d, "reading-poi", null);
+        this.mark(d, "reading-para", null);
+      }
+      return this.sync(f, hook);
+    },
+    // a key that is not motion: point first goes where the reader is
+    sync(f, hook) {
+      if (!this.dirty) return false;
+      this.dirty = false;
+      const at = this.spot(f);
+      if (at !== null) {
+        hook.pushEvent("preview_goto_pos", { win: parseInt(f.dataset.win, 10), pos: at, extend: false });
+      }
+      return false;
+    }
+  };
+
   const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
 
   // Telemetry, the browser's layer. Every key and intent push carries
@@ -1922,6 +2133,7 @@
             return;
           }
           if (native) return;
+          if (Reading.key(e, this)) { e.preventDefault(); return; }
           const spec = keySpec(e);
           if (spec === null) return;
           e.preventDefault();

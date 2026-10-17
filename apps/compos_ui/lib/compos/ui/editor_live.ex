@@ -1998,6 +1998,7 @@ defmodule Compos.Ui.EditorLive do
           data-pt={@node.point}
           data-rm={@node.render_mode}
           data-visual-lines={to_string(@node.visual_line_mode)}
+          data-reading={to_string("reading-mode" in (Map.get(@node, :minor_modes) || []))}
           data-v={@node.version}
           data-doc={Base.encode64(@node.preview)}
           sandbox="allow-same-origin"

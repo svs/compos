@@ -1868,6 +1868,15 @@ whole document. R cycles calm, full and the page itself.")
         (toggle-minor-mode! "calm-mode")
         (message "calm-mode reads browse pages"))))
 
+;; reading-mode: the rendered page moves in the browser. Lines scroll,
+;; links and paragraphs are stepped and marked there, and point follows
+;; only when a key that is not motion needs it (app.js, Reading).
+(register-minor-mode! "reading-mode" (lambda (buf) #t) (lambda (buf) #t))
+(mode-doc! "reading-mode"
+  "Read a rendered page without the server's point. Down and Up (n, p, TAB, S-TAB) step through the links, outlined, and RET follows the marked one; a link more than a screen away scrolls a screen instead. C-n and C-p scroll a line, SPC and S-SPC a screen. M-<down> and M-<up> step through the paragraphs and dim the rest. ESC clears the marks.")
+(define-command "reading-mode" "Toggle client-side reading motion on this page"
+  (lambda () (toggle-minor-mode! "reading-mode")))
+
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
     (let ((url (buffer-local (current-buffer) 'browse-url)))
@@ -2102,6 +2111,7 @@ whole document. R cycles calm, full and the page itself.")
                 (preview-heal! buf)
                 (enable-minor-mode! buf "preview-mode"))))
       (web--install-keys! buf)
+      (unless (minor-mode-on? buf "reading-mode") (enable-minor-mode! buf "reading-mode"))
       (web--apply-meta-faces! buf)
       (web--apply-separator-faces! buf)
       (web--declare-cache! buf)

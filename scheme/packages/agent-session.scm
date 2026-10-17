@@ -1623,10 +1623,12 @@
       (let ((pm (plist-get opts 'permission-mode)))
         (when pm (buffer-set-local! buf 'chat-permission-mode pm)))))
     (chat-task-init! buf name)
-    (let ((slug (chat-attach-agent! buf
-                  (or (plist-get opts 'connector) (buffer-local buf 'agent-connector) *default-connector*)
-                  (or (plist-get opts 'model) (buffer-local buf 'agent-model))
-                  opts)))
+    (let* ((bundle (or (let ((g (or (buffer-group buf) spawner-group))) (and g (llm-group-bundle g)))
+                       (llm-default-bundle-record)))
+           (connector (or (plist-get opts 'connector) (and bundle (plist-get bundle 'connector)) *default-connector*))
+           (model (or (plist-get opts 'model)
+                      (and bundle (equal? connector (plist-get bundle 'connector)) (plist-get bundle 'model))))
+           (slug (chat-attach-agent! buf connector model opts)))
       ;; a spawn is quiet: the child gets its mode on its own buffer, and no
       ;; window, point or focus of the spawner's moves. Interactive callers
       ;; display it themselves.

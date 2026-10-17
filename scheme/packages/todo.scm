@@ -1044,46 +1044,81 @@
   (let ((id (buffer-local buf 'todo-id)))
     (and id (todo-get id))))
 
+(define (todo--detail-tone state)
+  (cond ((equal? state "doing") "warn")
+        ((equal? state "review") "info")
+        ((equal? state "done") "good")
+        ((equal? state "cancelled") "bad")
+        (else "")))
+
+;; the facts under the title: project, priority, when it is due, when filed
+(define (todo--detail-facts t)
+  (let* ((p (plist-get t 'priority))
+         (d (plist-get t 'deadline))
+         (s (plist-get t 'scheduled))
+         (segs (filter pair?
+                 (list (let ((pr (plist-get t 'project))) (and (not (todo--blank? pr)) (list "" pr)))
+                       (and p (list "" (string-append "#" p)))
+                       (and d (list (if (todo--overdue? t) "c-warn" "")
+                                    (string-append "due " (todo--short-date d) (if (todo--overdue? t) " — overdue" ""))))
+                       (and s (list "" (string-append "scheduled " (todo--short-date s))))
+                       (let ((c (plist-get t 'created))) (and c (list "" (string-append "filed " (todo--short-date c)))))))))
+    (let loop ((xs segs) (out '()))
+      (cond ((null? xs) (reverse out))
+            ((null? out) (loop (cdr xs) (list (car xs))))
+            (else (loop (cdr xs) (cons (car xs) (cons '("c-sep" "  ·  ") out))))))))
+
+;; a log line is "YYYY-MM-DD HH:MM WHO TEXT": its when and who head the text
+(define (todo--detail-entry line)
+  (let ((ws (string-split line " ")))
+    (if (< (length ws) 4)
+        (component 'ui/bullet (list 'text line))
+        (component 'ui/group
+          (list 'body
+                (list (component 'ui/meta
+                        (list 'segs (list (list "" (string-append (todo--short-date (car ws)) " " (cadr ws)))
+                                          '("c-sep" "  ·  ")
+                                          (list "" (caddr ws)))))
+                      (list 'tag "c-text" 'text (string-join (list-tail ws 3) " "))))))))
+
 (define (todo--detail-blocks t)
   (let* ((chat (todo--chat-of t))
          (logs (or (plist-get t 'log) '()))
          (notes (plist-get t 'notes))
+         (tags (plist-get t 'tags))
+         (state (or (plist-get t 'state) "inbox"))
          (pair (lambda (k v) (if (todo--blank? v) '() (list (list k v))))))
     (list
       (component 'ui/page
         (list 'body
           (append
+            (list (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state)))
+                  (component 'ui/meta (list 'segs (todo--detail-facts t))))
+            (if (pair? tags) (list (component 'ui/chips (list 'items tags))) '())
+            (if (todo--blank? notes)
+                '()
+                (list (component 'ui/group
+                        (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose" 'text notes))))))
             (list
               (component 'ui/group
-                (list 'title (plist-get t 'title)
+                (list 'title "Details"
                       'body
                       (list
                         (component 'ui/kv
                           (list 'pairs
                             (append
-                              (pair "State" (plist-get t 'state))
-                              (pair "Priority" (plist-get t 'priority))
-                              (pair "Project" (plist-get t 'project))
-                              (pair "Chat" (if chat
-                                                 (string-append chat "  ·  a goes there")
-                                                 (plist-get t 'assignee)))
+                              (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
                               (pair "Status" (todo--status t))
-                              (pair "Deadline" (plist-get t 'deadline))
-                              (pair "Scheduled" (plist-get t 'scheduled))
-                              (pair "Tags" (let ((tags (plist-get t 'tags))) (if (pair? tags) (string-join tags " ") "")))
-                              (pair "Filed by" (plist-get t 'by))
                               (pair "Group" (group-name (plist-get t 'group)))
+                              (pair "Filed by" (plist-get t 'by))
                               (pair "Source" (plist-get t 'source))
                               (pair "Created" (plist-get t 'created))
                               (pair "Id" (plist-get t 'id)))))))))
-            (if (todo--blank? notes)
-                '()
-                (list (component 'ui/group (list 'title "Notes" 'body (list (component 'ui/quote (list 'text notes)))))))
             (if (null? logs)
                 '()
                 (list (component 'ui/group
-                        (list 'title "Log"
-                              'body (map (lambda (l) (component 'ui/bullet (list 'text l))) (reverse logs))))))))))))
+                        (list 'title (string-append "Log  ·  " (number->string (length logs)))
+                              'body (map todo--detail-entry (reverse logs))))))))))))
 
 (define (todo--detail-render! buf)
   (let ((t (todo--detail-task buf)))
@@ -1156,6 +1191,12 @@
   (todo--detail-render! (current-buffer)))
 
 (define-mode "todo-detail-mode" todo--detail-setup!)
+
+;; the gutter would count the text's lines, not the tasks, so the list and
+;; the page draw none
+(define (todo--no-line-numbers!) (buffer-set-local! (current-buffer) 'line-numbers "off"))
+(add-hook! 'todo-mode-hook 'todo--no-line-numbers!)
+(add-hook! 'todo-detail-mode-hook 'todo--no-line-numbers!)
 
 (mode-keys! "todo-detail-mode"
   '(("a" "todo-detail-agent")
@@ -1307,6 +1348,9 @@
   (list
     'buffer *todo-buffer*
     'special #f
+    ;; moving shows the row's page beside the list, once the highlight rests
+    'preview (lambda (buf t) (unless (todo--sep? t) (todo-show-detail! (plist-get t 'id))))
+    'debounce #t
     'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))
     'title-spans (lambda (buf)
                    (let ((rest (string-append (todo--view buf) " · by " (todo--sort-by buf))))

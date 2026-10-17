@@ -131,8 +131,9 @@
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
         'detail-kind "ats-approval-mode"
-        ;; only the happy path has a key: approve; o opens the site for the rest
-        'detail-keys (list "a")
+        ;; approve presses the site's button; e edits the draft in a buffer; o opens the site for the rest
+        'detail-keys (list "a" "e")
+        'detail-actions (list (list "Edit draft" (lambda (ctx) (ats-draft-open! ctx))))
         'detail-composed (list *ats-brief-tab*)
         'detail-default "brief"
         'detail-tabs
@@ -694,4 +695,70 @@
             (message (string-append verb " failed: " (if (string? text) text ""))))))))
 (define (ats-approve! id &optional note) (ats-approval-resolve! id #t note))
 (define (ats-reject! id &optional note) (ats-approval-resolve! id #f note))
+
+;; e on an approval: the site's Edit draft form, worked from a buffer. The draft opens
+;; from the form in the app's tab; C-c C-c writes it back into that form and submits
+;; it, so the proposal stays pending with the new text and no rejection lands
+(define (ats-draft-form id) (string-append "document.getElementById('edit-form-" id "')"))
+;; K runs once the edit form of ID is open in TAB; a press would close an open one
+(define (ats-draft-with-form tab id k)
+  (tab-eval tab (string-append "(" (ats-draft-form id) " ? 'open' : 'closed')")
+    (lambda (s)
+      (if (equal? s "open")
+          (k)
+          (tab-press tab (string-append "button[phx-click='open_edit_form'][phx-value-id='" id "']")
+            (lambda (html) (k)))))))
+(define (ats-draft-open! ctx)
+  (let* ((src (plist-get ctx 'buf))
+         (id (ats-case-id src))
+         (name (string-append "*ats-draft: " (ats-row-label (buffer-local src 'site-app-row) src) "*")))
+    (message "Edit draft…")
+    ((plist-get ctx 'live)
+     (lambda (tab)
+       (if (not tab)
+           (message "Edit draft: the site did not answer")
+           (ats-draft-with-form tab id
+             (lambda ()
+               (tab-eval tab (string-append "(() => { const f = " (ats-draft-form id) "; return f ? f.querySelector('textarea[name=comment]').value : ''; })()")
+                 (lambda (text)
+                   (if (not (and (string? text) (> (string-length text) 0)))
+                       (message "Edit draft: the site showed no draft")
+                       (begin
+                         (buffer-set-text! name text #f)
+                         (buffer-set-local! name 'ats-draft-id id)
+                         (buffer-set-local! name 'ats-draft-source src)
+                         (buffer-set-local! name 'mode-name "ats-draft-mode")
+                         (switch-to-buffer! name)
+                         (set-mode! "ats-draft-mode")
+                         (message "C-c C-c saves the draft to the site, C-c C-k drops it"))))))))))))
+(define (ats-draft-push! name)
+  (let* ((id (buffer-local name 'ats-draft-id))
+         (src (buffer-local name 'ats-draft-source))
+         (url (site-app-url (site-app-spec 'ats) (plist-get (buffer-local src 'site-app-row) 'href)))
+         (form (ats-draft-form id))
+         (fill (string-append "(() => { const f = " form "; if (!f) return 'no form'; "
+                              "const t = f.querySelector('textarea[name=comment]'); t.value = " (json-encode (buffer-text name)) "; "
+                              "t.dispatchEvent(new Event('input', {bubbles: true})); f.requestSubmit(); return 'saved'; })()")))
+    (message "Saving draft…")
+    (site-app-live-tab! 'ats url
+      (lambda (tab)
+        (if (not tab)
+            (message "Save draft: the site did not answer")
+            (let ((submit (lambda ()
+                            (tab-eval tab fill
+                              (lambda (r)
+                                (if (equal? r "saved")
+                                    (begin (buffer-mark-saved! name)
+                                           (buffer-kill! name)
+                                           (when (buffer-known? src) (site-app-detail-after! src "Draft saved" #f)))
+                                    (message (string-append "Save draft: " (if (string? r) r "no answer")))))))))
+              (ats-draft-with-form tab id submit))))))
+(define-mode "ats-draft-mode"
+  (lambda () (buffer-set-read-only! (current-buffer) #f)))
+(define-command "ats-draft-save" "Save this draft to its approval on the site"
+  (lambda () (ats-draft-push! (current-buffer))))
+(define-command "ats-draft-abort" "Drop this draft; the approval keeps its text"
+  (lambda () (let ((b (current-buffer))) (buffer-mark-saved! b) (buffer-kill! b))))
+(mode-keys! "ats-draft-mode" '(("C-c C-c" "ats-draft-save") ("C-c C-k" "ats-draft-abort")))
+(mode-doc! "ats-draft-mode" "An approval's candidate-facing draft. C-c C-c saves it to the site, C-c C-k drops it.")
 

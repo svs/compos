@@ -752,7 +752,7 @@
                                            (buffer-kill! name)
                                            (when (buffer-known? src) (site-app-detail-after! src "Draft saved" #f)))
                                     (message (string-append "Save draft: " (if (string? r) r "no answer")))))))))
-              (ats-draft-with-form tab id submit))))))
+              (ats-draft-with-form tab id submit)))))))
 (define-mode "ats-draft-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #f)))
 (define-command "ats-draft-save" "Save this draft to its approval on the site"

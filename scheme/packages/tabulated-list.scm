@@ -1047,7 +1047,10 @@
          (chip (list-chip buf)))
     (if (equal? chip "")
         (list title own)
-        (let* ((gap (max 1 (- w (string-length title) (string-length chip))))
+        ;; 'title-cells: the extra cells a title drawn in a larger face
+        ;; takes, so the chip still ends at the edge instead of wrapping
+        (let* ((extra (let ((f (list-opt buf 'title-cells))) (if f (f buf) 0)))
+               (gap (max 1 (- w (string-length title) (string-length chip) extra)))
                (text (string-append title (string-repeat " " gap) chip)))
           ;; the chip shows only while the list is narrowed, and it wears
           ;; the same colour as the note under it: one colour says "you

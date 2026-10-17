@@ -667,6 +667,29 @@
   "(llm-companion-ensure! BUF [GROUP]) — BUF's own chat, the one M-o opens, made and titled quietly when it has none: (CHAT NEW?); shows nothing, sends nothing")
 (catalog-meta! 'function "llm-companion-ensure!" 'domain 'chat 'effects '(write))
 
+;; every list/detail app hands an item to a chat the same way: the chat the
+;; item already holds, else its page's own chat, and only then a new one.
+;; TEXT may be a procedure of the chat, so the item records its chat before
+;; the brief goes.
+(define (assign-chat! src group text &optional held)
+  (let* ((g (or (group-resolve-id group) (group-ensure-record! group)))
+         (got (cond ((and held (buffer-exists? held) (equal? (buffer-group held) g)) (list held #f))
+                    ((and src (buffer-exists? src)) (llm-companion-ensure! src g))
+                    (else (let ((chat (group-chat-new-name g)))
+                            (buffer-create chat)
+                            (group-chat-init! chat g)
+                            (chat-set-group! chat g)
+                            (when (boundp 'llm-default-bundle-apply!) (llm-default-bundle-apply! chat))
+                            (when (boundp 'workspace-chat-inherit!) (workspace-chat-inherit! chat (group-name g)))
+                            (list chat #t)))))
+         (chat (car got)))
+    (agent-continue! chat (if (procedure? text) (text chat) text))
+    got))
+
+(public! 'assign-chat!
+  "(assign-chat! SRC GROUP TEXT [HELD]) — send TEXT to the item's chat in GROUP: HELD while it is live there, else SRC's own chat (the one M-o opens), else a new chat; TEXT may be a procedure of the chat; answers (CHAT NEW?)")
+(catalog-meta! 'function "assign-chat!" 'domain 'chat 'effects '(write spend))
+
 ;; the first thing a new chat for a buffer asks: the most specific of its
 ;; modes that has one, a minor mode before the major mode and its parents
 ;; kept across a reload of this file: other packages filled it

@@ -1177,6 +1177,139 @@ is forgotten and that group falls back to creation order in the switcher."
                     (else (loop (cdr rest)))))))
         #t)))
 
+;;; --- frame names, and groups that move between frames ----------------------
+
+;; frame id -> the name the user gave it. A client reattaches to its frame
+;; id after a restart, so the name lasts as long as the frame does.
+(define *frame-names* '())
+
+(define (frame-name &optional frame)
+  (let ((kv (assoc (or frame (selected-frame)) *frame-names*)))
+    (and kv (cadr kv))))
+
+(define (frame-label frame)
+  (or (frame-name frame) frame))
+
+(define (frame-name-set! frame name)
+  ;; an empty name gives the frame back its id
+  (set! *frame-names*
+    (append (if (and (string? name) (not (equal? name "")))
+                (list (list frame name))
+                '())
+            (remove (lambda (e) (equal? (car e) frame)) *frame-names*)))
+  (desktop-dirty!)
+  (frame-name frame))
+
+(define (frame-by-label label)
+  (let loop ((frames (frame-list)))
+    (cond ((null? frames) #f)
+          ((equal? (frame-label (car frames)) label) (car frames))
+          (else (loop (cdr frames))))))
+
+(persist-global! 'frame-names
+  (lambda () *frame-names*)
+  (lambda (saved) (set! *frame-names* (if (list? saved) saved '()))))
+
+(define (frame-targets)
+  ;; the other frames a group can go to: the ones a client shows, or named
+  (let ((here (selected-frame)))
+    (filter (lambda (f)
+              (and (not (equal? f here))
+                   (or (> (frame-clients f) 0) (frame-name f))))
+            (frame-list))))
+
+(define (group-in-frame! frame thunk)
+  ;; run THUNK as FRAME's own work, then come back
+  (let ((home (selected-frame)))
+    (select-frame! frame)
+    (unwind-protect (lambda () (with-frame-windows thunk))
+      (lambda () (select-frame! home)))))
+
+(define (group-step-off! frame id)
+  ;; FRAME stops standing in ID: back to the group it left, else its most
+  ;; recent other group, else no group at all
+  (group-in-frame! frame
+    (lambda ()
+      (let* ((back (group-resolve-id (frame-local 'previous-group)))
+             (next (if (and back (not (equal? back id)) (group-of-frame? back frame))
+                       back
+                       (let loop ((ids (group-ids-mru)))
+                         (cond ((null? ids) #f)
+                               ((and (not (equal? (car ids) id))
+                                     (group-of-frame? (car ids) frame))
+                                (car ids))
+                               (else (loop (cdr ids))))))))
+        (if next
+            (switch-to-group! next)
+            (begin (set-frame-local! 'current-group #f)
+                   (frame-group-label-refresh!)))))))
+
+(define (group-move-to-frame! g frame)
+  ;; G belongs to FRAME and FRAME stands in it. One group stands in one
+  ;; workspace, so a frame that stood in G steps off first.
+  (let ((id (group-resolve-id g)))
+    (when id
+      (for-each
+        (lambda (other)
+          (when (and (not (equal? other frame))
+                     (equal? (group-resolve-id (frame-local-in other 'current-group)) id))
+            (group-step-off! other id)))
+        (frame-list))
+      (group-frame-own! id frame)
+      (group-in-frame! frame (lambda () (switch-to-group! id)))
+      (desktop-dirty!))
+    id))
+
+(define (group-take-rows)
+  ;; (LABEL ID) for every group another live frame keeps
+  (let loop ((ids (group-ids-mru-all)) (out '()))
+    (if (null? ids)
+        (reverse out)
+        (let ((away (group-elsewhere-frame (car ids))))
+          (loop (cdr ids)
+                (if away
+                    (cons (list (string-append (group-name (car ids)) " — " (frame-label away))
+                                (car ids))
+                          out)
+                    out))))))
+
+(define-command "frame-rename" "Name this frame; an empty name gives it back its id"
+  (lambda ()
+    (minibuffer-read "Frame name: " '()
+      (lambda (name)
+        (frame-name-set! (selected-frame) name)
+        (message (if (frame-name)
+                     (string-append "Frame named " (frame-name))
+                     "Frame name cleared"))))))
+
+(define-command "group-take" "Move a group another frame keeps into this frame"
+  (lambda ()
+    (let ((rows (group-take-rows)))
+      (if (null? rows)
+          (message "No other frame keeps a group")
+          (minibuffer-read "Take group: " (map car rows)
+            (lambda (label)
+              (let ((row (assoc label rows)))
+                (if row
+                    (group-move-to-frame! (cadr row) (selected-frame))
+                    (message "No such group")))))))))
+
+(define-command "group-send-to-frame" "Move this frame's group to another frame"
+  (lambda ()
+    (let ((id (frame-group))
+          (targets (frame-targets)))
+      (cond ((not id) (message "This frame stands in no group"))
+            ((null? targets) (message "No other frame"))
+            (else
+              (minibuffer-read "Send group to frame: " (map frame-label targets)
+                (lambda (label)
+                  (let ((frame (frame-by-label label)))
+                    (if frame
+                        (begin (group-move-to-frame! id frame)
+                               (message (string-append "Sent " (group-name id)
+                                                       " to " (frame-label frame))))
+                        (message "No such frame"))))))))))
+
 (define (group-layout g)
   (let* ((record (and (group-resolve-id g)
                       (group-record-by-id (group-resolve-id g))))
@@ -4931,6 +5064,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-elsewhere-frame "(group-elsewhere-frame G) -> the other live frame that keeps G, or #f")
 (public! 'group-adopt-here! "(group-adopt-here! G) — an unowned G joins this frame")
 (public! 'frame-isolated? "(frame-isolated?) — #t when this frame shows only the groups it owns")
+(public! 'frame-name "(frame-name [FRAME]) -> the name the user gave FRAME, or #f")
+(public! 'frame-label "(frame-label FRAME) -> FRAME's name, else its id")
+(public! 'frame-name-set! "(frame-name-set! FRAME NAME) — name FRAME; an empty NAME clears it")
+(public! 'frame-by-label "(frame-by-label LABEL) -> the frame whose name or id is LABEL, or #f")
+(public! 'group-move-to-frame! "(group-move-to-frame! G FRAME) — G belongs to FRAME and FRAME stands in it; a frame that stood in G steps off")
 (public! 'buffer-family
   "(buffer-family BUFFER) -> the group-relative work family, including its shared scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")

@@ -331,9 +331,9 @@
   const READ_BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, table, dt, dd";
   const READ_CSS = `
     body.reading .pt { display: none !important; }
-    .reading-para { border-radius: 3px;
-      background: color-mix(in srgb, currentColor 10%, transparent);
-      box-shadow: 0 0 0 .4em color-mix(in srgb, currentColor 10%, transparent); }
+    #reading-sec-bar, #reading-para-bar { position: absolute; width: 2px; border-radius: 1px;
+      pointer-events: none; background: color-mix(in srgb, currentColor 30%, transparent); }
+    #reading-para-bar { background: color-mix(in srgb, currentColor 85%, transparent); }
     .reading-poi { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
   `;
   // the keys that begin a chord: the key after one is the chord's, not ours
@@ -357,7 +357,26 @@
     mark(d, cls, el) {
       d.querySelectorAll("." + cls).forEach(x => x.classList.remove(cls));
       if (el) el.classList.add(cls);
-      if (cls === "reading-para") d.body.classList.toggle("reading-focus", !!el);
+      if (cls === "reading-para") {
+        d.body.classList.toggle("reading-focus", !!el);
+        this.bar(d, "reading-para-bar", el, el);
+      }
+    },
+    // a mark is a thin bar in the page's left margin, from FIRST's top to
+    // LAST's bottom: it never covers the text, and never clips at the edge
+    bar(d, id, first, last) {
+      const old = d.getElementById(id);
+      if (old) old.remove();
+      if (!first) return;
+      const s = this.scroller(d);
+      const top = first.getBoundingClientRect().top + s.scrollTop;
+      const bottom = last.getBoundingClientRect().bottom + s.scrollTop;
+      const el = d.createElement("div");
+      el.id = id;
+      el.style.left = (d.body.getBoundingClientRect().left + s.scrollLeft + 16) + "px";
+      el.style.top = top + "px";
+      el.style.height = Math.max(0, bottom - top) + "px";
+      d.body.appendChild(el);
     },
     // the innermost blocks that hold text: a list item's paragraph, not the item
     // A page's paragraphs and links are found once: a redraw replaces the
@@ -379,6 +398,49 @@
           .filter(a => !isChrome(a) && a.textContent.trim() !== "");
       }
       return this.poiList.filter(a => a.getClientRects().length);
+    },
+    // a paragraph stop: a block, but a whole list, nested lists and all, is one
+    paraOf(el) {
+      const b = el && el.closest("[data-rb]");
+      if (!b) return null;
+      let top = null;
+      for (let l = b.closest("ul, ol"); l; l = l.parentElement && l.parentElement.closest("ul, ol")) top = l;
+      return top || b;
+    },
+    paras(d) {
+      if (this.parasOf === d.body) return this.paraList;
+      const seen = new Set();
+      this.paraList = this.blocks(d).map(b => this.paraOf(b)).filter(p => !seen.has(p) && seen.add(p));
+      this.parasOf = d.body;
+      return this.paraList;
+    },
+    heads(d) { return this.blocks(d).filter(el => /^H[1-6]$/.test(el.tagName)); },
+    level(h) { return parseInt(h.tagName[1], 10); },
+    // the heading whose section holds EL, or null before the first
+    headOf(d, el) {
+      let h = null;
+      for (const x of this.heads(d)) {
+        if (x === el || (x.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) h = x;
+        else break;
+      }
+      return h;
+    },
+    // a section is its heading and every block up to the next heading of
+    // its level or above: a part holds its chapters
+    // It shows as one thin bar in the page's left margin, its whole length.
+    markSection(d, head) {
+      d.querySelectorAll(".reading-sec").forEach(x => x.classList.remove("reading-sec"));
+      if (!head) { this.bar(d, "reading-sec-bar", null); return; }
+      const bs = this.blocks(d);
+      const lv = this.level(head);
+      let last = head;
+      for (let j = bs.indexOf(head); j >= 0 && j < bs.length; j++) {
+        const x = bs[j];
+        if (x !== head && /^H[1-6]$/.test(x.tagName) && this.level(x) <= lv) break;
+        x.classList.add("reading-sec");
+        last = x;
+      }
+      this.bar(d, "reading-sec-bar", head, last);
     },
     // where the eye rests: a third of the way down the view
     eye(f) { return f.clientHeight / 3; },
@@ -432,7 +494,7 @@
     scroll(f, dy) {
       const d = this.doc(f);
       this.scroller(d).scrollTop += dy;
-      if (this.marked(d, "reading-para")) this.mark(d, "reading-para", this.blockAtEye(f, this.blocks(d)));
+      if (this.marked(d, "reading-para")) this.mark(d, "reading-para", this.blockAtEye(f, this.paras(d)));
       const poi = this.marked(d, "reading-poi");
       if (poi) {
         const r = poi.getBoundingClientRect();
@@ -482,14 +544,26 @@
       const secDir = plain && e.key === "n" ? 1 : plain && e.key === "p" ? -1 : 0;
       if (secDir) {
         const m = 16;
-        const heads = this.blocks(d).filter(el => /^H[1-6]$/.test(el.tagName));
-        const cur = this.marked(d, "reading-para");
-        let i = secDir > 0
-          ? heads.findIndex(el => el.getBoundingClientRect().top > m + 1)
-          : heads.findLastIndex(el => el.getBoundingClientRect().top < m - 1);
-        if (i >= 0 && heads[i] === cur) i += secDir;
+        const heads = this.heads(d);
+        // the step goes on from point: the marked link or paragraph. p within
+        // a section goes to its heading; at the heading, to the one before
+        const ref = this.marked(d, "reading-poi") || this.marked(d, "reading-para");
+        let i;
+        if (ref) {
+          const own = this.headOf(d, ref);
+          const at = own ? heads.indexOf(own) : -1;
+          const atStart = own && (ref === own || own.contains(ref) || ref === this.secPoi);
+          i = secDir > 0 ? at + 1 : atStart ? at - 1 : at;
+        } else {
+          const cur = this.marked(d, "reading-para");
+          i = secDir > 0
+            ? heads.findIndex(el => el.getBoundingClientRect().top > m + 1)
+            : heads.findLastIndex(el => el.getBoundingClientRect().top < m - 1);
+          if (i >= 0 && heads[i] === cur) i += secDir;
+        }
         const head = i >= 0 ? heads[i] || null : null;
         if (head) {
+          this.markSection(d, head);
           this.mark(d, "reading-para", head);
           // the section's first link is where Down and RET go on from: the
           // heading's own, else the first one before the next heading
@@ -497,6 +571,7 @@
           this.mark(d, "reading-poi", this.pois(d).find(l => head.contains(l)
             || ((head.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)
                 && !(nextHead && (nextHead.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)))) || null);
+          this.secPoi = this.marked(d, "reading-poi");
           this.scroller(d).scrollTop += head.getBoundingClientRect().top - m;
         } else if (secDir < 0) {
           this.scroller(d).scrollTop = 0;
@@ -523,9 +598,11 @@
           this.scroll(f, poiDir * page);
         } else {
           this.mark(d, "reading-poi", a);
+          // a marked section follows point into the next one
+          if (this.marked(d, "reading-sec")) this.markSection(d, this.headOf(d, a));
           if (this.marked(d, "reading-para")) {
             this.blocks(d);
-            this.mark(d, "reading-para", a.closest("[data-rb]"));
+            this.mark(d, "reading-para", this.paraOf(a));
           }
           this.showBlock(f, a);
         }
@@ -536,7 +613,7 @@
         // paragraphs and screens are one run of stops, and a step takes the
         // next: a marked paragraph whose far edge is off the view is read a
         // screen at a time, else the next paragraph is marked and centred
-        const blocks = this.blocks(d);
+        const blocks = this.paras(d);
         const h = f.clientHeight;
         const m = 16;
         const cur = this.marked(d, "reading-para");
@@ -552,6 +629,7 @@
           : paraDir > 0 ? blocks.find(el => el.getBoundingClientRect().top > h / 2) || null
           : blocks.slice().reverse().find(el => el.getBoundingClientRect().bottom < h / 2) || null;
         if (p) {
+          if (this.marked(d, "reading-sec")) this.markSection(d, this.headOf(d, p));
           this.mark(d, "reading-para", p);
           // the paragraph's first link is where Down and RET go on from
           this.mark(d, "reading-poi", this.pois(d).find(l => p.contains(l)) || null);
@@ -582,6 +660,7 @@
       if (e.key === "Escape" || spec === "C-g") {
         this.mark(d, "reading-poi", null);
         this.mark(d, "reading-para", null);
+        this.markSection(d, null);
       }
       return this.sync(f, hook);
     },

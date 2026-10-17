@@ -188,6 +188,7 @@
 (require 'telemetry)
 (require 'perf)
 (require 'profile)
+(require 'racket)
 (require 'test)
 (require 'treesit)
 (require 'web)

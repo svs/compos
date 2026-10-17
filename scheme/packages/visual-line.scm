@@ -81,10 +81,13 @@
              (q (if (and (> next start) (or (equal? b " ") (equal? b "\n")))
                     (- next 1)
                     next)))
-        (let loop ((q q))
-          (if (and (> q start) (equal? (visual--byte-before q) "\n"))
-              (loop (- q 1))
-              q)))))
+        ;; a row never runs past its own newline: a table row measures from
+        ;; its cell text, so NEXT can sit past "|\n| [" on the line below
+        (min (visual--line-end start)
+             (let loop ((q q))
+               (if (and (> q start) (equal? (visual--byte-before q) "\n"))
+                   (loop (- q 1))
+                   q))))))
 
 (define (visual--row-before rows start)
   (let loop ((rs rows) (prev #f))

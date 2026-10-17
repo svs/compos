@@ -2338,6 +2338,12 @@ the tabs. C-s searches to any link.")
 ;; shows it, or a fresh one joined to the group of the window that
 ;; opened it. The tab is made and its fetch starts without a window
 ;; move, so the caller decides where it shows.
+(define (web--tab-name url)
+  (let ((base (string-append "*browse:" (web--slug (web--sans-fragment url)))))
+    (let loop ((n 1))
+      (let ((name (if (= n 1) (string-append base "*") (string-append base " " (number->string n) "*"))))
+        (if (buffer-known? name) (loop (+ n 1)) name)))))
+
 (define (web--tab-for! url)
   (let ((group (web--tab-group!))
         (existing (web--buffer-for url)))
@@ -2348,7 +2354,7 @@ the tabs. C-s searches to any link.")
         (begin
           (when group (buffer-add-group! existing group))
           existing)
-        (let ((name (string-append "*browse:" (web--slug (web--sans-fragment url)) "*")))
+        (let ((name (web--tab-name url)))
           (buffer-create name)
           (when group (buffer-add-group! name group))
           (with-current-buffer name (lambda () (set-mode! "browse-mode")))

@@ -235,9 +235,12 @@ defmodule Compos.Ui.EditorLive do
 
   # the reader's place in a followed block list: a runtime mirror, so a
   # page refresh keeps the place. Stored inverted: a cleared local follows.
+  # A report made before a newer step ('follow-seq) is stale: it would undo
+  # the step, so it is dropped.
   def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
       when is_boolean(stick) and is_integer(top) do
-    if Compos.Core.Buffer.exists?(buf) do
+    if Compos.Core.Buffer.exists?(buf) and
+         params["seq"] in [nil, Compos.Core.Buffer.get_local(buf, "follow-seq") || 0] do
       anchor = if is_integer(params["anchor"]), do: params["anchor"], else: false
       offset = if is_integer(params["offset"]), do: params["offset"], else: 0
       Compos.Core.Buffer.set_local(buf, "follow-place", [not stick, top, anchor, offset])

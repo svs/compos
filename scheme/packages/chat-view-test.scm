@@ -251,17 +251,9 @@
           (check-equal! (buffer-local buf 'follow-place) #f "past the newest the view follows the bottom")))
       (buffer-kill! buf))))
 
-(deftest 'chat-view-follow-mode-off-marks-the-transcript
-  "chat-follow-mode off draws the transcript with ag-nofollow, and on draws it without"
+(deftest 'chat-view-meta-arrows-walk-the-history
+  "M-<up>/M-<down> step a chat's blocks; M-S-<up>/M-S-<down> walk its family"
   (lambda ()
-    (let ((buf (chat-view-test--buffer "*zz-chat-view-follow*"))
-          (nofollow? (lambda (buf)
-                       (string-contains? (plist-get (car (buffer-local buf 'render-blocks)) 'class)
-                                         "ag-nofollow"))))
-      (enable-minor-mode! buf "chat-follow-mode")
-      (check-false! (nofollow? buf) "on: the view follows")
-      (disable-minor-mode! buf "chat-follow-mode")
-      (check-true! (nofollow? buf) "off: the view stays")
-      (enable-minor-mode! buf "chat-follow-mode")
-      (check-false! (nofollow? buf) "on again")
-      (buffer-kill! buf))))
+    (check-equal! (keymap-lookup "chat-mode-map" "M-<up>") "chat-previous-block" "up the history")
+    (check-equal! (keymap-lookup "chat-mode-map" "M-<down>") "chat-next-block" "down to the bottom")
+    (check-equal! (keymap-lookup "chat-mode-map" "M-S-<down>") "window-next-child-chat" "the family")))

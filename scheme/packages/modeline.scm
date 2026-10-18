@@ -888,7 +888,7 @@
                                (cadr file))))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '())
-                     ;; a chat that spawned chats counts them; M-<down> walks them
+                     ;; a chat that spawned chats counts them; M-S-<down> walks them
                      (let ((kids (dash--children-seg buf)))
                        (if kids (list (list 'wide kids)) '())))))
          (width (buffer-cols buf))

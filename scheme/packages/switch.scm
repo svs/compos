@@ -944,11 +944,11 @@ the next row down. STEP is kept for the callers."
     "window-next-mode-buffer" "window-previous-mode-buffer" "window-walk-end"))
 
 ;; A chat's lineage is the chat that spawned it and the chats it spawned
-;; (agent-session.scm). M-<down> walks it the way S-<down> walks the
+;; (agent-session.scm). M-S-<down> walks it the way S-<down> walks the
 ;; window's stack: the parent first, then its children, oldest first. A
 ;; chat with no lineage keeps the key's old meaning, the fallback. Only
 ;; spawn edges count: a listing's detail pages are its dismissal children
-;; too, and M-<down> beside a listing must still scroll the page.
+;; too, and the walk beside a listing must still scroll the page.
 (define (buffer-lineage-parent buf)
   (and (chat-buffer? buf)
        (let ((p (subagent-parent buf)))

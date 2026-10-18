@@ -1163,8 +1163,7 @@
 
 (define (chat-view-tree buf children verbosity queued activity hidden)
   (append
-    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity
-                                                   (if (buffer-local buf 'chat-follow-off) " ag-nofollow" ""))
+    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity)
                 'isolate #t 'follow #t 'anchor "transcript"
                 'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
                 ;; the first drawn block keeps its index in the whole
@@ -1229,7 +1228,6 @@
            (activity (chat-activity-live buf))
            (sig (list raw open verbosity queued activity
                       (buffer-local buf 'chat-view-reveal)
-                      (buffer-local buf 'chat-follow-off)
                       (buffer-local buf 'chat-view-nav)
                       chat-view-window-bytes))
            (m (chat-view--memo buf)))
@@ -1330,13 +1328,18 @@
 (define-command "chat-next-block" "Show the next block of this chat at the top; past the newest, follow the bottom"
   (lambda () (chat-view-step! (current-buffer) 1)))
 
-;; a chat that spawned chats, or was spawned by one, walks that family on
-;; M-<up>/M-<down> (switch.scm); any other chat steps by block
-(define-key "chat-mode-map" "M-<up>" "window-previous-child-chat")
-(define-key "chat-mode-map" "M-<down>" "window-next-child-chat")
+;; The bottom is home, as at a shell prompt: there the view follows new
+;; output. M-<up> leaves it for the history, a block at a time, and so
+;; does the reader's own scroll; while away the view stays put and the
+;; transcript shows a history pill. Typing, M->, M-<down> past the newest
+;; block, or a scroll back to the end, comes home again.
+(define-key "chat-mode-map" "M-<up>" "chat-previous-block")
+(define-key "chat-mode-map" "M-<down>" "chat-next-block")
+;; a chat that spawned chats, or was spawned by one, walks that family
+;; (switch.scm)
+(define-key "chat-mode-map" "M-S-<up>" "window-previous-child-chat")
+(define-key "chat-mode-map" "M-S-<down>" "window-next-child-chat")
 
-;; typing answers at the bottom, so a key that types brings the view back,
-;; unless the reader asked the view to stay
 ;; An action runs with the props the fence holds now. Effects past read,
 ;; display and external ask first.
 (define (chat-component--asks? effects)
@@ -1391,10 +1394,22 @@
 .ag-selected .ag-component > :first-child { outline: 1px solid var(--accent-fg); outline-offset: 2px; }
 ")
 
+;; away from the bottom (ag-away, set by the page's scroller) the transcript
+;; says so, pinned to the foot of the view
+(define-style! 'chat-view-history "
+.ag-scroll.ag-away::after {
+  content: 'history · M-> back to the bottom';
+  position: sticky; bottom: 8px; display: block; width: fit-content; margin: 0 auto;
+  padding: 2px 10px; border: 1px solid var(--border-bg); border-radius: 10px;
+  background: var(--window-bg); color: var(--dim-fg); font: 12px var(--font-sans);
+  pointer-events: none;
+}
+")
+
+;; typing answers at the bottom, so a key that types comes home
 (define (chat-view-type-follows!)
   (let ((buf (current-buffer)))
     (when (and (chat-rich-view? buf)
-               (not (buffer-local buf 'chat-follow-off))
                (member (editing--command-name) chat-view-input-commands)
                (let ((fp (buffer-local buf 'follow-place))) (and (pair? fp) (car fp))))
       (buffer-set-local! buf 'chat-view-nav #f)
@@ -1402,31 +1417,6 @@
 
 (add-hook! 'post-command-hook 'chat-view-type-follows!)
 
-;; chat-follow-mode: new output scrolls into view while the reader is at
-;; the bottom. It is on in every chat; off, the view stays where it is
-;; until the reader moves it (M->, a block step, a scroll).
-(register-minor-mode! "chat-follow-mode"
-  (lambda (buf) (buffer-set-local! buf 'chat-follow-off #f) (chat-view-sync! buf))
-  (lambda (buf) (buffer-set-local! buf 'chat-follow-off #t) (chat-view-sync! buf)))
-
-(define-command "chat-follow-mode" "Toggle whether new output in this chat scrolls into view"
-  (lambda ()
-    (message (if (toggle-minor-mode! "chat-follow-mode")
-                 "chat-follow-mode enabled: new output scrolls into view"
-                 "chat-follow-mode disabled: the view stays where it is"))))
-
-(define (chat-follow-mode-default! buf)
-  (unless (minor-mode-on? buf "chat-follow-mode")
-    (enable-minor-mode! buf "chat-follow-mode")))
-
-(define (chat-view--mode-hook!)
-  (chat-follow-mode-default! (current-buffer))
-  (chat-view-sync! (current-buffer)))
+(define (chat-view--mode-hook!) (chat-view-sync! (current-buffer)))
 
 (add-hook! 'chat-mode-hook 'chat-view--mode-hook!)
-
-;; the chats that were open before the mode existed get it too
-(for-each (lambda (b)
-            (when (buffer-derived-mode? b "chat-mode")
-              (chat-follow-mode-default! b)))
-          (buffer-list))

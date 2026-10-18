@@ -1570,10 +1570,11 @@
           // scroll anchoring, a reflow while output streams) puts the
           // view back on the tail instead of dropping the stick.
           if (this.stick && !tail && Date.now() - this.handAt > 1000) {
-            if (this.follows()) this.place();
+            this.place();
             return;
           }
           this.stick = tail;
+          this.mark();
           // A modal overlay covers the hit test point. Keep the
           // place the reader left rather than dropping it.
           const anchor = this.lastVisible();
@@ -1581,10 +1582,14 @@
             this.anchor = anchor.index;
             this.offset = Math.round(anchor.offset);
           }
+          // the report belongs to the step it was made after; one that
+          // lands after a newer step (M-<up>) is stale and is dropped
+          const seq = this.followSeq;
           clearTimeout(this.report);
           this.report = setTimeout(() => {
             this.pushEvent("follow_place", {
               buf: this.el.dataset.buf,
+              seq: seq,
               stick: this.stick,
               top: Math.round(s.scrollTop),
               anchor: this.anchor,
@@ -1626,13 +1631,14 @@
         // updated() never runs here. Follow that growth too, once a
         // frame, while the reader is at the tail.
         this.mo = new MutationObserver(() => {
-          if (this.grow || !this.stick || !this.follows()) return;
+          if (this.grow || !this.stick) return;
           this.grow = requestAnimationFrame(() => {
             this.grow = null;
-            if (this.stick && this.follows()) this.place();
+            if (this.stick) this.place();
           });
         });
         this.mo.observe(this.el, { childList: true, subtree: true, characterData: true });
+        this.mark();
         this.settle();
       },
       // Put the transcript where the reader left it. A window that
@@ -1673,10 +1679,10 @@
         s.scrollTop = want;
         requestAnimationFrame(() => { this.placing = false; });
       },
-      // chat-follow-mode off (the ag-nofollow class): new output keeps
-      // the view where it is, even at the tail. A follow token (M->)
-      // still places the view once.
-      follows() { return !this.el.classList.contains("ag-nofollow"); },
+      // away from the tail the list says so (ag-away): the page draws
+      // the history pill from it. A patch rewrites the class, so every
+      // update marks it again.
+      mark() { this.el.classList.toggle("ag-away", !this.stick); },
       // A transcript keeps growing for a moment after a page
       // load: fonts land, images decode, late patches arrive.
       // Each one moves the place under the reader, so hold the
@@ -1700,6 +1706,10 @@
         this.raf = requestAnimationFrame(step);
       },
       updated() {
+        this.follow();
+        this.mark();
+      },
+      follow() {
         // A window may show another chat without replacing the DOM
         // id. Adopt that buffer's saved position once; within one
         // chat the local flag wins over a lagging server patch.
@@ -1727,7 +1737,7 @@
           this.place();
           return;
         }
-        if (this.stick && this.follows()) { this.place(); return; }
+        if (this.stick) { this.place(); return; }
         // A reader who left the tail keeps the block at the top of
         // their view where it was. The transcript window draws
         // earlier blocks above it on a reveal, and without this the
@@ -1747,7 +1757,7 @@
       beforeUpdate() {
         this.pin = null;
         const s = this.scroller;
-        if ((this.stick && this.follows()) || !s || !s.isConnected || s.clientHeight === 0) return;
+        if (this.stick || !s || !s.isConnected || s.clientHeight === 0) return;
         const r = s.getBoundingClientRect();
         const hit = document.elementFromPoint(r.left + r.width / 2, Math.max(r.top, 0) + 2);
         let block = hit && hit.closest && hit.closest("[data-index]");

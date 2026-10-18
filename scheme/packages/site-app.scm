@@ -594,19 +594,95 @@
          (title (or (and own (own row)) (and namer (namer row)) (site-app-field row 'key))))
     (string-append "*" (symbol->string name) ": " title "*")))
 
-;; The pages of a one-buffer app, by href: what a row's page last read, kept for
-;; when the buffer comes back to the row. Bounded, the oldest let go
-(define *site-app-page-cache* '())
+;;; --- caches: what an app has read, kept by key ------------------------------
+;;; An app keeps what it read in named stores, each an alist of (KEY VALUE),
+;;; newest first. (site-app-cache-store! APP STORE OPTS) says how a store keeps:
+;;; 'max bounds it, the oldest let go; 'persist saves it to APP-cache.json in
+;;; compos-home, read back by (site-app-cache-load! APP); 'keep? picks the
+;;; entries worth saving. Site-app keeps one store of its own, 'pages: what a
+;;; row's page last read, for a one-buffer app coming back to the row.
+
+(define *site-app-caches* '())       ; ((APP STORE) ENTRIES)
+(define *site-app-cache-opts* '())   ; ((APP STORE) OPTS)
 (define site-app-page-cache-size 60)
 
-(define (site-app-cache-put! name href entry)
-  (let ((key (list name href)))
-    (set! *site-app-page-cache*
-      (let ((all (cons (list key entry) (filter (lambda (e) (not (equal? (car e) key))) *site-app-page-cache*))))
-        (if (> (length all) site-app-page-cache-size) (list-head all site-app-page-cache-size) all)))))
+(define (site-app-cache-store! app store opts)
+  (set! *site-app-cache-opts* (alist-put *site-app-cache-opts* (list app store) opts)))
 
-(define (site-app-cache-get name href)
-  (let ((e (assoc (list name href) *site-app-page-cache*))) (and e (cadr e))))
+(define (site-app--cache-opts app store)
+  (let ((e (assoc (list app store) *site-app-cache-opts*)))
+    (cond (e (cadr e))
+          ((eq? store 'pages) (list 'max site-app-page-cache-size))
+          (else '()))))
+
+(define (site-app-cache-entries app store)
+  (let ((e (assoc (list app store) *site-app-caches*))) (if e (cadr e) '())))
+
+(define (site-app-cache-has? app store key)
+  (and (assoc key (site-app-cache-entries app store)) #t))
+
+(define (site-app-cache-get app store key)
+  ;; the value kept under KEY, else #f
+  (let ((e (assoc key (site-app-cache-entries app store)))) (and e (cadr e))))
+
+(define (site-app--cache-set! app store entries)
+  (set! *site-app-caches* (alist-put *site-app-caches* (list app store) entries))
+  (when (plist-get (site-app--cache-opts app store) 'persist) (site-app-cache-touch! app)))
+
+(define (site-app-cache-put! app store key value)
+  ;; VALUE under KEY, newest; answers VALUE
+  (let* ((max (plist-get (site-app--cache-opts app store) 'max))
+         (all (alist-put (site-app-cache-entries app store) key value)))
+    (site-app--cache-set! app store (if (and max (> (length all) max)) (list-head all max) all))
+    value))
+
+(define (site-app-cache-drop! app store key)
+  (site-app--cache-set! app store (filter (lambda (e) (not (equal? (car e) key))) (site-app-cache-entries app store))))
+
+(define (site-app-cache-file app)
+  (string-append (compos-home) "/" (symbol->string app) "-cache.json"))
+
+(define *site-app-cache-loaded* '())   ; the apps whose file has been read
+
+(define (site-app-cache-save! app)
+  ;; every store of APP that persists, as one JSON object by store. A save
+  ;; before the load reads the file first, so it never writes over a session's worth
+  (unless (memq app *site-app-cache-loaded*) (site-app-cache-load! app))
+  (let loop ((os *site-app-cache-opts*) (out '()))
+    (cond ((null? os) (write-file! (site-app-cache-file app) (json-encode out)))
+          ((and (eq? (car (car (car os))) app) (plist-get (cadr (car os)) 'persist))
+           (let* ((store (cadr (car (car os))))
+                  (keep? (plist-get (cadr (car os)) 'keep?))
+                  (es (site-app-cache-entries app store)))
+             (loop (cdr os) (append out (list store (if keep? (filter keep? es) es))))))
+          (else (loop (cdr os) out)))))
+
+(define (site-app-cache-touch! app)
+  ;; many puts at once save once
+  (debounce! (string->symbol (string-append "site-app-cache-" (symbol->string app))) 2000 site-app-cache-save! app))
+
+(define (site-app--cache-merge mine theirs)
+  ;; MINE, then each entry of THEIRS under a key MINE lacks, once
+  (let loop ((ts theirs) (seen (map car mine)) (acc (reverse mine)))
+    (cond ((null? ts) (reverse acc))
+          ((or (not (pair? (car ts))) (member (car (car ts)) seen)) (loop (cdr ts) seen acc))
+          (else (loop (cdr ts) (cons (car (car ts)) seen) (cons (car ts) acc))))))
+
+(define (site-app-cache-load! app)
+  ;; what earlier sessions saved. A reload loads again: what is here already
+  ;; wins, and nothing doubles
+  (let* ((file (site-app-cache-file app))
+         (text (and (file-exists? file) (read-file file)))
+         (data (and (string? text) (> (string-length text) 2) (json-parse text))))
+    (unless (memq app *site-app-cache-loaded*) (set! *site-app-cache-loaded* (cons app *site-app-cache-loaded*)))
+    (when (pair? data)
+      (let loop ((d data))
+        (when (and (pair? d) (pair? (cdr d)))
+          (when (and (symbol? (car d)) (pair? (cadr d)))
+            (set! *site-app-caches*
+              (alist-put *site-app-caches* (list app (car d))
+                         (site-app--cache-merge (site-app-cache-entries app (car d)) (cadr d)))))
+          (loop (cddr d)))))))
 
 
 (define-mode "site-app-detail-mode"
@@ -1725,9 +1801,9 @@
       (when (and old (not (equal? (site-app-field old 'href) (site-app-field row 'href))))
         ;; the page leaves what it read behind, and takes what the new row's last read
         (when (and (buffer-local buf 'site-app-data) (not (buffer-local buf 'site-app-stub)))
-          (site-app-cache-put! name (site-app-field old 'href)
+          (site-app-cache-put! name 'pages (site-app-field old 'href)
             (list (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-fetched-at) (buffer-local buf 'site-app-sections))))
-        (let ((hit (site-app-cache-get name (site-app-field row 'href))))
+        (let ((hit (site-app-cache-get name 'pages (site-app-field row 'href))))
           (cond (hit (buffer-set-locals! buf (list 'site-app-data (car hit) 'site-app-fetched-at (cadr hit)
                                                    'site-app-sections (or (caddr hit) '()) 'site-app-stub #f)))
                 ;; a page drawn without its read holds nothing of the last row's

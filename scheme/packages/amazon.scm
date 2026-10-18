@@ -1234,9 +1234,12 @@
   (list 'tag "img" 'class class
         'attrs (list (list "src" src) (list "alt" "") (list "loading" "lazy") (list "referrerpolicy" "no-referrer"))))
 
-(define (amz--thumb class src title)
-  (if (and (string? src) (not (equal? src "")))
-      (amz--img class src)
+(define (amz--thumb class file title)
+  ;; the photo is drawn from its copy on disk, served by the editor itself:
+  ;; Amazon's own image links break in the editor's page. Until the copy
+  ;; arrives, the title's first letter holds its place
+  (if (and (string? file) (not (equal? file "")))
+      (list 'tag "img" 'class class 'file file 'attrs (list (list "alt" "")))
       (amz--text (string-append class " amz-blank")
                  (if (> (string-length (or title "")) 0) (string-upcase (substring title 0 1)) "?"))))
 
@@ -1344,9 +1347,10 @@
            (lands (component--get p 'delivery ""))
            (marks (amz--marks p)))
       (list 'tag "div" 'class "amz-hero"
-            'attrs (if (equal? img "") '() (list (list "style" (string-append "--amz-art:url('" img "')"))))
             'children
-            (list (list 'tag "span" 'class "amz-hero-tile"
+            (list (if (equal? img "") (amz--text "amz-hero-bg" "")
+                      (list 'tag "img" 'class "amz-hero-bg" 'file img 'attrs (list (list "alt" ""))))
+                  (list 'tag "span" 'class "amz-hero-tile"
                         'children (list (amz--thumb "amz-hero-art" img (component--get p 'title ""))))
                   (list 'tag "div" 'class "amz-hero-main"
                         'children
@@ -1401,7 +1405,7 @@
 .amz-shelf-meta { color: var(--dim-fg); font-size: .85em; }
 
 .amz-hero { position: relative; overflow: hidden; display: flex; align-items: flex-end; gap: 24px; padding: 26px; margin: 0 0 16px; border-radius: 14px; font-family: var(--font-sans); isolation: isolate; background: var(--hl-line-bg); }
-.amz-hero::before { content: ''; position: absolute; inset: -60px; z-index: -1; background: var(--amz-art) center / cover; filter: blur(50px) saturate(1.4) brightness(.6); opacity: .85; }
+.amz-hero-bg { position: absolute; inset: -60px; width: calc(100% + 120px); height: calc(100% + 120px); z-index: -1; object-fit: cover; filter: blur(50px) saturate(1.4) brightness(.6); opacity: .85; pointer-events: none; }
 .amz-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 20%, rgba(0,0,0,.5)); }
 .amz-hero-tile { flex: none; display: grid; place-items: center; width: 200px; height: 200px; border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(0,0,0,.5); overflow: hidden; }
 .amz-hero-art { max-width: 184px; max-height: 184px; object-fit: contain; }

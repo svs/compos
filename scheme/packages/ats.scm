@@ -73,6 +73,58 @@
                  (let ((note (ats-brief-note (section "history"))))
                    (append (if note (list note) '()) (ats-brief-work (section "candidate")))))))
 
+;; the candidate tab, cut before each heading; a heading's numeral rides with it
+(define (ats-tab-chunks nodes)
+  (let ((is (lambda (n tag) (and (pair? n) (equal? (plist-get n 'tag) tag)))))
+    (let loop ((ns nodes) (cur '()) (out '()))
+      (let ((done (if (null? cur) out (cons (reverse cur) out))))
+        (cond ((null? ns) (reverse done))
+              ((and (is (car ns) "c-field") (pair? (cdr ns)) (is (cadr ns) "c-heading"))
+               (loop (cddr ns) (list (cadr ns) (car ns)) done))
+              ((is (car ns) "c-heading") (loop (cdr ns) (list (car ns)) done))
+              (else (loop (cdr ns) (cons (car ns) cur) out)))))))
+
+(define (ats-chunk-title chunk)
+  (let ((h (site-app-find (lambda (n) (and (pair? n) (equal? (plist-get n 'tag) "c-heading"))) chunk)))
+    (and h (string-trim (or (plist-get h 'text) "")))))
+
+;; a note the evaluator wrote: its head line starts with its source
+(define (ats-evaluation-note? n)
+  (and (pair? n) (equal? (plist-get n 'tag) "c-item")
+       (let ((f (site-app-find (lambda (c) (and (pair? c) (equal? (plist-get c 'tag) "c-field")))
+                               (or (plist-get n 'children) '()))))
+         (and f (string-prefix? "evaluator" (string-trim (or (plist-get f 'text) "")))))))
+
+;; the Notes section without NOTE, its count one less; nothing when none are left
+(define (ats-notes-without notes note)
+  (let* ((rest (filter (lambda (n) (not (equal? n note))) notes))
+         (left (length (filter (lambda (n) (and (pair? n) (equal? (plist-get n 'tag) "c-item"))) rest))))
+    (if (= left 0)
+        '()
+        (map (lambda (n)
+               (if (and (pair? n) (equal? (plist-get n 'tag) "c-field")
+                        (re-match? "^[0-9]+$" (string-trim (or (plist-get n 'text) ""))))
+                   (plist-put n 'text (number->string left))
+                   n))
+             rest))))
+
+;; the newest evaluation takes the place of Skills beside About, and Skills goes last
+(define (ats-candidate-order nodes)
+  (let* ((chunks (ats-tab-chunks nodes))
+         (titled (lambda (t) (site-app-find (lambda (c) (equal? (ats-chunk-title c) t)) chunks)))
+         (skills (titled "Skills"))
+         (notes (titled "Notes"))
+         (note (and notes (site-app-find ats-evaluation-note? notes))))
+    (if (not skills)
+        nodes
+        (apply append
+               (append (map (lambda (c)
+                              (cond ((equal? c skills) (if note (list (list 'tag "c-heading" 'text "Last evaluation") note) '()))
+                                    ((and note (equal? c notes)) (ats-notes-without notes note))
+                                    (else c)))
+                            chunks)
+                       (list skills))))))
+
 (define *ats-candidates-page*
   (list 'id 'candidates
         'label "Candidates"
@@ -200,6 +252,8 @@
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
+        ;; the candidate tab leads with the newest evaluation, beside About; Skills goes last
+        'detail-moves (list (list "candidate" ats-candidate-order))
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
         'list-keys (list (list "M-o" "site-app-agent" "agent"))
         ;; the status, stage or scope tabs a section's page draws above its rows
@@ -666,7 +720,7 @@
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"
-  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text") " Then search the open jobs for other roles that suit this candidate, with findJobsForCandidate, and say which are worth putting them forward for and why.")))
+  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text") " Only if the candidate is rated 4 stars or above, then search the open jobs for other roles that suit them, with findJobsForCandidate, and say which are worth putting them forward for and why; below 4, skip the job search.")))
 
 (domain! 'web)
 (effects! '(write external display))

@@ -1389,6 +1389,9 @@
             (cons "spotify-now-mode" (cons "spotify-detail-mode"
                   (map (lambda (page) (site-app-page-mode 'spotify (plist-get page 'id)))
                        (site-app-pages (site-app-spec 'spotify))))))
+  ;; a page is not a list: its arrows step from part to part
+  (define-key (mode-keymap "spotify-detail-mode") "<down>" "site-app-detail-next")
+  (define-key (mode-keymap "spotify-detail-mode") "<up>" "site-app-detail-prev")
   (define-key (mode-keymap "spotify-now-mode") "g" "spotify-now-reload")
   (define-key (mode-keymap "spotify-now-mode") "q" "quit-window")
   (define-key (mode-keymap "spotify-now-mode") "RET" "spotify-now-act")

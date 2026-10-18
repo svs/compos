@@ -2746,10 +2746,11 @@ bottom, as a window-rects row; #f past either end."
          (buf (window-buffer source))
          (point (window-point source))
          (past (window-prev-buffers source))
-         ;; what fills the pane the buffer leaves: the one rule, with the
-         ;; neighbor's buffer free since the moved buffer takes its place
+         ;; what fills the pane the buffer leaves: only the pane's own
+         ;; stack, with the neighbor's buffer free since the moved buffer
+         ;; takes its place; an emptied stack closes the pane
          (action (window-fill-decide
-                   (window-fill-snapshot source buf 'others #f
+                   (window-fill-snapshot source buf 'others #f 'refill #f
                      'shown (filter (lambda (b)
                                       (not (and neighbor (equal? b (window-buffer (car neighbor))))))
                                     (window-fill-shown-elsewhere source)))

@@ -1065,7 +1065,8 @@
 
 ;; A spec's 'detail-moves puts a section of a tab before another: the
 ;; evaluation above the work experience. A section is its heading and what
-;; follows it up to the next heading.
+;; follows it up to the next heading. A move (TAB PROC) instead hands the
+;; tab's nodes to PROC, which answers them in the order to draw.
 (define (site-app-heading-at nodes title)
   (let loop ((ns nodes) (i 0))
     (cond ((null? ns) #f)
@@ -1091,7 +1092,10 @@
 (define (site-app-moved spec tab nodes)
   (let loop ((ms (or (and spec (plist-get spec 'detail-moves)) '())) (ns nodes))
     (cond ((null? ms) ns)
-          ((equal? (car (car ms)) tab) (loop (cdr ms) (site-app-move-section ns (cadr (car ms)) (caddr (car ms)))))
+          ((equal? (car (car ms)) tab)
+           (loop (cdr ms) (if (procedure? (cadr (car ms)))
+                              ((cadr (car ms)) ns)
+                              (site-app-move-section ns (cadr (car ms)) (caddr (car ms))))))
           (else (loop (cdr ms) ns)))))
 
 ;; a teaser the site keeps folded is dropped when what it folds is on the

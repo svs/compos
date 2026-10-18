@@ -23,6 +23,9 @@
 (defcustom 'spotify-url "https://open.spotify.com/"
   "The page the player runs in." 'group 'spotify)
 
+(defcustom 'spotify-player "auto"
+  "Where the music plays. auto: the desktop app while it runs, else the web player; desktop or web: always that one. Browsing, search and likes always read the web page." 'group 'spotify)
+
 (defcustom 'spotify-user ""
   "Your Spotify user id, the last part of your profile's /user/ID link. The Playlists section reads that profile."
   'group 'spotify)
@@ -561,13 +564,102 @@
              (t (cond ((pair? front) (car front)) ((pair? hits) (car (reverse hits))) (else #f))))
         (if t (tab-eval-main t code k) (k #f))))))
 
+(domain! 'spotify)
+(effects! '(write external execute))
+
+;; The desktop app plays and the web page browses. The app answers
+;; AppleScript at once and with no page to break, so the transport (play,
+;; skip, volume, shuffle, repeat) and the read of what plays go to it; what
+;; AppleScript cannot do (browse, search, like) stays on the page.
+
+(define (spotify--desktop! body k)
+  ;; K gets the app's answer, or #f when it is not running or refused us
+  (shell-command->string
+    (string-append "osascript -e "
+                   (sh-quote (string-append "if application \"Spotify\" is running then\ntell application \"Spotify\"\n"
+                                            body "\nend tell\nelse\nreturn \"-off-\"\nend if")) " 2>&1")
+    (compos-home)
+    (lambda (out)
+      (let ((v (string-trim (or out ""))))
+        (k (and (not (equal? v "-off-")) (not (string-contains? v "execution error")) v))))))
+
+(define (spotify--via! body web k)
+  ;; the desktop app where spotify-player allows it and it answers; else WEB
+  (if (equal? spotify-player "web")
+      (web)
+      (spotify--desktop! body
+        (lambda (v)
+          (cond (v (k v))
+                ((equal? spotify-player "desktop") (message "Spotify: the desktop app is not running"))
+                (else (web)))))))
+
+(define (spotify--route! body web)
+  ;; a control: the app's answer is said, and the bar reads it back
+  (spotify--via! body web (lambda (v) (message v) (spotify-now-refresh!))))
+
+(define (spotify--uri href)
+  ;; /playlist/ID, or the whole link, as spotify:playlist:ID; #f for a page with no uri
+  (let* ((path (car (string-split (or href "") "?")))
+         (parts (reverse (filter (lambda (p) (not (equal? p ""))) (string-split path "/")))))
+    (and (>= (length parts) 2)
+         (member (cadr parts) '("track" "album" "playlist" "artist" "episode" "show"))
+         (string-append "spotify:" (cadr parts) ":" (car parts)))))
+
+(define (spotify--mmss expr)
+  (string-append "((" expr ") div 60 as string) & \":\" & text -2 thru -1 of (\"0\" & ((" expr ") mod 60 as string))"))
+
+(define spotify--desktop-now-as
+  (string-append
+    "set t to current track\n"
+    "return (player state as string) & tab & (name of t) & tab & (artist of t) & tab & (album of t) & tab & (id of t) & tab & (artwork url of t) & tab & "
+    (spotify--mmss "(player position) div 1") " & tab & " (spotify--mmss "(duration of t) div 1000")
+    " & tab & (shuffling as string) & tab & (repeating as string)"))
+
+(define (spotify--desktop-now v)
+  ;; the app's line as the plist the page's read gives. The heart is the
+  ;; page's to know, so it stays while the track does
+  (let ((f (string-split v "\t")))
+    (and (= (length f) 10)
+         (let ((href (or (spotify--path-of-uri (list-ref f 4)) "")))
+           (list 'title (list-ref f 1) 'artists (list-ref f 2) 'album (list-ref f 3)
+                 'art (list-ref f 5) 'playing (equal? (list-ref f 0) "playing")
+                 'position (list-ref f 6) 'duration (list-ref f 7)
+                 'albumHref "" 'artistHref "" 'trackHref href
+                 'shuffle (if (equal? (list-ref f 8) "true") "on" "off")
+                 'repeat (if (equal? (list-ref f 9) "true") "all" "off")
+                 'liked (and (equal? href (plist-get *spotify-now* 'trackHref)) (eq? (plist-get *spotify-now* 'liked) #t))
+                 'source "desktop")))))
+
+(define (spotify--path-of-uri uri)
+  ;; spotify:track:ID as /track/ID
+  (let ((p (string-split (or uri "") ":")))
+    (and (= (length p) 3) (string-append "/" (cadr p) "/" (caddr p)))))
+
+(define (spotify--now-take! now k)
+  (when (and (pair? now) (not (equal? now *spotify-now*)))
+    (spotify--now-set! now))
+  (when k (k now)))
+
 (define (spotify-now-refresh! &optional k)
-  (spotify--quiet-eval spotify--now-json-js
+  (spotify--via! spotify--desktop-now-as
+    (lambda ()
+      (spotify--quiet-eval spotify--now-json-js
+        (lambda (v)
+          (spotify--now-take! (and (string? v) (> (string-length v) 1) (json-parse v)) k))))
+    (lambda (v) (spotify--now-take! (spotify--desktop-now v) k))))
+
+(define (spotify--desktop-play! uri context what web)
+  ;; the app plays a uri, in its list when there is one; WEB when it cannot
+  (spotify--via! (string-append "play track " (json-encode uri)
+                                (if context (string-append " in context " (json-encode context)) "")
+                                "\nreturn \"playing\"")
+    web
     (lambda (v)
-      (let ((now (and (string? v) (> (string-length v) 1) (json-parse v))))
-        (when (and (pair? now) (not (equal? now *spotify-now*)))
-          (spotify--now-set! now))
-        (when k (k now))))))
+      (message (string-append "Playing " what))
+      (spotify--now-set! (plist-put *spotify-now* 'playing #t))
+      (spotify-now-refresh!))))
+
+(effects! '(write external))
 
 ;; Spotify cannot tell the editor its track changed, so while a section is on
 ;; screen the bar reads the player every few seconds, and stops when none is.
@@ -645,6 +737,13 @@
     "t=setTimeout(function(){obs.disconnect();done('')},10000);})"))
 
 (define (spotify--play! path selector what)
+  ;; a page plays in the desktop app; a row the page alone knows, on the page
+  (let ((uri (and (equal? selector spotify--entity-play) (spotify--uri path))))
+    (if uri
+        (spotify--desktop-play! uri #f what (lambda () (spotify--play-web! path selector what)))
+        (spotify--play-web! path selector what))))
+
+(define (spotify--play-web! path selector what)
   ;; Chrome gives sound only to a page a person has pressed, and b.click()
   ;; is not a person; a real mouse click never reaches the hidden tab. The
   ;; debugger's userGesture makes the press count as the person's
@@ -669,9 +768,12 @@
 (define (spotify--play-track! context label href name)
   ;; in its list when the row carries its button's label, else on its own page.
   ;; A JSON string is a CSS string too, quotes and backslashes escaped
-  (if (and (string? label) (string-prefix? "Play " label))
-      (spotify--play! context (string-append "main button[aria-label=" (json-encode label) "]") name)
-      (spotify--play! href spotify--entity-play name)))
+  (let ((uri (spotify--uri href))
+        (web (lambda ()
+               (if (and (string? label) (string-prefix? "Play " label))
+                   (spotify--play-web! context (string-append "main button[aria-label=" (json-encode label) "]") name)
+                   (spotify--play-web! href spotify--entity-play name)))))
+    (if uri (spotify--desktop-play! uri (spotify--uri context) name web) (web))))
 
 (define (spotify--play-row! buf row)
   (let ((name (site-app-field row 'name)))
@@ -940,13 +1042,16 @@
 
 ;;;###autoload
 (define-command "spotify-play-pause" "Play or pause the Spotify tab"
-  (lambda () (spotify--control! (spotify--click-js "control-button-playpause" "play/pause") 'playing)))
+  (lambda () (spotify--route! "playpause\nreturn player state as string"
+                (lambda () (spotify--control! (spotify--click-js "control-button-playpause" "play/pause") 'playing)))))
 
 (define-command "spotify-next" "Play the next track"
-  (lambda () (spotify--control! (spotify--click-js "control-button-skip-forward" "next") #f)))
+  (lambda () (spotify--route! "next track\nreturn \"next\""
+                (lambda () (spotify--control! (spotify--click-js "control-button-skip-forward" "next") #f)))))
 
 (define-command "spotify-previous" "Play the previous track"
-  (lambda () (spotify--control! (spotify--click-js "control-button-skip-back" "previous") #f)))
+  (lambda () (spotify--route! "previous track\nreturn \"previous\""
+                (lambda () (spotify--control! (spotify--click-js "control-button-skip-back" "previous") #f)))))
 
 (define spotify--shuffle-js
   "(function(){var b=Array.from(document.querySelectorAll('[data-testid=player-controls] button')).filter(function(e){return /shuffle/i.test(e.getAttribute('aria-label')||'')})[0];if(!b)return 'no shuffle button — is the tab loaded?';var st=b.getAttribute('aria-disabled')==='true'?'off':(function(l){return /^enable/i.test(l)?'off':/smart/i.test(l)?'smart':(/^disable/i.test(l)||!/subdued/.test(b.className))?'on':'off'})(b.getAttribute('aria-label')||'');b.click();return st==='off'?'shuffle on':'shuffle off'})()")
@@ -955,13 +1060,28 @@
   "(function(){var b=document.querySelector('[data-testid=control-button-repeat]');if(!b)return 'no repeat button — is the tab loaded?';var c=b.getAttribute('aria-checked');b.click();return c==='false'?'repeat all':(c==='true'?'repeat one':'repeat off')})()")
 
 (define-command "spotify-shuffle" "Shuffle on or off (smart shuffle too, where Spotify offers it)"
-  (lambda () (spotify--control! spotify--shuffle-js #f)))
+  (lambda () (spotify--route! "set shuffling to not shuffling\nif shuffling then return \"shuffle on\"\nreturn \"shuffle off\""
+                (lambda () (spotify--control! spotify--shuffle-js #f)))))
 
 (define-command "spotify-repeat" "Repeat: off, then the whole list, then the one track"
-  (lambda () (spotify--control! spotify--repeat-js #f)))
+  (lambda () (spotify--route! "set repeating to not repeating\nif repeating then return \"repeat on\"\nreturn \"repeat off\""
+                (lambda () (spotify--control! spotify--repeat-js #f)))))
 
 (define-command "spotify-like" "Save the current track to your library, or take it out"
-  (lambda () (spotify--control! (spotify--click-sel-js spotify--like-sel "liked") 'liked)))
+  (lambda ()
+    (let ((href (plist-get *spotify-now* 'trackHref)))
+      (if (and (equal? (plist-get *spotify-now* 'source) "desktop") (string? href) (not (equal? href "")))
+          ;; the app plays it, so its heart is on the track's own page
+          (let ((sel "main [data-testid=action-bar-row] [data-testid=add-button]"))
+            (site-app-navigate! 'spotify (string-append "https://open.spotify.com" href) sel
+              (lambda (tab answer)
+                (if (not tab)
+                    (message "Spotify: the track's page did not open")
+                    (tab-eval-main tab (spotify--click-sel-js sel "liked")
+                      (lambda (v)
+                        (message (if (string? v) v "Spotify: no answer"))
+                        (spotify--now-set! (plist-put *spotify-now* 'liked (not (eq? (plist-get *spotify-now* 'liked) #t))))))))))
+          (spotify--control! (spotify--click-sel-js spotify--like-sel "liked") 'liked)))))
 
 ;;;###autoload
 (define-command "spotify-now-playing" "Say what is playing, and redraw the player bar"
@@ -973,10 +1093,12 @@
                      "nothing playing"))))))
 
 (define-command "spotify-volume-up" "Raise the player's volume"
-  (lambda () (spotify--eval (spotify--volume-js "0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))
+  (lambda () (spotify--route! "set sound volume to (sound volume + 10)\nreturn \"volume \" & sound volume & \"%\""
+                (lambda () (spotify--eval (spotify--volume-js "0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))))
 
 (define-command "spotify-volume-down" "Lower the player's volume"
-  (lambda () (spotify--eval (spotify--volume-js "-0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))
+  (lambda () (spotify--route! "set sound volume to (sound volume - 10)\nreturn \"volume \" & sound volume & \"%\""
+                (lambda () (spotify--eval (spotify--volume-js "-0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))))
 
 ;;;###autoload
 (define-command "spotify-search" "Search Spotify and show the results in the app"

@@ -1983,7 +1983,7 @@ whole document. R cycles calm, full and the page itself.")
 ;; only when a key that is not motion needs it (app.js, Reading).
 (register-minor-mode! "reading-mode" (lambda (buf) #t) (lambda (buf) #t))
 (mode-doc! "reading-mode"
-  "Read a rendered page without the server's point. Down and Up (TAB, S-TAB) step through the links, outlined, and RET follows the marked one; a link more than a screen away scrolls a screen instead. n and p go from section to section, each heading set at the top. } and { step through the paragraphs, centred, a long one a screen at a time, and mark the paragraph's first link. C-n and C-p scroll a line, SPC and S-SPC a screen. The Meta and Shift arrows stay the editor's: M-<down> and M-<up> scroll the other window. ESC clears the marks.")
+  "Read a rendered page without the server's point. } and { (TAB, S-TAB) step through the links, outlined, and RET follows the marked one; a link more than a screen away scrolls a screen instead. n and p go from section to section, each heading set at the top. Down and Up step through the paragraphs, centred, a long one a screen at a time, and mark the paragraph's first link. C-n and C-p scroll a line, SPC and S-SPC a screen. The Meta and Shift arrows stay the editor's: M-<down> and M-<up> scroll the other window. ESC clears the marks.")
 (define-command "reading-mode" "Toggle client-side reading motion on this page"
   (lambda () (toggle-minor-mode! "reading-mode")))
 
@@ -2195,7 +2195,7 @@ whole document. R cycles calm, full and the page itself.")
 
 ;; the keys card in the window's corner, as a list carries one
 (define *web-keys-bar*
-  '(("↑ ↓" "link") ("{ }" "paragraph") ("n p" "section") ("RET" "open")
+  '(("{ }" "link") ("↑ ↓" "paragraph") ("n p" "section") ("RET" "open")
     ("M-↑ ↓" "other window") ("R" "reading") ("i" "index") ("M-g i" "sections") ("q" "quit")))
 
 (define (web--install-keys! buf)
@@ -2302,7 +2302,7 @@ s-RET opens it as its own tab, and M-RET opens it beside this page as
 its child: every link the page opens takes that one window. A page that
 is mostly links into its site is an index: RET opens beside it too, and
 on the page you opened N and P walk the index's links and ^ goes back
-to it. i decides whether this page is an index. Down and Up and TAB go from link to link, } and { from paragraph to
+to it. i decides whether this page is an index. } and { and TAB go from link to link, Down and Up from paragraph to
 paragraph, and n and p from section to section; M-g i lists the
 sections. M-<down> and M-<up> scroll the other window. l and M-<left>
 go back, r and M-<right> go forward, and both return to the line

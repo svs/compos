@@ -317,10 +317,10 @@
   // its motion in the browser: a key that only moves the eye never
   // waits on the server. A step and a mark at every level:
   //   lines       C-n/C-p: scroll one line; SPC, S-SPC, C-v, M-v: one screen
-  //   points      Down/Up, TAB/S-TAB: the next link, outlined; RET follows it
-  //   paragraphs  } and {: the next paragraph, and its first link
+  //   points      } and {, TAB/S-TAB: the next link, outlined; RET follows it
+  //   paragraphs  Down/Up: the next paragraph, and its first link
   //   sections    n/p: the next heading, set at the top of the view
-  // A plain arrow goes one link at a time; the jumps are letters.
+  // A plain arrow goes one paragraph at a time; the jumps are letters.
   // The Meta and Shift arrows are not reading: they reach the editor, which
   // scrolls the other window and moves buffers between panes with them.
   // The reader's place is the browser's. The editor hears it before a link
@@ -331,6 +331,7 @@
   const READ_BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, table, dt, dd";
   const READ_CSS = `
     body.reading .pt { display: none !important; }
+    body.reading { padding-bottom: 50vh !important; }
     #reading-sec-bar, #reading-para-bar { position: absolute; width: 2px; border-radius: 1px;
       pointer-events: none; background: color-mix(in srgb, currentColor 30%, transparent); }
     #reading-para-bar { background: color-mix(in srgb, currentColor 85%, transparent); }
@@ -369,11 +370,12 @@
       if (old) old.remove();
       if (!first) return;
       const s = this.scroller(d);
-      const top = first.getBoundingClientRect().top + s.scrollTop;
-      const bottom = last.getBoundingClientRect().bottom + s.scrollTop;
+      const z = parseFloat(d.defaultView.getComputedStyle(d.documentElement).zoom) || 1;
+      const top = (first.getBoundingClientRect().top + s.scrollTop) / z;
+      const bottom = (last.getBoundingClientRect().bottom + s.scrollTop) / z;
       const el = d.createElement("div");
       el.id = id;
-      el.style.left = (d.body.getBoundingClientRect().left + s.scrollLeft + 16) + "px";
+      el.style.left = ((d.body.getBoundingClientRect().left + s.scrollLeft) / z + 16) + "px";
       el.style.top = top + "px";
       el.style.height = Math.max(0, bottom - top) + "px";
       d.body.appendChild(el);
@@ -565,7 +567,7 @@
         if (head) {
           this.markSection(d, head);
           this.mark(d, "reading-para", head);
-          // the section's first link is where Down and RET go on from: the
+          // the section's first link is where } and RET go on from: the
           // heading's own, else the first one before the next heading
           const nextHead = heads[i + 1];
           this.mark(d, "reading-poi", this.pois(d).find(l => head.contains(l)
@@ -580,8 +582,8 @@
         }
         return moved();
       }
-      const poiDir = plain && ((e.key === "ArrowDown" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) ? 1
-        : plain && ((e.key === "ArrowUp" && !e.shiftKey) || (e.key === "Tab" && e.shiftKey)) ? -1 : 0;
+      const poiDir = plain && ((e.key === "}") || (e.key === "Tab" && !e.shiftKey)) ? 1
+        : plain && ((e.key === "{") || (e.key === "Tab" && e.shiftKey)) ? -1 : 0;
       if (poiDir) {
         // a marked paragraph with no link marked: go on from the paragraph
         const para = this.marked(d, "reading-para");
@@ -608,7 +610,7 @@
         }
         return moved();
       }
-      const paraDir = plain && e.key === "}" ? 1 : plain && e.key === "{" ? -1 : 0;
+      const paraDir = plain && e.key === "ArrowDown" && !e.shiftKey ? 1 : plain && e.key === "ArrowUp" && !e.shiftKey ? -1 : 0;
       if (paraDir) {
         // paragraphs and screens are one run of stops, and a step takes the
         // next: a marked paragraph whose far edge is off the view is read a
@@ -631,7 +633,7 @@
         if (p) {
           if (this.marked(d, "reading-sec")) this.markSection(d, this.headOf(d, p));
           this.mark(d, "reading-para", p);
-          // the paragraph's first link is where Down and RET go on from
+          // the paragraph's first link is where } and RET go on from
           this.mark(d, "reading-poi", this.pois(d).find(l => p.contains(l)) || null);
           this.center(f, p, paraDir);
         } else {

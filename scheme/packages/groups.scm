@@ -3054,26 +3054,21 @@ is forgotten and that group falls back to creation order in the switcher."
                       (if home (cons home taken) taken)
                       (cons (list (car modes) home) plan))))))))
 
-;; Consolidation moves buffers between windows; it never changes how many
-;; panes the layout shows. A pane it emptied takes one of the gathered
-;; windows from the ring, in plan order, until the frame shows PANES again.
-(define (mode-consolidate-refill! panes used)
+;; Consolidation moves buffers between windows and lets the panes fall
+;; where they may: a pane it emptied stays gone. The gathered windows
+;; join the layout ring, in plan order, after the panes still shown.
+(define (mode-consolidate-refill! used)
   (let* ((now (layout-pane-windows))
          (alive (lambda (w) (and (window-buffer-any w) #t)))
          (gathered (filter (lambda (w) (and (alive w) (not (member w now)))) used))
          (rest (filter (lambda (w) (and (not (member w now)) (not (member w gathered))))
-                       (layout-hidden-windows)))
-         (algorithm (or (layout-target) (layout-for-count panes)))
-         (want (min panes (or (layout-capacity algorithm) panes))))
-    (layout-strip-set! (append now gathered rest) 0)
-    (when (and algorithm (< (length now) want))
-      (layout-arrange-windows! algorithm (layout-strip-run want)))))
+                       (layout-hidden-windows))))
+    (layout-strip-set! (append now gathered rest) 0)))
 
 ;; Every major mode of the group gets one window. A mode with a pane
 ;; gathers there; one without takes a hidden window the layout ring walks to.
 (define (mode-consolidate!)
-  (let ((me (active-window))
-        (panes (length (display--work-windows))))
+  (let ((me (active-window)))
     (if (not (member me (display--work-windows)))
         (begin (message "Select a work window to consolidate") #f)
         (let loop ((plan (mode-consolidate-plan me)) (modes '()) (count 0) (used '()))
@@ -3093,7 +3088,7 @@ is forgotten and that group falls back to creation order in the switcher."
                 ((= count 0)
                  (message "No mode buffers to consolidate") #f)
                 (else
-                  (mode-consolidate-refill! panes (reverse used))
+                  (mode-consolidate-refill! (reverse used))
                   (when (window-buffer me) (select-window! me))
                   (layout-target-note-slots! (layout-target-visible-buffers))
                   (message (string-append "Consolidated " (number->string count) " buffers of "

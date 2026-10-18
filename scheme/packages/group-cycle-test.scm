@@ -291,3 +291,21 @@
           (check-equal! (window-buffer neighbor) "*zz-cyc-three*" "the existing other window stays")
           (check-equal! (length (window-list)) 2 "no visible window is created")
           (check-equal! (layout-target) 'two-pane "the target stays unchanged"))))))
+
+(deftest 'mode-consolidate-lets-an-emptied-pane-close
+  "two panes of one mode leave one pane; the target does not refill the other"
+  (lambda ()
+    (group-cycle-groups-scene
+      (lambda ()
+        (group-cycle-test-open!)
+        (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
+        (tile-windows! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"))
+        (layout-target-set! 'columns)
+        (let ((destination (window-showing "*zz-cyc-work-a*"))
+              (neighbor (window-showing "*zz-cyc-work-b*")))
+          (set-window-prev-buffers! destination '())
+          (set-window-prev-buffers! neighbor '())
+          (select-window! destination)
+          (run-command "mode-consolidate")
+          (check-equal! (length (window-list)) 1 "the emptied pane stays closed")
+          (check-equal! (window-prev-buffers destination) '("*zz-cyc-work-b*") "its buffer joins the stack"))))))

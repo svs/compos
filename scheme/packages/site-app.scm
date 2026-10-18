@@ -564,6 +564,22 @@
            (spec (buffer-local buf 'site-app-spec)))
       (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf)))))
 
+(define (site-app-imenu-rows buf)
+  ;; imenu's index of a section: one entry per row, filed under the row's kind,
+  ;; so a list of tracks and albums gives a tab of each
+  (with-current-buffer buf
+    (lambda ()
+      (let loop ((es (list-entries buf)) (os (list-offsets buf)) (out '()))
+        (if (or (null? es) (null? os))
+            (reverse out)
+            (let ((name (or (site-app-field (car es) 'name) ""))
+                  (kind (or (site-app-field (car es) 'kind) "")))
+              (loop (cdr es) (cdr os)
+                    (if (equal? name "") out
+                        (cons (list (line-number-at-pos (car os)) (if (equal? kind "") "item" kind) name
+                                    (or (site-app-field (car es) 'sub) ""))
+                              out)))))))))
+
 (define (site-app-open! name &optional id)
   ;; each section is its own buffer; one already read is shown as it stands, g rereads it
   (let* ((spec (site-app-spec name))
@@ -575,6 +591,7 @@
     (site-app-join-group! buf name)
     (buffer-set-local! buf 'site-app-spec spec)
     (buffer-set-local! buf 'site-app-page pid)
+    (buffer-set-local! buf 'imenu-index-function 'site-app-imenu-rows)
     (unless (buffer-derived-mode? buf mode)
       (with-current-buffer buf (lambda () (set-mode! mode))))
     ;; an app with a group of its own is opened there
@@ -1888,10 +1905,11 @@
            ;; every item opens on the tab this group last chose, else the first
            ;; a page's 'detail-default tab wins over the one the group last chose
            (valid (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-composed) '())) ids))
-           ;; a page drawn again (the music moved on) stays on the tab it was on
+           ;; a page drawn again (the music moved on) stays on the tab it was on; a page
+           ;; that declares no tabs takes them from its read, so any tab it was on is one
            (kept (buffer-local made 'site-app-active))
            (opened (buffer-set-local! made 'site-app-active
-                     (if (and kept (member kept valid)) kept
+                     (if (and kept (or (member kept valid) (null? ids))) kept
                          (or (plist-get page 'detail-default)
                              (site-app-chosen-tab name page list-buf valid)))))
            ;; what this page last read draws at once; a read under a minute old stands

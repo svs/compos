@@ -299,6 +299,38 @@
         'click (string-append "dash-mode:" name)
         'attrs (list (list "title" (string-append "toggle " name)))))
 
+;; Every value in the card that can change is its own switch, so C-x ? is
+;; the one place to manage HERE: a click on the value acts, and a `+` asks
+;; for the one to add.
+(define (dash--action text id &optional class title)
+  (list 'tag "c-action" 'class (or class "dash-chip dash-toggle")
+        'text text
+        'click id
+        'attrs (list (list "title" (or title text)))))
+
+;; the panel is derived state: an action that changed HERE redraws it
+(define (dash--refresh! buf)
+  (when (buffer-local buf 'modeline-expanded)
+    (dashboard-panel-open! buf)))
+
+(define (dash--add-mode! buf)
+  (let ((major (or (buffer-local buf 'mode-name) "Fundamental"))
+        (minors (or (buffer-local buf 'minor-modes) '())))
+    (completing-read "Toggle mode: "
+      (filter (lambda (m) (not (equal? m major))) (mode-names))
+      (lambda (m)
+        (when (and (string? m) (not (equal? m "")))
+          (with-current-buffer buf (lambda () (modeline-toggle-mode! m)))
+          (dash--refresh! buf)))
+      'require-match #t)))
+
+(define (dash--add-preset! buf chat)
+  (minibuffer-read "Toggle preset: " (map car (chat-preset-candidates chat))
+    (lambda (p)
+      (when (and (string? p) (not (equal? p "")))
+        (chat-preset-toggle! chat (string->symbol p))
+        (dash--refresh! buf)))))
+
 ;; Every mode that answers here. The modeline shows the major mode and the
 ;; buffer's minor modes; other maps answer with nothing said -- cua-mode's,
 ;; the editing state's, a global minor map -- and the card names those as
@@ -326,12 +358,20 @@
                     (list (dash--chip "none")))))
         (if (pair? hidden)
             (list (dash--chip-row "hidden"
+                    ;; a hidden minor mode is a switch; a parent's map is not
                     (map (lambda (m)
-                           (list 'tag "span" 'class "dash-chip dim"
-                                 'text (dashboard--mode-name m)))
+                           (if (equal? (mode-get m 'kind) 'minor)
+                               (dash--mode-toggle m "dash-chip dim")
+                               (list 'tag "span" 'class "dash-chip dim"
+                                     'text (dashboard--mode-name m))))
                          hidden)))
             '())
-        (list (dash--row "read-only" (if (buffer-read-only? buf) "yes" "no"))
+        (list (dash--chip-row "add"
+                (list (dash--action "+ mode…" "dash-add-mode" #f
+                                    "turn any mode on or off here")))
+              (dash--chip-row "read-only"
+                (list (dash--action (if (buffer-read-only? buf) "yes" "no")
+                                    "dash-cmd:read-only-mode" #f "toggle read-only")))
               (dash--row "state" (dash--state buf)))))))
 
 (define (dash--group buf)
@@ -492,7 +532,16 @@
               (list (list 'tag "div" 'class "dash-big"
                           'text (string-append (number->string n)
                                                (if (= n 1) " tool" " tools")))
-                    (dash--row "presets" (or ps "none") (if ps #f "dim"))
+                    (dash--chip-row "presets"
+                      (append
+                        (map (lambda (p)
+                               (dash--action (value->string p)
+                                             (string-append "dash-preset:" (value->string p))
+                                             "dash-chip dash-chip-on"
+                                             (string-append "turn off " (value->string p))))
+                             (or (buffer-local chat 'chat-presets) '()))
+                        (list (dash--action "+ preset…" "dash-add-preset" #f
+                                            "turn a tool preset or server on or off"))))
                     (dash--row "list" state
                                (cond ((equal? state "stale") "warn")
                                      ((equal? state "frozen") "good")
@@ -519,8 +568,12 @@
          (here (dash--here-cost buf)))
     (dash--section "llm"
       (append
-        (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
-              (dash--row "lane" (dash--lane buf)))
+        (list (dash--action (dash--model buf) "dash-chat:chat-set-model"
+                            "dash-big dash-toggle" "choose the model")
+              (dash--row "lane" (dash--lane buf))
+              (dash--chip-row "config"
+                (list (dash--action "configure…" "dash-chat:llm-configure" #f
+                                    "backend, effort, agent mode, saved presets"))))
         (if here (list (dash--row "this chat" (format-usd here))) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
               (dash--row "total, all" (format-usd total))
@@ -566,7 +619,33 @@
 (define (dashboard-block-click buf id)
   (and (string? id)
        (cond ((string-prefix? "dash-mode:" id)
-              (modeline-toggle-mode! (substring id 10 (string-length id)))
+              (with-current-buffer buf
+                (lambda () (modeline-toggle-mode! (substring id 10 (string-length id)))))
+              (dash--refresh! buf)
+              #t)
+             ((equal? id "dash-add-mode") (dash--add-mode! buf) #t)
+             ((string-prefix? "dash-cmd:" id)
+              (with-current-buffer buf
+                (lambda () (run-command (substring id 9 (string-length id)))))
+              (dash--refresh! buf)
+              #t)
+             ;; presets and the llm belong to the chat that speaks for HERE
+             ((string-prefix? "dash-preset:" id)
+              (let ((chat (dash--here-chat buf)))
+                (when chat
+                  (chat-preset-toggle! chat (string->symbol (substring id 12 (string-length id))))
+                  (dash--refresh! buf)))
+              #t)
+             ((equal? id "dash-add-preset")
+              (let ((chat (dash--here-chat buf)))
+                (if chat (dash--add-preset! buf chat) (message "no chat here: C-c c opens one")))
+              #t)
+             ((string-prefix? "dash-chat:" id)
+              (let ((chat (dash--here-chat buf)))
+                (if chat
+                    (with-current-buffer chat
+                      (lambda () (run-command (substring id 10 (string-length id)))))
+                    (message "no chat here: C-c c opens one")))
               #t)
              ;; the header line's one switcher opens the narrow about HERE
              ((equal? id "buffer-switcher")

@@ -1445,28 +1445,63 @@
 
 (effects! '(write))
 
-(define-command "imenu" "Jump to a definition in this buffer"
+(define (imenu--kinds rows)
+  ;; the kinds of ROWS, in the order they first come
+  (let loop ((rs rows) (out '()))
+    (cond ((null? rs) (reverse out))
+          ((member (cadr (car rs)) out) (loop (cdr rs) out))
+          (else (loop (cdr rs) (cons (cadr (car rs)) out))))))
+
+(define (imenu--plural kind)
+  (cond ((equal? kind "") "other")
+        ((or (string-suffix? "s" kind) (string-suffix? "x" kind) (string-suffix? "ch" kind) (string-suffix? "sh" kind))
+         (string-append kind "es"))
+        (else (string-append kind "s"))))
+
+(define-command "imenu" "Jump to a definition in this buffer; an index of more than one kind has a tab for each"
   (lambda ()
-    (let ((rows (imenu-rows (current-buffer)))
-          (source (current-buffer))
-          (orig (point)))
-      (if (null? rows)
+    (let* ((all (imenu-rows (current-buffer)))
+           (source (current-buffer))
+           (orig (point))
+           ;; tracks and albums, functions and modules: each kind is a tab, the arrows of the tab row step
+           (kinds (imenu--kinds all))
+           (tabbed? (> (length kinds) 1))
+           (tab 0)
+           (rows (lambda () (if tabbed? (filter (lambda (r) (equal? (cadr r) (nth tab kinds))) all) all)))
+           (cands (lambda () (imenu--candidates (rows))))
+           (shown (lambda ()
+                    (let ((rs (rows)))
+                      (map (lambda (c)
+                             (let ((row (assoc (cadr c) rs)))
+                               (list (car c) (caddr c) "symbol" '() ""
+                                 (list (list "name" (caddr row)) (list "kind" (cadr row))
+                                       (list "source" source) (list "line" (number->string (car row)))
+                                       (list "doc" (imenu--snip (or (nth 3 row) "")))))))
+                           (cands)))))
+           (tab-row (lambda ()
+                      (let loop ((ks kinds) (i 0) (out '()))
+                        (if (null? ks) (reverse out)
+                            (loop (cdr ks) (+ i 1) (cons (list (imenu--plural (car ks)) (= i tab)) out))))))
+           (line-of (lambda (label) (let ((c (assoc label (cands)))) (and c (cadr c)))))
+           (on-confirm (lambda (label)
+                         (let ((l (line-of label)))
+                           (goto-char! (if l (line-start-position l) orig))))))
+      (if (null? all)
           (message "imenu: no definitions in this buffer")
-          (let ((cands (imenu--candidates rows)))
-            (minibuffer-read-preview "Imenu: "
-              (map (lambda (c)
-                (let ((row (assoc (cadr c) rows)))
-                  (list (car c) (caddr c) "symbol" '() ""
-                    (list (list "name" (caddr row)) (list "kind" (cadr row))
-                          (list "source" source) (list "line" (number->string (car row)))
-                          (list "doc" (imenu--snip (or (nth 3 row) ""))))))) cands)
+          (begin
+            (minibuffer-read-preview "Imenu: " (shown)
               (lambda (label)
-                (let ((c (assoc label cands)))
-                  (when c (goto-char! (line-start-position (cadr c))))))
-              (lambda (label)
-                (let ((c (assoc label cands)))
-                  (goto-char! (if c (line-start-position (cadr c)) orig))))
+                (let ((l (line-of label)))
+                  (when l (goto-char! (line-start-position l)))))
+              on-confirm
               (lambda () (goto-char! orig))
-              #t))))))
+              #t)
+            (when tabbed?
+              (minibuffer-tabs! (tab-row))
+              (set! *mb-tab-fn* (lambda (step)
+                                  (set! tab (modulo (+ tab step) (length kinds)))
+                                  (minibuffer-tabs! (tab-row))
+                                  (minibuffer-preview-candidates! (shown) on-confirm)
+                                  #t))))))))
 
 (define-key "goto-map" "i" "imenu")

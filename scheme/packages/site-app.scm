@@ -564,21 +564,13 @@
            (spec (buffer-local buf 'site-app-spec)))
       (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf)))))
 
-(define (site-app-imenu-rows buf)
-  ;; imenu's index of a section: one entry per row, filed under the row's kind,
-  ;; so a list of tracks and albums gives a tab of each
-  (with-current-buffer buf
-    (lambda ()
-      (let loop ((es (list-entries buf)) (os (list-offsets buf)) (out '()))
-        (if (or (null? es) (null? os))
-            (reverse out)
-            (let ((name (or (site-app-field (car es) 'name) ""))
-                  (kind (or (site-app-field (car es) 'kind) "")))
-              (loop (cdr es) (cdr os)
-                    (if (equal? name "") out
-                        (cons (list (line-number-at-pos (car os)) (if (equal? kind "") "item" kind) name
-                                    (or (site-app-field (car es) 'sub) ""))
-                              out)))))))))
+(define (site-app-row-anchor buf row)
+  ;; a section's row is an anchor named for it, filed under its kind, so a list
+  ;; of tracks and albums gives imenu a tab of each
+  (let ((name (or (site-app-field row 'name) ""))
+        (kind (or (site-app-field row 'kind) "")))
+    (and (not (equal? name ""))
+         (list name (list 'kind (if (equal? kind "") "item" kind) 'doc (or (site-app-field row 'sub) ""))))))
 
 (define (site-app-open! name &optional id)
   ;; each section is its own buffer; one already read is shown as it stands, g rereads it
@@ -591,7 +583,6 @@
     (site-app-join-group! buf name)
     (buffer-set-local! buf 'site-app-spec spec)
     (buffer-set-local! buf 'site-app-page pid)
-    (buffer-set-local! buf 'imenu-index-function 'site-app-imenu-rows)
     (unless (buffer-derived-mode? buf mode)
       (with-current-buffer buf (lambda () (set-mode! mode))))
     ;; an app with a group of its own is opened there
@@ -2522,6 +2513,7 @@
                   ;; rows and head as blocks, so the sections and status tabs are tabs
                   'collection "c-list"
                   'composml site-app-composml
+                  'anchor site-app-row-anchor
                   'composml-head site-app-composml-head
                   'preview site-app-show-detail!
                   'debounce #t

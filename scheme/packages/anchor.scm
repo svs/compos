@@ -117,6 +117,16 @@
   (when (boundp 'anchor-scale-redraw!) ((symbol-value 'anchor-scale-redraw!) buf))
   (anchor-list buf))
 
+;; Parts declared for the index alone: imenu and the outline read them, and
+;; nothing marks, walks or keys them unless the buffer has anchor-mode on.
+;; A list declares its rows so on every draw
+(define (anchor-index! buf as)
+  (let ((sorted (anchor--sorted as)))
+    (unless (equal? sorted (buffer-local buf 'anchors))
+      (buffer-set-local! buf 'anchors sorted)
+      (when (minor-mode-on? buf "anchor-mode") (anchor-sync! buf)))
+    sorted))
+
 (define (anchor-add! buf name start end &optional keymap data levels)
   (anchor-set! buf (cons (list name start end keymap data levels) (anchor-list buf))))
 
@@ -396,7 +406,9 @@
 
 (define (anchor-imenu-rows buf)
   ;; imenu's index of an anchored page: its parts, a part inside another
-  ;; indented under it, its first words for the preview
+  ;; indented under it, its first words for the preview. A part whose DATA
+  ;; names its 'kind is filed under it, so imenu gives each kind a tab; its
+  ;; 'doc, when it has one, is the preview
   (let ((text (buffer-text buf)))
     (let loop ((as (anchor-list buf)) (open '()) (acc '()))
       (if (null? as)
@@ -408,10 +420,13 @@
                  (path (string-append (string-join (map (lambda (o) "   ") open) "") (anchor-name a)))
                  (body (substring-bytes text (anchor-start a) (anchor-end a)))
                  (lines (cdr (string-split body "\n")))
-                 (doc (if (pair? lines) (string-join lines " ") "")))
+                 (data (let ((d (anchor-data a))) (and (pair? d) (symbol? (car d)) d)))
+                 (kind (or (and data (plist-get data 'kind)) ""))
+                 (doc (or (and data (plist-get data 'doc))
+                          (if (pair? lines) (string-join lines " ") ""))))
             (loop (cdr as) (cons a open)
                   (cons (list (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a))))
-                              "" path doc)
+                              kind path doc)
                         acc)))))))
 
 (define (anchor--apply! buf)

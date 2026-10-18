@@ -2046,6 +2046,20 @@
                                   (if (string? key) key (value->string key)))))
                                 (or (plist-get block 'attrs) '()))) block)) out)))))))))))
 
+;; A list whose 'anchor names its rows declares each drawn row an anchor, so
+;; imenu and the outline index them. ('anchor BUF ROW) answers (NAME DATA), or #f
+;; for a row that is no stop; DATA's 'kind files the row under a tab of imenu
+(define (list-anchors! buf shown)
+  (let ((f (list-opt buf 'anchor)))
+    (when f
+      (let loop ((rs shown) (os (list-offsets buf)) (out '()))
+        (if (or (null? rs) (null? os))
+            (anchor-index! buf (reverse out))
+            (let ((a (f buf (car rs)))
+                  (end (if (pair? (cdr os)) (- (cadr os) 1) (buffer-size buf))))
+              (loop (cdr rs) (cdr os)
+                    (if a (cons (list (car a) (car os) end #f (cadr a)) out) out))))))))
+
 (define (list-composml! buf rows head &optional destination)
   (let ((render (list-opt buf 'composml))
         (collection (list-opt buf 'collection)))
@@ -2224,6 +2238,7 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           (list-composml! buf shown head)
           (list-composml-text! buf shown prepared)
+          (list-anchors! buf shown)
           ;; the keys bar at the window's foot is the list's one keymap
           (desktop-skip! buf 'footer-line-blocks)
           (let ((blocks (list-keys-bar-blocks buf)))

@@ -1399,6 +1399,8 @@
   ;; function from BUF to rows, the way Emacs's imenu-create-index-function does
   (cond ((symbol? (buffer-local buf 'imenu-index-function))
          ((eval (buffer-local buf 'imenu-index-function)) buf))
+        ;; a buffer with anchors is indexed by them
+        ((pair? (anchor-list buf)) (anchor-imenu-rows buf))
         ((buffer-derived-mode? buf "morg-mode")
          (map (lambda (e)
                 (list (line-number-at-pos (car e)) "heading"

@@ -5,6 +5,7 @@
 ;;;
 ;;;   RET   go to the window, walking the ring until it is on screen
 ;;;   k     close the window; a ring window takes its pane
+;;;   c     mode-consolidate from the window on this line
 ;;;   g / q refresh · bury
 
 (domain! 'windows)
@@ -30,6 +31,8 @@
     (list (list (if on "■" "□") (if on "win-on" "win-off"))
           (list (if (and win (equal? win (active-window))) "●" "") "win-on")
           (list (if (equal? name "") "" (buffer-modeline-name name)) "win-name")
+          (list (or (and win (mode-consolidate-window-mode win)) "") "faint")
+          (list (if win (number->string (+ 1 (length (window-prev-buffers win)))) "") "dim")
           (list (if on "on screen" "waiting") "faint")
           (list id "dim"))))
 
@@ -50,6 +53,20 @@
             (delete-window-id! win))
         (list-refresh! *windows-list-buffer*)))))
 
+(define-command "windows-list-consolidate"
+  "Give every major mode one window, from the window on this line; visible panes keep their modes"
+  (lambda ()
+    (windows-list-on-current
+      (lambda (win)
+        (let ((list-win (active-window)))
+          (unless (member win (layout-pane-windows))
+            (layout-ring-show! win))
+          (when (member win (layout-pane-windows))
+            (select-window! win)
+            (mode-consolidate!))
+          (when (window-exists? list-win) (select-window! list-win))
+          (list-refresh! *windows-list-buffer*))))))
+
 (define-command "windows-list-refresh" "Redraw the window list"
   (lambda () (list-refresh! *windows-list-buffer*)))
 
@@ -58,11 +75,12 @@
     'doc (string-append
            "The windows of this frame's ring, in ring order. A filled box is a "
            "window on screen, a hollow one waits off it. `RET` goes to the "
-           "window and walks the ring to it, `k` closes it.")
+           "window and walks the ring to it, `k` closes it, `c` gives every major mode one window from the window on the line.")
     'buffer *windows-list-buffer*
     'rows windows-list-ids
     'columns (lambda (buf)
                (list (list "" 1) (list "" 1) (list "buffer" 40)
+                     (list "mode" 20) (list "bufs" 4)
                      (list "state" 10) (list "id" #f)))
     'cells windows-list-cells
     'title (lambda (buf) "Windows")
@@ -72,9 +90,9 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "go") ("k" "close") ("/" "filter")
+              '(("RET" "go") ("k" "close") ("c" "consolidate") ("/" "filter")
                 ("g" "refresh") ("q" "quit")))
-    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close")
+    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate")
             ("g" "windows-list-refresh") ("q" "quit-window"))))
 
 (define-command "list-windows"

@@ -303,10 +303,12 @@
      (filter (lambda (w) (equal? (cadr w) name)) (window-list)))))
 
 (define (window-show-buffer! win name)
-  (if *display-preview*
-      (window-preview-buffer! name win)
-      (begin (window-set-buffer! win name)
-             (window-release-duplicates! win name))))
+  ;; a group that declares its panes sends its buffers to their own pane
+  (let ((win (if (boundp 'group-panes-target) (group-panes-target win name) win)))
+    (if *display-preview*
+        (window-preview-buffer! name win)
+        (begin (window-set-buffer! win name)
+               (window-release-duplicates! win name)))))
 
 (define (with-display-preview thunk)
   (let ((was *display-preview*))
@@ -1088,7 +1090,9 @@
              (actions (display-buffer-actions-for name a)))
         (window-display!
           (lambda ()
-            (or (and (layout-target) (not (layout-arranging?)) (pair? actions)
+            (or (and (boundp 'group-panes-open!) (not (layout-arranging?))
+                     (group-panes-open! name #f))
+                (and (layout-target) (not (layout-arranging?)) (pair? actions)
                      (not (member (car actions) *display-buffer-outside-layout*))
                      (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
                 (display-buffer-run-actions name a actions)))))))
@@ -2557,6 +2561,43 @@ keeps the buffer you were in and your point.")
                                      (not (equal? (car w) except))))
                     (window-list))))
     (if (null? ws) #f (car (car ws)))))
+
+;; A buffer is on screen in one pane, never two. After any change to a
+;; frame's panes, a pane that repeats a buffer another pane shows (the
+;; selected one wins) turns to its own previous buffer that is not on
+;; screen, else to the frame's next fill buffer, else it closes.
+(define *window-unique-busy* #f)
+
+(define (window-unique-panes!)
+  (unless *window-unique-busy*
+    (set! *window-unique-busy* #t)
+    (unwind-protect
+      (lambda ()
+        (let* ((me (active-window))
+               (rows (window-list))
+               (ordered (append (filter (lambda (r) (equal? (car r) me)) rows)
+                                (filter (lambda (r) (not (equal? (car r) me))) rows))))
+          (let loop ((rows ordered) (seen '()))
+            (when (pair? rows)
+              (let ((win (car (car rows))) (buf (cadr (car rows))))
+                (if (not (member buf seen))
+                    (loop (cdr rows) (cons buf seen))
+                    (let* ((shown (map cadr (window-list)))
+                           (free (lambda (c) (and (fill-candidate? c) (not (member c shown)))))
+                           (prev (window-prev-buffers win))
+                           (next (or (find free prev) (find free (window-fill-buffers)))))
+                      (cond (next
+                              (display-buffer-in-window! win next)
+                              (set-window-prev-buffers! win
+                                (filter (lambda (p) (not (or (equal? p next) (equal? p buf)))) prev))
+                              (loop (cdr rows) (cons next seen)))
+                            ((> (length (window-list)) 1)
+                              (delete-window-id! win)
+                              (loop (cdr rows) seen))
+                            (else (loop (cdr rows) seen))))))))))
+      (lambda () (set! *window-unique-busy* #f)))))
+
+(add-hook! 'window-configuration-change-hook 'window-unique-panes!)
 
 ;; the buffer a window is showing, or #f
 (define (window-buffer id)

@@ -3062,8 +3062,15 @@ is forgotten and that group falls back to creation order in the switcher."
          (alive (lambda (w) (and (window-buffer-any w) #t)))
          (gathered (filter (lambda (w) (and (alive w) (not (member w now)))) used))
          (rest (filter (lambda (w) (and (not (member w now)) (not (member w gathered))))
-                       (layout-hidden-windows))))
-    (layout-strip-set! (append now gathered rest) 0)))
+                       (layout-hidden-windows)))
+         (target (layout-target))
+         (capacity (or (and target (layout-target-capacity target)) (length now)))
+         ;; a layout with free panes shows the gathered modes in them, so a
+         ;; mode that had no pane gets one instead of waiting in the ring
+         (shown (take (append now gathered) (max (length now) capacity))))
+    (when (and target (> (length shown) (length now)))
+      (layout-arrange-windows! target shown))
+    (layout-strip-set! (append shown (filter (lambda (w) (not (member w shown))) (append gathered rest))) 0)))
 
 ;; Every major mode of the group gets one window. A mode with a pane
 ;; gathers there; one without takes a hidden window the layout ring walks to.
@@ -5270,3 +5277,148 @@ is forgotten and that group falls back to creation order in the switcher."
 (set! *group-records* (group-record-colors-restore *group-records*))
 (group-frame-styles-refresh!)
 (modeline-groups-refresh!)
+
+
+;;; Group panes: a group's own layout, written in its group.scm.
+;;;
+;;;   (group-panes! '(index detail chat)
+;;;     (lambda (buf) (cond (... 'index) (... 'detail) (else 'chat))))
+;;;
+;;; The panes stand left to right, one window each. A buffer of the group
+;;; opens on top of the stack of the pane the function names, wherever it
+;;; is opened from: no pane splits, and no buffer shows in two.
+
+(domain! 'windows)
+(effects! '(write display))
+
+(define *group-panes* '())   ;; ((GROUP PANES PLACE) ...)
+
+(define (group-panes! panes place)
+  (if (not *group-config-loading*)
+      (begin (message "group-panes! belongs in a group's group.scm") #f)
+      (let ((id (car *group-config-loading*)))
+        (set! *group-panes*
+              (cons (list id panes place)
+                    (filter (lambda (e) (not (equal? (car e) id))) *group-panes*)))
+        #t)))
+
+;; every group without its own group-panes! takes this: the listing on
+;; the left, its pages in the middle, the chat and everything else on
+;; the right
+(define (group-panes-default-place buf)
+  (cond ((buffer-local buf 'detail-of) 'detail)
+        ((buffer-local buf 'list-mode) 'index)
+        (else 'chat)))
+
+(define *group-panes-default* (list '(index detail chat) group-panes-default-place))
+
+(define (group-panes-of g)
+  (let ((e (and g (assoc g *group-panes*))))
+    (cond (e (cdr e))
+          (g *group-panes-default*)
+          (else #f))))
+
+;; the pane BUF opens in under this frame's group, or #f when the group
+;; declares no panes, BUF is not its member, or the function fails
+(define (group-panes-pane buf)
+  (let* ((g (frame-group))
+         (spec (group-panes-of g)))
+    (and spec (string? buf) (fill-candidate? buf) (group-cycle-member? buf g)
+         (let ((p (ignore-errors (lambda () ((cadr spec) buf)))))
+           (and (member p (car spec)) p)))))
+
+(define (group-panes-windows)
+  (let ((rec (frame-local 'group-panes)))
+    (if (and rec (equal? (car rec) (frame-group))) (cadr rec) '())))
+
+(define (group-panes-window pane)
+  (let* ((hit (assoc pane (group-panes-windows)))
+         (win (and hit (cadr hit))))
+    (and win (assoc win (window-list)) win)))
+
+;; window-show-buffer! asks this: a group buffer shown in one pane goes
+;; to the pane its function names
+(define (group-panes-target win name)
+  (let* ((pane (and (find (lambda (row) (equal? (cadr row) win)) (group-panes-windows))
+                    (group-panes-pane name)))
+         (w (and pane (group-panes-window pane))))
+    (or w win)))
+
+;; display-buffer, the detail opener and switch-to-buffer ask this first:
+;; the window NAME went to, or #f when the group has no say
+(define (group-panes-open! name select?)
+  (let ((pane (group-panes-pane name)))
+    (and pane
+         (let ((w (or (group-panes-window pane)
+                      (and (group-panes-apply! name) (group-panes-window pane)))))
+           (and w
+                (begin
+                  (unless (equal? (window-buffer w) name)
+                    (display-buffer-in-window! w name))
+                  (when select? (select-window! w))
+                  w))))))
+
+;; lay the frame out as its group's panes: each pane one window, its
+;; buffers its stack, the shown or most recent on top; FORCE goes on top
+;; of its own pane
+(define (group-panes-apply! &optional force)
+  (let* ((g (frame-group))
+         (spec (group-panes-of g)))
+    (if (not spec)
+        (begin (message "This group declares no panes in its group.scm") #f)
+        (let* ((me (window-buffer (active-window)))
+               (shown (map cadr (window-list)))
+               (members (filter (lambda (b) (and (fill-candidate? b) (group-cycle-member? b g)))
+                                (buffer-list-mru)))
+               (stacks
+                 (filter (lambda (s) (pair? (cadr s)))
+                   (map (lambda (p)
+                          (let* ((bufs (filter (lambda (b) (equal? (group-panes-pane b) p)) members))
+                                 (top (cond ((and force (member force bufs)) force)
+                                            ((find (lambda (b) (member b shown)) bufs))
+                                            ((pair? bufs) (car bufs))
+                                            (else #f))))
+                            (list p (if top (cons top (filter (lambda (b) (not (equal? b top))) bufs)) '()))))
+                        (car spec))))
+               (rows (map (lambda (s)
+                            (let* ((top (car (cadr s)))
+                                   (w (or (window-showing top) (window-new-hidden! top))))
+                              (list (car s) w (cadr s))))
+                          stacks))
+               (ids (filter (lambda (w) w) (map cadr rows))))
+          (and (pair? ids)
+               (begin
+                 (layout-target-free!)
+                 (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
+                 (for-each (lambda (r)
+                             (when (cadr r)
+                               (set-window-prev-buffers! (cadr r) (cdr (caddr r)))
+                               (window-mode-preference! (cadr r) #f)))
+                           rows)
+                 (set-frame-local! 'group-panes (list g (map (lambda (r) (list (car r) (cadr r))) rows)))
+                 (let ((home (window-showing me)))
+                   (select-window! (or home (car ids))))
+                 (window-state-changed!)
+                 ids))))))
+
+;; switch-to-buffer goes to the buffer's pane and selects it
+(advice-add! 'switch-to-buffer--show! 'around 'group-panes
+  (lambda (next buf)
+    (if (and (not (buffer-context?)) (not (layout-arranging?))
+             (group-panes-open! buf #t))
+        buf
+        (next buf))))
+
+(define-command "group-panes-apply"
+  "Lay this frame out as the panes its group declares in group.scm"
+  (lambda () (group-panes-apply!)))
+
+(public! 'group-panes!
+  "(group-panes! PANES PLACE) — in group.scm: the group's panes, left to right, and (PLACE BUF) naming the pane each buffer opens in")
+(public! 'group-panes-apply!
+  "(group-panes-apply! [FORCE]) — lay this frame out as its group's panes; FORCE goes on top of its pane")
+(public! 'group-panes-default-place
+  "(group-panes-default-place BUF) — the default layout's pane for BUF: detail pages in the middle, listings on the left, the rest on the right")
+(public! 'group-panes-pane
+  "(group-panes-pane BUF) — the pane BUF opens in under this frame's group, or #f")
+(catalog-meta! 'function "group-panes-pane" 'effects '(read))

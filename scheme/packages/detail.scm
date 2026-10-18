@@ -345,3 +345,15 @@
   "(detail-name! MODE FN) — MODE says what to call a detail it keeps; FN takes the buffer and answers a name")
 (public! 'detail-window-forget!
   "(detail-window-forget! OWNER) — drop the window OWNER opens its rows into; the next row picks one again")
+
+;; A group that declares its panes opens a list's rows in its own detail
+;; pane: the page is adopted first, so the group's function sees a detail.
+(advice-add! 'display-buffer-detail! 'around 'group-panes
+  (lambda (next name &optional owner)
+    (let* ((o (or owner (window-buffer (active-window))))
+           (panes (and (boundp 'group-panes-open!) (group-panes-of (frame-group)))))
+      (when panes (detail-adopt! o name))
+      (let ((win (and panes (not (layout-arranging?)) (group-panes-open! name #f))))
+        (cond (win (detail-window-note! o win) win)
+              (owner (next name owner))
+              (else (next name)))))))

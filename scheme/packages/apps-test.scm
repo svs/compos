@@ -99,3 +99,26 @@
           (app-move-buffers! "zz-app:one" "zz-app-destination")
           (check-equal! (window-list) before "the same windows show the same buffers")
           (check-equal! (active-window) here "and focus never left"))))))
+
+(deftest 'app-layout-gives-its-roles-panes-before-what-was-on-screen
+  "a full layout keeps the app's index and page; the screen fills what is left, the selected buffer first"
+  (lambda ()
+    (t--apps-with
+      (lambda ()
+        (let ((group (frame-local 'current-group)) (target (layout-target)))
+          (set-frame-local! 'current-group #f)
+          (test-buffer! "*zz-app-work-a*" "a")
+          (test-buffer! "*zz-app-work-b*" "b")
+          (test-buffer! "*zz-app-three-home*" "home")
+          (test-buffer! "*zz-app-three-detail*" "detail")
+          (app-claim! "*zz-app-three-home*" "zz-app:three" 'home)
+          (app-claim! "*zz-app-three-detail*" "zz-app:three" 'detail)
+          (tile-windows! 'columns '("*zz-app-work-a*" "*zz-app-work-b*"))
+          (layout-target-set! 'columns)
+          (select-window! (window-showing "*zz-app-work-b*"))
+          (app-layout! "zz-app:three")
+          (check-equal! (map cadr (window-list))
+                        '("*zz-app-work-b*" "*zz-app-three-home*" "*zz-app-three-detail*")
+                        "three columns: the selected work buffer, the index, the page")
+          (layout-target-set! target)
+          (set-frame-local! 'current-group group))))))

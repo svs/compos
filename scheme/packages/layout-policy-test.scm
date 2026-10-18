@@ -516,3 +516,20 @@
       (lp-rect! chat (/ 2 3) 0 (/ 1 3) 1)
       (buffer-kill! chat)
       (layout-target-set! #f)))))
+
+(deftest 'a-buffer-moved-onto-its-own-mode-covers-the-neighbor
+  "a neighbor of the same mode takes the buffer onto its stack, even with room to spare"
+  (lp-journey (lambda ()
+    (lp-start!) (lp-buffer! "b")
+    (lp-mode! "a" "text-mode") (lp-mode! "b" "text-mode")
+    (tile-visible-windows! 'columns '("zz-lp-a" "zz-lp-b"))
+    (layout-target-set! 'columns)
+    (select-window! (window-showing "zz-lp-b"))
+    (run-command "buffer-previous-pane")
+    (lp-snapshot! 'covered)
+    (check-equal! (layout-target-visible-buffers) '("zz-lp-b") "b covers a, one pane")
+    (check-equal! (car (window-prev-buffers (active-window))) "zz-lp-a" "a waits under b")
+    (layout-target-set! #f))))
+
+(define (lp-mode! name mode)
+  (with-current-buffer (string-append "zz-lp-" name) (lambda () (set-mode! mode))))

@@ -128,7 +128,7 @@
                     classes))
          (tops (map car rows))
          ;; what is on screen stays there, and the app joins it
-         (others (let loop ((ws (display--work-windows)) (acc '()))
+         (screen (let loop ((ws (display--work-windows)) (acc '()))
                    (if (null? ws)
                        (reverse acc)
                        (let ((b (window-buffer (car ws))))
@@ -136,6 +136,18 @@
                                (if (or (not b) (equal? (app-id b) id) (member b extras) (member b acc))
                                    acc
                                    (cons b acc)))))))
+         ;; the app's roles always get their panes; what was on screen fills
+         ;; the room left, the selected window's buffer first, in screen order
+         (capacity (and (layout-target) (layout-capacity (layout-target))))
+         (room (and capacity (max 0 (- capacity (length extras) (length tops)))))
+         (here (window-buffer (active-window)))
+         (kept (if room
+                   (let ((ranked (if (member here screen)
+                                     (cons here (filter (lambda (b) (not (equal? b here))) screen))
+                                     screen)))
+                     (take ranked (min room (length ranked))))
+                   screen))
+         (others (filter (lambda (b) (member b kept)) screen))
          (panes (append extras others tops)))
     (and (pair? tops)
          (begin

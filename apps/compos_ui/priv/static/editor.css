@@ -938,8 +938,7 @@ body.unfocused .window.active .cursor {
   flex: 1; width: 100%; border: 0;
   background: var(--window-inactive-bg, #f4f0e6);
   /* a rendered page is its own document and reads no variable
-     of ours; the buffer text scale zooms the frame instead */
-  zoom: var(--text-scale-factor, 1);
+     of ours; PreviewScroll zooms its root by the buffer text scale */
 }
 .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
 .file-preview {

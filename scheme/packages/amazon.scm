@@ -1293,7 +1293,7 @@
             'class (string-append "amz-item" (if (component--get p 'hidden? #f) " amz-hidden" "")
                                   " " (component--get p 'class ""))
             'children
-            (list (list 'tag "span" 'class "amz-tile"
+            (list (list 'tag "div" 'class "amz-tile"
                         'children (list (amz--thumb "amz-thumb" (component--get p 'image "") (component--get p 'title ""))))
                   (list 'tag "div" 'class "amz-main"
                         'children
@@ -1348,9 +1348,9 @@
            (marks (amz--marks p)))
       (list 'tag "div" 'class "amz-hero"
             'children
-            (list (if (equal? img "") (amz--text "amz-hero-bg" "")
+            (list (if (equal? img "") (list 'tag "div" 'class "amz-hero-bg")
                       (list 'tag "img" 'class "amz-hero-bg" 'file img 'attrs (list (list "alt" ""))))
-                  (list 'tag "span" 'class "amz-hero-tile"
+                  (list 'tag "div" 'class "amz-hero-tile"
                         'children (list (amz--thumb "amz-hero-art" img (component--get p 'title ""))))
                   (list 'tag "div" 'class "amz-hero-main"
                         'children
@@ -1371,10 +1371,11 @@
                           (if (null? marks) '() (list (list 'tag "div" 'class "amz-marks" 'children marks))))))))))
 
 (define-style! 'amazon "
-.semantic-list > .semantic-item.amz-item { border-left: 0; }
-.amz-item { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-radius: 10px; font-family: var(--font-sans); font-size: 13px; min-width: 0; }
-.amz-item:hover { background: var(--hl-line-bg); }
-.current > .amz-item, .amz-item.current { background: color-mix(in srgb, var(--accent-fg) 16%, var(--hl-line-bg)); box-shadow: inset 3px 0 0 var(--accent-fg); }
+.semantic-list:has(> .amz-item) { padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.semantic-list > .semantic-item.amz-item, .amz-item { display: flex; align-items: center; gap: 14px; padding: 8px 12px; margin: 0; border: 0; border-left: 0; border-radius: 10px; font-family: var(--font-sans); font-size: 13px; min-width: 0; }
+.semantic-list > .semantic-item.amz-item:hover { background: var(--hl-line-bg); }
+.semantic-list > .semantic-item.amz-item.selected { background: color-mix(in srgb, var(--accent-fg) 14%, var(--hl-line-bg)); box-shadow: inset 3px 0 0 var(--accent-fg); }
+.amz-item > * { grid-column: auto; }
 .amz-hidden { opacity: .45; }
 .amz-tile { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 8px; background: #fff; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 .amz-thumb { max-width: 56px; max-height: 56px; object-fit: contain; }

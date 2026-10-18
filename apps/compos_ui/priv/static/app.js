@@ -1058,6 +1058,7 @@
         this.onLoad = () => {
           this.lastDoc = null;
           this.syncDoc();
+          this.applyScale();
           this.attach();
           // the document is only now scrollable: put the reader's
           // saved offset back, the same as a line window does
@@ -1066,11 +1067,13 @@
         };
         this.el.addEventListener("load", this.onLoad);
         this.syncDoc();
+        this.applyScale();
         this.attach();
         this.apply();
       },
       updated() {
         this.syncDoc();
+        this.applyScale();
         this.attach();
         this.apply();
         this.selectRegion();
@@ -1121,6 +1124,17 @@
         settleCaret(d);
         this.lastDoc = encoded;
         this.lastHtml = html;
+      },
+
+      // The buffer text scale. zoom on the iframe grows its box and
+      // leaves the document inside at its own size, so the factor the
+      // window style carries zooms the document's root instead.
+      applyScale() {
+        const d = this.doc();
+        if (!d || !d.documentElement) return;
+        const f = parseFloat(getComputedStyle(this.el).getPropertyValue("--text-scale-factor")) || 1;
+        const want = f === 1 ? "" : String(f);
+        if (d.documentElement.style.zoom !== want) d.documentElement.style.zoom = want;
       },
 
       // Put the caret at source byte POINT, in the run that owns it.

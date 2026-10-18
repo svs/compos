@@ -77,7 +77,9 @@
 
 (define (site-app-parse sheet html)
   (let ((out (and (string? html) (xslt-apply sheet html))))
-    (and (string? out) (> (string-length out) 1) (json-parse out))))
+    (and (string? out) (> (string-length out) 1)
+         ;; a paragraph break in the page's text comes through raw, which JSON refuses
+         (json-parse (re-replace-all "[\\r\\n]" (re-replace-all "\\t" out " ") "\\\\n")))))
 
 (define (site-app-field row key)
   (let ((value (plist-get row key)))
@@ -363,6 +365,12 @@
           (message "The site did not answer")))))
 
 (define *site-app-opening* '())
+;; when each open began: an open whose reply never comes (a closed window, a
+;; lost message) must not hold every read behind it for good
+(define *site-app-opening-at* '())
+(define (site-app-opening-live? name)
+  (let ((t (assoc name *site-app-opening-at*)))
+    (and t (< (- (monotonic-ms) (cadr t)) 20000))))
 
 (define (site-app-find-tab! name k)
   ;; the reader tab lives in its own window, so it is looked for in every
@@ -371,7 +379,7 @@
   ;; and callers that ask while a tab is opening wait for that same tab
   (let ((spec (site-app-spec name))
         (remembered (site-app-tab name))
-        (waiting (assoc name *site-app-opening*)))
+        (waiting (and (site-app-opening-live? name) (assoc name *site-app-opening*))))
     (if waiting
         (set! *site-app-opening* (alist-put *site-app-opening* name (cons k (cadr waiting))))
         (chrome-call "tabs" '()
@@ -391,6 +399,7 @@
                 (stray (k (site-app-note-tab! name (plist-get stray 'id))))
                 (else
                  (set! *site-app-opening* (alist-put *site-app-opening* name (list k)))
+                 (set! *site-app-opening-at* (alist-put *site-app-opening-at* name (monotonic-ms)))
                  (chrome-call "open"
                    (chrome-here
                      ;; the reader's minimized window: the app works the site out of sight
@@ -1775,10 +1784,13 @@
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            ;; every item opens on the tab this group last chose, else the first
            ;; a page's 'detail-default tab wins over the one the group last chose
+           (valid (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-composed) '())) ids))
+           ;; a page drawn again (the music moved on) stays on the tab it was on
+           (kept (buffer-local made 'site-app-active))
            (opened (buffer-set-local! made 'site-app-active
-                     (or (plist-get page 'detail-default)
-                         (site-app-chosen-tab name page list-buf
-                       (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-composed) '())) ids)))))
+                     (if (and kept (member kept valid)) kept
+                         (or (plist-get page 'detail-default)
+                             (site-app-chosen-tab name page list-buf valid)))))
            ;; what this page last read draws at once; a read under a minute old stands
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)

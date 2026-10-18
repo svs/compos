@@ -708,6 +708,7 @@
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: .85em; }
 .c-kv-row { display: grid; grid-template-columns: minmax(8ch, .35fr) 1fr; gap: 10px; }
 .c-group { display: block; margin: 0 0 10px; }
+c-header.c-group { padding: 10px 14px; }
 .c-table { display: table; width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: .85em; }
 .c-tr { display: table-row; }
 .c-th, .c-td { display: table-cell; padding: 3px 10px; white-space: nowrap; border-bottom: 1px solid var(--border-bg); }

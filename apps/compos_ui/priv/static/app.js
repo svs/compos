@@ -1542,6 +1542,7 @@
         this.ro = null;
         this.reader = false;
         this.raf = null;
+        this.grow = null;
         this.linkH = (e) => {
           const link = e.target.closest && e.target.closest("a[href]");
           if (!link || !this.el.contains(link)) return;
@@ -1610,6 +1611,18 @@
         ["wheel", "touchstart", "pointerdown"].forEach((t) =>
           this.scroller.addEventListener(t, this.inputH, { passive: true })
         );
+        // A block can grow without a patch to this list: a streaming
+        // reply or a component patches only its own subtree, and
+        // updated() never runs here. Follow that growth too, once a
+        // frame, while the reader is at the tail.
+        this.mo = new MutationObserver(() => {
+          if (this.grow || !this.stick || !this.follows()) return;
+          this.grow = requestAnimationFrame(() => {
+            this.grow = null;
+            if (this.stick && this.follows()) this.place();
+          });
+        });
+        this.mo.observe(this.el, { childList: true, subtree: true, characterData: true });
         this.settle();
       },
       // Put the transcript where the reader left it. A window that
@@ -1749,6 +1762,8 @@
         );
         clearTimeout(this.report);
         if (this.raf) cancelAnimationFrame(this.raf);
+        if (this.grow) cancelAnimationFrame(this.grow);
+        if (this.mo) { this.mo.disconnect(); this.mo = null; }
         if (this.ro) { this.ro.disconnect(); this.ro = null; }
       }
     },

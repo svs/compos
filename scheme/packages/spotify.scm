@@ -542,14 +542,39 @@
 
 (define (spotify--now-set! now)
   ;; every section's bar redraws; the Now Playing page too, and it reads the
-  ;; album and the artist when the music moved on to new ones
+  ;; album and the artist when the music moved on to new ones. Music that
+  ;; starts brings the page up
   (let ((moved (or (not (equal? (plist-get now 'albumHref) (plist-get *spotify-now* 'albumHref)))
-                   (not (equal? (plist-get now 'artistHref) (plist-get *spotify-now* 'artistHref))))))
+                   (not (equal? (plist-get now 'artistHref) (plist-get *spotify-now* 'artistHref)))))
+        (started (and (eq? (plist-get now 'playing) #t) (not (eq? (plist-get *spotify-now* 'playing) #t)))))
     (set! *spotify-now* now)
     (for-each (lambda (b) (buffer-set-local! b 'list-layout-cache #f) (list-refresh! b)) (spotify--list-buffers))
     (cell-set! 'spotify/track (spotify--track-of now))
     (cell-set! 'spotify/position (spotify--position-of now))
     (when (and moved (boundp 'spotify--now-draw!) (buffer-exists? *spotify-now-buffer*))
+      (spotify--context!))
+    (when started (spotify--now-up!))))
+
+(define (spotify--section-pane)
+  ;; the window showing a section, if one does
+  (with-frame-windows
+    (lambda ()
+      (find (lambda (w) (member (window-buffer w) (spotify--list-buffers)))
+            (map car (window-list))))))
+
+(define (spotify--now-up!)
+  ;; music that starts turns the section on screen to its Now Playing tab; the
+  ;; focus stays where it is, and nothing changes while no section shows
+  (let ((buf *spotify-now-buffer*)
+        (pane (spotify--section-pane)))
+    (when (and pane (boundp 'spotify--now-draw!) (not (member buf (get-visible-buffers))))
+      (unless (buffer-exists? buf)
+        (buffer-create buf)
+        (with-current-buffer buf (lambda () (set-mode! "spotify-now-mode"))))
+      (app-join-group! buf "Spotify")
+      (app-claim! buf "spotify" 'list)
+      (spotify--now-draw!)
+      (with-frame-windows (lambda () (window-set-buffer! pane buf)))
       (spotify--context!))))
 
 (define (spotify--track-of now) (plist-put now 'position ""))
@@ -695,6 +720,10 @@
           'liked? (eq? (plist-get n 'liked) #t)
           'position (or (plist-get n 'position) "") 'duration (or (plist-get n 'duration) "")
           'shuffle (or (plist-get n 'shuffle) "off") 'repeat (or (plist-get n 'repeat) "off"))))
+
+(define (spotify--loaded?)
+  (let ((title (plist-get *spotify-now* 'title)))
+    (and (string? title) (not (equal? title "")))))
 
 (define (spotify--playing? name)
   (let ((title (plist-get *spotify-now* 'title)))
@@ -974,6 +1003,11 @@
         'navigate (lambda (name url wait k) (spotify-navigate! name url wait k))
         'detail-name (lambda (row) (site-app-field row 'name))
         ;; the player bar heads every section
+        ;; what plays is the tab before Home, while there is something
+        'lead-tabs (lambda (buf)
+                     (if (spotify--loaded?)
+                         (list (list "spotify:spotify-now-page" "Now Playing" #f "M-0"))
+                         '()))
         'list-head (lambda (buf)
                      (spotify--ticker-start!)
                      (list (component 'spotify/search-bar (list 'query *spotify-query*))
@@ -1119,7 +1153,7 @@
 
 (define *spotify-now-buffer* "*spotify-now*")
 (when (and (boundp 'app-claim!) (buffer-exists? *spotify-now-buffer*))
-  (app-claim! *spotify-now-buffer* "spotify" 'aux))
+  (app-claim! *spotify-now-buffer* "spotify" 'list))
 (define *spotify-albums* '())    ; (HREF . what the album page says)
 (define *spotify-artists* '())   ; (HREF . what the artist page says)
 (define *spotify-news* '())      ; (ARTIST . stories)
@@ -1308,6 +1342,19 @@
         '())))
 
 (define (spotify--now-blocks)
+  ;; the page is the app's Now Playing tab: the tabs head it, as they head a section
+  (cons (spotify--now-tabs) (spotify--now-body)))
+
+(define (spotify--now-tabs)
+  (let ((tabs (cons (list "spotify:spotify-now-page" "Now Playing" #t "M-0")
+                    (map (lambda (page)
+                           (list (string-append "spotify:spotify-" (symbol->string (plist-get page 'id)))
+                                 (plist-get page 'label) #f (string-append "M-" (plist-get page 'key))))
+                         (site-app-pages (site-app-spec 'spotify))))))
+    (spotify--lined (component 'ui/tabs (list 'class "sa-sections" 'tabs tabs))
+                    (string-join (map (lambda (t) (string-append (list-ref t 3) " " (cadr t))) tabs) "  "))))
+
+(define (spotify--now-body)
   (let* ((title (spotify--now-field 'title))
          (album-href (spotify--now-field 'albumHref))
          (artist-href (spotify--now-field 'artistHref))
@@ -1448,15 +1495,16 @@
         (buffer-create buf)
         (with-current-buffer buf (lambda () (set-mode! "spotify-now-mode"))))
       (app-join-group! buf "Spotify")
-      ;; the player is part of the app, beside its lists and pages
-      (app-claim! buf "spotify" 'aux)
+      ;; a tab of the app: it takes the place of the section on screen
+      (app-claim! buf "spotify" 'list)
       (spotify--now-draw!)
       (unless (equal? from buf)
-        ;; from outside the app it opens in the app's group, beside its home
         (unless (buffer-in-group? from (app-group "Spotify"))
-          (frame-tab! (app-group "Spotify"))
-          (set! from (spotify--section-ready! 'home)))
-        (display-buffer-detail! buf from))
+          (frame-tab! (app-group "Spotify")))
+        (let ((pane (and (not (member from (spotify--list-buffers))) (spotify--section-pane))))
+          (if pane
+              (with-frame-windows (lambda () (window-set-buffer! pane buf)))
+              (switch-to-buffer! buf))))
       (spotify-now-refresh! (lambda (now) (spotify--context!))))))
 
 (define-command "spotify-now-reload" "Read the album, the artist and the news of what plays again"
@@ -1499,7 +1547,7 @@
         (list "." "spotify-next") (list "," "spotify-previous")
         (list "l" "spotify-like") (list "i" "spotify-now-playing")
         (list "=" "spotify-volume-up") (list "-" "spotify-volume-down")
-        (list "/" "spotify-search") (list "N" "spotify-now-page")
+        (list "/" "spotify-search") (list "N" "spotify-now-page") (list "M-0" "spotify-now-page")
         (list "S" "spotify-shuffle") (list "R" "spotify-repeat")
           (list "<down>" "list-next") (list "<up>" "list-prev")))
 
@@ -1517,7 +1565,11 @@
   (define-key (mode-keymap "spotify-now-mode") "g" "spotify-now-reload")
   (define-key (mode-keymap "spotify-now-mode") "q" "quit-window")
   (define-key (mode-keymap "spotify-now-mode") "RET" "spotify-now-act")
-  (define-key (mode-keymap "spotify-now-mode") "p" "spotify-play-pause"))
+  (define-key (mode-keymap "spotify-now-mode") "p" "spotify-play-pause")
+  (for-each (lambda (page)
+              (define-key (mode-keymap "spotify-now-mode") (string-append "M-" (plist-get page 'key))
+                (string-append "spotify-" (symbol->string (plist-get page 'id)))))
+            (site-app-pages (site-app-spec 'spotify))))
 
 (spotify--define-app!)
 

@@ -106,6 +106,12 @@
       (equal? (plist-get tab 'query) query)
       (equal? (plist-get tab 'active) "yes")))
 
+(define (site-app-lead-tabs buf)
+  ;; an app's 'lead-tabs (buf) gives tabs of its own before the sections, as
+  ;; (CLICK LABEL ACTIVE KEY); its block-click hook takes the CLICK
+  (let ((lead (plist-get (buffer-local buf 'site-app-spec) 'lead-tabs)))
+    (if lead (lead buf) '())))
+
 (define (site-app-composml-head buf head)
   ;; the site's navbar, then the section's status tabs, each a row of tabs.
   ;; An app's 'list-head (buf) puts blocks of its own above them
@@ -118,12 +124,13 @@
       (if own (own buf) '())
       (list (component 'ui/tabs
               (list 'class "sa-sections"
-                    'tabs (map (lambda (page)
-                                 (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
-                                       (plist-get page 'label)
-                                       (equal? current (plist-get page 'id))
-                                       (string-append "M-" (plist-get page 'key))))
-                               (site-app-pages spec)))))
+                    'tabs (append (site-app-lead-tabs buf)
+                                  (map (lambda (page)
+                                         (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
+                                               (plist-get page 'label)
+                                               (equal? current (plist-get page 'id))
+                                               (string-append "M-" (plist-get page 'key))))
+                                       (site-app-pages spec))))))
       ;; one row of tabs per group of filters, in the page's order
       (map (lambda (group)
              (component 'ui/tabs
@@ -231,13 +238,15 @@
   ;; the site's navbar, then the section's own status tabs when it has them
   (let* ((spec (buffer-local buf 'site-app-spec))
          (current (buffer-local buf 'site-app-page))
+         (mark (lambda (text on) (if on (string-append "[" text "]") (string-append " " text " "))))
          (nav (string-join
-                (map (lambda (page)
-                       (let ((text (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))))
-                         (if (equal? current (plist-get page 'id))
-                             (string-append "[" text "]")
-                             (string-append " " text " "))))
-                     (site-app-pages spec))
+                (append
+                  (map (lambda (tab) (mark (string-append (list-ref tab 3) " " (cadr tab)) (caddr tab)))
+                       (site-app-lead-tabs buf))
+                  (map (lambda (page)
+                         (mark (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))
+                               (equal? current (plist-get page 'id))))
+                       (site-app-pages spec)))
                 " "))
          (filters (or (buffer-local buf 'site-app-filters) '()))
          (query (buffer-local buf 'site-app-filter)))

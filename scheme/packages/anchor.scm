@@ -281,6 +281,39 @@
   (lambda () (anchor--arrow! 1)))
 (define-command "anchor-up" "Move point to the previous anchor, or up a line when there is none"
   (lambda () (anchor--arrow! -1)))
+;; Columns. A page that lays its parts out side by side hangs (column N) on
+;; an anchor's data; the others are column 1. Left and right cross to the
+;; next column the way the arrows do, landing on the same place down the
+;; page (the Nth stop of that column), else its last. On a page without
+;; columns the arrow is a character again.
+(define (anchor--column a)
+  (let ((d (anchor-data a)))
+    (or (and (pair? d) (plist-get d 'column)) 1)))
+
+(define (anchor--sideways! dir)
+  (let* ((buf (current-buffer))
+         (as (anchor-list buf))
+         (cur (anchor-at buf (buffer-point buf))))
+    (cond
+      ((not (find (lambda (a) (not (= 1 (anchor--column a)))) as))
+       (run-command (if (> dir 0) "forward-char" "backward-char")))
+      ((not cur) (message "No anchor here"))
+      (else
+       (let* ((col (anchor--column cur))
+              (cols (filter (lambda (c) (if (> dir 0) (> c col) (< c col))) (map anchor--column as))))
+         (if (null? cols)
+             (message (if (> dir 0) "No column to the right" "No column to the left"))
+             (let* ((target (fold (lambda (best c) (if (> dir 0) (min best c) (max best c))) (car cols) cols))
+                    (mine (filter (lambda (a) (= col (anchor--column a))) as))
+                    (theirs (filter (lambda (a) (= target (anchor--column a))) as))
+                    (n (let loop ((xs mine) (i 0)) (cond ((null? xs) 0) ((equal? (anchor-name (car xs)) (anchor-name cur)) i) (else (loop (cdr xs) (+ i 1))))))
+                    (a (list-ref theirs (min n (- (length theirs) 1)))))
+               (anchor--land! buf a "anchor"))))))))
+
+(define-command "anchor-right" "Move to the same place in the column to the right, or a character right on a page without columns"
+  (lambda () (anchor--sideways! 1)))
+(define-command "anchor-left" "Move to the same place in the column to the left, or a character left on a page without columns"
+  (lambda () (anchor--sideways! -1)))
 
 ;; The reading walk, M-<up> and M-<down>. An anchor always comes first,
 ;; however far: the page chose its stops. Past the last one the key pages,
@@ -412,6 +445,8 @@
     ("M-down" "anchor-read-next")
     ("M-up" "anchor-read-previous")
     ("M-g a" "anchor-jump")
+    ("<right>" "anchor-right")
+    ("<left>" "anchor-left")
     ("f" "anchor-fold")
     ;; zoom the part at point; content-scale owns the commands
     ("-" "anchor-scale-decrease")

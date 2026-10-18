@@ -365,6 +365,8 @@
                               "100% { opacity: 0; transform: scale(1.08); } }\n")))
            (list 2 3 4 5 6 7 8)))))
 
+(define-style! 'spotify-montage (spotify--montage-css))
+
 (defcomponent 'spotify/artist-card
   "Who the artist is: their photo as a banner with the name, the verified mark and the monthly listeners over it, then the bio in paragraphs. IMAGES, when it holds more than one photo, makes the banner a montage: each photo drifts in and dissolves into the next."
   '((name string required) (image string optional) (images list optional) (listeners string optional) (verified? boolean optional) (bio string optional))
@@ -389,13 +391,9 @@
   '(month "Nov" day "1" city "Santiago" venue "Movistar Arena" when "Sun 7:00 PM")
   (lambda (p)
     (list 'tag "div" 'class "sp-gig" 'click (component--get p 'click "")
-          'children (list (list 'tag "span" 'class "sp-gig-date"
-                                'children (list (spotify--text "sp-gig-month" (component--get p 'month ""))
-                                                (spotify--text "sp-gig-day" (component--get p 'day ""))))
-                          (list 'tag "div" 'class "sp-main"
+          'children (list (list 'tag "div" 'class "sp-main"
                                 'children (list (spotify--text "sp-name" (component--get p 'city ""))
-                                                (spotify--text "sp-by" (string-append (component--get p 'venue "")
-                                                                                       (let ((w (component--get p 'when ""))) (if (equal? w "") "" (string-append "  ·  " w)))))))))))
+                                                (spotify--text "sp-by" (component--get p 'venue ""))))))))
 
 (defcomponent 'spotify/person
   "One person on the record: their photo, else their initials, their name and what they did. CREW? draws the card small, for who made the record rather than played on it. CLICK opens their page."
@@ -515,6 +513,12 @@
 .sp-np-empty { color: var(--dim-fg); font-family: var(--font-sans); padding: 6px 10px; }
 .sp-now-open { cursor: pointer; }
 .sp-artist-banner { position: relative; overflow: hidden; }
+/* an artist's page: the tour runs down a sidebar beside the news */
+.c-page:has(> .sp-part-on-tour) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 30%); grid-auto-flow: row dense; column-gap: 18px; align-items: start; }
+.c-page:has(> .sp-part-on-tour) > * { grid-column: 1 / -1; }
+.c-page:has(> .sp-part-on-tour) > .sp-part-news { grid-column: 1; }
+.c-page:has(> .sp-part-on-tour) > .sp-part-on-tour { grid-column: 2; position: sticky; top: 0; }
+.sp-part-on-tour .sp-gig { padding: 6px 4px; gap: 10px; }
 .sp-artist-banner > :not(.sp-montage) { position: relative; z-index: 1; }
 .sp-montage { position: absolute; inset: 0; z-index: 0; opacity: 0; background-size: cover; background-position: center 25%; will-change: opacity, transform; }
 .sp-montage::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.65)); }
@@ -710,6 +714,65 @@
                           (spotify--artist-blocks name artist))))))
     (car (spotify--claim-all b page))))
 
+(define *spotify-photos* '())   ; (NAME URLS): the artist's photos beyond Spotify's own
+;; one artist's photos at a time: Wikimedia refuses a burst, and every
+;; artist tab drawing at once is one
+(define *spotify-photos-busy* #f)
+;; a refusal waits a minute before the next artist is asked
+(define *spotify-photos-after* -1000000000000000)
+
+(define (spotify--photos! name)
+  ;; the artist's photos for the montage: their Wikipedia page's, then their
+  ;; Commons category's. The page is found by a search, kept only when its
+  ;; title carries the artist's last name, so a namesake lends no faces
+  (when (and (not (equal? name "")) (not *spotify-photos-busy*) (> (monotonic-ms) *spotify-photos-after*)
+             (spotify--ask! (string-append "photos:" name)))
+    (set! *spotify-photos-busy* #t)
+    (task-run!
+      (lambda ()
+        (let* ((ua (list 'headers (list (list "User-Agent" "compos-spotify/1.0 (svs@svs.io)"))))
+               (found (http-get-json (string-append "https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srlimit=1&srsearch="
+                                                    (url-encode (string-append name " musician")))
+                                     ua))
+               (hits (and found (plist-get (plist-get found 'query) 'search)))
+               (title (and (pair? hits) (plist-get (car hits) 'title)))
+               (title (and (string? title) (spotify--has? title (car (reverse (string-split name " ")))) title))
+               (pages (lambda (j) (let loop ((x (let ((p (and j (plist-get (plist-get j 'query) 'pages)))) (if (pair? p) p '()))) (acc '()))
+                                    (if (null? x) (reverse acc) (loop (cddr x) (cons (cadr x) acc))))))
+               ;; photographs, big enough for the banner: no logos, maps or covers
+               (photos (lambda (j)
+                         (filter string?
+                           (map (lambda (p) (let* ((ii (plist-get p 'imageinfo)) (i (and (pair? ii) (car ii))))
+                                              (and i (equal? (plist-get i 'mime) "image/jpeg") (> (or (plist-get i 'width) 0) 500)
+                                                   (plist-get i 'thumburl))))
+                                (pages j)))))
+               (ask (lambda (host query) (http-get-json (string-append "https://" host "/w/api.php?action=query&format=json&redirects=1&prop=imageinfo&iiprop=url%7Csize%7Cmime&iiurlwidth=1280&" query) ua))))
+          ;; no answer to the search is a refusal, asked again later; no page is no photos
+          (cond ((not found) 'refused)
+                ((not title) '())
+                (else
+              (fold (lambda (acc u) (if (member u acc) acc (append acc (list u)))) '()
+                    (append (photos (ask "en.wikipedia.org" (string-append "generator=images&gimlimit=30&titles=" (url-encode title))))
+                            (photos (ask "commons.wikimedia.org" (string-append "generator=categorymembers&gcmtype=file&gcmlimit=20&gcmtitle="
+                                                                                (url-encode (string-append "Category:" title)))))))))))
+      (lambda (ok urls)
+        (set! *spotify-photos-busy* #f)
+        (if (and ok (or (null? urls) (pair? urls)))
+            (begin
+              (set! *spotify-photos* (cons (list name urls) *spotify-photos*))
+              (spotify--redraw-artist-tabs!))
+            (begin
+              (set! *spotify-photos-after* (+ (monotonic-ms) 60000))
+              (set! *spotify-asked* (spotify--without (string-append "photos:" name) *spotify-asked*)))))
+      30000)))
+
+(define (spotify--artist-images name artist)
+  ;; Spotify's photo first, then the rest; asking for the rest the first time
+  (let ((main (or (and artist (plist-get artist 'image)) ""))
+        (more (spotify--cached *spotify-photos* name)))
+    (unless more (spotify--photos! name))
+    (append (if (equal? main "") '() (list main)) (or more '()))))
+
 (define (spotify--artist-blocks name artist)
   (let* ((brief (spotify--cached *spotify-briefs* name))
          (news (spotify--cached *spotify-news* name))
@@ -718,7 +781,8 @@
     (append
       (if artist
           (list (spotify--lined (component 'spotify/artist-card
-                  (list 'name name 'image (or (plist-get artist 'image) "") 'listeners (or (plist-get artist 'listeners) "")
+                  (list 'name name 'image (or (plist-get artist 'image) "") 'images (spotify--artist-images name artist)
+                        'listeners (or (plist-get artist 'listeners) "")
                         'verified? (equal? (plist-get artist 'verified) "yes")
                         'bio (if (string? brief) brief (or (plist-get artist 'bio) ""))))
                   name))
@@ -933,9 +997,11 @@
 (define (spotify--para text) (list 'tag "p" 'class "sp-bio" 'text text 'sp-line text))
 
 (define (spotify--part title blocks)
-  ;; a part of the page: its heading and what is under it, one anchor
+  ;; a part of the page: its heading and what is under it, one anchor. Its
+  ;; class names it too (sp-part-on-tour), for a page that lays parts out
   (if (null? blocks) '()
-      (list (spotify--lined (component 'ui/group (list 'class "sp-part" 'body (cons (spotify--section-title title) blocks)))
+      (list (spotify--lined (component 'ui/group (list 'class (string-append "sp-part sp-part-" (re-replace-all "[^a-z0-9]+" (string-downcase title) "-"))
+                                                         'body (cons (spotify--section-title title) blocks)))
                             title))))
 
 (define *spotify-review-skip*
@@ -2075,7 +2141,8 @@
                                 tour)))
                  (list (spotify--section-title "About")
                        (spotify--lined (component 'spotify/artist-card
-                         (list 'name name 'image (or (plist-get artist 'image) "") 'listeners (or (plist-get artist 'listeners) "")
+                         (list 'name name 'image (or (plist-get artist 'image) "") 'images (spotify--artist-images name artist)
+                               'listeners (or (plist-get artist 'listeners) "")
                                ;; the brief says what the bio says: the card keeps the bio only until a brief is written
                                'verified? (equal? (plist-get artist 'verified) "yes")
                                'bio (if (spotify--cached *spotify-briefs* name) "" (or (plist-get artist 'bio) ""))))
@@ -2145,10 +2212,13 @@
                                        (kids (map (lambda (k)
                                                ;; a line that opens something is a stop of its own
                                                (let ((c (claim k)) (click (plist-get k 'click)))
-                                                 (if (and (string? click) (not (equal? click ""))) c (plist-put c 'anchor-name #f))))
+                                                 (let ((c (if (and (string? click) (not (equal? click ""))) c (plist-put c 'anchor-name #f))))
+                                                   ;; the tour is the page's sidebar: a second column to cross to
+                                                   (if (equal? (plist-get block 'sp-line) "On tour") (plist-put c 'anchor-data '(column 2)) c))))
                                                   (or (plist-get block 'children) '()))))
-                                  (site-app-claim (plist-put block 'children kids) first (max first (b 'count #f #f))
-                                                  (plist-get block 'sp-line))))
+                                  (plist-put (site-app-claim (plist-put block 'children kids) first (max first (b 'count #f #f))
+                                                             (plist-get block 'sp-line))
+                             'anchor-data (if (equal? (plist-get block 'sp-line) "On tour") '(column 2) #f))))
                                (else
                                 ;; a shelf: each release is a part of its own
                                 (let* ((first (+ 1 (b 'count #f #f)))

@@ -464,7 +464,7 @@
           'children
           (list (component 'amazon/hero
                   (list 'title (or (plist-get row 'title) "")
-                        'image (or (amazon--photo-url (plist-get row 'image)) "")
+                        'image (amazon--image-file (amazon--photo-url (plist-get row 'image)))
                         'brand (or (and data (amazon--brand data)) "")
                         'price (or (plist-get row 'price) "")
                         'mrp (or (plist-get row 'mrp) "")
@@ -1426,11 +1426,38 @@
 (domain! 'web)
 (effects! '(read write external))
 
+(define *amazon-image-dir* (string-append (compos-home) "/amazon-images/"))
+(define *amazon-image-wanted* '())
+
+(define (amazon--image-file url)
+  ;; the photo's copy on disk, or "" while it is read; asking starts the read
+  (if (and (string? url) (> (string-length url) 0))
+      (let ((path (string-append *amazon-image-dir* (content-hash url) ".jpg")))
+        (if (file-exists? path)
+            path
+            (begin (amazon--image-fetch! url path) "")))
+      ""))
+
+(define (amazon--image-fetch! url path)
+  (unless (member url *amazon-image-wanted*)
+    (set! *amazon-image-wanted* (cons url *amazon-image-wanted*))
+    (task-run! (lambda () (make-directory! *amazon-image-dir*) (http-download! url path))
+      (lambda (ok arrived?)
+        (set! *amazon-image-wanted* (filter (lambda (u) (not (equal? u url))) *amazon-image-wanted*))
+        ;; a page of photos lands together, so it redraws once
+        (when (and ok arrived?) (debounce! 'amazon-images 150 amazon--images-arrived! #f)))
+      20000)))
+
+(define (amazon--images-arrived! ignored)
+  (when (buffer-exists? *amazon-buffer*) (list-refresh! *amazon-buffer*))
+  (for-each amazon-detail-refresh!
+            (filter (lambda (b) (buffer-derived-mode? b "amazon-detail-mode")) (buffer-list))))
+
 (define (amazon--card buf row)
   (let ((asin (plist-get row 'asin)))
     (component 'amazon/product
       (list 'title (or (plist-get row 'title) "")
-            'image (or (plist-get row 'image) "")
+            'image (amazon--image-file (plist-get row 'image))
             'price (or (plist-get row 'price) "")
             'mrp (or (plist-get row 'mrp) "")
             'rating (amazon--stars (plist-get row 'rating))

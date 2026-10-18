@@ -332,9 +332,42 @@
                                   (list 'class "sp-np-controls"
                                         'actions (spotify--controls p #t)))))))))))
 
+(define spotify--montage-seconds 7)
+
+(define (spotify--montage images)
+  ;; the banner's layers, one a photo: each fades in on its turn of the
+  ;; cycle as the one before fades out. One photo is the banner alone
+  (let ((n (min 8 (length images))))
+    (if (< n 2) '()
+        (let loop ((is (list-head images n)) (i 0) (acc '()))
+          (if (null? is) (reverse acc)
+              (loop (cdr is) (+ i 1)
+                    (cons (list 'tag "div" 'class "sp-montage"
+                                'attrs (list (list "style" (string-append "background-image:url('" (car is) "');"
+                                                                            "animation:sp-fade-" (number->string n) " "
+                                                                            (number->string (* n spotify--montage-seconds)) "s linear infinite;"
+                                                                            "animation-delay:" (number->string (* i spotify--montage-seconds)) "s"))))
+                          acc)))))))
+
+(define (spotify--montage-css)
+  ;; a cycle for each count of photos: a photo's turn is its share of the
+  ;; cycle, and its fade in takes the first third of the turn, while the one
+  ;; before fades out
+  (let ((pct (lambda (tenths) (string-append (number->string (quotient tenths 10)) "." (number->string (remainder tenths 10)) "%"))))
+    (apply string-append
+      (map (lambda (n)
+             (let* ((turn (quotient 1000 n)) (fade (quotient turn 3)))
+               (string-append "@keyframes sp-fade-" (number->string n) " { "
+                              "0% { opacity: 0; transform: scale(1); } "
+                              (pct fade) " { opacity: 1; } "
+                              (pct turn) " { opacity: 1; } "
+                              (pct (+ turn fade)) " { opacity: 0; transform: scale(1.08); } "
+                              "100% { opacity: 0; transform: scale(1.08); } }\n")))
+           (list 2 3 4 5 6 7 8)))))
+
 (defcomponent 'spotify/artist-card
-  "Who the artist is: their photo as a banner with the name, the verified mark and the monthly listeners over it, then the bio in paragraphs."
-  '((name string required) (image string optional) (listeners string optional) (verified? boolean optional) (bio string optional))
+  "Who the artist is: their photo as a banner with the name, the verified mark and the monthly listeners over it, then the bio in paragraphs. IMAGES, when it holds more than one photo, makes the banner a montage: each photo drifts in and dissolves into the next."
+  '((name string required) (image string optional) (images list optional) (listeners string optional) (verified? boolean optional) (bio string optional))
   '(name "Opeth" listeners "1,022,069 monthly listeners" verified? #t bio "Swedish progressive titans.")
   (lambda (p)
     (let ((image (component--get p 'image ""))
@@ -344,7 +377,8 @@
             'children
             (cons (list 'tag "div" 'class "sp-artist-banner"
                         'attrs (if (equal? image "") '() (list (list "style" (string-append "background-image:url('" image "')"))))
-                        'children (append (if (component--get p 'verified? #f) (list (spotify--text "sp-verified" "✔ Verified artist")) '())
+                        'children (append (spotify--montage (component--get p 'images '()))
+                                          (if (component--get p 'verified? #f) (list (spotify--text "sp-verified" "✔ Verified artist")) '())
                                           (list (spotify--text "sp-artist-name" (component--get p 'name ""))
                                                 (spotify--text "sp-artist-listeners" (component--get p 'listeners "")))))
                   (map (lambda (s) (list 'tag "p" 'class "sp-bio" 'text (string-trim s))) paras))))))
@@ -480,6 +514,10 @@
 .sp-news-snippet { color: var(--dim-fg); font-size: .9em; line-height: 1.5; }
 .sp-np-empty { color: var(--dim-fg); font-family: var(--font-sans); padding: 6px 10px; }
 .sp-now-open { cursor: pointer; }
+.sp-artist-banner { position: relative; overflow: hidden; }
+.sp-artist-banner > :not(.sp-montage) { position: relative; z-index: 1; }
+.sp-montage { position: absolute; inset: 0; z-index: 0; opacity: 0; background-size: cover; background-position: center 25%; will-change: opacity, transform; }
+.sp-montage::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.65)); }
 .sp-part:has(> .sp-person) { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; align-items: start; }
 .sp-part:has(> .sp-person) > :not(.sp-person) { grid-column: 1 / -1; }
 .sp-part:has(> .sp-person-crew) { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 14px; }
@@ -584,6 +622,23 @@
     (lambda ()
       (find (lambda (w) (member (window-buffer w) (spotify--list-buffers)))
             (map car (window-list))))))
+
+;; The app is two panes: a section, and the page beside it. Whatever opens
+;; from either takes the page pane; nothing opens a third
+(define (spotify--section-list)
+  ;; the section on screen, else Home
+  (let ((pane (spotify--section-pane)))
+    (or (and pane (with-frame-windows (lambda () (window-buffer pane))))
+        (spotify--section-ready! 'home))))
+
+(define (spotify--page-pane from)
+  ;; the window showing FROM when it is one of the app's pages, else the one
+  ;; showing any of them
+  (with-frame-windows
+    (lambda ()
+      (let ((ws (map car (window-list))))
+        (or (find (lambda (w) (equal? (window-buffer w) from)) (if (spotify--detail? from) ws '()))
+            (find (lambda (w) (spotify--detail? (window-buffer w))) ws))))))
 
 (define (spotify--now-up!)
   ;; music that starts turns the section on screen to Now Playing; the focus
@@ -1069,8 +1124,9 @@
         (spotify--playing-section! #f)))))
 
 (define (spotify--playing-section! focus?)
-  ;; the section pane turns to Now Playing, read again when the music moved
-  ;; to another list; FOCUS? takes the focus there
+  ;; the section pane turns to Now Playing and the pane beside it to the page
+  ;; of what plays; the list is read again when the music moved to another
+  ;; list, and its fill brings the page. FOCUS? takes the focus there
   (let* ((path (spotify--now-path))
          (buf (spotify--section-ready! 'playing))
          (pane (spotify--section-pane))
@@ -1082,7 +1138,7 @@
                  (pane (with-frame-windows (lambda () (window-set-buffer! pane buf)))))
            (if (or moved (null? (site-app-rows buf)))
                (site-app-read-page! 'spotify (site-app-page (site-app-spec 'spotify) 'playing))
-               (spotify--goto-playing! buf))))))
+               (or (spotify--show-playing-row! buf) (spotify--goto-playing! buf)))))))
 
 (define (spotify--window-of buf)
   (with-frame-windows
@@ -1295,19 +1351,27 @@
 (define *spotify-ticking* #f)
 
 (define (spotify--shown?)
+  ;; a section or one of its pages is on screen
   (let ((shown (get-visible-buffers)))
-    (pair? (filter (lambda (b) (member b shown)) (cons "*spotify-now*" (spotify--list-buffers))))))
+    (pair? (filter (lambda (b) (or (member b (spotify--list-buffers)) (spotify--detail? b))) shown))))
 
 (define (spotify--tick! ignored)
-  ;; off until the read answers: a player that never does stops the ticks,
-  ;; and the next draw of the bar starts them again
+  ;; a shown app reads the player; a hidden one only looks every two seconds
+  ;; whether it shows again, so coming back finds the music where it is. A
+  ;; player that never answers is asked again by the watchdog
   (set! *spotify-ticking* #f)
-  (when (spotify--shown?)
-    (spotify-now-refresh!
-      (lambda (now)
-        (unless *spotify-ticking*
-          (set! *spotify-ticking* #t)
-          (debounce! 'spotify-now (* 1000 spotify-now-seconds) spotify--tick! #f))))))
+  (if (spotify--shown?)
+      (begin
+        (debounce! 'spotify-now-watchdog (* 3000 spotify-now-seconds)
+          (lambda (ignored) (unless *spotify-ticking* (spotify--ticker-start!))) #f)
+        (spotify-now-refresh!
+          (lambda (now)
+            (unless *spotify-ticking*
+              (set! *spotify-ticking* #t)
+              (debounce! 'spotify-now (* 1000 spotify-now-seconds) spotify--tick! #f)))))
+      (begin
+        (set! *spotify-ticking* #t)
+        (debounce! 'spotify-now 2000 spotify--tick! #f))))
 
 (define (spotify--ticker-start!)
   (unless *spotify-ticking*
@@ -2049,11 +2113,18 @@
     (and (string? c) (string-prefix? "spotify-url:" c) (substring c 12 (string-length c)))))
 
 (define (spotify--open-url! url from)
-  ;; a review or a story reads in the editor beside FROM; Spotify's own
-  ;; pages (a concert) open in its tab
+  ;; a review or a story reads in the page pane, where FROM was, so the app
+  ;; stays two panes; Spotify's own pages (a concert) open in its tab
   (if (spotify--has? url "open.spotify.com")
       (tab-open url)
-      (display-buffer-detail! (browse url) from)))
+      (let ((page (browse url))
+            (pane (spotify--page-pane from)))
+        (if pane
+            (begin
+              ;; the list's later pages land here again
+              (buffer-set-local! page 'detail-of (buffer-local from 'detail-of))
+              (with-frame-windows (lambda () (window-set-buffer! pane page))))
+            (display-buffer-detail! page from)))))
 
 (define (spotify--claim-all b blocks)
   ;; BLOCKS on B's lines, one line a part, as (CLAIMED CLICKS): CLICKS is
@@ -2124,7 +2195,7 @@
             ((string-prefix? "spotify-open:" id)
              (let* ((p (split (after "spotify-open:"))) (href (car p)))
                (unless (equal? href "")
-                 (site-app-show-detail! (spotify--section-ready! 'home)
+                 (site-app-show-detail! (spotify--section-list)
                    (list 'key href 'href href 'name (if (equal? (cadr p) "") href (cadr p)))))
                #t))
             ((string-prefix? "spotify-play:" id)

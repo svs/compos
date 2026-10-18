@@ -273,11 +273,23 @@
 
 (define (site-app-rows buf) (or (buffer-local buf 'site-app-rows) '()))
 
+;; A site-app's buffers are one app, named for it: a page is its detail,
+;; a section its list. app-layout! lays them out by that. Answers the name.
+(define (site-app-claim! buf &optional name)
+  (let ((nm (or name (buffer-local buf 'site-app-name)
+                (let ((sp (buffer-local buf 'site-app-spec))) (and sp (plist-get sp 'name))))))
+    (when (and nm (boundp 'app-claim!))
+      (app-claim! buf (if (symbol? nm) (symbol->string nm) nm)
+                  (if (buffer-local buf 'site-app-row) 'detail 'list)))
+    nm))
+
+;; buffers open before apps were claimed take their claim on load
+(for-each (lambda (b) (when (buffer-exists? b) (site-app-claim! b))) (buffer-list))
+
 (define (site-app-join-group! buf &optional name)
   ;; an app whose spec says 'own-group lives in a group of its own, named for
   ;; it; any other joins the group of the frame it opened in
-  (let* ((nm (or name (buffer-local buf 'site-app-name)
-                 (let ((sp (buffer-local buf 'site-app-spec))) (and sp (plist-get sp 'name)))))
+  (let* ((nm (site-app-claim! buf name))
          (spec (and nm (site-app-spec nm))))
     (if (and spec (plist-get spec 'own-group))
         (app-join-group! buf (or (plist-get spec 'title) (symbol->string nm)))

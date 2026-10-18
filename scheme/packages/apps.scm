@@ -63,14 +63,6 @@
 
 (effects! '(write display))
 
-;; Tile what the app has on screen. The set is the app's WINDOWS, not its
-;; buffers: an app that has walked twelve rows holds twelve detail
-;; buffers and wants exactly one of them tiled. Laying out app-buffers
-;; would open eleven panes nobody asked for, so a layout reads the frame.
-;;
-;; EXTRA names panes that are not the app's — the group's chat is the
-;; usual one — and they go first, so the reader's own column stays on the
-;; left. Answers the panes it tiled, or #f when the app has no window.
 ;; An app with a home of its own: a group named for it, made the first time.
 ;; Its buffers always belong there, whatever other group you also put them
 ;; in, and calling the app takes you there.
@@ -87,15 +79,99 @@
 (public! 'app-group "(app-group TITLE) — the id of the app's own group, named TITLE; made the first time")
 (public! 'app-join-group! "(app-join-group! BUF TITLE) — BUF joins the app's own group; answers its id")
 
-(define (app-layout! id &optional extra)
-  (let* ((extras (filter buffer-known? (or extra '())))
-         (mine (filter (lambda (buf) (not (member buf extras)))
-                       (map cadr (or (app-windows id) '()))))
-         (panes (append extras mine)))
-    (and (pair? panes)
-         (begin (tile-default-windows! panes) panes))))
+;; An app's buffers fall in three roles: its index (the home and its
+;; lists), its pages, and the rest, like a player. Each role takes one
+;; window; its other buffers wait in that window's history.
+(define (app-role-class buf)
+  (let* ((r (app-role buf))
+         (r (if (string? r) (string->symbol r) r)))
+    (cond ((memq r '(home list)) 'index)
+          ((eq? r 'detail) 'detail)
+          (else 'other))))
 
-(public! 'app-layout! "(app-layout! ID &optional EXTRA) — tile the app's on-screen panes, the EXTRA list first; answers the panes")
+;; The mode a role's pane holds. A page's kind is its own mode, derived
+;; from the app's detail mode, so the pane holds that family.
+(define (app-class-mode buf)
+  (if (eq? (app-role-class buf) 'detail)
+      (or (buffer-local buf 'detail-family) (buffer-local buf 'mode-name))
+      (buffer-local buf 'mode-name)))
+
+;; the window that holds BUF, on screen or in the ring
+(define (app-window-of buf)
+  (or (window-showing buf)
+      (let ((row (find (lambda (r) (equal? (cadr r) buf)) (window-hidden-list))))
+        (and row (car row)))))
+
+;; Lay the app out by role: one window for its index, one for its pages,
+;; one for the rest, in that order. Each shows the buffer of its role you
+;; see now, else the last one used. EXTRA names panes that are not the
+;; app's, the group's chat the usual one; they go first. Every other pane
+;; on screen stays where it is, and the app's windows join after them; the
+;; layout fits them all. Answers the panes it tiled, or #f when the app has
+;; nothing open in this group.
+(define (app-layout! id &optional extra)
+  (let* ((group (frame-group))
+         (extras (filter buffer-known? (or extra '())))
+         (mine (filter (lambda (b)
+                         (and (equal? (app-id b) id)
+                              (not (member b extras))
+                              (or (not group) (buffer-in-group? b group))))
+                       (buffer-list-mru)))
+         (shown (map cadr (window-list)))
+         (classes (filter (lambda (c) (pair? (cdr c)))
+                          (map (lambda (class)
+                                 (cons class (filter (lambda (b) (eq? (app-role-class b) class)) mine)))
+                               '(index detail other))))
+         ;; a role shows the one of its buffers you see now, else its last used:
+         ;; (TOP CLASS) per role, map and for-each taking one list here
+         (rows (map (lambda (c) (list (or (find (lambda (b) (member b shown)) (cdr c)) (cadr c)) c))
+                    classes))
+         (tops (map car rows))
+         ;; what is on screen stays there, and the app joins it
+         (others (let loop ((ws (display--work-windows)) (acc '()))
+                   (if (null? ws)
+                       (reverse acc)
+                       (let ((b (window-buffer (car ws))))
+                         (loop (cdr ws)
+                               (if (or (not b) (equal? (app-id b) id) (member b extras) (member b acc))
+                                   acc
+                                   (cons b acc)))))))
+         (panes (append extras others tops)))
+    (and (pair? tops)
+         (begin
+           (tile-default-windows! panes)
+           (with-layout-suppressed
+             (lambda ()
+               (for-each
+                 (lambda (row)
+                   (let* ((top (car row))
+                          (theirs (cdr (cadr row)))
+                          (win (app-window-of top)))
+                     (when win
+                       (for-each
+                         (lambda (w)
+                           (unless (equal? w win)
+                             (set-window-prev-buffers! w
+                               (filter (lambda (b) (not (member b theirs))) (window-prev-buffers w)))))
+                         (append (display--work-windows) (map car (window-hidden-list))))
+                       (set-window-prev-buffers! win
+                         (append (filter (lambda (b) (not (equal? b top))) theirs)
+                                 (filter (lambda (b) (not (member b theirs))) (window-prev-buffers win))))
+                       ;; the pane keeps its role: the next page of any list opens there
+                       (window-mode-preference! win (app-class-mode top)))))
+                 rows)))
+           panes))))
+
+(public! 'app-layout! "(app-layout! ID &optional EXTRA) — one window per role of app ID: its index, its pages, the rest; each gathers its role's buffers. EXTRA panes go first; answers the panes")
+(public! 'app-role-class "(app-role-class BUF) — BUF's role in app-layout!: index, detail or other")
+
+(define-command "app-layout"
+  "Lay this app out: its lists in one window, its pages in another, the rest in a third"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (cond ((not id) (message "This buffer belongs to no app"))
+            ((not (app-layout! id)) (message "Nothing of this app to lay out"))))))
+(catalog-meta! 'command "app-layout" 'domain 'windows 'effects '(write display))
 
 (effects! '(read))
 

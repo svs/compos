@@ -145,6 +145,19 @@
   (let ((fa (buffer-local a 'detail-family)))
     (and fa (equal? fa (buffer-local b 'detail-family)))))
 
+;; A pane that holds a mode (mode-consolidate, or a chosen preference) that
+;; NAME is not of. A page never covers a pane another mode holds.
+(define (detail--foreign-pane? win name)
+  (let ((held (window-mode-preference win)))
+    (and held (not (window-prefers-buffer? win name)))))
+
+;; some other work pane holds another mode: the display chain could land
+;; on it, so the detail picks its window itself
+(define (detail--held-elsewhere? name me)
+  (and (find (lambda (w) (and (not (equal? w me)) (detail--foreign-pane? w name)))
+             (display--work-windows))
+       #t))
+
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
          (me (active-window))
@@ -201,6 +214,23 @@
                    (if nw
                        (window-display! (lambda () (display-buffer-in-window! nw name)))
                        (display-buffer name '(category detail inhibit-same-window #t)))))
+                ;; a pane that holds another mode is never covered: the layout
+                ;; grows a pane while it has room, else the page goes on a
+                ;; free pane, else on the app's own stack, over the list
+                ((and room (detail--held-elsewhere? name me))
+                 (let* ((ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me))
+                        (nw (split-window-in! ow 'h)))
+                   (if nw
+                       (window-display! (lambda () (display-buffer-in-window! nw name)))
+                       (window-display! (lambda () (display-buffer-in-window! ow name))))))
+                ((detail--held-elsewhere? name me)
+                 (let ((free (find (lambda (w)
+                                     (and (not (equal? w me))
+                                          (not (equal? (window-buffer w) o))
+                                          (not (detail--foreign-pane? w name))))
+                                   (display--work-windows)))
+                       (ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me)))
+                   (window-display! (lambda () (display-buffer-in-window! (or free ow) name)))))
                 (else
                   (or (display-buffer name '(category detail inhibit-same-window #t))
                       ;; nowhere to go: one window, or a target layout that

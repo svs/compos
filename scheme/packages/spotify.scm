@@ -903,10 +903,22 @@
 ;;; --- commands -----------------------------------------------------------------
 
 ;;;###autoload
-(define-command "spotify" "Open Spotify as an app: Home, Liked Songs, Playlists and Search"
+(define-command "spotify" "Open Spotify as an app: Home, Liked Songs, Playlists and Search, laid out by role"
   (lambda ()
-    (site-app-open! 'spotify)
-    (spotify-now-refresh!)))
+    ;; Home is made ready, not shown where you stand: the app's windows join
+    ;; the ones on screen, its lists, its pages and its player each in its
+    ;; own, and the layout fits them. Every call brings that back.
+    (let ((spec (site-app-spec 'spotify)))
+      (when (plist-get spec 'own-group)
+        (frame-tab! (app-group (or (plist-get spec 'title) "Spotify"))))
+      (let ((home (spotify--section-ready! 'home)))
+        (when (null? (site-app-rows home))
+          (site-app-find-tab! 'spotify
+            (lambda (tab) (site-app-read-page! 'spotify (site-app-page spec 'home)))))
+        (app-layout! "spotify")
+        (let ((win (app-window-of home)))
+          (when (and win (window-buffer win)) (select-window! win)))
+        (spotify-now-refresh!)))))
 
 (define-command "spotify-play" "Play the row, track or page at point in your Spotify tab"
   (lambda ()
@@ -984,6 +996,8 @@
 (effects! '(write external))
 
 (define *spotify-now-buffer* "*spotify-now*")
+(when (and (boundp 'app-claim!) (buffer-exists? *spotify-now-buffer*))
+  (app-claim! *spotify-now-buffer* "spotify" 'aux))
 (define *spotify-albums* '())    ; (HREF . what the album page says)
 (define *spotify-artists* '())   ; (HREF . what the artist page says)
 (define *spotify-news* '())      ; (ARTIST . stories)
@@ -1312,6 +1326,8 @@
         (buffer-create buf)
         (with-current-buffer buf (lambda () (set-mode! "spotify-now-mode"))))
       (app-join-group! buf "Spotify")
+      ;; the player is part of the app, beside its lists and pages
+      (app-claim! buf "spotify" 'aux)
       (spotify--now-draw!)
       (unless (equal? from buf)
         ;; from outside the app it opens in the app's group, beside its home

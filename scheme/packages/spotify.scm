@@ -772,6 +772,67 @@
                 (spotify--liner-put! key (list 'allmusic-done #t))))))
     60000))
 
+(define (spotify--row-now row)
+  ;; a row's track as the Now Playing page's plist
+  (let ((links (assoc (or (site-app-field row 'href) "") *spotify-track-links*)))
+    (list 'title (or (site-app-field row 'name) "") 'artists (or (site-app-field row 'artists) "")
+          'art (spotify--row-cover row) 'duration (or (site-app-field row 'duration) "")
+          'albumHref (if links (cadr links) "") 'artistHref (if links (caddr links) ""))))
+
+(define (spotify--para text) (list 'tag "p" 'class "sp-bio" 'text text 'sp-line text))
+
+(define (spotify--liner-blocks album liner)
+  (let ((review (plist-get liner 'review))
+        (people (or (plist-get liner 'personnel) '()))
+        (facts (filter (lambda (s) (and (string? s) (not (equal? s ""))))
+                       (list (plist-get liner 'label) (plist-get liner 'date) (plist-get liner 'country) (plist-get liner 'genre))))
+        (sources (filter string? (list (plist-get liner 'allmusic) (plist-get liner 'musicbrainz) (plist-get liner 'wiki-url))))
+        (stars (spotify--stars (plist-get liner 'rating))))
+    (append
+      (if (null? facts) '() (list (spotify--para (string-join facts " · "))))
+      (list (spotify--section-title (if (equal? stars "") "Review" (string-append "Review  " stars))))
+      (cond ((string? review) (map spotify--para (filter (lambda (s) (not (equal? (string-trim s) ""))) (string-split review "\n"))))
+            ((not (plist-get liner 'allmusic-done)) (list (spotify--quiet "Reading AllMusic's review…")))
+            ((string? (plist-get liner 'allmusic-snippet)) (list (spotify--para (plist-get liner 'allmusic-snippet))))
+            (else (list (spotify--quiet "AllMusic has no review of this album."))))
+      (if (null? people) '()
+          (cons (spotify--section-title "Personnel")
+                (map (lambda (p) (spotify--para (string-append (car p) " — " (string-join (cadr p) ", ")))) people)))
+      (apply append
+        (map (lambda (s) (cons (spotify--section-title (if (equal? (car s) "") "Background" (car s))) (map spotify--para (cadr s))))
+             (or (plist-get liner 'wiki) '())))
+      (if (null? sources) '()
+          (list (spotify--quiet
+                  (string-append "From "
+                    (string-join (map (lambda (u) (cond ((spotify--has? u "allmusic") "AllMusic")
+                                                        ((spotify--has? u "musicbrainz") "MusicBrainz")
+                                                        (else "Wikipedia")))
+                                      sources)
+                                 ", "))))))))
+
+(define (spotify--album-draw buf b)
+  ;; the album of the track on BUF's row, as its liner notes: the cover,
+  ;; AllMusic's review, who played, the release, and the story behind it
+  (let* ((row (buffer-local buf 'site-app-row))
+         (href (or (site-app-field row 'href) ""))
+         (album (or (site-app-field row 'album) ""))
+         (artist (car (string-split (or (site-app-field row 'artists) "") ",")))
+         (key (string-append artist " | " album))
+         (liner (spotify--cached *spotify-liners* key)))
+    (when (and (not liner) (not (equal? album "")) (spotify--ask! (string-append "liner:" key)))
+      (spotify--liner! key album artist))
+    (car (spotify--claim-all b
+      (append
+        (if (string-prefix? "/track/" href)
+            (list (car (spotify--track-page (spotify--row-now row) (equal? href (spotify--now-field 'trackHref)))))
+            '())
+        (cond ((equal? album "") (list (spotify--quiet "No album for this row.")))
+              ((not (and liner (plist-get liner 'done))) (list (spotify--quiet (string-append "Reading the notes for " album "…"))))
+              (else (spotify--liner-blocks album liner))))))))
+
+(define *spotify-album-tab*
+  (list 'id "album" 'label "album" 'from '() 'draw (lambda (buf b) (spotify--album-draw buf b))))
+
 (define *spotify-artist-tab*
   (list 'id "artist" 'label "artist" 'from '() 'draw (lambda (buf b) (spotify--artist-draw buf b))))
 

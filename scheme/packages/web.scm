@@ -75,6 +75,10 @@
   "Which reading a page opens in: \"calm\" for the article alone, \"full\" for the whole document."
   'group 'web 'type 'string)
 
+(defcustom 'browse-text-scale 0
+  "Text size a page opens at, as a step on the 1.2 ladder; 0 is the normal size. A page opened from another page takes that page's size."
+  'group 'web 'type 'number)
+
 ;; The calm reading of an unknown site is Readability's guess. A site
 ;; the editor has a stylesheet for reads better and costs one process.
 ;; With this on, the first page from a new host buys that stylesheet:
@@ -2344,8 +2348,18 @@ the tabs. C-s searches to any link.")
       (let ((name (if (= n 1) (string-append base "*") (string-append base " " (number->string n) "*"))))
         (if (buffer-known? name) (loop (+ n 1)) name)))))
 
+;; A new tab reads at the size of the page it was opened from, so C-+
+;; on one article carries to the links you follow from it; any other
+;; opener gives it browse-text-scale.
+(define (web--scale-tab! name opener)
+  (let ((n (and (buffer-known? opener)
+                (equal? (buffer-local opener 'mode-name) "browse-mode")
+                (buffer-local opener 'text-scale))))
+    (text-scale-apply! name (if (number? n) n browse-text-scale))))
+
 (define (web--tab-for! url)
   (let ((group (web--tab-group!))
+        (opener (current-buffer))
         (existing (web--buffer-for url)))
     (if existing
         ;; a tab you open a second time joins the group you opened it
@@ -2358,6 +2372,7 @@ the tabs. C-s searches to any link.")
           (buffer-create name)
           (when group (buffer-add-group! name group))
           (with-current-buffer name (lambda () (set-mode! "browse-mode")))
+          (web--scale-tab! name opener)
           (web--goto-url! name url #t)
           name))))
 

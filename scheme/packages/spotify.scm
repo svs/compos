@@ -732,10 +732,10 @@
     (cond
       ((equal? active "artist")
        (let* ((links (spotify--links href))
-              (artist-href (if links (caddr links) ""))
+              (artist-href (spotify--artist-href row links))
               (artist (spotify--get 'artists artist-href))
               (name (let ((n (and artist (plist-get artist 'name))))
-                      (if (and (string? n) (not (equal? n ""))) n (car (string-split (or (site-app-field row 'artists) "") ","))))))
+                      (if (and (string? n) (not (equal? n ""))) n (spotify--row-artist row)))))
          ;; the artist's page is the artist's, whichever of their songs plays
          (list active artist-href artist (and (member artist-href *spotify-failed*) #t)
                (spotify--get 'briefs name) (spotify--get 'news name)
@@ -837,21 +837,37 @@
                (spotify--redraw-artist-tabs!))
              30000)))))))
 
+(define (spotify--row-artist row)
+  ;; the first artist a row names: its own, else the shelf it sits on ("More by X")
+  (let ((a (string-trim (car (string-split (or (site-app-field row 'artists) "") ","))))
+        (shelf (or (site-app-field row 'shelf) "")))
+    (cond ((not (equal? a "")) a)
+          ((string-prefix? "More by " shelf) (substring shelf 8 (string-length shelf)))
+          (else ""))))
+
+(define (spotify--artist-href row links)
+  ;; the artist is read once, by name: a page already read of that name stands for
+  ;; every row of theirs; only an artist not yet read asks a track whose page it is
+  (let* ((name (spotify--row-artist row))
+         (known (and (not (equal? name ""))
+                     (find (lambda (e) (equal? (plist-get (cadr e) 'name) name))
+                           (site-app-cache-entries 'spotify 'artists)))))
+    (cond (known (car known)) (links (caddr links)) (else ""))))
+
 (define (spotify--artist-draw buf b)
   ;; the artist of the track on BUF's row: their photo over the bio (the
   ;; brief once it is written), then their tours and the news
   (let* ((row (spotify--as-track buf (buffer-local buf 'site-app-row)))
          (href (or (site-app-field row 'href) ""))
          (links (spotify--links href))
-         (artist-href (if links (caddr links) ""))
+         (artist-href (spotify--artist-href row links))
          (artist (spotify--get 'artists artist-href))
          (name (let ((n (and artist (plist-get artist 'name))))
-                 (if (and (string? n) (not (equal? n ""))) n
-                     (car (string-split (or (site-app-field row 'artists) "") ",")))))
-         (page (cond ((not (string-prefix? "/track/" href)) '())
-                     ((not links)
+                 (if (and (string? n) (not (equal? n ""))) n (spotify--row-artist row))))
+         (page (cond ((and (equal? artist-href "") (string-prefix? "/track/" href))
                       (spotify--track-links! href)
                       (list (spotify--quiet "Finding the artist…")))
+                     ((equal? artist-href "") '())
                      (else
                       (when (and (not artist) (not (equal? artist-href "")) (spotify--ask! artist-href))
                         (spotify--artist-read! artist-href name))

@@ -1564,7 +1564,16 @@
           // the hook's own placement is not a scroll the reader
           // made, so it must not move the place they left
           if (this.placing) return;
-          this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+          const tail = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+          // The tail is home, as at a shell prompt: only the reader's
+          // hand leaves it. A scroll they did not make (the browser's
+          // scroll anchoring, a reflow while output streams) puts the
+          // view back on the tail instead of dropping the stick.
+          if (this.stick && !tail && Date.now() - this.handAt > 1000) {
+            if (this.follows()) this.place();
+            return;
+          }
+          this.stick = tail;
           // A modal overlay covers the hit test point. Keep the
           // place the reader left rather than dropping it.
           const anchor = this.lastVisible();
@@ -1607,7 +1616,8 @@
         // A scroll event is an effect and cannot tell the
         // reader's hand from the hook's own assignment. A
         // gesture is the cause, so it is what ends the settle.
-        this.inputH = () => { this.reader = true; };
+        this.handAt = 0;
+        this.inputH = () => { this.reader = true; this.handAt = Date.now(); };
         ["wheel", "touchstart", "pointerdown"].forEach((t) =>
           this.scroller.addEventListener(t, this.inputH, { passive: true })
         );

@@ -588,8 +588,7 @@
     ;; an app with a group of its own is opened there
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
     ;; a page of the app turns over in its own pane; opened from anything else it takes a new pane
-    ;; while the layout has room, else the window you are in. The layout counts no special buffer,
-    ;; so the room is the frame's windows against the layout's panes.
+    ;; while the layout has room, else the window you are in.
     (let* ((target (layout-target))
            (capacity (and target (layout-target-capacity target)))
            (room (and target (or (not capacity) (< (length (window-list)) capacity))))

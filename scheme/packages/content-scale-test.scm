@@ -72,7 +72,6 @@
     (let ((view (content-scale-view-name t--cs-buf)))
       (check-true! (string-contains? (buffer-text view) "the summary") "the view holds it")
       (check-equal! (content-scale-source view) t--cs-buf "the view knows its source")
-      (check-true! (buffer-special? view) "special, so no group follows it")
       (check-equal! (map car (cadr (buffer-rows (list 'names (list view))))) '() "no list shows it")
       (content-scale-set! t--cs-buf 0)
       (check-false! (buffer-known? view) "level 0 kills it"))

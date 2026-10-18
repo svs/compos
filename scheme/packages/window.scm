@@ -1432,8 +1432,6 @@ keeps the buffer you were in and your point.")
   "(window-fill-apply! WIN ACTION) — apply an answer of window-fill-decide to WIN; #t when the window changed")
 (public! 'window-fill-blank
   "(window-fill-blank) — context scratch fallback, or #f; fixed target layouts leave spare capacity empty")
-(public! 'buffer-special?
-  "(buffer-special? NAME) — a view of something else (a listing, a diff, a mail thread), not a place you work: Emacs special-mode")
 (public! 'fill-candidate?
   "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, special, context-only, floating or peek")
 (public! 'peek!
@@ -1692,38 +1690,20 @@ keeps the buffer you were in and your point.")
 
 ;;; --- special-mode (after Emacs) -------------------------------------------
 ;;; The parent of every view: a listing, a diff, a mail thread. Deriving
-;;; from it is how a MODE says "this is not a place you work", which fill,
-;;; group seeding and group context all ask through buffer-special?. A
-;;; mode answers once; a buffer-local had to be written onto every buffer
-;;; and could be stripped again, which is exactly what happened.
+;;; from it once told fill, group seeding and group context "this is not a
+;;; place you work". There are no special buffers any more: every buffer is a
+;;; place you work, takes a pane and stands in its group.
 ;;; It carries NO keys. Emacs' special-mode also forces read-only and binds
 ;;; q and g; here that is the child's business, and giving the parent a q
 ;;; broke a writable buffer that owns a child (dismiss-test: "writable
-;;; buffers keep typing q"). Classification is what this mode is for.
+;;; buffers keep typing q"). It is an empty parent, kept so modes derive.
 (define-mode "special-mode" (lambda () #t))
-;; Emacs' special-mode: a buffer that is a VIEW of something else -- a
-;; listing, a diff, the telemetry, a mail thread -- and not a place you
-;; work. Read-only, g re-renders it, q buries it. Nothing fills a window
-;; with one, no group is seeded from one, and one never tells the frame
-;; which group it stands in. It says NOTHING about persistence: what a
-;; view rebuilds from is its mode's business (desktop-skip!), and it was
-;; called 'transient until the day that name made four other things true.
-;;
-;; The MODE answers: a mode that derives from special-mode is a view. The
-;; buffer-local stays as an explicit override for a buffer whose mode does
-;; not say -- a hand-written view mode, or a test standing one up.
-(define (buffer-special? b)
-  (and (string? b)
-       (or (derived-mode? (buffer-local b 'mode-name) "special-mode")
-           (and (buffer-local b 'special) #t))))
-
 ;; a buffer a window may be filled with: known, not hidden, not floating,
 ;; not a peek (a look, not a place)
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
        (not (buffer-local b 'context-only))
-       (not (buffer-special? b))
        (not (float--class? b))
        (not (peek-buffer? b))))
 

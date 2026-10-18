@@ -767,7 +767,7 @@
 ;; the group that filed the task wears an outline, not a fill
 (defface! 'todo-group 'fg "var(--faint-fg)" 'box "color-mix(in srgb, var(--faint-fg) 55%, transparent)")
 (defface! 'todo-project 'fg "var(--accent-fg)" 'bg "color-mix(in srgb, var(--accent-fg) 16%, transparent)")
-(defface! 'todo-tags 'fg "var(--dim-fg)")
+(defface! 'todo-tags 'fg "var(--dim-fg)" 'bg "var(--hl-line-bg)")
 (defface! 'todo-date 'fg "var(--faint-fg)")
 (defface! 'todo-overdue 'fg "#e0556b" 'weight "700")
 ;; a state's hue tints its pill and mixes into the text, so it reads on a dark theme and a light one
@@ -804,8 +804,9 @@
           (else ""))))
 
 (define (todo--tag-text t)
+  ;; the tags as badges, one cell of pills
   (let ((tags (plist-get t 'tags)))
-    (if (pair? tags) (string-join (map (lambda (g) (string-append "#" g)) tags) " ") "")))
+    (todo--chips (if (pair? tags) (map (lambda (g) (todo--chip g "todo-tags")) tags) '()))))
 
 ;; a window this wide shows a task on one line; a narrower one gives the
 ;; title its own line, so the title is not cut
@@ -845,7 +846,7 @@
 
 (define (todo--tags-width buf)
   ;; the tags sit flush right, as wide as the widest of them
-  (max 1 (min 40 (apply max (cons 0 (map (lambda (t) (string-length (todo--tag-text t)))
+  (max 1 (min 40 (apply max (cons 0 (map (lambda (t) (string-length (car (todo--tag-text t))))
                                          (list-entries buf)))))))
 
 (define (todo--row-columns buf)
@@ -872,7 +873,7 @@
                            (if (equal? who "") ""
                                (list (string-append " " who) (if (todo--stalled? t) "todo-overdue" "org-meta")))))))
         (list (list (list (if closed? "☑" "☐") "todo-check") (list (plist-get t 'title) "todo-title"))
-              (list "" meta (list (todo--tag-text t) "todo-tags"))
+              (list "" meta (todo--tag-text t))
               (list "")))))
 
 (define (todo--at) (let ((t (list-current (todo--list-buffer)))) (and t (not (todo--sep? t)) t)))
@@ -1067,7 +1068,7 @@
          (s (plist-get t 'scheduled))
          (segs (filter pair?
                  (list (let ((pr (plist-get t 'project))) (and (not (todo--blank? pr)) (list "" pr)))
-                       (and p (list "" (string-append "#" p)))
+                       (and p (list "c-badge" p))
                        (and d (list (if (todo--overdue? t) "c-warn" "")
                                     (string-append "due " (todo--short-date d) (if (todo--overdue? t) " — overdue" ""))))
                        (and s (list "" (string-append "scheduled " (todo--short-date s))))

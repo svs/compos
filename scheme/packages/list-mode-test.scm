@@ -224,3 +224,11 @@
           (buffer-set-local! t--lm-buf 'list-layout-cache (list (list-view-width t--lm-buf) t--lm-wide))
           (check-equal! (length ((list-opt t--lm-buf 'columns) t--lm-buf)) 2
                         "the wide profile's columns answer in a wide window"))))))
+
+(deftest 'a-cell-with-no-spans-paints-no-face
+  (lambda ()
+    ;; a cell of pills with no pills is ("" ()): no face, not a face named ()
+    (let ((laid (list-lay-out (list (list "" '()) (list "x" "bold"))
+                              (list (list "a" 4) (list "b" #f)))))
+      (check-equal! (cadr laid) (list (list 6 1 "bold"))
+                    "only the named face paints a span"))))

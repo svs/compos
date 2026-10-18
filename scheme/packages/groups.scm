@@ -1699,10 +1699,8 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-context-group buf)
   ;; the group a pane shows: a chat's own, a work buffer's one group, or #f
-  ;; for a work buffer in none. A special view takes no part and answers
-  ;; 'outside.
+  ;; for a work buffer in none.
   (cond ((chat-buffer? buf) (chat-group-id buf))
-        ((buffer-special? buf) 'outside)
         ((group-work-buffer? buf) (buffer-group buf))
         (else 'outside)))
 
@@ -2359,8 +2357,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; telemetry, ibuffer) seeds nothing. The switcher's new-group action
 ;; asks this; group-new never seeds itself from the current buffer.
 (define (group-seed-buffer? buf)
-  (and (group-work-buffer? buf)
-       (not (buffer-special? buf))))
+  (group-work-buffer? buf))
 
 (define (group-switch-new-action)
   (let ((buf (current-buffer))
@@ -4504,8 +4501,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (buffer-family--eligible? name)
   (and (buffer-known? name)
-       (group-work-buffer? name)
-       (not (buffer-special? name))))
+       (group-work-buffer? name)))
 
 ;; A grouped scratch belongs to its group. A chat or that scratch therefore
 ;; resolves through the group's work buffers. An ordinary work buffer keeps a

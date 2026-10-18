@@ -861,7 +861,10 @@
     (if f (or (f buf) "") "")))
 
 (define (list-cell-text c) (if (pair? c) (car c) c))
-(define (list-cell-face c) (if (pair? c) (car (cdr c)) #f))
+;; a cell's face is one name, or its own spans; no spans is no face
+(define (list-cell-face c)
+  (let ((f (and (pair? c) (pair? (cdr c)) (car (cdr c)))))
+    (if (null? f) #f f)))
 
 ;; a name too long for its column loses its MIDDLE: the head says what
 ;; the thing is and the tail says which one, and a path or a suffix lives

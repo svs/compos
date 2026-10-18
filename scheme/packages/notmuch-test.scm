@@ -212,8 +212,6 @@
 
     (check-equal! (length (filter (lambda (b) (string-prefix? "*mail" b)) (buffer-list))) 1
                   "exactly one mail view")
-    (check-true! (buffer-special? "*mail*") "the mail view is special")
-    (check-true! (buffer-special? "*notmuch*") "and so is the listing")
     (t--nm-done!)))
 
 ;;; --- the row verbs -------------------------------------------------------------

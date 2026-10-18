@@ -541,7 +541,7 @@ Moving the highlight shows the group under it, whole: the layout that group save
 
 ### Transient buffers
 
-One predicate, `buffer-special?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. A floating window is left out too. Transient buffers are excluded from the indicator and from the selection. Every other buffer is a normal buffer.
+There are no special buffers. The minibuffer and the echo area are hidden buffers (their names start with a space), previews and floating windows are left out, and transient buffers are excluded from the indicator and from the selection. Every other buffer, a listing or an app page as much as a file, is a normal buffer: it takes a pane and stands in its group.
 
 ## The scratch buffer
 

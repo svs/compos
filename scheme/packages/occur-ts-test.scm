@@ -47,7 +47,6 @@
     (t--occur-source!)
     (occur-ts-open t--occur-src "json" t--occur-query)
     (check-equal! (buffer-local "*occur-ts*" 'mode-name) "occur-ts-mode" "the mode")
-    (check-true! (buffer-special? "*occur-ts*") "the list is special")
     (check-equal! (buffer-local "*occur-ts*" 'occur-ts-source) t--occur-src "it names its source")
     (let ((text (buffer-text "*occur-ts*")))
       (check-contains! text "Tree-sitter matches" "the title")

@@ -106,6 +106,10 @@
       (equal? (plist-get tab 'query) query)
       (equal? (plist-get tab 'active) "yes")))
 
+(define (site-app-page-shortcut page)
+  ;; the key a section's tab shows: the app's own 'shortcut, else M-KEY
+  (or (plist-get page 'shortcut) (string-append "M-" (plist-get page 'key))))
+
 (define (site-app-lead-tabs buf)
   ;; an app's 'lead-tabs (buf) gives tabs of its own before the sections, as
   ;; (CLICK LABEL ACTIVE KEY); its block-click hook takes the CLICK
@@ -129,7 +133,7 @@
                                          (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
                                                (plist-get page 'label)
                                                (equal? current (plist-get page 'id))
-                                               (string-append "M-" (plist-get page 'key))))
+                                               (site-app-page-shortcut page)))
                                        (site-app-pages spec))))))
       ;; one row of tabs per group of filters, in the page's order
       (map (lambda (group)
@@ -244,7 +248,7 @@
                   (map (lambda (tab) (mark (string-append (list-ref tab 3) " " (cadr tab)) (caddr tab)))
                        (site-app-lead-tabs buf))
                   (map (lambda (page)
-                         (mark (string-append "M-" (plist-get page 'key) " " (plist-get page 'label))
+                         (mark (string-append (site-app-page-shortcut page) " " (plist-get page 'label))
                                (equal? current (plist-get page 'id))))
                        (site-app-pages spec)))
                 " "))
@@ -738,10 +742,23 @@
 (define (site-app-composed-tab buf id)
   (site-app-find (lambda (t) (equal? (plist-get t 'id) id)) (site-app-composed-tabs buf)))
 
+(define *site-app-composing* #f)
+
+(define (site-app-composed-lead buf)
+  ;; how many composed tabs come before 1: all of them, on 0 and below, unless
+  ;; the page numbers every tab from 1 ('detail-count-from-one)
+  (let ((page (or (buffer-local buf 'site-app-for-page) (site-app-detail-page buf))))
+    (if (and page (plist-get page 'detail-count-from-one)) 0 (length (site-app-composed-tabs buf)))))
+
+(define (site-app-composed-draw buf id)
+  (let ((t (site-app-composed-tab buf id)))
+    (and t (plist-get t 'draw))))
+
 (define (site-app-detail-tabs buf)
-  (let ((data (buffer-local buf 'site-app-data)))
+  (let ((data (buffer-local buf 'site-app-data))
+        (lead? (> (site-app-composed-lead buf) 0)))
     (if data
-        (append (map (lambda (t) (list 'id (plist-get t 'id) 'label (plist-get t 'label) 'composed #t))
+        (append (map (lambda (t) (list 'id (plist-get t 'id) 'label (plist-get t 'label) 'composed lead?))
                      (site-app-composed-tabs buf))
                 (site-app-real (plist-get data 'tabs)))
         '())))
@@ -755,8 +772,10 @@
   (let ((composed (site-app-composed-tab buf id)))
     (if composed
         ;; loading until every tab it draws from has answered; a failed one adds nothing
+        ;; *site-app-composing* names the page being built, for a build that needs its row
         (and (not (member #f (map (lambda (src) (site-app-detail-section buf src)) (plist-get composed 'from))))
-             ((plist-get composed 'build)
+             (begin (set! *site-app-composing* buf) #t)
+             ((or (plist-get composed 'build) (lambda (section) '()))
               (lambda (src) (let ((s (site-app-detail-section buf src))) (if (equal? s 'failed) '() s)))))
         (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
           (and hit (cdr hit))))))
@@ -1468,6 +1487,8 @@
                    (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf)))
                    (cond ;; a page with no tabs is all head: nothing waits below it
                          ((null? tabs) '())
+                         ;; a composed tab that draws itself ('draw BUF BUILDER) gives its claimed blocks
+                         ((site-app-composed-draw buf active) ((site-app-composed-draw buf active) buf b))
                          ((not section) (list (site-app-part b 'ui/empty "Loading…" (list 'text "Loading…") #f)))
                          ((equal? section 'failed)
                           (let ((t "The site did not answer for this tab. g reads the page again.")) (list (site-app-part b 'ui/empty t (list 'text t) #f))))
@@ -1842,7 +1863,7 @@
   ;; 1 is the site's first tab; 0 reaches back to the composed tab before it
   (let* ((buf (current-buffer))
          (tabs (site-app-detail-tabs buf))
-         (i (+ n (length (site-app-composed-tabs buf)) -1)))
+         (i (+ n (site-app-composed-lead buf) -1)))
     (when (and (>= i 0) (< i (length tabs)))
       (site-app-detail-select! buf (plist-get (list-ref tabs i) 'id)))))
 

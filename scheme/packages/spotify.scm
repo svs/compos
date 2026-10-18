@@ -1129,16 +1129,43 @@
 ;; skip, volume, shuffle, repeat) and the read of what plays go to it; what
 ;; AppleScript cannot do (browse, search, like) stays on the page.
 
+;; the Linux app answers through MPRIS: each control as a playerctl line
+;; that says what its AppleScript says
+(define spotify--mpris
+  (list (list 'playpause "case $(playerctl -p spotify status) in Playing) playerctl -p spotify pause; echo paused;; *) playerctl -p spotify play; echo playing;; esac")
+        (list 'next "playerctl -p spotify next && echo next")
+        (list 'previous "playerctl -p spotify previous && echo previous")
+        (list 'shuffle "case $(playerctl -p spotify shuffle) in On) playerctl -p spotify shuffle Off; echo 'shuffle off';; *) playerctl -p spotify shuffle On; echo 'shuffle on';; esac")
+        (list 'repeat "case $(playerctl -p spotify loop) in None) playerctl -p spotify loop Playlist; echo 'repeat on';; *) playerctl -p spotify loop None; echo 'repeat off';; esac")
+        (list 'volume-up "playerctl -p spotify volume 0.1+ >/dev/null && printf 'volume %.0f%%' $(playerctl -p spotify volume | awk '{print $1 * 100}')")
+        (list 'volume-down "playerctl -p spotify volume 0.1- >/dev/null && printf 'volume %.0f%%' $(playerctl -p spotify volume | awk '{print $1 * 100}')")
+        ;; the ten fields of spotify--desktop-now-as, tab between
+        (list 'now (string-append
+                     "IFS=; T=$(printf '\\t')\n"
+                     "m=$(playerctl -p spotify metadata --format '{{lc(status)}}'$T'{{title}}'$T'{{artist}}'$T'{{album}}'$T'{{mpris:trackid}}'$T'{{mpris:artUrl}}'$T'{{duration(position)}}'$T'{{duration(mpris:length)}}') || exit 0\n"
+                     "case $(playerctl -p spotify shuffle 2>/dev/null) in On) s=true;; *) s=false;; esac\n"
+                     "case $(playerctl -p spotify loop 2>/dev/null) in Track|Playlist) l=true;; *) l=false;; esac\n"
+                     "printf '%s\\t%s\\t%s\\n' $m $s $l"))))
+
 (define (spotify--desktop! body k)
-  ;; K gets the app's answer, or #f when it is not running or refused us
-  (shell-command->string
-    (string-append "osascript -e "
-                   (sh-quote (string-append "if application \"Spotify\" is running then\ntell application \"Spotify\"\n"
-                                            body "\nend tell\nelse\nreturn \"-off-\"\nend if")) " 2>&1")
-    (compos-home)
-    (lambda (out)
-      (let ((v (string-trim (or out ""))))
-        (k (and (not (equal? v "-off-")) (not (string-contains? v "execution error")) v))))))
+  ;; K gets the app's answer, or #f when it is not running or refused us.
+  ;; BODY is AppleScript for the Mac, or (APPLESCRIPT LINUX): LINUX is a
+  ;; key of spotify--mpris or a shell line, #f where MPRIS cannot do it
+  (let* ((as (if (pair? body) (car body) body))
+         (linux (and (pair? body) (cadr body)))
+         (sh (if (symbol? linux) (cadr (assq linux spotify--mpris)) linux)))
+    (shell-command->string
+      (string-append "if command -v osascript >/dev/null 2>&1; then osascript -e "
+                     (sh-quote (string-append "if application \"Spotify\" is running then\ntell application \"Spotify\"\n"
+                                              as "\nend tell\nelse\nreturn \"-off-\"\nend if"))
+                     " 2>&1\nelif command -v playerctl >/dev/null 2>&1 && playerctl -p spotify status >/dev/null 2>&1; then\n"
+                     (or sh "echo -off-")
+                     "\nelse echo -off-\nfi")
+      (compos-home)
+      (lambda (out)
+        (let ((v (string-trim (or out ""))))
+          (k (and (not (equal? v "-off-")) (not (string-contains? v "execution error"))
+                  (not (string-prefix? "No player" v)) v)))))))
 
 (define (spotify--via! body web k)
   ;; the desktop app where spotify-player allows it and it answers; else WEB
@@ -1188,9 +1215,11 @@
                  'source "desktop")))))
 
 (define (spotify--path-of-uri uri)
-  ;; spotify:track:ID as /track/ID
+  ;; spotify:track:ID, or the Linux app's /com/spotify/track/ID, as /track/ID
   (let ((p (string-split (or uri "") ":")))
-    (and (= (length p) 3) (string-append "/" (cadr p) "/" (caddr p)))))
+    (cond ((= (length p) 3) (string-append "/" (cadr p) "/" (caddr p)))
+          ((string-prefix? "/com/spotify/" (or uri "")) (substring uri 12 (string-length uri)))
+          (else #f))))
 
 (define *spotify-track-links* '())
 
@@ -1233,7 +1262,7 @@
   (when k (k now)))
 
 (define (spotify-now-refresh! &optional k)
-  (spotify--via! spotify--desktop-now-as
+  (spotify--via! (list spotify--desktop-now-as 'now)
     (lambda ()
       (spotify--quiet-eval spotify--now-json-js
         (lambda (v)
@@ -1244,9 +1273,11 @@
   ;; the app plays a uri, in its list when there is one; WEB when it cannot
   (let ((origin (current-buffer))
         (path (spotify--path-of-uri (or context uri))))
-  (spotify--via! (string-append "play track " (json-encode uri)
-                                (if context (string-append " in context " (json-encode context)) "")
-                                "\nreturn \"playing\"")
+  (spotify--via! (list (string-append "play track " (json-encode uri)
+                                      (if context (string-append " in context " (json-encode context)) "")
+                                      "\nreturn \"playing\"")
+                     ;; MPRIS opens a track, not a track in its list
+                     (and (not context) (string-append "playerctl -p spotify open " (sh-quote uri) " && echo playing")))
     web
     (lambda (v)
       (when path (set! *spotify-origin* (list path origin)))
@@ -1397,7 +1428,7 @@
     (unless (minor-mode-on? (current-buffer) "spotify-now-mode")
       (enable-minor-mode! (current-buffer) "spotify-now-mode"))))
 
-
+(define (spotify--detail? buf)
   (and (eq? (buffer-local buf 'site-app-name) 'spotify) (buffer-local buf 'site-app-row) #t))
 
 (define (spotify--card-title node)
@@ -1703,15 +1734,15 @@
 
 ;;;###autoload
 (define-command "spotify-play-pause" "Play or pause the Spotify tab"
-  (lambda () (spotify--route! "playpause\nreturn player state as string"
+  (lambda () (spotify--route! (list "playpause\nreturn player state as string" 'playpause)
                 (lambda () (spotify--control! (spotify--click-js "control-button-playpause" "play/pause") 'playing)))))
 
 (define-command "spotify-next" "Play the next track"
-  (lambda () (spotify--route! "next track\nreturn \"next\""
+  (lambda () (spotify--route! (list "next track\nreturn \"next\"" 'next)
                 (lambda () (spotify--control! (spotify--click-js "control-button-skip-forward" "next") #f)))))
 
 (define-command "spotify-previous" "Play the previous track"
-  (lambda () (spotify--route! "previous track\nreturn \"previous\""
+  (lambda () (spotify--route! (list "previous track\nreturn \"previous\"" 'previous)
                 (lambda () (spotify--control! (spotify--click-js "control-button-skip-back" "previous") #f)))))
 
 (define spotify--shuffle-js
@@ -1721,11 +1752,11 @@
   "(function(){var b=document.querySelector('[data-testid=control-button-repeat]');if(!b)return 'no repeat button — is the tab loaded?';var c=b.getAttribute('aria-checked');b.click();return c==='false'?'repeat all':(c==='true'?'repeat one':'repeat off')})()")
 
 (define-command "spotify-shuffle" "Shuffle on or off (smart shuffle too, where Spotify offers it)"
-  (lambda () (spotify--route! "set shuffling to not shuffling\nif shuffling then return \"shuffle on\"\nreturn \"shuffle off\""
+  (lambda () (spotify--route! (list "set shuffling to not shuffling\nif shuffling then return \"shuffle on\"\nreturn \"shuffle off\"" 'shuffle)
                 (lambda () (spotify--control! spotify--shuffle-js #f)))))
 
 (define-command "spotify-repeat" "Repeat: off, then the whole list, then the one track"
-  (lambda () (spotify--route! "set repeating to not repeating\nif repeating then return \"repeat on\"\nreturn \"repeat off\""
+  (lambda () (spotify--route! (list "set repeating to not repeating\nif repeating then return \"repeat on\"\nreturn \"repeat off\"" 'repeat)
                 (lambda () (spotify--control! spotify--repeat-js #f)))))
 
 (define-command "spotify-like" "Save the current track to your library, or take it out"
@@ -1754,11 +1785,11 @@
                      "nothing playing"))))))
 
 (define-command "spotify-volume-up" "Raise the player's volume"
-  (lambda () (spotify--route! "set sound volume to (sound volume + 10)\nreturn \"volume \" & sound volume & \"%\""
+  (lambda () (spotify--route! (list "set sound volume to (sound volume + 10)\nreturn \"volume \" & sound volume & \"%\"" 'volume-up)
                 (lambda () (spotify--eval (spotify--volume-js "0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))))
 
 (define-command "spotify-volume-down" "Lower the player's volume"
-  (lambda () (spotify--route! "set sound volume to (sound volume - 10)\nreturn \"volume \" & sound volume & \"%\""
+  (lambda () (spotify--route! (list "set sound volume to (sound volume - 10)\nreturn \"volume \" & sound volume & \"%\"" 'volume-down)
                 (lambda () (spotify--eval (spotify--volume-js "-0.1") (lambda (v) (message (if (string? v) v "Spotify: no answer"))))))))
 
 ;;;###autoload

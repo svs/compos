@@ -1695,6 +1695,10 @@
 (define (site-app-prepare-detail! name row page)
   (let ((buf (site-app-detail-buffer name row)))
     (unless (buffer-exists? buf) (buffer-create buf))
+    ;; a page a namer reuses for another row starts empty, not with the last row's data
+    (let ((old (buffer-local buf 'site-app-row)))
+      (when (and old (not (equal? (site-app-field old 'href) (site-app-field row 'href))))
+        (buffer-set-locals! buf (list 'site-app-data #f 'site-app-fetched-at #f 'site-app-sections '()))))
     (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name (site-app-spec name) page))
     (buffer-set-local! buf 'site-app-detail-kind (plist-get page 'detail-kind))
     (buffer-set-local! buf 'detail-family (site-app-detail-mode-name (site-app-spec name) page))

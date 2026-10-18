@@ -199,8 +199,8 @@
             (if (equal? title "")
                 (list (spotify--text "sp-now-idle" "Nothing playing. p on a row plays it."))
                 ;; the cover and the title open the Now Playing page
-                (list (plist-put (spotify--cover "sp-now-art sp-now-open" (component--get p 'art "") title) 'click "spotify:spotify-now-page")
-                      (list 'tag "div" 'class "sp-main sp-now-open" 'click "spotify:spotify-now-page"
+                (list (plist-put (spotify--cover "sp-now-art sp-now-open" (component--get p 'art "") title) 'click "spotify:spotify-now-context")
+                      (list 'tag "div" 'class "sp-main sp-now-open" 'click "spotify:spotify-now-context"
                             'children (list (list 'tag "span" 'class "sp-name"
                                                   'children (append (list (spotify--text "" title))
                                                                     (if (component--get p 'liked? #f) (list (spotify--text "sp-liked" " ♥")) '())))
@@ -363,6 +363,21 @@
                                                 (spotify--text "sp-by" (string-append (component--get p 'venue "")
                                                                                        (let ((w (component--get p 'when ""))) (if (equal? w "") "" (string-append "  ·  " w)))))))))))
 
+(defcomponent 'spotify/person
+  "One person on the record: their photo, else their initials, their name and what they did. CREW? draws the card small, for who made the record rather than played on it. CLICK opens their page."
+  '((name string required) (roles string optional) (image string optional) (crew? boolean optional) (click string optional))
+  '(name "Eric Harland" roles "drums" image "")
+  (lambda (p)
+    (let ((name (component--get p 'name "")) (image (component--get p 'image "")))
+      (list 'tag "div" 'class (if (component--get p 'crew? #f) "sp-person sp-person-crew" "sp-person")
+            'click (component--get p 'click "")
+            'children (list (if (equal? image "")
+                                (spotify--text "sp-person-face" (spotify--initials name))
+                                (spotify--img "sp-person-face" image))
+                            (list 'tag "div" 'class "sp-person-text"
+                                  'children (list (spotify--text "sp-person-name" name)
+                                                  (spotify--text "sp-person-roles" (component--get p 'roles "")))))))))
+
 (defcomponent 'spotify/news-item
   "One story about the artist: its headline, where it ran and when, and the first lines. CLICK opens it."
   '((title string required) (source string optional) (date string optional) (snippet string optional) (click string optional))
@@ -465,6 +480,18 @@
 .sp-news-snippet { color: var(--dim-fg); font-size: .9em; line-height: 1.5; }
 .sp-np-empty { color: var(--dim-fg); font-family: var(--font-sans); padding: 6px 10px; }
 .sp-now-open { cursor: pointer; }
+.sp-part:has(> .sp-person) { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; align-items: start; }
+.sp-part:has(> .sp-person) > :not(.sp-person) { grid-column: 1 / -1; }
+.sp-part:has(> .sp-person-crew) { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 14px; }
+.sp-person { display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 10px; font-family: var(--font-sans); cursor: pointer; min-width: 0; }
+.sp-person:hover { background: var(--hl-line-bg); }
+.sp-person-face { width: 100%; aspect-ratio: 1; object-fit: cover; object-position: center 25%; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--hl-line-bg); color: var(--dim-fg); font-size: 2em; font-weight: 700; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.sp-person-text { display: flex; flex-direction: column; gap: 2px; text-align: center; min-width: 0; }
+.sp-person-name { font-weight: 700; color: var(--default-fg); }
+.sp-person-roles { font-size: .85em; color: var(--dim-fg); line-height: 1.4; }
+.sp-person-crew { flex-direction: row; align-items: center; gap: 10px; padding: 4px 8px; }
+.sp-person-crew .sp-person-face { width: 36px; height: 36px; flex: none; font-size: .85em; box-shadow: none; }
+.sp-person-crew .sp-person-text { text-align: left; }
 ")
 
 ;;; --- the player ---------------------------------------------------------------
@@ -541,19 +568,13 @@
                (site-app-pages (site-app-spec 'spotify)))))
 
 (define (spotify--now-set! now)
-  ;; every section's bar redraws; the Now Playing page too, and it reads the
-  ;; album and the artist when the music moved on to new ones. Music that
-  ;; starts brings the page up
-  (let ((moved (or (not (equal? (plist-get now 'albumHref) (plist-get *spotify-now* 'albumHref)))
-                   (not (equal? (plist-get now 'artistHref) (plist-get *spotify-now* 'artistHref)))))
-        (started (and (eq? (plist-get now 'playing) #t) (not (eq? (plist-get *spotify-now* 'playing) #t))))
+  ;; every section's bar redraws. Music that starts brings Now Playing up
+  (let ((started (and (eq? (plist-get now 'playing) #t) (not (eq? (plist-get *spotify-now* 'playing) #t))))
         (changed (not (equal? (plist-get now 'trackHref) (plist-get *spotify-now* 'trackHref)))))
     (set! *spotify-now* now)
     (for-each (lambda (b) (buffer-set-local! b 'list-layout-cache #f) (list-refresh! b)) (spotify--list-buffers))
     (cell-set! 'spotify/track (spotify--track-of now))
     (cell-set! 'spotify/position (spotify--position-of now))
-    (when (and moved (boundp 'spotify--now-draw!) (buffer-exists? *spotify-now-buffer*))
-      (spotify--context!))
     (when started (spotify--now-up!))
     (when (and changed (not started)) (spotify--follow-track!))))
 
@@ -624,12 +645,14 @@
                           (lambda (data)
                             (if data
                                 (set! *spotify-artists* (cons (list artist-href data) *spotify-artists*))
-                                (set! *spotify-asked* (spotify--without artist-href *spotify-asked*)))
+                                (set! *spotify-failed* (cons artist-href *spotify-failed*)))
                             (spotify--redraw-artist-tabs!))))
                       (spotify--news-of! name)
                       (when (and artist (spotify--ask! (string-append "brief:" name)))
                         (spotify--brief! name artist))
-                      (spotify--artist-blocks name artist)))))
+                      (if (and (not artist) (member artist-href *spotify-failed*))
+                          (list (spotify--quiet (string-append "Spotify did not show " name "'s page.")))
+                          (spotify--artist-blocks name artist))))))
     (car (spotify--claim-all b page))))
 
 (define (spotify--artist-blocks name artist)
@@ -687,7 +710,7 @@
 
 (define (spotify--mb-personnel release)
   ;; MusicBrainz's credits, the release's and every recording's, as
-  ;; ((NAME ROLES) ...): the players first, then who made the record
+  ;; ((NAME ROLES ID KIND) ...): the players first, then who made the record
   (let* ((rels (append (or (plist-get release 'relations) '())
                        (apply append
                          (map (lambda (medium)
@@ -703,15 +726,15 @@
                          ((equal? type "audio") "engineer")
                          (else type)))))
          (plays? (lambda (r) (member (plist-get r 'type) '("instrument" "vocal" "performer"))))
-         (gather (lambda (keep)
+         (gather (lambda (keep kind)
                    (fold (lambda (acc r)
-                           (let* ((name (plist-get (plist-get r 'artist) 'name)) (what (role r)) (hit (assoc name acc)))
+                           (let* ((name (plist-get (plist-get r 'artist) 'name)) (id (plist-get (plist-get r 'artist) 'id)) (what (role r)) (hit (assoc name acc)))
                              (cond ((not (and (string? name) (keep r))) acc)
-                                   ((not hit) (append acc (list (list name (list what)))))
+                                   ((not hit) (append acc (list (list name (list what) id kind))))
                                    ((member what (cadr hit)) acc)
-                                   (else (map (lambda (e) (if (equal? (car e) name) (list name (append (cadr e) (list what))) e)) acc)))))
+                                   (else (map (lambda (e) (if (equal? (car e) name) (list name (append (cadr e) (list what)) (list-ref e 2) kind) e)) acc)))))
                          '() rels))))
-    (append (gather plays?) (gather (lambda (r) (not (plays? r)))))))
+    (append (gather plays? 'player) (gather (lambda (r) (not (plays? r))) 'crew))))
 
 (define (spotify--wiki-sections text)
   ;; a Wikipedia extract as ((TITLE PARAGRAPHS) ...), without the lists the
@@ -738,6 +761,25 @@
           (string-append (apply string-append (map (lambda (i) "★") (iota whole)))
                          (if half "½" ""))))))
 
+(define (spotify--allmusic-paras html)
+  ;; the review as the page sets it, a paragraph each; its schema.org copy
+  ;; runs them all together
+  (let* ((parts (string-split html "class=\"editorialAuthorLink\""))
+         (after (and (pair? (cdr parts)) (string-split (car (reverse parts)) "</h3>")))
+         (body (and after (pair? (cdr after)) (car (string-split (cadr after) "</div>"))))
+         (clean (lambda (p)
+                  (string-trim
+                    (re-replace-all "&nbsp;"
+                      (re-replace-all "&#0?39;"
+                        (re-replace-all "&quot;"
+                          (re-replace-all "&amp;" (re-replace-all "<[^>]*>" p "") "&")
+                          "\"")
+                        "'")
+                      " ")))))
+    (if body
+        (filter (lambda (s) (not (equal? s ""))) (map clean (cdr (string-split body "<p>"))))
+        '())))
+
 (define (spotify--allmusic-read! key url)
   ;; AllMusic answers no plain request; your Chrome reads it, and the page's
   ;; own schema.org data holds the review and its rating
@@ -753,7 +795,10 @@
                  (review (of "Review"))
                  (album (of "MusicAlbum")))
             (spotify--liner-put! key
-              (list 'review (and review (plist-get review 'reviewBody))
+              (list 'review (let ((paras (if (string? html) (spotify--allmusic-paras html) '())))
+                              (if (pair? paras)
+                                  (string-join paras "\n")
+                                  (and review (plist-get review 'reviewBody))))
                     'rating (and review (plist-get (plist-get review 'reviewRating) 'ratingValue))
                     'genre (if (and album (pair? (plist-get album 'genre))) (string-join (plist-get album 'genre) ", ") "")
                     'allmusic-done #t))))
@@ -827,7 +872,7 @@
   ;; a row's track as the Now Playing page's plist
   (let ((links (assoc (or (site-app-field row 'href) "") *spotify-track-links*)))
     (list 'title (or (site-app-field row 'name) "") 'artists (or (site-app-field row 'artists) "")
-          'art (spotify--row-cover row) 'duration (or (site-app-field row 'duration) "")
+          'art (spotify--row-cover row) 'duration (or (site-app-field row 'duration) "") 'album (or (site-app-field row 'album) "")
           'albumHref (if links (cadr links) "") 'artistHref (if links (caddr links) ""))))
 
 (define (spotify--para text) (list 'tag "p" 'class "sp-bio" 'text text 'sp-line text))
@@ -869,6 +914,63 @@
                           'click (string-append "spotify-url:" (or (plist-get n 'link) ""))))
                   (or (plist-get n 'title) "")))
 
+(define (spotify--faces! key liner)
+  ;; who played, with their faces: one Wikidata question for everyone, by
+  ;; MusicBrainz id, answers each one's photo and Wikipedia page. Notes read
+  ;; before the ids were kept read their release again for them
+  (task-run!
+    (lambda ()
+      (let* ((people (or (plist-get liner 'personnel) '()))
+             (people (if (or (null? people) (find (lambda (p) (> (length p) 2)) people)) people
+                         (let* ((mb (plist-get liner 'musicbrainz))
+                                (release (and (string? mb)
+                                              (http-get-json (string-append (re-replace-all "musicbrainz.org/release/" mb "musicbrainz.org/ws/2/release/")
+                                                                            "?fmt=json&inc=artist-rels+recordings+recording-level-rels")
+                                                             *spotify-mb-agent*))))
+                           (if release (spotify--mb-personnel release) people))))
+             (ids (filter string? (map (lambda (p) (and (> (length p) 2) (list-ref p 2))) people)))
+             (q (string-append "SELECT ?mbid ?img ?article WHERE { VALUES ?mbid { "
+                               (string-join (map (lambda (i) (string-append "\"" i "\"")) ids) " ")
+                               " } ?item wdt:P434 ?mbid . OPTIONAL { ?item wdt:P18 ?img } "
+                               "OPTIONAL { ?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> } }"))
+             (ans (and (pair? ids)
+                       (http-get-json (string-append "https://query.wikidata.org/sparql?format=json&query=" (url-encode q))
+                                      (list 'headers (append (plist-get *spotify-mb-agent* 'headers)
+                                                             (list (list "Accept" "application/sparql-results+json")))))))
+             (value (lambda (row k) (let ((v (plist-get row k))) (and v (plist-get v 'value))))))
+        (list 'personnel people
+              'faces (map (lambda (row)
+                            (list (value row 'mbid)
+                                  (let ((img (value row 'img))) (and img (string-append (re-replace-all "^http:" img "https:") "?width=320")))
+                                  (value row 'article)))
+                          (if ans (or (plist-get (plist-get ans 'results) 'bindings) '()) '())))))
+    (lambda (ok found)
+      (if ok
+          (spotify--liner-put! key (append found (list 'faces-done #t)))
+          (set! *spotify-asked* (spotify--without (string-append "faces:" key) *spotify-asked*))))
+    30000))
+
+(define (spotify--initials name)
+  (let ((words (filter (lambda (w) (not (equal? w ""))) (string-split (or name "") " "))))
+    (string-upcase (apply string-append (map (lambda (w) (substring w 0 1))
+                                             (if (> (length words) 1) (list (car words) (car (reverse words))) words))))))
+
+(define (spotify--person-card p faces)
+  ;; one credit as a card: the face Wikidata knows, the roles, and a click to
+  ;; their Wikipedia page, else their MusicBrainz one
+  (let* ((name (car p))
+         (roles (string-join (cadr p) ", "))
+         (id (and (> (length p) 2) (list-ref p 2)))
+         (face (and id (assoc id faces)))
+         (link (cond ((and face (list-ref face 2)) (list-ref face 2))
+                     (id (string-append "https://musicbrainz.org/artist/" id))
+                     (else #f))))
+    (spotify--lined (component 'spotify/person
+                      (list 'name name 'roles roles 'image (or (and face (cadr face)) "")
+                            'crew? (and (> (length p) 3) (eq? (list-ref p 3) 'crew))
+                            'click (if link (string-append "spotify-url:" link) "")))
+                    (string-append name " — " roles))))
+
 (define (spotify--liner-blocks album liner)
   ;; the notes, a part each: AllMusic's review, the reviews around the web,
   ;; who played, and each part of the Wikipedia page
@@ -888,8 +990,12 @@
       (spotify--part "Reviews"
         (cond ((not (plist-get liner 'reviews-done)) (list (spotify--quiet "Looking for reviews…")))
               (else (map spotify--review-card (or (plist-get liner 'reviews) '())))))
-      (spotify--part "Personnel"
-        (map (lambda (p) (spotify--para (string-append (car p) " — " (string-join (cadr p) ", ")))) people))
+      ;; who played as faces; who made the record, smaller, after them
+      (let ((faces (or (plist-get liner 'faces) '()))
+            (crew? (lambda (p) (and (> (length p) 3) (eq? (list-ref p 3) 'crew)))))
+        (append
+          (spotify--part "Personnel" (map (lambda (p) (spotify--person-card p faces)) (filter (lambda (p) (not (crew? p))) people)))
+          (spotify--part "Production" (map (lambda (p) (spotify--person-card p faces)) (filter crew? people)))))
       (apply append
         (map (lambda (s) (spotify--part (if (equal? (car s) "") "Background" (car s)) (map spotify--para (cadr s))))
              (or (plist-get liner 'wiki) '())))
@@ -916,6 +1022,9 @@
       (spotify--liner! key album artist))
     (when (and liner (not (plist-get liner 'reviews-done)))
       (spotify--reviews! key album artist))
+    (when (and liner (plist-get liner 'done) (pair? (plist-get liner 'personnel))
+               (not (plist-get liner 'faces-done)) (spotify--ask! (string-append "faces:" key)))
+      (spotify--faces! key liner))
     (car (spotify--claim-all b
       (append
         (if (string-prefix? "/track/" href)
@@ -1140,7 +1249,7 @@
                                 "\nreturn \"playing\"")
     web
     (lambda (v)
-      (when (and path (not (equal? origin *spotify-now-buffer*))) (set! *spotify-origin* (list path origin)))
+      (when path (set! *spotify-origin* (list path origin)))
       (message (string-append "Playing " what))
       (spotify--now-set! (plist-put *spotify-now* 'playing #t))
       (spotify-now-refresh!)))))
@@ -1246,7 +1355,7 @@
           (lambda (r)
             (if (equal? (plist-get (plist-get (plist-get r 'result) 'result) 'value) "playing")
                 (begin
-                  (unless (equal? origin *spotify-now-buffer*) (set! *spotify-origin* (list path origin)))
+                  (set! *spotify-origin* (list path origin))
                   (message (string-append "Playing " what))
                   ;; the bar shows it playing at once; the next read names the track
                   (spotify--now-set! (plist-put *spotify-now* 'playing #t)))
@@ -1272,7 +1381,23 @@
                               (site-app-field row 'play) (site-app-field row 'href) name)
         (spotify--play! (site-app-field row 'href) spotify--entity-play name))))
 
-(define (spotify--detail? buf)
+(define *spotify-now-title* "Now Playing")
+(define *spotify-now-detail* (string-append "*spotify: " *spotify-now-title* "*"))
+
+(define (spotify--now-row? row)
+  (let ((href (spotify--now-field 'trackHref)))
+    (and (not (equal? href "")) (equal? (site-app-field row 'href) href))))
+
+;; the page of what plays: one buffer, drawn again for each track
+(register-minor-mode! "spotify-now-mode" (lambda (buf) #t) (lambda (buf) #t))
+(mode-doc! "spotify-now-mode" "The page of the track that plays. It is one page: when the music moves on, it draws the next track in place.")
+
+(define (spotify--now-minor!)
+  (when (equal? (current-buffer) *spotify-now-detail*)
+    (unless (minor-mode-on? (current-buffer) "spotify-now-mode")
+      (enable-minor-mode! (current-buffer) "spotify-now-mode"))))
+
+
   (and (eq? (buffer-local buf 'site-app-name) 'spotify) (buffer-local buf 'site-app-row) #t))
 
 (define (spotify--card-title node)
@@ -1500,7 +1625,8 @@
         'adopt #t
         ;; pages are read by moving the running player, not by loading it again
         'navigate (lambda (name url wait k) (spotify-navigate! name url wait k))
-        'detail-name (lambda (row) (site-app-field row 'name))
+        ;; what plays has one page, which follows the music
+        'detail-name (lambda (row) (if (spotify--now-row? row) *spotify-now-title* (site-app-field row 'name)))
         ;; the player bar heads every section
         'list-head (lambda (buf)
                      (spotify--ticker-start!)
@@ -1652,11 +1778,11 @@
 (domain! 'spotify)
 (effects! '(write external))
 
-(define *spotify-now-buffer* "*spotify-now*")
-(when (and (boundp 'app-claim!) (buffer-exists? *spotify-now-buffer*))
-  (app-claim! *spotify-now-buffer* "spotify" 'aux))
 (define *spotify-albums* '())    ; (HREF . what the album page says)
 (define *spotify-artists* '())   ; (HREF . what the artist page says)
+;; the pages a read came back from empty: no one asks again until a reload,
+;; since every read ends in a redraw and a redraw asks for what is missing
+(define *spotify-failed* '())
 (define *spotify-news* '())      ; (ARTIST . stories)
 (define *spotify-asked* '())     ; what has been asked for, so it is asked once
 
@@ -1696,42 +1822,8 @@
           (if (not ok)
               (set! *spotify-asked* (spotify--without (string-append "news:" artist) *spotify-asked*))
               (set! *spotify-news* (cons (list artist (if (pair? items) items '())) *spotify-news*)))
-          (spotify--now-draw!)))
+          (spotify--redraw-artist-tabs!)))
       30000)))
-
-(define *spotify-reading* #f)
-
-(define (spotify--context!)
-  ;; what the page needs that it has not read: the album, then the artist, then
-  ;; the news. One read at a time: the reader tab has one page, and a second
-  ;; read would take it from under the first. When the chain ends it looks
-  ;; again, for music that moved on while it read
-  (let ((album (spotify--now-field 'albumHref))
-        (artist (spotify--now-field 'artistHref))
-        (artist-name (car (string-split (spotify--now-field 'artists) ","))))
-    (spotify--news-of! artist-name)
-    (unless *spotify-reading*
-      (let* ((done (lambda () (set! *spotify-reading* #f) (spotify--now-draw!)))
-             (step (lambda (href sheet store! k)
-                     (spotify--read-page! href sheet
-                       (lambda (data)
-                         (store! data)
-                         (unless data (set! *spotify-asked* (spotify--without href *spotify-asked*)))
-                         (spotify--now-draw!)
-                         (k)))))
-             (read-artist
-               (lambda ()
-                 (if (and (not (equal? artist "")) (spotify--ask! artist))
-                     (step artist *spotify-artist-sheet*
-                           (lambda (data) (set! *spotify-artists* (cons (list artist data) *spotify-artists*)))
-                           (lambda () (done) (spotify--context!)))
-                     (done)))))
-        (set! *spotify-reading* #t)
-        (if (and (not (equal? album "")) (spotify--ask! album))
-            (step album *spotify-detail-sheet*
-                  (lambda (data) (set! *spotify-albums* (cons (list album data) *spotify-albums*)))
-                  read-artist)
-            (read-artist))))))
 
 (define (spotify--album-facts href)
   ;; (NAME RELEASED) from the album page's head: the whole date, else the year
@@ -1764,7 +1856,7 @@
     (lambda (ok text)
       (if ok
           (llm (spotify--brief-prompt name (or (plist-get artist 'bio) "") (if (string? text) text ""))
-               (lambda (answer) (set! *spotify-briefs* (cons (list name answer) *spotify-briefs*)) (spotify--now-draw!)))
+               (lambda (answer) (set! *spotify-briefs* (cons (list name answer) *spotify-briefs*)) (spotify--redraw-artist-tabs!)))
           (set! *spotify-asked* (spotify--without (string-append "brief:" name) *spotify-asked*))))
     30000))
 
@@ -1812,7 +1904,7 @@
              (if ok
                  (set! *spotify-listen* (cons (list name items) *spotify-listen*))
                  (set! *spotify-asked* (spotify--without (string-append "listen:" name) *spotify-asked*)))
-             (spotify--now-draw!))
+             (spotify--redraw-artist-tabs!))
            120000))))
 
 (define (spotify--listen-blocks name artist)
@@ -1842,22 +1934,6 @@
           (list (spotify--quiet (string-append "Playing from " label))))
         '())))
 
-(define (spotify--now-blocks)
-  (cons (spotify--now-tabs) (spotify--now-body)))
-
-(define (spotify--now-tabs)
-  ;; the page's tabs, as every page beside the list has them: what plays,
-  ;; then the list it plays from
-  (let* ((o *spotify-origin*)
-         (tabs (cons (list "spotify:spotify-now-page" "Now Playing" #t "1")
-                     (if (and o (string-index (cadr o) ": "))
-                         (list (list "spotify:spotify-now-context" (spotify--origin-name (cadr o)) #f "2"))
-                         '()))))
-    (spotify--lined (component 'ui/tabs (list 'tabs tabs))
-                    (string-join (map (lambda (t) (string-append (list-ref t 3) " " (cadr t))) tabs) "  "))))
-
-(define (spotify--now-body) (spotify--track-page *spotify-now* #t))
-
 (define (spotify--track-page now playing?)
   ;; the page of the track NOW: its head, then its artist; PLAYING? when it
   ;; is the one that plays, which says where it plays from
@@ -1875,7 +1951,7 @@
         (append
           (list (spotify--lined (component 'spotify/np-hero
                   (list 'title title 'artists (field 'artists) 'art (spotify--hires (field 'art))
-                        'album (car album) 'released (cadr album)
+                        'album (if (equal? (car album) "") (field 'album) (car album)) 'released (cadr album)
                         'click (string-append "spotify-open:" album-href "|" (car album))
                         'playing? (eq? (plist-get now 'playing) #t) 'liked? (eq? (plist-get now 'liked) #t)
                         'position (field 'position) 'duration (field 'duration)
@@ -1885,6 +1961,8 @@
           (spotify--brief-blocks name artist)
           (spotify--listen-blocks name artist)
           (cond
+            ((and (not artist) (member artist-href *spotify-failed*))
+             (list (spotify--quiet (string-append "Spotify did not show " name "'s page."))))
             ((not artist) (list (spotify--quiet (string-append "Reading " name "'s page…"))))
             (else
              (let ((tour (let ((ts (filter (lambda (g) (equal? (plist-get g 'artist) name)) (or (plist-get artist 'tour) '()))))
@@ -1962,7 +2040,10 @@
                                ((plist-get block 'sp-line)
                                 ;; a part (spotify--part): one anchor, named by its heading
                                 (let* ((first (+ 1 (b 'count #f #f)))
-                                       (kids (map (lambda (k) (let ((c (claim k))) (plist-put c 'anchor-name #f)))
+                                       (kids (map (lambda (k)
+                                               ;; a line that opens something is a stop of its own
+                                               (let ((c (claim k)) (click (plist-get k 'click)))
+                                                 (if (and (string? click) (not (equal? click ""))) c (plist-put c 'anchor-name #f))))
                                                   (or (plist-get block 'children) '()))))
                                   (site-app-claim (plist-put block 'children kids) first (max first (b 'count #f #f))
                                                   (plist-get block 'sp-line))))
@@ -1974,75 +2055,12 @@
                        blocks)))
     (list claimed clicks)))
 
-(define (spotify--now-draw!)
-  ;; one line a part: a track, a concert, a release, a story. The cursor
-  ;; walks them line by line, TAB and M-<down> part by part, and RET does
-  ;; what a click on the part does. The line the cursor was on stays. What
-  ;; it read (news, an artist) draws the artist tabs beside the lists too
-  (spotify--redraw-artist-tabs!)
-  (let ((buf *spotify-now-buffer*))
-    (when (buffer-exists? buf)
-      (let* ((b (site-app-builder))
-             (claimed (spotify--claim-all b (spotify--now-blocks)))
-             (blocks (car claimed))
-             (clicks (cadr claimed))
-             (line (car (buffer-line-at-point buf)))
-             (text (b 'text #f #f))
-             (key (list text (spotify--track-of *spotify-now*))))
-        (unless (equal? key (buffer-local buf 'spotify-now-key))
-          (buffer-set-local! buf 'spotify-now-key key)
-          (buffer-set-text! buf text #t)
-          (buffer-goto-line! buf (max 1 (min line (b 'count #f #f))))
-          (buffer-set-local! buf 'spotify-now-clicks clicks)
-          (buffer-set-locals! buf
-            (list 'render-mode "blocks"
-                  'render-blocks (list (component 'ui/page (list 'body blocks)))))
-          (site-app-set-anchors! buf text blocks)
-          (anchor-sync! buf))))))
-
 (cell-define! 'spotify/track '())
 (cell-define! 'spotify/position '("" ""))
-(cell-watch! 'spotify/track 'spotify-now-page
-  (lambda (track old) (when (buffer-exists? *spotify-now-buffer*) (spotify--now-draw!))))
-(cell-part-bind! *spotify-now-buffer* 'spotify/progress '(spotify/position)
+;; the clock on the page of what plays
+(cell-part-bind! *spotify-now-detail* 'spotify/progress '(spotify/position)
   (lambda () (let ((p (cell-ref 'spotify/position))) (spotify--progress "sp-np-progress" (car p) (cadr p)))))
 
-(define-command "spotify-now-act" "Play the track at point, or open the release, concert or story there"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (line (car (buffer-line-at-point buf)))
-           (hit (assoc line (or (buffer-local buf 'spotify-now-clicks) '()))))
-      (if hit
-          (run-hook-with-args-until-success 'block-click buf (cadr hit))
-          (message "Nothing to play or open on this line")))))
-
-(define-mode "mplayer-now-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-doc! "mplayer-now-mode" "What plays now, from any music source: the track, its album, its artist and the news. P plays or pauses, . and , skip, l likes, = and - set the volume, q quits.")
-(mode-parent! "mplayer-now-mode" "special-mode")
-
-(define-mode "spotify-now-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-parent! "spotify-now-mode" "mplayer-now-mode")
-(mode-doc! "spotify-now-mode" "What plays now, with its album, the artist's popular tracks, tour dates, bio, discography and news. P plays or pauses, . and , skip, l likes, = and - set the volume, g reads the artist again, q quits.")
-
-;;;###autoload
-(define-command "spotify-now-page" "Show what is playing, with the artist's tours, bio, discography and news"
-  (lambda ()
-    (let ((buf *spotify-now-buffer*)
-          (from (current-buffer)))
-      (unless (buffer-exists? buf)
-        (buffer-create buf)
-        (with-current-buffer buf (lambda () (set-mode! "spotify-now-mode"))))
-      (app-join-group! buf "Spotify")
-      ;; the player is part of the app, beside its lists and pages
-      (app-claim! buf "spotify" 'aux)
-      (spotify--now-draw!)
-      (unless (equal? from buf)
-        ;; from outside the app it opens in the app's group, beside its home
-        (unless (buffer-in-group? from (app-group "Spotify"))
-          (frame-tab! (app-group "Spotify"))
-          (set! from (spotify--section-ready! 'home)))
-        (display-buffer-detail! buf from))
-      (spotify-now-refresh! (lambda (now) (spotify--context!))))))
 
 (define-command "spotify-now-context" "Go to Now Playing: the list that plays, on the track that plays"
   (lambda () (spotify--playing-section! #t)))
@@ -2064,17 +2082,6 @@
 
 (define-command "spotify-go-playlists" "Go to your Spotify playlists"
   (lambda () (spotify--go-section! 'playlists)))
-
-(define-command "spotify-now-reload" "Read the album, the artist and the news of what plays again"
-  (lambda ()
-    (let ((album (spotify--now-field 'albumHref)) (artist (spotify--now-field 'artistHref))
-          (name (car (string-split (spotify--now-field 'artists) ","))))
-      (set! *spotify-asked* (filter (lambda (k) (not (member k (list album artist (string-append "news:" name))))) *spotify-asked*))
-      (set! *spotify-albums* (filter (lambda (a) (not (equal? (car a) album))) *spotify-albums*))
-      (set! *spotify-artists* (filter (lambda (a) (not (equal? (car a) artist))) *spotify-artists*))
-      (set! *spotify-news* (filter (lambda (a) (not (equal? (car a) name))) *spotify-news*))
-      (spotify--now-draw!)
-      (spotify--context!))))
 
 ;; a click on the page: a release opens beside the list, a popular track plays
 ;; in the artist's list, a concert or a story opens in the browser
@@ -2116,18 +2123,13 @@
   ;; filter, so these go on after it every time
   (for-each (lambda (mode)
               (for-each (lambda (k) (define-key (mode-keymap mode) (car k) (cadr k))) *spotify-keys*))
-            (cons "spotify-now-mode" (cons "spotify-detail-mode"
+            (cons "spotify-detail-mode"
                   (map (lambda (page) (site-app-page-mode 'spotify (plist-get page 'id)))
-                       (site-app-pages (site-app-spec 'spotify))))))
+                       (site-app-pages (site-app-spec 'spotify)))))
   ;; a page is not a list: its arrows step from part to part
   (define-key (mode-keymap "spotify-detail-mode") "<down>" "site-app-detail-next")
   (define-key (mode-keymap "spotify-detail-mode") "<up>" "site-app-detail-prev")
-  (define-key (mode-keymap "spotify-detail-mode") "RET" "spotify-detail-follow")
-  (define-key (mode-keymap "spotify-now-mode") "g" "spotify-now-reload")
-  (define-key (mode-keymap "spotify-now-mode") "q" "quit-window")
-  (define-key (mode-keymap "spotify-now-mode") "RET" "spotify-now-act")
-  (define-key (mode-keymap "spotify-now-mode") "p" "spotify-play-pause")
-  (define-key (mode-keymap "spotify-now-mode") "2" "spotify-now-context"))
+  (define-key (mode-keymap "spotify-detail-mode") "RET" "spotify-detail-follow"))
 
 (define (spotify--own-nav!)
   ;; detail-mode's N and P walk the list beside the page, and its map is
@@ -2136,7 +2138,7 @@
   (local-remap*! (current-buffer) "index-previous-item" "spotify-go-playlists"))
 
 (add-hook! 'spotify-detail-mode-hook 'spotify--own-nav!)
-(add-hook! 'spotify-now-mode-hook 'spotify--own-nav!)
+(add-hook! 'spotify-detail-mode-hook 'spotify--now-minor!)
 
 (spotify--define-app!)
 
@@ -2183,7 +2185,7 @@
                     (message (string-append (number->string (length kept)) " albums for " *spotify-query* " · g reads again"))
                     (site-app-read-page! 'spotify (site-app-page (site-app-spec 'spotify) 'results))))))))))
 (define-key "spotify-map" "g" "spotify")
-(define-key "spotify-map" "N" "spotify-now-page")
+(define-key "spotify-map" "N" "spotify-now-context")
 (define-key "spotify-map" "S" "spotify-shuffle")
 (define-key "spotify-map" "R" "spotify-repeat")
 

@@ -1794,7 +1794,7 @@
            ;; what this page last read draws at once; a read under a minute old stands
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)
-                       (< (- (monotonic-ms) (buffer-local made 'site-app-fetched-at)) 60000)))
+                       (< (- (monotonic-ms) (buffer-local made 'site-app-fetched-at)) (or (plist-get spec 'fresh-ms) 60000))))
            (buf (site-app-render-detail! name row #f))
            (sheet (plist-get page 'detail-sheet))
            (wait (plist-get page 'detail-wait))
@@ -1811,6 +1811,14 @@
       (cond
         ((not sheet) #f)
         (fresh #f)
+        ;; a page that draws its composed tabs from what the app already holds needs no read
+        ;; to show one: it draws at once, and reads the page only when its own tab is asked for
+        ((and (plist-get page 'detail-lazy) (member (buffer-local made 'site-app-active) valid)
+              (or (not cached) (buffer-local made 'site-app-stub))
+              (site-app-composed-tab buf (buffer-local made 'site-app-active)))
+         (buffer-set-local! buf 'site-app-stub #t)
+         (site-app-render-detail! name row
+           (list 'title (or (site-app-field row 'name) "") 'tabs (list (list 'active "yes" 'id "main" 'label "Tracks")) 'section '())))
         ((plist-get page 'detail-fetch)
          ;; one plain page with no tabs to press: fetch it, no live tab needed.
          ;; Each item keeps its own page, so only a newer read of this page outdates the answer.
@@ -1834,7 +1842,10 @@
                                             (site-app-real (plist-get data 'tabs)))))
                    (buffer-set-local! buf 'site-app-sections
                      (if open (list (cons (plist-get open 'id) (plist-get data 'section))) '()))
+                   (buffer-set-local! buf 'site-app-stub #f)
                    (site-app-render-detail! name row data)
+                   ;; so the page is not read again while it stands
+                   (buffer-set-local! buf 'site-app-fetched-at (monotonic-ms))
                    (site-app-collect-detail! name buf tab url wait page gen))))))))
       buf)))
 
@@ -1850,6 +1861,11 @@
 
 (define (site-app-detail-select! buf id)
   (buffer-set-local! buf 'site-app-active id)
+  ;; a page drawn without its read reads it now, for a tab that needs it
+  (when (and (buffer-local buf 'site-app-stub) (not (site-app-composed-tab buf id)))
+    (buffer-set-local! buf 'site-app-stub #f)
+    (buffer-set-local! buf 'site-app-data #f)
+    (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row) (buffer-local buf 'site-app-for-page)))
   (let* ((list-buf (buffer-local buf 'site-app-list))
          (g (and list-buf (buffer-group list-buf))))
     (when g

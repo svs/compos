@@ -1422,6 +1422,22 @@
 .amz-hero-when { font-size: .9em; opacity: .9; }
 .amz-hero .amz-mark { color: #fff; border-color: rgba(255,255,255,.4); }
 .amazon-tabs { margin: 0 0 6px; }
+/* a narrow pane stacks the hero: the photo over the words, never beside a sliver of them */
+.amazon-head { container-type: inline-size; }
+@container (max-width: 520px) {
+  .amz-hero { flex-direction: column; align-items: stretch; gap: 16px; padding: 18px; }
+  .amz-hero-tile { width: 100%; height: 220px; }
+  .amz-hero-art { max-width: 90%; max-height: 204px; }
+  .amz-hero-name { font-size: 1.35em; -webkit-line-clamp: 4; }
+  .amz-hero-price { font-size: 1.8em; }
+}
+.semantic-list:has(> .amz-item) { container-type: inline-size; }
+@container (max-width: 340px) {
+  .amz-tile { width: 48px; height: 48px; }
+  .amz-thumb { max-width: 42px; max-height: 42px; }
+  .amz-buy { min-width: 0; }
+  .amz-was { flex-direction: column; align-items: flex-end; gap: 1px; }
+}
 ")
 
 (domain! 'web)

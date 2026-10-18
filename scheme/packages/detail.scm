@@ -145,7 +145,7 @@
   (let ((fa (buffer-local a 'detail-family)))
     (and fa (equal? fa (buffer-local b 'detail-family)))))
 
-;; A pane that holds a mode (mode-consolidate, or a chosen preference) that
+;; A pane that holds a mode (consolidate, or a chosen preference) that
 ;; NAME is not of. A page never covers a pane another mode holds.
 (define (detail--foreign-pane? win name)
   (let ((held (window-mode-preference win)))

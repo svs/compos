@@ -75,6 +75,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `scratch-buffer` | `C-c s` | Toggle between this buffer and its plain scratch buffer |
 | `switch-del` |  | Widen the narrowing by one character |
 | `switch-groups` | `C-x G` | Switch group or project, then pick a buffer or file in it |
+| `switch-window` | `C-x j` | Pick a window of this frame by name and go to it |
 | `switch-kill` |  | Kill the marked buffers, or the one at point |
 | `switch-lock` |  | Narrow to the selected group's buffers |
 | `switch-mark` |  | Mark the row at point, or unmark a marked one |
@@ -661,7 +662,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `load-mode` | `C-x m` | Choose a mode by name and put this buffer in it |
+| `jump-to-mode` | `C-x m` | Pick a major mode among this frame's windows and go to its window |
+| `load-mode` |  | Choose a mode by name and put this buffer in it |
 
 ## navigation
 
@@ -1143,6 +1145,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `window-down` | `s-S-<down>` | Move this window downward with its complete buffer stack |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
 | `window-layout` | `C-x l` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
+| `window-rename` |  | Give this window a name; an empty name goes back to the default |
+| `windows-overview` | `s-S-<down>` | Show every window of this frame at once; again goes back to the panes |
+| `windows-overview-exit` | `s-S-<up>` | Back from the all-windows view to the panes, the window you are in at the front of its pane |
 | `window-layout-columns` |  | Show three equal columns |
 | `window-layout-free` |  | Drop the frame's target layout: a display may split a window again |
 | `window-layout-halves` |  | Show two equal panes side by side |

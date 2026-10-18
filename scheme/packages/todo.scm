@@ -998,7 +998,7 @@
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n")))
 
 (define (todo-assign-chat! id group &optional who)
-  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief; return the chat"
+  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief when the chat is new; return the chat"
   (let* ((t (todo--must id))
          (g (or (group-resolve-id group) (group-ensure-record! group))))
     (car (assign-chat! #f g

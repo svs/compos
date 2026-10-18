@@ -838,7 +838,7 @@
                        (if mode
                            (buffer-derived-mode? name mode)
                            (not (buffer-local name 'mode-name))))))
-            (window-prev-buffers win))))
+            (switch-pane-buffers win))))
 
 (define (switch-window-buffer-pick! step &optional mode-only)
   "Offer this window's other buffers in the minibuffer. Each row shows in
@@ -1080,9 +1080,20 @@ the next row down. STEP is kept for the callers."
   (cond ((eq? tab 'group)
          (if group (filter (lambda (r) (switch-row-in-group? r group)) rows) '()))
         ((eq? tab 'window)
-         (let ((mine (if (and win (window-exists? win)) (window-prev-buffers win) '())))
+         (let ((mine (if (and win (window-exists? win)) (switch-pane-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
         (else rows)))
+
+;; the buffers of every window in WIN's pane, the window on screen first:
+;; a group with panes keeps one window per mode behind each pane
+(define (switch-pane-buffers win)
+  (let loop ((wins (if (boundp 'group-panes-pane-windows) (group-panes-pane-windows win) (list win)))
+             (acc '()))
+    (if (null? wins)
+        acc
+        (let ((b (window-buffer-any (car wins))))
+          (loop (cdr wins)
+                (append acc (if b (list b) '()) (window-prev-buffers (car wins))))))))
 
 (define (switch-bare-prompt!)
   (let* ((start (monotonic-ms))

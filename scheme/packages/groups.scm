@@ -3074,33 +3074,37 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; Every major mode of the group gets one window. A mode with a pane
 ;; gathers there; one without takes a hidden window the layout ring walks to.
-(define (mode-consolidate!)
+((define (consolidate!)
   (let ((me (active-window)))
-    (if (not (member me (display--work-windows)))
-        (begin (message "Select a work window to consolidate") #f)
-        (let loop ((plan (mode-consolidate-plan me)) (modes '()) (count 0) (used '()))
-          (cond ((pair? plan)
-                 (let* ((mode (car (car plan)))
-                        (home (cadr (car plan)))
-                        (win (if (and home (window-buffer-any home))
-                                 home
-                                 (let ((first (find (lambda (b) (equal? (mode-consolidate-mode-of b) mode))
-                                                    (buffer-list-mru))))
-                                   (and first (window-new-hidden! first))))))
-                   (if (not win)
-                       (loop (cdr plan) modes count used)
-                       (loop (cdr plan) (cons mode modes)
-                             (+ count (mode-consolidate-into! win mode))
-                             (cons win used)))))
-                ((= count 0)
-                 (message "No mode buffers to consolidate") #f)
-                (else
-                  (mode-consolidate-refill! (reverse used))
-                  (when (window-buffer me) (select-window! me))
-                  (layout-target-note-slots! (layout-target-visible-buffers))
-                  (message (string-append "Consolidated " (number->string count) " buffers of "
-                                          (string-join (reverse modes) ", ")))
-                  me))))))
+    (cond ((and (boundp 'group-panes-of) (group-panes-of (frame-group)))
+           ;; a group with panes: each mode one window, behind its pane
+           (group-panes-apply!))
+          ((not (member me (display--work-windows)))
+           (message "Select a work window to consolidate") #f)
+          (else
+            (let loop ((plan (mode-consolidate-plan me)) (modes '()) (count 0) (used '()))
+              (cond ((pair? plan)
+                     (let* ((mode (car (car plan)))
+                            (home (cadr (car plan)))
+                            (win (if (and home (window-buffer-any home))
+                                     home
+                                     (let ((first (find (lambda (b) (equal? (mode-consolidate-mode-of b) mode))
+                                                        (buffer-list-mru))))
+                                       (and first (window-new-hidden! first))))))
+                       (if (not win)
+                           (loop (cdr plan) modes count used)
+                           (loop (cdr plan) (cons mode modes)
+                                 (+ count (mode-consolidate-into! win mode))
+                                 (cons win used)))))
+                    ((= count 0)
+                     (message "No mode buffers to consolidate") #f)
+                    (else
+                      (mode-consolidate-refill! (reverse used))
+                      (when (window-buffer me) (select-window! me))
+                      (layout-target-note-slots! (layout-target-visible-buffers))
+                      (message (string-append "Consolidated " (number->string count) " buffers of "
+                                              (string-join (reverse modes) ", ")))
+                      me)))))))
 
 ;; The mode a window holds: that of the buffer it shows, else the one it
 ;; was given, else that of its nearest work buffer beneath temporary covers.
@@ -3174,14 +3178,66 @@ is forgotten and that group falls back to creation order in the switcher."
       (length buffers))))
 
 
-(define-command "mode-consolidate"
-  "Give every major mode of this group one window, the hidden ones on the layout ring"
-  mode-consolidate!)
-(public! 'mode-consolidate!
-  "(mode-consolidate!) — give every major mode of the group one window: a mode with a pane gathers there, one without gets a hidden window the layout ring reaches")
+(define-command "consolidate"
+  "Give every major mode of this group one window: behind its pane, or on the layout ring"
+  consolidate!)
+(global-set-key "C-x C" "consolidate")
+(public! 'consolidate!
+  "(consolidate!) — give every major mode of the group one window: in a group with panes each mode's window waits behind its pane; elsewhere a mode with a pane gathers there, one without gets a hidden window the layout ring reaches")
 (public! 'mode-consolidate-plan
   "(mode-consolidate-plan WIN) — what mode-consolidate! from WIN would do, as (MODE WINDOW) per major mode; WINDOW #f means a new hidden window. Changes nothing")
 (catalog-meta! 'function "mode-consolidate-plan" 'effects '(read))
+
+;;; Jump to mode: C-x m picks a major mode among this frame's windows and
+;;; goes to its window, bringing it to the front of its pane or the ring.
+
+;; every window of this frame: the pane rows when the group has panes,
+;; else the panes on screen and the ring behind them
+(define (jump-to-mode-windows)
+  (let ((rows (group-panes-windows)))
+    (if (pair? rows)
+        (let loop ((rs rows) (acc '()))
+          (if (null? rs)
+              acc
+              (loop (cdr rs) (append acc (filter group-panes-live? (cdr (car rs)))))))
+        (append (layout-pane-windows) (layout-hidden-windows)))))
+
+;; (MODE WINDOW BUFFER) once per mode, in window order
+(define (jump-to-mode-choices)
+  (let loop ((wins (jump-to-mode-windows)) (acc '()))
+    (if (null? wins)
+        (reverse acc)
+        (let* ((w (car wins))
+               (m (mode-consolidate-window-mode w)))
+          (loop (cdr wins)
+                (if (and m (not (assoc m acc)))
+                    (cons (list m w (window-buffer-any w)) acc)
+                    acc))))))
+
+(define (jump-to-mode! mode)
+  (let ((hit (assoc mode (jump-to-mode-choices))))
+    (and hit
+         (let* ((w (cadr hit))
+                (row (group-panes-row-of w)))
+           (cond (row (group-panes-show! (car row) w) (select-window! w) w)
+                 ((member w (layout-pane-windows)) (select-window! w) w)
+                 (else (layout-ring-show! w)))))))
+
+(define-command "jump-to-mode"
+  "Pick a major mode among this frame's windows and go to its window"
+  (lambda ()
+    (let ((choices (jump-to-mode-choices)))
+      (if (null? choices)
+          (message "No mode windows in this frame")
+          (minibuffer-read "Mode: "
+            (map (lambda (ch) (list (car ch) (buffer-modeline-name (caddr ch)))) choices)
+            (lambda (pick)
+              (let ((name (if (pair? pick) (car pick) pick)))
+                (or (jump-to-mode! name)
+                    (message (string-append "no window of mode " name))))))))))
+(global-set-key "C-x m" "jump-to-mode")
+(public! 'jump-to-mode!
+  "(jump-to-mode! MODE) — go to the window of MODE in this frame, bringing it to the front of its pane; #f when no window holds it")
 
 (domain! 'groups)
 (effects! '(write display))
@@ -5284,9 +5340,11 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;;   (group-panes! '(index detail chat)
 ;;;     (lambda (buf) (cond (... 'index) (... 'detail) (else 'chat))))
 ;;;
-;;; The panes stand left to right, one window each. A buffer of the group
-;;; opens on top of the stack of the pane the function names, wherever it
-;;; is opened from: no pane splits, and no buffer shows in two.
+;;; The panes stand left to right. A pane holds one window per major
+;;; mode, one on screen and the rest behind it. A buffer of the group
+;;; opens on top of the window of its mode in the pane the function
+;;; names, wherever it is opened from: no pane splits, and no buffer
+;;; shows in two.
 
 (domain! 'windows)
 (effects! '(write display))
@@ -5331,36 +5389,118 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((rec (frame-local 'group-panes)))
     (if (and rec (equal? (car rec) (frame-group))) (cadr rec) '())))
 
+(define (group-panes-set-rows! rows)
+  (set-frame-local! 'group-panes (list (frame-group) rows)))
+
+;; a window still on screen or waiting behind a pane
+(define (group-panes-live? win)
+  (and win (window-buffer-any win) #t))
+
+;; the row (PANE SHOWN HIDDEN...) that holds WIN, or #f
+(define (group-panes-row-of win)
+  (find (lambda (row) (member win (cdr row))) (group-panes-windows)))
+
 (define (group-panes-window pane)
   (let* ((hit (assoc pane (group-panes-windows)))
-         (win (and hit (cadr hit))))
+         (win (and hit (pair? (cdr hit)) (cadr hit))))
     (and win (assoc win (window-list)) win)))
+
+;; every window of the pane that holds WIN, the shown one first; a window
+;; outside the panes is a pane of its own
+(define (group-panes-pane-windows win)
+  (let ((row (group-panes-row-of win)))
+    (filter group-panes-live? (if row (cdr row) (list win)))))
+
+;; the window of PANE that holds MODE, or #f
+(define (group-panes-window-for pane mode)
+  (let ((row (assoc pane (group-panes-windows))))
+    (and row mode
+         (find (lambda (w) (and (group-panes-live? w)
+                                (equal? (mode-consolidate-window-mode w) mode)))
+               (cdr row)))))
+
+;; put WIN in PANE's row: on top when it is the one on screen, else behind
+(define (group-panes-record! pane win shown?)
+  (let* ((rows (group-panes-windows))
+         (row (or (assoc pane rows) (list pane)))
+         (rest (filter (lambda (w) (and (not (equal? w win)) (group-panes-live? w))) (cdr row)))
+         (new (cons pane (if shown? (cons win rest) (append rest (list win))))))
+    (group-panes-set-rows!
+      (if (assoc pane rows)
+          (map (lambda (r) (if (equal? (car r) pane) new r)) rows)
+          (append rows (list new))))))
+
+;; bring WIN to the front of PANE: the shown window goes behind it; a pane
+;; with no window on screen gets its column back
+(define (group-panes-show! pane win)
+  (let ((shown (group-panes-window pane)))
+    (cond ((equal? shown win) #t)
+          ;; already on screen, as in the all-windows view: it is the front
+          ((assoc win (window-list))
+           (group-panes-record! pane win #t) #t)
+          ((and shown (window-swap-hidden! shown win))
+           (group-panes-record! pane win #t) #t)
+          ((not shown)
+           (group-panes-record! pane win #t)
+           (and (group-panes-arrange!) #t))
+          (else #f))))
+
+;; lay the frame out as the shown window of each pane, in pane order
+(define (group-panes-arrange!)
+  (let* ((spec (group-panes-of (frame-group)))
+         (rows (group-panes-windows))
+         (ids (filter (lambda (w) w)
+                      (map (lambda (p)
+                             (let ((row (assoc p rows)))
+                               (and row (pair? (cdr row)) (group-panes-live? (cadr row)) (cadr row))))
+                           (if spec (car spec) (map car rows))))))
+    (and (pair? ids)
+         (begin
+           (layout-target-free!)
+           (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
+           (window-state-changed!)
+           ids))))
 
 ;; window-show-buffer! asks this: a group buffer shown in one pane goes
 ;; to the pane its function names
 (define (group-panes-target win name)
-  (let* ((pane (and (find (lambda (row) (equal? (cadr row) win)) (group-panes-windows))
-                    (group-panes-pane name)))
-         (w (and pane (group-panes-window pane))))
-    (or w win)))
+  (if (or (layout-arranging?) (not (group-panes-row-of win)))
+      win
+      (let ((pane (group-panes-pane name)))
+        (if (not pane)
+            win
+            (let ((w (or (group-panes-window-for pane (mode-consolidate-mode-of name))
+                         (let ((shown (group-panes-window pane)))
+                           (and shown (not (mode-consolidate-window-mode shown)) shown))
+                         (let ((nw (window-new-hidden! name)))
+                           (and nw (begin (group-panes-record! pane nw #f) nw))))))
+              (if (and w (group-panes-show! pane w)) w win))))))
 
 ;; display-buffer, the detail opener and switch-to-buffer ask this first:
 ;; the window NAME went to, or #f when the group has no say
 (define (group-panes-open! name select?)
   (let ((pane (group-panes-pane name)))
     (and pane
-         (let ((w (or (group-panes-window pane)
-                      (and (group-panes-apply! name) (group-panes-window pane)))))
-           (and w
-                (begin
-                  (unless (equal? (window-buffer w) name)
-                    (display-buffer-in-window! w name))
-                  (when select? (select-window! w))
-                  w))))))
+         (begin
+           (when (null? (group-panes-windows)) (group-panes-apply! name))
+           (let* ((mode (mode-consolidate-mode-of name))
+                  (w (or (group-panes-window-for pane mode)
+                         ;; a pane whose shown window holds no mode yet takes this one
+                         (let ((shown (group-panes-window pane)))
+                           (and shown (not (mode-consolidate-window-mode shown)) shown))
+                         (let ((nw (window-new-hidden! name)))
+                           (and nw (begin (group-panes-record! pane nw #f) nw))))))
+             (and w (group-panes-show! pane w)
+                  (begin
+                    (unless (equal? (window-buffer w) name)
+                      (display-buffer-in-window! w name))
+                    (when select? (select-window! w))
+                    w)))))))
 
-;; lay the frame out as its group's panes: each pane one window, its
-;; buffers its stack, the shown or most recent on top; FORCE goes on top
-;; of its own pane
+;; lay the frame out as its group's panes: in each pane one window per
+;; mode, its buffers of that mode its stack; the window on screen is the
+;; one showing a buffer, else the newest; FORCE's window goes on top of
+;; its own pane
 (define (group-panes-apply! &optional force)
   (let* ((g (frame-group))
          (spec (group-panes-of g)))
@@ -5368,38 +5508,55 @@ is forgotten and that group falls back to creation order in the switcher."
         (begin (message "This group declares no panes in its group.scm") #f)
         (let* ((me (window-buffer (active-window)))
                (shown (map cadr (window-list)))
+               (old (let loop ((rows (group-panes-windows)) (acc '()))
+                      (if (null? rows) acc (loop (cdr rows) (append acc (cdr (car rows)))))))
                (members (filter (lambda (b) (and (fill-candidate? b) (group-cycle-member? b g)))
                                 (buffer-list-mru)))
+               ;; one stack per mode: FORCE, else the buffer on screen, else the newest on top
                (stacks
-                 (filter (lambda (s) (pair? (cadr s)))
+                 (lambda (bufs)
+                   (let loop ((bs bufs) (acc '()))
+                     (if (null? bs)
+                         (reverse acc)
+                         (let* ((m (mode-consolidate-mode-of (car bs)))
+                                (same (filter (lambda (b) (equal? (mode-consolidate-mode-of b) m)) bs))
+                                (top (cond ((and force (member force same)) force)
+                                           ((find (lambda (b) (member b shown)) same))
+                                           (else (car same)))))
+                           (loop (filter (lambda (b) (not (member b same))) bs)
+                                 (cons (cons top (filter (lambda (b) (not (equal? b top))) same)) acc)))))))
+               ;; the window for a stack: the one showing its top, the pane window that held it, or a new hidden one
+               (window-for
+                 (lambda (s)
+                   (let ((w (or (window-showing (car s))
+                                (find (lambda (w) (equal? (window-buffer-any w) (car s))) old)
+                                (window-new-hidden! (car s)))))
+                     (when w
+                       (set-window-prev-buffers! w (cdr s))
+                       (window-mode-preference! w (mode-consolidate-mode-of (car s))))
+                     w)))
+               (rows
+                 (filter (lambda (r) (pair? (cdr r)))
                    (map (lambda (p)
                           (let* ((bufs (filter (lambda (b) (equal? (group-panes-pane b) p)) members))
-                                 (top (cond ((and force (member force bufs)) force)
-                                            ((find (lambda (b) (member b shown)) bufs))
-                                            ((pair? bufs) (car bufs))
-                                            (else #f))))
-                            (list p (if top (cons top (filter (lambda (b) (not (equal? b top))) bufs)) '()))))
-                        (car spec))))
-               (rows (map (lambda (s)
-                            (let* ((top (car (cadr s)))
-                                   (w (or (window-showing top) (window-new-hidden! top))))
-                              (list (car s) w (cadr s))))
-                          stacks))
-               (ids (filter (lambda (w) w) (map cadr rows))))
-          (and (pair? ids)
+                                 (sts (stacks bufs))
+                                 ;; the stack on screen: FORCE's, else one already shown, else the newest
+                                 (first (or (and force (find (lambda (s) (member force s)) sts))
+                                            (find (lambda (s) (member (car s) shown)) sts)
+                                            (and (pair? sts) (car sts))))
+                                 (ordered (if first
+                                              (cons first (filter (lambda (s) (not (equal? s first))) sts))
+                                              '())))
+                            (cons p (filter (lambda (w) w) (map window-for ordered)))))
+                        (car spec)))))
+          (and (pair? rows)
                (begin
-                 (layout-target-free!)
-                 (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
-                 (for-each (lambda (r)
-                             (when (cadr r)
-                               (set-window-prev-buffers! (cadr r) (cdr (caddr r)))
-                               (window-mode-preference! (cadr r) #f)))
-                           rows)
-                 (set-frame-local! 'group-panes (list g (map (lambda (r) (list (car r) (cadr r))) rows)))
+                 (group-panes-set-rows! rows)
+                 (group-panes-arrange!)
                  (let ((home (window-showing me)))
-                   (select-window! (or home (car ids))))
+                   (select-window! (or home (cadr (car rows)))))
                  (window-state-changed!)
-                 ids))))))
+                 (map cadr rows)))))))
 
 ;; switch-to-buffer goes to the buffer's pane and selects it
 (advice-add! 'switch-to-buffer--show! 'around 'group-panes
@@ -5413,12 +5570,68 @@ is forgotten and that group falls back to creation order in the switcher."
   "Lay this frame out as the panes its group declares in group.scm"
   (lambda () (group-panes-apply!)))
 
+;;; The all-windows view: s-S-<down> puts every window of the frame on
+;;; screen at once, the ones behind the panes included, each with its own
+;;; stack. Every window and buffer command works as usual there. s-S-<up>,
+;;; or s-S-<down> again, lays the panes out again with the window you are
+;;; in at the front of its pane.
+
+(define (windows-overview-active?)
+  (equal? (frame-local 'windows-overview) #t))
+
+(define (windows-overview-enter!)
+  (let ((spec (group-panes-of (frame-group))))
+    (cond ((not spec)
+           (message "This frame has no panes to spread") #f)
+          (else
+            (when (null? (group-panes-windows)) (group-panes-apply!))
+            (let* ((me (active-window))
+                   (ids (filter group-panes-live? (jump-to-mode-windows))))
+              (cond ((null? ids) (message "No windows in this frame") #f)
+                    (else
+                      (layout-target-free!)
+                      (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
+                      (set-frame-local! 'windows-overview #t)
+                      (when (assoc me (window-list)) (select-window! me))
+                      (window-state-changed!)
+                      (message (string-append (number->string (length ids)) " windows; s-S-<up> goes back to the panes"))
+                      ids)))))))
+
+(define (windows-overview-exit!)
+  (let* ((me (active-window))
+         (row (group-panes-row-of me)))
+    (when row (group-panes-record! (car row) me #t))
+    (set-frame-local! 'windows-overview #f)
+    (let ((ids (group-panes-arrange!)))
+      (when (and ids (member me ids)) (select-window! me))
+      ids)))
+
+(define-command "windows-overview"
+  "Show every window of this frame at once; again, or windows-overview-exit, goes back to the panes"
+  (lambda ()
+    (if (windows-overview-active?) (windows-overview-exit!) (windows-overview-enter!))))
+
+(define-command "windows-overview-exit"
+  "Back from the all-windows view to the panes, the window you are in at the front of its pane"
+  (lambda ()
+    (if (windows-overview-active?)
+        (windows-overview-exit!)
+        (message "Not in the all-windows view"))))
+
+(global-set-key "s-S-<down>" "windows-overview")
+(global-set-key "s-S-<up>" "windows-overview-exit")
+(public! 'windows-overview-active? "(windows-overview-active?) — #t while this frame shows every window at once")
+(catalog-meta! 'function "windows-overview-active?" 'effects '(read))
+
 (public! 'group-panes!
   "(group-panes! PANES PLACE) — in group.scm: the group's panes, left to right, and (PLACE BUF) naming the pane each buffer opens in")
 (public! 'group-panes-apply!
-  "(group-panes-apply! [FORCE]) — lay this frame out as its group's panes; FORCE goes on top of its pane")
+  "(group-panes-apply! [FORCE]) — lay this frame out as its group's panes, one window per mode behind each pane; FORCE's window goes on top of its pane")
 (public! 'group-panes-default-place
   "(group-panes-default-place BUF) — the default layout's pane for BUF: detail pages in the middle, listings on the left, the rest on the right")
 (public! 'group-panes-pane
   "(group-panes-pane BUF) — the pane BUF opens in under this frame's group, or #f")
 (catalog-meta! 'function "group-panes-pane" 'effects '(read))
+(public! 'group-panes-pane-windows
+  "(group-panes-pane-windows WIN) — every window of the pane that holds WIN, the shown one first; a window outside the panes is a pane of its own")
+(catalog-meta! 'function "group-panes-pane-windows" 'effects '(read))

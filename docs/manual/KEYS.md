@@ -119,7 +119,10 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x C-g s` | `tile-all` | Open the current group or project in locked columns |
 | `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
 | `C-x l` | `window-layout` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
-| `C-x m` | `load-mode` | Choose a mode by name and put this buffer in it |
+| `C-x m` | `jump-to-mode` | Pick a major mode among this frame's windows and go to its window |
+| `C-x j` | `switch-window` | Pick a window of this frame by name and go to it |
+| `s-S-<down>` | `windows-overview` | Show every window of this frame at once; again goes back to the panes |
+| `s-S-<up>` | `windows-overview-exit` | Back from the all-windows view to the panes |
 | `C-x n N` | `narrow-context-also` | Narrow the view and the LLM context to the same region or Morg section |
 | `C-x n n` | `narrow-to-region` | Show only the text between point and mark |
 | `C-x n w` | `widen` | Show the complete current buffer |

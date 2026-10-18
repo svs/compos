@@ -2513,7 +2513,6 @@
         (if (member name (mode-names))
             (load-mode! name)
             (message (string-append "no mode named " name)))))))
-(global-set-key "C-x m" "load-mode")
 (domain! 'unknown)
 (effects! '(unknown))
 

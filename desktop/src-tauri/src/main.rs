@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 /// A hard reload: fetch the document and every script and stylesheet
 /// with `cache: "reload"`, so the cache holds fresh copies, then reload.
@@ -122,6 +123,29 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        // closing the window asks first: a stray Cmd-W must not drop the
+        // shell. The daemon keeps running either way.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let w = window.clone();
+                window
+                    .dialog()
+                    .message("The daemon and your buffers keep running.")
+                    .title("Close the compos window?")
+                    .parent(window)
+                    .buttons(MessageDialogButtons::OkCancelCustom(
+                        "Close".to_string(),
+                        "Cancel".to_string(),
+                    ))
+                    .show(move |close| {
+                        if close {
+                            let _ = w.destroy();
+                        }
+                    });
+            }
+        })
         .setup(move |app| {
             // the default menu, plus a Shell menu with the two browser
             // reloads: Cmd-R re-reads the page, Cmd-Shift-R first fetches

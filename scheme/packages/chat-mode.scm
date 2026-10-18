@@ -683,11 +683,12 @@
                             (when (boundp 'workspace-chat-inherit!) (workspace-chat-inherit! chat (group-name g)))
                             (list chat #t)))))
          (chat (car got)))
-    (agent-continue! chat (if (procedure? text) (text chat) text))
+    (when (cadr got)
+      (agent-continue! chat (if (procedure? text) (text chat) text)))
     got))
 
 (public! 'assign-chat!
-  "(assign-chat! SRC GROUP TEXT [HELD]) — send TEXT to the item's chat in GROUP: HELD while it is live there, else SRC's own chat (the one M-o opens), else a new chat; TEXT may be a procedure of the chat; answers (CHAT NEW?)")
+  "(assign-chat! SRC GROUP TEXT [HELD]) — the item's chat in GROUP: HELD while it is live there, else SRC's own chat (the one M-o opens), else a new chat; TEXT, which may be a procedure of the chat, goes only to a new chat; answers (CHAT NEW?)")
 (catalog-meta! 'function "assign-chat!" 'domain 'chat 'effects '(write spend))
 
 ;; the first thing a new chat for a buffer asks: the most specific of its

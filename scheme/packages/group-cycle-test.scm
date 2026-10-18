@@ -239,7 +239,7 @@
         (let* ((windows (group-consolidate-test-open!))
                (destination (car windows))
                (geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects))))
-          (run-command "mode-consolidate")
+          (run-command "consolidate")
           (check-equal! (length (window-list)) 2 "each app keeps one window; the exhausted ones close")
           (check-equal! (active-window) destination "the destination stays selected")
           (check-equal! (current-buffer) "*zz-cyc-work-a*" "the current buffer stays visible")
@@ -254,7 +254,7 @@
           (check-false! (window-exists? (nth 3 windows)) "the exhausted window closes")
           (check-true! (buffer-known? "*zz-cyc-work-b*") "the gathered buffer stays alive")
           (let ((before (window-tree)))
-            (run-command "mode-consolidate")
+            (run-command "consolidate")
             (check-equal! (window-tree) before "a second consolidation changes nothing")))))))
 
 (deftest 'mode-consolidate-includes-hidden-mode-buffers
@@ -268,7 +268,7 @@
         (switch-to-buffer-here! "*zz-cyc-work-a*")
         (delete-other-windows!)
         (set-window-prev-buffers! (active-window) '())
-        (run-command "mode-consolidate")
+        (run-command "consolidate")
         (check-equal! (window-prev-buffers (active-window)) '("*zz-cyc-work-b*") "the hidden buffer joins")))))
 
 (deftest 'mode-consolidate-keeps-the-other-stack-invisible-at-target-capacity
@@ -285,7 +285,7 @@
           (set-window-prev-buffers! destination '("*zz-cyc-one*" "*zz-cyc-two*"))
           (set-window-prev-buffers! neighbor '())
           (select-window! destination)
-          (run-command "mode-consolidate")
+          (run-command "consolidate")
           (check-equal! (window-prev-buffers destination) '("*zz-cyc-work-b*") "only matching history remains")
           (check-false! (window-showing "*zz-cyc-one*") "the other stack is invisible")
           (check-equal! (window-buffer neighbor) "*zz-cyc-three*" "the existing other window stays")
@@ -306,6 +306,6 @@
           (set-window-prev-buffers! destination '())
           (set-window-prev-buffers! neighbor '())
           (select-window! destination)
-          (run-command "mode-consolidate")
+          (run-command "consolidate")
           (check-equal! (length (window-list)) 1 "the emptied pane stays closed")
           (check-equal! (window-prev-buffers destination) '("*zz-cyc-work-b*") "its buffer joins the stack"))))))

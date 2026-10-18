@@ -1838,7 +1838,7 @@ keeps the buffer you were in and your point.")
         (append (take kept (- capacity 1)) (list focus))
         kept)))
 
-;; A pane that holds a mode (mode-consolidate, or a chosen preference)
+;; A pane that holds a mode (consolidate, or a chosen preference)
 ;; keeps that mode's buffers in its history. A layout that needs a new
 ;; window fills it from the rest, so the pane loses no member.
 (define (layout-held-buffers)

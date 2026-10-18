@@ -5,7 +5,8 @@
 ;;;
 ;;;   RET   go to the window, walking the ring until it is on screen
 ;;;   k     close the window; a ring window takes its pane
-;;;   c     mode-consolidate from the window on this line
+;;;   c     consolidate from the window on this line
+;;;   r     name the window
 ;;;   g / q refresh · bury
 
 (domain! 'windows)
@@ -30,6 +31,7 @@
          (name (if win (window-buffer win) "")))
     (list (list (if on "■" "□") (if on "win-on" "win-off"))
           (list (if (and win (equal? win (active-window))) "●" "") "win-on")
+          (list (if win (window-name win) "") "win-name")
           (list (if (equal? name "") "" (buffer-modeline-name name)) "win-name")
           (list (or (and win (mode-consolidate-window-mode win)) "") "faint")
           (list (if win (number->string (+ 1 (length (window-prev-buffers win)))) "") "dim")
@@ -63,23 +65,29 @@
             (layout-ring-show! win))
           (when (member win (layout-pane-windows))
             (select-window! win)
-            (mode-consolidate!))
+            (consolidate!))
           (when (window-exists? list-win) (select-window! list-win))
           (list-refresh! *windows-list-buffer*))))))
 
 (define-command "windows-list-refresh" "Redraw the window list"
   (lambda () (list-refresh! *windows-list-buffer*)))
 
+(define-command "windows-list-rename" "Name the window on this line"
+  (lambda ()
+    (windows-list-on-current
+      (lambda (win)
+        (window-rename-prompt! win (lambda () (list-refresh! *windows-list-buffer*)))))))
+
 (define-list-mode! "windows-mode"
   (list
     'doc (string-append
            "The windows of this frame's ring, in ring order. A filled box is a "
            "window on screen, a hollow one waits off it. `RET` goes to the "
-           "window and walks the ring to it, `k` closes it, `c` gives every major mode one window from the window on the line.")
+           "window and walks the ring to it, `k` closes it, `c` gives every major mode one window from the window on the line, `r` names the window.")
     'buffer *windows-list-buffer*
     'rows windows-list-ids
     'columns (lambda (buf)
-               (list (list "" 1) (list "" 1) (list "buffer" 40)
+               (list (list "" 1) (list "" 1) (list "name" 18) (list "buffer" 40)
                      (list "mode" 20) (list "bufs" 4)
                      (list "state" 10) (list "id" #f)))
     'cells windows-list-cells
@@ -90,9 +98,9 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "go") ("k" "close") ("c" "consolidate") ("/" "filter")
+              '(("RET" "go") ("k" "close") ("c" "consolidate") ("r" "rename") ("/" "filter")
                 ("g" "refresh") ("q" "quit")))
-    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate")
+    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate") ("r" "windows-list-rename")
             ("g" "windows-list-refresh") ("q" "quit-window"))))
 
 (define-command "list-windows"

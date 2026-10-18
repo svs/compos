@@ -464,8 +464,17 @@
 (define (todo--home-group t)
   (group-resolve-id (plist-get t 'group)))
 
+(define (todo--group-names)
+  (string-join (filter (lambda (n) (and (string? n) (not (string-prefix? "*" n)))) (map car (group-name-table))) ", "))
+
+(define (todo--group-of g)
+  (cond ((todo--blank? g)
+         (todo--fail "a task needs 'group, the group it belongs to. \"Put a todo in X\" means group X: pass (list 'group \"X\" ...), a group name or id. Groups: " (todo--group-names)))
+        ((group-resolve-id g))
+        (else (todo--fail "no group " (if (string? g) g "?") ". Pass a group name or id from: " (todo--group-names)))))
+
 (define (todo-create title &optional props)
-  "(todo-create TITLE [PROPS]) — file a task; return its id. PROPS: project, state (default inbox), assignee, priority, deadline, scheduled, tags, source, parent, depends, notes, by, group (default: the group of the chat or buffer that files it; assigning starts the chat there). A source already filed is not filed twice: that task's id comes back."
+  "(todo-create TITLE PROPS) — file a task; return its id. PROPS must hold group, a group name or id: the task shows in that group's todo list, and assigning starts the chat there. Without it, or with an unknown one, it errors with the groups to pick from. PROPS may also hold project, state (default inbox), assignee, priority, deadline, scheduled, tags, source, parent, depends, notes, by. A source already filed is not filed twice: that task's id comes back."
   (let* ((props (or props '()))
          (src (plist-get props 'source))
          (dup (and (not (todo--blank? src))
@@ -473,7 +482,7 @@
     (if dup
         (plist-get dup 'id)
         (let* ((who (or (plist-get props 'by) todo-user))
-               (group (or (group-resolve-id (plist-get props 'group)) (todo--origin-group who)))
+               (group (todo--group-of (plist-get props 'group)))
                (id (todo--new-id))
                (t (list 'id id
                         'title (string-join (todo--words (string-join (split-lines title) " ")) " ")
@@ -594,7 +603,7 @@
 ;;; --- the list ----------------------------------------------------------------
 
 (category! 'writing)
-(public! 'todo-create "(todo-create TITLE [PROPS]) — file a task; answers its id. PROPS may hold 'by, the name the change is logged under")
+(public! 'todo-create "(todo-create TITLE PROPS) — file a task; answers its id. PROPS must hold 'group, a group name or id (\"put a todo in X\" is group X); 'by is the name the change is logged under")
 (public! 'todo-update "(todo-update ID PROPS) — change the task's fields; each change lands in its log")
 (public! 'todo-log "(todo-log ID TEXT [WHO]) — add a line to the task's log")
 (public! 'todo-triage "(todo-triage ID [PROPS]) — move an inbox task to todo")
@@ -1290,7 +1299,7 @@
   (lambda ()
     (read-string "Task: "
       (lambda (s)
-        (let ((id (todo-create s (list 'state "todo"))))
+        (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
           (todo--refresh-all!)
           (message (string-append "Filed " id)))))))
 
@@ -1446,7 +1455,7 @@
 The user and every agent share one todo list. Each project keeps its tasks in a PROJECT/todos.md that `todo-directories` finds. Use the todo calls; do not edit those files.
 
 - Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
-- File: `(todo-create TITLE PROPS)` gives the new id. A task you find goes in as inbox, for the user to triage.
+- File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.
 - Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress.
 - WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
 - A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")

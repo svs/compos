@@ -323,7 +323,7 @@
                              'source src
                              'notes (string-append "eval-scheme-read refused " name
                                       " because the catalog declares no effects for it. Find its definition and read what it does. Declare its effects where it is made public: an effects! line before its public!, or catalog-meta! after it when the stamp in force there is wrong for it alone, or a public! with effects! for a builtin that has none. Save, check (eval-read-refusal \"(" name " ...)\") no longer names it, then close the task."))
-                       (if healing? (list 'group (group-ensure-record! self-healing-group)) '())))))
+                       (list 'group (group-ensure-record! (if healing? self-healing-group "compos")))))))
           (when chat? (todo-assign-chat! id self-healing-group))
           id))))
 

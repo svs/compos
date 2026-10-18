@@ -174,7 +174,7 @@ The todo list lives in files, outside the log, so filing one is an effect that c
 (define (write-todos _ intents)
   (for-each (lambda (i)
               (todo-create (plist-get (plist-get i 'data) 'title)
-                           (list 'project "recruiting" 'source (string-append "intent:" (number->string (plist-get i 'seq))))))
+                           (list 'group "recruiting" 'project "recruiting" 'source (string-append "intent:" (number->string (plist-get i 'seq))))))
             intents))
 ```
 

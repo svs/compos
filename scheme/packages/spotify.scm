@@ -2018,7 +2018,10 @@
         'pages
         (list ;; Now Playing is the list that plays, on the track that plays
               (append (list 'shortcut "N" 'after-fill (lambda (buf rows) (spotify--fill-covers! buf rows) (or (spotify--show-playing-row! buf) (spotify--goto-playing! buf)))
-                            'detail-composed (list *spotify-artist-tab* *spotify-album-tab*) 'detail-default "artist" 'detail-lazy #t
+                            'detail-composed (list *spotify-artist-tab* *spotify-album-tab*) 'detail-default "artist"
+                            ;; a track row holds what the artist and album tabs need; an album row
+                            ;; holds only its name, so its page is read for its tracks and artist
+                            'detail-lazy (lambda (row) (string-prefix? "/track/" (or (site-app-field row 'href) "")))
                             'detail-count-from-one #t)
                       (spotify--section 'playing "Now Playing" "0"
                         (lambda () (let ((p (spotify--now-path))) (if (equal? p "") "/collection/tracks" p)))

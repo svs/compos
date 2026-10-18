@@ -1939,8 +1939,10 @@
         ((not sheet) #f)
         (fresh #f)
         ;; a page that draws its composed tabs from what the app already holds needs no read
-        ;; to show one: it draws at once, and reads the page only when its own tab is asked for
-        ((and (plist-get page 'detail-lazy) (member (buffer-local made 'site-app-active) valid)
+        ;; to show one: it draws at once, and reads the page only when its own tab is asked for.
+        ;; 'detail-lazy may be a procedure of the row, for a page whose rows do not all hold enough
+        ((and (let ((lazy (plist-get page 'detail-lazy))) (if (procedure? lazy) (lazy row) lazy))
+              (member (buffer-local made 'site-app-active) valid)
               (or (not cached) (buffer-local made 'site-app-stub))
               (site-app-composed-tab buf (buffer-local made 'site-app-active)))
          (buffer-set-local! buf 'site-app-stub #t)

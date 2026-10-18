@@ -1274,7 +1274,7 @@
           (and (component--get p 'sponsored? #f) (amz--text "amz-mark" "sponsored")))))
 
 (defcomponent 'amazon/product
-  "One product as a row: its photo on a white tile, the title over its stars and when it lands, the marks you put on it, and the price with the M.R.P. struck through and the discount as a pill."
+  "One product as a row: its photo on a white tile, the title over its stars and when it lands, the marks you put on it, and the price with the M.R.P. struck through and the discount as a pill. IMAGE is the photo's file on disk."
   '((title string required) (image string optional) (price string optional) (mrp string optional)
     (rating string optional) (reviews string optional) (delivery string optional)
     (saved? boolean optional) (cart? boolean optional) (note? boolean optional) (hidden? boolean optional)
@@ -1331,7 +1331,7 @@
                             (amz--text "amz-key" (component--get p 'key "s")))))))
 
 (defcomponent 'amazon/hero
-  "The head of a product's page: its photo large on a white tile over a blur of itself, the brand, the title, the stars, the price with the M.R.P. and the discount, when it lands, and the marks."
+  "The head of a product's page: its photo large on a white tile over a blur of itself, the brand, the title, the stars, the price with the M.R.P. and the discount, when it lands, and the marks. IMAGE is the photo's file on disk."
   '((title string required) (image string optional) (brand string optional) (price string optional) (mrp string optional)
     (rating string optional) (reviews string optional) (delivery string optional)
     (saved? boolean optional) (cart? boolean optional) (note? boolean optional) (sponsored? boolean optional))

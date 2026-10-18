@@ -183,43 +183,39 @@
           (list "spotify:spotify-like" (if liked? (say "♥" "liked") (say "♡" "like")) "l"))))
 
 (defcomponent 'spotify/now-playing
-  "The player bar: the cover, the title over its artists with a heart when it is liked, the time and a progress bar, and the controls as keys. Each control's CLICK is spotify:COMMAND."
+  "The player bar: the cover, where it plays from, the title over its artists and album with a heart when it is liked, the time and a progress bar, and the controls as keys. Each control's CLICK is spotify:COMMAND."
   '((title string optional) (artists string optional) (album string optional) (from string optional) (art string optional) (playing? boolean optional)
     (liked? boolean optional) (position string optional) (duration string optional) (shuffle string optional) (repeat string optional) (class string optional))
   '(title "Windowpane" artists "Opeth" album "Damnation" playing? #t liked? #t position "2:10" duration "7:44")
   (lambda (p)
     (let* ((title (component--get p 'title ""))
-           (pos (component--get p 'position ""))
-           (dur (component--get p 'duration ""))
-           (total (spotify--seconds dur))
-           (pct (if (> total 0) (min 100 (quotient (* 100 (spotify--seconds pos)) total)) 0))
-           (playing? (component--get p 'playing? #f)))
+           (art (component--get p 'art ""))
+           (artists (component--get p 'artists ""))
+           (album (component--get p 'album ""))
+           (from (component--get p 'from "")))
       (list 'tag "div" 'class (string-append "sp-now " (component--get p 'class ""))
+            'attrs (if (equal? art "") '() (list (list "style" (string-append "--sp-art:url('" art "')"))))
             'children
             (if (equal? title "")
                 (list (spotify--text "sp-now-idle" "Nothing playing. p on a row plays it."))
-                ;; the cover and the title open the Now Playing page
-                (list (plist-put (spotify--cover "sp-now-art sp-now-open" (component--get p 'art "") title) 'click "spotify:spotify-now-context")
-                      (list 'tag "div" 'class "sp-main sp-now-open" 'click "spotify:spotify-now-context"
-                            'children (list (list 'tag "span" 'class "sp-name"
-                                                  'children (append (list (spotify--text "" title))
-                                                                    (if (component--get p 'liked? #f) (list (spotify--text "sp-liked" " ♥")) '())))
-                                            (list 'tag "span" 'class "sp-by"
-                                                  'children (append (list (spotify--text "" (component--get p 'artists "")))
-                                                                    (if (equal? (component--get p 'album "") "") '()
-                                                                        (list (spotify--text "sp-album" (string-append "· " (component--get p 'album "")))))))
-                                            (if (equal? (component--get p 'from "") "") (spotify--text "" "")
-                                                (spotify--text "sp-now-from" (component--get p 'from "")))))
-
-                      (list 'tag "div" 'class "sp-now-time"
-                            'children (list (spotify--text "sp-dur" pos)
-                                            (list 'tag "span" 'class "sp-bar"
-                                                  'children (list (list 'tag "span" 'class "sp-bar-fill"
-                                                                        'attrs (list (list "style" (string-append "width:" (number->string pct) "%"))))))
-                                            (spotify--text "sp-dur" dur)))
-                      (component 'ui/actions
-                        (list 'class "sp-controls"
-                              'actions (spotify--controls p #f)))))))))
+                ;; the names own the top row; the time and the controls share the one below,
+                ;; so a narrow pane never squeezes the title away
+                (list (list 'tag "div" 'class "sp-now-in"
+                            'children
+                            (list (plist-put (spotify--cover "sp-now-art sp-now-open" art title) 'click "spotify:spotify-now-context")
+                                  ;; the cover and the names open the Now Playing page
+                                  (list 'tag "div" 'class "sp-now-main sp-now-open" 'click "spotify:spotify-now-context"
+                                        'children
+                                        (append
+                                          (if (equal? from "") '() (list (spotify--text "sp-now-from" from)))
+                                          (list (spotify--text (if (component--get p 'liked? #f) "sp-now-title sp-now-liked" "sp-now-title") title)
+                                                (spotify--text "sp-now-by"
+                                                               (if (equal? album "") artists
+                                                                   (if (equal? artists "") album (string-append artists "  ·  " album)))))))
+                                  (spotify--progress "sp-now-time" (component--get p 'position "") (component--get p 'duration ""))
+                                  (component 'ui/actions
+                                    (list 'class "sp-controls"
+                                          'actions (spotify--controls p #f)))))))))))
 
 ;;; --- release dates ------------------------------------------------------------
 ;;; Search and list pages do not show when a song came out. The player's embed
@@ -476,15 +472,28 @@
 .sp-search-icon { flex: none; font-size: 17px; color: var(--dim-fg); }
 .sp-search-text { flex: 1; min-width: 0; color: var(--default-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-search-empty { color: var(--dim-fg); }
-.sp-now { display: flex; align-items: center; gap: 14px; padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 10px; font-family: var(--font-sans); font-size: 13px; }
-.sp-now-from { color: var(--dim-fg); font-size: .75em; text-transform: uppercase; letter-spacing: .08em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-now-art { flex: none; width: 52px; height: 52px; border-radius: 6px; object-fit: cover; background: var(--hl-line-bg); }
+/* the player bar: the names own the top row, the time and the controls the row below; in a narrow pane each takes a row of its own */
+.sp-now { container-type: inline-size; position: relative; overflow: hidden; isolation: isolate; margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 12px; background: var(--hl-line-bg); font-family: var(--font-sans); font-size: 13px; }
+.sp-now::before { content: ''; position: absolute; inset: -40px; z-index: -1; background: var(--sp-art, none) center / cover; filter: blur(40px) saturate(1.4); opacity: .3; }
+.sp-now > .sp-now-idle { display: block; padding: 12px 14px; }
+.sp-now-in { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; grid-template-areas: 'art main main' 'art time ctrl'; column-gap: 16px; row-gap: 8px; align-items: center; padding: 12px 14px; }
+.sp-now-art { grid-area: art; width: 72px; height: 72px; border-radius: 8px; object-fit: cover; background: var(--hl-line-bg); box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 28px; }
+.sp-now-main { grid-area: main; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sp-now-from { color: var(--dim-fg); font-size: .72em; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-now-title { font-size: 1.3em; font-weight: 700; line-height: 1.2; color: var(--default-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-now-liked::after { content: '  ♥'; color: var(--ok-fg); }
+.sp-now-by { color: var(--dim-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 520px) {
+  .sp-now-in { grid-template-columns: 56px minmax(0, 1fr); grid-template-areas: 'art main' 'time time' 'ctrl ctrl'; }
+  .sp-now-art { width: 56px; height: 56px; }
+  .sp-now-in > .sp-controls { justify-self: center; }
+}
 .sp-now-idle { color: var(--dim-fg); }
 .sp-liked { color: var(--ok-fg); }
-.sp-now-time { display: flex; align-items: center; gap: 8px; flex: 0 1 34%; min-width: 120px; }
+.sp-now-time { grid-area: time; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sp-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--border-bg); overflow: hidden; }
 .sp-bar-fill { display: block; height: 100%; background: var(--ok-fg); }
-.sp-controls { flex: none; }
+.sp-controls { grid-area: ctrl; justify-self: end; }
 
 .sp-np-hero { position: relative; overflow: hidden; display: flex; align-items: flex-end; gap: 28px; padding: 32px; margin: 0 0 22px; border-radius: 14px; font-family: var(--font-sans); isolation: isolate; background: var(--hl-line-bg); }
 .sp-np-hero::before { content: ''; position: absolute; inset: -60px; z-index: -1; background: var(--sp-art) center / cover; filter: blur(48px) saturate(1.5) brightness(.75); opacity: .9; }
@@ -690,15 +699,16 @@
              (lambda ()
                (site-app-show-detail! list-buf
                  (list 'key path 'href path 'kind ""
-                       'name (if o (spotify--origin-name (cadr o)) (spotify--now-field 'title)))))))
+                       'name (if o (if (pair? (cddr o)) (caddr o) (spotify--origin-name (cadr o))) (spotify--now-field 'title)))))))
           (else (message "Nothing is playing") #f))))
 
 ;; Whether a page would draw as it last did. What an artist tab shows comes from the
 ;; artist's read, brief, news and photos; an album tab from the notes; so a
 ;; redraw that none of them prompted leaves the page alone
-(define (spotify--tab-inputs b)
+(define (spotify--tab-inputs b &optional given)
+  ;; GIVEN the row about to be drawn; else the one drawn
   (let* ((active (buffer-local b 'site-app-active))
-         (row (spotify--as-track b (buffer-local b 'site-app-row)))
+         (row (spotify--as-track b (or given (buffer-local b 'site-app-row))))
          (href (or (site-app-field row 'href) "")))
     (cond
       ((equal? active "artist")
@@ -707,7 +717,8 @@
               (artist (spotify--cached *spotify-artists* artist-href))
               (name (let ((n (and artist (plist-get artist 'name))))
                       (if (and (string? n) (not (equal? n ""))) n (car (string-split (or (site-app-field row 'artists) "") ","))))))
-         (list active href links artist (and (member artist-href *spotify-failed*) #t)
+         ;; the artist's page is the artist's, whichever of their songs plays
+         (list active artist-href artist (and (member artist-href *spotify-failed*) #t)
                (spotify--cached *spotify-briefs* name) (spotify--cached *spotify-news* name)
                (spotify--cached *spotify-photos* name))))
       (else
@@ -1399,6 +1410,13 @@
     (when pane (select-window! pane))
     (site-app-open! 'spotify id)))
 
+;; what the list played from is called: the page's own name when it is one buffer
+;; for every page, else the buffer's
+(define (spotify--origin-label buf)
+  (let* ((row (and (buffer-exists? buf) (buffer-local buf 'site-app-row)))
+         (n (and row (spotify--detail? buf) (site-app-field row 'name))))
+    (if (and (string? n) (not (equal? n ""))) n (spotify--origin-name buf))))
+
 (define (spotify--origin-name buf)
   ;; *spotify: Daily Mix 2* as Daily Mix 2
   (let ((parts (string-split buf ": ")))
@@ -1575,7 +1593,7 @@
                      (and (not context) (string-append "playerctl -p spotify open " (sh-quote uri) " && echo playing")))
     web
     (lambda (v)
-      (when path (set! *spotify-origin* (list path origin)))
+      (when path (set! *spotify-origin* (list path origin (spotify--origin-label origin))))
       (message (string-append "Playing " what))
       (spotify--now-set! (plist-put *spotify-now* 'playing #t))
       (spotify-now-refresh!)))))
@@ -1628,7 +1646,7 @@
          (from (and o (equal? path (car o)) (cadr o)))
          (name (cond (album? (spotify--now-field 'album))
                      ((equal? kind "Liked Songs") "Liked Songs")
-                     ((and from (string-prefix? "*spotify: " from)) (spotify--origin-name from))
+                     ((and from o (pair? (cddr o)) (not (equal? (caddr o) ""))) (caddr o))
                      (else ""))))
     (list 'kind (if (equal? kind "") "queue" kind) 'name name
           'art (spotify--now-field 'art)
@@ -1717,7 +1735,7 @@
           (lambda (r)
             (if (equal? (plist-get (plist-get (plist-get r 'result) 'result) 'value) "playing")
                 (begin
-                  (set! *spotify-origin* (list path origin))
+                  (set! *spotify-origin* (list path origin (spotify--origin-label origin)))
                   (message (string-append "Playing " what))
                   ;; the bar shows it playing at once; the next read names the track
                   (spotify--now-set! (plist-put *spotify-now* 'playing #t)))
@@ -2001,11 +2019,20 @@
         'own-group #t
         ;; one tab plays and reads; a Spotify tab already open is that tab
         'adopt #t
+        ;; a page whose inputs are as they were at its last draw is not drawn again
+        'drawn-same? (lambda (buf row) (spotify--same-inputs? (spotify--tab-inputs buf row) (buffer-local buf 'sp-drawn)))
+        'drawn! (lambda (buf) (buffer-set-local! buf 'sp-drawn (spotify--tab-inputs buf)))
         ;; a track's or album's page does not change by the minute: what it read stands for an hour
         'fresh-ms 3600000
         ;; pages are read by moving the running player, not by loading it again
         'navigate (lambda (name url wait k) (spotify-navigate! name url wait k))
         ;; what plays has one page, which follows the music
+        ;; one detail buffer for each section; what it read of other rows stays in the app's cache
+        'detail-buffer (lambda (row)
+                           (let ((p (site-app-field row 'detail-page)))
+                             (cond ((equal? p "home") "Home") ((equal? p "liked") "Liked Songs")
+                                   ((equal? p "playlists") "Playlists") ((equal? p "results") "Search")
+                                   (else *spotify-now-title*))))
         'detail-name (lambda (row) (if (spotify--now-row? row) *spotify-now-title* (site-app-field row 'name)))
         ;; the player bar heads every section
         'list-head (lambda (buf)

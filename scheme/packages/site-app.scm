@@ -586,11 +586,27 @@
 
 
 (define (site-app-detail-buffer name row)
-  ;; the spec's 'detail-name says what a row's page is called; the key is the fallback
+  ;; an app with 'detail-buffer (ROW) keeps every page in the buffer that names: one
+  ;; buffer for whatever is looked at, its pages kept aside (site-app-cache-put!)
   (let* ((spec (site-app-spec name))
+         (own (and spec (plist-get spec 'detail-buffer)))
          (namer (and spec (plist-get spec 'detail-name)))
-         (title (or (and namer (namer row)) (site-app-field row 'key))))
+         (title (or (and own (own row)) (and namer (namer row)) (site-app-field row 'key))))
     (string-append "*" (symbol->string name) ": " title "*")))
+
+;; The pages of a one-buffer app, by href: what a row's page last read, kept for
+;; when the buffer comes back to the row. Bounded, the oldest let go
+(define *site-app-page-cache* '())
+(define site-app-page-cache-size 60)
+
+(define (site-app-cache-put! name href entry)
+  (let ((key (list name href)))
+    (set! *site-app-page-cache*
+      (let ((all (cons (list key entry) (filter (lambda (e) (not (equal? (car e) key))) *site-app-page-cache*))))
+        (if (> (length all) site-app-page-cache-size) (list-head all site-app-page-cache-size) all)))))
+
+(define (site-app-cache-get name href)
+  (let ((e (assoc (list name href) *site-app-page-cache*))) (and e (cadr e))))
 
 
 (define-mode "site-app-detail-mode"
@@ -1707,7 +1723,16 @@
     ;; a page a namer reuses for another row starts empty, not with the last row's data
     (let ((old (buffer-local buf 'site-app-row)))
       (when (and old (not (equal? (site-app-field old 'href) (site-app-field row 'href))))
-        (buffer-set-locals! buf (list 'site-app-data #f 'site-app-fetched-at #f 'site-app-sections '()))))
+        ;; the page leaves what it read behind, and takes what the new row's last read
+        (when (and (buffer-local buf 'site-app-data) (not (buffer-local buf 'site-app-stub)))
+          (site-app-cache-put! name (site-app-field old 'href)
+            (list (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-fetched-at) (buffer-local buf 'site-app-sections))))
+        (let ((hit (site-app-cache-get name (site-app-field row 'href))))
+          (cond (hit (buffer-set-locals! buf (list 'site-app-data (car hit) 'site-app-fetched-at (cadr hit)
+                                                   'site-app-sections (or (caddr hit) '()) 'site-app-stub #f)))
+                ;; a page drawn without its read holds nothing of the last row's
+                ((buffer-local buf 'site-app-stub) #f)
+                (else (buffer-set-locals! buf (list 'site-app-data #f 'site-app-fetched-at #f 'site-app-sections '())))))))
     (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name (site-app-spec name) page))
     (buffer-set-local! buf 'site-app-detail-kind (plist-get page 'detail-kind))
     (buffer-set-local! buf 'detail-family (site-app-detail-mode-name (site-app-spec name) page))
@@ -1780,6 +1805,8 @@
     (let* ((name (plist-get (buffer-local list-buf 'site-app-spec) 'name))
            (spec (site-app-spec name))
            (page (or for-page (site-app-current-page list-buf)))
+           ;; which page the row is shown for: an app with a buffer for each can name it so
+           (row (plist-put row 'detail-page (plist-get page 'id)))
            (made (site-app-prepare-detail! name row page))
            (ids (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-tabs) '())))
            ;; every item opens on the tab this group last chose, else the first
@@ -1795,7 +1822,13 @@
            (cached (buffer-local made 'site-app-data))
            (fresh (and cached (buffer-local made 'site-app-fetched-at)
                        (< (- (monotonic-ms) (buffer-local made 'site-app-fetched-at)) (or (plist-get spec 'fresh-ms) 60000))))
-           (buf (site-app-render-detail! name row #f))
+           ;; a page that would draw just as it last did is left as it is
+           (same? (let ((f (plist-get spec 'drawn-same?))) (and f cached (buffer-local made 'site-app-active) (f made row))))
+           (buf (if same?
+                    (begin (buffer-set-local! made 'site-app-row row) made)
+                    (let ((r (site-app-render-detail! name row #f)))
+                      (let ((f (plist-get spec 'drawn!))) (when f (f r)))
+                      r)))
            (sheet (plist-get page 'detail-sheet))
            (wait (plist-get page 'detail-wait))
            (url (site-app-url spec (plist-get row 'href)))
@@ -1817,8 +1850,10 @@
               (or (not cached) (buffer-local made 'site-app-stub))
               (site-app-composed-tab buf (buffer-local made 'site-app-active)))
          (buffer-set-local! buf 'site-app-stub #t)
-         (site-app-render-detail! name row
-           (list 'title (or (site-app-field row 'name) "") 'tabs (list (list 'active "yes" 'id "main" 'label "Tracks")) 'section '())))
+         (unless same?
+           (site-app-render-detail! name row
+             (list 'title (or (site-app-field row 'name) "") 'tabs (list (list 'active "yes" 'id "main" 'label "Tracks")) 'section '()))
+           (let ((f (plist-get spec 'drawn!))) (when f (f buf)))))
         ((plist-get page 'detail-fetch)
          ;; one plain page with no tabs to press: fetch it, no live tab needed.
          ;; Each item keeps its own page, so only a newer read of this page outdates the answer.

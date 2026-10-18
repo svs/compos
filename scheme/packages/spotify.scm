@@ -472,24 +472,16 @@
 (effects! '(write external))
 
 (define (spotify--tab? t)
-  (let ((u (plist-get t 'url)))
-    (and (string? u) (string-prefix? "https://open.spotify.com" u)
-         (not (equal? (chrome--tab-id t) (site-app-tab 'spotify))))))
+  ;; one tab plays and reads: the app's own, remembered across sessions. A
+  ;; second web player would take the sound from it
+  (equal? (chrome--tab-id t) (site-app-tab 'spotify)))
 
 ;; Every control starts here. With no player tab open we open one and say so,
 ;; because a command that silently does nothing reads like a broken editor.
 (define (spotify-tab k)
-  ;; every Chrome window, not only the editor's: the player is wherever you
-  ;; left it. The tab in front in its window wins, else the newest
-  (chrome-call "tabs" '()
-    (lambda (r)
-      (let* ((hits (filter spotify--tab? (or (plist-get r 'tabs) '())))
-             (front (filter (lambda (t) (eq? (plist-get t 'active) #t)) hits)))
-        (cond ((pair? front) (k (car front)))
-              ((pair? hits) (k (car (reverse hits))))
-              (else
-               (tab-open spotify-url)
-               (message "Opened the Spotify tab — sign in there, then try again")))))))
+  ;; the app's one tab, wherever it is; gone, a fresh one opens out of sight
+  ;; and is remembered
+  (site-app-find-tab! 'spotify k))
 
 ;; The page's own world: Spotify's CSP refuses a string evaluated in the
 ;; isolated one, and both worlds see the same DOM.
@@ -639,25 +631,31 @@
 (define (spotify--play-js path selector)
   ;; In place, no reload: the player's router follows a pushed history entry,
   ;; and an observer presses the button the moment the new page draws it. A
-  ;; button still on the old page does not count. Gives up after ten seconds
+  ;; button still on the old page does not count. The promise answers once
+  ;; it pressed, or '' after ten seconds
   (string-append
-    "(function(){var path=" (json-encode path) ",sel=" (json-encode selector) ";"
+    "new Promise(function(done){var path=" (json-encode path) ",sel=" (json-encode selector) ";"
     "var moving=location.pathname!==path,old=moving?document.querySelector('main section'):null;"
     "var go=function(){var b=Array.from(document.querySelectorAll(sel)).filter(function(e){return !(old&&old.isConnected&&old.contains(e))})[0];"
-    "if(b){b.click();return true}return false};"
+    "if(b){b.click();done('playing');return true}return false};"
     "if(moving){history.pushState({},'',path);dispatchEvent(new PopStateEvent('popstate',{state:{}}))}"
-    "if(go())return 'playing';"
+    "if(go())return;"
     "var t,obs=new MutationObserver(function(){if(go()){obs.disconnect();clearTimeout(t)}});"
     "obs.observe(document.body,{subtree:true,childList:true,attributes:true});"
-    "t=setTimeout(function(){obs.disconnect()},10000);return 'queued';})()"))
+    "t=setTimeout(function(){obs.disconnect();done('')},10000);})"))
 
 (define (spotify--play! path selector what)
+  ;; Chrome gives sound only to a page a person has pressed, and b.click()
+  ;; is not a person; a real mouse click never reaches the hidden tab. The
+  ;; debugger's userGesture makes the press count as the person's
   (let ((origin (current-buffer)))
     (spotify-tab
       (lambda (t)
-        (tab-eval-main t (spotify--play-js path selector)
-          (lambda (v)
-            (if (member v (list "playing" "queued"))
+        (tab-cdp t "Runtime.evaluate"
+          (list 'expression (spotify--play-js path selector)
+                'userGesture #t 'awaitPromise #t 'returnByValue #t)
+          (lambda (r)
+            (if (equal? (plist-get (plist-get (plist-get r 'result) 'result) 'value) "playing")
                 (begin
                   (unless (equal? origin *spotify-now-buffer*) (set! *spotify-origin* (list path origin)))
                   (message (string-append "Playing " what))
@@ -868,6 +866,8 @@
         'detail-mode "spotify-detail-mode"
         ;; Spotify lives in a group of its own; calling it goes there
         'own-group #t
+        ;; one tab plays and reads; a Spotify tab already open is that tab
+        'adopt #t
         ;; pages are read by moving the running player, not by loading it again
         'navigate (lambda (name url wait k) (spotify-navigate! name url wait k))
         'detail-name (lambda (row) (site-app-field row 'name))
@@ -1389,8 +1389,6 @@
             (cons "spotify-now-mode" (cons "spotify-detail-mode"
                   (map (lambda (page) (site-app-page-mode 'spotify (plist-get page 'id)))
                        (site-app-pages (site-app-spec 'spotify))))))
-  (define-key (mode-keymap "spotify-detail-mode") "<down>" "next-line")
-  (define-key (mode-keymap "spotify-detail-mode") "<up>" "previous-line")
   (define-key (mode-keymap "spotify-now-mode") "g" "spotify-now-reload")
   (define-key (mode-keymap "spotify-now-mode") "q" "quit-window")
   (define-key (mode-keymap "spotify-now-mode") "RET" "spotify-now-act")
@@ -1463,7 +1461,7 @@
          (front (filter (lambda (t) (eq? (plist-get t 'active) #t)) all))
          (hits (if (pair? front) front (reverse all))))
     (if (null? hits)
-        (begin (tab-open spotify-url) "No Spotify tab was open. I opened one — sign in, then ask again.")
+        (begin (site-app-find-tab! 'spotify (lambda (t) #t)) "No Spotify tab was open. I opened one — sign in, then ask again.")
         (let ((r (browser-call-sync "eval" (list 'tab (chrome--tab-id (car hits)) 'code code 'world "main") 4000)))
           (if (plist-get r 'ok)
               (let ((v (plist-get r 'value))) (if (string? v) v "done"))

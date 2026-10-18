@@ -349,30 +349,47 @@
       (if html (site-app-fill! name page html)
           (message "The site did not answer")))))
 
+(define *site-app-opening* '())
+
 (define (site-app-find-tab! name k)
   ;; the reader tab lives in its own window, so it is looked for in every
-  ;; window: a look in this frame's alone never found it, and opened another
+  ;; window: a look in this frame's alone never found it, and opened another.
+  ;; An app with 'adopt takes a tab already on its site before it opens one,
+  ;; and callers that ask while a tab is opening wait for that same tab
   (let ((spec (site-app-spec name))
-        (remembered (site-app-tab name)))
-    (chrome-call "tabs" '()
-      (lambda (reply)
-        (let* ((tabs (or (plist-get reply 'tabs) '()))
-               (live (and remembered
-                         (site-app-find
-                           (lambda (tab) (equal? (plist-get tab 'id) remembered))
-                           tabs))))
-          (if live
-              (k remembered)
-              (chrome-call "open"
-                (chrome-here
-                  ;; the reader's minimized window: the app works the site out of sight
-                  (list 'url (site-app-url spec (plist-get spec 'home))
-                        'background #t
-                        'reader #t))
-                (lambda (reply)
-                  (let ((tab (plist-get reply 'tab)))
-                    (site-app-note-tab! name tab)
-                    (k tab))))))))))
+        (remembered (site-app-tab name))
+        (waiting (assoc name *site-app-opening*)))
+    (if waiting
+        (set! *site-app-opening* (alist-put *site-app-opening* name (cons k (cadr waiting))))
+        (chrome-call "tabs" '()
+          (lambda (reply)
+            (let* ((tabs (or (plist-get reply 'tabs) '()))
+                   (live (and remembered
+                             (site-app-find
+                               (lambda (tab) (equal? (plist-get tab 'id) remembered))
+                               tabs)))
+                   (base (plist-get spec 'base-url))
+                   (stray (and (not live) (plist-get spec 'adopt) (string? base)
+                               (site-app-find
+                                 (lambda (tab) (string-prefix? base (or (plist-get tab 'url) "")))
+                                 tabs))))
+              (cond
+                (live (k remembered))
+                (stray (k (site-app-note-tab! name (plist-get stray 'id))))
+                (else
+                 (set! *site-app-opening* (alist-put *site-app-opening* name (list k)))
+                 (chrome-call "open"
+                   (chrome-here
+                     ;; the reader's minimized window: the app works the site out of sight
+                     (list 'url (site-app-url spec (plist-get spec 'home))
+                           'background #t
+                           'reader #t))
+                   (lambda (reply)
+                     (let ((tab (plist-get reply 'tab))
+                           (ks (cadr (assoc name *site-app-opening*))))
+                       (set! *site-app-opening* (filter (lambda (e) (not (eq? (car e) name))) *site-app-opening*))
+                       (site-app-note-tab! name tab)
+                       (for-each (lambda (f) (f tab)) (reverse ks)))))))))))))
 
 (define (site-app-select-page! index)
   (let* ((spec (buffer-local (current-buffer) 'site-app-spec))

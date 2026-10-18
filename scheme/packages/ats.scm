@@ -666,7 +666,7 @@
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"
-  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text"))))
+  (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text") " Then search the open jobs for other roles that suit this candidate, with findJobsForCandidate, and say which are worth putting them forward for and why.")))
 
 (domain! 'web)
 (effects! '(write external display))

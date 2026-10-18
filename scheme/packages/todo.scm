@@ -786,6 +786,29 @@
 (define (todo--pill t)
   (list (string-append " " (or (plist-get t 'state) "") " ") (todo--state-face t)))
 
+;; the dot before a card's title: the state's hue, without the pill's fill
+(for-each (lambda (s)
+            (defface! (string->symbol (string-append "todo-dot-" s))
+                      'fg (let ((hue (assoc s '(("review" "#e0556b") ("doing" "#e0a040") ("todo" "#6b8cff")
+                                                ("waiting" "#a07ad0") ("done" "#4fa36b")))))
+                            (if hue (cadr hue) "var(--faint-fg)"))))
+          *todo-states*)
+(defface! 'todo-agent-live 'fg "#4fa36b")
+
+(define (todo--dot t)
+  (let ((s (or (plist-get t 'state) "inbox")))
+    (list (if (member s *todo-closed*) "✓" "●") (string-append "todo-dot-" s))))
+
+;; who holds the task, short: a chat says how it is doing, not its id
+(define (todo--agent t)
+  (let* ((a (plist-get t 'assignee))
+         (row (and (string? a) (event-view-get 'chat-status a))))
+    (cond ((todo--blank? a) "")
+          ((todo--stalled? t) (list "◌ stalled" "todo-overdue"))
+          ((and row (member (plist-get row 'status) '(running starting))) (list "● working" "todo-agent-live"))
+          ((string-prefix? "chat:" a) (list "○ agent" "todo-date"))
+          (else (list (string-append "@" a) "org-meta")))))
+
 (define *todo-months* '("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
 
 (define (todo--short-date d)
@@ -862,17 +885,18 @@
   (if (todo--sep? t)
       (list (list "" (list (plist-get t 'title) "list-section-name")))
       (let* ((closed? (member (plist-get t 'state) *todo-closed*))
-             (who (todo--who-status t))
+             (who (todo--agent t))
              (due (todo--when t))
+             (project (plist-get t 'project))
+             (group (group-name (plist-get t 'group)))
              (meta (todo--chips
                      (list (todo--pill t)
                            (todo--chip (plist-get t 'priority) "org-priority")
-                           (todo--chip (plist-get t 'project) "todo-project")
-                           (todo--chip (group-name (plist-get t 'group)) "todo-group")
+                           (todo--chip project "todo-project")
+                           (if (equal? group project) "" (todo--chip group "todo-group"))
                            (if (pair? due) (list (string-append " " (car due)) (cadr due)) "")
-                           (if (equal? who "") ""
-                               (list (string-append " " who) (if (todo--stalled? t) "todo-overdue" "org-meta")))))))
-        (list (list (list (if closed? "☑" "☐") "todo-check") (list (plist-get t 'title) "todo-title"))
+                           (if (pair? who) (list (string-append " " (car who)) (cadr who)) "")))))
+        (list (list (todo--dot t) (list (plist-get t 'title) "todo-title"))
               (list "" meta (todo--tag-text t))
               (list "")))))
 

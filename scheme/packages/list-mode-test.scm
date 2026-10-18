@@ -226,8 +226,8 @@
                         "the wide profile's columns answer in a wide window"))))))
 
 (deftest 'a-cell-with-no-spans-paints-no-face
+  "list-lay-out reads a cell of pills with no pills, (\"\" ()), as a cell with no face, not a face named ()"
   (lambda ()
-    ;; a cell of pills with no pills is ("" ()): no face, not a face named ()
     (let ((laid (list-lay-out (list (list "" '()) (list "x" "bold"))
                               (list (list "a" 4) (list "b" #f)))))
       (check-equal! (cadr laid) (list (list 6 1 "bold"))

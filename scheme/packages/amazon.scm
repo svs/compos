@@ -220,7 +220,9 @@
 ;; nodes were 16 products, 2 ad carousels, 3 labels, the facet rail, related
 ;; searches and a help line.
 (define (amazon-fetch-page! query page k)
-  ;; a tab: the search page is the one that will not answer a fetch
+  ;; a fetch first: it answers the whole page in about a second, where a tab
+  ;; takes ten. A shell or a throttled answer parses to nothing, and then
+  ;; amazon-read! reads it in a tab after all
   (amazon-read! (amazon-page-url query page) *amazon-sheet* pair?
     (lambda (rows html)
       ;; The s-pagination-* classes are absent from the rendered
@@ -230,8 +232,63 @@
          (and (string? html)
               (string-contains? html
                 (string-append "page=" (number->string (+ page 1))))
-              #t)))
-    #t))
+              #t)))))
+
+;; ----------------------------------------------------------------------
+;; The cache. A search you ran, and a product page you read, draw at once
+;; from what was read last time; the site is read again behind it. It is
+;; kept on disk, so a restart starts warm too.
+
+(define *amazon-cache-file* (string-append (compos-home) "/amazon-cache.json"))
+(define *amazon-searches* '())
+(define *amazon-details* '())
+
+(define (amazon--cached alist key) (let ((hit (assoc key alist))) (and hit (cadr hit))))
+
+(define (amazon--kept alist key val cap)
+  (let ((rest (filter (lambda (e) (not (equal? (car e) key))) alist)))
+    (cons (list key val) (if (> (length rest) (- cap 1)) (list-head rest (- cap 1)) rest))))
+
+(define (amazon--cache-save! ignored)
+  (write-file! *amazon-cache-file*
+    (json-encode (list 'searches *amazon-searches* 'details *amazon-details*))))
+
+(define (amazon--cache-touch!) (debounce! 'amazon-cache 2000 amazon--cache-save! #f))
+
+(define (amazon--cache-load!)
+  (let ((text (and (file-exists? *amazon-cache-file*) (read-file *amazon-cache-file*))))
+    (when (and (string? text) (> (string-length text) 2))
+      (let ((data (json-parse text)))
+        (when (pair? data)
+          (set! *amazon-searches* (or (plist-get data 'searches) '()))
+          (set! *amazon-details* (or (plist-get data 'details) '())))))))
+
+(define (amazon--search-key query page)
+  (string-append amazon-host " / " query " / " (number->string page)))
+
+(define (amazon--search-keep! query page rows next)
+  (set! *amazon-searches*
+    (amazon--kept *amazon-searches* (amazon--search-key query page) (list 'rows rows 'more (and next #t)) 40))
+  (amazon--cache-touch!))
+
+(define (amazon--detail-keep! asin data)
+  (set! *amazon-details* (amazon--kept *amazon-details* asin data 200))
+  (amazon--cache-touch!))
+
+(define (amazon--prefetch-page! query page)
+  ;; the next page, read before you ask for it, so n draws at once. A fetch
+  ;; only: a prefetch never takes the tab the reads you asked for need
+  (unless (amazon--cached *amazon-searches* (amazon--search-key query page))
+    (browser-fetch (amazon-page-url query page)
+      (lambda (reply)
+        (let* ((html (and (pair? reply) (car (cdr reply))))
+               (rows (amazon--parse *amazon-sheet* html)))
+          (when (pair? rows)
+            (amazon--search-keep! query page rows
+              (and (string? html)
+                   (string-contains? html (string-append "page=" (number->string (+ page 1))))))))))))
+
+(when (and (null? *amazon-searches*) (null? *amazon-details*)) (amazon--cache-load!))
 
 ;;; --- the product page ----------------------------------------------------
 ;;; A detail is one buffer per row, named after the ASIN, so the details
@@ -398,35 +455,26 @@
                   (list "amazon-note" (if note "Edit note" "Add a note") "N")
                   (list "amazon-open" "Open in browser" "o"))))))
 
-(define (amazon--head-block row)
+(define (amazon--head-block row &optional buf)
+  ;; the page opens on a hero, as a Spotify page does, its buttons under it
   (let* ((asin (plist-get row 'asin))
-         (mrp (plist-get row 'mrp))
-         (rating (plist-get row 'rating))
-         (revs (plist-get row 'reviews))
-         (kept? (amazon-saved? asin))
-         (in? (amazon-in-cart? asin))
-         (photo (amazon--photo-block row)))
+         (data (and buf (amazon-detail-data buf)))
+         (revs (or (and data (plist-get data 'reviewCount)) (plist-get row 'reviews))))
     (list 'tag "div" 'class "amazon-head"
           'children
-          (append
-            (if photo (list photo) '())
-            (list
-            (list 'tag "div" 'class "amazon-title" 'text (plist-get row 'title))
-            (list 'tag "div" 'class "amazon-price"
-                  'text (string-append
-                          "₹" (amazon--row-field row 'price "—")
-                                        (if mrp (string-append "  ·  M.R.P. ₹" mrp) "")))
-            (list 'tag "div" 'class "amazon-chips"
-                  'children
-                  (filter (lambda (b) b)
-                    (list
-                      (and rating (component 'ui/badge
-                                     (list 'text (string-append "★ " rating
-                                                (if revs (string-append " · " revs) "")))))
-                      (and (plist-get row 'sponsored) (component 'ui/badge (list 'text "sponsored")))
-                      (and kept? (component 'ui/badge (list 'text "saved")))
-                      (and in? (component 'ui/badge (list 'text "in your cart"))))))
-            (amazon--actions row))))))
+          (list (component 'amazon/hero
+                  (list 'title (or (plist-get row 'title) "")
+                        'image (or (amazon--photo-url (plist-get row 'image)) "")
+                        'brand (or (and data (amazon--brand data)) "")
+                        'price (or (plist-get row 'price) "")
+                        'mrp (or (plist-get row 'mrp) "")
+                        'rating (amazon--stars (or (and data (plist-get data 'rating)) (plist-get row 'rating)))
+                        'reviews (if revs (string-append (amazon--count revs) " ratings") "")
+                        'delivery (or (and data (plist-get data 'delivery)) (plist-get row 'delivery) "")
+                        'saved? (amazon-saved? asin) 'cart? (amazon-in-cart? asin)
+                        'note? (and (amazon-note asin) #t)
+                        'sponsored? (and (plist-get row 'sponsored) #t)))
+                (amazon--actions row)))))
 
 (define (amazon--overview-blocks buf row)
   (let* ((asin (plist-get row 'asin))
@@ -495,17 +543,26 @@
     (when row
       (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
 
-(define (amazon-detail-load! buf row)
-  ;; a fetch: /dp/ arrives whole, and a tab only if that answer is thin
-  (let ((asin (and row (plist-get row 'asin))))
+(define (amazon-detail-load! buf row &optional fresh?)
+  ;; a fetch: /dp/ arrives whole, and a tab only if that answer is thin. A
+  ;; page read before draws from the cache at once, unless FRESH? asks again
+  (let* ((asin (and row (plist-get row 'asin)))
+         (hit (and asin (not fresh?) (amazon--cached *amazon-details* asin))))
     (when (and asin (equal? (amazon-detail-state buf) 'cold))
-      (buffer-set-local! buf 'amazon-detail-state 'loading)
-      (amazon-read! (amazon-product-url asin) *amazon-detail-sheet*
-        amazon-detail-whole?
-        (lambda (data html)
-          (buffer-set-local! buf 'amazon-detail data)
-          (buffer-set-local! buf 'amazon-detail-state (if data 'ready 'failed))
-          (amazon-detail-refresh! buf))))))
+      (if hit
+          (begin
+            (buffer-set-local! buf 'amazon-detail hit)
+            (buffer-set-local! buf 'amazon-detail-state 'ready)
+            (amazon-detail-refresh! buf))
+          (begin
+            (buffer-set-local! buf 'amazon-detail-state 'loading)
+            (amazon-read! (amazon-product-url asin) *amazon-detail-sheet*
+              amazon-detail-whole?
+              (lambda (data html)
+                (when data (amazon--detail-keep! asin data))
+                (buffer-set-local! buf 'amazon-detail data)
+                (buffer-set-local! buf 'amazon-detail-state (if data 'ready 'failed))
+                (amazon-detail-refresh! buf))))))))
 
 ;; A throttled read parses to a record with every field empty. A real
 ;; product page has a title and at least one of the three things the tabs
@@ -522,7 +579,7 @@
 (define (amazon-detail-reload! buf row)
   (buffer-set-local! buf 'amazon-detail-state 'cold)
   (buffer-set-local! buf 'amazon-detail #f)
-  (amazon-detail-load! buf row))
+  (amazon-detail-load! buf row #t))
 
 ;; a specification table as (KEY VALUE) rows: the page repeats keys
 ;; across its tables, and the first mention is the one that reads best
@@ -711,8 +768,8 @@
 (define (amazon--detail-blocks buf row)
   (let ((tab (amazon-tab buf)))
     (append
-      (list (amazon--tabs-block buf)
-            (amazon--head-block row))
+      (list (amazon--head-block row buf)
+            (amazon--tabs-block buf))
       (cond ((equal? tab "specs") (amazon--specs-blocks buf row))
             ((equal? tab "reviews") (amazon--reviews-blocks buf row))
             (else (amazon--overview-blocks buf row))))))
@@ -1163,6 +1220,240 @@
         (list "N" "note") (list "n/p" "pg") (list "x" "hide")
         (list "d" "sort") (list "o" "web") (list "q" "quit")))
 
+;; ----------------------------------------------------------------------
+;; Drawing: the listing and the page as cards, the way the Spotify app
+;; draws its own. A row is a product card, the head a search bar over the
+;; shelf's title, the page opens on a hero.
+
+(domain! 'ui)
+(effects! '(pure))
+
+(define (amz--text class text) (list 'tag "span" 'class class 'text (or text "")))
+
+(define (amz--img class src)
+  (list 'tag "img" 'class class
+        'attrs (list (list "src" src) (list "alt" "") (list "loading" "lazy") (list "referrerpolicy" "no-referrer"))))
+
+(define (amz--thumb class src title)
+  (if (and (string? src) (not (equal? src "")))
+      (amz--img class src)
+      (amz--text (string-append class " amz-blank")
+                 (if (> (string-length (or title "")) 0) (string-upcase (substring title 0 1)) "?"))))
+
+(define (amz--rupees s)
+  ;; ₹1,595 or 1,349. or null₹999 as a whole number of rupees, #f when none
+  (let* ((s (car (string-split (re-replace-all "[^0-9.]" (or s "") "") ".")))
+         (n (and (> (string-length s) 0) (string->number s))))
+    (and (number? n) (> n 0) n)))
+
+(define (amz--off price mrp)
+  ;; the discount as -15%, or nothing when there is none worth a pill
+  (let ((p (amz--rupees price)) (m (amz--rupees mrp)))
+    (if (and p m (> m p))
+        (let ((pct (quotient (+ (* 100 (- m p)) (quotient m 2)) m)))
+          (if (> pct 0) (string-append "-" (number->string pct) "%") ""))
+        "")))
+
+(define (amz--money s)
+  (let* ((s (or s ""))
+         (s (if (string-prefix? "null" s) (substring s 4 (string-length s)) s))
+         (s (if (string-suffix? "." s) (substring s 0 (- (string-length s) 1)) s)))
+    (cond ((equal? s "") "")
+          ((string-prefix? "₹" s) s)
+          (else (string-append "₹" s)))))
+
+(define (amz--marks p)
+  (filter (lambda (b) b)
+    (list (and (component--get p 'saved? #f) (amz--text "amz-mark amz-mark-saved" "★ saved"))
+          (and (component--get p 'cart? #f) (amz--text "amz-mark amz-mark-cart" "✓ in cart"))
+          (and (component--get p 'note? #f) (amz--text "amz-mark" "✎ note"))
+          (and (component--get p 'hidden? #f) (amz--text "amz-mark amz-mark-hidden" "⊘ hidden"))
+          (and (component--get p 'sponsored? #f) (amz--text "amz-mark" "sponsored")))))
+
+(defcomponent 'amazon/product
+  "One product as a row: its photo on a white tile, the title over its stars and when it lands, the marks you put on it, and the price with the M.R.P. struck through and the discount as a pill."
+  '((title string required) (image string optional) (price string optional) (mrp string optional)
+    (rating string optional) (reviews string optional) (delivery string optional)
+    (saved? boolean optional) (cart? boolean optional) (note? boolean optional) (hidden? boolean optional)
+    (sponsored? boolean optional) (class string optional))
+  '(title "Casio FX-991CW Classwiz Scientific Calculator" price "1,349" mrp "₹1,595"
+    rating "4.5" reviews "(3.6K)" delivery "Thu, 22 Oct" saved? #t)
+  (lambda (p)
+    (let* ((price (amz--money (component--get p 'price "")))
+           (mrp (amz--money (component--get p 'mrp "")))
+           (off (amz--off price mrp))
+           (rating (component--get p 'rating ""))
+           (revs (component--get p 'reviews ""))
+           (lands (component--get p 'delivery ""))
+           (marks (amz--marks p)))
+      (list 'tag "div"
+            'class (string-append "amz-item" (if (component--get p 'hidden? #f) " amz-hidden" "")
+                                  " " (component--get p 'class ""))
+            'children
+            (list (list 'tag "span" 'class "amz-tile"
+                        'children (list (amz--thumb "amz-thumb" (component--get p 'image "") (component--get p 'title ""))))
+                  (list 'tag "div" 'class "amz-main"
+                        'children
+                        (append
+                          (list (amz--text "amz-name" (component--get p 'title "")))
+                          (list (list 'tag "div" 'class "amz-sub"
+                                      'children
+                                      (append
+                                        (if (equal? rating "") '()
+                                            (list (amz--text "amz-stars" (string-append "★ " rating))
+                                                  (amz--text "amz-revs" revs)))
+                                        (if (equal? lands "") '()
+                                            (list (amz--text "amz-when" lands))))))
+                          (if (null? marks) '() (list (list 'tag "div" 'class "amz-marks" 'children marks)))))
+                  (list 'tag "div" 'class "amz-buy"
+                        'children
+                        (append
+                          (list (amz--text "amz-price" (if (equal? price "") "—" price)))
+                          (if (or (equal? mrp "") (equal? mrp price)) '()
+                              (list (list 'tag "div" 'class "amz-was"
+                                          'children (append (list (amz--text "amz-mrp" mrp))
+                                                            (if (equal? off "") '() (list (amz--text "amz-off" off))))))))))))))
+
+(defcomponent 'amazon/search-bar
+  "The search field over the listing: a magnifier, the query or the prompt to search, and its key. A click, like the key, asks for a search."
+  '((query string optional) (click string optional) (key string optional))
+  '(query "scientific calculator" click "amazon:amazon-search" key "s")
+  (lambda (p)
+    (let ((q (component--get p 'query "")))
+      (list 'tag "div" 'class "amz-search"
+            'click (component--get p 'click "amazon:amazon-search")
+            'children (list (amz--text "amz-search-icon" "⌕")
+                            (amz--text (if (equal? q "") "amz-search-text amz-search-empty" "amz-search-text")
+                                       (if (equal? q "") "Search Amazon" q))
+                            (amz--text "amz-key" (component--get p 'key "s")))))))
+
+(defcomponent 'amazon/hero
+  "The head of a product's page: its photo large on a white tile over a blur of itself, the brand, the title, the stars, the price with the M.R.P. and the discount, when it lands, and the marks."
+  '((title string required) (image string optional) (brand string optional) (price string optional) (mrp string optional)
+    (rating string optional) (reviews string optional) (delivery string optional)
+    (saved? boolean optional) (cart? boolean optional) (note? boolean optional) (sponsored? boolean optional))
+  '(title "Casio FX-991CW Classwiz Scientific Calculator" brand "Casio" price "1,349" mrp "₹1,595"
+    rating "4.5" reviews "3,612 ratings" delivery "FREE delivery Thu, 22 Oct")
+  (lambda (p)
+    (let* ((img (component--get p 'image ""))
+           (price (amz--money (component--get p 'price "")))
+           (mrp (amz--money (component--get p 'mrp "")))
+           (off (amz--off price mrp))
+           (rating (component--get p 'rating ""))
+           (brand (component--get p 'brand ""))
+           (lands (component--get p 'delivery ""))
+           (marks (amz--marks p)))
+      (list 'tag "div" 'class "amz-hero"
+            'attrs (if (equal? img "") '() (list (list "style" (string-append "--amz-art:url('" img "')"))))
+            'children
+            (list (list 'tag "span" 'class "amz-hero-tile"
+                        'children (list (amz--thumb "amz-hero-art" img (component--get p 'title ""))))
+                  (list 'tag "div" 'class "amz-hero-main"
+                        'children
+                        (append
+                          (if (equal? brand "") '() (list (amz--text "amz-hero-brand" brand)))
+                          (list (amz--text "amz-hero-name" (component--get p 'title "")))
+                          (if (equal? rating "") '()
+                              (list (list 'tag "div" 'class "amz-hero-rating"
+                                          'children (list (amz--text "amz-stars" (string-append "★ " rating))
+                                                          (amz--text "amz-revs" (component--get p 'reviews ""))))))
+                          (list (list 'tag "div" 'class "amz-hero-buy"
+                                      'children (append
+                                                  (list (amz--text "amz-hero-price" (if (equal? price "") "—" price)))
+                                                  (if (or (equal? mrp "") (equal? mrp price)) '()
+                                                      (list (amz--text "amz-mrp" (string-append "M.R.P. " mrp))))
+                                                  (if (equal? off "") '() (list (amz--text "amz-off" off))))))
+                          (if (equal? lands "") '() (list (amz--text "amz-hero-when" lands)))
+                          (if (null? marks) '() (list (list 'tag "div" 'class "amz-marks" 'children marks))))))))))
+
+(define-style! 'amazon "
+.semantic-list > .semantic-item.amz-item { border-left: 0; }
+.amz-item { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-radius: 10px; font-family: var(--font-sans); font-size: 13px; min-width: 0; }
+.amz-item:hover { background: var(--hl-line-bg); }
+.current > .amz-item, .amz-item.current { background: color-mix(in srgb, var(--accent-fg) 16%, var(--hl-line-bg)); box-shadow: inset 3px 0 0 var(--accent-fg); }
+.amz-hidden { opacity: .45; }
+.amz-tile { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 8px; background: #fff; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.amz-thumb { max-width: 56px; max-height: 56px; object-fit: contain; }
+.amz-blank { display: grid; place-items: center; width: 100%; height: 100%; font-weight: 800; font-size: 22px; color: #888; }
+.amz-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.amz-name { font-weight: 600; color: var(--default-fg); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.amz-sub { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; color: var(--dim-fg); font-size: .9em; }
+.amz-stars { color: #f5a623; font-weight: 700; font-variant-numeric: tabular-nums; }
+.amz-revs { color: var(--dim-fg); }
+.amz-when { color: var(--ok-fg); }
+.amz-marks { display: flex; flex-wrap: wrap; gap: 6px; }
+.amz-mark { font-size: .75em; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-bg); color: var(--dim-fg); }
+.amz-mark-saved { color: #f5a623; border-color: color-mix(in srgb, #f5a623 50%, transparent); }
+.amz-mark-cart { color: var(--ok-fg); border-color: color-mix(in srgb, var(--ok-fg) 50%, transparent); }
+.amz-buy { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 84px; }
+.amz-price { font-size: 1.25em; font-weight: 800; letter-spacing: -.01em; color: var(--default-fg); font-variant-numeric: tabular-nums; }
+.amz-was { display: flex; gap: 6px; align-items: baseline; }
+.amz-mrp { color: var(--dim-fg); font-size: .85em; text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.amz-off { font-size: .78em; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--ok-fg) 22%, transparent); color: var(--ok-fg); }
+.amz-search { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 0 0 10px; border-radius: 999px; background: var(--hl-line-bg); border: 1px solid transparent; font-family: var(--font-sans); font-size: 14px; cursor: text; }
+.amz-search:hover { border-color: var(--border-bg); }
+.amz-search-icon { flex: none; font-size: 17px; color: var(--dim-fg); }
+.amz-search-text { flex: 1; min-width: 0; color: var(--default-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amz-search-empty { color: var(--dim-fg); }
+.amz-key { font-family: var(--font-mono); font-size: .8em; border: 1px solid var(--border-bg); border-radius: 4px; padding: 0 5px; color: var(--dim-fg); }
+.amz-shelf { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 4px 4px 8px; font-family: var(--font-sans); }
+.amz-shelf-title { font-size: 1.6em; font-weight: 800; letter-spacing: -.02em; color: var(--default-fg); }
+.amz-shelf-meta { color: var(--dim-fg); font-size: .85em; }
+
+.amz-hero { position: relative; overflow: hidden; display: flex; align-items: flex-end; gap: 24px; padding: 26px; margin: 0 0 16px; border-radius: 14px; font-family: var(--font-sans); isolation: isolate; background: var(--hl-line-bg); }
+.amz-hero::before { content: ''; position: absolute; inset: -60px; z-index: -1; background: var(--amz-art) center / cover; filter: blur(50px) saturate(1.4) brightness(.6); opacity: .85; }
+.amz-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 20%, rgba(0,0,0,.5)); }
+.amz-hero-tile { flex: none; display: grid; place-items: center; width: 200px; height: 200px; border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(0,0,0,.5); overflow: hidden; }
+.amz-hero-art { max-width: 184px; max-height: 184px; object-fit: contain; }
+.amz-hero-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; color: #fff; }
+.amz-hero-brand { font-size: .75em; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.amz-hero-name { font-size: 1.7em; font-weight: 800; line-height: 1.15; letter-spacing: -.02em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.amz-hero-rating { display: flex; gap: 10px; align-items: baseline; font-size: .95em; }
+.amz-hero-rating .amz-revs { color: rgba(255,255,255,.8); }
+.amz-hero-buy { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; }
+.amz-hero-price { font-size: 2.2em; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.amz-hero .amz-mrp { color: rgba(255,255,255,.7); font-size: .95em; }
+.amz-hero .amz-off { background: rgba(255,255,255,.18); color: #7CFC9A; font-size: .9em; }
+.amz-hero-when { font-size: .9em; opacity: .9; }
+.amz-hero .amz-mark { color: #fff; border-color: rgba(255,255,255,.4); }
+.amazon-tabs { margin: 0 0 6px; }
+")
+
+(domain! 'web)
+(effects! '(read write external))
+
+(define (amazon--card buf row)
+  (let ((asin (plist-get row 'asin)))
+    (component 'amazon/product
+      (list 'title (or (plist-get row 'title) "")
+            'image (or (plist-get row 'image) "")
+            'price (or (plist-get row 'price) "")
+            'mrp (or (plist-get row 'mrp) "")
+            'rating (amazon--stars (plist-get row 'rating))
+            'reviews (or (plist-get row 'reviews) "")
+            'delivery (amazon--when (plist-get row 'delivery))
+            'saved? (amazon-saved? asin) 'cart? (amazon-in-cart? asin)
+            'note? (and (amazon-note asin) #t) 'hidden? (amazon-hidden? asin)
+            'sponsored? (and (plist-get row 'sponsored) #t)))))
+
+(define (amazon--list-head buf head)
+  ;; the search bar, then the shelf: what you searched and where you are in it
+  (let ((meta (let ((f (list-opt buf 'meta))) (if f (f buf) "")))
+        (n (let ((f (list-opt buf 'total))) (if f (f buf) 0)))
+        (cart? (amazon--in-cart-view?))
+        (query (or (buffer-local buf 'amazon-query) "")))
+    (list (component 'amazon/search-bar (list 'query (if cart? "" query)))
+          (list 'tag "div" 'class "amz-shelf"
+                'children (list (amz--text "amz-shelf-title" (if cart? "Your cart" (if (equal? query "") "Amazon" query)))
+                                (amz--text "amz-shelf-meta" (string-append (number->string n) " products · " meta)))))))
+
+;; a click on the search bar is amazon:COMMAND
+(add-hook! (list 'block-click 'amazon)
+  (lambda (buf id)
+    (if (and (string? id) (string-prefix? "amazon:" id))
+        (begin (run-command (substring id 7 (string-length id))) #t)
+        #f)))
+
 (define-list-mode! "amazon-mode"
   (list 'doc "Amazon search results as the signed-in account sees them, with the retail price beside the one you pay. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
         'buffer *amazon-buffer*
@@ -1177,6 +1468,10 @@
                       (amz-sort-by-delivery rows)
                       rows)))
         'key (lambda (buf row) (plist-get row 'asin))
+        ;; rows and head as blocks: each product a card, the search bar over them
+        'collection "c-list"
+        'composml amazon--card
+        'composml-head amazon--list-head
         'columns amazon--columns
         'cells amazon--cells
         'layouts (list (list 'name 'narrow
@@ -1212,7 +1507,16 @@
                                     (list "C" "cart") (list "d" "sort") (list "o" "browser")
                                     (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
                                     (list "s" "search") (list "q" "quit")))
-        'preview (lambda (buf row) (amazon-show-detail! row))
+        'preview (lambda (buf row)
+                   ;; the page draws from the row at once; its specs and reviews come
+                   ;; from the cache, or are read once you have rested on the row
+                   (let ((page (amazon-show-detail! row)))
+                     (when page
+                       (if (amazon--cached *amazon-details* (plist-get row 'asin))
+                           (amazon-detail-load! page row)
+                           (debounce! 'amazon-prefetch 600
+                             (lambda (p) (when (buffer-exists? (car p)) (amazon-detail-load! (car p) (cadr p))))
+                             (list page row))))))
         'keys (list (list "RET" "amazon-detail")
                     (list "m" "amazon-save")
                     (list "N" "amazon-note")
@@ -1331,33 +1635,50 @@
   (unless (buffer-exists? *amazon-buffer*) (buffer-create *amazon-buffer*))
   (amazon-join-group! *amazon-buffer*)
   (buffer-set-local! *amazon-buffer* 'amazon-query query)
-  (message (string-append "Amazon: " query
-                          (if (> page 1) (string-append " page " (number->string page)) "")
-                          "..."))
-  (amazon-fetch-page! query page
-    (lambda (rows next)
-      (if (or (not rows) (null? rows))
-          (message (if rows
-                       (string-append "No results on page " (number->string page))
-                       "Amazon did not answer -- try again"))
-          (begin
-            (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
-            (buffer-set-local! *amazon-buffer* 'amazon-page page)
-            (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
-            (unless (buffer-derived-mode? *amazon-buffer* "amazon-mode")
-              (with-current-buffer *amazon-buffer* (lambda () (set-mode! "amazon-mode"))))
-            (list-refresh! *amazon-buffer*)
-            ;; mark the rows the cart already holds, not just the ones this
-            ;; session put there
-            (amazon-cart-sync!)
-            (when first? (switch-to-buffer! *amazon-buffer*))
-            (amazon-show-detail! (list-current *amazon-buffer*))
-            (when first?
-              (amazon-layout!)
-              (let ((id (amazon-home-group!))) (when id (group-layout-save! id))))
-            (message (string-append (number->string (length rows))
-                                    " results for " query
-                                    " · page " (number->string page))))))))
+  (let* ((hit (amazon--cached *amazon-searches* (amazon--search-key query page)))
+         (here? (lambda () (and (equal? (buffer-local *amazon-buffer* 'amazon-query) query)
+                                (equal? (amazon-page) page))))
+         (fill! (lambda (rows next)
+                  (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
+                  (buffer-set-local! *amazon-buffer* 'amazon-page page)
+                  (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
+                  (unless (buffer-derived-mode? *amazon-buffer* "amazon-mode")
+                    (with-current-buffer *amazon-buffer* (lambda () (set-mode! "amazon-mode"))))
+                  (list-refresh! *amazon-buffer*)
+                  ;; mark the rows the cart already holds, not just the ones this
+                  ;; session put there. The cart is a tab read, so once in a while
+                  (let ((last (or (buffer-local *amazon-buffer* 'amazon-cart-read) 0)))
+                    (when (or first? (> (- (current-time) last) 300))
+                      (buffer-set-local! *amazon-buffer* 'amazon-cart-read (current-time))
+                      (amazon-cart-sync!)))
+                  (when first? (switch-to-buffer! *amazon-buffer*))
+                  (amazon-show-detail! (list-current *amazon-buffer*))
+                  (when first?
+                    (amazon-layout!)
+                    (let ((id (amazon-home-group!))) (when id (group-layout-save! id))))
+                  (message (string-append (number->string (length rows))
+                                          " results for " query
+                                          " · page " (number->string page))))))
+    ;; what this search found last time draws now; the site is read behind it
+    (if hit
+        (fill! (plist-get hit 'rows) (plist-get hit 'more))
+        (message (string-append "Amazon: " query
+                                (if (> page 1) (string-append " page " (number->string page)) "")
+                                "...")))
+    (amazon-fetch-page! query page
+      (lambda (rows next)
+        (cond ((pair? rows)
+               (amazon--search-keep! query page rows next)
+               (cond ((not hit) (fill! rows next))
+                     ((and (here?) (not (equal? rows (plist-get hit 'rows))))
+                      (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
+                      (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
+                      (list-refresh! *amazon-buffer*)))
+               (when next (amazon--prefetch-page! query (+ page 1))))
+              (hit #f)
+              (else (message (if rows
+                                 (string-append "No results on page " (number->string page))
+                                 "Amazon did not answer, try again"))))))))
 
 ;;;###autoload
 (define-command "amazon" "Open the Amazon app"

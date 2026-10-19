@@ -1453,7 +1453,7 @@
 
 ;; The header, in the page's order: breadcrumbs, the title with where the item
 ;; stands, the candidate, their facts, and the tabs.
-(define (site-app-head-blocks b spec data tabs active &optional actions)
+(define (site-app-head-blocks b spec data tabs active &optional actions avatar)
   (let* ((tones (and spec (plist-get spec 'tones)))
          (h (site-app-head spec data))
          (title (or (plist-get h 'title) ""))
@@ -1471,34 +1471,32 @@
                         (if name (cdr rest) rest))))
     ;; no breadcrumbs or position: the list beside the page is the navigation
     (append
-      ;; a page with no title has no title row: its name is the heading
-      (if (equal? title "")
+      ;; a page with no title has no title row: its name is the heading; with a name, the title goes in the person's head
+      (if (or name (equal? title ""))
           '()
       (let ((n (b 'line (if state (string-append title "  " state) title) (plist-get h 'title-href))))
         (list (site-app-claim
                 (component 'ui/title (append (list 'text title)
                                              (if state (list 'badge state 'tone (or (site-app-tone-class tones state) "")) '())))
                 n n title))))
-      ;; the name large, its stars small after it, and the photo beside it when the sheet has one
+      ;; the title over the name large, its stars small after it, and the photo left of both: the sheet's, else the row's
       (if name
-          (let* ((n (b 'line (string-append (plist-get name 'text) (if stars (string-append "  " (site-app-stars-string (plist-get stars 'text))) ""))
+          (let* ((top (and (not (equal? title ""))
+                           (b 'line (if state (string-append title "  " state) title) (plist-get h 'title-href))))
+                 (label (let ((l (plist-get name 'link))) (if (and l (not (equal? l ""))) l (plist-get name 'text))))
+                 (n (b 'line (string-append label (if stars (string-append "  " (site-app-stars-string (plist-get stars 'text))) ""))
                        (plist-get name 'href)))
-                 (heading (component 'ui/title
-                            (append (list 'level 1
-                                          'segs (append (list (list "" (plist-get name 'text)))
-                                                        (if stars (cons (list "" "  ") (map (lambda (s) (list (string-append (car s) " sa-head-stars") (cadr s))) (site-app-stars-segs (plist-get stars 'text)))) '())))
-                                    (site-app-click-props (plist-get name 'href)))))
-                 (src (let ((a (plist-get name 'avatar))) (and a (not (equal? a "")) a)))
-                 (face (if src
-                           (list 'tag "div" 'class "sa-head-face"
-                                 'children (list (list 'tag "img" 'class "sa-head-avatar"
-                                                       'attrs (list (list "src" (if (string-prefix? "/" src)
-                                                                                     (string-append (or (plist-get spec 'base-url) "") src)
-                                                                                     src))
-                                                                    (list "alt" "") (list "referrerpolicy" "no-referrer")))
-                                                 heading))
-                           heading)))
-            (list (site-app-claim face n n)))
+                 (src (let ((a (or (plist-get name 'avatar) avatar))) (and a (not (equal? a "")) a))))
+            (list (site-app-claim
+                    (component 'ui/person-head
+                      (append (list 'name label
+                                    'title title
+                                    'below (if stars (site-app-stars-segs (plist-get stars 'text)) '()))
+                              (if src (list 'avatar (if (string-prefix? "/" src) (string-append (or (plist-get spec 'base-url) "") src) src)) '())
+                              (if state (list 'badge state 'tone (or (site-app-tone-class tones (car (reverse (string-split state " ")))) "")) '())
+                              (let ((href (plist-get h 'title-href))) (if href (list 'title-click (plist-get (site-app-click-props href) 'click)) '()))
+                              (site-app-click-props (plist-get name 'href))))
+                    (or top n) n)))
           '())
       (if (null? facts)
           '()
@@ -1604,7 +1602,7 @@
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
                  (append
-                   (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf)))
+                   (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf) (and row (site-app-field row 'avatar))))
                    (cond ;; a page with no tabs is all head: nothing waits below it
                          ((null? tabs) '())
                          ;; a composed tab that draws itself ('draw BUF BUILDER) gives its claimed blocks
@@ -1679,9 +1677,6 @@
 .sa-stars-cell { font-size: 11px; }
 /* one rating everywhere: gold stars, filled once met, hollow until then */
 .sa-stars { color: var(--warn-fg); letter-spacing: -1px; white-space: nowrap; }
-.sa-head-face { display: flex; gap: 14px; align-items: center; margin: .2em 0 .3em; }
-.sa-head-face > .c-title { margin: 0; }
-.sa-head-avatar { width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
 .sa-head-stars { font-size: .5em; vertical-align: middle; }
 .sa-row > img.sa-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); justify-self: center; }
 .sa-name-cell { font-weight: 600; color: var(--default-fg); }

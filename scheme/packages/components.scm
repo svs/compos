@@ -572,6 +572,31 @@
                                   '())))
       (component--click p))))
 
+(defcomponent 'ui/person-head
+  "The head of a person's page: their photo round to the left of the lines it heads. TITLE, when there is one, is a line above the name, with BADGE in TONE beside it and TITLE-CLICK on it; then the name in large serif type. AFTER is segs drawn small after the name; BELOW is segs on a quiet line under it, such as their stars; CLICK opens their page."
+  '((name string required) (avatar string optional) (after list optional) (below list optional) (click any optional)
+    (title string optional) (badge string optional) (tone string optional) (title-click any optional))
+  '(name "Kunal Roy Choudhury" avatar "https://github.com/octocat.png" title "Backend Engineer at Thine" badge "accepted → applied" tone "info")
+  (lambda (p)
+    (let* ((src (component--get p 'avatar ""))
+           (top (if (equal? (component--get p 'title "") "")
+                    '()
+                    (list (component 'ui/title (append (list 'text (component--get p 'title))
+                                                       (if (component--has? p 'badge) (list 'badge (component--get p 'badge) 'tone (component--get p 'tone "")) '())
+                                                       (if (component--has? p 'title-click) (list 'click (component--get p 'title-click)) '()))))))
+           (name (component 'ui/title (append (list 'level 1
+                                                    'segs (cons (list "" (component--get p 'name ""))
+                                                                (component--get p 'after '())))
+                                              (if (component--has? p 'click) (list 'click (component--get p 'click)) '()))))
+           (below (if (null? (component--get p 'below '())) '() (list (component 'ui/meta (list 'segs (component--get p 'below))))))
+           (lines (list 'tag "div" 'class "c-person-lines" 'children (append top (list name) below))))
+      (if (equal? src "")
+          lines
+          (list 'tag "div" 'class "c-person-head"
+                'children (list (list 'tag "img" 'class "c-person-avatar"
+                                      'attrs (list (list "src" src) (list "alt" "") (list "referrerpolicy" "no-referrer")))
+                                lines))))))
+
 (defcomponent 'ui/meta
   "A quiet line of facts under a title: dim, small, its items apart by dots."
   '((segs list required))
@@ -737,6 +762,10 @@ c-header.c-group { padding: 10px 14px; }
 .c-title-text { font-family: var(--font-serif, ui-serif, Georgia, serif); font-weight: 700; line-height: 1.2; color: var(--default-fg); }
 .c-title-1 .c-title-text { font-size: 1.7em; }
 .c-title-2 .c-title-text { font-size: 1.1em; }
+.c-person-head { display: flex; gap: 14px; align-items: center; margin: .2em 0 .3em; }
+.c-person-lines { display: flex; flex-direction: column; gap: .15em; min-width: 0; }
+.c-person-lines > .c-title, .c-person-lines > .c-meta { margin: 0; }
+.c-person-avatar { width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
 .c-meta { font-family: var(--font-sans); font-size: .88em; line-height: 1.5; color: var(--dim-fg); margin: .15em 0 .5em; }
 .c-prose { font-family: var(--font-sans); line-height: 1.6; margin: .15em 0 .7em; max-width: 75ch; }
 .c-bullet { font-family: var(--font-sans); line-height: 1.6; margin: 0 0 .25em; padding-left: 1.3em; text-indent: -1.3em; max-width: 80ch; }

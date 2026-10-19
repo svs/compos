@@ -192,9 +192,10 @@
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
         'detail-kind "ats-approval-mode"
-        ;; approve goes straight to the API, not through the site's button; e edits the draft in a buffer; o opens the site for the rest
-        'detail-keys (list "a" "e")
+        ;; approve and reject go straight to the API, not through the site's buttons; e edits the draft in a buffer; o opens the site for the rest
+        'detail-keys (list "a" "r" "e")
         'detail-actions (list (list "Approve" (lambda (ctx) (message "Approving…") (ats-approve! (ats-case-id (plist-get ctx 'buf)))))
+                              (list "Reject" (lambda (ctx) (message "Rejecting…") (ats-reject! (ats-case-id (plist-get ctx 'buf)))))
                               (list "Edit draft" (lambda (ctx) (ats-draft-open! ctx))))
         'detail-composed (list *ats-brief-tab*)
         'detail-default "brief"
@@ -237,6 +238,15 @@
                        (list 'label "app" 'width 4 'field 'applied 'face "dim")
                        (list 'label "posted" 'width #f 'field 'posted 'face "dim"))))
 
+;; a state line as its transition: "accepted → pending: applied happened 23 Feb" is "accepted → applied"
+(define (ats-transition text)
+  (let* ((sides (string-split (string-trim text) " → "))
+         (from (car (string-split (car sides) " ")))
+         (to (if (null? (cdr sides)) "" (string-trim (cadr sides))))
+         (to (if (string-prefix? "pending: " to) (substring to 9 (string-length to)) to))
+         (to (car (string-split to " "))))
+    (if (equal? to "") from (string-append from " → " to))))
+
 (define *ats-spec*
   (list 'name 'ats
         'title "ATS"
@@ -250,14 +260,14 @@
         ;; a rating is a run of stars, ticked when a person confirmed it
         'rating "^★+✓?$"
         ;; the header: the job at the company, where the application stands, then the candidate.
-        ;; The state line ("withdrawn → pending: withdrawn scheduled 2 Sep") gives its first word
+        ;; The state line ("accepted → pending: applied happened 23 Feb") gives the transition, accepted → applied
         'detail-head (lambda (data)
                        (let* ((profile (site-app-real (plist-get data 'profile)))
                               (state-node (site-app-find (lambda (n) (re-match? " → " (or (plist-get n 'text) ""))) profile))
                               (job (or (plist-get data 'job) "")))
                          (list 'title (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))
                                'title-href (plist-get data 'job_href)
-                               'state (and state-node (car (string-split (string-trim (plist-get state-node 'text)) " ")))
+                               'state (and state-node (ats-transition (plist-get state-node 'text)))
                                'head (filter (lambda (n) (not (equal? n state-node))) profile))))
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
@@ -283,7 +293,7 @@
                  ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
                  ("^(?i)(elite|strong|fit|advance|advanced|approve|approved|hired|shortlisted|offer)$" good)
-                 ("^(?i)(new|applied|create|created)$" info))
+                 ("^(new|applied|create|created)$" info))
         ;; the site's navbar, in its order; M-key switches to a section
         'pages
         (list

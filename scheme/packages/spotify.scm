@@ -411,84 +411,6 @@
 
 (define-style! 'spotify-montage (spotify--montage-css))
 
-(define spotify--stage-seconds 9)
-
-(define (spotify--ambient-stage images)
-  ;; the ambient stage: each photo fills it on its turn, cross-fades with the
-  ;; one before, and drifts and zooms the whole time it shows, each its own way
-  (let ((n (min 8 (length images))))
-    (if (< n 2) '()
-        (let loop ((is (list-head images n)) (i 0) (acc '()))
-          (if (null? is) (reverse acc)
-              (let ((dx (list-ref '("3%" "-3%" "2%" "-2%") (remainder i 4)))
-                    (dy (list-ref '("-2%" "2%" "2%" "-2%") (remainder i 4))))
-                (loop (cdr is) (+ i 1)
-                      (cons (list 'tag "div" 'class "sp-montage sp-stage"
-                                  'attrs (list (list "style" (string-append "background-image:url('" (car is) "');"
-                                                                              "--sp-dx:" dx ";--sp-dy:" dy ";"
-                                                                              "animation:sp-stage-" (number->string n) " "
-                                                                              (number->string (* n spotify--stage-seconds)) "s linear infinite;"
-                                                                              "animation-delay:" (number->string (- (* i spotify--stage-seconds) (quotient (* spotify--stage-seconds 35) 100))) "s"))))
-                            acc))))))))
-
-(define spotify--float-slots
-  ;; where each floating photo circles: left and top in percent, width in
-  ;; pixels, the seconds of its sway across and of its bob up and down, and
-  ;; how far each goes. The small ones sit further back
-  '((8 10 150 47 31 9 6) (72 30 170 41 29 7 8) (40 16 100 59 43 12 9)))
-
-(define (spotify--ambient-floats images)
-  ;; photos that float over the stage, each on its own slow loop, so the
-  ;; page keeps moving between the stage's turns
-  (let ((n (length images)))
-    (if (< n 2) '()
-        (let loop ((ss spotify--float-slots) (i 0) (acc '()))
-          (if (or (null? ss) (>= i n)) (reverse acc)
-              (let* ((s (car ss))
-                     (num (lambda (k) (number->string (list-ref s k))))
-                     (far (< (list-ref s 2) 115)))
-                (loop (cdr ss) (+ i 1)
-                      (cons (list 'tag "div" 'class (if far "sp-float sp-float-far" "sp-float")
-                                  'attrs (list (list "style" (string-append "left:" (num 0) "%;top:" (num 1) "%;width:" (num 2) "px;"
-                                                                              "--sp-ax:" (num 5) "cqw;--sp-ay:" (num 6) "cqw;"
-                                                                              "animation-duration:" (num 3) "s;animation-delay:-" (number->string (* i 11)) "s")))
-                                  'children (list (list 'tag "div" 'class "sp-float-in"
-                                                        'attrs (list (list "style" (string-append "background-image:url('" (list-ref images (remainder (+ i 1) n)) "');"
-                                                                                                    "animation-duration:" (num 4) "s,2s;animation-delay:-" (number->string (* i 7)) "s," (number->string (* i 400)) "ms"))))))
-                            acc))))))))
-
-(define (spotify--ambient-motion-css)
-  ;; the stage's cycle for each count of photos: a turn is its share, the
-  ;; photo fades in over the first third of it while the one before fades
-  ;; out, and pans and zooms from its first frame to its last. The floating
-  ;; photos sway across and bob up and down on two clocks, so each loop
-  ;; wanders
-  (let ((pct (lambda (tenths) (string-append (number->string (quotient tenths 10)) "." (number->string (remainder tenths 10)) "%")))
-        (from "transform: scale(1.04) translate(calc(var(--sp-dx) * -1), calc(var(--sp-dy) * -1));")
-        (to "transform: scale(1.16) translate(var(--sp-dx), var(--sp-dy));"))
-    (string-append
-      (apply string-append
-        (map (lambda (n)
-               (let* ((turn (quotient 1000 n)) (fade (quotient (* turn 35) 100)))
-                 (string-append "@keyframes sp-stage-" (number->string n) " { "
-                                "0% { opacity: 0; " from " } "
-                                (pct fade) " { opacity: 1; } "
-                                (pct turn) " { opacity: 1; } "
-                                (pct (+ turn fade)) " { opacity: 0; " to " } "
-                                "100% { opacity: 0; " to " } }\n")))
-             (list 2 3 4 5 6 7 8)))
-      "@keyframes sp-float-x { from { transform: translateX(calc(var(--sp-ax) * -1)) rotate(-4deg); } to { transform: translateX(var(--sp-ax)) rotate(4deg); } }\n"
-      "@keyframes sp-float-y { from { transform: translateY(calc(var(--sp-ay) * -1)) scale(.96); } to { transform: translateY(var(--sp-ay)) scale(1.04); } }\n"
-      "@keyframes sp-float-in { from { opacity: 0; } }\n"
-      ".sp-ambient > .sp-stage { will-change: opacity, transform; }\n"
-      ".sp-float { position: absolute; z-index: -1; aspect-ratio: 4 / 5; pointer-events: none; animation: sp-float-x 50s ease-in-out infinite alternate; will-change: transform; }\n"
-      ".sp-float-in { width: 100%; height: 100%; border-radius: 12px; background-size: cover; background-position: center 25%; box-shadow: 0 24px 60px rgba(0,0,0,.55); opacity: .9; animation-name: sp-float-y, sp-float-in; animation-timing-function: ease-in-out, ease-out; animation-iteration-count: infinite, 1; animation-direction: alternate, normal; animation-fill-mode: none, backwards; }\n"
-      ".sp-float-far .sp-float-in { opacity: .55; filter: blur(2px) brightness(.8); }\n"
-      ".sp-ambient:not(.sp-ambient-on) .sp-float, .sp-ambient:not(.sp-ambient-on) .sp-float-in, .sp-ambient:not(.sp-ambient-on) > .sp-stage { animation-play-state: paused; }\n"
-      "@media (prefers-reduced-motion: reduce) { .sp-float, .sp-float-in { animation: none; } }\n")))
-
-(define-style! 'spotify-ambient-motion (spotify--ambient-motion-css))
-
 (defcomponent 'spotify/artist-card
   "Who the artist is: their photo as a banner with the name, the verified mark and the monthly listeners over it, then the bio in paragraphs. IMAGES, when it holds more than one photo, makes the banner a montage: each photo drifts in and dissolves into the next."
   '((name string required) (image string optional) (images list optional) (listeners string optional) (verified? boolean optional) (bio string optional))
@@ -509,60 +431,6 @@
                       (list (list 'tag "div" 'class "sp-bio-box"
                                   'children (map (lambda (s) (list 'tag "p" 'class "sp-bio" 'text (string-trim s))) paras)))))))))
 
-(define spotify--fact-seconds 9)
-
-(define (spotify--fact-css)
-  ;; a cycle for each count of facts, as the montage's: a fact rises into
-  ;; view on its turn, holds, and fades as the next one rises
-  (let ((pct (lambda (tenths) (string-append (number->string (quotient tenths 10)) "." (number->string (remainder tenths 10)) "%"))))
-    (apply string-append
-      (map (lambda (n)
-             (let* ((turn (quotient 1000 n)) (fade (quotient turn 8)))
-               (string-append "@keyframes sp-fact-" (number->string n) " { "
-                              "0% { opacity: 0; transform: translateY(10px); } "
-                              (pct fade) " { opacity: 1; transform: translateY(0); } "
-                              (pct turn) " { opacity: 1; transform: translateY(0); } "
-                              (pct (+ turn fade)) " { opacity: 0; transform: translateY(-6px); } "
-                              "100% { opacity: 0; transform: translateY(-6px); } }\n")))
-           (list 2 3 4 5 6 7 8 9 10 11 12)))))
-
-(define-style! 'spotify-facts (spotify--fact-css))
-
-(defcomponent 'spotify/ambient
-  "The page of what plays, to glance at: the photos fill the stage and keep changing, the cover sits large beside the title, and one fact at a time fades in under it, its label over it. FACTS is ((LABEL TEXT) ...)."
-  '((title string required) (artists string optional) (art string optional) (images list optional)
-    (facts list optional) (playing? boolean optional) (position string optional) (duration string optional))
-  '(title "Windowpane" artists "Opeth" playing? #t facts (("From" "Damnation · 2003") ("On the record" "Steven Wilson — producer")) position "2:10" duration "7:44")
-  (lambda (p)
-    (let* ((art (component--get p 'art ""))
-           (title (component--get p 'title ""))
-           (facts (let ((fs (component--get p 'facts '()))) (if (> (length fs) 12) (list-head fs 12) fs)))
-           (n (length facts))
-           (fact (lambda (f i)
-                   (list 'tag "div" 'class "sp-fact"
-                         'attrs (if (< n 2) '()
-                                    (list (list "style" (string-append "animation:sp-fact-" (number->string n) " "
-                                                                       (number->string (* n spotify--fact-seconds)) "s ease-in-out infinite;"
-                                                                       "animation-delay:" (number->string (* i spotify--fact-seconds)) "s"))))
-                         'children (list (spotify--text "sp-fact-label" (car f))
-                                         (spotify--text "sp-fact-text" (cadr f)))))))
-      (list 'tag "div" 'class (if (component--get p 'playing? #f) "sp-ambient sp-ambient-on" "sp-ambient")
-            'attrs (if (equal? art "") '() (list (list "style" (string-append "--sp-art:url('" art "')"))))
-            'children
-            (append (spotify--ambient-stage (component--get p 'images '()))
-                    (spotify--ambient-floats (component--get p 'images '()))
-                    (list (list 'tag "div" 'class "sp-ambient-veil")
-                          (list 'tag "div" 'class "sp-ambient-main"
-                                'children (list (spotify--cover "sp-ambient-art" art title)
-                                                (list 'tag "div" 'class "sp-ambient-side"
-                                                      'children (list (spotify--text "sp-ambient-title" title)
-                                                                      (spotify--text "sp-ambient-artists" (component--get p 'artists ""))
-                                                                      (list 'tag "div" 'class "sp-facts"
-                                                                            'children (let loop ((fs facts) (i 0) (acc '()))
-                                                                                        (if (null? fs) (reverse acc)
-                                                                                            (loop (cdr fs) (+ i 1) (cons (fact (car fs) i) acc)))))
-                                                                      (cell-part 'spotify/progress
-                                                                        (spotify--progress "sp-np-progress" (component--get p 'position "") (component--get p 'duration "")))))))))))))
 
 (defcomponent 'spotify/gig
   "One concert: the date as a calendar leaf, the city, the venue and the time. CLICK opens it."
@@ -740,15 +608,10 @@
 .sp-ambient > .sp-montage::after { display: none; }
 .sp-ambient-veil { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,0) 35%, rgba(0,0,0,.55) 65%, rgba(0,0,0,.85)); }
 .sp-ambient-main { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 32px; width: 100%; padding: 40px; text-align: center; }
-.sp-ambient-art { flex: none; width: min(42cqw, 460px); height: auto; aspect-ratio: 1; border-radius: 10px; object-fit: cover; box-shadow: 0 30px 80px rgba(0,0,0,.7); font-size: 120px; }
 .sp-ambient-side { width: 100%; max-width: 760px; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .sp-ambient-title { font-size: 2.3em; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .sp-ambient-artists { font-size: 1.1em; font-weight: 600; opacity: .8; }
-.sp-facts { display: grid; margin-top: 26px; min-height: 7.5em; }
-.sp-fact { grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; gap: 8px; align-self: end; opacity: 1; }
-.sp-facts > .sp-fact:not(:only-child) { opacity: 0; will-change: opacity, transform; }
 .sp-fact-label { font-size: .78em; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.65); }
-.sp-fact-text { font-size: 1.75em; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; color: white; text-wrap: balance; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
 .sp-ambient .sp-np-progress { width: 100%; max-width: 420px; margin-top: 22px; opacity: .6; }
 .sp-ambient .sp-np-progress .sp-bar { height: 3px; }
 ")
@@ -834,6 +697,7 @@
     (for-each (lambda (b) (buffer-set-local! b 'list-layout-cache #f) (list-refresh! b)) (spotify--list-buffers))
     (cell-set! 'spotify/track (spotify--track-of now))
     (cell-set! 'spotify/position (spotify--position-of now))
+    (when changed (spotify-stage-purge!))
     (when started (spotify--now-up!))
     (when (and changed (not started)) (spotify--follow-track!))))
 
@@ -914,6 +778,7 @@
            (list active href artist-href artist (spotify--get 'photos name) (spotify--get 'briefs name)
                  (spotify--get 'news name) (spotify--get 'liners key) (spotify--get 'facts (spotify--dig-key name album))
                  (spotify--get 'albums (or (plist-get now 'albumHref) ""))
+                 (spotify--get 'stages (spotify--stage-key name (or (plist-get now 'title) "")))
                  (eq? (plist-get *spotify-now* 'playing) #t)))))
       ((equal? active "artist")
        (let* ((links (spotify--links href))
@@ -1727,15 +1592,17 @@
     (spotify--news-of! name)
     (when (null? dug) (spotify--dig! name album title))
     (spotify--dig-start!)
-    (car (spotify--claim-all b
-      (list (spotify--lined (component 'spotify/ambient
-              (list 'title title 'artists (or (plist-get now 'artists) "")
-                    'art (spotify--hires (plist-get now 'art))
-                    'facts (spotify--ambient-facts name artist now liner dug)
-                    'playing? (eq? (plist-get *spotify-now* 'playing) #t)
-                    'images (spotify--ambient-images name artist now liner)
-                    'position (car (cell-ref 'spotify/position)) 'duration (or (plist-get now 'duration) "")))
-              title))))))
+    (let ((facts (spotify--ambient-facts name artist now liner dug))
+          (cover (spotify--hires (plist-get now 'art))))
+      (spotify-stage! name album title facts)
+      (car (spotify--claim-all b
+        (list (spotify--lined (component 'spotify/ambient
+                (append (list 'title title 'artists (or (plist-get now 'artists) "") 'art cover
+                              'playing? (eq? (plist-get *spotify-now* 'playing) #t)
+                              'position (car (cell-ref 'spotify/position)) 'duration (or (plist-get now 'duration) ""))
+                        (spotify--staged (spotify--get 'stages (spotify--stage-key name title))
+                                         (spotify--ambient-images name artist now liner) cover facts)))
+                title)))))))
 
 (define *spotify-ambient-tab*
   (list 'id "ambient" 'label "ambient" 'from '() 'draw (lambda (buf b) (spotify--ambient-draw buf b))))
@@ -3252,3 +3119,6 @@
                  (plist-get args 'query)
                  (plist-get args 'level)))
   '(write external))
+
+;; The ambient page and the stager that plans it for each song.
+(require 'spotify-ambient "spotify/visualisers/ambient.scm")

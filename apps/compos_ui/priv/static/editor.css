@@ -645,7 +645,7 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
   content: ""; width: .9em; height: .9em; flex: 0 0 auto;
   border: 2px solid color-mix(in srgb, var(--accent-fg, #26356b) 24%, transparent);
   border-top-color: var(--accent-fg, #26356b); border-radius: 50%;
-  animation: llm-thinking-spin var(--chrome-anim, 0s) linear infinite;
+  animation: llm-thinking-spin calc(var(--chrome-anim, 0s) * 10) linear infinite;
 }
 @keyframes llm-thinking-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {

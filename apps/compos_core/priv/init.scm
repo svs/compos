@@ -97,6 +97,8 @@
 (require 'git)
 (require 'google)
 (require 'groups)
+;; the all-windows view over the group's panes
+(require 'overview)
 ;; app identity: an app names the buffers of one instance, and a move
 ;; retags them through group membership, so this follows groups
 (require 'apps)

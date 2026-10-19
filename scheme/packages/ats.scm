@@ -309,7 +309,27 @@
       (lambda (p) (plist-put (component base p) 'tag element)))))
 
 (ats-component-as! 'ats/work-experiences 'ui/group "work-experiences" "A candidate's work history: its heading and one work-experience a job.")
-(ats-component-as! 'ats/work-experience 'ui/card "work-experience" "One job in a work history: the employer's logo, name, tier and tags head it; the role, dates and bullets are its body.")
+(define-element! "work-experience")
+;; tags that say the same thing once: "Early stage" goes when "Early-Stage AI Startup" says it
+(define (ats-distinct-tags tags)
+  (let ((norm (lambda (t) (string-downcase (re-replace "-" t " ")))))
+    (filter (lambda (t)
+              (not (site-app-find (lambda (o) (and (not (equal? o t))
+                                                   (> (string-length o) (string-length t))
+                                                   (string-index (norm o) (norm t))))
+                                  tags)))
+            tags)))
+;; a job in the work history: the employer heads it with its tier as a chip that says
+;; so ("Tier B", toned S top, A good, B info, the rest quiet) and its tags as pills
+(let ((e (component-entry 'ui/card)))
+  (defcomponent 'ats/work-experience
+    "One job in a work history: the employer's logo, name, tier and tags head it; the role, dates and bullets are its body."
+    (nth 1 e) (nth 2 e)
+    (lambda (p)
+      (let* ((tier (component--get p 'badge #f))
+             (p (if tier (plist-put p 'badge (string-append "Tier " tier)) p))
+             (p (plist-put p 'tags (ats-distinct-tags (component--get p 'tags '())))))
+        (plist-put (component 'ui/card p) 'tag "work-experience")))))
 (ats-component-as! 'ats/applications 'ui/group "applications" "A candidate's applications, one application a job.")
 (define-element! "application")
 (let ((e (component-entry 'ui/card)))
@@ -388,6 +408,16 @@
 .ats-app-fact + .ats-app-fact::before, .ats-pill + .ats-app-fact::before { content: '·'; margin-right: 8px; color: var(--border-bg); }
 .ats-app-caret { flex: none; color: var(--dim-fg); }
 .ats-app-body { margin: 0; padding: 4px 14px 12px 68px; }
+/* a job in the work history: the employer, its tier as a filled chip, its tags as soft pills */
+work-experience > .c-fold-head { align-items: center; flex-wrap: wrap; row-gap: 4px; font-family: var(--font-sans); }
+work-experience > .c-fold-head > :not(.c-fold-title) { flex: none; white-space: nowrap; }
+work-experience > .c-fold-head > .c-fold-icon, work-experience > .c-fold-head > .c-fold-letter { width: 20px; height: 20px; min-width: 20px; }
+work-experience > .c-fold-head > .c-fold-grade { font-family: var(--font-mono); font-size: .72em; font-weight: 700; letter-spacing: .06em; line-height: 1.6; padding: 0 7px; border: 1px solid transparent; border-radius: 3px; color: var(--default-bg); background: var(--dim-fg); }
+work-experience > .c-fold-head > .c-fold-grade.top { background: var(--warn-fg); }
+work-experience > .c-fold-head > .c-fold-grade.good { background: var(--ok-fg); }
+work-experience > .c-fold-head > .c-fold-grade.info { background: var(--accent-fg); }
+work-experience > .c-fold-head > .c-fold-grade.quiet { color: var(--dim-fg); background: transparent; border-color: var(--border-bg); }
+work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.6; padding: 0 8px; border-radius: 999px; border-color: transparent; color: var(--dim-fg); background: var(--default-bg); }
 ")
 
 (define-site-app *ats-spec*)

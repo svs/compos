@@ -5579,6 +5579,57 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (windows-overview-active?)
   (equal? (frame-local 'windows-overview) #t))
 
+(define (windows-overview--rows ids)
+  ;; IDS cut into the rows of a near-square grid, the longer rows first
+  (let* ((n (length ids))
+         (cols (let loop ((c 1)) (if (>= (* c c) n) c (loop (+ c 1)))))
+         (rows (quotient (+ n cols -1) cols)))
+    (let loop ((ids ids) (r 0) (acc '()))
+      (if (null? ids)
+          (reverse acc)
+          (let ((k (+ (quotient n rows) (if (< r (remainder n rows)) 1 0))))
+            (loop (list-tail ids k) (+ r 1) (cons (list-head ids k) acc)))))))
+
+(define (windows-overview--split-off! win ratio)
+  ;; split WIN side by side, WIN keeping RATIO; the new window
+  (let ((before (map car (window-list))))
+    (select-window! win)
+    (split-window! 'h ratio)
+    (let loop ((ws (window-list)))
+      (cond ((null? ws) #f)
+            ((member (car (car ws)) before) (loop (cdr ws)))
+            (else (car (car ws)))))))
+
+(define (windows-overview--row! ids)
+  ;; lay IDS side by side in the space of the first, each an equal share
+  (let loop ((win (car ids)) (rest (cdr ids)))
+    (when (pair? rest)
+      (let ((new (windows-overview--split-off! win (* 1.0 (/ 1 (+ 1 (length rest)))))))
+        (when new
+          (window-swap-hidden! new (car rest))
+          (window-hidden-delete! new)
+          (loop (car rest) (cdr rest)))))))
+
+(define (windows-overview--order)
+  ;; every live window of the panes, pane by pane, each pane's windows in
+  ;; the order they were made, so a visit does not reshuffle the tiles
+  (let ((rows (group-panes-windows)))
+    (if (pair? rows)
+        (apply append (map (lambda (row) (sort (filter group-panes-live? (cdr row)))) rows))
+        (filter group-panes-live? (jump-to-mode-windows)))))
+
+(define (windows-overview--bindings)
+  (list (list "<left>" "windows-overview-left")
+        (list "<right>" "windows-overview-right")
+        (list "<up>" "windows-overview-up")
+        (list "<down>" "windows-overview-down")
+        (list "RET" "windows-overview-exit")
+        (list "q" "windows-overview-exit")
+        (list "ESC" "windows-overview-exit")
+        (list "C-g" "windows-overview-exit")
+        (list "s-S-<up>" "windows-overview-exit")
+        (list "s-S-<down>" "windows-overview-exit")))
+
 (define (windows-overview-enter!)
   (let ((spec (group-panes-of (frame-group))))
     (cond ((not spec)
@@ -5586,23 +5637,42 @@ is forgotten and that group falls back to creation order in the switcher."
           (else
             (when (null? (group-panes-windows)) (group-panes-apply!))
             (let* ((me (active-window))
-                   (ids (filter group-panes-live? (jump-to-mode-windows))))
+                   (ids (windows-overview--order)))
               (cond ((null? ids) (message "No windows in this frame") #f)
                     (else
                       (layout-target-free!)
-                      (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
+                      (let ((rows (windows-overview--rows ids)))
+                        (with-layout-suppressed
+                          (lambda ()
+                            (window-arrange-line! 'v (map (lambda (r) (/ 1 (length rows))) rows) (map car rows))
+                            (for-each windows-overview--row! rows))))
+                      (client-slide! (json-encode (list 'spread (windows-overview--homes))))
                       (set-frame-local! 'windows-overview #t)
+                      (transient-keymap-install! (windows-overview--bindings))
+                      (transient-show! #t)
                       (when (assoc me (window-list)) (select-window! me))
                       (window-state-changed!)
                       (message (string-append (number->string (length ids)) " windows; s-S-<up> goes back to the panes"))
                       ids)))))))
+
+(define (windows-overview--homes)
+  ;; ((WIN FRONT) ...): each window behind a pane, with the window at that pane's front
+  (apply append
+         (map (lambda (row)
+                (if (and (pair? (cdr row)) (pair? (cddr row)))
+                    (map (lambda (w) (list w (cadr row))) (cddr row))
+                    '()))
+              (group-panes-windows))))
 
 (define (windows-overview-exit!)
   (let* ((me (active-window))
          (row (group-panes-row-of me)))
     (when row (group-panes-record! (car row) me #t))
     (set-frame-local! 'windows-overview #f)
+    (transient-show! #f)
+    (transient-keymap-clear!)
     (let ((ids (group-panes-arrange!)))
+      (when ids (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
       (when (and ids (member me ids)) (select-window! me))
       ids)))
 
@@ -5617,6 +5687,15 @@ is forgotten and that group falls back to creation order in the switcher."
     (if (windows-overview-active?)
         (windows-overview-exit!)
         (message "Not in the all-windows view"))))
+
+(define-command "windows-overview-left" "Select the tile to the left in the all-windows view"
+  (lambda () (focus-move! 'left)))
+(define-command "windows-overview-right" "Select the tile to the right in the all-windows view"
+  (lambda () (focus-move! 'right)))
+(define-command "windows-overview-up" "Select the tile above in the all-windows view"
+  (lambda () (focus-move! 'up)))
+(define-command "windows-overview-down" "Select the tile below in the all-windows view"
+  (lambda () (focus-move! 'down)))
 
 (global-set-key "s-S-<down>" "windows-overview")
 (global-set-key "s-S-<up>" "windows-overview-exit")

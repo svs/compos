@@ -322,8 +322,87 @@
     ), frame);
   }
 
+  // The overview: a window behind a pane grows out of the pane's front
+  // window into its tile, and shrinks back into it on the way out. Each
+  // starts a little after the one before, so the desk fans out.
+  const ZOOM = 1.5;
+  const FAN = 0.05;
+
+  // Nothing is stretched: a window keeps its own proportions, so its
+  // text never squashes. It moves part of the way, and scales evenly.
+  const LEAD = 0.25;
+  const SMALL = 0.92;
+  const lead = (a, b) => {
+    const [ax, ay] = center(a);
+    const [bx, by] = center(b);
+    return [(ax - bx) * LEAD, (ay - by) * LEAD];
+  };
+
+  // W leaves the front of its pane, box A, for its own box B
+  function grow(w, a, b, ms, delay) {
+    const [dx, dy] = lead(a, b);
+    track(w.animate(
+      [
+        { opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(${SMALL})` },
+        { opacity: 1, transform: 'none' }
+      ],
+      { duration: ms, delay, easing: EASE, fill: 'backwards' }
+    ));
+  }
+
+  // W stays and slides from box A to box B at its new size
+  function shift(w, a, b, ms) {
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    track(w.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)`, zIndex: 2 },
+        { transform: 'none', zIndex: 2 }
+      ],
+      { duration: ms, easing: SLIDE }
+    ));
+  }
+
+  // the old content of O, at its old box, shrinks into box TO and fades
+  function gather(s, o, to, ms, delay) {
+    const box = unz(s.root.getBoundingClientRect(), s.k);
+    const r = o.rect;
+    const frame = document.createElement('div');
+    frame.className = 'motion-ghost';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.inert = true;
+    Object.assign(frame.style, {
+      position: 'absolute', overflow: 'hidden', pointerEvents: 'none', zIndex: '1',
+      left: `${r.left - box.left - s.root.clientLeft}px`,
+      top: `${r.top - box.top - s.root.clientTop}px`,
+      width: `${r.width}px`, height: `${r.height}px`
+    });
+    Object.assign(o.ghost.style, { position: 'absolute', inset: '0' });
+    frame.appendChild(o.ghost);
+    s.root.appendChild(frame);
+    restore(o.ghost, o.offsets);
+    frame._motion = { root: s.root, ghost: o.ghost, offsets: o.offsets };
+    ghosts.push(frame);
+    const [dx, dy] = lead(to, r);
+    track(frame.animate(
+      [
+        { transform: 'none', opacity: 1 },
+        { opacity: 0, transform: `translate(${-dx}px, ${-dy}px) scale(${SMALL})` }
+      ],
+      { duration: ms, delay, easing: EASE, fill: 'both' }
+    ), frame);
+  }
+
   function play(s) {
     const now = panes(s.root).map((w) => ({ w, id: w.dataset.winId, rect: unz(w.getBoundingClientRect(), s.k) }));
+    // the overview's windows, each with the front window of its pane
+    const homes = s.spread
+      ? new Map((s.spread.spread || s.spread.gather).map(([w, h]) => [String(w), String(h)]))
+      : null;
+    const order = homes ? [...homes.keys()] : [];
+    const zoom = s.ms * ZOOM;
+    const fan = (id) => Math.max(0, order.indexOf(id)) * s.ms * FAN;
     const ids = new Set(now.map((p) => p.id));
     // where each buffer stood before the render, and where it stands now
     const wasAt = new Map();
@@ -333,6 +412,10 @@
 
     now.forEach((p) => {
       const o = s.old.get(p.id);
+      if (!o && homes && homes.has(p.id) && s.old.has(homes.get(p.id))) {
+        grow(p.w, s.old.get(homes.get(p.id)).rect, p.rect, zoom, fan(p.id));
+        return;
+      }
       if (!o) {
         // a new pane comes out of the pane whose place it took
         const c = center(p.rect);
@@ -362,6 +445,7 @@
         leave(s, o, null, true, false, s.ms * 1.3);
         return;
       }
+      if (homes) { shift(p.w, o.rect, p.rect, zoom); return; }
       const moved = reshape(p.w, o.rect, p.rect, s.ms);
       // the selected window went to another pane with its stack: it
       // sweeps there on top, and the stack trails behind it
@@ -389,6 +473,11 @@
     // a pane that went slides away from the pane that took its place
     s.old.forEach((o, id) => {
       if (ids.has(id) || !o.ghost) return;
+      const home = homes && homes.has(id) && now.find((q) => q.id === homes.get(id));
+      if (home) {
+        gather(s, o, home.rect, zoom, fan(id));
+        return;
+      }
       // its buffer went on in another pane, on the paper that carries it
       if (o.buffer && isAt.has(o.buffer)) return;
       const heir = now.find((q) => inside(q.rect, center(o.rect)));
@@ -407,11 +496,14 @@
     const sent = fresh && token.startsWith('{') ? parseWalk(token) : null;
     const walk = sent && sent.pane ? sent : null;
     const move = sent && sent.move ? sent : null;
+    // the overview spreads every window of the panes, or gathers them back
+    const spread = sent && (sent.spread || sent.gather) ? sent : null;
+    if (spread) document.documentElement.classList.toggle('windows-overview', !!sent.spread);
     if (walk) pending = walk;
     const was = from.getAttribute('data-panes');
     const next = to.getAttribute('data-panes');
     if (!was || !next || was === next) return;
-    if (fresh && !walk && !move) return;
+    if (fresh && !walk && !move && !spread) return;
     if (from.querySelector('.listing-peek')) return;
     const ms = duration();
     const prev = parse(was);
@@ -433,7 +525,7 @@
       });
     });
     finish();
-    snap = { root: from, old, after, ms, walk, move, k };
+    snap = { root: from, old, after, ms, walk, move, spread, k };
   }
 
   // after each patch; a render during the motion removes the copies,

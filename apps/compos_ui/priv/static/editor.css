@@ -505,6 +505,10 @@ body {
 }
 .buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
 .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+/* the keys card gives way to the buffer: in a narrow window, and in the
+   all-windows overview, where every tile is a glance */
+@container (max-width: 520px) { .buffer-footer:has(.c-keys-bar) { display: none; } }
+html.windows-overview .buffer-footer:has(.c-keys-bar) { display: none; }
 .buffer-footer .keys-line {
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--s3) var(--s9); min-width: 0;

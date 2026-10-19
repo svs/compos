@@ -1906,6 +1906,75 @@
         (debounce! 'spotify-move-dog (* 1000 spotify--move-seconds) spotify--move-stalled! *spotify-move-epoch*)
         (job))))
 
+(define (spotify--embed-tracks path)
+  ;; every track of a playlist or album, from its embed page: the web page draws
+  ;; only the rows on screen, and a hidden tab draws no more however it scrolls
+  (let* ((html (http-text (string-append "https://open.spotify.com/embed" path)))
+         (parts (and (string? html) (string-split html "id=\"__NEXT_DATA__\" type=\"application/json\">")))
+         (data (and parts (pair? (cdr parts)) (json-parse (car (string-split (cadr parts) "</script>")))))
+         (tracks (let dig ((v data) (ks '(props pageProps state data entity trackList)))
+                   (if (or (null? ks) (not (pair? v))) v (dig (plist-get v (car ks)) (cdr ks))))))
+    (if (pair? tracks) tracks '())))
+
+(define (spotify--mmss ms)
+  (let* ((s (quotient (if (integer? ms) ms 0) 1000)) (r (remainder s 60)))
+    (string-append (number->string (quotient s 60)) ":" (if (< r 10) "0" "") (number->string r))))
+
+(define (spotify--rows-drawn html)
+  (- (length (string-split html "data-testid=\"tracklist-row\"")) 1))
+
+(define (spotify--rows-total html)
+  ;; the rows the page's grid says it holds, its head row aside; 0 when it names none
+  (let ((p (string-split html "aria-rowcount=\"")))
+    (if (pair? (cdr p))
+        (let ((n (string->number (car (string-split (cadr p) "\""))))) (if n (- n 1) 0))
+        0)))
+
+(define (spotify--with-all-rows html tracks)
+  ;; HTML with a row, as the page draws one, for each of TRACKS it left out. They
+  ;; go after its last row, before the shelves under the list
+  (let* ((rows (let loop ((ts tracks) (i 1) (acc '()))
+                 (if (null? ts)
+                     (apply string-append (reverse acc))
+                     (let* ((t (car ts))
+                            (href (or (spotify--path-of-uri (plist-get t 'uri)) ""))
+                            (n (number->string i)))
+                       (loop (cdr ts) (+ i 1)
+                             (if (or (not (string-prefix? "/track/" href)) (string-index html (string-append "href=\"" href "\"")))
+                                 acc
+                                 (cons (string-append "<div role=\"row\" aria-rowindex=\"" n "\"><div data-testid=\"tracklist-row\">"
+                                                      "<div role=\"gridcell\"><span>" n "</span></div>"
+                                                      "<div role=\"gridcell\"><a href=\"" href "\">" (html-escape (plist-get t 'title)) "</a>"
+                                                      "<a href=\"/artist/\">" (html-escape (plist-get t 'subtitle)) "</a></div>"
+                                                      "<div role=\"gridcell\"><span data-encore-id=\"text\">" (spotify--mmss (plist-get t 'duration)) "</span></div>"
+                                                      "</div></div>")
+                                       acc)))))))
+         (mark "data-testid=\"tracklist-row\"")
+         (parts (string-split html mark))
+         (head (string-join (reverse (cdr (reverse parts))) mark))
+         (tail (car (reverse parts)))
+         (secs (string-split tail "<section"))
+         (shelf (let loop ((ss (cdr secs)) (before (car secs)))
+                  (cond ((null? ss) #f)
+                        ((string-index (car ss) "data-testid=\"component-shelf\"") (list before (string-join ss "<section")))
+                        (else (loop (cdr ss) (string-append before "<section" (car ss)))))))
+         (tail (if shelf
+                   (string-append (car shelf) rows "<section" (cadr shelf))
+                   (let ((m (string-split tail "</main>")))
+                     (if (pair? (cdr m)) (string-append (car m) rows "</main>" (string-join (cdr m) "</main>")) (string-append tail rows))))))
+    (if (null? (cdr parts)) html (string-append head mark tail))))
+
+(define (spotify--fill-rows path html k)
+  ;; K gets HTML with the rows a playlist or album page did not draw
+  (if (and (or (string-prefix? "/playlist/" path) (string-prefix? "/album/" path))
+           (> (spotify--rows-total html) (spotify--rows-drawn html)))
+      ;; all of it in the task, so a page that would not fill still reaches K as it was
+      (task-run! (lambda () (let ((tracks (spotify--embed-tracks path)))
+                              (if (pair? tracks) (spotify--with-all-rows html tracks) html)))
+        (lambda (ok filled) (k (if (and ok (string? filled)) filled html)))
+        15000)
+      (k html)))
+
 (define (spotify-navigate! name url wait k)
   ;; site-app's 'navigate for Spotify: K gets (TAB ANSWER) as a full load gives
   (set! *spotify-move-queue*
@@ -1925,7 +1994,8 @@
                               (tab-press tab (string-append "#compos-go-" id)
                                 (lambda (html)
                                   (if html
-                                      (finish tab (list 'tab tab 'url url 'html html))
+                                      (spotify--fill-rows (spotify--path url) html
+                                        (lambda (html) (finish tab (list 'tab tab 'url url 'html html))))
                                       (full)))
                                 (string-append "#compos-ready-" id)))))))))))))
   (unless *spotify-moving* (spotify--move-next!)))

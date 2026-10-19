@@ -30,6 +30,10 @@
   "Your Spotify user id, the last part of your profile's /user/ID link. The Playlists section reads that profile."
   'group 'spotify)
 
+(defcustom 'spotify-own-group #f
+  "Whether Spotify lives in a group of its own, so calling it goes there. Off, it opens in whatever group you are in."
+  'group 'spotify 'type 'boolean)
+
 ;;; --- the components -----------------------------------------------------------
 ;;; Pure: props in, one block out. A track and a tile take the props a ui/card
 ;;; takes (title, icon, badge, tags), so site-app can draw them on an item's
@@ -356,10 +360,12 @@
 
 (define spotify--montage-seconds 7)
 
-(define (spotify--montage images)
+(define (spotify--montage images &optional seconds)
   ;; the banner's layers, one a photo: each fades in on its turn of the
-  ;; cycle as the one before fades out. One photo is the banner alone
-  (let ((n (min 8 (length images))))
+  ;; cycle as the one before fades out. One photo is the banner alone.
+  ;; SECONDS is each photo's turn
+  (let ((n (min 8 (length images)))
+        (s (or seconds spotify--montage-seconds)))
     (if (< n 2) '()
         (let loop ((is (list-head images n)) (i 0) (acc '()))
           (if (null? is) (reverse acc)
@@ -367,8 +373,8 @@
                     (cons (list 'tag "div" 'class "sp-montage"
                                 'attrs (list (list "style" (string-append "background-image:url('" (car is) "');"
                                                                             "animation:sp-fade-" (number->string n) " "
-                                                                            (number->string (* n spotify--montage-seconds)) "s linear infinite;"
-                                                                            "animation-delay:" (number->string (* i spotify--montage-seconds)) "s"))))
+                                                                            (number->string (* n s)) "s linear infinite;"
+                                                                            "animation-delay:" (number->string (* i s)) "s"))))
                           acc)))))))
 
 (define (spotify--montage-css)
@@ -408,6 +414,41 @@
                   (if (null? paras) '()
                       (list (list 'tag "div" 'class "sp-bio-box"
                                   'children (map (lambda (s) (list 'tag "p" 'class "sp-bio" 'text (string-trim s))) paras)))))))))
+
+(defcomponent 'spotify/ambient
+  "The page of what plays, to glance at: the photos fill the stage and keep changing, the cover sits large beside the title, and one fact at a time fades in under it, its label over it. FACTS is ((LABEL TEXT) ...)."
+  '((title string required) (artists string optional) (art string optional) (images list optional)
+    (facts list optional) (playing? boolean optional) (position string optional) (duration string optional))
+  '(title "Windowpane" artists "Opeth" playing? #t facts (("From" "Damnation · 2003") ("On the record" "Steven Wilson — producer")) position "2:10" duration "7:44")
+  (lambda (p)
+    (let* ((art (component--get p 'art ""))
+           (title (component--get p 'title ""))
+           (facts (let ((fs (component--get p 'facts '()))) (if (> (length fs) 12) (list-head fs 12) fs)))
+           (n (length facts))
+           (fact (lambda (f i)
+                   (list 'tag "div" 'class "sp-fact"
+                         'attrs (if (< n 2) '()
+                                    (list (list "style" (string-append "animation:sp-fact-" (number->string n) " "
+                                                                       (number->string (* n spotify--fact-seconds)) "s ease-in-out infinite;"
+                                                                       "animation-delay:" (number->string (* i spotify--fact-seconds)) "s"))))
+                         'children (list (spotify--text "sp-fact-label" (car f))
+                                         (spotify--text "sp-fact-text" (cadr f)))))))
+      (list 'tag "div" 'class (if (component--get p 'playing? #f) "sp-ambient sp-ambient-on" "sp-ambient")
+            'attrs (if (equal? art "") '() (list (list "style" (string-append "--sp-art:url('" art "')"))))
+            'children
+            (append (spotify--montage (component--get p 'images '()) 10)
+                    (list (list 'tag "div" 'class "sp-ambient-veil")
+                          (list 'tag "div" 'class "sp-ambient-main"
+                                'children (list (spotify--cover "sp-ambient-art" art title)
+                                                (list 'tag "div" 'class "sp-ambient-side"
+                                                      'children (list (spotify--text "sp-ambient-title" title)
+                                                                      (spotify--text "sp-ambient-artists" (component--get p 'artists ""))
+                                                                      (list 'tag "div" 'class "sp-facts"
+                                                                            'children (let loop ((fs facts) (i 0) (acc '()))
+                                                                                        (if (null? fs) (reverse acc)
+                                                                                            (loop (cdr fs) (+ i 1) (cons (fact (car fs) i) acc)))))
+                                                                      (cell-part 'spotify/progress
+                                                                        (spotify--progress "sp-np-progress" (component--get p 'position "") (component--get p 'duration "")))))))))))))
 
 (defcomponent 'spotify/gig
   "One concert: the date as a calendar leaf, the city, the venue and the time. CLICK opens it."
@@ -578,6 +619,25 @@
 .sp-person-crew { flex-direction: row; align-items: center; gap: 10px; padding: 4px 8px; }
 .sp-person-crew .sp-person-face { width: 36px; height: 36px; flex: none; font-size: .85em; box-shadow: none; }
 .sp-person-crew .sp-person-text { text-align: left; }
+/* the ambient page: the music alone, on the artist's photos */
+.sp-ambient { container-type: inline-size; position: relative; overflow: hidden; isolation: isolate; min-height: 78vh; display: grid; place-items: center; border-radius: 14px; font-family: var(--font-sans); color: white; background: black; }
+.sp-ambient::before { content: ''; position: absolute; inset: -80px; z-index: -2; background: var(--sp-art, none) center / cover; filter: blur(70px) saturate(1.3) brightness(.55); }
+.sp-ambient > .sp-montage { z-index: -1; filter: saturate(.8) brightness(.6); }
+.sp-ambient-veil { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,0,0,.15), rgba(0,0,0,.65)); }
+.sp-ambient-main { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; max-width: 560px; padding: 40px 24px; text-align: center; }
+.sp-ambient-art { width: min(300px, 60%); height: auto; aspect-ratio: 1; margin-bottom: 14px; border-radius: 10px; object-fit: cover; box-shadow: 0 24px 70px rgba(0,0,0,.6); font-size: 90px; }
+.sp-ambient-title { font-size: 1.9em; font-weight: 700; line-height: 1.1; letter-spacing: -.015em; }
+.sp-ambient-artists { font-size: 1em; opacity: .75; }
+.sp-ambient .sp-np-progress { width: 100%; max-width: 360px; margin-top: 18px; opacity: .7; }
+.sp-ambient .sp-np-progress .sp-bar { height: 3px; }
+.sp-drifts { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.sp-drift { position: absolute; left: 0; white-space: nowrap; color: rgba(255,255,255,.22); font-weight: 600; letter-spacing: .01em; animation: sp-drift linear infinite; will-change: transform; }
+.sp-drift-back { animation-direction: reverse; font-style: italic; font-weight: 400; color: rgba(255,255,255,.16); }
+@keyframes sp-drift { from { transform: translateX(100cqw); } to { transform: translateX(-100%); } }
+.sp-pulse { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; z-index: 0; display: flex; align-items: flex-end; gap: 3px; padding: 0 18px; opacity: .35; pointer-events: none; }
+.sp-pulse-bar { flex: 1; height: 100%; border-radius: 2px 2px 0 0; background: linear-gradient(to top, rgba(255,255,255,.75), rgba(255,255,255,0)); transform-origin: bottom; transform: scaleY(.08); animation: sp-pulse ease-in-out infinite alternate; animation-play-state: paused; }
+.sp-ambient-on .sp-pulse-bar { animation-play-state: running; }
+@keyframes sp-pulse { 0% { transform: scaleY(.08); } 50% { transform: scaleY(.55); } 100% { transform: scaleY(.2); } }
 ")
 
 ;;; --- the player ---------------------------------------------------------------
@@ -730,6 +790,13 @@
          (row (spotify--as-track b (or given (buffer-local b 'site-app-row))))
          (href (or (site-app-field row 'href) "")))
     (cond
+      ((equal? active "ambient")
+       (let* ((artist-href (spotify--artist-href row (spotify--links href)))
+              (artist (spotify--get 'artists artist-href))
+              (name (let ((n (and artist (plist-get artist 'name))))
+                      (if (and (string? n) (not (equal? n ""))) n (spotify--row-artist row)))))
+         (list active href artist-href artist (spotify--get 'photos name) (spotify--get 'briefs name)
+               (eq? (plist-get *spotify-now* 'playing) #t))))
       ((equal? active "artist")
        (let* ((links (spotify--links href))
               (artist-href (spotify--artist-href row links))
@@ -757,7 +824,7 @@
   ;; every read ends here, so this is where what it read goes to disk
   (spotify--cache-touch!)
   (for-each (lambda (b)
-              (when (member (buffer-local b 'site-app-active) '("artist" "album"))
+              (when (member (buffer-local b 'site-app-active) '("ambient" "artist" "album"))
                 (let ((now (spotify--tab-inputs b)))
                   (unless (spotify--same-inputs? now (buffer-local b 'sp-drawn))
                     (buffer-set-local! b 'sp-drawn now)
@@ -908,16 +975,25 @@
                (photos (lambda (j)
                          (filter string?
                            (map (lambda (p) (let* ((ii (plist-get p 'imageinfo)) (i (and (pair? ii) (car ii))))
-                                              (and i (equal? (plist-get i 'mime) "image/jpeg") (> (or (plist-get i 'width) 0) 500)
+                                              (and i (member (plist-get i 'mime) '("image/jpeg" "image/png")) (> (or (plist-get i 'width) 0) 500)
                                                    (plist-get i 'thumburl))))
                                 (pages j)))))
-               (ask (lambda (host query) (http-get-json (string-append "https://" host "/w/api.php?action=query&format=json&redirects=1&prop=imageinfo&iiprop=url%7Csize%7Cmime&iiurlwidth=1280&" query) ua))))
-          ;; no answer to the search is a refusal, asked again later; no page is no photos
+               (ask (lambda (host query) (http-get-json (string-append "https://" host "/w/api.php?action=query&format=json&redirects=1&prop=imageinfo&iiprop=url%7Csize%7Cmime&iiurlwidth=1280&" query) ua)))
+               ;; Deezer's portrait of the artist, whatever Wikipedia has
+               (deezer (let* ((j (http-get-json (string-append "https://api.deezer.com/search/artist?limit=1&q=" (url-encode name))))
+                              (d (and j (plist-get j 'data)))
+                              (a (and (pair? d) (car d))))
+                         (if (and a (equal? (string-downcase (or (plist-get a 'name) "")) (string-downcase name))
+                                  (string? (plist-get a 'picture_xl)))
+                             (list (plist-get a 'picture_xl))
+                             '()))))
+          ;; no answer to the search is a refusal, asked again later; no page is Deezer's photo alone
           (cond ((not found) 'refused)
-                ((not title) '())
+                ((not title) deezer)
                 (else
               (fold (lambda (acc u) (if (member u acc) acc (append acc (list u)))) '()
-                    (append (photos (ask "en.wikipedia.org" (string-append "generator=images&gimlimit=30&titles=" (url-encode title))))
+                    (append deezer
+                            (photos (ask "en.wikipedia.org" (string-append "generator=images&gimlimit=30&titles=" (url-encode title))))
                             (photos (ask "commons.wikimedia.org" (string-append "generator=categorymembers&gcmtype=file&gcmlimit=20&gcmtitle="
                                                                                 (url-encode (string-append "Category:" title)))))))))))
       (lambda (ok urls)
@@ -1360,6 +1436,43 @@
         (cond ((equal? album "") (list (spotify--quiet "No album for this row.")))
               ((not (and liner (plist-get liner 'done))) (list (spotify--quiet (string-append "Reading the notes for " album "…"))))
               (else (spotify--liner-blocks album liner))))))))
+
+(define (spotify--ambient-words name artist now)
+  ;; what floats across the ambient page: the album, the listeners, and the
+  ;; brief's or the bio's sentences, each short enough to read in passing
+  (let* ((text (or (spotify--get 'briefs name) (and artist (plist-get artist 'bio)) ""))
+         (text (if (string? text) text ""))
+         (sentences (filter (lambda (s) (let ((l (string-length s))) (and (> l 12) (< l 110))))
+                            (map string-trim (string-split (re-replace-all "[.!?]\\s+" (re-replace-all "[*_]" text "") "\n") "\n"))))
+         (facts (filter (lambda (s) (and (string? s) (not (equal? s ""))))
+                        (list (plist-get now 'album) (and artist (plist-get artist 'listeners))))))
+    (append facts sentences)))
+
+(define (spotify--ambient-draw buf b)
+  ;; the music and nothing else: the cover on the artist's photos. Only the
+  ;; artist's page and photos are read; no news, tour or brief
+  (let* ((row (spotify--as-track buf (buffer-local buf 'site-app-row)))
+         (now (spotify--row-now row))
+         (href (or (site-app-field row 'href) ""))
+         (artist-href (spotify--artist-href row (spotify--links href)))
+         (artist (spotify--get 'artists artist-href))
+         (name (let ((n (and artist (plist-get artist 'name))))
+                 (if (and (string? n) (not (equal? n ""))) n (spotify--row-artist row))))
+         (title (or (plist-get now 'title) "")))
+    (cond ((and (equal? artist-href "") (string-prefix? "/track/" href)) (spotify--track-links! href))
+          ((and (not artist) (not (equal? artist-href "")) (spotify--ask! artist-href)) (spotify--artist-read! artist-href name)))
+    (car (spotify--claim-all b
+      (list (spotify--lined (component 'spotify/ambient
+              (list 'title title 'artists (or (plist-get now 'artists) "")
+                    'art (spotify--hires (plist-get now 'art))
+                    'words (spotify--ambient-words name artist now)
+                    'playing? (eq? (plist-get *spotify-now* 'playing) #t)
+                    'images (if (equal? name "") '() (spotify--artist-images name artist))
+                    'position (car (cell-ref 'spotify/position)) 'duration (or (plist-get now 'duration) "")))
+              title))))))
+
+(define *spotify-ambient-tab*
+  (list 'id "ambient" 'label "ambient" 'from '() 'draw (lambda (buf b) (spotify--ambient-draw buf b))))
 
 (define *spotify-album-tab*
   (list 'id "album" 'label "album" 'from '() 'draw (lambda (buf b) (spotify--album-draw buf b))))
@@ -2091,8 +2204,8 @@
         'home "/"
         'home-page 'home
         'detail-mode "spotify-detail-mode"
-        ;; Spotify lives in a group of its own; calling it goes there
-        'own-group #t
+        ;; Spotify lives in a group of its own when spotify-own-group says so
+        'own-group spotify-own-group
         ;; one tab plays and reads; a Spotify tab already open is that tab
         'adopt #t
         ;; a page whose inputs are as they were at its last draw is not drawn again
@@ -2121,7 +2234,7 @@
         'pages
         (list ;; Now Playing is the list that plays, on the track that plays
               (append (list 'shortcut "N" 'after-fill (lambda (buf rows) (spotify--fill-covers! buf rows) (or (spotify--show-playing-row! buf) (spotify--goto-playing! buf)))
-                            'detail-composed (list *spotify-artist-tab* *spotify-album-tab*) 'detail-default "artist"
+                            'detail-composed (list *spotify-ambient-tab* *spotify-artist-tab* *spotify-album-tab*) 'detail-default "ambient"
                             ;; a track row holds what the artist and album tabs need; an album row
                             ;; holds only its name, so its page is read for its tracks and artist
                             'detail-lazy (lambda (row) (string-prefix? "/track/" (or (site-app-field row 'href) "")))

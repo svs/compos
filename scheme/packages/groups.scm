@@ -3178,6 +3178,23 @@ is forgotten and that group falls back to creation order in the switcher."
 (define-command "consolidate"
   "Give every major mode of this group one window: behind its pane, or on the layout ring"
   consolidate!)
+
+(define (mode-consolidate!)
+  (let* ((me (active-window))
+         (mode (and (window-buffer me) (mode-consolidate-mode-of (window-buffer me)))))
+    (cond ((not (member me (display--work-windows)))
+           (message "Select a work window to consolidate") #f)
+          ((not mode)
+           (message "Nothing to consolidate in this pane") #f)
+          (else
+            (let ((count (mode-consolidate-into! me mode)))
+              (layout-target-note-slots! (layout-target-visible-buffers))
+              (message (string-append "Consolidated " (number->string count) " buffers of " mode))
+              me)))))
+
+(define-command "mode-consolidate"
+  "Gather every buffer of this pane's major mode into this pane"
+  mode-consolidate!)
 (global-set-key "C-x C" "consolidate")
 (public! 'consolidate!
   "(consolidate!) — give every major mode of the group one window: in a group with panes each mode's window waits behind its pane; elsewhere a mode with a pane gathers there, one without gets a hidden window the layout ring reaches")

@@ -839,18 +839,28 @@
 
 
 
+(define *amazon-reader-tab*
+  (if (boundp '*amazon-reader-tab*) *amazon-reader-tab* #f))
+
 (define (amazon--tab k)
-  ;; the first storefront tab the extension may script. Chrome walls off some
-  ;; of the site's pages (the account switcher), and a tab left there answers
-  ;; no eval at all, so probe each and pass over the walled ones
-  (tab-list (lambda (ts)
-    (let loop ((ts ts))
-      (cond ((null? ts) (k #f))
-            ((amz-has? (or (plist-get (car ts) 'url) "") amazon-host)
-             (let ((id (plist-get (car ts) 'id)))
-               (browser-call "eval" (list 'tab id 'code "1")
-                 (lambda (r) (if (plist-get r 'ok) (k id) (loop (cdr ts)))))))
-            (else (loop (cdr ts))))))))
+  ;; the app's own storefront tab, in the extension's minimized reader window.
+  ;; It never borrows one of yours: a tab of yours may sit on a page Chrome
+  ;; walls off (the account switcher), or in a window this frame has none of.
+  ;; The tab is asked where it is before each use, and one that is gone, walled
+  ;; off or wandered from the store is replaced
+  (let ((open! (lambda ()
+                 (chrome-call "open"
+                   (list 'url (string-append "https://" amazon-host "/") 'background #t 'reader #t)
+                   (lambda (r)
+                     (set! *amazon-reader-tab* (plist-get r 'tab))
+                     (k *amazon-reader-tab*))))))
+    (if (not *amazon-reader-tab*)
+        (open!)
+        (browser-call "eval" (list 'tab *amazon-reader-tab* 'code "location.host")
+          (lambda (r)
+            (if (and (plist-get r 'ok) (amz-has? (or (plist-get r 'value) "") amazon-host))
+                (k *amazon-reader-tab*)
+                (open!)))))))
 
 
 ;;; Amazon no longer adds from a plain fetch. /gp/aws/cart/add.html answers the
@@ -1021,14 +1031,10 @@
 
 
 (define (amazon--cart-tab)
-  ;; inside a task: find a tab, open one if there is none, and do not hand it
-  ;; back until its page has stopped loading -- injecting into a tab that is
-  ;; still arriving loses the globals to the load that follows
-  (let ((tab (app-await (lambda (k) (amazon--tab k)) 10)))
-    (unless tab
-      (tab-open (string-append "https://" amazon-host "/") #f #t)
-      (app-pause 800)
-      (set! tab (app-await (lambda (k) (amazon--tab k)) 10)))
+  ;; inside a task: the app's own tab, and not handed back until its page has
+  ;; stopped loading -- injecting into a tab that is still arriving loses the
+  ;; globals to the load that follows
+  (let ((tab (app-await (lambda (k) (amazon--tab k)) 15)))
     (and tab
          (let ready ((n 40))
            (let ((state (app-await (lambda (k) (tab-eval tab "document.readyState" k)) 10)))

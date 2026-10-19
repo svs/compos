@@ -426,23 +426,26 @@
   (if (number? t) t (plist-get t 'id)))
 
 (define (chrome-call op args k)
+  ;; a refusal still answers K, with the error reply: a caller waiting on K
+  ;; must hear the no rather than sit out its timeout
   (if (chrome--tool-allowed?)
       (browser-call op args
         (lambda (reply)
-          (if (chrome--report reply) (k reply) #f)))
+          (chrome--report reply)
+          (k reply)))
       (error
         "browser category denied in code-mode; use compos state, or ask the user to enable M-x browser-mode as a last resort")))
 
 (define (tab-list k)
   ;; only this frame's window: another window's tabs belong to another frame,
-  ;; often another profile with other logins. An unknown window lists nothing.
+  ;; often another profile with other logins. A frame no browser window shows
+  ;; (the desktop app's) has no window to keep to, so it takes every tab of the
+  ;; extension the bridge routes it to: the profile it is connected to.
   (let ((w (chrome-window-resolve!)))
     (chrome-call "tabs" (if w (list 'window w) '())
       (lambda (r)
-        (k (if w
-               (filter (lambda (t) (equal? (plist-get t 'window) w))
-                       (or (plist-get r 'tabs) '()))
-               '()))))))
+        (let ((ts (or (plist-get r 'tabs) '())))
+          (k (if w (filter (lambda (t) (equal? (plist-get t 'window) w)) ts) ts)))))))
 
 ;; the reader's fetch, THROUGH the browser: the user's cookies and
 ;; Chrome's http cache ride along, so a page that knows them logged in
@@ -611,13 +614,8 @@
               ;; no tab answers for this frame. Another frame's window is the
               ;; wrong answer: a tab opened there lands out of sight, in a
               ;; profile that may not share this one's logins. #f lets the
-              ;; bridge route by this frame instead. When every frame the bridge
-              ;; knows sits in one window, that window is this profile's.
-              (else
-               (let ((ws (filter (lambda (w) w) (map (lambda (e) (plist-get e 'window)) rows))))
-                 (and (pair? ws)
-                      (null? (filter (lambda (w) (not (equal? w (car ws)))) ws))
-                      (car ws))))))))
+              ;; bridge route by this frame instead.
+              (else #f)))))
 
 ;; BACKGROUND opens the tab without taking the reader there. The default is
 ;; the front, because a tab opened by a key the reader pressed is usually one

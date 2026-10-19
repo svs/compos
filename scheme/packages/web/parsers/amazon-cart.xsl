@@ -99,7 +99,7 @@
       <xsl:text>,</xsl:text>
       <xsl:call-template name="field">
         <xsl:with-param name="key" select="'image'"/>
-        <xsl:with-param name="val" select=".//img[1]/@src"/>
+        <xsl:with-param name="val" select="(.//img[contains(@class,'sc-product-image')] | .//img[not(contains(@src,'loadIndicators'))])[1]/@src"/>
       </xsl:call-template>
       <xsl:text>}</xsl:text>
     </xsl:for-each>

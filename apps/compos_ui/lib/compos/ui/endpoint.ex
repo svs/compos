@@ -44,7 +44,7 @@ defmodule Compos.Ui.Endpoint do
   )
 
   # the port listens on every interface; this admits loopback and the
-  # tailnet and refuses the rest before anything else runs
+  # trusted networks and refuses the rest before anything else runs
   plug(Compos.Ui.Reach)
 
   # LiveView's browser JS is shipped prebuilt inside the hex packages —

@@ -18,6 +18,9 @@ defmodule Compos.Core.EmbeddingIndex do
   # lane, so the query path gives up long before the catalog sync does.
   @query_timeout 8_000
   @cache_version 1
+  # persistent_term keys carry this tag. Tag 2 holds packed vectors; a hot
+  # reload must not read a tag-1 entry, which holds float lists.
+  @term_tag 2
   @endpoint "https://api.openai.com/v1/embeddings"
 
   @type score :: {non_neg_integer(), float()}
@@ -38,7 +41,7 @@ defmodule Compos.Core.EmbeddingIndex do
       path = Keyword.get(opts, :path, cache_path())
 
       query_hash = content_hash(model, dimensions, query)
-      query_cache = :persistent_term.get({__MODULE__, :queries, path}, %{})
+      query_cache = :persistent_term.get({__MODULE__, @term_tag, :queries, path}, %{})
       available = prepared(texts, model, dimensions, path, Keyword.get(opts, :gen))
 
       cond do
@@ -100,8 +103,8 @@ defmodule Compos.Core.EmbeddingIndex do
 
   @doc false
   def forget_memory(path \\ cache_path()) do
-    :persistent_term.erase({__MODULE__, :disk, path})
-    :persistent_term.erase({__MODULE__, :queries, path})
+    :persistent_term.erase({__MODULE__, @term_tag, :disk, path})
+    :persistent_term.erase({__MODULE__, @term_tag, :queries, path})
     :ok
   end
 
@@ -120,7 +123,7 @@ defmodule Compos.Core.EmbeddingIndex do
   # the whole cost of a repeated query. Prepare it once per generation and a
   # query is the cosine pass alone.
   defp prepared(texts, model, dimensions, path, gen) do
-    key = {__MODULE__, :prepared, path, model, dimensions}
+    key = {__MODULE__, @term_tag, :prepared, path, model, dimensions}
 
     case :persistent_term.get(key, :missing) do
       %{gen: ^gen, available: available} when not is_nil(gen) ->
@@ -156,7 +159,7 @@ defmodule Compos.Core.EmbeddingIndex do
     path = Keyword.get(opts, :path, cache_path())
     model = Keyword.get(opts, :model, @default_model)
     dimensions = Keyword.get(opts, :dimensions, @default_dimensions)
-    :persistent_term.erase({__MODULE__, :prepared, path, model, dimensions})
+    :persistent_term.erase({__MODULE__, @term_tag, :prepared, path, model, dimensions})
     :ok
   end
 
@@ -165,7 +168,7 @@ defmodule Compos.Core.EmbeddingIndex do
   # bought it while we waited, so the cache is read again here.
   defp do_search(query, texts, api_key, model, dimensions, path, opts) do
     query_hash = content_hash(model, dimensions, query)
-    query_cache = :persistent_term.get({__MODULE__, :queries, path}, %{})
+    query_cache = :persistent_term.get({__MODULE__, @term_tag, :queries, path}, %{})
     available = prepared(texts, model, dimensions, path, Keyword.get(opts, :gen))
 
     if available == [] or available == :not_prepared do
@@ -245,7 +248,7 @@ defmodule Compos.Core.EmbeddingIndex do
     )
     |> Enum.reduce_while({:ok, %{}}, fn
       {:ok, {hashes, {:ok, vectors}}}, {:ok, acc} when length(vectors) == length(hashes) ->
-        {:cont, {:ok, Map.merge(acc, Map.new(Enum.zip(hashes, vectors)))}}
+        {:cont, {:ok, Map.merge(acc, Map.new(Enum.zip(hashes, Enum.map(vectors, &pack/1))))}}
 
       {:ok, {_hashes, {:ok, _vectors}}}, _acc ->
         {:halt, {:error, :invalid_embedding_count}}
@@ -297,17 +300,34 @@ defmodule Compos.Core.EmbeddingIndex do
   end
 
   defp cosine(left, right) do
-    {dot, l2, r2} =
-      Enum.zip(left, right)
-      |> Enum.reduce({0.0, 0.0, 0.0}, fn {l, r}, {dot, l2, r2} ->
-        {dot + l * r, l2 + l * l, r2 + r * r}
-      end)
-
+    {dot, l2, r2} = cosine_sums(left, right, 0.0, 0.0, 0.0)
     if l2 == 0.0 or r2 == 0.0, do: 0.0, else: dot / (:math.sqrt(l2) * :math.sqrt(r2))
   end
 
+  defp cosine_sums(
+         <<l::float-64-native, left::binary>>,
+         <<r::float-64-native, right::binary>>,
+         dot,
+         l2,
+         r2
+       ),
+       do: cosine_sums(left, right, dot + l * r, l2 + l * l, r2 + r * r)
+
+  defp cosine_sums(_, _, dot, l2, r2), do: {dot, l2, r2}
+
+  # A vector is one binary of float64s. A binary this size lives off the
+  # process heap, so persistent_term keeps a reference and not a copy. As
+  # float lists, every sync copied about 60 MB into the literal area, and
+  # the 1 GB literal area filled and stopped the VM.
+  defp pack(vector) when is_binary(vector), do: vector
+
+  defp pack(vector) when is_list(vector),
+    do: for(x <- vector, into: <<>>, do: <<x / 1::float-64-native>>)
+
+  defp pack_all(vectors), do: Map.new(vectors, fn {hash, vector} -> {hash, pack(vector)} end)
+
   defp load_cache(path, model, dimensions) do
-    key = {__MODULE__, :disk, path}
+    key = {__MODULE__, @term_tag, :disk, path}
 
     case :persistent_term.get(key, :missing) do
       %{model: ^model, dimensions: ^dimensions} = cache ->
@@ -324,7 +344,7 @@ defmodule Compos.Core.EmbeddingIndex do
     with {:ok, binary} <- File.read(path),
          %{version: @cache_version, model: ^model, dimensions: ^dimensions, vectors: vectors}
          when is_map(vectors) <- :erlang.binary_to_term(binary, [:safe]) do
-      %{model: model, dimensions: dimensions, vectors: vectors}
+      %{model: model, dimensions: dimensions, vectors: pack_all(vectors)}
     else
       _ -> %{model: model, dimensions: dimensions, vectors: %{}}
     end
@@ -348,7 +368,7 @@ defmodule Compos.Core.EmbeddingIndex do
     File.rename!(tmp, path)
 
     :persistent_term.put(
-      {__MODULE__, :disk, path},
+      {__MODULE__, @term_tag, :disk, path},
       %{model: model, dimensions: dimensions, vectors: vectors}
     )
   end
@@ -363,6 +383,6 @@ defmodule Compos.Core.EmbeddingIndex do
 
     cache = Map.put(cache, hash, vector)
 
-    :persistent_term.put({__MODULE__, :queries, path}, cache)
+    :persistent_term.put({__MODULE__, @term_tag, :queries, path}, cache)
   end
 end

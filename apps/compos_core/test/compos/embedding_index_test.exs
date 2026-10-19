@@ -120,7 +120,10 @@ defmodule Compos.EmbeddingIndexTest do
     # a query nobody has asked has no vector, and this caller will not wait
     # for one: it says so instead of embedding on the spot
     assert {:error, :absent} =
-             EmbeddingIndex.search("remove the current document", texts, "test-key",
+             EmbeddingIndex.search(
+               "remove the current document",
+               texts,
+               "test-key",
                opts ++ [cached_only: true]
              )
 
@@ -135,7 +138,10 @@ defmodule Compos.EmbeddingIndexTest do
 
     # now the caller may keep its texts at home: the generation names them
     assert {:ok, [{0, _}, {1, _}]} =
-             EmbeddingIndex.search("remove the current document", [], "test-key",
+             EmbeddingIndex.search(
+               "remove the current document",
+               [],
+               "test-key",
                opts ++ [cached_only: true]
              )
 
@@ -145,7 +151,10 @@ defmodule Compos.EmbeddingIndexTest do
                "remove the current document",
                [],
                "test-key",
-               [path: path, dimensions: 2, gen: 8, cached_only: true]
+               path: path,
+               dimensions: 2,
+               gen: 8,
+               cached_only: true
              )
   end
 
@@ -186,5 +195,44 @@ defmodule Compos.EmbeddingIndexTest do
                path: path,
                dimensions: 2
              )
+  end
+
+  # As float lists, the vectors made every sync copy about 60 MB into the
+  # literal area, and the literal area filled and stopped the VM.
+  test "the cache keeps each vector as one off-heap binary", %{path: path} do
+    texts = ["function buffer-kill! Kill buffer B.", "function load-theme Apply a theme."]
+    opts = [path: path, dimensions: 2]
+
+    assert {:ok, 2} = EmbeddingIndex.sync(texts, "test-key", opts)
+
+    %{vectors: vectors} = :erlang.binary_to_term(File.read!(path))
+    assert map_size(vectors) == 2
+    assert Enum.all?(Map.values(vectors), &(is_binary(&1) and byte_size(&1) == 16))
+  end
+
+  test "a cache file of float lists still answers without embedding again", %{path: path} do
+    texts = ["function buffer-kill! Kill buffer B.", "function load-theme Apply a theme."]
+    opts = [path: path, dimensions: 2]
+    assert {:ok, 2} = EmbeddingIndex.sync(texts, "test-key", opts)
+    assert_receive {:embedding_request, _}
+
+    old = :erlang.binary_to_term(File.read!(path))
+
+    lists =
+      Map.new(old.vectors, fn {hash, bin} ->
+        {hash, for(<<x::float-64-native <- bin>>, do: x)}
+      end)
+
+    File.write!(path, :erlang.term_to_binary(%{old | vectors: lists}))
+    EmbeddingIndex.forget_memory(path)
+    EmbeddingIndex.forget_prepared(opts)
+
+    assert {:ok, 0} = EmbeddingIndex.sync(texts, "test-key", opts)
+    refute_receive {:embedding_request, _}
+
+    assert {:ok, [{0, first}, {1, second}]} =
+             EmbeddingIndex.search("remove the current document", texts, "test-key", opts)
+
+    assert first > second
   end
 end

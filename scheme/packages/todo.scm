@@ -1001,14 +1001,29 @@
   "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief when the chat is new; return the chat"
   (let* ((t (todo--must id))
          (g (or (group-resolve-id group) (group-ensure-record! group))))
-    (car (assign-chat! #f g
-           (lambda (chat)
-             (todo-update id (list 'assignee (chat-stable-id! chat)
-                                   'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
-                                   'log (string-append "assigned to a chat in " (group-name g))
-                                   'by (or who todo-user)))
-             (todo--brief (todo-get id) (chat-stable-id! chat)))
-           (todo--chat-of t)))))
+    (let* ((got (assign-chat! #f g
+                  (lambda (chat)
+                    (todo-update id (list 'assignee (chat-stable-id! chat)
+                                          'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
+                                          'log (string-append "assigned to a chat in " (group-name g))
+                                          'by (or who todo-user)))
+                    (todo--brief (todo-get id) (chat-stable-id! chat)))
+                  (todo--chat-of t)))
+           (chat (car got)))
+      ;; A new chat wears the task's title. Named here, after the brief went
+      ;; out under the old name; the first-prompt title lands later and
+      ;; leaves a titled chat alone.
+      (if (and (cadr got) (string? (plist-get t 'title)))
+          (let ((sid (chat-stable-id! chat)))
+            (if (chat-title chat (plist-get t 'title))
+                ;; chat-title may have settled on "Title<2>"; find the renamed
+                ;; buffer by its stable id
+                (or (find (lambda (b) (and (string? (buffer-local b 'chat-title))
+                                           (equal? (chat-stable-id! b) sid)))
+                          (group-buffers g))
+                    chat)
+                chat))
+          chat))))
 
 ;; the assignee of a chat-held task is the chat's stable id, since the
 ;; chat renames itself after its first answer
@@ -1196,6 +1211,18 @@
     (todo--detail-render! buf)
     (display-buffer-detail! buf (todo--list-buffer))
     buf))
+;; highlighting a row also brings up its chat, where chats live, without
+;; taking focus: the pane already showing a chat, else a spare window, else
+;; a split under the task's page
+(define (todo--preview-chat! t)
+  (let ((chat (todo--chat-of t)))
+    (when (and chat (not (window-showing chat)))
+      (let* ((keep (list (window-showing (todo--list-buffer)) (window-showing *todo-detail-buffer*)))
+             (pane (or (window-showing-mode "chat-mode" #f)
+                       (find (lambda (w) (not (member w keep))) (display--work-windows))
+                       (and (cadr keep) (split-window-in! (cadr keep) 'v)))))
+        (when pane (window-display! (lambda () (display-buffer-in-window! pane chat) pane)))))))
+
 
 (define-command "todo-show" "Show the task as its own page beside the list"
   (lambda ()
@@ -1399,8 +1426,11 @@
   (list
     'buffer *todo-buffer*
     'special #f
-    ;; moving shows the row's page beside the list, once the highlight rests
-    'preview (lambda (buf t) (unless (todo--sep? t) (todo-show-detail! (plist-get t 'id))))
+    ;; moving shows the row's page beside the list, and its chat, once the highlight rests
+    'preview (lambda (buf t)
+                (unless (todo--sep? t)
+                  (todo-show-detail! (plist-get t 'id))
+                  (todo--preview-chat! t)))
     'debounce #t
     'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))
     'title-spans (lambda (buf)

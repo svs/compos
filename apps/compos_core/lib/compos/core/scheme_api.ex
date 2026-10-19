@@ -3326,12 +3326,17 @@ defmodule Compos.Core.SchemeAPI do
   defp async_dispatch(callback, work) do
     key = {:async_call, make_ref()}
     rooted? = Roots.put(key, callback)
+    # the callback comes back to the lane, frame, and buffer that asked, as
+    # a task-run! callback does; a poll on its own lane stays off :ui
+    fid = Compos.Core.Frame.current()
+    buffer = Compos.Core.Frame.buffer_context()
+    lane = Compos.Core.Lane.current() || :ui
 
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
       value = work.()
 
       try do
-        Compos.Core.Session.apply_callback(callback, [value])
+        Compos.Core.Session.apply_callback(callback, [value], fid, lane, buffer)
       after
         if rooted?, do: Roots.drop(key)
       end

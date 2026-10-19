@@ -111,4 +111,37 @@ defmodule Compos.AsyncShellTest do
     assert printed =~ "start"
     refute printed =~ "end"
   end
+  # the lane that ran the newest telemetry row whose label starts with PREFIX
+  defp lane_of(prefix) do
+    eval!(~s{(let loop ((es (telemetry-events 400)))
+               (cond ((null? es) "none")
+                     ((string-prefix? "#{prefix}" (plist-get (car es) 'label)) (plist-get (car es) 'owner))
+                     (else (loop (cdr es)))))})
+  end
+
+  test "run-on-lane! queues the thunk on its own lane and returns at once" do
+    eval!(~s{(define *lane-probe* #f)})
+
+    # the thunk blocks for a second; the caller must not wait for it
+    {elapsed, _} =
+      ms(fn ->
+        eval!(~s{(run-on-lane! 'probe (lambda () (shell-command->string "sleep 1") (set! *lane-probe* 'ran)))})
+      end)
+
+    assert elapsed < 500
+    wait_until(fn -> eval!("*lane-probe*") == "ran" end, 10_000)
+    assert lane_of("apply ((shell-command->string") =~ ~r/:named, \\"probe\\"/
+  end
+
+  test "a shell callback comes back to the lane that started the shell" do
+    eval!(~s{(define *lane-shell-out* #f)})
+
+    eval!(~s{(run-on-lane! 'probe
+               (lambda ()
+                 (shell-command->string "echo back" "/tmp"
+                   (lambda (out) (set! *lane-shell-out* out)))))})
+
+    wait_until(fn -> eval!("*lane-shell-out*") != "#f" end, 10_000)
+    assert lane_of("apply ((set! *lane-shell-out*") =~ ~r/:named, \\"probe\\"/
+  end
 end

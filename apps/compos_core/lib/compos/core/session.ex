@@ -2112,6 +2112,29 @@ defmodule Compos.Core.Session do
 
           :void
         end,
+      {"run-on-lane!",
+       "(run-on-lane! KEY THUNK) — queue THUNK on the serial lane named KEY and return at once. A shell or task callback that THUNK starts comes back to that lane, so a poll stays off the UI lane."} =>
+        fn [key, thunk] ->
+          # rooted while it waits in the queue: a GC sweep must not take its frames
+          root = {:run_on_lane, make_ref()}
+          Roots.put(root, thunk)
+          fid = Frame.current()
+          buffer = Frame.buffer_context()
+
+          Lane.cast(
+            {:named, s(key)},
+            fn _from ->
+              try do
+                exec_apply(thunk, [], fid, buffer)
+              after
+                Roots.drop(root)
+              end
+            end,
+            apply_label(thunk)
+          )
+
+          :void
+        end,
       {"minibuffer-confirm!",
        "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value."} =>
         fn [], store ->

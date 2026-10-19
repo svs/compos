@@ -1657,22 +1657,25 @@
     (pair? (filter (lambda (b) (or (member b (spotify--list-buffers)) (spotify--detail? b))) shown))))
 
 (define (spotify--tick! ignored)
+  ;; the timer fires on the UI lane. The read and the redraw run on the
+  ;; player's own lane, so a slow answer does not hold a key
+  (run-on-lane! 'spotify spotify--read-player!))
+
+(define (spotify--read-player!)
   ;; a shown app reads the player; a hidden one only looks every two seconds
   ;; whether it shows again, so coming back finds the music where it is. A
-  ;; player that never answers is asked again by the watchdog
-  (set! *spotify-ticking* #f)
+  ;; player that never answers is asked again by the watchdog. The flag
+  ;; stays set for the whole read: the redraw draws the list head, and a
+  ;; head that saw it clear started a second loop at half a second
+  (set! *spotify-ticking* #t)
   (if (spotify--shown?)
       (begin
         (debounce! 'spotify-now-watchdog (* 3000 spotify-now-seconds)
-          (lambda (ignored) (unless *spotify-ticking* (spotify--ticker-start!))) #f)
+          (lambda (ignored) (set! *spotify-ticking* #f) (spotify--ticker-start!)) #f)
         (spotify-now-refresh!
           (lambda (now)
-            (unless *spotify-ticking*
-              (set! *spotify-ticking* #t)
-              (debounce! 'spotify-now (* 1000 spotify-now-seconds) spotify--tick! #f)))))
-      (begin
-        (set! *spotify-ticking* #t)
-        (debounce! 'spotify-now 2000 spotify--tick! #f))))
+            (debounce! 'spotify-now (* 1000 spotify-now-seconds) spotify--tick! #f))))
+      (debounce! 'spotify-now 2000 spotify--tick! #f)))
 
 (define (spotify--ticker-start!)
   (unless *spotify-ticking*

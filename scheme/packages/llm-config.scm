@@ -165,6 +165,7 @@
     (set-frame-local! 'llm-config-drafts '())
     (set-frame-local! 'llm-config-filter "")
     (set-frame-local! 'llm-config-new #f)
+    (set-frame-local! 'llm-config-left #t)
     (set-frame-local! 'llm-config-follow '())))
 
 ;; the box shows NAME's config (#f: the chat's own), its draft if it has one
@@ -1042,9 +1043,14 @@
         (string-append (llm-config--field-text key (llm-config--source)) " → " now)
         now)))
 
+;; In the presets the letters type the filter, so a config row's key
+;; takes Meta there: M-m picks the model from either column.
+(define (llm-config--row-key key)
+  (if (frame-local 'llm-config-left) (string-append "M-" key) key))
+
 (define (llm-config--field-row key label field command &rest properties)
   (append
-    (transient-infix key label command
+    (transient-infix (llm-config--row-key key) label command
       (lambda (_scope) (llm-config--field-value field))
       'flags-fn (lambda (_scope) (if (llm-config--drifted? field) "drift" "")))
     properties))
@@ -1082,6 +1088,7 @@
 
 ;; the cursor hook: a source row shows its config on the right
 (define (llm-config--on-select _buf item)
+  (set-frame-local! 'llm-config-left (llm-config--source-row? item))
   (cond ((plist-get item 'bundle) (llm-config--show! (llm-bundle-name (plist-get item 'bundle))))
         ((plist-get item 'live-row) (llm-config--show! #f))
         (else #f)))
@@ -1197,16 +1204,16 @@
 
 (define (llm-config--more-items)
   (list
-    (transient-suffix "i" "prompt" "llm-prompt-sections"
+    (transient-suffix (llm-config--row-key "i") "prompt" "llm-prompt-sections"
       'value-fn (lambda (_scope) (llm-config--field-value 'prompt-disabled))
       'flags-fn (lambda (_scope) (if (llm-config--drifted? 'prompt-disabled) "drift" "")))
     (llm-config--field-row "x" "sandbox" 'sandbox "llm-config-pick-sandbox")
     ;; our gates decide what asks: the sandbox, and a card for an action
     ;; it cannot see. The backend's own stances (asks, agent mode, file
     ;; tools) are not fields.
-    (transient-suffix "t" "tool surface" "chat-tools"
+    (transient-suffix (llm-config--row-key "t") "tool surface" "chat-tools"
       'value-fn (lambda (scope) (llm-config--tools-label scope)))
-    (transient-suffix "v" "show prompt" "chat-show-prompt" 'transient 'stay)
+    (transient-suffix (llm-config--row-key "v") "show prompt" "chat-show-prompt" 'transient 'stay)
     (transient-infix "d" "always asks" "llm-config-pick-asks"
       (lambda (scope) (llm-config--asks-text scope)))))
 
@@ -1214,10 +1221,7 @@
 (define (llm-config--config-title)
   (string-append (or (llm-config--source-name) "this chat")
                  (if (pair? (llm-config--drift)) "*" "")
-                 " · config"
-                 ;; on the left the letters type the filter, so the
-                 ;; column says how to reach its keys
-                 (if (llm-config--on-left?) " · → to edit" "")))
+                 " · config"))
 
 (define (llm-config--presets-title)
   (let ((f (llm-config--filter)))
@@ -1288,7 +1292,7 @@
       (if (llm-config--on-left?)
           (append
             (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select")
-                  (list "→" "edit config"))
+                  (list "M-b m e p" "set a field") (list "→" "edit config"))
             (if (and name drift?) (list (list "M-u" (string-append "update " name))) '())
             (list (list "M-s" "save as…") (list "M-n" "new preset"))
             (if name (list (list "M-k" "delete…")) '())

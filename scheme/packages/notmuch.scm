@@ -1405,15 +1405,44 @@ when a message has no text/plain part." 'group 'notmuch)
       (substring line 7 (string-length line))
       line))
 
-(define (nm--autotag-targets buf)
-  (if (nm--any-marked? buf)
-      (map nm--autotag-thread-id
-           (filter (lambda (l) (not (equal? l "")))
-             (string-split
-               (string-trim (nm--run (string-append "search --output=threads -- "
-                                       (sh-quote (nm--marked-query buf)))))
-               "\n")))
-      (let ((th (nm--thread-at buf))) (if th (list (nm--th-id th)) '()))))
+(defcustom 'notmuch-autotag-only-unprocessed #t
+  "When true, notmuch-autotag and notmuch-autotag-new skip a thread that already
+carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them all.")
+
+(define (nm--autotag-unprocessed-clause)
+  ;; " and not thread:\"{tag:a or ...}\"" over every tag that says what a mail is,
+  ;; so a thread counts as processed when any of its messages carries one.
+  ;; Thread-level, since a bare `not tag:x` matches a thread with one untagged
+  ;; message. Blocks on the mail host, as nm--all-tags does.
+  (let ((done (filter (lambda (t) (not (member t notmuch-autotag-exclude)))
+                      (nm--all-tags))))
+    (if (null? done)
+        ""
+        ;; The quoted form takes the spaces; a quote inside it doubles.
+        (string-append " and not thread:\"{"
+          (string-join (map (lambda (t) (string-append "tag:\"\"" t "\"\"")) done) " or ")
+          "}\""))))
+
+(define (nm--autotag-targets buf &optional all)
+  ;; ALL takes processed threads too; otherwise notmuch-autotag-only-unprocessed
+  ;; narrows the marks or the thread at point to the unprocessed ones.
+  (let* ((th (and (not (nm--any-marked? buf)) (nm--thread-at buf)))
+         (base (cond ((nm--any-marked? buf) (nm--marked-query buf))
+                     (th (string-append "thread:" (nm--th-id th)))
+                     (else #f))))
+    (cond ((not base) '())
+          ((and th (or all (not notmuch-autotag-only-unprocessed))) (list (nm--th-id th)))
+          (else
+           (map nm--autotag-thread-id
+                (filter (lambda (l) (not (equal? l "")))
+                  (string-split
+                    (string-trim
+                      (nm--run (string-append "search --output=threads -- "
+                                 (sh-quote (string-append "(" base ")"
+                                             (if (or all (not notmuch-autotag-only-unprocessed))
+                                                 ""
+                                                 (nm--autotag-unprocessed-clause)))))))
+                    "\n")))))))
 
 (define (nm--autotag-flag-key i)
   (string->symbol (string-append "f" (number->string i))))
@@ -1545,18 +1574,20 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--autotag-one! id vocab k)
   ;; K gets the signed ops this thread actually took, so the caller reports a
-  ;; real change and never a blind "done". Each notmuch call is a blocking
-  ;; trip to the mail host, so the read and the write run in tasks; on the lane
-  ;; they would put the threads in a line behind each other.
+  ;; real change and never a blind "done", or #f when the read, the model or
+  ;; the write failed, so a failure never passes for "nothing to change".
+  ;; Each notmuch call is a blocking trip to the mail host, so the read and the
+  ;; write run in tasks; on the lane they would put the threads in a line
+  ;; behind each other.
   (task-run! (lambda () (nm--autotag-input id))
     (lambda (ok? input)
       (if (not ok?)
-          (k '())
+          (k #f)
           (jev-ask input
                    (nm--autotag-questions vocab)
             (lambda (reply)
               (if (not reply)
-                  (k '())
+                  (k #f)
                   (let* ((chosen (jev-answer-choice reply 'tag))
                          (tag (and chosen (nm--autotag-tag-of vocab chosen)))
                          (picked (jev-answer-choice reply 'kind))
@@ -1565,7 +1596,7 @@ when a message has no text/plain part." 'group 'notmuch)
                                        (if kind (list kind) '())
                                        (nm--autotag-flags-said-yes reply))))
                     (task-run! (lambda () (nm--autotag-apply! id want))
-                      (lambda (ok? ops) (k (if ok? ops '()))))))))))))
+                      (lambda (ok? ops) (k (and ok? ops))))))))))))
 
 (defcustom 'notmuch-autotag-parallel 8
   "How many threads notmuch-autotag classifies at the same time.")
@@ -1576,21 +1607,27 @@ when a message has no text/plain part." 'group 'notmuch)
   ;; once, after the last thread answers. BUF is #f when no list asked.
   ;; The addresses are read here, on the lane, so no task sets the global.
   (nm--autotag-addresses)
-  (let ((queue ids) (left (length ids)) (changed '()))
+  ;; DONE gets how many threads failed.
+  (let ((queue ids) (left (length ids)) (changed '()) (failed 0))
     (define (finish!)
       (when buf (nm--refresh! buf))
-      (message (if (null? changed)
-                   "Autotag: nothing to change"
-                   (string-append "Autotag: "
-                     (string-join (nm--uniq changed) " "))))
-      (when done (done)))
+      (message (string-append
+                 (if (null? changed)
+                     "Autotag: nothing to change"
+                     (string-append "Autotag: " (string-join (nm--uniq changed) " ")))
+                 (if (= failed 0)
+                     ""
+                     (string-append "; " (number->string failed) " failed"))))
+      (when done (done failed)))
     (define (next!)
       (unless (null? queue)
         (let ((id (car queue)))
           (set! queue (cdr queue))
           (nm--autotag-one! id vocab
             (lambda (ops)
-              (set! changed (append changed ops))
+              (if ops
+                  (set! changed (append changed ops))
+                  (set! failed (+ failed 1)))
               (set! left (- left 1))
               (if (= left 0)
                   (finish!)
@@ -1604,12 +1641,12 @@ when a message has no text/plain part." 'group 'notmuch)
         (loop (- n 1))))))
 
 (define-command "notmuch-autotag"
-  "Classify the marked threads, or the thread at point, with this mailbox's own tags"
+  "Classify the marked threads, or the thread at point, with this mailbox's own tags; only untagged ones unless C-u"
   (lambda ()
     (let* ((buf (current-buffer))
            (vocab (nm--autotag-vocabulary))
-           (ids (nm--autotag-targets buf)))
-      (cond ((null? ids) (message "No thread on this line"))
+           (ids (nm--autotag-targets buf (current-prefix-arg))))
+      (cond ((null? ids) (message "Autotag: no unprocessed thread here (C-u to take all)"))
             ((null? vocab) (message "This mailbox has no tags to classify with"))
             ((not (jev-api-key)) (message "Autotag needs a JEV key: set TYPESAFE_API_KEY"))
             (else (nm--autotag-run! buf ids vocab))))))
@@ -1626,6 +1663,13 @@ when a message has no text/plain part." 'group 'notmuch)
 (defcustom 'notmuch-autotag-new-seconds 300
   "How often the new-mail autotag looks for mail it has not classified.")
 
+(defcustom 'notmuch-autotag-new-stale-seconds 900
+  "How long a new-mail autotag run may hold the lock before the next tick takes it.")
+
+;; The current run as its start time, or #f. A run that never answers (a hung
+;; ssh trip, a JEV call that never calls back) must not stop new mail being
+;; tagged for good, so a tick takes a lock older than the stale limit, and the
+;; old run's late answers find their start time gone and do nothing.
 (define nm--autotag-new-running #f)
 
 (define (nm--autotag-new-key) (string-append "notmuch-autotag:" notmuch-host ":" notmuch-profile))
@@ -1647,7 +1691,10 @@ when a message has no text/plain part." 'group 'notmuch)
                                       "lastmod:" (number->string (+ after 1)) ".."
                                       " and date:@" (number->string (- since 86400)) ".."
                                       " and not tag:sent and not tag:draft"
-                                      " and not tag:spam and not tag:trash")))))
+                                      " and not tag:spam and not tag:trash"
+                                      (if notmuch-autotag-only-unprocessed
+                                          (nm--autotag-unprocessed-clause)
+                                          ""))))))
                 "\n"))))
 
 (define (nm--autotag-new-save! rev now)
@@ -1656,31 +1703,41 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define (nm--autotag-new!)
   ;; One run at a time. The first run only saves the cursor.
-  (unless (or nm--autotag-new-running (not (jev-api-key)))
+  (unless (or (and nm--autotag-new-running
+                   (< (- (current-time) nm--autotag-new-running)
+                      notmuch-autotag-new-stale-seconds))
+              (not (jev-api-key)))
     (let ((after (event-log-position (nm--autotag-new-key)))
           (since (event-log-position (string-append (nm--autotag-new-key) ":since")))
           (now (current-time)))
-      (define (stop!) (set! nm--autotag-new-running #f))
-      (define (save-after-writes!)
-        ;; The cursor moves after the run's own writes, so read it then.
-        (task-run! (lambda () (nm--autotag-revision))
+      (define (mine?) (eqv? nm--autotag-new-running now))
+      (define (stop!) (when (mine?) (set! nm--autotag-new-running #f)))
+      (define (save! rev) (when (mine?) (nm--autotag-new-save! rev now)))
+      (define (save-after-writes! failed)
+        ;; The cursor moves after the run's own writes, so read it then. A run
+        ;; with a failed thread leaves it where it was, so the next tick tries
+        ;; again; the threads it did tag are processed by then and drop out.
+        (task-run! (lambda () (and (= failed 0) (nm--autotag-revision)))
           (lambda (ok? rev)
-            (when (and ok? rev) (nm--autotag-new-save! rev now))
-            (stop!))))
-      (set! nm--autotag-new-running #t)
+            (when (and ok? rev) (save! rev))
+            (stop!))
+          120000))
+      (set! nm--autotag-new-running now)
       (task-run!
        (lambda ()
          (list (nm--autotag-revision)
-               (if (and after since) (nm--autotag-new-ids after since) '())))
+               (if (and after since) (nm--autotag-new-ids after since) '())
+               (nm--autotag-vocabulary)))
        (lambda (ok? value)
-         (let ((rev (and ok? (car value)))
+         (let ((rev (and ok? (mine?) (car value)))
                (ids (if ok? (cadr value) '()))
-               (vocab (nm--autotag-vocabulary)))
+               (vocab (if ok? (caddr value) '())))
            (cond ((not rev) (stop!))
                  ((or (null? ids) (null? vocab))
-                  (nm--autotag-new-save! rev now)
+                  (save! rev)
                   (stop!))
-                 (else (nm--autotag-run! #f ids vocab save-after-writes!)))))))))
+                 (else (nm--autotag-run! #f ids vocab save-after-writes!)))))
+       120000))))
 
 (define-command "notmuch-autotag-new"
   "Classify each thread that came in since the last run, with this mailbox's own tags"

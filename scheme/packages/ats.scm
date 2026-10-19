@@ -192,9 +192,10 @@
         'detail-wait "#approvals-show-root"
         'detail-tab-param "tab"
         'detail-kind "ats-approval-mode"
-        ;; approve presses the site's button; e edits the draft in a buffer; o opens the site for the rest
+        ;; approve goes straight to the API, not through the site's button; e edits the draft in a buffer; o opens the site for the rest
         'detail-keys (list "a" "e")
-        'detail-actions (list (list "Edit draft" (lambda (ctx) (ats-draft-open! ctx))))
+        'detail-actions (list (list "Approve" (lambda (ctx) (message "Approving…") (ats-approve! (ats-case-id (plist-get ctx 'buf)))))
+                              (list "Edit draft" (lambda (ctx) (ats-draft-open! ctx))))
         'detail-composed (list *ats-brief-tab*)
         'detail-default "brief"
         'detail-tabs

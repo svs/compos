@@ -5597,16 +5597,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (windows-overview-active?)
   (equal? (frame-local 'windows-overview) #t))
 
-(define (windows-overview--rows ids)
-  ;; IDS cut into the rows of a near-square grid, the longer rows first
-  (let* ((n (length ids))
-         (cols (let loop ((c 1)) (if (>= (* c c) n) c (loop (+ c 1)))))
-         (rows (quotient (+ n cols -1) cols)))
-    (let loop ((ids ids) (r 0) (acc '()))
-      (if (null? ids)
-          (reverse acc)
-          (let ((k (+ (quotient n rows) (if (< r (remainder n rows)) 1 0))))
-            (loop (list-tail ids k) (+ r 1) (cons (list-head ids k) acc)))))))
+(define (windows-overview--rows ids cols)
+  ;; IDS cut into rows of COLS each, as many to a row as the screen shows
+  (if (<= (length ids) cols)
+      (list ids)
+      (cons (list-head ids cols) (windows-overview--rows (list-tail ids cols) cols))))
 
 (define (windows-overview--split-off! win ratio)
   ;; split WIN side by side, WIN keeping RATIO; the new window
@@ -5685,12 +5680,9 @@ is forgotten and that group falls back to creation order in the switcher."
                   (when (pair? rest) (group-panes-record! (car row) (car rest) #t)))))
             (buffer-kill! buf)
             (when next
-              ;; the windows that were on screen keep the top row; the rest regrid
-              (let* ((drop (lambda (ws) (filter (lambda (w) (not (equal? w win))) ws)))
-                     (top (drop (car rows)))
-                     (rest (drop (apply append (cdr rows))))
-                     (left (append (if (pair? top) (list top) '())
-                                   (if (pair? rest) (windows-overview--rows rest) '()))))
+              ;; the rest regrid, as many to a row as before
+              (let* ((left (windows-overview--rows (filter (lambda (w) (not (equal? w win))) flat)
+                                                   (max 1 (length (car rows))))))
                 (set-frame-local! 'windows-overview-rows left)
                 (windows-overview--lay! left)
                 (when (assoc win (window-hidden-list)) (window-hidden-delete! win))
@@ -5707,14 +5699,16 @@ is forgotten and that group falls back to creation order in the switcher."
           (else
             (when (null? (group-panes-windows)) (group-panes-apply!))
             (let* ((me (active-window))
+                   (home (group-panes-row-of me))
                    (order (windows-overview--order))
                    (ids (append (car order) (cadr order))))
               (cond ((null? ids) (message "No windows in this frame") #f)
                     (else
                       (layout-target-free!)
-                      (let ((rows (append (if (pair? (car order)) (list (car order)) '())
-                                          (if (pair? (cadr order)) (windows-overview--rows (cadr order)) '()))))
+                      (let ((rows (windows-overview--rows ids (max 1 (length (car order))))))
                         (set-frame-local! 'windows-overview-rows rows)
+                        ;; the pane the user came from takes the window they choose
+                        (set-frame-local! 'windows-overview-home (and home (car home)))
                         (windows-overview--lay! rows))
                       (client-slide! (json-encode (list 'spread (windows-overview--homes))))
                       (set-frame-local! 'windows-overview #t)
@@ -5738,10 +5732,17 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (windows-overview-exit!)
   (let* ((me (active-window))
-         (row (group-panes-row-of me)))
-    (when row (group-panes-record! (car row) me #t))
+         (row (group-panes-row-of me))
+         (pane (or (frame-local 'windows-overview-home) (and row (car row)))))
+    (when pane
+      ;; the chosen window leaves its own pane for the one the user came from
+      (group-panes-set-rows!
+        (map (lambda (r) (if (equal? (car r) pane) r (cons (car r) (filter (lambda (w) (not (equal? w me))) (cdr r)))))
+             (group-panes-windows)))
+      (group-panes-record! pane me #t))
     (set-frame-local! 'windows-overview #f)
     (set-frame-local! 'windows-overview-armed #f)
+    (set-frame-local! 'windows-overview-home #f)
     (transient-show! #f)
     (transient-keymap-clear!)
     (let ((ids (group-panes-arrange!)))

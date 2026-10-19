@@ -743,6 +743,7 @@
       (else
        (let* ((key (string-append (car (string-split (or (site-app-field row 'artists) "") ",")) " | " (or (site-app-field row 'album) ""))))
          (list active href key (spotify--get 'liners key) (spotify--now-field 'trackHref)
+               (spotify--get 'albums (or (plist-get (spotify--row-now row) 'albumHref) ""))
                (buffer-local b 'site-app-data)))))))
 
 (define (spotify--same-inputs? a b)
@@ -2296,6 +2297,16 @@
           (spotify--redraw-artist-tabs!)))
       30000)))
 
+(define (spotify--album-read! href)
+  ;; the album's page, for the name and release in the head of its track's page
+  (when (and (string-prefix? "/album/" href) (not (spotify--get 'albums href)) (spotify--ask! href))
+    (spotify--read-page! href *spotify-detail-sheet*
+      (lambda (data)
+        (if data
+            (spotify--put! 'albums href data)
+            (set! *spotify-asked* (spotify--without href *spotify-asked*)))
+        (spotify--redraw-artist-tabs!)))))
+
 (define (spotify--album-facts href)
   ;; (NAME RELEASED) from the album page's head: the whole date, else the year
   (let* ((data (spotify--get 'albums href))
@@ -2408,7 +2419,7 @@
          (title (field 'title))
          (album-href (field 'albumHref))
          (artist-href (field 'artistHref))
-         (album (spotify--album-facts album-href))
+         (album (begin (spotify--album-read! album-href) (spotify--album-facts album-href)))
          (artist (spotify--get 'artists artist-href))
          (name (let ((n (and artist (plist-get artist 'name))))
                  (if (and (string? n) (not (equal? n ""))) n (car (string-split (field 'artists) ",")))))

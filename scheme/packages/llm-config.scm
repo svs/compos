@@ -1048,11 +1048,23 @@
 (define (llm-config--row-key key)
   (if (frame-local 'llm-config-left) (string-append "M-" key) key))
 
+;; ...and says so: an armed row's key chip is outlined in the accent
+(define (llm-config--armed flags)
+  (if (frame-local 'llm-config-left) (string-append flags " armed") flags))
+
+(define-style! 'llm-config "
+.transient-layout-split .transient-column .transient-item.armed:not(.selected) .transient-key {
+  width: auto; min-width: 2.4em; padding: 0 0.4em;
+  color: var(--accent-fg, #26356b);
+  box-shadow: inset 0 0 0 1.5px var(--accent-fg, #26356b);
+}
+")
+
 (define (llm-config--field-row key label field command &rest properties)
   (append
     (transient-infix (llm-config--row-key key) label command
       (lambda (_scope) (llm-config--field-value field))
-      'flags-fn (lambda (_scope) (if (llm-config--drifted? field) "drift" "")))
+      'flags-fn (lambda (_scope) (llm-config--armed (if (llm-config--drifted? field) "drift" ""))))
     properties))
 
 ;; the row the cursor is on, or #f
@@ -1099,6 +1111,11 @@
   (llm-config--refresh!)
   (message (string-append "selected " (or name "this chat")
                           " · ESC gives it to the chat")))
+
+;; RET on a preset selects it and enters its config, cursor on the first field
+(define (llm-config--enter! name)
+  (llm-config--choose! name)
+  (llm-config--select-row! (lambda (item) (not (llm-config--source-row? item)))))
 
 (define (llm-config--dirty-name? name)
   (let ((draft (transient--alist-get (llm-config--drafts) (or name "") #f)))
@@ -1167,7 +1184,7 @@
              (string-append name
                (if (llm-config--dirty? name) "*" "")
                (if (llm-config--default? b) " · default" ""))
-             (lambda () (llm-config--choose! name))
+             (lambda () (llm-config--enter! name))
              'transient 'stay 'bundle b
              'flags-fn (lambda (_scope) (llm-config--shown-flag name))
              'value-fn (lambda (_scope) (if (llm-config--selected? name) "selected" ""))
@@ -1179,7 +1196,7 @@
 ;; the menu can open on it and the chat has a config to go into.
 (define (llm-config--live-item)
   (transient-suffix "" (string-append "this chat" (if (llm-config--dirty? #f) "*" ""))
-    (lambda () (llm-config--choose! #f))
+    (lambda () (llm-config--enter! #f))
     'transient 'stay 'live-row #t
     'flags-fn (lambda (_scope) (llm-config--shown-flag #f))
     'value-fn (lambda (_scope) (if (llm-config--selected? #f) "selected" ""))
@@ -1206,14 +1223,16 @@
   (list
     (transient-suffix (llm-config--row-key "i") "prompt" "llm-prompt-sections"
       'value-fn (lambda (_scope) (llm-config--field-value 'prompt-disabled))
-      'flags-fn (lambda (_scope) (if (llm-config--drifted? 'prompt-disabled) "drift" "")))
+      'flags-fn (lambda (_scope) (llm-config--armed (if (llm-config--drifted? 'prompt-disabled) "drift" ""))))
     (llm-config--field-row "x" "sandbox" 'sandbox "llm-config-pick-sandbox")
     ;; our gates decide what asks: the sandbox, and a card for an action
     ;; it cannot see. The backend's own stances (asks, agent mode, file
     ;; tools) are not fields.
     (transient-suffix (llm-config--row-key "t") "tool surface" "chat-tools"
-      'value-fn (lambda (scope) (llm-config--tools-label scope)))
-    (transient-suffix (llm-config--row-key "v") "show prompt" "chat-show-prompt" 'transient 'stay)
+      'value-fn (lambda (scope) (llm-config--tools-label scope))
+      'flags-fn (lambda (_scope) (llm-config--armed "")))
+    (transient-suffix (llm-config--row-key "v") "show prompt" "chat-show-prompt" 'transient 'stay
+      'flags-fn (lambda (_scope) (llm-config--armed "")))
     (transient-infix "d" "always asks" "llm-config-pick-asks"
       (lambda (scope) (llm-config--asks-text scope)))))
 
@@ -1291,7 +1310,7 @@
     (append
       (if (llm-config--on-left?)
           (append
-            (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select")
+            (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select + edit")
                   (list "M-b m e p" "set a field") (list "→" "edit config"))
             (if (and name drift?) (list (list "M-u" (string-append "update " name))) '())
             (list (list "M-s" "save as…") (list "M-n" "new preset"))

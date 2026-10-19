@@ -108,15 +108,24 @@
                    n))
              rest))))
 
-;; the newest evaluation takes the place of Skills beside About, and Skills goes last
+;; the newest evaluation takes the place of Skills beside About, the applications go above the work history, and Skills goes last
 (define (ats-candidate-order nodes)
   (let* ((chunks (ats-tab-chunks nodes))
          (titled (lambda (t) (site-app-find (lambda (c) (equal? (ats-chunk-title c) t)) chunks)))
          (skills (titled "Skills"))
          (notes (titled "Notes"))
-         (note (and notes (site-app-find ats-evaluation-note? notes))))
+         (note (and notes (site-app-find ats-evaluation-note? notes)))
+         (apps (titled "Applications"))
+         (work (titled "Work Experience"))
+         ;; the applications go just above the work history
+         (chunks (if (and apps work)
+                     (apply append (map (lambda (c) (cond ((equal? c work) (list apps work))
+                                                          ((equal? c apps) '())
+                                                          (else (list c))))
+                                        chunks))
+                     chunks)))
     (if (not skills)
-        nodes
+        (apply append chunks)
         (apply append
                (append (map (lambda (c)
                               (cond ((equal? c skills) (if note (list (list 'tag "c-heading" 'text "Last evaluation") note) '()))
@@ -252,8 +261,8 @@
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
-        ;; the candidate tab leads with the newest evaluation, beside About; Skills goes last
-        'detail-moves (list (list "candidate" ats-candidate-order))
+        ;; the candidate tab (profile on a candidate's own page) leads with the newest evaluation, beside About; Skills goes last
+        'detail-moves (list (list "candidate" ats-candidate-order) (list "profile" ats-candidate-order))
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
         'list-keys (list (list "M-o" "site-app-agent" "agent"))
         ;; the status, stage or scope tabs a section's page draws above its rows
@@ -468,6 +477,140 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
             (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
 (define-key (mode-keymap "ats-approvals-mode") "M-O" "ats-approvals-review")
+
+;; / in the candidates list: the site's own search (?q=), over every candidate
+;; and not only the page drawn. An empty answer shows them all again
+(define (ats-search-query buf)
+  (let ((q (buffer-local buf 'site-app-filter)))
+    (if (and (string? q) (string-prefix? "q=" q)) (url-decode (substring q 2 (string-length q))) "")))
+
+(define-command "ats-candidates-search" "Search every candidate on the site by name"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (read-string "Candidate: "
+        (lambda (text)
+          (let ((name (string-trim (or text ""))))
+            (site-app-set-filter! buf (if (equal? name "") #f (string-append "q=" (url-encode name))))))
+        'initial (ats-search-query buf)))))
+(catalog-meta! 'command "ats-candidates-search" 'domain 'web 'effects '(read external display))
+(define-key (mode-keymap "ats-candidates-mode") "/" "ats-candidates-search")
+
+;; s-k in the ATS: the site's ⌘K. Candidates, jobs and companies as you type,
+;; candidates first; RET opens the pick beside its list. The site's palette
+;; lives in its LiveView, so the candidates and companies come from ats-ash's
+;; searches and the jobs from one read of the open jobs when the palette opens
+(define *ats-palette-prompt* "ATS: ")
+(define *ats-palette-jobs* '())
+(define *ats-palette-hits* '())
+
+(define (ats-palette--clip s n)
+  (let ((s (string-trim (or s ""))))
+    (if (> (string-length s) n) (string-append (substring s 0 n) "…") s)))
+
+(define (ats-palette--take xs n)
+  (if (or (null? xs) (= n 0)) '() (cons (car xs) (ats-palette--take (cdr xs) (- n 1)))))
+
+(define (ats-palette--parse text)
+  (if (string? text) (or (json-parse text) '()) '()))
+
+(define (ats-palette--candidates text)
+  (map (lambda (c)
+         (let ((rating (plist-get c 'rating)))
+           (list (plist-get c 'name) (string-append "/staff/candidates/" (plist-get c 'slug)) (plist-get c 'slug)
+                 "candidate"
+                 (string-append (if (number? rating) (string-append (number->string rating) "★  ") "")
+                                (ats-palette--clip (plist-get c 'summary) 90)))))
+       (ats-palette--take (or (plist-get (ats-palette--parse text) 'results) '()) 8)))
+
+(define (ats-palette--companies text)
+  (map (lambda (c)
+         (list (plist-get c 'name) (string-append "/staff/companies/" (plist-get c 'slug)) (plist-get c 'slug)
+               "company" (or (plist-get c 'website_url) "")))
+       (ats-palette--take (ats-palette--parse text) 3)))
+
+(define (ats-palette--jobs input)
+  (let ((q (string-downcase input)))
+    (ats-palette--take
+      (filter (lambda (j) (string-contains? (string-downcase (string-append (car j) " " (list-ref j 4))) q))
+              *ats-palette-jobs*)
+      5)))
+
+(define (ats-palette--load-jobs!)
+  (mcp-call! 'ats-ash "listJobs" "{\"input\":{}}"
+    (lambda (ok text)
+      (when ok
+        (set! *ats-palette-jobs*
+          (map (lambda (j)
+                 (let ((co (plist-get j 'company)))
+                   (list (plist-get j 'title) (string-append "/staff/jobs/" (plist-get j 'slug)) (plist-get j 'slug)
+                         "job" (if (pair? co) (or (plist-get co 'name) "") ""))))
+               (ats-palette--parse text)))))))
+
+;; a name two hits share gets its kind and key, so RET knows which one
+(define (ats-palette--label hit seen)
+  (if (member (car hit) seen) (string-append (car hit) " · " (list-ref hit 3) " " (list-ref hit 2)) (car hit)))
+
+(define (ats-palette--show! input hits)
+  (let ((state (minibuffer-state)))
+    (when (and state (equal? (plist-get state 'prompt) *ats-palette-prompt*) (equal? (plist-get state 'input) input))
+      (let loop ((rest hits) (seen '()) (acc '()))
+        (if (null? rest)
+            (begin (set! *ats-palette-hits* (reverse acc))
+                   (minibuffer-set-candidates!
+                     (map (lambda (h) (list (car h) (list-ref h 5) (list-ref h 4))) *ats-palette-hits*)))
+            (let ((label (ats-palette--label (car rest) seen)))
+              (loop (cdr rest) (cons (car (car rest)) seen)
+                    ;; (LABEL HREF KEY TITLE KIND HINT)
+                    (cons (cons label (cdr (car rest))) acc))))))))
+
+(define (ats-palette--refresh input)
+  (let ((q (string-trim input)))
+    (if (< (string-length q) 2)
+        (ats-palette--show! input '())
+        (let ((cands #f) (cos #f)
+              (args (string-append "{\"input\":{\"q\":" (json-encode q) "}}")))
+          (define (done)
+            (when (and cands cos)
+              (ats-palette--show! input
+                (map (lambda (h) (list (car h) (cadr h) (caddr h) (car h) (list-ref h 3) (list-ref h 4)))
+                     (append cands (ats-palette--jobs q) cos)))))
+          (mcp-call! 'ats-ash "searchCandidates" args
+            (lambda (ok text) (set! cands (if ok (ats-palette--candidates text) '())) (done)))
+          (mcp-call! 'ats-ash "searchCompanies" args
+            (lambda (ok text) (set! cos (if ok (ats-palette--companies text) '())) (done)))))))
+
+;; the pick opens as a link on its page would: beside the list of its section
+(define (ats-palette--open! from hit)
+  (let* ((spec (site-app-spec 'ats))
+         (href (list-ref hit 1))
+         (page (site-app-href-page spec href))
+         (own (and page (site-app-page-buffer 'ats (plist-get page 'id))))
+         (list-buf (cond ((and own (buffer-known? own)) own)
+                         ((buffer-local from 'site-app-spec) from)
+                         (else (buffer-local from 'site-app-list)))))
+    (if (and page list-buf (buffer-known? list-buf))
+        (site-app-show-detail! list-buf (list 'href href 'key (list-ref hit 2) 'name (list-ref hit 3)) page)
+        (tab-open (site-app-url spec href)))))
+
+(define-command "ats-palette" "Search the ATS as the site's Cmd-K does: candidates, jobs and companies as you type"
+  (lambda ()
+    (let ((from (current-buffer)))
+      (ats-palette--load-jobs!)
+      (set! *ats-palette-hits* '())
+      (minibuffer-read* *ats-palette-prompt* '()
+        (list (list 'confirm
+                (lambda (choice)
+                  (let ((hit (assoc choice *ats-palette-hits*)))
+                    (if hit (ats-palette--open! from hit) (message (string-append "No match for " choice))))))
+              (list 'change
+                (lambda (input)
+                  (debounce! (string-append "ats-palette:" (selected-frame)) 150 ats-palette--refresh input)))
+              (list 'filter #f)
+              (list 'style "palette"))))))
+(catalog-meta! 'command "ats-palette" 'domain 'web 'effects '(read external display))
+(for-each (lambda (mode) (define-key (mode-keymap mode) "s-k" "ats-palette"))
+          '("ats-candidates-mode" "ats-approvals-mode" "ats-applications-mode" "ats-companies-mode"
+            "ats-jobs-mode" "ats-comms-mode" "ats-pipeline-mode" "ats-detail-mode"))
 
 (domain! 'web)
 (effects! '(write external display))

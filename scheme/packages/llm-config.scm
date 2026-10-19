@@ -1214,7 +1214,10 @@
 (define (llm-config--config-title)
   (string-append (or (llm-config--source-name) "this chat")
                  (if (pair? (llm-config--drift)) "*" "")
-                 " · config"))
+                 " · config"
+                 ;; on the left the letters type the filter, so the
+                 ;; column says how to reach its keys
+                 (if (llm-config--on-left?) " · → to edit" "")))
 
 (define (llm-config--presets-title)
   (let ((f (llm-config--filter)))

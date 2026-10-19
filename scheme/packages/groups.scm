@@ -5363,9 +5363,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-panes-default-place buf)
   (cond ((buffer-local buf 'detail-of) 'detail)
         ((buffer-local buf 'list-mode) 'index)
-        (else 'chat)))
+        ((chat-buffer? buf) 'chat)
+        (else 'detail)))
 
-(define *group-panes-default* (list '(index detail chat) group-panes-default-place))
+(define *group-panes-default*
+  (list '(index detail chat) (lambda (buf) (group-panes-default-place buf))))
 
 (define (group-panes-of g)
   (let ((e (and g (assoc g *group-panes*))))
@@ -5645,6 +5647,8 @@ is forgotten and that group falls back to creation order in the switcher."
                             (for-each windows-overview--row! rows))))
                       (client-slide! (json-encode (list 'spread (windows-overview--homes))))
                       (set-frame-local! 'windows-overview #t)
+                      ;; a tile is a glance: every window is in focus, none editing
+                      (for-each (lambda (w) (let ((b (window-buffer-any w))) (when b (editing-state-off! b)))) ids)
                       (transient-keymap-install! (windows-overview--bindings))
                       (transient-show! #t)
                       (when (assoc me (window-list)) (select-window! me))
@@ -5704,7 +5708,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-panes-apply!
   "(group-panes-apply! [FORCE]) — lay this frame out as its group's panes, one window per mode behind each pane; FORCE's window goes on top of its pane")
 (public! 'group-panes-default-place
-  "(group-panes-default-place BUF) — the default layout's pane for BUF: detail pages in the middle, listings on the left, the rest on the right")
+  "(group-panes-default-place BUF) — the default layout's pane for BUF: listings on the left, chats on the right, everything else in the middle")
 (public! 'group-panes-pane
   "(group-panes-pane BUF) — the pane BUF opens in under this frame's group, or #f")
 (catalog-meta! 'function "group-panes-pane" 'effects '(read))

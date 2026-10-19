@@ -1163,6 +1163,19 @@
 
 (define (spotify--para text) (list 'tag "p" 'class "sp-bio" 'text text 'sp-line text))
 
+(define (spotify--reflow text)
+  ;; a long paragraph as a few, a handful of sentences each: AllMusic sets
+  ;; many a review as one
+  (if (< (string-length text) 600)
+      (list text)
+      (let loop ((ss (string-split (re-replace-all "([.!?][\"”)]?) (?=[A-Z\"“])" text "\\1\n") "\n")) (cur "") (out '()))
+        (if (null? ss)
+            (reverse (if (equal? cur "") out (cons cur out)))
+            (let ((next (if (equal? cur "") (car ss) (string-append cur " " (car ss)))))
+              (if (>= (string-length next) 350)
+                  (loop (cdr ss) "" (cons next out))
+                  (loop (cdr ss) next out)))))))
+
 (define (spotify--part title blocks)
   ;; a part of the page: its heading and what is under it, one anchor. Its
   ;; class names it too (sp-part-on-tour), for a page that lays parts out
@@ -1297,7 +1310,7 @@
     (append
       (if (null? facts) '() (list (spotify--para (string-join facts " · "))))
       (spotify--part (if (equal? stars "") "AllMusic" (string-append "AllMusic  " stars))
-        (cond ((string? review) (map spotify--para (filter (lambda (s) (not (equal? (string-trim s) ""))) (string-split review "\n"))))
+        (cond ((string? review) (map spotify--para (apply append (map spotify--reflow (filter (lambda (s) (not (equal? (string-trim s) ""))) (string-split review "\n"))))))
               ((not (plist-get liner 'allmusic-done)) (list (spotify--quiet "Reading AllMusic's review…")))
               ((string? (plist-get liner 'allmusic-snippet)) (list (spotify--para (plist-get liner 'allmusic-snippet))))
               (else '())))
@@ -1311,7 +1324,7 @@
           (spotify--part "Personnel" (map (lambda (p) (spotify--person-card p faces)) (filter (lambda (p) (not (crew? p))) people)))
           (spotify--part "Production" (map (lambda (p) (spotify--person-card p faces)) (filter crew? people)))))
       (apply append
-        (map (lambda (s) (spotify--part (if (equal? (car s) "") "Background" (car s)) (map spotify--para (cadr s))))
+        (map (lambda (s) (spotify--part (if (equal? (car s) "") "Background" (car s)) (map spotify--para (apply append (map spotify--reflow (cadr s))))))
              (or (plist-get liner 'wiki) '())))
       ;; each source a line RET reads beside the page
       (spotify--part "Sources"

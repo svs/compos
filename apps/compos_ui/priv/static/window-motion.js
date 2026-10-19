@@ -498,7 +498,12 @@
     const move = sent && sent.move ? sent : null;
     // the overview spreads every window of the panes, or gathers them back
     const spread = sent && (sent.spread || sent.gather) ? sent : null;
+    // the Exposé view (sent with its rows) places its own tiles; the tiled
+    // overview is panes like any other and moves as they do
+    if (spread && (spread.rows || expose)) { exposeBefore(from, spread); return; }
     if (spread) document.documentElement.classList.toggle('windows-overview', !!sent.spread);
+    // a tile's place is its stylesheet: the pane motion would fight it
+    if (expose) return;
     if (walk) pending = walk;
     const was = from.getAttribute('data-panes');
     const next = to.getAttribute('data-panes');
@@ -531,6 +536,7 @@
   // after each patch; a render during the motion removes the copies,
   // because the server does not know them, so they go back
   function after() {
+    exposeAfter();
     if (pending) {
       const w = pending;
       pending = null;
@@ -699,6 +705,154 @@
     }
   }, true);
   window.addEventListener('blur', () => { meta = false; end(); });
+
+  // The all-windows overview, as Mission Control shows a desk: every
+  // window stays live and keeps the size it has in its pane, and only a
+  // transform scales it into the grid of rows the daemon sent. Its text
+  // keeps its columns, so nothing wraps again. The places live in a
+  // stylesheet, not on the panes: every patch rewrites a pane's attributes.
+  const PAD = 48;
+  const GAP = 28;
+  let expose = null;
+  let gathered = null;
+
+  const isExpose = () => document.documentElement.classList.contains('windows-expose');
+
+  function exposeSheet() {
+    let el = document.getElementById('expose-places');
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'expose-places';
+      document.head.appendChild(el);
+    }
+    return el;
+  }
+
+  function exposeBefore(from, sent) {
+    const k = zoomOf(from);
+    const rects = new Map(panes(from).map((w) => [w.dataset.winId, unz(w.getBoundingClientRect(), k)]));
+    finish();
+    const html = document.documentElement;
+    if (sent.spread) {
+      const rows = (sent.rows || []).map((r) => r.map(String));
+      if (expose && isExpose()) {
+        // a tile went (k) or the view laid again: the tiles keep their sizes
+        expose.rows = rows;
+        expose.sig = null;
+        return;
+      }
+      expose = {
+        root: from, rows, sizes: new Map(), start: rects, fresh: true, sig: null,
+        homes: new Map((sent.spread || []).map(([w, f]) => [String(w), String(f)]))
+      };
+      html.classList.add('windows-overview', 'windows-expose');
+    } else {
+      // where each tile is now, for the panes to grow back out of
+      gathered = isExpose() ? { root: from, rects } : null;
+      expose = null;
+      exposeSheet().textContent = '';
+      html.classList.remove('windows-overview', 'windows-expose');
+    }
+  }
+
+  function exposeAfter() {
+    if (expose && expose.root.isConnected && isExpose()) {
+      const sig = expose.root.getAttribute('data-panes');
+      if (expose.fresh || sig !== expose.sig) {
+        expose.sig = sig;
+        placeTiles(expose.root, expose.fresh);
+        expose.fresh = false;
+      }
+    }
+    if (gathered) {
+      const g = gathered;
+      gathered = null;
+      if (g.root.isConnected) gatherPlay(g);
+    }
+  }
+
+  function placeTiles(root, first) {
+    const k = zoomOf(root);
+    const box = unz(root.getBoundingClientRect(), k);
+    const tiles = new Map(panes(root).map((w) => [w.dataset.winId, w]));
+    if (!tiles.size) return;
+    // the rows the daemon laid, then any tile they do not name
+    const named = new Set(expose.rows.flat());
+    const rows = expose.rows.map((r) => r.filter((id) => tiles.has(id))).filter((r) => r.length);
+    const extra = [...tiles.keys()].filter((id) => !named.has(id));
+    if (extra.length) rows.push(extra);
+    // a tile is the size its window had in its pane, or its pane's front
+    const known = [...expose.start.values()];
+    const fallback = known.length
+      ? { width: known.reduce((a, r) => a + r.width, 0) / known.length, height: known[0].height }
+      : { width: box.width / 2, height: box.height };
+    tiles.forEach((w, id) => {
+      if (expose.sizes.has(id)) return;
+      const r = expose.start.get(id) || expose.start.get(expose.homes.get(id));
+      expose.sizes.set(id, r ? { width: r.width, height: r.height } : fallback);
+    });
+    const cols = Math.max(...rows.map((r) => r.length));
+    const W = box.width - 2 * PAD;
+    const H = box.height - 2 * PAD;
+    const cw = (W - GAP * (cols - 1)) / cols;
+    const ch = (H - GAP * (rows.length - 1)) / rows.length;
+    // one scale for every tile, so a wide window reads wider than a narrow one
+    const s = Math.min(1, ...[...tiles.keys()].map((id) => {
+      const z = expose.sizes.get(id);
+      return Math.min(cw / z.width, ch / z.height);
+    }));
+    const place = new Map();
+    const tallest = rows.map((r) => Math.max(...r.map((id) => expose.sizes.get(id).height * s)));
+    const used = tallest.reduce((a, h) => a + h, 0) + GAP * (rows.length - 1);
+    let y = PAD + (H - used) / 2;
+    rows.forEach((r, i) => {
+      const widths = r.map((id) => expose.sizes.get(id).width * s);
+      let x = PAD + (W - widths.reduce((a, w) => a + w, 0) - GAP * (r.length - 1)) / 2;
+      r.forEach((id, j) => {
+        const h = expose.sizes.get(id).height * s;
+        place.set(id, { x, y: y + (tallest[i] - h) / 2 });
+        x += widths[j] + GAP;
+      });
+      y += tallest[i] + GAP;
+    });
+    const rule = (id, x, y, sc) => {
+      const z = expose.sizes.get(id);
+      return `html.windows-expose .windows c-window.window[data-win-id='${id}']` +
+        `{width:${z.width}px;height:${z.height}px;--tile-scale:${sc};` +
+        `transform:translate(${x}px,${y}px) scale(${sc})}`;
+    };
+    const sheet = exposeSheet();
+    const ms = duration();
+    const html = document.documentElement;
+    if (first && ms) {
+      // each tile starts where its window was, or behind the pane it waited in
+      html.style.setProperty('--expose-ms', '0ms');
+      sheet.textContent = [...place.keys()].map((id) => {
+        const r = expose.start.get(id) || expose.start.get(expose.homes.get(id));
+        const p = place.get(id);
+        return r ? rule(id, r.left - box.left, r.top - box.top, 1) : rule(id, p.x, p.y, s);
+      }).join(' ');
+      root.getBoundingClientRect();
+    }
+    html.style.setProperty('--expose-ms', `${ms}ms`);
+    sheet.textContent = [...place.entries()].map(([id, p]) => rule(id, p.x, p.y, s)).join(' ');
+  }
+
+  // back to the panes: each pane grows out of the tile it was
+  function gatherPlay(g) {
+    const ms = duration();
+    if (!ms) return;
+    const k = zoomOf(g.root);
+    panes(g.root).forEach((w) => {
+      const was = g.rects.get(w.dataset.winId);
+      if (!was) return;
+      const now = unz(w.getBoundingClientRect(), k);
+      if (!now.width) return;
+      const t = `translate(${was.left - now.left}px, ${was.top - now.top}px) scale(${was.width / now.width})`;
+      w.animate([{ transform: t, transformOrigin: '0 0' }, { transform: 'none', transformOrigin: '0 0' }],
+        { duration: ms, easing: EASE });
+    });
+  }
 
   const windowMotion = { before, after, onEnd: null };
   window.windowMotion = windowMotion;

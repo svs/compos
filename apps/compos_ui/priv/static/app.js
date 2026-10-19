@@ -3207,6 +3207,9 @@
           // re-rendered every window twice per prefix key; the
           // measurement before the panel still holds after it.
           if (document.querySelector(".which-key")) return;
+          // an overview tile is its window scaled, not resized: its rows
+          // and columns stay what they were in the pane
+          if (document.documentElement.classList.contains("windows-expose")) return;
           const rows = {};
           const cols = {};
           document.querySelectorAll(".window[data-win-id]").forEach((win) => {

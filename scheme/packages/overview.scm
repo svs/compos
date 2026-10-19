@@ -10,34 +10,18 @@
 (domain! 'windows)
 (effects! '(write display))
 
+(defcustom 'windows-overview-expose #f
+  "Show the all-windows view as Exposé does: every window live and scaled into a grid over a dimmed desk, at the size it has in its pane. Off, the windows tile the frame."
+  'group 'windows 'type 'boolean)
+
 (define (windows-overview-active?)
   (equal? (frame-local 'windows-overview) #t))
 
 (define (windows-overview--rows ids cols)
-  ;; IDS cut into rows of COLS each, as many to a row as the screen shows
+  ;; IDS cut into rows of COLS each
   (if (<= (length ids) cols)
       (list ids)
       (cons (list-head ids cols) (windows-overview--rows (list-tail ids cols) cols))))
-
-(define (windows-overview--split-off! win ratio)
-  ;; split WIN side by side, WIN keeping RATIO; the new window
-  (let ((before (map car (window-list))))
-    (select-window! win)
-    (split-window! 'h ratio)
-    (let loop ((ws (window-list)))
-      (cond ((null? ws) #f)
-            ((member (car (car ws)) before) (loop (cdr ws)))
-            (else (car (car ws)))))))
-
-(define (windows-overview--row! ids)
-  ;; lay IDS side by side in the space of the first, each an equal share
-  (let loop ((win (car ids)) (rest (cdr ids)))
-    (when (pair? rest)
-      (let ((new (windows-overview--split-off! win (* 1.0 (/ 1 (+ 1 (length rest)))))))
-        (when new
-          (window-swap-hidden! new (car rest))
-          (window-hidden-delete! new)
-          (loop (car rest) (cdr rest)))))))
 
 (define (windows-overview--order)
   ;; (SHOWN REST): the windows on screen, left to right, and every other
@@ -76,12 +60,93 @@
         (list "s-S-<up>" "windows-overview-exit")
         (list "s-S-<down>" "windows-overview-exit")))
 
+;; The view's keys are a map of its own. transient-map is one map for every
+;; frame: a menu, or the layouts overview, opened anywhere rewrote the keys
+;; this frame was locked to, and no key led out of the view again.
+(define-keymap! "windows-overview-map")
+(for-each (lambda (row) (define-key "windows-overview-map" (car row) (cadr row)))
+          (windows-overview--bindings))
+
+(define (windows-overview-on?)
+  ;; the view, or what is left of one: its flag, or this frame's keys still
+  ;; locked to its map
+  (or (windows-overview-active?)
+      (let ((over (cadr (key-context))))
+        (and (pair? over) (equal? (car over) "windows-overview-map")))))
+
+(define (windows-overview--split-off! win ratio)
+  ;; split WIN side by side, WIN keeping RATIO; the new window
+  (let ((before (map car (window-list))))
+    (select-window! win)
+    (split-window! 'h ratio)
+    (let loop ((ws (window-list)))
+      (cond ((null? ws) #f)
+            ((member (car (car ws)) before) (loop (cdr ws)))
+            (else (car (car ws)))))))
+
+(define (windows-overview--row! ids)
+  ;; lay IDS side by side in the space of the first, each an equal share
+  (let loop ((win (car ids)) (rest (cdr ids)))
+    (when (pair? rest)
+      (let ((new (windows-overview--split-off! win (* 1.0 (/ 1 (+ 1 (length rest)))))))
+        (when new
+          (window-swap-hidden! new (car rest))
+          (window-hidden-delete! new)
+          (loop (car rest) (cdr rest)))))))
+
 (define (windows-overview--lay! rows)
-  ;; ROWS of window ids, one line each, stacked in equal shares
   (with-layout-suppressed
     (lambda ()
-      (window-arrange-line! 'v (map (lambda (r) (/ 1 (length rows))) rows) (map car rows))
-      (for-each windows-overview--row! rows))))
+      (if windows-overview-expose
+          ;; every tile on screen in one line, one call: the client places
+          ;; them in the grid of ROWS at the size each has in its pane, so
+          ;; the tree under them does not matter and no window rewraps
+          (let ((ids (apply append rows)))
+            (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids))
+          ;; ROWS of window ids, one line each, stacked in equal shares
+          (begin
+            (window-arrange-line! 'v (map (lambda (r) (/ 1 (length rows))) rows) (map car rows))
+            (for-each windows-overview--row! rows))))))
+
+(define (windows-overview--cols n)
+  ;; tiles to a row: about 1.6 across for each one down, as a wide screen holds them
+  (max 1 (min n (ceiling (sqrt (* n 1.6))))))
+
+(define (windows-overview--nearest c len len2)
+  ;; rows are centred: the index in a row of LEN2 nearest tile C of a row of LEN
+  (max 0 (min (- len2 1) (floor (+ (- c (/ (- len 1) 2)) (/ (- len2 1) 2) 0.5)))))
+
+(define (windows-overview--move! dir)
+  ;; the arrows walk the grid the eye sees, the rows the view laid, not the
+  ;; window tree under it
+  (let* ((rows (or (frame-local 'windows-overview-rows) '()))
+         (me (active-window))
+         (r (let loop ((rs rows) (i 0))
+              (cond ((null? rs) #f) ((member me (car rs)) i) (else (loop (cdr rs) (+ i 1))))))
+         (row (and r (list-ref rows r)))
+         (c (and row (- (length row) (length (member me row)))))
+         (target
+           (and r
+                (cond ((equal? dir 'left) (and (> c 0) (list-ref row (- c 1))))
+                      ((equal? dir 'right) (and (< (+ c 1) (length row)) (list-ref row (+ c 1))))
+                      (else
+                        (let ((r2 (if (equal? dir 'up) (- r 1) (+ r 1))))
+                          (and (>= r2 0) (< r2 (length rows))
+                               (let ((next (list-ref rows r2)))
+                                 (list-ref next (windows-overview--nearest c (length row) (length next)))))))))))
+    (if target
+        (select-window! target)
+        (message (string-append "No tile " (symbol->string dir))))))
+
+(define (windows-overview--step! dir)
+  ;; Exposé tiles sit in the grid of rows; tiled panes are where the tree says
+  (if windows-overview-expose (windows-overview--move! dir) (focus-move! dir)))
+
+(define (windows-overview--spread)
+  ;; the client's token: the windows behind each pane, and for Exposé the rows
+  (if windows-overview-expose
+      (list 'spread (windows-overview--homes) 'rows (frame-local 'windows-overview-rows))
+      (list 'spread (windows-overview--homes))))
 
 (define (windows-overview-kill!)
   ;; kill the selected tile's buffer, drop its window, and close the gap
@@ -112,6 +177,7 @@
                                                    (max 1 (length (car rows))))))
                 (set-frame-local! 'windows-overview-rows left)
                 (windows-overview--lay! left)
+                (when windows-overview-expose (client-slide! (json-encode (windows-overview--spread))))
                 (when (assoc win (window-hidden-list)) (window-hidden-delete! win))
                 (when (assoc next (window-list)) (select-window! next))
                 (editing-state-off! (window-buffer next))))
@@ -128,21 +194,29 @@
             (let* ((me (active-window))
                    (home (group-panes-row-of me))
                    (order (windows-overview--order))
-                   (ids (append (car order) (cadr order))))
+                   (ids (append (car order) (cadr order)))
+                   (done #f))
               (cond ((null? ids) (message "No windows in this frame") #f)
                     (else
-                      (layout-target-free!)
-                      (let ((rows (windows-overview--rows ids (max 1 (length (car order))))))
-                        (set-frame-local! 'windows-overview-rows rows)
-                        ;; the pane the user came from takes the window they choose
-                        (set-frame-local! 'windows-overview-home (and home (car home)))
-                        (windows-overview--lay! rows))
-                      (client-slide! (json-encode (list 'spread (windows-overview--homes))))
-                      (set-frame-local! 'windows-overview #t)
-                      ;; a tile is a glance: every window is in focus, none editing
-                      (for-each (lambda (w) (let ((b (window-buffer-any w))) (when b (editing-state-off! b)))) ids)
-                      (transient-keymap-install! (windows-overview--bindings))
-                      (transient-show! #t)
+                      ;; a spread that fails half way goes back to the panes
+                      (unwind-protect
+                        (lambda ()
+                          (layout-target-free!)
+                          (let ((rows (windows-overview--rows ids (if windows-overview-expose
+                                                                       (windows-overview--cols (length ids))
+                                                                       (max 1 (length (car order)))))))
+                            (set-frame-local! 'windows-overview-rows rows)
+                            ;; the pane the user came from takes the window they choose
+                            (set-frame-local! 'windows-overview-home (and home (car home)))
+                            (windows-overview--lay! rows))
+                          (client-slide! (json-encode (windows-overview--spread)))
+                          (set-frame-local! 'windows-overview #t)
+                          ;; a tile is a glance: every window is in focus, none editing
+                          (for-each (lambda (w) (let ((b (window-buffer-any w))) (when b (editing-state-off! b)))) ids)
+                          (overriding-map! "windows-overview-map" #t)
+                          (transient-show! #t)
+                          (set! done #t))
+                        (lambda () (unless done (windows-overview-exit!))))
                       (when (assoc me (window-list)) (select-window! me))
                       (window-state-changed!)
                       (message (string-append (number->string (length ids)) " windows; s-S-<up> goes back to the panes"))
@@ -158,36 +232,42 @@
               (group-panes-windows))))
 
 (define (windows-overview-exit!)
+  ;; the keys and the client leave the view first: a pane restore that
+  ;; raises must not leave the frame locked in it
+  (set-frame-local! 'windows-overview #f)
+  (set-frame-local! 'windows-overview-armed #f)
+  (set-frame-local! 'windows-overview-rows #f)
+  (transient-show! #f)
+  (overriding-map! #f)
+  (client-slide! (json-encode (list 'gather (windows-overview--homes))))
   (let* ((me (active-window))
          (row (group-panes-row-of me))
          (pane (or (frame-local 'windows-overview-home) (and row (car row)))))
+    (set-frame-local! 'windows-overview-home #f)
     (when pane
       ;; the chosen window leaves its own pane for the one the user came from
       (group-panes-set-rows!
         (map (lambda (r) (if (equal? (car r) pane) r (cons (car r) (filter (lambda (w) (not (equal? w me))) (cdr r)))))
              (group-panes-windows)))
       (group-panes-record! pane me #t))
-    (set-frame-local! 'windows-overview #f)
-    (set-frame-local! 'windows-overview-armed #f)
-    (set-frame-local! 'windows-overview-home #f)
-    (transient-show! #f)
-    (transient-keymap-clear!)
     (let ((ids (group-panes-arrange!)))
-      (when ids (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
       (when (and ids (member me ids)) (select-window! me))
       ids)))
 
 (define-command "windows-overview"
   "Show every window of this frame at once; again, or windows-overview-exit, goes back to the panes"
   (lambda ()
-    (if (windows-overview-active?) (windows-overview-exit!) (windows-overview-enter!))))
+    (if (windows-overview-on?) (windows-overview-exit!) (windows-overview-enter!))))
 
 (define-command "windows-overview-exit"
   "Back from the all-windows view to the panes, the window you are in at the front of its pane"
   (lambda ()
-    (if (windows-overview-active?)
+    (if (windows-overview-on?)
         (windows-overview-exit!)
-        (message "Not in the all-windows view"))))
+        (begin
+          ;; the client may still show the view a failed exit left it in
+          (client-slide! (json-encode (list 'gather '())))
+          (message "Not in the all-windows view")))))
 
 (define-command "windows-overview-kill" "Kill the buffer of the selected tile in the all-windows view"
   (lambda ()
@@ -200,33 +280,39 @@
     (if (windows-overview-active?)
         (let* ((me (window-buffer (active-window)))
                (rows (or (frame-local 'windows-overview-rows) '()))
-               (front (if (pair? rows) (map window-buffer-any (car rows)) '())))
+               (front (if (pair? rows) (map window-buffer-any (car rows)) '()))
+               (done #f))
           (set-frame-local! 'windows-overview #f)
-          (consolidate!)
-          ;; what was on top of each pane stays on top: a buffer the merge
-          ;; folded into a window's history comes back to its front
-          (for-each
-            (lambda (buf)
-              (let* ((ws (apply append (map cdr (group-panes-windows))))
-                     (win (or (find (lambda (w) (equal? (window-buffer-any w) buf)) ws)
-                              (find (lambda (w) (member buf (window-prev-buffers w))) ws)))
-                     (row (and win (group-panes-row-of win))))
-                (when (and win row)
-                  (unless (equal? (window-buffer-any win) buf) (window-set-buffer! win buf))
-                  (group-panes-record! (car row) win #t))))
-            (filter (lambda (b) b) front))
-          (group-panes-arrange!)
-          (windows-overview-enter!)
+          ;; a merge that fails half way leaves the panes, not a locked view
+          (unwind-protect
+            (lambda ()
+              (consolidate!)
+              ;; what was on top of each pane stays on top: a buffer the merge
+              ;; folded into a window's history comes back to its front
+              (for-each
+                (lambda (buf)
+                  (let* ((ws (apply append (map cdr (group-panes-windows))))
+                         (win (or (find (lambda (w) (equal? (window-buffer-any w) buf)) ws)
+                                  (find (lambda (w) (member buf (window-prev-buffers w))) ws)))
+                         (row (and win (group-panes-row-of win))))
+                    (when (and win row)
+                      (unless (equal? (window-buffer-any win) buf) (window-set-buffer! win buf))
+                      (group-panes-record! (car row) win #t))))
+                (filter (lambda (b) b) front))
+              (group-panes-arrange!)
+              (windows-overview-enter!)
+              (set! done #t))
+            (lambda () (unless done (windows-overview-exit!))))
           (let ((w (window-showing me))) (when w (select-window! w))))
         (message "Not in the all-windows view"))))
 (define-command "windows-overview-left" "Select the tile to the left in the all-windows view"
-  (lambda () (focus-move! 'left)))
+  (lambda () (windows-overview--step! 'left)))
 (define-command "windows-overview-right" "Select the tile to the right in the all-windows view"
-  (lambda () (focus-move! 'right)))
+  (lambda () (windows-overview--step! 'right)))
 (define-command "windows-overview-up" "Select the tile above in the all-windows view"
-  (lambda () (focus-move! 'up)))
+  (lambda () (windows-overview--step! 'up)))
 (define-command "windows-overview-down" "Select the tile below in the all-windows view"
-  (lambda () (focus-move! 'down)))
+  (lambda () (windows-overview--step! 'down)))
 
 (global-set-key "s-S-<down>" "windows-overview")
 (global-set-key "s-S-<up>" "windows-overview-exit")

@@ -350,10 +350,9 @@ nonstandard install out of the built-in connector catalog."
       (let* ((meta (or (plist-get conf 'meta) '()))
              (sp (or (plist-get meta 'systemPrompt) '()))
              (had (or (plist-get sp 'append) "")))
-        (append (list 'meta (append (list 'systemPrompt
-                                          (list 'append (agent-system-text had text)))
-                                    meta))
-                conf))))
+        (plist-put conf 'meta
+                   (plist-put meta 'systemPrompt
+                              (list 'append (agent-system-text had text)))))))
 
 (define (agent-config-with-mcp-note conf)
   (let ((note (if (and (boundp (quote mcp-system-note))

@@ -179,25 +179,44 @@
                 (cons (string-append hm "  " who ": " body "\n")
                       (if (equal? d day) acc (cons (string-append "\n" d "\n") acc))))))))
 
-(define (otp-recent &optional minutes)
+(define (otp--hits where)
   (let loop ((rows (imessage--query
                     (string-append
                      "select h.id sender, " (imessage--sql-body "m") " text,"
+                     " cast(m.date/1000000000 + 978307200 as integer) at,"
                      " cast(strftime('%s','now') - (m.date/1000000000 + 978307200) as integer) age"
                      " from message m left join handle h on h.ROWID = m.handle_id"
-                     " where m.is_from_me = 0 and m.date > (strftime('%s','now') - 978307200 - "
-                     (number->string (* 60 (or minutes otp-minutes))) ") * 1000000000 order by m.date desc;")))
+                     " where m.is_from_me = 0 and " where " order by m.date desc;")))
              (acc '()))
     (if (null? rows) (reverse acc)
         (let* ((r (car rows)) (code (otp-scan (plist-get r 'text))))
           (loop (cdr rows)
                 (if code
-                    (cons (list 'code code 'sender (plist-get r 'sender) 'age (plist-get r 'age) 'text (plist-get r 'text)) acc)
+                    (cons (list 'code code 'sender (plist-get r 'sender) 'at (plist-get r 'at)
+                                'age (plist-get r 'age) 'text (plist-get r 'text))
+                          acc)
                     acc))))))
 
-(define (otp-latest &optional minutes)
-  (let ((hits (otp-recent minutes)))
+(define (otp--matches? hit match)
+  ;; MATCH, #f for any, is found in the sender or the text, any case
+  (or (not match) (equal? match "")
+      (let ((m (string-downcase match)))
+        (or (string-contains? (string-downcase (or (plist-get hit 'sender) "")) m)
+            (string-contains? (string-downcase (or (plist-get hit 'text) "")) m)))))
+
+(define (otp-recent &optional minutes match)
+  (filter (lambda (h) (otp--matches? h match))
+          (otp--hits (string-append "m.date > (strftime('%s','now') - 978307200 - "
+                                    (number->string (* 60 (or minutes otp-minutes))) ") * 1000000000"))))
+
+(define (otp-latest &optional minutes match)
+  (let ((hits (otp-recent minutes match)))
     (and (pair? hits) (plist-get (car hits) 'code))))
+
+(define (otp-since since &optional match)
+  ;; the codes received after unix second SINCE, newest first
+  (filter (lambda (h) (otp--matches? h match))
+          (otp--hits (string-append "m.date > (" (number->string since) " - 978307200) * 1000000000"))))
 
 (domain! 'chat)
 (effects! '(write))
@@ -402,6 +421,78 @@
     (task-run! (lambda () (length (imessage-contacts)))
       (lambda (ok? n) (message (if ok? (string-append (number->string n) " contact handles") (format "~a" n)))))))
 
+;;; An agent that asks a site for a code waits for it with otp-wait. Messages
+;;; writes chat.db-wal as a message lands, the watch on its directory wakes
+;;; the waiters, and each takes the newest code later than its SINCE. The
+;;; directory is watched only while someone waits.
+
+(domain! 'chat)
+(effects! '(write external execute))
+
+(defcustom 'otp-wait-grace 60
+  "Seconds before the call that otp-wait still counts when it has no SINCE: a code that landed while the agent was getting to the wait."
+  'group 'imessage 'type 'integer)
+
+(define *otp-waiters* '())
+(define *otp-watch* #f)
+(define *otp-checking* #f)
+(define *otp-dirty* #f)
+(define *otp-serial* 0)
+
+(define (otp--first pred xs)
+  (cond ((null? xs) #f) ((pred (car xs)) (car xs)) (else (otp--first pred (cdr xs)))))
+
+(define (otp--resolve! id value)
+  ;; a waiter is (ID MATCH SINCE K); it answers once, with a hit or #f
+  (let ((w (assoc id *otp-waiters*)))
+    (when w
+      (set! *otp-waiters* (filter (lambda (x) (not (equal? (car x) id))) *otp-waiters*))
+      (when (and (null? *otp-waiters*) *otp-watch*)
+        (unwatch-path! *otp-watch*)
+        (set! *otp-watch* #f))
+      ((list-ref w 3) value))))
+
+(define (otp--check!)
+  (cond (*otp-checking* (set! *otp-dirty* #t))
+        ((pair? *otp-waiters*)
+         (set! *otp-checking* #t)
+         (set! *otp-dirty* #f)
+         (let* ((ws *otp-waiters*)
+                (since (apply min (map caddr ws))))
+           (task-run! (lambda () (otp-since since))
+             (lambda (ok? hits)
+               (set! *otp-checking* #f)
+               (when ok?
+                 (for-each (lambda (w)
+                             (let ((hit (otp--first (lambda (h) (and (> (plist-get h 'at) (caddr w))
+                                                                     (otp--matches? h (cadr w))))
+                                                    hits)))
+                               (when hit (otp--resolve! (car w) hit))))
+                           ws))
+               (when *otp-dirty* (otp--check!))))))))
+
+(define (otp--fs-change root)
+  (when (and *otp-watch* (equal? root *otp-watch*)) (otp--check!)))
+
+(add-hook! 'fs-change-hook 'otp--fs-change)
+
+(define (otp-wait match since timeout k)
+  (set! *otp-serial* (+ *otp-serial* 1))
+  (let ((id (string-append "otp-wait-" (number->string *otp-serial*)))
+        (since (or since (- (current-time) otp-wait-grace))))
+    (set! *otp-waiters* (cons (list id match since k) *otp-waiters*))
+    (unless *otp-watch*
+      (let ((got (watch-path! (expand-path "~/Library/Messages"))))
+        (set! *otp-watch* (and (string? got) got))))
+    (debounce! id (* 1000 (or timeout 120)) (lambda (id) (otp--resolve! id #f)) id)
+    (otp--check!)
+    id))
+
+(define (otp-await &optional match since timeout)
+  ;; blocks: call it inside a task, never on the lane
+  (let ((hit (app-await (lambda (k) (otp-wait match since timeout k)) (+ 5 (or timeout 120)))))
+    (and hit (plist-get hit 'code))))
+
 (mode-icon! "imessage-mode" "I")
 (mode-icon! "imessage-chat-mode" "I")
 
@@ -411,7 +502,11 @@
 (public! 'imessage-chats "(imessage-chats [LIMIT]) -- recent chats, newest first, as plists: id guid handle name service time mine text")
 (public! 'imessage-messages "(imessage-messages CHAT-ID [LIMIT]) -- a chat's recent messages, oldest first, as plists: id time mine sender service text")
 (public! 'imessage-name "(imessage-name HANDLE) -- the Contacts name for a phone number or email, else HANDLE")
-(public! 'otp-recent "(otp-recent [MINUTES]) -- the codes received in the last MINUTES (otp-minutes), newest first, as (code C sender S age SECONDS text T)")
-(public! 'otp-latest "(otp-latest [MINUTES]) -- the newest code received in the last MINUTES (otp-minutes), or #f")
+(public! 'otp-recent "(otp-recent [MINUTES] [MATCH]) -- one-time codes (OTP, verification, 2FA, login) from SMS and iMessage in the last MINUTES (otp-minutes), newest first, as (code C sender S at UNIX age SECONDS text T); MATCH keeps those whose sender or text has it, any case")
+(public! 'otp-latest "(otp-latest [MINUTES] [MATCH]) -- the newest one-time code (OTP, verification, 2FA) from SMS or iMessage in the last MINUTES whose sender or text has MATCH, or #f")
+(public! 'otp-since "(otp-since UNIX [MATCH]) -- the one-time codes received after unix second UNIX, newest first, as otp-recent gives them")
+(effects! '(write external execute))
+(public! 'otp-wait "(otp-wait MATCH SINCE TIMEOUT K) -- wait for a one-time code (OTP, verification, 2FA) to arrive by SMS or iMessage: K gets (code C sender S at UNIX age SECONDS text T) for the newest code after SINCE (unix seconds; #f is now less otp-wait-grace) whose sender or text has MATCH (#f any), or #f after TIMEOUT seconds (#f 120). Wakes on the message, no polling; answers the waiter id")
+(public! 'otp-await "(otp-await [MATCH] [SINCE] [TIMEOUT]) -- inside a task only: block until a one-time code arrives, as otp-wait, and answer the code string or #f. Note (current-time) before you ask the site for the code and pass it as SINCE")
 (effects! '(write external execute))
 (public! 'imessage-send! "(imessage-send! TO TEXT) -- send TEXT through Messages; TO is a chat guid, chat id, or a phone or email with a chat. #t, or the error")

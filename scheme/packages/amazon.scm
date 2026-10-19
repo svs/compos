@@ -840,10 +840,16 @@
 
 
 (define (amazon--tab k)
+  ;; the first storefront tab the extension may script. Chrome walls off some
+  ;; of the site's pages (the account switcher), and a tab left there answers
+  ;; no eval at all, so probe each and pass over the walled ones
   (tab-list (lambda (ts)
     (let loop ((ts ts))
       (cond ((null? ts) (k #f))
-            ((amz-has? (or (plist-get (car ts) 'url) "") amazon-host) (k (plist-get (car ts) 'id)))
+            ((amz-has? (or (plist-get (car ts) 'url) "") amazon-host)
+             (let ((id (plist-get (car ts) 'id)))
+               (browser-call "eval" (list 'tab id 'code "1")
+                 (lambda (r) (if (plist-get r 'ok) (k id) (loop (cdr ts)))))))
             (else (loop (cdr ts))))))))
 
 

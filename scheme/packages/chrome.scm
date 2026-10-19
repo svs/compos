@@ -611,8 +611,13 @@
               ;; no tab answers for this frame. Another frame's window is the
               ;; wrong answer: a tab opened there lands out of sight, in a
               ;; profile that may not share this one's logins. #f lets the
-              ;; bridge route by this frame instead.
-              (else #f)))))
+              ;; bridge route by this frame instead. When every frame the bridge
+              ;; knows sits in one window, that window is this profile's.
+              (else
+               (let ((ws (filter (lambda (w) w) (map (lambda (e) (plist-get e 'window)) rows))))
+                 (and (pair? ws)
+                      (null? (filter (lambda (w) (not (equal? w (car ws)))) ws))
+                      (car ws))))))))
 
 ;; BACKGROUND opens the tab without taking the reader there. The default is
 ;; the front, because a tab opened by a key the reader pressed is usually one

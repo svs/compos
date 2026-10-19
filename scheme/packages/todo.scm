@@ -1012,10 +1012,27 @@
 
 ;; the assignee of a chat-held task is the chat's stable id, since the
 ;; chat renames itself after its first answer
+(define (todo--chat-id who)
+  ;; "chat:A:B" as it is; the agent form "agent:chat-A-B" as "chat:A:B"
+  (cond ((string-prefix? "chat:" who) who)
+        ((string-prefix? "agent:chat-" who)
+         (let ((parts (string-split (substring who 11 (string-length who)) "-")))
+           (and (= (length parts) 2) (string-append "chat:" (car parts) ":" (cadr parts)))))
+        (else #f)))
+
+(define (todo--live-chat id)
+  (and (string? id)
+       (todo--first (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list))))
+
 (define (todo--chat-of t)
-  (let ((a (plist-get t 'assignee)))
-    (and (string? a) (string-prefix? "chat:" a)
-         (todo--first (lambda (b) (equal? (buffer-local b 'chat-id) a)) (buffer-list)))))
+  ;; the assignee while it is live, else the last live chat the log names:
+  ;; a chat that moved the task to review is the one that worked it
+  (or (todo--live-chat (plist-get t 'assignee))
+      (todo--first (lambda (x) x)
+        (map (lambda (line)
+               (let ((words (string-split line " ")))
+                 (and (>= (length words) 3) (todo--live-chat (todo--chat-id (caddr words))))))
+             (reverse (or (plist-get t 'log) '()))))))
 
 (define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
 

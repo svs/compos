@@ -195,7 +195,7 @@
         ;; approve and reject go straight to the API, not through the site's buttons; e edits the draft in a buffer; o opens the site for the rest
         'detail-keys (list "a" "r" "e")
         'detail-actions (list (list "Approve" (lambda (ctx) (message "Approving…") (ats-approve! (ats-case-id (plist-get ctx 'buf)))))
-                              (list "Reject" (lambda (ctx) (message "Rejecting…") (ats-reject! (ats-case-id (plist-get ctx 'buf)))))
+                              (list "Reject" (lambda (ctx) (ats-reject-ask! (ats-case-id (plist-get ctx 'buf)))))
                               (list "Edit draft" (lambda (ctx) (ats-draft-open! ctx))))
         'detail-composed (list *ats-brief-tab*)
         'detail-default "brief"
@@ -922,17 +922,33 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           (else (message note)))))
 
 ;; approve or reject approval ID through the ATS, then move the view on; NOTE is the why
-(define (ats-approval-resolve! id approve? &optional note)
+(define (ats-approval-resolve! id approve? &optional note action)
   (let ((tool (if approve? "approveJobApplicationEvent" "rejectJobApplicationEvent"))
-        (verb (if approve? "Approved" "Rejected")))
+        (verb (if approve? "Approved" "Rejected"))
+        (input (list 'resolution_note (or note (if approve? "Approved" "Rejected")))))
     (mcp-call! 'ats-ash tool
-      (json-encode (list 'id id 'input (list 'resolution_note (or note verb))))
+      (json-encode (list 'id id 'input (if action (append input (list 'correct_action action)) input)))
       (lambda (ok text)
         (if ok
             (ats-approval-resolved! id verb)
             (message (string-append verb " failed: " (if (string? text) text ""))))))))
 (define (ats-approve! id &optional note) (ats-approval-resolve! id #t note))
-(define (ats-reject! id &optional note) (ats-approval-resolve! id #f note))
+(define (ats-reject! id &optional note action) (ats-approval-resolve! id #f note action))
+
+;; what the ATS should do instead of the proposal; no_action only drops it, the rest run at once
+(define *ats-correct-actions*
+  '("no_action" "withdraw" "reject" "unrecommend" "recommend" "accept" "email" "whatsapp" "remind"
+    "apply" "unapply" "shortlist" "unshortlist" "offer" "accept_offer" "reject_offer" "rescind_offer"
+    "reconsider_offer" "whatsapp_intro" "create" "close" "job_paused" "job_closed"))
+
+;; reject approval ID, asking first what the ATS should do instead
+(define (ats-reject-ask! id)
+  (completing-read "Reject, and instead: " *ats-correct-actions*
+    (lambda (action)
+      (when (and action (not (equal? action "")))
+        (message "Rejecting…")
+        (ats-reject! id #f action)))
+    'require-match #t 'default "no_action"))
 
 ;; e on an approval: the site's Edit draft form, worked from a buffer. The draft opens
 ;; from the form in the app's tab; C-c C-c writes it back into that form and submits

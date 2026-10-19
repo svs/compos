@@ -2773,12 +2773,6 @@ is forgotten and that group falls back to creation order in the switcher."
           (minibuffer-cancel!)
           (group-switch-run-new-action! action typed))))))
 
-;; C-n belongs to the list: every prompt in the editor moves the
-;; selection with it, and the modal's own legend says so. Taking it
-;; for a verb made the one key the reader already knows do the one
-;; thing they did not ask for. New goes on the C-c prefix, where the
-;; prompt's other verbs live.
-(define-key "group-switch-modal-map" "C-c C-n" "group-switch-new")
 
 (define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
@@ -2851,7 +2845,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (set! *group-switch-rows* (cdr prompt-rows))
           (set! *group-switch-restore* restore!)
           (begin
-              (minibuffer-read-preview "Switch group (C-c C-n new): " candidates
+              (minibuffer-read-preview "Switch group: " candidates
                 peek!
                 (lambda (name)
                   (let ((id (group-switch-id name)))
@@ -2865,7 +2859,10 @@ is forgotten and that group falls back to creation order in the switcher."
                            ;; rather than pull its windows into this one
                            (group-frame-raise! (group-elsewhere-frame id)))
                           (id (switch-to-group! id))
-                          (else (message "No such group"))))
+                          ;; a name no group has makes that group
+                          ((and name (not (equal? (string-trim name) "")))
+                           (group-switch-run-new-action! action (string-trim name)))
+                          (else #f)))
                   (sleep-woken!))
                 (lambda ()
                   (close!)
@@ -3074,7 +3071,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; Every major mode of the group gets one window. A mode with a pane
 ;; gathers there; one without takes a hidden window the layout ring walks to.
-((define (consolidate!)
+(define (consolidate!)
   (let ((me (active-window)))
     (cond ((and (boundp 'group-panes-of) (group-panes-of (frame-group)))
            ;; a group with panes: each mode one window, behind its pane

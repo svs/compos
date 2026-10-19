@@ -28,7 +28,7 @@
 (define (windows-list-cells buf id)
   (let* ((win (windows-list-window id))
          (on (and win (member win (layout-pane-windows)) #t))
-         (name (if win (window-buffer win) "")))
+         (name (if win (or (window-buffer-any win) "") "")))
     (list (list (if on "■" "□") (if on "win-on" "win-off"))
           (list (if (and win (equal? win (active-window))) "●" "") "win-on")
           (list (if win (window-name win) "") "win-name")

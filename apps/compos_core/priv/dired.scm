@@ -700,9 +700,14 @@
     ;; re-opening a directory re-reads what git and the sizes say
     (dired-rescan! buf)
     (switch-to-buffer-here! buf)
-    (set-mode! "Dired")
-    (dired-arm-watch! buf)
-    (when fresh (dired-goto-first-entry))
+    ;; the mode goes on BUF, not on whatever is current: a group preview
+    ;; revives a directory while the prompt is current, and the switch
+    ;; above leaves the minibuffer current, so it became a Dired of /
+    (with-current-buffer buf
+      (lambda ()
+        (set-mode! "Dired")
+        (dired-arm-watch! buf)
+        (when fresh (dired-goto-first-entry))))
     buf))
 
 ;; the entry on the current line: a name, the ".." token, or #f above them

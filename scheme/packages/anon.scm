@@ -27,6 +27,10 @@
   "The part before the @ of each email anon barred. It is barred wherever it shows."
   'group 'anon 'type 'sexp)
 
+(defcustom 'anon-selected '()
+  "Texts the user selected to redact. Each is barred wherever it shows, in any case."
+  'group 'anon 'type 'sexp)
+
 (defcustom 'anon-cache-size 2000
   "The words each cache keeps. A cache drops the words it used least recently."
   'group 'anon 'type 'integer)
@@ -82,9 +86,17 @@
   (map (lambda (r) (list (car r) (cadr r) "")) (re-find* anon--email-pattern text)))
 
 (define (anon--outside emails spans)
-  "the SPANS that no email span holds"
-  (filter (lambda (s) (null? (filter (lambda (e) (and (<= (car e) (car s)) (<= (cadr s) (cadr e)))) emails)))
-          spans))
+  "the SPANS that no email span holds, by start"
+  ;; one walk of both by start: a span is held when an email that starts at
+  ;; or before it reaches past its end
+  (if (null? emails)
+      spans
+      (let loop ((ss (sort spans)) (es (sort emails)) (reach -1) (acc '()))
+        (cond ((null? ss) (reverse acc))
+              ((and (pair? es) (<= (car (car es)) (car (car ss))))
+               (loop ss (cdr es) (max reach (cadr (car es))) acc))
+              ((>= reach (cadr (car ss))) (loop (cdr ss) es reach acc))
+              (else (loop (cdr ss) es reach (cons (car ss) acc)))))))
 
 (define (anon--merge rs)
   "sorted (START END) ranges with each overlap joined: a handle inside a run is one bar"
@@ -178,25 +190,26 @@
                       ")(?![\\p{L}\\p{N}_])")))
 
 ;; a name the decide called proper bars in any case: a page may print it lowercased
-(define *anon-name-pattern* (list #f #f #f))
+(define *anon-name-pattern* (list #f #f #f #f))
 
 (define (anon--name-pattern)
   "one case-blind pattern for every known name and each word of a name of two or more"
   ;; a one-word guess such as Jobs stays case-bound: lowercased it is a common word
   ;; a part that is a known common word bars nothing alone: History of a misjudged run
   (if (and (eq? (car *anon-name-pattern*) anon-proper-nouns)
-           (eq? (caddr *anon-name-pattern*) anon-common-words))
+           (eq? (caddr *anon-name-pattern*) anon-common-words)
+           (eq? (list-ref *anon-name-pattern* 3) anon-selected))
       (cadr *anon-name-pattern*)
       (let* ((parts (apply append (map (lambda (n) (let ((ps (string-split n " "))) (if (pair? (cdr ps)) ps '())))
                                        anon-proper-nouns)))
              (full (filter (lambda (n) (pair? (cdr (string-split n " ")))) anon-proper-nouns))
-             (ws (append full (filter (lambda (w) (and (>= (string-length w) 3) (not (member w anon-common-words))))
+             (ws (append anon-selected full (filter (lambda (w) (and (>= (string-length w) 3) (not (member w anon-common-words))))
                                       parts)))
              (p (and (pair? ws)
                      (string-append "(?i)(?<![\\p{L}\\p{N}_])(?:"
                                     (string-join (map regexp-quote ws) "|")
                                     ")(?![\\p{L}\\p{N}_])"))))
-        (set! *anon-name-pattern* (list anon-proper-nouns p anon-common-words))
+        (set! *anon-name-pattern* (list anon-proper-nouns p anon-common-words anon-selected))
         p)))
 
 (define (anon--hard-spans text)
@@ -388,9 +401,30 @@
         (when (<= (string-byte-length text) anon-max-bytes)
           (anon--ask-text! text (anon--spans text)))))))
 
+(define (anon--fill-ranges buf tree)
+  "TREE with the buffer text of each range block as its content: a chat draws prose
+from the buffer, so the redaction must reach that text through the tree"
+  (let ((text #f))
+    (let walk ((t tree))
+      (cond ((not (pair? t)) t)
+            ((and (eq? (car t) 'range) (pair? (cdr t)) (pair? (cadr t)) (integer? (car (cadr t))))
+             (let ((rest (cddr t)))
+               (unless text (set! text (buffer-text buf)))
+               (let* ((n (string-byte-length text))
+                      (a (min n (car (cadr t))))
+                      (b (min n (cadr (cadr t)))))
+                 (cons 'range
+                       (cons (cadr t)
+                             (cons 'content
+                                   (cons (substring-bytes text a (max a b))
+                                         (walk (if (and (pair? rest) (eq? (car rest) 'content) (pair? (cdr rest)))
+                                                   (cddr rest)
+                                                   rest)))))))))
+            (else (cons (walk (car t)) (walk (cdr t))))))))
+
 (define (anon--view-plist buf tree)
   (let* ((saved (buffer-local buf 'anon-render-blocks))
-         (tree (if (pair? saved) (anon--unredact tree (cadr saved) (car saved)) tree)))
+         (tree (anon--fill-ranges buf (if (pair? saved) (anon--unredact tree (cadr saved) (car saved)) tree))))
     (set! *anon-new-text* '())
     ;; an answer of decide changes what is barred: then the whole tree again
     (let ((red (if (and (pair? saved) (not *anon-stale*))
@@ -692,6 +726,9 @@
                  "anon-local-mode enabled"
                  "anon-local-mode disabled"))))
 
+;; a key, not M-x: the minibuffer takes the focus and the page drops its selection
+(minor-mode-keys! "anon-local-mode" '(("C-c x" "anon-selected")))
+
 ;; anon-mode is on: a buffer gets anon-local-mode when a window shows it
 (define *anon-global* #f)
 
@@ -752,6 +789,27 @@
           (anon--on-display!)
           (message "anon-mode enabled")))))
 
+(define (anon--bar! text)
+  "keep TEXT in anon-selected and repaint"
+  (let ((s (if (string? text) (string-trim text) "")))
+    (if (string=? s "")
+        (message "anon: nothing to redact")
+        (begin
+          (customize-save! 'anon-selected (cons s (filter (lambda (x) (not (equal? x s))) anon-selected)))
+          (anon--refresh!)
+          (message (string-append "anon: redacting " (number->string (string-length s)) " chars"))))))
+
+(define-command "anon-add" "Redact a text you type wherever anon shows it"
+  (lambda () (read-string "Redact: " anon--bar!)))
+
+(define-command "anon-selected" "Redact the selected text wherever anon shows it; with no selection, ask for one"
+  (lambda ()
+    (let* ((r (string-trim (region-text)))
+           (s (if (string=? r "") (string-trim (dom-selection-text)) r)))
+      (if (string=? s "")
+          (read-string "Redact: " anon--bar!)
+          (anon--bar! s)))))
+
 (define-command "anon-forget" "Forget every cached name, common word and email handle"
   (lambda ()
     (customize-save! 'anon-proper-nouns '())
@@ -763,6 +821,8 @@
 
 (catalog-meta! 'command "anon-mode" 'domain "anon" 'effects '("write" "external"))
 (catalog-meta! 'command "anon-local-mode" 'domain "anon" 'effects '("write" "external"))
+(catalog-meta! 'command "anon-selected" 'domain "anon" 'effects '("write"))
+(catalog-meta! 'command "anon-add" 'domain "anon" 'effects '("write"))
 (catalog-meta! 'command "anon-forget" 'domain "anon" 'effects '("write"))
 
 (public! 'anon-ask!

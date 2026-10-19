@@ -136,6 +136,7 @@
   // and a plain Cmd-arrow change nothing: they are the window
   // motion itself, or the shift before a chord.
   function editingAfterKey(e, editing) {
+    if (document.documentElement.classList.contains("windows-overview")) return false;
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return editing;
     if (e.key === "Escape") return false;
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === "g") return false;
@@ -144,6 +145,9 @@
     return true;
   }
   function nativeTextKey(e, editing) {
+    // The all-windows overview is a glance: its keymap owns every key,
+    // and no tile takes text or moves a caret.
+    if (document.documentElement.classList.contains("windows-overview")) return false;
     const a = document.activeElement;
     // A pane switch can leave DOM focus in the old editable until
     // the next patch. Only the selected pane may handle keys natively.

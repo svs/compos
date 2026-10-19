@@ -2670,6 +2670,8 @@ defmodule Compos.Ui.EditorLive do
       attrs: block_attrs(pget(pl, "attrs") || []),
       children: [],
       range: block_range(pget(pl, "range")),
+      # the text to draw in place of the range's own, e.g. anon's redaction
+      content: if(is_binary(pget(pl, "content")), do: pget(pl, "content")),
       format: pget(pl, "format"),
       html: nil,
       empty: false,
@@ -2781,7 +2783,7 @@ defmodule Compos.Ui.EditorLive do
   # children is empty, and the renderer skips it.
   defp block_fill(%{range: {a, b}} = view, text) do
     view =
-      case range_content(Text.slice(text, a, b), view.format) do
+      case range_content(Map.get(view, :content) || Text.slice(text, a, b), view.format) do
         {:html, html} -> %{view | html: html}
         {:text, t} -> %{view | text: t}
       end

@@ -631,6 +631,26 @@
 
 (define (todo--refresh-all!) (for-each list-refresh! (todo--buffers)))
 
+;; the list and its task page are one app, an instance per group, laid out
+;; by role as apps are: the list in one window, the page in the next
+(define (todo--app-id group) (string-append "todo:" (or group "none")))
+
+(define (todo--group-buffer mode base group)
+  "the MODE buffer GROUP keeps, like chat-menu and ibuffer; made from BASE when it has none"
+  (let ((buf (or (find (lambda (b) (and (equal? (buffer-local b 'mode-name) mode) (equal? (buffer-group b) group)))
+                       (buffer-list-mru))
+                 (let loop ((n 1))
+                   (let ((name (if (= n 1) base (string-append base "<" (number->string n) ">"))))
+                     (if (buffer-known? name)
+                         (loop (+ n 1))
+                         (begin (buffer-create name)
+                                (when group (buffer-move-to-group! name group))
+                                (with-current-buffer name (lambda () (set-mode! mode)))
+                                name)))))))
+    (when (boundp 'app-claim!)
+      (app-claim! buf (todo--app-id group) (if (equal? mode "todo-mode") 'list 'detail)))
+    buf))
+
 (define *todo-views*
   (list (list "open" '())
         (list "inbox" '(state "inbox"))
@@ -1106,6 +1126,15 @@
 ;; chat that works the task, never the one that filed it
 (define *todo-detail-buffer* "*Todo*")
 
+(define (todo--detail-group)
+  (let ((l (todo--list-buffer))) (or (and l (buffer-group l)) (group-here))))
+
+(define (todo--detail-buffer)
+  "the task page of the group you are in, or #f; a group keeps its own"
+  (let ((group (todo--detail-group)))
+    (find (lambda (b) (and (equal? (buffer-local b 'mode-name) "todo-detail-mode") (equal? (buffer-group b) group)))
+          (buffer-list-mru))))
+
 (define (todo--detail-task buf)
   (let ((id (buffer-local buf 'todo-id)))
     (and id (todo-get id))))
@@ -1203,11 +1232,8 @@
     buf))
 
 (define (todo-show-detail! id)
-  (let ((buf *todo-detail-buffer*))
-    (unless (buffer-exists? buf) (buffer-create buf))
+  (let ((buf (todo--group-buffer "todo-detail-mode" *todo-detail-buffer* (todo--detail-group))))
     (buffer-set-local! buf 'todo-id id)
-    (unless (buffer-derived-mode? buf "todo-detail-mode")
-      (with-current-buffer buf (lambda () (set-mode! "todo-detail-mode"))))
     (todo--detail-render! buf)
     (display-buffer-detail! buf (todo--list-buffer))
     buf))
@@ -1217,7 +1243,7 @@
 (define (todo--preview-chat! t)
   (let ((chat (todo--chat-of t)))
     (when (and chat (not (window-showing chat)))
-      (let* ((keep (list (window-showing (todo--list-buffer)) (window-showing *todo-detail-buffer*)))
+      (let* ((keep (list (window-showing (todo--list-buffer)) (let ((d (todo--detail-buffer))) (and d (window-showing d)))))
              (pane (or (window-showing-mode "chat-mode" #f)
                        (find (lambda (w) (not (member w keep))) (display--work-windows))
                        (and (cadr keep) (split-window-in! (cadr keep) 'v)))))
@@ -1497,18 +1523,12 @@
     ;; a normal buffer of the group, so showing it keeps the frame in the
     ;; group; each group reuses its own list, and a new one opens on it
     (let* ((group (group-here))
-           (own (filter (lambda (b) (equal? (buffer-group b) group)) (todo--buffers)))
-           (buf (if (pair? own)
-                    (car own)
-                    (let loop ((n 1))
-                      (let ((name (if (= n 1) *todo-buffer* (string-append *todo-buffer* "<" (number->string n) ">"))))
-                        (if (buffer-known? name) (loop (+ n 1)) name)))))
-           (fresh (not (pair? own))))
-      (when fresh
-        (buffer-create buf)
-        (when group (buffer-move-to-group! buf group))
-        (with-current-buffer buf (lambda () (set-mode! "todo-mode"))))
-      (switch-to-buffer! buf)
+           (fresh (not (find (lambda (b) (equal? (buffer-group b) group)) (todo--buffers))))
+           (buf (todo--group-buffer "todo-mode" *todo-buffer* group)))
+      ;; the list and its page take their panes as an app's do
+      (if (and (boundp 'app-layout!) (app-layout! (todo--app-id group)))
+          (let ((win (app-window-of buf))) (when win (select-window! win)))
+          (switch-to-buffer! buf))
       ;; it opens on the group you are in; / picks another one, or All
       (when fresh
         (list-facet-set! buf (list-facet buf "group") group))

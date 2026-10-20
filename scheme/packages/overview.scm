@@ -274,6 +274,23 @@
     (if (windows-overview-active?)
         (windows-overview-kill!)
         (message "Not in the all-windows view"))))
+(define (windows-overview--merge-modes!)
+  ;; one window for each major mode of the frame, the hidden ones included:
+  ;; the first tile of a mode keeps all its buffers in its stack, and the
+  ;; other windows of that mode close. consolidate! only lays a group's
+  ;; panes again, and left every window behind them standing.
+  (let loop ((ids (let ((order (windows-overview--order))) (append (car order) (cadr order))))
+             (done '())
+             (count 0))
+    (if (null? ids)
+        count
+        (let* ((win (car ids))
+               (buf (window-buffer-any win))
+               (mode (and buf (mode-consolidate-mode-of buf))))
+          (if (and mode (not (member mode done)))
+              (loop (cdr ids) (cons mode done) (+ count (mode-consolidate-into! win mode)))
+              (loop (cdr ids) done count))))))
+
 (define-command "windows-overview-consolidate"
   "Give every major mode of the group one window, then spread the windows again"
   (lambda ()
@@ -286,7 +303,7 @@
           ;; a merge that fails half way leaves the panes, not a locked view
           (unwind-protect
             (lambda ()
-              (consolidate!)
+              (windows-overview--merge-modes!)
               ;; what was on top of each pane stays on top: a buffer the merge
               ;; folded into a window's history comes back to its front
               (for-each

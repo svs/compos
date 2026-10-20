@@ -2262,6 +2262,96 @@
   (when (and (pair? rows) (not (equal? *spotify-query* "")))
     (spotify--put! 'searches *spotify-query* rows)))
 
+;;; --- imenu --------------------------------------------------------------------
+
+;; M-g i on a section: every row a stop, and the highlight landing on one
+;; shows its page beside the list, as the arrows do. Each section read is a
+;; tab, ← and → walk them. Home's rows sit on shelves: each shelf is an entry
+;; with its rows under it, taken by M-1, M-2, ...
+
+(domain! 'navigation)
+(effects! '(read))
+
+;; Spotify runs a shelf's blurb into its title: "Non-stop music … . Recommended Stations"
+(define (spotify--shelf-title shelf)
+  (car (reverse (string-split shelf ". "))))
+
+;; the shelves' keys in order: 1 to 9, 0, then the letters
+(define (spotify--imenu-key i)
+  (cond ((< i 9) (number->string (+ i 1)))
+        ((= i 9) "0")
+        ((< i 36) (substring "abcdefghijklmnopqrstuvwxyz" (- i 10) (- i 9)))
+        (else #f)))
+
+(define (spotify--row-shelf row)
+  (let ((s (site-app-field row 'shelf))) (and (string? s) (not (equal? s "")) s)))
+
+(define (spotify--imenu-show! buf)
+  ;; BUF takes the pane that shows a section; the focus stays where it is
+  (let ((pane (spotify--section-pane)))
+    (when (and pane (not (equal? (with-frame-windows (lambda () (window-buffer pane))) buf)))
+      (with-frame-windows (lambda () (window-display! (lambda () (display-buffer-in-window! pane buf))))))))
+
+(define (spotify--imenu-visit buf line &optional from from-line)
+  ;; the row at LINE of section BUF current, and its page beside the list. A row
+  ;; of another section puts back the line imenu took in FROM, the one it was asked in
+  (lambda ()
+    (when from (buffer-goto-line! from from-line))
+    (spotify--imenu-show! buf)
+    (buffer-goto-line! buf line)
+    (list-update-selection! buf)
+    (list-preview! buf)))
+
+(define (spotify--section-imenu-rows buf label from from-line)
+  ;; the rows of one section, all of kind LABEL so the section is a tab of imenu.
+  ;; Each drawn row (an anchor) is paired with the shelf of the row it draws
+  (let* ((paired (let pair ((as (anchor-list buf)) (rs (site-app-rows buf)) (out '()))
+                   (if (null? as)
+                       (reverse out)
+                       (let ((tail (let find ((r rs))
+                                     (cond ((null? r) #f)
+                                           ((equal? (site-app-field (car r) 'name) (anchor-name (car as))) r)
+                                           (else (find (cdr r)))))))
+                         (pair (cdr as) (if tail (cdr tail) rs)
+                               (cons (list (car as) (and tail (spotify--row-shelf (car tail)))) out)))))))
+    (let loop ((ps paired) (shelf #f) (n 0) (out '()))
+      (if (null? ps)
+          (reverse out)
+          (let* ((a (car (car ps)))
+                 (s (cadr (car ps)))
+                 (line (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a)))))
+                 (data (or (anchor-data a) '()))
+                 (new? (and s (not (equal? s shelf))))
+                 (title (and s (spotify--shelf-title s)))
+                 (go (spotify--imenu-visit buf line from from-line))
+                 (out (if new? (cons (list line label title s go "" (spotify--imenu-key n)) out) out))
+                 ;; a row on a shelf nests under it
+                 (row (list line label (string-append (if s "   " "") (anchor-name a))
+                            (or (plist-get data 'doc) "") go (or title "") #f)))
+            (loop (cdr ps) (or s shelf) (if new? (+ n 1) n) (cons row out)))))))
+
+(define (spotify-list-imenu-rows src)
+  ;; every section read so far is a tab, in the app's order; ← and → walk them
+  (let ((line (car (buffer-line-at-point src))))
+    (apply append
+           (map (lambda (page)
+                  (let ((b (site-app-page-buffer 'spotify (plist-get page 'id))))
+                    (if (and (buffer-exists? b) (pair? (anchor-list b)))
+                        (spotify--section-imenu-rows b (plist-get page 'label) (if (equal? b src) #f src) line)
+                        '())))
+                (site-app-pages (site-app-spec 'spotify))))))
+
+(define (spotify-list-imenu-snapshot buf)
+  ;; what imenu puts back when it is cancelled: the section, its row, and the row's page beside it
+  (spotify--imenu-visit buf (car (buffer-line-at-point buf))))
+
+(define (spotify--imenu! buf)
+  ;; imenu opens on the tab of the section it is asked in
+  (buffer-set-local! buf 'anchor-imenu-index 'spotify-list-imenu-rows)
+  (buffer-set-local! buf 'imenu-snapshot 'spotify-list-imenu-snapshot)
+  (buffer-set-local! buf 'imenu-tab
+    (plist-get (site-app-page (site-app-spec 'spotify) (buffer-local buf 'site-app-page)) 'label)))
+
 ;;; --- the app ------------------------------------------------------------------
 
 (domain! 'web)
@@ -2315,6 +2405,7 @@
 (define (spotify--section id label key path wait)
   (list 'id id 'label label 'key key 'path path
         'live #t 'wait wait
+        'after-fill (lambda (buf rows) (spotify--imenu! buf))
         'sheet *spotify-rows-sheet*
         'detail-sheet *spotify-detail-sheet*
         'detail-wait spotify--wait
@@ -2366,7 +2457,7 @@
                          (list "sp-tile" (list (list "RET" "spotify-open" "open") (list "p" "spotify-play" "play"))))
         'pages
         (list ;; Now Playing is the list that plays, on the track that plays
-              (append (list 'shortcut "N" 'after-fill (lambda (buf rows) (spotify--fill-covers! buf rows) (or (spotify--show-playing-row! buf) (spotify--goto-playing! buf)))
+              (append (list 'shortcut "N" 'after-fill (lambda (buf rows) (spotify--imenu! buf) (spotify--fill-covers! buf rows) (or (spotify--show-playing-row! buf) (spotify--goto-playing! buf)))
                             'detail-composed (list *spotify-ambient-tab* *spotify-artist-tab* *spotify-album-tab*) 'detail-default "ambient"
                             ;; a track row holds what the artist and album tabs need; an album row
                             ;; holds only its name, so its page is read for its tracks and artist
@@ -2381,7 +2472,7 @@
                                 (lambda () (if (equal? spotify-user "") "/" (string-append "/user/" spotify-user "/playlists")))
                                 "main [data-encore-id=card]")) 'shortcut "P")
               ;; a search reads Spotify's albums page for the query, which draws whole
-              (append (list 'shortcut "/" 'after-fill (lambda (buf rows) (spotify--search-keep! buf rows)))
+              (append (list 'shortcut "/" 'after-fill (lambda (buf rows) (spotify--imenu! buf) (spotify--search-keep! buf rows)))
               (spotify--section 'results "Search" "4"
                                 (lambda () (string-append "/search/" (url-encode *spotify-query*)
                                                           "/" (spotify--search-category)))

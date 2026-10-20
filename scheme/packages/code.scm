@@ -1460,6 +1460,8 @@
 
 (define (imenu--plural kind)
   (cond ((equal? kind "") "other")
+        ;; a capitalised kind is a name, a page's own tab: Home stays Home
+        ((not (equal? (substring kind 0 1) (string-downcase (substring kind 0 1)))) kind)
         ((or (string-suffix? "s" kind) (string-suffix? "x" kind) (string-suffix? "ch" kind) (string-suffix? "sh" kind))
          (string-append kind "es"))
         (else (string-append kind "s"))))
@@ -1509,7 +1511,10 @@
            ;; tracks and albums, functions and modules: each kind is a tab, the arrows of the tab row step
            (kinds (imenu--kinds all))
            (tabbed? (> (length kinds) 1))
-           (tab 0)
+           ;; a page names the tab imenu opens on, its own, in 'imenu-tab
+           (tab (let ((want (buffer-local source 'imenu-tab)))
+                  (let loop ((ks kinds) (i 0))
+                    (cond ((null? ks) 0) ((equal? (car ks) want) i) (else (loop (cdr ks) (+ i 1)))))))
            ;; TAB folds a row with rows under it, and unfolds it. It opens all
            ;; folded; a filter typed searches every row, folded or not
            (folded (filter (lambda (r) (imenu--opens? all r)) all))
@@ -1598,3 +1603,4 @@
                                   #t))))))))
 
 (define-key "goto-map" "i" "imenu")
+(define-key "global" "s-i" "imenu")

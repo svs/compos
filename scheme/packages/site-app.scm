@@ -1611,7 +1611,8 @@
 ;; tab showing as drawn and every other from the section the page keeps for
 ;; it, so a part of any tab is one pick away. A part of another tab takes that
 ;; tab, then goes to the part. The spec's 'imenu-names ((REGEX REPLACEMENT) ...)
-;; say a name shorter in imenu.
+;; say a name shorter in imenu, and its 'imenu-depths ((TAB LEVELS) ...) how
+;; deep a tab's entries go: a history is one entry an event.
 (define (site-app-imenu-rename spec)
   (let ((rules (or (and spec (plist-get spec 'imenu-names)) '())))
     (lambda (name)
@@ -1643,11 +1644,23 @@
       (buffer-goto-line! buf (car hit))
       (anchor-sync! buf))))
 
+(define (site-app-imenu-cut spec id entries)
+  (let ((hit (assoc id (or (and spec (plist-get spec 'imenu-depths)) '()))))
+    (if hit (filter (lambda (e) (< (nth 1 e) (cadr hit))) entries) entries)))
+
+(define (site-app-imenu-snapshot buf)
+  ;; what imenu puts back when it is cancelled: the tab the page was on
+  (let ((id (site-app-detail-active buf)))
+    (lambda () (unless (equal? (site-app-detail-active buf) id) (site-app-detail-select! buf id)))))
+
 (define (site-app-imenu-rows buf)
   (let* ((spec (site-app-spec (buffer-local buf 'site-app-name)))
          (rename (site-app-imenu-rename spec))
          (active (site-app-detail-active buf))
-         (tab-line (or (buffer-local buf 'site-app-tab-line) 1)))
+         (tab-line (or (buffer-local buf 'site-app-tab-line) 1))
+         (tabs (site-app-detail-tabs buf))
+         ;; each tab's key, as the page's own: the site's tabs from 1, composed ones before
+         (first (- 1 (length (filter (lambda (t) (plist-get t 'composed)) tabs)))))
     (append
       (anchor-entry-rows buf (anchor-block-entries (or (buffer-local buf 'site-app-index-head) '())) (list 'rename rename))
       (apply append
@@ -1655,18 +1668,22 @@
                (let* ((id (plist-get t 'id))
                       (label (site-app-capitalize (plist-get t 'label)))
                       (here? (equal? id active))
-                      (take (lambda () (site-app-detail-select! buf id))))
-                 (cons (list tab-line "" label "" (if here? #f take) "")
+                      ;; every row of a tab takes the tab first, so a preview that left it
+                      ;; for another comes back: the page shows the part a row names
+                      (take (lambda () (unless (equal? (site-app-detail-active buf) id) (site-app-detail-select! buf id))))
+                      (go (lambda (e) (lambda () (take) (site-app-imenu-goto! buf (nth 4 e)))))
+                      (key (number->string (+ first (- (length tabs) (length (member t tabs)))))))
+                 (cons (list tab-line "" label "" (lambda () (take) (buffer-goto-line! buf tab-line) (anchor-sync! buf)) "" key)
                        (if here?
-                           (anchor-entry-rows buf (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '()))
-                                              (list 'rename rename 'depth 1 'where label))
+                           (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '())))
+                                              (list 'rename rename 'depth 1 'where label 'target go))
                            (let ((built (site-app-tab-blocks buf id)))
                              (if (not built)
                                  '()
-                                 (anchor-entry-rows buf (anchor-block-entries (car built))
+                                 (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (car built)))
                                    (list 'rename rename 'depth 1 'where label 'text (cadr built) 'line tab-line
-                                         'target (lambda (e) (lambda () (take) (site-app-imenu-goto! buf (nth 4 e))))))))))))
-             (site-app-detail-tabs buf))))))
+                                         'target go))))))))
+             tabs)))))
 
 (define (site-app-draw! buf)
   (set! *site-app-folding* buf)
@@ -1703,7 +1720,8 @@
       (buffer-goto-line! buf (max 1 (min line (b 'count #f #f))))
       (site-app-set-anchors! buf text blocks)
       ;; imenu reads every tab of the page, not only the one drawn
-      (buffer-set-local! buf 'imenu-index-function 'site-app-imenu-rows))
+      (buffer-set-local! buf 'anchor-imenu-index 'site-app-imenu-rows)
+      (buffer-set-local! buf 'imenu-snapshot 'site-app-imenu-snapshot))
     ;; anchor-mode's f hands a card back to the page, which folds it by its own state
     (buffer-set-local! buf 'anchor-fold-handler site-app-fold-anchor!)
     (buffer-set-local! buf 'site-app-links (b 'links #f #f))

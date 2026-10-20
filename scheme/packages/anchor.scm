@@ -422,8 +422,9 @@
 ;; with an imenu-name, or else an anchor-name, and lines, its own or those of
 ;; the blocks in it, with the entries inside it a level under it. An entry
 ;; named as the one it is in is that one: a part and its own heading are one
-;; entry. A row of tabs gives one entry for each tab, taken by its click.
-;; -> (LINE DEPTH NAME LAST PATH CLICK KIND DOC), in page order
+;; entry. A row of tabs gives one entry for each tab, taken by its click,
+;; with the tab's own key. -> (LINE DEPTH NAME LAST PATH CLICK KIND DOC KEY),
+;; in page order
 (define (anchor-block-entries blocks)
   (reverse
     (let walk ((bs blocks) (path '()) (acc '()))
@@ -442,7 +443,8 @@
                     (acc (if new?
                              (cons (list (car span) (length path) name (cadr span) (reverse inner) #f
                                          (or (and data (plist-get data 'kind)) "")
-                                         (and data (plist-get data 'doc)))
+                                         (and data (plist-get data 'doc))
+                                         (or (plist-get blk 'imenu-key) (and data (plist-get data 'key))))
                                    acc)
                              acc))
                     (acc (let each ((ts (if row tabs '())) (acc acc))
@@ -450,7 +452,8 @@
                                acc
                                (each (cdr ts)
                                      (cons (list row (length inner) (cadr (car ts)) row
-                                                 (reverse (cons (cadr (car ts)) inner)) (car (car ts)) "" "")
+                                                 (reverse (cons (cadr (car ts)) inner)) (car (car ts)) "" ""
+                                                 (and (> (length (car ts)) 3) (nth 3 (car ts))))
                                            acc))))))
                (walk (cdr bs) path (walk (or (plist-get blk 'children) '()) inner acc))))))))
 
@@ -460,10 +463,10 @@
          (parts (string-split t ". ")))
     (if (pair? (cdr parts)) (string-append (car parts) ".") t)))
 
-;; imenu rows from those entries: (LINE KIND NAME DOC TARGET WHERE), the name
-;; indented by its depth, the preview the first sentence under its first line,
-;; TARGET a thunk that takes a tab, and WHERE the entries it is in, which tell
-;; one name from another. OPTS: 'text the text the lines are of (BUF's), 'depth
+;; imenu rows from those entries: (LINE KIND NAME DOC TARGET WHERE KEY), the
+;; name indented by its depth, the preview the first sentence under its first
+;; line, TARGET a thunk that takes a tab, WHERE the entries it is in, which
+;; tell one name from another, and KEY the one imenu takes it by, with M-. OPTS: 'text the text the lines are of (BUF's), 'depth
 ;; to add, 'rename a name's shorter say, 'where the path above them all,
 ;; 'line every row's line, 'target (ENTRY -> thunk or #f)
 (define (anchor-entry-rows buf entries &optional opts)
@@ -489,7 +492,8 @@
                    (cond (target (target e))
                          (click (lambda () (run-hook-with-args-until-success 'block-click buf click)))
                          (else #f))
-                   where)))
+                   where
+                   (and (> (length e) 8) (nth 8 e)))))
          entries)))
 
 (define (anchor-imenu-rows buf)
@@ -497,7 +501,10 @@
   ;; indented under it, its first words for the preview. A part whose DATA
   ;; names its 'kind is filed under it, so imenu gives each kind a tab; its
   ;; 'doc, when it has one, is the preview. A page drawn as blocks is indexed
-  ;; as its components name it, when that names every part
+  ;; as its components name it, when that names every part. A page that
+  ;; indexes itself names its function in 'anchor-imenu-index
+  (if (symbol? (buffer-local buf 'anchor-imenu-index))
+      ((eval (buffer-local buf 'anchor-imenu-index)) buf)
   (let* ((entries (and (equal? (buffer-local buf 'render-mode) "blocks")
                        (anchor-block-entries (or (buffer-local buf 'render-blocks) '()))))
          (starts (map car (or entries '())))
@@ -524,7 +531,7 @@
             (loop (cdr as) (cons a open)
                   (cons (list (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a))))
                               kind path doc)
-                        acc))))))))
+                        acc)))))))))
 
 (define (anchor--apply! buf)
   ;; a page that indexes itself (every tab of a site page) keeps its index
@@ -649,8 +656,8 @@
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
 (public! 'anchor-levels "(anchor-levels ANCHOR) — how it zooms, ((N REDUCTION) ...), or #f for the default fold")
 (public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor, or the nested entries its components name")
-(public! 'anchor-block-entries "(anchor-block-entries BLOCKS) — the imenu entries a block tree names, nested: (LINE DEPTH NAME LAST PATH CLICK KIND DOC)")
-(public! 'anchor-entry-rows "(anchor-entry-rows BUF ENTRIES [OPTS]) — imenu rows (LINE KIND NAME DOC TARGET WHERE) from anchor-block-entries; OPTS 'text 'depth 'rename 'where 'line 'target")
+(public! 'anchor-block-entries "(anchor-block-entries BLOCKS) — the imenu entries a block tree names, nested: (LINE DEPTH NAME LAST PATH CLICK KIND DOC KEY)")
+(public! 'anchor-entry-rows "(anchor-entry-rows BUF ENTRIES [OPTS]) — imenu rows (LINE KIND NAME DOC TARGET WHERE KEY) from anchor-block-entries; OPTS 'text 'depth 'rename 'where 'line 'target")
 
 (domain! 'navigation)
 (effects! '(read))

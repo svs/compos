@@ -77,6 +77,13 @@
 ;; prompt clears it, so a stale fn never steers the next prompt.
 (define *mb-tab-fn* #f)
 
+;; a prompt whose rows nest folds them with TAB: the fn gets the selected
+;; candidate and answers #t when it took the key
+(define *mb-fold-fn* #f)
+
+;; a preview prompt that redraws its rows as the input changes: the fn gets the input
+(define *mb-change-fn* #f)
+
 (define (mb-tab-step! step)
   (and *mb-tab-fn* (minibuffer-active?) (*mb-tab-fn* step)))
 
@@ -247,8 +254,11 @@
         (*mb-row-delete-fn*)
         (message "Nothing here deletes a row"))))
 (define-command "minibuffer-complete"
-  "Fold the section at hand in the list behind the prompt, else complete the input"
-  (lambda () (if (mb-list-call! 'fold) #t (minibuffer-complete!))))
+  "Fold the row or section at hand, else complete the input"
+  (lambda ()
+    (cond ((and *mb-fold-fn* (minibuffer-selected) (*mb-fold-fn* (minibuffer-selected))) #t)
+          ((mb-list-call! 'fold) #t)
+          (else (minibuffer-complete!)))))
 (define-command "minibuffer-regroup"
   "Cycle what a section is in the list behind the prompt"
   (lambda () (if (mb-list-call! 'regroup) #t (message "no list here"))))
@@ -548,8 +558,8 @@
 
 ;; swap the open preview prompt's candidates; the M-1..M-9 shortcuts
 ;; follow them, and the preview follows the new selection
-(define (minibuffer-preview-candidates! cands on-confirm)
-  (let ((rows (mb-preview-shortcut-rows cands #f)))
+(define (minibuffer-preview-candidates! cands on-confirm &optional shortcuts)
+  (let ((rows (mb-preview-shortcut-rows cands shortcuts)))
     (set! *mb-shortcuts* (mb-preview-shortcuts rows on-confirm))
     (minibuffer-set-candidates! (mb-preview-shortcut-hint cands rows))
     (mb-select-notify!)))
@@ -574,7 +584,9 @@
            ;; the key goes last: a prompt that matches on its annotation
            ;; reads the first fields as kinds, and the mode must stay first
            (if (and hit (pair? cand))
-             (list name (string-append (car (cdr cand)) "  M-" hit))
+             ;; the rest of the candidate, its kind and facts, stays as it was
+             (cons name (cons (string-append (if (pair? (cdr cand)) (car (cdr cand)) "") "  M-" hit)
+                              (if (pair? (cdr cand)) (cdr (cdr cand)) '())))
              cand)))
        cands))
 
@@ -592,6 +604,8 @@
          (bindings (mb-preview-shortcuts rows on-confirm)))
     (set! *mb-shortcuts* bindings)
     (set! *mb-tab-fn* #f)
+    (set! *mb-fold-fn* #f)
+    (set! *mb-change-fn* #f)
     (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
     (minibuffer-read* prompt (mb-preview-shortcut-hint cands rows)
       (append
@@ -599,13 +613,17 @@
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
                                 (set! *mb-tab-fn* #f)
+                                (set! *mb-fold-fn* #f)
+                                (set! *mb-change-fn* #f)
                                 (with-invoking-buffer (lambda () (on-confirm v)))))
               (list 'cancel  (lambda ()
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
                                 (set! *mb-tab-fn* #f)
+                                (set! *mb-fold-fn* #f)
+                                (set! *mb-change-fn* #f)
                                 (with-invoking-buffer on-cancel)))
-              (list 'change  (lambda (input) (mb-select-notify!)))
+              (list 'change  (lambda (input) (when *mb-change-fn* (*mb-change-fn* input)) (mb-select-notify!)))
               (list 'match-hint (if match-hint match-hint #f))
               (list 'style style))
         (if complete (list (list 'complete complete)) '())
@@ -664,7 +682,7 @@
   (lambda (key)
     (define-key "minibuffer-mode-map" (string-append "M-" key)
       (mb-shortcut-command key)))
-  '("1" "2" "3" "4" "5" "6" "7" "8" "9"
+  '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
     "a" "b" "c" "d" "e" "f" "g" "h" "i" "j"
     "k" "l" "m" "n" "o" "p" "q" "r" "s" "t"
     "u" "v" "w" "x" "y" "z"))

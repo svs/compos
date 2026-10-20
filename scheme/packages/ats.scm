@@ -262,6 +262,7 @@
         ;; imenu's names, short: a history event by its verb and move, the staff note by what it is
         'imenu-names '(("^(\\w+) (\\S+( → \\S+)?) by .*$" "\\1 · \\2")
                        ("^Internal assessment.*$" "Internal assessment"))
+        'imenu-depths '(("history" 1))
         ;; the header: the job at the company, where the application stands, then the candidate.
         ;; The state line ("accepted → pending: applied happened 23 Feb") gives the transition, accepted → applied
         'detail-head (lambda (data)
@@ -316,11 +317,24 @@
                          (list 'label "jobs" 'width 10 'field 'active 'face "dim")
                          (list 'label "website" 'width #f 'field 'website 'face "dim"))))
           *ats-jobs-page*
-          (ats-section 'comms "Comms" "6" "/staff/comms" "ats-message-mode"
-            (list (list 'label "from" 'width 26 'field 'name)
-                  (list 'label "when" 'width 8 'field 'when 'face "dim")
-                  (list 'label "via" 'width 9 'field 'channel 'face "dim")
-                  (list 'label "subject" 'width #f 'field 'subject))))))
+          ;; the site's meetings open on this week; ours open on today, then its range tabs (today,
+          ;; this week, last week, next week) take over through [ and ]
+          (append
+            (list 'path (lambda ()
+                          (let* ((buf (site-app-page-buffer 'ats 'meetings))
+                                 (on (and (buffer-known? buf) (buffer-local buf 'site-app-filter)))
+                                 (day (format-time (current-time) "%Y-%m-%d")))
+                            (if (and (string? on) (> (string-length on) 0))
+                                "/staff/meetings"
+                                (string-append "/staff/meetings?start_date=" day "&end_date=" day)))))
+            (ats-section 'meetings "Meetings" "6" "/staff/meetings" "ats-meeting-mode"
+              (list (list 'label "day" 'width 11 'field 'day 'face "dim")
+                    (list 'label "time" 'width 6 'field 'time)
+                    (list 'label "status" 'width 10 'field 'status 'face "dim")
+                    (list 'label "candidate" 'width 26 'field 'name)
+                    (list 'label "with" 'width 14 'field 'with 'face "dim")
+                    (list 'label "length" 'width 7 'field 'length 'face "dim")
+                    (list 'label "summary" 'width #f 'field 'summary 'face "dim")))))))
 
 ;; the ATS's own words for what its pages hold. A page's sheet names the component
 ;; a record is ("component": "ats/work-experience"); each is a core component drawn
@@ -624,7 +638,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (catalog-meta! 'command "ats-palette" 'domain 'web 'effects '(read external display))
 (for-each (lambda (mode) (define-key (mode-keymap mode) "s-k" "ats-palette"))
           '("ats-candidates-mode" "ats-approvals-mode" "ats-applications-mode" "ats-companies-mode"
-            "ats-jobs-mode" "ats-comms-mode" "ats-pipeline-mode" "ats-detail-mode"))
+            "ats-jobs-mode" "ats-meetings-mode" "ats-pipeline-mode" "ats-detail-mode"))
 
 (domain! 'web)
 (effects! '(write external display))

@@ -1464,23 +1464,68 @@
          (string-append kind "es"))
         (else (string-append kind "s"))))
 
+;; a row's depth: its leading spaces, three a level
+(define (imenu--depth r)
+  (let ((n (caddr r)))
+    (let loop ((i 0))
+      (if (and (< i (string-length n)) (equal? (substring n i (+ i 1)) " ")) (loop (+ i 1)) (quotient i 3)))))
+
+(define (imenu--at r i) (and (> (length r) i) (nth i r)))
+
+;; the row a shown one stands for: a folded row is a copy that names it
+(define (imenu--orig r) (or (imenu--at r 7) r))
+
+(define (imenu--opens? rows r)
+  ;; whether R has rows nested under it in ROWS
+  (let ((tail (memq r rows)))
+    (and tail (pair? (cdr tail)) (> (imenu--depth (cadr tail)) (imenu--depth r)))))
+
+(define (imenu--fold-rows rows folded)
+  ;; ROWS less what FOLDED rows hold, each folded one marked ▸
+  (let loop ((rs rows) (hide #f) (out '()))
+    (if (null? rs)
+        (reverse out)
+        (let* ((r (car rs)) (d (imenu--depth r)))
+          (if (and hide (> d hide))
+              (loop (cdr rs) hide out)
+              (let ((shut? (and (memq r folded) (imenu--opens? rows r))))
+                (loop (cdr rs) (and shut? d)
+                      (cons (if shut?
+                                (list (car r) (cadr r) (string-append (caddr r) " ▸") (imenu--at r 3)
+                                      (imenu--at r 4) (imenu--at r 5) (imenu--at r 6) r)
+                                r)
+                            out))))))))
+
+;; an entry nests under its part by its leading spaces: the list draws them
+(define-style! 'imenu "symbol-entry symbol-name.mb-label { white-space: pre; }")
+
 (define-command "imenu" "Jump to a definition in this buffer; an index of more than one kind has a tab for each"
   (lambda ()
     (let* ((all (imenu-rows (current-buffer)))
            (source (current-buffer))
            (orig (point))
+           ;; a page whose rows reach past what it shows (another tab) says how to put it back
+           (restore (let ((f (buffer-local source 'imenu-snapshot))) (and (symbol? f) ((eval f) source))))
            ;; tracks and albums, functions and modules: each kind is a tab, the arrows of the tab row step
            (kinds (imenu--kinds all))
            (tabbed? (> (length kinds) 1))
            (tab 0)
-           (rows (lambda () (if tabbed? (filter (lambda (r) (equal? (cadr r) (nth tab kinds))) all) all)))
+           ;; TAB folds a row with rows under it, and unfolds it. It opens all
+           ;; folded; a filter typed searches every row, folded or not
+           (folded (filter (lambda (r) (imenu--opens? all r)) all))
+           (searching #f)
+           (kind-rows (lambda () (if tabbed? (filter (lambda (r) (equal? (cadr r) (nth tab kinds))) all) all)))
+           (rows (lambda () (if searching (kind-rows) (imenu--fold-rows (kind-rows) folded))))
            (cands (lambda () (imenu--candidates (rows))))
            (shown (lambda ()
                     (let ((rs (rows)))
                       (map (lambda (c)
                              (let ((row (nth 3 c)))
                                (list (car c) (caddr c) "symbol" '() ""
-                                 (list (list "name" (caddr row)) (list "kind" (cadr row))
+                                 ;; a row with a key shows it where a kind goes: M-0 takes it
+                                 (list (list "name" (caddr row))
+                                       (list "kind" (let ((k (and (> (length row) 6) (nth 6 row))))
+                                                      (if (and (string? k) (not (equal? k ""))) (string-append "M-" k) (cadr row))))
                                        (list "source" source) (list "line" (number->string (car row)))
                                        (list "doc" (imenu--snip (or (nth 3 row) "")))))))
                            (cands)))))
@@ -1489,29 +1534,67 @@
                         (if (null? ks) (reverse out)
                             (loop (cdr ks) (+ i 1) (cons (list (imenu--plural (car ks)) (= i tab)) out))))))
            (line-of (lambda (label) (let ((c (assoc label (cands)))) (and c (cadr c)))))
+           ;; a row with a KEY is taken by M-KEY while imenu is up: typing filters, M- acts.
+           ;; Without any, M-1..M-9 take the rows by place
+           (keys (lambda ()
+                   (let loop ((cs (cands)) (out '()))
+                     (if (null? cs)
+                         (and (pair? out) (reverse out))
+                         (let* ((r (nth 3 (car cs)))
+                                (k (and (> (length r) 6) (nth 6 r))))
+                           (loop (cdr cs) (if (and (string? k) (not (equal? k "")))
+                                              (cons (list k (car (car cs))) out)
+                                              out)))))))
            ;; a row with a TARGET is somewhere else, another tab of the page: the target takes it there
            (target-of (lambda (label) (let ((c (assoc label (cands))))
                                         (and c (> (length (nth 3 c)) 4) (procedure? (nth 4 (nth 3 c))) (nth 4 (nth 3 c))))))
+           ;; a page of parts marks and scrolls to the part point is in; the
+           ;; prompt has the keys, so the page's own hook never runs: imenu marks it
+           (mark! (lambda () (when (minor-mode-on? source "anchor-mode") (anchor-sync! source))))
            (on-confirm (lambda (label)
                          (let ((l (line-of label)) (go (target-of label)))
                            (goto-char! (if l (line-start-position l) orig))
+                           (mark!)
                            (when go (go))))))
       (if (null? all)
           (message "imenu: no definitions in this buffer")
           (begin
             (minibuffer-read-preview "Imenu: " (shown)
               (lambda (label)
-                (let ((l (line-of label)))
-                  (when l (goto-char! (line-start-position l)))))
+                ;; a row with a target previews by it: the page takes the tab, then the part
+                (let ((l (line-of label)) (go (target-of label)))
+                  (cond (go (go) (mark!))
+                        (l (goto-char! (line-start-position l)) (mark!)))))
               on-confirm
-              (lambda () (goto-char! orig))
-              #t)
+              (lambda () (when restore (restore)) (goto-char! orig) (mark!))
+              #t #f #f #f (keys))
+            (set! *mb-change-fn*
+              (lambda (input)
+                (let ((now (not (equal? input ""))))
+                  (unless (eq? now searching)
+                    (set! searching now)
+                    (minibuffer-preview-candidates! (shown) on-confirm (keys))))))
+            (set! *mb-fold-fn*
+              (lambda (label)
+                (let* ((c (assoc label (cands)))
+                       (r (and c (imenu--orig (nth 3 c)))))
+                  (when (and r (imenu--opens? (kind-rows) r))
+                    (set! folded (if (memq r folded) (remove (lambda (x) (eq? x r)) folded) (cons r folded)))
+                    (minibuffer-preview-candidates! (shown) on-confirm (keys))
+                    ;; the selection stays on the row folded
+                    (let ((want (let find ((cs (cands))) (cond ((null? cs) #f) ((eq? (imenu--orig (nth 3 (car cs))) r) (car (car cs))) (else (find (cdr cs)))))))
+                      (let step ((n (length (cands))))
+                        (when (and want (> n 0) (not (equal? (minibuffer-selected) want)))
+                          (minibuffer-next!)
+                          (step (- n 1))))))
+                  ;; a row with nothing under it takes TAB too: it completes nothing
+                  #t)))
             (when tabbed?
               (minibuffer-tabs! (tab-row))
               (set! *mb-tab-fn* (lambda (step)
                                   (set! tab (modulo (+ tab step) (length kinds)))
                                   (minibuffer-tabs! (tab-row))
-                                  (minibuffer-preview-candidates! (shown) on-confirm)
+                                  (minibuffer-preview-candidates! (shown) on-confirm (keys))
                                   #t))))))))
 
 (define-key "goto-map" "i" "imenu")

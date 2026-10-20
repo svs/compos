@@ -95,7 +95,7 @@
 ;; ANCHOR-KEYMAP is the keymap in force while point is inside it, and
 ;; ANCHOR-DATA is what those keys act on. They ride on the block it makes,
 ;; where anchor-blocks reads them; a component that sets one itself wins.
-(define component--anchor-keys '(anchor-name anchor-keymap anchor-data imenu-name))
+(define component--anchor-keys '(anchor-name anchor-keymap anchor-data imenu-name imenu-key))
 
 (define (component--anchored block props)
   (if (not (pair? block))
@@ -184,6 +184,8 @@
 ;; gives the entry's title, or #f for none. The block carries it as
 ;; imenu-name, and an imenu-name prop says it outright. anchor-imenu-rows
 ;; lists every block with a title and lines, the entries in it nested under it.
+;; An imenu-key prop is the key that takes the entry, with M-, while imenu is
+;; up and nowhere else: typing filters, M- acts.
 (define *component-imenu* (if (boundp '*component-imenu*) *component-imenu* '()))
 
 (define (component-imenu! name fn)

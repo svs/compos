@@ -500,10 +500,12 @@
   ;; as its components name it, when that names every part
   (let* ((entries (and (equal? (buffer-local buf 'render-mode) "blocks")
                        (anchor-block-entries (or (buffer-local buf 'render-blocks) '()))))
-         (names (map (lambda (e) (nth 2 e)) (or entries '())))
+         (starts (map car (or entries '())))
          (text (buffer-text buf)))
+    ;; when every part starts where an entry does: the entries may name it anew
     (if (and (pair? entries)
-             (null? (filter (lambda (a) (not (member (string-trim (anchor-name a)) names))) (anchor-list buf))))
+             (null? (filter (lambda (a) (not (member (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a)))) starts)))
+                            (anchor-list buf))))
         (anchor-entry-rows buf entries)
     (let loop ((as (anchor-list buf)) (open '()) (acc '()))
       (if (null? as)
@@ -525,7 +527,9 @@
                         acc))))))))
 
 (define (anchor--apply! buf)
-  (buffer-set-local! buf 'imenu-index-function 'anchor-imenu-rows)
+  ;; a page that indexes itself (every tab of a site page) keeps its index
+  (unless (buffer-local buf 'imenu-index-function)
+    (buffer-set-local! buf 'imenu-index-function 'anchor-imenu-rows))
   ;; Anchor navigation must win over generic scrolling in other minor maps.
   (let ((maps (buffer-minor-maps buf)))
     (buffer-minor-maps! buf

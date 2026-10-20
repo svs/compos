@@ -4096,9 +4096,17 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-migrate-live!)
   (map group-record-id *group-records*))
 
+;; Most recently used first, as the frame tabs are; a group the MRU has
+;; never seen keeps its record order at the end.
 (define (group-names)
   (group-migrate-live!)
-  (map group-record-name *group-records*))
+  (let* ((ranked (filter (lambda (r) r)
+                         (map (lambda (id)
+                                (find (lambda (r) (equal? (group-record-id r) id))
+                                      *group-records*))
+                              (group-ids-mru-all))))
+         (rest (filter (lambda (r) (not (memq r ranked))) *group-records*)))
+    (map group-record-name (append ranked rest))))
 
 ;; the groups a reader chooses between: the founded ones, then the
 ;; pseudo groups. A destination prompt keeps to group-names, because a

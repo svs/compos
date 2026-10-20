@@ -801,7 +801,7 @@
 (defface! 'todo-title 'family "var(--font-sans)" 'size "1.12em" 'weight "500" 'fg "var(--default-fg)")
 ;; the wide table keeps one font, so its columns stay in line
 (defface! 'todo-row-title 'weight "600")
-(defface! 'todo-heading 'family "var(--font-sans)" 'size "1.6em" 'weight "700" 'fg "var(--default-fg)")
+(defface! 'todo-heading 'weight "700" 'fg "var(--default-fg)")
 (defface! 'todo-check 'fg "var(--dim-fg)")
 ;; the group that filed the task wears an outline, not a fill
 (defface! 'todo-group 'fg "var(--faint-fg)" 'box "color-mix(in srgb, var(--faint-fg) 55%, transparent)")
@@ -902,22 +902,43 @@
 (define todo-wide-cols 150)
 
 (define (todo--wide-columns buf)
-  (list (list "STATE" 11)
+  ;; plain fixed columns, as ibuffer draws them; the title takes what is left
+  (list (list "STATE" 7)
         (list "P" 1)
         (list "TODO" #f 'left 'end)
-        (list "PROJECT" 12)
-        (list "WHO" 16)
+        (list "PROJECT" 14 'left 'end)
+        (list "WHO" 24 'left 'end)
         (list "DUE" 12)))
 
+(define (todo--narrow-columns buf)
+  ;; a narrow window keeps ibuffer's one line a task, without who and when
+  (list (list "STATE" 7)
+        (list "P" 1)
+        (list "TODO" #f 'left 'end)
+        (list "PROJECT" 12 'left 'end)))
+
+(define (todo--narrow-cells buf t)
+  (let ((cs (todo--cells buf t)))
+    (list (list-ref cs 0) (list-ref cs 1) (list-ref cs 2) (list-ref cs 3))))
+
+(define (todo--short-project t)
+  ;; "recruiting:thine" reads as "thine" in a column this narrow
+  (let ((p (or (plist-get t 'project) "")))
+    (car (reverse (string-split p ":")))))
+
 (define (todo--cells buf t)
+  ;; ibuffer's look: plain text, the state in its hue, the rest dim
   (if (todo--sep? t)
       (list "" "" (list (plist-get t 'title) "list-section-name") "" "" "")
-  (list (todo--pill t)
-        (list (or (plist-get t 'priority) "") "org-priority")
-        (list (plist-get t 'title) "todo-row-title")
-        (list (plist-get t 'project) "todo-project")
-        (list (todo--who-status t) (if (todo--stalled? t) "todo-overdue" "org-meta"))
-        (todo--when t))))
+  (let ((s (or (plist-get t 'state) "inbox")))
+    (list (list s (string-append "todo-dot-" s))
+          (list (or (plist-get t 'priority) "") "org-priority")
+          (list (plist-get t 'title) (if (member s *todo-closed*) "f-dim" "ibuffer-name"))
+          (list (todo--short-project t) "f-dim")
+          ;; a chat that closed leaves only its id behind, which says nothing
+          (list (let ((w (todo--who t))) (if (string-prefix? "chat:" w) "chat closed" w))
+                (if (todo--stalled? t) "todo-overdue" "f-dim"))
+          (todo--when t)))))
 
 (define (todo--chips parts)
   ;; one cell of pills: PARTS are (TEXT FACE), or "" for none. Answers the
@@ -1570,16 +1591,14 @@
     'title-spans (lambda (buf)
                    (let ((rest (string-append (todo--view buf) " · by " (todo--sort-by buf))))
                      (list (list 0 5 "todo-heading") (list 8 (string-byte-length rest) "dim"))))
-    ;; "Todos" at 1.6em takes about four cells more than its five letters
-    'title-cells (lambda (buf) 4)
     'layouts (list (list 'name 'wide
                          'min-cols todo-wide-cols
                          'columns todo--wide-columns
                          'cells todo--cells)
-                   (list 'name 'stacked
+                   (list 'name 'narrow
                          'default #t
-                         'row-columns todo--row-columns
-                         'row-cells todo--row-cells))
+                         'columns todo--narrow-columns
+                         'cells todo--narrow-cells))
     'key (lambda (buf t) (plist-get t 'id))
     ;; the whole card lights up, not just its title line
     'selection-face "select"

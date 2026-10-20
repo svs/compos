@@ -2193,19 +2193,27 @@ defmodule Compos.Core.SchemeAPI do
       # search: returns (start end) byte range or #f
       {"buffer-search",
        "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f."} =>
-        fn [q, from] ->
+        fn [q, from] when is_binary(q) and is_integer(from) ->
           case Buffer.search(Editor.current_buffer(), q, from, :forward) do
             {s, e} -> [s, e]
             nil -> false
           end
+
+          args ->
+            raise Compos.Scheme.Eval.Error,
+              message: "(buffer-search Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got " <> inspect(args)
         end,
       {"buffer-search-backward",
        "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f."} =>
-        fn [q, from] ->
+        fn [q, from] when is_binary(q) and is_integer(from) ->
           case Buffer.search(Editor.current_buffer(), q, from, :backward) do
             {s, e} -> [s, e]
             nil -> false
           end
+
+          args ->
+            raise Compos.Scheme.Eval.Error,
+              message: "(buffer-search-backward Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got " <> inspect(args)
         end,
 
       # faces: (set-face-attribute! 'modeline 'bg "#2f3140" 'fg "#fff" ...)

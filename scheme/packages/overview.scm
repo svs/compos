@@ -67,6 +67,62 @@
 (for-each (lambda (row) (define-key "windows-overview-map" (car row) (cadr row)))
           (windows-overview--bindings))
 
+;; Every other key works as it does outside the view, except a key that
+;; acts on a buffer: the tiles are a glance. The view's map falls back to a
+;; copy of the global map without those commands; the buffers' own maps
+;; are never asked.
+(define windows-overview--blocked
+  '("self-insert-command" "newline" "preview-newline" "indent-for-tab" "yank" "yank-pop"
+    "kill-line" "kill-word" "backward-kill-word" "kill-region" "copy-region-as-kill"
+    "delete-char" "delete-backward-char" "undo" "set-mark-command" "exchange-point-and-mark"
+    "pop-global-mark" "forward-char" "backward-char" "next-line" "previous-line"
+    "forward-word" "backward-word" "beginning-of-line" "end-of-line" "beginning-of-buffer"
+    "end-of-buffer" "back-to-indentation" "goto-line" "scroll-up-command" "scroll-down-command"
+    "scroll-other-window" "scroll-other-window-down" "recenter-top-bottom" "forward-sexp"
+    "backward-sexp" "down-list" "backward-up-list" "completion-at-point" "isearch-forward"
+    "isearch-backward" "query-replace" "narrow-to-region" "narrow-context-also" "widen"
+    "eval-last-sexp" "chat-send-region" "llm-pipe-region" "llm-send-buffer" "read-only-mode"
+    "goto-thing-at-point" "lsp-pop-marker" "embark-act" "imenu"))
+
+(define-command "windows-overview-blocked" "Nothing: in the all-windows view a key does not reach the windows"
+  (lambda () #f))
+
+(define (windows-overview--copy! from prefix)
+  (for-each
+    (lambda (b)
+      (let ((keys (if prefix (string-append prefix " " (car b)) (car b)))
+            (cmd (cadr b)))
+        (cond ((not (string? cmd)) #f)
+              ((string-prefix? "keymap:" cmd)
+               (windows-overview--copy! (substring cmd 7 (string-length cmd)) keys))
+              (else (define-key "windows-overview-global" keys
+                                (if (member cmd windows-overview--blocked) "windows-overview-blocked" cmd))))))
+    (keymap-bindings from)))
+
+(define (windows-overview--keys-of from)
+  ;; the bindings of FROM with its prefix maps inside: a copy is rebuilt only
+  ;; when these change, as a rebuild costs a fifth of a second
+  (map (lambda (b)
+         (if (and (string? (cadr b)) (string-prefix? "keymap:" (cadr b)))
+             (cons (car b) (windows-overview--keys-of (substring (cadr b) 7 (string-length (cadr b)))))
+             b))
+       (keymap-bindings from)))
+
+(define windows-overview--copied #f)
+
+(define (windows-overview--sync-keys!)
+  ;; the global map as it is now: a key it lost since the last copy does nothing
+  (let ((now (windows-overview--keys-of "global")))
+    (unless (equal? now windows-overview--copied)
+      (for-each (lambda (b) (define-key "windows-overview-global" (car b) "windows-overview-blocked"))
+                (keymap-bindings "windows-overview-global"))
+      (windows-overview--copy! "global" #f)
+      (set! windows-overview--copied now))))
+
+(define-keymap! "windows-overview-global")
+(keymap-parent! "windows-overview-map" "windows-overview-global")
+(windows-overview--sync-keys!)
+
 (define (windows-overview-on?)
   ;; the view, or what is left of one: its flag, or this frame's keys still
   ;; locked to its map
@@ -213,6 +269,7 @@
                           (set-frame-local! 'windows-overview #t)
                           ;; a tile is a glance: every window is in focus, none editing
                           (for-each (lambda (w) (let ((b (window-buffer-any w))) (when b (editing-state-off! b)))) ids)
+                          (windows-overview--sync-keys!)
                           (overriding-map! "windows-overview-map" #t)
                           (transient-show! #t)
                           (set! done #t))
@@ -231,15 +288,16 @@
                     '()))
               (group-panes-windows))))
 
-(define (windows-overview-exit!)
+(define (windows-overview-exit! &optional quiet)
   ;; the keys and the client leave the view first: a pane restore that
-  ;; raises must not leave the frame locked in it
+  ;; raises must not leave the frame locked in it. QUIET leaves the client
+  ;; in the view, for a command that runs on the panes and spreads again.
   (set-frame-local! 'windows-overview #f)
   (set-frame-local! 'windows-overview-armed #f)
   (set-frame-local! 'windows-overview-rows #f)
   (transient-show! #f)
   (overriding-map! #f)
-  (client-slide! (json-encode (list 'gather (windows-overview--homes))))
+  (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
   (let* ((me (active-window))
          (row (group-panes-row-of me))
          (pane (or (frame-local 'windows-overview-home) (and row (car row)))))
@@ -330,6 +388,38 @@
   (lambda () (windows-overview--step! 'up)))
 (define-command "windows-overview-down" "Select the tile below in the all-windows view"
   (lambda () (windows-overview--step! 'down)))
+
+;; Another command runs on the panes, not on the spread tiles: the view
+;; gathers them quietly before it and spreads them again after it. A
+;; command that asks first, M-x or a buffer prompt, shows the panes until
+;; it has its answer.
+(define windows-overview--passive
+  '("universal-argument" "digit-argument" "negative-argument" "telemetry-toggle"))
+
+(define (windows-overview--foreign? cmd)
+  (and (string? cmd)
+       (not (equal? cmd ""))
+       (not (string-prefix? "windows-overview" cmd))
+       (not (member cmd windows-overview--passive))))
+
+(define (windows-overview--pre-command!)
+  (when (and (windows-overview-active?) (windows-overview--foreign? (this-command)))
+    (windows-overview-exit! #t)
+    (set-frame-local! 'windows-overview-resume #t)))
+
+(define (windows-overview--post-command!)
+  (when (frame-local 'windows-overview-resume)
+    (if (minibuffer-active?)
+        (unless (frame-local 'windows-overview-asking)
+          (set-frame-local! 'windows-overview-asking #t)
+          (client-slide! (json-encode (list 'gather '()))))
+        (begin
+          (set-frame-local! 'windows-overview-resume #f)
+          (set-frame-local! 'windows-overview-asking #f)
+          (windows-overview-enter!)))))
+
+(add-hook! 'pre-command-hook 'windows-overview--pre-command!)
+(add-hook! 'post-command-hook 'windows-overview--post-command!)
 
 (global-set-key "s-S-<down>" "windows-overview")
 (global-set-key "s-S-<up>" "windows-overview-exit")

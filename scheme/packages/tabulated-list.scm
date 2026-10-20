@@ -1344,7 +1344,20 @@
           ((equal? (buffer-local buf (car p)) (cadr p)) (loop (cddr p) fresh))
           (else (loop (cddr p) (cons (car p) (cons (cadr p) fresh)))))))
 
-(define (list-write! buf lines first-row n-rows per &optional extra-locals)
+(define (list-write! buf lines first-row n-rows per &optional extra-locals heights)
+  ;; HEIGHTS is each row's own line count: a wrapped cell makes its row
+  ;; taller than PER, and a row's start is where its own lines begin
+  (let* ((starts (if (pair? heights)
+                     (let loop ((hs heights) (at first-row) (out '()))
+                       (if (null? hs) (reverse out) (loop (cdr hs) (+ at (car hs)) (cons at out))))
+                     #f))
+         ;; the lines come in order, so the starts are walked as they pass
+         (row-start? (lambda (i)
+                       (if starts
+                           (and (pair? starts) (= i (car starts))
+                                (begin (set! starts (cdr starts)) #t))
+                           (and (>= i first-row) (< i (+ first-row (* n-rows per)))
+                                (= 0 (modulo (- i first-row) per)))))))
   (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()) (texts '()))
     (if (null? ls)
         (begin (list-write-text! buf (string-join (reverse texts) ""))
@@ -1366,11 +1379,10 @@
                       ovs spans)
                 ;; one offset per row: a row of two lines answers with
                 ;; the line the reader lands on
-                (if (and (>= i first-row) (< i (+ first-row (* n-rows per)))
-                         (= 0 (modulo (- i first-row) per)))
+                (if (row-start? i)
                     (cons off offsets)
                     offsets)
-                (cons (string-append text "\n") texts))))))
+                (cons (string-append text "\n") texts)))))))
 
 ;;; --- where point is, in rows ---------------------------------------------------
 
@@ -1380,9 +1392,15 @@
 ;; header names the row count, and asking it to count rows that a refresh
 ;; is halfway through replacing reads the rows that went
 (define (list-index buf)
-  (let ((ln (line-index-at buf (or (buffer-local buf 'list-head-count)
-                                   (list-header-lines buf)))))
-    (and ln (quotient ln (list-drawn-row-height buf)))))
+  ;; the row whose drawn start is the last at or before point: rows can be
+  ;; of different heights, so a line count divided by one height drifts
+  (let ((at (buffer-point buf))
+        (offs (list-offsets buf)))
+    (if (and (number? at) (pair? offs))
+        (and (>= at (car offs)) (list-index-at-pos buf at))
+        (let ((ln (line-index-at buf (or (buffer-local buf 'list-head-count)
+                                         (list-header-lines buf)))))
+          (and ln (quotient ln (list-drawn-row-height buf)))))))
 
 (define (list-goto-index! buf i)
   (let ((offs (list-offsets buf)))
@@ -2235,7 +2253,8 @@
                (prepared (list-prepare-rows! buf shown ctx fetch))
                (base (list-write! buf (list-view-lines buf shown head prepared)
                                   (length head) (length shown)
-                                  (list-row-height buf) extra)))
+                                  (list-row-height buf) extra
+                                  (and prepared (map (lambda (p) (length (cadr p))) prepared)))))
           ;; the tag's old ranges go with this set: one change, not a
           ;; clear and then a set
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))

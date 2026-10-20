@@ -1197,7 +1197,12 @@
   (let* ((modes *reload-touched*)
          (bufs (reload--buffers-to-rebuild modes)))
     (set! *reload-touched* '())
-    (for-each restore-buffer-runtime! bufs)
+    ;; The list is taken before any buffer is rebuilt, and a rebuild can
+    ;; outlive a buffer: a chat closed meanwhile is gone by its turn. Check
+    ;; each one again at its turn, so a vanished buffer is skipped instead
+    ;; of aborting the rest of the rebuild and the redraw.
+    (for-each (lambda (b) (when (buffer-exists? b) (restore-buffer-runtime! b)))
+              bufs)
     ;; A reload changes what a render would produce, but nothing asks for
     ;; one: a client repaints on an editor event, and evaluating a
     ;; definition is not an event. Without this a new modeline, face, or

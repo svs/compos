@@ -277,8 +277,24 @@
               ((todo--boundary? line) (step #f #f (close)))
               (else (step #f (add line) acc))))))))
 
+
+;; parsing is the slow part of a read, so each file's tasks are kept with
+;; the text they came from and parsed again only when that text changes
+(define *todo-parse-cache* '())
+
+(define (todo--parsed f)
+  (let ((text (todo--text f))
+        (hit (assoc f *todo-parse-cache*)))
+    (if (and hit (equal? (cadr hit) text))
+        (caddr hit)
+        (let ((tasks (todo--parse f text)))
+          (set! *todo-parse-cache*
+                (cons (list f text tasks)
+                      (remove (lambda (e) (equal? (car e) f)) *todo-parse-cache*)))
+          tasks))))
+
 (define (todo--all)
-  (fold (lambda (acc f) (append acc (todo--parse f (todo--text f)))) '() (todo--files)))
+  (fold (lambda (acc f) (append acc (todo--parsed f))) '() (todo--files)))
 
 ;;; --- render ------------------------------------------------------------------
 
@@ -658,6 +674,7 @@
         (list "inbox" '(state "inbox"))
         (list "review" '(state "review"))
         (list "working" '(state "doing"))
+        (list "waiting" '(state "waiting"))
         (list "mine" 'mine)
         (list "overdue" '(overdue #t))
         (list "closed" '(state ("done" "cancelled")))
@@ -1087,9 +1104,25 @@
            (and (= (length parts) 2) (string-append "chat:" (car parts) ":" (cadr parts)))))
         (else #f)))
 
+;; every card asks which buffer is a chat, often once per log line, so one
+;; walk of the buffers answers a whole draw; it is kept for a second
+(define *todo-chat-index* #f)
+
+(define (todo--chat-index)
+  (let ((now (monotonic-ms)))
+    (if (and *todo-chat-index* (< (- now (car *todo-chat-index*)) 1000))
+        (cdr *todo-chat-index*)
+        (let ((ix (reverse (fold (lambda (acc b)
+                                   (let ((id (buffer-local b 'chat-id)))
+                                     (if (string? id) (cons (list id b) acc) acc)))
+                                 '() (buffer-list)))))
+          (set! *todo-chat-index* (cons now ix))
+          ix))))
+
 (define (todo--live-chat id)
   (and (string? id)
-       (todo--first (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list))))
+       (let ((hit (assoc id (todo--chat-index))))
+         (and hit (buffer-exists? (cadr hit)) (cadr hit)))))
 
 (define (todo--chat-of t)
   ;; the assignee while it is live, else the last live chat the log names:
@@ -1456,15 +1489,51 @@
                    (message (string-append "Filed " id))))
                'initial chat))))))
 
-(define-command "todo-next-view" "Cycle the view: open, inbox, review, working, mine, overdue, closed"
-  (lambda ()
-    (let* ((names (map car *todo-views*))
-           (buf (todo--list-buffer))
-           (i (todo--rank (todo--view buf) names))
-           (next (nth (modulo (+ i 1) (length names)) names)))
-      (buffer-set-local! buf 'todo-view next)
-      (list-refresh! buf)
-      (message (string-append "Todos: " next)))))
+(define (todo--view-set! buf name)
+  (buffer-set-local! buf 'todo-view name)
+  (list-refresh! buf))
+
+(define (todo--view-step! buf step)
+  (let* ((names (map car *todo-views*))
+         (i (todo--rank (todo--view buf) names)))
+    (todo--view-set! buf (nth (modulo (+ i step) (length names)) names))))
+
+;; a tab's count is what the tab would show under the list's group and
+;; project filters. Reading the tasks is the slow part, so every tab counts
+;; from one read
+(define (todo--tab-count all scoped view)
+  (let* ((s (cadr view))
+         (spec (if (equal? s 'mine) (list 'assignee todo-user) s)))
+    (length (filter (lambda (t) (todo--match? t spec all)) scoped))))
+
+;; the views as ui/tabs in the window's header line; left and right step,
+;; a click takes one
+(define (todo--tab-blocks buf)
+  (let* ((all (todo--all))
+         (fs (filter (lambda (f) (member (car f) '("group" "project"))) (list-filters buf)))
+         (scoped (filter (lambda (t) (null? (remove (lambda (f) (todo--filter buf t f)) fs))) all)))
+    (list (component 'ui/tabs
+            (list 'class "todo-tabs"
+                  'tabs (map (lambda (v)
+                               (list (string-append "todo-tab-" (car v))
+                                     (string-append (car v) " " (number->string (todo--tab-count all scoped v)))
+                                     (equal? (car v) (todo--view buf))))
+                             *todo-views*))))))
+
+(add-hook! (list 'block-click 'todo-tabs)
+  (lambda (buf id)
+    (and (string? id)
+         (string-prefix? "todo-tab-" id)
+         (buffer-exists? buf)
+         (let ((name (substring id 9 (string-length id))))
+           (and (assoc name *todo-views*)
+                (begin (todo--view-set! buf name) #t))))))
+
+(define-command "todo-next-view" "Show the next status tab: open, inbox, review, working, waiting, mine, overdue, closed, all"
+  (lambda () (todo--view-step! (todo--list-buffer) 1)))
+
+(define-command "todo-prev-view" "Show the previous status tab"
+  (lambda () (todo--view-step! (todo--list-buffer) -1)))
 
 (define-command "todo-filter-project" "Show one project's tasks: pick it from the list; all shows every project"
   (lambda ()
@@ -1496,6 +1565,7 @@
                   (todo-show-detail! (plist-get t 'id))
                   (todo--preview-chat! t)))
     'debounce #t
+    'head-blocks todo--tab-blocks
     'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))
     'title-spans (lambda (buf)
                    (let ((rest (string-append (todo--view buf) " · by " (todo--sort-by buf))))
@@ -1523,7 +1593,7 @@
     'separator? (lambda (buf t) (todo--sep? t))
     'section? (lambda (buf t) (todo--sep? t))
     'footer (lambda (buf)
-              '(("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
+              '(("←→" "status") ("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
                 ("a" "assign") ("D" "deadline") ("P" "project") ("!" "priority")
                 ("c" "capture") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
@@ -1545,11 +1615,13 @@
             ("!" "todo-cycle-priority")
             ("c" "todo-capture")
             ("v" "todo-next-view")
+            ("<right>" "todo-next-view")
+            ("<left>" "todo-prev-view")
             ("F" "todo-filter-project")
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. `v` cycles the view: open, inbox, review, working, mine, overdue, closed, all. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, working, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

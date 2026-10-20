@@ -2044,12 +2044,15 @@
   (let ((buf (or buf (current-buffer))))
     (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
           ((and (boundp (quote buffer-group)) (buffer-group buf))
+           ;; the most recent chat of the group, so the walk stops at it:
+           ;; this runs on every mode-line draw, and resolving every
+           ;; chat's group for the first one cost a full walk each time
            (let* ((g (buffer-group buf))
-                  (chats (filter (lambda (b)
-                                   (and (chat-buffer? b)
-                                        (equal? (chat-group-id b) g)))
-                                 (buffer-list-mru))))
-             (cond ((pair? chats) (car chats))
+                  (chat (find (lambda (b)
+                                (and (chat-buffer? b)
+                                     (equal? (chat-group-id b) g)))
+                              (buffer-list-mru))))
+             (cond (chat chat)
                    ((and (boundp (quote group-primary-chat)) (group-primary-chat g)))
                    (else buf))))
           (else buf))))

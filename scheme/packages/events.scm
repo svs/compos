@@ -93,6 +93,7 @@
 (define (event-view-get name key)
   "(event-view-get NAME KEY) — KEY's entry in a view whose state is an alist, or #f"
   (alist-get (or (event-view name) '()) key))
+(public! 'event-view-get "(event-view-get NAME KEY) — KEY's entry in a view whose state is an alist, or #f")
 
 (effects! '(write))
 

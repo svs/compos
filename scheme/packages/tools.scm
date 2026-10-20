@@ -356,6 +356,9 @@
                              (symbol->string name)))))
 (public! 'describe-function "(describe-function 'NAME) — the Scheme source of a function or M-x command; a builtin gives its one-line doc")
 (catalog-meta! 'function "describe-function" 'domain 'discovery 'effects '(read))
+;; reads the catalog's stamps; ON-UNSTAMPED is the caller's own effect
+(public! 'eval-read-refusal "(eval-read-refusal CODE [ON-UNSTAMPED]) — #f when CODE only reads, else why eval-scheme-read refuses it")
+(catalog-meta! 'function "eval-read-refusal" 'domain 'discovery 'effects '(read))
 
 (define-tool! 'describe-function
   "Read a function's actual implementation. Userland functions and M-x commands return their full Scheme source (most of the editor — dired, org, chat, modes — is userland); builtins are Elixir and return only a marker. Use it to understand how something works before changing it."

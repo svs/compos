@@ -138,8 +138,10 @@
                              (map (lambda (n) (if (string-suffix? "/" n) (substring-bytes n 0 (- (string-byte-length n) 1)) n)) (names))))))
             (else (walk (todo--join dir (car segs)) (cdr segs)))))))
 
+;; A worktree daemon keeps its own copy of ~/.compos under worktree-daemons/;
+;; its todos.md files are stale copies of the user's, so `**` must not reach them.
 (define (todo--resolve)
-  (fold (lambda (acc f) (if (member f acc) acc (append acc (list f))))
+  (fold (lambda (acc f) (if (or (member f acc) (string-contains? f "/worktree-daemons/")) acc (append acc (list f))))
         '() (fold (lambda (acc p) (append acc (todo--glob p))) '() todo-directories)))
 
 (define *todo-files* #f)
@@ -821,13 +823,40 @@
 
 ;; who holds the task, short: a chat says how it is doing, not its id
 (define (todo--agent t)
+  ;; the chat that holds the task: its state, its title, and how long since
+  ;; its last turn moved
   (let* ((a (plist-get t 'assignee))
-         (row (and (string? a) (event-view-get 'chat-status a))))
-    (cond ((todo--blank? a) "")
-          ((todo--stalled? t) (list "◌ stalled" "todo-overdue"))
-          ((and row (member (plist-get row 'status) '(running starting))) (list "● working" "todo-agent-live"))
-          ((string-prefix? "chat:" a) (list "○ agent" "todo-date"))
+         (row (and (string? a) (event-view-get 'chat-status a)))
+         (running? (and row (member (plist-get row 'status) '(running starting))))
+         (chat (todo--chat-of t))
+         (at (and row (plist-get row 'at)))
+         (label (lambda (state)
+                  (string-join (filter (lambda (s) (not (equal? s "")))
+                                       (list state
+                                             (if chat (format-elide chat 32) "")
+                                             (if (and at (not running?)) (format-age (- (current-time) at)) "")))
+                               " · "))))
+    (cond ((and (todo--blank? a) (not chat)) "")
+          ((todo--stalled? t) (list (label (if chat "◌ stalled" "◌ stalled · chat gone")) "todo-overdue"))
+          (running? (list (label "● working") "todo-agent-live"))
+          ((or chat (string-prefix? "chat:" a)) (list (label (if chat "○ idle" "○ chat closed")) "todo-date"))
           (else (list (string-append "@" a) "org-meta")))))
+
+(define (todo--last-update t)
+  ;; the newest log line as "TEXT · AGE ago", without its stamp and author
+  (let ((log (plist-get t 'log)))
+    (if (not (pair? log))
+        ""
+        (let* ((line (car (reverse log)))
+               (words (string-split line " ")))
+          (if (< (length words) 4)
+              line
+              (let* ((d (map string->number (string-split (car words) "-")))
+                     (hm (map string->number (string-split (cadr words) ":")))
+                     (when (and (= (length d) 3) (= (length hm) 2) (not (member #f (append d hm)))
+                                (parts->time (car d) (cadr d) (caddr d) (car hm) (cadr hm)))))
+                (string-append (format-elide (string-join (list-tail words 3) " ") 90)
+                               (if when (string-append " · " (format-age (- (current-time) when) 'ago)) ""))))))))
 
 (define *todo-months* '("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
 
@@ -894,14 +923,16 @@
 
 (define (todo--row-columns buf)
   ;; a card: a box and the title, which wraps; then the pills on the left
-  ;; and the tags flush right; then a blank line
+  ;; and the tags flush right; then the last update; then a blank line
   (list (list (list "" 2) (list "TODO" #f 'left 'wrap))
         (list (list "" 2) (list "META" #f 'left 'end) (list "TAGS" (todo--tags-width buf) 'right))
+        (list (list "" 2) (list "UPDATE" #f 'left 'end))
         (list (list "" #f 'left 'end))))
 
 (define (todo--row-cells buf t)
   ;; a card: a box and the title; the state, priority, project and group as
-  ;; pills, then the date and who holds it; the tags on the right
+  ;; pills, then the date; the tags on the right; under them the chat that
+  ;; holds it and the last log line with its age
   (if (todo--sep? t)
       (list (list "" (list (plist-get t 'title) "list-section-name")))
       (let* ((closed? (member (plist-get t 'state) *todo-closed*))
@@ -914,10 +945,11 @@
                            (todo--chip (plist-get t 'priority) "org-priority")
                            (todo--chip project "todo-project")
                            (if (equal? group project) "" (todo--chip group "todo-group"))
-                           (if (pair? due) (list (string-append " " (car due)) (cadr due)) "")
-                           (if (pair? who) (list (string-append " " (car who)) (cadr who)) "")))))
+                           (if (pair? due) (list (string-append " " (car due)) (cadr due)) "")))))
         (list (list (todo--dot t) (list (plist-get t 'title) "todo-title"))
               (list "" meta (todo--tag-text t))
+              (list "" (todo--chips (list (if (pair? who) (todo--chip (car who) (cadr who)) "")
+                                        (todo--chip (todo--last-update t) "org-meta"))))
               (list "")))))
 
 (define (todo--at) (let ((t (list-current (todo--list-buffer)))) (and t (not (todo--sep? t)) t)))
@@ -1062,12 +1094,18 @@
 (define (todo--chat-of t)
   ;; the assignee while it is live, else the last live chat the log names:
   ;; a chat that moved the task to review is the one that worked it
-  (or (todo--live-chat (plist-get t 'assignee))
+  (let ((a (plist-get t 'assignee)))
+  ;; a task assigned to a chat is that chat's, even when the chat is gone
+  (if (and (string? a) (string-prefix? "chat:" a))
+      (todo--live-chat a)
       (todo--first (lambda (x) x)
         (map (lambda (line)
                (let ((words (string-split line " ")))
-                 (and (>= (length words) 3) (todo--live-chat (todo--chat-id (caddr words))))))
-             (reverse (or (plist-get t 'log) '()))))))
+                 ;; the chat that filed or assigned the task did not work it
+                 (and (>= (length words) 4)
+                      (not (member (list-ref words 3) '("created" "assignee" "assigned")))
+                      (todo--live-chat (todo--chat-id (caddr words))))))
+             (reverse (or (plist-get t 'log) '())))))))
 
 (define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
 

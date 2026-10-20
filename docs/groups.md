@@ -514,9 +514,9 @@ The choice is one pure function, `window-fill-decide SNAPSHOT POOL`. The snapsho
 
 The destination is per frame. Two frames can show two groups, or one group with two layouts. The `previous` slot is per frame.
 
-A frame is a workspace, and a group belongs to one of them. The frame that founds a group keeps it, so another frame's rail, tabs and switcher stay clear of work that was never done there. A group whose frame is gone belongs to no one: the next frame to enter it adopts it, so a closed window strands nothing.
+Frames are just frames: they isolate nothing by default. Every frame shows every group, and any number of frames can stand in one group at once, each with its own layout. A group records the frame that founded it, but that owner counts only when the frame is isolated (`frame-isolate`): an isolated frame shows only the groups it owns, and keeps them out of the other frames' rail, tabs and switcher. A group whose owner is gone belongs to no one: the next frame to enter it adopts it.
 
-A group of another frame is still reachable. It is the last section of the switcher, marked "in another window", and the board lists every group whatever frame holds it. Picking one goes to the frame that holds it rather than pulling the group into this one: one group stands in one workspace, never two at once. A frame that lives in a browser tab is raised by its tab. Any other client says where the group is and moves nothing yet.
+A group an isolated frame keeps is still reachable. It is the last section of the switcher, marked "in another window", and the board lists every group whatever frame holds it. Picking one goes to the frame that holds it rather than pulling the group into this one. A frame that lives in a browser tab is raised by its tab. Any other client says where the group is and moves nothing yet.
 
 ### Indicator
 
@@ -645,7 +645,7 @@ These are not in this specification. The design leaves room for them.
 
 ### Frame slots
 
-- A group record stores the frame that owns it, under the `frame` setting. `group-here?` answers for the selected frame, `group-elsewhere-frame` names the other live frame that holds a group, and `group-ids-mru` answers this frame's groups where `group-ids-mru-all` answers every one.
+- A group record stores the frame that owns it, under the `frame` setting. `group-here?` answers for the selected frame, `group-elsewhere-frame` names the other live frame that keeps a group by isolation, and `group-ids-mru` answers this frame's groups where `group-ids-mru-all` answers every one.
 - `previous` and `pinned` are per-frame state. `switch`, `switch-last`, `new`, `dissolve`, `kill`, and `group-pin` write them.
 - `destination` (the current group) is derived. The stored frame-local is the last answer of the derivation, not a standing context. See "The current group".
 - A frame with no destination is the plain editor plus the project fallback.

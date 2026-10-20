@@ -489,7 +489,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                  #f (and path? clean))))
               (set! *group-records* (append *group-records* (list record)))
               (when path? (group-assign-path-name! id clean))
-              ;; the frame that founds a group is the workspace that keeps it
+              ;; the founding frame owns it; that counts only if the frame is isolated
               (group-frame-own! id (selected-frame))
               (desktop-dirty!)
               id)))))
@@ -1112,24 +1112,32 @@ is forgotten and that group falls back to creation order in the switcher."
     (when (and id frame) (group-setting-set! id 'frame frame))
     id))
 
+(define (group-frame-isolating? frame)
+  ;; an isolated live frame keeps the groups it owns to itself
+  (and (group-frame-alive? frame) (frame-local-in frame 'isolated) #t))
+
 (define (group-unowned? g)
   ;; a group made before workspaces, or one whose frame has gone
   (not (group-frame-alive? (group-frame-owner g))))
 
 (define (group-of-frame? g frame)
+  ;; frames share every group. Only isolation separates them: an isolated
+  ;; frame shows only the groups it owns, and keeps them from the others.
   (let ((owner (group-frame-owner g)))
     (or (equal? owner frame)
-        (and (not (group-frame-alive? owner))
-             (not (and (equal? frame (selected-frame)) (frame-isolated?)))))))
+        (and (not (group-frame-isolating? owner))
+             (not (frame-local-in frame 'isolated))))))
 
 (define (group-here? g)
   (group-of-frame? g (selected-frame)))
 
 (define (group-elsewhere-frame g)
-  ;; the live frame that owns G, when that frame is not this one
+  ;; the live frame that owns G, when that frame is not this one and
+  ;; isolation keeps G there
   (let ((owner (group-frame-owner g)))
     (and (group-frame-alive? owner)
          (not (equal? owner (selected-frame)))
+         (or (group-frame-isolating? owner) (frame-isolated?))
          owner)))
 
 (define (group-adopt-here! g)
@@ -1152,7 +1160,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (frame-theme-apply! #f)
           (desktop-dirty!)
           (frame-group-label-refresh!)
-          (message "Frame shares unowned groups again"))
+          (message "Frame shares groups again"))
         (let ((id (frame-group)))
           ;; the group in view comes along, so the frame is never empty
           (when id (group-frame-own! id (selected-frame)))
@@ -1225,36 +1233,13 @@ is forgotten and that group falls back to creation order in the switcher."
     (unwind-protect (lambda () (with-frame-windows thunk))
       (lambda () (select-frame! home)))))
 
-(define (group-step-off! frame id)
-  ;; FRAME stops standing in ID: back to the group it left, else its most
-  ;; recent other group, else no group at all
-  (group-in-frame! frame
-    (lambda ()
-      (let* ((back (group-resolve-id (frame-local 'previous-group)))
-             (next (if (and back (not (equal? back id)) (group-of-frame? back frame))
-                       back
-                       (let loop ((ids (group-ids-mru)))
-                         (cond ((null? ids) #f)
-                               ((and (not (equal? (car ids) id))
-                                     (group-of-frame? (car ids) frame))
-                                (car ids))
-                               (else (loop (cdr ids))))))))
-        (if next
-            (switch-to-group! next)
-            (begin (set-frame-local! 'current-group #f)
-                   (frame-group-label-refresh!)))))))
+
 
 (define (group-move-to-frame! g frame)
-  ;; G belongs to FRAME and FRAME stands in it. One group stands in one
-  ;; workspace, so a frame that stood in G steps off first.
+  ;; G belongs to FRAME and FRAME stands in it. A frame that stands in G
+  ;; too keeps it: frames share groups.
   (let ((id (group-resolve-id g)))
     (when id
-      (for-each
-        (lambda (other)
-          (when (and (not (equal? other frame))
-                     (equal? (group-resolve-id (frame-local-in other 'current-group)) id))
-            (group-step-off! other id)))
-        (frame-list))
       (group-frame-own! id frame)
       (group-in-frame! frame (lambda () (switch-to-group! id)))
       (desktop-dirty!))
@@ -2076,9 +2061,9 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; Group navigation uses the same recency stream as buffer navigation.
 ;; Groups without a history entry trail in record order.
 (define (group-ids-mru-split)
-  ;; (MINE AWAY), both in MRU order: MINE is this workspace's groups, the
-  ;; frame's own and the unowned ones unless the frame is isolated; AWAY is
-  ;; the groups another live frame owns
+  ;; (MINE AWAY), both in MRU order: MINE is the groups this frame shows,
+  ;; every group unless isolation separates it; AWAY is the groups another
+  ;; live frame owns and isolation keeps from this one
   ;;
   ;; The frame tab bar calls this on every render, so it settles the frame
   ;; once for the whole pass and reads the records in one sweep. Going
@@ -2089,6 +2074,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((here (selected-frame))
          (frames (frame-list))
          (isolated (frame-isolated?))
+         (isolating (filter (lambda (f) (frame-local-in f 'isolated)) frames))
          (owner-of (lambda (record)
                      (let loop ((rest (group-record-settings record)))
                        (cond ((not (pair? rest)) #f)
@@ -2099,8 +2085,9 @@ is forgotten and that group falls back to creation order in the switcher."
          (away '()))
     (for-each (lambda (record)
                 (let* ((owner (owner-of record))
-                       (alive (and owner (member owner frames) #t)))
-                  (cond ((or (equal? owner here) (and (not isolated) (not alive)))
+                       (alive (and owner (member owner frames) #t))
+                       (kept (and alive (member owner isolating) #t)))
+                  (cond ((or (equal? owner here) (and (not isolated) (not kept)))
                          (set! mine (cons (group-record-id record) mine)))
                         (alive (set! away (cons (group-record-id record) away))))))
               *group-records*)
@@ -2778,8 +2765,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda ()
     (if (in-groups-board?)
         ;; the board lists every group, this frame's and the rest. A row
-        ;; that belongs to another frame goes to that frame: one group
-        ;; stands in one workspace, never two at once.
+        ;; an isolated frame keeps goes to that frame.
         (let* ((g (groups--current))
                (away (and g (group-elsewhere-frame g))))
           (cond ((not g) #f)
@@ -2855,8 +2841,8 @@ is forgotten and that group falls back to creation order in the switcher."
                     ;; arrangement you were working in
                     (show-here!)
                     (cond ((and id (group-elsewhere-frame id))
-                           ;; the group is another frame's: go to that frame
-                           ;; rather than pull its windows into this one
+                           ;; an isolated frame keeps the group: go to that
+                           ;; frame rather than pull its windows into this one
                            (group-frame-raise! (group-elsewhere-frame id)))
                           (id (switch-to-group! id))
                           ;; a name no group has makes that group

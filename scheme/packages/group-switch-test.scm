@@ -1922,8 +1922,8 @@
       (check-true! (member id (group-ids-mru)) "this frame lists it"))
     (t--sw-done!)))
 
-(deftest 'another-frames-group-stays-out-of-this-frames-lists
-  "a workspace shows its own groups only, and reaches the rest through one marked row"
+(deftest 'frames-share-groups-unless-isolated
+  "every frame shows every group; an isolated frame keeps its own, reached through one marked row"
   (lambda ()
     (t--sw-setup!)
     (let* ((id (group-record-create! "zz-sw-away"))
@@ -1934,8 +1934,12 @@
            (back (select-frame! home)))
       (check-equal! (selected-frame) home "the test is back in its own frame")
       (group-frame-own! id other)
-      (check-equal! (group-elsewhere-frame id) other "the other frame keeps it")
-      (check-false! (group-here? id) "it is not a group of this workspace")
+      (check-false! (group-elsewhere-frame id) "a plain frame keeps nothing")
+      (check-true! (group-here? id) "so this frame shows its group")
+      (check-true! (member id (group-ids-mru)) "and lists it")
+      (set-frame-local-in! other 'isolated #t)
+      (check-equal! (group-elsewhere-frame id) other "the isolated frame keeps it")
+      (check-false! (group-here? id) "it is not a group of this frame")
       (check-false! (member id (group-ids-mru)) "so this frame does not list it")
       (check-true! (member id (group-ids-mru-all)) "the whole-editor list still has it")
       (check-false! (member id (active-groups)) "and it is not active here")

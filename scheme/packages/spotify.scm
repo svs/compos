@@ -761,10 +761,20 @@
 ;; Whether a page would draw as it last did. What an artist tab shows comes from the
 ;; artist's read, brief, news and photos; an album tab from the notes; so a
 ;; redraw that none of them prompted leaves the page alone
+(define (spotify--playing-row b)
+  ;; the ambient page is of what plays, not of the row under point: the
+  ;; Now Playing row that plays, else the row drawn
+  (let* ((href (spotify--now-field 'trackHref))
+         (list-buf (site-app-page-buffer 'spotify 'playing))
+         (rows (if (buffer-exists? list-buf) (site-app-rows list-buf) '())))
+    (or (and (string? href) (not (equal? href ""))
+             (find (lambda (r) (equal? (site-app-field r 'href) href)) rows))
+        (buffer-local b 'site-app-row))))
+
 (define (spotify--tab-inputs b &optional given)
   ;; GIVEN the row about to be drawn; else the one drawn
   (let* ((active (buffer-local b 'site-app-active))
-         (row (spotify--as-track b (or given (buffer-local b 'site-app-row))))
+         (row (spotify--as-track b (if (equal? active "ambient") (spotify--playing-row b) (or given (buffer-local b 'site-app-row)))))
          (href (or (site-app-field row 'href) "")))
     (cond
       ((equal? active "ambient")
@@ -1571,7 +1581,7 @@
 (define (spotify--ambient-draw buf b)
   ;; the page to glance at: the photos, the cover, and one fact at a time.
   ;; It reads the artist, the album's notes and the news, and digs for more
-  (let* ((row (spotify--as-track buf (buffer-local buf 'site-app-row)))
+  (let* ((row (spotify--as-track buf (spotify--playing-row buf)))
          (now (spotify--row-now row))
          (href (or (site-app-field row 'href) ""))
          (artist-href (spotify--artist-href row (spotify--links href)))

@@ -6033,6 +6033,7 @@
 (public! 'featurep "(featurep F) — #t when the feature F is provided: its file loaded, or (provide 'F) ran")
 (public! 'locate-library "(locate-library NAME) — the file (load NAME) reads, or #f")
 (public! 'autoload-file "(autoload-file NAME) — the file the autoload stub under NAME would load, or #f when NAME is defined")
+(public! 'priv-path "(priv-path REL) — the absolute path of REL in the compos_core priv directory, symlinks resolved")
 (effects! '(write))
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
@@ -6044,7 +6045,7 @@
 (public! 'add-to-list! "(add-to-list! 'VAR VALUE) — VALUE goes to the front of the list VAR names, once")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(read)))
-  '("featurep" "locate-library" "autoload-file"))
+  '("featurep" "locate-library" "autoload-file" "priv-path"))
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(write)))
   '("provide" "require" "with-eval-after-load" "autoload" "autoload-command"

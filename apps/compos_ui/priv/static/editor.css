@@ -2183,8 +2183,8 @@ c-action-key {
 }
 .wk-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 3px 22px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 3px 28px;
 }
 .wk-item {
   display: grid; grid-template-columns: minmax(8ch, auto) 1fr;
@@ -2199,7 +2199,8 @@ c-action-key {
   font-weight: var(--fw-semi);
 }
 .wk-cmd {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* The whole command name shows: a long one wraps at its hyphens. */
+  min-width: 0; white-space: normal; overflow-wrap: anywhere;
   color: var(--dim-fg, #57534a);
 }
 

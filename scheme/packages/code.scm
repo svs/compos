@@ -1428,8 +1428,12 @@
                (kind (cadr r))
                (name (caddr r))
                (doc (car (cdr (cdr (cdr r)))))
+               ;; a row that says WHERE it is tells its name from another's by that
+               (where (and (> (length r) 5) (nth 5 r)))
                (label (if (member name seen)
-                          (string-append name " (L" (number->string line) ")")
+                          (if (and where (not (equal? where "")))
+                              (string-append name " · " where)
+                              (string-append name " (L" (number->string line) ")"))
                           name))
                ;; a row with no kind is a part of a page: its words say more than its line
                (hint (if (equal? kind "")
@@ -1440,7 +1444,7 @@
                                ""
                                (string-append " — " (imenu--snip doc)))))))
           (loop (cdr rs) (cons name seen)
-                (cons (list label line hint) out))))))
+                (cons (list label line hint r) out))))))
 
 (public! 'imenu-rows
   "(imenu-rows BUF) — the imenu index as outline rows (LINE KIND NAME DOC)")
@@ -1474,7 +1478,7 @@
            (shown (lambda ()
                     (let ((rs (rows)))
                       (map (lambda (c)
-                             (let ((row (assoc (cadr c) rs)))
+                             (let ((row (nth 3 c)))
                                (list (car c) (caddr c) "symbol" '() ""
                                  (list (list "name" (caddr row)) (list "kind" (cadr row))
                                        (list "source" source) (list "line" (number->string (car row)))
@@ -1485,9 +1489,13 @@
                         (if (null? ks) (reverse out)
                             (loop (cdr ks) (+ i 1) (cons (list (imenu--plural (car ks)) (= i tab)) out))))))
            (line-of (lambda (label) (let ((c (assoc label (cands)))) (and c (cadr c)))))
+           ;; a row with a TARGET is somewhere else, another tab of the page: the target takes it there
+           (target-of (lambda (label) (let ((c (assoc label (cands))))
+                                        (and c (> (length (nth 3 c)) 4) (procedure? (nth 4 (nth 3 c))) (nth 4 (nth 3 c))))))
            (on-confirm (lambda (label)
-                         (let ((l (line-of label)))
-                           (goto-char! (if l (line-start-position l) orig))))))
+                         (let ((l (line-of label)) (go (target-of label)))
+                           (goto-char! (if l (line-start-position l) orig))
+                           (when go (go))))))
       (if (null? all)
           (message "imenu: no definitions in this buffer")
           (begin

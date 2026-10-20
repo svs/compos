@@ -404,12 +404,107 @@
 .anchor-current:is(.c-prose, .c-bullet, .c-meta, .c-title, .c-row).current { background-color: transparent; }
 ")
 
+(define (anchor--block-span blk)
+  ;; the lines a block spans: its own, else from the first of the blocks in it to the last
+  (let ((own (plist-get blk 'lines)))
+    (if own
+        (list (car own) (cadr own))
+        (let loop ((cs (or (plist-get blk 'children) '())) (span #f))
+          (if (null? cs)
+              span
+              (let ((s (and (pair? (car cs)) (anchor--block-span (car cs)))))
+                (loop (cdr cs)
+                      (cond ((not s) span)
+                            ((not span) s)
+                            (else (list (min (car span) (car s)) (max (cadr span) (cadr s))))))))))))
+
+;; The index a block page gives imenu, as its components name it: each block
+;; with an imenu-name, or else an anchor-name, and lines, its own or those of
+;; the blocks in it, with the entries inside it a level under it. An entry
+;; named as the one it is in is that one: a part and its own heading are one
+;; entry. A row of tabs gives one entry for each tab, taken by its click.
+;; -> (LINE DEPTH NAME LAST PATH CLICK KIND DOC), in page order
+(define (anchor-block-entries blocks)
+  (reverse
+    (let walk ((bs blocks) (path '()) (acc '()))
+      (cond ((null? bs) acc)
+            ((not (pair? (car bs))) (walk (cdr bs) path acc))
+            (else
+             (let* ((blk (car bs))
+                    (name (or (plist-get blk 'imenu-name) (plist-get blk 'anchor-name)))
+                    (name (and (string? name) (not (equal? (string-trim name) "")) (string-trim name)))
+                    (span (and name (anchor--block-span blk)))
+                    (new? (and span (not (and (pair? path) (equal? (car path) name)))))
+                    (data (let ((d (plist-get blk 'anchor-data))) (and (pair? d) (symbol? (car d)) d)))
+                    (tabs (and data (plist-get data 'tabs)))
+                    (row (and (pair? tabs) (plist-get blk 'lines) (car (plist-get blk 'lines))))
+                    (inner (if new? (cons name path) path))
+                    (acc (if new?
+                             (cons (list (car span) (length path) name (cadr span) (reverse inner) #f
+                                         (or (and data (plist-get data 'kind)) "")
+                                         (and data (plist-get data 'doc)))
+                                   acc)
+                             acc))
+                    (acc (let each ((ts (if row tabs '())) (acc acc))
+                           (if (null? ts)
+                               acc
+                               (each (cdr ts)
+                                     (cons (list row (length inner) (cadr (car ts)) row
+                                                 (reverse (cons (cadr (car ts)) inner)) (car (car ts)) "" "")
+                                           acc))))))
+               (walk (cdr bs) path (walk (or (plist-get blk 'children) '()) inner acc))))))))
+
+(define (anchor--gist text)
+  ;; a preview's first sentence
+  (let* ((t (string-trim text))
+         (parts (string-split t ". ")))
+    (if (pair? (cdr parts)) (string-append (car parts) ".") t)))
+
+;; imenu rows from those entries: (LINE KIND NAME DOC TARGET WHERE), the name
+;; indented by its depth, the preview the first sentence under its first line,
+;; TARGET a thunk that takes a tab, and WHERE the entries it is in, which tell
+;; one name from another. OPTS: 'text the text the lines are of (BUF's), 'depth
+;; to add, 'rename a name's shorter say, 'where the path above them all,
+;; 'line every row's line, 'target (ENTRY -> thunk or #f)
+(define (anchor-entry-rows buf entries &optional opts)
+  (let* ((opts (or opts '()))
+         (lines (string-split (or (plist-get opts 'text) (buffer-text buf)) "\n"))
+         (n (length lines))
+         (rename (or (plist-get opts 'rename) (lambda (s) s)))
+         (base (or (plist-get opts 'depth) 0))
+         (above (or (plist-get opts 'where) ""))
+         (target (plist-get opts 'target)))
+    (map (lambda (e)
+           (let* ((line (nth 0 e)) (last (nth 3 e)) (click (nth 5 e))
+                  (body (if (and (< line last) (< line n))
+                            (string-join (list-head (list-tail lines line) (- (min last n) line)) " ")
+                            ""))
+                  (doc (or (nth 7 e) (anchor--gist body)))
+                  (parents (map rename (reverse (cdr (reverse (nth 4 e))))))
+                  (where (string-join (filter (lambda (s) (not (equal? s ""))) (cons above parents)) " / ")))
+             (list (or (plist-get opts 'line) line)
+                   (nth 6 e)
+                   (string-append (string-join (map (lambda (i) "   ") (iota (+ base (nth 1 e)))) "") (rename (nth 2 e)))
+                   doc
+                   (cond (target (target e))
+                         (click (lambda () (run-hook-with-args-until-success 'block-click buf click)))
+                         (else #f))
+                   where)))
+         entries)))
+
 (define (anchor-imenu-rows buf)
   ;; imenu's index of an anchored page: its parts, a part inside another
   ;; indented under it, its first words for the preview. A part whose DATA
   ;; names its 'kind is filed under it, so imenu gives each kind a tab; its
-  ;; 'doc, when it has one, is the preview
-  (let ((text (buffer-text buf)))
+  ;; 'doc, when it has one, is the preview. A page drawn as blocks is indexed
+  ;; as its components name it, when that names every part
+  (let* ((entries (and (equal? (buffer-local buf 'render-mode) "blocks")
+                       (anchor-block-entries (or (buffer-local buf 'render-blocks) '()))))
+         (names (map (lambda (e) (nth 2 e)) (or entries '())))
+         (text (buffer-text buf)))
+    (if (and (pair? entries)
+             (null? (filter (lambda (a) (not (member (string-trim (anchor-name a)) names))) (anchor-list buf))))
+        (anchor-entry-rows buf entries)
     (let loop ((as (anchor-list buf)) (open '()) (acc '()))
       (if (null? as)
           (reverse acc)
@@ -427,7 +522,7 @@
             (loop (cdr as) (cons a open)
                   (cons (list (with-current-buffer buf (lambda () (line-number-at-pos (anchor-start a))))
                               kind path doc)
-                        acc)))))))
+                        acc))))))))
 
 (define (anchor--apply! buf)
   (buffer-set-local! buf 'imenu-index-function 'anchor-imenu-rows)
@@ -549,7 +644,9 @@
 (public! 'anchor-keymap "(anchor-keymap ANCHOR) — the keymap in force inside it, or #f")
 (public! 'anchor-data "(anchor-data ANCHOR) — whatever the page hung on it")
 (public! 'anchor-levels "(anchor-levels ANCHOR) — how it zooms, ((N REDUCTION) ...), or #f for the default fold")
-(public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor")
+(public! 'anchor-imenu-rows "(anchor-imenu-rows BUF) — imenu's index of BUF: one row per anchor, or the nested entries its components name")
+(public! 'anchor-block-entries "(anchor-block-entries BLOCKS) — the imenu entries a block tree names, nested: (LINE DEPTH NAME LAST PATH CLICK KIND DOC)")
+(public! 'anchor-entry-rows "(anchor-entry-rows BUF ENTRIES [OPTS]) — imenu rows (LINE KIND NAME DOC TARGET WHERE) from anchor-block-entries; OPTS 'text 'depth 'rename 'where 'line 'target")
 
 (domain! 'navigation)
 (effects! '(read))

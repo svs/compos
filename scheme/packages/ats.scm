@@ -259,6 +259,9 @@
         'ornament "^[^A-Za-z]*[\\x{0900}-\\x{097F}][^A-Za-z]*$"
         ;; a rating is a run of stars, ticked when a person confirmed it
         'rating "^★+✓?$"
+        ;; imenu's names, short: a history event by its verb and move, the staff note by what it is
+        'imenu-names '(("^(\\w+) (\\S+( → \\S+)?) by .*$" "\\1 · \\2")
+                       ("^Internal assessment.*$" "Internal assessment"))
         ;; the header: the job at the company, where the application stands, then the candidate.
         ;; The state line ("accepted → pending: applied happened 23 Feb") gives the transition, accepted → applied
         'detail-head (lambda (data)

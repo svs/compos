@@ -79,7 +79,7 @@
         (list 'error (string-append "no component named " (catalog--string name)))
         (let ((valid (component--validate (car e) props (nth 1 e))))
           (if (equal? valid #t)
-              (component--named (component--anchored ((nth 3 e) props) props) name)
+              (component--imenu-named (component--named (component--anchored ((nth 3 e) props) props) name) (car e) props)
               valid)))))
 
 ;; the page source names what drew it: the root block carries component="ui/card"
@@ -95,7 +95,7 @@
 ;; ANCHOR-KEYMAP is the keymap in force while point is inside it, and
 ;; ANCHOR-DATA is what those keys act on. They ride on the block it makes,
 ;; where anchor-blocks reads them; a component that sets one itself wins.
-(define component--anchor-keys '(anchor-name anchor-keymap anchor-data))
+(define component--anchor-keys '(anchor-name anchor-keymap anchor-data imenu-name))
 
 (define (component--anchored block props)
   (if (not (pair? block))
@@ -180,6 +180,27 @@
 
 ;; An action is (NAME LABEL KEY EFFECTS FN); FN gets the props. The first
 ;; is the default. Effects past read, display and external ask first.
+;; A component names its own entry in imenu: its rule takes the props and
+;; gives the entry's title, or #f for none. The block carries it as
+;; imenu-name, and an imenu-name prop says it outright. anchor-imenu-rows
+;; lists every block with a title and lines, the entries in it nested under it.
+(define *component-imenu* (if (boundp '*component-imenu*) *component-imenu* '()))
+
+(define (component-imenu! name fn)
+  (let ((q (component--qualified name)))
+    (set! *component-imenu*
+      (cons (list q fn) (remove (lambda (e) (equal? (car e) q)) *component-imenu*)))
+    q))
+
+(define (component--imenu-named block qualified props)
+  (let ((rule (assoc qualified *component-imenu*)))
+    (if (or (not rule) (not (pair? block)) (plist-get block 'imenu-name))
+        block
+        (let ((title ((cadr rule) props)))
+          (if (and (string? title) (not (equal? (string-trim title) "")))
+              (append block (list 'imenu-name title))
+              block)))))
+
 (define *component-actions* (if (boundp '*component-actions*) *component-actions* '()))
 
 (define (component-actions! name actions)
@@ -641,6 +662,18 @@
     (list 'tag "c-group" 'class "c-chips"
           'children (map (lambda (t) (component 'ui/badge (list 'text t))) (component--get p 'items)))))
 
+;; each one's imenu entry: a heading, group or card by its title, a callout by
+;; its label, a person's head by who they are and their role
+(for-each (lambda (r) (component-imenu! (car r) (cadr r)))
+  (list (list 'ui/section (lambda (p) (component--get p 'title #f)))
+        (list 'ui/group (lambda (p) (component--get p 'title #f)))
+        (list 'ui/card (lambda (p) (component--get p 'title #f)))
+        (list 'ui/callout (lambda (p) (component--get p 'label #f)))
+        (list 'ui/person-head
+              (lambda (p) (let ((title (component--get p 'title "")))
+                            (string-append (component--get p 'name "")
+                                           (if (equal? title "") "" (string-append " · " title))))))))
+
 ;; the ones whose props are plain data, so a chat reply may draw them
 (for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/chips))
 
@@ -811,6 +844,7 @@ c-header.c-group { padding: 10px 14px; }
 (effects! '(write))
 (public! 'component-chat! "(component-chat! NAME) — let a chat reply draw NAME; its props must all be data")
 (public! 'component-actions! "(component-actions! NAME ACTIONS) — declare NAME's actions, each (NAME LABEL KEY EFFECTS FN), the default first")
+(public! 'component-imenu! "(component-imenu! NAME FN) — NAME's imenu entry: FN takes the props and gives the entry's title, or #f for none")
 (effects! '(read))
 (effects! '(read external spend))
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")

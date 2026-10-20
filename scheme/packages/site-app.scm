@@ -277,10 +277,12 @@
          (head (filter (lambda (x) (not (tabs? x))) blocks))
          (tabs (filter tabs? blocks))
          (real (filter (lambda (x) (and (pair? x) (plist-get x 'lines))) head))
-         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'anchor-name) (plist-get (car bs) 'anchor-name)) (else (find (cdr bs)))))))
+         (name (let find ((bs real)) (cond ((null? bs) "Header") ((plist-get (car bs) 'anchor-name) (plist-get (car bs) 'anchor-name)) (else (find (cdr bs))))))
+         ;; in imenu the head is who or what the page is about, as its first component names it
+         (title (let find ((bs real)) (cond ((null? bs) name) ((plist-get (car bs) 'imenu-name) (plist-get (car bs) 'imenu-name)) (else (find (cdr bs)))))))
     (if (null? real)
         blocks
-        (cons (site-app-claim (component 'ui/group (list 'tag "c-header" 'body (site-app-unanchored head)))
+        (cons (site-app-claim (component 'ui/group (list 'tag "c-header" 'body (site-app-unanchored head) 'imenu-name title))
                               (apply min (map (lambda (x) (car (plist-get x 'lines))) real))
                               (apply max (map (lambda (x) (cadr (plist-get x 'lines))) real))
                               name)
@@ -1155,7 +1157,8 @@
                                 (span (cdr xs) (if ls (max m (cadr ls)) m)))))))
              (loop (list-tail (cdr bs) (length body))
                    (cons (site-app-claim (component (or (plist-get head 'sa-kind) 'ui/group)
-                                                    (list 'body (if flat? inner (site-app-summary inner name 2))))
+                                                    ;; the section is imenu's entry, its parts under it
+                                                    (list 'body (if flat? inner (site-app-summary inner name 2)) 'imenu-name name))
                                          first last (and flat? name))
                          acc))))
           (else (loop (cdr bs) (cons (car bs) acc))))))
@@ -1196,6 +1199,8 @@
 
 ;; what an open card adds below its own lines: each read under its label,
 ;; asked for the first time the card is drawn open
+(define *site-app-indexing* #f)
+
 (define (site-app-card-more node title)
   (let ((buf *site-app-folding*))
     (apply append
@@ -1203,7 +1208,8 @@
              (let* ((hit (site-app-find (lambda (e) (and (equal? (car e) title) (equal? (cadr e) (car detail))))
                                         (or (buffer-local buf 'site-app-card-more) '())))
                     (got (and hit (caddr hit))))
-               (unless hit (site-app-card-fetch! buf title detail))
+               ;; imenu reading a tab aside fetches nothing
+               (unless (or hit *site-app-indexing*) (site-app-card-fetch! buf title detail))
                (cons (list 'tag "c-heading" 'text (car detail))
                      (cond ((pair? got) got)
                            ((equal? got 'failed) (list (list 'tag "c-field" 'text "The site did not answer. g reads the page again.")))
@@ -1281,6 +1287,11 @@
             (if (has 'tier) (list 'badge (has 'tier) 'badge-class (or (has 'tone) "")) '())
             (if (pair? (plist-get node 'tags)) (list 'tags (plist-get node 'tags)) '()))))
 
+(define (site-app-letter-name lead)
+  ;; a letter in imenu, by who it is to: "Hi Shubham," is the email to Shubham
+  (let ((to (string-trim (re-replace "[,!:.]\\s*$" (re-replace "^(Hi|Hello|Dear|Hey)\\s+" (or lead "") "") ""))))
+    (if (or (equal? to "") (> (string-length to) 30)) "Email" (string-append "Email to " to))))
+
 (define (site-app-node-blocks b nodes tones)
   (let loop ((rest (site-app-kept nodes)) (prev #f) (acc '()))
     (if (null? rest)
@@ -1339,7 +1350,8 @@
                      (if (and (null? body) (not label)) acc
                          (cons (site-app-claim (component (site-app-node-kind node 'ui/callout)
                                                  (append (list 'tone (if letter? "paper" "note") 'body body)
-                                                         (if label (list 'label label) '())))
+                                                         (if label (list 'label label) '())
+                                                         (if letter? (list 'imenu-name (site-app-letter-name lead)) '())))
                                                first (max first (b 'count #f #f))
                                                (and flat? (if letter? (string-append "Email · " lead) lead)))
                                acc)))))
@@ -1584,8 +1596,81 @@
 (define-command "site-app-detail-prev" "Go to the previous piece of this page"
   (lambda () (site-app-detail-stop! -1)))
 
+(define (site-app-c-tabs? x)
+  (and (pair? x) (re-match? "\\bc-tabs\\b" (or (plist-get x 'class) ""))))
+
+(define (site-app-index-parts! buf head body)
+  ;; the page drawn, its head and the tab showing kept apart for imenu
+  (let ((tabs (site-app-find site-app-c-tabs? head)))
+    (buffer-set-locals! buf (list 'site-app-index-head (filter (lambda (x) (not (site-app-c-tabs? x))) head)
+                                  'site-app-index-body body
+                                  'site-app-tab-line (and tabs (plist-get tabs 'lines) (car (plist-get tabs 'lines)))))
+    (append head body)))
+
+;; imenu of a page: its head, then each of its tabs with the parts in it, the
+;; tab showing as drawn and every other from the section the page keeps for
+;; it, so a part of any tab is one pick away. A part of another tab takes that
+;; tab, then goes to the part. The spec's 'imenu-names ((REGEX REPLACEMENT) ...)
+;; say a name shorter in imenu.
+(define (site-app-imenu-rename spec)
+  (let ((rules (or (and spec (plist-get spec 'imenu-names)) '())))
+    (lambda (name)
+      (let loop ((rs rules) (n name))
+        (if (null? rs) n (loop (cdr rs) (re-replace (car (car rs)) n (cadr (car rs)))))))))
+
+(define (site-app-tab-blocks buf id)
+  ;; the parts tab ID would draw, built aside with their own text: (BLOCKS TEXT), or #f
+  (let ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+        (data (buffer-local buf 'site-app-data)))
+    (and data (not (site-app-composed-draw buf id))
+         (let ((section (site-app-detail-section buf id)))
+           (and (pair? section) (pair? (site-app-real section))
+                (let ((b (site-app-builder)) (folding *site-app-folding*))
+                  (set! *site-app-folding* buf)
+                  (set! *site-app-indexing* #t)
+                  (unwind-protect
+                    (lambda ()
+                      (let ((blocks (site-app-summary (site-app-node-blocks b (site-app-drop-repeats (site-app-drop-teasers (site-app-moved spec id section)) spec data)
+                                                                            (and spec (plist-get spec 'tones))))))
+                        (list blocks (b 'text #f #f))))
+                    (lambda () (set! *site-app-indexing* #f) (set! *site-app-folding* folding)))))))))
+
+(define (site-app-imenu-goto! buf path)
+  ;; after a tab is taken: point to its part at PATH
+  (let ((hit (site-app-find (lambda (e) (equal? (nth 4 e) path))
+                            (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '())))))
+    (when hit
+      (buffer-goto-line! buf (car hit))
+      (anchor-sync! buf))))
+
+(define (site-app-imenu-rows buf)
+  (let* ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+         (rename (site-app-imenu-rename spec))
+         (active (site-app-detail-active buf))
+         (tab-line (or (buffer-local buf 'site-app-tab-line) 1)))
+    (append
+      (anchor-entry-rows buf (anchor-block-entries (or (buffer-local buf 'site-app-index-head) '())) (list 'rename rename))
+      (apply append
+        (map (lambda (t)
+               (let* ((id (plist-get t 'id))
+                      (label (site-app-capitalize (plist-get t 'label)))
+                      (here? (equal? id active))
+                      (take (lambda () (site-app-detail-select! buf id))))
+                 (cons (list tab-line "" label "" (if here? #f take) "")
+                       (if here?
+                           (anchor-entry-rows buf (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '()))
+                                              (list 'rename rename 'depth 1 'where label))
+                           (let ((built (site-app-tab-blocks buf id)))
+                             (if (not built)
+                                 '()
+                                 (anchor-entry-rows buf (anchor-block-entries (car built))
+                                   (list 'rename rename 'depth 1 'where label 'text (cadr built) 'line tab-line
+                                         'target (lambda (e) (lambda () (take) (site-app-imenu-goto! buf (nth 4 e))))))))))))
+             (site-app-detail-tabs buf))))))
+
 (define (site-app-draw! buf)
   (set! *site-app-folding* buf)
+  (buffer-set-locals! buf (list 'site-app-index-head '() 'site-app-index-body '() 'site-app-tab-line #f))
   (let* ((data (buffer-local buf 'site-app-data))
          (row (buffer-local buf 'site-app-row))
          (spec (site-app-spec (buffer-local buf 'site-app-name)))
@@ -1601,7 +1686,7 @@
                (let* ((tabs (site-app-detail-tabs buf))
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
-                 (append
+                 (site-app-index-parts! buf
                    (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf) (and row (site-app-field row 'avatar))))
                    (cond ;; a page with no tabs is all head: nothing waits below it
                          ((null? tabs) '())
@@ -1616,7 +1701,9 @@
            (text (b 'text #f #f)))
       (buffer-set-text! buf text #t)
       (buffer-goto-line! buf (max 1 (min line (b 'count #f #f))))
-      (site-app-set-anchors! buf text blocks))
+      (site-app-set-anchors! buf text blocks)
+      ;; imenu reads every tab of the page, not only the one drawn
+      (buffer-set-local! buf 'imenu-index-function 'site-app-imenu-rows))
     ;; anchor-mode's f hands a card back to the page, which folds it by its own state
     (buffer-set-local! buf 'anchor-fold-handler site-app-fold-anchor!)
     (buffer-set-local! buf 'site-app-links (b 'links #f #f))

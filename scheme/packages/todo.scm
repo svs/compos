@@ -1453,7 +1453,7 @@
 
 (public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
 
-(define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task shows its chat in the other window; C-u asks for the group"
+(define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane; C-u asks for the group"
   (lambda ()
     (let* ((t (todo--at))
            (marked (todo--marked-tasks))
@@ -1465,7 +1465,7 @@
           chat))
       (define (assign-one! g)
         (let ((chat (assign! t g)))
-          (display-buffer-other-window! chat)
+          (todo--show-chat! chat)
           (message (string-append "Assigned to " chat))))
       (define (assign-marked! g)
         (list-clear-marks! (todo--list-buffer))

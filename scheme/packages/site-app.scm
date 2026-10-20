@@ -2668,3 +2668,7 @@
   "(site-app-open! NAME) — open a registered website app in the current group")
 (public! 'site-app-read-page!
   "(site-app-read-page! NAME PAGE) — navigate the app's live tab and redraw PAGE")
+
+(effects! '(read))
+(public! 'site-app-gen
+  "(site-app-gen NAME) — the current render generation of a website app, or #f")

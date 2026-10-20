@@ -99,13 +99,41 @@ defmodule Compos.Core.Hotload.Scheme do
   defp reduce_reload_files(files, interp) do
     Enum.reduce_while(files, {:ok, nil, interp}, fn {path, _fingerprints, forms},
                                                     {:ok, _, current} ->
-      current = stamp_load_unit(current, path, reload_origin(path))
+      if unloaded_library?(current, path) do
+        {:cont, {:ok, nil, current}}
+      else
+        current = stamp_load_unit(current, path, reload_origin(path))
 
-      case Scheme.eval_forms(current, forms) do
-        {:ok, value, next} -> {:cont, {:ok, value, next}}
-        {:error, message} -> {:halt, {:error, message, current}}
+        case Scheme.eval_forms(current, forms) do
+          {:ok, value, next} -> {:cont, {:ok, value, next}}
+          {:error, message} -> {:halt, {:error, message, current}}
+        end
       end
     end)
+  end
+
+  # A package on the load path that this session has not loaded yet: an
+  # autoload stub stands for it, and its first use loads the saved file
+  # whole. Replaying its changed forms alone would run a registration
+  # against definitions that were never evaluated.
+  defp unloaded_library?(interp, path) do
+    if path in library_paths() do
+      feature = Path.basename(path, ".scm")
+
+      case Scheme.eval_string(interp, "(featurep '\#{feature})") do
+        {:ok, false, _} -> true
+        _ -> false
+      end
+    else
+      false
+    end
+  end
+
+  defp library_paths do
+    home = Session.canonical(Compos.Core.config_dir())
+
+    (project_source_paths() ++ Path.wildcard(Path.join([home, "packages", "**/*.scm"])))
+    |> Enum.map(&Session.canonical/1)
   end
 
   defp eval_hook(interp, src) do

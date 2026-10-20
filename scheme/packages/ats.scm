@@ -640,6 +640,40 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           '("ats-candidates-mode" "ats-approvals-mode" "ats-applications-mode" "ats-companies-mode"
             "ats-jobs-mode" "ats-meetings-mode" "ats-pipeline-mode" "ats-detail-mode"))
 
+;; An ATS page by its id, as a row of its section opens it. KIND is jobs, approvals,
+;; applications or candidates; ID is the key in the site's URL: a job's slug, an
+;; approval's or application's uuid, a candidate's short id. The page opens beside its
+;; section's list, which is made without showing it when it is not open.
+
+(domain! 'web)
+(effects! '(write external display))
+
+;; the section's list buffer, made and moded as site-app-open! makes it, but not shown or read
+(define (ats-list-buffer! kind)
+  (let ((buf (site-app-page-buffer 'ats kind))
+        (mode (site-app-page-mode 'ats kind)))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (site-app-join-group! buf 'ats)
+    (buffer-set-local! buf 'site-app-spec (site-app-spec 'ats))
+    (buffer-set-local! buf 'site-app-page kind)
+    (unless (buffer-derived-mode? buf mode)
+      (with-current-buffer buf (lambda () (set-mode! mode))))
+    buf))
+
+;; the row the list holds for ID, else one made from it; NAME titles a page the list does not
+;; hold. QUIET makes the page without showing it
+(define (ats-show! kind id &optional name quiet)
+  (let* ((page (site-app-page (site-app-spec 'ats) kind))
+         (list-buf (ats-list-buffer! kind))
+         (row (or (site-app-find (lambda (r) (equal? (plist-get r 'key) id)) (site-app-rows list-buf))
+                  (list 'key id 'name (or name id) 'href (string-append (plist-get page 'path) "/" id)))))
+    (site-app-show-detail! list-buf row page quiet)))
+
+(define (ats-job-show! id &optional name quiet) (ats-show! 'jobs id name quiet))
+(define (ats-approval-show! id &optional name quiet) (ats-show! 'approvals id name quiet))
+(define (ats-application-show! id &optional name quiet) (ats-show! 'applications id name quiet))
+(define (ats-candidate-show! id &optional name quiet) (ats-show! 'candidates id name quiet))
+
 (domain! 'web)
 (effects! '(write external display))
 

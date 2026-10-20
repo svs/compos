@@ -96,9 +96,19 @@
 (require 'feeds)
 (require 'git)
 (require 'google)
+;; the window model: a row of panes, each a stack of windows, each a stack
+;; of buffers, and the policy that says where a buffer opens. groups.scm
+;; keeps one per group, so it comes first
+(require 'panes)
 (require 'groups)
 ;; the all-windows view over the group's panes
 (require 'overview)
+;; every change of the windows, as it happened: M-x debug-last-window-movement
+(require 'window-log)
+;; the window model on the frame: M-x panes-mode; off until asked
+(require 'panes-mode)
+;; the model as a list: M-x list-panes
+(require 'panes-board)
 ;; app identity: an app names the buffers of one instance, and a move
 ;; retags them through group membership, so this follows groups
 (require 'apps)

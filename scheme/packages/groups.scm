@@ -5601,10 +5601,12 @@ is forgotten and that group falls back to creation order in the switcher."
                  (window-state-changed!)
                  (map cadr rows)))))))
 
-;; switch-to-buffer goes to the buffer's pane and selects it
+;; switch-to-buffer goes to the buffer's pane and selects it. With the
+;; window model on (panes-mode.scm) the model places instead.
 (advice-add! 'switch-to-buffer--show! 'around 'group-panes
   (lambda (next buf)
     (if (and (not (buffer-context?)) (not (layout-arranging?))
+             (not (and (boundp 'panes-mode) panes-mode))
              (group-panes-open! buf #t))
         buf
         (next buf))))

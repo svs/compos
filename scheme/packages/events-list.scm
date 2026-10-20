@@ -95,13 +95,20 @@
     (set! *events-list-drawing* #t)
     (debounce! 'events-list-draw events-list-draw-ms (lambda (_) (events-list--draw!)) #f)))
 
+;; the tabs of /: one for now, the topic families
+(define events-list-facets
+  (list (list 'label "Families" 'kind "family"
+              'options (lambda (buf) (map (lambda (f) (list f (string-append f ":*"))) (events-list--families)))
+              'get (lambda (buf) events-list-topic)
+              'set (lambda (buf v) (events-list-set-topic! v)))))
+
 (define-list-mode! "events-mode"
   (list
     'doc (string-append
            "The event log: the newest events of every topic, newest first. "
            "Moving the point shows the whole event beside the list, and RET shows it too. "
            "t keeps one topic family, such as whatsapp or mail, and T shows every topic again. "
-           "/ narrows the rows drawn. The list follows the log while it is on screen. "
+           "/ picks a topic family from its tab, or narrows the rows to what you type. The list follows the log while it is on screen. "
            "g redraws, and q quits.")
     'buffer *events-buffer*
     'transient #f
@@ -109,6 +116,7 @@
     'key (lambda (buf e) (number->string (plist-get e 'seq)))
     'follow-head #t
     'local-filter #t
+    'facets events-list-facets
     'no-marks #t
     'columns (lambda (buf)
                (list (list "seq" 7) (list "age" 5) (list "topic" 28) (list "kind" 10) (list "what" #f)))

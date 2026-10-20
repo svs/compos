@@ -24,8 +24,8 @@
 (domain! 'chat)
 (effects! '(pure))
 
-(defcustom 'agent-listen-file (string-append (compos-home) "/agent-listeners.scm")
-  "The file that keeps the agents' event listeners, one form each.")
+(defcustom 'agent-listen-file (string-append (compos-home) "/agent-listeners.scd")
+  "The file that keeps the agents' event listeners, one form each. Not .scm: hotload evaluates a .scm saved under ~/.compos.")
 
 ;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B pending SEQS created SECS)
 (defvar '*agent-listeners* '())

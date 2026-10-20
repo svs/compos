@@ -801,7 +801,7 @@
 (defface! 'todo-title 'family "var(--font-sans)" 'size "1.12em" 'weight "500" 'fg "var(--default-fg)")
 ;; the wide table keeps one font, so its columns stay in line
 (defface! 'todo-row-title 'weight "600")
-(defface! 'todo-heading 'weight "700" 'fg "var(--default-fg)")
+(defface! 'todo-heading 'family "inherit" 'size "1em" 'weight "700" 'fg "var(--default-fg)")
 (defface! 'todo-check 'fg "var(--dim-fg)")
 ;; the group that filed the task wears an outline, not a fill
 (defface! 'todo-group 'fg "var(--faint-fg)" 'box "color-mix(in srgb, var(--faint-fg) 55%, transparent)")
@@ -1678,6 +1678,7 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 - Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
 - File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.
 - Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress.
+- Waiting on someone: after `todo-wait`, call `(agent-listen! '(topic \"whatsapp:PHONE\" kind received task ID) NOTE)`. The event comes to you as a message; decide whether it answers, then carry on or listen again. `mail:ACCOUNT` topics need `match` with the sender.
 - WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
 - A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")
 

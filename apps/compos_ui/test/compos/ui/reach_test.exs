@@ -1,5 +1,6 @@
 defmodule Compos.Ui.ReachTest do
-  use ExUnit.Case, async: true
+  # the trusted networks are application env, which one test changes
+  use ExUnit.Case, async: false
 
   import Plug.Test
 
@@ -7,6 +8,20 @@ defmodule Compos.Ui.ReachTest do
 
   defp from(ip) do
     conn(:get, "/") |> Map.put(:remote_ip, ip) |> Reach.call([])
+  end
+
+  defp with_networks(networks, fun) do
+    old = Application.fetch_env(:compos_ui, :trusted_networks)
+    Application.put_env(:compos_ui, :trusted_networks, networks)
+
+    try do
+      fun.()
+    after
+      case old do
+        {:ok, value} -> Application.put_env(:compos_ui, :trusted_networks, value)
+        :error -> Application.delete_env(:compos_ui, :trusted_networks)
+      end
+    end
   end
 
   test "loopback and tailnet addresses pass; the LAN and the internet get 403" do
@@ -36,5 +51,40 @@ defmodule Compos.Ui.ReachTest do
     refute Reach.local_origin?(URI.parse("http://192.168.1.20:4004"))
     refute Reach.local_origin?(URI.parse("https://evil.example"))
     refute Reach.local_origin?(nil)
+  end
+
+  test "a configured WireGuard subnet replaces the tailnet" do
+    with_networks(["10.10.69.0/24", "10.10.67.4", "fd00:69::/64"], fn ->
+      refute from({10, 10, 69, 7}).halted
+      refute from({10, 10, 67, 4}).halted
+      refute from({0xFD00, 0x69, 0, 0, 0, 0, 0, 5}).halted
+      refute from({0, 0, 0, 0, 0, 0xFFFF, 10 * 256 + 10, 69 * 256 + 7}).halted
+      refute from({127, 0, 0, 1}).halted
+
+      assert from({10, 10, 67, 5}).halted
+      assert from({10, 10, 70, 1}).halted
+      assert from({100, 93, 101, 79}).halted
+      assert from({192, 168, 1, 20}).halted
+
+      assert Reach.local_origin?(URI.parse("http://10.10.69.1:4004"))
+      refute Reach.local_origin?(URI.parse("http://100.93.101.79:4004"))
+      refute Reach.local_origin?(URI.parse("http://10.10.70.1:4004"))
+    end)
+  end
+
+  test "a malformed network matches no address" do
+    for bad <- ["10.10.69.0/33", "10.10.69/24", "10.10.69.0/x", "host.example/24", "", "::1/129"] do
+      assert Reach.parse_network(bad) == nil, bad
+    end
+
+    with_networks(["not-a-network", "10.10.69.0/24"], fn ->
+      refute from({10, 10, 69, 7}).halted
+      assert from({100, 93, 101, 79}).halted
+    end)
+
+    with_networks([], fn ->
+      refute from({127, 0, 0, 1}).halted
+      assert from({10, 10, 69, 7}).halted
+    end)
   end
 end

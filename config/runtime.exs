@@ -20,6 +20,8 @@ import Config
 #   registry = ~/.compos/daemons.json
 #   secret_key_base = ...
 #   buffer_idle_hours = 24
+#   trusted_networks = 10.10.69.0/24, 10.10.67.4
+#   bind = 10.10.69.1
 #
 # COMPOS_CONF names the file: `COMPOS_CONF=/etc/compos.conf bin/compos daemon`.
 # Without COMPOS_CONF the daemon reads $COMPOS_HOME/daemon.conf. The file can
@@ -80,6 +82,21 @@ if config_env() != :test do
 
   if port = get.("COMPOS_PORT", "port") do
     config :compos_ui, Compos.Ui.Endpoint, http: [ip: {0, 0, 0, 0}, port: String.to_integer(port)]
+  end
+
+  # one interface instead of every interface: the address of a WireGuard
+  # interface keeps the port off the LAN, and loopback keeps it on this machine
+  if bind = get.("COMPOS_BIND", "bind") do
+    case :inet.parse_address(String.to_charlist(String.trim(bind))) do
+      {:ok, ip} -> config :compos_ui, Compos.Ui.Endpoint, http: [ip: ip]
+      _ -> raise "COMPOS_BIND=#{bind} is not an IP address"
+    end
+  end
+
+  # the networks besides loopback that may reach the port (Compos.Ui.Reach),
+  # comma or space separated CIDRs. They replace the Tailscale default.
+  if networks = get.("COMPOS_TRUSTED_NETWORKS", "trusted_networks") do
+    config :compos_ui, trusted_networks: String.split(networks, [",", " "], trim: true)
   end
 
   # the preview-app origin; a second daemon must move this port too

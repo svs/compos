@@ -12,8 +12,8 @@ import Config
 config :compos_ui, Compos.Ui.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
-  # every interface, so a browser on the tailnet reaches the editor;
-  # Compos.Ui.Reach admits loopback and tailnet addresses only
+  # every interface, so a browser on a private network reaches the editor;
+  # Compos.Ui.Reach admits loopback and the trusted networks only
   http: [ip: {0, 0, 0, 0}, port: 4004],
   server: true,
   check_origin: false,
@@ -21,6 +21,10 @@ config :compos_ui, Compos.Ui.Endpoint,
   render_errors: [formats: [html: Compos.Ui.ErrorHTML], layout: false],
   pubsub_server: Compos.Ui.PubSub,
   live_view: [signing_salt: "compos-lv-salt"]
+
+# the networks besides loopback that Compos.Ui.Reach admits, as CIDRs.
+# The default is Tailscale; COMPOS_TRUSTED_NETWORKS replaces it.
+config :compos_ui, trusted_networks: ["100.64.0.0/10", "fd7a:115c:a1e0::/48"]
 
 # the origin previewed apps run in — a different port is a different origin,
 # which is the whole point: an app's JavaScript can never read the editor

@@ -93,7 +93,11 @@
   (write-file! agent-listen-file
     (string-append ";; agent listeners: agent-listen! keeps this file. One listener a form.\n"
                    (apply string-append
-                          (map (lambda (l) (string-append (format "~s" l) "\n")) *agent-listeners*)))))
+                          (map (lambda (l) (string-append (format "~s" l) "\n")) *agent-listeners*))))
+  ;; a task's page lists what its agent listens for
+  (for-each (lambda (b) (when (equal? (buffer-local b 'mode-name) "todo-detail-mode")
+                          (todo--detail-render! b)))
+            (buffer-list)))
 
 (define (agent-listen--load!)
   (set! *agent-listeners*

@@ -155,6 +155,21 @@
 
 (define-key "mode-specific-map" "s" "scratch-buffer")
 
+;; A fresh, throwaway Morg note: *scratch-1*, *scratch-2*, ... It belongs to
+;; no group and is never a file.
+(define (scratch--new-name)
+  (let loop ((n 1))
+    (let ((name (string-append "*scratch-" (number->string n) "*")))
+      (if (buffer-exists? name) (loop (+ n 1)) name))))
+
+(define-command "scratch-new"
+  "Open a new Morg scratch buffer"
+  (lambda ()
+    (let ((name (scratch--new-name)))
+      (buffer-create name)
+      (with-current-buffer name (lambda () (set-mode! "morg-mode")))
+      (switch-to-buffer! name))))
+
 ;;; --- the project's scratch ----------------------------------------------------
 ;;; A file has a scratch; so does the project around it. Notes about one file
 ;;; belong beside that file, and notes about the whole change belong in one

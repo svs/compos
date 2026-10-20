@@ -1085,6 +1085,7 @@
      "- (todo-log \"" id "\" TEXT \"" chat "\") for progress\n"
      "- (todo-review \"" id "\" SUMMARY \"" chat "\") before anything goes out, and stop there\n"
      "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
+     "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n")))
 
 (define (todo-assign-chat! id group &optional who)
@@ -1268,6 +1269,34 @@
                                           (list "" (caddr ws)))))
                       (list 'tag "c-text" 'text (string-join (list-tail ws 3) " "))))))))
 
+;; what the task's agent waits for: the listeners agent-listen! made for
+;; the task, or for its chat when they name no task
+(define (todo--listeners t)
+  (if (not (boundp 'agent-listeners))
+      '()
+      (let ((chat (let ((b (todo--chat-of t))) (and b (buffer-local b 'chat-id)))))
+        (filter (lambda (l)
+                  (if (todo--blank? (plist-get l 'task))
+                      (and chat (equal? (plist-get l 'chat) chat))
+                      (equal? (plist-get l 'task) (plist-get t 'id))))
+                (agent-listeners)))))
+
+(define (todo--detail-listener l)
+  (let ((match (plist-get l 'match)) (kind (plist-get l 'kind)) (at (plist-get l 'created)))
+    (component 'ui/group
+      (list 'body
+            (list (component 'ui/meta
+                    (list 'segs (filter pair?
+                                  (list (list "" (plist-get l 'topic))
+                                        (and kind '("c-sep" "  ·  ")) (and kind (list "" kind))
+                                        (and (not (todo--blank? match)) '("c-sep" "  ·  "))
+                                        (and (not (todo--blank? match)) (list "" (string-append "holding " match)))
+                                        (and at '("c-sep" "  ·  "))
+                                        (and at (list "" (string-append "since " (format-time at "%d %b %H:%M"))))
+                                        (and (plist-get l 'keep) '("c-sep" "  ·  "))
+                                        (and (plist-get l 'keep) (list "" "keeps listening"))))))
+                  (list 'tag "c-text" 'text (or (plist-get l 'note) "")))))))
+
 (define (todo--detail-blocks t)
   (let* ((chat (todo--chat-of t))
          (logs (or (plist-get t 'log) '()))
@@ -1301,6 +1330,12 @@
                               (pair "Source" (plist-get t 'source))
                               (pair "Created" (plist-get t 'created))
                               (pair "Id" (plist-get t 'id)))))))))
+            (let ((ls (todo--listeners t)))
+              (if (null? ls)
+                  '()
+                  (list (component 'ui/group
+                          (list 'title (string-append "Listening  ·  " (number->string (length ls)))
+                                'body (map todo--detail-listener ls))))))
             (if (null? logs)
                 '()
                 (list (component 'ui/group

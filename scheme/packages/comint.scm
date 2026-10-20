@@ -174,7 +174,6 @@
                        (sh-quote (string-append "tail -n 200 -F " (sh-quote (cadr hp))))))
       (string-append "exec tail -n 200 -F " (sh-quote path))))
 
-(mode-parent! "tail-mode" "special-mode")
 (define-mode "tail-mode"
   (lambda ()
     (let ((buf (current-buffer)))

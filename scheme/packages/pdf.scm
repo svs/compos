@@ -848,7 +848,6 @@
 
 (mode-icon! "pdf-reader-mode" "")
 
-(mode-parent! "pdf-reader-mode" "special-mode")
 (define-mode "pdf-reader-mode"
   (lambda ()
     ;; the text is extracted from the PDF, which is the record: a history
@@ -886,7 +885,6 @@
 
 (mode-icon! "pdf-edit-mode" "")
 
-(mode-parent! "pdf-edit-mode" "special-mode")
 (define-mode "pdf-edit-mode"
   (lambda () (pdf-edit-setup! (current-buffer))))
 

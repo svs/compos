@@ -24,12 +24,10 @@
                     "subdomain becomes a canonical URL"))))
 
 (deftest 'substack-has-consolidated-list-detail-reader-modes
-  "the app registers its listing and publication list while the reader remains special"
+  "the app registers its listing and publication list"
   (lambda ()
     (check-true! (pair? (list-mode-opts "substack-mode")) "listing is a list mode")
-    (check-true! (pair? (list-mode-opts "substack-detail-mode")) "publication is a list mode")
-    (check-true! (derived-mode? "substack-reader-mode" "special-mode")
-                 "reader derives from special mode")))
+    (check-true! (pair? (list-mode-opts "substack-detail-mode")) "publication is a list mode")))
 
 (deftest 'substack-uses-one-stable-buffer-per-publication-and-post
   "detail and reader names consolidate repeat visits"

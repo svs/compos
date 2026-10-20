@@ -35,8 +35,8 @@
 (require 'migrations)
 (require 'transient)
 (require 'tabulated-list)
-; windows: display-buffer, the float, peek, layouts, special-mode, tiling;
-; a list mode derives from special-mode at load, so this precedes dired
+; windows: display-buffer, the float, peek, layouts, tiling;
+; it precedes dired
 (require 'window)
 (require 'tramp)
 (require 'dired)

@@ -642,7 +642,6 @@
         (set! events-demo-playing #f))))
 
 (define-mode "events-demo-flow-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-parent! "events-demo-flow-mode" "special-mode")
 (mode-doc! "events-demo-flow-mode"
   "The event bus scene as a picture. Each of the newest events is a pulsing arrow on the edge it travelled, and a workflow whose last run failed pulses red. <left> and <right> step one event back and forth, [ and ] ten, SPC plays forward from there, l goes live, and q buries the picture.")
 (mode-keys! "events-demo-flow-mode"

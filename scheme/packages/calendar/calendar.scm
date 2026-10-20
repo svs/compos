@@ -1047,7 +1047,6 @@
                 #t)
                (else #f)))))
 
-(mode-parent! "calendar-mode" "special-mode")
 (define-mode "calendar-mode"
   (lambda ()
     (let ((buf (current-buffer)))

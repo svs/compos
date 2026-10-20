@@ -1606,7 +1606,6 @@
       (let ((row (buffer-local buf 'amazon-row)))
         (when row
           (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))))
-(mode-parent! "amazon-detail-mode" "special-mode")
 (mode-doc! "amazon-detail-mode"
   "One product, as its own page. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "amazon-detail-mode"

@@ -484,7 +484,6 @@
 
 (define-mode "recruiting-detail-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-parent! "recruiting-detail-mode" "special-mode")
 (mode-doc! "recruiting-detail-mode"
   "One person from the board, or one fact about the job. q quits.")
 (mode-keys! "recruiting-detail-mode" (list (list "q" "bury-buffer")))
@@ -628,11 +627,9 @@
             ((equal? tab 'applications) (buffer-set-local! buf 'recruiting-applications #f)))
       (rec-load-tab! buf tab #f))))
 
-;;;###autoload
 (define-command "recruiting-job" "Open another job in its own listing"
   (lambda () (rec-pick-job! #f)))
 
-;;;###autoload
 (define-command "recruiting" "Open a job from the ATS with its tabs"
   (lambda () (rec-pick-job! #t)))
 

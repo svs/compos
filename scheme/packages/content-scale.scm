@@ -426,7 +426,7 @@
     (let ((buf (content-scale-source (current-buffer))))
       (content-scale--apply! buf (content-scale-level buf)))))
 
-(define-derived-mode "content-scale-view-mode" "special-mode" (lambda () #t))
+(define-mode "content-scale-view-mode" (lambda () #t))
 
 (define-key "content-scale-view-mode-map" "RET" "content-scale-visit")
 (define-key "content-scale-view-mode-map" "g" "content-scale-refresh")

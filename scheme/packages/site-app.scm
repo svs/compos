@@ -811,7 +811,6 @@
 (define site-app-tab-click "site-app-tab:")
 
 
-(mode-parent! "site-app-detail-mode" "special-mode")
 
 ;; A chat made for a detail page is about the thing it shows: its title, where it
 ;; lives on the site, its row's fields and the parts to read. Facts, never the

@@ -980,7 +980,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `daemons` | `C-x d` | List daemons and switch this browser tab |
 | `daemons-refresh` |  | Refresh the daemon list |
 | `workspace-open-tab` |  | Open the workspace at point in a new browser tab |
-| `workspaces` | `C-x w` | List workspaces and open one in a new browser tab |
+| `workspaces` |  | List workspaces and open one in a new browser tab |
 | `workspaces-refresh` |  | Refresh the workspace list |
 
 ## system

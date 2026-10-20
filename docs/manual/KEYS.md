@@ -148,7 +148,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x r x` | `copy-to-register` | Save the region's text in a register |
 | `C-x u` | `undo` | Undo the last change |
 | `C-x v l` | `buffer-log` | Show the provenance of this buffer: every accepted revision |
-| `C-x w` | `workspaces` | List workspaces and open one in a new browser tab |
+| `C-x w` | `list-windows` | List the windows of this frame's ring, on screen and waiting |
 | `C-y` | `yank` | Reinsert the last killed text at point |
 | `DEL` | `delete-backward-char` | Delete the character before point |
 | `ESC` | `keyboard-quit` | Quit the current operation: cancel the prompt, close the dashboard, or clear the mark |

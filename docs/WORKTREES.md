@@ -78,7 +78,7 @@ records the owner. On stamp:
 - Otherwise the current daemon claims it.
 
 Removal releases the claim. Rebase refuses to run when another daemon
-owns the workspace ("open this workspace with C-x w").
+owns the workspace ("open this workspace with M-x workspaces").
 
 ### Working state
 

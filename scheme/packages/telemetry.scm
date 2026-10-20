@@ -226,7 +226,6 @@
 
 (mode-icon! "telemetry-detail-mode" "")
 
-(mode-parent! "telemetry-detail-mode" "special-mode")
 (define-mode "telemetry-detail-mode"
   (lambda () (telemetry--detail-setup! (current-buffer))))
 

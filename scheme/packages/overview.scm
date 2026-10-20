@@ -257,6 +257,7 @@
                       ;; a spread that fails half way goes back to the panes
                       (unwind-protect
                         (lambda ()
+                          (when (layout-target) (set-frame-local! 'windows-overview-target (layout-target)))
                           (layout-target-free!)
                           (let ((rows (windows-overview--rows ids (if windows-overview-expose
                                                                        (windows-overview--cols (length ids))
@@ -308,7 +309,11 @@
         (map (lambda (r) (if (equal? (car r) pane) r (cons (car r) (filter (lambda (w) (not (equal? w me))) (cdr r)))))
              (group-panes-windows)))
       (group-panes-record! pane me #t))
-    (let ((ids (group-panes-arrange!)))
+    (let ((ids (group-panes-arrange! #t))
+          (target (frame-local 'windows-overview-target)))
+      (set-frame-local! 'windows-overview-target #f)
+      ;; the spread borrowed the frame; the chosen layout comes back
+      (when target (layout-target-set! target))
       (when (and ids (member me ids)) (select-window! me))
       ids)))
 

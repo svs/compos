@@ -2349,10 +2349,7 @@
     (buffer-set-local! buf 'list-mode name)
     (desktop-skip! buf 'list-layout-cache)
     (buffer-set-local! buf 'list-layout-cache #f)
-    ;; whether this list is a view is the MODE's answer now (its parent is
-    ;; special-mode unless the list declared 'special #f), so nothing is
-    ;; written here. What the desktop keeps is a separate question,
-    ;; answered by desktop-skip! above.
+    ;; What the desktop keeps is answered by desktop-skip! above.
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
     ;; A list opens WIDE. The typed narrowing answers a question you asked
@@ -2421,12 +2418,8 @@
   ;; a real mode: a restored list buffer gets its keys and its read-only
   ;; flag back from here, not from whatever command first opened it
   (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
-  ;; Emacs derives tabulated-list-mode from special-mode. A generated list
-  ;; is a view unless it says otherwise, and it says so once, here, as its
-  ;; parent -- not as a local on every buffer the mode makes.
-  (mode-parent! name (if (if (member 'special opts) (plist-get opts 'special) #t)
-                         "special-mode"
-                         "list-mode"))
+  ;; a list is a place you work, like any buffer
+  (mode-parent! name "list-mode")
   ;; the list's keys: its own on its map, every list's under it
   (keymap-parent! (mode-keymap name) "list-mode-map")
   (mode-keys! name (or (plist-get opts 'keys) '()))

@@ -1058,7 +1058,6 @@
 ;; open
 (mode-icon! "diff-show" "")
 
-(mode-parent! "diff-show" "special-mode")
 (define-mode "diff-show"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -1372,7 +1371,6 @@
 
 (mode-icon! "diff-mode" "")
 
-(mode-parent! "diff-mode" "special-mode")
 (define-mode "diff-mode"
   (lambda ()
     (let ((buf (current-buffer)))

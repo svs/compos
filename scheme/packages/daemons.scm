@@ -390,7 +390,6 @@
             ("q" "quit-window"))))
 
 (define-key "ctl-x-map" "d" "daemons")
-(define-key "ctl-x-map" "w" "workspaces")
 
 (category! 'sessions)
 (effects! '(write external))
@@ -415,7 +414,7 @@
   "(daemon-arrived!) — announce this daemon and the frame's restored workspace")
 (public! 'daemons "M-x daemons or C-x d — switch this tab to another daemon")
 (public! 'workspaces
-  "M-x workspaces or C-x w — open a workspace in a new browser tab")
+  "M-x workspaces — open a workspace in a new browser tab")
 
 ;; Every running daemon announces itself. All local daemon homes share this
 ;; registry unless COMPOS_DAEMON_REGISTRY gives them another file.

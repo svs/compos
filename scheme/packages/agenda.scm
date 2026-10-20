@@ -533,7 +533,6 @@
 
 (mode-icon! "morg-agenda-mode" "")
 
-(mode-parent! "morg-agenda-mode" "special-mode")
 (define-mode "morg-agenda-mode"
   (lambda ()
     (let ((buf (current-buffer)))

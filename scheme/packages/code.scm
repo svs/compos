@@ -535,7 +535,7 @@
 ;; this mode would take h j k l TAB RET q from all of them, in a buffer
 ;; that survives a restart. code-browse reads FILES; the rest already
 ;; have a reader. The shape follows evil--eligible? (evil.scm).
-(define code--special-modes
+(define code--reader-modes
   '("chat-mode" "dired-mode" "notmuch-mode" "diff-mode" "switch-mode"
     "mcp-hub-mode" "agent-mode" "tabulated-list-mode"))
 
@@ -543,7 +543,7 @@
   (and (not (string-prefix? " " buf))
        (not (process-running? buf))
        (or (buffer-path buf) (equal? buf "*scratch*"))
-       (not (member (or (buffer-local buf 'mode-name) "") code--special-modes))))
+       (not (member (or (buffer-local buf 'mode-name) "") code--reader-modes))))
 
 (define-command "code-browse" "Toggle structural browsing in this buffer"
   (lambda ()

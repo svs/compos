@@ -2474,7 +2474,6 @@ them the address is live, so a purge never follows one."
 
 (mode-icon! "notmuch-show-mode" "")
 
-(mode-parent! "notmuch-show-mode" "special-mode")
 (define-mode "notmuch-show-mode"
   (lambda ()
     (let ((buf (current-buffer)))

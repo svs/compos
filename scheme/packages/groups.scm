@@ -3003,7 +3003,8 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; A buffer's major mode, the one thing consolidation groups by.
 (define (mode-consolidate-mode-of buf)
-  (and (buffer-known? buf) (buffer-local buf 'mode-name)))
+  ;; a buffer that never set a mode is fundamental, and consolidates like any other
+  (and (buffer-known? buf) (or (buffer-local buf 'mode-name) "fundamental-mode")))
 
 ;; What consolidation will do, as (MODE WINDOW) per major mode: the
 ;; selected window's mode, the other panes', then every other mode the
@@ -3057,10 +3058,30 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; Every major mode of the group gets one window. A mode with a pane
 ;; gathers there; one without takes a hidden window the layout ring walks to.
+(define (consolidate--merge-modes!)
+  ;; every buffer of a mode into one window of that mode. The windows on
+  ;; screen go first, so a mode that shows keeps the window it shows in and
+  ;; the screen hardly moves; a hidden window takes only a mode not on screen.
+  (let* ((shown (map car (window-list)))
+         (rest (filter (lambda (w) (not (member w shown)))
+                       (append (apply append (map cdr (group-panes-windows)))
+                               (map car (window-hidden-list))))))
+    (let loop ((ids (append shown rest)) (done '()) (count 0))
+      (if (null? ids)
+          count
+          (let* ((win (car ids))
+                 (buf (window-buffer-any win))
+                 (mode (and buf (equal? (buffer-group buf) (frame-group)) (mode-consolidate-mode-of buf))))
+            (if (and mode (not (member mode done)))
+                (loop (cdr ids) (cons mode done) (+ count (mode-consolidate-into! win mode)))
+                (loop (cdr ids) done count)))))))
+
 (define (consolidate!)
   (let ((me (active-window)))
     (cond ((and (boundp 'group-panes-of) (group-panes-of (frame-group)))
-           ;; a group with panes: each mode one window, behind its pane
+           ;; a group with panes: every buffer of a mode goes into that mode's
+           ;; one window, the hidden ones included, then the panes lay again
+           (consolidate--merge-modes!)
            (group-panes-apply!))
           ((not (member me (display--work-windows)))
            (message "Select a work window to consolidate") #f)
@@ -3147,7 +3168,10 @@ is forgotten and that group falls back to creation order in the switcher."
                              (window-mode-preference! win #f))
                             (else
                               (window-mode-preference! win #f)
-                              (delete-window-id! win)))))))
+                              ;; delete-window-id! refuses a hidden window
+                              (if (assoc win (window-hidden-list))
+                                  (window-hidden-delete! win)
+                                  (delete-window-id! win))))))))
               (append (display--work-windows) (map car (window-hidden-list))))
             (let ((top (if (matches? shown) shown (car matching))))
               (unless (equal? top shown)
@@ -3163,7 +3187,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define-command "consolidate"
   "Give every major mode of this group one window: behind its pane, or on the layout ring"
-  consolidate!)
+  (lambda () (consolidate!)))
 
 (define (mode-consolidate!)
   (let* ((me (active-window))
@@ -5458,7 +5482,9 @@ is forgotten and that group falls back to creation order in the switcher."
           (else #f))))
 
 ;; lay the frame out as the shown window of each pane, in pane order
-(define (group-panes-arrange!)
+(define (group-panes-arrange! &optional force)
+  ;; a chosen layout owns the frame: panes only arrange a free one, or when
+  ;; FORCE asks, and a forced arrange keeps the chosen layout as the target
   (let* ((spec (group-panes-of (frame-group)))
          (rows (group-panes-windows))
          (ids (filter (lambda (w) w)
@@ -5467,11 +5493,13 @@ is forgotten and that group falls back to creation order in the switcher."
                                (and row (pair? (cdr row)) (group-panes-live? (cadr row)) (cadr row))))
                            (if spec (car spec) (map car rows))))))
     (and (pair? ids)
-         (begin
-           (layout-target-free!)
-           (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
-           (window-state-changed!)
-           ids))))
+         (or (and (layout-target) (not force) ids)
+             (let ((target (layout-target)))
+               (layout-target-free!)
+               (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
+               (when target (layout-target-set! target))
+               (window-state-changed!)
+               ids)))))
 
 ;; window-show-buffer! asks this: a group buffer shown in one pane goes
 ;; to the pane its function names
@@ -5540,11 +5568,14 @@ is forgotten and that group falls back to creation order in the switcher."
                ;; the window for a stack: the one showing its top, the pane window that held it, or a new hidden one
                (window-for
                  (lambda (s)
+                   ;; any window that already holds one of the stack's buffers, the
+                   ;; ones on screen first, keeps what it shows; a new one is the last resort
                    (let ((w (or (window-showing (car s))
-                                (find (lambda (w) (equal? (window-buffer-any w) (car s))) old)
+                                (find (lambda (w) (member (window-buffer-any w) s))
+                                      (append (map car (window-list)) old (map car (window-hidden-list))))
                                 (window-new-hidden! (car s)))))
                      (when w
-                       (set-window-prev-buffers! w (cdr s))
+                       (set-window-prev-buffers! w (filter (lambda (b) (not (equal? b (window-buffer-any w)))) s))
                        (window-mode-preference! w (mode-consolidate-mode-of (car s))))
                      w)))
                (rows
@@ -5564,7 +5595,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (and (pair? rows)
                (begin
                  (group-panes-set-rows! rows)
-                 (group-panes-arrange!)
+                 (group-panes-arrange! #t)
                  (let ((home (window-showing me)))
                    (select-window! (or home (cadr (car rows)))))
                  (window-state-changed!)

@@ -398,7 +398,6 @@
   (lambda ()
     (substack-join-group! (current-buffer))
     (buffer-set-read-only! (current-buffer) #t)))
-(mode-parent! "substack-reader-mode" "special-mode")
 (mode-doc! "substack-reader-mode"
   "One Substack post. o opens it in the browser, g refreshes it, q quits. The detail keys walk sibling readers.")
 (mode-keys! "substack-reader-mode"

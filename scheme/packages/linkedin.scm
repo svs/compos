@@ -769,7 +769,6 @@ a{color:var(--accent);text-decoration:none}
 
 (define-mode "linkedin-detail-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-parent! "linkedin-detail-mode" "special-mode")
 (mode-doc! "linkedin-detail-mode"
   "One row of the LinkedIn listing as its own page: a Recruiter project, or a conversation and the whole last message in it. o opens it in the real Recruiter, w copies its link, g reads the listing again, q puts it away. The detail walk reaches the other pages opened from this listing, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-keys! "linkedin-detail-mode"
@@ -914,7 +913,6 @@ a{color:var(--accent);text-decoration:none}
 (define-command "linkedin-tab-prev" "Show the previous LinkedIn tab"
   (lambda () (linkedin--step-tab! -1)))
 
-;;;###autoload
 (define-command "linkedin-messages" "Show the Recruiter inbox in the listing"
   (lambda ()
     (if (buffer-exists? *linkedin-buffer*)
@@ -923,7 +921,6 @@ a{color:var(--accent);text-decoration:none}
                (buffer-set-local! *linkedin-buffer* 'linkedin-tab 'messages)
                (linkedin-threads-open!)))))
 
-;;;###autoload
 (define-command "linkedin" "Open the LinkedIn Recruiter app"
   (lambda () (linkedin-open! #t)))
 

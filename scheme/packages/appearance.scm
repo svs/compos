@@ -273,7 +273,7 @@
   'group 'appearance
   'set (chrome-publisher "mode-line-format"))
 
-(define workspace-bar-help "C-x w new tab · C-x d switch daemon")
+(define workspace-bar-help "M-x workspaces new tab · C-x d switch daemon")
 (define frame-tabs-more-title "every group (C-x C-g l)")
 
 (frame-chrome-set! "echo-hints" echo-key-hints)

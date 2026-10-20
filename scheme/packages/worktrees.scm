@@ -606,7 +606,7 @@
          (owner (and (boundp (quote daemon-workspace-owner))
                      (daemon-workspace-owner path))))
     (if (and owner (not (equal? (plist-get owner 'url) (editor-url))))
-        (message "open this workspace with C-x w before rebasing it")
+        (message "open this workspace with M-x workspaces before rebasing it")
         (let ((chat (group-chat path)))
           (unless (buffer-local chat 'workspace-root)
             (workspace--stamp! chat id path project))

@@ -61,7 +61,7 @@
 (define *ibuffer-buffer* "*ibuffer*")
 
 ;; the sort modes and the groupings, in the order the toggles cycle
-(define *ibuffer-sorts* '(name recent size))
+(define *ibuffer-sorts* '(name recent size mode))
 (define *ibuffer-groupings* '(group mode directory none))
 
 ;; the tint under a marked row: a background alone, so the row's own
@@ -778,10 +778,19 @@
 (define (ibuffer-nest-indent depth)
   (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
 
+(define (ibuffer-sort-modes rows)
+  (map (lambda (k) (list-ref k 2))
+       (sort (map (lambda (row)
+                    (list (string-downcase (ibuffer-row-label row))
+                          (string-downcase (ibuffer-row-title row))
+                          row))
+                  rows))))
+
 (define (ibuffer-sort-rows buf rows)
   (let ((mode (ibuffer-sort buf)))
     (cond ((equal? mode 'size) (ibuffer-sort-sizes rows))
           ((equal? mode 'recent) rows)
+          ((equal? mode 'mode) (ibuffer-sort-modes rows))
           (else (ibuffer-sort-names rows)))))
 
 ;;; --- headings -----------------------------------------------------------------
@@ -3077,7 +3086,7 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-refresh! "(ibuffer-refresh! [BUF]) — rebuild the table BUF, else the view at hand")
 (public! 'ibuffer-open! "(ibuffer-open! SCOPE [VIEW MODE]) — open a table on SCOPE: #f for every buffer, a list, or a scope name")
 (public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")
-(public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE [BUF]) — order the rows of a section by 'name, 'recent, or 'size")
+(public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE [BUF]) — order the rows of a section by 'name, 'recent, 'size, or 'mode (mode, then name)")
 (public! 'ibuffer-set-grouping! "(ibuffer-set-grouping! MODE [BUF]) — section the table by 'group, 'mode, or 'directory")
 (public! 'ibuffer-toggle-fold! "(ibuffer-toggle-fold! KEY [BUF]) — fold or unfold the section KEY names")
 (public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")

@@ -97,6 +97,11 @@ h1 {
 .emblem { justify-self: end; width: 100%; max-width: 500px; line-height: 0; }
 .emblem img { width: 100%; height: auto; display: block; }
 
+/* real screenshot */
+.shot { margin: 0 0 72px; }
+.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
+.shot figcaption { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); }
+
 /* the frame */
 .frame-wrap { padding: 0 0 96px; }
 .frame {
@@ -281,6 +286,11 @@ footer { border-top: 1px solid var(--rule); }
       <img src="images/compos-logo-dark.png" width="560" height="560" alt="The Compos logo">
     </div>
   </section>
+
+  <figure class="shot">
+    <img src="images/smartbrew-frame.webp" width="2560" height="1294" alt="A Compos workspace for a sales team: a pipeline of leads by stage beside a lead's details, with the group tabs and status lines across the top and bottom">
+    <figcaption>A real workspace: a sales pipeline, shaped for one team.</figcaption>
+  </figure>
 
   <section class="frame-wrap" aria-label="A Compos workspace: a planning note beside an agent chat that edits it">
     <div class="frame">

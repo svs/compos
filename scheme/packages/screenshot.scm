@@ -105,8 +105,8 @@
 
 ;; the page writes the PNG to the clipboard; Chrome allows it while the
 ;; editor tab has focus, which a click in the picker gives
-(define (screenshot--copy! data)
-  (tab-cdp (dom--editor-tab) "Runtime.evaluate"
+(define (screenshot--copy! tab data)
+  (tab-cdp tab "Runtime.evaluate"
     (list 'expression
           (string-append "(async () => { const b = await (await fetch('data:image/png;base64," data
                          "')).blob(); await navigator.clipboard.write([new ClipboardItem({'image/png': b})]); })()")
@@ -118,23 +118,27 @@
 ;; once and never awaits a promise, so this cannot wait for a paint; it
 ;; used to await one through Runtime.evaluate, and that call never answered,
 ;; so no screenshot was ever written. K runs whatever the page says.
-(define (screenshot--settle k)
-  (tab-eval (dom--editor-tab)
+(define (screenshot--settle tab k)
+  (tab-eval tab
     "!document.querySelector('.mb-modal-layer')"
     (lambda (r) (k))))
 
-(define (screenshot--capture params path k)
-  (screenshot--settle
-    (lambda ()
-      (tab-cdp (dom--editor-tab) "Page.captureScreenshot" params
-        (lambda (r)
-          (let ((data (plist-get (plist-get r 'result) 'data)))
-            (if (string? data)
-                (begin (write-file! path (base64-decode data))
-                       (variable-set! 'screenshot--last path)
-                       (when screenshot-copy (screenshot--copy! data))
-                       (k path))
-                (k #f))))))))
+;; the tab is the caller's frame, read once now: a callback runs with
+;; another frame selected, and dom--editor-tab there falls back to the
+;; first tab, someone else's frame.
+(define (screenshot--capture params path k &optional tab)
+  (let ((tab (or tab (dom--editor-tab))))
+    (screenshot--settle tab
+      (lambda ()
+        (tab-cdp tab "Page.captureScreenshot" params
+          (lambda (r)
+            (let ((data (plist-get (plist-get r 'result) 'data)))
+              (if (string? data)
+                  (begin (write-file! path (base64-decode data))
+                         (variable-set! 'screenshot--last path)
+                         (when screenshot-copy (screenshot--copy! tab data))
+                         (k path))
+                  (k #f)))))))))
 
 (define (screenshot! target &optional path k)
   (let ((params (screenshot--params target))
@@ -188,24 +192,25 @@
 
 ;; long-polls the picker in short rounds, so the bridge never times out;
 ;; a click answers at once. K gets the picked box, or #f on cancel.
-(define (screenshot--pick-wait k)
-  (tab-cdp (dom--editor-tab) "Runtime.evaluate"
+(define (screenshot--pick-wait tab k)
+  (tab-cdp tab "Runtime.evaluate"
     (list 'expression "window.__composPickWait?window.__composPickWait(10000):'cancel'"
           'awaitPromise #t 'returnByValue #t)
     (lambda (r)
       (let ((v (plist-get (plist-get (plist-get r 'result) 'result) 'value)))
-        (cond ((equal? v "pending") (screenshot--pick-wait k))
+        (cond ((equal? v "pending") (screenshot--pick-wait tab k))
               ((and (string? v) (not (equal? v "cancel"))) (k (json-parse v)))
               (else (k #f)))))))
 
 (define (screenshot-pick! &optional path k)
   (let ((path (or path (screenshot--default-path)))
-        (k (or k (lambda (v) v))))
+        (k (or k (lambda (v) v)))
+        (tab (dom--editor-tab)))
     (dom-eval (screenshot--pick-js))
-    (screenshot--pick-wait
+    (screenshot--pick-wait tab
       (lambda (box)
         (if box
-            (screenshot--capture (screenshot--clip box) path k)
+            (screenshot--capture (screenshot--clip box) path k tab)
             (k 'cancelled))))
     path))
 

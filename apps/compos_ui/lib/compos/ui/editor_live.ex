@@ -2975,8 +2975,25 @@ defmodule Compos.Ui.EditorLive do
 
   defp render_preview(rm, leaf, pt, mark, faces, cache) do
     {text, pt, mark} = preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
-    {preview_doc(rm, text, pt, mark, faces, leaf.preview_authored, leaf.overlays), cache}
+    html = preview_doc(rm, text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
+    {if(rm == "html", do: local_images(html, Map.get(leaf, :path)), else: html), cache}
   end
+
+  # The preview writes the page into a frame of the editor's own origin, so a
+  # relative image would resolve against the editor. Point each one that names
+  # a file beside the page at a signed LocalFile URL instead.
+  @local_image ~r/(\s(?:src|href)=["'])([^"'#?:]+?\.(?:png|jpe?g|gif|webp|avif|svg|ico))(["'])/i
+
+  defp local_images(html, path) when is_binary(path) do
+    dir = Path.dirname(path)
+
+    Regex.replace(@local_image, html, fn whole, open, rel, close ->
+      file = Path.expand(rel, dir)
+      if File.regular?(file), do: open <> LocalFile.url(file) <> close, else: whole
+    end)
+  end
+
+  defp local_images(html, _path), do: html
 
   # What only the web client knows: how a local path becomes a URL the
   # page can load, and how an X post becomes a card.

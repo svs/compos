@@ -5211,7 +5211,8 @@ is forgotten and that group falls back to creation order in the switcher."
   (define-key "buffer-group-map" "C-g" "group-switch-last")
   (define-key "buffer-group-map" "g" "buffer-goto-group")
   (define-key "buffer-group-map" "b" "group-members")
-  (define-key "buffer-group-map" "l" "groups")
+;; l lays the group's panes again: the rows come back from the members
+  (define-key "buffer-group-map" "l" "group-panes-apply")
   (define-key "buffer-group-map" "s" "tile-all")
   (define-key "buffer-group-map" "p" "group-pin")
   (define-key "buffer-group-map" "a" "group-add")

@@ -274,7 +274,7 @@
   'set (chrome-publisher "mode-line-format"))
 
 (define workspace-bar-help "M-x workspaces new tab · C-x d switch daemon")
-(define frame-tabs-more-title "every group (C-x C-g l)")
+(define frame-tabs-more-title "every group (M-x groups)")
 
 (frame-chrome-set! "echo-hints" echo-key-hints)
 (frame-chrome-set! "mode-line-format" mode-line-format)

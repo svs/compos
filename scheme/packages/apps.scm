@@ -17,7 +17,14 @@
 (effects! '(read))
 
 (define (app-id buf)
-  (and buf (buffer-known? buf) (buffer-local buf 'app-id)))
+  ;; a site app's page names its app in 'site-app-name even when no
+  ;; claim tagged it
+  (and buf (buffer-known? buf)
+       (or (buffer-local buf 'app-id)
+           (let ((nm (buffer-local buf 'site-app-name)))
+             (cond ((symbol? nm) (symbol->string nm))
+                   ((string? nm) nm)
+                   (else #f))))))
 
 (define (app-role buf)
   (and buf (buffer-known? buf) (buffer-local buf 'app-role)))

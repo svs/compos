@@ -42,8 +42,9 @@
   layout)
 
 (define (panes-layout-set! layout)
-  (panes--layout-store! (panes--group-key) layout)
-  (panes--check-model! layout))
+  (let ((layout (panes-unique-buffers layout)))
+    (panes--layout-store! (panes--group-key) layout)
+    (panes--check-model! layout)))
 
 (define (panes-model-faults model)
   ;; pure: what MODEL breaks of its own rules, as text; () is none. One live
@@ -208,8 +209,21 @@
     layout))
 
 ;; the frame follows LAYOUT and it becomes this group's model
+;; the open buffers of this frame's group: each is in a window. The read model
+;; answers the group's names; only the ones no window holds are checked further
+(define (panes--group-buffers &optional held)
+  (let* ((group (or (frame-group) (and (boundp 'group-cycle-group) (group-cycle-group))))
+         (names (if group (map car (cadr (buffer-rows (list 'groups (list group) 'fields '(name))))) '())))
+    (filter (lambda (b) (or (and held (member b held))
+                            (and (not (string-prefix? " " b))
+                                 (fill-candidate? b)
+                                 (not (buffer-context-only? b)))))
+            names)))
+
 (define (panes-apply! layout)
-  (let ((layout (panes--draw! layout)))
+  ;; a buffer is in one window, whatever made this layout, and every window of
+  ;; the layout is a window of the frame: one the screen does not show waits hidden
+  (let ((layout (panes--draw! (panes--materialize! (panes-unique-buffers (panes-adopt-buffers layout (panes--group-buffers (panes-buffers layout)) panes--buffer-mode))))))
     (panes-layout-set! layout)
     (window-state-changed!)
     layout))
@@ -288,6 +302,35 @@
 ;; the model keeps no spares: the frame's hidden windows change under it
 (define (panes--without-spares layout) (plist-put layout 'spares '()))
 
+;; consolidate on the model: every mode one window. The frame-level consolidate
+;; makes hidden windows the model does not know, and the next redraw throws them away
+(define (panes-consolidate!)
+  (let* ((me (active-window))
+         ;; every buffer is in a window already (panes-apply!); consolidate only regroups
+         (after (panes-consolidate (panes--ensure-layout!) panes--buffer-mode)))
+    (window-log-note! "panes consolidate")
+    (panes-apply! after)
+    (when (window-exists? me) (select-window! me))
+    (message (string-append "Consolidated into " (number->string (length (panes-window-keys after))) " windows"))
+    me))
+
+;; a frame window, hidden, for every window of the model that has none: a
+;; consolidate makes windows the frame never drew. A handle two keys share
+;; counts once. The window takes its stack, so it walks as the model says
+(define (panes--materialize! layout)
+  (let loop ((ks (panes-window-keys layout)) (l layout) (used '()))
+    (if (null? ks)
+        l
+        (let* ((k (car ks)) (h (panes-handle l k)) (buf (panes-window-buffer l k)))
+          (if (and (panes--live-handle? h) (not (member h used)))
+              (loop (cdr ks) l (cons h used))
+              (let ((nh (and buf (buffer-known? buf) (window-new-hidden! buf))))
+                (if nh
+                    (begin
+                      (set-window-prev-buffers! nh (cdr (panes-window-buffers l k)))
+                      (loop (cdr ks) (panes-set-handle l k nh) (cons nh used)))
+                    (loop (cdr ks) l used))))))))
+
 (define (panes-quit! win)
   (let* ((layout (panes-layout))
          (k (and layout (panes-key-of-handle layout win))))
@@ -306,7 +349,10 @@
     (and layout (member name (panes-buffers layout))
          (begin
            (window-log-note! "panes kill" name)
-           (panes-apply! (panes--without-spares (panes-drop-buffer (panes--with-spares layout name) name)))
+           ;; a kill from the overview keeps no count of panes: nothing refills
+           (panes-apply! (if (and (boundp 'windows-overview-active?) (windows-overview-active?))
+                             (plist-put (panes-drop-buffer (plist-put layout 'bare #t) name) 'bare #f)
+                             (panes--without-spares (panes-drop-buffer (panes--with-spares layout name) name))))
            (lambda () (window-state-changed!))))))
 
 (define (panes--rename! old new)
@@ -499,6 +545,8 @@
     (lambda (next)
       (when panes-mode
         (panes--ensure-layout!)
+        ;; every window of the model gets a tile, so each wants a frame window
+        (panes-layout-set! (panes--materialize! (panes-layout)))
         (group-panes-set-rows! (panes--rows)))
       (next)))
   (advice-add! 'windows-overview-exit! 'around 'panes

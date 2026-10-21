@@ -1055,7 +1055,18 @@ the next row down. STEP is kept for the callers."
   "The tab C-x b opens on: 'all, 'group, or 'window. The left and right arrows move to the others while the prompt is open."
   'group 'buffers 'type 'choice)
 
-(define *switch-tabs* '((all "All") (group "Group") (window "Window")))
+(define *switch-tabs* '((all "All") (group "Group") (window "Window") (pane "Pane")))
+
+;; every buffer of every window in WIN's pane, its front window first: under
+;; panes-mode the pane is a stack of windows; else the windows the pane records
+(define (switch-pane-tab-buffers win)
+  (let* ((l (and (boundp 'panes-mode) panes-mode (panes-layout)))
+         (k (and l (panes-key-of-handle l win)))
+         (pane (and k (panes-pane-of l k))))
+    (if pane
+        (panes--uniq (apply append (map (lambda (key) (panes-window-buffers l key))
+                                        (or (plist-get (panes-pane l pane) 'windows) '()))))
+        (switch-pane-buffers win))))
 
 ;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...)
 (define (switch-tab-row tab)
@@ -1081,6 +1092,9 @@ the next row down. STEP is kept for the callers."
          (if group (filter (lambda (r) (switch-row-in-group? r group)) rows) '()))
         ((eq? tab 'window)
          (let ((mine (if (and win (window-exists? win)) (switch-pane-buffers win) '())))
+           (filter (lambda (r) (member (car r) mine)) rows)))
+        ((eq? tab 'pane)
+         (let ((mine (if (and win (window-exists? win)) (switch-pane-tab-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
         (else rows)))
 

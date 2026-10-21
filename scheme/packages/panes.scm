@@ -200,6 +200,47 @@
                 layout
                 (panes--uniq (list pa pb)))))))
 
+;; a buffer is in one window: the window that shows it on screen, else one that
+;; has it in front, else the first that holds it. Every other window lets it go,
+;; and a window left with nothing closes
+;; no buffer is without a window: each of BUFS the layout does not hold joins
+;; the back of its mode's window (MODE-OF), else a window of its own behind the
+;; last pane
+(define (panes-adopt-buffers layout bufs mode-of)
+  (let ((held (panes-buffers layout)))
+    (panes--adopt-missing layout (panes--uniq (filter (lambda (b) (not (member b held))) bufs)) mode-of)))
+
+(define (panes--adopt-missing layout missing mode-of)
+  (fold (lambda (l b)
+          (let ((m (mode-of b)))
+            (cond ((and m (panes-mode-window l m))
+                   (panes--update-window l (panes-mode-window l m)
+                     (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list b))))))
+                  ((pair? (panes-panes l))
+                   (car (panes-new-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
+                  (else l))))
+        layout missing))
+
+(define (panes-unique-buffers layout)
+  (let* ((keys (panes-window-keys layout))
+         (tops (panes-top-windows layout))
+         (order (append tops (filter (lambda (k) (not (member k tops))) keys)))
+         (fronts (fold (lambda (acc k)
+                         (let ((b (panes-window-buffer layout k)))
+                           (if (and b (not (assoc b acc))) (cons (list b k) acc) acc)))
+                       '() order))
+         (owner (fold (lambda (acc k)
+                        (fold (lambda (a b) (if (assoc b a) a (cons (list b k) a)))
+                              acc (panes-window-buffers layout k)))
+                      fronts order)))
+    (fold (lambda (l k)
+            (let* ((bufs (panes-window-buffers l k))
+                   (mine (filter (lambda (b) (equal? (cadr (assoc b owner)) k)) bufs)))
+              (cond ((= (length mine) (length bufs)) l)
+                    ((null? mine) (panes-close-window l k))
+                    (else (panes--update-window l k (lambda (w) (panes--put w 'buffers mine)))))))
+          layout keys)))
+
 (define (panes-close-window layout key)
   (let ((pane (panes-pane-of layout key)))
     (if (not pane)
@@ -209,7 +250,11 @@
                (layout (panes--update-pane layout pane
                          (lambda (p) (panes--put p 'windows (panes--without key (or (plist-get p 'windows) '()))))))
                (left (plist-get (panes-pane layout pane) 'windows)))
-          (if (and (null? left) (> (panes-pane-count layout) 1))
+          (cond
+            ((not (and (null? left) (> (panes-pane-count layout) 1))) layout)
+            ;; a 'bare layout keeps no count of panes (the overview's): the emptied pane goes
+            ((plist-get layout 'bare) (panes-remove-pane layout pane))
+            (else
               ;; the layout keeps its panes: an emptied pane takes a window that waits
               ;; behind another pane's front one, else one of the frame's hidden
               ;; windows ('spares), and goes only when no window is left
@@ -217,8 +262,7 @@
                 (if waiting
                     (panes-move-window layout waiting pane)
                     (or (panes--take-spare layout pane)
-                        (panes-remove-pane layout pane))))
-              layout)))))
+                        (panes-remove-pane layout pane))))))))))
 
 ;; KEY comes to the front of its pane
 (define (panes-raise layout key)
@@ -390,12 +434,46 @@
 ;;; a buffer has the mode of the window that holds it. A window that gives
 ;;; up every buffer closes. MODES limits the work to those modes.
 
-(define (panes-consolidate layout &optional mode-of modes)
+;; before a consolidate: a window takes the mode of the buffer it shows now,
+;; not the one it was made with; each of EXTRA joins the back of its mode's window,
+;; or a new window behind the last pane; and a mode with buffers but no window gets
+;; one, behind the pane of the first window that holds such a buffer. Only with
+;; MODE-OF, which reads the buffers' own modes
+(define (panes--consolidate-homes layout mode-of modes &optional extra)
+  (if (not mode-of)
+      layout
+      (let* ((layout (fold (lambda (l k)
+                             (let* ((top (panes-window-buffer l k)) (m (and top (mode-of top))))
+                               (if m (panes-set-mode l k m) l)))
+                           layout (panes-window-keys layout)))
+             (layout (fold (lambda (l b)
+                             (let ((m (mode-of b)))
+                               (cond ((or (not m) (member b (panes-buffers l)) (and modes (not (member m modes)))) l)
+                                     ((panes-mode-window l m)
+                                      (panes--update-window l (panes-mode-window l m)
+                                        (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list b))))))
+                                     ((pair? (panes-panes l))
+                                      (car (panes-new-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
+                                     (else l))))
+                           layout (or extra '())))
+             (wanted (panes--uniq (filter (lambda (m) (and m (or (not modes) (member m modes))))
+                                          (map mode-of (panes-buffers layout))))))
+        (fold (lambda (l m)
+                (if (panes-mode-window l m)
+                    l
+                    (let ((k (find (lambda (k) (find (lambda (b) (equal? (mode-of b) m)) (panes-window-buffers l k)))
+                                   (panes-window-keys l))))
+                      (if k (car (panes-new-window l (panes-pane-of l k) #f m #t)) l))))
+              layout wanted))))
+
+(define (panes-consolidate layout &optional mode-of modes extra)
   ;; the mode of every buffer is read once, from the layout as it stands:
   ;; the window showing it first, else the first window holding it. The
   ;; walk below only looks it up, so a 12-window frame consolidates in
-  ;; milliseconds instead of a quarter of a second
-  (let* ((keys (panes-window-keys layout))
+  ;; milliseconds instead of a quarter of a second. EXTRA are buffers the
+  ;; layout does not hold yet, such as the rest of the group: they join too
+  (let* ((layout (panes--consolidate-homes layout mode-of modes extra))
+         (keys (panes-window-keys layout))
          (index (let loop ((ks keys) (acc '()))
                   (if (null? ks)
                       (let loop2 ((ks keys) (acc acc))

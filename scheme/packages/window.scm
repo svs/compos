@@ -2736,10 +2736,11 @@ bottom, as a window-rects row; #f past either end."
                        (loop (cdr l) best bestd)))))))))
 
 (define (focus-move! dir)
+  ;; focus moves between the windows on screen; at the edge it stays put and
+  ;; the ring does not slide
   (let ((w (window-in-direction dir)))
     (cond (w (select-window! (car w))
              (chat-snap-to-input!))
-          ((layout-edge-scroll! dir) (chat-snap-to-input!))
           (else (message (string-append "No window " (symbol->string dir)))))))
 
 ;; a move that lands on a peek's window goes back: a preview takes no
@@ -3211,11 +3212,17 @@ and right walk the panes, up and down move by geometry."
     (windows-list-on-current
       (lambda (win)
         (let ((list-win (active-window)))
-          (unless (member win (layout-pane-windows))
-            (layout-ring-show! win))
-          (when (member win (layout-pane-windows))
-            (select-window! win)
-            (consolidate!))
+          (if (and (boundp 'panes-mode) panes-mode)
+              ;; the panes model consolidates every window it holds, shown or not
+              (begin
+                (when (member win (map car (window-list))) (select-window! win))
+                (consolidate!))
+              (begin
+                (unless (member win (layout-pane-windows))
+                  (layout-ring-show! win))
+                (when (member win (layout-pane-windows))
+                  (select-window! win)
+                  (consolidate!))))
           (when (window-exists? list-win) (select-window! list-win))
           (list-refresh! *windows-list-buffer*))))))
 

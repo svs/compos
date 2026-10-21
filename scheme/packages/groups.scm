@@ -3096,7 +3096,9 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (consolidate!)
   (let ((me (active-window)))
-    (cond ((and (boundp 'group-panes-of) (group-panes-of (frame-group)))
+    (cond ((and (boundp 'panes-mode) panes-mode (boundp 'panes-consolidate!))
+           (panes-consolidate!))
+          ((and (boundp 'group-panes-of) (group-panes-of (frame-group)))
            ;; a group with panes: every buffer of a mode goes into that mode's
            ;; one window, the hidden ones included, then the panes lay again
            (consolidate--merge-modes!)

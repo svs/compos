@@ -518,10 +518,13 @@
           ((equal? tab 'window)
            (let ((w (buffer-local buf 'ibuffer-tab-window)))
              (and w (window-exists? w) (member name (window-prev-buffers w)) #t)))
+          ((equal? tab 'pane)
+           (let ((w (buffer-local buf 'ibuffer-tab-window)))
+             (and w (window-exists? w) (member name (switch-pane-tab-buffers w)) #t)))
           (else #t))))
 
 (define (ibuffer-tab-filter buf names)
-  (if (member (ibuffer-tab buf) '(group window))
+  (if (member (ibuffer-tab buf) '(group window pane))
       (filter (lambda (n) (or (not (string? n)) (ibuffer-tab-keep? buf n))) names)
       names))
 

@@ -32,15 +32,14 @@
          (tracked (if (pair? rows)
                       (apply append (map (lambda (row) (filter group-panes-live? (cdr row))) rows))
                       (filter group-panes-live? (jump-to-mode-windows))))
-         ;; a window of this group that no pane recorded still gets a tile, one per buffer
+         ;; a window of this group that no pane recorded still gets a tile: the
+         ;; overview is of windows, so two windows on one buffer are two tiles
          (all (let loop ((ws (map car (append (window-list) (window-hidden-list)))) (acc (reverse tracked)))
                 (cond ((null? ws) (reverse acc))
                       ((member (car ws) acc) (loop (cdr ws) acc))
                       (else
                         (let ((buf (window-buffer-any (car ws))))
-                          (if (and buf
-                                   (equal? (buffer-group buf) (frame-group))
-                                   (not (find (lambda (w) (equal? (window-buffer-any w) buf)) acc)))
+                          (if (and buf (equal? (buffer-group buf) (frame-group)))
                               (loop (cdr ws) (cons (car ws) acc))
                               (loop (cdr ws) acc)))))))
          (shown (filter (lambda (w) (member w all)) (map car (window-list))))
@@ -272,9 +271,15 @@
       (list 'spread (windows-overview--homes))))
 
 (define (windows-overview-kill!)
-  ;; kill the selected tile's buffer, drop its window, and close the gap
+  ;; kill the selected tile's window and every buffer in it, and close the gap
   (let* ((win (active-window))
          (buf (window-buffer win))
+         (l (and (boundp 'panes-mode) panes-mode (panes-layout)))
+         (k (and l (panes-key-of-handle l win)))
+         ;; the window's whole stack: the model's when it holds the window, else the frame's
+         (bufs (filter (lambda (b) (and (string? b) (buffer-known? b)))
+                       (if k (panes-window-buffers l k) (cons buf (window-prev-buffers win)))))
+         (dirty (filter buffer-modified? bufs))
          (rows (or (frame-local 'windows-overview-rows) '()))
          (flat (apply append rows))
          (after (member win flat))
@@ -282,9 +287,9 @@
                      ((> (length flat) 1) (car (reverse (filter (lambda (w) (not (equal? w win))) flat))))
                      (else #f))))
     (cond ((not buf) #f)
-          ((and (buffer-modified? buf) (not (equal? (frame-local 'windows-overview-armed) win)))
+          ((and (pair? dirty) (not (equal? (frame-local 'windows-overview-armed) win)))
            (set-frame-local! 'windows-overview-armed win)
-           (message (string-append buf " has unsaved changes; k again kills it")) #f)
+           (message (string-append (string-join dirty ", ") " has unsaved changes; k again kills the window")) #f)
           (else
             (set-frame-local! 'windows-overview-armed #f)
             (let ((row (group-panes-row-of win)))
@@ -293,10 +298,13 @@
                 (let ((rest (filter (lambda (w) (and (not (equal? w win)) (group-panes-live? w)))
                                     (cdr (assoc (car row) (group-panes-windows))))))
                   (when (pair? rest) (group-panes-record! (car row) (car rest) #t)))))
-            (buffer-kill! buf)
-            ;; the model the exit draws loses the buffer too
+            (for-each buffer-kill! bufs)
+            ;; the model the exit draws loses the buffers too
             (let ((m (frame-local 'windows-overview-model)))
-              (when m (set-frame-local! 'windows-overview-model (windows-overview-model-kill m win buf))))
+              ;; the overview keeps no count of panes or windows: nothing refills
+              (when m (set-frame-local! 'windows-overview-model
+                        (plist-put (fold (lambda (m b) (windows-overview-model-kill m win b)) (plist-put m 'bare #t) bufs)
+                                   'bare #f))))
             (when next
               ;; the rest regrid, as many to a row as before
               (let* ((left (windows-overview--rows (filter (lambda (w) (not (equal? w win))) flat)
@@ -308,7 +316,9 @@
                 (when (assoc next (window-list)) (select-window! next))
                 (editing-state-off! (window-buffer next))))
             (window-state-changed!)
-            (message (string-append "Killed " buf))
+            (message (if (= (length bufs) 1)
+                         (string-append "Killed " buf)
+                         (string-append "Killed the window of " buf " and its " (number->string (length bufs)) " buffers")))
             buf))))
 
 (define (windows-overview-enter!)
@@ -571,7 +581,7 @@
 (advice-add! 'switch-to-group! 'before 'windows-overview
   (lambda (g) (when (windows-overview-on?) (windows-overview-exit! #t))))
 
-(define-command "windows-overview-kill" "Kill the buffer of the selected tile in the all-windows view"
+(define-command "windows-overview-kill" "Kill the selected tile's window and every buffer in it, in the all-windows view"
   (lambda ()
     (if (windows-overview-active?)
         (windows-overview-kill!)

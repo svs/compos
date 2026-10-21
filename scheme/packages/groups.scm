@@ -5528,7 +5528,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (if (or (layout-arranging?) (not (group-panes-row-of win)))
       win
       (let ((pane (group-panes-pane name)))
-        (if (not pane)
+        (if (or (not pane) (not (assoc pane (group-panes-windows))))
             win
             (let ((w (or (group-panes-window-for pane (mode-consolidate-mode-of name))
                          (let ((shown (group-panes-window pane)))

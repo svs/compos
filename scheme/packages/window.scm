@@ -3279,7 +3279,11 @@ and right walk the panes, up and down move by geometry."
 
 ;; The list follows the ring while it is on screen.
 (define (windows-list-follow!)
-  (when (and (buffer-known? *windows-list-buffer*) (window-showing *windows-list-buffer*))
+  ;; only a list on screen follows, and not while the overview lays its
+  ;; tiles: a hidden window holding the list does not count as showing it
+  (when (and (buffer-known? *windows-list-buffer*)
+             (not (frame-local 'windows-overview-rows))
+             (find (lambda (w) (equal? (cadr w) *windows-list-buffer*)) (window-list)))
     (list-refresh! *windows-list-buffer*)))
 
 (add-hook! 'window-state-change-hook 'windows-list-follow!)

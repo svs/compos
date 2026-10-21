@@ -49,8 +49,21 @@
 
 ;; (WIN NAME) for every window of this frame: given names as they are,
 ;; default ones numbered when they repeat
+(define *window-names-cache* #f)   ;; (KEY NAMES)
+
 (define (window-names)
-  (let loop ((wins (frame-windows)) (seen '()) (acc '()))
+  ;; every row of a list asks for one name, so the names are worked out once
+  ;; for each arrangement: the frame, its windows, what they show, the given names
+  (let* ((wins (frame-windows))
+         (key (list (selected-frame) *window-names* (map (lambda (w) (list w (window-buffer-any w))) wins))))
+    (if (and *window-names-cache* (equal? (car *window-names-cache*) key))
+        (cadr *window-names-cache*)
+        (let ((names (window-names--work wins)))
+          (set! *window-names-cache* (list key names))
+          names))))
+
+(define (window-names--work wins)
+  (let loop ((wins wins) (seen '()) (acc '()))
     (if (null? wins)
         (reverse acc)
         (let* ((w (car wins))

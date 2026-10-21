@@ -275,7 +275,9 @@
 ;; window on screen the model never saw gets a pane; a window that is gone
 ;; leaves the model
 (define (panes--reconcile!)
-  (unless (or (not panes-mode) panes--applying (layout-arranging?))
+  ;; the overview's tiles are not panes: the model waits until it gathers
+  (unless (or (not panes-mode) panes--applying (layout-arranging?)
+              (frame-local 'windows-overview-rows))
     (let ((layout (panes-layout)))
       (when layout
         (let* ((tops (panes-top-windows layout))
@@ -398,7 +400,11 @@
                                                 (window-tree-buffers saved)))
                                  '()))
                        (bufs (if (pair? kept) kept (group-default-panes id))))
-                  (panes-apply! (panes--default-layout bufs))))))))
+                  (panes-apply! (panes--default-layout bufs))))
+            ;; the group's chosen layout comes back with it: the frame is
+            ;; free only while the panes are drawn
+            (layout-target-set! (group-layout-target id))
+            (layout-target-default!)))))
   ;; the switcher's look at a group draws that group's model, and wakes what
   ;; it shows the way the old look did; the switcher sleeps them again
   (advice-add! 'group-preview-draw! 'around 'panes
@@ -437,10 +443,12 @@
           (apply next args)
           (let* ((me (active-window))
                  (home (frame-local 'windows-overview-home))
+                 ;; back on the window it opened from, the view gives the frame back as it was
+                 (stay (and (frame-local 'windows-overview-arrangement) (frame-local 'windows-overview-from)))
                  (r (apply next args))
                  (l (panes-layout))
                  (k (and l (panes-key-of-handle l me))))
-            (when k
+            (when (and k (not stay))
               (panes-apply! (if (and home (panes-pane l home)) (panes-move-window l k home 0) (panes-raise l k)))
               (when (window-exists? me) (select-window! me)))
             r))))

@@ -155,6 +155,15 @@
           (loop (car rest) (cdr rest)))))))
 
 (define (windows-overview--lay! rows)
+  ;; the tiles are a look at the group, as the switcher's is: the frame's
+  ;; group is not worked out again after every split
+  (let ((look *group-look-active*))
+    (set! *group-look-active* #t)
+    (unwind-protect
+      (lambda () (windows-overview--lay-tiles! rows))
+      (lambda () (set! *group-look-active* look)))))
+
+(define (windows-overview--lay-tiles! rows)
   (with-layout-suppressed
     (lambda ()
       (if windows-overview-expose
@@ -169,8 +178,13 @@
             (for-each windows-overview--row! rows))))))
 
 (define (windows-overview--cols n)
-  ;; tiles to a row: about 1.6 across for each one down, as a wide screen holds them
-  (max 1 (min n (ceiling (sqrt (* n 1.6))))))
+  ;; tiles to a row: about 1.6 across for each one down, as a wide screen
+  ;; holds them, evened out so the last row is not a lone wide tile
+  (if (< n 2)
+      1
+      (let* ((cols (max 1 (min n (ceiling (sqrt (* n 1.6))))))
+             (rows (ceiling (/ n cols))))
+        (ceiling (/ n rows)))))
 
 (define (windows-overview--nearest c len len2)
   ;; rows are centred: the index in a row of LEN2 nearest tile C of a row of LEN
@@ -277,12 +291,13 @@
                           ;; the frame the spread borrows: the exit gives it back when the panes cannot
                           (set-frame-local! (quote windows-overview-arrangement) (arrangement-push! (quote overview)))
                           (layout-target-free!)
-                          (let ((rows (windows-overview--rows ids (if windows-overview-expose
-                                                                       (windows-overview--cols (length ids))
-                                                                       (max 1 (length (car order)))))))
+                          (let ((rows (windows-overview--rows ids (windows-overview--cols (length ids)))))
                             (set-frame-local! 'windows-overview-rows rows)
                             ;; the pane the user came from takes the window they choose
                             (set-frame-local! 'windows-overview-home (and home (car home)))
+                            (set-frame-local! 'windows-overview-from me)
+                            ;; the window model as it was: the exit draws it back, as data
+                            (set-frame-local! 'windows-overview-model (and (boundp 'panes-layout) (panes-layout)))
                             (windows-overview--lay! rows))
                           (client-slide! (json-encode (windows-overview--spread)))
                           (set-frame-local! 'windows-overview #t)
@@ -307,7 +322,127 @@
                     '()))
               (group-panes-windows))))
 
+(define (windows-overview--swap-keys model a b)
+  ;; pure: windows A and B trade places in the panes
+  (let ((sw (lambda (k) (cond ((equal? k a) b) ((equal? k b) a) (else k)))))
+    (panes--put model 'panes
+                (map (lambda (p) (panes--put p 'windows (map sw (or (plist-get p 'windows) '()))))
+                     (panes-panes model)))))
+
+(define (windows-overview-return-model model from chosen bufs mode)
+  ;; pure: the window model after the overview, from the window it opened
+  ;; from and the one chosen. Nothing chosen, or a window on screen, gives
+  ;; MODEL back as it was; a window behind takes FROM's place, and FROM
+  ;; takes its place behind
+  (let ((tops (filter (lambda (h) h) (map (lambda (k) (panes-handle model k)) (panes-top-windows model))))
+        (kf (panes-key-of-handle model from))
+        (kc (panes-key-of-handle model chosen)))
+    (cond ((or (not chosen) (equal? chosen from) (member chosen tops) (not kf)) model)
+          (kc (windows-overview--swap-keys model kf kc))
+          (else
+            (let* ((made (panes-new-window model (panes-pane-of model kf) (and (pair? bufs) (car bufs)) mode))
+                   (l (panes-set-buffers (car made) (cadr made) bufs)))
+              (panes-set-handle l (cadr made) chosen))))))
+
+(define (windows-overview-model-faults before after from chosen)
+  ;; pure: what AFTER breaks of the rules a return keeps, as text; () is none.
+  ;; One live window to one model window, each model window in one pane, the
+  ;; panes and their shares as they were, and no pane but FROM's changes
+  (let* ((handles (filter (lambda (h) h) (map (lambda (w) (plist-get w 'win)) (panes-windows after))))
+         (keys (map (lambda (w) (plist-get w 'key)) (panes-windows after)))
+         (placed (apply append (map (lambda (p) (or (plist-get p 'windows) '())) (panes-panes after))))
+         (count (lambda (x xs) (length (filter (lambda (y) (equal? x y)) xs))))
+         (shape (lambda (m) (map (lambda (p) (list (plist-get p 'id) (plist-get p 'share))) (panes-panes m))))
+         (front (lambda (m) (map (lambda (p) (let ((ks (or (plist-get p 'windows) '())))
+                                               (list (plist-get p 'id) (and (pair? ks) (panes-handle m (car ks))))))
+                                 (panes-panes m))))
+         (kf (panes-key-of-handle before from))
+         (home (and kf (panes-pane-of before kf)))
+         (tops (map cadr (front before)))
+         (moved (and chosen (not (equal? chosen from)) (not (member chosen tops)) kf)))
+    (append
+      (map (lambda (h) (format "window ~a is held by two model windows" h))
+           (panes--uniq (filter (lambda (h) (> (count h handles) 1)) handles)))
+      (map (lambda (k) (format "model window ~a is in ~a panes" k (count k placed)))
+           (filter (lambda (k) (not (= (count k placed) 1))) keys))
+      (map (lambda (k) (format "a pane names ~a, which no model window is" k))
+           (filter (lambda (k) (not (member k keys))) placed))
+      (if (equal? (shape before) (shape after)) '() (list "the panes or their shares changed"))
+      (if moved
+          (append
+            (filter (lambda (x) x)
+                    (map (lambda (b) (let ((a (assoc (car b) (front after))))
+                                       (and (not (equal? (car b) home)) (not (equal? b a))
+                                            (format "pane ~a shows ~a, was ~a" (car b) (and a (cadr a)) (cadr b)))))
+                         (front before)))
+            (let ((h (assoc home (front after))))
+              (if (and h (equal? (cadr h) chosen)) '()
+                  (list (format "pane ~a shows ~a, not the chosen ~a" home (and h (cadr h)) chosen)))))
+          (if (equal? before after) '() (list "nothing was chosen, yet the model changed"))))))
+
+(define (windows-overview--apply-return! quiet model from me)
+  ;; the model the view saved, with the chosen window in FROM's place, is
+  ;; drawn once; a model that breaks the rules is not drawn, the saved one is
+  (let* ((target (frame-local 'windows-overview-target))
+         (borrowed (frame-local 'windows-overview-arrangement))
+         (buf (window-buffer-any me))
+         (after (windows-overview-return-model model from me
+                                               (if buf (panes--window-stack me buf) '())
+                                               (and buf (panes--buffer-mode buf))))
+         (faults (windows-overview-model-faults model after from me))
+         (drawn (if (null? faults) after model)))
+    (for-each (lambda (k) (set-frame-local! k #f))
+              '(windows-overview windows-overview-armed windows-overview-rows windows-overview-home
+                windows-overview-target windows-overview-arrangement windows-overview-from windows-overview-model))
+    (transient-show! #f)
+    (overriding-map! #f)
+    (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
+    (when borrowed (arrangement-drop! borrowed))
+    (panes-apply! drawn)
+    (when (and target (not (equal? (layout-target) target))) (layout-target-set! target))
+    (let ((shown (map car (window-list))))
+      (select-window! (cond ((member me shown) me) ((member from shown) from) (else (car shown))))
+      (unless (null? faults)
+        (message (string-append "Overview: kept the panes as they were; " (string-join faults "; "))))
+      shown)))
+
 (define (windows-overview-exit! &optional quiet)
+  ;; leaving gives the frame back as it was, nothing moves; a tile chosen
+  ;; elsewhere then takes the place of the window the view opened from, or
+  ;; is gone to when it is on screen already
+  (let ((from (frame-local 'windows-overview-from))
+        (model (frame-local 'windows-overview-model))
+        (me (active-window)))
+    (if (and from model (boundp 'panes-mode) panes-mode)
+        (windows-overview--apply-return! quiet model from me)
+    (if (and from (frame-local 'windows-overview-arrangement))
+        (let ((ids (windows-overview--return! quiet)))
+          (cond ((equal? me from) ids)
+                ((assoc me (window-list)) (select-window! me) ids)
+                ((and (assoc from (window-list)) (assoc me (window-hidden-list)))
+                 (window-swap-hidden! from me)
+                 (select-window! me)
+                 (window-state-changed!)
+                 (map car (window-list)))
+                (else ids)))
+        (windows-overview--gather! quiet)))))
+
+(define (windows-overview--return! quiet)
+  (let ((target (frame-local 'windows-overview-target))
+        (borrowed (frame-local 'windows-overview-arrangement)))
+    (for-each (lambda (k) (set-frame-local! k #f))
+              '(windows-overview windows-overview-armed windows-overview-rows windows-overview-home
+                windows-overview-target windows-overview-arrangement windows-overview-from))
+    (transient-show! #f)
+    (overriding-map! #f)
+    (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
+    (arrangement-pop! borrowed)
+    (when (and target (not (equal? (layout-target) target))) (layout-target-set! target))
+    (window-state-changed!)
+    (map car (window-list))))
+
+(define (windows-overview--gather! quiet)
+  (set-frame-local! 'windows-overview-from #f)
   ;; the keys and the client leave the view first: a pane restore that
   ;; raises must not leave the frame locked in it. QUIET leaves the client
   ;; in the view, for a command that runs on the panes and spreads again.
@@ -353,7 +488,20 @@
         (begin
           ;; the client may still show the view a failed exit left it in
           (client-slide! (json-encode (list 'gather '())))
+          ;; and the frame may still hold what the spread borrowed: the
+          ;; chosen layout comes back, the borrowed arrangement goes
+          (let ((target (frame-local 'windows-overview-target))
+                (borrowed (frame-local 'windows-overview-arrangement)))
+            (set-frame-local! 'windows-overview-target #f)
+            (set-frame-local! 'windows-overview-arrangement #f)
+            (when borrowed (arrangement-drop! borrowed))
+            (when (and target (not (layout-target))) (layout-target-set! target)))
           (message "Not in the all-windows view")))))
+
+;; a group switch takes the spread down first, so the group records its
+;; panes and its chosen layout, not the spread's free frame
+(advice-add! 'switch-to-group! 'before 'windows-overview
+  (lambda (g) (when (windows-overview-on?) (windows-overview-exit! #t))))
 
 (define-command "windows-overview-kill" "Kill the buffer of the selected tile in the all-windows view"
   (lambda ()

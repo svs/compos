@@ -272,9 +272,12 @@ defmodule Compos.Core.Desktop do
 
   # the leaf carries the per-window point and scroll state — saved so
   # each window reopens at its own spot, pinned if the reader pinned it
+  # the 10-tuple leaf spec: no restore record and no owner, which are
+  # session state, and the window id, so a restart gives every window
+  # back under the id the layouts and groups knew it by
   defp serialize(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, [])}
+     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, []), nil, nil, Map.get(leaf, :id)}
   end
 
   defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
@@ -645,8 +648,7 @@ defmodule Compos.Core.Desktop do
       # no client: the frame waits for its tab to reconnect, and expires
       # on the editor's grace when none does
       {:ok, ^fid} = Editor.attach_frame(fid, client: nil)
-      Editor.restore_tree(tree, active, fid)
-      Editor.set_hidden_windows(Map.get(frame, :hidden, []), fid)
+      Editor.restore_layout(tree, Map.get(frame, :hidden, []), active, fid)
     end
   end
 

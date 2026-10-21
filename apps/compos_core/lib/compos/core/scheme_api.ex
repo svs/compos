@@ -2367,10 +2367,10 @@ defmodule Compos.Core.SchemeAPI do
        "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree."} =>
         fn [%{tree: tree, active: active} = layout]
            when elem(tree, 0) in [:leaf, :split] ->
-          Editor.restore_tree(tree, active)
-          # the layout's hidden windows replace the frame's; a layout saved
-          # before hidden windows existed has none
-          Editor.set_hidden_windows(Map.get(layout, :hidden, []))
+          # the layout's hidden windows replace the frame's, in the same
+          # step so every saved window id is free to come back; a layout
+          # saved before hidden windows existed has none
+          Editor.restore_layout(tree, Map.get(layout, :hidden, []), active)
           :void
         end,
       # the same look, one level up from window-preview-buffer!: a whole
@@ -3563,6 +3563,7 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
+  defp tree_buffers({:leaf, b, _, _, _, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
@@ -3575,6 +3576,13 @@ defmodule Compos.Core.SchemeAPI do
   defp tree_rename({:leaf, b, top, point, manual, ctop, history}, old, new) do
     renamed = Enum.map(history, fn name -> if name == old, do: new, else: name end)
     {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop, renamed}
+  end
+
+  defp tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner, id}, old, new) do
+    {:leaf, b2, top, point, manual, ctop, history, restore2, owner} =
+      tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner}, old, new)
+
+    {:leaf, b2, top, point, manual, ctop, history, restore2, owner, id}
   end
 
   defp tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner}, old, new) do
@@ -3593,7 +3601,7 @@ defmodule Compos.Core.SchemeAPI do
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
      Map.get(leaf, :ctop, 0), Map.get(leaf, :history, []), Map.get(leaf, :restore),
-     Map.get(leaf, :owner)}
+     Map.get(leaf, :owner), Map.get(leaf, :id)}
   end
 
   defp tree_spec(%{type: :split, dir: dir, children: [a, b]} = s),

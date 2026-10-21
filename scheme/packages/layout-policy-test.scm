@@ -43,7 +43,7 @@
             '("zz-lp-group" "zz-lp-other" "zz-lp-away")))
 (define (lp-start!)
   (set! *lp-trace* '())
-  (layout-target-free!)
+  (layout-target-set! #f)
   (set-frame-local! 'pinned-group #f)
   (lp-clean!)
   ;; the first buffer founds the group, so the default layout shows it and

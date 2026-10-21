@@ -340,10 +340,9 @@
                       ;; a spread that fails half way goes back to the panes
                       (unwind-protect
                         (lambda ()
-                          (when (layout-target) (set-frame-local! 'windows-overview-target (layout-target)))
                           ;; the frame the spread borrows: the exit gives it back when the panes cannot
                           (set-frame-local! (quote windows-overview-arrangement) (arrangement-push! (quote overview)))
-                          (layout-target-free!)
+                          (set-frame-local! 'layout-held #t)
                           (let ((rows (windows-overview--rows ids (windows-overview--cols (length ids)))))
                             (set-frame-local! 'windows-overview-rows rows)
                             ;; the pane the user came from takes the window they choose
@@ -459,8 +458,7 @@
 (define (windows-overview--apply-return! quiet model from me)
   ;; the model the view saved, with the chosen window in FROM's place, is
   ;; drawn once; a model that breaks the rules is not drawn, the saved one is
-  (let* ((target (frame-local 'windows-overview-target))
-         (borrowed (frame-local 'windows-overview-arrangement))
+  (let* ((borrowed (frame-local 'windows-overview-arrangement))
          (buf (window-buffer-any me))
          (after (windows-overview-return-model model from me
                                                (if buf (panes--window-stack me buf) '())
@@ -469,13 +467,13 @@
          (drawn (if (null? faults) after model)))
     (for-each (lambda (k) (set-frame-local! k #f))
               '(windows-overview windows-overview-armed windows-overview-rows windows-overview-home
-                windows-overview-target windows-overview-arrangement windows-overview-from windows-overview-model))
+                windows-overview-arrangement windows-overview-from windows-overview-model))
     (transient-show! #f)
     (overriding-map! #f)
     (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
     (when borrowed (arrangement-drop! borrowed))
     (panes-apply! drawn)
-    (when (and target (not (equal? (layout-target) target))) (layout-target-set! target))
+    (set-frame-local! 'layout-held #f)
     (let ((shown (map car (window-list))))
       (select-window! (cond ((member me shown) me) ((member from shown) from) (else (car shown))))
       (unless (null? faults)
@@ -506,16 +504,15 @@
         (windows-overview--gather! quiet)))))
 
 (define (windows-overview--return! quiet)
-  (let ((target (frame-local 'windows-overview-target))
-        (borrowed (frame-local 'windows-overview-arrangement)))
+  (let ((borrowed (frame-local 'windows-overview-arrangement)))
     (for-each (lambda (k) (set-frame-local! k #f))
               '(windows-overview windows-overview-armed windows-overview-rows windows-overview-home
-                windows-overview-target windows-overview-arrangement windows-overview-from))
+                windows-overview-arrangement windows-overview-from))
     (transient-show! #f)
     (overriding-map! #f)
     (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
     (arrangement-pop! borrowed)
-    (when (and target (not (equal? (layout-target) target))) (layout-target-set! target))
+    (set-frame-local! 'layout-held #f)
     (window-state-changed!)
     (map car (window-list))))
 
@@ -541,15 +538,13 @@
              (group-panes-windows)))
       (group-panes-record! pane me #t))
     (let ((ids (group-panes-arrange! #t))
-          (target (frame-local 'windows-overview-target))
           (borrowed (frame-local 'windows-overview-arrangement)))
-      (set-frame-local! 'windows-overview-target #f)
       (set-frame-local! 'windows-overview-arrangement #f)
       ;; no pane row named a live window: the frame goes back to what the
       ;; spread borrowed rather than staying spread
       (if ids (arrangement-drop! borrowed) (arrangement-pop! borrowed))
       ;; the spread borrowed the frame; the chosen layout comes back
-      (when target (layout-target-set! target))
+      (set-frame-local! 'layout-held #f)
       (when (and ids (member me ids)) (select-window! me))
       ids)))
 
@@ -568,12 +563,10 @@
           (client-slide! (json-encode (list 'gather '())))
           ;; and the frame may still hold what the spread borrowed: the
           ;; chosen layout comes back, the borrowed arrangement goes
-          (let ((target (frame-local 'windows-overview-target))
-                (borrowed (frame-local 'windows-overview-arrangement)))
-            (set-frame-local! 'windows-overview-target #f)
+          (let ((borrowed (frame-local 'windows-overview-arrangement)))
             (set-frame-local! 'windows-overview-arrangement #f)
             (when borrowed (arrangement-drop! borrowed))
-            (when (and target (not (layout-target))) (layout-target-set! target)))
+            (set-frame-local! 'layout-held #f))
           (message "Not in the all-windows view")))))
 
 ;; a group switch takes the spread down first, so the group records its

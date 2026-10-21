@@ -35,7 +35,7 @@
   (set! *group-mru* '())
   (set! *group-next-id* 0)
   ;; these tests read a free frame; the default target has its own
-  (layout-target-free!)
+  (layout-target-set! #f)
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
@@ -1666,7 +1666,6 @@
   "a group with no saved layout opens its members in the default columns"
   (lambda ()
     (t--sw-setup!)
-    (set-frame-local! 'layout-freed #f)
     (let ((id (group-record-create! "zzsw-cols")))
       (for-each (lambda (b) (buffer-add-group! b id))
                 (list t--sw-first t--sw-second t--sw-third))

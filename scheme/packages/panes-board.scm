@@ -437,8 +437,8 @@
     (list-refresh! buf)
     buf))
 
-(define-command "windows-list" "List every group's panes and their windows, a section for each; + zooms in, - out, <left>/<right> switch to Group"
-  (lambda () (panes-board-open! 'all #f)))
+(define-command "windows-list" "List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group"
+  (lambda () (panes-board-open! 'all (panes-board--id "g" (panes-board-here-group)))))
 
 ;; the board follows the frame while it is on screen
 (define (panes-board-follow!)

@@ -431,12 +431,12 @@
 ;; the frame enters a group: its layout comes back, or the frame is read
 ;; in. The layout target stands down: the model owns the shape now.
 (define (panes--enter-group!)
-  (layout-target-free!)
   (window-log-note! "panes enter group" (or (frame-group) "none"))
   (let ((layout (panes-layout)))
     (if layout
         (panes-apply! (panes-validate layout buffer-known?))
-        (panes-adopt!))))
+        (panes-adopt!)))
+  (layout-target-refresh!))
 
 ;;; --- the mode ---------------------------------------------------------------------------
 
@@ -506,7 +506,8 @@
       (if (not panes-mode)
           (next id saved)
           (begin
-            (layout-target-free!)
+            ;; the group's layout stays the target; panes--draw! holds the
+            ;; reflow back while it draws
             (window-log-note! "panes enter group" id)
             (if (panes-layout)
                 (panes-apply! (panes-validate (panes-layout) buffer-known?))
@@ -520,10 +521,7 @@
                                  '()))
                        (bufs (if (pair? kept) kept (group-default-panes id))))
                   (panes-apply! (panes--default-layout bufs))))
-            ;; the group's chosen layout comes back with it: the frame is
-            ;; free only while the panes are drawn
-            (layout-target-set! (group-layout-target id))
-            (layout-target-default!)))))
+            (layout-target-refresh!)))))
   ;; the switcher's look at a group draws that group's model, and wakes what
   ;; it shows the way the old look did; the switcher sleeps them again
   (advice-add! 'group-preview-draw! 'around 'panes

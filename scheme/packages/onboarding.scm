@@ -89,7 +89,6 @@
       (switch-to-buffer-in-group! chat)
       ;; the guide and its stage are columns: the frame keeps the columns
       ;; layout, so the next buffer the lesson opens takes the third column
-      (set-frame-local! 'layout-freed #f)
       (layout-target-set! 'columns)
       (tile-windows! 'columns (list chat stage))
       (let ((cw (window-showing chat)))

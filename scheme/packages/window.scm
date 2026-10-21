@@ -523,11 +523,34 @@
   (let ((fs (hook-functions (list 'display-action name))))
     (and (pair? fs) (car fs))))
 
+;; The layout belongs to the group the frame shows; a frame without a group
+;; keeps its own. Free is a layout the person chooses, stored as 'free. A
+;; group that chose nothing takes the target its saved arrangement holds,
+;; then window-layout-default. Nothing clears the layout to switch groups.
+(define (layout-target--stored)
+  (let ((g (and (boundp 'frame-group) (frame-group))))
+    (if g
+        (or (group-setting g 'layout) (group-layout-target g))
+        (frame-local 'layout-target))))
+
 ;; Explicit layouts remain targets as their occupied pane count changes.
-(define (layout-target) (frame-local 'layout-target))
+;; A view that borrows the frame, such as the overview spread, holds the
+;; layout: the frame acts free and the stored layout stays as it is.
+(define (layout-target)
+  (let ((stored (layout-target--stored)))
+    (cond ((frame-local 'layout-held) #f)
+          ((equal? stored 'free) #f)
+          (stored stored)
+          ((layout-capacity window-layout-default) window-layout-default)
+          (else #f))))
+
 (define (layout-target-set! name)
-  (set-frame-local! 'layout-target name)
-  (when name (set-frame-local! 'layout-freed #f))
+  (let ((g (and (boundp 'frame-group) (frame-group)))
+        (stored (or name 'free)))
+    (unless (equal? (layout-target--stored) stored)
+      (if g
+          (group-setting-set! g 'layout stored)
+          (set-frame-local! 'layout-target stored))))
   (unless name (set-frame-local! 'layout-slots #f))
   (when (and name (not (frame-local 'layout-slots)))
     (layout-target-note-slots! (layout-visible-buffers)))
@@ -535,19 +558,21 @@
   (layout-target-modeline!)
   name)
 
-;; A frame with no target takes window-layout-default, unless the person
-;; freed it. The shape stays as it is: the layout fills as windows come.
-(define (layout-target-default!)
-  (unless (or (layout-target) (frame-local 'layout-freed)
-              (not (layout-capacity window-layout-default)))
-    (layout-target-set! window-layout-default))
+;; Run THUNK with the layout held: the frame acts free while THUNK draws
+;; windows itself, and the stored layout does not change.
+(define (with-layout-held thunk)
+  (let ((was (frame-local 'layout-held)))
+    (set-frame-local! 'layout-held #t)
+    (unwind-protect thunk (lambda () (set-frame-local! 'layout-held was)))))
+
+;; A frame that enters a group takes that group's layout as it stands: the
+;; slots and the pane count it noted belong to the group it left.
+(define (layout-target-refresh!)
+  (set-frame-local! 'layout-slots #f)
+  (when (layout-target) (layout-target-note-slots! (layout-visible-buffers)))
+  (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
+  (layout-target-modeline!)
   (layout-target))
-
-(define (layout-target-free!)
-  (layout-target-set! #f)
-  (set-frame-local! 'layout-freed #t))
-
-(add-hook! 'frame-attach-hook 'layout-target-default!)
 
 ;;; The modeline names the chosen layout as Markdown: `*layout*:NAME`. The label
 ;;; is bold and the target reads plainly beside it, with no segment gap between
@@ -2173,7 +2198,7 @@ keeps the buffer you were in and your point.")
   (debounce-cancel! "window-layout-preview")
   (cond ((equal? name "free")
          (preview-end #f)
-         (layout-target-free!)
+         (layout-target-set! #f)
          (message "Layout free: a display may split a window again"))
         (else
           (if (let ((ok (window-layout-preview-without-history! name requested)))
@@ -2227,7 +2252,7 @@ keeps the buffer you were in and your point.")
 (define-command "window-layout-free"
   "Drop the frame's target layout: a display may split a window again"
   (lambda ()
-    (layout-target-free!)
+    (layout-target-set! #f)
     (message "Layout free: a display may split a window again")))
 
 ;;; --- scrolling the ring -----------------------------------------------------

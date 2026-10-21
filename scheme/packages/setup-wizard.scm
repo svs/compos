@@ -458,7 +458,6 @@
 (define (setup-choose-columns!)
   (unless (equal? window-layout-default 'columns)
     (customize-save! 'window-layout-default 'columns))
-  (set-frame-local! 'layout-freed #f)
   (unless (equal? (layout-target) 'columns)
     (layout-target-set! 'columns)))
 

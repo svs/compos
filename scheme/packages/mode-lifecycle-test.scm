@@ -43,14 +43,13 @@
 ;; start from a frame some mode arranged
 (define (ml--frame-kept thunk)
   (let ((tree (window-tree)) (group (frame-group)) (here (current-buffer))
-        (target (layout-target)) (freed (frame-local 'layout-freed)))
+        (target (layout-target)))
     (let ((r (thunk)))
       (cond ((and group (not (equal? (frame-group) group))) (frame-tab! group))
             ((and (not group) (frame-group) (buffer-known? "*scratch*"))
              (switch-to-buffer! "*scratch*")))
       ;; a mode that chose a target layout would arrange every later frame
       (unless (equal? (layout-target) target) (layout-target-set! target))
-      (set-frame-local! 'layout-freed freed)
       (ignore-errors (lambda () (window-tree-set! tree)))
       (when (and (buffer-known? here) (not (equal? (current-buffer) here)))
         (switch-to-buffer! here))

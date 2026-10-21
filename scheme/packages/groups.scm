@@ -1390,10 +1390,12 @@ is forgotten and that group falls back to creation order in the switcher."
             (list "*scratch*")))))
 
 (define (group-default-layout! g)
-  (layout-target-default!)
   (let ((panes (group-default-panes g)))
-    (delete-other-windows!)
-    (switch-to-buffer-here! (car panes))
+    ;; the panes come next; the layout does not reflow the frame on its way
+    (with-layout-held
+      (lambda ()
+        (delete-other-windows!)
+        (switch-to-buffer-here! (car panes))))
     (when (pair? (cdr panes))
       (tile-windows! (or (layout-target) (layout-for-count (length panes))) panes))
     ;; No pane may carry the group we just left.
@@ -1646,13 +1648,13 @@ is forgotten and that group falls back to creation order in the switcher."
   (if saved
       (begin
         (group-revive-layout-files! saved)
-        (window-tree-set! saved)
+        (with-layout-held (lambda () (window-tree-set! saved)))
         (group-restore-sanitize! id)
-        (layout-target-set! (group-layout-target id))
-        (layout-target-default!))
+        (layout-target-refresh!))
       ;; the windows the frame hid belong to the group it left
       (begin (window-hidden-clear!)
-             (group-default-layout! id))))
+             (group-default-layout! id)
+             (layout-target-refresh!))))
 
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
@@ -1668,7 +1670,6 @@ is forgotten and that group falls back to creation order in the switcher."
               (unless (group-preview-shown? id)
                 (client-slide! (group-slide-direction from id)))
               (group-frame-leave! from)))
-          (layout-target-set! #f)
           (set-frame-local! 'current-group id)
           ;; An explicit switch moves an active pin. The frame stays pinned,
           ;; but it does not trap the user in the old group.
@@ -5534,10 +5535,9 @@ is forgotten and that group falls back to creation order in the switcher."
                            (if spec (car spec) (map car rows))))))
     (and (pair? ids)
          (or (and (layout-target) (not force) ids)
-             (let ((target (layout-target)))
-               (layout-target-free!)
-               (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)
-               (when target (layout-target-set! target))
+             (begin
+               (with-layout-held
+                 (lambda () (window-arrange-line! 'h (map (lambda (w) (/ 1 (length ids))) ids) ids)))
                (window-state-changed!)
                ids)))))
 

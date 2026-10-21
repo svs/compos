@@ -163,6 +163,43 @@
     (list layout key)))
 
 ;; the window goes; a pane it leaves empty goes too, unless it is the last
+;; a window waiting behind the front window of a pane other than ID, from the
+;; nearest pane out; #f when every other pane shows its only window
+(define (panes--waiting-window layout id)
+  (let* ((ids (panes-pane-ids layout))
+         (at (or (panes--index-of id ids) 0))
+         (waits? (lambda (pid)
+                   (let ((ws (or (plist-get (panes-pane layout pid) 'windows) '())))
+                     (and (not (equal? pid id)) (pair? ws) (pair? (cdr ws)))))))
+    (let loop ((d 1))
+      (if (> d (length ids))
+          #f
+          (let ((hit (find (lambda (pid) (and (= (abs (- (panes--index-of pid ids) at)) d) (waits? pid))) ids)))
+            (if hit
+                (cadr (plist-get (panes-pane layout hit) 'windows))
+                (loop (+ d 1))))))))
+
+;; the first of the layout's 'spares, ((WIN BUFFER STACK MODE) ...): the frame's hidden
+;; windows outside the model, most recently used first. It becomes a window of PANE
+;; with its own handle, so the frame shows it again; #f when there is none
+(define (panes--take-spare layout pane)
+  (let ((spares (or (plist-get layout 'spares) '())))
+    (and (pair? spares)
+         (let* ((s (car spares))
+                (made (panes-new-window (panes--put layout 'spares (cdr spares)) pane (cadr s) (list-ref s 3)))
+                (l (panes-set-buffers (car made) (cadr made) (caddr s))))
+           (panes-set-handle l (cadr made) (car s))))))
+
+;; windows A and B trade places: each takes the other's spot in the other's pane
+(define (panes-swap-windows layout a b)
+  (let ((pa (panes-pane-of layout a)) (pb (panes-pane-of layout b)))
+    (if (or (not pa) (not pb) (equal? a b))
+        layout
+        (let ((trade (lambda (k) (cond ((equal? k a) b) ((equal? k b) a) (else k)))))
+          (fold (lambda (l id) (panes--update-pane l id (lambda (p) (panes--put p 'windows (map trade (or (plist-get p 'windows) '()))))))
+                layout
+                (panes--uniq (list pa pb)))))))
+
 (define (panes-close-window layout key)
   (let ((pane (panes-pane-of layout key)))
     (if (not pane)
@@ -173,7 +210,14 @@
                          (lambda (p) (panes--put p 'windows (panes--without key (or (plist-get p 'windows) '()))))))
                (left (plist-get (panes-pane layout pane) 'windows)))
           (if (and (null? left) (> (panes-pane-count layout) 1))
-              (panes-remove-pane layout pane)
+              ;; the layout keeps its panes: an emptied pane takes a window that waits
+              ;; behind another pane's front one, else one of the frame's hidden
+              ;; windows ('spares), and goes only when no window is left
+              (let ((waiting (panes--waiting-window layout pane)))
+                (if waiting
+                    (panes-move-window layout waiting pane)
+                    (or (panes--take-spare layout pane)
+                        (panes-remove-pane layout pane))))
               layout)))))
 
 ;; KEY comes to the front of its pane

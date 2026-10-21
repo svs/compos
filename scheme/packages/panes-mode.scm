@@ -240,13 +240,32 @@
 
 ;; q in WIN: its shown buffer leaves that window and the next one shows;
 ;; an exhausted window closes. #t when the model knew the window.
+;; the frame's hidden windows the model does not hold, most recently used first, as
+;; the 'spares an emptied pane takes before it goes (panes-close-window); EXCEPT is
+;; a buffer that is leaving
+(define (panes--spare-windows layout &optional except)
+  (filter (lambda (s) s)
+          (map (lambda (row)
+                 (let ((win (car row)) (buf (cadr row)))
+                   (and (not (panes-key-of-handle layout win))
+                        (string? buf) (not (equal? buf except))
+                        (buffer-known? buf) (fill-candidate? buf)
+                        (list win buf (panes--window-stack win buf) (panes--buffer-mode buf)))))
+               (window-hidden-list))))
+
+(define (panes--with-spares layout &optional except)
+  (plist-put layout 'spares (panes--spare-windows layout except)))
+
+;; the model keeps no spares: the frame's hidden windows change under it
+(define (panes--without-spares layout) (plist-put layout 'spares '()))
+
 (define (panes-quit! win)
   (let* ((layout (panes-layout))
          (k (and layout (panes-key-of-handle layout win))))
     (and k
-         (let ((popped (panes-pop layout k)))
+         (let ((popped (panes-pop (panes--with-spares layout) k)))
            (window-log-note! "panes quit" k "->" (or (cadr popped) "window closes"))
-           (panes-apply! (car popped))
+           (panes-apply! (panes--without-spares (car popped)))
            #t))))
 
 ;; a buffer dies: it leaves every stack before the core looks for a
@@ -258,7 +277,7 @@
     (and layout (member name (panes-buffers layout))
          (begin
            (window-log-note! "panes kill" name)
-           (panes-apply! (panes-drop-buffer layout name))
+           (panes-apply! (panes--without-spares (panes-drop-buffer (panes--with-spares layout name) name)))
            (lambda () (window-state-changed!))))))
 
 (define (panes--rename! old new)
@@ -378,6 +397,22 @@
       (if (and (panes--door?) (not (display-buffer-agent-refuses? name (or alist '()))))
           (panes-display! name (plist-get (or alist '()) 'inhibit-same-window))
           (next name alist))))
+  ;; a window moved to the neighbouring pane trades places with that pane's window
+  ;; in the model too, so the next placement keeps what the screen shows
+  (advice-add! 'window-swap! 'around 'panes
+    (lambda (next dir)
+      (let* ((win (active-window))
+             (nb (and panes-mode (window-in-direction dir)))
+             (at (panes--index-of win (map car (window-list))))
+             (r (next dir))
+             ;; only a swap that happened: the window stands somewhere else now
+             (l (and nb (not (equal? at (panes--index-of win (map car (window-list))))) (panes-layout)))
+             (a (and l (panes-key-of-handle l win)))
+             (b (and l (panes-key-of-handle l (car nb)))))
+        (when (and a b)
+          (window-log-note! "panes swap" a b)
+          (panes-layout-set! (panes-swap-windows l a b)))
+        r)))
   (advice-add! 'window-unwind-or-close! 'around 'panes
     (lambda (next win) (if (and panes-mode (panes-quit! win)) #t (next win))))
   ;; a group switch arranges the group's windows; it rebuilds nothing. A

@@ -4,7 +4,8 @@
 ;;; The value is plain data, so it saves with the group and reads back:
 ;;;
 ;;;   LAYOUT = (panes (PANE ...) windows (WINDOW ...) next N capacity C)
-;;;   PANE   = (id ID share S windows (KEY ...))       the first KEY is on screen
+;;;   PANE   = (id ID share S windows (KEY ...))       the first KEY is on screen;
+;;;                                                   no KEY is an empty pane
 ;;;   WINDOW = (key KEY win HANDLE mode MODE buffers (B ...) preferred BOOL)
 ;;;                                                   the first B is shown
 ;;;
@@ -162,34 +163,6 @@
                        (panes--put p 'windows (if behind (append keys (list key)) (cons key keys))))))))
     (list layout key)))
 
-;; the window goes; a pane it leaves empty goes too, unless it is the last
-;; a window waiting behind the front window of a pane other than ID, from the
-;; nearest pane out; #f when every other pane shows its only window
-(define (panes--waiting-window layout id)
-  (let* ((ids (panes-pane-ids layout))
-         (at (or (panes--index-of id ids) 0))
-         (waits? (lambda (pid)
-                   (let ((ws (or (plist-get (panes-pane layout pid) 'windows) '())))
-                     (and (not (equal? pid id)) (pair? ws) (pair? (cdr ws)))))))
-    (let loop ((d 1))
-      (if (> d (length ids))
-          #f
-          (let ((hit (find (lambda (pid) (and (= (abs (- (panes--index-of pid ids) at)) d) (waits? pid))) ids)))
-            (if hit
-                (cadr (plist-get (panes-pane layout hit) 'windows))
-                (loop (+ d 1))))))))
-
-;; the first of the layout's 'spares, ((WIN BUFFER STACK MODE) ...): the frame's hidden
-;; windows outside the model, most recently used first. It becomes a window of PANE
-;; with its own handle, so the frame shows it again; #f when there is none
-(define (panes--take-spare layout pane)
-  (let ((spares (or (plist-get layout 'spares) '())))
-    (and (pair? spares)
-         (let* ((s (car spares))
-                (made (panes-new-window (panes--put layout 'spares (cdr spares)) pane (cadr s) (list-ref s 3)))
-                (l (panes-set-buffers (car made) (cadr made) (caddr s))))
-           (panes-set-handle l (cadr made) (car s))))))
-
 ;; windows A and B trade places: each takes the other's spot in the other's pane
 (define (panes-swap-windows layout a b)
   (let ((pa (panes-pane-of layout a)) (pb (panes-pane-of layout b)))
@@ -241,6 +214,7 @@
                     (else (panes--update-window l k (lambda (w) (panes--put w 'buffers mine)))))))
           layout keys)))
 
+;; the window goes; the pane stays, empty when it held nothing else
 (define (panes-close-window layout key)
   (let ((pane (panes-pane-of layout key)))
     (if (not pane)
@@ -250,19 +224,11 @@
                (layout (panes--update-pane layout pane
                          (lambda (p) (panes--put p 'windows (panes--without key (or (plist-get p 'windows) '()))))))
                (left (plist-get (panes-pane layout pane) 'windows)))
-          (cond
-            ((not (and (null? left) (> (panes-pane-count layout) 1))) layout)
-            ;; a 'bare layout keeps no count of panes (the overview's): the emptied pane goes
-            ((plist-get layout 'bare) (panes-remove-pane layout pane))
-            (else
-              ;; the layout keeps its panes: an emptied pane takes a window that waits
-              ;; behind another pane's front one, else one of the frame's hidden
-              ;; windows ('spares), and goes only when no window is left
-              (let ((waiting (panes--waiting-window layout pane)))
-                (if waiting
-                    (panes-move-window layout waiting pane)
-                    (or (panes--take-spare layout pane)
-                        (panes-remove-pane layout pane))))))))))
+          ;; an emptied pane stays, empty, as a group with no buffers stays; a
+          ;; 'bare layout keeps no count of panes (the overview's): there it goes
+          (if (and (null? left) (plist-get layout 'bare))
+              (panes-remove-pane layout pane)
+              layout)))))
 
 ;; KEY comes to the front of its pane
 (define (panes-raise layout key)
@@ -629,9 +595,20 @@
           ((pair? panes) (car panes))
           (else #f))))
 
+;; an empty pane a buffer can open in: the selected one when it is empty,
+;; else the first empty one; #f when every pane holds a window
+(define (panes--empty-pane layout ctx)
+  (let ((sel (plist-get ctx 'selected-pane))
+        (empty (filter (lambda (id) (null? (or (plist-get (panes-pane layout id) 'windows) '())))
+                       (panes-pane-ids layout))))
+    (cond ((null? empty) #f)
+          ((member sel empty) sel)
+          (else (car empty)))))
+
 (define (panes--selected-pane layout ctx)
   (let ((sel (plist-get ctx 'selected)))
     (or (and sel (panes-pane-of layout sel))
+        (let ((p (plist-get ctx 'selected-pane))) (and p (panes-pane layout p) p))
         (let ((ids (panes-pane-ids layout))) (and (pair? ids) (car ids))))))
 
 ;; mode-affinity: a buffer belongs with its kind. The window that holds it,
@@ -650,9 +627,15 @@
                    (find (lambda (k) (equal? (panes-window-mode layout k) mode))
                          (panes-windows-holding layout buf))))
          (kin (panes-mode-window layout mode))
-         (sel-pane (panes--selected-pane layout ctx)))
-    (cond ((and held (not (and inhibit (equal? held selected)))) (list 'window held))
+         (sel-pane (panes--selected-pane layout ctx))
+         (empty (panes--empty-pane layout ctx)))
+    (cond ;; a visit from an empty pane fills it
+          ((and empty (not display?) (not inhibit) (equal? empty (plist-get ctx 'selected-pane))
+                (not (panes-window-showing layout buf)))
+           (list 'new-window empty))
+          ((and held (not (and inhibit (equal? held selected)))) (list 'window held))
           ((and kin (not (and inhibit (equal? kin selected)))) (list 'window kin))
+          (empty (list 'new-window empty))
           ((or (null? (panes-panes layout)) (panes-under-capacity? layout)) '(new-pane))
           ((or display? inhibit)
            (list 'new-window (or (panes--lru-pane layout ctx sel-pane) sel-pane)))
@@ -666,10 +649,13 @@
          (inhibit (plist-get ctx 'inhibit-same))
          (display? (equal? (plist-get ctx 'kind) 'display))
          (shown (panes-window-showing layout buf))
-         (sel-pane (panes--selected-pane layout ctx)))
+         (sel-pane (panes--selected-pane layout ctx))
+         (empty (panes--empty-pane layout ctx)))
     (cond ((null? (panes-panes layout)) '(new-pane))
           ((and (not display?) (not inhibit) selected) (list 'window selected))
+          ((and empty (not display?) (not inhibit) (equal? empty (plist-get ctx 'selected-pane))) (list 'new-window empty))
           ((and shown (not (and inhibit (equal? shown selected)))) (list 'window shown))
+          (empty (list 'new-window empty))
           ((panes-under-capacity? layout) '(new-pane))
           (else
             (let* ((lru (panes--lru-pane layout ctx sel-pane))

@@ -197,7 +197,7 @@
              (list (list (if here? "■" "□") (if here? "ok" "faint"))
                    (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) #f)
                    (list (panes-board--pct share) "faint")
-                   (list (string-append (number->string (length (or (plist-get p 'windows) '()))) " windows") "dim"))))
+                   (list (let ((n (length (or (plist-get p 'windows) '())))) (if (= n 0) "empty" (string-append (number->string n) " windows"))) "dim"))))
           ((equal? kind "w")
            (let* ((k (panes-board-key id))
                   (h (and here? (panes-handle l k)))
@@ -301,6 +301,10 @@
                          (left (panes--without b (panes-window-buffers l key))))
                     (if (null? left) (panes-close-window l key) (panes-set-buffers l key left))))))))))
 
+(define-command "panes-board-add-pane" "Add an empty pane after the pane on this row"
+  (lambda ()
+    (panes-board-edit! (lambda (l id) (car (panes-add-empty-pane l (panes-board-pane-of id)))))))
+
 (define-command "panes-board-kill" "Kill the buffer on this row"
   (lambda ()
     (let ((id (list-current *panes-board-buffer*)))
@@ -394,7 +398,7 @@
            "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
            "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
            "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `S-<left>`/`S-<right>` move a window "
-           "or a pane, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `{`/`}` resize a pane, `=` equalizes.")
+           "or a pane, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
     'buffer *panes-board-buffer*
     'rows panes-board-ids
     'section? (lambda (buf id) (equal? (panes-board-kind id) "g"))
@@ -416,13 +420,13 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("M-n/M-p" "group") ("TAB" "fold") ("S-<left>/<right>" "move") ("k" "close")
-                ("K" "kill") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
+                ("K" "kill") ("a" "add pane") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
     'keys '(("RET" "panes-board-visit") ("+" "panes-board-zoom-in") ("-" "panes-board-zoom-out")
             ("<left>" "panes-board-view-next") ("<right>" "panes-board-view-next")
             ("TAB" "panes-board-fold") ("S-TAB" "panes-board-fold-all")
             ("M-n" "panes-board-next-group") ("M-p" "panes-board-previous-group")
             ("S-<left>" "panes-board-left") ("S-<right>" "panes-board-right")
-            ("k" "panes-board-close") ("K" "panes-board-kill") ("c" "panes-board-consolidate")
+            ("k" "panes-board-close") ("K" "panes-board-kill") ("a" "panes-board-add-pane") ("c" "panes-board-consolidate")
             ("}" "panes-board-wider") ("{" "panes-board-narrower") ("=" "panes-board-equalize")
             ("g" "panes-board-refresh") ("q" "quit-window"))))
 

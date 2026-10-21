@@ -146,6 +146,66 @@
 
 ;;; --- apply: the frame becomes the model -----------------------------------------------
 
+;; an empty pane holds no window of the model; the frame shows it as a window
+;; on the blank buffer. That window is kept here, per group and pane, and
+;; never in the model: ((GROUP PANE) . WIN) rows
+(define panes-empty-buffer " *pane*")
+
+(define (panes--empty-rows) (or (frame-local 'panes-empty-windows) '()))
+(define (panes--empty-key pid) (list (panes--group-key) pid))
+
+(define (panes--empty-handle pid)
+  (let ((row (assoc (panes--empty-key pid) (panes--empty-rows))))
+    (and row (panes--live-handle? (cdr row)) (cdr row))))
+
+(define (panes--forget-empty! pid)
+  (set-frame-local! 'panes-empty-windows
+    (filter (lambda (r) (not (equal? (car r) (panes--empty-key pid)))) (panes--empty-rows))))
+
+(define (panes--empty-handle! pid)
+  (or (panes--empty-handle pid)
+      (begin
+        (unless (buffer-exists? panes-empty-buffer) (buffer-create panes-empty-buffer))
+        (let ((h (window-new-hidden! panes-empty-buffer)))
+          (when h
+            (panes--forget-empty! pid)
+            (set-frame-local! 'panes-empty-windows (cons (cons (panes--empty-key pid) h) (panes--empty-rows))))
+          h))))
+
+;; the pane of this group that frame window WIN stands for while it is empty, or #f
+(define (panes--empty-pane-of win)
+  (let* ((g (panes--group-key))
+         (row (find (lambda (r) (and (equal? (cdr r) win) (equal? (car (car r)) g))) (panes--empty-rows))))
+    (and row (cadr (car row)))))
+
+;; a pane that took a window takes its blank one too, so the frame window stays
+(define (panes--claim-empty-windows layout)
+  (fold (lambda (l p)
+          (let* ((ks (or (plist-get p 'windows) '()))
+                 (pid (plist-get p 'id))
+                 (h (and (pair? ks) (panes--empty-handle pid))))
+            (if (and h (not (panes--live-handle? (panes-handle l (car ks)))))
+                (begin (panes--forget-empty! pid) (panes-set-handle l (car ks) h))
+                l)))
+        layout (panes-panes layout)))
+
+;; the blank windows of panes that hold a window now, or are gone, go
+(define (panes--drop-stale-empty-windows! layout)
+  (let ((g (panes--group-key)))
+    (for-each (lambda (r)
+                (let ((p (and (equal? (car (car r)) g) (panes-pane layout (cadr (car r))))))
+                  (when (and (equal? (car (car r)) g) (or (not p) (pair? (or (plist-get p 'windows) '()))))
+                    (panes--forget-empty! (cadr (car r)))
+                    (when (assoc (cdr r) (window-hidden-list)) (window-hidden-delete! (cdr r))))))
+              (panes--empty-rows))))
+
+;; a frame window for every pane, left to right: its front window, else its blank one
+(define (panes--pane-handles layout)
+  (map (lambda (p)
+         (let ((ks (or (plist-get p 'windows) '())))
+           (if (pair? ks) (panes-handle layout (car ks)) (panes--empty-handle! (plist-get p 'id)))))
+       (panes-panes layout)))
+
 ;; every window in KEYS has a live handle
 (define (panes--materialize layout keys)
   (fold (lambda (l k)
@@ -156,12 +216,12 @@
                           (if nw (panes-set-handle l k nw) l))))))
         layout keys))
 
-;; the shares of the panes that have a window, normalized
+;; the shares of the panes, empty ones too, normalized
 (define (panes--top-shares layout)
   ;; a pane's share is its own once it was resized; panes that kept the
   ;; default follow the layout target: under two-chat the last pane is the
   ;; chat, at window-layout-chat-ratio, and the rest share what is left
-  (let* ((rows (filter (lambda (p) (pair? (plist-get p 'windows))) (panes-panes layout)))
+  (let* ((rows (panes-panes layout))
          (raw (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1))) rows))
          (n (length raw))
          (plain (and (> n 1) (null? (filter (lambda (s) (not (= s 1))) raw))))
@@ -191,19 +251,20 @@
                       (loop (cdr keys) (panes-set-handle layout k #f) taken)))))))))
 
 ;; the frame drawn as LAYOUT: every top window on screen with its pane's
-;; share, showing the front of its stack, the rest waiting behind. Answers
+;; share, showing the front of its stack, the rest waiting behind; an empty
+;; pane shows its blank window. Answers
 ;; the layout with the handles the draw took or made. Nothing is recorded.
 (define (panes--draw! layout)
-  (let* ((layout (panes--attach-handles layout))
+  (let* ((layout (panes--claim-empty-windows (panes--attach-handles layout)))
          (tops (panes-top-windows layout))
          (layout (panes--materialize layout tops))
-         (handles (filter (lambda (h) h) (map (lambda (k) (panes-handle layout k)) tops))))
+         (handles (panes--pane-handles layout)))
     (set! panes--applying #t)
     (unwind-protect
       (lambda ()
         (with-layout-suppressed
           (lambda ()
-            (when (and (pair? handles) (= (length handles) (length tops)))
+            (when (and (pair? handles) (null? (filter (lambda (h) (not h)) handles)))
               (window-arrange-line! 'h (panes--top-shares layout) handles)
               (for-each
                 (lambda (k)
@@ -213,7 +274,8 @@
                         (window-set-buffer! h (car bufs)))
                       (set-window-prev-buffers! h (cdr bufs)))))
                 tops)
-              (unless (member (active-window) handles) (select-window! (car handles)))))))
+              (unless (member (active-window) handles) (select-window! (car handles))))
+            (panes--drop-stale-empty-windows! layout))))
       (lambda () (set! panes--applying #f)))
     layout))
 
@@ -262,6 +324,7 @@
 (define (panes--ctx layout kind inhibit mode)
   (list 'mode mode 'kind kind 'inhibit-same inhibit
         'selected (panes-key-of-handle layout (active-window))
+        'selected-pane (panes--empty-pane-of (active-window))
         'recent (panes--recent layout)))
 
 ;; the layout of this frame's group, adopted from the frame when it has none
@@ -292,25 +355,6 @@
 
 ;; q in WIN: its shown buffer leaves that window and the next one shows;
 ;; an exhausted window closes. #t when the model knew the window.
-;; the frame's hidden windows the model does not hold, most recently used first, as
-;; the 'spares an emptied pane takes before it goes (panes-close-window); EXCEPT is
-;; a buffer that is leaving
-(define (panes--spare-windows layout &optional except)
-  (filter (lambda (s) s)
-          (map (lambda (row)
-                 (let ((win (car row)) (buf (cadr row)))
-                   (and (not (panes-key-of-handle layout win))
-                        (string? buf) (not (equal? buf except))
-                        (buffer-known? buf) (fill-candidate? buf)
-                        (list win buf (panes--window-stack win buf) (panes--buffer-mode buf)))))
-               (window-hidden-list))))
-
-(define (panes--with-spares layout &optional except)
-  (plist-put layout 'spares (panes--spare-windows layout except)))
-
-;; the model keeps no spares: the frame's hidden windows change under it
-(define (panes--without-spares layout) (plist-put layout 'spares '()))
-
 ;; consolidate on the model: every mode one window. The frame-level consolidate
 ;; makes hidden windows the model does not know, and the next redraw throws them away
 (define (panes-consolidate!)
@@ -344,9 +388,9 @@
   (let* ((layout (panes-layout))
          (k (and layout (panes-key-of-handle layout win))))
     (and k
-         (let ((popped (panes-pop (panes--with-spares layout) k)))
+         (let ((popped (panes-pop layout k)))
            (window-log-note! "panes quit" k "->" (or (cadr popped) "window closes"))
-           (panes-apply! (panes--without-spares (car popped)))
+           (panes-apply! (car popped))
            #t))))
 
 ;; a buffer dies: it leaves every stack before the core looks for a
@@ -358,10 +402,11 @@
     (and layout (member name (panes-buffers layout))
          (begin
            (window-log-note! "panes kill" name)
-           ;; a kill from the overview keeps no count of panes: nothing refills
+           ;; a kill from the overview keeps no count of panes: an emptied pane goes;
+           ;; elsewhere it stays, empty
            (panes-apply! (if (and (boundp 'windows-overview-active?) (windows-overview-active?))
                              (plist-put (panes-drop-buffer (plist-put layout 'bare #t) name) 'bare #f)
-                             (panes--without-spares (panes-drop-buffer (panes--with-spares layout name) name))))
+                             (panes-drop-buffer layout name)))
            (lambda () (window-state-changed!))))))
 
 (define (panes--rename! old new)
@@ -376,7 +421,7 @@
 ;; a change made by another door joins the model: a pane that shows a
 ;; buffer the model does not know of takes it onto its window's stack; a
 ;; window on screen the model never saw gets a pane; a window that is gone
-;; leaves the model
+;; takes its pane with it (C-x 0 deletes the pane)
 (define (panes--reconcile!)
   ;; the overview's tiles are not panes: the model waits until it gathers
   (unless (or (not panes-mode) panes--applying (layout-arranging?)
@@ -387,11 +432,22 @@
                (l (fold (lambda (l k)
                           (let* ((h (panes-handle l k))
                                  (shown (and h (window-exists? h) (window-buffer h))))
-                            (cond ((and h (not (panes--live-handle? h))) (panes-close-window l k))
+                            ;; C-x 0 deletes the pane; the last pane keeps its place
+                            (cond ((and h (not (panes--live-handle? h)))
+                                   (let ((gone (panes-remove-pane l (panes-pane-of l k))))
+                                     (if (equal? gone l) (panes-close-window l k) gone)))
                                   ((and shown (not (equal? shown (panes-window-buffer l k))) (fill-candidate? shown))
                                    (panes-show l k shown))
                                   (else l))))
                         layout tops))
+               ;; an empty pane whose blank window was deleted goes too
+               (l (fold (lambda (l pid)
+                          (let ((row (assoc (panes--empty-key pid) (panes--empty-rows))))
+                            (if (and row (null? (or (plist-get (panes-pane l pid) 'windows) '()))
+                                     (not (panes--live-handle? (cdr row))))
+                                (begin (panes--forget-empty! pid) (panes-remove-pane l pid))
+                                l)))
+                        l (panes-pane-ids l)))
                (known (filter (lambda (h) h) (map (lambda (k) (panes-handle l k)) (panes-top-windows l))))
                (rows (panes--frame-row))
                ;; panes whose front window a swap took off the screen
@@ -406,6 +462,15 @@
                         (let ((win (car (car rows))) (buf (cadr (car rows))))
                           (cond ((or (member win known) (not (fill-candidate? buf)))
                                  (loop (cdr rows) l vacated))
+                                ;; a buffer shown in an empty pane's blank window fills that pane
+                                ((let ((pid (panes--empty-pane-of win))) (and pid (panes-pane l pid)))
+                                 (let* ((pid (panes--empty-pane-of win))
+                                        (made (panes-new-window l pid buf (panes--buffer-mode buf))))
+                                   (panes--forget-empty! pid)
+                                   (loop (cdr rows)
+                                         (panes-set-handle (panes-set-buffers (car made) (cadr made) (panes--window-stack win buf))
+                                                           (cadr made) win)
+                                         vacated)))
                                 ;; a window that took a pane's place on screen is that pane's front window
                                 ((pair? vacated)
                                  (let ((k (panes-key-of-handle l win)))
@@ -590,12 +655,25 @@
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
   (message "panes-mode off"))
 
+;; the pane of the selected window, an empty pane's blank window included
+(define (panes--current-pane l)
+  (let ((k (panes-key-of-handle l (active-window))))
+    (or (and k (panes-pane-of l k)) (panes--empty-pane-of (active-window)))))
+
+;; an empty pane right after PID (the end when #f); the capacity grows to hold
+;; it. (LAYOUT ID)
+(define (panes-add-empty-pane l pid)
+  (let* ((i (and pid (panes--index-of pid (panes-pane-ids l))))
+         (added (panes-add-pane l (if i (+ i 1) (panes-pane-count l))))
+         (l (car added)))
+    (list (if (> (panes-pane-count l) (panes-capacity l)) (panes-set-capacity l (panes-pane-count l)) l)
+          (cadr added))))
+
 (define (panes--move-current-pane! step)
   ;; the pane of the selected window trades places with its neighbour, every
   ;; window and stack in it going along
   (let* ((l (panes--ensure-layout!))
-         (k (panes-key-of-handle l (active-window)))
-         (pid (and k (panes-pane-of l k)))
+         (pid (panes--current-pane l))
          (ids (map (lambda (p) (plist-get p 'id)) (panes-panes l)))
          (i (let loop ((xs ids) (n 0))
               (cond ((null? xs) #f) ((equal? (car xs) pid) n) (else (loop (cdr xs) (+ n 1))))))
@@ -652,6 +730,13 @@
 
 (define-command "pane-previous-window" "Bring the previous window of this pane to the front"
   (lambda () (panes--cycle-pane-window! -1)))
+
+(define-command "pane-add" "Add an empty pane to the right of this one; you stay where you are"
+  (lambda ()
+    (let* ((l (panes--ensure-layout!))
+           (me (active-window)))
+      (panes-apply! (car (panes-add-empty-pane l (panes--current-pane l))))
+      (when (window-exists? me) (select-window! me)))))
 
 ;; BUFS go to a second window of their mode, beside FROM (the window that
 ;; holds the first of them when absent); the new window is selected

@@ -294,7 +294,7 @@
         ;; A chat is named for where it lives, and a worktree is its own
         ;; checkout, so the name is the worktree's, not the whole path.
         (switch-to-buffer! task)
-        (run-command "chat")
+        (run-command "chat-companion")
         (let ((chat (current-buffer)))
           (check-equal! chat (group-chat-name workspace) "the chat is the workspace's")
           (check-equal! (buffer-local chat 'workspace-root) workspace "and carries its root")
@@ -311,7 +311,7 @@
             (check-equal! second-workspace (string-append root "-worktrees/a2")
                           "the second is a sibling, not a child")
             (switch-to-buffer! second)
-            (run-command "chat")
+            (run-command "chat-companion")
             (check-false! (equal? (current-buffer) chat) "with a chat of its own")
             (check-true! (buffer-known? chat) "and the first chat survives")
             (check-equal! (length (worktree-list root)) 3 "three worktrees: the checkout and two"))))

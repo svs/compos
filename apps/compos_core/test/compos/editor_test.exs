@@ -1913,7 +1913,7 @@ defmodule Compos.EditorTest do
     on_exit(fn -> Compos.Core.kill_buffer(companion) end)
 
     press(["M-x"])
-    type("chat")
+    type("chat-companion")
     press(["RET"])
     assert Editor.current_buffer() == companion
     type("remember me")
@@ -2300,9 +2300,9 @@ defmodule Compos.EditorTest do
     end)
 
     press(["M-x"])
-    type("chat")
+    type("chat-companion")
     press(["RET"])
-    # one chat interface: C-c c is the group companion, rich from birth
+    # one chat interface: C-c w is the group companion, rich from birth
     assert Editor.current_buffer() == companion
     assert Buffer.get_local(companion, "render-mode") == "blocks"
     assert Buffer.text(companion) =~ "companion · #{buf}"
@@ -2328,7 +2328,7 @@ defmodule Compos.EditorTest do
     end)
 
     press(["M-x"])
-    type("chat")
+    type("chat-companion")
     press(["RET"])
     type("hello?")
     press(["RET"])

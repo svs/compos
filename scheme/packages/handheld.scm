@@ -305,7 +305,7 @@
 ;; receives the message.
 (define (handheld-say! text)
   (let ((cur (current-buffer)))
-    (unless (chat-buffer? cur) (run-command "chat"))
+    (unless (chat-buffer? cur) (run-command "chat-companion"))
     (let ((buf (current-buffer)))
       (if (chat-buffer? buf)
           (begin

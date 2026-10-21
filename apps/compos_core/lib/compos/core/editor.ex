@@ -559,8 +559,7 @@ defmodule Compos.Core.Editor do
   back with the windows it was saved with.
   """
   def restore_layout(spec, hidden_specs, active_buffer, fid \\ nil),
-    do:
-      GenServer.call(__MODULE__, {:restore_layout, spec, hidden_specs, active_buffer, fid(fid)})
+    do: GenServer.call(__MODULE__, {:restore_layout, spec, hidden_specs, active_buffer, fid(fid)})
 
   # viewport: each client reports how many text rows fit its frame; wheel
   # scrolls server-side; any key re-enables point auto-follow
@@ -2150,28 +2149,6 @@ defmodule Compos.Core.Editor do
   # The hidden windows built from SPECS replace the frame's. A spec keeps
   # the id it names when it is free; one without an id takes the old hidden
   # window that showed its buffer, as a pane does on a restore.
-  defp replace_hidden_windows(state, f, specs, taken) do
-    old = for leaf <- hidden(f), do: {leaf.id, leaf.buffer}
-    Enum.each(hidden(f), &drop_point/1)
-
-    leaves =
-      Enum.flat_map(specs || [], fn spec ->
-        {leaf, _n} = build_tree(spec, state.next_win)
-
-        # a window on a buffer that cannot start has nothing to show
-        case leaf.type == :leaf and Compos.Core.ensure_buffer(leaf.buffer) do
-          {:error, _} -> []
-          false -> []
-          _started -> [leaf]
-        end
-      end)
-
-    wants = Enum.map(leaves, &{&1.buffer, Map.get(&1, :want)})
-    {ids, next_win} = window_ids_for(wants, old, taken, state.next_win)
-    leaves = Enum.zip_with(leaves, ids, &take_id/2)
-    f = Map.put(f, :hidden, leaves)
-    {put_frame(%{state | next_win: next_win}, f), f}
-  end
 
   # selecting a window selects its frame: bare window ids arrive from Scheme
   # (ibuffer buffer-locals, agent closures) with no frame attached
@@ -2310,64 +2287,6 @@ defmodule Compos.Core.Editor do
     {state, f} = restore_frame_tree(state, f, spec, active_buffer, true, taken)
     {state, f} = replace_hidden_windows(state, f, hidden_specs, taken ++ leaf_ids(f.tree))
     changed(:ok, state, f.id)
-  end
-
-  defp restore_frame_tree(state, f, spec, active_buffer, bump_mru?, taken) do
-    # the old windows are gone — their stored points go with them
-    Enum.each(leaf_ids_buffers(f.tree), fn {id, buffer} ->
-      if Buffer.exists?(buffer), do: wp_safely(fn -> Buffer.drop_win_point(buffer, id) end)
-    end)
-
-    # A retile rearranges panes; it does not make new ones. Minting a fresh
-    # id for every leaf told the client that every pane was new, so it re-sent
-    # each pane's whole buffer -- one arrow key in window-layout cost a patch
-    # the size of every visible buffer. Keep the ids the frame already had,
-    # and the ids the leaves name when they are free.
-    old_panes = leaf_ids_buffers(f.tree)
-    {tree, _minted} = build_tree(spec, state.next_win)
-    {tree, next_win} = reuse_window_ids(tree, old_panes, taken, state.next_win)
-    tree = prune_owners(tree, leaf_ids(tree))
-
-    # A buffer that cannot start leaves its pane to *scratch*: a window
-    # must show a live buffer, and the dormant one keeps its files.
-    tree =
-      Enum.reduce(leaf_ids_buffers(tree), tree, fn {id, buffer}, tree ->
-        case Compos.Core.ensure_buffer(buffer) do
-          {:error, _reason} ->
-            replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: live_scratch()})
-
-          _started ->
-            Buffer.touch(buffer)
-            tree
-        end
-      end)
-
-    # No saved point is laid down. A layout arranges windows; it does not
-    # move point (S9). The old windows' points went above, so each window
-    # falls back to the buffer's own point — where the reader left it.
-
-    active =
-      Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
-        if buffer == active_buffer, do: id
-      end) || first_leaf(tree).id
-
-    # what the restored tree shows IS the recent history now: the active
-    # buffer leads, the other windows follow. Without this a group
-    # switch left no trace in C-x b. A preview is not a switch, so a look
-    # at a layout leaves the history exactly as it was.
-    shown = tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
-    active_buf = find_leaf(tree, active).buffer
-
-    state =
-      if bump_mru? do
-        Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
-      else
-        state
-      end
-
-    f = %{f | tree: tree, active: active}
-    state = resync_swap(put_frame(%{state | next_win: next_win}, f))
-    {state, state.frames[f.id]}
   end
 
   # --- frame clients ----------------------------------------------------------
@@ -2857,7 +2776,6 @@ defmodule Compos.Core.Editor do
     }
   end
 
-
   # --- tree helpers ----------------------------------------------------------
 
   # (1-based logical line, char col) -> byte offset; line lookup is the
@@ -3181,9 +3099,6 @@ defmodule Compos.Core.Editor do
     {put_want(leaf, want), n}
   end
 
-  defp put_want(leaf, want) when is_integer(want), do: Map.put(leaf, :want, want)
-  defp put_want(leaf, _), do: leaf
-
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
 
   defp build_tree({:split, dir, ratio, a, b}, n) do
@@ -3192,10 +3107,96 @@ defmodule Compos.Core.Editor do
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
   end
 
+  defp put_want(leaf, want) when is_integer(want), do: Map.put(leaf, :want, want)
+
+  defp put_want(leaf, _), do: leaf
+
   # Lay the frame's existing window ids back over a freshly built tree, in
   # leaf order, minting only for panes the old tree did not have. Pane
   # identity survives a retile, so the client patches geometry instead of
   # re-sending every buffer.
+
+  defp replace_hidden_windows(state, f, specs, taken) do
+    old = for leaf <- hidden(f), do: {leaf.id, leaf.buffer}
+    Enum.each(hidden(f), &drop_point/1)
+
+    leaves =
+      Enum.flat_map(specs || [], fn spec ->
+        {leaf, _n} = build_tree(spec, state.next_win)
+
+        # a window on a buffer that cannot start has nothing to show
+        case leaf.type == :leaf and Compos.Core.ensure_buffer(leaf.buffer) do
+          {:error, _} -> []
+          false -> []
+          _started -> [leaf]
+        end
+      end)
+
+    wants = Enum.map(leaves, &{&1.buffer, Map.get(&1, :want)})
+    {ids, next_win} = window_ids_for(wants, old, taken, state.next_win)
+    leaves = Enum.zip_with(leaves, ids, &take_id/2)
+    f = Map.put(f, :hidden, leaves)
+    {put_frame(%{state | next_win: next_win}, f), f}
+  end
+
+  defp restore_frame_tree(state, f, spec, active_buffer, bump_mru?, taken) do
+    # the old windows are gone — their stored points go with them
+    Enum.each(leaf_ids_buffers(f.tree), fn {id, buffer} ->
+      if Buffer.exists?(buffer), do: wp_safely(fn -> Buffer.drop_win_point(buffer, id) end)
+    end)
+
+    # A retile rearranges panes; it does not make new ones. Minting a fresh
+    # id for every leaf told the client that every pane was new, so it re-sent
+    # each pane's whole buffer -- one arrow key in window-layout cost a patch
+    # the size of every visible buffer. Keep the ids the frame already had,
+    # and the ids the leaves name when they are free.
+    old_panes = leaf_ids_buffers(f.tree)
+    {tree, _minted} = build_tree(spec, state.next_win)
+    {tree, next_win} = reuse_window_ids(tree, old_panes, taken, state.next_win)
+    tree = prune_owners(tree, leaf_ids(tree))
+
+    # A buffer that cannot start leaves its pane to *scratch*: a window
+    # must show a live buffer, and the dormant one keeps its files.
+    tree =
+      Enum.reduce(leaf_ids_buffers(tree), tree, fn {id, buffer}, tree ->
+        case Compos.Core.ensure_buffer(buffer) do
+          {:error, _reason} ->
+            replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: live_scratch()})
+
+          _started ->
+            Buffer.touch(buffer)
+            tree
+        end
+      end)
+
+    # No saved point is laid down. A layout arranges windows; it does not
+    # move point (S9). The old windows' points went above, so each window
+    # falls back to the buffer's own point — where the reader left it.
+
+    active =
+      Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
+        if buffer == active_buffer, do: id
+      end) || first_leaf(tree).id
+
+    # what the restored tree shows IS the recent history now: the active
+    # buffer leads, the other windows follow. Without this a group
+    # switch left no trace in C-x b. A preview is not a switch, so a look
+    # at a layout leaves the history exactly as it was.
+    shown = tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    active_buf = find_leaf(tree, active).buffer
+
+    state =
+      if bump_mru? do
+        Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
+      else
+        state
+      end
+
+    f = %{f | tree: tree, active: active}
+    state = resync_swap(put_frame(%{state | next_win: next_win}, f))
+    {state, state.frames[f.id]}
+  end
+
   defp reuse_window_ids(tree, old_panes, taken, next_win) do
     {ids, next_win} = window_ids_for(leaf_wants(tree), old_panes, taken, next_win)
     {tree, _left, _n} = relabel_leaves(tree, ids, next_win)
@@ -3260,16 +3261,17 @@ defmodule Compos.Core.Editor do
     {Enum.reverse(ids), next_win}
   end
 
-  defp relabel_leaves(%{type: :leaf} = leaf, [id | rest], n), do: {take_id(leaf, id), rest, n}
-  defp relabel_leaves(%{type: :leaf} = leaf, [], n), do: {take_id(leaf, n), [], n + 1}
-
-  defp take_id(leaf, id), do: leaf |> Map.put(:id, id) |> Map.delete(:want)
-
   defp relabel_leaves(%{type: :split, children: [a, b]} = node, ids, n) do
     {a, ids, n} = relabel_leaves(a, ids, n)
     {b, ids, n} = relabel_leaves(b, ids, n)
     {%{node | children: [a, b]}, ids, n}
   end
+
+  defp relabel_leaves(%{type: :leaf} = leaf, [id | rest], n), do: {take_id(leaf, id), rest, n}
+
+  defp relabel_leaves(%{type: :leaf} = leaf, [], n), do: {take_id(leaf, n), [], n + 1}
+
+  defp take_id(leaf, id), do: leaf |> Map.put(:id, id) |> Map.delete(:want)
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
 

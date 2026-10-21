@@ -774,7 +774,7 @@
       (if (equal? text "")
           (message "No region")
           (begin
-            (run-command "chat")
+            (unless (chat-buffer? (current-buffer)) (run-command "chat-companion"))
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 

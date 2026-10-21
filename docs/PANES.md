@@ -43,6 +43,19 @@ model docs/WINDOWS-SPEC.md describes; the code is `scheme/packages/panes.scm`.
    `panes-mode` is on: a visit, a display, `q`, a kill, a rename, a group
    switch. A change made by another door is read back into the model.
 
+## Window ids
+
+A window id is immutable. The core mints one when a window is made and never
+hands it to another window while that one lives. A saved layout, the value
+`window-tree` answers, names the id of every leaf, on screen and hidden, and
+`window-tree-set!` gives each window back under that id when no other window
+holds it. Only a leaf without an id, or whose id another frame took, matches
+an old pane by buffer, and only then does the core mint. The desktop file
+carries the ids too, so a restart gives every window back under the id the
+layouts and groups knew it by. The group switcher's look and its return
+therefore leave every id as it found it, and a record keyed by window id,
+pane rows, restore records, the hidden ring, stays true across a restore.
+The tests are `window_ids_test.exs`.
 ## The board
 
 `M-x list-panes` shows the model as a list: each pane, its windows (on

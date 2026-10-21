@@ -1306,15 +1306,6 @@
 (mode-keys! "chat-mode" '(("C-c k" "kill-buffer")))
 
 
-;; there is only one chat interface: the rich group-chat surface. C-c c
-;; opens the current buffer's group chat (founding a group if needed);
-;; from inside a chat it is a no-op.
-(define-command "chat" "Open the group chat for this buffer"
-  (lambda ()
-    (let ((cur (current-buffer)))
-      (unless (chat-buffer? cur)
-        (group-chat-show! (group-ensure! cur))))))
-
 ;;; The system prompt is the cache prefix. Every byte is resent on every turn
 ;;; and tool round, so changing group membership must not change it. The static
 ;;; context section tells the agent to call chat-context for current members,
@@ -2601,7 +2592,6 @@
   (lambda ()
     (group-ask! (group-ensure! (current-buffer)))))
 
-(global-set-key "C-c c" "chat")
 (define-command "chat-send-new" "Send the input to a new chat in this group; this chat keeps its conversation"
   (lambda ()
     (let* ((buf (current-buffer))

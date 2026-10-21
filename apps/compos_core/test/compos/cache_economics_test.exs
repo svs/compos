@@ -70,7 +70,7 @@ defmodule Compos.CacheEconomicsTest do
         (buffer-append! "*doc1*" "the first draft\\n")
         (switch-to-buffer! "*doc1*")
         (set! chat-use-tools #f)
-        (run-command "chat")
+        (run-command "chat-companion")
         (current-buffer))])
       |> String.trim(~s{"})
 
@@ -123,7 +123,7 @@ defmodule Compos.CacheEconomicsTest do
         (buffer-set-local! "*doc-b*" 'group "*doc-a*")
         (set! chat-use-tools #f)
         (switch-to-buffer! "*doc-a*")
-        (run-command "chat")
+        (run-command "chat-companion")
         (current-buffer))])
       |> String.trim(~s{"})
 

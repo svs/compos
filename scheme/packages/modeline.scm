@@ -521,7 +521,7 @@
     (if (not chat)
         (dash--section "tools"
           (list (dash--row "chat" "none" "dim")
-                (dash--row "open" "C-c c" "dim")))
+                (dash--row "open" "C-c w" "dim")))
         (let* ((st (dash--tool-state chat))
                (state (car st))
                (names (map car (car (cdr st))))
@@ -638,14 +638,14 @@
               #t)
              ((equal? id "dash-add-preset")
               (let ((chat (dash--here-chat buf)))
-                (if chat (dash--add-preset! buf chat) (message "no chat here: C-c c opens one")))
+                (if chat (dash--add-preset! buf chat) (message "no chat here: C-c w opens one")))
               #t)
              ((string-prefix? "dash-chat:" id)
               (let ((chat (dash--here-chat buf)))
                 (if chat
                     (with-current-buffer chat
                       (lambda () (run-command (substring id 10 (string-length id)))))
-                    (message "no chat here: C-c c opens one")))
+                    (message "no chat here: C-c w opens one")))
               #t)
              ;; the header line's one switcher opens the narrow about HERE
              ((equal? id "buffer-switcher")

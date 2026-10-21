@@ -39,7 +39,26 @@
 ;; panes-layout-set!
 (define (panes--layout-store! g layout)
   (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
+  (when (string? g) (set! panes--latest (alist-put panes--latest g (panes-strip-handles layout))))
   layout)
+
+;; the newest layout of every group, whichever frame made it: a frame that
+;; enters a group it has never shown takes this, not whatever the screen holds
+(define panes--latest (if (boundp 'panes--latest) panes--latest '()))
+
+(define (panes--seed g)
+  (let ((e (and g (assoc g panes--latest))))
+    (if e
+        (cadr e)
+        (let loop ((fs (frame-list)))
+          (if (null? fs)
+              #f
+              (let ((e (and g (assoc g (or (frame-local-in (car fs) 'panes-layouts) '())))))
+                (if e (panes-strip-handles (cadr e)) (loop (cdr fs)))))))))
+
+(define (panes--seed! g)
+  (let ((seed (panes--seed g)))
+    (and seed (panes-apply! (panes-validate seed buffer-known?)))))
 
 (define (panes-layout-set! layout)
   (let ((layout (panes-unique-buffers layout)))
@@ -91,6 +110,8 @@
             (or saved '())))
 
 (persist-global! 'panes-layouts panes-layouts-state panes-layouts-restore!)
+;; a restart brings new frame ids, so the per-group layouts carry across apart
+(persist-global! 'panes-latest (lambda () panes--latest) (lambda (saved) (set! panes--latest (or saved '()))))
 
 ;;; --- the frame as a layout ---------------------------------------------------------
 
@@ -329,7 +350,7 @@
 
 ;; the layout of this frame's group, adopted from the frame when it has none
 (define (panes--ensure-layout!)
-  (or (panes-layout) (panes-adopt!)))
+  (or (panes-layout) (panes--seed! (frame-group)) (panes-adopt!)))
 
 ;; BUF opens where the policy says; the window's handle, or #f
 (define (panes-place! buf kind inhibit)
@@ -500,7 +521,7 @@
   (let ((layout (panes-layout)))
     (if layout
         (panes-apply! (panes-validate layout buffer-known?))
-        (panes-adopt!)))
+        (or (panes--seed! (frame-group)) (panes-adopt!))))
   (layout-target-refresh!))
 
 ;;; --- the mode ---------------------------------------------------------------------------
@@ -574,8 +595,12 @@
             ;; the group's layout stays the target; panes--draw! holds the
             ;; reflow back while it draws
             (window-log-note! "panes enter group" id)
-            (if (panes-layout)
-                (panes-apply! (panes-validate (panes-layout) buffer-known?))
+            (cond
+              ((panes-layout)
+               (panes-apply! (panes-validate (panes-layout) buffer-known?)))
+              ;; another frame laid this group out: its arrangement comes along
+              ((panes--seed! id))
+              (else
                 ;; no model yet: the group's saved arrangement names the
                 ;; buffers, else the group's default does; the model is built
                 ;; from them and the frame's other windows only step aside
@@ -585,7 +610,7 @@
                                                 (window-tree-buffers saved)))
                                  '()))
                        (bufs (if (pair? kept) kept (group-default-panes id))))
-                  (panes-apply! (panes--default-layout bufs))))
+                  (panes-apply! (panes--default-layout bufs)))))
             (layout-target-refresh!)))))
   ;; the switcher's look at a group draws that group's model, and wakes what
   ;; it shows the way the old look did; the switcher sleeps them again

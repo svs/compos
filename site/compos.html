@@ -100,7 +100,7 @@ h1 {
 /* real screenshot */
 .shot { margin: 0 0 72px; }
 .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
-.shot figcaption { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); }
+.shot figcaption, .closing-shot figcaption { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); }
 
 /* the frame */
 .frame-wrap { padding: 0 0 96px; }
@@ -209,7 +209,12 @@ pre.code {
 .who-grid p { margin: 12px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 
 /* closing */
-.closing { padding: 72px 0 112px; border-top: 1px solid var(--rule); text-align: left; }
+.closing {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 56px; align-items: center;
+  padding: 72px 0 112px; border-top: 1px solid var(--rule); text-align: left;
+}
+.closing-shot { margin: 0; }
+.closing-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
 .closing h2 { margin: 0; font-weight: 300; font-size: clamp(40px, 5.4vw, 76px); line-height: 1; letter-spacing: -.03em; max-width: 16ch; text-wrap: balance; }
 .closing p { margin: 22px 0 0; font-size: 19px; line-height: 1.55; color: var(--ink-2); max-width: 44ch; }
 
@@ -224,6 +229,7 @@ footer { border-top: 1px solid var(--rule); }
   .windows { grid-template-columns: minmax(0, 1fr); }
   .feature-grid, .who-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .world { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .closing { grid-template-columns: minmax(0, 1fr); gap: 40px; }
   .feature, .feature:nth-child(3n+1), .feature:nth-child(3n) { padding: 28px 24px 32px; border-right: 1px solid var(--rule); border-top: 0; }
   .feature:nth-child(odd) { padding-left: 0; }
   .feature:nth-child(even) { border-right: 0; padding-right: 0; }
@@ -379,12 +385,18 @@ footer { border-top: 1px solid var(--rule); }
   </section>
 
   <section class="closing">
-    <h2>Flow state has a home.</h2>
-    <p>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
-    <div class="actions">
-      <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
-      <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
+    <div>
+      <h2>Flow state has a home.</h2>
+      <p>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
+      <div class="actions">
+        <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
+        <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
+      </div>
     </div>
+    <figure class="closing-shot">
+      <img src="images/compos-spotify.webp" width="2560" height="1299" alt="Compos with Spotify, a Pitchfork review and the album's page side by side">
+      <figcaption>For doing what you love.</figcaption>
+    </figure>
   </section>
 </main>
 

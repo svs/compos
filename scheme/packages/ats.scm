@@ -276,6 +276,8 @@
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
+        ;; every index is one list mode too; each section (ats-approvals-mode, ...) is a minor mode on it
+        'index-mode "ats-index-mode"
         ;; the candidate tab (profile on a candidate's own page) leads with the newest evaluation, beside About; Skills goes last
         'detail-moves (list (list "candidate" ats-candidate-order) (list "profile" ats-candidate-order))
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
@@ -508,7 +510,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                                        (list 'title title 'model "claude-sonnet-5-5"))))))
             (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
-(define-key (mode-keymap "ats-approvals-mode") "M-O" "ats-approvals-review")
+(minor-mode-keys! "ats-approvals-mode" '(("M-O" "ats-approvals-review")))
 
 ;; / in the candidates list: the site's own search (?q=), over every candidate
 ;; and not only the page drawn. An empty answer shows them all again
@@ -525,7 +527,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
             (site-app-set-filter! buf (if (equal? name "") #f (string-append "q=" (url-encode name))))))
         'initial (ats-search-query buf)))))
 (catalog-meta! 'command "ats-candidates-search" 'domain 'web 'effects '(read external display))
-(define-key (mode-keymap "ats-candidates-mode") "/" "ats-candidates-search")
+(minor-mode-keys! "ats-candidates-mode" '(("/" "ats-candidates-search")))
 
 ;; s-k in the ATS: the site's ⌘K. Candidates, jobs and companies as you type,
 ;; candidates first; RET opens the pick beside its list. The site's palette
@@ -641,8 +643,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
               (list 'style "palette"))))))
 (catalog-meta! 'command "ats-palette" 'domain 'web 'effects '(read external display))
 (for-each (lambda (mode) (define-key (mode-keymap mode) "s-k" "ats-palette"))
-          '("ats-candidates-mode" "ats-approvals-mode" "ats-applications-mode" "ats-companies-mode"
-            "ats-jobs-mode" "ats-meetings-mode" "ats-pipeline-mode" "ats-detail-mode"))
+          '("ats-index-mode" "ats-pipeline-mode" "ats-detail-mode"))
 
 ;; An ATS page by its id, as a row of its section opens it. KIND is jobs, approvals,
 ;; applications or candidates; ID is the key in the site's URL: a job's slug, an
@@ -654,15 +655,12 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 ;; the section's list buffer, made and moded as site-app-open! makes it, but not shown or read
 (define (ats-list-buffer! kind)
-  (let ((buf (site-app-page-buffer 'ats kind))
-        (mode (site-app-page-mode 'ats kind)))
+  (let ((buf (site-app-page-buffer 'ats kind)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf 'ats)
     (buffer-set-local! buf 'site-app-spec (site-app-spec 'ats))
     (buffer-set-local! buf 'site-app-page kind)
-    (unless (buffer-derived-mode? buf mode)
-      (with-current-buffer buf (lambda () (set-mode! mode))))
-    buf))
+    (site-app-index-enter! buf 'ats kind)))
 
 ;; the row the list holds for ID, else one made from it; NAME titles a page the list does not
 ;; hold. QUIET makes the page without showing it
@@ -796,7 +794,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 ;; the job at hand: the row of the jobs list, or the job page beside it
 (define (ats-pipeline-job-at buf)
-  (if (buffer-derived-mode? buf "ats-jobs-mode")
+  (if (minor-mode-on? buf "ats-jobs-mode")
       (let ((row (list-current buf))) (and row (list row buf)))
       (let ((row (buffer-local buf 'site-app-row)))
         (and row (string-prefix? "/staff/jobs/" (or (plist-get row 'href) ""))
@@ -861,7 +859,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (index-declare! "ats-pipeline-mode" 'next "list-next" 'prev "list-prev" 'open "ats-pipeline-open"))
 
 ;; c on the jobs list opens the row's candidates; the job page has it as an extra key
-(define-key (mode-keymap "ats-jobs-mode") "c" "ats-pipeline")
+(minor-mode-keys! "ats-jobs-mode" '(("c" "ats-pipeline")))
 
 ;; ---------------------------------------------------------------- suggestion cards
 ;; The job page's Suggestions tab is one card a candidate; these are its keys.

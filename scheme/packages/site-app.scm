@@ -56,6 +56,27 @@
   (string-append "*" (symbol->string name) "-" (symbol->string id) "*"))
 (define (site-app-page-mode name id)
   (string-append (symbol->string name) "-" (symbol->string id) "-mode"))
+
+(define (site-app-index-modes name)
+  ;; the list modes of the app's indexes: its one 'index-mode, else each section's own
+  (let ((spec (site-app-spec name)))
+    (if (plist-get spec 'index-mode)
+        (list (plist-get spec 'index-mode))
+        (map (lambda (page) (site-app-page-mode name (plist-get page 'id))) (site-app-pages spec)))))
+
+(define (site-app-index-enter! buf name pid)
+  ;; a section's buffer in its mode: under the app's 'index-mode the section is a
+  ;; minor mode on it, else the section's mode is the major
+  (let ((index (plist-get (site-app-spec name) 'index-mode))
+        (mode (site-app-page-mode name pid)))
+    (if index
+        (begin
+          (unless (buffer-derived-mode? buf index)
+            (with-current-buffer buf (lambda () (set-mode! index))))
+          (unless (minor-mode-on? buf mode) (enable-minor-mode! buf mode)))
+        (unless (buffer-derived-mode? buf mode)
+          (with-current-buffer buf (lambda () (set-mode! mode)))))
+    buf))
 (define (site-app-pages spec) (or (plist-get spec 'pages) '()))
 
 (define (site-app-page spec id)
@@ -579,14 +600,12 @@
   (let* ((spec (site-app-spec name))
          (page (site-app-page spec (or id (plist-get spec 'home-page))))
          (pid (plist-get page 'id))
-         (buf (site-app-page-buffer name pid))
-         (mode (site-app-page-mode name pid)))
+         (buf (site-app-page-buffer name pid)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf name)
     (buffer-set-local! buf 'site-app-spec spec)
     (buffer-set-local! buf 'site-app-page pid)
-    (unless (buffer-derived-mode? buf mode)
-      (with-current-buffer buf (lambda () (set-mode! mode))))
+    (site-app-index-enter! buf name pid)
     ;; an app with a group of its own is opened there
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
     ;; a page of the app turns over in its own pane; opened from anything else it takes a new pane
@@ -2282,8 +2301,8 @@
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
         (let ((name (buffer-local buf 'site-app-name)))
-          (for-each (lambda (page) (app-detail-keys! (site-app-page-mode name (plist-get page 'id)) mode))
-                    (site-app-pages (site-app-spec name))))))))
+          (for-each (lambda (index) (app-detail-keys! index mode))
+                    (site-app-index-modes name)))))))
 
 (define-command "site-app-detail-tab-0" "Show this page's composed tab" (lambda () (site-app-detail-nth! 0)))
 (define-command "site-app-detail-tab-1" "Show this page's first tab" (lambda () (site-app-detail-nth! 1)))
@@ -2580,11 +2599,66 @@
               (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))))
 (catalog-meta! 'command "site-app-bulk-agents" 'domain 'chat 'effects '(write spend display))
 
+(define (site-app-list-opts name title pages list-keys doc buffer)
+  ;; one section's index as a list mode; under an app's 'index-mode every section shares it
+  (list 'doc doc
+        'buffer buffer
+        'transient #f
+        'noun "item"
+        'rows site-app-rows
+        'key site-app-row-key
+        'columns site-app-columns
+        'cells site-app-cells
+        'title site-app-title
+        'header site-app-header
+        ;; rows and head as blocks, so the sections and status tabs are tabs
+        'collection "c-list"
+        'composml site-app-composml
+        'anchor site-app-row-anchor
+        'composml-head site-app-composml-head
+        'preview site-app-show-detail!
+        'debounce #t
+        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
+                                    (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
+        ;; Digits are left free so they reach the page beside the list, as
+        ;; its tab keys; the sections move to M-digit.
+        'keys (append (list (list "RET" "site-app-detail")
+                            (list "t" "site-app-tabs")
+                            (list "s" "site-app-sections")
+                            (list "[" "site-app-filter-prev")
+                            (list "]" "site-app-filter-next")
+                            (list "g" "site-app-refresh")
+                            ;; the page beside the list, part by part, without leaving the row
+                            (list "M-<down>" "site-app-detail-anchor-next")
+                            (list "M-<up>" "site-app-detail-anchor-prev")
+                            (list "q" "quit-window"))
+                      ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
+                      (map (lambda (k) (list (car k) (cadr k))) list-keys)
+                      (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
+                                             (string-append "site-app-tab-" (plist-get p 'key))))
+                           pages))))
+
+(define (site-app-index-list-mode! mode)
+  ;; what every index list mode gets on top of its opts
+  ;; / asks for a status tab; the list mode's own row filter stays on f
+  (define-key (mode-keymap mode) "/" "site-app-filter-choose")
+  ;; The index keeps its own bindings; unclaimed detail-page keys run in the
+  ;; adjacent detail, just as they do when focus is on the detail itself.
+  (when (boundp 'app-detail-keys!)
+    (app-detail-keys! mode "site-app-detail-mode"))
+  ;; its pages walk it: N and P on a page open the next and previous row
+  (when (boundp 'index-declare!)
+    (index-declare! mode 'next "list-next" 'prev "list-prev" 'open "site-app-detail")))
+
 (define (define-site-app spec)
   (let* ((name (plist-get spec 'name))
          (title (or (plist-get spec 'title) (symbol->string name)))
          (pages (site-app-pages spec))
-         (list-keys (or (plist-get spec 'list-keys) '())))
+         (list-keys (or (plist-get spec 'list-keys) '()))
+         (index (plist-get spec 'index-mode))
+         (section-doc (lambda (page)
+                        (string-append title " " (plist-get page 'label)
+                                       ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits."))))
     (site-app-put! name spec)
     (site-app-card-keys! spec)
     (let ((major (plist-get spec 'detail-mode)))
@@ -2602,59 +2676,28 @@
                   (when kind
                     (define-derived-mode kind (site-app-detail-mode-name spec page) (lambda () #t)))))
               pages)
+    ;; one major mode for every index of the app, so they share a pane and a map;
+    ;; each section is a minor mode on it that holds the section's own keys
+    (when index
+      (define-list-mode! index
+        (site-app-list-opts name title pages list-keys
+                            (string-append title " index, read from the live site. Each section is a minor mode on it. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits.")
+                            #f))
+      (site-app-index-list-mode! index))
     ;; Every section is an index of its own: its buffer, its mode, its command.
     (for-each
       (lambda (page)
         (let* ((id (plist-get page 'id))
                (mode (site-app-page-mode name id))
                (command (string-append (symbol->string name) "-" (symbol->string id))))
-          (define-list-mode! mode
-            (list 'doc (string-append title " " (plist-get page 'label)
-                                      ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits.")
-                  'buffer (site-app-page-buffer name id)
-                  'transient #f
-                  'noun "item"
-                  'rows site-app-rows
-                  'key site-app-row-key
-                  'columns site-app-columns
-                  'cells site-app-cells
-                  'title site-app-title
-                  'header site-app-header
-                  ;; rows and head as blocks, so the sections and status tabs are tabs
-                  'collection "c-list"
-                  'composml site-app-composml
-                  'anchor site-app-row-anchor
-                  'composml-head site-app-composml-head
-                  'preview site-app-show-detail!
-                  'debounce #t
-                  'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
-                                            (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
-                  ;; Digits are left free so they reach the page beside the list, as
-                  ;; its tab keys; the sections move to M-digit.
-                  'keys (append (list (list "RET" "site-app-detail")
-                                      (list "t" "site-app-tabs")
-                                      (list "s" "site-app-sections")
-                                      (list "[" "site-app-filter-prev")
-                                      (list "]" "site-app-filter-next")
-                                      (list "g" "site-app-refresh")
-                                      ;; the page beside the list, part by part, without leaving the row
-                                      (list "M-<down>" "site-app-detail-anchor-next")
-                                      (list "M-<up>" "site-app-detail-anchor-prev")
-                                      (list "q" "quit-window"))
-                                ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
-                                (map (lambda (k) (list (car k) (cadr k))) list-keys)
-                                (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
-                                                       (string-append "site-app-tab-" (plist-get p 'key))))
-                                     pages))))
-          ;; / asks for a status tab; the list mode's own row filter stays on f
-          (define-key (mode-keymap mode) "/" "site-app-filter-choose")
-          ;; The index keeps its own bindings; unclaimed detail-page keys run in the
-          ;; adjacent detail, just as they do when focus is on the detail itself.
-          (when (boundp 'app-detail-keys!)
-            (app-detail-keys! mode "site-app-detail-mode"))
-          ;; its pages walk it: N and P on a page open the next and previous row
-          (when (boundp 'index-declare!)
-            (index-declare! mode 'next "list-next" 'prev "list-prev" 'open "site-app-detail"))
+          (if index
+              (begin
+                (register-minor-mode! mode (lambda (buf) #t))
+                (mode-doc! mode (section-doc page)))
+              (begin
+                (define-list-mode! mode
+                  (site-app-list-opts name title pages list-keys (section-doc page) (site-app-page-buffer name id)))
+                (site-app-index-list-mode! mode)))
           (define-command command (string-append "Open " title " " (plist-get page 'label))
             (lambda () (site-app-open! name id)))))
       pages)
@@ -2663,9 +2706,12 @@
 (domain! 'web)
 (effects! '(write external display))
 (public! 'define-site-app
-  "(define-site-app SPEC) — register a website app and its list mode")
+  "(define-site-app SPEC) — register a website app and its list mode; a spec's 'index-mode is one list mode for every section, each section a minor mode on it")
 (public! 'site-app-open!
   "(site-app-open! NAME) — open a registered website app in the current group")
+
+(public! 'site-app-index-enter!
+  "(site-app-index-enter! BUF NAME SECTION) — put a section's buffer in its mode: the app's 'index-mode with the section as a minor mode, else the section's own list mode")
 (public! 'site-app-read-page!
   "(site-app-read-page! NAME PAGE) — navigate the app's live tab and redraw PAGE")
 

@@ -5535,7 +5535,7 @@ is forgotten and that group falls back to creation order in the switcher."
                            (and shown (not (mode-consolidate-window-mode shown)) shown))
                          (let ((nw (window-new-hidden! name)))
                            (and nw (begin (group-panes-record! pane nw #f) nw))))))
-              (if (and w (group-panes-show! pane w)) w win))))))
+              (if (and w (group-panes-show! pane w) (assoc w (window-list))) w win))))))
 
 ;; display-buffer, the detail opener and switch-to-buffer ask this first:
 ;; the window NAME went to, or #f when the group has no say

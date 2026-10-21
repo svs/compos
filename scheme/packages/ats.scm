@@ -277,7 +277,7 @@
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
         ;; every index is one list mode too; each section (ats-approvals-mode, ...) is a minor mode on it
-        'index-mode "ats-index-mode"
+        'index-mode "ats-mode"
         ;; the candidate tab (profile on a candidate's own page) leads with the newest evaluation, beside About; Skills goes last
         'detail-moves (list (list "candidate" ats-candidate-order) (list "profile" ats-candidate-order))
         ;; M-o on a row: the chat of that case, as on its page; a falls through to the page and approves
@@ -643,7 +643,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
               (list 'style "palette"))))))
 (catalog-meta! 'command "ats-palette" 'domain 'web 'effects '(read external display))
 (for-each (lambda (mode) (define-key (mode-keymap mode) "s-k" "ats-palette"))
-          '("ats-index-mode" "ats-pipeline-mode" "ats-detail-mode"))
+          '("ats-mode" "ats-pipeline-mode" "ats-detail-mode"))
 
 ;; An ATS page by its id, as a row of its section opens it. KIND is jobs, approvals,
 ;; applications or candidates; ID is the key in the site's URL: a job's slug, an

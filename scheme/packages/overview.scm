@@ -190,40 +190,80 @@
   ;; rows are centred: the index in a row of LEN2 nearest tile C of a row of LEN
   (max 0 (min (- len2 1) (floor (+ (- c (/ (- len 1) 2)) (/ (- len2 1) 2) 0.5)))))
 
+(define (windows-overview-step rows me dir)
+  ;; pure: the tile DIR of ME in the grid ROWS, or #f at its edge. Left and
+  ;; right run on across the rows: before the first tile of a row is the
+  ;; last of the row above, after the last is the first of the row below.
+  ;; Up and down keep the column, centred on a shorter row
+  (let* ((r (let loop ((rs rows) (i 0))
+              (cond ((null? rs) #f) ((member me (car rs)) i) (else (loop (cdr rs) (+ i 1))))))
+         (row (and r (list-ref rows r)))
+         (c (and row (- (length row) (length (member me row))))))
+    (and r
+         (cond ((equal? dir 'left)
+                (if (> c 0) (list-ref row (- c 1)) (and (> r 0) (car (reverse (list-ref rows (- r 1)))))))
+               ((equal? dir 'right)
+                (if (< (+ c 1) (length row)) (list-ref row (+ c 1)) (and (< (+ r 1) (length rows)) (car (list-ref rows (+ r 1))))))
+               (else
+                 (let ((r2 (if (equal? dir 'up) (- r 1) (+ r 1))))
+                   (and (>= r2 0) (< r2 (length rows))
+                        (let ((next (list-ref rows r2)))
+                          (list-ref next (windows-overview--nearest c (length row) (length next)))))))))))
+
+(define (windows-overview-after-kill rows win)
+  ;; pure: (ROWS NEXT) once WIN's tile is gone: the rest laid again in rows
+  ;; as wide as the grid was, and the tile after it, else the last one
+  (let* ((flat (apply append rows))
+         (after (member win flat))
+         (left (filter (lambda (w) (not (equal? w win))) flat))
+         (next (cond ((and after (pair? (cdr after))) (cadr after)) ((pair? left) (car (reverse left))) (else #f))))
+    (list (if (null? left) '() (windows-overview--rows left (max 1 (length (car rows))))) next)))
+
+(define (windows-overview-model-kill model win buf)
+  ;; pure: the model once BUF is killed from WIN's tile: no window lists BUF,
+  ;; and a window left with no buffer closes
+  (let loop ((ws (panes-windows model)) (l model))
+    (if (null? ws)
+        l
+        (let* ((w (car ws)) (k (plist-get w 'key))
+               (bufs (filter (lambda (b) (not (equal? b buf))) (or (plist-get w 'buffers) '()))))
+          (loop (cdr ws)
+                (cond ((equal? bufs (or (plist-get w 'buffers) '())) l)
+                      ((null? bufs) (panes-close-window l k))
+                      (else (panes-set-buffers l k bufs))))))))
+
+(define (windows-overview-session model rows from keys buffer-of)
+  ;; pure: the view walked by KEYS from FROM, as its commands walk it: left,
+  ;; right, up, down, kill, and ret or quit to leave. BUFFER-OF names a
+  ;; window's buffer. Answers (CHOSEN AFTER FAULTS ROWS KILLED); a step past
+  ;; the edge stays put
+  (let loop ((keys keys) (at from) (rows rows) (l model) (killed '()))
+    (if (or (null? keys) (member (car keys) '(ret quit)))
+        (let* ((buf (buffer-of at))
+               (after (windows-overview-return-model l from at (if buf (list buf) '()) (and buf "fundamental-mode"))))
+          (list at after (windows-overview-model-faults model after from at killed) rows killed))
+        (let ((key (car keys)))
+          (cond ((member key '(left right up down))
+                 (loop (cdr keys) (or (windows-overview-step rows at key) at) rows l killed))
+                ((equal? key 'kill)
+                 (let* ((buf (buffer-of at)) (gone (windows-overview-after-kill rows at)))
+                   (if (not (cadr gone))
+                       (loop (cdr keys) at rows l killed)
+                       (loop (cdr keys) (cadr gone) (car gone)
+                             (windows-overview-model-kill l at buf) (cons (list at buf) killed)))))
+                (else (loop (cdr keys) at rows l killed)))))))
+
 (define (windows-overview--move! dir)
   ;; the arrows walk the grid the eye sees, the rows the view laid, not the
   ;; window tree under it
-  (let* ((rows (or (frame-local 'windows-overview-rows) '()))
-         (me (active-window))
-         (r (let loop ((rs rows) (i 0))
-              (cond ((null? rs) #f) ((member me (car rs)) i) (else (loop (cdr rs) (+ i 1))))))
-         (row (and r (list-ref rows r)))
-         (c (and row (- (length row) (length (member me row)))))
-         (target
-           (and r
-                ;; left and right run on across the rows: before the first tile
-                ;; of a row is the last tile of the row above, and after the last
-                ;; tile is the first of the row below
-                (cond ((equal? dir 'left)
-                       (if (> c 0)
-                           (list-ref row (- c 1))
-                           (and (> r 0) (car (reverse (list-ref rows (- r 1)))))))
-                      ((equal? dir 'right)
-                       (if (< (+ c 1) (length row))
-                           (list-ref row (+ c 1))
-                           (and (< (+ r 1) (length rows)) (car (list-ref rows (+ r 1))))))
-                      (else
-                        (let ((r2 (if (equal? dir 'up) (- r 1) (+ r 1))))
-                          (and (>= r2 0) (< r2 (length rows))
-                               (let ((next (list-ref rows r2)))
-                                 (list-ref next (windows-overview--nearest c (length row) (length next)))))))))))
+  (let ((target (windows-overview-step (or (frame-local 'windows-overview-rows) '()) (active-window) dir)))
     (if target
         (select-window! target)
         (message (string-append "No tile " (symbol->string dir))))))
 
 (define (windows-overview--step! dir)
-  ;; Exposé tiles sit in the grid of rows; tiled panes are where the tree says
-  (if windows-overview-expose (windows-overview--move! dir) (focus-move! dir)))
+  ;; the tiles sit in the grid of rows in both views: the arrows walk it
+  (windows-overview--move! dir))
 
 (define (windows-overview--spread)
   ;; the client's token: the windows behind each pane, and for Exposé the rows
@@ -254,6 +294,9 @@
                                     (cdr (assoc (car row) (group-panes-windows))))))
                   (when (pair? rest) (group-panes-record! (car row) (car rest) #t)))))
             (buffer-kill! buf)
+            ;; the model the exit draws loses the buffer too
+            (let ((m (frame-local 'windows-overview-model)))
+              (when m (set-frame-local! 'windows-overview-model (windows-overview-model-kill m win buf))))
             (when next
               ;; the rest regrid, as many to a row as before
               (let* ((left (windows-overview--rows (filter (lambda (w) (not (equal? w win))) flat)
@@ -297,7 +340,9 @@
                             (set-frame-local! 'windows-overview-home (and home (car home)))
                             (set-frame-local! 'windows-overview-from me)
                             ;; the window model as it was: the exit draws it back, as data
-                            (set-frame-local! 'windows-overview-model (and (boundp 'panes-layout) (panes-layout)))
+                            (set-frame-local! 'windows-overview-model
+                              (and (boundp 'panes-layout) (panes-layout)
+                                   (windows-overview-model-as-shown (panes-layout) (map car (window-list)))))
                             (windows-overview--lay! rows))
                           (client-slide! (json-encode (windows-overview--spread)))
                           (set-frame-local! 'windows-overview #t)
@@ -322,6 +367,19 @@
                     '()))
               (group-panes-windows))))
 
+(define (windows-overview-model-as-shown model shown)
+  ;; pure: MODEL as the screen has it: the panes in the order SHOWN puts
+  ;; their windows, and the window on screen at the front of its pane. The
+  ;; view saves this, so leaving gives back what was on screen even when the
+  ;; model had drifted from it
+  (let* ((l (fold (lambda (l h) (let ((k (panes-key-of-handle l h))) (if k (panes-raise l k) l))) model shown))
+         (order (panes--uniq (filter (lambda (p) p)
+                                     (map (lambda (h) (let ((k (panes-key-of-handle l h))) (and k (panes-pane-of l k)))) shown))))
+         (panes (panes-panes l))
+         (first (filter (lambda (p) p) (map (lambda (id) (find (lambda (p) (equal? (plist-get p 'id) id)) panes)) order)))
+         (rest (filter (lambda (p) (not (member (plist-get p 'id) order))) panes)))
+    (panes--put l 'panes (append first rest))))
+
 (define (windows-overview--swap-keys model a b)
   ;; pure: windows A and B trade places in the panes
   (let ((sw (lambda (k) (cond ((equal? k a) b) ((equal? k b) a) (else k)))))
@@ -344,21 +402,27 @@
                    (l (panes-set-buffers (car made) (cadr made) bufs)))
               (panes-set-handle l (cadr made) chosen))))))
 
-(define (windows-overview-model-faults before after from chosen)
+(define (windows-overview-model-faults before after from chosen &optional killed)
   ;; pure: what AFTER breaks of the rules a return keeps, as text; () is none.
-  ;; One live window to one model window, each model window in one pane, the
-  ;; panes and their shares as they were, and no pane but FROM's changes
-  (let* ((handles (filter (lambda (h) h) (map (lambda (w) (plist-get w 'win)) (panes-windows after))))
+  ;; BEFORE is the model the view saved, KILLED the (WIN BUF) the view killed.
+  ;; One live window to one model window, each model window in one pane, no
+  ;; killed buffer left, the panes and their shares as they were, and no pane
+  ;; but FROM's changes
+  (let* ((killed (or killed '()))
+         (base (let loop ((ks (reverse killed)) (l before))
+                 (if (null? ks) l (loop (cdr ks) (windows-overview-model-kill l (car (car ks)) (cadr (car ks)))))))
+         (handles (filter (lambda (h) h) (map (lambda (w) (plist-get w 'win)) (panes-windows after))))
          (keys (map (lambda (w) (plist-get w 'key)) (panes-windows after)))
          (placed (apply append (map (lambda (p) (or (plist-get p 'windows) '())) (panes-panes after))))
+         (shown (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows after))))
          (count (lambda (x xs) (length (filter (lambda (y) (equal? x y)) xs))))
          (shape (lambda (m) (map (lambda (p) (list (plist-get p 'id) (plist-get p 'share))) (panes-panes m))))
          (front (lambda (m) (map (lambda (p) (let ((ks (or (plist-get p 'windows) '())))
                                                (list (plist-get p 'id) (and (pair? ks) (panes-handle m (car ks))))))
                                  (panes-panes m))))
-         (kf (panes-key-of-handle before from))
-         (home (and kf (panes-pane-of before kf)))
-         (tops (map cadr (front before)))
+         (kf (panes-key-of-handle base from))
+         (home (and kf (panes-pane-of base kf)))
+         (tops (map cadr (front base)))
          (moved (and chosen (not (equal? chosen from)) (not (member chosen tops)) kf)))
     (append
       (map (lambda (h) (format "window ~a is held by two model windows" h))
@@ -367,18 +431,20 @@
            (filter (lambda (k) (not (= (count k placed) 1))) keys))
       (map (lambda (k) (format "a pane names ~a, which no model window is" k))
            (filter (lambda (k) (not (member k keys))) placed))
-      (if (equal? (shape before) (shape after)) '() (list "the panes or their shares changed"))
+      (map (lambda (b) (format "the killed ~a is still in a window" b))
+           (filter (lambda (b) (member b shown)) (map cadr killed)))
+      (if (equal? (shape base) (shape after)) '() (list "the panes or their shares changed"))
       (if moved
           (append
             (filter (lambda (x) x)
                     (map (lambda (b) (let ((a (assoc (car b) (front after))))
                                        (and (not (equal? (car b) home)) (not (equal? b a))
                                             (format "pane ~a shows ~a, was ~a" (car b) (and a (cadr a)) (cadr b)))))
-                         (front before)))
+                         (front base)))
             (let ((h (assoc home (front after))))
               (if (and h (equal? (cadr h) chosen)) '()
                   (list (format "pane ~a shows ~a, not the chosen ~a" home (and h (cadr h)) chosen)))))
-          (if (equal? before after) '() (list "nothing was chosen, yet the model changed"))))))
+          (if (equal? base after) '() (list "nothing was chosen, yet the model changed"))))))
 
 (define (windows-overview--apply-return! quiet model from me)
   ;; the model the view saved, with the chosen window in FROM's place, is

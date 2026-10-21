@@ -583,6 +583,26 @@
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
   (message "panes-mode off"))
 
+(define (panes--move-current-pane! step)
+  ;; the pane of the selected window trades places with its neighbour, every
+  ;; window and stack in it going along
+  (let* ((l (panes--ensure-layout!))
+         (k (panes-key-of-handle l (active-window)))
+         (pid (and k (panes-pane-of l k)))
+         (ids (map (lambda (p) (plist-get p 'id)) (panes-panes l)))
+         (i (let loop ((xs ids) (n 0))
+              (cond ((null? xs) #f) ((equal? (car xs) pid) n) (else (loop (cdr xs) (+ n 1))))))
+         (to (and i (+ i step))))
+    (if (and to (>= to 0) (< to (length ids)))
+        (begin (panes-apply! (panes-move-pane l pid to)) #t)
+        (begin (message "No pane that way") #f))))
+
+(define-command "pane-move-left" "Move this pane left, with all its windows"
+  (lambda () (panes--move-current-pane! -1)))
+
+(define-command "pane-move-right" "Move this pane right, with all its windows"
+  (lambda () (panes--move-current-pane! 1)))
+
 (define-command "panes-mode"
   "Toggle the window model: a row of panes, each a stack of windows, each a stack of buffers; a buffer opens where the window policy says"
   (lambda () (if panes-mode (panes-mode-disable!) (panes-mode-enable!))))

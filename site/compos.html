@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Compos — The hackable harness for power users</title>
-<meta name="description" content="Code, mail, chat and agents as buffers in one keyboard-driven frame. An Emacs, modernised: on the BEAM, scripted in Scheme.">
+<meta name="description" content="The hackable harness for power users. Personal, malleable software for the human in the loop: precise agent context, every model setting in reach, and the subscriptions you already pay for.">
 <link rel="icon" type="image/png" href="images/compos-logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -163,10 +163,26 @@ pre.code {
 .rule .title { color: var(--ink); }
 .rule .line { flex: 1; height: 1px; background: var(--rule); min-width: 40px; }
 
+/* features */
+.features { padding: 0 0 96px; }
+.feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--edge); }
+.feature { padding: 28px 24px 32px 0; border-right: 1px solid var(--rule); }
+.feature + .feature { padding-left: 24px; }
+.feature:last-child { border-right: 0; }
+.feature .num { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--faint); }
+.feature .num b { color: var(--green); font-weight: 500; }
+.feature h2 { margin: 18px 0 0; font-weight: 400; font-size: clamp(24px, 2.2vw, 30px); line-height: 1.12; letter-spacing: -.015em; text-wrap: balance; }
+.feature p { margin: 14px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.feature .tags { margin-top: 18px; font-family: var(--mono); font-size: 11.5px; color: var(--blue); }
+
 @media (max-width: 980px) {
   .hero { grid-template-columns: minmax(0, 1fr); }
   .emblem { max-width: 320px; justify-self: start; }
   .windows { grid-template-columns: minmax(0, 1fr); }
+  .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feature:nth-child(2n) { border-right: 0; }
+  .feature:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .feature:nth-child(odd) { padding-left: 0; }
   .nav { display: none; }
 }
 @media (max-width: 600px) {
@@ -174,6 +190,9 @@ pre.code {
   .hero { padding-top: 56px; }
   .echo { flex-wrap: wrap; }
   .echo .msg { flex-basis: 100%; }
+  .feature-grid { grid-template-columns: minmax(0, 1fr); }
+  .feature, .feature + .feature { padding-left: 0; padding-right: 0; border-right: 0; }
+  .feature + .feature { border-top: 1px solid var(--rule); }
 }
 </style>
 </head>
@@ -187,7 +206,7 @@ pre.code {
     </a>
     <span class="spacer"></span>
     <nav class="nav">
-      <a href="#philosophy">philosophy</a>
+      <a href="#features">features</a>
       <a href="https://github.com/svs/compos/tree/main/docs/manual">manual</a>
       <a href="https://github.com/svs/compos">source</a>
     </nav>
@@ -198,9 +217,9 @@ pre.code {
 <main id="top">
   <section class="hero">
     <div>
-      <div class="eyebrow"><i></i><span>an emacs, modernised</span></div>
+      <div class="eyebrow"><i></i><span>the agent context manager</span></div>
       <h1>The hackable harness for power users.</h1>
-      <p class="subline">It's like Emacs, but it's on the <b>BEAM</b>.</p>
+      <p class="subline">Personal software for the human in the loop. Runs on the <b>BEAM</b>.</p>
       <p class="lede">Code, mail, chat and agents as buffers in one keyboard-driven frame. Every model, tool and keybinding is a form you can read, change and evaluate — while it runs.</p>
       <div class="actions">
         <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
@@ -209,7 +228,7 @@ pre.code {
       <div class="facts">
         <span><span class="key">M-x</span> is the interface</span>
         <span>·</span>
-        <span>bring your own model</span>
+        <span>use your subscriptions</span>
         <span>·</span>
         <span>no telemetry</span>
       </div>
@@ -275,10 +294,39 @@ pre.code {
     </div>
   </section>
 
-  <section id="philosophy" class="rule">
-    <span class="title">§ philosophy</span>
+  <section id="features" class="rule">
+    <span class="title">§ what it does</span>
     <span class="line"></span>
-    <span>next section</span>
+    <span>four reasons</span>
+  </section>
+
+  <section class="features" aria-label="Features">
+    <div class="feature-grid">
+      <article class="feature">
+        <div class="num"><b>01</b> · malleable</div>
+        <h2>Software shaped to the person using it.</h2>
+        <p>Every command, mode, keymap and hook is Scheme you can read and change while it runs. Ask the agent for a tool and it builds one into your workspace. A kanban board, a hiring pipeline, a mail triage view. It stays yours.</p>
+        <div class="tags">M-x · C-x C-e · live reload</div>
+      </article>
+      <article class="feature">
+        <div class="num"><b>02</b> · context</div>
+        <h2>The agent sees what you see.</h2>
+        <p>A group holds the buffers of one task. The agent reads the windows you have open, the companions you pin and the group it lives in, and nothing else. You arrange the context. You don't hope for it.</p>
+        <div class="tags">groups · companions · visible context</div>
+      </article>
+      <article class="feature">
+        <div class="num"><b>03</b> · tuning</div>
+        <h2>Every model setting, per chat.</h2>
+        <p>Connector, model, prompt fragments, skills and permissions are all settings you can change. Set one chat up for review and another for writing, then save them as presets. Permissions follow the effects each call declares.</p>
+        <div class="tags">presets · prompt fragments · effects</div>
+      </article>
+      <article class="feature">
+        <div class="num"><b>04</b> · subscriptions</div>
+        <h2>Use what you already pay for.</h2>
+        <p>Compos runs Claude Code, OpenCode and other ACP agents on your own plans. No markup, no extra API key, no telemetry.</p>
+        <div class="tags">claude code · opencode · acp</div>
+      </article>
+    </div>
   </section>
 </main>
 

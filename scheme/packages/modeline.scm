@@ -391,7 +391,12 @@
             (list (dash--row "members"
                              (number->string (length (group-buffers-mru id))))
                   (dash--row "companion" (group-noise id))
-                  (dash--row "layout" (if (group-layout id) "saved" "default")))
+                  (dash--row "layout" (if (group-layout id) "saved" "default"))
+                  (dash--row "group cwd" (or (group-cwd id) "none")))
+            ;; a chat's agent works in a directory of its own
+            (if (chat-buffer? buf)
+                (list (dash--row "chat cwd" (or (chat-cwd-of buf) "none")))
+                '())
             (let ((m (group-meta id)))
               (if m (list (dash--row "about" m)) '())))))))
 

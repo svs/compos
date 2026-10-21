@@ -62,7 +62,7 @@ a:hover { color: var(--blue); }
 /* hero */
 main { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 .hero {
-  display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 48px; align-items: center; padding: 88px 0 64px;
 }
 .eyebrow {
@@ -72,8 +72,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 .eyebrow i { width: 7px; height: 7px; background: var(--green); display: block; }
 h1 {
   margin: 26px 0 0; font-weight: 300;
-  font-size: clamp(48px, 7.2vw, 104px); line-height: .95; letter-spacing: -.035em;
-  text-wrap: balance;
+  font-size: clamp(34px, 4vw, 56px); line-height: 1; letter-spacing: -.035em;
 }
 .subline {
   margin: 22px 0 0; font-family: var(--mono); font-size: clamp(14px, 1.3vw, 16px);
@@ -94,13 +93,20 @@ h1 {
   display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 28px;
   font-family: var(--mono); font-size: 11.5px; color: var(--faint);
 }
-.emblem { justify-self: end; width: 100%; max-width: 500px; line-height: 0; }
-.emblem img { width: 100%; height: auto; display: block; }
+/* the screenshot runs past the page margin to the window's right edge;
+   50vw - 608px is that distance beside main's 1280px box and 32px pad */
+body { overflow-x: clip; }
+.hero-shot { margin: 0 calc(-1 * max(32px, 50vw - 608px)) 0 0; }
+.hero-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); border-right: 0; box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
 
 /* real screenshot */
+.shot-row { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 2fr); gap: 40px; align-items: start; margin: 0 0 72px; }
+.shot-row .shot { margin: 0; }
+.shot-row p { margin: 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+.shot-head { margin: 0 0 28px; font-weight: 300; font-size: clamp(28px, 3.2vw, 44px); line-height: 1.05; letter-spacing: -.03em; }
 .shot { margin: 0 0 72px; }
 .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
-.shot figcaption, .closing-shot figcaption { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); }
+.shot figcaption, .hero-shot figcaption { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); }
 
 /* the frame */
 .frame-wrap { padding: 0 0 96px; }
@@ -189,7 +195,7 @@ pre.code {
 .note .added { border-left: 2px solid var(--green); padding-left: 10px; margin-left: -12px; }
 
 /* outside world */
-.world { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; padding: 0 0 96px; }
+.world { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: start; padding: 0 0 96px; }
 .world h2 { margin: 0; font-weight: 300; font-size: clamp(34px, 4.2vw, 58px); line-height: 1.02; letter-spacing: -.025em; text-wrap: balance; }
 .world p { margin: 20px 0 0; font-size: 18px; line-height: 1.55; color: var(--ink-2); max-width: 40ch; text-wrap: pretty; }
 .log { border: 1px solid var(--edge); background: var(--panel-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
@@ -209,12 +215,7 @@ pre.code {
 .who-grid p { margin: 12px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 
 /* closing */
-.closing {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 56px; align-items: center;
-  padding: 72px 0 112px; border-top: 1px solid var(--rule); text-align: left;
-}
-.closing-shot { margin: 0; }
-.closing-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--edge); box-shadow: 0 22px 60px rgba(0, 0, 0, .7); }
+.closing { padding: 72px 0 112px; border-top: 1px solid var(--rule); text-align: left; }
 .closing h2 { margin: 0; font-weight: 300; font-size: clamp(40px, 5.4vw, 76px); line-height: 1; letter-spacing: -.03em; max-width: 16ch; text-wrap: balance; }
 .closing p { margin: 22px 0 0; font-size: 19px; line-height: 1.55; color: var(--ink-2); max-width: 44ch; }
 
@@ -225,11 +226,10 @@ footer { border-top: 1px solid var(--rule); }
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: minmax(0, 1fr); }
-  .emblem { max-width: 320px; justify-self: start; }
+  .shot-row { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .windows { grid-template-columns: minmax(0, 1fr); }
   .feature-grid, .who-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .world { grid-template-columns: minmax(0, 1fr); gap: 32px; }
-  .closing { grid-template-columns: minmax(0, 1fr); gap: 40px; }
   .feature, .feature:nth-child(3n+1), .feature:nth-child(3n) { padding: 28px 24px 32px; border-right: 1px solid var(--rule); border-top: 0; }
   .feature:nth-child(odd) { padding-left: 0; }
   .feature:nth-child(even) { border-right: 0; padding-right: 0; }
@@ -240,6 +240,7 @@ footer { border-top: 1px solid var(--rule); }
 @media (max-width: 600px) {
   .top-inner, main { padding-left: 16px; padding-right: 16px; }
   .hero { padding-top: 56px; }
+  .hero-shot { margin-right: -16px; }
   .echo { flex-wrap: wrap; }
   .echo .msg { flex-basis: 100%; }
   .feature-grid, .who-grid { grid-template-columns: minmax(0, 1fr); }
@@ -273,8 +274,8 @@ footer { border-top: 1px solid var(--rule); }
   <section class="hero">
     <div>
       <div class="eyebrow"><i></i><span>the agent context manager</span></div>
-      <h1>The hackable harness for power users!</h1>
-      <p class="subline">Finally, a home for your agent that is also <b>a home for you</b>.</p>
+      <h1>Flow state has a home.</h1>
+      <p class="subline">Compos is the hackable harness for power users to build the software you need - for work or for life.</p>
       <p class="lede">Your whole working day in one place that fits the way you think. Your agents already know what you are working on, so you explain less and get more done, on the AI subscriptions you already pay for.</p>
       <div class="actions">
         <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
@@ -288,15 +289,20 @@ footer { border-top: 1px solid var(--rule); }
         <span>no new bill</span>
       </div>
     </div>
-    <div class="emblem">
-      <img src="images/compos-logo-dark.png" width="560" height="560" alt="The Compos logo">
-    </div>
+    <figure class="hero-shot">
+      <img src="images/compos-music.webp" width="2560" height="1294" alt="Compos with Spotify, the album's page and an agent chat that recommends similar records">
+      <figcaption>For doing what you love.</figcaption>
+    </figure>
   </section>
 
-  <figure class="shot">
-    <img src="images/compos-workspace.webp" width="2560" height="1294" alt="A Compos workspace">
-    <figcaption>Build the app *your* work needs.&nbsp;</figcaption>
-  </figure>
+  <h2 class="shot-head">Build any app you need.</h2>
+  <div class="shot-row">
+    <figure class="shot">
+      <img src="images/compos-workspace.webp" width="2560" height="1294" alt="A Compos workspace">
+      <figcaption>Build the app *your* work needs.&nbsp;</figcaption>
+    </figure>
+    <p>Build your app as you work with your agent. Over time you get software that fits your head, not the other way around.<div><br></div><div>Whether it is CRMs,&nbsp;</div><div><br></div><div>Then&nbsp;</div></p>
+  </div>
 
   <section id="features" class="rule">
     <span class="title">§ features</span>
@@ -333,8 +339,8 @@ footer { border-top: 1px solid var(--rule); }
       </article>
       <article class="feature">
         <div class="num"><b>06</b> · cost</div>
-        <h2>It listens and responds</h2>
-        <p>Compos can listen for Whatsapps, emails, DMs - you name it. If you can reach it in the browser or the cli you can get an agent to handle it.&nbsp;</p>
+        <h2>Durable workflows</h2>
+        <p>Compos agents can work across days. Sleeping, waking, listening to signals and working until the job gets done.<div><br></div><div>Perfect for tasks that require follow-ups and interfacing with the outside world where everyone isn’t on Compos yet.</div></p>
       </article>
     </div>
   </section>
@@ -347,16 +353,11 @@ footer { border-top: 1px solid var(--rule); }
 
   <section class="world" aria-label="Compos responds to the outside world">
     <div>
-      <h2>It answers the world while you work.</h2>
-      <p>A WhatsApp message, an email, an alert from the tools you already use. Your agents notice, take care of the routine, and bring you only what needs you. Nothing slips while you are heads down or away.</p>
+      <h2>Ludicrously good context management.</h2>
+      <p>Point the agent to where your attention is. Compos agents are more like copilots than bounty hunters.&nbsp;<div><br></div><div>Collect context into groups.&nbsp;</div></p>
     </div>
-    <div class="log" role="img" aria-label="A log of outside events and what the agent did with each">
-      <div class="row"><span class="t">09:12</span><span class="src">whatsapp</span><span class="what">Arun: a 30% deposit is fine.</span></div>
-      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">updated the q4 plan, drafted a reply for your OK</span></div>
-      <div class="row"><span class="t">09:40</span><span class="src">email</span><span class="what">Kestrel: shipping confirmed for 14 Nov.</span></div>
-      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">ticked the todo, added the date to your calendar</span></div>
-      <div class="row"><span class="t">10:05</span><span class="src">webhook</span><span class="what">invoice #2231 paid</span></div>
-      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">noted it in the plan. Nothing else needs you.</span></div>
+    <div>
+      <img src="images/compos-context.svg" alt="Three group layouts stacked in space, each holding windows split into panes, with buffers floating above" style="width:100%;height:auto;display:block">
     </div>
   </section>
 
@@ -385,18 +386,12 @@ footer { border-top: 1px solid var(--rule); }
   </section>
 
   <section class="closing">
-    <div>
-      <h2>Flow state has a home.</h2>
-      <p>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
-      <div class="actions">
-        <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
-        <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
-      </div>
+    <h2>Finally, a home for your agent that is also <b>a home for you</b>.</h2>
+    <p>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
+    <div class="actions">
+      <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
+      <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
     </div>
-    <figure class="closing-shot">
-      <img src="images/compos-spotify.webp" width="2560" height="1299" alt="Compos with Spotify, a Pitchfork review and the album's page side by side">
-      <figcaption>For doing what you love.</figcaption>
-    </figure>
   </section>
 </main>
 

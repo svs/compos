@@ -2073,13 +2073,7 @@
     (and (not (equal? href "")) (equal? (site-app-field row 'href) href))))
 
 ;; the page of what plays: one buffer, drawn again for each track
-(register-minor-mode! "spotify-now-mode" (lambda (buf) #t) (lambda (buf) #t))
-(mode-doc! "spotify-now-mode" "The page of the track that plays. It is one page: when the music moves on, it draws the next track in place.")
 
-(define (spotify--now-minor!)
-  (when (equal? (current-buffer) *spotify-now-detail*)
-    (unless (minor-mode-on? (current-buffer) "spotify-now-mode")
-      (enable-minor-mode! (current-buffer) "spotify-now-mode"))))
 
 (define (spotify--detail? buf)
   (and (eq? (buffer-local buf 'site-app-name) 'spotify) (buffer-local buf 'site-app-row) #t))
@@ -2437,6 +2431,9 @@
         'base-url "https://open.spotify.com"
         'home "/"
         'home-page 'home
+        ;; every section is an index: one major mode, so they share one window
+        'index-mode "spotify-mode"
+        ;; the page beside it, the visualiser and the album browser, is the other window
         'detail-mode "spotify-detail-mode"
         ;; Spotify lives in a group of its own when spotify-own-group says so
         'own-group spotify-own-group
@@ -3046,9 +3043,7 @@
   ;; filter, so these go on after it every time
   (for-each (lambda (mode)
               (for-each (lambda (k) (define-key (mode-keymap mode) (car k) (cadr k))) *spotify-keys*))
-            (cons "spotify-detail-mode"
-                  (map (lambda (page) (site-app-page-mode 'spotify (plist-get page 'id)))
-                       (site-app-pages (site-app-spec 'spotify)))))
+            (cons "spotify-detail-mode" (site-app-index-modes 'spotify)))
   ;; a page is not a list: its arrows step from part to part
   (define-key (mode-keymap "spotify-detail-mode") "<down>" "site-app-detail-next")
   (define-key (mode-keymap "spotify-detail-mode") "<up>" "site-app-detail-prev")
@@ -3061,7 +3056,6 @@
   (local-remap*! (current-buffer) "index-previous-item" "spotify-go-playlists"))
 
 (add-hook! 'spotify-detail-mode-hook 'spotify--own-nav!)
-(add-hook! 'spotify-detail-mode-hook 'spotify--now-minor!)
 
 (spotify--define-app!)
 

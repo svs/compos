@@ -314,8 +314,10 @@
 
 (define (panes-apply! layout)
   ;; a buffer is in one window, whatever made this layout, and every window of
-  ;; the layout is a window of the frame: one the screen does not show waits hidden
-  (let ((layout (panes--draw! (panes--materialize! (panes-unique-buffers (panes-adopt-buffers layout (panes--group-buffers (panes-buffers layout)) panes--buffer-mode))))))
+  ;; the layout is a window of the frame: one the screen does not show waits hidden.
+  ;; Only the layout's own windows are drawn: a member of the group with no
+  ;; window stays without one until the user opens it
+  (let ((layout (panes--draw! (panes--materialize! (panes-unique-buffers layout)))))
     (panes-layout-set! layout)
     (window-state-changed!)
     layout))
@@ -779,11 +781,11 @@
               (when (and h (window-exists? h)) (select-window! h))
               h)))))
 
-(define-command "window-split-mode"
+(define-command "buffer-pop"
   "Move this buffer to a second window of its mode, beside this one; ibuffer's split action moves the marked buffers"
   (lambda ()
     (let ((buf (window-buffer (active-window))))
-      (cond ((not panes-mode) (message "window-split-mode needs panes-mode") #f)
+      (cond ((not panes-mode) (message "buffer-pop needs panes-mode") #f)
             ((not buf) #f)
             (else (panes-split-off! (list buf)
                                     (panes-key-of-handle (panes--ensure-layout!) (active-window))))))))

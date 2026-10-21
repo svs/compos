@@ -1,0 +1,20 @@
+.hero-art.hero-options { aspect-ratio: auto; overflow: visible; }
+.hero-options fieldset { min-width: 0; margin: 0 0 16px; padding: 12px; border: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 10px 16px; font-family: var(--mono); font-size: 11px; }
+.hero-options legend { padding: 0 6px; color: var(--muted); }
+.hero-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.hero-options input { accent-color: var(--ink); }
+.hero-options label:has(input:checked) { font-weight: 600; }
+.hero-options .hero-choice { display: none; margin: 0; }
+.hero-options:has(#hero-cinematic:checked) .choice-cinematic,
+.hero-options:has(#hero-abstract:checked) .choice-abstract,
+.hero-options:has(#hero-type:checked) .choice-type,
+.hero-options:has(#hero-geometric:checked) .choice-geometric,
+.hero-options:has(#hero-workshop:checked) .choice-workshop { display: block; }
+.hero-options .hero-choice img { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; animation: none; }
+.hero-options figcaption { margin-top: 12px; font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--muted); }
+
+.hero-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding-bottom: 56px; }
+.hero-comparison figure { min-width: 0; margin: 0; }
+.hero-comparison img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; }
+.hero-comparison figcaption { margin-top: 12px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+@media (max-width: 600px) { .hero-comparison { grid-template-columns: minmax(0, 1fr); } }

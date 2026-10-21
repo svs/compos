@@ -5,6 +5,8 @@
 (effects! '(write display))
 
 (define (pmt-buffer! name mode)
+  ;; every test starts with the model off and turns it on itself
+  (when panes-mode (panes-mode-disable!))
   (test-buffer! name "text\n")
   (buffer-set-local! name 'mode-name mode)
   name)
@@ -117,6 +119,9 @@
                   (let ((before (window-list)))
                     (switch-to-group! gb)
                     (check-false! (equal? (map cadr (window-list)) (map cadr before)) "B shows its own windows")
+                    (check-equal! (list 'windows (window-list) 'hidden (window-hidden-list)
+                                        'a-handles (let ((l (panes-layout-of ga))) (map (lambda (k) (list k (panes-handle l k) (panes-window-buffer l k))) (panes-window-keys l))))
+                                  'probe "state after entering B")
                     (switch-to-group! ga)
                     (check-equal! (window-list) before "A comes back with the same windows: same ids, same buffers, same order")))
                 (lambda () (pmt-done! (list a1 a2 b1)))))))))))

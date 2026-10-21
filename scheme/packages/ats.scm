@@ -498,11 +498,15 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                         (map (lambda (row) (let ((p (site-app-show-detail! buf row #f #t))) (and p (ats-case-id p)))) rows))))
       (if (null? ids)
           (message "no approvals here")
-          (let ((orch (subagent-live-buffer
-                        (execute* (ats-approvals-review-prompt ids)
-                                  (list 'title (string-append "Review: " (number->string (length ids)) " approvals")
-                                        'model "claude-sonnet-5-5")))))
-            (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
+          ;; the title carries a hash of the ids, so the same set reuses its chat
+          (let* ((title (string-append "Review: " (number->string (length ids)) " approvals ("
+                                       (substring (content-hash (apply string-append (sort ids))) 0 6) ")"))
+                 (orch (if (buffer-known? title)
+                           title
+                           (subagent-live-buffer
+                             (execute* (ats-approvals-review-prompt ids)
+                                       (list 'title title 'model "claude-sonnet-5-5"))))))
+            (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))))))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
 (define-key (mode-keymap "ats-approvals-mode") "M-O" "ats-approvals-review")
 

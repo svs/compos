@@ -169,3 +169,14 @@
       (check-equal! d2 '(new-pane) "a display pops a pane while there is room")
       (check-equal! d3 (list 'window ka) "at capacity the least recently used other window takes it")
       (check-equal! d4 (list 'window kb) "a buffer on screen is reused"))))
+
+(deftest 'a-stray-in-another-modes-stack-opens-in-its-mode-window
+  "a buffer another mode's window kept in its stack, from a stray display, opens in the window of its own mode and leaves that window as it was"
+  (lambda ()
+    (let* ((o1 (pt-visit (panes-empty 3) "*list*" "ats-mode"))
+           (o2 (pt-display (car o1) "*d1*" "ats-approval-mode" (cadr o1) '()))
+           (o3 (pt-visit (car o2) "*chat*" "chat-mode" (cadr o1)))
+           (l (panes-show (panes-show (car o3) (cadr o3) "*d2*") (cadr o3) "*chat*"))
+           (o4 (pt-display l "*d2*" "ats-approval-mode" (cadr o1) '())))
+      (check-equal! (cadr o4) (cadr o2) "d2 went to the approval window")
+      (check-equal! (panes-window-buffer (car o4) (cadr o3)) "*chat*" "the chat window still shows the chat"))))

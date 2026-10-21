@@ -2,9 +2,11 @@
 
 ## Assignment
 
-Design and build a distinctive, production-quality homepage for **Compos**, the operating system for knowledge work: a place that grows and shrinks around the work at hand through ephemeral, task-shaped applications.
+Design and build a distinctive, production-quality homepage for **Compos**, the hackable harness for power users: a place that grows and shrinks around the work at hand through ephemeral, task-shaped applications.
 
-The page should make Compos feel like a new computing environment, not another AI code editor and not an Emacs remake. It inherits the most important idea in Emacs—that every tool can share one inspectable, programmable world—and extends it to modern work, integrations, graphical applications, concurrency, and agents.
+The page should make Compos feel like a new computing environment, not another AI code editor and not a remake of an older editor. Its idea is that every tool can share one inspectable, programmable world, across modern work, integrations, graphical applications, concurrency, and agents.
+
+**Never use the word "Emacs"** on the page, in copy, alt text, metadata or code comments. Compos is not about bringing back an old editor; it is the hackable harness for power users.
 
 ## Product truth
 
@@ -35,7 +37,7 @@ Three governing sentences:
 
 ## Audience
 
-People whose work spills across editors, browsers, terminals, dashboards, SaaS products, and agent conversations—especially programmers who understand why Emacs, Lisp machines, Smalltalk, REPLs, and Unix remain important. They want to assemble the right environment for a task without creating another permanent product or surrendering its state to an opaque interface. Assume technical literacy. Do not explain AI basics or use breathless productivity claims.
+People whose work spills across editors, browsers, terminals, dashboards, SaaS products, and agent conversations—especially programmers who understand why Lisp machines, Smalltalk, REPLs, and Unix remain important. They want to assemble the right environment for a task without creating another permanent product or surrendering its state to an opaque interface. Assume technical literacy. Do not explain AI basics or use breathless productivity claims.
 
 ## Desired impression
 
@@ -141,7 +143,7 @@ Use a two-column comparison:
 
 The columns should visibly interlock instead of looking like competing products.
 
-This is where the Emacs and BEAM lineage may be named. It supports the proposition; it is not the opening proposition.
+This is where the BEAM lineage may be named. It supports the proposition; it is not the opening proposition.
 
 ### 6. Everything is alive
 
@@ -221,7 +223,7 @@ Respect `prefers-reduced-motion`. No scroll hijacking, ornamental parallax, anim
 - glowing orbs, brains, robots, sparkles, or circuit-board animals;
 - fake editor screenshots or illegible decorative code;
 - chatbot-first framing;
-- leading with “Emacs rebuilt” or treating compatibility as the product;
+- any mention of Emacs, or framing Compos as a rebuild or revival of an older editor;
 - describing ephemeral apps as throwaway data, disposable code, or generated UI gimmicks;
 - implying that every buffer is visually plain text;
 - glassmorphism and stacks of rounded feature cards;

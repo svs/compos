@@ -314,11 +314,14 @@
 ;; A site-app's buffers are one app, named for it: a page is its detail,
 ;; a section its list. app-layout! lays them out by that. Answers the name.
 (define (site-app-claim! buf &optional name)
+  ;; 'site-app-name is the buffer's app: app-id reads it, so only the role
+  ;; is written here
   (let ((nm (or name (buffer-local buf 'site-app-name)
                 (let ((sp (buffer-local buf 'site-app-spec))) (and sp (plist-get sp 'name))))))
-    (when (and nm (boundp 'app-claim!))
-      (app-claim! buf (if (symbol? nm) (symbol->string nm) nm)
-                  (if (buffer-local buf 'site-app-row) 'detail 'list)))
+    (when (and nm (buffer-known? buf))
+      (buffer-set-local! buf 'site-app-name (if (string? nm) (string->symbol nm) nm))
+      (buffer-set-local! buf 'app-id #f)
+      (buffer-set-local! buf 'app-role (if (buffer-local buf 'site-app-row) 'detail 'list)))
     nm))
 
 ;; buffers open before apps were claimed take their claim on load

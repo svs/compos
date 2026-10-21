@@ -1491,23 +1491,23 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; back to the layout you left behind; a scene asserts one. Two different
 ;;; questions — "where was I" and "build me this" — so two verbs.
 
-;; App windows are identified by the persistent 'app-id buffer-local.
+;; App windows are identified by app-id.
 ;; An app can assign the same id to its listing, detail, and auxiliary buffers.
 (domain! 'windows)
 (effects! '(read))
-(define (app-windows app-id)
-  "Return visible windows whose buffers belong to APP-ID."
+(define (app-windows id)
+  "Return visible windows whose buffers belong to app ID."
   (filter (lambda (row)
-            (equal? (buffer-local (cadr row) 'app-id) app-id))
+            (equal? (app-id (cadr row)) id))
           (window-list)))
 
 (domain! 'buffers)
 (effects! '(write display))
-(define (app-move-buffers app-id destination)
-  "Move every known buffer with APP-ID to DESTINATION, including visible app windows."
+(define (app-move-buffers id destination)
+  "Move every known buffer of app ID to DESTINATION, including visible app windows."
   (let ((buffers (filter (lambda (buf)
                            (and (buffer-known? buf)
-                                (equal? (buffer-local buf 'app-id) app-id)))
+                                (equal? (app-id buf) id)))
                          (buffer-list))))
     (group-move-buffers-to! buffers destination)
     buffers))
@@ -5527,17 +5527,23 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; window-show-buffer! asks this: a group buffer shown in one pane goes
 ;; to the pane its function names
 (define (group-panes-target win name)
-  (if (or (layout-arranging?) (not (group-panes-row-of win)))
+  ;; the window model places every buffer itself; this routing is the old
+  ;; path and stands aside while panes-mode is on
+  (if (or (and (boundp 'panes-mode) panes-mode)
+          (layout-arranging?) (not (group-panes-row-of win)))
       win
       (let ((pane (group-panes-pane name)))
         (if (or (not pane) (not (assoc pane (group-panes-windows))))
             win
-            (let ((w (or (group-panes-window-for pane (mode-consolidate-mode-of name))
-                         (let ((shown (group-panes-window pane)))
-                           (and shown (not (mode-consolidate-window-mode shown)) shown))
-                         (let ((nw (window-new-hidden! name)))
-                           (and nw (begin (group-panes-record! pane nw #f) nw))))))
-              (if (and w (group-panes-show! pane w) (assoc w (window-list))) w win))))))
+            ;; only a pane on screen takes the buffer; a pane with no window
+            ;; showing leaves it where the display chain put it, in another
+            ;; pane, never behind one
+            (let* ((live (window-list))
+                   (w (or (let ((f (group-panes-window-for pane (mode-consolidate-mode-of name))))
+                            (and f (assoc f live) f))
+                          (let ((shown (group-panes-window pane)))
+                            (and shown (not (mode-consolidate-window-mode shown)) shown)))))
+              (if w (begin (group-panes-record! pane w #t) w) win))))))
 
 ;; display-buffer, the detail opener and switch-to-buffer ask this first:
 ;; the window NAME went to, or #f when the group has no say

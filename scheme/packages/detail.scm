@@ -158,6 +158,36 @@
              (display--work-windows))
        #t))
 
+;; The fallback: a new pane beside the list while the layout has room for
+;; one, else the pane closest to the list. A detail waiting in a hidden
+;; window comes to the front there instead of opening again.
+(define (detail--nearest ws ow)
+  (let* ((i (let find-ow ((l ws) (k 0))
+              (cond ((null? l) 0) ((equal? (car l) ow) k) (else (find-ow (cdr l) (+ k 1))))))
+         (n (length ws)))
+    (let loop ((d 1))
+      (cond ((> d n) #f)
+            ((< (+ i d) n) (list-ref ws (+ i d)))
+            ((>= (- i d) 0) (list-ref ws (- i d)))
+            (else (loop (+ d 1)))))))
+
+(define (detail--place-beside! name o me)
+  (let* ((ws (map car (window-list)))
+         (ow (or (find (lambda (w) (equal? (window-buffer w) o)) ws) me))
+         (target (layout-target))
+         (room (or (not target) (< (length ws) (layout-target-capacity target))))
+         (hidden (let ((h (find (lambda (p) (equal? (cadr p) name)) (window-hidden-list))))
+                   (and h (car h)))))
+    (or (and room
+             (let ((nw (split-window-in! ow 'h)))
+               (and nw (window-display! (lambda () (display-buffer-in-window! nw name))))))
+        ;; a pane that holds another mode, a chat pane say, refuses the detail
+        (let ((near (detail--nearest (filter (lambda (w) (or (equal? w ow) (not (detail--foreign-pane? w name)))) ws) ow)))
+          (and near
+               (if (and hidden (window-swap-hidden! near hidden))
+                   hidden
+                   (window-display! (lambda () (display-buffer-in-window! near name)))))))))
+
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
          (me (active-window))
@@ -200,6 +230,9 @@
          (kept (and (not shown) (not here) (not pinned) (not sibling) (not kin) (not room) (detail-window o)))
          (win (cond
                 (shown shown)
+                ;; under the window model a buffer slots into its mode's
+                ;; window, as the window policy places it
+                ((and (boundp 'panes-mode) panes-mode) (panes-display! name #t))
                 (here (window-display! (lambda () (display-buffer-in-window! here name))))
                 (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))
                 (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
@@ -231,14 +264,7 @@
                                    (display--work-windows)))
                        (ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me)))
                    (window-display! (lambda () (display-buffer-in-window! (or free ow) name)))))
-                (else
-                  (or (display-buffer name '(category detail inhibit-same-window #t))
-                      ;; nowhere to go: one window, or a target layout that
-                      ;; refuses this buffer a slot and never splits on its
-                      ;; own. A detail still needs a window beside the list.
-                      (begin
-                        (split-window! 'h 0.5)
-                        (display-buffer name '(category detail inhibit-same-window #t))))))))
+                (else (detail--place-beside! name o me)))))
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name))
@@ -351,7 +377,11 @@
 (advice-add! 'display-buffer-detail! 'around 'group-panes
   (lambda (next name &optional owner)
     (let* ((o (or owner (window-buffer (active-window))))
-           (panes (and (boundp 'group-panes-open!) (group-panes-of (frame-group)))))
+           ;; the window model places details itself; the group's panes
+           ;; are the old path
+           (panes (and (boundp 'group-panes-open!)
+                       (not (and (boundp 'panes-mode) panes-mode))
+                       (group-panes-of (frame-group)))))
       (when panes (detail-adopt! o name))
       (let ((win (and panes (not (layout-arranging?)) (group-panes-open! name #f))))
         (cond (win (detail-window-note! o win) win)

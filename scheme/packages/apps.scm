@@ -17,14 +17,13 @@
 (effects! '(read))
 
 (define (app-id buf)
-  ;; a site app's page names its app in 'site-app-name even when no
-  ;; claim tagged it
+  ;; a site app's buffers name their app in 'site-app-name, the one
+  ;; truth for them; any other app tags its buffers with app-claim!
   (and buf (buffer-known? buf)
-       (or (buffer-local buf 'app-id)
-           (let ((nm (buffer-local buf 'site-app-name)))
-             (cond ((symbol? nm) (symbol->string nm))
-                   ((string? nm) nm)
-                   (else #f))))))
+       (let ((nm (buffer-local buf 'site-app-name)))
+         (cond ((symbol? nm) (symbol->string nm))
+               ((string? nm) nm)
+               (else (buffer-local buf 'app-id))))))
 
 (define (app-role buf)
   (and buf (buffer-known? buf) (buffer-local buf 'app-role)))
@@ -192,6 +191,17 @@
             ((not (app-layout! id)) (message "Nothing of this app to lay out"))))))
 (catalog-meta! 'command "app-layout" 'domain 'windows 'effects '(write display))
 
+(define (app--drop-hidden-windows! id shown)
+  ;; a dismissed app leaves no windows waiting behind the panes: its buffers
+  ;; stay alive, and the next visit opens what it needs
+  (when shown
+    (for-each (lambda (b) (detail-window-forget! b)) (app-buffers id))
+    (for-each (lambda (row)
+                (when (equal? (app-id (cadr row)) id)
+                  (window-hidden-delete! (car row))))
+              (window-hidden-list)))
+  shown)
+
 ;; Put the app away: its windows leave the screen and its buffers stay alive,
 ;; so a player keeps playing. The columns it held go to what else is on
 ;; screen, then to the group's most recent buffers.
@@ -200,9 +210,16 @@
          (layout (and panes-mode (panes-layout)))
          (room (if layout (panes-pane-count layout) (length (display--work-windows))))
          ;; under the window model the app leaves every stack, else a redraw brings it back
+         ;; the model forgets the app: its buffers leave every stack and the
+         ;; windows of its modes close, so nothing of it is reopened in place
+         (modes (filter (lambda (m) m)
+                        (map (lambda (b) (buffer-local b 'mode-name)) (app-buffers id))))
          (kept (if layout
-                   (fold (lambda (l b) (if (equal? (app-id b) id) (panes-drop-buffer l b) l))
-                         layout (panes-buffers layout))
+                   (let* ((layout (panes-validate layout buffer-known?))
+                          (l (fold (lambda (l b) (if (equal? (app-id b) id) (panes-drop-buffer l b) l))
+                                   layout (panes-buffers layout))))
+                     (fold (lambda (l k) (if (member (panes-window-mode l k) modes) (panes-close-window l k) l))
+                           l (panes-window-keys l)))
                    #f))
          (screen (if kept
                      (map caddr (panes-visible kept))
@@ -215,7 +232,9 @@
                               (fill-candidate? b)
                               (or (not group) (buffer-in-group? b group))))
                        (buffer-list-mru))))
-    (cond ((not (pair? (app-windows id))) #f)
+    (app--drop-hidden-windows!
+     id
+     (cond ((not (pair? (app-windows id))) #f)
           (kept
            (let loop ((l kept) (fill fill))
              (if (or (null? fill) (>= (panes-pane-count l) room))
@@ -226,7 +245,7 @@
           (else
            (let* ((more (append screen fill))
                   (panes (take more (min room (length more)))))
-             (and (pair? panes) (begin (tile-default-windows! panes) panes)))))))
+             (and (pair? panes) (begin (tile-default-windows! panes) panes))))))))
 
 (public! 'app-dismiss! "(app-dismiss! ID) — take app ID off the screen; its buffers stay alive and its columns go to other work")
 

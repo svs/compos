@@ -377,7 +377,15 @@
   (let ((w (panes-window layout key))) (if w (or (plist-get w 'buffers) '()) '())))
 
 (define (panes-window-mode layout key)
-  (let ((w (panes-window layout key))) (and w (plist-get w 'mode))))
+  ;; fundamental-mode is what a window was read with when its buffer named no
+  ;; mode yet; the buffer it shows names the mode once it has one
+  (let* ((w (panes-window layout key))
+         (m (and w (plist-get w 'mode))))
+    (if (and w (or (not m) (equal? m "fundamental-mode")))
+        (let* ((top (let ((bs (plist-get w 'buffers))) (and (pair? bs) (car bs))))
+               (tm (and top (buffer-known? top) (buffer-local top 'mode-name))))
+          (or tm m))
+        m)))
 
 ;; ((PANE KEY BUFFER) ...): what each pane shows, in pane order
 (define (panes-visible layout)
@@ -615,7 +623,12 @@
          (selected (plist-get ctx 'selected))
          (inhibit (plist-get ctx 'inhibit-same))
          (display? (equal? (plist-get ctx 'kind) 'display))
-         (held (panes-find layout buf))
+         ;; a window holds the buffer when it shows it, or keeps it in its
+         ;; stack and is of its mode; a stack another mode kept from a stray
+         ;; display does not pull the buffer back
+         (held (or (panes-window-showing layout buf)
+                   (find (lambda (k) (equal? (panes-window-mode layout k) mode))
+                         (panes-windows-holding layout buf))))
          (kin (panes-mode-window layout mode))
          (sel-pane (panes--selected-pane layout ctx)))
     (cond ((and held (not (and inhibit (equal? held selected)))) (list 'window held))

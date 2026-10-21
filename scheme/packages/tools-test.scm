@@ -53,3 +53,27 @@
                     "image a.png\n[image content: this backend reads text only]"
                     "the note replaces the image")
       (check-equal! (tool-result-text "plain") "plain" "text passes as is"))))
+
+;;; An agent call ran select-frame! around each tool. That moved the frame
+;;; order and the window points of the person's frame, and agent edits broke.
+(deftest 'agent-call-runs-in-the-chat-frame-and-moves-no-frame
+  "a tool call sees the chat's frame; the frame order stays as it was"
+  (lambda ()
+    (let ((home (selected-frame)))
+      (with-frame
+        (lambda (frame)
+          (buffer-create "*t-agent-chat*")
+          (switch-to-buffer! "*t-agent-chat*")
+          (select-frame! home)
+          (let ((order (frame-list)))
+            (check-equal! (mcp-proxy--chat-frame "*t-agent-chat*") frame
+                          "the chat frame is the frame that shows the chat")
+            (check-equal! (mcp-proxy--in-chat-frame "*t-agent-chat*"
+                            (lambda () (selected-frame)))
+                          frame "the call sees the chat's frame")
+            (check-equal! (selected-frame) home "the frame comes back after the call")
+            (check-equal! (frame-list) order "the frame order does not change")
+            (check-equal! (mcp-proxy--in-chat-frame "*t-no-such-chat*"
+                            (lambda () (selected-frame)))
+                          home "a chat that no frame shows keeps the current frame"))))
+      (kill-buffer-confirm! "*t-agent-chat*" #f))))

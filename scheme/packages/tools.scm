@@ -1822,6 +1822,19 @@
         (mcp-proxy--refused raw verdict)))))
 
 ;; the inline path, with the agent's edits attributed to its thread
+
+;; The frame that shows BUF, the agent's chat. The person who reads the
+;; chat sits in that frame, so the agent opens its buffers there.
+(define (mcp-proxy--chat-frame buf)
+  (let ((row (find (lambda (r) (equal? (cadr r) buf)) (window-list-all))))
+    (and row (caddr row))))
+
+;; with-selected-frame changes the frame of this lane only: the frame
+;; order and the window points of the person's frame stay as they are.
+(define (mcp-proxy--in-chat-frame buf thunk)
+  (let ((frame (mcp-proxy--chat-frame buf)))
+    (if frame (with-selected-frame frame thunk) (thunk))))
+
 (define (mcp-proxy--sync name args-json author)
   (if author
       (let* ((slug (and (string-prefix? "agent:" author)
@@ -1835,8 +1848,10 @@
                            (lambda () (mcp-proxy-dispatch name args-json)))
                          (mcp-proxy-dispatch name args-json)))))
         (if (and buf (buffer-exists? buf))
-            (with-current-buffer buf
-              (lambda () (with-edit-author author call)))
+            (mcp-proxy--in-chat-frame buf
+              (lambda ()
+                (with-current-buffer buf
+                  (lambda () (with-edit-author author call)))))
             (with-edit-author author call)))
       (mcp-proxy-dispatch name args-json)))
 

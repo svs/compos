@@ -2531,6 +2531,16 @@ defmodule Compos.Core.SchemeAPI do
           if ok, do: Compos.Core.Frame.put(id)
           ok
         end,
+      # Emacs with-selected-frame: stamp FRAME for this process only. Unlike
+      # select-frame!, the frame MRU and the window points stay as they are,
+      # so work in one frame does not move the frame a person uses.
+      {"with-selected-frame",
+       "(with-selected-frame FRAME THUNK) - run THUNK with FRAME as the current frame of this lane; no other frame or window changes."} =>
+        fn [id, thunk], store ->
+          Compos.Core.Frame.with_frame(id, fn ->
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          end)
+        end,
       # a frame of its own: the multi-frame tests and a script that opens a
       # second workspace ask for one
       {"make-frame!", "(make-frame!) — create a frame and return its id."} => fn [] ->

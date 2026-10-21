@@ -2772,6 +2772,8 @@ is forgotten and that group falls back to creation order in the switcher."
                 (away (group-frame-raise! away))
                 (else (switch-to-group! g))))
         (let* ((action (group-switch-new-action))
+               ;; the window the prompt opened from, the source of every look
+               (home (active-window))
                (prompt-rows (group-switch-prompt-rows))
                (candidates (car prompt-rows))
                ;; built by the first look: a prompt that never looks never pays
@@ -2809,11 +2811,15 @@ is forgotten and that group falls back to creation order in the switcher."
                    (when open
                      (let ((id (group-switch-id name)))
                        (if id
+                           ;; HOME names the look's source every time: a look whose
+                           ;; source is the window the last look selected is a new
+                           ;; look to preview-show, which then puts the frame you
+                           ;; came from back before it draws, one flash per highlight
                            (preview-show
                              (lambda ()
                                (unless index (set! index (group-members-index)))
                                (set! woken (append (group-preview-draw! index id) woken)))
-                             'frame)
+                             'frame home)
                            ;; An unmatched filter leaves the invoking windows intact.
                            (show-here!))))))
                ;; a look per highlight that RESTS: C-n held down moves the

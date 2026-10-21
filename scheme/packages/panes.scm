@@ -388,7 +388,9 @@
 
 ;; a well-formed layout, or #f
 (define (panes-layout? x)
-  (and (pair? x) (list? (plist-get x 'panes)) (list? (plist-get x 'windows)) #t))
+  ;; this Scheme has no list?: a proper list here is () or a pair
+  (let ((lst? (lambda (v) (or (not v) (null? v) (pair? v)))))
+    (and (pair? x) (lst? (plist-get x 'panes)) (lst? (plist-get x 'windows)) #t)))
 
 ;;; --- policies ---------------------------------------------------------------------
 ;;; A policy answers one question: where does BUF open? It reads the layout

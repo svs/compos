@@ -180,13 +180,21 @@
 ;; page in one request; asking it COUNT times does not work, because a
 ;; frame keeps ONE pending request and each ask overwrites the last, so a
 ;; page moved one row.
+;; a rendered table row moves whole: its cells wrap into rows of their
+;; own, and the page reads it as one row. Turn preview-mode off to edit
+;; inside a cell.
+(define (visual--table-row? buf)
+  (and (buffer-local buf 'preview-rows)
+       (re-match "^[ \t]*[|]" (line-text))
+       #t))
+
 (define (visual-row-move! dir extend &optional count)
   (let* ((buf (current-buffer))
          (n (max 1 (or count 1)))
-         (rows (visual-rows buf)))
+         (rows (and (not (visual--table-row? buf)) (visual-rows buf))))
     ;; a fresh map answers first (a rendered page measures one; so does a
     ;; test); an editable surface measures none and asks the browser
-    (if (and (not rows) (visual--client? buf))
+    (if (and (not rows) (not (visual--table-row? buf)) (visual--client? buf))
         (visual--client-move! (if extend "extend" "move") dir "line" n)
         (and rows
              (let loop ((i 0) (moved #f))

@@ -38,7 +38,7 @@
 ;; editor.scm loads before custom.scm; layouts.scm makes it a custom.
 ;; It is the first pane's share of the frame.
 (define window-layout-main-ratio (- 1 *window-third*))
-;; The columns layout shows this many panes of its ring; layouts.scm makes
+;; The columns layout shows this many panes and keeps no others; layouts.scm makes
 ;; it a setting.
 (define window-layout-columns 3)
 
@@ -2026,6 +2026,9 @@ keeps the buffer you were in and your point.")
                                      ids))
              (lambda () (set! *layout-busy* #f)))))
     (when ok
+      ;; columns keeps no ring: a window it does not show is deleted
+      (when (equal? algorithm 'columns)
+        (for-each window-hidden-delete! (layout-hidden-windows)))
       (window-state-changed!)
       (layout-target-note-slots! (map window-buffer ids)))
     (and ok ids)))
@@ -2197,7 +2200,7 @@ keeps the buffer you were in and your point.")
         '(("single" "one window")
           ("two-pane" "2/3 + 1/3 side by side")
           ("halves" "two equal panes side by side")
-          ("columns" "equal columns, a window ring wider than the frame")
+          ("columns" "three equal columns, no hidden windows")
           ("rows" "two equal panes, stacked")
           ("two-chat" "2 + chat: two equal panes and a narrow chat")
           ("free" "no target: a display may split a window"))
@@ -2797,7 +2800,8 @@ bottom, as a window-rects row; #f past either end."
                          (when w (window-set-point! w point))))))))
           ;; The layout is full: the buffer takes a new window in the ring and
           ;; the layout walks one window along to show it.
-          ((and (not neighbor) (member dir '(previous next)) (layout-target))
+          ((and (not neighbor) (member dir '(previous next)) (layout-target)
+                (not (equal? (layout-target) 'columns)))
            (cond ((or (not (layout-visible-window? (list source buf)))
                       (not (window-fill-member? buf)))
                   (message "Cannot move this buffer into a new pane"))

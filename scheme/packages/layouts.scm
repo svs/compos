@@ -47,7 +47,7 @@
   'group 'windows 'type 'number)
 
 (defcustom 'window-layout-columns 3
-  "How many panes the columns layout shows; more windows wait in its ring."
+  "How many panes the columns layout shows; it keeps no hidden windows."
   'group 'windows 'type 'integer)
 
 ;; The two-chat layout reads this one.

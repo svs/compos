@@ -93,3 +93,95 @@
             (check-equal! (panes-shares l) '(0.5 0.5) "equal shares")
             (check-equal! (panes-handle l (cadr (car (panes-visible l)))) (car (car (window-list))) "the handle is the window")))
         (lambda () (pmt-done! (list a b)))))))
+
+(deftest 'panes-mode-group-switch-arranges-the-same-windows
+  "with the model on, leaving a group and coming back puts the very same windows on screen: nothing is rebuilt, no id changes"
+  (lambda ()
+    (with-fresh-group "zz-panes-sw-a"
+      (lambda (ga)
+        (with-fresh-group "zz-panes-sw-b"
+          (lambda (gb)
+            (let ((a1 (pmt-buffer! "zz-sw-a1" "zz-a-mode"))
+                  (a2 (pmt-buffer! "zz-sw-a2" "zz-c-mode"))
+                  (b1 (pmt-buffer! "zz-sw-b1" "zz-b-mode")))
+              (for-each (lambda (x) (buffer-add-group! x ga)) (list a1 a2))
+              (buffer-add-group! b1 gb)
+              (switch-to-group! ga)
+              (delete-other-windows!)
+              (switch-to-buffer-here! a1)
+              (unwind-protect
+                (lambda ()
+                  (panes-mode-enable!)
+                  (switch-to-buffer! a2)
+                  (check-equal! (length (window-list)) 2 "two panes in A")
+                  (let ((before (window-list)))
+                    (switch-to-group! gb)
+                    (check-false! (equal? (map cadr (window-list)) (map cadr before)) "B shows its own windows")
+                    (switch-to-group! ga)
+                    (check-equal! (window-list) before "A comes back with the same windows: same ids, same buffers, same order")))
+                (lambda () (pmt-done! (list a1 a2 b1)))))))))))
+
+(deftest 'panes-mode-arrangement-pop-arranges-back
+  "a frame look ends by arranging the model's windows back: the same window id, and the model follows the frame"
+  (lambda ()
+    (with-fresh-group "zz-panes-arr"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-ar-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-ar-c" "zz-c-mode")))
+          (for-each (lambda (x) (buffer-add-group! x id)) (list a c))
+          (switch-to-group! id)
+          (delete-other-windows!)
+          (switch-to-buffer-here! a)
+          (unwind-protect
+            (lambda ()
+              (panes-mode-enable!)
+              (let ((before (window-list))
+                    (token (arrangement-push! 'zz-panes)))
+                (switch-to-buffer! c)
+                (check-equal! (length (window-list)) 2 "a second pane opened")
+                (check-true! (arrangement-pop! token #t) "the pop answers #t")
+                (check-equal! (window-list) before "the frame is back with the same window")
+                (check-equal! (length (panes-panes (panes-layout))) 1 "and the model is the one pane again")))
+            (lambda () (pmt-done! (list a c)))))))))
+
+(deftest 'panes-mode-a-layout-without-handles-takes-the-windows-that-show-its-buffers
+  "a layout whose handles are gone, as after a restart, is drawn on the windows that already show its buffers; no window is made"
+  (lambda ()
+    (let ((a (pmt-buffer! "zz-at-a" "zz-a-mode"))
+          (b (pmt-buffer! "zz-at-b" "zz-b-mode")))
+      (unwind-protect
+        (lambda ()
+          (delete-other-windows!)
+          (switch-to-buffer-here! a)
+          (split-window! 'h 0.5)
+          (other-window!)
+          (switch-to-buffer-here! b)
+          (let* ((before (window-list))
+                 (drawn (panes-look! (panes-strip-handles (panes-adopt)))))
+            (check-equal! (window-list) before "the same windows, untouched")
+            (check-equal! (map (lambda (k) (panes-handle drawn k)) (panes-top-windows drawn))
+                          (map car before)
+                          "each window took its handle back")))
+        (lambda () (pmt-done! (list a b)))))))
+
+(deftest 'panes-mode-winner-walks-the-layout-history
+  "with the model on, winner-previous puts the previous pane arrangement back and winner-next goes forward again"
+  (lambda ()
+    (with-fresh-group "zz-panes-wn"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-wn-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-wn-c" "zz-c-mode")))
+          (for-each (lambda (x) (buffer-add-group! x id)) (list a c))
+          (switch-to-group! id)
+          (delete-other-windows!)
+          (switch-to-buffer-here! a)
+          (unwind-protect
+            (lambda ()
+              (panes-mode-enable!)
+              (switch-to-buffer! c)
+              (check-equal! (length (window-list)) 2 "two panes")
+              (winner-previous!)
+              (check-equal! (length (window-list)) 1 "winner-previous put the one pane back")
+              (winner-next!)
+              (check-equal! (length (window-list)) 2 "winner-next went forward again"))
+            (lambda () (pmt-done! (list a c)))))))))

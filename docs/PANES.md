@@ -56,15 +56,18 @@ layouts and groups knew it by. The group switcher's look and its return
 therefore leave every id as it found it, and a record keyed by window id,
 pane rows, restore records, the hidden ring, stays true across a restore.
 The tests are `window_ids_test.exs`.
-## The board
+## Status
 
-`M-x list-panes` shows the model as a list: each pane, its windows (on
-screen or behind), each window's buffers. `RET` goes there, the arrows move
-a window or a pane, `k` closes a window or takes a buffer out of one, `K`
-kills, `c` gives every mode one window, `+` `-` `=` set the shares. The board
-is `panes-board.scm`. It reads the frame when the mode is off, so it is a
-true picture either way.
-
+- The model is on by default (`panes-mode-default`). `M-x panes-mode` turns
+  it off and on for the frame; off puts the old doors back.
+- A group switch, the switcher's look and its return, an arrangement pop,
+  winner, and the overview go through the model: the group's windows are
+  arranged, never rebuilt, so a window keeps its id for life.
+- The layouts of every frame and group go into the desktop. A handle that
+  did not come back is taken again by the window that shows its buffer.
+- Still standing in window.scm and groups.scm: the layout target, the window
+  ring, group-panes rows and the saved window trees. They are the fallback
+  for a group with no model yet, and the next thing to retire.
 ## Layout history
 
 `M-x layout-undo` puts back the previous pane arrangement and `M-x

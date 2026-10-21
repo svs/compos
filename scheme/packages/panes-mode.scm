@@ -28,16 +28,39 @@
 (define (panes--group-key) (or (frame-group) 'none))
 
 ;; the layout of this frame's group, or #f
-(define (panes-layout)
-  (let ((e (assoc (panes--group-key) (panes--store))))
+(define (panes-layout) (panes-layout-of (panes--group-key)))
+
+;; the layout of group G on this frame, or #f
+(define (panes-layout-of g)
+  (let ((e (assoc (or g 'none) (panes--store))))
     (and e (cadr e))))
 
-(define (panes-layout-set! layout)
-  (set-frame-local! 'panes-layouts (alist-put (panes--store) (panes--group-key) layout))
+;; the raw write: a change records in the layout history only through
+;; panes-layout-set!
+(define (panes--layout-store! g layout)
+  (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
   layout)
+
+(define (panes-layout-set! layout) (panes--layout-store! (panes--group-key) layout))
 
 (define (panes-layout-forget!)
   (set-frame-local! 'panes-layouts (alist-delete (panes--store) (panes--group-key))))
+
+;; --- across restarts -------------------------------------------------------
+;; every frame's layouts go into the desktop as they are. A window id
+;; survives a restart (the desktop names it), and a handle that did not
+;; come back is taken again by buffer when the frame next draws the layout.
+(define (panes-layouts-state)
+  (map (lambda (frame) (list frame (or (frame-local-in frame 'panes-layouts) '())))
+       (frame-list)))
+
+(define (panes-layouts-restore! saved)
+  (for-each (lambda (entry)
+              (when (and (pair? entry) (pair? (cdr entry)) (member (car entry) (frame-list)))
+                (set-frame-local-in! (car entry) 'panes-layouts (cadr entry))))
+            (or saved '())))
+
+(persist-global! 'panes-layouts panes-layouts-state panes-layouts-restore!)
 
 ;;; --- the frame as a layout ---------------------------------------------------------
 
@@ -110,8 +133,30 @@
          (total (apply + raw)))
     (map (lambda (s) (/ s total)) raw)))
 
-(define (panes-apply! layout)
-  (let* ((tops (panes-top-windows layout))
+;; a window whose handle is gone takes the frame window that shows its
+;; buffer, on screen or hidden, each window once: a layout read back from
+;; the desktop, or one whose windows another door rebuilt, meets the frame
+;; again without a new window being made
+(define (panes--attach-handles layout)
+  (let ((rows (append (window-list) (window-hidden-list))))
+    (let loop ((keys (panes-window-keys layout)) (layout layout) (taken '()))
+      (if (null? keys)
+          layout
+          (let* ((k (car keys)) (h (panes-handle layout k)))
+            (if (panes--live-handle? h)
+                (loop (cdr keys) layout (cons h taken))
+                (let* ((buf (panes-window-buffer layout k))
+                       (row (find (lambda (r) (and (equal? (cadr r) buf) (not (member (car r) taken)))) rows)))
+                  (if row
+                      (loop (cdr keys) (panes-set-handle layout k (car row)) (cons (car row) taken))
+                      (loop (cdr keys) (panes-set-handle layout k #f) taken)))))))))
+
+;; the frame drawn as LAYOUT: every top window on screen with its pane's
+;; share, showing the front of its stack, the rest waiting behind. Answers
+;; the layout with the handles the draw took or made. Nothing is recorded.
+(define (panes--draw! layout)
+  (let* ((layout (panes--attach-handles layout))
+         (tops (panes-top-windows layout))
          (layout (panes--materialize layout tops))
          (handles (filter (lambda (h) h) (map (lambda (k) (panes-handle layout k)) tops))))
     (set! panes--applying #t)
@@ -129,10 +174,23 @@
                         (window-set-buffer! h (car bufs)))
                       (set-window-prev-buffers! h (cdr bufs)))))
                 tops)
-              (unless (member (active-window) handles) (select-window! (car handles))))))
-        (panes-layout-set! layout))
+              (unless (member (active-window) handles) (select-window! (car handles)))))))
       (lambda () (set! panes--applying #f)))
+    layout))
+
+;; the frame follows LAYOUT and it becomes this group's model
+(define (panes-apply! layout)
+  (let ((layout (panes--draw! layout)))
+    (panes-layout-set! layout)
     (window-state-changed!)
+    layout))
+
+;; a look: the frame shows LAYOUT and nothing is recorded as a change. The
+;; model of group G keeps the handles the look made, so the switch into G
+;; finds its windows on screen already.
+(define (panes-look! layout &optional g)
+  (let ((layout (panes--draw! layout)))
+    (when g (panes--layout-store! g layout))
     layout))
 
 ;;; --- the doors ------------------------------------------------------------------------
@@ -256,7 +314,20 @@
 (define (panes--door?)
   (and panes-mode (not (buffer-context?)) (not (layout-arranging?)) (not panes--applying)))
 
-(define (panes-mode-enable!)
+;; the model as group-panes rows, ((PANE WIN ...) ...), the window on screen
+;; first: the overview spreads and gathers the frame by these rows
+(define (panes--rows)
+  (let ((l (panes-layout)))
+    (if (not l)
+        '()
+        (map (lambda (p)
+               (cons (plist-get p 'id)
+                     (filter (lambda (h) h)
+                             (map (lambda (k) (panes-handle l k)) (or (plist-get p 'windows) '())))))
+             (panes-panes l)))))
+
+;; the doors, installed: every one yields to the old path while panes-mode is #f
+(define (panes-mode--install!)
   (set! panes-mode #t)
   (advice-add! 'switch-to-buffer--show! 'around 'panes
     (lambda (next buf)
@@ -274,18 +345,77 @@
           (next name alist))))
   (advice-add! 'window-unwind-or-close! 'around 'panes
     (lambda (next win) (if (and panes-mode (panes-quit! win)) #t (next win))))
-  (advice-add! 'switch-to-group! 'around 'panes
-    (lambda (next g) (let ((r (next g))) (when panes-mode (panes--enter-group!)) r)))
+  ;; a group switch arranges the group's windows; it rebuilds nothing. A
+  ;; group with no model yet takes the old path once and is read from the frame
+  (advice-add! 'group-layout-enter! 'around 'panes
+    (lambda (next id saved)
+      (if (not panes-mode)
+          (next id saved)
+          (begin
+            (layout-target-free!)
+            (window-log-note! "panes enter group" id)
+            (cond ((panes-layout) (panes-apply! (panes-validate (panes-layout) buffer-known?)))
+                  (saved (next id saved) (panes-adopt!))
+                  (else (group-default-layout! id) (panes-adopt!)))))))
+  ;; the switcher's look at a group draws that group's model, and wakes what
+  ;; it shows the way the old look did; the switcher sleeps them again
+  (advice-add! 'group-preview-draw! 'around 'panes
+    (lambda (next index g)
+      (let ((layout (and panes-mode (panes-layout-of g))))
+        (cond ((not layout) (next index g))
+              ((group-preview-shown? g) '())
+              (else
+                (let ((standing *group-current-inhibit*)
+                      (asleep (filter (lambda (b) (and (buffer-known? b) (not (buffer-exists? b))))
+                                      (map caddr (panes-visible layout)))))
+                  (set! *group-current-inhibit* #t)
+                  (set! *group-look-active* #t)
+                  (panes-look! layout g)
+                  (set! *group-current-inhibit* standing)
+                  (set! *group-preview-last* (list g (map cadr (window-list))))
+                  (let ((woken (filter buffer-exists? asleep)))
+                    (for-each restore-buffer-runtime! woken)
+                    woken)))))))
+  ;; winner walks the layout history
+  (advice-add! 'winner-previous! 'around 'panes
+    (lambda (next) (if panes-mode (run-command "layout-undo") (next))))
+  (advice-add! 'winner-next! 'around 'panes
+    (lambda (next) (if panes-mode (run-command "layout-redo") (next))))
+  ;; the overview spreads the model's windows, and the window chosen comes
+  ;; to the front of the pane the user came from
+  (advice-add! 'windows-overview-enter! 'around 'panes
+    (lambda (next)
+      (when panes-mode
+        (panes--ensure-layout!)
+        (group-panes-set-rows! (panes--rows)))
+      (next)))
+  (advice-add! 'windows-overview-exit! 'around 'panes
+    (lambda (next &rest args)
+      (if (not panes-mode)
+          (apply next args)
+          (let* ((me (active-window))
+                 (home (frame-local 'windows-overview-home))
+                 (r (apply next args))
+                 (l (panes-layout))
+                 (k (and l (panes-key-of-handle l me))))
+            (when k
+              (panes-apply! (if (and home (panes-pane l home)) (panes-move-window l k home 0) (panes-raise l k)))
+              (when (window-exists? me) (select-window! me)))
+            r))))
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (add-hook! 'buffer-renamed-hook 'panes--rename!)
-  (add-hook! 'window-configuration-change-hook 'panes--reconcile!)
+  (add-hook! 'window-configuration-change-hook 'panes--reconcile!))
+
+(define (panes-mode-enable!)
+  (panes-mode--install!)
   (panes--enter-group!)
   (message "panes-mode on: one window per mode, in a row of panes"))
 
 (define (panes-mode-disable!)
   (set! panes-mode #f)
   (for-each (lambda (t) (advice-remove! t 'panes))
-            '(switch-to-buffer--show! display-buffer window-unwind-or-close! switch-to-group!))
+            '(switch-to-buffer--show! display-buffer window-unwind-or-close! group-layout-enter!
+              group-preview-draw! winner-previous! winner-next! windows-overview-enter! windows-overview-exit!))
   (remove-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (remove-hook! 'buffer-renamed-hook 'panes--rename!)
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
@@ -304,3 +434,12 @@
 (public! 'panes-apply! "(panes-apply! LAYOUT) -> lay the frame out as LAYOUT and keep it as this group's model")
 (public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen, the hidden windows behind the last")
 (catalog-meta! 'function "panes-adopt" 'effects '(read))
+
+;; --- the default -------------------------------------------------------------
+;; the model is the editor's window management. Off puts the old doors
+;; back: the layout target, the window ring, the saved window trees.
+(defcustom 'panes-mode-default #t
+  "Start the window model with the editor: one window per mode, in a row of panes"
+  'group 'windows 'type 'boolean)
+
+(when (and panes-mode-default (not panes-mode)) (panes-mode--install!))

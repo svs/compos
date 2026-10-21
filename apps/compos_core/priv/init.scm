@@ -105,7 +105,7 @@
 (require 'overview)
 ;; every change of the windows, as it happened: M-x debug-last-window-movement
 (require 'window-log)
-;; the window model on the frame: M-x panes-mode; off until asked
+;; the window model on the frame: on by default (panes-mode-default); M-x panes-mode toggles it
 (require 'panes-mode)
 ;; the model as a list: M-x list-panes
 (require 'panes-board)

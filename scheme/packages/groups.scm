@@ -1632,6 +1632,22 @@ is forgotten and that group falls back to creation order in the switcher."
           ((equal? (car ids) from) "down")
           (else (walk (cdr ids))))))
 
+;; the frame takes the layout of group ID: SAVED, the arrangement the group
+;; kept, or the default. The one seam every restore goes through, so the
+;; window model (panes-mode) arranges the group's windows here instead of
+;; rebuilding them
+(define (group-layout-enter! id saved)
+  (if saved
+      (begin
+        (group-revive-layout-files! saved)
+        (window-tree-set! saved)
+        (group-restore-sanitize! id)
+        (layout-target-set! (group-layout-target id))
+        (layout-target-default!))
+      ;; the windows the frame hid belong to the group it left
+      (begin (window-hidden-clear!)
+             (group-default-layout! id))))
+
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
     (if (not id)
@@ -1652,17 +1668,7 @@ is forgotten and that group falls back to creation order in the switcher."
           ;; but it does not trap the user in the old group.
           (when (group-pinned) (set-frame-local! 'pinned-group id))
           (frame-group-label-refresh!)
-          (let ((saved (group-layout id)))
-            (if saved
-                (begin
-                  (group-revive-layout-files! saved)
-                  (window-tree-set! saved)
-                  (group-restore-sanitize! id)
-                  (layout-target-set! (group-layout-target id))
-                  (layout-target-default!))
-                ;; the windows the frame hid belong to the group it left
-                (begin (window-hidden-clear!)
-                       (group-default-layout! id))))
+          (group-layout-enter! id (group-layout id))
           (set! *group-current-inhibit* #f)
           (group-current-recalculate!)
           (group-mru-note! id)

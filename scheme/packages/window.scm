@@ -330,7 +330,10 @@
   (let ((token (+ 1 (or (frame-local 'arrangement-last) 0))))
     (set-frame-local! 'arrangement-last token)
     (set-frame-local! 'arrangements
-      (cons (list token reason (window-tree) (frame-group) (layout-target) (active-window))
+      ;; under the window model the entry keeps the model it saw, so the
+      ;; pop arranges the group's windows back instead of rebuilding them
+      (cons (list token reason (window-tree) (frame-group) (layout-target) (active-window)
+                  (and (boundp 'panes-mode) panes-mode (panes-layout)))
             (arrangements)))
     token))
 
@@ -355,7 +358,9 @@
     (when e
       (with-layout-suppressed
         (lambda ()
-          (if look? (window-tree-preview! (nth 2 e)) (window-tree-set! (nth 2 e)))))
+          (if (and (> (length e) 6) (nth 6 e) (boundp 'panes-mode) panes-mode)
+              (panes-look! (nth 6 e) (nth 3 e))
+              (if look? (window-tree-preview! (nth 2 e)) (window-tree-set! (nth 2 e))))))
       (when (and (window-exists? (nth 5 e)) (not (equal? (active-window) (nth 5 e))))
         (select-window! (nth 5 e)))
       (unless (equal? (layout-target) (nth 4 e)) (layout-target-set! (nth 4 e)))

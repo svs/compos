@@ -1585,12 +1585,13 @@
           // made, so it must not move the place they left
           if (this.placing) return;
           const tail = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
-          // The tail is home, as at a shell prompt: only the reader's
-          // hand leaves it. A scroll they did not make (the browser's
-          // scroll anchoring, a reflow while output streams) puts the
-          // view back on the tail instead of dropping the stick.
-          if (this.stick && !tail && Date.now() - this.handAt > 1000) {
-            this.place();
+          // Only the reader's hand moves the place. A scroll they did
+          // not make (the browser's scroll anchoring, a reflow while
+          // output streams, the overview's spread and gather, a zoom)
+          // neither drops the tail nor records a new place: on the
+          // tail it goes back there, elsewhere it is left alone.
+          if (Date.now() - this.handAt > 1000) {
+            if (this.stick && !tail) this.place();
             return;
           }
           this.stick = tail;
@@ -1634,8 +1635,15 @@
           const b = block.getBoundingClientRect();
           return {
             index: parseInt(block.dataset.index, 10),
-            offset: b.top - r.top
+            offset: (b.top - r.top) / this.scale()
           };
+        };
+        // A rect counts in screen px, and a scrollTop in the list's own.
+        // The overview's tile scale and the ui zoom set them apart, so a
+        // place kept in screen px comes back wrong at another scale.
+        this.scale = () => {
+          const h = this.scroller.offsetHeight;
+          return (h && this.scroller.getBoundingClientRect().height / h) || 1;
         };
         this.scroller.addEventListener("scroll", this.scrollH);
         // A scroll event is an effect and cannot tell the
@@ -1684,7 +1692,7 @@
         const saved = this.anchor !== null ? this.el.querySelector(`[data-index="${this.anchor}"]`) : null;
         if (!this.stick && saved) {
           const r = this.scroller.getBoundingClientRect();
-          const delta = saved.getBoundingClientRect().top - r.top - this.offset;
+          const delta = (saved.getBoundingClientRect().top - r.top) / this.scale() - this.offset;
           if (Math.abs(delta) <= 1) return;
           this.placing = true;
           this.scroller.scrollTop += delta;
@@ -2608,10 +2616,13 @@
           try {
             const r = document.createRange(); r.setStart(pos.node, pos.offset); r.collapse(true);
             const b = r.getBoundingClientRect(), bb = buf.getBoundingClientRect();
+            // rects count in screen px, the box and its scroll in its own:
+            // the ui zoom and the overview's tile scale set them apart
+            const z = (buf.offsetHeight && bb.height / buf.offsetHeight) || 1;
             if (b.height > 0) {
-              g.style.top = (b.top - bb.top + buf.scrollTop) + "px";
-              g.style.left = (b.left - bb.left + buf.scrollLeft) + "px";
-              g.style.height = b.height + "px";
+              g.style.top = ((b.top - bb.top) / z + buf.scrollTop) + "px";
+              g.style.left = ((b.left - bb.left) / z + buf.scrollLeft) + "px";
+              g.style.height = b.height / z + "px";
             }
           } catch (_) { /* nothing to draw */ }
         };
@@ -2907,7 +2918,8 @@
             const cr = r.getBoundingClientRect(), br = buf.getBoundingClientRect();
             if (cr.height && (cr.top < br.top || cr.bottom > br.bottom)) {
               buf._composSelfScroll = performance.now();
-              buf.scrollTop += (cr.top + cr.bottom) / 2 - (br.top + br.bottom) / 2;
+              const z = (buf.offsetHeight && br.height / buf.offsetHeight) || 1;
+              buf.scrollTop += ((cr.top + cr.bottom) / 2 - (br.top + br.bottom) / 2) / z;
             }
           }
           this.sendSelection(buf, true);

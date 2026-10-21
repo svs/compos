@@ -297,7 +297,7 @@
                  ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
                  ("^(?i)(elite|strong|fit|advance|advanced|approve|approved|hired|shortlisted|offer)$" good)
-                 ("^(new|applied|create|created)$" info))
+                 ("^(new|applied|create|created|prospect)$" info))
         ;; the site's navbar, in its order; M-key switches to a section
         'pages
         (list
@@ -506,7 +506,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                            (subagent-live-buffer
                              (execute* (ats-approvals-review-prompt ids)
                                        (list 'title title 'model "claude-sonnet-5-5"))))))
-            (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))))))
+            (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
 (define-key (mode-keymap "ats-approvals-mode") "M-O" "ats-approvals-review")
 

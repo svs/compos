@@ -273,8 +273,8 @@
                                'title-href (plist-get data 'job_href)
                                'state (and state-node (ats-transition (plist-get state-node 'text)))
                                'head (filter (lambda (n) (not (equal? n state-node))) profile))))
-        ;; every detail derives from ats-detail-mode and they share a pane; each
-        ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
+        ;; every detail is in ats-detail-mode and they share a pane; each page's kind
+        ;; is a minor mode on it (ats-approval-mode, ats-application-mode, ...) that holds its keys
         'detail-mode "ats-detail-mode"
         ;; every index is one list mode too; each section (ats-approvals-mode, ...) is a minor mode on it
         'index-mode "ats-mode"

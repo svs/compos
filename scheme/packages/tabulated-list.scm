@@ -1547,11 +1547,18 @@
   (let ((f (list-opt buf 'preview))
         (delay (if (list-opt buf 'debounce) debounce-delay 0)))
     (if (and f (> delay 0))
-        (debounce! (string-append "list-preview:" buf) delay
-          (lambda (b)
-            (when (buffer-exists? b)
-              (let ((e (list-current b))) (when e (f b e)))))
-          buf)
+        ;; the timer fires outside the command: carry the frame the
+        ;; highlight moved in, or the detail opens in another frame
+        (let ((frame (selected-frame)))
+          (debounce! (string-append "list-preview:" buf) delay
+            (lambda (b)
+              (when (buffer-exists? b)
+                (let ((e (list-current b)))
+                  (when e
+                    (if (and frame (member frame (frame-list)))
+                        (with-selected-frame frame (lambda () (f b e)))
+                        (f b e))))))
+            buf))
         (let ((e (list-current buf)))
           (when (and f e) (f buf e))))))
 

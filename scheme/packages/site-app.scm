@@ -1835,12 +1835,10 @@
     (let ((minors (buffer-local buf 'minor-modes)))
       (when (pair? minors)
         (buffer-set-local! buf 'minor-modes (filter (lambda (m) (not (equal? (mode-get m 'kind) 'major))) minors))))
-    ;; The page's kind is its major mode, derived from the app's detail mode. The
-    ;; app's details are one family, so the next row of any list takes their pane.
-    (let ((mode (site-app-detail-major buf)))
-      (buffer-set-local! buf 'detail-family (or (buffer-local buf 'site-app-detail-mode) "site-app-detail-mode"))
-      (unless (equal? (buffer-local buf 'mode-name) mode)
-        (with-current-buffer buf (lambda () (set-mode! mode)))))
+    ;; The app's detail mode is the major, so every page takes one pane; the
+    ;; page's kind is a minor mode on it.
+    (buffer-set-local! buf 'detail-family (site-app-detail-major buf))
+    (site-app-detail-enter! buf)
     (site-app-draw! buf)
     (site-app-join-group! buf)
     buf))
@@ -1924,11 +1922,26 @@
 
 ;; the kind of detail a page makes, as a minor mode under the app's one major
 ;; mode; it carries the page's own keys
-;; the page's major mode: its kind (ats-approval-mode), else the app's detail mode
+;; the page's major mode: the app's one detail mode, so every page shares a pane
 (define (site-app-detail-major buf)
-  (or (buffer-local buf 'site-app-detail-kind)
-      (buffer-local buf 'site-app-detail-mode)
+  (or (buffer-local buf 'site-app-detail-mode)
       "site-app-detail-mode"))
+
+;; the page's kind (ats-approval-mode) as a minor mode on that major, and no other kind
+(define (site-app-detail-enter! buf)
+  (let ((major (site-app-detail-major buf))
+        (kind (buffer-local buf 'site-app-detail-kind)))
+    (unless (equal? (buffer-local buf 'mode-name) major)
+      (with-current-buffer buf (lambda () (set-mode! major))))
+    (let ((spec (site-app-spec (buffer-local buf 'site-app-name))))
+      (for-each (lambda (page)
+                  (let ((other (plist-get page 'detail-kind)))
+                    (when (and other (not (equal? other kind)) (minor-mode-on? buf other))
+                      (disable-minor-mode! buf other))))
+                (if spec (site-app-pages spec) '())))
+    (when (and kind (not (minor-mode-on? buf kind)))
+      (enable-minor-mode! buf kind))
+    buf))
 
 (define (site-app-prepare-detail! name row page)
   (let ((buf (site-app-detail-buffer name row)))
@@ -2291,13 +2304,14 @@
        (site-app-keyed-actions buf)))
 
 (define (site-app-bind-action-keys! buf)
-  ;; the page's own mode holds its button keys
-  (let* ((mode (site-app-detail-major buf))
+  ;; the page's kind holds its button keys, else the app's detail mode
+  (let* ((kind (buffer-local buf 'site-app-detail-kind))
+         (mode (or kind (site-app-detail-major buf)))
          (keys (append (map (lambda (k) (list (car k) (string-append "site-app-detail-key-" (car k))))
                             (site-app-detail-action-keys buf))
                        (map (lambda (k) (list (car k) (cadr k))) (site-app-detail-extra-keys buf)))))
     (when mode
-      (mode-keys! mode keys)
+      (if kind (minor-mode-keys! kind keys) (mode-keys! mode keys))
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
         (let ((name (buffer-local buf 'site-app-name)))
@@ -2671,10 +2685,10 @@
                   (when mode
                     (define-mode mode (lambda () (buffer-set-read-only! (current-buffer) #t)))
                     (mode-parent! mode "site-app-detail-mode"))
-                  ;; the page's kind derives from the app's detail mode: an approval
-                  ;; page is an ATS page is a site-app page, most specific last
+                  ;; the page's kind is a minor mode on the app's detail mode: the major
+                  ;; places the page, the kind holds what it does (its keys, its chat)
                   (when kind
-                    (define-derived-mode kind (site-app-detail-mode-name spec page) (lambda () #t)))))
+                    (register-minor-mode! kind (lambda (buf) #t)))))
               pages)
     ;; one major mode for every index of the app, so they share a pane and a map;
     ;; each section is a minor mode on it that holds the section's own keys

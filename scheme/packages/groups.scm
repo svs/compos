@@ -3212,7 +3212,24 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (mode-consolidate!)
   (let* ((me (active-window))
          (mode (and (window-buffer me) (mode-consolidate-mode-of (window-buffer me)))))
-    (cond ((not (member me (display--work-windows)))
+    (cond ((and (boundp 'panes-mode) panes-mode (window-buffer me))
+           ;; the window model regroups its stacks: every buffer of the mode
+           ;; this window shows, by the buffer's own mode, joins that mode's window
+           ;; a stack that mixes in other modes gives those up too, else they
+           ;; stay behind in the window this mode claims
+           (let* ((m (panes--buffer-mode (window-buffer me)))
+                  (l (panes--ensure-layout!))
+                  (touched (filter (lambda (k) (find (lambda (b) (equal? (panes--buffer-mode b) m)) (panes-window-buffers l k)))
+                                   (panes-window-keys l)))
+                  (modes (cons m (filter (lambda (x) x)
+                                         (map panes--buffer-mode
+                                              (apply append (map (lambda (k) (panes-window-buffers l k)) touched))))))
+                  (after (panes-consolidate l panes--buffer-mode modes)))
+             (panes-apply! after)
+             (when (window-exists? me) (select-window! me))
+             (message (string-append "Consolidated " m))
+             me))
+          ((not (member me (display--work-windows)))
            (message "Select a work window to consolidate") #f)
           ((not mode)
            (message "Nothing to consolidate in this pane") #f)

@@ -158,8 +158,17 @@
 
 ;; the shares of the panes that have a window, normalized
 (define (panes--top-shares layout)
+  ;; a pane's share is its own once it was resized; panes that kept the
+  ;; default follow the layout target: under two-chat the last pane is the
+  ;; chat, at window-layout-chat-ratio, and the rest share what is left
   (let* ((rows (filter (lambda (p) (pair? (plist-get p 'windows))) (panes-panes layout)))
          (raw (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1))) rows))
+         (n (length raw))
+         (plain (and (> n 1) (null? (filter (lambda (s) (not (= s 1))) raw))))
+         (raw (if (and plain (equal? (layout-target) 'two-chat) (number? window-layout-chat-ratio))
+                  (let ((r window-layout-chat-ratio))
+                    (append (map (lambda (_) (/ (- 1 r) (- n 1))) (cdr raw)) (list r)))
+                  raw))
          (total (apply + raw)))
     (map (lambda (s) (/ s total)) raw)))
 
@@ -597,11 +606,54 @@
         (begin (panes-apply! (panes-move-pane l pid to)) #t)
         (begin (message "No pane that way") #f))))
 
+(define (panes--shift-window! dir)
+  ;; the selected window goes on top of the next pane's windows, which wait
+  ;; behind it; at the edge it takes a new pane while there is room
+  (let* ((l (panes--ensure-layout!))
+         (key (panes-key-of-handle l (active-window)))
+         (from (and key (panes-pane-of l key)))
+         (ids (panes-pane-ids l))
+         (i (and from (+ dir (panes--index-of from ids))))
+         (next (cond ((not i) #f)
+                     ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i)))
+                     ((not (panes-under-capacity? l)) #f)
+                     (else (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
+                             (panes-move-window (car added) key (cadr added)))))))
+    (if (not next)
+        (begin (message "No pane that way") #f)
+        (let* ((applied (panes-apply! next))
+               (h (panes-handle applied key)))
+          (when (and h (window-exists? h)) (select-window! h))
+          #t))))
+
 (define-command "pane-move-left" "Move this pane left, with all its windows"
   (lambda () (panes--move-current-pane! -1)))
 
 (define-command "pane-move-right" "Move this pane right, with all its windows"
   (lambda () (panes--move-current-pane! 1)))
+
+(define (panes--cycle-pane-window! step)
+  ;; the next window of the selected pane comes to its front; the one that
+  ;; was there goes to the back, so stepping on walks the whole pane
+  (let* ((l (panes--ensure-layout!))
+         (k (panes-key-of-handle l (active-window)))
+         (pid (and k (panes-pane-of l k)))
+         (ws (if pid (or (plist-get (panes-pane l pid) 'windows) '()) '())))
+    (if (< (length ws) 2)
+        (begin (message "No other window in this pane") #f)
+        (let* ((order (if (> step 0)
+                          (append (cdr ws) (list (car ws)))
+                          (cons (car (reverse ws)) (reverse (cdr (reverse ws))))))
+               (applied (panes-apply! (panes--update-pane l pid (lambda (p) (panes--put p 'windows order)))))
+               (h (panes-handle applied (car order))))
+          (when (and h (window-exists? h)) (select-window! h))
+          #t))))
+
+(define-command "pane-next-window" "Bring the next window of this pane to the front"
+  (lambda () (panes--cycle-pane-window! 1)))
+
+(define-command "pane-previous-window" "Bring the previous window of this pane to the front"
+  (lambda () (panes--cycle-pane-window! -1)))
 
 (define-command "panes-mode"
   "Toggle the window model: a row of panes, each a stack of windows, each a stack of buffers; a buffer opens where the window policy says"

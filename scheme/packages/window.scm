@@ -2908,9 +2908,11 @@ bottom, as a window-rects row; #f past either end."
         (message (string-append "No window " (symbol->string dir))))))
 
 (define-command "window-previous-pane" "Move this window to the previous pane with its complete buffer stack"
-  (lambda () (window-swap! 'previous)))
+  ;; under the window model it goes on top of that pane's windows
+  (lambda () (if (and (boundp 'panes-mode) panes-mode) (panes--shift-window! -1) (window-swap! 'previous))))
 (define-command "window-next-pane" "Move this window to the next pane with its complete buffer stack"
-  (lambda () (window-swap! 'next)))
+  ;; under the window model it goes on top of that pane's windows
+  (lambda () (if (and (boundp 'panes-mode) panes-mode) (panes--shift-window! 1) (window-swap! 'next))))
 (define-command "window-up" "Move this window upward with its complete buffer stack"
   (lambda () (window-swap! 'up)))
 (define-command "window-down" "Move this window downward with its complete buffer stack"
@@ -3037,8 +3039,8 @@ and right walk the panes, up and down move by geometry."
     ("s-S-<right>" "pane-move-right")
     ("S-<left>" "window-previous-pane")
     ("S-<right>" "window-next-pane")
-    ("S-<up>" "window-previous-buffer")
-    ("S-<down>" "window-next-buffer")
+    ("S-<up>" "pane-previous-window")
+    ("S-<down>" "pane-next-window")
     ("s-<up>" "window-previous-mode-buffer")
     ("s-<down>" "window-next-mode-buffer")))
 
@@ -3119,7 +3121,7 @@ and right walk the panes, up and down move by geometry."
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
 (public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
-;;; The window list. M-x list-windows opens *windows*: the windows of the
+;;; The flat window list. M-x windows-list-ring opens *windows*: the windows of the
 ;;; selected frame in ring order, the ones on screen filled, the ones
 ;;; waiting off it hollow. RET goes to one, k closes it, c consolidates
 ;;; from it, r names it.
@@ -3268,8 +3270,8 @@ and right walk the panes, up and down move by geometry."
     'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate") ("r" "windows-list-rename")
             ("g" "windows-list-refresh") ("q" "quit-window"))))
 
-(define-command "list-windows"
-  "List the windows of this frame's ring, on screen and waiting"
+(define-command "windows-list-ring"
+  "List the windows of this frame's ring in one flat list, on screen and waiting"
   (lambda ()
     ;; a list that waits behind a pane comes to this one: popping to it
     ;; would leave it hidden in its own window
@@ -3286,7 +3288,7 @@ and right walk the panes, up and down move by geometry."
 
 
 
-(define-key "ctl-x-map" "w" "list-windows")
+(define-key "ctl-x-map" "w" "windows-list")
 
 ;; The list follows the ring while it is on screen.
 (define (windows-list-follow!)

@@ -109,7 +109,7 @@
 (require 'window-log)
 ;; the window model on the frame: on by default (panes-mode-default); M-x panes-mode toggles it
 (require 'panes-mode)
-;; the model as a list: M-x list-panes
+;; the model as a list: M-x windows-list (C-x w)
 (require 'panes-board)
 ;; undo and redo over the pane arrangement alone: M-x layout-undo, layout-redo
 (require 'panes-history)

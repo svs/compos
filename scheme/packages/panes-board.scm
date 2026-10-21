@@ -1,6 +1,8 @@
-;;; panes-board.scm --- the window model as a list: panes, their windows,
-;;; their buffers. C-x w lists them; the verbs edit the model and the frame
-;;; follows.
+;;; panes-board.scm --- the window model as a list: groups, their panes, the
+;;; panes' windows, the windows' buffers. C-x w lists them. Two views: Group,
+;;; this group's model, and All, every group's model on this frame. + zooms one
+;;; level towards the row at point, - zooms back out; the verbs edit the model
+;;; and the frame follows.
 
 (require 'panes-mode)
 
@@ -12,38 +14,152 @@
 ;; the model the board shows: the group's, else the frame read in
 (define (panes-board-layout) (or (panes-layout) (panes-adopt)))
 
-;; row ids: p:PANE, w:KEY, b:KEY:BUFFER
-(define (panes-board-ids buf)
-  (let ((l (panes-board-layout)))
-    (apply append
-      (map (lambda (p)
-             (cons (string-append "p:" (plist-get p 'id))
-                   (apply append
-                     (map (lambda (k)
-                            (cons (string-append "w:" k)
-                                  (map (lambda (b) (string-append "b:" k ":" b)) (panes-window-buffers l k))))
-                          (or (plist-get p 'windows) '())))))
-           (panes-panes l)))))
+;; row ids: g|GROUP, p|GROUP|PANE, w|GROUP|KEY, b|GROUP|KEY|BUFFER
+(define (panes-board--gs g) (if (symbol? g) (symbol->string g) g))
+(define (panes-board--g s) (if (equal? s "none") 'none s))
+(define (panes-board--id kind g &rest more)
+  (string-join (cons kind (cons (panes-board--gs g) more)) "|"))
+(define (panes-board--split id)
+  ;; at most four parts: a buffer name may hold the separator itself
+  (let loop ((i 0) (start 0) (acc '()))
+    (cond ((= (length acc) 3) (reverse (cons (substring id start (string-length id)) acc)))
+          ((>= i (string-length id)) (reverse (cons (substring id start i) acc)))
+          ((equal? (substring id i (+ i 1)) "|") (loop (+ i 1) (+ i 1) (cons (substring id start i) acc)))
+          (else (loop (+ i 1) start acc)))))
 
-(define (panes-board-kind id) (substring id 0 1))
+(define (panes-board-kind id) (car (panes-board--split id)))
+(define (panes-board-group id) (panes-board--g (cadr (panes-board--split id))))
+;; the pane id of a p row, the window key of a w or b row
+(define (panes-board-key id) (let ((ps (panes-board--split id))) (and (> (length ps) 2) (caddr ps))))
+(define (panes-board-buffer-of id) (let ((ps (panes-board--split id))) (and (> (length ps) 3) (cadddr ps))))
 
-(define (panes-board-key id)
-  ;; the window key of a w: or b: row
-  (let ((rest (substring id 2 (string-length id))))
-    (if (equal? (panes-board-kind id) "b")
-        (let loop ((i 0)) (if (or (>= i (string-length rest)) (equal? (substring rest i (+ i 1)) ":")) (substring rest 0 i) (loop (+ i 1))))
-        rest)))
-
-(define (panes-board-buffer-of id)
-  (let* ((rest (substring id 2 (string-length id)))
-         (key (panes-board-key id)))
-    (substring rest (+ 1 (string-length key)) (string-length rest))))
+(define (panes-board-here-group) (panes--group-key))
+(define (panes-board-layout-of g)
+  (if (equal? g (panes-board-here-group)) (panes-board-layout) (panes-layout-of g)))
+(define (panes-board-row-layout id) (panes-board-layout-of (panes-board-group id)))
 
 (define (panes-board-pane-of id)
-  (let ((l (panes-board-layout)))
-    (if (equal? (panes-board-kind id) "p")
-        (substring id 2 (string-length id))
-        (panes-pane-of l (panes-board-key id)))))
+  (let ((kind (panes-board-kind id)))
+    (cond ((equal? kind "p") (panes-board-key id))
+          ((member kind '("w" "b")) (let ((l (panes-board-row-layout id))) (and l (panes-pane-of l (panes-board-key id)))))
+          (else #f))))
+
+(define (panes-board-view buf) (or (buffer-local buf 'panes-board-view) 'group))
+(define (panes-board-root buf) (buffer-local buf 'panes-board-root))
+
+(define (panes-board--groups)
+  (let ((here (panes-board-here-group)))
+    (cons here (filter (lambda (g) (and (not (equal? g here)) (panes-layout-of g))) (map car (panes--store))))))
+
+(define (panes-board--open? buf id) (and (member id (or (buffer-local buf 'panes-board-open) '())) #t))
+(define (panes-board--shut? buf id) (and (member id (or (buffer-local buf 'panes-board-shut) '())) #t))
+
+(define (panes-board--toggle! buf var x)
+  (let ((xs (or (buffer-local buf var) '())))
+    (buffer-set-local! buf var (if (member x xs) (filter (lambda (y) (not (equal? y x))) xs) (cons x xs)))))
+
+(define (panes-board--window-rows buf g l k force)
+  (let ((id (panes-board--id "w" g k)))
+    (cons id (if (or force (panes-board--open? buf id))
+                 (map (lambda (b) (panes-board--id "b" g k b)) (panes-window-buffers l k))
+                 '()))))
+
+(define (panes-board--pane-rows buf g l pid force)
+  (let ((id (panes-board--id "p" g pid)))
+    (cons id (if (and (not force) (panes-board--shut? buf id))
+                 '()
+                 (apply append (map (lambda (k) (panes-board--window-rows buf g l k #f))
+                                    (or (plist-get (panes-pane l pid) 'windows) '())))))))
+
+(define (panes-board--group-rows buf g)
+  (let ((l (panes-board-layout-of g)))
+    (if (not l)
+        '()
+        (apply append (map (lambda (p) (panes-board--pane-rows buf g l (plist-get p 'id) #f)) (panes-panes l))))))
+
+(define (panes-board--root-valid? root)
+  (let* ((kind (panes-board-kind root)) (l (panes-board-row-layout root)))
+    (cond ((equal? kind "g") (and l #t))
+          ((equal? kind "p") (and l (panes-pane l (panes-board-key root)) #t))
+          ((equal? kind "w") (and l (panes-window l (panes-board-key root)) #t))
+          (else #f))))
+
+;; the rows of the view, or of what it is zoomed to
+(define (panes-board-ids buf)
+  (let ((root (panes-board-root buf)))
+    (cond ((and root (not (panes-board--root-valid? root)))
+           ;; what it zoomed to is gone: back to the whole view
+           (buffer-set-local! buf 'panes-board-root #f)
+           (panes-board-ids buf))
+          (root
+           (let* ((kind (panes-board-kind root)) (g (panes-board-group root)) (l (panes-board-layout-of g)))
+             (cond ((equal? kind "g") (cons root (panes-board--group-rows buf g)))
+                   ((equal? kind "p") (panes-board--pane-rows buf g l (panes-board-key root) #t))
+                   (else (panes-board--window-rows buf g l (panes-board-key root) #t)))))
+          ((equal? (panes-board-view buf) 'all)
+           (apply append
+             (map (lambda (g)
+                    (let ((id (panes-board--id "g" g)))
+                      (cons id (if (panes-board--shut? buf id) '() (panes-board--group-rows buf g)))))
+                  (panes-board--groups))))
+          (else (panes-board--group-rows buf (panes-board-here-group))))))
+
+;;; --- zoom ------------------------------------------------------------------------
+
+;; the way from the top of the view down to a row: g p w. A buffer row's way
+;; ends at its window
+(define (panes-board--chain buf id)
+  (let* ((kind (panes-board-kind id)) (g (panes-board-group id))
+         (top (if (equal? (panes-board-view buf) 'all) (list (panes-board--id "g" g)) '())))
+    (cond ((equal? kind "g") (list id))
+          ((equal? kind "p") (append top (list id)))
+          (else (let ((pid (panes-board-pane-of id)))
+                  (append top (if pid (list (panes-board--id "p" g pid)) '())
+                          (list (panes-board--id "w" g (panes-board-key id)))))))))
+
+;; one level below the root on the way to the row; a buffer row in a view not
+;; zoomed at all goes straight to its window
+(define (panes-board-zoom-target buf id)
+  (let* ((chain (panes-board--chain buf id))
+         (root (panes-board-root buf))
+         (below (if root (let ((m (member root chain))) (and m (cdr m))) chain)))
+    (cond ((and (equal? (panes-board-kind id) "b") (not root)) (car (reverse chain)))
+          ((pair? below) (car below))
+          (else #f))))
+
+(define (panes-board-zoom-parent buf root)
+  (let ((kind (panes-board-kind root)) (g (panes-board-group root)))
+    (cond ((equal? kind "w") (let ((pid (panes-board-pane-of root))) (and pid (panes-board--id "p" g pid))))
+          ((equal? kind "p") (and (equal? (panes-board-view buf) 'all) (panes-board--id "g" g)))
+          (else #f))))
+
+(define (panes-board--label id)
+  (let ((kind (panes-board-kind id)) (l (panes-board-row-layout id)))
+    (cond ((equal? kind "g") (let ((g (panes-board-group id))) (or (and (string? g) (group-name g)) "no group")))
+          ((equal? kind "p") (string-append "pane " (number->string (+ 1 (panes--index-of (panes-board-key id) (panes-pane-ids l))))))
+          (else (let* ((k (panes-board-key id)) (h (panes-handle l k)))
+                  (or (and h (window-exists? h) (boundp 'window-name) (window-name h))
+                      (let ((m (panes-board--short (panes-window-mode l k)))) (and (not (equal? m "")) m))
+                      k))))))
+
+;; the trail from the view down to the root, for the title
+(define (panes-board-trail buf)
+  (let loop ((r (panes-board-root buf)) (acc '()))
+    (if (not r) acc (loop (panes-board-zoom-parent buf r) (cons (panes-board--label r) acc)))))
+
+(define (panes-board--depth buf id)
+  ;; how far in a row sits below the top of what is shown
+  (let* ((kind (panes-board-kind id))
+         (d (cond ((equal? kind "g") 0) ((equal? kind "p") 1) ((equal? kind "w") 2) (else 3)))
+         (root (panes-board-root buf))
+         (top (cond (root (let ((k (panes-board-kind root))) (cond ((equal? k "g") 0) ((equal? k "p") 1) (else 2))))
+                    ((equal? (panes-board-view buf) 'all) 0)
+                    (else 1))))
+    (max 0 (- d top))))
+
+(define (panes-board--indent buf id)
+  (let loop ((n (* 2 (panes-board--depth buf id))) (s ""))
+    (if (<= n 0) s (loop (- n 1) (string-append s " ")))))
 
 (define (panes-board--pct share) (string-append (number->string (round (* 100 share))) "%"))
 
@@ -52,32 +168,43 @@
     (if (string-suffix? "-mode" m) (substring m 0 (- (string-length m) 5)) m)))
 
 (define (panes-board-cells buf id)
-  (let* ((l (panes-board-layout))
-         (kind (panes-board-kind id)))
-    (cond ((equal? kind "p")
-           (let* ((pid (substring id 2 (string-length id)))
+  (let* ((kind (panes-board-kind id))
+         (g (panes-board-group id))
+         (here? (equal? g (panes-board-here-group)))
+         (l (panes-board-layout-of g))
+         (pad (panes-board--indent buf id)))
+    (cond ((not l) (list (list "" #f) (list id "faint") (list "" #f) (list "" #f)))
+          ((equal? kind "g")
+           (list (list (if here? "◆" "◇") (if here? "ok" "faint"))
+                 (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) #f)
+                 (list (if here? "this group" "") "faint")
+                 (list (string-append (number->string (panes-pane-count l)) " panes") "dim")))
+          ((equal? kind "p")
+           (let* ((pid (panes-board-key id))
                   (p (panes-pane l pid))
                   (i (panes--index-of pid (panes-pane-ids l)))
-                  (share (list-ref (panes-shares l) i)))
-             (list (list "■" "ok")
-                   (list (string-append "pane " (number->string (+ i 1))) #f)
+                  ;; this group's panes as the frame draws them, the layout target's share included
+                  (shares (if (and here? (= (length (panes--top-shares l)) (panes-pane-count l))) (panes--top-shares l) (panes-shares l)))
+                  (share (list-ref shares i)))
+             (list (list (if here? "■" "□") (if here? "ok" "faint"))
+                   (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) #f)
                    (list (panes-board--pct share) "faint")
                    (list (string-append (number->string (length (or (plist-get p 'windows) '()))) " windows") "dim"))))
           ((equal? kind "w")
            (let* ((k (panes-board-key id))
-                  (h (panes-handle l k))
-                  (on (member k (panes-top-windows l)))
-                  (here (and h (equal? h (active-window)))))
-             (list (list (cond (here "  ●") (on "  ■") (else "  □")) (if on "ok" "faint"))
-                   (list (string-append "  " (or (and h (boundp 'window-name) (window-name h)) k)) #f)
+                  (h (and here? (panes-handle l k)))
+                  (on (and here? (member k (panes-top-windows l))))
+                  (me (and h (equal? h (active-window)))))
+             (list (list (cond (me "●") (on "■") (else "□")) (if on "ok" "faint"))
+                   (list (string-append pad (if (or (panes-board--open? buf id) (equal? id (panes-board-root buf))) "▾ " "▸ ") (panes-board--label id)) #f)
                    (list (panes-board--short (panes-window-mode l k)) "dim")
                    (list (string-append (number->string (length (panes-window-buffers l k))) " buffers") "faint"))))
           (else
             (let* ((k (panes-board-key id))
-                    (b (panes-board-buffer-of id))
-                    (top (equal? b (panes-window-buffer l k))))
-              (list (list (if top "    ·" "     ") "faint")
-                    (list (string-append "    " (if (buffer-known? b) (buffer-modeline-name b) b)) (if top #f "faint"))
+                   (b (panes-board-buffer-of id))
+                   (top (equal? b (panes-window-buffer l k))))
+              (list (list (if top "·" "") "faint")
+                    (list (string-append pad (if (buffer-known? b) (buffer-modeline-name b) b)) (if top #f "faint"))
                     (list (panes-board--short (panes--buffer-mode b)) "dim")
                     (list (if (and (buffer-known? b) (buffer-modified? b)) "modified" "") "faint")))))))
 
@@ -87,18 +214,21 @@
 
 (define (panes-board-refresh!) (list-refresh! *panes-board-buffer*))
 
-;; edit the model with FN (layout id) -> layout, lay the frame out, redraw
+;; edit the model with FN (layout id) -> layout, lay the frame out, redraw. Only
+;; this group's model edits: another group's is drawn when that group is entered
 (define (panes-board-edit! fn)
   (let ((id (list-current *panes-board-buffer*)))
-    (if (not id)
-        (message "no row here")
-        (let* ((l (panes-board-layout))
-               (next (fn l id)))
-          (when (and next (not (equal? next l)))
-            (let ((me (active-window)))
-              (panes-apply! next)
-              (when (window-exists? me) (select-window! me))))
-          (panes-board-refresh!)))))
+    (cond ((not id) (message "no row here"))
+          ((not (equal? (panes-board-group id) (panes-board-here-group)))
+           (message "That is another group's layout; enter the group to change it"))
+          (else
+            (let* ((l (panes-board-layout))
+                   (next (fn l id)))
+              (when (and next (not (equal? next l)))
+                (let ((me (active-window)))
+                  (panes-apply! next)
+                  (when (window-exists? me) (select-window! me))))
+              (panes-board-refresh!))))))
 
 ;;; --- the verbs -------------------------------------------------------------------
 
@@ -106,13 +236,15 @@
   (lambda ()
     (let ((id (list-current *panes-board-buffer*)))
       (cond ((not id) (message "no row here"))
+            ((not (equal? (panes-board-group id) (panes-board-here-group)))
+             (message "That window is in another group"))
+            ((equal? (panes-board-kind id) "g") (message "This is the group you are in"))
             (else
               (let* ((l (panes-board-layout))
                      (kind (panes-board-kind id))
-                     (key (cond ((equal? kind "p")
-                                 (let ((ks (plist-get (panes-pane l (substring id 2 (string-length id))) 'windows)))
-                                   (and (pair? ks) (car ks))))
-                                (else (panes-board-key id))))
+                     (key (if (equal? kind "p")
+                              (let ((ks (plist-get (panes-pane l (panes-board-key id)) 'windows))) (and (pair? ks) (car ks)))
+                              (panes-board-key id)))
                      (next (cond ((not key) l)
                                  ((equal? kind "b") (panes-show l key (panes-board-buffer-of id)))
                                  (else (panes-raise l key)))))
@@ -121,23 +253,26 @@
                          (h (panes-handle applied key)))
                     (when (and h (window-exists? h)) (select-window! h))))))))))
 
-;; move the window on this row one pane over; at the edge a new pane while there is room
+;; move the window on this row one pane over, on top of that pane's windows; a
+;; pane row moves the pane. At the edge a window takes a new pane while there is room
 (define (panes-board-shift! dir)
   (panes-board-edit!
     (lambda (l id)
-      (if (equal? (panes-board-kind id) "p")
-          (let* ((pid (substring id 2 (string-length id)))
-                 (i (panes--index-of pid (panes-pane-ids l))))
-            (panes-move-pane l pid (+ i dir)))
-          (let* ((key (panes-board-key id))
-                 (from (panes-pane-of l key))
-                 (ids (panes-pane-ids l))
-                 (i (+ dir (panes--index-of from ids))))
-            (cond ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i)))
-                  ((not (panes-under-capacity? l)) (message "no pane that way") l)
-                  (else
-                    (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
-                      (panes-move-window (car added) key (cadr added))))))))))
+      (let ((kind (panes-board-kind id)))
+        (cond ((equal? kind "g") l)
+              ((equal? kind "p")
+               (let* ((pid (panes-board-key id)) (i (panes--index-of pid (panes-pane-ids l))))
+                 (panes-move-pane l pid (+ i dir))))
+              (else
+                (let* ((key (panes-board-key id))
+                       (from (panes-pane-of l key))
+                       (ids (panes-pane-ids l))
+                       (i (+ dir (panes--index-of from ids))))
+                  (cond ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i)))
+                        ((not (panes-under-capacity? l)) (message "no pane that way") l)
+                        (else
+                          (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
+                            (panes-move-window (car added) key (cadr added))))))))))))
 
 (define-command "panes-board-left" "Move this window to the pane on its left; a pane row moves the pane"
   (lambda () (panes-board-shift! -1)))
@@ -150,7 +285,8 @@
     (panes-board-edit!
       (lambda (l id)
         (let ((kind (panes-board-kind id)))
-          (cond ((equal? kind "p") (panes-remove-pane l (substring id 2 (string-length id))))
+          (cond ((equal? kind "g") l)
+                ((equal? kind "p") (panes-remove-pane l (panes-board-key id)))
                 ((equal? kind "w") (panes-close-window l (panes-board-key id)))
                 (else
                   (let* ((key (panes-board-key id)) (b (panes-board-buffer-of id))
@@ -182,43 +318,112 @@
   (lambda () (panes-board-edit! (lambda (l id) (panes-equalize l)))))
 (define-command "panes-board-refresh" "Redraw the board" (lambda () (panes-board-refresh!)))
 
+(define-command "panes-board-fold" "Fold or unfold the group, pane or window on this row"
+  (lambda ()
+    (let* ((buf *panes-board-buffer*)
+           (id (list-current buf)))
+      (when id
+        (let ((kind (panes-board-kind id)))
+          (cond ((member kind '("g" "p")) (panes-board--toggle! buf 'panes-board-shut id))
+                ((equal? kind "w") (panes-board--toggle! buf 'panes-board-open id))
+                (else (panes-board--toggle! buf 'panes-board-open (panes-board--id "w" (panes-board-group id) (panes-board-key id))))))
+        (panes-board-refresh!)))))
+
+(define-command "panes-board-fold-all" "Unfold every window, or fold them all when any is open"
+  (lambda ()
+    (let ((buf *panes-board-buffer*))
+      (buffer-set-local! buf 'panes-board-shut '())
+      (buffer-set-local! buf 'panes-board-open
+        (if (pair? (or (buffer-local buf 'panes-board-open) '()))
+            '()
+            (apply append
+              (map (lambda (g) (let ((l (panes-board-layout-of g)))
+                                 (if l (map (lambda (k) (panes-board--id "w" g k)) (panes-window-keys l)) '())))
+                   (panes-board--groups)))))
+      (panes-board-refresh!))))
+
+(define (panes-board--rezoom! buf root keep)
+  ;; the row KEEP stays under the cursor when it is still shown
+  (buffer-set-local! buf 'panes-board-root root)
+  (when keep (buffer-set-local! buf 'list-selection-key keep))
+  (list-refresh! buf))
+
+(define-command "panes-board-zoom-in" "Zoom one level towards this row: a pane, a window"
+  (lambda ()
+    (let* ((buf *panes-board-buffer*)
+           (id (list-current buf))
+           (target (and id (panes-board-zoom-target buf id))))
+      (if target
+          (panes-board--rezoom! buf target id)
+          (message "Zoomed in as far as it goes")))))
+
+(define-command "panes-board-zoom-out" "Zoom back out one level"
+  (lambda ()
+    (let* ((buf *panes-board-buffer*)
+           (root (panes-board-root buf)))
+      (if root
+          (panes-board--rezoom! buf (panes-board-zoom-parent buf root) root)
+          (message "Zoomed out as far as it goes")))))
+
+(define (panes-board--set-view! buf view)
+  (buffer-set-local! buf 'panes-board-view view)
+  (buffer-set-local! buf 'panes-board-root #f)
+  (list-refresh! buf))
+
+(define-command "panes-board-view-next" "Switch between the views: Group, All"
+  (lambda () (let ((buf *panes-board-buffer*))
+               (panes-board--set-view! buf (if (equal? (panes-board-view buf) 'all) 'group 'all)))))
+
 (define-list-mode! "panes-list-mode"
   (list
     'doc (string-append
-           "The windows of this frame as the model holds them: a pane, its windows (■ on screen, ● the one you are in, □ behind), "
-           "and each window's buffers (· the one it shows). `RET` goes there, `<left>`/`<right>` move a window or a pane, `k` closes a window "
-           "or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `+`/`-` resize a pane, `=` equalizes.")
+           "The windows as the model holds them, in two views: Group, this group's panes, and All, every group's on this frame. "
+           "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
+           "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
+           "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `S-<left>`/`S-<right>` move a window "
+           "or a pane, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `{`/`}` resize a pane, `=` equalizes.")
     'buffer *panes-board-buffer*
     'rows panes-board-ids
     'layouts (list (list 'name 'wide 'min-cols 70
-                         'columns (lambda (buf) (list (list "" 5) (list "what" 34) (list "mode" 16) (list "" #f)))
+                         'columns (lambda (buf) (list (list "" 2) (list "what" 38) (list "mode" 16) (list "" #f)))
                          'cells panes-board-cells)
                    (list 'name 'narrow 'default #t
-                         'columns (lambda (buf) (list (list "" 5) (list "what" #f) (list "mode" 14)))
+                         'columns (lambda (buf) (list (list "" 2) (list "what" #f) (list "mode" 14)))
                          'cells panes-board-narrow-cells))
     'cells panes-board-cells
-    'title (lambda (buf) "Panes")
+    'title (lambda (buf) (string-join (cons (if (equal? (panes-board-view buf) 'all) "Windows · All" "Windows · Group")
+                                            (panes-board-trail buf))
+                                      " › "))
     'meta (lambda (buf) (let ((l (panes-board-layout)))
                           (string-append (number->string (panes-pane-count l)) " panes, "
-                                         (number->string (length (panes-window-keys l))) " windows")))
+                                         (number->string (length (panes-window-keys l))) " windows here")))
     'total (lambda (buf) (length (list-source-entries buf)))
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "go") ("<left>/<right>" "move") ("k" "close") ("K" "kill") ("c" "consolidate")
-                ("+/-" "resize") ("=" "equalize") ("g" "refresh") ("q" "quit")))
-    'keys '(("RET" "panes-board-visit") ("<left>" "panes-board-left") ("<right>" "panes-board-right")
+              '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("TAB" "fold") ("S-<left>/<right>" "move") ("k" "close")
+                ("K" "kill") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
+    'keys '(("RET" "panes-board-visit") ("+" "panes-board-zoom-in") ("-" "panes-board-zoom-out")
+            ("<left>" "panes-board-view-next") ("<right>" "panes-board-view-next")
+            ("TAB" "panes-board-fold") ("S-TAB" "panes-board-fold-all")
+            ("S-<left>" "panes-board-left") ("S-<right>" "panes-board-right")
             ("k" "panes-board-close") ("K" "panes-board-kill") ("c" "panes-board-consolidate")
-            ("+" "panes-board-wider") ("-" "panes-board-narrower") ("=" "panes-board-equalize")
+            ("}" "panes-board-wider") ("{" "panes-board-narrower") ("=" "panes-board-equalize")
             ("g" "panes-board-refresh") ("q" "quit-window"))))
 
-(define-command "list-panes" "List the panes of this frame, their windows and their buffers"
-  (lambda ()
-    (let ((buf *panes-board-buffer*))
-      (buffer-create buf)
-      (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
-      (pop-to-buffer buf)
-      (list-refresh! buf))))
+;; the list opened on VIEW, zoomed to ROOT (#f: the whole view)
+(define (panes-board-open! view root)
+  (let ((buf *panes-board-buffer*))
+    (buffer-create buf)
+    (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
+    (buffer-set-local! buf 'panes-board-view view)
+    (buffer-set-local! buf 'panes-board-root root)
+    (pop-to-buffer buf)
+    (list-refresh! buf)
+    buf))
+
+(define-command "windows-list" "List this group's panes and their windows; + zooms in, - out, <left>/<right> switch to All"
+  (lambda () (panes-board-open! 'group #f)))
 
 ;; the board follows the frame while it is on screen
 (define (panes-board-follow!)

@@ -529,10 +529,20 @@
       names))
 
 ;; each opening starts on the tab C-x b opens on
+;; ibuffer's views: All and Group. A pane's or a window's buffers are the
+;; windows list zoomed in (C-x w), not tabs of this one
+(define *ibuffer-tabs* '((all "All") (group "Group")))
+
+(define (ibuffer-tab-step-of tab step)
+  (let* ((keys (map car *ibuffer-tabs*))
+         (n (length keys))
+         (i (let loop ((ks keys) (i 0)) (cond ((null? ks) 0) ((eq? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
+    (nth (modulo (+ i step n) n) keys)))
+
 (define (ibuffer-tabs-start! buf from)
   ;; a frame outside every group has no Group tab to show: it would list
   ;; nothing, so the list opens on All
-  (let ((tab (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group)))
+  (let ((tab (if (assoc switch-buffer-initial-tab *ibuffer-tabs*) switch-buffer-initial-tab 'group)))
     (buffer-set-local! buf 'ibuffer-tab
       (if (and (equal? tab 'group) (not (frame-group))) 'all tab)))
   (buffer-set-local! buf 'ibuffer-tab-window from)
@@ -540,7 +550,7 @@
   (buffer-set-local! buf 'ibuffer-narrow-group #f))
 
 (define (ibuffer-tab-step! buf step)
-  (buffer-set-locals! buf (list 'ibuffer-tab (switch-tab-step (ibuffer-tab buf) step)
+  (buffer-set-locals! buf (list 'ibuffer-tab (ibuffer-tab-step-of (ibuffer-tab buf) step)
                                 'ibuffer-narrow-group #f))
   (ibuffer-refresh! buf)
   (ibuffer-goto-first-row! buf))
@@ -555,7 +565,7 @@
                        'tabs (map (lambda (t)
                                     (list (string-append "ibuffer-tab-" (symbol->string (car t)))
                                           (cadr t) (equal? (car t) tab)))
-                                  *switch-tabs*)))
+                                  *ibuffer-tabs*)))
                (list 'tag "span" 'text "← → switch tabs"
                      'attrs '(("style" "font-family:var(--font-mono);font-size:.85em;color:var(--dim-fg,#8a857a)")))))))
 
@@ -566,7 +576,7 @@
          (buffer-exists? buf)
          (ibuffer-tab buf)
          (let ((tab (string->symbol (substring id 12 (string-length id)))))
-           (and (assoc tab *switch-tabs*)
+           (and (assoc tab *ibuffer-tabs*)
                 (begin (buffer-set-local! buf 'ibuffer-tab tab)
                        (ibuffer-refresh! buf)
                        (ibuffer-goto-first-row! buf)
@@ -2225,13 +2235,13 @@
 (define-command "ibuffer" "List buffers by group in a buffer"
   (lambda () (ibuffer-open! #f #f #f #f '(pretty #f info #t group-by group tabs #t))))
 
-(define-command "ibuffer-tab-next" "Show the next tab of the list: all, group, window"
+(define-command "ibuffer-tab-next" "Show the next tab of the list: all, group"
   (lambda ()
     (if (ibuffer-tab (current-buffer))
         (ibuffer-tab-step! (current-buffer) 1)
         (run-command "forward-char"))))
 
-(define-command "ibuffer-tab-prev" "Show the previous tab of the list: all, group, window"
+(define-command "ibuffer-tab-prev" "Show the previous tab of the list: all, group"
   (lambda ()
     (if (ibuffer-tab (current-buffer))
         (ibuffer-tab-step! (current-buffer) -1)

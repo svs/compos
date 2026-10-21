@@ -1,0 +1,31 @@
+/* html-edit.css: the inspector marks over an HTML page in html-edit (html-edit.js) */
+[data-he-ui] {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  z-index: 2147483647;
+  box-sizing: border-box;
+}
+/* quiet marks: a copy editor reads the page, so nothing frames it */
+#he-hover { border-radius: 4px; background: color-mix(in srgb, var(--amber, #e0a33a) 9%, transparent); }
+#he-sel { border-radius: 4px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber, #e0a33a) 70%, transparent); }
+#he-note {
+  left: 50% !important;
+  bottom: 24px;
+  transform: translateX(-50%);
+  font: 13px/1.4 -apple-system, system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #fff;
+}
+[data-hs][contenteditable="true"] {
+  outline: none;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--amber, #e0a33a) 12%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber, #e0a33a) 12%, transparent);
+  cursor: text;
+}
+/* an embedded frame would eat the click that selects it */
+[data-hs] iframe { pointer-events: none; }
+[data-hs] a { cursor: text; }

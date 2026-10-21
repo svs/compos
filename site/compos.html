@@ -203,7 +203,7 @@ pre.code {
 
 /* who it is for */
 .who { padding: 0 0 96px; }
-.who-intro { max-width: 46ch; font-size: clamp(20px, 2vw, 26px); line-height: 1.45; color: var(--ink); margin: 0 0 40px; text-wrap: pretty; }
+.who-intro { font-size: clamp(20px, 2vw, 26px); line-height: 1.45; color: var(--ink); margin: 0 0 40px; text-wrap: pretty; }
 .who-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
 .who-grid h3 { margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--amber); font-weight: 500; }
 .who-grid p { margin: 12px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
@@ -267,7 +267,7 @@ footer { border-top: 1px solid var(--rule); }
   <section class="hero">
     <div>
       <div class="eyebrow"><i></i><span>the agent context manager</span></div>
-      <h1>The hackable harness for power users.</h1>
+      <h1>The hackable harness for power users!</h1>
       <p class="subline">Finally, a home for your agent that is also <b>a home for you</b>.</p>
       <p class="lede">Your whole working day in one place that fits the way you think. Your agents already know what you are working on, so you explain less and get more done, on the AI subscriptions you already pay for.</p>
       <div class="actions">
@@ -288,64 +288,9 @@ footer { border-top: 1px solid var(--rule); }
   </section>
 
   <figure class="shot">
-    <img src="images/smartbrew-frame.webp" width="2560" height="1294" alt="A Compos workspace for a sales team: a pipeline of leads by stage beside a lead's details, with the group tabs and status lines across the top and bottom">
-    <figcaption>A real workspace: a sales pipeline, shaped for one team.</figcaption>
+    <img src="images/compos-workspace.webp" width="2560" height="1294" alt="A Compos workspace">
+    <figcaption>Build the app *your* work needs.&nbsp;</figcaption>
   </figure>
-
-  <section class="frame-wrap" aria-label="A Compos workspace: a planning note beside an agent chat that edits it">
-    <div class="frame">
-      <div class="tabs">
-        <img src="images/compos-logo-dark.png" width="15" height="15" alt="">
-        <span class="tab on">q4 plan</span>
-        <span class="tab">mail</span>
-        <span class="tab">reading</span>
-        <span class="fill"></span>
-        <span class="count">2 windows · 5 buffers</span>
-      </div>
-
-      <div class="windows">
-        <div class="win selected">
-          <div class="head">
-            <span class="c-kw">¶</span>
-            <span class="name">q4-plan.md</span>
-            <span class="dot" style="background: var(--amber)"></span>
-            <span class="fold">▾</span>
-          </div>
-<div class="note">
-            <div class="h"># Q4 plan</div>
-            <div>Ship the field kit to three pilot sites before December.</div>
-            <div class="h">## Suppliers</div>
-            <div class="added">Kestrel can deliver 400 units by 14 Nov at the quoted price. Arun at Mehta Tools wants a deposit first. Lumen has not replied since 2 Oct.</div>
-            <div class="h">## Next</div>
-            <div class="todo"><b>[x]</b> compare the supplier quotes</div>
-            <div class="todo">[ ] call Arun about the deposit<span class="cursor"></span></div>
-          </div>
-          <div class="modeline"><span class="mode">markdown</span><span>q4 plan</span><span class="right">L7 C31</span></div>
-        </div>
-
-        <div class="win other">
-          <div class="head">
-            <span class="c-fn">◍</span>
-            <span class="name">*chat:q4 plan*</span>
-            <span class="dot" style="background: var(--green)"></span>
-            <span class="fold">▾</span>
-          </div>
-          <div class="chat">
-            <div class="say">Summarise the three supplier threads into the plan.</div>
-            <div class="step"><span class="c-str">✓</span><span>read 3 threads · mail</span></div>
-            <div class="step"><span class="c-str">✓</span><span>edit q4-plan.md · ## Suppliers</span></div>
-            <div class="reply">Done. Kestrel is the only firm offer. I added a todo to call Arun, and I can draft a nudge to Lumen if you want.</div>
-          </div>
-          <div class="modeline"><span class="mode">chat</span><span>claude code</span><span>your plan</span><span class="right">turn 2</span></div>
-        </div>
-      </div>
-
-      <div class="echo">
-        <span class="msg">context: q4 plan group · 2 visible · 3 mail threads</span>
-        <span><span class="key">M-x</span> any command</span>
-      </div>
-    </div>
-  </section>
 
   <section id="features" class="rule">
     <span class="title">§ features</span>
@@ -362,18 +307,18 @@ footer { border-top: 1px solid var(--rule); }
       </article>
       <article class="feature">
         <div class="num"><b>02</b> · focus</div>
-        <h2>Better answers, less explaining.</h2>
-        <p>Your agent already knows what you are working on. Stop pasting, re-explaining and correcting. It stays on the task in front of you, and nothing from elsewhere leaks in.</p>
+        <h2>Seamless Context</h2>
+        <p>Your agent already knows what you are working on. Stop pasting, re-explaining and correcting. It stays on the task in front of it.&nbsp;</p>
       </article>
       <article class="feature">
         <div class="num"><b>03</b> · control</div>
-        <h2>The right agent for every job.</h2>
-        <p>A careful reviewer for one task, a fast drafter for the next. Keep the setups that work and use them again. You stay in charge of what an agent may do on its own.</p>
+        <h2>Agents anywhere...</h2>
+        <p>Attach an agent to anything.&nbsp;<div><br>Agents see all the context that you do so they know what's important now. Compos helps you finetune their context.</div></p>
       </article>
       <article class="feature">
         <div class="num"><b>04</b> · flow</div>
-        <h2>Stop switching apps.</h2>
-        <p>Mail, notes, reading and projects in one place, so you keep your train of thought. Find anything fast, connect ideas across sources, and keep moving.</p>
+        <h2>And everywhere.</h2>
+        <p>&nbsp;Mail, Slack, presentations, notes, reading you name it you can point your agent at it. Stay in one place, get into your flow state.&nbsp;</p>
       </article>
       <article class="feature">
         <div class="num"><b>05</b> · time</div>
@@ -382,8 +327,8 @@ footer { border-top: 1px solid var(--rule); }
       </article>
       <article class="feature">
         <div class="num"><b>06</b> · cost</div>
-        <h2>No new AI bill.</h2>
-        <p>Use the AI subscriptions you already pay for. No markup, no extra key, and your data stays yours.</p>
+        <h2>It listens and responds</h2>
+        <p>Compos can listen for Whatsapps, emails, DMs - you name it. If you can reach it in the browser or the cli you can get an agent to handle it.&nbsp;</p>
       </article>
     </div>
   </section>
@@ -416,15 +361,15 @@ footer { border-top: 1px solid var(--rule); }
   </section>
 
   <section class="who" aria-label="Who Compos is for">
-    <p class="who-intro">For people who keep their thinking in plain text, live on the keyboard, and want their tools to bend to how they work. Not only programmers, but programmers too.</p>
+    <p class="who-intro">For the human in the loop.<br><br>You are an expert in your field. You are an operations maven. You love Excel. AI would supercharge you if only you had the correct tools.</p>
     <div class="who-grid">
-      <div>
-        <h3>Researchers &amp; writers</h3>
-        <p>Read, take notes and write in one place. Get help comparing sources and checking a draft against what you read, without losing the thread.</p>
-      </div>
       <div>
         <h3>Founders &amp; operators</h3>
         <p>Get through the inbox faster and never drop a follow-up. Approve drafts instead of writing them, and see the whole day at a glance.</p>
+      </div>
+      <div>
+        <h3>Researchers &amp; writers</h3>
+        <p>Read, take notes and write in one place. Get help comparing sources and checking a draft against what you read, without losing the thread.</p>
       </div>
       <div>
         <h3>Programmers</h3>

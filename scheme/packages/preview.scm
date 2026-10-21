@@ -535,9 +535,11 @@
 
 ;; a save is the reload signal: you save the buffer, the app runs the new
 ;; code. The app server reads buffers, not files, so an unsaved edit in a
-;; sibling file shows on the next reload too.
+;; sibling file shows on the next reload too. An app that writes its own
+;; source (html-edit) keeps its page.
 (define (preview--after-save-hook!)
-  (for-each app-reload! (preview-app-buffers)))
+  (for-each (lambda (b) (unless (buffer-local b 'app-keep-on-save) (app-reload! b)))
+            (preview-app-buffers)))
 
 (add-hook! 'after-save-hook 'preview--after-save-hook!)
 

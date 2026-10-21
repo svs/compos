@@ -326,6 +326,19 @@
 (define (panes-under-capacity? layout)
   (< (panes-pane-count layout) (panes-capacity layout)))
 
+;; panes past the capacity fold into the last one that fits: their windows
+;; wait behind it, in order, and the panes left share the frame equally
+(define (panes-fit-capacity layout)
+  (let ((ps (panes-panes layout)) (cap (panes-capacity layout)))
+    (if (<= (length ps) cap)
+        layout
+        (let* ((kept (list-head ps cap))
+               (extra (list-tail ps cap))
+               (moved (apply append (map (lambda (p) (or (plist-get p 'windows) '())) extra)))
+               (last (car (reverse kept)))
+               (last (panes--put last 'windows (append (or (plist-get last 'windows) '()) moved))))
+          (panes-equalize (panes--set-panes layout (append (list-head kept (- cap 1)) (list last))))))))
+
 ;;; --- consolidation ------------------------------------------------------------
 ;;; Every mode has one window: the preferred window of a mode gathers every
 ;;; buffer of that mode from every other window, its own first and then

@@ -112,7 +112,7 @@
                (l (panes-set-buffers (car made) (cadr made) (panes--window-stack win buf))))
           (loop (cdr rows) (panes-set-handle l (cadr made) win))))))
 
-(define (panes-adopt!) (panes-layout-set! (panes-adopt)))
+(define (panes-adopt!) (panes-layout-set! (panes-fit-capacity (panes-adopt))))
 
 ;;; --- apply: the frame becomes the model -----------------------------------------------
 
@@ -297,7 +297,10 @@
                                   (panes-set-handle (panes-set-buffers (car made) (cadr made) (panes--window-stack win buf))
                                                     (cadr made) win)))))
                         l (panes--frame-row))))
-          (unless (equal? l layout) (panes-layout-set! l)))))))
+          ;; a window that came on screen past the capacity waits behind the last pane
+          (if (> (panes-pane-count l) (panes-capacity l))
+              (panes-apply! (panes-fit-capacity l))
+              (unless (equal? l layout) (panes-layout-set! l))))))))
 
 ;; the frame enters a group: its layout comes back, or the frame is read
 ;; in. The layout target stands down: the model owns the shape now.
@@ -445,7 +448,7 @@
 
 (define-command "panes-adopt"
   "Read this frame as it stands into the window model, and lay it out from the model"
-  (lambda () (panes-apply! (panes-adopt))))
+  (lambda () (panes-apply! (panes-fit-capacity (panes-adopt)))))
 
 (public! 'panes-layout "(panes-layout) -> the window model of this frame's group, or #f")
 (catalog-meta! 'function "panes-layout" 'effects '(read))

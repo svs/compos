@@ -185,6 +185,52 @@
             ((not (app-layout! id)) (message "Nothing of this app to lay out"))))))
 (catalog-meta! 'command "app-layout" 'domain 'windows 'effects '(write display))
 
+;; Put the app away: its windows leave the screen and its buffers stay alive,
+;; so a player keeps playing. The columns it held go to what else is on
+;; screen, then to the group's most recent buffers.
+(define (app-dismiss! id)
+  (let* ((group (frame-group))
+         (layout (and panes-mode (panes-layout)))
+         (room (if layout (panes-pane-count layout) (length (display--work-windows))))
+         ;; under the window model the app leaves every stack, else a redraw brings it back
+         (kept (if layout
+                   (fold (lambda (l b) (if (equal? (app-id b) id) (panes-drop-buffer l b) l))
+                         layout (panes-buffers layout))
+                   #f))
+         (screen (if kept
+                     (map caddr (panes-visible kept))
+                     (filter (lambda (b) (and b (not (equal? (app-id b) id))))
+                             (map window-buffer (display--work-windows)))))
+         (fill (filter (lambda (b)
+                         (and (not (equal? (app-id b) id))
+                              (not (member b screen))
+                              (not (and kept (member b (panes-buffers kept))))
+                              (fill-candidate? b)
+                              (or (not group) (buffer-in-group? b group))))
+                       (buffer-list-mru))))
+    (cond ((not (pair? (app-windows id))) #f)
+          (kept
+           (let loop ((l kept) (fill fill))
+             (if (or (null? fill) (>= (panes-pane-count l) room))
+                 (and (pair? (panes-panes l)) (begin (panes-apply! l) (map caddr (panes-visible l))))
+                 (let* ((added (panes-add-pane l))
+                        (made (panes-new-window (car added) (cadr added) (car fill) (panes--buffer-mode (car fill)))))
+                   (loop (car made) (cdr fill))))))
+          (else
+           (let* ((more (append screen fill))
+                  (panes (take more (min room (length more)))))
+             (and (pair? panes) (begin (tile-default-windows! panes) panes)))))))
+
+(public! 'app-dismiss! "(app-dismiss! ID) — take app ID off the screen; its buffers stay alive and its columns go to other work")
+
+(define-command "app-dismiss"
+  "Put this app away: its windows leave the screen, its buffers keep running"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (cond ((not id) (message "This buffer belongs to no app"))
+            ((not (app-dismiss! id)) (message "Nothing else to show in its place"))))))
+(catalog-meta! 'command "app-dismiss" 'domain 'windows 'effects '(write display))
+
 (effects! '(read))
 
 ;; The page open beside a listing, or #f. The detail contract already

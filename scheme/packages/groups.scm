@@ -5456,9 +5456,11 @@ is forgotten and that group falls back to creation order in the switcher."
   (find (lambda (row) (member win (cdr row))) (group-panes-windows)))
 
 (define (group-panes-window pane)
-  (let* ((hit (assoc pane (group-panes-windows)))
-         (win (and hit (pair? (cdr hit)) (cadr hit))))
-    (and win (assoc win (window-list)) win)))
+  ;; the head of the row is the shown window, unless a swap elsewhere hid
+  ;; it; then the row's window still on screen is the one the pane shows
+  (let ((hit (assoc pane (group-panes-windows)))
+        (live (window-list)))
+    (and hit (find (lambda (w) (assoc w live)) (cdr hit)))))
 
 ;; every window of the pane that holds WIN, the shown one first; a window
 ;; outside the panes is a pane of its own

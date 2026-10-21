@@ -57,6 +57,24 @@
       (check-equal! (panes-pane-of l (cadr o3)) (panes-pane-of l (cadr o1)) "help took the scheme pane")
       (check-equal! (panes-window-buffer l (cadr o2)) "*chat*" "the selected pane still shows the chat"))))
 
+(deftest 'a-split-gives-a-mode-a-second-window-beside-the-first
+  "the split buffers leave their window for a new one of the same mode in the next pane; the first window keeps the rest and still takes new buffers of the mode"
+  (lambda ()
+    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
+           (o2 (pt-visit (car o1) "b.scm" "scheme-mode" (cadr o1)))
+           (o3 (pt-visit (car o2) "c.scm" "scheme-mode" (cadr o2)))
+           (ka (cadr o1))
+           (split (panes-split-off (car o3) '("c.scm" "b.scm") ka))
+           (l (car split)) (kb (cadr split))
+           (o4 (pt-visit l "d.scm" "scheme-mode" kb)))
+      (check-equal! (panes-pane-count l) 2 "a second pane")
+      (check-equal! (map caddr (panes-visible l)) '("a.scm" "c.scm") "side by side")
+      (check-equal! (panes-window-buffers l kb) '("c.scm" "b.scm") "the new window holds the split buffers")
+      (check-equal! (panes-window-buffers l ka) '("a.scm") "the first keeps the rest")
+      (check-equal! (panes-window-mode l kb) "scheme-mode" "of the same mode")
+      (check-equal! (cadr o4) ka "a new scheme buffer still opens in the first window")
+      (check-equal! (panes-split-off l '("a.scm") ka) #f "a split never empties its window"))))
+
 (deftest 'an-explicit-move-is-kept-and-does-not-retarget-opens
   "W04 to W06: a buffer moved out of its mode window stays there, a new buffer of the mode still goes to the preferred window, and revisiting the moved buffer brings it forward where it is"
   (lambda ()

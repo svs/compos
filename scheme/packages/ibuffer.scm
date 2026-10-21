@@ -2460,6 +2460,12 @@
           (lambda (id)
             (ibuffer-pick! id (lambda () (run-command "quit-window")) 'other)))
     (list "move here" (ibuffer-act group-move-buffers-here!))
+    (list "split window"
+          (ibuffer-act
+            (lambda (targets)
+              (if (and (boundp 'panes-mode) panes-mode)
+                  (panes-split-off! targets)
+                  (message "split window needs panes-mode")))))
     ;; the two that ask for a group are the commands themselves: they
     ;; read the same marks the table shows
     (list "add to group" (lambda (id) (run-command "group-add")))

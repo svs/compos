@@ -334,6 +334,26 @@
                          (panes-close-window layout from)
                          (panes--update-window layout from (lambda (w) (panes--put w 'buffers left))))))
         (panes-show layout to buf))))
+;; BUFS leave every window for a new window beside FROM, of FROM's mode: a
+;; new pane to the right of FROM's pane while there is room, else the front
+;; of the next pane. FROM keeps the rest of its stack and its preference, so
+;; new buffers of the mode still open there. (LAYOUT KEY), or #f when FROM
+;; would be left empty
+(define (panes-split-off layout bufs from)
+  (let* ((w (panes-window layout from))
+         (left (and w (filter (lambda (b) (not (member b bufs))) (panes-window-buffers layout from)))))
+    (if (or (not w) (null? bufs) (null? left))
+        #f
+        (let* ((layout (fold (lambda (l b) (panes-drop-buffer l b)) layout bufs))
+               (pid (panes-pane-of layout from))
+               (ids (panes-pane-ids layout))
+               (i (panes--index-of pid ids))
+               (added (cond ((panes-under-capacity? layout) (panes-add-pane layout (+ i 1)))
+                            ((< (+ i 1) (length ids)) (list layout (list-ref ids (+ i 1))))
+                            ((> i 0) (list layout (list-ref ids (- i 1))))
+                            (else (list layout pid))))
+               (made (panes-new-window (car added) (cadr added) (car bufs) (plist-get w 'mode))))
+          (list (panes-set-buffers (car made) (cadr made) bufs) (cadr made))))))
 
 ;; a renamed buffer keeps its places
 (define (panes-rename layout old new)
@@ -693,4 +713,6 @@
 (catalog-meta! 'function "panes-open" 'effects '(pure))
 (public! 'panes-decide "(panes-decide LAYOUT BUF CTX [POLICY]) -> (window KEY) | (new-window PANE) | (new-pane): where BUF would open; pure")
 (catalog-meta! 'function "panes-decide" 'effects '(pure))
+(public! 'panes-split-off "(panes-split-off LAYOUT BUFS FROM) -> (LAYOUT KEY) | #f: BUFS move to a new window of FROM's mode beside FROM; pure")
+(catalog-meta! 'function "panes-split-off" 'effects '(pure))
 (public! 'define-window-policy! "(define-window-policy! NAME DOC PLACE) -- register a window policy; PLACE is (lambda (layout buf ctx) decision)")

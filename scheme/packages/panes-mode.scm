@@ -653,6 +653,31 @@
 (define-command "pane-previous-window" "Bring the previous window of this pane to the front"
   (lambda () (panes--cycle-pane-window! -1)))
 
+;; BUFS go to a second window of their mode, beside FROM (the window that
+;; holds the first of them when absent); the new window is selected
+(define (panes-split-off! bufs &optional from)
+  (let* ((l (panes--ensure-layout!))
+         (from (or from
+                   (find (lambda (k) k) (map (lambda (b) (panes-find l b)) bufs))
+                   (panes-mode-window l (panes--buffer-mode (car bufs)))))
+         (split (and from (panes-split-off l bufs from))))
+    (cond ((not from) (message "No window of this mode to split") #f)
+          ((not split) (message "The window would be left empty") #f)
+          (else
+            (let* ((applied (panes-apply! (car split)))
+                   (h (panes-handle applied (cadr split))))
+              (when (and h (window-exists? h)) (select-window! h))
+              h)))))
+
+(define-command "window-split-mode"
+  "Move this buffer to a second window of its mode, beside this one; ibuffer's split action moves the marked buffers"
+  (lambda ()
+    (let ((buf (window-buffer (active-window))))
+      (cond ((not panes-mode) (message "window-split-mode needs panes-mode") #f)
+            ((not buf) #f)
+            (else (panes-split-off! (list buf)
+                                    (panes-key-of-handle (panes--ensure-layout!) (active-window))))))))
+
 (define-command "panes-mode"
   "Toggle the window model: a row of panes, each a stack of windows, each a stack of buffers; a buffer opens where the window policy says"
   (lambda () (if panes-mode (panes-mode-disable!) (panes-mode-enable!))))

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Compos — The hackable harness for power users</title>
-<meta name="description" content="The hackable harness for power users. Personal, malleable software for the human in the loop: precise agent context, every model setting in reach, and the subscriptions you already pay for.">
+<meta name="description" content="The hackable harness for power users. Finally, a home for your agent that is also a home for you. Flow state has a home.">
 <link rel="icon" type="image/png" href="images/compos-logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -165,24 +165,65 @@ pre.code {
 
 /* features */
 .features { padding: 0 0 96px; }
-.feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--edge); }
-.feature { padding: 28px 24px 32px 0; border-right: 1px solid var(--rule); }
-.feature + .feature { padding-left: 24px; }
-.feature:last-child { border-right: 0; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--edge); }
+.feature { padding: 30px 28px 36px; border-right: 1px solid var(--rule); }
+.feature:nth-child(3n+1) { padding-left: 0; }
+.feature:nth-child(3n) { border-right: 0; padding-right: 0; }
+.feature:nth-child(n+4) { border-top: 1px solid var(--rule); }
 .feature .num { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--faint); }
 .feature .num b { color: var(--green); font-weight: 500; }
 .feature h2 { margin: 18px 0 0; font-weight: 400; font-size: clamp(24px, 2.2vw, 30px); line-height: 1.12; letter-spacing: -.015em; text-wrap: balance; }
 .feature p { margin: 14px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
-.feature .tags { margin-top: 18px; font-family: var(--mono); font-size: 11.5px; color: var(--blue); }
+
+/* markdown note in the demo */
+.note { margin: 0; padding: 16px 16px 20px; flex: 1; font-family: var(--serif); font-size: 15.5px; line-height: 1.55; color: var(--ink-2); }
+.note .h { font-family: var(--mono); font-size: 13px; color: var(--amber); margin: 14px 0 4px; }
+.note .h:first-child { margin-top: 0; }
+.note .todo { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.note .todo b { color: var(--green); font-weight: 500; }
+.note .added { border-left: 2px solid var(--green); padding-left: 10px; margin-left: -12px; }
+
+/* outside world */
+.world { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; padding: 0 0 96px; }
+.world h2 { margin: 0; font-weight: 300; font-size: clamp(34px, 4.2vw, 58px); line-height: 1.02; letter-spacing: -.025em; text-wrap: balance; }
+.world p { margin: 20px 0 0; font-size: 18px; line-height: 1.55; color: var(--ink-2); max-width: 40ch; text-wrap: pretty; }
+.log { border: 1px solid var(--edge); background: var(--panel-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
+.log .row { display: grid; grid-template-columns: 52px 92px minmax(0, 1fr); gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+.log .row:last-child { border-bottom: 0; }
+.log .t { color: var(--faint); }
+.log .src { color: var(--amber); }
+.log .src.agent { color: var(--blue); }
+.log .what { color: var(--ink-2); }
+.log .row.act { background: var(--panel); }
+
+/* who it is for */
+.who { padding: 0 0 96px; }
+.who-intro { max-width: 46ch; font-size: clamp(20px, 2vw, 26px); line-height: 1.45; color: var(--ink); margin: 0 0 40px; text-wrap: pretty; }
+.who-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+.who-grid h3 { margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--amber); font-weight: 500; }
+.who-grid p { margin: 12px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+
+/* closing */
+.closing { padding: 72px 0 112px; border-top: 1px solid var(--rule); text-align: left; }
+.closing h2 { margin: 0; font-weight: 300; font-size: clamp(40px, 5.4vw, 76px); line-height: 1; letter-spacing: -.03em; max-width: 16ch; text-wrap: balance; }
+.closing p { margin: 22px 0 0; font-size: 19px; line-height: 1.55; color: var(--ink-2); max-width: 44ch; }
+
+footer { border-top: 1px solid var(--rule); }
+.foot { display: flex; flex-wrap: wrap; gap: 12px 24px; max-width: 1280px; margin: 0 auto; padding: 20px 32px 28px; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.foot a { color: var(--muted); }
+.foot .spacer { flex: 1; }
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: minmax(0, 1fr); }
   .emblem { max-width: 320px; justify-self: start; }
   .windows { grid-template-columns: minmax(0, 1fr); }
-  .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .feature:nth-child(2n) { border-right: 0; }
-  .feature:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .feature-grid, .who-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .world { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .feature, .feature:nth-child(3n+1), .feature:nth-child(3n) { padding: 28px 24px 32px; border-right: 1px solid var(--rule); border-top: 0; }
   .feature:nth-child(odd) { padding-left: 0; }
+  .feature:nth-child(even) { border-right: 0; padding-right: 0; }
+  .feature:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  .closing h2 { font-size: clamp(36px, 7vw, 56px); }
   .nav { display: none; }
 }
 @media (max-width: 600px) {
@@ -190,8 +231,10 @@ pre.code {
   .hero { padding-top: 56px; }
   .echo { flex-wrap: wrap; }
   .echo .msg { flex-basis: 100%; }
-  .feature-grid { grid-template-columns: minmax(0, 1fr); }
-  .feature, .feature + .feature { padding-left: 0; padding-right: 0; border-right: 0; }
+  .feature-grid, .who-grid { grid-template-columns: minmax(0, 1fr); }
+  .log .row { grid-template-columns: 44px minmax(0, 1fr); }
+  .log .what { grid-column: 1 / -1; }
+  .feature, .feature:nth-child(odd), .feature:nth-child(even) { padding-left: 0; padding-right: 0; border-right: 0; }
   .feature + .feature { border-top: 1px solid var(--rule); }
 }
 </style>
@@ -207,6 +250,7 @@ pre.code {
     <span class="spacer"></span>
     <nav class="nav">
       <a href="#features">features</a>
+      <a href="#who">who it's for</a>
       <a href="https://github.com/svs/compos/tree/main/docs/manual">manual</a>
       <a href="https://github.com/svs/compos">source</a>
     </nav>
@@ -219,18 +263,18 @@ pre.code {
     <div>
       <div class="eyebrow"><i></i><span>the agent context manager</span></div>
       <h1>The hackable harness for power users.</h1>
-      <p class="subline">Personal software for the human in the loop. Runs on the <b>BEAM</b>.</p>
-      <p class="lede">Code, mail, chat and agents as buffers in one keyboard-driven frame. Every model, tool and keybinding is a form you can read, change and evaluate — while it runs.</p>
+      <p class="subline">Finally, a home for your agent that is also <b>a home for you</b>.</p>
+      <p class="lede">Your whole working day in one place that fits the way you think. Your agents already know what you are working on, so you explain less and get more done, on the AI subscriptions you already pay for.</p>
       <div class="actions">
         <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
         <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
       </div>
       <div class="facts">
-        <span><span class="key">M-x</span> is the interface</span>
+        <span>fewer apps</span>
         <span>·</span>
-        <span>use your subscriptions</span>
+        <span>less explaining</span>
         <span>·</span>
-        <span>no telemetry</span>
+        <span>no new bill</span>
       </div>
     </div>
     <div class="emblem">
@@ -238,97 +282,167 @@ pre.code {
     </div>
   </section>
 
-  <section class="frame-wrap" aria-label="A Compos frame: a Scheme buffer beside an agent chat">
+  <section class="frame-wrap" aria-label="A Compos workspace: a planning note beside an agent chat that edits it">
     <div class="frame">
       <div class="tabs">
         <img src="images/compos-logo.png" width="15" height="15" alt="">
-        <span class="tab on">vidura</span>
-        <span class="tab">notes</span>
+        <span class="tab on">q4 plan</span>
         <span class="tab">mail</span>
+        <span class="tab">reading</span>
         <span class="fill"></span>
-        <span class="count">3 windows</span>
+        <span class="count">2 windows · 5 buffers</span>
       </div>
 
       <div class="windows">
         <div class="win selected">
           <div class="head">
-            <span class="c-str">λ</span>
-            <span class="name">harness.scm</span>
+            <span class="c-kw">¶</span>
+            <span class="name">q4-plan.md</span>
             <span class="dot" style="background: var(--amber)"></span>
             <span class="fold">▾</span>
           </div>
-<pre class="code"><span class="c-comment">;; a harness is a form. change it, C-x C-e, done.</span>
-(<span class="c-fn">define-harness</span> <span class="c-name">vidura</span>
-  <span class="c-kw">#:model</span>   'claude-opus
-  <span class="c-kw">#:tools</span>   (list shell grep git-log)
-  <span class="c-kw">#:context</span> (buffers 'marked)
-  <span class="c-kw">#:lane</span>    'review)
-
-(<span class="c-fn">bind-key</span> <span class="c-str">"C-c a"</span> 'vidura-ask)<span class="cursor"></span></pre>
-          <div class="modeline"><span class="mode">scheme</span><span>cua</span><span class="right">L8 C27</span></div>
+<div class="note">
+            <div class="h"># Q4 plan</div>
+            <div>Ship the field kit to three pilot sites before December.</div>
+            <div class="h">## Suppliers</div>
+            <div class="added">Kestrel can deliver 400 units by 14 Nov at the quoted price. Arun at Mehta Tools wants a deposit first. Lumen has not replied since 2 Oct.</div>
+            <div class="h">## Next</div>
+            <div class="todo"><b>[x]</b> compare the supplier quotes</div>
+            <div class="todo">[ ] call Arun about the deposit<span class="cursor"></span></div>
+          </div>
+          <div class="modeline"><span class="mode">markdown</span><span>q4 plan</span><span class="right">L7 C31</span></div>
         </div>
 
         <div class="win other">
           <div class="head">
             <span class="c-fn">◍</span>
-            <span class="name">*chat:vidura*</span>
+            <span class="name">*chat:q4 plan*</span>
             <span class="dot" style="background: var(--green)"></span>
             <span class="fold">▾</span>
           </div>
           <div class="chat">
-            <div class="say">Why does the mode line shed the lane before the model?</div>
-            <div class="reply">Two ranks decide it. I will read <code>mode-line.scm</code> first, then the width hook that calls it.</div>
-            <div class="step"><span class="c-str">✓</span><span>grep "rank" mode-line.scm · 6 matches</span></div>
-            <div class="step"><span class="c-kw">●</span><span>read window-width-hook · 212 lines</span></div>
+            <div class="say">Summarise the three supplier threads into the plan.</div>
+            <div class="step"><span class="c-str">✓</span><span>read 3 threads · mail</span></div>
+            <div class="step"><span class="c-str">✓</span><span>edit q4-plan.md · ## Suppliers</span></div>
+            <div class="reply">Done. Kestrel is the only firm offer. I added a todo to call Arun, and I can draft a nudge to Lumen if you want.</div>
           </div>
-          <div class="modeline"><span class="mode">chat</span><span>claude-opus</span><span>review</span><span class="right">turn 4</span></div>
+          <div class="modeline"><span class="mode">chat</span><span>claude code</span><span>your plan</span><span class="right">turn 2</span></div>
         </div>
       </div>
 
       <div class="echo">
-        <span class="msg">evaluated define-harness vidura — rebound C-c a</span>
-        <span><span class="key">C-c a</span> ask</span>
-        <span><span class="key">M-x</span> command</span>
-        <span><span class="key">C-x C-e</span> eval</span>
+        <span class="msg">context: q4 plan group · 2 visible · 3 mail threads</span>
+        <span><span class="key">M-x</span> any command</span>
       </div>
     </div>
   </section>
 
   <section id="features" class="rule">
-    <span class="title">§ what it does</span>
+    <span class="title">§ features</span>
     <span class="line"></span>
-    <span>four reasons</span>
+    <span>what changes for you</span>
   </section>
 
   <section class="features" aria-label="Features">
     <div class="feature-grid">
       <article class="feature">
-        <div class="num"><b>01</b> · malleable</div>
-        <h2>Software shaped to the person using it.</h2>
-        <p>Every command, mode, keymap and hook is Scheme you can read and change while it runs. Ask the agent for a tool and it builds one into your workspace. A kanban board, a hiring pipeline, a mail triage view. It stays yours.</p>
-        <div class="tags">M-x · C-x C-e · live reload</div>
+        <div class="num"><b>01</b> · fits you</div>
+        <h2>Work the way you think.</h2>
+        <p>Your workspace fits your habits, not the other way round. Need a new tool? Ask for it and have it in minutes. When your work changes, your tools change with it.</p>
       </article>
       <article class="feature">
-        <div class="num"><b>02</b> · context</div>
-        <h2>The agent sees what you see.</h2>
-        <p>A group holds the buffers of one task. The agent reads the windows you have open, the companions you pin and the group it lives in, and nothing else. You arrange the context. You don't hope for it.</p>
-        <div class="tags">groups · companions · visible context</div>
+        <div class="num"><b>02</b> · focus</div>
+        <h2>Better answers, less explaining.</h2>
+        <p>Your agent already knows what you are working on. Stop pasting, re-explaining and correcting. It stays on the task in front of you, and nothing from elsewhere leaks in.</p>
       </article>
       <article class="feature">
-        <div class="num"><b>03</b> · tuning</div>
-        <h2>Every model setting, per chat.</h2>
-        <p>Connector, model, prompt fragments, skills and permissions are all settings you can change. Set one chat up for review and another for writing, then save them as presets. Permissions follow the effects each call declares.</p>
-        <div class="tags">presets · prompt fragments · effects</div>
+        <div class="num"><b>03</b> · control</div>
+        <h2>The right agent for every job.</h2>
+        <p>A careful reviewer for one task, a fast drafter for the next. Keep the setups that work and use them again. You stay in charge of what an agent may do on its own.</p>
       </article>
       <article class="feature">
-        <div class="num"><b>04</b> · subscriptions</div>
-        <h2>Use what you already pay for.</h2>
-        <p>Compos runs Claude Code, OpenCode and other ACP agents on your own plans. No markup, no extra API key, no telemetry.</p>
-        <div class="tags">claude code · opencode · acp</div>
+        <div class="num"><b>04</b> · flow</div>
+        <h2>Stop switching apps.</h2>
+        <p>Mail, notes, reading and projects in one place, so you keep your train of thought. Find anything fast, connect ideas across sources, and keep moving.</p>
+      </article>
+      <article class="feature">
+        <div class="num"><b>05</b> · time</div>
+        <h2>Get more done while you think.</h2>
+        <p>Hand off the follow-ups, summaries and first drafts. Work comes back to you when it is ready, and nothing important goes out without your OK.</p>
+      </article>
+      <article class="feature">
+        <div class="num"><b>06</b> · cost</div>
+        <h2>No new AI bill.</h2>
+        <p>Use the AI subscriptions you already pay for. No markup, no extra key, and your data stays yours.</p>
       </article>
     </div>
   </section>
+
+  <section class="rule">
+    <span class="title">§ always on</span>
+    <span class="line"></span>
+    <span>whatsapp · email · webhooks</span>
+  </section>
+
+  <section class="world" aria-label="Compos responds to the outside world">
+    <div>
+      <h2>It answers the world while you work.</h2>
+      <p>A WhatsApp message, an email, an alert from the tools you already use. Your agents notice, take care of the routine, and bring you only what needs you. Nothing slips while you are heads down or away.</p>
+    </div>
+    <div class="log" role="img" aria-label="A log of outside events and what the agent did with each">
+      <div class="row"><span class="t">09:12</span><span class="src">whatsapp</span><span class="what">Arun: a 30% deposit is fine.</span></div>
+      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">updated the q4 plan, drafted a reply for your OK</span></div>
+      <div class="row"><span class="t">09:40</span><span class="src">email</span><span class="what">Kestrel: shipping confirmed for 14 Nov.</span></div>
+      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">ticked the todo, added the date to your calendar</span></div>
+      <div class="row"><span class="t">10:05</span><span class="src">webhook</span><span class="what">invoice #2231 paid</span></div>
+      <div class="row act"><span class="t"></span><span class="src agent">agent</span><span class="what">noted it in the plan. Nothing else needs you.</span></div>
+    </div>
+  </section>
+
+  <section id="who" class="rule">
+    <span class="title">§ who it's for</span>
+    <span class="line"></span>
+    <span>nerdy knowledge workers</span>
+  </section>
+
+  <section class="who" aria-label="Who Compos is for">
+    <p class="who-intro">For people who keep their thinking in plain text, live on the keyboard, and want their tools to bend to how they work. Not only programmers, but programmers too.</p>
+    <div class="who-grid">
+      <div>
+        <h3>Researchers &amp; writers</h3>
+        <p>Read, take notes and write in one place. Get help comparing sources and checking a draft against what you read, without losing the thread.</p>
+      </div>
+      <div>
+        <h3>Founders &amp; operators</h3>
+        <p>Get through the inbox faster and never drop a follow-up. Approve drafts instead of writing them, and see the whole day at a glance.</p>
+      </div>
+      <div>
+        <h3>Programmers</h3>
+        <p>Get focused changes, not rewrites, from agents that see the code you see. Stay in the place you think, from the first note to the last commit.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <h2>Flow state has a home.</h2>
+    <p>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
+    <div class="actions">
+      <a href="mailto:hello@compos.in?subject=Compos%20access" class="btn btn-solid">request access</a>
+      <a href="https://github.com/svs/compos/tree/main/docs/manual" class="btn btn-ghost">read the manual</a>
+    </div>
+  </section>
 </main>
+
+<footer>
+  <div class="foot">
+    <span>Compos</span>
+    <span>the hackable harness for power users</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/svs/compos">source</a>
+    <a href="https://github.com/svs/compos/tree/main/docs/manual">manual</a>
+    <a href="mailto:hello@compos.in">contact</a>
+  </div>
+</footer>
 
 </body>
 </html>

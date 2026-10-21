@@ -6,11 +6,11 @@ Design and build a distinctive, production-quality homepage for **Compos**, the 
 
 The page should make Compos feel like a new computing environment, not another AI code editor and not a remake of an older editor. Its idea is that every tool can share one inspectable, programmable world, across modern work, integrations, graphical applications, concurrency, and agents.
 
-**Never use the word "Emacs"** on the page, in copy, alt text, metadata or code comments. Compos is not about bringing back an old editor; it is the hackable harness for power users.
+**Never use the words "Emacs", "BEAM" or "Scheme"**, and never describe how Compos is built (languages, runtimes, protocols, internals). This applies to the page, copy, alt text, metadata and code comments. The page sells what the user gets. Compos is not about bringing back an old editor; it is the hackable harness for power users.
 
 ## Product truth
 
-Compos is **the operating system for knowledge work**.
+Compos is **the hackable harness for power users**.
 
 Its defining mechanism is **ephemeral apps over durable, observable state**.
 
@@ -21,23 +21,19 @@ When a task appears, the environment should be able to grow the application need
 - Windows are temporary views over that shared state.
 - Named commands give people and agents the same semantic action surface.
 - Modes and hooks add contextual behavior.
-- Scheme keeps editor policy live, inspectable, and redefinable.
-- Elixir/OTP owns concurrency, processes, sockets, terminals, parsing, and model streams.
 - Sentry, calendars, email, terminals, databases, and custom MCPs become native materials for applications.
 - The browser renders application state; it does not own or conceal it.
 - Agents act through the same buffers and commands as the person. They do not depend on scraping pixels or operating a parallel chat world.
 
-Three governing sentences:
+Two governing sentences:
 
 > **Apps are ephemeral. State is durable. Actions are semantic.**
 >
 > **Everything is observable through a buffer.**
->
-> **Elixir supplies mechanism. Scheme decides policy.**
 
 ## Audience
 
-People whose work spills across editors, browsers, terminals, dashboards, SaaS products, and agent conversations—especially programmers who understand why Lisp machines, Smalltalk, REPLs, and Unix remain important. They want to assemble the right environment for a task without creating another permanent product or surrendering its state to an opaque interface. Assume technical literacy. Do not explain AI basics or use breathless productivity claims.
+The nerdy knowledge worker: researchers, writers, founders, operators and programmers whose work spills across notes, mail, documents, browsers, terminals, SaaS products and agent conversations. Not only coders, but coders too. They want to assemble the right environment for a task without creating another permanent product or surrendering its state to an opaque interface. Assume technical literacy. Do not explain AI basics or use breathless productivity claims.
 
 ## Desired impression
 
@@ -129,35 +125,11 @@ Explain the apparent paradox. Compos does not make work disposable. It separates
 
 An app can vanish without taking the work with it. It can be reconstructed, remixed into another app, or inspected later.
 
-### 5. Mechanism and policy
-
-Make the architectural rule a strong editorial moment:
-
-> Elixir supplies mechanism.  
-> Scheme decides policy.
-
-Use a two-column comparison:
-
-- **Elixir / OTP:** ropes, tree-sitter, sockets, PTYs, schedulers, LLM transport, supervision.
-- **Scheme:** commands, keymaps, modes, hooks, themes, chat, mail, org, dired, applications.
-
-The columns should visibly interlock instead of looking like competing products.
-
-This is where the BEAM lineage may be named. It supports the proposition; it is not the opening proposition.
-
 ### 6. Everything is alive
 
-Show the immediacy of extending the system with a small, authentic Scheme example:
+Show the immediacy of changing the workspace without showing code: the user asks for a new command in plain words, the agent adds it, and it works at once.
 
-```scheme
-(define-command "insert-buffer-name"
-  "Insert the name of this buffer"
-  (lambda () (insert! (current-buffer))))
-
-(global-set-key "C-c n" "insert-buffer-name")
-```
-
-Caption: **Evaluate it. The command exists. Use it from a key, a view, an agent, or another app.**
+Caption: **Ask for it. The command exists. Use it from a key, a view, an agent, or another app.**
 
 ### 7. Capabilities
 
@@ -167,7 +139,7 @@ Use a restrained grid or editorial index—not floating SaaS cards—for:
 - Durable buffers and workspace state
 - Rich views over inspectable data
 - Shared commands for people and agents
-- Live Scheme-defined behavior
+- Behavior you can change while it runs
 - Supervised concurrent processes and agents
 - Native MCP and external-service integration
 - Provenance-aware changes and history
@@ -223,7 +195,7 @@ Respect `prefers-reduced-motion`. No scroll hijacking, ornamental parallax, anim
 - glowing orbs, brains, robots, sparkles, or circuit-board animals;
 - fake editor screenshots or illegible decorative code;
 - chatbot-first framing;
-- any mention of Emacs, or framing Compos as a rebuild or revival of an older editor;
+- any mention of Emacs, the BEAM, Scheme or other implementation details, or framing Compos as a rebuild or revival of an older editor;
 - describing ephemeral apps as throwaway data, disposable code, or generated UI gimmicks;
 - implying that every buffer is visually plain text;
 - glassmorphism and stacks of rounded feature cards;

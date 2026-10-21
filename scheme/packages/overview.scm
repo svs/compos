@@ -479,7 +479,9 @@
   (let ((from (frame-local 'windows-overview-from))
         (model (frame-local 'windows-overview-model))
         (me (active-window)))
-    (if (and from model (boundp 'panes-mode) panes-mode)
+    ;; a model that was broken before the view opened is not drawn: the
+    ;; arrangement the view borrowed comes back instead
+    (if (and from model (boundp 'panes-mode) panes-mode (null? (panes-model-faults model)))
         (windows-overview--apply-return! quiet model from me)
     (if (and from (frame-local 'windows-overview-arrangement))
         (let ((ids (windows-overview--return! quiet)))

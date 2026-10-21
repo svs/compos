@@ -122,3 +122,12 @@
       (check-equal! (map (lambda (p) (plist-get p 'share)) (panes-panes saved)) '(1.0 1 1.0) "each pane keeps its share")
       (check-equal! (t--ov-fronts (cadr r)) shown "leaving draws the screen as it was")
       (check-equal! (caddr r) '() "no faults"))))
+
+(deftest 'overview-model-rules
+  "a whole model has no faults; one window held twice, a window in two panes, a pane naming nothing: each is one"
+  (lambda ()
+    (let ((m t--ov-model))
+      (check-equal! (panes-model-faults m) '() "the sample model is whole")
+      (check-equal! (length (panes-model-faults (panes-set-handle (panes-set-handle m "w4" 10) "w6" 10))) 1 "window 10 held three times is one fault")
+      (check-true! (pair? (panes-model-faults (panes--put m 'panes (cons (list 'windows '("w1") 'id "p9" 'share 1) (panes-panes m))))) "w1 in two panes")
+      (check-true! (pair? (panes-model-faults (panes--put m 'panes (cons (list 'windows '("w99") 'id "p9" 'share 1) (panes-panes m))))) "a pane names w99"))))

@@ -41,7 +41,36 @@
   (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
   layout)
 
-(define (panes-layout-set! layout) (panes--layout-store! (panes--group-key) layout))
+(define (panes-layout-set! layout)
+  (panes--layout-store! (panes--group-key) layout)
+  (panes--check-model! layout))
+
+(define (panes-model-faults model)
+  ;; pure: what MODEL breaks of its own rules, as text; () is none. One live
+  ;; window to one model window, each model window in one pane, and no pane
+  ;; naming a window the model does not have
+  (let* ((handles (filter (lambda (h) h) (map (lambda (w) (plist-get w 'win)) (panes-windows model))))
+         (keys (map (lambda (w) (plist-get w 'key)) (panes-windows model)))
+         (placed (apply append (map (lambda (p) (or (plist-get p 'windows) '())) (panes-panes model))))
+         (count (lambda (x xs) (length (filter (lambda (y) (equal? x y)) xs)))))
+    (append
+      (map (lambda (h) (format "window ~a is held by ~a model windows" h (count h handles)))
+           (panes--uniq (filter (lambda (h) (> (count h handles) 1)) handles)))
+      (map (lambda (k) (format "model window ~a is in ~a panes" k (count k placed)))
+           (filter (lambda (k) (not (= (count k placed) 1))) keys))
+      (map (lambda (k) (format "a pane names ~a, which the model does not have" k))
+           (panes--uniq (filter (lambda (k) (not (member k keys))) placed))))))
+
+(define panes--last-faults '())
+
+(define (panes--check-model! layout)
+  ;; a model that breaks its rules is noted in the window log with the
+  ;; command that broke it, once, so the break can be found
+  (let ((faults (if layout (panes-model-faults layout) '())))
+    (unless (or (null? faults) (equal? faults panes--last-faults))
+      (window-log-note! "panes model broken" (string-join faults "; "))
+      (message (string-append "panes: the window model broke: " (car faults))))
+    (set! panes--last-faults faults)))
 
 (define (panes-layout-forget!)
   (set-frame-local! 'panes-layouts (alist-delete (panes--store) (panes--group-key))))

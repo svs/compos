@@ -187,8 +187,17 @@
          (c (and row (- (length row) (length (member me row)))))
          (target
            (and r
-                (cond ((equal? dir 'left) (and (> c 0) (list-ref row (- c 1))))
-                      ((equal? dir 'right) (and (< (+ c 1) (length row)) (list-ref row (+ c 1))))
+                ;; left and right run on across the rows: before the first tile
+                ;; of a row is the last tile of the row above, and after the last
+                ;; tile is the first of the row below
+                (cond ((equal? dir 'left)
+                       (if (> c 0)
+                           (list-ref row (- c 1))
+                           (and (> r 0) (car (reverse (list-ref rows (- r 1)))))))
+                      ((equal? dir 'right)
+                       (if (< (+ c 1) (length row))
+                           (list-ref row (+ c 1))
+                           (and (< (+ r 1) (length rows)) (car (list-ref rows (+ r 1))))))
                       (else
                         (let ((r2 (if (equal? dir 'up) (- r 1) (+ r 1))))
                           (and (>= r2 0) (< r2 (length rows))

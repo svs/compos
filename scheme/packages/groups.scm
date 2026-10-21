@@ -1373,19 +1373,25 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; recent work buffers fill the frame's target layout (three columns by
 ;; default), with the group chat last when its noise is "loud". One
 ;; member alone fills the frame. A scratch is never a pane.
-(define (group-default-layout! g)
-  (layout-target-default!)
+;; the buffers a group with no saved layout shows, left to right: its
+;; documents up to the layout's capacity, its chat beside them when the group
+;; is loud, the chat alone when it has no documents, *scratch* when it has nothing
+(define (group-default-panes g)
   (let* ((docs (filter group-primary-fill? (group-docs g)))
          (chat (if (pair? docs) (group-primary-chat g) (group-chat g)))
          (loud (and chat (pair? docs) (equal? (group-noise g) "loud")))
-         (capacity (or (layout-capacity (layout-target)) 2))
-         (work (take docs (min (length docs) (if loud (- capacity 1) capacity))))
-         (panes (cond ((pair? work) (if loud (append work (list chat)) work))
-                      (chat (list chat))
-                      (else
-                        (unless (buffer-exists? "*scratch*")
-                          (buffer-create "*scratch*"))
-                        (list "*scratch*")))))
+         (capacity (or (and (layout-target) (layout-capacity (layout-target))) 2))
+         (work (take docs (min (length docs) (if loud (- capacity 1) capacity)))))
+    (cond ((pair? work) (if loud (append work (list chat)) work))
+          (chat (list chat))
+          (else
+            (unless (buffer-exists? "*scratch*")
+              (buffer-create "*scratch*"))
+            (list "*scratch*")))))
+
+(define (group-default-layout! g)
+  (layout-target-default!)
+  (let ((panes (group-default-panes g)))
     (delete-other-windows!)
     (switch-to-buffer-here! (car panes))
     (when (pair? (cdr panes))

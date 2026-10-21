@@ -314,6 +314,15 @@
 (define (panes--door?)
   (and panes-mode (not (buffer-context?)) (not (layout-arranging?)) (not panes--applying)))
 
+;; one pane per buffer, left to right, equal shares: a group's first layout
+(define (panes--default-layout bufs)
+  (fold (lambda (l b)
+          (let* ((added (panes-add-pane l))
+                 (made (panes-new-window (car added) (cadr added) b (panes--buffer-mode b))))
+            (car made)))
+        (panes-empty)
+        bufs))
+
 ;; the model as group-panes rows, ((PANE WIN ...) ...), the window on screen
 ;; first: the overview spreads and gathers the frame by these rows
 (define (panes--rows)
@@ -354,9 +363,18 @@
           (begin
             (layout-target-free!)
             (window-log-note! "panes enter group" id)
-            (cond ((panes-layout) (panes-apply! (panes-validate (panes-layout) buffer-known?)))
-                  (saved (next id saved) (panes-adopt!))
-                  (else (group-default-layout! id) (panes-adopt!)))))))
+            (if (panes-layout)
+                (panes-apply! (panes-validate (panes-layout) buffer-known?))
+                ;; no model yet: the group's saved arrangement names the
+                ;; buffers, else the group's default does; the model is built
+                ;; from them and the frame's other windows only step aside
+                (let* ((kept (if saved
+                                 (begin (group-revive-layout-files! saved)
+                                        (filter (lambda (b) (and (buffer-known? b) (fill-candidate? b) (buffer-in-group? b id)))
+                                                (window-tree-buffers saved)))
+                                 '()))
+                       (bufs (if (pair? kept) kept (group-default-panes id))))
+                  (panes-apply! (panes--default-layout bufs))))))))
   ;; the switcher's look at a group draws that group's model, and wakes what
   ;; it shows the way the old look did; the switcher sleeps them again
   (advice-add! 'group-preview-draw! 'around 'panes

@@ -117,6 +117,10 @@ defmodule Compos.SchemeSuite do
 
   @doc "Run NAMES one eval each; answers the failures, and prints times on SCHEME_TIMES."
   def run(names) do
+    # the suite tests the editor's doors one at a time: the window model is
+    # off while it runs, and the model's own tests turn it on themselves
+    eval("(when (and (boundp 'panes-mode) panes-mode) (panes-mode-disable!))")
+
     {failures, times} =
       Enum.reduce(names, {[], []}, fn name, {fails, times} ->
         {us, result} = :timer.tc(fn -> eval("(run-test '#{name})") end)

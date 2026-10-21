@@ -290,16 +290,36 @@
           (message "jj: flush lock stuck; continuing unlocked"))
         (jj-open! root (or (jj-last-author buf) (current-edit-author)))))))
 
+;; The repo each run saved into last, by its author slug. A chat's own buffer
+;; often sits outside the repo it edits, so jj-describe! looks here when its
+;; chat's directory is no repo.
+(define *jj-run-roots* (if (boundp '*jj-run-roots*) *jj-run-roots* '()))
+
+(define (jj-note-run-root! slug root)
+  (when (and slug root)
+    (set! *jj-run-roots* (cons (list slug root) (filter (lambda (e) (not (equal? (car e) slug))) *jj-run-roots*)))))
+
+(define (jj-run-root slug)
+  (let ((e (and slug (assoc slug *jj-run-roots*)))) (and e (cadr e))))
+
+;; an agent's save skips after-save-hook, so the save itself notes the repo
+(advice-add! 'buffer-save! 'after 'jj-run-root
+  (lambda (&rest args)
+    (let* ((path (buffer-path (current-buffer)))
+           (root (and path (jj-root path))))
+      (when root (jj-note-run-root! (jj-author-slug (or (current-edit-author) "")) root)))))
+
 (define (jj-after-save!)
   (when jj-autosave
     (let* ((buf (current-buffer))
            (path (buffer-path buf))
-           (root (and path (jj-root path))))
+           (root (and path (jj-root path)))
+           (slug (jj-author-slug (or (jj-last-author buf) (current-edit-author)))))
       (when root
+        (jj-note-run-root! slug root)
         (jj-snapshot! root)
         (jj-unlock! root)
-        (jj-modeline-update! root
-          (jj-author-slug (or (jj-last-author buf) (current-edit-author))))))))
+        (jj-modeline-update! root slug)))))
 
 ;; Appended, so auto-revert's guard runs first: a save it refuses must not
 ;; leave an opened change behind.
@@ -314,8 +334,12 @@
 ;; an untagged @ is adopted by an agent with no change of its own yet.
 ;; The Agent: line stays under the message: label and identity are one
 ;; description.
-(define (jj-describe! text)
-  (let ((root (jj-here)))
+(define (jj-describe! text &optional path)
+  ;; the repo: PATH's, else the chat's own directory, else the one this run
+  ;; saved into last
+  (let ((root (or (and path (jj-root path))
+                  (jj-here)
+                  (jj-run-root (jj-author-slug (or (current-edit-author) ""))))))
     (if (not root)
         #f
         (let* ((slug (jj-author-slug (or (current-edit-author) "")))
@@ -332,7 +356,7 @@
                 (jj-sh root (string-append "jj describe -r " rev " -m '" (jj-quote msg) "' 2>&1"))
                 (jj-modeline-update! root slug)
                 text))))))
-(public! 'jj-describe! "(jj-describe! TEXT) — describe this run's jj change as TEXT, with its Agent line; TEXT, or #f when no change is this run's")
+(public! 'jj-describe! "(jj-describe! TEXT [PATH]) — describe this run's jj change as TEXT, with its Agent line, in PATH's repo, else the chat's, else the one this run saved into last; TEXT, or #f when there is no repo or no change of this run's")
 
 ;;; --- the push -----------------------------------------------------------
 

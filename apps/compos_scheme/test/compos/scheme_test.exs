@@ -43,6 +43,14 @@ defmodule Compos.SchemeTest do
     assert run("(fold + 0 '(1 2 3 4))") == 10
   end
 
+  test "prelude: list accessors, list?, any and every" do
+    assert run("(list (cadddr '(1 2 3 4 5)) (cdddr '(1 2 3 4 5)) (caar '((1 2) 3)) (cdar '((1 2) 3)))") == [4, [4, 5], 1, [2]]
+    assert run("(list (list? '()) (list? '(1 2)) (list? \"x\") (list? 3))") == [true, true, false, false]
+    assert run("(list (any (lambda (x) (and (> x 2) x)) '(1 2 3 4)) (any (lambda (x) (> x 9)) '(1 2)))") == [3, false]
+    assert run("(list (every (lambda (x) (> x 0)) '(1 2)) (every (lambda (x) (> x 1)) '(1 2)) (every (lambda (x) #f) '()))") == [true, false, true]
+    assert run("(list (last '(1 2 3)) (last-pair '(1 2 3)))") == [3, [3]]
+  end
+
   test "string escapes reach the bytes a protocol needs" do
     # \n and \t were already here; a line protocol needs CR, and a binary
     # one needs every byte. Without these a package cannot speak CRLF.

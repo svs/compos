@@ -250,7 +250,10 @@
     (cond ((not spec)
            (message "This frame has no panes to spread") #f)
           (else
-            (when (null? (group-panes-windows)) (group-panes-apply!))
+            ;; rows that name no live window (a restore gave the frame new ids)
+            ;; are rebuilt first, or the exit would have nothing to lay out
+            (unless (find group-panes-live? (apply append (map cdr (group-panes-windows))))
+              (group-panes-apply!))
             (let* ((me (active-window))
                    (home (group-panes-row-of me))
                    (order (windows-overview--order))
@@ -262,6 +265,8 @@
                       (unwind-protect
                         (lambda ()
                           (when (layout-target) (set-frame-local! 'windows-overview-target (layout-target)))
+                          ;; the frame the spread borrows: the exit gives it back when the panes cannot
+                          (set-frame-local! (quote windows-overview-arrangement) (arrangement-push! (quote overview)))
                           (layout-target-free!)
                           (let ((rows (windows-overview--rows ids (if windows-overview-expose
                                                                        (windows-overview--cols (length ids))
@@ -314,8 +319,13 @@
              (group-panes-windows)))
       (group-panes-record! pane me #t))
     (let ((ids (group-panes-arrange! #t))
-          (target (frame-local 'windows-overview-target)))
+          (target (frame-local 'windows-overview-target))
+          (borrowed (frame-local 'windows-overview-arrangement)))
       (set-frame-local! 'windows-overview-target #f)
+      (set-frame-local! 'windows-overview-arrangement #f)
+      ;; no pane row named a live window: the frame goes back to what the
+      ;; spread borrowed rather than staying spread
+      (if ids (arrangement-drop! borrowed) (arrangement-pop! borrowed))
       ;; the spread borrowed the frame; the chosen layout comes back
       (when target (layout-target-set! target))
       (when (and ids (member me ids)) (select-window! me))

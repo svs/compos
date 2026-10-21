@@ -109,6 +109,8 @@
 (require 'panes-mode)
 ;; the model as a list: M-x list-panes
 (require 'panes-board)
+;; undo and redo over the pane arrangement alone: M-x layout-undo, layout-redo
+(require 'panes-history)
 ;; app identity: an app names the buffers of one instance, and a move
 ;; retags them through group membership, so this follows groups
 (require 'apps)

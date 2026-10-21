@@ -52,6 +52,17 @@ kills, `c` gives every mode one window, `+` `-` `=` set the shares. The board
 is `panes-board.scm`. It reads the frame when the mode is off, so it is a
 true picture either way.
 
+## Layout history
+
+`M-x layout-undo` puts back the previous pane arrangement and `M-x
+layout-redo` goes forward again. Winner restores whole configurations,
+buffers and points included; this keeps only the layout: the panes, their
+shares and the order of their windows. A window both states hold keeps the
+buffers it shows now, so what you were reading stays and only the shape of
+the frame moves. A change of buffer alone records no state; a change of
+shape does, and ends any redo. One history per frame and group, fifty
+states deep, in `panes-history.scm`. It needs panes-mode on.
+
 ## Status
 
 - `M-x panes-mode` turns the model on. It is off by default.

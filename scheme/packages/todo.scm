@@ -47,10 +47,10 @@
 (define *todo-states* '("inbox" "todo" "doing" "waiting" "review" "done" "cancelled"))
 (define *todo-closed* '("done" "cancelled"))
 ;; the #+ lines, in the order they are written
-(define *todo-fields* '(id state assignee priority source parent depends created by group))
+(define *todo-fields* '(id state assignee chats priority source parent depends created by group))
 ;; what todo-update may change
 (define *todo-settable*
-  '(title state project assignee priority deadline scheduled tags source parent depends notes group))
+  '(title state project assignee chats priority deadline scheduled tags source parent depends notes group))
 
 ;;; --- small helpers -----------------------------------------------------------
 
@@ -205,6 +205,7 @@
 (define (todo--set-prop t k v)
   (cond ((equal? k "log") (plist-put t 'log (cons v (plist-get t 'log))))
         ((equal? k "depends") (plist-put t 'depends (todo--ids v)))
+        ((equal? k "chats") (plist-put t 'chats (todo--ids v)))
         ((member (string->symbol k) *todo-fields*)
          (plist-put t (string->symbol k) (if (equal? v "") #f v)))
         (else (plist-put t 'extra (cons (list k v) (plist-get t 'extra))))))
@@ -529,7 +530,7 @@
         ((equal? k 'project) (todo--slug v))
         ((member k '(deadline scheduled)) (todo-date v))
         ((equal? k 'tags) (todo--tags v))
-        ((equal? k 'depends) (todo--ids v))
+        ((member k '(depends chats)) (todo--ids v))
         ((equal? k 'priority) (todo--priority v))
         ((equal? k 'notes) (or v ""))
         ((equal? k 'title) (if (todo--blank? v) (todo--fail "a task needs a title") (string-trim v)))
@@ -545,7 +546,7 @@
         (else (string-append (symbol->string k) " " (todo--show new)))))
 
 (define (todo-update id props)
-  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, priority, deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
+  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
          (who (or (plist-get props 'by) todo-user)))
     (let loop ((ps props) (new t) (changes '()))
@@ -1095,6 +1096,7 @@
     (let* ((got (assign-chat! #f g
                   (lambda (chat)
                     (todo-update id (list 'assignee (chat-stable-id! chat)
+                                          'chats (todo--chats-keeping t (plist-get t 'assignee))
                                           'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
                                           'log (string-append "assigned to a chat in " (group-name g))
                                           'by (or who todo-user)))
@@ -1135,7 +1137,11 @@
     (if (and *todo-chat-index* (< (- now (car *todo-chat-index*)) 1000))
         (cdr *todo-chat-index*)
         (let ((ix (reverse (fold (lambda (acc b)
-                                   (let ((id (buffer-local b 'chat-id)))
+                                   ;; a chat read back from its file keeps only its slug
+                                   (let* ((slug (buffer-local b 'agent-slug))
+                                          (id (or (buffer-local b 'chat-id)
+                                                  (and (string? slug) (string-prefix? "chat-" slug)
+                                                       (string-append "chat:" (string-join (cdr (string-split slug "-")) ":"))))))
                                      (if (string? id) (cons (list id b) acc) acc)))
                                  '() (buffer-list)))))
           (set! *todo-chat-index* (cons now ix))
@@ -1161,6 +1167,146 @@
                       (not (member (list-ref words 3) '("created" "assignee" "assigned")))
                       (todo--live-chat (todo--chat-id (caddr words))))))
              (reverse (or (plist-get t 'log) '())))))))
+
+(define (todo--archived-chat a)
+  ;; the .chat file of the chat "chat:SECS:N": its file is stamped a moment
+  ;; after the chat was made, and its header names the slug
+  (let* ((parts (string-split a ":"))
+         (secs (and (= (length parts) 3) (string->number (cadr parts))))
+         (slug (string-append "chat-" (cadr parts) "-" (caddr parts))))
+    (and secs
+         (todo--first
+           (lambda (p)
+             (let* ((leaf (car (reverse (string-split p "/"))))
+                    (stamp (string->number (car (string-split leaf "-")))))
+               (and stamp (<= secs stamp) (< stamp (+ secs 86400))
+                    (equal? slug (plist-get (cadr (memq 'header (chat-log-read p))) 'slug))
+                    p)))
+           (chat-log-files)))))
+
+(define (todo--chat-title path)
+  (plist-get (cadr (memq 'header (chat-log-read path))) 'title))
+
+(define (todo--open-chat c group)
+  ;; the chat whose id is C: live, else its archived conversation read back
+  ;; in GROUP, else #f
+  (or (todo--live-chat c)
+      (let ((path (todo--archived-chat c)))
+        (and path
+             ;; name it after its title now, as chat-restore does, and find it by its id
+             (let ((buf (visit-in-group path group))
+                   (title (todo--chat-title path)))
+               (when (and buf (string? title)) (chat-title buf title))
+               (set! *todo-chat-index* #f)
+               (todo--live-chat c))))))
+
+(define (todo--revive-chat t)
+  ;; the task's chat: live, else its archived conversation read back in the
+  ;; task's group, else #f
+  (or (todo--chat-of t)
+      (let ((a (plist-get t 'assignee)))
+        (and (string? a) (string-prefix? "chat:" a)
+             (todo--open-chat a (or (todo--home-group t) (frame-group)))))))
+
+(define (todo--chat-ref chat)
+  ;; a chat's id, from the id itself or from its buffer
+  (cond ((not (string? chat)) #f)
+        ((string-prefix? "chat:" chat) chat)
+        ((buffer-known? chat) (chat-stable-id! chat))
+        (else #f)))
+
+(define (todo--chats-keeping t c)
+  ;; the task's attached chats with C among them, when C is a chat
+  (let ((cs (or (plist-get t 'chats) '())))
+    (if (and (string? c) (string-prefix? "chat:" c) (not (member c cs)))
+        (append cs (list c))
+        cs)))
+
+(define (todo-chats t)
+  "(todo-chats TASK) — the ids of the task's chats: the assignee first, then the attached ones"
+  (let ((a (plist-get t 'assignee)))
+    (fold (lambda (acc c) (if (member c acc) acc (append acc (list c))))
+          '()
+          (append (if (and (string? a) (string-prefix? "chat:" a)) (list a) '())
+                  (or (plist-get t 'chats) '())))))
+
+(define (todo-attach-chat! id chat &optional who)
+  "(todo-attach-chat! ID CHAT [WHO]) — attach CHAT, a chat buffer or its id, to the task beside its assignee; return the task"
+  (let* ((t (todo--must id)) (c (todo--chat-ref chat)))
+    (cond ((not c) (todo--fail "not a chat: " chat))
+          ((member c (todo-chats t)) t)
+          (else (todo-update id (list 'chats (todo--chats-keeping t c) 'by (or who todo-user)))))))
+
+(define (todo-detach-chat! id chat &optional who)
+  "(todo-detach-chat! ID CHAT [WHO]) — take CHAT off the task's attached chats; the assignee stays; return the task"
+  (let* ((t (todo--must id)) (c (todo--chat-ref chat)))
+    (todo-update id (list 'chats (remove (lambda (x) (equal? x c)) (or (plist-get t 'chats) '()))
+                          'by (or who todo-user)))))
+
+(public! 'todo-chats "(todo-chats TASK) — the ids of the task's chats: the assignee first, then the attached ones")
+(public! 'todo-attach-chat! "(todo-attach-chat! ID CHAT [WHO]) — attach a chat, its buffer or id, to the task beside its assignee")
+(public! 'todo-detach-chat! "(todo-detach-chat! ID CHAT [WHO]) — take a chat off the task's attached chats")
+
+(define (todo--chat-label c)
+  ;; a live chat's name, else its archived title, else its id
+  (or (todo--live-chat c)
+      (let* ((path (todo--archived-chat c)) (title (and path (todo--chat-title path))))
+        (and path (string-append (or title c) "  (archived)")))
+      (string-append c "  (gone)")))
+
+(define (todo--pick-chat! t)
+  ;; one chat goes straight there; several ask which
+  (let ((cs (todo-chats t)) (g (or (todo--home-group t) (frame-group))))
+    (define (go! c)
+      (let ((buf (todo--open-chat c g)))
+        (if buf (todo--show-chat! buf) (message "That chat is gone"))))
+    (cond ((null? cs) (message "The task has no chat"))
+          ((null? (cdr cs)) (go! (car cs)))
+          (else
+            (let ((labels (map (lambda (c) (list (todo--chat-label c) c)) cs)))
+              (minibuffer-read* "Chat: " (map car labels)
+                (list (list 'confirm (lambda (l) (let ((hit (assoc l labels))) (when hit (go! (cadr hit)))))))))))))
+
+(define (todo--attach-read! t after)
+  ;; ask for an open chat not yet on the task, and attach it
+  (let* ((have (todo-chats t))
+         (open (filter (lambda (row) (not (member (car row) have))) (todo--chat-index))))
+    (if (null? open)
+        (message "No other open chat")
+        (minibuffer-read* "Attach chat: " (map cadr open)
+          (list (list 'confirm
+                      (lambda (name)
+                        (let ((row (find (lambda (r) (equal? (cadr r) name)) open)))
+                          (when row
+                            (todo-attach-chat! (plist-get t 'id) (car row))
+                            (after)
+                            (message (string-append "Attached " name)))))))))))
+
+(define-command "todo-attach-chat" "Attach another open chat to the task at point, beside the one it is assigned to"
+  (lambda ()
+    (let ((t (todo--at)))
+      (if t (todo--attach-read! t (lambda () #t)) (message "No task at point")))))
+
+(define-command "todo-detail-attach-chat" "Attach another open chat to this task, beside the one it is assigned to"
+  (lambda ()
+    (let* ((buf (current-buffer)) (t (todo--detail-task buf)))
+      (if t (todo--attach-read! t (lambda () (todo--detail-render! buf))) (message "The task is gone")))))
+
+(define-command "todo-attach-this-chat" "Attach the chat you are in to an open task"
+  (lambda ()
+    (let* ((chat (current-buffer))
+           (c (and (buffer-local chat 'agent-slug) (todo--chat-ref chat)))
+           (rows (map (lambda (t) (list (string-append (plist-get t 'title) "  ·  " (plist-get t 'id)) (plist-get t 'id)))
+                      (todo-list))))
+      (if (not c)
+          (message "Not in a chat")
+          (minibuffer-read* "Attach this chat to task: " (map car rows)
+            (list (list 'confirm
+                        (lambda (l)
+                          (let ((hit (assoc l rows)))
+                            (when hit
+                              (todo-attach-chat! (cadr hit) c)
+                              (message (string-append "Attached to " (car hit)))))))))))))
 
 (define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
 
@@ -1208,10 +1354,11 @@
           (else (switch-to-buffer! chat)))
     chat))
 
-(define-command "todo-goto-chat" "Go to the chat the task is assigned to"
+(define-command "todo-goto-chat" "Go to the chat the task is assigned to; with several, ask which"
   (lambda ()
     (let* ((t (todo--at)) (chat (and t (todo--chat-of t))))
       (cond ((not t) (message "No task at point"))
+            ((pair? (todo-chats t)) (todo--pick-chat! t))
             (chat (todo--show-chat! chat))
             (else (message "The task is not with a live chat"))))))
 
@@ -1324,6 +1471,10 @@
                           (list 'pairs
                             (append
                               (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
+                              (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
+                                             (if (null? more) ""
+                                                 (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
+                                                                "  ·  w picks, C attaches"))))
                               (pair "Status" (todo--status t))
                               (pair "Group" (group-name (plist-get t 'group)))
                               (pair "Filed by" (plist-get t 'by))
@@ -1382,10 +1533,11 @@
     (let ((t (todo--at)))
       (if t (todo-show-detail! (plist-get t 'id)) (message "No task at point")))))
 
-(define-command "todo-detail-goto-chat" "Go to the chat working this task"
+(define-command "todo-detail-goto-chat" "Go to the chat working this task; with several, ask which"
   (lambda ()
     (let* ((t (todo--detail-task (current-buffer))) (chat (and t (todo--chat-of t))))
       (cond ((not t) (message "The task is gone"))
+            ((pair? (todo-chats t)) (todo--pick-chat! t))
             (chat (todo--show-chat! chat))
             ((plist-get t 'assignee) (message "The task's chat is not live"))
             (else (message "The task is not assigned to a chat"))))))
@@ -1394,7 +1546,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (t (todo--detail-task buf))
-           (chat (and t (todo--chat-of t)))
+           (chat (and t (todo--revive-chat t)))
            (here (or (and t (todo--home-group t)) (group-here))))
       (define (start! g)
         (let ((new (todo-assign-chat! (plist-get t 'id) g)))
@@ -1432,6 +1584,7 @@
 (mode-keys! "todo-detail-mode"
   '(("a" "todo-detail-agent")
     ("w" "todo-detail-goto-chat")
+    ("C" "todo-detail-attach-chat")
     ("e" "todo-detail-visit")
     ("g" "todo-detail-refresh")
     ("q" "quit-window")))
@@ -1453,7 +1606,7 @@
 
 (public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
 
-(define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane; C-u asks for the group"
+(define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane, the chat it already has when it has one; C-u asks for the group"
   (lambda ()
     (let* ((t (todo--at))
            (marked (todo--marked-tasks))
@@ -1479,6 +1632,8 @@
                        (group-read-or-create! "Assign to new chats in group: " assign-marked!)
                        (assign-marked! #f))))))
             ((not t) (message "No task at point"))
+            ((and (not ask?) (todo--revive-chat t))
+             (todo--show-chat! (todo--revive-chat t)))
             ((or ask? (not here))
              (group-read-or-create! "Assign to a new chat in group: "
                (lambda (g) (assign-one! g))))
@@ -1648,7 +1803,7 @@
     'section? (lambda (buf t) (todo--sep? t))
     'footer (lambda (buf)
               '(("←→" "status") ("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
-                ("a" "assign") ("D" "deadline") ("P" "project") ("!" "priority")
+                ("a" "assign") ("C" "attach chat") ("D" "deadline") ("P" "project") ("!" "priority")
                 ("c" "capture") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
@@ -1663,6 +1818,7 @@
             ("w" "todo-goto-chat")
             ("s" "todo-mark-doing")
             ("a" "todo-assign")
+            ("C" "todo-attach-chat")
             ("D" "todo-set-deadline")
             ("P" "todo-set-project")
             ("N" "todo-add-note")
@@ -1675,7 +1831,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, `s` starts it. `a` hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, working, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `a` hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, working, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

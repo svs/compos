@@ -25,7 +25,9 @@
 
 (define (windows-overview--order)
   ;; (SHOWN REST): the windows on screen, left to right, and every other
-  ;; window of the panes, the most recently seen first
+  ;; window of the panes in the order of the hidden list, the most recently
+  ;; hidden first. The tiles lay in this order and the exit hides them again
+  ;; in tile order, so any other order here rewrites the ring on every visit
   (let* ((rows (group-panes-windows))
          (tracked (if (pair? rows)
                       (apply append (map (lambda (row) (filter group-panes-live? (cdr row))) rows))
@@ -43,8 +45,10 @@
                               (loop (cdr ws) acc)))))))
          (shown (filter (lambda (w) (member w all)) (map car (window-list))))
          (rest (filter (lambda (w) (not (member w shown))) all))
-         (seen (lambda (w) (let ((b (window-buffer-any w))) (or (and b (buffer-last-seen b)) 0)))))
-    (list shown (map cadr (sort (map (lambda (w) (list (- 0 (seen w)) w)) rest))))))
+         (hidden (map car (window-hidden-list))))
+    (list shown
+          (append (filter (lambda (w) (member w rest)) hidden)
+                  (filter (lambda (w) (not (member w hidden))) rest)))))
 
 (define (windows-overview--bindings)
   (list (list "<left>" "windows-overview-left")

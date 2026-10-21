@@ -101,6 +101,8 @@
 ;; keeps one per group, so it comes first
 (require 'panes)
 (require 'groups)
+;; windows have names: C-x j switch-window, M-x window-rename
+(require 'window-names)
 ;; the all-windows view over the group's panes
 (require 'overview)
 ;; every change of the windows, as it happened: M-x debug-last-window-movement

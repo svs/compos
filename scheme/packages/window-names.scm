@@ -72,7 +72,7 @@
 (define (window-where win)
   (let ((row (and (boundp 'group-panes-row-of) (group-panes-row-of win))))
     (cond ((member win (layout-pane-windows)) "on screen")
-          (row (string-append "behind " (symbol->string (car row))))
+          (row (string-append "behind " (let ((p (car row))) (if (symbol? p) (symbol->string p) p))))
           (else "waiting"))))
 
 ;; go to WIN: to the front of its pane, or along the ring

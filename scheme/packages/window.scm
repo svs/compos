@@ -3146,7 +3146,7 @@ and right walk the panes, up and down move by geometry."
 
 (define (windows-list-pane win)
   (let ((row (and win (boundp 'group-panes-row-of) (group-panes-row-of win))))
-    (if row (symbol->string (car row)) "")))
+    (if row (let ((p (car row))) (if (symbol? p) (symbol->string p) p)) "")))
 
 (define (windows-list-narrow-cells buf id)
   (let ((cells (windows-list-cells buf id)))

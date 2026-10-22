@@ -322,8 +322,15 @@
   (run-hook-with-args-until-success 'block-click (current-buffer) (car tab)))
 
 (define (tabs--key! key)
+  ;; a key no tab of the row wears is the page's own again: the digits of
+  ;; an app's tab bars (tab-bars.scm) reach past a row keyed otherwise
   (let loop ((ts (tabs--here)))
-    (cond ((null? ts) (message (string-append "No tab on " key)))
+    (cond ((null? ts)
+           (let* ((mode (buffer-local (current-buffer) 'mode-name))
+                  (cmd (and mode (keymap-lookup (mode-keymap mode) key))))
+             (if (and (string? cmd) (not (string-prefix? "tabs-key-" cmd)))
+                 (run-command cmd)
+                 (message (string-append "No tab on " key)))))
           ((and (> (length (car ts)) 3) (equal? (nth 3 (car ts)) key)) (tabs--take! (car ts)))
           (else (loop (cdr ts))))))
 

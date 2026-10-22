@@ -2461,7 +2461,7 @@ defmodule Compos.Ui.EditorLive do
 
   # a product photo or an embedded picture, drawn from its src attr
   defp blk_node(%{b: %{tag: "img"}} = assigns) do
-    ~M|<img class={blk_class(@b, @line)} {@b.attrs} loading="lazy" />|
+    ~M|<img class={blk_class(@b, @line)} {@b.attrs} loading="lazy" referrerpolicy="no-referrer" />|
   end
 
   # A ComposML element draws with a static tag: a dynamic tag re-sends its

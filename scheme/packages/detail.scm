@@ -363,7 +363,7 @@
 (minor-mode-keys! "detail-mode"
   '(("C-`" "detail-next") ("C-M-`" "detail-previous") ("M-RET" "detail-keep")
     ;; the list's own items, from here (index.scm)
-    ("N" "index-next-item") ("P" "index-previous-item") ("^" "index-up")))
+    ("N" "index-next-item") ("P" "index-previous-item") ("^" "index-up") ("x" "index-hide-item")))
 
 (public! 'display-buffer-detail!
   "(display-buffer-detail! NAME [OWNER]) — show NAME in the one window the list OWNER opens its rows into, keep that window for the next row, and select nothing")

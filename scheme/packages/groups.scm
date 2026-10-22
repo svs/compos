@@ -1988,7 +1988,21 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; found a group from what is on screen: every window's buffer joins,
 ;; the layout is saved, and the group chat holds the durable state
 (define (group-found-from-windows! name)
-  (group-create-and-enter! name (group-visible-work-buffers) (window-tree)))
+  ;; the windows as they stand found the group: their buffers, chats too,
+  ;; MOVE into it, and the screen is adopted as its layout. Adding left
+  ;; them in the old group as well, so both groups came out mixed, and a
+  ;; chat that already had a group refused the add and stayed behind.
+  (let ((clean (string-trim name)))
+    (cond ((equal? clean "")
+           (message "Group needs a name")
+           #f)
+          ((group-record-by-name clean)
+           (message (string-append "Group " clean " already exists"))
+           #f)
+          (else
+            (let ((id (group-record-create! clean)))
+              (group-move-into! (group-visible-work-buffers) id #t)
+              id)))))
 
 ;; the LLM reads the member list and writes one sentence of metadata
 (define (group-describe! g)
@@ -4598,13 +4612,13 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the windows stay as they are. A new name founds a group from them, with
 ;; the windows as its first layout, and enters it.
 (define-command "group-from-visible"
-  "Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows"
+  "Move the visible windows, chats included, to a group: pick one, or type a new name to found it from these windows"
   (lambda ()
     (let ((buffers (group-visible-work-buffers)))
       (if (null? buffers)
           (message "No work buffers visible")
           (minibuffer-read (string-append "Move " (number->string (length buffers))
-                                          (if (= (length buffers) 1) " buffer" " buffers")
+                                          (if (= (length buffers) 1) " window" " windows")
                                           " to (pick or type new): ")
                            (group-names)
             (lambda (input)

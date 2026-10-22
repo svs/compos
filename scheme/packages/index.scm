@@ -12,6 +12,8 @@
 ;;;
 ;;; A detail walks its index without going back to it: N and P open the next
 ;;; and previous item in the detail's own window, and ^ goes up to the index.
+;;; An index that declares a hide command lets x on its detail take the item
+;;; out of the index and open the one that took its place.
 ;;; A buffer can be both: a job's pipeline is a detail of the jobs list and
 ;;; the index of its candidates.
 
@@ -80,6 +82,23 @@
 (define-command "index-previous-item" "Open the previous item of the list this page came from, here"
   (lambda () (index--walk! -1)))
 
+(define (index-hide! ix)
+  ;; HIDE, run in the index, takes the item at point out; OPEN then shows the one now there
+  (let ((spec (index-spec ix)))
+    (cond ((not spec) (message "This list cannot hide its items") #f)
+          ((not (plist-get spec 'hide)) (message "This list does not hide items") #f)
+          (else (with-current-buffer ix
+                  (lambda ()
+                    (run-command (plist-get spec 'hide))
+                    (run-command (plist-get spec 'open))))))))
+
+(define-command "index-hide-item" "Hide this item from the list it came from, and open the next one here"
+  (lambda ()
+    (if (not (buffer-read-only? (current-buffer)))
+        (run-command "self-insert-command")
+        (let ((ix (detail-owner)))
+          (if ix (index-hide! ix) (message "This page has no list"))))))
+
 (define-command "index-up" "Go to the list this page came from"
   (lambda ()
     (if (not (buffer-read-only? (current-buffer)))
@@ -93,8 +112,10 @@
 (for-each index--sync! (buffer-list))
 
 (public! 'index-declare!
-  "(index-declare! MODE 'next CMD 'prev CMD 'open CMD) — MODE's buffers are indexes: NEXT and PREV move to an item, OPEN shows it as a detail")
+  "(index-declare! MODE 'next CMD 'prev CMD 'open CMD ['hide CMD]) — MODE's buffers are indexes: NEXT and PREV move to an item, OPEN shows it as a detail, HIDE takes the item at point out of the index")
 (public! 'index-set!
   "(index-set! BUF SPEC) — BUF's own index declaration: a plist as index-declare! takes, 'none for not an index, #f for its mode's")
+(public! 'index-hide!
+  "(index-hide! INDEX) — run INDEX's hide on the item at point and open the item that takes its place")
 (public! 'index-step!
   "(index-step! INDEX DIR) — move INDEX one item, forward for DIR 1 and back for -1, and open it")

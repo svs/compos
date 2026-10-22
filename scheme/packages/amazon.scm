@@ -419,16 +419,22 @@
                             (list "alt" (or (plist-get row 'title) "")))))))
 
 (define (amazon--actions row)
+  ;; a line of the cart is taken out with c, and u puts the last one back;
+  ;; any other product is added with c
   (let* ((asin (plist-get row 'asin))
          (kept? (amazon-saved? asin))
          (in? (amazon-in-cart? asin))
          (note (amazon-note asin)))
     (component 'ui/actions
       (list 'actions
-            (list (list "amazon-add-to-cart" (if in? "✓ in cart · add another" "Add to cart") "c")
-                  (list "amazon-save" (if kept? "★ saved" "Save") "m")
-                  (list "amazon-note" (if note "Edit note" "Add a note") "N")
-                  (list "amazon-open" "Open in browser" "o"))))))
+            (append
+              (if (plist-get row 'qty)
+                  (append (list (list "amazon-cart-remove" "Remove from cart" "c" "bad"))
+                          (if (pair? *amazon-cart-removed*) (list (list "amazon-cart-restore" "Put back" "u")) '()))
+                  (list (list "amazon-add-to-cart" (if in? "✓ in cart · add another" "Add to cart") "c")))
+              (list (list "amazon-save" (if kept? "★ saved" "Save") "m")
+                    (list "amazon-note" (if note "Edit note" "Add a note") "N")
+                    (list "amazon-open" "Open in browser" "o")))))))
 
 (define (amazon--head-block row &optional buf)
   ;; the page opens on a hero, as a Spotify page does, its buttons under it
@@ -947,6 +953,7 @@
         (buffer-set-local! *amazon-buffer* 'amazon-cart
                            (cons asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
       (amazon-log! (string-append asin " added -- " text))
+      (when (buffer-known? *amazon-cart-buffer*) (amazon-cart-sync!))
       (message (string-append (amazon-name-of asin) " added to the cart"))
       (amazon-touch! asin))
      (signin
@@ -1007,6 +1014,102 @@
              (message (string-append "Could not open a " amazon-host " tab")))
             (else (amazon--cart-done! asin (cadr result)))))
     120000))
+
+;; Taking a line out of the cart presses its own Delete in the cart page, in a
+;; hidden frame of the reader's tab, and answers once the line holds no
+;; quantity any more: a removed line leaves a notice behind with its asin.
+(define (amazon--cart-remove-js asin)
+  (string-append "(function(){window.__amzcart='pending';"
+                 "var A='" asin "';"
+                 "var fr=document.createElement('iframe');"
+                 "fr.style.cssText='position:fixed;left:-9999px;top:0;width:1280px;height:1000px;opacity:0';"
+                 "var done=false,step=0,tries=0;"
+                 "function say(o){if(done)return;done=true;"
+                 "window.__amzcart=JSON.stringify(o);try{fr.remove()}catch(e){}}"
+                 "setTimeout(function(){say({removed:false,error:'timed out'})},30000);"
+                 "function line(d){var l=d&&d.querySelector('div[id^=sc-active-][data-asin='+A+']');"
+                 "return l&&l.querySelector('input.sc-quantity-textfield')?l:null}"
+                 "function verify(){if(done)return;tries++;"
+                 "if(!line(fr.contentDocument)){say({removed:true,checks:tries})}"
+                 "else if(tries>20){say({removed:false,error:'still in the cart after the click'})}"
+                 "else{setTimeout(verify,500)}}"
+                 "function find(n){try{"
+                 "if(String(fr.contentWindow.location.href).indexOf('/ap/signin')>=0){say({removed:false,signin:true});return}"
+                 "var l=line(fr.contentDocument);"
+                 "if(!l){if(n>0){setTimeout(function(){find(n-1)},500)}else{say({removed:false,error:'not in the cart'})}return}"
+                 "var b=l.querySelector('.sc-action-delete input, input[value=Delete], [data-action=delete] input, [data-action=delete-active] input, button[aria-label^=Delete]');"
+                 "if(!b){say({removed:false,error:'no delete button'});return}"
+                 "b.click();setTimeout(verify,800)}"
+                 "catch(e){say({removed:false,error:String(e.message)})}}"
+                 "fr.onload=function(){if(done||step>0)return;step=1;find(20)};"
+                 "fr.src='/gp/cart/view.html';document.body.appendChild(fr);"
+                 "return 'started'})()"))
+
+;; what this session took out of the cart, newest first, so u can put it
+;; back. Kept in memory only: a restart forgets it
+(define *amazon-cart-removed*
+  (if (boundp '*amazon-cart-removed*) *amazon-cart-removed* '()))
+
+(define (amazon--without asin rows)
+  (filter (lambda (r) (not (equal? (plist-get r 'asin) asin))) (or rows '())))
+
+(define (amazon--cart-gone! row answer)
+  (let* ((asin (plist-get row 'asin))
+         (name (amz-clip (or (plist-get row 'title) asin) 40))
+         (text (if (string? answer) answer "")))
+    (cond
+     ((amz-has? text "\"removed\":true")
+      (set! *amazon-cart-removed* (cons row (amazon--without asin *amazon-cart-removed*)))
+      (when (buffer-known? *amazon-buffer*)
+        (buffer-set-local! *amazon-buffer* 'amazon-cart
+                           (filter (lambda (a) (not (equal? a asin)))
+                                   (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
+      (when (buffer-known? *amazon-cart-buffer*)
+        (amazon--fill! *amazon-cart-buffer* (amazon--without asin (buffer-local *amazon-cart-buffer* 'amazon-rows))))
+      (amazon-touch! asin)
+      (amazon--bar! *amazon-typing*)
+      (amazon-log! (string-append asin " removed -- " text))
+      (message (string-append name " taken out of the cart -- u puts it back")))
+     ((amz-has? text "\"signin\":true")
+      (amazon-log! (string-append asin " not removed -- signed out -- " text))
+      (message (string-append "Sign in to " amazon-host " in your browser, then try again")))
+     (else
+      (amazon-log! (string-append asin " not removed -- " text))
+      (message (string-append name " is still in the cart. See " *amazon-log*))))))
+
+(define (amazon-cart-remove! row)
+  (let ((asin (plist-get row 'asin)))
+    (message (string-append "Taking " (amz-clip (or (plist-get row 'title) asin) 40) " out of the cart..."))
+    (task-run!
+      (lambda ()
+        (let ((tab (amazon--cart-tab)))
+          (if (not tab)
+              (list 'no-tab #f)
+              (begin
+                (app-await (lambda (k) (tab-eval tab (amazon--cart-remove-js asin) k)) 10)
+                (list 'answer (amazon--cart-answer tab))))))
+      (lambda (ok result)
+        (cond ((not ok)
+               (amazon-log! (string-append asin " not removed -- task failed"))
+               (message "The cart remove failed"))
+              ((equal? (car result) 'no-tab)
+               (message (string-append "Could not open a " amazon-host " tab")))
+              (else (amazon--cart-gone! row (cadr result)))))
+      120000)))
+
+(define (amazon-cart-restore!)
+  ;; the last thing taken out goes back in, one of it; u again goes further back
+  (if (null? *amazon-cart-removed*)
+      (message "Nothing was taken out of the cart this session")
+      (let ((row (car *amazon-cart-removed*)))
+        (set! *amazon-cart-removed* (cdr *amazon-cart-removed*))
+        (amazon-cart-add! (plist-get row 'asin)))))
+
+(define-command "amazon-cart-remove" "Take this product out of the Amazon cart; u puts it back"
+  (lambda () (let ((r (amazon-row-here))) (when r (amazon-cart-remove! r)))))
+
+(define-command "amazon-cart-restore" "Put the last product taken out of the cart back in"
+  (lambda () (amazon-cart-restore!)))
 
 (define (amazon-open-external! asin)
   (begin (tab-open (amazon-product-url asin))
@@ -1171,11 +1274,11 @@
           (and (component--get p 'sponsored? #f) (amz--text "amz-mark" "sponsored")))))
 
 (defcomponent 'amazon/product
-  "One product as a row: its photo on a white tile, the title over its stars and when it lands, the marks you put on it, and the price with the M.R.P. struck through and the discount as a pill. IMAGE is the photo's file on disk."
+  "One product as a row: its photo on a white tile, the title over its stars and when it lands, the marks you put on it, and the price with the M.R.P. struck through and the discount as a pill. IMAGE is the photo's file on disk. A line of the cart gives its QTY, and REMOVE is the click id of the pill that takes it out."
   '((title string required) (image string optional) (price string optional) (mrp string optional)
     (rating string optional) (reviews string optional) (delivery string optional)
     (saved? boolean optional) (cart? boolean optional) (note? boolean optional) (hidden? boolean optional)
-    (sponsored? boolean optional) (class string optional))
+    (sponsored? boolean optional) (class string optional) (qty string optional) (remove string optional))
   '(title "Casio FX-991CW Classwiz Scientific Calculator" price "1,349" mrp "₹1,595"
     rating "4.5" reviews "(3.6K)" delivery "Thu, 22 Oct" saved? #t)
   (lambda (p)
@@ -1212,20 +1315,25 @@
                           (if (or (equal? mrp "") (equal? mrp price)) '()
                               (list (list 'tag "div" 'class "amz-was"
                                           'children (append (list (amz--text "amz-mrp" mrp))
-                                                            (if (equal? off "") '() (list (amz--text "amz-off" off))))))))))))))
+                                                            (if (equal? off "") '() (list (amz--text "amz-off" off)))))))
+                          (let ((q (component--get p 'qty "")))
+                            (if (equal? q "") '() (list (amz--text "amz-qty" (string-append "Qty " q)))))
+                          (let ((rm (component--get p 'remove "")))
+                            (if (equal? rm "") '()
+                                (list (list 'tag "span" 'class "amz-remove" 'click rm 'text "✕ Remove")))))))))))
 
 (defcomponent 'amazon/search-bar
-  "The search field over the listing: a magnifier, the query or the prompt to search, and its key. A click, like the key, asks for a search."
-  '((query string optional) (click string optional) (key string optional))
-  '(query "scientific calculator" click "amazon:amazon-search" key "s")
+  "The search field over the listing: a magnifier, the query or the prompt to search, and its key. A click, like the key, asks for a search; ACTIVE? marks it while the prompt is open, its query what you type."
+  '((query string optional) (click string optional) (key string optional) (active? boolean optional))
+  '(query "scientific calculator" click "amazon:amazon-search" key "/")
   (lambda (p)
     (let ((q (component--get p 'query "")))
-      (list 'tag "div" 'class "amz-search"
+      (list 'tag "div" 'class (if (component--get p 'active? #f) "amz-search amz-search-active" "amz-search")
             'click (component--get p 'click "amazon:amazon-search")
             'children (list (amz--text "amz-search-icon" "⌕")
                             (amz--text (if (equal? q "") "amz-search-text amz-search-empty" "amz-search-text")
                                        (if (equal? q "") "Search Amazon" q))
-                            (amz--text "amz-key" (component--get p 'key "s")))))))
+                            (amz--text "amz-key" (component--get p 'key "/")))))))
 
 (defcomponent 'amazon/hero
   "The head of a product's page: its photo large on a white tile over a blur of itself, the brand, the title, the stars, the price with the M.R.P. and the discount, when it lands, and the marks. IMAGE is the photo's file on disk."
@@ -1291,9 +1399,14 @@
 .amz-price { font-size: 1.25em; font-weight: 800; letter-spacing: -.01em; color: var(--default-fg); font-variant-numeric: tabular-nums; }
 .amz-was { display: flex; gap: 6px; align-items: baseline; }
 .amz-mrp { color: var(--dim-fg); font-size: .85em; text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.amz-qty { color: var(--dim-fg); font-size: .85em; font-variant-numeric: tabular-nums; }
+.amz-remove { font-size: .78em; font-weight: 600; padding: 2px 8px; border-radius: 999px; cursor: pointer; color: var(--alert-fg); border: 1px solid color-mix(in srgb, var(--alert-fg) 45%, transparent); }
+.amz-remove:hover { background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
 .amz-off { font-size: .78em; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--ok-fg) 22%, transparent); color: var(--ok-fg); }
 .amz-search { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 0 0 10px; border-radius: 999px; background: var(--hl-line-bg); border: 1px solid transparent; font-family: var(--font-sans); font-size: 14px; cursor: text; }
 .amz-search:hover { border-color: var(--border-bg); }
+.amz-search-active, .amz-search-active:hover { border-color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 8%, var(--hl-line-bg)); }
+.amz-search-active .amz-search-text::after { content: '▏'; color: var(--accent-fg); }
 .amz-search-icon { flex: none; font-size: 17px; color: var(--dim-fg); }
 .amz-search-text { flex: 1; min-width: 0; color: var(--default-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amz-search-empty { color: var(--dim-fg); }
@@ -1379,7 +1492,9 @@
             'delivery (amazon--when (plist-get row 'delivery))
             'saved? (amazon-saved? asin) 'cart? (amazon-in-cart? asin)
             'note? (and (amazon-note asin) #t) 'hidden? (amazon-hidden? asin)
-            'sponsored? (and (plist-get row 'sponsored) #t)))))
+            'sponsored? (and (plist-get row 'sponsored) #t)
+            'qty (or (plist-get row 'qty) "")
+            'remove (if (plist-get row 'qty) (string-append "amazon-remove:" asin) "")))))
 
 (define (amazon--meta buf)
   ;; where you are in the search: the store, the page, the order, what is hidden
@@ -1393,18 +1508,34 @@
                          ((amazon-showing-hidden?) (string-append " · showing " (number->string n) " hidden"))
                          (else (string-append " · " (number->string n) " hidden"))))))
 
+;; what the search bar shows while / is open: the prompt's text, else #f
+(define *amazon-typing* #f)
+
+(define (amazon--bar! text)
+  (set! *amazon-typing* text)
+  (for-each (lambda (b) (when (buffer-known? b) (list-refresh! b)))
+            (list *amazon-buffer* *amazon-cart-buffer*)))
+
 (define (amazon--list-head buf)
   ;; the search bar, then the shelf: what you searched, or the cart, and where you are in it
   (let* ((cart? (equal? buf *amazon-cart-buffer*))
          (query (or (buffer-local *amazon-buffer* 'amazon-query) ""))
          (n (length (site-app-rows buf))))
-    (list (component 'amazon/search-bar (list 'query (if cart? "" query) 'click "amazon:amazon-search" 'key "/"))
+    (filter pair? (list (component 'amazon/search-bar (list 'query (or *amazon-typing* query) 'active? (and *amazon-typing* #t)
+                                              'click "amazon:amazon-search" 'key "/"))
           (list 'tag "div" 'class "amz-shelf"
                 'children (list (amz--text "amz-shelf-title" (cond (cart? "Your cart") ((equal? query "") "Amazon") (else query)))
                                 (amz--text "amz-shelf-meta"
                                            (if cart?
                                                (string-append (number->string n) " in the cart · " amazon-host)
-                                               (string-append (number->string n) " products · " (amazon--meta buf)))))))))
+                                               (string-append (number->string n) " products · " (amazon--meta buf))))))
+          ;; in the cart, what this session took out can go back in
+          (if (and cart? (pair? *amazon-cart-removed*))
+              (component 'ui/actions
+                (list 'actions (list (list "amazon:amazon-cart-restore"
+                                           (string-append "Put back " (amz-clip (or (plist-get (car *amazon-cart-removed*) 'title) "") 40))
+                                           "u"))))
+              #f)))))
 
 ;; a click on the search bar is amazon:COMMAND; a button on a page is the
 ;; product's own verb. One hook: a second of the same name replaces the first
@@ -1413,8 +1544,14 @@
     (let ((row (and (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-row))))
       (cond ((not (string? id)) #f)
             ((string-prefix? "amazon:" id) (run-command (substring id 7 (string-length id))) #t)
+            ((string-prefix? "amazon-remove:" id)
+             (let ((hit (amazon-row-by-asin (substring id 14 (string-length id)))))
+               (when hit (amazon-cart-remove! hit))
+               #t))
             ((not row) #f)
             ((equal? id "amazon-add-to-cart") (amazon-cart-add! (plist-get row 'asin)) #t)
+            ((equal? id "amazon-cart-remove") (amazon-cart-remove! row) #t)
+            ((equal? id "amazon-cart-restore") (amazon-cart-restore!) #t)
             ((equal? id "amazon-save") (amazon-save-toggle! (plist-get row 'asin)) #t)
             ((equal? id "amazon-note") (amazon-ask-note! (plist-get row 'asin)) #t)
             ((equal? id "amazon-open") (amazon-open-external! (plist-get row 'asin)) #t)
@@ -1480,7 +1617,15 @@
         (list "N" "amazon-note" "note")
         (list "w" "amazon-copy-link" "link")))
 
-(define (amazon--section id label key path wait kind columns)
+;; in the cart, c takes the line out and u puts the last one back
+(define *amazon-cart-page-keys*
+  (list (list "c" "amazon-cart-remove" "remove")
+        (list "u" "amazon-cart-restore" "put back")
+        (list "m" "amazon-save" "save")
+        (list "N" "amazon-note" "note")
+        (list "w" "amazon-copy-link" "link")))
+
+(define (amazon--section id label key path wait kind keys columns)
   (list 'id id 'label label 'key key 'path path
         'live #t 'wait wait
         'after-fill (lambda (buf rows) (amazon--filled! buf rows))
@@ -1488,7 +1633,7 @@
         'detail-kind kind
         'detail-composed *amazon-tabs*
         'detail-count-from-one #t
-        'detail-extra-keys *amazon-page-keys*
+        'detail-extra-keys keys
         'columns columns))
 
 (define *amazon-spec*
@@ -1508,12 +1653,13 @@
         'drawn! (lambda (buf) (amazon--page-drawn! buf))
         'detail-name (lambda (row) (amazon--detail-name row))
         'list-head (lambda (buf) (amazon--list-head buf))
-        'list-keys (append *amazon-page-keys* (list (list "C" "amazon-cart" "cart")))
+        'list-keys (append (list (list "c" "amazon-add-to-cart" "add · remove")) (cdr *amazon-page-keys*)
+                           (list (list "C" "amazon-cart" "cart")))
         'pages
         (list
           (amazon--section 'results "Results" "1"
             (lambda () (amazon-page-url (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query) (amazon-page)))
-            #f "amazon-product-mode"
+            #f "amazon-product-mode" *amazon-page-keys*
             (list (list 'label "" 'width 4 'field 'marks)
                   (list 'label "₹" 'width 9 'field 'pay)
                   (list 'label "m.r.p" 'width 9 'field 'was 'face "dim")
@@ -1523,7 +1669,7 @@
           (amazon--section 'cart "Cart" "2"
             (lambda () (string-append "https://" amazon-host "/gp/cart/view.html"))
             ;; the cart fills itself after the load completes
-            "[id^='sc-active-'] .sc-quantity-textfield" "amazon-cart-item-mode"
+            "[id^='sc-active-'] .sc-quantity-textfield" "amazon-cart-item-mode" *amazon-cart-page-keys*
             (list (list 'label "" 'width 4 'field 'marks)
                   (list 'label "qty" 'width 4 'field 'qty)
                   (list 'label "₹" 'width 9 'field 'pay)
@@ -1538,23 +1684,24 @@
         (list "x" "amazon-hide") (list "X" "amazon-hidden") (list "d" "amazon-sort-delivery")
         (list "g" "amazon-refresh")))
 (minor-mode-keys! "amazon-cart-mode"
-  (list (list "/" "amazon-search") (list "C" "amazon-results")))
+  (list (list "/" "amazon-search") (list "C" "amazon-results")
+        (list "c" "amazon-cart-remove") (list "u" "amazon-cart-restore")))
 
 ;; a page reads its product again; its other keys are its kind's
-(mode-keys! "amazon-detail-mode" (list (list "g" "amazon-reload-detail")))
+(mode-keys! "amazon-detail-mode" (list (list "g" "amazon-reload-detail") (list "/" "amazon-search")))
 
 (mode-doc! "amazon-mode"
   "Amazon as the signed-in account sees it, with the retail price beside the one you pay. Every index is this mode: the search results and the cart are each a section with a mode of its own on it. Moving shows that product as a page beside the list, and C-` there flips through the pages you have opened. M-1 shows the results and M-2 the cart, s picks one; RET shows the page again, c adds the product to the cart, m saves it and marks the row, N writes a note on it, w copies its link, C opens the cart, digits switch the tabs of the page beside the list, M-↑ and M-↓ walk its parts, q quits.")
 (mode-doc! "amazon-results-mode"
   "The results of one search. / runs another, n and p walk to the next and previous page of results, d orders them by the soonest delivery, x takes a product out of the list and X shows the hidden ones again marked ⊘, g reads this page again.")
 (mode-doc! "amazon-cart-mode"
-  "What the cart holds: the lines you are buying, not the ones saved for later. g reads the cart again, C goes back to the results, / searches.")
+  "What the cart holds: the lines you are buying, not the ones saved for later. c takes a line out of the cart, and u puts the last one taken out back in, one of it; u again goes further back. What was taken out is kept until the editor restarts. g reads the cart again, C goes back to the results, / searches.")
 (mode-doc! "amazon-detail-mode"
   "One Amazon page beside its list. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; c adds the product to the cart, m saves it and marks it in the list, N writes a note that stays on this page, w copies its link, o opens it on the site, g reads the product page again, q puts it away. C-` walks the other pages opened from the list, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
 (mode-doc! "amazon-product-mode"
   "A product from the search results, as its own page. Its keys are amazon-detail-mode's.")
 (mode-doc! "amazon-cart-item-mode"
-  "A line of the cart, as its own page. c adds one more of it; the rest of its keys are amazon-detail-mode's.")
+  "A line of the cart, as its own page. c takes it out of the cart and u puts the last line taken out back in; the rest of its keys are amazon-detail-mode's.")
 
 ;; a kept page takes the product's name, not a number
 (detail-name! "amazon-detail-mode"
@@ -1676,10 +1823,21 @@
 ;;;###autoload
 (define-command "amazon-search" "Search Amazon and fill the listing"
   (lambda ()
-    (read-string "Amazon: "
-                 (lambda (q)
-                   (when (and (string? q) (not (equal? q "")))
-                     (amazon-open! q))))))
+    ;; the prompt opens on the search you are in, and the bar over the list
+    ;; follows what you type until you search or quit
+    (let ((now (or (buffer-local *amazon-buffer* 'amazon-query) "")))
+      (amazon--bar! now)
+      (minibuffer-read* "Amazon: " '()
+        (list (list 'initial now)
+              (list 'change (lambda (input) (unless (equal? input *amazon-typing*) (amazon--bar! input))))
+              (list 'cancel (lambda () (amazon--bar! #f)))
+              (list 'confirm (lambda (q)
+                               (amazon--bar! #f)
+                               (let ((q (string-trim (or q ""))))
+                                 (if (equal? q "")
+                                     (message "Nothing to search for")
+                                     (amazon-open! q)))))
+              (list 'style #f))))))
 
 (define-command "amazon-refresh" "Read the search again"
   (lambda ()

@@ -7,6 +7,9 @@
 ;;; A row on the job tab is one fact about the job, and its page is the
 ;;; whole description.
 
+;; the job's tab bar takes the hand keys and / (tab-bars.scm)
+(require 'tab-bars)
+
 (domain! 'web) 
 (effects! '(read))
 
@@ -260,17 +263,22 @@
         (string-append (rec-str (plist-get job 'title))
                        (if co (string-append " - " (rec-str (plist-get co 'name))) "")))))
 
+(define (rec--tabs buf)
+  ;; the tab bar, each tab with its left-hand key (tab-bars.scm)
+  (let ((at (rec-tab buf)))
+    (tab-bars-keyed 'index (map (lambda (t) (rec--tab-entry buf t at)) *recruiting-tabs*))))
+
 (define (rec--composml-head buf head)
   (let* ((at (rec-tab buf))
          (q (list-query buf))
          (note (if (equal? q "")
-                   "RET page - <left>/<right> tab - g refresh - q quit"
+                   "RET page - 1-5 or <left>/<right> tab - / any tab - g refresh - q quit"
                    (string-append "matching " q))))
     (list
       (rec--block "div" (rec-title buf) #f rec-css-title)
       (component 'ui/tabs
         (list 'class "recruiting-tabs"
-              'tabs (map (lambda (t) (rec--tab-entry buf t at)) *recruiting-tabs*)))
+              'tabs (rec--tabs buf)))
       (rec--block "div" note #f rec-css-note)
       (rec--block "div" "" #f rec-css-rule))))
 
@@ -447,7 +455,7 @@
     "opened. RET shows it again, <left> and <right> change the tab and "
     "so does clicking one in the tab bar, a tab reads the ATS the first "
     "time you enter it, g reads this tab again, J opens another job, "
-    "q quits. / narrows the rows already drawn."))
+    "q quits. 1 to 5 take the tabs, / any tab by name, and f narrows the rows already drawn."))
 
 (define-list-mode! "recruiting-mode"
   (list 'doc *recruiting-doc*
@@ -487,6 +495,10 @@
 (mode-doc! "recruiting-detail-mode"
   "One person from the board, or one fact about the job. q quits.")
 (mode-keys! "recruiting-detail-mode" (list (list "q" "bury-buffer")))
+
+;; 1-5 take the job's tabs from either pane, / any of them by name
+(tab-bars-declare! "recruiting-mode" (lambda (buf) (list (list "Tabs" (rec--tabs buf)))))
+(tab-bars-declare! "recruiting-detail-mode" (lambda (buf) '()))
 
 ;; a kept page takes the name of who it is about, not a number
 (detail-name! "recruiting-detail-mode"

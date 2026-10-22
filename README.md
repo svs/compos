@@ -99,7 +99,8 @@ apps/compos_core     buffers, editor state, primitives, NIFs, procs, LLM
   priv/*.scm        the kernel: editor.scm, dired, themes, init.scm
   native/compos_ts   tree-sitter Rustler NIF
 apps/compos_ui       Phoenix LiveView frontend (a client — no editor logic)
-scheme/packages      every package: commands, modes, apps, chat
+scheme/packages      every package: commands, modes, chat
+scheme/apps          the apps (ats, spotify, slides, ...): one more place to load and autoload from
 apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 ```
 

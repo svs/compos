@@ -43,8 +43,8 @@ defmodule Compos.LoadTest do
     priv = Application.app_dir(:compos_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))
 
-    # the bundled packages: scheme/packages at the project root
-    dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages")]
+    # the bundled packages and apps: scheme/packages and scheme/apps at the project root
+    dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages"), Path.join(Compos.Core.project_dir(), "scheme/apps")]
     locate = fn name -> Enum.find(Enum.map(dirs, &Path.join(&1, name)), &File.regular?/1) end
 
     # init.scm also loads editor/blocks and editor/goto-address by name;
@@ -87,7 +87,7 @@ defmodule Compos.LoadTest do
     expected = packages -- (opt_in ++ ["calendar/calendar.scm"])
     assert Enum.sort(loaded -- expected) == [], "loaded, but not a stock package"
     assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
-    assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages"
+    assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages and scheme/apps"
     assert length(loaded) == length(Enum.uniq(loaded))
 
     assert "agent.scm" in top_level

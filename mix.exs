@@ -37,14 +37,19 @@ defmodule Compos.MixProject do
     ]
   end
 
-  # The packages live at the project root, and a release has no checkout:
-  # they ride in compos_core's priv/packages, the load-path entry that
-  # stays in a release, so the Scheme side needs no release branch.
+  # The packages and apps live at the project root, and a release has no
+  # checkout: they ride in compos_core's priv/packages and priv/apps, the
+  # load-path entries that stay in a release, so the Scheme side needs no
+  # release branch.
   defp copy_scheme_packages(release) do
     vsn = release.applications[:compos_core][:vsn]
-    dest = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", "packages"])
-    File.mkdir_p!(dest)
-    File.cp_r!("scheme/packages", dest)
+
+    for dir <- ["packages", "apps"] do
+      dest = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", dir])
+      File.mkdir_p!(dest)
+      File.cp_r!(Path.join("scheme", dir), dest)
+    end
+
     release
   end
 

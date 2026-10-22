@@ -3650,18 +3650,22 @@
 
 ;;; --- load-path ----------------------------------------------------------------
 ;;; Where (load NAME) looks for a relative NAME, first match wins: the
-;;; editor's own priv tree, the packages at the project root, the config
-;;; home, and the user's packages. A release has no project root and
-;;; carries the packages under priv instead. An absolute name loads as it is. The
+;;; editor's own priv tree, the packages and the apps at the project root,
+;;; the config home, and the user's packages. An app is nothing special:
+;;; scheme/apps is one more place to load and autoload from. A release has
+;;; no project root and carries the packages and apps under priv instead. An absolute name loads as it is. The
 ;;; kernel sets the default; init.scm and the user init load by bare name
 ;;; and add a directory only for Scheme outside these four.
 
 (defvar 'load-path
   (append (list (compos-priv-dir))
           (let ((root (compos-project-dir)))
-            (if root (list (string-append root "/scheme/packages")) '()))
-          ;; a release copies scheme/packages here; a checkout has nothing here
+            (if root
+                (list (string-append root "/scheme/packages") (string-append root "/scheme/apps"))
+                '()))
+          ;; a release copies scheme/packages and scheme/apps here; a checkout has nothing here
           (list (string-append (compos-priv-dir) "/packages")
+                (string-append (compos-priv-dir) "/apps")
                 (compos-config-dir)
                 (string-append (compos-config-dir) "/packages")))
   "Directories (load NAME) searches for a relative NAME, in order.")

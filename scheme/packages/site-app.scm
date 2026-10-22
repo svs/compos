@@ -3,6 +3,9 @@
 (package! 'site-app)
 (origin! 'bundled)
 
+;; the index and its page share the hand keys and / over their tab bars
+(require 'tab-bars)
+
 (domain! 'web)
 (effects! '(read))
 
@@ -139,39 +142,48 @@
   (let ((lead (plist-get (buffer-local buf 'site-app-spec) 'lead-tabs)))
     (if lead (lead buf) '())))
 
-(define (site-app-composml-head buf head)
-  ;; the site's navbar, then the section's status tabs, each a row of tabs.
-  ;; An app's 'list-head (buf) puts blocks of its own above them
+(define (site-app-index-bars buf)
+  ;; the list's tab bars as (LABEL CLASS TABS): the site's navbar, then one row
+  ;; of status tabs per group of filters, in the page's order. The navbar's
+  ;; first five take the left hand's keys, 1 to 5; the rest keep their own
   (let* ((spec (buffer-local buf 'site-app-spec))
          (current (buffer-local buf 'site-app-page))
          (filters (or (buffer-local buf 'site-app-filters) '()))
          (query (buffer-local buf 'site-app-filter))
-         (own (plist-get spec 'list-head)))
+         (sections (append (site-app-lead-tabs buf)
+                           (map (lambda (page)
+                                  (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
+                                        (plist-get page 'label)
+                                        (equal? current (plist-get page 'id))
+                                        (site-app-page-shortcut page)))
+                                (site-app-pages spec)))))
+    (cons (list "Sections" "sa-sections"
+                (map (lambda (t i)
+                       (let ((key (or (tab-bars-key 'index i) (and (> (length t) 3) (list-ref t 3)))))
+                         (append (list (car t) (cadr t) (list-ref t 2)) (if key (list key) '()))))
+                     sections (iota (length sections))))
+          (map (lambda (group)
+                 (list (if group (site-app-capitalize group) "Status")
+                       (if group (string-append "sa-status sa-status-" group) "sa-status")
+                       (map (lambda (tab)
+                              (let ((count (plist-get tab 'count)))
+                                (list (string-append site-app-status-click (plist-get tab 'query))
+                                      (if (equal? count "") (plist-get tab 'label)
+                                          (string-append (plist-get tab 'label) " " count))
+                                      (site-app-filter-on? tab query))))
+                            (filter (lambda (tab) (equal? (plist-get tab 'group) group)) filters))))
+               (fold (lambda (groups tab)
+                       (if (member (plist-get tab 'group) groups) groups (append groups (list (plist-get tab 'group)))))
+                     '() filters)))))
+
+(define (site-app-composml-head buf head)
+  ;; the list's tab bars, each a row of tabs. An app's 'list-head (buf) puts
+  ;; blocks of its own above them
+  (let ((own (plist-get (buffer-local buf 'site-app-spec) 'list-head)))
     (append
       (if own (own buf) '())
-      (list (component 'ui/tabs
-              (list 'class "sa-sections"
-                    'tabs (append (site-app-lead-tabs buf)
-                                  (map (lambda (page)
-                                         (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
-                                               (plist-get page 'label)
-                                               (equal? current (plist-get page 'id))
-                                               (site-app-page-shortcut page)))
-                                       (site-app-pages spec))))))
-      ;; one row of tabs per group of filters, in the page's order
-      (map (lambda (group)
-             (component 'ui/tabs
-               (list 'class (if group (string-append "sa-status sa-status-" group) "sa-status")
-                     'tabs (map (lambda (tab)
-                                  (let ((count (plist-get tab 'count)))
-                                    (list (string-append site-app-status-click (plist-get tab 'query))
-                                          (if (equal? count "") (plist-get tab 'label)
-                                              (string-append (plist-get tab 'label) " " count))
-                                          (site-app-filter-on? tab query))))
-                                (filter (lambda (tab) (equal? (plist-get tab 'group) group)) filters)))))
-           (fold (lambda (groups tab)
-                   (if (member (plist-get tab 'group) groups) groups (append groups (list (plist-get tab 'group)))))
-                 '() filters)))))
+      (map (lambda (bar) (component 'ui/tabs (list 'class (cadr bar) 'tabs (caddr bar))))
+           (site-app-index-bars buf)))))
 
 (define (site-app-stars text &optional confirmed?)
   ;; a rating in any shape the sheets give it, "4", "3.5", "★★★" or "★★★✓",
@@ -906,6 +918,27 @@
                 (site-app-real (plist-get data 'tabs)))
         '())))
 
+(define (site-app-detail-tab-row tabs active)
+  ;; the page's tabs as ui/tabs takes them, each with its right-hand key
+  (tab-bars-keyed 'detail
+    (map (lambda (t)
+           (list (string-append site-app-tab-click (plist-get t 'id))
+                 (site-app-capitalize (plist-get t 'label))
+                 (equal? (plist-get t 'id) active)))
+         tabs)))
+
+(define (site-app-detail-bars buf)
+  ;; the page's tab bars: its own tabs, then the stages of the tab it shows
+  (let ((stages (site-app-detail-stages buf)))
+    (list (list "Tabs" (site-app-detail-tab-row (site-app-detail-tabs buf) (site-app-detail-active buf)))
+          (list "Stages" (if stages
+                             (map (lambda (s)
+                                    (list (string-append site-app-stage-click (plist-get s 'status))
+                                          (site-app-stage-label s)
+                                          (and (plist-get s 'active) #t)))
+                                  (site-app-stage-shown stages))
+                             '())))))
+
 (define (site-app-detail-active buf)
   (or (buffer-local buf 'site-app-active)
       (let ((hit (site-app-find (lambda (t) (plist-get t 'active)) (site-app-detail-tabs buf))))
@@ -1556,18 +1589,8 @@
           '()
           (let ((n (b 'line (string-join (map (lambda (t) (site-app-capitalize (plist-get t 'label))) tabs) "   ") #f)))
             (list (site-app-claim
-                    (component 'ui/tabs
-                      ;; keys as site-app-detail-nth! takes them: the site's tabs from 1, composed ones before
-                      (list 'tabs (let loop ((ts tabs)
-                                             (i (- 1 (length (filter (lambda (t) (plist-get t 'composed)) tabs))))
-                                             (acc '()))
-                                    (if (null? ts) (reverse acc)
-                                        (loop (cdr ts) (+ i 1)
-                                              (cons (list (string-append site-app-tab-click (plist-get (car ts) 'id))
-                                                          (site-app-capitalize (plist-get (car ts) 'label))
-                                                          (equal? (plist-get (car ts) 'id) active)
-                                                          (number->string i))
-                                                    acc))))))
+                    ;; the right hand's keys, 6 to 0, in the order drawn
+                    (component 'ui/tabs (list 'tabs (site-app-detail-tab-row tabs active)))
                     n n)))))))
 
 ;; Up and down go from one piece of the page to the next, not line by line:
@@ -2525,19 +2548,15 @@
         (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
         (list "<up>" "site-app-detail-prev")
-        (list "0" "site-app-detail-tab-0")
-        (list "1" "site-app-detail-tab-1")
-        (list "2" "site-app-detail-tab-2")
-        (list "3" "site-app-detail-tab-3")
-        (list "4" "site-app-detail-tab-4")
-        (list "5" "site-app-detail-tab-5")
         (list "[" "site-app-detail-stage-prev")
         (list "]" "site-app-detail-stage-next")
-        (list "/" "site-app-detail-stage")
         (list "RET" "site-app-detail-follow")
         (list "g" "site-app-detail-reload")
         (list "o" "site-app-detail-open")
         (list "q" "quit-window")))
+
+;; 1-5 take the list's tabs, 6-0 the page's, / any of them by name
+(tab-bars-declare! "site-app-detail-mode" site-app-detail-bars)
 
 (define (site-app-list-detail list-buf)
   ;; the page the list shows beside it
@@ -2621,10 +2640,10 @@
         'composml-head site-app-composml-head
         'preview site-app-show-detail!
         'debounce #t
-        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "s" "sections") (list "t" "status") (list "[ ]" "status") (list "1–5" "page tabs") (list "M-↑↓" "page parts")
-                                    (list "/" "state") (list "g" "refresh") (list "q" "quit"))))
-        ;; Digits are left free so they reach the page beside the list, as
-        ;; its tab keys; the sections move to M-digit.
+        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "1–5" "sections") (list "6–0" "page tabs") (list "/" "any tab") (list "[ ]" "status") (list "M-↑↓" "page parts")
+                                    (list "g" "refresh") (list "q" "quit"))))
+        ;; The digits are the tab bars' (tab-bars.scm): 1-5 the sections,
+        ;; 6-0 the page beside the list. M-digit still takes a section.
         'keys (append (list (list "RET" "site-app-detail")
                             (list "t" "site-app-tabs")
                             (list "s" "site-app-sections")
@@ -2643,8 +2662,9 @@
 
 (define (site-app-index-list-mode! mode)
   ;; what every index list mode gets on top of its opts
-  ;; / asks for a status tab; the list mode's own row filter stays on f
-  (define-key (mode-keymap mode) "/" "site-app-filter-choose")
+  ;; 1-5 take its tabs, 6-0 the page's, / any of them by name; the list
+  ;; mode's own row filter stays on f
+  (tab-bars-declare! mode (lambda (buf) (map (lambda (bar) (list (car bar) (caddr bar))) (site-app-index-bars buf))))
   ;; The index keeps its own bindings; unclaimed detail-page keys run in the
   ;; adjacent detail, just as they do when focus is on the detail itself.
   (when (boundp 'app-detail-keys!)
@@ -2661,7 +2681,7 @@
          (index (plist-get spec 'index-mode))
          (section-doc (lambda (page)
                         (string-append title " " (plist-get page 'label)
-                                       ", read from the live site. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits."))))
+                                       ", read from the live site. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] walk the status tabs, g rereads, q quits."))))
     (site-app-put! name spec)
     (site-app-card-keys! spec)
     (let ((major (plist-get spec 'detail-mode)))
@@ -2684,7 +2704,7 @@
     (when index
       (define-list-mode! index
         (site-app-list-opts name title pages list-keys
-                            (string-append title " index, read from the live site. Each section is a minor mode on it. M-number keys switch sections, [ and ] walk the status tabs, / asks for one, number keys switch the tabs of the page beside the list, g rereads, q quits.")
+                            (string-append title " index, read from the live site. Each section is a minor mode on it. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] walk the status tabs, g rereads, q quits.")
                             #f))
       (site-app-index-list-mode! index))
     ;; Every section is an index of its own: its buffer, its mode, its command.

@@ -71,10 +71,12 @@ defmodule Compos.SchemeRawNamesTest do
     priv = Application.app_dir(:compos_core, "priv")
 
     packages = Path.join(Compos.Core.project_dir(), "scheme/packages")
+    apps = Path.join(Compos.Core.project_dir(), "scheme/apps")
 
     src =
       (Path.wildcard(Path.join(priv, "*.scm")) ++
-         Path.wildcard(Path.join(packages, "**/*.scm")))
+         Path.wildcard(Path.join(packages, "**/*.scm")) ++
+         Path.wildcard(Path.join(apps, "**/*.scm")))
       |> Enum.map_join("\n", &File.read!/1)
 
     for {raw, target} <- SchemeRawNames.wrapped() do

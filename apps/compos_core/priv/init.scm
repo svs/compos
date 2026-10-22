@@ -15,8 +15,8 @@
 ;;;
 ;;;   (load "my-package.scm")
 ;;;
-;;; The stock boot is the editor. An app the editor does not need ships in
-;;; scheme/packages but loads on its first use: the ;;;###autoload cookies
+;;; The stock boot is the editor. An app ships in scheme/apps, which is
+;;; nothing special: one more load-path entry, so it loads on its first use: the ;;;###autoload cookies
 ;;; in its file name the commands M-x shows before the file loads, and the
 ;;; harvest at the end of this file installs them (amazon, doom, doom-lite,
 ;;; graphql, linkedin, movie, peers, px0, recording, spotify, spreadsheet,
@@ -58,6 +58,8 @@
 (require 'tools)
 (require 'recipes)
 (require 'components)
+;; the hand keys and / over an index's and a detail's tab bars
+(require 'tab-bars)
 ; the detail window: an app registers how it names a kept detail at load,
 ; so this comes before every app that opens rows into one
 (require 'detail)

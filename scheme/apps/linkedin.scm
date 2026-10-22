@@ -28,9 +28,8 @@
 ;;; saves the three-column layout and gives it back. Opening a project in the real browser is the reader
 ;;; pressing a button, never a render.
 
-;; the major modes this file defines: a buffer restored in one loads the file
-;;;###autoload
-(autoload-modes "linkedin-mode" "linkedin-detail-mode")
+;; the listing's tab bar takes the hand keys and / (tab-bars.scm)
+(require 'tab-bars)
 
 (domain! 'web)
 (effects! '(read))
@@ -666,17 +665,22 @@ a{color:var(--accent);text-decoration:none}
 ;; The head the cards stand under: the app, its tabs, and the keys. The
 ;; text head says the same thing in one line of chips; this one says it in
 ;; the shape a reader already knows a tab bar by.
+(define (linkedin--tabs buf)
+  ;; the tab bar, each tab with its left-hand key (tab-bars.scm)
+  (let ((at (linkedin-tab buf)))
+    (tab-bars-keyed 'index (map (lambda (t) (li--tab-entry buf t at)) *linkedin-tabs*))))
+
 (define (linkedin--composml-head buf head)
   (let* ((at (linkedin-tab buf))
          (q (list-query buf))
          (note (if (equal? q "")
-                   "RET page · o recruiter · w copy · ←/→ tab · g refresh · q quit"
+                   "RET page · o recruiter · w copy · 1–5 or ←/→ tab · / any tab · g refresh · q quit"
                    (string-append "matching \"" q "\" · \\ widens"))))
     (list
       (li--block "div" "LinkedIn Recruiter" #f li-css-title)
       (component 'ui/tabs
         (list 'class "linkedin-tabs"
-              'tabs (map (lambda (t) (li--tab-entry buf t at)) *linkedin-tabs*)))
+              'tabs (linkedin--tabs buf)))
       (li--block "div" note #f li-css-note)
       (li--block "div" "" #f li-css-rule))))
 
@@ -784,6 +788,10 @@ a{color:var(--accent);text-decoration:none}
 ;; a kept page takes the project's or the person's name, not a number
 (detail-name! "linkedin-detail-mode"
   (lambda (buf) (string-append "*" (or (buffer-local buf 'linkedin-title) "linkedin") "*")))
+
+;; 1-5 take the listing's tabs from either pane, / any of them by name
+(tab-bars-declare! "linkedin-mode" (lambda (buf) (list (list "Tabs" (linkedin--tabs buf)))))
+(tab-bars-declare! "linkedin-detail-mode" (lambda (buf) '()))
 
 ;; the listing and every page it opens wear the LinkedIn mark
 (mode-icon! "linkedin-mode" "")
@@ -925,7 +933,6 @@ a{color:var(--accent);text-decoration:none}
                (buffer-set-local! *linkedin-buffer* 'linkedin-tab 'messages)
                (linkedin-threads-open!)))))
 
-;;;###autoload
 (define-command "linkedin" "Open the LinkedIn Recruiter app"
   (lambda () (linkedin-open! #t)))
 

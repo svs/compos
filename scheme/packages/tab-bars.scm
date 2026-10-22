@@ -9,7 +9,8 @@
 ;;;
 ;;; / reaches every tab by name: one minibuffer whose tabs are the bars on
 ;;; screen, the index's first. Typing filters the tabs of every bar at once; a
-;;; minibuffer tab only brings its bar's tabs to the top.
+;;; minibuffer tab only brings its bar's tabs to the top. Text that names no
+;;; tab narrows the index's rows, so / stays the search key of a list.
 ;;;
 ;;; A mode declares its bars with (tab-bars-declare! MODE FN). FN, given a
 ;;; buffer, answers ((LABEL TABS) ...), one entry per bar in the order drawn,
@@ -78,10 +79,11 @@
 (effects! '(write))
 
 (define (tab-bars-keys! mode)
-  (for-each (lambda (k i) (define-key (mode-keymap mode) k (string-append "tab-bars-index-" (number->string i))))
-            tab-bars-left-keys '(1 2 3 4 5))
-  (for-each (lambda (k i) (define-key (mode-keymap mode) k (string-append "tab-bars-detail-" (number->string i))))
-            tab-bars-right-keys '(1 2 3 4 5))
+  (for-each (lambda (i)
+              (let ((n (number->string (+ i 1))))
+                (define-key (mode-keymap mode) (list-ref tab-bars-left-keys i) (string-append "tab-bars-index-" n))
+                (define-key (mode-keymap mode) (list-ref tab-bars-right-keys i) (string-append "tab-bars-detail-" n))))
+            '(0 1 2 3 4))
   (define-key (mode-keymap mode) "/" "tab-bars-pick")
   mode)
 
@@ -162,11 +164,16 @@
          (row (lambda () (let loop ((bs bars) (i 0) (out '()))
                            (if (null? bs) (reverse out)
                                (loop (cdr bs) (+ i 1) (cons (list (car bs) (= i tab)) out))))))
+         ;; text that names no tab narrows the index's rows, as / does in a list
+         (ix (car (tab-bars-pair buf)))
          (on-confirm (lambda (name)
-                       (let ((hit (find (lambda (e) (equal? (tab-bars--name e entries) name)) entries)))
-                         (if hit
-                             (tab-bars-take! (car hit) (caddr hit))
-                             (message (string-append "No tab " name)))))))
+                       (let ((hit (find (lambda (e) (equal? (tab-bars--name e entries) name)) entries))
+                             (text (string-trim name)))
+                         (cond (hit (tab-bars-take! (car hit) (caddr hit)))
+                               ((and ix (not (equal? text "")) (boundp 'list-opt) (list-opt ix 'rows))
+                                (list-set-query! ix text)
+                                (list-goto-first-entry ix))
+                               (else (message (string-append "No tab " name))))))))
     (if (null? entries)
         (message "No tab bars here")
         (begin

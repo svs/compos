@@ -51,12 +51,14 @@ defmodule Compos.SchemeSuite do
   def files(:core), do: Path.wildcard(Path.join(core_dir(), "*.scm"))
 
   def files(:packages) do
-    dir = package_dir()
-    Path.wildcard(Path.join(dir, "*-test.scm")) ++ Path.wildcard(Path.join(dir, "*/*-test.scm"))
+    Enum.flat_map([package_dir(), apps_dir()], fn dir ->
+      Path.wildcard(Path.join(dir, "*-test.scm")) ++ Path.wildcard(Path.join(dir, "*/*-test.scm"))
+    end)
   end
 
   def core_dir, do: Path.join(:code.priv_dir(:compos_core), "tests")
   def package_dir, do: Path.join(Compos.Core.project_dir(), "scheme/packages")
+  def apps_dir, do: Path.join(Compos.Core.project_dir(), "scheme/apps")
 
   @doc "The deftest names a file declares, read from the file."
   def declared(path) do

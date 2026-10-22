@@ -327,6 +327,7 @@ Agents read a page the same way: `(buffer-outline BUF)` first, then `(buffer-sec
 - One detail buffer per row keeps what it last read. Opening it draws that at once; a read under a minute old stands, an older one rereads behind it.
 - Read the rows a reader goes to next before they are asked for (three below, one above), filed off screen: store, do not draw.
 - An answer lands in its own row's buffer whenever it comes. Check the buffer's own generation, not one global counter, or moving on throws the reads away.
+- What outlives a buffer (geocodes, lookups, fetched pages) goes in the content cache: `(cache-get 'NS KEY)`, `(cache-put! 'NS KEY STRING)`, `(cache-del! 'NS KEY)`, memory then disk under `~/.compos/cache`. Never write your own `.scm` data file under `~/.compos`: the hot-loader reloads it as code, and every saved row fails as `not a function: "KEY"`.
 
 ### Colours come from the theme
 

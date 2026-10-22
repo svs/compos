@@ -250,19 +250,28 @@
   (let ((root (compos-project-dir)))
     (and root (string-append root "/scheme/packages"))))
 
+;; the packages' tests and the apps': scheme/packages and scheme/apps
+(define (package-test-dirs)
+  (let ((root (compos-project-dir)))
+    (if root
+        (list (string-append root "/scheme/packages") (string-append root "/scheme/apps"))
+        '())))
+
 ;; KIND is 'core or 'packages
 (define (test-files kind)
   (if (equal? kind 'core)
       (test-files--in (test-dir) (lambda (n) (string-suffix? ".scm" n)))
-      (let ((dir (package-test-dir)))
-        (if (not dir)
-            '()
-            (append
-              (test-files--in dir test-file?)
-              (apply append
-                (map (lambda (sub) (test-files--in (string-append dir "/" sub) test-file?))
-                     (filter (lambda (n) (file-directory? (string-append dir "/" n)))
-                             (list-dir dir)))))))))
+      (apply append
+        (map (lambda (dir)
+               (if (not (file-exists? dir))
+                   '()
+                   (append
+                     (test-files--in dir test-file?)
+                     (apply append
+                       (map (lambda (sub) (test-files--in (string-append dir "/" sub) test-file?))
+                            (filter (lambda (n) (file-directory? (string-append dir "/" n)))
+                                    (list-dir dir)))))))
+             (package-test-dirs)))))
 
 (define (load-test-files! files)
   (for-each

@@ -44,11 +44,11 @@
       (panes-validate layout (lambda (b) (or (not (buffer-group b)) (buffer-in-group? b g))))
       layout))
 
-(define (panes--layout-store! g layout*)
-  (define layout (panes--sealed layout* g))
-  (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
-  (when (string? g) (set! panes--latest (alist-put panes--latest g (panes-strip-handles layout))))
-  layout)
+(define (panes--layout-store! g layout)
+  (let ((layout (panes--sealed layout g)))
+    (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
+    (when (string? g) (set! panes--latest (alist-put panes--latest g (panes-strip-handles layout))))
+    layout))
 
 ;; the newest layout of every group, whichever frame made it: a frame that
 ;; enters a group it has never shown takes this, not whatever the screen holds
@@ -526,22 +526,11 @@
 
 ;; the frame enters a group: its layout comes back, or the frame is read
 ;; in. The layout target stands down: the model owns the shape now.
-;; groups are sealed: a group's model shows only its own buffers. One that
-;; another group holds leaves the model; one that has no group joins G
-(define (panes--own-buffers layout g)
-  (panes-validate layout
-    (lambda (b)
-      (and (buffer-known? b)
-           (cond ((not g) #t)
-                 ((buffer-in-group? b g) #t)
-                 ((buffer-group b) #f)
-                 (else (group-add-buffers-to! (list b) g) #t))))))
-
 (define (panes--enter-group!)
   (window-log-note! "panes enter group" (or (frame-group) "none"))
   (let ((layout (panes-layout)))
     (if layout
-        (panes-apply! (panes--own-buffers layout (frame-group)))
+        (panes-apply! (panes-validate layout buffer-known?))
         (or (panes--seed! (frame-group)) (panes-adopt!))))
   (layout-target-refresh!))
 
@@ -618,7 +607,7 @@
             (window-log-note! "panes enter group" id)
             (cond
               ((panes-layout)
-               (panes-apply! (panes--own-buffers (panes-layout) id)))
+               (panes-apply! (panes-validate (panes-layout) buffer-known?)))
               ;; another frame laid this group out: its arrangement comes along
               ((panes--seed! id))
               (else

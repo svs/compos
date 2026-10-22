@@ -187,3 +187,30 @@
               (winner-next!)
               (check-equal! (length (window-list)) 2 "winner-next went forward again"))
             (lambda () (pmt-done! (list a c)))))))))
+
+(deftest 'panes-mode-a-group-model-never-holds-another-groups-buffer
+  "a window of A that comes to show B's buffer leaves A's model without it, so coming back to A never shows B's buffer"
+  (lambda ()
+    (with-fresh-group "zz-panes-seal-a"
+      (lambda (ga)
+        (with-fresh-group "zz-panes-seal-b"
+          (lambda (gb)
+            (let ((a1 (pmt-buffer! "zz-se-a1" "zz-a-mode"))
+                  (a2 (pmt-buffer! "zz-se-a2" "zz-c-mode"))
+                  (b1 (pmt-buffer! "zz-se-b1" "zz-b-mode")))
+              (for-each (lambda (x) (buffer-add-group! x ga)) (list a1 a2))
+              (buffer-add-group! b1 gb)
+              (switch-to-group! ga)
+              (delete-other-windows!)
+              (switch-to-buffer-here! a1)
+              (unwind-protect
+                (lambda ()
+                  (panes-mode-enable!)
+                  (switch-to-buffer! a2)
+                  (panes-layout-set! (panes-show (panes-layout) (car (panes-top-windows (panes-layout))) b1))
+                  (check-false! (member b1 (panes-buffers (panes-layout-of ga))) "A's model kept B's buffer out")
+                  (check-true! (and (member a2 (panes-buffers (panes-layout-of ga))) #t) "and its own buffers in")
+                  (switch-to-group! gb)
+                  (switch-to-group! ga)
+                  (check-false! (window-showing b1) "back in A, B's buffer is not on screen"))
+                (lambda () (pmt-done! (list a1 a2 b1)))))))))))

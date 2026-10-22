@@ -11,6 +11,12 @@
 ;;; sheets that read the pages are web/parsers/spotify-rows.xsl and
 ;;; web/parsers/spotify-detail.xsl.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes
+  "spotify-mode" "spotify-detail-mode" "spotify-playing-mode" "spotify-home-mode"
+  "spotify-liked-mode" "spotify-playlists-mode" "spotify-results-mode")
+
 (package! 'spotify)
 (require 'site-app)
 (require 'cell)

@@ -119,12 +119,9 @@
       (if (member key *catalog-keys*)
           (set! *catalog*
             (cons entry
-                  (remove (lambda (e)
-                            (and (equal? (catalog--get e 'kind) k)
-                                 (if (equal? k "component")
-                                     (equal? (catalog--get e 'qualified-name) qualified)
-                                     (equal? (catalog--get e 'name) n))))
-                          *catalog*)))
+                  (if (equal? k "component")
+                      (remove-plists *catalog* 'kind k 'qualified-name qualified)
+                      (remove-plists *catalog* 'kind k 'name n))))
           (begin
             (set! *catalog* (cons entry *catalog*))
             (set! *catalog-keys* (cons key *catalog-keys*)))))
@@ -147,10 +144,7 @@
                                                         (catalog--get e 'qualified-name))))
                   *catalog-keys*))
         (set! *catalog*
-          (remove (lambda (x) (and (equal? (catalog--get x 'kind) k)
-                                   (equal? (catalog--get x 'qualified-name)
-                                           (catalog--get e 'qualified-name))))
-                  *catalog*))
+          (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
     (and e #t)))
 
@@ -158,14 +152,9 @@
 
 (define (catalog-entry kind name)
   (let ((k (catalog--string kind)) (n (catalog--string name)))
-    (let loop ((es *catalog*))
-    (cond ((null? es) #f)
-          ((and (equal? (catalog--get (car es) 'kind) k)
-                (if (and (equal? k "component") (string-contains? n "/"))
-                    (equal? (catalog--get (car es) 'qualified-name) n)
-                    (equal? (catalog--get (car es) 'name) n)))
-           (car es))
-          (else (loop (cdr es)))))))
+    (if (and (equal? k "component") (string-contains? n "/"))
+        (find-plist *catalog* 'kind k 'qualified-name n)
+        (find-plist *catalog* 'kind k 'name n))))
 
 (define (catalog--merge entry meta)
   (if (or (null? meta) (null? (cdr meta)))
@@ -199,11 +188,8 @@
                               "declared" "unknown"))))
           (set! *catalog*
             (cons updated
-                  (remove (lambda (e)
-                            (and (equal? (catalog--get e 'kind) (catalog--get old 'kind))
-                                 (equal? (catalog--get e 'qualified-name)
-                                         (catalog--get old 'qualified-name))))
-                          *catalog*)))
+                  (remove-plists *catalog* 'kind (catalog--get old 'kind)
+                                 'qualified-name (catalog--get old 'qualified-name))))
           (catalog--changed! updated)))))
 
 ;; Commands are an Elixir registry underneath, but this wrapper gives every
@@ -2075,6 +2061,8 @@
     (define-keymap! (mode-keymap name))
     (use-local-map! buf (mode-keymap name))
     (buffer-set-local! buf 'mode-name name)
+    ;; a mode of a package that is not loaded yet: its autoload loads it now
+    (unless (mode-get name 'kind) (mode-autoload! name))
     (mode-setup! name)
     (when changed (restore-minor-modes! buf))
     ;; a mode with font-lock keywords is painted from here on
@@ -3861,12 +3849,33 @@
       (catalog-meta! 'command name 'autoload file)))
   name)
 
+;; (autoload-mode NAME FILE): the major mode NAME belongs to FILE. When a
+;; buffer enters NAME before FILE loads (a desktop restore, a find-file),
+;; set-mode! loads FILE first, as an autoloaded foo-mode does in Emacs.
+(define (autoload-mode name file)
+  (unless (mode-get name 'kind) (autoload--note! name file))
+  name)
+
+;; (autoload-modes "a-mode" ...) is a cookie form: the harvest reads it with
+;; the file's path. A plain load of the file runs it here and does nothing,
+;; because the file then defines the modes itself.
+(define (autoload-modes &rest names) names)
+
+;; load the file an autoload-mode names for NAME; #t when NAME is defined after
+(define (mode-autoload! name)
+  (let ((file (autoload-file name)))
+    (when file
+      (autoload--forget! name)
+      (load file))
+    (and (mode-get name 'kind) #t)))
+
 ;;; ;;;###autoload cookies: Emacs's loaddefs, read at boot instead of
 ;;; generated at build time. A line that is exactly ";;;###autoload" marks
 ;;; the form below it. (autoload-harvest!) scans every file on load-path
 ;;; whose feature is not provided and installs what the cookies name: a
 ;;; define-command becomes an autoload-command, a (define (f ...) ...)
-;;; becomes an autoload, and any other form runs as it is, so a mode's
+;;; becomes an autoload, (autoload-modes "a-mode" ...) makes each mode an
+;;; autoload-mode of the file, and any other form runs as it is, so a mode's
 ;;; auto-mode entry or a list registration exists before its file loads.
 
 (define (autoload-install-form! form file)
@@ -3877,6 +3886,10 @@
         ((and (pair? form) (eq? (car form) 'define)
               (pair? (cdr form)) (pair? (cadr form)) (symbol? (car (cadr form))))
          (autoload (car (cadr form)) file))
+        ;; (autoload-modes "a-mode" ...): the file's major modes, named
+        ;; where a spec computes them; the file is this one
+        ((and (pair? form) (eq? (car form) 'autoload-modes))
+         (for-each (lambda (name) (autoload-mode name file)) (cdr form)))
         (else (eval form))))
 
 ;; the autoload files in DIR: every .scm but the tests, as library names
@@ -6039,6 +6052,8 @@
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
 (public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")
 (public! 'autoload "(autoload 'NAME FILE [DOC]) — NAME is a stub that loads FILE on its first call, then applies the real definition")
+(public! 'autoload-mode "(autoload-mode NAME FILE) — the major mode NAME belongs to FILE; a buffer that enters NAME before FILE loads loads FILE first")
+(public! 'mode-autoload! "(mode-autoload! NAME) — load the file an autoload-mode names for NAME; #t when NAME is defined after")
 (public! 'autoload-command "(autoload-command NAME FILE [DOC]) — the command NAME exists for M-x and the keys; its first run loads FILE")
 (public! 'autoload-harvest! "(autoload-harvest! [DIRS]) — install the ;;;###autoload cookies of every unprovided file in DIRS (load-path); returns the files read")
 (public! 'load "(load NAME) — find NAME on load-path, evaluate it, and provide its library name")
@@ -6049,7 +6064,7 @@
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(write)))
   '("provide" "require" "with-eval-after-load" "autoload" "autoload-command"
-    "autoload-harvest!" "load" "add-to-list!"))
+    "autoload-mode" "mode-autoload!" "autoload-harvest!" "load" "add-to-list!"))
 (public! 'with-current-buffer "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window")
 (effects! '(read))
 (public! 'monotonic-ms "(monotonic-ms) — a monotonic millisecond count, for timing one span")

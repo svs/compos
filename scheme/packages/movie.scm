@@ -1,5 +1,9 @@
 ;;; movie.scm --- play a buffer's Provenance inside compos.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes "movie-stream-mode")
+
 (domain! 'buffers)
 (effects! '(read write display execute))
 

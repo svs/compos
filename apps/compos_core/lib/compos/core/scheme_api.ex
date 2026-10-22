@@ -2689,16 +2689,23 @@ defmodule Compos.Core.SchemeAPI do
         end
       end,
       # (load) restores its stamps with this, so a file that raises leaves
-      # the loader clean. The cleanup runs against the caller's store: its
-      # job is the globals, which live in ETS and need no store back.
+      # the loader clean. CLEANUP runs on the store THUNK returns, and its
+      # store is the result: during the boot load the global frame lives in
+      # the store, so a dropped store drops the set! that CLEANUP did.
       {"unwind-protect",
        "(unwind-protect THUNK CLEANUP) — THUNK's value; CLEANUP runs after THUNK, also when THUNK raises, and the error goes on."} =>
         fn [thunk, cleanup], store ->
-          try do
-            Compos.Scheme.Eval.apply_fn(thunk, [], store)
-          after
-            Compos.Scheme.Eval.apply_fn(cleanup, [], store)
-          end
+          {value, store} =
+            try do
+              Compos.Scheme.Eval.apply_fn(thunk, [], store)
+            catch
+              kind, reason ->
+                Compos.Scheme.Eval.apply_fn(cleanup, [], store)
+                :erlang.raise(kind, reason, __STACKTRACE__)
+            end
+
+          {_, store} = Compos.Scheme.Eval.apply_fn(cleanup, [], store)
+          {value, store}
         end,
       # describe-key arms this, then reads the sequence back with (last-keys)
       {"capture-key!",

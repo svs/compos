@@ -1,5 +1,14 @@
 ;;; ats.scm --- SVS recruiting as a live website app
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes
+  "ats-mode" "ats-detail-mode" "ats-approval-mode" "ats-candidate-mode"
+  "ats-application-mode" "ats-company-mode" "ats-job-mode" "ats-meeting-mode"
+  "ats-approvals-mode" "ats-candidates-mode" "ats-applications-mode"
+  "ats-companies-mode" "ats-jobs-mode" "ats-meetings-mode" "ats-pipeline-mode"
+  "ats-draft-mode")
+
 (package! 'ats)
 (origin! 'user)
 
@@ -932,7 +941,9 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 ;; what a new chat for an ATS page asks first; the page's own kind wins
 ;; a case chat says whose case it is: "Approval: Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
 (define (ats-case-label src) (ats-row-label (or (buffer-local src 'site-app-row) '()) src))
+;;;###autoload
 (define (ats-case-id src) (plist-get (or (buffer-local src 'site-app-row) '()) 'key))
+;;;###autoload
 (define (ats-case-buffer id)
   (let ((hit (filter (lambda (b) (equal? (ats-case-id b) id)) (buffer-list))))
     (and (pair? hit) (car hit))))

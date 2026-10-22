@@ -4,6 +4,10 @@
 ;;; Univer 0.25.1 supplies the isolated browser workbook.
 ;;; Univer uses the Apache-2.0 license.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes "spreadsheet-mode")
+
 (namespace! 'spreadsheet)
 (domain! 'data)
 (effects! '(read write))

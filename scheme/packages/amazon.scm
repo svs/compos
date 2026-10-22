@@ -24,6 +24,12 @@
 ;;; index sections, each a mode of its own, and every product is a page of
 ;;; its own kind. See the app section below.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes
+  "amazon-mode" "amazon-results-mode" "amazon-cart-mode" "amazon-detail-mode"
+  "amazon-product-mode" "amazon-cart-item-mode")
+
 (require 'site-app)
 
 (domain! 'web)

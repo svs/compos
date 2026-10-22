@@ -505,6 +505,19 @@ defmodule Compos.Scheme.Builtins do
       {"plist-put",
        "(plist-put PLIST KEY VAL) — PLIST with KEY VAL first and any older KEY pair gone."} =>
         fn [pl, key, val] -> [key, val | plist_delete(pl, key)] end,
+      # native: a registry of plists (the catalog) looked an entry up with an
+      # interpreted loop and dropped one with remove and a lambda, and every
+      # definition at boot paid a walk of the whole registry, about 6 s
+      {"find-plist",
+       "(find-plist LIST KEY VAL ...) — the first plist in LIST whose KEY is equal to VAL for every pair; false when none is."} =>
+        fn [list | pairs] when is_list(list) ->
+          Enum.find(list, false, &plist_matches?(&1, pairs))
+        end,
+      {"remove-plists",
+       "(remove-plists LIST KEY VAL ...) — LIST without the plists whose KEY is equal to VAL for every pair."} =>
+        fn [list | pairs] when is_list(list) ->
+          Enum.reject(list, &plist_matches?(&1, pairs))
+        end,
       # native: an interpreted walk paid one frame per element, and a read
       # into a list of 3000 lines per definition made an outline take seconds
       {"list-ref",
@@ -811,6 +824,11 @@ defmodule Compos.Scheme.Builtins do
 
     {Enum.reverse(kept), store}
   end
+
+  defp plist_matches?(pl, [key, val | rest]),
+    do: plist_get(pl, key) == val and plist_matches?(pl, rest)
+
+  defp plist_matches?(_pl, []), do: true
 
   defp plist_get([k, v | _], key) when k == key, do: v
   defp plist_get([_, _ | rest], key), do: plist_get(rest, key)

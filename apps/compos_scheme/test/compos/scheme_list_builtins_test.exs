@@ -77,6 +77,21 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(plist-get (plist-put '(a 1 b 2) 'b 3) 'b)") == 3
   end
 
+  test "find-plist answers the first plist that matches every pair" do
+    src = "(define rows '((kind \"c\" name \"a\" n 1) (kind \"c\" name \"b\" n 2) (kind \"c\" name \"b\" n 3)))"
+    assert run(src <> "(plist-get (find-plist rows 'kind \"c\" 'name \"b\") 'n)") == 2
+    assert run(src <> "(find-plist rows 'kind \"m\" 'name \"b\")") == false
+    assert run(src <> "(plist-get (find-plist rows) 'n)") == 1
+    assert run("(find-plist '() 'kind \"c\")") == false
+  end
+
+  test "remove-plists drops every plist that matches every pair and keeps the order" do
+    src = "(define rows '((kind \"c\" name \"a\" n 1) (kind \"m\" name \"b\" n 2) (kind \"c\" name \"b\" n 3)))"
+    assert run(src <> "(map (lambda (e) (plist-get e 'n)) (remove-plists rows 'name \"b\"))") == [1]
+    assert run(src <> "(map (lambda (e) (plist-get e 'n)) (remove-plists rows 'kind \"c\" 'name \"b\"))") == [1, 2]
+    assert run(src <> "(length (remove-plists rows 'kind \"x\"))") == 3
+  end
+
   test "a predicate error reaches the caller as a Scheme error" do
     assert {:error, msg} = Scheme.eval_string(Scheme.new(), "(filter (lambda (x) (car x)) '(1))")
     assert msg =~ "car"

@@ -17,6 +17,10 @@
 ;;; animation, background image, image row and layout at work. Read it
 ;;; before writing a deck, and start from it with slides-new!.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes "slides-mode")
+
 (namespace! 'slides)
 (domain! 'writing)
 (effects! '(write))

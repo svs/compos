@@ -48,7 +48,10 @@
     (check-true! (featurep 'editor) "editor.scm")
     (check-true! (featurep 'init) "init.scm")
     (check-true! (featurep 'dired) "dired.scm, loaded by init.scm")
-    (check-true! (featurep 'custom) "custom.scm, loaded by init.scm")))
+    (check-true! (featurep 'custom) "custom.scm, loaded by init.scm")
+    ;; every boot load popped its entry: a leaked chain turned one failed
+    ;; file into a "recursive require" for every later require of it
+    (check-equal! *features-loading* '() "the boot left the require chain empty")))
 
 (deftest 'require-loads-a-file-once
   "the first require loads; the second is free; load provides the library name"
@@ -251,4 +254,30 @@
     (undefine-command "zz-ft-cookie-cmd")
     (undefine-command "zz-ft-cookie-quiet")
     (t--ft-forget! 'zz-ft-cookie 'zz-ft-cookie-provided)
+    (t--ft-remove!)))
+
+(deftest 'autoload-mode-loads-the-file-when-a-buffer-enters-the-mode
+  "an autoload-modes cookie names the file's modes; set-mode! of one loads the file first"
+  (lambda ()
+    (t--ft-make!)
+    (t--ft-forget! 'zz-ft-modes)
+    (mode-forget! "zz-ft-auto-mode")
+    (t--ft-write! "zz-ft-modes.scm"
+      (string-append
+        ";;;###autoload\n"
+        "(autoload-modes \"zz-ft-auto-mode\")\n"
+        "(define-mode \"zz-ft-auto-mode\" (lambda () (buffer-set-local! (current-buffer) 'zz-ft-set-up #t)))\n"))
+    (autoload-harvest! (list t--ft-dir))
+    (check-equal! (autoload-file "zz-ft-auto-mode") (t--ft-path "zz-ft-modes.scm")
+                  "the cookie names the file")
+    (check-false! (featurep 'zz-ft-modes) "the harvest loads nothing")
+    (let ((buf "*zz-ft-auto-mode*"))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "zz-ft-auto-mode")))
+      (check-true! (featurep 'zz-ft-modes) "entering the mode loaded the file")
+      (check-true! (buffer-local buf 'zz-ft-set-up) "and the mode setup ran")
+      (check-false! (autoload-file "zz-ft-auto-mode") "the autoload is spent")
+      (buffer-kill! buf))
+    (mode-forget! "zz-ft-auto-mode")
+    (t--ft-forget! 'zz-ft-modes)
     (t--ft-remove!)))

@@ -28,6 +28,10 @@
 ;;; saves the three-column layout and gives it back. Opening a project in the real browser is the reader
 ;;; pressing a button, never a render.
 
+;; the major modes this file defines: a buffer restored in one loads the file
+;;;###autoload
+(autoload-modes "linkedin-mode" "linkedin-detail-mode")
+
 (domain! 'web)
 (effects! '(read))
 
@@ -921,6 +925,7 @@ a{color:var(--accent);text-decoration:none}
                (buffer-set-local! *linkedin-buffer* 'linkedin-tab 'messages)
                (linkedin-threads-open!)))))
 
+;;;###autoload
 (define-command "linkedin" "Open the LinkedIn Recruiter app"
   (lambda () (linkedin-open! #t)))
 

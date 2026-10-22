@@ -19,6 +19,12 @@
 ;;; join the group the frame is in, so that group saves the layout and
 ;;; gives it back. Actions that leave the editor -- the cart -- are the
 ;;; reader pressing a button, never a render.
+;;;
+;;; The app is a site-app (site-app.scm): the results and the cart are its
+;;; index sections, each a mode of its own, and every product is a page of
+;;; its own kind. See the app section below.
+
+(require 'site-app)
 
 (domain! 'web)
 (effects! '(read))
@@ -33,7 +39,8 @@
 
 ;; How many times the app looks for the search page before giving up. Each look is 400ms.
 
-(define *amazon-buffer* "*amazon*")
+(define *amazon-buffer* "*amazon-results*")
+(define *amazon-cart-buffer* "*amazon-cart*")
 (define *amazon-log* "*amazon-log*")
 
 ;;; --- reading the page ----------------------------------------------------
@@ -137,12 +144,7 @@
   ;; Amazon lives in a group of its own; calling it goes there
   (app-group "Amazon"))
 
-(define (amazon-join-group! buf)
-  (when (and buf (buffer-exists? buf))
-    (let ((id (amazon-home-group!)))
-      (when (and id (not (buffer-in-group? buf id)))
-        (buffer-add-group! buf id))))
-  buf)
+(define (amazon-join-group! buf) (site-app-join-group! buf 'amazon))
 
 (define (amazon-log! line)
   (unless (buffer-exists? *amazon-log*) (buffer-create *amazon-log*))
@@ -326,7 +328,11 @@
 (define (amazon--row-field row key alt) (or (plist-get row key) alt))
 
 (define (amazon-in-cart? asin)
-  (member asin (or (buffer-local *amazon-buffer* 'amazon-cart) '())))
+  ;; what the last read of the cart named, or what this session added
+  (and (or (member asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))
+           (member asin (map (lambda (r) (plist-get r 'asin))
+                             (or (buffer-local *amazon-cart-buffer* 'amazon-rows) '()))))
+       #t))
 
 ;; saved products and their notes live on the listing buffer, so they survive
 ;; the next search and come back with the desktop
@@ -344,11 +350,16 @@
   (let ((hit (assoc asin (amazon-notes)))) (and hit (car (cdr hit)))))
 
 ;; redraw the row, and the product's own page when it is open
+(define (amazon--pages)
+  (filter (lambda (b) (buffer-derived-mode? b "amazon-detail-mode")) (buffer-list)))
+
 (define (amazon-touch! asin)
-  (let ((row (amazon-row-by-asin asin)))
-    (when (and row (buffer-exists? (amazon-detail-buffer row)))
-      (amazon-render-detail! (amazon-detail-buffer row) row)))
-  (list-refresh! *amazon-buffer*))
+  (for-each amazon--redraw! (list *amazon-buffer* *amazon-cart-buffer*))
+  (for-each (lambda (b)
+              (let ((row (buffer-local b 'site-app-row)))
+                (when (and row (equal? (plist-get row 'asin) asin))
+                  (amazon-detail-refresh! b))))
+            (amazon--pages)))
 
 (define (amazon-save-toggle! asin)
   (buffer-set-local! *amazon-buffer* 'amazon-saved
@@ -374,53 +385,17 @@
                            (cons (list asin text) rest))))
   (amazon-touch! asin))
 
-(define (amazon-tab buf) (or (buffer-local buf 'amazon-tab) "overview"))
-
-(define (amazon-tab-set! buf tab)
-  (buffer-set-local! buf 'amazon-tab tab)
-  (let ((row (buffer-local buf 'amazon-row)))
-    (when row
-      ;; asking for a tab is asking for the page behind it
-      (amazon-detail-load! buf row)
-      (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
-
-;; the tab bar's number hints are real keys: 1, 2 and 3 switch the tab
-;; without the mouse; the click handler takes the same ids
-(define (amazon-tab-here! tab)
-  (let ((buf (current-buffer)))
-    (if (buffer-local buf 'amazon-row)
-        (begin (amazon-tab-set! buf tab)
-               (message (string-append "Showing " tab)))
-        (message "Not a product page"))))
-
-(define-command "amazon-tab-overview" "Show the product's Overview tab"
-  (lambda () (amazon-tab-here! "overview")))
-
-(define-command "amazon-tab-specs" "Show the product's Specs tab"
-  (lambda () (amazon-tab-here! "specs")))
-
-(define-command "amazon-tab-reviews" "Show the product's Reviews tab"
-  (lambda () (amazon-tab-here! "reviews")))
 
 (define-command "amazon-reload-detail" "Read this product's page again"
   (lambda ()
     (let* ((buf (current-buffer))
-           (row (buffer-local buf 'amazon-row)))
+           (row (buffer-local buf 'site-app-row)))
       (if row
           (begin (amazon-detail-reload! buf row)
                  (amazon-detail-refresh! buf)
                  (message "Reading the product page again"))
           (message "Not a product page")))))
 
-(define (amazon--tab-entry buf id label key)
-  (list id label (equal? (amazon-tab buf) id) key))
-
-(define (amazon--tabs-block buf)
-  (component 'ui/tabs
-    (list 'class "amazon-tabs"
-          'tabs (list (amazon--tab-entry buf "overview" "Overview" "1")
-                      (amazon--tab-entry buf "specs" "Specs" "2")
-                      (amazon--tab-entry buf "reviews" "Reviews" "3")))))
 
 ;; the search page gives one photo per row; block mode draws it as an <img>,
 ;; so the detail page keeps the product picture the listing page dropped
@@ -450,7 +425,7 @@
          (note (amazon-note asin)))
     (component 'ui/actions
       (list 'actions
-            (list (list "amazon-cart" (if in? "✓ in cart · add another" "Add to cart") "c")
+            (list (list "amazon-add-to-cart" (if in? "✓ in cart · add another" "Add to cart") "c")
                   (list "amazon-save" (if kept? "★ saved" "Save") "m")
                   (list "amazon-note" (if note "Edit note" "Add a note") "N")
                   (list "amazon-open" "Open in browser" "o"))))))
@@ -539,9 +514,8 @@
 (define (amazon-detail-state buf) (or (buffer-local buf 'amazon-detail-state) 'cold))
 
 (define (amazon-detail-refresh! buf)
-  (let ((row (and (buffer-exists? buf) (buffer-local buf 'amazon-row))))
-    (when row
-      (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))
+  (when (and (buffer-exists? buf) (buffer-local buf 'site-app-data))
+    (site-app-draw! buf)))
 
 (define (amazon-detail-load! buf row &optional fresh?)
   ;; a fetch: /dp/ arrives whole, and a tab only if that answer is thin. A
@@ -765,53 +739,40 @@
                   (list 'text "The product page prints no reviews for this one.")))
           '()))))
 
-(define (amazon--detail-blocks buf row)
-  (let ((tab (amazon-tab buf)))
-    (append
-      (list (amazon--head-block row buf)
-            (amazon--tabs-block buf))
-      (cond ((equal? tab "specs") (amazon--specs-blocks buf row))
-            ((equal? tab "reviews") (amazon--reviews-blocks buf row))
-            (else (amazon--overview-blocks buf row))))))
+(define (amazon--claimed b blocks)
+  ;; the page's blocks as site-app parts: a line of text each, and a stop for
+  ;; M-<down> where the block has a name
+  (map (lambda (blk)
+         (let* ((name (plist-get blk 'imenu-name))
+                (n (b 'line (or name "") #f)))
+           (site-app-claim blk n n name)))
+       (filter pair? blocks)))
+
+(define (amazon--tab id label blocks)
+  ;; a tab of a product's page, drawn from the row and the product page: the
+  ;; hero over it, then the tab's own parts
+  (list 'id id 'label label 'from '()
+        'draw (lambda (buf b)
+                (let ((row (buffer-local buf 'site-app-row)))
+                  (amazon--claimed b (cons (append (amazon--head-block row buf) (list 'imenu-name "Product"))
+                                           (blocks buf row)))))))
+
+(define *amazon-tabs*
+  (list (amazon--tab "overview" "Overview" (lambda (buf row) (amazon--overview-blocks buf row)))
+        (amazon--tab "specs" "Specs" (lambda (buf row) (amazon--specs-blocks buf row)))
+        (amazon--tab "reviews" "Reviews" (lambda (buf row) (amazon--reviews-blocks buf row)))))
 
 (define (amz-page-title row)
   (let ((title (amz-clip (string-trim (amz-replace (or (plist-get row 'title) "") "*" "")) 48)))
     (if (equal? title "") (string-append "amazon:" (plist-get row 'asin)) title)))
 
-;; two products can share the first 48 characters of a title; the second one
-;; keeps its ASIN, so no page is ever shown under another product's name
-(define (amazon-detail-buffer row)
-  (let* ((base (string-append "*" (amz-page-title row) "*"))
-         (mine (plist-get row 'asin))
-         (held (let ((r (and (buffer-exists? base) (buffer-local base 'amazon-row))))
-                 (and r (plist-get r 'asin)))))
-    (if (or (not held) (equal? held mine))
-        base
-        (string-append "*" (amz-page-title row) " " mine "*"))))
+(define (amazon-detail-buffer row) (site-app-detail-buffer 'amazon row))
 
-(define (amazon-render-detail! buf row)
-  (unless (buffer-exists? buf) (buffer-create buf))
-  (buffer-set-read-only! buf #f)
-  (let ((old (buffer-text buf)) (title (plist-get row 'title)))
-    (if (> (string-length old) 0)
-        (buffer-replace! buf old title)
-        (buffer-append! buf title)))
-  (buffer-set-local! buf 'amazon-row row)
-  (buffer-set-local! buf 'amazon-title (amz-page-title row))
-  (unless (buffer-derived-mode? buf "amazon-detail-mode")
-    (with-current-buffer buf (lambda () (set-mode! "amazon-detail-mode"))))
-  (when (minor-mode-on? buf "preview-mode") (disable-minor-mode! buf "preview-mode"))
-  (buffer-set-local! buf 'render-mode "blocks")
-  (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row))
-  (buffer-set-read-only! buf #t)
-  buf)
 
 (define (amazon-show-detail! row)
+  ;; a line of the cart opens as one, anything else as a product of the results
   (when row
-    (let ((buf (amazon-render-detail! (amazon-detail-buffer row) row)))
-      (amazon-join-group! buf)
-      (display-buffer-detail! buf *amazon-buffer*)
-      buf)))
+    (site-app-show-detail! (if (plist-get row 'qty) *amazon-cart-buffer* *amazon-buffer*) row)))
 
 ;;; --- the cart ------------------------------------------------------------
 ;;; The add goes through the reader's own browser tab, so it lands in the
@@ -819,7 +780,8 @@
 ;;; page, which says whether the ASIN is in it.
 
 (define (amazon-row-by-asin asin)
-  (let loop ((rs (or (buffer-local *amazon-buffer* 'amazon-rows) '())))
+  (let loop ((rs (append (or (buffer-local *amazon-buffer* 'amazon-rows) '())
+                         (or (buffer-local *amazon-cart-buffer* 'amazon-rows) '()))))
     (cond ((null? rs) #f)
           ((equal? (plist-get (car rs) 'asin) asin) (car rs))
           (else (loop (cdr rs))))))
@@ -835,8 +797,6 @@
 ;; is still arriving and the load wipes the globals you just set, so the answer
 ;; never comes and the caller waits out its whole poll for nothing. That is a
 ;; readyState away, and cheaper than guessing with a timer.
-
-
 
 
 (define *amazon-reader-tab*
@@ -874,8 +834,6 @@
 ;;; own answer. The click needs seconds, not milliseconds; the caller polls.
 
 
-
-
 ;; The cart itself, in the browser. Pressing C is the reader asking to go
 ;; there, so the tab comes to the front -- this is the one place the app is
 ;; allowed to take the screen, because that is what was asked for.
@@ -888,74 +846,49 @@
 ;; them at all -- on one real cart, 4 active elements were 2 products.
 
 
-(define (amazon--in-cart-view?)
-  (and (buffer-known? *amazon-buffer*)
-       (equal? (buffer-local *amazon-buffer* 'amazon-query) "cart")))
+(define (amazon--keyed r)
+  ;; a row as the engine knows one: its key, and the page it opens on the site
+  (let ((asin (or (plist-get r 'asin) "")))
+    (plist-put (plist-put r 'key asin) 'href (string-append "/dp/" asin))))
 
-;; The cart takes the listing over, so the listing it took over is kept and
-;; C puts it back. Without this the cart is a one-way door and the only way
-;; out is running the search again.
-(define (amazon--restore-search!)
-  (let ((rows (buffer-local *amazon-buffer* 'amazon-prev-rows))
-        (q (buffer-local *amazon-buffer* 'amazon-prev-query)))
-    (if (not (and rows q))
-        (message "No search to go back to -- s starts one")
-        (begin
-          (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
-          (buffer-set-local! *amazon-buffer* 'amazon-query q)
-          (buffer-set-local! *amazon-buffer* 'amazon-page
-                             (or (buffer-local *amazon-buffer* 'amazon-prev-page) 1))
-          (buffer-set-local! *amazon-buffer* 'list-layout-cache #f)
-          (list-refresh! *amazon-buffer*)
-          (message (string-append "back to " q))))))
+(define (amazon--redraw! buf)
+  ;; the section's rows as the list draws them: the hidden ones out of the
+  ;; results unless X shows them, soonest delivery first when d asks, and the
+  ;; cells of each
+  (when (buffer-known? buf)
+    (let* ((all (or (buffer-local buf 'amazon-rows) '()))
+           (shown (if (or (amazon-showing-hidden?) (not (equal? buf *amazon-buffer*)))
+                      all
+                      (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))
+           (rows (if (equal? (buffer-local buf 'amazon-sort) 'delivery) (amz-sort-by-delivery shown) shown)))
+      (buffer-set-local! buf 'site-app-rows (map amazon--cells-of rows))
+      (buffer-set-local! buf 'list-layout-cache #f)
+      (list-refresh! buf))))
 
-(define (amazon--cart-show! rows)
-  (when (and rows (buffer-known? *amazon-buffer*))
-    (unless (amazon--in-cart-view?)
-      (buffer-set-local! *amazon-buffer* 'amazon-prev-rows
-                         (buffer-local *amazon-buffer* 'amazon-rows))
-      (buffer-set-local! *amazon-buffer* 'amazon-prev-query
-                         (buffer-local *amazon-buffer* 'amazon-query))
-      (buffer-set-local! *amazon-buffer* 'amazon-prev-page
-                         (buffer-local *amazon-buffer* 'amazon-page)))
-    (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
-    (buffer-set-local! *amazon-buffer* 'amazon-query "cart")
-    (buffer-set-local! *amazon-buffer* 'amazon-page 1)
-    (buffer-set-local! *amazon-buffer* 'amazon-more #f)
-    (buffer-set-local! *amazon-buffer* 'amazon-cart
-                       (map (lambda (r) (plist-get r 'asin)) rows))
-    (buffer-set-local! *amazon-buffer* 'list-layout-cache #f)
-    (list-refresh! *amazon-buffer*)
-    (message (string-append (number->string (length rows)) " in the cart"))))
+(define (amazon--fill! buf rows)
+  (buffer-set-local! buf 'amazon-rows (map amazon--keyed rows))
+  (amazon--redraw! buf))
 
+(define (amazon--cart-marks! rows)
+  ;; what the cart holds marks the results
+  (when (buffer-known? *amazon-buffer*)
+    (buffer-set-local! *amazon-buffer* 'amazon-cart (map (lambda (r) (plist-get r 'asin)) rows))
+    (amazon--redraw! *amazon-buffer*)))
 
+(define (amazon--filled! buf rows)
+  ;; a section the engine read: its rows keyed by ASIN; a read of the cart marks the results too
+  (amazon--fill! buf rows)
+  (when (equal? buf *amazon-cart-buffer*) (amazon--cart-marks! rows)))
 
 (define *amazon-cart-sheet* "web/parsers/amazon-cart.xsl")
 
-;; The cart in the app, parsed by the same kind of sheet the listing uses.
-;; It reads through a snapshot, so nothing of the reader's browser moves --
-;; and it names the selector the cart is finished by, because Amazon answers
-;; "complete" with an empty basket and fills it afterwards.
-(define (amazon-goto-cart!)
-  (if (amazon--in-cart-view?) (amazon--restore-search!) (amazon--cart-fetch!)))
-
-(define (amazon--cart-fetch!)
-  (message "Reading the cart...")
-  ;; a tab that waits: the cart fills itself after the load completes
-  (amazon-read! (string-append "https://" amazon-host "/gp/cart/view.html")
-    *amazon-cart-sheet* pair?
-    (lambda (rows html)
-      (if (pair? rows)
-          (amazon--cart-show! rows)
-          (message (if (string? html) "The cart read empty" "Could not read the cart"))))
-    "[id^='sc-active-'] .sc-quantity-textfield"))
-
 ;; Read the real cart and mark the listing from it.
 (define (amazon-cart-sync!)
-  ;; Marks the listing from the real cart. It reads the same sheet the cart
-  ;; view does, so it counts what the cart holds and not what the page
-  ;; mentions: a cart page also carries saved-for-later, and scraping every
-  ;; data-asin on it once marked seventeen rows for a cart holding one.
+  ;; Marks the listing from the real cart, and fills the cart's section when it
+  ;; is open. It reads the same sheet the cart section does, so it counts what
+  ;; the cart holds and not what the page mentions: a cart page also carries
+  ;; saved-for-later, and scraping every data-asin on it once marked seventeen
+  ;; rows for a cart holding one.
   (task-run!
     (lambda ()
       (let* ((html (app-await
@@ -966,10 +899,9 @@
              (out (and (string? html) (xslt-apply *amazon-cart-sheet* html))))
         (and out (json-parse out))))
     (lambda (ok rows)
-      (when (and ok rows (pair? rows) (buffer-known? *amazon-buffer*))
-        (buffer-set-local! *amazon-buffer* 'amazon-cart
-                           (map (lambda (r) (plist-get r 'asin)) rows))
-        (list-refresh! *amazon-buffer*)
+      (when (and ok rows (pair? rows))
+        (amazon--cart-marks! rows)
+        (when (buffer-known? *amazon-cart-buffer*) (amazon--fill! *amazon-cart-buffer* rows))
         (amazon-log! (string-append "cart holds " (number->string (length rows)) " items"))))
     60000))
 
@@ -1016,10 +948,7 @@
                            (cons asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
       (amazon-log! (string-append asin " added -- " text))
       (message (string-append (amazon-name-of asin) " added to the cart"))
-      (let ((row (amazon-row-by-asin asin)))
-        (when (and row (buffer-exists? (amazon-detail-buffer row)))
-          (amazon-render-detail! (amazon-detail-buffer row) row)))
-      (list-refresh! *amazon-buffer*))
+      (amazon-touch! asin))
      (signin
       (amazon-log! (string-append asin " not added -- signed out -- " text))
       (message (string-append "Sign in to " amazon-host " in your browser, then try again")))
@@ -1027,7 +956,6 @@
       (amazon-log! (string-append asin " not added -- " (if (string? answer) answer "no answer")))
       (message (string-append "The cart did not move -- " (amazon-name-of asin)
                               " was not added. See " *amazon-log*))))))
-
 
 
 (define (amazon--cart-tab)
@@ -1084,38 +1012,14 @@
   (begin (tab-open (amazon-product-url asin))
              (message (string-append "Opened " asin " in the browser"))))
 
-;; the page's own blocks, pressed in Scheme
-(add-hook! (list 'block-click 'amazon)
-  (lambda (buf id)
-    (let ((row (buffer-local buf 'amazon-row)))
-      (and row
-           (let ((asin (plist-get row 'asin)))
-             (cond ((equal? id "overview") (amazon-tab-set! buf "overview"))
-                   ((equal? id "specs") (amazon-tab-set! buf "specs"))
-                   ((equal? id "reviews") (amazon-tab-set! buf "reviews"))
-                   ((equal? id "amazon-cart") (amazon-cart-add! asin))
-                   ((equal? id "amazon-save") (amazon-save-toggle! asin))
-                   ((equal? id "amazon-note") (amazon-ask-note! asin))
-                   ((equal? id "amazon-open") (amazon-open-external! asin))
-                   (else #f))
-             #t)))))
-
-;;; --- actions, on the listing and on the page -----------------------------
-;;; The same verb under the same key in both places: the listing reads the
-;;; row at point, the page keeps its own.
-
 (define (amazon-row-here)
-  (or (buffer-local (current-buffer) 'amazon-row)
-      (list-current *amazon-buffer*)))
+  ;; the product of the page you are on, else of the row
+  (let ((buf (current-buffer)))
+    (or (buffer-local buf 'site-app-row)
+        (and (equal? (buffer-local buf 'site-app-name) 'amazon) (list-current buf)))))
 
-(define-command "amazon-detail" "Show the product on this row beside the listing"
-  (lambda ()
-    ;; opening a page is the ask that pays for reading it; a preview is not
-    (let ((row (amazon-row-here)))
-      (let ((buf (amazon-show-detail! row)))
-        (when buf (amazon-detail-load! buf row))))))
 
-(define-command "amazon-cart" "Add this product to the Amazon cart"
+(define-command "amazon-add-to-cart" "Add this product to the Amazon cart"
   (lambda () (let ((r (amazon-row-here))) (when r (amazon-cart-add! (plist-get r 'asin))))))
 
 (define-command "amazon-open" "Open this product's page in the real browser"
@@ -1153,7 +1057,7 @@
   (lambda ()
     (let ((on (not (equal? (buffer-local *amazon-buffer* 'amazon-sort) 'delivery))))
       (buffer-set-local! *amazon-buffer* 'amazon-sort (if on 'delivery 'relevance))
-      (list-refresh! *amazon-buffer*)
+      (amazon--redraw! *amazon-buffer*)
       (message (if on "Soonest delivery first" "Amazon's order")))))
 
 (define-command "amazon-hide" "Take this product out of the listing"
@@ -1168,7 +1072,7 @@
   (lambda ()
     (let ((on (not (amazon-showing-hidden?))))
       (buffer-set-local! *amazon-buffer* 'amazon-show-hidden on)
-      (list-refresh! *amazon-buffer*)
+      (amazon--redraw! *amazon-buffer*)
       (message (if on
                    (string-append (number->string (length (amazon-hidden-list))) " hidden, shown")
                    "Hidden products put away")))))
@@ -1191,46 +1095,27 @@
   ;; the sheet hands over "4.8 out of 5 stars"; a column wants "4.8"
   (car (string-split (or s "") " out of")))
 
-(define (amazon--cells buf row)
-  (let ((asin (plist-get row 'asin)))
-    (list (string-append (if (amazon-hidden? asin) "⊘" " ")
-                         (if (amazon-saved? asin) "★" " ")
-                         (if (amazon-note asin) "✎" " ")
-                         (if (amazon-in-cart? asin) "✓" " "))
-          (let* ((p (or (plist-get row 'price) ""))
-                 (p (if (string-suffix? "." p) (substring p 0 (- (string-length p) 1)) p)))
-            (if (equal? p "") "—" (string-append "₹" p)))
-          ;; the cart's basis-price carries a literal "null" in an offscreen span
-          (let ((m (or (plist-get row 'mrp) "")))
-            (list (if (string-prefix? "null" m) (substring m 4 (string-length m)) m) "dim"))
-          (list (amazon--stars (plist-get row 'rating)) "dim")
-          (list (amazon--when (plist-get row 'delivery)) "dim")
-          (amz-clip (or (plist-get row 'title) "") 80))))
+(define (amazon--cells-of row)
+  ;; the text the columns show, kept on the row: the marks, the price you pay,
+  ;; the M.R.P. (the cart's basis-price carries a literal "null" in an
+  ;; offscreen span), the stars and the day it lands
+  (let* ((asin (plist-get row 'asin))
+         (p (or (plist-get row 'price) ""))
+         (p (if (string-suffix? "." p) (substring p 0 (- (string-length p) 1)) p))
+         (m (or (plist-get row 'mrp) ""))
+         (m (if (string-prefix? "null" m) (substring m 4 (string-length m)) m)))
+    (fold (lambda (r kv) (plist-put r (car kv) (cadr kv)))
+          row
+          (list (list 'marks (string-append (if (amazon-hidden? asin) "⊘" " ")
+                                            (if (amazon-saved? asin) "★" " ")
+                                            (if (amazon-note asin) "✎" " ")
+                                            (if (amazon-in-cart? asin) "✓" " ")))
+                (list 'pay (if (equal? p "") "—" (string-append "₹" p)))
+                (list 'was m)
+                (list 'stars (amazon--stars (plist-get row 'rating)))
+                (list 'lands (amazon--when (plist-get row 'delivery)))
+                (list 'name (amz-clip (or (plist-get row 'title) "") 80))))))
 
-(define (amazon--columns buf)
-  ;; widest last and unbounded: the title takes whatever the frame leaves
-  (list (list "" 4) (list "₹" 9) (list "m.r.p" 9)
-        (list "★" 5) (list "delivery" 22) (list "product" #f)))
-
-;;; A three-column app leaves the listing about 59 columns wide, which cuts the
-;;; price, delivery and asin off the right edge and packs the key hints down to
-;;; the first five. The narrow profile drops the columns that repeat on the
-;;; product page and shortens the hints so the ones worth pressing survive; ?
-;;; still shows every key.
-(define (amazon--narrow-columns buf)
-  ;; delivery earns its width even here: when a thing lands is half of why
-  ;; one row beats another, and a narrow frame is still a frame
-  (list (list "" 4) (list "₹" 9) (list "delivery" 19) (list "product" #f)))
-
-(define (amazon--narrow-cells buf row)
-  (let ((cs (amazon--cells buf row)))
-    (list (list-ref cs 0) (list-ref cs 1) (list-ref cs 4)
-          (amz-clip (or (plist-get row 'title) "") 40))))
-
-(define (amazon--narrow-footer buf)
-  (list (list "RET" "open") (list "c" "cart") (list "m" "save")
-        (list "N" "note") (list "n/p" "pg") (list "x" "hide")
-        (list "d" "sort") (list "o" "web") (list "q" "quit")))
 
 ;; ----------------------------------------------------------------------
 ;; Drawing: the listing and the page as cards, the way the Spotify app
@@ -1478,9 +1363,9 @@
       20000)))
 
 (define (amazon--images-arrived! ignored)
-  (when (buffer-exists? *amazon-buffer*) (list-refresh! *amazon-buffer*))
-  (for-each amazon-detail-refresh!
-            (filter (lambda (b) (buffer-derived-mode? b "amazon-detail-mode")) (buffer-list))))
+  (for-each (lambda (buf) (when (buffer-exists? buf) (list-refresh! buf)))
+            (list *amazon-buffer* *amazon-cart-buffer*))
+  (for-each amazon-detail-refresh! (amazon--pages)))
 
 (define (amazon--card buf row)
   (let ((asin (plist-get row 'asin)))
@@ -1496,147 +1381,186 @@
             'note? (and (amazon-note asin) #t) 'hidden? (amazon-hidden? asin)
             'sponsored? (and (plist-get row 'sponsored) #t)))))
 
-(define (amazon--list-head buf head)
-  ;; the search bar, then the shelf: what you searched and where you are in it
-  (let ((meta (let ((f (list-opt buf 'meta))) (if f (f buf) "")))
-        (n (let ((f (list-opt buf 'total))) (if f (f buf) 0)))
-        (cart? (amazon--in-cart-view?))
-        (query (or (buffer-local buf 'amazon-query) "")))
-    (list (component 'amazon/search-bar (list 'query (if cart? "" query)))
-          (list 'tag "div" 'class "amz-shelf"
-                'children (list (amz--text "amz-shelf-title" (if cart? "Your cart" (if (equal? query "") "Amazon" query)))
-                                (amz--text "amz-shelf-meta" (string-append (number->string n) " products · " meta)))))))
+(define (amazon--meta buf)
+  ;; where you are in the search: the store, the page, the order, what is hidden
+  (string-append amazon-host
+                 (let ((p (or (buffer-local buf 'amazon-page) 1)))
+                   (if (> p 1) (string-append " · page " (number->string p)) ""))
+                 (if (buffer-local buf 'amazon-more) "" " · last page")
+                 (if (equal? (buffer-local buf 'amazon-sort) 'delivery) " · soonest delivery first" "")
+                 (let ((n (length (amazon-hidden-list))))
+                   (cond ((= n 0) "")
+                         ((amazon-showing-hidden?) (string-append " · showing " (number->string n) " hidden"))
+                         (else (string-append " · " (number->string n) " hidden"))))))
 
-;; a click on the search bar is amazon:COMMAND
+(define (amazon--list-head buf)
+  ;; the search bar, then the shelf: what you searched, or the cart, and where you are in it
+  (let* ((cart? (equal? buf *amazon-cart-buffer*))
+         (query (or (buffer-local *amazon-buffer* 'amazon-query) ""))
+         (n (length (site-app-rows buf))))
+    (list (component 'amazon/search-bar (list 'query (if cart? "" query) 'click "amazon:amazon-search" 'key "/"))
+          (list 'tag "div" 'class "amz-shelf"
+                'children (list (amz--text "amz-shelf-title" (cond (cart? "Your cart") ((equal? query "") "Amazon") (else query)))
+                                (amz--text "amz-shelf-meta"
+                                           (if cart?
+                                               (string-append (number->string n) " in the cart · " amazon-host)
+                                               (string-append (number->string n) " products · " (amazon--meta buf)))))))))
+
+;; a click on the search bar is amazon:COMMAND; a button on a page is the
+;; product's own verb. One hook: a second of the same name replaces the first
 (add-hook! (list 'block-click 'amazon)
   (lambda (buf id)
-    (if (and (string? id) (string-prefix? "amazon:" id))
-        (begin (run-command (substring id 7 (string-length id))) #t)
-        #f)))
+    (let ((row (and (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-row))))
+      (cond ((not (string? id)) #f)
+            ((string-prefix? "amazon:" id) (run-command (substring id 7 (string-length id))) #t)
+            ((not row) #f)
+            ((equal? id "amazon-add-to-cart") (amazon-cart-add! (plist-get row 'asin)) #t)
+            ((equal? id "amazon-save") (amazon-save-toggle! (plist-get row 'asin)) #t)
+            ((equal? id "amazon-note") (amazon-ask-note! (plist-get row 'asin)) #t)
+            ((equal? id "amazon-open") (amazon-open-external! (plist-get row 'asin)) #t)
+            (else #f)))))
 
-(define-list-mode! "amazon-mode"
-  (list 'doc "Amazon search results as the signed-in account sees them, with the retail price beside the one you pay. The delivery column is the day it lands, and d orders the listing by the soonest. Moving shows that product as a page beside the listing, and C-` there flips through the pages you have opened. RET shows it again, m saves it and marks the row, N writes a note on it, n and p walk to the next and previous page of results, x takes it out of the listing and X shows the hidden ones again marked ⊘, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, s runs another search, g reads this page again, q quits."
-        'buffer *amazon-buffer*
-        'transient #f
-        'noun "product"
-        'rows (lambda (buf)
-                (let* ((all (or (buffer-local buf 'amazon-rows) '()))
-                       (rows (if (amazon-showing-hidden?)
-                                 all
-                                 (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all))))
-                  (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
-                      (amz-sort-by-delivery rows)
-                      rows)))
-        'key (lambda (buf row) (plist-get row 'asin))
-        ;; rows and head as blocks: each product a card, the search bar over them
-        'collection "c-list"
-        'composml amazon--card
-        'composml-head amazon--list-head
-        'columns amazon--columns
-        'cells amazon--cells
-        'layouts (list (list 'name 'narrow
-                             'max-cols 74
-                             'columns amazon--narrow-columns
-                             'cells amazon--narrow-cells
-                             'footer amazon--narrow-footer)
-                       (list 'name 'wide
-                             'default #t
-                             'columns amazon--columns
-                             'cells amazon--cells))
-        'title (lambda (buf) (or (buffer-local buf 'amazon-query) "Amazon"))
-        'meta (lambda (buf)
-                (string-append amazon-host
-                               (let ((p (or (buffer-local buf 'amazon-page) 1)))
-                                 (if (> p 1) (string-append " · page " (number->string p)) ""))
-                               (if (buffer-local buf 'amazon-more) "" " · last page")
-                               (if (equal? (buffer-local buf 'amazon-sort) 'delivery)
-                                   " · soonest delivery first"
-                                   "")
-                               (let ((n (length (amazon-hidden-list))))
-                                 (cond ((= n 0) "")
-                                       ((amazon-showing-hidden?)
-                                        (string-append " · showing " (number->string n) " hidden"))
-                                       (else (string-append " · " (number->string n) " hidden"))))))
-        'total (lambda (buf)
-                 (let ((all (or (buffer-local buf 'amazon-rows) '())))
-                   (if (amazon-showing-hidden?)
-                       (length all)
-                       (length (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))))
-        'footer (lambda (buf) (list (list "RET" "open") (list "c" "cart") (list "m" "save")
-                                    (list "n/p" "page") (list "N" "note") (list "x" "hide")
-                                    (list "C" "cart") (list "d" "sort") (list "o" "browser")
-                                    (list "X" (if (amazon-showing-hidden?) "hide hidden" "show hidden"))
-                                    (list "s" "search") (list "q" "quit")))
-        'preview (lambda (buf row)
-                   ;; the page draws from the row at once; its specs and reviews come
-                   ;; from the cache, or are read once you have rested on the row
-                   (let ((page (amazon-show-detail! row)))
-                     (when page
-                       (if (amazon--cached *amazon-details* (plist-get row 'asin))
-                           (amazon-detail-load! page row)
-                           (debounce! 'amazon-prefetch 600
-                             (lambda (p) (when (buffer-exists? (car p)) (amazon-detail-load! (car p) (cadr p))))
-                             (list page row))))))
-        'keys (list (list "RET" "amazon-detail")
-                    (list "m" "amazon-save")
-                    (list "N" "amazon-note")
-                    (list "n" "amazon-next-page")
-                    (list "p" "amazon-prev-page")
-                    (list "x" "amazon-hide")
-                    (list "X" "amazon-hidden")
-                    (list "d" "amazon-sort-delivery")
-                    (list "c" "amazon-cart")
-                    (list "o" "amazon-open")
-                    (list "w" "amazon-copy-link")
-                    (list "s" "amazon-search")
-                    (list "g" "amazon-refresh")
-                    (list "q" "quit-window"))))
 
-;;; --- the page's mode -----------------------------------------------------
-;;; detail-mode arrives with the buffer (display-buffer-detail!) and brings
-;;; C-`, C-M-` and M-RET. This mode adds the app's own verbs, so the page
-;;; answers the same keys as the row it came from.
+;;; --- the app -------------------------------------------------------------
+;;; Amazon is a site-app. Its search results and its cart are each an index
+;;; of its own: a section with a mode of its own (amazon-results-mode,
+;;; amazon-cart-mode) on amazon-mode, the one list mode of every index. A row
+;;; opens a page of its own kind (amazon-product-mode, amazon-cart-item-mode),
+;;; each derived from amazon-detail-mode. The engine draws the sections, the
+;;; tabs and the keys; this file reads the store and draws the pages' tabs.
 
-(define-mode "amazon-detail-mode"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
-      (buffer-set-local! buf 'render-mode "blocks")
-      (let ((row (buffer-local buf 'amazon-row)))
-        (when row
-          (buffer-set-local! buf 'render-blocks (amazon--detail-blocks buf row)))))))
+(define (amazon--section! id)
+  ;; a section's buffer, made and moded as site-app-open! makes it, but not shown or read
+  (let ((buf (site-app-page-buffer 'amazon id)))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (site-app-join-group! buf 'amazon)
+    (buffer-set-local! buf 'site-app-spec (site-app-spec 'amazon))
+    (buffer-set-local! buf 'site-app-page id)
+    (site-app-index-enter! buf 'amazon id)))
+
+(define (amazon--navigate! url wait k)
+  ;; the engine reads a section through here: a fetch, and a tab when that is thin
+  (amazon-read! url (if (amz-has? url "/gp/cart") *amazon-cart-sheet* *amazon-sheet*) pair?
+    (lambda (data html) (k #f (and (string? html) (list 'html html))))
+    wait))
+
+(define (amazon--detail-name row)
+  ;; two products can share the first 48 characters of a title; the second one
+  ;; takes its ASIN too
+  (let* ((title (amz-page-title row))
+         (name (string-append "*amazon: " title "*"))
+         (held (and (buffer-exists? name) (buffer-local name 'site-app-row)))
+         (theirs (and held (plist-get held 'asin))))
+    (if (or (not theirs) (equal? theirs (plist-get row 'asin)))
+        title
+        (string-append title " " (plist-get row 'asin)))))
+
+(define (amazon--page-drawn! buf)
+  ;; a page draws from its row at once; the product page behind it comes from
+  ;; the cache, or is read once you have rested on the row. The engine names
+  ;; the page's list only after this, and the page finds its tabs through it
+  (let ((row (buffer-local buf 'site-app-row)))
+    (when (and row (not (buffer-local buf 'site-app-list)) (plist-get row 'detail-page))
+      (buffer-set-local! buf 'site-app-list (site-app-page-buffer 'amazon (plist-get row 'detail-page))))
+    (unless (buffer-local buf 'site-app-data)
+      ;; no title of the site's: the hero under the tabs carries the product's
+      (buffer-set-local! buf 'site-app-data (list 'title "" 'tabs '()))
+      (site-app-draw! buf))
+    (when row
+      (if (amazon--cached *amazon-details* (plist-get row 'asin))
+          (amazon-detail-load! buf row)
+          (debounce! 'amazon-prefetch 600
+            (lambda (p) (when (buffer-exists? (car p)) (amazon-detail-load! (car p) (cadr p))))
+            (list buf row))))))
+
+;; the verbs a product has, on its page and on its row
+(define *amazon-page-keys*
+  (list (list "c" "amazon-add-to-cart" "add to cart")
+        (list "m" "amazon-save" "save")
+        (list "N" "amazon-note" "note")
+        (list "w" "amazon-copy-link" "link")))
+
+(define (amazon--section id label key path wait kind columns)
+  (list 'id id 'label label 'key key 'path path
+        'live #t 'wait wait
+        'after-fill (lambda (buf rows) (amazon--filled! buf rows))
+        'row (lambda (buf row) (amazon--card buf row))
+        'detail-kind kind
+        'detail-composed *amazon-tabs*
+        'detail-count-from-one #t
+        'detail-extra-keys *amazon-page-keys*
+        'columns columns))
+
+(define *amazon-spec*
+  (list 'name 'amazon
+        'title "Amazon"
+        'base-url (string-append "https://" amazon-host)
+        'home "/"
+        'home-page 'results
+        ;; every index is amazon-mode, each section a minor mode on it
+        'index-mode "amazon-mode"
+        ;; every page is amazon-detail-mode, each kind a mode derived from it
+        'detail-mode "amazon-detail-mode"
+        'own-group #t
+        ;; a tab already on the store is the app's tab
+        'adopt #t
+        'navigate (lambda (name url wait k) (amazon--navigate! url wait k))
+        'drawn! (lambda (buf) (amazon--page-drawn! buf))
+        'detail-name (lambda (row) (amazon--detail-name row))
+        'list-head (lambda (buf) (amazon--list-head buf))
+        'list-keys (append *amazon-page-keys* (list (list "C" "amazon-cart" "cart")))
+        'pages
+        (list
+          (amazon--section 'results "Results" "1"
+            (lambda () (amazon-page-url (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query) (amazon-page)))
+            #f "amazon-product-mode"
+            (list (list 'label "" 'width 4 'field 'marks)
+                  (list 'label "₹" 'width 9 'field 'pay)
+                  (list 'label "m.r.p" 'width 9 'field 'was 'face "dim")
+                  (list 'label "★" 'width 5 'field 'stars 'face "dim")
+                  (list 'label "delivery" 'width 22 'field 'lands 'face "dim")
+                  (list 'label "product" 'width #f 'field 'name)))
+          (amazon--section 'cart "Cart" "2"
+            (lambda () (string-append "https://" amazon-host "/gp/cart/view.html"))
+            ;; the cart fills itself after the load completes
+            "[id^='sc-active-'] .sc-quantity-textfield" "amazon-cart-item-mode"
+            (list (list 'label "" 'width 4 'field 'marks)
+                  (list 'label "qty" 'width 4 'field 'qty)
+                  (list 'label "₹" 'width 9 'field 'pay)
+                  (list 'label "m.r.p" 'width 9 'field 'was 'face "dim")
+                  (list 'label "product" 'width #f 'field 'name))))))
+
+(define-site-app *amazon-spec*)
+
+;; each section's own keys, on top of amazon-mode's
+(minor-mode-keys! "amazon-results-mode"
+  (list (list "/" "amazon-search") (list "n" "amazon-next-page") (list "p" "amazon-prev-page")
+        (list "x" "amazon-hide") (list "X" "amazon-hidden") (list "d" "amazon-sort-delivery")
+        (list "g" "amazon-refresh")))
+(minor-mode-keys! "amazon-cart-mode"
+  (list (list "/" "amazon-search") (list "C" "amazon-results")))
+
+;; a page reads its product again; its other keys are its kind's
+(mode-keys! "amazon-detail-mode" (list (list "g" "amazon-reload-detail")))
+
+(mode-doc! "amazon-mode"
+  "Amazon as the signed-in account sees it, with the retail price beside the one you pay. Every index is this mode: the search results and the cart are each a section with a mode of its own on it. Moving shows that product as a page beside the list, and C-` there flips through the pages you have opened. M-1 shows the results and M-2 the cart, s picks one; RET shows the page again, c adds the product to the cart, m saves it and marks the row, N writes a note on it, w copies its link, C opens the cart, digits switch the tabs of the page beside the list, M-↑ and M-↓ walk its parts, q quits.")
+(mode-doc! "amazon-results-mode"
+  "The results of one search. / runs another, n and p walk to the next and previous page of results, d orders them by the soonest delivery, x takes a product out of the list and X shows the hidden ones again marked ⊘, g reads this page again.")
+(mode-doc! "amazon-cart-mode"
+  "What the cart holds: the lines you are buying, not the ones saved for later. g reads the cart again, C goes back to the results, / searches.")
 (mode-doc! "amazon-detail-mode"
-  "One product, as its own page. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; m saves it and marks it in the listing, N writes a note that stays on this page, n and p walk the listing's pages, c adds it to the cart and C opens the cart itself, o opens it in the real browser, w copies its link, g reads the listing again, q puts it away. C-` walks the other pages opened from this listing, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
-(mode-keys! "amazon-detail-mode"
-  (list (list "1" "amazon-tab-overview")
-        (list "2" "amazon-tab-specs")
-        (list "3" "amazon-tab-reviews")
-        (list "c" "amazon-cart")
-        (list "m" "amazon-save")
-        (list "N" "amazon-note")
-        (list "n" "amazon-next-page")
-        (list "p" "amazon-prev-page")
-        (list "o" "amazon-open")
-        (list "w" "amazon-copy-link")
-        (list "g" "amazon-reload-detail")
-        (list "C" "amazon-goto-cart")
-        (list "q" "quit-window")))
-
-(define-command "amazon-goto-cart" "Show the cart in the listing; again goes back to the search"
-  (lambda () (amazon-goto-cart!)))
-
-(mode-keys! "amazon-mode" (list (list "C" "amazon-goto-cart")))
-
-;; The listing and the page are one surface: a key the listing does not claim
-;; runs in the page beside it, so 1, 2 and 3 turn the product's tabs from the
-;; row that opened it and the focus never leaves the list.
-(when (boundp 'app-detail-keys!)
-  (app-detail-keys! "amazon-mode" "amazon-detail-mode"))
+  "One Amazon page beside its list. 1, 2 and 3 switch the Overview, Specs and Reviews tabs; c adds the product to the cart, m saves it and marks it in the list, N writes a note that stays on this page, w copies its link, o opens it on the site, g reads the product page again, q puts it away. C-` walks the other pages opened from the list, C-M-` walks back, and M-RET keeps this one so the next row opens a fresh page.")
+(mode-doc! "amazon-product-mode"
+  "A product from the search results, as its own page. Its keys are amazon-detail-mode's.")
+(mode-doc! "amazon-cart-item-mode"
+  "A line of the cart, as its own page. c adds one more of it; the rest of its keys are amazon-detail-mode's.")
 
 ;; a kept page takes the product's name, not a number
 (detail-name! "amazon-detail-mode"
-  (lambda (buf) (string-append "*" (or (buffer-local buf 'amazon-title) "amazon") "*")))
+  (lambda (buf)
+    (let ((row (buffer-local buf 'site-app-row)))
+      (string-append "*" (if row (amz-page-title row) "amazon") "*"))))
 
 ;; the listing and every page it opens wear the Amazon mark
 (mode-icon! "amazon-mode" "")
@@ -1649,8 +1573,8 @@
 ;;; stacks them on a narrow one. No split here decides a width.
 
 (define (amazon-current-detail)
-  (let ((row (list-current *amazon-buffer*)))
-    (and row (amazon-detail-buffer row))))
+  (let ((row (and (buffer-exists? *amazon-buffer*) (list-current *amazon-buffer*))))
+    (and row (site-app-detail-buffer 'amazon row))))
 
 ;;; The third column is whichever product page is already on screen -- the one
 ;;; you are reading keeps its place. Only when none is showing does the listing's
@@ -1659,8 +1583,9 @@
 (define (amazon--detail-pane)
   (let ((shown (let loop ((ws (window-list)))
                  (cond ((null? ws) #f)
-                       ((and (not (equal? (car (cdr (car ws))) *amazon-buffer*))
-                             (buffer-local (car (cdr (car ws))) 'amazon-row))
+                       ((let ((b (car (cdr (car ws)))))
+                          (and (equal? (buffer-local b 'site-app-name) 'amazon)
+                               (buffer-local b 'site-app-row)))
                         (car (cdr (car ws))))
                        (else (loop (cdr ws)))))))
     (or shown
@@ -1670,15 +1595,21 @@
 (define (amazon-layout!)
   (let* ((id (amazon-home-group!))
          (chat (and id (boundp 'group-chat) (group-chat id)))
+         ;; the section you are in leads: the results, or the cart
+         (here (window-buffer (active-window)))
+         (index (if (and (equal? (buffer-local here 'site-app-name) 'amazon)
+                         (not (buffer-local here 'site-app-row)))
+                    here
+                    *amazon-buffer*))
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
-                        (list *amazon-buffer* (amazon--detail-pane) chat))))
+                        (list index (amazon--detail-pane) chat))))
     ;; three columns: the app names the layout it wants, so the panes do not
     ;; depend on what the frame happened to hold. The listing leads because tile-windows!
     ;; clears the frame and fills from the selected window outward: the first
     ;; buffer lands in the pane you were already in and keeps the focus. Lead
     ;; with the chat and the app opens beside you instead of under your hands.
     (when (pair? (cdr panes)) (tile-windows! 'columns panes))
-    (let ((home (window-showing *amazon-buffer*)))
+    (let ((home (window-showing index)))
       (when home (select-window! home)))
     panes))
 
@@ -1691,53 +1622,51 @@
 ;;; the mode, the layout; paging with n and p only swaps the rows underneath.
 (define (amazon-open-page! query page first?)
   (when first? (frame-tab! (amazon-home-group!)))
-  (unless (buffer-exists? *amazon-buffer*) (buffer-create *amazon-buffer*))
-  (amazon-join-group! *amazon-buffer*)
-  (buffer-set-local! *amazon-buffer* 'amazon-query query)
-  (let* ((hit (amazon--cached *amazon-searches* (amazon--search-key query page)))
-         (here? (lambda () (and (equal? (buffer-local *amazon-buffer* 'amazon-query) query)
-                                (equal? (amazon-page) page))))
-         (fill! (lambda (rows next)
-                  (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
-                  (buffer-set-local! *amazon-buffer* 'amazon-page page)
-                  (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
-                  (unless (buffer-derived-mode? *amazon-buffer* "amazon-mode")
-                    (with-current-buffer *amazon-buffer* (lambda () (set-mode! "amazon-mode"))))
-                  (list-refresh! *amazon-buffer*)
-                  ;; mark the rows the cart already holds, not just the ones this
-                  ;; session put there. The cart is a tab read, so once in a while
-                  (let ((last (or (buffer-local *amazon-buffer* 'amazon-cart-read) 0)))
-                    (when (or first? (> (- (current-time) last) 300))
-                      (buffer-set-local! *amazon-buffer* 'amazon-cart-read (current-time))
-                      (amazon-cart-sync!)))
-                  (when first? (switch-to-buffer! *amazon-buffer*))
-                  (amazon-show-detail! (list-current *amazon-buffer*))
-                  (when first?
-                    (amazon-layout!)
-                    (let ((id (amazon-home-group!))) (when id (group-layout-save! id))))
-                  (message (string-append (number->string (length rows))
-                                          " results for " query
-                                          " · page " (number->string page))))))
-    ;; what this search found last time draws now; the site is read behind it
-    (if hit
-        (fill! (plist-get hit 'rows) (plist-get hit 'more))
-        (message (string-append "Amazon: " query
-                                (if (> page 1) (string-append " page " (number->string page)) "")
-                                "...")))
-    (amazon-fetch-page! query page
-      (lambda (rows next)
-        (cond ((pair? rows)
-               (amazon--search-keep! query page rows next)
-               (cond ((not hit) (fill! rows next))
-                     ((and (here?) (not (equal? rows (plist-get hit 'rows))))
-                      (buffer-set-local! *amazon-buffer* 'amazon-rows rows)
-                      (buffer-set-local! *amazon-buffer* 'amazon-more (and next #t))
-                      (list-refresh! *amazon-buffer*)))
-               (when next (amazon--prefetch-page! query (+ page 1))))
-              (hit #f)
-              (else (message (if rows
-                                 (string-append "No results on page " (number->string page))
-                                 "Amazon did not answer, try again"))))))))
+  (let ((buf (amazon--section! 'results)))
+    (buffer-set-local! buf 'amazon-query query)
+    (let* ((hit (amazon--cached *amazon-searches* (amazon--search-key query page)))
+           (here? (lambda () (and (equal? (buffer-local buf 'amazon-query) query)
+                                  (equal? (amazon-page) page))))
+           (fill! (lambda (rows next)
+                    (buffer-set-local! buf 'amazon-page page)
+                    (buffer-set-local! buf 'amazon-more (and next #t))
+                    (amazon--fill! buf rows)
+                    ;; mark the rows the cart already holds, not just the ones this
+                    ;; session put there. The cart is a tab read, so once in a while
+                    (let ((last (or (buffer-local buf 'amazon-cart-read) 0)))
+                      (when (or first? (> (- (current-time) last) 300))
+                        (buffer-set-local! buf 'amazon-cart-read (current-time))
+                        (amazon-cart-sync!)))
+                    (when first? (amazon--show! buf))
+                    (message (string-append (number->string (length rows))
+                                            " results for " query
+                                            " · page " (number->string page))))))
+      ;; what this search found last time draws now; the site is read behind it
+      (if hit
+          (fill! (plist-get hit 'rows) (plist-get hit 'more))
+          (message (string-append "Amazon: " query
+                                  (if (> page 1) (string-append " page " (number->string page)) "")
+                                  "...")))
+      (amazon-fetch-page! query page
+        (lambda (rows next)
+          (cond ((pair? rows)
+                 (amazon--search-keep! query page rows next)
+                 (cond ((not hit) (fill! rows next))
+                       ((and (here?) (not (equal? rows (plist-get hit 'rows))))
+                        (buffer-set-local! buf 'amazon-more (and next #t))
+                        (amazon--fill! buf rows)))
+                 (when next (amazon--prefetch-page! query (+ page 1))))
+                (hit #f)
+                (else (message (if rows
+                                   (string-append "No results on page " (number->string page))
+                                   "Amazon did not answer, try again")))))))))
+
+(define (amazon--show! buf)
+  ;; the results where you are, the page of their row beside them, the chat beside that
+  (switch-to-buffer! buf)
+  (site-app-show-detail! buf (list-current buf))
+  (amazon-layout!)
+  (let ((id (amazon-home-group!))) (when id (group-layout-save! id))))
 
 ;;;###autoload
 (define-command "amazon" "Open the Amazon app"

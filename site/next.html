@@ -15,7 +15,6 @@
 <link href='https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;1,300;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap' rel='stylesheet'>
 <link rel='preload' as='image' href='images/compos-musical-waves-hero.png'>
 <link rel='stylesheet' href='next.css'>
-<link rel='stylesheet' href='hero-options.css'>
 <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
@@ -56,10 +55,6 @@
 </section>
 
 
-<div class='wrap hero-comparison' aria-label='Musical hero image options'>
-  <figure><img src='images/compos-musical-hero.png' width='1672' height='941' alt='A continuous melody with accompanying musical voices arranged as a shared workspace.'><figcaption>1. Musical score</figcaption></figure>
-  <figure><img src='images/compos-musical-waves-hero.png' width='1672' height='941' alt='Flowing musical staves carry a continuous melody with accompanying voices in broad waves.'><figcaption>2. Musical waves</figcaption></figure>
-</div>
 <div class='wrap'>
 
 <section class='rule' id='how'>
@@ -156,6 +151,7 @@
     <button role='tab' id='tab-fire' aria-controls='pl-fire' aria-selected='false' tabindex='-1'>for the bad days</button>
     <button role='tab' id='tab-love' aria-controls='pl-love' aria-selected='false' tabindex='-1'>for doing what you love</button>
   </div>
+  <div class='slides'>
   <figure class='plate on' id='pl-work' role='tabpanel' aria-labelledby='tab-work'>
     <img src='images/smartbrew-frame.webp' width='2560' height='1294' loading='lazy' alt='Compos with a sales pipeline list, one lead in detail, and an agent chat that fixes a user setting in production.'>
     <figcaption><b>A CRM that fits one team.</b><span>The pipeline on the left, the lead in the middle, the agent on the right. The agent sees what you see, so 'why can't this user save?' is the whole question.</span></figcaption>
@@ -168,6 +164,7 @@
     <img src='images/compos-music.webp' width='2560' height='1294' loading='lazy' alt='Compos with Spotify, the album page and an agent chat that recommends similar records.'>
     <figcaption><b>For doing what you love.</b><span>Your music, the story of the album, and an agent that knows Steve Reich and Fela Kuti have more in common than it seems.</span></figcaption>
   </figure>
+  </div>
 </section>
 
 <section class='rule' id='buffers'>
@@ -355,6 +352,6 @@
   </div>
 </footer>
 
-<script src='next.js' defer></script>
+<script src='next.js?v=gallery-refresh-1' defer></script>
 </body>
 </html>

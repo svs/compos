@@ -168,8 +168,17 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(46px, 5.8vw, 88px); li
 .plate figcaption { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 32px; margin-top: 22px; }
 .plate figcaption b { font-weight: 300; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: -.02em; }
 .plate figcaption span { font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 56ch; }
-.js .gal .plate:not(.on) { display: none; }
-.js .gal .plate.on { animation: rise .5s ease-out both; }
+.slides { display: grid; }
+.js .slides { position: relative; overflow-x: clip; touch-action: pan-y; }
+.js .slides img { -webkit-user-drag: none; user-select: none; }
+.js .slides .plate { grid-area: 1 / 1; will-change: transform; transition: transform .9s cubic-bezier(.65, 0, .35, 1), visibility 0s; }
+.js .slides .plate:not(.on) { transform: translateX(100%); visibility: hidden; pointer-events: none; transition-delay: 0s, .9s; }
+.js .slides .plate.snap { transition: none; }
+.slide-nav { position: absolute; inset: 0 0 auto; aspect-ratio: 2560 / 1294; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; pointer-events: none; z-index: 1; }
+.slide-nav button { all: unset; pointer-events: auto; cursor: pointer; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: rgba(253, 243, 220, .9); color: var(--ink); font-family: var(--mono); font-size: 22px; line-height: 1; box-shadow: 0 8px 24px -10px rgba(0, 0, 0, .6); transition: transform .2s; }
+.slide-nav button:hover { transform: scale(1.08); }
+.slide-nav button:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+.js .slides .plate.before { transform: translateX(-100%); }
 .gal .plate + .plate { margin-top: 56px; }
 .js .gal .plate + .plate { margin-top: 0; }
 

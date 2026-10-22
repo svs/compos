@@ -10,29 +10,49 @@
   }, { threshold: 0.3 });
   document.querySelectorAll('.rule, .map, .log, .ask').forEach(function (el) { io.observe(el); });
 
+  // Reconnect when the editor replaces the gallery markup.
+  var currentGallery = null, cleanupGallery = null;
+  function initGallery() {
+    var nextGallery = document.querySelector('.gal');
+    if (nextGallery === currentGallery) return;
+    if (cleanupGallery) { cleanupGallery(); cleanupGallery = null; }
+    currentGallery = nextGallery;
+    if (!nextGallery) return;
   // Rotate the app screenshots while the gallery is being read.
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.gal-tabs [role=tab]'));
-  var gallery = document.querySelector('.gal');
-  var galleryTimer = null, galleryVisible = false, galleryHover = false;
+  var gallery = nextGallery;
+  var galleryTimer = null, galleryVisible = false;
   var galleryPaused = reduce, galleryIndex = 0;
-  var galleryPause = null;
 
   function scheduleGallery() {
     clearTimeout(galleryTimer);
     galleryTimer = null;
-    if (!gallery || tabs.length < 2 || galleryPaused || !galleryVisible ||
-        galleryHover || document.hidden || gallery.contains(document.activeElement)) return;
+    if (!gallery || tabs.length < 2 || galleryPaused || !galleryVisible || document.hidden) return;
     galleryTimer = setTimeout(function () {
-      pick(tabs[(galleryIndex + 1) % tabs.length]);
+      pick(tabs[(galleryIndex + 1) % tabs.length], false, 1);
     }, 6000);
   }
-  function pick(t, focus) {
-    galleryIndex = tabs.indexOf(t);
+  function plateOf(t) { return document.getElementById(t.getAttribute('aria-controls')); }
+  // DIR 1 slides the new plate in from the right, -1 from the left; without
+  // it the plate's place in the row decides
+  function pick(t, focus, dir) {
+    var from = galleryIndex, to = tabs.indexOf(t);
+    dir = dir || (to > from ? 1 : -1);
+    if (to !== from) {
+      // the incoming plate jumps to its side first, then slides in
+      var inc = plateOf(t), out = plateOf(tabs[from]);
+      inc.classList.add('snap');
+      inc.classList.toggle('before', dir < 0);
+      void inc.offsetWidth;
+      inc.classList.remove('snap');
+      out.classList.toggle('before', dir > 0);
+    }
+    galleryIndex = to;
     tabs.forEach(function (x) {
       var on = x === t;
       x.setAttribute('aria-selected', on ? 'true' : 'false');
       x.tabIndex = on ? 0 : -1;
-      document.getElementById(x.getAttribute('aria-controls')).classList.toggle('on', on);
+      plateOf(x).classList.toggle('on', on);
     });
     if (focus) t.focus();
     scheduleGallery();
@@ -43,33 +63,51 @@
     t.addEventListener('keydown', function (e) {
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
-        pick(tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length], true);
+        pick(tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length], true, e.key === 'ArrowRight' ? 1 : -1);
       }
     });
   });
   if (gallery && tabs.length > 1) {
-    galleryPause = document.createElement('button');
-    galleryPause.type = 'button';
-    galleryPause.textContent = galleryPaused ? 'play slideshow' : 'pause slideshow';
-    galleryPause.setAttribute('aria-pressed', galleryPaused ? 'true' : 'false');
-    gallery.querySelector('.gal-tabs').after(galleryPause);
-    galleryPause.className = 'btn btn-ghost';
-    galleryPause.addEventListener('click', function () {
-      galleryPaused = !galleryPaused;
-      galleryPause.textContent = galleryPaused ? 'play slideshow' : 'pause slideshow';
-      galleryPause.setAttribute('aria-pressed', galleryPaused ? 'true' : 'false');
-      scheduleGallery();
+    // a carousel: arrows on the picture, and a swipe either way
+    var slides = gallery.querySelector('.slides');
+    function step(d) { pick(tabs[(galleryIndex + d + tabs.length) % tabs.length], false, d); }
+    var nav = document.createElement('div');
+    nav.className = 'slide-nav';
+    [['prev', -1, '\u2039', 'previous app'], ['next', 1, '\u203a', 'next app']].forEach(function (b) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = b[0];
+      btn.textContent = b[2];
+      btn.setAttribute('aria-label', b[3]);
+      btn.addEventListener('click', function () { step(b[1]); });
+      nav.appendChild(btn);
     });
-    gallery.addEventListener('mouseenter', function () { galleryHover = true; scheduleGallery(); });
-    gallery.addEventListener('mouseleave', function () { galleryHover = false; scheduleGallery(); });
-    gallery.addEventListener('focusin', scheduleGallery);
-    gallery.addEventListener('focusout', function () { queueMicrotask(scheduleGallery); });
+    slides.appendChild(nav);
+    var downX = null;
+    slides.addEventListener('pointerdown', function (e) { downX = e.clientX; });
+    slides.addEventListener('pointerup', function (e) {
+      if (downX === null) return;
+      var dx = e.clientX - downX;
+      downX = null;
+      if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
+    });
+    slides.addEventListener('pointercancel', function () { downX = null; });
     document.addEventListener('visibilitychange', scheduleGallery);
-    new IntersectionObserver(function (es) {
+    var galleryObserver = new IntersectionObserver(function (es) {
       galleryVisible = es[0].isIntersecting;
       scheduleGallery();
-    }, { threshold: 0.3 }).observe(gallery);
+    }, { threshold: 0.1 });
+    galleryObserver.observe(slides);
+    cleanupGallery = function () {
+      clearTimeout(galleryTimer);
+      galleryObserver.disconnect();
+      document.removeEventListener('visibilitychange', scheduleGallery);
+    };
   }
+
+  }
+  initGallery();
+  new MutationObserver(initGallery).observe(document.body, { childList: true, subtree: true });
 
   // the film: five scenes, need -> ask -> work -> keep -> let go
   var film = document.getElementById('film');

@@ -93,6 +93,7 @@
     (compos-home))
   (message "title: the on-device card writer is loading"))
 
+;;;###autoload
 (define (title-ready?)
   (if (not (title--local?))
       ;; a hosted model has nothing to install and nothing to warm: it is
@@ -171,6 +172,7 @@
 
 ;;; --- the card -------------------------------------------------------------------
 
+;;;###autoload
 (define (title-card text k)
   (if (not (title-ready?))
       (k #f)

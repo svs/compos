@@ -481,21 +481,29 @@
          (indexed-mode-of (lambda (b) (let ((e (assoc b index))) (and e (cadr e)))))
          (mode-of (or mode-of indexed-mode-of))
          (all (panes--uniq (filter (lambda (m) (and m (or (not modes) (member m modes))))
-                                   (map (lambda (k) (panes-window-mode layout k)) keys)))))
+                                   (map (lambda (k) (panes-window-mode layout k)) keys))))
+         ;; a window on screen keeps its place; a second one of the same mode
+         ;; gives its buffers to the first, and its pane takes a hidden mode
+         (tops (panes-top-windows layout)))
     (let loop ((ms all) (layout layout))
       (if (null? ms)
-          layout
+          ;; a pane left empty shows a mode no pane shows, from behind another pane
+          (panes--fill-empty-panes layout)
           (let* ((mode (car ms))
-                 (home (panes-mode-window layout mode))
+                 (home (let ((h (panes-mode-window layout mode)))
+                         (if (member h tops) h (or (find (lambda (k) (equal? (panes-window-mode layout k) mode)) tops) h))))
                  (mine (lambda (b) (equal? (mode-of b) mode)))
+                 (kept (lambda (l k) (or (equal? k home) (and (member k tops) (not (equal? (panes-window-mode l k) mode))))))
+                 (fronts (filter (lambda (b) b) (map (lambda (k) (and (not (equal? k home)) (kept layout k) (panes-window-buffer layout k))) tops)))
                  (gathered (panes--uniq
                              (append (filter mine (panes-window-buffers layout home))
                                      (apply append
-                                            (map (lambda (k) (if (equal? k home) '() (filter mine (panes-window-buffers layout k))))
+                                            (map (lambda (k) (if (kept layout k) '() (filter mine (panes-window-buffers layout k))))
                                                  (panes-window-keys layout))))))
-                 ;; the other windows give those buffers up; one left empty closes
+                 (gathered (filter (lambda (b) (not (member b fronts))) gathered))
+                 ;; the hidden windows give those buffers up; one left empty closes
                  (layout (fold (lambda (l k)
-                                 (if (equal? k home)
+                                 (if (kept l k)
                                      l
                                      (let ((left (filter (lambda (b) (not (mine b))) (panes-window-buffers l k))))
                                        (cond ((= (length left) (length (panes-window-buffers l k))) l)
@@ -507,6 +515,17 @@
                                (lambda (w) (panes--put w 'buffers (append gathered (filter (lambda (b) (not (mine b))) (plist-get w 'buffers))))))
                              layout)))
             (loop (cdr ms) layout))))))
+
+(define (panes--fill-empty-panes layout)
+  (let loop ((ps (panes-panes layout)) (l layout))
+    (cond ((null? ps) l)
+          ((pair? (or (plist-get (car ps) 'windows) '())) (loop (cdr ps) l))
+          (else
+           (let* ((shown (map (lambda (k) (panes-window-mode l k)) (panes-top-windows l)))
+                  (spare (find (lambda (k) (and (not (member k (panes-top-windows l)))
+                                                (not (member (panes-window-mode l k) shown))))
+                               (panes-window-keys l))))
+             (loop (cdr ps) (if spare (panes-move-window l spare (plist-get (car ps) 'id)) l)))))))
 
 ;;; --- housekeeping ---------------------------------------------------------------
 

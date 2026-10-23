@@ -120,7 +120,7 @@ defmodule Compos.Core.Hotload.Scheme do
     if path in library_paths() do
       feature = Path.basename(path, ".scm")
 
-      case Scheme.eval_string(interp, "(featurep '\#{feature})") do
+      case Scheme.eval_string(interp, "(featurep '#{feature})") do
         {:ok, false, _} -> true
         _ -> false
       end

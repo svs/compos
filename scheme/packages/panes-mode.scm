@@ -185,7 +185,7 @@
 
 (define (panes--empty-handle pid)
   (let ((row (assoc (panes--empty-key pid) (panes--empty-rows))))
-    (and row (panes--live-handle? (cdr row)) (cdr row))))
+    (and row (panes--live-handle? (cadr row)) (cadr row))))
 
 (define (panes--forget-empty! pid)
   (set-frame-local! 'panes-empty-windows
@@ -198,13 +198,13 @@
         (let ((h (window-new-hidden! panes-empty-buffer)))
           (when h
             (panes--forget-empty! pid)
-            (set-frame-local! 'panes-empty-windows (cons (cons (panes--empty-key pid) h) (panes--empty-rows))))
+            (set-frame-local! 'panes-empty-windows (cons (list (panes--empty-key pid) h) (panes--empty-rows))))
           h))))
 
 ;; the pane of this group that frame window WIN stands for while it is empty, or #f
 (define (panes--empty-pane-of win)
   (let* ((g (panes--group-key))
-         (row (find (lambda (r) (and (equal? (cdr r) win) (equal? (car (car r)) g))) (panes--empty-rows))))
+         (row (find (lambda (r) (and (equal? (cadr r) win) (equal? (car (car r)) g))) (panes--empty-rows))))
     (and row (cadr (car row)))))
 
 ;; a pane that took a window takes its blank one too, so the frame window stays
@@ -225,7 +225,7 @@
                 (let ((p (and (equal? (car (car r)) g) (panes-pane layout (cadr (car r))))))
                   (when (and (equal? (car (car r)) g) (or (not p) (pair? (or (plist-get p 'windows) '()))))
                     (panes--forget-empty! (cadr (car r)))
-                    (when (assoc (cdr r) (window-hidden-list)) (window-hidden-delete! (cdr r))))))
+                    (when (assoc (cadr r) (window-hidden-list)) (window-hidden-delete! (cadr r))))))
               (panes--empty-rows))))
 
 ;; a frame window for every pane, left to right: its front window, else its blank one
@@ -390,8 +390,10 @@
 ;; makes hidden windows the model does not know, and the next redraw throws them away
 (define (panes-consolidate!)
   (let* ((me (active-window))
-         ;; every buffer is in a window already (panes-apply!); consolidate only regroups
-         (after (panes-consolidate (panes--ensure-layout!) panes--buffer-mode)))
+         ;; the group's buffers no window holds any more join behind their mode's window
+         (g (frame-group))
+         (after (panes-consolidate (panes--ensure-layout!) panes--buffer-mode #f
+                                   (filter (lambda (b) (and (equal? (buffer-group b) g) (not (buffer-local b 'context-only)))) (buffer-list)))))
     (window-log-note! "panes consolidate")
     (panes-apply! after)
     (when (window-exists? me) (select-window! me))
@@ -475,7 +477,7 @@
                (l (fold (lambda (l pid)
                           (let ((row (assoc (panes--empty-key pid) (panes--empty-rows))))
                             (if (and row (null? (or (plist-get (panes-pane l pid) 'windows) '()))
-                                     (not (panes--live-handle? (cdr row))))
+                                     (not (panes--live-handle? (cadr row))))
                                 (begin (panes--forget-empty! pid) (panes-remove-pane l pid))
                                 l)))
                         l (panes-pane-ids l)))
@@ -560,6 +562,12 @@
                              (map (lambda (k) (panes-handle l k)) (or (plist-get p 'windows) '())))))
              (panes-panes l)))))
 
+;; a saved frame still fits the model when it shows the model's front buffers
+(define (panes--tree-matches? tree layout)
+  (let ((shown (window-tree-buffers tree))
+        (fronts (map (lambda (k) (panes-window-buffer layout k)) (panes-top-windows layout))))
+    (and (pair? fronts) (equal? shown fronts) (null? (filter (lambda (b) (not (buffer-known? b))) shown)))))
+
 ;; the doors, installed: every one yields to the old path while panes-mode is #f
 (define (panes-mode--install!)
   (set! panes-mode #t)
@@ -597,6 +605,10 @@
     (lambda (next win) (if (and panes-mode (panes-quit! win)) #t (next win))))
   ;; a group switch arranges the group's windows; it rebuilds nothing. A
   ;; group with no model yet takes the old path once and is read from the frame
+  ;; the frame as the group is left, sizes and selected window with it, is
+  ;; the one record a return puts back
+  (advice-add! 'group-frame-leave! 'before 'panes
+    (lambda (from) (when (and panes-mode from (group-resolve-id from)) (group-layout-save! from))))
   (advice-add! 'group-layout-enter! 'around 'panes
     (lambda (next id saved)
       (if (not panes-mode)
@@ -606,6 +618,9 @@
             ;; reflow back while it draws
             (window-log-note! "panes enter group" id)
             (cond
+              ;; the frame as the group was left: put back, nothing recalculated
+              ((and (panes-layout) saved (panes--tree-matches? saved (panes-layout)))
+               (with-layout-held (lambda () (window-tree-set! saved))))
               ((panes-layout)
                (panes-apply! (panes-validate (panes-layout) buffer-known?)))
               ;; another frame laid this group out: its arrangement comes along
@@ -650,6 +665,8 @@
   ;; to the front of the pane the user came from
   (advice-add! 'windows-overview-enter! 'around 'panes
     (lambda (next)
+      ;; the frame as it was, to put back when the view closes on it
+      (set-frame-local! 'panes-overview-tree (and panes-mode (window-tree)))
       (when panes-mode
         (panes--ensure-layout!)
         ;; every window of the model gets a tile, so each wants a frame window
@@ -667,9 +684,26 @@
                  (r (apply next args))
                  (l (panes-layout))
                  (k (and l (panes-key-of-handle l me))))
-            (when (and k (not stay))
-              (panes-apply! (if (and home (panes-pane l home)) (panes-move-window l k home 0) (panes-raise l k)))
-              (when (window-exists? me) (select-window! me)))
+            (let ((tree (frame-local 'panes-overview-tree)))
+              (set-frame-local! 'panes-overview-tree #f)
+              (cond ((and k (not stay) tree (panes--tree-matches? tree l))
+                     ;; the frame as it was, then the one change the choice asks for
+                     (with-layout-held (lambda () (window-tree-set! tree)))
+                     (unless (assoc me (window-list))
+                       (let* ((pid (or (and home (panes-pane l home) home) (panes-pane-of l k)))
+                              (front (panes-handle l (car (or (plist-get (panes-pane l pid) 'windows) (list k))))))
+                         (when (and front (assoc front (window-list)) (assoc me (window-hidden-list)))
+                           (window-swap-hidden! front me)
+                           (panes-layout-set! (panes-move-window l k pid 0))
+                           (window-state-changed!))))
+                     (when (window-exists? me) (select-window! me)))
+                    ((and k (not stay))
+                     (panes-apply! (if (and home (panes-pane l home)) (panes-move-window l k home 0) (panes-raise l k)))
+                     (when (window-exists? me) (select-window! me)))
+                    ;; back where it opened: the frame as it was, nothing recalculated
+                    ((and tree l (panes--tree-matches? tree l))
+                     (with-layout-held (lambda () (window-tree-set! tree)))
+                     (when (window-exists? me) (select-window! me)))))
             r))))
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (add-hook! 'buffer-renamed-hook 'panes--rename!)

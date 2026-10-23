@@ -4510,6 +4510,8 @@
           (begin (message (file-too-big-message path)) #f)
         (let ((file-buffer (find-file path #f (file-shown-from-disk? path))))
           (visit-apply-group! file-buffer group existing)
+          ;; a file an agent opens is context: no listing, no pane, no window
+          (unless existing (buffer-set-local! file-buffer 'context-only #t))
           (with-current-buffer file-buffer
             (lambda ()
               (auto-mode path)

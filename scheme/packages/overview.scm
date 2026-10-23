@@ -472,8 +472,9 @@
     (overriding-map! #f)
     (unless quiet (client-slide! (json-encode (list 'gather (windows-overview--homes)))))
     (when borrowed (arrangement-drop! borrowed))
-    (panes-apply! drawn)
+    ;; released first: a held layout draws the panes at equal widths
     (set-frame-local! 'layout-held #f)
+    (panes-apply! drawn)
     (let ((shown (map car (window-list))))
       (select-window! (cond ((member me shown) me) ((member from shown) from) (else (car shown))))
       (unless (null? faults)

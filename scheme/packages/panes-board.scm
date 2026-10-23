@@ -11,6 +11,22 @@
 
 (define *panes-board-buffer* "*panes*")
 
+;; one window list per group, a member of it like any buffer: the one shown
+;; here, else the group's own, made the first time
+(define (panes-board-buffer)
+  (let ((here (current-buffer)) (g (frame-group)))
+    (if (and here (buffer-derived-mode? here "panes-list-mode"))
+        here
+        (or (find (lambda (b) (and (buffer-derived-mode? b "panes-list-mode") (equal? (buffer-group b) g))) (buffer-list))
+            (let loop ((n 1))
+              (let ((name (if (= n 1) *panes-board-buffer* (string-append *panes-board-buffer* "<" (number->string n) ">"))))
+                (if (buffer-known? name)
+                    (loop (+ n 1))
+                    (begin (buffer-create name)
+                           (when g (buffer-move-to-group! name g))
+                           (with-current-buffer name (lambda () (set-mode! "panes-list-mode")))
+                           name))))))))
+
 ;; the model the board shows: the group's, else the frame read in
 (define (panes-board-layout) (or (panes-layout) (panes-adopt)))
 
@@ -220,12 +236,12 @@
   (let ((cells (panes-board-cells buf id)))
     (list (nth 0 cells) (nth 1 cells) (nth 2 cells))))
 
-(define (panes-board-refresh!) (list-refresh! *panes-board-buffer*))
+(define (panes-board-refresh!) (list-refresh! (panes-board-buffer)))
 
 ;; edit the model with FN (layout id) -> layout, lay the frame out, redraw. Only
 ;; this group's model edits: another group's is drawn when that group is entered
 (define (panes-board-edit! fn)
-  (let ((id (list-current *panes-board-buffer*)))
+  (let ((id (list-current (panes-board-buffer))))
     (cond ((not id) (message "no row here"))
           ((not (equal? (panes-board-group id) (panes-board-here-group)))
            (message "That is another group's layout; enter the group to change it"))
@@ -242,7 +258,7 @@
 
 (define-command "panes-board-visit" "Show this window, or this buffer in its window, and go there"
   (lambda ()
-    (let ((id (list-current *panes-board-buffer*)))
+    (let ((id (list-current (panes-board-buffer))))
       (cond ((not id) (message "no row here"))
             ((not (equal? (panes-board-group id) (panes-board-here-group)))
              (message "That window is in another group"))
@@ -307,7 +323,7 @@
 
 (define-command "panes-board-kill" "Kill the buffer on this row"
   (lambda ()
-    (let ((id (list-current *panes-board-buffer*)))
+    (let ((id (list-current (panes-board-buffer))))
       (if (and id (equal? (panes-board-kind id) "b"))
           (kill-buffer-confirm! (panes-board-buffer-of id) (lambda (done) (panes-board-refresh!)))
           (message "K on a buffer row kills it")))))
@@ -332,7 +348,7 @@
 
 (define-command "panes-board-fold" "Fold or unfold the group, pane or window on this row"
   (lambda ()
-    (let* ((buf *panes-board-buffer*)
+    (let* ((buf (panes-board-buffer))
            (id (list-current buf)))
       (when id
         (let ((kind (panes-board-kind id)))
@@ -343,7 +359,7 @@
 
 (define-command "panes-board-fold-all" "Unfold every window, or fold them all when any is open"
   (lambda ()
-    (let ((buf *panes-board-buffer*))
+    (let ((buf (panes-board-buffer)))
       (buffer-set-local! buf 'panes-board-shut '())
       (buffer-set-local! buf 'panes-board-open
         (if (pair? (or (buffer-local buf 'panes-board-open) '()))
@@ -362,7 +378,7 @@
 
 (define-command "panes-board-zoom-in" "Zoom one level towards this row: a pane, a window"
   (lambda ()
-    (let* ((buf *panes-board-buffer*)
+    (let* ((buf (panes-board-buffer))
            (id (list-current buf))
            (target (and id (panes-board-zoom-target buf id))))
       (if target
@@ -371,7 +387,7 @@
 
 (define-command "panes-board-zoom-out" "Zoom back out one level"
   (lambda ()
-    (let* ((buf *panes-board-buffer*)
+    (let* ((buf (panes-board-buffer))
            (root (panes-board-root buf)))
       (if root
           (panes-board--rezoom! buf (panes-board-zoom-parent buf root) root)
@@ -383,12 +399,12 @@
   (list-refresh! buf))
 
 (define-command "panes-board-next-group" "Go to the next group's heading"
-  (lambda () (list-move-section! *panes-board-buffer* 1)))
+  (lambda () (list-move-section! (panes-board-buffer) 1)))
 (define-command "panes-board-previous-group" "Go to the previous group's heading"
-  (lambda () (list-move-section! *panes-board-buffer* -1)))
+  (lambda () (list-move-section! (panes-board-buffer) -1)))
 
 (define-command "panes-board-view-next" "Switch between the views: All, Group"
-  (lambda () (let ((buf *panes-board-buffer*))
+  (lambda () (let ((buf (panes-board-buffer)))
                (panes-board--set-view! buf (if (equal? (panes-board-view buf) 'all) 'group 'all)))))
 
 (define-list-mode! "panes-list-mode"
@@ -432,12 +448,13 @@
 
 ;; the list opened on VIEW, zoomed to ROOT (#f: the whole view)
 (define (panes-board-open! view root)
-  (let ((buf *panes-board-buffer*))
+  (let ((buf (panes-board-buffer)))
     (buffer-create buf)
     (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
     (buffer-set-local! buf 'panes-board-view view)
     (buffer-set-local! buf 'panes-board-root root)
-    (pop-to-buffer buf)
+    ;; a buffer like any other: it opens in this window, and q goes back
+    (switch-to-buffer! buf)
     (list-refresh! buf)
     buf))
 
@@ -446,6 +463,6 @@
 
 ;; the board follows the frame while it is on screen
 (define (panes-board-follow!)
-  (when (and (buffer-known? *panes-board-buffer*) (window-showing *panes-board-buffer*))
+  (when (and (buffer-known? (panes-board-buffer)) (window-showing (panes-board-buffer)))
     (panes-board-refresh!)))
 (add-hook! 'window-state-change-hook 'panes-board-follow!)

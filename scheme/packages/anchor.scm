@@ -112,6 +112,8 @@
 ;; offsets; nothing else has to be undone.
 (define (anchor-set! buf as)
   (buffer-set-local! buf 'anchors (anchor--sorted as))
+  ;; fresh text leaves point at its end; the page opens at its top
+  (anchor--keep-on-page! buf #t)
   (anchor-sync! buf)
   ;; a zoomed part folds against the new offsets
   (when (boundp 'anchor-scale-redraw!) ((symbol-value 'anchor-scale-redraw!) buf))
@@ -214,12 +216,34 @@
         (buffer-set-local! buf 'anchor-marked (cons key new))
         (buffer-set-local! buf 'render-blocks new)))))
 
+(define (anchor--keep-on-page! buf &optional top?)
+  ;; a page drawn as blocks shows only its parts: point outside every one
+  ;; (the line after the last) is nowhere on screen. It comes back to the
+  ;; part before it, or to the top for a page just drawn.
+  (when (equal? (buffer-local buf 'render-mode) "blocks")
+    (let ((pos (buffer-point buf)) (as (anchor-list buf)))
+      (when (and (pair? as) (not (anchor-at buf pos)))
+        (let ((a (if top? (car as) (or (anchor--before buf pos) (car as)))))
+          (with-current-buffer buf (lambda () (goto-char! (anchor-start a)))))))))
+
 (define (anchor--post-command!)
   (let ((buf (current-buffer)))
     (when (and (buffer-exists? buf) (minor-mode-on? buf "anchor-mode"))
+      (anchor--keep-on-page! buf)
       (anchor-sync! buf))))
 
 (add-hook! 'post-command-hook 'anchor--post-command!)
+
+;; A page drawn as blocks scrolls in the browser, and point must stay on
+;; screen: when the part point is in leaves the view, the page reports the
+;; first part still in it, and point goes there. The window keeps its place.
+(define (anchor-follow-scroll! win line)
+  (let ((buf (window-buffer win)))
+    (and buf (buffer-exists? buf)
+         (let ((pos (with-current-buffer buf
+                      (lambda () (let ((p (line-start-position line))) (goto-char! p) p)))))
+           (anchor-sync! buf)
+           pos))))
 
 ;; a click on a part of a block page selects it: the renderer gives an anchored block
 ;; that has no click of its own the id anchor-line:N, N its first line
@@ -649,6 +673,7 @@
 (public! 'anchor-find "(anchor-find BUF NAME) — BUF's anchor called NAME, or #f")
 (public! 'anchor-goto! "(anchor-goto! BUF NAME) — put point at the start of that anchor")
 (public! 'anchor-sync! "(anchor-sync! BUF) — put the anchor at point's keymap and highlight in force now; the post-command hook already does this")
+(public! 'anchor-follow-scroll! "(anchor-follow-scroll! WIN LINE) — WIN's page scrolled point off screen: point goes to LINE, the first part in view")
 (public! 'anchor-name "(anchor-name ANCHOR) — its name")
 (public! 'anchor-start "(anchor-start ANCHOR) — its first byte")
 (public! 'anchor-end "(anchor-end ANCHOR) — the byte after its last")

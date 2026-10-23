@@ -263,6 +263,18 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # a block page scrolled the part point is in out of view: point follows to
+  # the first part still on screen, and focus stays where it is
+  def handle_event("block_point", %{"win" => win, "line" => line}, socket) when is_integer(line) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Compos.Core.Session.call_named("anchor-follow-scroll!", [id, line])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # a client-scrolled window reporting its pixel offset (S1) — a passive
   # mirror into the leaf, so refresh and restart give the place back
   def handle_event("cscroll", %{"win" => win, "top" => top}, socket) when is_integer(top) do
@@ -1931,10 +1943,10 @@ defmodule Compos.Ui.EditorLive do
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
         <%!-- a c-buffer root is a static tag: a dynamic tag re-sends its
              own markup on every render --%>
-        <c-buffer :if={@node.blk_root.tag == "c-buffer"} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
+        <c-buffer :if={@node.blk_root.tag == "c-buffer"} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} {@node.blk_root.attrs}>
           <.blocks_body node={@node} active?={@active?} completion={@completion} />
         </c-buffer>
-        <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" {@node.blk_root.attrs}>
+        <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} {@node.blk_root.attrs}>
           <.blocks_body node={@node} active?={@active?} completion={@completion} />
         </.dynamic_tag>
       <% else %>

@@ -1983,13 +1983,57 @@
         this.scroller = this.el.querySelector(".blocks-scroll");
         this.last = null;
         // the reader's own wheel or touch takes the page back from a glide
-        this.stop = () => cancelAnimationFrame(this.raf);
+        this.stop = () => { cancelAnimationFrame(this.raf); this.gliding = false; };
         this.el.addEventListener("wheel", this.stop, {passive: true});
         this.el.addEventListener("touchstart", this.stop, {passive: true});
+        // point stays on screen: once the page settles, a part point left
+        // behind hands point to the first part in view
+        this.onScroll = () => {
+          clearTimeout(this.pointT);
+          this.pointT = setTimeout(() => this.keepPoint(), 150);
+        };
+        if (this.scroller) this.scroller.addEventListener("scroll", this.onScroll, {passive: true});
+        // a scroll request seen at mount is history: a reload must not replay it
+        this.seen = this.el.dataset.scroll || "";
         this.follow();
       },
       updated() {
+        this.scrollRequest();
         this.follow();
+      },
+      // The server scrolls a window in lines (scroll-other-window, C-v):
+      // data-scroll="GEN:LINES", and a new generation moves the page by
+      // that many of its own rows. A page drawn as blocks has no lines, so
+      // a row is the scroller's line height.
+      scrollRequest() {
+        const req = this.el.dataset.scroll || "";
+        if (!this.scroller || req === this.seen) return;
+        this.seen = req;
+        const lines = parseInt(req.split(":")[1] || "0", 10);
+        if (!lines) return;
+        const cs = getComputedStyle(this.scroller);
+        const row = parseFloat(cs.lineHeight) || 1.4 * parseFloat(cs.fontSize) || 20;
+        this.stop();
+        this.scroller.scrollTop = Math.max(0, this.scroller.scrollTop + Math.sign(lines) * Math.floor(Math.abs(lines) * row));
+      },
+      keepPoint() {
+        const s = this.scroller;
+        // a glide is point's own travel, and a hidden window scrolls to 0
+        if (!s || this.gliding || !s.isConnected || s.clientHeight === 0) return;
+        const sr = s.getBoundingClientRect();
+        const seen = (el) => { const r = el.getBoundingClientRect(); return r.bottom > sr.top + 1 && r.top < sr.bottom - 1; };
+        const cur = this.el.querySelector(".anchor-current");
+        if (cur && seen(cur)) return;
+        const next = [...this.el.querySelectorAll("[data-anchor][phx-value-id^='anchor-line:']")].find(seen);
+        if (!next) return;
+        const winEl = this.el.closest("[data-win-id]");
+        if (!winEl) return;
+        // the part is already in view: marking it must not glide the page
+        this.lastPart = next.dataset.anchor;
+        this.pushEvent("block_point", {
+          win: parseInt(winEl.dataset.winId, 10),
+          line: parseInt(next.getAttribute("phx-value-id").split(":")[1], 10)
+        });
       },
       follow() {
         if (!this.scroller) return;
@@ -2026,6 +2070,7 @@
         if (matchMedia("(prefers-reduced-motion: reduce)").matches) { s.scrollTop = target; return; }
         const from = s.scrollTop, d = target - from;
         if (Math.abs(d) < 1) return;
+        this.gliding = true;
         const dur = Math.min(560, 240 + Math.abs(d) * 0.22);
         const ease = t => 1 - Math.pow(1 - t, 4);
         const t0 = performance.now();
@@ -2033,11 +2078,14 @@
           const t = Math.min(1, (now - t0) / dur);
           s.scrollTop = from + d * ease(t);
           if (t < 1) this.raf = requestAnimationFrame(step);
+          else this.gliding = false;
         };
         this.raf = requestAnimationFrame(step);
       },
       destroyed() {
         cancelAnimationFrame(this.raf);
+        clearTimeout(this.pointT);
+        if (this.scroller) this.scroller.removeEventListener("scroll", this.onScroll);
         this.el.removeEventListener("wheel", this.stop);
         this.el.removeEventListener("touchstart", this.stop);
       }

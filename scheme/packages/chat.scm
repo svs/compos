@@ -729,6 +729,7 @@
 (define *llm-models*
   (list "openai:gpt-5.6-luna"
         "openrouter:x-ai/grok-4.7"
+        "openrouter:moonshotai/kimi-k3.1-pro"
         "openrouter:anthropic/claude-sonnet-5"
         "claude-sonnet-5"
         "claude-opus-5"

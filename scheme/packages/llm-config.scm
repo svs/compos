@@ -977,6 +977,19 @@
 (public! 'llm-default-save!
   "(llm-default-save! B) — make config B what every new chat starts with, unless its group names one")
 
+(define (group-llm! b &optional g)
+  ;; B, a preset's name or a whole config, is what group G's new chats start
+  ;; with; #f puts them back on the global default. Answers the group's id.
+  (let ((id (group-resolve-id (or g (buffer-group (current-buffer)) (frame-group)))))
+    (cond ((not id) (error "group-llm!: no group here"))
+          ((and (string? b) (not (member b (map llm-bundle-name *llm-bundles*))))
+           (error (string-append "group-llm!: no preset " b "; presets: "
+                                 (string-join (map llm-bundle-name *llm-bundles*) ", "))))
+          (else (and (group-config-set! id 'llm b) id)))))
+
+(public! 'group-llm!
+  "(group-llm! PRESET [GROUP]) — make PRESET, a preset name or a config, what GROUP's new chats start with; #f puts the group back on the global default")
+
 (define-command "group-llm" "Choose the preset this group's new chats start with"
   (lambda ()
     (let ((id (group-resolve-id (or (buffer-group (current-buffer)) (frame-group)))))
@@ -988,7 +1001,7 @@
               (list 'confirm
                 (lambda (name)
                   (let ((v (if (equal? name "(global default)") #f name)))
-                    (when (group-config-set! id 'llm v)
+                    (when (group-llm! v id)
                       (message (string-append (group-name id) ": new chats start with "
                                               (or v "the global default")
                                               " (group.scm)"))))))))))))
@@ -1007,6 +1020,12 @@
     (llm-default-save! (llm-config--box))
     (llm-config--refresh!)
     (message "new chats start with this config")))
+
+(define-command "llm-config-save-group-default" "Make the box's config the default for this group's new chats"
+  (lambda ()
+    (let ((id (group-llm! (llm-config--box))))
+      (llm-config--refresh!)
+      (message (string-append (group-name id) ": new chats start with this config")))))
 
 ;;; --- the menu -------------------------------------------------------------------
 ;;; Two columns. The left column is the presets: the cursor moves through
@@ -1277,7 +1296,8 @@
           (list "M-s" "llm-config-save-bundle")
           (list "M-n" "llm-config-new-preset")
           (list "M-k" "llm-config-forget-bundle")
-          (list "M-d" "llm-config-save-default"))))
+          (list "M-d" "llm-config-save-default")
+          (list "M-g" "llm-config-save-group-default"))))
 
 ;; what the menu writes to: this buffer, or the group chat whose session
 ;; the buffer shares

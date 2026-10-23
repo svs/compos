@@ -1071,10 +1071,20 @@
 (define (ibuffer-name-width buf fields)
   (max 12 (min (ibuffer-name-room buf fields) (ibuffer-name-fit buf))))
 
+;; a name too long for its column gives up its "kind: " prefix first, so
+;; *travel-hotel: Pride Plaza Aerocity* reads "…Pride Plaza Aerocity*" and
+;; not "*travel-hote…za Aerocity*"; a name without one loses its middle
+(define (ibuffer-name-trim s w)
+  (let* ((lead (if (string-prefix? "└ " s) "└ " ""))
+         (parts (string-split (substring s (string-length lead) (string-length s)) ": ")))
+    (if (null? (cdr parts))
+        (list-fit s w 'middle)
+        (list-fit (string-append lead "…" (string-join (cdr parts) ": ")) w 'end))))
+
 (define (ibuffer-columns buf fields)
   (append (list (list "" 1)
                 (list "" 1)
-                (list "" (ibuffer-name-width buf fields) 'left 'middle))
+                (list "" (ibuffer-name-width buf fields) 'left ibuffer-name-trim))
           fields))
 
 ;;; A FIELD is one narrow column beside the name: (TAG WIDTH ALIGN TRIM).

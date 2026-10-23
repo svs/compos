@@ -421,9 +421,14 @@
   (let* ((layout (panes-layout))
          (k (and layout (panes-key-of-handle layout win))))
     (and k
-         (let ((popped (panes-pop layout k)))
+         (let ((popped (panes-pop layout k)) (pid (panes-pane-of layout k)))
            (window-log-note! "panes quit" k "->" (or (cadr popped) "window closes"))
-           (panes-apply! (car popped))
+           (let* ((after (panes-apply! (car popped)))
+                  (p (and pid (panes-pane after pid)))
+                  (ks (and p (plist-get p 'windows)))
+                  (h (and (pair? ks) (panes-handle after (car ks)))))
+             ;; quitting leaves you where the buffer stood
+             (when (and h (window-exists? h)) (select-window! h)))
            #t))))
 
 ;; a buffer dies: it leaves every stack before the core looks for a

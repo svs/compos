@@ -232,9 +232,20 @@
                     (list (panes-board--short (panes--buffer-mode b)) "dim")
                     (list (if (and (buffer-known? b) (buffer-modified? b)) "modified" "") "faint")))))))
 
+;; narrow, the name is the row: the mode column goes, and a name too long
+;; gives up its "kind: " prefix before its end, never its middle
 (define (panes-board-narrow-cells buf id)
   (let ((cells (panes-board-cells buf id)))
-    (list (nth 0 cells) (nth 1 cells) (nth 2 cells))))
+    (list (nth 0 cells) (nth 1 cells))))
+
+(define (panes-board--trim s w)
+  (let loop ((i 0))
+    (if (and (< i (string-length s)) (member (substring s i (+ i 1)) '(" " "▸" "▾")))
+        (loop (+ i 1))
+        (let* ((lead (substring s 0 i))
+               (parts (string-split (substring s i (string-length s)) ": ")))
+          (list-fit (if (null? (cdr parts)) s (string-append lead "…" (string-join (cdr parts) ": ")))
+                    w 'end)))))
 
 (define (panes-board-refresh!) (list-refresh! (panes-board-buffer)))
 
@@ -269,6 +280,11 @@
                      (key (if (equal? kind "p")
                               (let ((ks (plist-get (panes-pane l (panes-board-key id)) 'windows))) (and (pair? ks) (car ks)))
                               (panes-board-key id)))
+                     ;; here: the pane the list stands in; the window takes its place
+                     (me (panes-key-of-handle l (active-window)))
+                     (pid (and me (panes-pane-of l me)))
+                     (l (if (and me key (not (equal? me key))) (car (panes-pop l me)) l))
+                     (l (if (and pid key (panes-pane l pid)) (panes-move-window l key pid 0) l))
                      (next (cond ((not key) l)
                                  ((equal? kind "b") (panes-show l key (panes-board-buffer-of id)))
                                  (else (panes-raise l key)))))
@@ -413,8 +429,7 @@
            "The windows as the model holds them, one section for every group, as ibuffer has: this group first, then the rest most recent first. `<left>`/`<right>` switch to Group, this group's panes alone, and back to All. `M-n`/`M-p` go from group to group. "
            "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
            "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
-           "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `S-<left>`/`S-<right>` move a window "
-           "or a pane, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
+           "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
     'buffer *panes-board-buffer*
     'rows panes-board-ids
     'section? (lambda (buf id) (equal? (panes-board-kind id) "g"))
@@ -422,7 +437,7 @@
                          'columns (lambda (buf) (list (list "" 2) (list "what" 38) (list "mode" 16) (list "" #f)))
                          'cells panes-board-cells)
                    (list 'name 'narrow 'default #t
-                         'columns (lambda (buf) (list (list "" 2) (list "what" #f) (list "mode" 14)))
+                         'columns (lambda (buf) (list (list "" 2) (list "what" #f 'left panes-board--trim)))
                          'cells panes-board-narrow-cells))
     'cells panes-board-cells
     'title (lambda (buf) (string-join (cons (if (equal? (panes-board-view buf) 'all) "Windows · All" "Windows · Group")
@@ -435,20 +450,20 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("M-n/M-p" "group") ("TAB" "fold") ("S-<left>/<right>" "move") ("k" "close")
+              '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("M-n/M-p" "group") ("TAB" "fold") ("k" "close")
                 ("K" "kill") ("a" "add pane") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
     'keys '(("RET" "panes-board-visit") ("+" "panes-board-zoom-in") ("-" "panes-board-zoom-out")
             ("<left>" "panes-board-view-next") ("<right>" "panes-board-view-next")
             ("TAB" "panes-board-fold") ("S-TAB" "panes-board-fold-all")
             ("M-n" "panes-board-next-group") ("M-p" "panes-board-previous-group")
-            ("S-<left>" "panes-board-left") ("S-<right>" "panes-board-right")
             ("k" "panes-board-close") ("K" "panes-board-kill") ("a" "panes-board-add-pane") ("c" "panes-board-consolidate")
             ("}" "panes-board-wider") ("{" "panes-board-narrower") ("=" "panes-board-equalize")
             ("g" "panes-board-refresh") ("q" "quit-window"))))
 
 ;; the list opened on VIEW, zoomed to ROOT (#f: the whole view)
 (define (panes-board-open! view root)
-  (let ((buf (panes-board-buffer)))
+  (let ((buf (panes-board-buffer))
+        (here (and (panes-layout) (panes-key-of-handle (panes-layout) (active-window)))))
     (buffer-create buf)
     (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
     (buffer-set-local! buf 'panes-board-view view)
@@ -456,6 +471,9 @@
     ;; a buffer like any other: it opens in this window, and q goes back
     (switch-to-buffer! buf)
     (list-refresh! buf)
+    ;; the list opens on the window you are in
+    (let ((i (and here (list-index-of buf (list-entries buf) (panes-board--id "w" (panes-board-here-group) here)))))
+      (when i (list-goto-index! buf i)))
     buf))
 
 (define-command "windows-list" "List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group"

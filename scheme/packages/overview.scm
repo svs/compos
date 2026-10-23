@@ -669,7 +669,6 @@
 (add-hook! 'pre-command-hook 'windows-overview--pre-command!)
 (add-hook! 'post-command-hook 'windows-overview--post-command!)
 
-(global-set-key "s-S-<down>" "windows-overview")
 (global-set-key "s-S-<up>" "windows-overview-exit")
 (public! 'windows-overview-active? "(windows-overview-active?) — #t while this frame shows every window at once")
 (catalog-meta! 'function "windows-overview-active?" 'effects '(read))

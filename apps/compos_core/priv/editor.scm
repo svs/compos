@@ -3466,14 +3466,21 @@
 (define (buffer-seen-memo! b t)
   (set! *buffer-seen-stamps* (alist-put *buffer-seen-stamps* b t)))
 
+;; when the local was last written; the memo itself stays exact
+(define *buffer-seen-written* '())
+
 (define (buffer-note-seen! b)
-  ;; one write a minute per buffer. The hook behind this runs on every
-  ;; window configuration change, and a local write is a call into the
-  ;; buffer's own process.
+  ;; the memo moves on every focus, so "last focused first" orders
+  ;; right; the local gets one write a minute. The hook behind this runs
+  ;; on every window configuration change, and a local write is a call
+  ;; into the buffer's own process.
   (when (and (string? b) (buffer-known? b))
-    (let ((now (current-time)) (was (buffer-seen-memo b)))
+    (let* ((now (current-time))
+           (e (assoc b *buffer-seen-written*))
+           (was (and e (cadr e))))
+      (buffer-seen-memo! b now)
       (when (or (not (number? was)) (> (- now was) buffer-seen-coarse-seconds))
-        (buffer-seen-memo! b now)
+        (set! *buffer-seen-written* (alist-put *buffer-seen-written* b now))
         (buffer-set-local! b 'last-seen now))))
   b)
 

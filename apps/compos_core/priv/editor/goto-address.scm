@@ -173,13 +173,15 @@
 ;; the spans of TEXT, whose first byte stands at AT in the buffer
 (define (goto-address--text-spans buf at text)
   (set! *goto-address--memo* '())
+  ;; ACC holds the spans in reverse: an append per line onto the front
+  ;; copies one line's spans, and an append onto the end copied them all
   (let loop ((lines (split-lines text)) (at at) (acc '()))
     (if (null? lines)
-        acc
+        (reverse acc)
         (let ((line (car lines)))
           (loop (cdr lines)
                 (+ at (string-byte-length line) 1)
-                (append acc (goto-address-line-spans buf at line)))))))
+                (append (reverse (goto-address-line-spans buf at line)) acc))))))
 
 (define (goto-address-spans buf)
   (let ((text (buffer-text buf)))
@@ -223,7 +225,12 @@
                                (and (< (car o) (cadr o))
                                     (or (<= (cadr o) ls) (>= (car o) le))))
                              (buffer-overlays buf 'goto-address)))
-               (fresh (goto-address--text-spans buf ls (buffer-substring ls le))))
+               ;; a change past the first-paint size, such as a whole
+               ;; transcript set at once, paints nothing, as a large
+               ;; buffer's first paint does
+               (fresh (if (> (- le ls) goto-address-first-paint-bytes)
+                          '()
+                          (goto-address--text-spans buf ls (buffer-substring ls le)))))
           (overlay-set! buf 'goto-address (append kept fresh)))))))
 
 ;;; --- every buffer ------------------------------------------------------------

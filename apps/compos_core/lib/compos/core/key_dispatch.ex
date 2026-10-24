@@ -369,6 +369,12 @@ defmodule Compos.Core.KeyDispatch do
     :exit, {:timeout, _} ->
       Logger.warning("key lookup timed out: #{Enum.join(seq, " ")}")
       :failed
+
+    # the lane worker died under the call (a kill, a code purge): drop
+    # the key, as for a timeout, and keep the client alive
+    :exit, reason ->
+      Logger.warning("key lookup failed: #{Enum.join(seq, " ")}: #{inspect(reason, limit: 5)}")
+      :failed
   end
 
   # text typed since the popup opened is the popup's query (orderless narrowing)
@@ -441,7 +447,8 @@ defmodule Compos.Core.KeyDispatch do
 
         {:error, msg} ->
           Editor.finish_command(name, false)
-          Editor.set_echo("#{name}: #{msg}")
+          # an error, so *Messages* keeps it: an echo alone is gone at the next key
+          Session.message("#{name}: #{msg}", "error")
       end
 
       note("after-command", name)

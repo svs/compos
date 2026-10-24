@@ -156,9 +156,13 @@
 (define (panes-board--label id)
   (let ((kind (panes-board-kind id)) (l (panes-board-row-layout id)))
     (cond ((equal? kind "g") (let ((g (panes-board-group id))) (or (and (string? g) (group-name g)) "no group")))
-          ((equal? kind "p") (string-append "pane " (number->string (+ 1 (panes--index-of (panes-board-key id) (panes-pane-ids l))))))
+          ;; a row drawn after its pane went, from a list not yet refreshed, says pane
+          ((equal? kind "p") (let ((i (and l (panes--index-of (panes-board-key id) (panes-pane-ids l)))))
+                                (if i (string-append "pane " (number->string (+ 1 i))) "pane")))
           (else (let* ((k (panes-board-key id)) (h (panes-handle l k)))
-                  (or (and h (window-exists? h) (boundp 'window-name) (window-name h))
+                  ;; a name the user gave, else the model's mode: window-name works out
+                  ;; every window's default name from the frame, ~7 ms a row
+                  (or (and h (boundp 'window-given-name) (window-given-name h))
                       (let ((m (panes-board--short (panes-window-mode l k)))) (and (not (equal? m "")) m))
                       k))))))
 
@@ -253,8 +257,8 @@
 
 ;; edit the model with FN (layout id) -> layout, lay the frame out, redraw. Only
 ;; this group's model edits: another group's is drawn when that group is entered
-(define (panes-board-edit! fn)
-  (let ((id (list-current (panes-board-buffer))))
+(define (panes-board-edit! fn &optional row)
+  (let ((id (or row (list-current (panes-board-buffer)))))
     (cond ((not id) (message "no row here"))
           ((not (equal? (panes-board-group id) (panes-board-here-group)))
            (message "That is another group's layout; enter the group to change it"))
@@ -310,16 +314,67 @@
                        (from (panes-pane-of l key))
                        (ids (panes-pane-ids l))
                        (i (+ dir (panes--index-of from ids))))
-                  (cond ((and (>= i 0) (< i (length ids))) (panes--prune-pane (panes-move-window l key (list-ref ids i)) from))
+                  (cond ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i)))
                         ((not (panes-under-capacity? l)) (message "no pane that way") l)
                         (else
                           (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
-                            (panes--prune-pane (panes-move-window (car added) key (cadr added)) from)))))))))))
+                            (panes-move-window (car added) key (cadr added))))))))))))
 
 (define-command "panes-board-left" "Move this window to the pane on its left; a pane row moves the pane"
   (lambda () (panes-board-shift! -1)))
 (define-command "panes-board-right" "Move this window to the pane on its right; a pane row moves the pane"
   (lambda () (panes-board-shift! 1)))
+
+(define (panes-board-move-targets l id)
+  "Destination keys for the window or buffer row, excluding its current home."
+  (let ((kind (panes-board-kind id)) (key (panes-board-key id)))
+    (cond ((equal? kind "w")
+           (filter (lambda (p) (not (equal? p (panes-pane-of l key)))) (panes-pane-ids l)))
+          ((equal? kind "b")
+           (filter (lambda (k) (not (equal? k key))) (panes-window-keys l)))
+          (else '()))))
+
+(define (panes-board-move-row l id target)
+  "Move one row, or leave the layout unchanged when its source or target is stale."
+  (let ((kind (panes-board-kind id)) (key (panes-board-key id)))
+    (if (and (panes-window l key) (member target (panes-board-move-targets l id)))
+        (cond ((equal? kind "w") (panes-move-window l key target))
+              ((and (equal? kind "b")
+                    (member (panes-board-buffer-of id) (panes-window-buffers l key)))
+               (panes-move-buffer l (panes-board-buffer-of id) target))
+              (else l))
+        l)))
+
+(define-command "panes-board-move" "Move this window to a pane, or this buffer to a window"
+  (lambda ()
+    (let* ((id (list-current (panes-board-buffer)))
+           (g (and id (panes-board-group id))))
+      (cond ((not id) (message "no row here"))
+            ((not (equal? g (panes-board-here-group)))
+             (message "That is another group's layout; enter the group to change it"))
+            ((not (member (panes-board-kind id) '("w" "b")))
+             (message "Choose a window or buffer row to move"))
+            (else
+              (let* ((l (panes-board-layout))
+                     (window? (equal? (panes-board-kind id) "w"))
+                     (rows (map
+                             (lambda (key)
+                               (let* ((pid (if window? key (panes-pane-of l key)))
+                                      (n (+ 1 (panes--index-of pid (panes-pane-ids l)))))
+                                 (list (string-append "Pane " (number->string n)
+                                         (if window? "" (string-append " / " (or (panes-window-buffer l key) "empty")))
+                                         " [" key "]") key)))
+                             (panes-board-move-targets l id))))
+                (if (null? rows)
+                    (message "No destination available")
+                    (completing-read (if window? "Move window to pane: " "Move buffer to window: ")
+                      (map car rows)
+                      (lambda (choice)
+                        (let ((row (assoc choice rows)))
+                          (when row
+                            (panes-board-edit!
+                              (lambda (current source) (panes-board-move-row current source (cadr row))) id))))
+                      'require-match #t))))))))
 
 (define-command "panes-board-close"
   "Close this window (its buffers stay open), take this buffer out of its window, or remove this pane"
@@ -431,7 +486,7 @@
            "The windows as the model holds them, one section for every group, as ibuffer has: this group first, then the rest most recent first. `<left>`/`<right>` switch to Group, this group's panes alone, and back to All. `M-n`/`M-p` go from group to group. "
            "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
            "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
-           "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
+           "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `m` moves a window to a pane or a buffer to a window, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
     'buffer *panes-board-buffer*
     'rows panes-board-ids
     'section? (lambda (buf id) (equal? (panes-board-kind id) "g"))
@@ -453,12 +508,12 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("M-n/M-p" "group") ("TAB" "fold") ("k" "close")
-                ("K" "kill") ("a" "add pane") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
+                ("K" "kill") ("m" "move") ("a" "add pane") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
     'keys '(("RET" "panes-board-visit") ("+" "panes-board-zoom-in") ("-" "panes-board-zoom-out")
             ("<left>" "panes-board-view-next") ("<right>" "panes-board-view-next")
             ("TAB" "panes-board-fold") ("S-TAB" "panes-board-fold-all")
             ("M-n" "panes-board-next-group") ("M-p" "panes-board-previous-group")
-            ("k" "panes-board-close") ("K" "panes-board-kill") ("a" "panes-board-add-pane") ("c" "panes-board-consolidate")
+            ("m" "panes-board-move") ("k" "panes-board-close") ("K" "panes-board-kill") ("a" "panes-board-add-pane") ("c" "panes-board-consolidate")
             ("}" "panes-board-wider") ("{" "panes-board-narrower") ("=" "panes-board-equalize")
             ("g" "panes-board-refresh") ("q" "quit-window"))))
 
@@ -484,7 +539,14 @@
   (lambda () (panes-board-open! 'all (panes-board--id "g" (panes-board-here-group)))))
 
 ;; the board follows the frame while it is on screen
+(define panes-board--drawn #f)
 (define (panes-board-follow!)
+  ;; the board is a projection of the models, the group and the focus: a
+  ;; window change that moved none of them draws nothing (a draw is ~70 ms)
   (when (and (buffer-known? (panes-board-buffer)) (window-showing (panes-board-buffer)))
-    (panes-board-refresh!)))
+    (let ((key (list (selected-frame) (panes--group-key) (active-window) (window-list)
+                     (frame-local 'panes-layouts))))
+      (unless (equal? key panes-board--drawn)
+        (set! panes-board--drawn key)
+        (panes-board-refresh!)))))
 (add-hook! 'window-state-change-hook 'panes-board-follow!)

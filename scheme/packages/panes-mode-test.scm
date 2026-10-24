@@ -214,3 +214,86 @@
                   (switch-to-group! ga)
                   (check-false! (window-showing b1) "back in A, B's buffer is not on screen"))
                 (lambda () (pmt-done! (list a1 a2 b1)))))))))))
+
+;; The frame primitives are doors: each edits the model, and no window hook
+;; writes it back. A hook that wrote the model looped until the heap bound.
+(define (pmt-two-panes! id a c)
+  (for-each (lambda (x) (buffer-add-group! x id)) (list a c))
+  (switch-to-group! id)
+  (delete-other-windows!)
+  (switch-to-buffer-here! a)
+  (panes-mode-enable!)
+  (panes-apply! (panes--default-layout (list a c))))
+
+(deftest 'panes-mode-a-selection-is-the-models-focus
+  "select-window! moves the model's focus to the pane of that window"
+  (lambda ()
+    (with-fresh-group "zz-panes-focus"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-pf-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-pf-c" "zz-c-mode")))
+          (unwind-protect
+            (lambda ()
+              (let* ((l (pmt-two-panes! id a c))
+                     (wc (panes-handle l (car (panes-pane-keys l (cadr (panes-pane-ids l)))))))
+                (check-equal! (length (window-list)) 2 "two panes on screen")
+                (select-window! wc)
+                (check-equal! (panes-focus (panes-layout)) (cadr (panes-pane-ids l)) "the model's focus is the second pane")
+                (check-equal! (active-window) wc "and the frame selected its window")))
+            (lambda () (pmt-done! (list a c)))))))))
+
+(deftest 'panes-mode-delete-window-removes-its-pane
+  "delete-window! removes the pane of the selected window from the model, and its frame window goes"
+  (lambda ()
+    (with-fresh-group "zz-panes-delete"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-pd-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-pd-c" "zz-c-mode")))
+          (unwind-protect
+            (lambda ()
+              (let* ((l (pmt-two-panes! id a c))
+                     (wc (panes-handle l (car (panes-pane-keys l (cadr (panes-pane-ids l)))))))
+                (select-window! wc)
+                (check-true! (delete-window!) "the delete answers #t")
+                (check-equal! (panes-pane-count (panes-layout)) 1 "the model has one pane")
+                (check-equal! (map cadr (window-list)) (list a) "the frame shows the pane left")
+                (check-false! (window-exists? wc) "the deleted window is gone, not hidden")
+                (check-false! (delete-window!) "the sole window stays")))
+            (lambda () (pmt-done! (list a c)))))))))
+
+(deftest 'panes-mode-tile-windows-sets-the-capacity-and-the-order
+  "tile-windows! makes the layout's capacity the model's and fronts the panes with the buffers in order"
+  (lambda ()
+    (with-fresh-group "zz-panes-tile"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-pt-a" "zz-a-mode"))
+              (b (pmt-buffer! "zz-pt-b" "zz-b-mode"))
+              (c (pmt-buffer! "zz-pt-c" "zz-c-mode")))
+          (buffer-add-group! b id)
+          (unwind-protect
+            (lambda ()
+              (pmt-two-panes! id a c)
+              (check-equal! (tile-windows! 'columns (list c b a)) (list c b a) "columns fronts three panes in order")
+              (check-equal! (map cadr (window-list)) (list c b a) "the frame shows them in that order")
+              (check-equal! (tile-windows! 'single (list b)) (list b) "single fronts one pane")
+              (check-equal! (panes-capacity (panes-layout)) 1 "the capacity is one")
+              (check-equal! (map cadr (window-list)) (list b) "the frame shows one window")
+              (check-true! (string? (panes-find (panes-layout) a)) "a folded buffer waits in the model"))
+            (lambda () (pmt-done! (list a b c)))))))))
+
+(deftest 'panes-mode-no-window-hook-writes-the-model
+  "with the model on, a window change runs no hook that writes the model"
+  (lambda ()
+    (with-fresh-group "zz-panes-hooks"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-ph-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-ph-c" "zz-c-mode")))
+          (unwind-protect
+            (lambda ()
+              (pmt-two-panes! id a c)
+              (let ((before (panes-layout)))
+                (window-configuration-changed!)
+                (check-equal! (panes-layout) before "the hooks left the model as it was"))
+              (check-false! (member 'panes--reconcile! (hook-functions 'window-configuration-change-hook)) "no reconcile hook")
+              (check-false! (member 'panes--note-focus! (hook-functions 'window-state-change-hook)) "no focus hook"))
+            (lambda () (pmt-done! (list a c)))))))))

@@ -247,8 +247,33 @@ defmodule Compos.Core.Lane do
     @impl true
     def handle_cast({:run, fun, label, owner, enqueued_at}, key) do
       {:message_queue_len, backlog} = Process.info(self(), :message_queue_len)
-      timed(self(), key, owner, label, enqueued_at, backlog, fn -> guarded(fun, nil) end)
+      run_cast_job(key, fun, label, owner, enqueued_at, backlog)
       {:noreply, key, @idle}
+    end
+
+    # A cast job runs in its own heap-bounded process, as a call job does.
+    # The bound then kills the job, not this worker; a worker death exits
+    # every caller that waits on the lane at that moment.
+    defp run_cast_job(key, fun, label, owner, enqueued_at, backlog) do
+      worker = self()
+
+      {job, job_monitor} =
+        :erlang.spawn_opt(
+          fn ->
+            Process.put(:compos_scheme_lane, key)
+            timed(worker, key, owner, label, enqueued_at, backlog, fn -> guarded(fun, nil) end)
+          end,
+          [:link, :monitor | SchemeHeap.spawn_opts()]
+        )
+
+      receive do
+        {:DOWN, ^job_monitor, :process, ^job, :normal} ->
+          :ok
+
+        {:DOWN, ^job_monitor, :process, ^job, reason} ->
+          :ets.delete(Compos.Core.Lane.jobs_table(), worker)
+          job_exit_message(key, owner, label, reason)
+      end
     end
 
     defp run_call_job(key, job_id, caller, from, fun, label, owner, enqueued_at) do

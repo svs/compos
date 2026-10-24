@@ -81,11 +81,13 @@
 ;; again only when buffers came or went; a rename clears it
 (define panes--names '())
 (define panes--names-count -1)
+(define panes--names-missed '())
 
 (define (panes--names-forget!)
   "Forget the id-to-name map; the next panes--name reads it again."
   (set! panes--names '())
-  (set! panes--names-count -1))
+  (set! panes--names-count -1)
+  (set! panes--names-missed '()))
 
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has
@@ -94,12 +96,20 @@
     (if e
         (cadr e)
         (let ((all (buffer-list)))
-          (unless (= (length all) panes--names-count)
+          ;; a kill and a create keep the count, so a new id reads the map
+          ;; again too; an id that missed once waits for the count to change
+          (unless (and (= (length all) panes--names-count) (member id panes--names-missed))
+            (unless (= (length all) panes--names-count) (set! panes--names-missed '()))
             (set! panes--names-count (length all))
             (set! panes--names
               (map (lambda (r) (list (cadr r) (car r)))
                    (filter cadr (buffer-read-many all '(id) '())))))
-          (let ((e (assoc id panes--names))) (if e (cadr e) id))))))
+          (let ((e (assoc id panes--names)))
+            (if e
+                (cadr e)
+                (begin (unless (member id panes--names-missed)
+                         (set! panes--names-missed (cons id panes--names-missed)))
+                       id)))))))
 
 (define (panes--with-ids layout)
   "LAYOUT with every stack entry an id: a name some buffer has becomes
@@ -290,12 +300,6 @@
   (let ((p (panes-pane-of layout key)))
     (if p (panes-set-focus (panes-raise layout key) p) layout)))
 
-(define (panes--prune-pane layout id)
-  "LAYOUT without pane ID when ID holds no window and is not the last
-   pane: what a command does after it moves a pane's last window out."
-  (if (and (panes-pane layout id) (null? (panes-pane-keys layout id)))
-      (panes-remove-pane layout id)
-      layout))
 
 (define (panes-shares layout)
   "The shares of the panes in pane order, normalized to sum 1. A share

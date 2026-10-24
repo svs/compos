@@ -162,6 +162,34 @@ defmodule Compos.LaneTest do
     assert Lane.run(lane, fn _ -> {:reply, :fresh} end, 1_000, "fresh") == :fresh
   end
 
+  # The heap bound kills a runaway job outright. A cast job that ran inline
+  # took the worker with it, and every caller queued on the lane exited
+  # :killed - a key lookup on :ui crashed the LiveView.
+  test "a killed cast job leaves the worker and its queued callers alive" do
+    lane = {:lane_test, System.unique_integer([:positive])}
+    me = self()
+
+    Lane.cast(
+      lane,
+      fn _ ->
+        send(me, {:cast_job, self()})
+        Process.sleep(100)
+        Process.exit(self(), :kill)
+      end,
+      "runaway"
+    )
+
+    assert_receive {:cast_job, job}, 1_000
+    [{worker, _}] = wait_registered(lane)
+    refute job == worker
+
+    capture_log(fn ->
+      assert Lane.run(lane, fn _ -> {:reply, :after} end, 2_000, "after") == :after
+    end)
+
+    assert Process.alive?(worker)
+  end
+
   # A deferred eval answers through eval-resolve! long after the worker moved
   # on. Its caller still monitors the worker, so an idle retirement in between
   # failed the call with :normal.

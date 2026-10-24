@@ -2325,9 +2325,12 @@ defmodule Compos.Core.SchemeAPI do
        "(window-hidden-list) — return (WIN BUFFER) pairs for the selected frame's hidden windows, most recently used first."} =>
         fn [] -> Enum.map(Editor.hidden_windows(), fn {id, b} -> [id, b] end) end,
       {"window-new-hidden!",
-       "(window-new-hidden! BUFFER) — make a hidden window on BUFFER; return its id, or #f."} =>
-        fn [buffer] ->
-          case Editor.new_hidden_window(buffer) do
+       "(window-new-hidden! BUFFER [ID]) — make a hidden window on BUFFER; return its id, or #f. It takes ID when no window holds it, so a window comes back with the id it had."} =>
+        fn args ->
+          [buffer | rest] = args
+          want = Enum.find(rest, &is_integer/1)
+
+          case Editor.new_hidden_window(buffer, nil, want) do
             id when is_integer(id) -> id
             _ -> false
           end

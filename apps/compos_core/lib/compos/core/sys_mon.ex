@@ -319,7 +319,8 @@ defmodule Compos.Core.SysMon do
              :stack_size,
              :garbage_collection,
              :group_leader,
-             :dictionary
+             :dictionary,
+             :current_stacktrace
            ]) do
       dict = info[:dictionary] || []
 
@@ -344,10 +345,21 @@ defmodule Compos.Core.SysMon do
         stack_words: info[:stack_size],
         minor_gcs: Keyword.get(info[:garbage_collection] || [], :minor_gcs, 0),
         group_leader: pid_string(info[:group_leader]),
+        lane: inspect(Keyword.get(dict, :compos_scheme_lane)),
+        lane_job: lane_job(pid),
+        stack: Enum.map(info[:current_stacktrace] || [], &Exception.format_stacktrace_entry/1),
         ancestors: dict |> Keyword.get(:"$ancestors", []) |> Enum.map(&ancestor/1)
       })
     else
       _ -> false
+    end
+  end
+
+  # the label of the lane job PID runs, from the lane's jobs table
+  defp lane_job(pid) do
+    case :ets.match(Compos.Core.Lane.jobs_table(), {:_, pid, :"$1", :_}) do
+      [[label] | _] -> to_string(label)
+      _ -> ""
     end
   end
 

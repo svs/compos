@@ -486,9 +486,13 @@ defmodule Compos.Core.Editor do
   """
   def hidden_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:hidden_windows, fid(fid)})
 
-  @doc "Make a hidden window on BUFFER; return its id."
-  def new_hidden_window(buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:new_hidden_window, buffer, fid(fid)})
+  @doc """
+  Make a hidden window on BUFFER; return its id. The window takes WANT
+  when no window of any frame holds it, so a window comes back with the
+  id it had; else it gets a fresh one.
+  """
+  def new_hidden_window(buffer, fid \\ nil, want \\ nil),
+    do: GenServer.call(__MODULE__, {:new_hidden_window, buffer, fid(fid), want})
 
   @doc "Put hidden window HIDDEN in the pane of VISIBLE; VISIBLE becomes hidden."
   def swap_hidden_window(visible, hidden),
@@ -2067,17 +2071,26 @@ defmodule Compos.Core.Editor do
     {:reply, rows, state}
   end
 
-  def handle_call({:new_hidden_window, buffer, fid}, _from, state) do
+  def handle_call({:new_hidden_window, buffer, fid}, from, state),
+    do: handle_call({:new_hidden_window, buffer, fid, nil}, from, state)
+
+  def handle_call({:new_hidden_window, buffer, fid, want}, _from, state) do
     case Compos.Core.ensure_buffer(buffer) do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
 
       _started ->
         f = frame(state, fid)
+        held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
+        # a wanted id below next_win is one this editor gave out, so no
+        # fresh id can meet it later
+        id = if is_integer(want) and want > 0 and want < state.next_win and want not in held,
+               do: want,
+               else: state.next_win
 
         leaf = %{
           type: :leaf,
-          id: state.next_win,
+          id: id,
           buffer: buffer,
           history: [],
           top: 0,
@@ -2085,7 +2098,8 @@ defmodule Compos.Core.Editor do
         }
 
         f = Map.put(f, :hidden, [leaf | hidden(f)])
-        changed(leaf.id, put_frame(%{state | next_win: state.next_win + 1}, f), f.id)
+        next_win = if id == state.next_win, do: state.next_win + 1, else: state.next_win
+        changed(leaf.id, put_frame(%{state | next_win: next_win}, f), f.id)
     end
   end
 

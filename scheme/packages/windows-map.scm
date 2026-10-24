@@ -122,10 +122,10 @@
       (let* ((key (cadr sel)) (ids (panes-pane-ids l))
              (i (+ dir (or (windows-map--index (car sel) ids) 0))))
         (cond ((not key) l)
-              ((and (>= i 0) (< i (length ids))) (panes--prune-pane (panes-move-window l key (list-ref ids i) 0) (car sel)))
+              ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i) 0))
               ((not (panes-under-capacity? l)) (message "no pane that way") l)
               (else (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
-                      (panes--prune-pane (panes-move-window (car added) key (cadr added) 0) (car sel)))))))))
+                      (panes-move-window (car added) key (cadr added) 0))))))))
 
 (define (windows-map--reorder! dir)
   (windows-map--edit!

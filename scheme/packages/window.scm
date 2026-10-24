@@ -632,12 +632,7 @@
     (unless (equal? text (layout-target-modeline-shown))
       (global-mode-string-set! 'layout-label '("ml-segment ml-strong" "layout"))
       (global-mode-string-set! 'layout-value (list "ml-segment ml-tight" text))))
-  (let ((ring (if (layout-target) (layout-ring-dots) ""))
-        (shown (assq 'layout-ring *global-mode-string*)))
-    (cond ((and (equal? ring "") shown) (global-mode-string-remove! 'layout-ring))
-          ((equal? ring "") #f)
-          ((not (and shown (equal? (cadr shown) (list "ml-segment ml-ring" ring))))
-           (global-mode-string-set! 'layout-ring (list "ml-segment ml-ring" ring))))))
+  (global-mode-string-remove! 'layout-ring))
 
 ;; A target is a layout and a capacity, not a frozen accidental tree.
 (define (layout-target-capacity target) (layout-capacity target))
@@ -787,7 +782,9 @@
 ;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
 (define (layout-target-on-change!)
   (layout-target-modeline!)
+  ;; under the window model the model owns the shape: its doors arrange
   (when (and (layout-target) (not (layout-arranging?))
+             (not (and (boundp 'panes-mode) panes-mode))
              (not (minibuffer-state)) (not (float-open?)))
     (let ((panes (layout-target-visible-buffers))
           (focus (window-buffer (active-window))))
@@ -2586,7 +2583,8 @@ keeps the buffer you were in and your point.")
 (define *window-unique-busy* #f)
 
 (define (window-unique-panes!)
-  (unless *window-unique-busy*
+  ;; under the window model a buffer is in one window already (panes-apply!)
+  (unless (or *window-unique-busy* (and (boundp 'panes-mode) panes-mode))
     (set! *window-unique-busy* #t)
     (unwind-protect
       (lambda ()

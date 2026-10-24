@@ -53,7 +53,6 @@ defmodule Compos.Core.SchemeRawNames do
     "local-set-file-mode!" => "set-file-mode!",
     "local-touch-file!" => "touch-file!",
     "local-make-symlink!" => "make-symlink!",
-    "builtin-window-tree-set!" => "window-tree-set!",
     "builtin-delete-other-windows!" => "delete-other-windows!",
     "builtin-split-window!" => "split-window!",
     "builtin-delete-window!" => "delete-window!",

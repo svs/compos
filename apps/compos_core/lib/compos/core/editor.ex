@@ -2950,13 +2950,12 @@ defmodule Compos.Core.Editor do
   defp put_owner(leaf, owner) when is_integer(owner), do: Map.put(leaf, :owner, owner)
   defp put_owner(leaf, _), do: Map.delete(leaf, :owner)
 
-  @doc false
-  def restore_rename({kind, covered, point, shown, under}, old, new) do
+  defp restore_rename({kind, covered, point, shown, under}, old, new) do
     swap = fn b -> if b == old, do: new, else: b end
     {kind, swap.(covered), point, swap.(shown), restore_rename(under, old, new)}
   end
 
-  def restore_rename(other, _old, _new), do: other
+  defp restore_rename(other, _old, _new), do: other
 
   defp update_leaf(state, win, fid, fun) do
     f = (win && find_window_frame(state, win)) || frame(state, fid)

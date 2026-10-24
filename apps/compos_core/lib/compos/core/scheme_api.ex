@@ -2351,7 +2351,7 @@ defmodule Compos.Core.SchemeAPI do
       # The tree travels as the same tuple spec the desktop file uses,
       # which is what restore_tree accepts.
       {"window-tree",
-       "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!."} =>
+       "(window-tree) — return the frame's window layout as an opaque value."} =>
         fn [] ->
           v = Editor.desktop_view()
 
@@ -2361,40 +2361,12 @@ defmodule Compos.Core.SchemeAPI do
             hidden: Enum.map(Map.get(v, :hidden, []), &tree_spec/1)
           }
         end,
-      {"window-tree-set!",
-       "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree."} =>
-        fn [%{tree: tree, active: active} = layout]
-           when elem(tree, 0) in [:leaf, :split] ->
-          # the layout's hidden windows replace the frame's, in the same
-          # step so every saved window id is free to come back; a layout
-          # saved before hidden windows existed has none
-          Editor.restore_layout(tree, Map.get(layout, :hidden, []), active)
-          :void
-        end,
       # A saved layout names buffers, and a name can outlive its buffer.
       # Scheme decides what to do about that — visit the file, drop the
       # window — so it must be able to read the names back out.
       {"window-tree-buffers",
        "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds."} =>
         fn [%{tree: tree}] -> tree_buffers(tree) end,
-      {"window-tree-hidden-buffers",
-       "(window-tree-hidden-buffers LAYOUT) — return the buffer names of the hidden windows a layout from window-tree holds."} =>
-        fn [layout] when is_map(layout) ->
-          Enum.flat_map(Map.get(layout, :hidden, []), &tree_buffers/1)
-        end,
-      # A rename must reach a stored layout too, not only the live frame.
-      # The swap is tree mechanics; which stores hold a layout is policy,
-      # so Scheme owns the sweep and this returns one renamed copy.
-      {"window-tree-rename",
-       "(window-tree-rename LAYOUT OLD NEW) — a copy of LAYOUT with the buffer name OLD replaced by NEW."} =>
-        fn [%{tree: tree, active: active} = layout, old, new] ->
-          %{
-            layout
-            | tree: tree_rename(tree, old, new),
-              active: if(active == old, do: new, else: active)
-          }
-          |> Map.update(:hidden, [], fn hidden -> Enum.map(hidden, &tree_rename(&1, old, new)) end)
-        end,
       # Emacs quit-restore as leaf data: what quit-window undoes in a window
       {"window-restore",
        "(window-restore WIN) — (KIND BUFFER POINT) while WIN still shows what a display or a look put there, else #f. KIND window: the display made WIN; other: it covered BUFFER; preview: a look covers BUFFER."} =>
@@ -3563,33 +3535,6 @@ defmodule Compos.Core.SchemeAPI do
   defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
   defp tree_buffers(_), do: []
 
-  defp tree_rename({:leaf, b, top, point, manual, ctop}, old, new),
-    do: {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop}
-
-  defp tree_rename({:leaf, b, top, point, manual, ctop, history}, old, new) do
-    renamed = Enum.map(history, fn name -> if name == old, do: new, else: name end)
-    {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop, renamed}
-  end
-
-  defp tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner, id}, old, new) do
-    {:leaf, b2, top, point, manual, ctop, history, restore2, owner} =
-      tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner}, old, new)
-
-    {:leaf, b2, top, point, manual, ctop, history, restore2, owner, id}
-  end
-
-  defp tree_rename({:leaf, b, top, point, manual, ctop, history, restore, owner}, old, new) do
-    {:leaf, b2, top, point, manual, ctop, history} =
-      tree_rename({:leaf, b, top, point, manual, ctop, history}, old, new)
-
-    {:leaf, b2, top, point, manual, ctop, history, Editor.restore_rename(restore, old, new),
-     owner}
-  end
-
-  defp tree_rename({:split, dir, ratio, a, b}, old, new),
-    do: {:split, dir, ratio, tree_rename(a, old, new), tree_rename(b, old, new)}
-
-  defp tree_rename(other, _old, _new), do: other
 
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),

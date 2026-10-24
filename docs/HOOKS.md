@@ -66,6 +66,7 @@ twice. registry-test.scm checks it.
 | `editing-state-hook` | BUF | the buffer entered or left the editing state |
 | `llm-config-changed-hook` | BUF | llm-config exited and the buffer's setup changed |
 | `group-membership-hook`, `group-kill-hook` | | see docs/groups.md |
+| `group-joined-hook` | BUF ID | BUF is in group ID now, by any way in (buffer-joined-group!) |
 
 `on-fs-change!`, `on-buffer-created!`, `on-buffer-woken!`,
 `on-buffer-renamed!`, `on-buffer-shown!` are the older spellings of

@@ -880,6 +880,14 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (group-resolve-id value)))
     (and id (equal? (buffer-color-group b) id))))
 
+;; buffer-joined-group!: B is in group ID now, by any way in. Every join
+;; passes here: the group's config takes the buffer (group-config.scm),
+;; and group-joined-hook runs with (B ID).
+(define (buffer-joined-group! b id)
+  (when (boundp 'group-configure-buffer!)
+    (group-configure-buffer! b))
+  (run-hook-with-args 'group-joined-hook b id))
+
 (define (chat-set-group! b value)
   (let ((id (and value (group-ensure-record! value))))
     ;; Publish ownership atomically; readers never see half a move.
@@ -889,8 +897,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (group-current-recalculate!)
     ;; the group's shared config is the chat's starting setup: what the
     ;; user has already chosen here stays (group-config.scm)
-    (when (and id (boundp 'group-configure-buffer!))
-      (group-configure-buffer! b))
+    (when id (buffer-joined-group! b id))
     id))
 
 ;; A role belongs to the membership, not globally to the buffer: one buffer
@@ -956,8 +963,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (group-current-recalculate!)
             ;; joining is adopting: the group's config is this buffer's
             ;; default now (group-config.scm)
-            (when (boundp 'group-configure-buffer!)
-              (group-configure-buffer! b))
+            (buffer-joined-group! b id)
             id))))
 
 (define (buffer-add-group-as! b value role)
@@ -973,8 +979,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (list 'group-roles '() 'group #f 'group-inherited #f 'companion-of #f))
           (buffer-group-display-refresh! b)
           ;; the destination's config takes over from the old group's
-          (when (and id (boundp 'group-configure-buffer!))
-            (group-configure-buffer! b))))
+          (when id (buffer-joined-group! b id))))
     (group-current-recalculate!)
     id))
 

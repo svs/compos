@@ -951,14 +951,48 @@
     "window-layout-halves" "window-layout-columns" "window-layout-two-chat"
     "layout-forward" "layout-backward"))
 
+(define panes--joined '())
+
+(define (panes--joined! buf id)
+  "group-joined-hook: BUF joined group ID. It goes into a window of ID's
+   model when the command ends (panes--place-joined!), when its mode is
+   set and the command has shown it or not."
+  (set! panes--joined (cons (list buf id) panes--joined)))
+
+(define (panes--place-joined!)
+  "post-command-hook: a buffer that joined a group and that no window of
+   the group's model holds joins the back of its mode's window, else a
+   new window behind the last pane (panes--consolidate-homes). A buffer
+   panes--group-buffers leaves out stays out. It does not draw."
+  (unless (null? panes--joined)
+    (let ((joined (reverse panes--joined)))
+      (set! panes--joined '())
+      (for-each
+        (lambda (e)
+          (let* ((buf (car e)) (id (cadr e)) (l (panes-layout-of id)))
+            (when (and l (buffer-known? buf)
+                       (equal? (group-resolve-id (buffer-group buf)) id)
+                       (not (string-prefix? " " buf))
+                       (fill-candidate? buf)
+                       (not (buffer-context-only? buf))
+                       (not (member buf (panes-buffers l))))
+              (let ((after (panes--consolidate-homes l panes--buffer-mode
+                             (list (panes--buffer-mode buf)) (list buf))))
+                (if (equal? id (frame-group))
+                    (panes-layout-set! after)
+                    (panes--layout-store! id (panes-unique-buffers after)))))))
+        joined))))
+
 (define (panes-mode--install!)
   "The doors, installed. It draws nothing. The doors:
    The frame primitives the draw uses: select-window! moves the focus,
-   and window-set-buffer! shows a buffer in its window; outside a draw
-   each edits the model first (see the section above).
-   Hooks: buffer-kill-repair runs panes--kill-repair!, and
-   buffer-renamed-hook runs panes--rename!. No window hook writes the
-   model."
+   and window-set-buffer! and switch-to-buffer-here! show a buffer in a
+   window; outside a draw each edits the model first (see the section
+   above).
+   Hooks: buffer-kill-repair runs panes--kill-repair!,
+   buffer-renamed-hook runs panes--rename!, and group-joined-hook with
+   post-command-hook give a buffer that joins a group a window
+   (panes--place-joined!). No window hook writes the model."
   (advice-add! 'select-window! 'around 'panes
     (lambda (next win &rest more)
       (when (panes--door?) (panes--focus-follows! win))
@@ -967,6 +1001,12 @@
     (lambda (next win buf &rest more)
       (when (panes--door?) (panes--show-follows! win buf))
       (apply next (cons win (cons buf more)))))
+  (advice-add! 'switch-to-buffer-here! 'around 'panes
+    (lambda (next buf &rest more)
+      (when (panes--door?) (panes--show-follows! (active-window) buf))
+      (apply next (cons buf more))))
+  (add-hook! 'group-joined-hook 'panes--joined!)
+  (add-hook! 'post-command-hook 'panes--place-joined!)
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (add-hook! 'buffer-renamed-hook 'panes--rename!)
   ;; an install over an older one drops the hooks that read the frame back

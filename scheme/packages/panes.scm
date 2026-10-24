@@ -95,7 +95,9 @@
   (let ((e (assoc id panes--names)))
     (if e
         (cadr e)
-        (let ((all (buffer-list)))
+        ;; every buffer, dormant ones too: a model window holds a dormant
+        ;; buffer as well, and buffer-list names only the live ones
+        (let ((all (map car (cadr (buffer-rows '(hidden #t context-only #t fields (name)))))))
           ;; a kill and a create keep the count, so a new id reads the map
           ;; again too; an id that missed once waits for the count to change
           (unless (and (= (length all) panes--names-count) (member id panes--names-missed))

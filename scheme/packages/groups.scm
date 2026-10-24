@@ -3059,7 +3059,11 @@ is forgotten and that group falls back to creation order in the switcher."
                (modes (cons m (filter (lambda (x) x)
                                       (map panes--buffer-mode
                                            (apply append (map (lambda (k) (panes-window-buffers l k)) touched))))))
-               (after (panes-consolidate l panes--buffer-mode modes)))
+               ;; the group's buffers of the mode that no window holds join too,
+               ;; dormant ones included: buffer-list names only the live ones
+               (extra (filter (lambda (b) (equal? (panes--buffer-mode b) m))
+                              (panes--group-buffers (panes-buffers l))))
+               (after (panes-consolidate l panes--buffer-mode modes extra)))
           (panes-apply! after)
           (when (window-exists? me) (select-window! me))
           (message (string-append "Consolidated " m))

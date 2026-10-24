@@ -620,10 +620,10 @@
    no window holds join too, except context-only ones. The selected
    window stays selected when it still exists. Answers that window."
   (let* ((me (active-window))
-         ;; the group's buffers no window holds any more join behind their mode's window
-         (g (frame-group))
-         (after (panes-consolidate (panes--ensure-layout!) panes--buffer-mode #f
-                                   (filter (lambda (b) (and (equal? (buffer-group b) g) (not (buffer-local b 'context-only)))) (buffer-list)))))
+         ;; the group's buffers no window holds join behind their mode's window,
+         ;; dormant ones included: buffer-list names only the live ones
+         (l (panes--ensure-layout!))
+         (after (panes-consolidate l panes--buffer-mode #f (panes--group-buffers (panes-buffers l)))))
     (window-log-note! "panes consolidate")
     (panes-apply! (let ((k (panes-key-of-handle after me))) (if k (panes-focus-window after k) after)))
     (message (string-append "Consolidated into " (number->string (length (panes-window-keys after))) " windows"))

@@ -35,7 +35,7 @@
   (set! *group-mru* '())
   (set! *group-next-id* 0)
   ;; these tests read a free frame; the default target has its own
-  (layout-target-set! #f)
+  (panes-choose-layout! #f)
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
@@ -61,7 +61,7 @@
 
 (define (t--sw-done!)
   (when (minibuffer-state) (minibuffer-cancel!))
-  (layout-target-set! #f)
+  (panes-choose-layout! #f)
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
@@ -703,7 +703,7 @@
         (t--sw-show-here! t--sw-third)
         ;; the group remembers the two panes it had before the third column.
         ;; A move must not answer from that memory: the screen is newer.
-        (group-layout-set! home older (layout-target))
+        (group-layout-set! home older (panes-current-layout))
         (let ((before (window-tree))
               (panes (length (window-list))))
           (winner--pre-command!)
@@ -721,7 +721,7 @@
                         "the move keeps the arrangement the person made")
           (for-each
             (lambda (buf)
-              (check-true! (member buf (layout-visible-buffers))
+              (check-true! (member buf (panes-shown-buffers))
                            (string-append buf " left the screen")))
             (list t--sw-first t--sw-second t--sw-third))
           (check-equal! (frame-group) home "the frame stands in the group")
@@ -1670,7 +1670,7 @@
       (for-each (lambda (b) (buffer-add-group! b id))
                 (list t--sw-first t--sw-second t--sw-third))
       (switch-to-group! id)
-      (check-equal! (layout-target) 'columns "the frame takes the default target")
+      (check-equal! (panes-current-layout) 'columns "the frame takes the default target")
       (check-equal! (length (window-list)) 3 "one pane for each member")
       (for-each
         (lambda (row)
@@ -1686,32 +1686,9 @@
       (buffer-add-group! t--sw-first id)
       (buffer-add-group! t--sw-second id)
       (switch-to-group! id)
-      (check-false! (layout-target) "the frame stays free"))
+      (check-false! (panes-current-layout) "the frame stays free"))
     (t--sw-done!)))
 
-(deftest 'a-new-pane-leaves-a-consolidated-windows-members-alone
-  "a layout that needs a window fills it from buffers no pane holds"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((id (group-record-create! "zzsw-held")))
-      (for-each (lambda (b) (buffer-add-group! b id))
-                (list t--sw-first t--sw-second t--sw-third))
-      (buffer-set-local! t--sw-first 'mode-name "text-mode")
-      (buffer-set-local! t--sw-second 'mode-name "text-mode")
-      (buffer-set-local! t--sw-third 'mode-name "fundamental-mode")
-      (delete-other-windows!)
-      (switch-to-buffer-here! t--sw-first)
-      (set-frame-local! 'current-group id)
-      (let ((win (active-window)))
-        (set-window-prev-buffers! win (list t--sw-second))
-        (window-mode-preference! win "text-mode")
-        (tile-visible-windows! 'columns)
-        (check-false! (window-showing t--sw-second) "the held member stays in its pane")
-        (check-true! (window-showing t--sw-third) "the new pane takes other work")
-        (check-true! (member t--sw-second (window-prev-buffers win))
-                     "and the pane keeps it in its history")
-        (window-mode-preference! win #f)))
-    (t--sw-done!)))
 
 (deftest 'group-pin-holds-the-frame-and-the-shown-buffer-joins-it
   "a pin holds the frame's group, and a buffer shown in the pinned frame joins that group"
@@ -1837,17 +1814,6 @@
   (when (float-open?) (float-close!))
   (when (buffer-known? foreign) (buffer-kill! foreign)))
 
-(deftest 'a-foreign-buffer-is-a-display-of-category-foreign
-  "a buffer outside the group is a foreign display, and nothing floats"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair)))
-      (check-false! (equal? (car (display-buffer-actions-for foreign)) 'popup)
-                    "a foreign buffer takes the window chain")
-      (check-true! (group-foreign-buffer? foreign) "the predicate names it")
-      (check-false! (group-foreign-buffer? t--sw-first) "and not a member")
-      (t--sw-sealed-done! foreign))
-    (t--sw-done!)))
 
 (deftest 'a-switch-to-an-ungrouped-buffer-joins-it-to-the-group
   "the ruling of 2026-09-22: a buffer opens in the current group, and the frame keeps it"

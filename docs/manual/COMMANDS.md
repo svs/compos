@@ -1107,10 +1107,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `buffer-down` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `buffer-left` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `buffer-right` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
-| `buffer-up` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `caret-browsing-mode` |  | Toggle the text cursor while reading a dismissible buffer |
 | `delete-other-windows` | `C-x 1` | Make the selected window the only one |
 | `delete-window` | `C-x 0` | Delete the selected window |
@@ -1128,35 +1126,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `layout-forward` |  | Move the layout one window forward through the frame's window ring |
 | `mode-consolidate` |  | Gather this group's preferred-mode buffers into the selected window |
 | `other-window` | `C-x o` | Select another window in cyclic order |
-| `overview-down` |  | Select the overview tile below |
-| `overview-left` |  | Select the overview tile to the left |
-| `overview-mark` |  | Mark or unmark the selected overview tile |
-| `overview-pop-out` |  | Pop the marked buffers, else the selected one, out into a new group |
-| `overview-quit` |  | Leave the overview and restore the layout |
-| `overview-right` |  | Select the overview tile to the right |
-| `overview-up` |  | Select the overview tile above |
 | `popper-cycle` | `` M-` `` | Show the next popup in the popup window |
 | `popper-toggle` |  | Close the popup on screen, or show the latest popup again |
 | `popper-toggle-type` | `` C-M-` `` | Make this popup an ordinary buffer, or make this buffer a popup |
 | `reset-layout` |  | Arrange the frame the way this buffer's mode asks |
 | `split-window-below` | `C-x 2` | Split the window in two, one above the other |
 | `split-window-right` | `C-x 3` | Split the window in two, side by side |
-| `tile-all` | `C-x C-g s` | Open the current group or project in locked columns |
-| `window-down` | `s-S-<down>` | Move this window downward with its complete buffer stack |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
 | `window-layout` | `C-x l` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
 | `window-rename` |  | Give this window a name; an empty name goes back to the default |
-| `windows-overview` | `s-S-<down>` | Show every window of this frame at once; again goes back to the panes |
-| `windows-overview-exit` | `s-S-<up>` | Back from the all-windows view to the panes, the window you are in at the front of its pane |
 | `window-layout-columns` |  | Show three equal columns |
 | `window-layout-free` |  | Drop the frame's target layout: a display may split a window again |
 | `window-layout-halves` |  | Show two equal panes side by side |
-| `window-layout-rows` |  | Show two equal panes, one above the other |
 | `window-layout-single` |  | Show one window |
 | `window-layout-two-pane` |  | Show two panes side by side; the first pane takes two thirds |
 | `window-left` | `s-S-<left>` | Move this window leftward with its complete buffer stack |
 | `window-right` | `s-S-<right>` | Move this window rightward with its complete buffer stack |
-| `window-up` | `s-S-<up>` | Move this window upward with its complete buffer stack |
 | `winner-next` | `C-c <right>` | Switch to the next window and buffer arrangement |
 | `winner-previous` | `C-c <left>` | Switch to the previous window and buffer arrangement |
 | `winner-redo` |  | Walk forward to a later window and buffer arrangement |

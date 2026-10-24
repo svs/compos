@@ -517,7 +517,7 @@
 (define (rec-layout! buf)
   (let ((panes (filter (lambda (b) (and b (buffer-exists? b)))
                        (list buf (rec-current-detail buf) (rec--chat-pane)))))
-    (when (pair? (cdr panes)) (tile-windows! 'columns panes))
+    (when (pair? (cdr panes)) (panes-tile! 'columns panes))
     panes))
 
 ;;; -------------------------------------------------------------- the moves

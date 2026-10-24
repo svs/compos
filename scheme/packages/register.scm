@@ -44,7 +44,8 @@
   (message (string-append "Point saved in register " name)))
 
 (define (window-configuration-to-register! name)
-  (register-set! name (list 'window (window-tree)))
+  ;; the window model of the frame's group, and the group
+  (register-set! name (list 'window (panes--ensure-layout!) (frame-group)))
   (message (string-append "Windows saved in register " name)))
 
 (define (copy-to-register! name text)
@@ -64,7 +65,11 @@
            (if (buffer-known? (nth 1 v))
                (begin (switch-to-buffer! (nth 1 v)) (goto-char! (nth 2 v)))
                (message (string-append "Buffer " (nth 1 v) " is gone"))))
-          ((equal? (car v) 'window) (window-tree-set! (nth 1 v)))
+          ((and (equal? (car v) 'window) (> (length v) 2))
+           (when (and (nth 2 v) (not (equal? (nth 2 v) (frame-group))) (group-resolve-id (nth 2 v)))
+             (switch-to-group! (nth 2 v)))
+           (panes-apply! (panes-validate (nth 1 v) buffer-known?)))
+          ((equal? (car v) 'window) (message (string-append "Register " name " holds windows from before the window model")))
           (else (message (string-append "Register " name " holds text; C-x r i inserts it"))))))
 
 (define (insert-register! name)

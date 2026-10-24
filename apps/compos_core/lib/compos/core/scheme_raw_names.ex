@@ -54,7 +54,6 @@ defmodule Compos.Core.SchemeRawNames do
     "local-touch-file!" => "touch-file!",
     "local-make-symlink!" => "make-symlink!",
     "builtin-window-tree-set!" => "window-tree-set!",
-    "builtin-window-tree-preview!" => "window-tree-preview!",
     "builtin-delete-other-windows!" => "delete-other-windows!",
     "builtin-split-window!" => "split-window!",
     "builtin-delete-window!" => "delete-window!",

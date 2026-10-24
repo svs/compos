@@ -883,23 +883,14 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; Only when no pane shows the mail view does this fall back to making
 ;; one, and it always puts focus back where it started.
 (define (nm--show-pane! buf &optional index)
-  (cond
-    ;; the layout engine is mid-build: it places every declared pane
-    ;; itself, so the view is rendered and no window is touched. A split
-    ;; here lands between the engine's own splits and leaves the frame in
-    ;; neither arrangement, and a switch here takes the index's window.
-    ((layout-arranging?) #f)
-    (else
-      (let ((scene (scene-window 'show)))
-        (if scene
-            ;; a scene names its mail pane: fill it, select nothing
-            (begin (window-set-buffer! scene buf) scene)
-            ;; otherwise the index's one detail window (packages/detail.scm):
-            ;; the mail view lands beside the list and every later thread
-            ;; retakes that window, so the frame never grows a pane per
-            ;; thread. It selects nothing, so focus and point stay put, and
-            ;; it makes the window when a target layout would not.
-            (display-buffer-detail! buf (or index (current-buffer))))))))
+  (let ((scene (scene-window 'show)))
+    (if scene
+        ;; a scene names its mail pane: fill it, select nothing
+        (begin (window-set-buffer! scene buf) scene)
+        ;; otherwise the index's detail (packages/detail.scm): the mail view
+        ;; opens beside the list, and it selects nothing, so focus and point
+        ;; stay put
+        (display-buffer-detail! buf (or index (current-buffer))))))
 
 ;; One mail view holds one thread at a time. M-RET keeps the one on screen:
 ;; it takes the subject for a name, which frees *mail* for the next thread.
@@ -1021,7 +1012,6 @@ when a message has no text/plain part." 'group 'notmuch)
       ((not (and notmuch-auto-preview
                  (buffer-exists? buf)
                  (nm--mail-window? buf)
-                 (not (layout-arranging?))
                  (not (minibuffer-active?))))
        #f)
       ;; q closed the pane. The first pass after the kill records WHICH

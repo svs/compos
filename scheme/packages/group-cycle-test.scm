@@ -206,7 +206,7 @@
       (lambda ()
         (group-cycle-test-open!)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-        (tile-windows! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
+        (panes-tile! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
         (select-window! (window-showing "*zz-cyc-work-a*"))
         (let ((win (active-window)) (neighbor (window-showing "*zz-cyc-three*")))
           (run-command "group-next-buffer")
@@ -218,10 +218,10 @@
 
 (define (group-consolidate-test-open!)
   (group-cycle-test-open!)
-  (layout-target-set! #f)
+  (panes-choose-layout! #f)
   (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
   (buffer-set-local! "*zz-cyc-work-there*" 'mode-name "text-mode")
-  (tile-windows! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
+  (panes-tile! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
                          "*zz-cyc-three*" "*zz-cyc-work-b*"))
   (let ((windows (map car (window-list))))
     (set-window-prev-buffers! (nth 0 windows) '("*zz-cyc-work-there*"))
@@ -263,7 +263,7 @@
     (group-cycle-scene
       (lambda ()
         (group-cycle-test-open!)
-        (layout-target-set! #f)
+        (panes-choose-layout! #f)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
         (switch-to-buffer-here! "*zz-cyc-work-a*")
         (delete-other-windows!)
@@ -278,8 +278,8 @@
       (lambda ()
         (group-cycle-test-open!)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-        (tile-windows! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
-        (layout-target-set! 'two-pane)
+        (panes-tile! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
+        (panes-choose-layout! 'two-pane)
         (let ((destination (window-showing "*zz-cyc-work-a*"))
               (neighbor (window-showing "*zz-cyc-three*")))
           (set-window-prev-buffers! destination '("*zz-cyc-one*" "*zz-cyc-two*"))
@@ -290,7 +290,7 @@
           (check-false! (window-showing "*zz-cyc-one*") "the other stack is invisible")
           (check-equal! (window-buffer neighbor) "*zz-cyc-three*" "the existing other window stays")
           (check-equal! (length (window-list)) 2 "no visible window is created")
-          (check-equal! (layout-target) 'two-pane "the target stays unchanged"))))))
+          (check-equal! (panes-current-layout) 'two-pane "the target stays unchanged"))))))
 
 (deftest 'mode-consolidate-lets-an-emptied-pane-close
   "two panes of one mode leave one pane; the target does not refill the other"
@@ -299,8 +299,8 @@
       (lambda ()
         (group-cycle-test-open!)
         (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-        (tile-windows! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"))
-        (layout-target-set! 'columns)
+        (panes-tile! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"))
+        (panes-choose-layout! 'columns)
         (let ((destination (window-showing "*zz-cyc-work-a*"))
               (neighbor (window-showing "*zz-cyc-work-b*")))
           (set-window-prev-buffers! destination '())

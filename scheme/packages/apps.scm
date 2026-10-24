@@ -144,7 +144,7 @@
                                    (cons b acc)))))))
          ;; the app's roles always get their panes; what was on screen fills
          ;; the room left, the selected window's buffer first, in screen order
-         (capacity (and (layout-target) (layout-capacity (layout-target))))
+         (capacity (and (panes-current-layout) (panes-layout-capacity (panes-current-layout))))
          (room (and capacity (max 0 (- capacity (length extras) (length tops)))))
          (here (window-buffer (active-window)))
          (kept (if room
@@ -157,9 +157,8 @@
          (panes (append extras others tops)))
     (and (pair? tops)
          (begin
-           (tile-default-windows! panes)
-           (with-layout-suppressed
-             (lambda ()
+           (panes-tile-default! panes)
+           (begin
                (for-each
                  (lambda (row)
                    (let* ((top (car row))
@@ -177,7 +176,7 @@
                                  (filter (lambda (b) (not (member b theirs))) (window-prev-buffers win))))
                        ;; the pane keeps its role: the next page of any list opens there
                        (window-mode-preference! win (app-class-mode top)))))
-                 rows)))
+                 rows))
            panes))))
 
 (public! 'app-layout! "(app-layout! ID &optional EXTRA) — one window per role of app ID: its index, its pages, the rest; each gathers its role's buffers. EXTRA panes go first; answers the panes")
@@ -207,7 +206,7 @@
 ;; screen, then to the group's most recent buffers.
 (define (app-dismiss! id)
   (let* ((group (frame-group))
-         (layout (and panes-mode (panes-layout)))
+         (layout (panes-layout))
          (room (if layout (panes-pane-count layout) (length (display--work-windows))))
          ;; under the window model the app leaves every stack, else a redraw brings it back
          ;; the model forgets the app: its buffers leave every stack and the
@@ -245,7 +244,7 @@
           (else
            (let* ((more (append screen fill))
                   (panes (take more (min room (length more)))))
-             (and (pair? panes) (begin (tile-default-windows! panes) panes))))))))
+             (and (pair? panes) (begin (panes-tile-default! panes) panes))))))))
 
 (public! 'app-dismiss! "(app-dismiss! ID) — take app ID off the screen; its buffers stay alive and its columns go to other work")
 

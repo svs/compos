@@ -22,7 +22,7 @@ defmodule Compos.GroupCycleTest do
                  """
                  (group-cycle-test-open!)
                  (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-                 (tile-windows! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
+                 (panes-tile! 'two-pane '("*zz-cyc-work-a*" "*zz-cyc-three*"))
                  (select-window! (window-showing "*zz-cyc-work-a*"))
                  (local-set-key "<f9>" "group-next-buffer")
                  """,
@@ -79,8 +79,8 @@ defmodule Compos.GroupCycleTest do
                  """
                  (group-cycle-test-open!)
                  (buffer-set-local! "*zz-cyc-work-a*" 'mode-name "Dired")
-                 (tile-windows! 'two-pane '("*zz-cyc-three*" "*zz-cyc-work-a*"))
-                 (layout-target-set! 'two-pane)
+                 (panes-tile! 'two-pane '("*zz-cyc-three*" "*zz-cyc-work-a*"))
+                 (panes-choose-layout! 'two-pane)
                  (set-window-prev-buffers! (window-showing "*zz-cyc-three*") '("*zz-cyc-one*"))
                  (set-window-prev-buffers! (window-showing "*zz-cyc-work-a*") '("*zz-cyc-two*"))
                  (select-window! (window-showing "*zz-cyc-three*"))

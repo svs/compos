@@ -158,18 +158,19 @@
         (check-equal! (apply + (panes-shares w)) 1 "shares sum to one")
         (check-equal! (car (panes-shares w)) (/ 1 4) "the other pane shrank")))))
 
-(deftest 'handles-do-not-save
-  "H05: a saved value carries no renderer handle; a dead buffer leaves on validation"
+(deftest 'a-key-is-the-frame-window-id
+  "H05: a window's key is its frame window id; a frame that gives another id rekeys it, and a dead buffer leaves on validation"
   (lambda ()
     (let* ((o1 (pt-visit (panes-empty 3) "old" "m"))
            (o2 (pt-visit (car o1) "other" "m" (cadr o1)))
            (k (cadr o1))
            (r (car o2))
            (h (panes-set-handle r k 42)))
-      (check-equal! (panes-handle h k) 42 "a handle attaches")
-      (check-equal! (panes-key-of-handle h 42) k "and answers its key")
-      (check-equal! (panes-handle (panes-strip-handles h) k) #f "and does not save")
-      (check-equal! (panes-window-buffers (panes-validate h (lambda (b) (equal? b "other"))) k) '("other") "a dead buffer leaves"))))
+      (check-equal! (panes-handle r k) k "the handle is the key")
+      (check-equal! (panes-handle h 42) 42 "another id rekeys the window")
+      (check-equal! (panes-key-of-handle h 42) 42 "and answers its key")
+      (check-equal! (panes-handle h k) #f "the old key is gone")
+      (check-equal! (panes-window-buffers (panes-validate h (lambda (b) (equal? b "other"))) 42) '("other") "a dead buffer leaves"))))
 
 
 (deftest 'a-stray-in-another-modes-stack-opens-in-its-mode-window

@@ -95,7 +95,7 @@ defmodule Compos.WindowIdsTest do
     end)
   end
 
-  test "window-tree and window-tree-set! round-trip the ids" do
+  test "window-tree and builtin-window-tree-set! round-trip the ids" do
     with_frame(fn frame ->
       {:ok, _} =
         Session.eval(
@@ -108,7 +108,7 @@ defmodule Compos.WindowIdsTest do
 
       {:ok, _} =
         Session.eval(
-          ~s|(let ((l (window-tree))) (delete-other-windows!) (window-hidden-clear!) (window-tree-set! l))|,
+          ~s|(let ((l (window-tree))) (delete-other-windows!) (window-hidden-clear!) (builtin-window-tree-set! l))|,
           frame
         )
 

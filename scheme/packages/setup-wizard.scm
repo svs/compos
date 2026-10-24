@@ -458,8 +458,8 @@
 (define (setup-choose-columns!)
   (unless (equal? window-layout-default 'columns)
     (customize-save! 'window-layout-default 'columns))
-  (unless (equal? (layout-target) 'columns)
-    (layout-target-set! 'columns)))
+  (unless (equal? (panes-current-layout) 'columns)
+    (panes-choose-layout! 'columns)))
 
 (define (setup-wizard! &optional step)
   (setup-choose-columns!)

@@ -10,7 +10,7 @@ defmodule Compos.GroupSwitchPreviewTest do
     Editor.completion_dismiss()
     Editor.set_pending([])
     Editor.delete_other_windows()
-    eval!("(layout-target-set! #f)")
+    eval!("(panes-choose-layout! #f)")
 
     suffix = System.unique_integer([:positive])
     source = "group-preview-source-#{suffix}"

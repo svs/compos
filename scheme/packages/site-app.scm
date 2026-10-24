@@ -623,18 +623,8 @@
     (site-app-index-enter! buf name pid)
     ;; an app with a group of its own is opened there
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
-    ;; a page of the app turns over in its own pane; opened from anything else it takes a new pane
-    ;; while the layout has room, else the window you are in.
-    (let* ((target (layout-target))
-           (capacity (and target (layout-target-capacity target)))
-           (room (and target (or (not capacity) (< (length (window-list)) capacity))))
-           (pane (and room
-                      (not (plist-get spec 'own-group))
-                      (not (equal? (plist-get (buffer-local (window-buffer (active-window)) 'site-app-spec) 'name) name))
-                      (split-window-in! (active-window) 'h))))
-      (if pane
-          (begin (window-display! (lambda () (display-buffer-in-window! pane buf))) (select-window! pane))
-          (switch-to-buffer! buf)))
+    ;; a page of the app turns over in its mode's window (the window model)
+    (switch-to-buffer! buf)
     (when (null? (site-app-rows buf))
       (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page))))
     buf))

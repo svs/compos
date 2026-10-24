@@ -520,31 +520,8 @@ body {
 }
 .buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
 .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-/* the keys card gives way to the buffer: in a narrow window, and in the
-   all-windows overview, where every tile is a glance */
+/* the keys card gives way to the buffer in a narrow window */
 @container (max-width: 520px) { .buffer-footer:has(.c-keys-bar) { display: none; } }
-html.windows-overview .buffer-footer:has(.c-keys-bar) { display: none; }
-/* the all-windows overview: the live windows float over a dimmed desk,
-   each at the size it has in its pane and scaled into place;
-   window-motion.js writes the places (#expose-places) */
-html.windows-expose .windows {
-  background: color-mix(in srgb, var(--default-bg, #d5cdb9) 55%, #000);
-  overflow: hidden;
-}
-html.windows-expose .windows .split,
-html.windows-expose .windows .split-child { position: static; }
-html.windows-expose .windows .window:not([class*='popup']) {
-  position: absolute; left: 0; top: 0; flex: none;
-  transform-origin: 0 0;
-  border-radius: calc(10px / var(--tile-scale, 1));
-  box-shadow: 0 calc(12px / var(--tile-scale, 1)) calc(40px / var(--tile-scale, 1)) rgba(0, 0, 0, 0.35);
-  transition: transform var(--expose-ms, 0ms) cubic-bezier(.2, .7, .2, 1);
-}
-html.windows-expose .windows .window.active {
-  z-index: 1;
-  outline: calc(3px / var(--tile-scale, 1)) solid var(--accent, #4a7cc0);
-  outline-offset: calc(4px / var(--tile-scale, 1));
-}
 .buffer-footer .keys-line {
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--s3) var(--s9); min-width: 0;

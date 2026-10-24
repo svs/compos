@@ -1057,10 +1057,10 @@ the next row down. STEP is kept for the callers."
 
 (define *switch-tabs* '((all "All") (group "Group") (window "Window") (pane "Pane")))
 
-;; every buffer of every window in WIN's pane, its front window first: under
-;; panes-mode the pane is a stack of windows; else the windows the pane records
+;; every buffer of every window in WIN's pane, its front window first: the
+;; pane is a stack of windows; without a layout, the windows the pane records
 (define (switch-pane-tab-buffers win)
-  (let* ((l (and (boundp 'panes-mode) panes-mode (panes-layout)))
+  (let* ((l (panes-layout))
          (k (and l (panes-key-of-handle l win)))
          (pane (and k (panes-pane-of l k))))
     (if pane
@@ -1101,7 +1101,7 @@ the next row down. STEP is kept for the callers."
 ;; the buffers of every window in WIN's pane, the window on screen first:
 ;; a group with panes keeps one window per mode behind each pane
 (define (switch-pane-buffers win)
-  (let loop ((wins (if (boundp 'group-panes-pane-windows) (group-panes-pane-windows win) (list win)))
+  (let loop ((wins (list win))
              (acc '()))
     (if (null? wins)
         acc

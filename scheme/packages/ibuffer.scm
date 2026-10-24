@@ -1857,9 +1857,8 @@
                   'header-line target 'window-classes "listing-peek"
                   'line-numbers "off"))
           (buffer-move-to-group! copy (buffer-group owner))
-          (with-layout-suppressed
-            (lambda () (with-display-preview
-              (lambda () (listing-peek-show! copy source)))))
+          (begin (with-display-preview
+              (lambda () (listing-peek-show! copy source))))
           ;; The floating helper owns its size. These two numeric properties
           ;; anchor the card to a source window and byte position in the UI.
           (buffer-set-local! copy 'window-style
@@ -1948,8 +1947,7 @@
   (listing-preview-dismiss! buf)
   (when (equal? (window-buffer (active-window)) buf)
     ;; The listing remains available for reuse. Ordinary history owns return.
-    (with-layout-suppressed
-      (lambda () (window-unwind-or-close! (active-window))))))
+    (begin (window-unwind-or-close! (active-window)))))
 
 (define (listing-visit! view target)
   ;; Leave the listing on the invoking window's history for q.
@@ -2000,7 +1998,7 @@
                    (display-buffer buf)
                    (let ((w (window-showing-other buf from)))
                      (if w (select-window! w) (switch-to-buffer-here! buf))))
-                 (with-layout-suppressed (lambda () (switch-to-buffer-here! buf)))))
+                 (begin (switch-to-buffer-here! buf))))
          (t2 (monotonic-ms))
          ;; the mode goes on the VIEW, whatever buffer is current: a prompt
          ;; can be current here, and a floated switch leaves the work buffer
@@ -2481,10 +2479,7 @@
     (list "move here" (ibuffer-act group-move-buffers-here!))
     (list "split window"
           (ibuffer-act
-            (lambda (targets)
-              (if (and (boundp 'panes-mode) panes-mode)
-                  (panes-split-off! targets)
-                  (message "split window needs panes-mode")))))
+            (lambda (targets) (panes-split-off! targets))))
     ;; the two that ask for a group are the commands themselves: they
     ;; read the same marks the table shows
     (list "add to group" (lambda (id) (run-command "group-add")))

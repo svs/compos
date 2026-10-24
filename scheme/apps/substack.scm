@@ -435,7 +435,7 @@
                               (substack-current-detail)
                               (substack-current-reader)
                               chat))))
-    (when (pair? (cdr panes)) (tile-default-windows! panes))
+    (when (pair? (cdr panes)) (panes-tile-default! panes))
     panes))
 (define (substack-sync!)
   "Fetch subscriptions and redraw the app."

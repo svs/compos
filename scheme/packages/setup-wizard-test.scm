@@ -119,9 +119,9 @@
 (deftest 'setup-chooses-the-columns-layout
   "opening the wizard puts the frame in the columns layout"
   (lambda ()
-    (layout-target-set! #f)
+    (panes-choose-layout! #f)
     (setup-wizard! "model")
-    (check-equal! (layout-target) 'columns "the frame")
+    (check-equal! (panes-current-layout) 'columns "the frame")
     (check-equal! window-layout-default 'columns "the saved default")))
 
 (deftest 'every-machine-can-paste-or-run-a-command-for-a-key

@@ -1757,11 +1757,11 @@
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
                         (list index (amazon--detail-pane) chat))))
     ;; three columns: the app names the layout it wants, so the panes do not
-    ;; depend on what the frame happened to hold. The listing leads because tile-windows!
+    ;; depend on what the frame happened to hold. The listing leads because panes-tile!
     ;; clears the frame and fills from the selected window outward: the first
     ;; buffer lands in the pane you were already in and keeps the focus. Lead
     ;; with the chat and the app opens beside you instead of under your hands.
-    (when (pair? (cdr panes)) (tile-windows! 'columns panes))
+    (when (pair? (cdr panes)) (panes-tile! 'columns panes))
     (let ((home (window-showing index)))
       (when home (select-window! home)))
     panes))

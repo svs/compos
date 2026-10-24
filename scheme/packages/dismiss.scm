@@ -55,7 +55,7 @@
              (and (not (dismiss--refused-mode? buf))
                   (or (dismiss--declared-mode? buf)
                       (member cmd '("quit-window" "dired-quit" "collect-quit"
-                                    "switch-quit" "overview-quit" "notmuch-back"
+                                    "switch-quit" "notmuch-back"
                                     "notmuch-quit" "peek-dismiss"))))))
        #t))
 

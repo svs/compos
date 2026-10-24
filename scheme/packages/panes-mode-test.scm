@@ -5,21 +5,18 @@
 (effects! '(write display))
 
 (define (pmt-buffer! name mode)
-  ;; every test starts with the model off and turns it on itself
-  (when panes-mode (panes-mode-disable!))
   (test-buffer! name "text\n")
   (buffer-set-local! name 'mode-name mode)
   name)
 
 (define (pmt-done! bufs)
-  (when panes-mode (panes-mode-disable!))
   (panes-layout-forget!)
   (delete-other-windows!)
   (switch-to-buffer-here! "*scratch*")
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) bufs))
 
 (deftest 'panes-mode-routes-a-visit-to-the-window-of-its-mode
-  "with the model on, a new mode takes a pane, a second buffer of a mode lands on that mode's window, q steps back in that window alone, and a kill closes an emptied window and its pane"
+  "a new mode takes a pane, a second buffer of a mode lands on that mode's window, q steps back in that window alone, and a kill closes an emptied window and its pane"
   (lambda ()
     (with-fresh-group "zz-panes-visit"
       (lambda (id)
@@ -32,7 +29,7 @@
           (switch-to-buffer-here! a)
           (unwind-protect
             (lambda ()
-              (panes-mode-enable!)
+              (panes--enter-group!)
               (check-equal! (length (window-list)) 1 "the model adopted the one pane")
               (switch-to-buffer! c)
               (check-equal! (length (window-list)) 2 "a new mode took a second pane")
@@ -65,7 +62,7 @@
           (switch-to-buffer-here! a)
           (unwind-protect
             (lambda ()
-              (panes-mode-enable!)
+              (panes--enter-group!)
               (let ((me (active-window)))
                 (display-buffer c)
                 (check-equal! (length (window-list)) 2 "the result took a pane of its own")
@@ -97,7 +94,7 @@
         (lambda () (pmt-done! (list a b)))))))
 
 (deftest 'panes-mode-group-switch-arranges-the-same-windows
-  "with the model on, leaving a group and coming back puts the very same windows on screen: nothing is rebuilt, no id changes"
+  "leaving a group and coming back puts the very same windows on screen: nothing is rebuilt, no id changes"
   (lambda ()
     (with-fresh-group "zz-panes-sw-a"
       (lambda (ga)
@@ -113,7 +110,7 @@
               (switch-to-buffer-here! a1)
               (unwind-protect
                 (lambda ()
-                  (panes-mode-enable!)
+                  (panes--enter-group!)
                   (switch-to-buffer! a2)
                   (check-equal! (length (window-list)) 2 "two panes in A")
                   (let ((before (window-list)))
@@ -136,7 +133,7 @@
           (switch-to-buffer-here! a)
           (unwind-protect
             (lambda ()
-              (panes-mode-enable!)
+              (panes--enter-group!)
               (let ((before (window-list))
                     (token (arrangement-push! 'zz-panes)))
                 (switch-to-buffer! c)
@@ -167,7 +164,7 @@
         (lambda () (pmt-done! (list a b)))))))
 
 (deftest 'panes-mode-winner-walks-the-layout-history
-  "with the model on, winner-previous puts the previous pane arrangement back and winner-next goes forward again"
+  "winner-previous puts the previous pane arrangement back and winner-next goes forward again"
   (lambda ()
     (with-fresh-group "zz-panes-wn"
       (lambda (id)
@@ -179,7 +176,7 @@
           (switch-to-buffer-here! a)
           (unwind-protect
             (lambda ()
-              (panes-mode-enable!)
+              (panes--enter-group!)
               (switch-to-buffer! c)
               (check-equal! (length (window-list)) 2 "two panes")
               (winner-previous!)
@@ -205,7 +202,7 @@
               (switch-to-buffer-here! a1)
               (unwind-protect
                 (lambda ()
-                  (panes-mode-enable!)
+                  (panes--enter-group!)
                   (switch-to-buffer! a2)
                   (panes-layout-set! (panes-show (panes-layout) (car (panes-top-windows (panes-layout))) b1))
                   (check-false! (member b1 (panes-buffers (panes-layout-of ga))) "A's model kept B's buffer out")
@@ -222,7 +219,7 @@
   (switch-to-group! id)
   (delete-other-windows!)
   (switch-to-buffer-here! a)
-  (panes-mode-enable!)
+  (panes--enter-group!)
   (panes-apply! (panes--default-layout (list a c))))
 
 (deftest 'panes-mode-a-selection-is-the-models-focus
@@ -262,7 +259,7 @@
             (lambda () (pmt-done! (list a c)))))))))
 
 (deftest 'panes-mode-tile-windows-sets-the-capacity-and-the-order
-  "tile-windows! makes the layout's capacity the model's and fronts the panes with the buffers in order"
+  "panes-tile! makes the layout's capacity the model's and fronts the panes with the buffers in order"
   (lambda ()
     (with-fresh-group "zz-panes-tile"
       (lambda (id)
@@ -273,16 +270,16 @@
           (unwind-protect
             (lambda ()
               (pmt-two-panes! id a c)
-              (check-equal! (tile-windows! 'columns (list c b a)) (list c b a) "columns fronts three panes in order")
+              (check-equal! (panes-tile! 'columns (list c b a)) (list c b a) "columns fronts three panes in order")
               (check-equal! (map cadr (window-list)) (list c b a) "the frame shows them in that order")
-              (check-equal! (tile-windows! 'single (list b)) (list b) "single fronts one pane")
+              (check-equal! (panes-tile! 'single (list b)) (list b) "single fronts one pane")
               (check-equal! (panes-capacity (panes-layout)) 1 "the capacity is one")
               (check-equal! (map cadr (window-list)) (list b) "the frame shows one window")
               (check-true! (string? (panes-find (panes-layout) a)) "a folded buffer waits in the model"))
             (lambda () (pmt-done! (list a b c)))))))))
 
 (deftest 'panes-mode-no-window-hook-writes-the-model
-  "with the model on, a window change runs no hook that writes the model"
+  "a window change runs no hook that writes the model"
   (lambda ()
     (with-fresh-group "zz-panes-hooks"
       (lambda (id)

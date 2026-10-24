@@ -77,19 +77,3 @@
 
 ;;; --- the winner ring ----------------------------------------------------------
 
-(deftest 'a-rename-follows-into-the-winner-ring
-  "winner-undo must not restore a window on a dead name"
-  (lambda ()
-    (let ((held (frame-local 'winner-ring))
-          (buf (test-buffer! "*zz-rf-ring*" "")))
-      (set-frame-local! 'winner-ring (list (t--rf-layout-naming "*zz-rf-ring*")))
-
-      (rename-buffer! buf "*zz-rf-ring-named*")
-
-      (let ((names (window-tree-buffers (car (frame-local 'winner-ring)))))
-        (check-true! (member "*zz-rf-ring-named*" names)
-                     "the ring entry names the new name")
-        (check-false! (member "*zz-rf-ring*" names)
-                      "and nothing is left under the old one"))
-      (set-frame-local! 'winner-ring held)
-      (t--rf-kill! "*zz-rf-ring*" "*zz-rf-ring-named*"))))

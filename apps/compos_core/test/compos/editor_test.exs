@@ -28,7 +28,7 @@ defmodule Compos.EditorTest do
     # next one starting inside it, and a buffer born in a group is not the
     # groupless buffer the next test asked for.
     Compos.Core.Session.eval(
-      "(begin (layout-target-set! #f) (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+      "(begin (panes-choose-layout! #f) (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
     )
 
     Editor.minibuffer_close()
@@ -3572,7 +3572,7 @@ defmodule Compos.EditorTest do
 
     assert {:ok, history} =
              Compos.Core.Session.eval(
-               "(let ((layout (window-tree))) (window-tree-set! layout) (window-prev-buffers))"
+               "(let ((layout (window-tree))) (builtin-window-tree-set! layout) (window-prev-buffers))"
              )
 
     assert history =~ ~r/\A\("#{last}" "#{first}"/
@@ -3826,28 +3826,6 @@ defmodule Compos.EditorTest do
       )
   end
 
-  test "a group's layout survives leave and restore" do
-    n = System.unique_integer([:positive])
-    m = "ly-a-#{n}"
-    Compos.Core.create_buffer(m)
-
-    {:ok, out} =
-      Compos.Core.Session.eval("""
-      (begin (delete-other-windows!)
-             (switch-to-buffer! "#{m}")
-             (buffer-set-local! "#{m}" 'group "lygrp-#{n}")
-             (split-window! 'h 0.5)
-             (group-layout-save! "lygrp-#{n}")
-             (delete-other-windows!)
-             (let ((one (length (window-list))))
-               (window-tree-set! (group-layout "lygrp-#{n}"))
-               (list one (length (window-list)))))
-      """)
-
-    assert out == "(1 2)"
-    {:ok, _} = Compos.Core.Session.eval("(delete-other-windows!)")
-  end
-
   test "a completion prompt keeps the bottom bar; only the switcher floats" do
     # the switcher asks for the centered palette by name
     open_switch_prompt()
@@ -4058,7 +4036,7 @@ defmodule Compos.EditorTest do
 
       {:ok, _} =
         Compos.Core.Session.eval(
-          ~s{(tile-windows! 'grid (list "#{buf}" "#{second}" "#{third}" "#{fourth}"))}
+          ~s{(panes-tile! 'grid (list "#{buf}" "#{second}" "#{third}" "#{fourth}"))}
         )
 
       assert %{
@@ -4331,7 +4309,7 @@ defmodule Compos.EditorTest do
         Compos.Core.Session.eval("""
         (begin
           (buffer-set-local! "#{shell}" 'window-class #f)
-          (tile-windows! 'grid
+          (panes-tile! 'grid
             (list "#{buf}" "#{second}" "#{replaced}" "#{shell}"))
           (select-window! (window-showing "#{replaced}"))
           (switch-to-buffer! "#{second}")

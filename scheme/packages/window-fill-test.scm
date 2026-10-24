@@ -101,7 +101,7 @@
           (a "*zz-fill-split-a*") (b "*zz-fill-split-b*"))
       (buffer-create a) (buffer-create b)
       (buffer-add-group! a id) (buffer-add-group! b id)
-      (layout-target-set! #f)
+      (panes-choose-layout! #f)
       (delete-other-windows!)
       (window-hidden-clear!)
       (switch-to-buffer-here! b)

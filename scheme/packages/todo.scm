@@ -1521,11 +1521,7 @@
 (define (todo--preview-chat! t)
   (let ((chat (todo--chat-of t)))
     (when (and chat (not (window-showing chat)))
-      (let* ((keep (list (window-showing (todo--list-buffer)) (let ((d (todo--detail-buffer))) (and d (window-showing d)))))
-             (pane (or (window-showing-mode "chat-mode" #f)
-                       (find (lambda (w) (not (member w keep))) (display--work-windows))
-                       (and (cadr keep) (split-window-in! (cadr keep) 'v)))))
-        (when pane (window-display! (lambda () (display-buffer-in-window! pane chat) pane)))))))
+      (display-buffer chat))))
 
 
 (define-command "todo-show" "Show the task as its own page beside the list"

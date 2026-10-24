@@ -147,14 +147,14 @@ Do not split by hand. Hand the app's panes to the tiler and the columns come out
 
 ```scheme
 (define (amazon-layout!)
-  (tile-default-windows!
+  (panes-tile-default!
     (filter buffer-exists?
             (list (group-chat (frame-group))
                   *amazon-buffer*
                   (amazon-current-detail)))))
 ```
 
-`tile-default-windows!` uses the frame's chosen layout. A frame that never
+`panes-tile-default!` uses the frame's chosen layout. A frame that never
 chose gets the layout that fits the panes:
 
 | panes | layout |

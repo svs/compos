@@ -1,28 +1,9 @@
-;;; layouts-test.scm — the five layouts and the overview.
+;;; layouts-test.scm — the layouts.
 
 (domain! 'testing)
 (effects! '(read))
 
-(deftest 'the-six-layouts-and-their-capacities
-  "there are six layouts; each one holds a fixed number of panes"
-  (lambda ()
-    (check-equal! *window-layout-algorithms* '(single two-pane halves columns rows two-chat)
-                  "six layouts and no others")
-    (check-equal! (layout-capacity 'single) 1 "one window")
-    (check-equal! (layout-capacity 'two-pane) 2 "2/3 + 1/3")
-    (check-equal! (layout-capacity 'halves) 2 "two equal panes")
-    (check-equal! (layout-capacity 'columns) 3 "three columns")
-    (check-equal! (layout-capacity 'rows) 2 "two stacked panes")
-    (check-equal! (layout-capacity 'two-chat) 3 "two panes and a chat")
-    (check-false! (layout-capacity 'grid) "a name that is not a layout has no capacity")))
 
-(deftest 'two-chat-gives-the-chat-a-narrow-last-pane
-  "two-chat splits the frame into two equal shares and a smaller chat share"
-  (lambda ()
-    (let ((shares (layout-first-ratio 'two-chat 3)))
-      (check-equal! (length shares) 3 "a share for each pane")
-      (check-equal! (car shares) (cadr shares) "the two work panes are equal")
-      (check-true! (< (caddr shares) (car shares)) "the chat is narrower"))))
 
 (deftest 'the-layout-that-fits-a-pane-count
   "a caller with panes in hand and no chosen layout gets the one that holds them"
@@ -31,27 +12,6 @@
     (check-equal! (layout-for-count 2) 'two-pane "two panes")
     (check-equal! (layout-for-count 3) 'columns "three panes")
     (check-equal! (layout-for-count 9) 'columns "more panes than any layout holds still fit three")))
-
-(deftest 'overview-uses-only-the-current-group
-  "the overview includes each group member and excludes other buffers"
-  (lambda ()
-    (with-fresh-group "zz-ov-list"
-      (lambda (group)
-        (let ((work (test-buffer! "*zz-ov-list-work*" ""))
-              (foreign (test-buffer! "*zz-ov-list-foreign*" ""))
-              (origin (current-buffer)))
-          (buffer-add-group! work group)
-          (switch-to-buffer! work)
-          (set-frame-local! 'current-group group)
-          (let* ((chat (group-chat group))
-                 (buffers (overview-buffers)))
-            (check-true! (member work buffers) "the work buffer tiles")
-            (check-true! (member chat buffers) "the group chat tiles")
-            (check-false! (member foreign buffers) "the foreign buffer stays out")
-            (switch-to-buffer! origin)
-            (set-frame-local! 'current-group #f)
-            (group-record-delete! group)
-            (for-each buffer-kill! (list work chat foreign))))))))
 
 (deftest 'dashboard-one-line-keeps-the-expanded-dashboard-facts
   "the persistent modeline summary names the mode and input lane"

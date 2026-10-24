@@ -73,22 +73,6 @@
       (check-false! (window-restore w) "and the record goes"))
     (t--wc-done!)))
 
-(deftest 'a-display-record-applies-only-while-the-window-shows-its-buffer
-  "set-window-restore! names the buffer shown; a switch away drops it; window-tree carries it"
-  (lambda ()
-    (t--wr-setup!)
-    (let ((w (active-window)))
-      (set-window-restore! w '(other "zz-wr-b" 0))
-      (check-equal! (window-restore w) '(other "zz-wr-b" 0) "the record reads back")
-      (let ((tree (window-tree)))
-        (set-window-restore! w #f)
-        (window-tree-set! tree)
-        (check-equal! (window-restore (active-window)) '(other "zz-wr-b" 0) "window-tree carries the record"))
-      (switch-to-buffer-here! "zz-wr-c")
-      (check-false! (window-restore (active-window)) "a window on another buffer has no record")
-      (set-window-owner! (active-window) 99999)
-      (check-false! (window-owner (active-window)) "an owner names a live window or nothing"))
-    (t--wc-done!)))
 
 (deftest 'quit-window-reads-the-leaf
   "window-quit-restore! deletes a window the display made and puts back a buffer it covered"
@@ -110,44 +94,7 @@
 
 ;;; the preview verb: one look per frame, no MRU, no focus, no winner
 
-(deftest 'a-look-here-moves-nothing-and-its-end-puts-back
-  "preview-show here shows in the window, preview-end #f puts back what it covered"
-  (lambda ()
-    (t--wr-setup!)
-    (let ((w (active-window)) (mru (buffer-list-mru)))
-      (set-frame-local! 'winner-ring '())
-      (preview-show "zz-wr-b" 'here)
-      (preview-show "zz-wr-c" 'here)
-      (check-equal! (window-buffer w) "zz-wr-c" "the look shows")
-      (check-equal! (buffer-list-mru) mru "the MRU did not change")
-      (check-equal! (frame-local 'winner-ring) '() "winner did not change")
-      (check-equal! (active-window) w "the focus stays")
-      (preview-end #f)
-      (check-equal! (window-buffer w) "zz-wr-a" "the end puts back what the first look covered")
-      (check-false! (preview-slot) "the slot is empty")
-      (preview-show "zz-wr-b" 'here)
-      (preview-end #t)
-      (check-equal! (window-buffer w) "zz-wr-b" "keep commits the look")
-      (check-equal! (car (window-prev-buffers w)) "zz-wr-a" "as a visit"))
-    (t--wc-done!)))
 
-(deftest 'a-look-in-another-window-is-owned-and-goes-with-its-end
-  "preview-show other shows in a window the invoking one owns; preview-end #f removes it"
-  (lambda ()
-    (t--wr-setup!)
-    (let ((me (active-window)) (mru (buffer-list-mru)))
-      (set-frame-local! 'winner-ring '())
-      (let ((w (preview-show "zz-wr-b" 'other)))
-        (check-true! (and w (not (equal? w me))) "another window shows the look")
-        (check-equal! (window-owner w) me "the invoking window owns it")
-        (check-equal! (active-window) me "the focus stays")
-        (check-equal! (preview-show "zz-wr-c" 'other) w "the next look takes the same window")
-        (check-equal! (buffer-list-mru) mru "the MRU did not change")
-        (check-equal! (frame-local 'winner-ring) '() "winner did not change")
-        (preview-end #f)
-        (check-false! (window-exists? w) "the end deletes the window the look made")
-        (check-equal! (window-buffer me) "zz-wr-a" "and the reader's window is as it was")))
-    (t--wc-done!)))
 
 (deftest 'a-definition-peek-is-the-frames-look
   "the definition shows beside the reader, and the reader keeps focus"
@@ -161,28 +108,3 @@
 
 ;;; the frame return stack
 
-(deftest 'a-pop-puts-back-the-tree-target-and-focus
-  "arrangement-pop! restores what arrangement-push! saw; drop keeps the screen; a pop ends later entries"
-  (lambda ()
-    (t--wr-setup!)
-    (layout-target-set! #f)
-    (set-frame-local! 'winner-ring '())
-    (let* ((me (active-window))
-           (token (arrangement-push! 'zz-test)))
-      (split-window! 'h 0.5)
-      (switch-to-buffer-here! "zz-wr-b")
-      (layout-target-set! 'columns)
-      (let ((later (arrangement-push! 'zz-later)))
-        (check-true! (arrangement-pop! token) "the pop answers #t")
-        (check-equal! (map cadr (window-list)) '("zz-wr-a") "the tree comes back")
-        (check-equal! (window-buffer (active-window)) "zz-wr-a" "and the focus")
-        (check-false! (layout-target) "and the layout target")
-        (check-false! (arrangement-for 'zz-later) "a pop ends the entries pushed after it")
-        (check-false! (arrangement-pop! later) "so they restore nothing"))
-      (let ((token (arrangement-push! 'zz-test)))
-        (split-window! 'h 0.5)
-        (check-true! (arrangement-drop! token) "a drop answers #t")
-        (check-equal! (length (window-list)) 2 "and keeps what is on screen")
-        (check-false! (arrangement-for 'zz-test) "the entry is gone")))
-    (layout-target-set! #f)
-    (t--wc-done!)))

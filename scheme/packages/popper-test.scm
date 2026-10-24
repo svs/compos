@@ -17,7 +17,7 @@
     (lambda ()
       (with-stub 'popper-reference-buffers '("\\*zz-pop-[abc]\\*")
         (lambda ()
-          (layout-target-set! #f)
+          (panes-choose-layout! #f)
           (when (float-open?) (float-close!))
           (for-each buffer-create (list t--pop-a t--pop-b t--pop-c t--pop-work))
           (switch-to-buffer! t--pop-work)
@@ -64,7 +64,7 @@
           (check-false! (float-open?) "nothing floats")
           (check-false! (buffer-local t--pop-a 'window-class) "the buffer wears no float class")
           (check-equal! (window-buffer me) t--pop-work "the work stays in its window")
-          (check-equal! (layout-visible-buffers) (list t--pop-work) "the layout does not count it"))))))
+          (check-equal! (panes-shown-buffers) (list t--pop-work) "the layout does not count it"))))))
 
 (deftest 'toggle-closes-the-popup-and-shows-the-latest-again
   "the close deletes the window a popup display made; the next toggle shows it again"
@@ -157,7 +157,7 @@
           (check-false! (popper-popup? t--pop-a) "the buffer is ordinary now")
           (check-false! (popper-window) "no popup window stays")
           (check-equal! (window-buffer w) t--pop-a "the buffer stays where it is")
-          (check-true! (member t--pop-a (layout-visible-buffers)) "as a work window")
+          (check-true! (member t--pop-a (panes-shown-buffers)) "as a work window")
           (run-command "popper-toggle-type")
           (check-true! (popper-popup? t--pop-a) "a popup again")
           (check-equal! (window-buffer w) t--pop-a "the buffer still stays where it is")

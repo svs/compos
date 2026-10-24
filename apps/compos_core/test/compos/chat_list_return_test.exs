@@ -22,7 +22,7 @@ defmodule Compos.ChatListReturnTest do
                    (set-frame-local! 'current-group *return-test-group*)
                    (set-frame-local! 'pinned-group *return-test-group*)
                    (begin
-                     (tile-windows! 'two-pane '("*zz-return-a*" "#{if @duplicate, do: "*zz-return-a*", else: "*zz-return-b*"}"))
+                     (panes-tile! 'two-pane '("*zz-return-a*" "#{if @duplicate, do: "*zz-return-a*", else: "*zz-return-b*"}"))
                      (let ((ws (map car (window-list))))
                        (set-window-prev-buffers! (car ws) '("*zz-return-past-a*"))
                        (set-window-prev-buffers! (cadr ws) '("*zz-return-past-b*"))
@@ -31,7 +31,7 @@ defmodule Compos.ChatListReturnTest do
                        (window-set-point! (car ws) 2)
                        (window-set-point! (cadr ws) 6)
                        (select-window! (cadr ws))))
-                   (layout-target-set! 'two-pane)
+                   (panes-choose-layout! 'two-pane)
                    (set! *group-current-inhibit* #f)
                    (define *return-test-tree* (window-tree))
                    (define *return-test-points* (map (lambda (r) (window-point (car r))) (window-list)))
@@ -64,7 +64,7 @@ defmodule Compos.ChatListReturnTest do
 
         assert {:ok, "#t"} = Session.eval("(equal? (frame-group) *return-test-group*)", frame)
         assert {:ok, "#t"} = Session.eval("(equal? (group-pinned) *return-test-group*)", frame)
-        assert {:ok, "two-pane"} = Session.eval("(layout-target)", frame)
+        assert {:ok, "two-pane"} = Session.eval("(panes-current-layout)", frame)
 
         assert {:ok, "#t"} =
                  Session.eval("(equal? (active-window) (car (cadr (window-list))))", frame)

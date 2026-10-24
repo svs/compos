@@ -332,16 +332,27 @@
 
 ;;; --- windows ----------------------------------------------------------------
 
+(define panes-key-source #f)
+
+(define (panes--new-key layout)
+  "A key for a new window and LAYOUT: (KEY LAYOUT). The key is the
+   frame window id that panes-key-source mints (panes-mode.scm sets it
+   to window-id-new!); without one, wN from LAYOUT's counter, as the
+   pure tests use."
+  (if (procedure? panes-key-source)
+      (list (panes-key-source) layout)
+      (panes--fresh layout 'next-window "w")))
+
 (define (panes-add-window layout pane-id buf mode &optional behind)
   "A new window of MODE on BUF in pane PANE-ID: (LAYOUT KEY). It goes to
    the front of the pane, so it is on screen, or to the back when
    BEHIND. The first window of a mode is that mode's preferred window.
    A #f BUF gives a window with an empty stack."
-  (let* ((made (panes--fresh layout 'next-window "w"))
+  (let* ((made (panes--new-key layout))
          (key (car made))
          (layout (cadr made))
          (first-of-mode (and mode (not (panes-mode-window layout mode))))
-         (window (list 'key key 'win #f 'mode mode
+         (window (list 'key key 'mode mode
                        'buffers (if buf (list (panes--id buf)) '())
                        'preferred (and first-of-mode #t))))
     (list (tree-insert panes--shape (panes--normal layout) pane-id window (if behind #f 0)) key)))
@@ -402,19 +413,10 @@
           layout keys)))
 
 (define (panes-remove-window layout key)
-  "Window KEY goes; its pane stays, empty when it held nothing else.
-   In a bare layout (the overview's) an emptied pane goes too. An
+  "Window KEY goes; its pane stays, empty when it held nothing else. An
    unknown KEY changes nothing."
-  (let ((pane (panes-pane-of layout key)))
-    (if pane
-        (panes--bare-prune (tree-remove panes--shape (panes--normal layout) key) pane)
-        layout)))
-
-(define (panes--bare-prune layout pane)
-  "A bare layout (the overview's) keeps no empty pane: PANE goes when
-   it is empty. Any other layout as it is."
-  (if (and (plist-get layout 'bare) (null? (panes-pane-keys layout pane)))
-      (panes-remove-pane layout pane)
+  (if (panes-pane-of layout key)
+      (tree-remove panes--shape (panes--normal layout) key)
       layout))
 
 
@@ -466,11 +468,11 @@
 (define (panes-move-window layout key pane-id &optional index)
   "Window KEY moves to pane PANE-ID, at INDEX (the front when absent);
    in its own pane it only moves to INDEX. A pane it leaves empty
-   stays, as after panes-remove-window, except in a bare layout (the
-   overview's). An unknown KEY or PANE-ID changes nothing."
+   stays, as after panes-remove-window. An unknown KEY or PANE-ID
+   changes nothing."
   (let ((from (panes-pane-of layout key)))
     (if (and from (panes-pane layout pane-id))
-        (panes--bare-prune (tree-move panes--shape (panes--normal layout) key pane-id (or index 0)) from)
+        (tree-move panes--shape (panes--normal layout) key pane-id (or index 0))
         layout)))
 
 (define (panes-move-buffer layout buf to)
@@ -625,6 +627,65 @@
 ;;; a buffer has the mode of the window that holds it. A window that gives
 ;;; up every buffer closes. MODES limits the work to those modes.
 
+;;; --- layouts -------------------------------------------------------------------
+;;; A layout is a named shape: how many panes the frame shows, and the share
+;;; of each. The model of a group names its layout in 'layout; panes keeps
+;;; the rest (stacks, focus, history, where a buffer goes).
+
+(define panes--layout-specs '())
+
+(define (define-layout! name &rest props)
+  "NAME is a layout of PROPS, a plist: 'capacity, a count of panes or a
+   procedure that answers one; 'shares, a procedure of a pane count that
+   answers a share for each pane, or #f for equal shares; 'doc, one line
+   for the prompt. Defining NAME again replaces it. Answers NAME."
+  (set! panes--layout-specs
+    (append (filter (lambda (e) (not (equal? (car e) name))) panes--layout-specs)
+            (list (list name props))))
+  name)
+
+(define (panes-layout-spec name)
+  "The plist of layout NAME, or #f."
+  (let ((e (assoc name panes--layout-specs))) (and e (cadr e))))
+
+(define (panes-layout-names)
+  "Every layout, in the order defined."
+  (map car panes--layout-specs))
+
+(define (panes-layout-capacity name)
+  "How many panes layout NAME shows, or #f for an unknown NAME."
+  (let* ((s (panes-layout-spec name)) (c (and s (plist-get s 'capacity))))
+    (if (procedure? c) (c) c)))
+
+(define (panes-layout-name layout)
+  "The name of the layout LAYOUT is in, or #f."
+  (plist-get layout 'layout))
+
+(define (panes-set-layout layout name)
+  "LAYOUT in layout NAME: the capacity becomes NAME's, panes past it
+   fold into the last one, and every pane takes the default share, so
+   NAME's shares hold. An unknown NAME changes nothing."
+  (let ((cap (panes-layout-capacity name)))
+    (if (not cap)
+        layout
+        (panes-equalize (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap))))))
+
+(define (panes-layout-shares layout)
+  "The share of each pane, normalized to sum 1. A pane resized by hand
+   keeps its own share; while every pane keeps the default, the shares
+   of LAYOUT's layout hold, else they are equal. A share that is not a
+   positive number counts as 1."
+  (let* ((raw (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1)))
+                   (panes-panes layout)))
+         (n (length raw))
+         (plain (null? (filter (lambda (s) (not (= s 1))) raw)))
+         (spec (panes-layout-spec (panes-layout-name layout)))
+         (f (and spec (plist-get spec 'shares)))
+         (given (and plain (procedure? f) (> n 0) (f n)))
+         (raw (if (and (pair? given) (= (length given) n)) given raw))
+         (total (apply + raw)))
+    (map (lambda (s) (/ s total)) raw)))
+
 (define (panes--consolidate-homes layout mode-of modes &optional extra)
   "Before a consolidate, a home for every mode. It runs only with
    MODE-OF, which reads the buffers' own modes; without it the layout
@@ -757,24 +818,45 @@
   (fold (lambda (l b) (if (live? b) l (panes-drop-buffer l b))) layout (panes-buffers layout)))
 
 (define (panes-handle layout key)
-  "The renderer's handle of window KEY: its frame window, or #f."
-  (let ((w (panes-window layout key))) (and w (plist-get w 'win))))
+  "The frame window of window KEY: KEY itself, the key is the frame
+   window id; #f for an unknown KEY."
+  (and (panes-window layout key) key))
 
 (define (panes-set-handle layout key handle)
-  "Window KEY takes HANDLE as its frame window; #f drops it."
-  (panes--update-window layout key (lambda (w) (panes--put w 'win handle))))
+  "Window KEY takes HANDLE as its key: the frame gave its window another
+   id than the one asked for. LAYOUT as it is for an unknown KEY, a #f
+   HANDLE, or a HANDLE another window already has."
+  (if (or (not handle) (equal? key handle) (not (panes-window layout key)) (panes-window layout handle))
+      layout
+      (panes--update-window layout key (lambda (w) (panes--put w 'key handle)))))
 
 (define (panes-key-of-handle layout handle)
-  "The key of the window whose handle is HANDLE, or #f. A #f HANDLE
-   answers #f."
-  (and handle
-       (let ((w (find (lambda (w) (equal? (plist-get w 'win) handle)) (panes-windows layout))))
-         (and w (plist-get w 'key)))))
+  "The key of the window whose frame window is HANDLE: HANDLE itself
+   when LAYOUT has that window, else #f. A #f HANDLE answers #f."
+  (and handle (panes-window layout handle) handle))
 
 (define (panes-strip-handles layout)
-  "LAYOUT as it is saved: every handle is #f, so no handle outlives the
-   frame."
-  (panes--map-windows layout (lambda (w) (panes--put w 'win #f))))
+  "LAYOUT as it is saved. A window's key is its frame window id, so
+   there is nothing to strip."
+  layout)
+
+(define (panes-rekey-legacy layout)
+  "LAYOUT with every window keyed by its frame window id. A layout saved
+   before keys were ids has keys like w3 and the id in 'win: a window
+   takes its 'win when no other window has it, else a new key from
+   panes-key-source. 'win goes. With no key source, LAYOUT."
+  (if (not (procedure? panes-key-source))
+      layout
+      (let loop ((ws (panes-windows layout)) (l layout) (used (filter integer? (panes-window-keys layout))))
+        (if (null? ws)
+            l
+            (let* ((w (car ws)) (k (plist-get w 'key)) (h (plist-get w 'win)))
+              (if (integer? k)
+                  (loop (cdr ws) l used)
+                  (let ((new (if (and (integer? h) (not (member h used))) h (panes-key-source))))
+                    (loop (cdr ws)
+                          (panes--update-window l k (lambda (w) (panes--put (panes--put w 'win #f) 'key new)))
+                          (cons new used)))))))))
 
 (define (panes-layout? x)
   "#t when X is a well-formed layout, else #f. A layout saved in the

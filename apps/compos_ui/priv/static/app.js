@@ -136,7 +136,6 @@
   // a plain Cmd-arrow and a plain Shift-arrow change nothing: they are
   // the window motion itself, or the shift before a chord.
   function editingAfterKey(e, editing) {
-    if (document.documentElement.classList.contains("windows-overview")) return false;
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return editing;
     if (e.key === "Escape") return false;
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === "g") return false;
@@ -147,9 +146,6 @@
     return true;
   }
   function nativeTextKey(e, editing) {
-    // The all-windows overview is a glance: its keymap owns every key,
-    // and no tile takes text or moves a caret.
-    if (document.documentElement.classList.contains("windows-overview")) return false;
     const a = document.activeElement;
     // A pane switch can leave DOM focus in the old editable until
     // the next patch. Only the selected pane may handle keys natively.
@@ -1592,7 +1588,7 @@
           const tail = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
           // Only the reader's hand moves the place. A scroll they did
           // not make (the browser's scroll anchoring, a reflow while
-          // output streams, the overview's spread and gather, a zoom)
+          // output streams, a zoom)
           // neither drops the tail nor records a new place: on the
           // tail it goes back there, elsewhere it is left alone.
           if (Date.now() - this.handAt > 1000) {
@@ -1644,7 +1640,7 @@
           };
         };
         // A rect counts in screen px, and a scrollTop in the list's own.
-        // The overview's tile scale and the ui zoom set them apart, so a
+        // The ui zoom sets them apart, so a
         // place kept in screen px comes back wrong at another scale.
         this.scale = () => {
           const h = this.scroller.offsetHeight;
@@ -2670,7 +2666,7 @@
             const r = document.createRange(); r.setStart(pos.node, pos.offset); r.collapse(true);
             const b = r.getBoundingClientRect(), bb = buf.getBoundingClientRect();
             // rects count in screen px, the box and its scroll in its own:
-            // the ui zoom and the overview's tile scale set them apart
+            // the ui zoom sets them apart
             const z = (buf.offsetHeight && bb.height / buf.offsetHeight) || 1;
             if (b.height > 0) {
               g.style.top = ((b.top - bb.top) / z + buf.scrollTop) + "px";
@@ -3272,9 +3268,6 @@
           // re-rendered every window twice per prefix key; the
           // measurement before the panel still holds after it.
           if (document.querySelector(".which-key")) return;
-          // an overview tile is its window scaled, not resized: its rows
-          // and columns stay what they were in the pane
-          if (document.documentElement.classList.contains("windows-expose")) return;
           const rows = {};
           const cols = {};
           document.querySelectorAll(".window[data-win-id]").forEach((win) => {

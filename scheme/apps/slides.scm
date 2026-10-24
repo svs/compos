@@ -343,15 +343,18 @@
           (let ((state
                  (with-frame-windows
                    (lambda ()
+                     ;; the model of the group comes back as it was; to
+                     ;; maximize, the slides' pane becomes the one pane
                      (let ((saved (buffer-local app 'slides-layout)))
-                       (if (and saved (equal? (window-tree-buffers (window-tree)) (list app)))
+                       (if (and saved (equal? (map cadr (window-list)) (list app)))
                            (begin
-                             (window-tree-set! saved)
+                             (panes-apply! (panes-validate saved buffer-known?))
                              (buffer-set-local! app 'slides-layout #f)
                              "restored")
                            (begin
-                             (buffer-set-local! app 'slides-layout (window-tree))
-                             (window-arrange-line! 'h 1.0 (list win))
+                             (buffer-set-local! app 'slides-layout (panes--ensure-layout!))
+                             (select-window! win)
+                             (delete-other-windows!)
                              "maximized")))))))
             (select-frame! prev)
             state)))))

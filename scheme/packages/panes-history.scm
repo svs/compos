@@ -6,7 +6,7 @@
 ;;; buffers the windows hold now, so what you were reading stays, and only
 ;;; the shape of the frame moves.
 ;;;
-;;; One history per frame and group, beside the layout panes-mode keeps.
+;;; One history per frame and group, beside the layout panes-mode.scm keeps.
 ;;; A change of shape records; a change of buffer alone does not.
 
 (require 'panes)
@@ -90,8 +90,7 @@
       r)))
 
 (define (panes-history--step! step what)
-  (cond ((not panes-mode) (message "panes-mode is off: the layout history needs the window model") #f)
-        ((not (panes-layout)) (message "No layout yet") #f)
+  (cond ((not (panes-layout)) (message "No layout yet") #f)
         (else
           (let ((r (step (panes-history))))
             (if (not r)

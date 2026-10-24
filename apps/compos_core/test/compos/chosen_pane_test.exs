@@ -15,7 +15,7 @@ defmodule Compos.ChosenPaneTest do
         (test-buffer! "*zz-chosen-left*" "left")
         (test-buffer! "*zz-chosen-detail*" "detail")
         (with-current-buffer "*zz-chosen-detail*" (lambda () (set-mode! "amazon-detail-mode")))
-        (tile-windows! 'two-pane '("*zz-chosen-left*" "*zz-chosen-detail*"))
+        (panes-tile! 'two-pane '("*zz-chosen-left*" "*zz-chosen-detail*"))
         (define *chosen-first* (car (car (window-list))))
         (define *chosen-detail* (window-showing "*zz-chosen-detail*"))
         (select-window! *chosen-first*)

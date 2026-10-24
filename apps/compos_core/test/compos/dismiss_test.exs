@@ -13,7 +13,7 @@ defmodule Compos.DismissTest do
 
     eval!(
       """
-      (customize-set! 'autolayout-mode #f) (layout-target-set! #f)
+      (customize-set! 'autolayout-mode #f) (panes-choose-layout! #f)
       (set-frame-local! 'current-group #f)
       (for-each (lambda (b)
                   (buffer-create b) (buffer-append! b "read me\n")

@@ -2314,18 +2314,13 @@ defmodule Compos.Core.SchemeAPI do
         fn [] -> Editor.delete_window() == :ok end,
       {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
         fn [id] -> Editor.delete_window_by_id(id) == :ok end,
-      # false when the two panes make no rectangle: only a whole shared
-      # edge can merge, so an eat never resizes a pane it leaves alone
-      {"window-eat-id!",
-       "(window-eat-id! ID VICTIM) — window ID takes the space of window VICTIM; #t when it did."} =>
-        fn [id, victim] -> Editor.eat_window(id, victim) == :ok end,
       # hidden windows: a window with no pane keeps its id, buffer, history
       # and point. Which window hides, and when, is Scheme's decision.
       {"window-hidden-list",
        "(window-hidden-list) — return (WIN BUFFER) pairs for the selected frame's hidden windows, most recently used first."} =>
         fn [] -> Enum.map(Editor.hidden_windows(), fn {id, b} -> [id, b] end) end,
       {"window-new-hidden!",
-       "(window-new-hidden! BUFFER [ID]) — make a hidden window on BUFFER; return its id, or #f. It takes ID when no window holds it, so a window comes back with the id it had."} =>
+       "(window-new-hidden! BUFFER [ID]) — make a hidden window on BUFFER; return its id, or #f. It takes ID when no window holds it, so a window keeps the id the window model gave it."} =>
         fn args ->
           [buffer | rest] = args
           want = Enum.find(rest, &is_integer/1)
@@ -2335,9 +2330,9 @@ defmodule Compos.Core.SchemeAPI do
             _ -> false
           end
         end,
-      {"window-swap-hidden!",
-       "(window-swap-hidden! VISIBLE HIDDEN) — show hidden window HIDDEN in the pane of VISIBLE, which becomes hidden; #t when it did."} =>
-        fn [visible, hidden] -> Editor.swap_hidden_window(visible, hidden) == :ok end,
+      {"window-id-new!",
+       "(window-id-new!) — a window id no window holds and none will be given again; it makes no window."} =>
+        fn [] -> Editor.new_window_id() end,
       {"window-arrange-line!",
        "(window-arrange-line! DIR RATIO IDS) — lay the frame out as one line of windows IDS, visible or hidden; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a visible window not in IDS becomes hidden; #t when it did."} =>
         fn [dir, ratio, ids] ->
@@ -2374,15 +2369,6 @@ defmodule Compos.Core.SchemeAPI do
           # step so every saved window id is free to come back; a layout
           # saved before hidden windows existed has none
           Editor.restore_layout(tree, Map.get(layout, :hidden, []), active)
-          :void
-        end,
-      # the same look, one level up from window-preview-buffer!: a whole
-      # arrangement drawn without an entry in the history
-      {"window-tree-preview!",
-       "(window-tree-preview! LAYOUT) — draw a layout from window-tree as a look: the windows change, the MRU ring does not."} =>
-        fn [%{tree: tree, active: active}]
-           when elem(tree, 0) in [:leaf, :split] ->
-          Editor.preview_tree(tree, active)
           :void
         end,
       # A saved layout names buffers, and a name can outlive its buffer.
@@ -2447,11 +2433,6 @@ defmodule Compos.Core.SchemeAPI do
        "(select-window! WIN) — make WIN and its frame active; return #t on success."} => fn [id] ->
         Editor.set_active(id) == :ok
       end,
-      {"window-swap-id!",
-       "(window-swap-id! FIRST SECOND) — swap the buffers of two windows; #t when it did."} =>
-        fn [first, second] ->
-          Editor.swap_windows(first, second) == :ok
-        end,
       {"active-window", "(active-window) — return the active window's id."} => fn [] ->
         Editor.active_window()
       end,

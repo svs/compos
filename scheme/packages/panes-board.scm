@@ -34,7 +34,8 @@
 (define (panes-board--gs g) (if (symbol? g) (symbol->string g) g))
 (define (panes-board--g s) (if (equal? s "none") 'none s))
 (define (panes-board--id kind g &rest more)
-  (string-join (cons kind (cons (panes-board--gs g) more)) "|"))
+  ;; a window key is a frame window id, a number
+  (string-join (cons kind (cons (panes-board--gs g) (map (lambda (x) (if (number? x) (number->string x) x)) more))) "|"))
 (define (panes-board--split id)
   ;; at most four parts: a buffer name may hold the separator itself
   (let loop ((i 0) (start 0) (acc '()))
@@ -45,8 +46,12 @@
 
 (define (panes-board-kind id) (car (panes-board--split id)))
 (define (panes-board-group id) (panes-board--g (cadr (panes-board--split id))))
-;; the pane id of a p row, the window key of a w or b row
-(define (panes-board-key id) (let ((ps (panes-board--split id))) (and (> (length ps) 2) (caddr ps))))
+;; the pane id of a p row, the window key of a w or b row: a window key
+;; is a frame window id, so it reads back as a number
+(define (panes-board-key id)
+  (let ((ps (panes-board--split id)))
+    (and (> (length ps) 2)
+         (let ((s (caddr ps))) (if (equal? (car ps) "p") s (or (string->number s) s))))))
 (define (panes-board-buffer-of id) (let ((ps (panes-board--split id))) (and (> (length ps) 3) (cadddr ps))))
 
 (define (panes-board-here-group) (panes--group-key))
@@ -211,8 +216,8 @@
            (let* ((pid (panes-board-key id))
                   (p (panes-pane l pid))
                   (i (panes--index-of pid (panes-pane-ids l)))
-                  ;; this group's panes as the frame draws them, the layout target's share included
-                  (shares (if (and here? (= (length (panes--top-shares l)) (panes-pane-count l))) (panes--top-shares l) (panes-shares l)))
+                  ;; the panes as the frame draws them, the layout's shares included
+                  (shares (panes-layout-shares l))
                   (share (if (and i (< i (length shares))) (list-ref shares i) 0))
                   (me (and here? (any (lambda (k) (equal? (panes-handle l k) (active-window))) (panes-keys p)))))
              (list (list (if here? "■" "□") (if here? "ok" "faint"))

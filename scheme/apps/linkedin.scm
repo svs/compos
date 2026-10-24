@@ -824,7 +824,7 @@ a{color:var(--accent);text-decoration:none}
          ;; that order, whatever order they were displayed in.
          (panes (filter (lambda (b) (and b (buffer-exists? b)))
                         (list *linkedin-buffer* (linkedin-current-detail) chat))))
-    (when (pair? (cdr panes)) (tile-windows! 'columns panes))
+    (when (pair? (cdr panes)) (panes-tile! 'columns panes))
     panes))
 
 ;;; --- opening it ----------------------------------------------------------

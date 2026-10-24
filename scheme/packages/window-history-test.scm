@@ -21,7 +21,7 @@
 
 ;; two windows: the left one on b after a, the right one on d after c
 (define (t--wh-setup!)
-  (layout-target-set! #f)
+  (panes-choose-layout! #f)
   (for-each (lambda (b) (test-buffer! b "")) t--wh-all)
   (delete-other-windows!)
   (switch-to-buffer! t--wh-a)
@@ -32,7 +32,7 @@
   (switch-to-buffer! t--wh-d))
 
 (define (t--wh-done!)
-  (layout-target-set! #f)
+  (panes-choose-layout! #f)
   (delete-other-windows!)
   (window-hidden-clear!)
   (switch-to-buffer! "*scratch*")
@@ -42,7 +42,7 @@
   "after a tile the pane on b still remembers a, and the pane on d remembers c"
   (lambda ()
     (t--wh-setup!)
-    (tile-windows! 'columns (list t--wh-b t--wh-d))
+    (panes-tile! 'columns (list t--wh-b t--wh-d))
     (check-equal! (length (window-list)) 2 "two panes")
     (check-equal! (car (window-prev-buffers (window-showing t--wh-b))) t--wh-a
                   "the pane on b remembers a")
@@ -54,7 +54,7 @@
   "kill d in its pane: the pane shows c, the layout stays"
   (lambda ()
     (t--wh-setup!)
-    (tile-windows! 'two-pane (list t--wh-b t--wh-d))
+    (panes-tile! 'two-pane (list t--wh-b t--wh-d))
     (let ((win (window-showing t--wh-d)))
       (buffer-kill! t--wh-d)
       (check-equal! (length (window-list)) 2 "the window stays")
@@ -67,14 +67,14 @@
   (lambda ()
     (t--wh-setup!)
     (let ((d-win (window-showing t--wh-d)))
-      (tile-windows! 'columns (list t--wh-b t--wh-e))
+      (panes-tile! 'columns (list t--wh-b t--wh-e))
       (check-false! (window-showing t--wh-d) "no pane shows d")
       (check-equal! (assoc d-win (window-hidden-list)) (list d-win t--wh-d)
                     "the window on d is hidden, with its id and buffer")
       (check-false! (member t--wh-c (window-prev-buffers (window-showing t--wh-e)))
                     "e's new window has its own past, not d's")
       ;; the same layout with d again shows the hidden window, not a new one
-      (tile-windows! 'columns (list t--wh-b t--wh-d))
+      (panes-tile! 'columns (list t--wh-b t--wh-d))
       (check-equal! (window-showing t--wh-d) d-win "d's own window comes back")
       (check-equal! (car (window-prev-buffers d-win)) t--wh-c "and it still remembers c"))
     (t--wh-done!)))

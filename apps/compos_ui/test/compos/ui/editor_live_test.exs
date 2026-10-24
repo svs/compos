@@ -683,13 +683,13 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, _} =
       Compos.Core.Session.eval("""
       (begin
-        (tile-windows! 'columns (list "#{base}" "#{other}"))
+        (panes-tile! 'columns (list "#{base}" "#{other}"))
         (select-window! (window-showing "#{base}"))
         (popup-show-on "#{popup}" 'right (/ 1 3)))
       """)
 
     assert {:ok, "#f"} =
-             Compos.Core.Session.eval(~s{(if (member "#{popup}" (layout-visible-buffers)) #t #f)})
+             Compos.Core.Session.eval(~s{(if (member "#{popup}" (panes-shown-buffers)) #t #f)})
 
     {:ok, _view, html} = live(conn, "/")
     assert html =~ ~r/class="window [^"]*popup popup-right"/

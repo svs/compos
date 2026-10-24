@@ -20,9 +20,8 @@
 ;;; is one action name or a list of them, tried in order; the
 ;;; display-buffer section below lists them.
 ;;;
-;;; A buffer with no rule takes *display-buffer-base-action* and then
-;;; *display-buffer-fallback-action*: reuse a window that shows it, split
-;;; a window big enough, use another window, else this one.
+;;; A buffer with no rule, or a rule whose action is not one of
+;;; *display-buffer-outside-layout*, goes where the window model places it.
 ;;; PARAMS is a plist, and every key has a default, so a rule says only
 ;;; what it wants to change:
 ;;;
@@ -109,7 +108,7 @@
             (else (loop (cdr rules)))))))
 
 (define (display-action-for name &optional alist)
-  (let ((actions (display-buffer-actions-for name alist)))
+  (let ((actions (display--rule-actions name alist)))
     (if (null? actions) #f (car actions))))
 
 ;; a rule's own value, else the default for that key
@@ -287,27 +286,24 @@
 ;; the only buffer in the editor cannot be in two places and nowhere: when
 ;; there is nothing else to reveal the other window keeps it.
 (define (window-release-duplicates! win name)
-  (unless (layout-arranging?)
-    (for-each
-     (lambda (w)
-       (let* ((other (car w))
-              (filler (and (not (equal? other win))
-                           (window-eviction-buffer other name))))
-         (when filler
-           (set-window-prev-buffers!
-            other
-            (filter (lambda (b) (not (equal? b name)))
-                    (window-prev-buffers other)))
-           (window-set-buffer! other filler))))
-     (filter (lambda (w) (equal? (cadr w) name)) (window-list)))))
+  (for-each
+   (lambda (w)
+     (let* ((other (car w))
+            (filler (and (not (equal? other win))
+                         (window-eviction-buffer other name))))
+       (when filler
+         (set-window-prev-buffers!
+          other
+          (filter (lambda (b) (not (equal? b name)))
+                  (window-prev-buffers other)))
+         (window-set-buffer! other filler))))
+   (filter (lambda (w) (equal? (cadr w) name)) (window-list))))
 
 (define (window-show-buffer! win name)
-  ;; a group that declares its panes sends its buffers to their own pane
-  (let ((win (if (boundp 'group-panes-target) (group-panes-target win name) win)))
-    (if *display-preview*
-        (window-preview-buffer! name win)
-        (begin (window-set-buffer! win name)
-               (window-release-duplicates! win name)))))
+  (if *display-preview*
+      (window-preview-buffer! name win)
+      (begin (window-set-buffer! win name)
+             (window-release-duplicates! win name))))
 
 (define (with-display-preview thunk)
   (let ((was *display-preview*))
@@ -318,11 +314,11 @@
 
 ;;; --- the frame return stack ----------------------------------------------------
 ;;; An arrangement that a mode or a prompt puts over the frame and takes
-;;; away again is one entry: (TOKEN REASON TREE GROUP TARGET FOCUS).
-;;; arrangement-push! answers the token. arrangement-pop! puts back the
-;;; tree, the group, the layout target and the focus; arrangement-drop!
-;;; keeps what is on screen. Either one also ends the entries pushed after
-;;; it. A pop is not a window command, so winner does not record it.
+;;; away again is one entry: (TOKEN REASON LAYOUT GROUP), the window
+;;; model of the frame's group and the group. arrangement-push! answers the
+;;; token. arrangement-pop! draws that model back, focus and layout with it,
+;;; and stands in that group again; arrangement-drop! keeps what is on
+;;; screen. Either one also ends the entries pushed after it.
 
 (define (arrangements) (or (frame-local 'arrangements) '()))
 
@@ -330,10 +326,7 @@
   (let ((token (+ 1 (or (frame-local 'arrangement-last) 0))))
     (set-frame-local! 'arrangement-last token)
     (set-frame-local! 'arrangements
-      ;; under the window model the entry keeps the model it saw, so the
-      ;; pop arranges the group's windows back instead of rebuilding them
-      (cons (list token reason (window-tree) (frame-group) (layout-target) (active-window)
-                  (and (boundp 'panes-mode) panes-mode (panes-layout)))
+      (cons (list token reason (panes--ensure-layout!) (frame-group))
             (arrangements)))
     token))
 
@@ -352,29 +345,22 @@
 
 (define (arrangement-drop! token) (and token (arrangement--take! token) #t))
 
-;; LOOK? draws the tree as a look (window-tree-preview!): the MRU stays
+;; LOOK? is kept for the callers: a pop is always a look, nothing is recorded
 (define (arrangement-pop! token &optional look?)
   (let ((e (and token (arrangement--take! token))))
     (when e
-      (with-layout-suppressed
-        (lambda ()
-          (if (and (> (length e) 6) (nth 6 e) (boundp 'panes-mode) panes-mode)
-              (panes-look! (nth 6 e) (nth 3 e))
-              (if look? (window-tree-preview! (nth 2 e)) (window-tree-set! (nth 2 e))))))
-      (when (and (window-exists? (nth 5 e)) (not (equal? (active-window) (nth 5 e))))
-        (select-window! (nth 5 e)))
-      (unless (equal? (layout-target) (nth 4 e)) (layout-target-set! (nth 4 e)))
       ;; a frame derives its group from what it shows: standing where you
       ;; stood is part of giving the frame back
       (unless (equal? (frame-group) (nth 3 e))
         (set-frame-local! 'current-group (nth 3 e))
         (frame-group-label-refresh!))
-      (winner--settle-screen!))
+      (when (nth 2 e) (panes-look! (panes-validate (nth 2 e) buffer-known?) (nth 3 e)))
+      (window-state-changed!))
     (and e #t)))
 
 ;;; --- the preview verb ----------------------------------------------------------
 ;;; A look shows a buffer for a while without keeping it. It never bumps
-;;; the MRU, never moves focus, and never enters winner's ring. A frame
+;;; the MRU and never moves focus. A frame
 ;;; holds one look: (BUF WHERE FROM SHOWN DATA TREE). WHERE says where:
 ;;;   here   the window FROM itself; its leaf records what the look covers
 ;;;   other  a window FROM owns: the one it owns already, else a display
@@ -439,7 +425,6 @@
       (unless (or (equal? where 'frame) (not (window-exists? me)) (equal? (active-window) me))
         (select-window! me))
       (set-frame-local! 'preview (list buf where from (and (not borrowed) shown) data tree))
-      (winner--settle-screen!)
       shown)))
 
 ;; end the look; KEEP #t keeps what it shows. Answers the slot it ended.
@@ -451,70 +436,35 @@
         (cond
           ((equal? where 'frame)
            (if keep
-               ;; a kept frame look is the user's change: winner records
-               ;; the arrangement the look covered
-               (let ((e (assoc (nth 5 slot) (arrangements))))
-                 (when e (winner-push! (nth 2 e)))
-                 (arrangement-drop! (nth 5 slot)))
+               (arrangement-drop! (nth 5 slot))
                (arrangement-pop! (nth 5 slot) #t)))
           ;; the card goes, or gives back the float it covered
           ((equal? where 'float)
            (let ((fw (float-window)))
              (unless (or keep (not fw) (not (equal? (window-buffer fw) buf)))
-               (with-layout-suppressed
-                 (lambda () (or (window-preview-end! fw) (float-close!)))))))
+               (begin (or (window-preview-end! fw) (float-close!))))))
           ((not (and w (window-exists? w) (equal? (window-buffer w) buf))) #f)
           ((equal? where 'here)
            (if keep (window-set-buffer! w buf) (window-preview-end! w)))
           (keep (set-window-owner! w #f) (set-window-restore! w #f))
           (else (set-window-owner! w #f) (window-quit-restore! w)))))
-    (winner--settle-screen!)
     slot))
 
 (domain! 'files)
 (effects! '(read))
 
-;;; --- display-buffer actions (Emacs window.el) ---------------------------------
+;;; --- display-buffer (Emacs window.el) -----------------------------------------
 ;;; display-buffer shows NAME somewhere and returns the window. It selects
 ;;; nothing. pop-to-buffer shows and selects. switch-to-buffer! shows in
-;;; the selected window. Where "somewhere" is comes from a chain of
-;;; actions, tried in order until one answers with a window:
-;;;
-;;;   the rule for NAME in *display-buffer-alist*
-;;;   *display-buffer-base-action*       the user's, empty by default
-;;;   *display-buffer-fallback-action*   reuse-window mode-window
-;;;                                      pop-up-window use-some-window
-;;;                                      same-window
-;;;
-;;; The actions, each a function of NAME and ALIST on the display-action hook:
-;;;
-;;;   reuse-window     a window that shows NAME already
-;;;   mode-window      a work window whose buffer has NAME's major mode: a
-;;;                    group keeps one window per mode, so every chat lands
-;;;                    in the chat pane
-;;;   pop-up-window    split the largest work window when it is big
-;;;                    enough (split-window-sensibly), else the selected one
-;;;   use-some-window  another work window; the float and a peek are not one
-;;;   same-window      the selected window (also 'same)
-;;;   shaped           the dock or the float, by the buffer's window-shape
+;;; the selected window. The window model places a buffer (panes-display!,
+;;; panes-mode.scm). Only a rule whose action places a buffer itself, off
+;;; the panes, runs its actions: the float and the dock ('shaped), the
+;;; selected window ('same-window), a popup (popper.scm). Those actions are
+;;; *display-buffer-outside-layout*.
 ;;;
 ;;; ALIST is a plist the caller passes. 'category names the kind of display,
-;;; and a rule (category KIND) matches it. A window the chain made or took
-;;; is noted for quit-window: q deletes the window the display made, or
-;;; puts back the buffer the display replaced.
-;;;
-;;; The thresholds are Emacs' own: a window splits below when it has
-;;; split-height-threshold rows, beside when it has split-width-threshold
-;;; columns, and the sole work window splits below whatever its size.
-;;; layouts.scm makes the four variables customizable.
+;;; and a rule (category KIND) matches it.
 
-(define split-height-threshold 80)
-(define split-width-threshold 160)
-(define window-min-height 4)
-(define window-min-width 10)
-(define *display-buffer-base-action* '())
-(define *display-buffer-fallback-action*
-  '(reuse-window mode-window pop-up-window use-some-window same-window))
 ;; an action is the keyed hook (display-action NAME)
 (define (define-display-action! name fn) (add-hook! (list 'display-action name) fn))
 
@@ -522,135 +472,26 @@
   (let ((fs (hook-functions (list 'display-action name))))
     (and (pair? fs) (car fs))))
 
-;; The layout belongs to the group the frame shows; a frame without a group
-;; keeps its own. Free is a layout the person chooses, stored as 'free. A
-;; group that chose nothing takes the target its saved arrangement holds,
-;; then window-layout-default. Nothing clears the layout to switch groups.
-(define (layout-target--stored)
-  (let ((g (and (boundp 'frame-group) (frame-group))))
-    (if g
-        (or (group-setting g 'layout) (group-layout-target g))
-        (frame-local 'layout-target))))
-
-;; Explicit layouts remain targets as their occupied pane count changes.
-;; A view that borrows the frame, such as the overview spread, holds the
-;; layout: the frame acts free and the stored layout stays as it is.
-(define (layout-target)
-  (let ((stored (layout-target--stored)))
-    (cond ((frame-local 'layout-held) #f)
-          ((equal? stored 'free) #f)
-          (stored stored)
-          ((layout-capacity window-layout-default) window-layout-default)
-          (else #f))))
-
-(define (layout-target-set! name)
-  (let ((g (and (boundp 'frame-group) (frame-group)))
-        (stored (or name 'free)))
-    (unless (equal? (layout-target--stored) stored)
-      (if g
-          (group-setting-set! g 'layout stored)
-          (set-frame-local! 'layout-target stored))))
-  (unless name (set-frame-local! 'layout-slots #f))
-  (when (and name (not (frame-local 'layout-slots)))
-    (layout-target-note-slots! (layout-visible-buffers)))
-  (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
-  (layout-target-modeline!)
-  name)
-
-;; Run THUNK with the layout held: the frame acts free while THUNK draws
-;; windows itself, and the stored layout does not change.
-(define (with-layout-held thunk)
-  (let ((was (frame-local 'layout-held)))
-    (set-frame-local! 'layout-held #t)
-    (unwind-protect thunk (lambda () (set-frame-local! 'layout-held was)))))
-
-;; A frame that enters a group takes that group's layout as it stands: the
-;; slots and the pane count it noted belong to the group it left.
-(define (layout-target-refresh!)
-  (set-frame-local! 'layout-slots #f)
-  (when (layout-target) (layout-target-note-slots! (layout-visible-buffers)))
-  (set-frame-local! 'layout-target-count (length (layout-visible-buffers)))
-  (layout-target-modeline!)
-  (layout-target))
-
 ;;; The modeline names the chosen layout as Markdown: `*layout*:NAME`. The label
 ;;; is bold and the target reads plainly beside it, with no segment gap between
 ;;; the two spans. The text is compared before it is set, so the change hook
 ;;; that calls this on every window move does no work on an unchanged frame.
-(define (layout-target-modeline-text)
-  (let ((target (layout-target)))
+(define (layout-modeline-text)
+  (let ((target (panes-current-layout)))
     (string-append ":" (cond ((not target) "free")
                              ((symbol? target) (symbol->string target))
                              (else target)))))
 
-;; The ring in ring order: a filled box for each window on screen, a hollow
-;; one for each waiting off it; nothing when the layout shows them all. The
-;; header draws the ml-ring segment right after the group tabs.
-(define (layout-ring-dots)
-  (let ((panes (layout-pane-windows)))
-    (if (null? (layout-hidden-windows))
-        ""
-        (apply string-append (map (lambda (w) (if (member w panes) "■" "□")) (layout-ring-order))))))
-
-;; Every window of the ring in ring order: the walk's strip while it still
-;; names exactly the live windows, else the panes and then the hidden ones.
-(define (layout-ring-order)
-  (let* ((live (append (layout-pane-windows) (layout-hidden-windows)))
-         (strip (layout-strip)))
-    (if (and (= (length strip) (length live))
-             (null? (filter (lambda (w) (not (member w live))) strip)))
-        strip
-        live)))
-
-;; Walk the ring the shortest way until WIN is on screen, then select it.
-(define (layout-ring-show! win)
-  (let* ((algorithm (layout-target))
-         (capacity (and algorithm (layout-capacity algorithm)))
-         (order (layout-ring-order))
-         (n (length order))
-         (i (and (member win order) (- n (length (member win order))))))
-    (cond ((not i) #f)
-          ((or (not capacity) (member win (layout-pane-windows)))
-           (select-window! win) win)
-          (else
-            (let* ((start (if (equal? order (layout-strip)) (layout-offset) 0))
-                   (ahead (modulo (- i start) n))
-                   (offset (if (<= (- ahead (- capacity 1)) (- n ahead))
-                               (+ start (- ahead (- capacity 1)))
-                               i)))
-              (layout-strip-set! order offset)
-              (layout-arrange-windows! algorithm (layout-strip-run capacity))
-              (select-window! win)
-              win)))))
-
-(define (layout-target-modeline-shown)
+(define (layout-modeline-shown)
   (let ((entry (assq 'layout-value *global-mode-string*)))
     (and entry (pair? (cadr entry)) (cadr (cadr entry)))))
 
-(define (layout-target-modeline!)
-  (let ((text (layout-target-modeline-text)))
-    (unless (equal? text (layout-target-modeline-shown))
+(define (layout-modeline!)
+  (let ((text (layout-modeline-text)))
+    (unless (equal? text (layout-modeline-shown))
       (global-mode-string-set! 'layout-label '("ml-segment ml-strong" "layout"))
       (global-mode-string-set! 'layout-value (list "ml-segment ml-tight" text))))
   (global-mode-string-remove! 'layout-ring))
-
-;; A target is a layout and a capacity, not a frozen accidental tree.
-(define (layout-target-capacity target) (layout-capacity target))
-
-;; Logical slot order is independent of focus and of the side holding main.
-;; Match each occurrence once so deliberate duplicate views remain distinct.
-(define (layout-target-note-slots! panes)
-  (let loop ((names panes) (rows (window-list)) (out '()))
-    (if (null? names)
-        (begin
-          (set-frame-local! 'layout-slots (reverse out))
-          (set-frame-local! 'layout-target-count (length out)))
-        (let ((matches (filter (lambda (row) (equal? (cadr row) (car names))) rows)))
-          (if (null? matches)
-              (loop (cdr names) rows out)
-              (loop (cdr names)
-                    (filter (lambda (row) (not (equal? (car row) (car (car matches))))) rows)
-                    (cons (car matches) out)))))))
 
 ;; A buffer that makes its window a work window. popper.scm answers #f
 ;; for a popup: a popup window is ordinary, but the layout does not tile
@@ -662,154 +503,15 @@
        (window-work-buffer? (cadr row))
        (not (window-dock? (car row) (cadr row)))))
 
-;; The current tree is authoritative: a manual swap or restored tree can
-;; keep window IDs while changing their order. Cached IDs must not undo it.
-(define (layout-target-visible-buffers)
-  (map cadr (filter layout-visible-window? (window-list))))
+;; the modeline names the layout of the group in front of you
+(add-hook! 'window-state-change-hook 'layout-modeline!)
 
-(define (layout-target-arrange! panes focus)
-  (let ((target (layout-target))
-        (token (if (equal? focus (window-buffer (active-window)))
-                   (layout-focus-token) (list focus 0))))
-    (when (pair? panes)
-      (tile-windows! target panes)
-      (layout-focus-restore! token)
-      panes)))
-
-(define (layout-focus-token)
-  (let ((name (window-buffer (active-window))))
-    (let loop ((rows (window-list)) (occurrence 0))
-      (cond ((null? rows) (list name 0))
-            ((equal? (car (car rows)) (active-window)) (list name occurrence))
-            (else (loop (cdr rows)
-                    (+ occurrence (if (equal? (cadr (car rows)) name) 1 0))))))))
-
-(define (layout-focus-restore! token)
-  (let ((matches (filter (lambda (row) (equal? (cadr row) (car token))) (window-list))))
-    (when (pair? matches)
-      (select-window! (car (nth (min (cadr token) (- (length matches) 1)) matches))))))
-
-;; A user open selects its result. A display records how to quit and keeps focus.
-(define (layout-target-open! name select?)
-  (and (fill-candidate? name) (window-fill-member? name)
-       (not (buffer-context?))
-       (let* ((selected (active-window))
-              (focus (window-buffer selected))
-              (shown (window-showing name))
-              ;; One window per mode outranks the target's spare capacity. A
-              ;; three-column target is no licence to show two chats: the
-              ;; second one takes the pane the first one already holds.
-              (kin (and (not shown)
-                        (window-showing-mode (display-buffer-mode name))))
-              (panes (layout-target-visible-buffers))
-              (capacity (layout-target-capacity (layout-target))))
-         (cond (shown
-                (when select? (select-window! shown))
-                shown)
-               (kin
-                (display-buffer-in-window! kin name)
-                (when select? (select-window! kin))
-                kin)
-               ((and (not (member name panes))
-                     (or (not capacity) (< (length panes) capacity)))
-                (layout-target-arrange! (append panes (list name)) (if select? name focus))
-                (window-showing name))
-               (select?
-                 (display-buffer-in-window! selected name)
-                 (select-window! selected)
-                 selected)
-               (else
-                 ;; A full layout does not change the buffer of a pane for
-                 ;; a display. A window on NAME takes the pane, and the pane's
-                 ;; window becomes hidden, with its buffer and point.
-                 (let ((win (layout-replacement-window selected)))
-                   (and win (layout-open-window-in! win name))))))))
-
-;; Put a window on NAME in the pane of WIN: a hidden window that shows
-;; NAME, else a new one. WIN becomes hidden. quit-window in the new pane
-;; brings WIN back (window-quit-restore!). Answers the window, or #f.
-(define (layout-open-window-in! win name)
-  (let* ((hidden (let loop ((rows (window-hidden-list)))
-                   (cond ((null? rows) #f)
-                         ((equal? (cadr (car rows)) name) (car (car rows)))
-                         (else (loop (cdr rows))))))
-         (restoring (not (buffer-exists? name)))
-         (new (or hidden (window-new-hidden! name))))
-    (and new
-         (window-swap-hidden! win new)
-         (begin
-           (when (and restoring (not hidden)) (restore-buffer-runtime! name))
-           (set-frame-local! 'layout-displaced
-             (cons (list new win)
-                   (filter (lambda (e) (not (equal? (car e) new)))
-                           (or (frame-local 'layout-displaced) '()))))
-           (window-state-changed!)
-           new))))
-
-;; A window a full layout opened gives its pane back to the window it took
-;; the pane from, and goes. #t when it did.
-(define (layout-give-back! win)
-  (let ((back (layout-displaced-by win)))
-    (and back
-         (window-swap-hidden! win back)
-         (begin
-           (window-hidden-delete! win)
-           (window-state-changed!)
-           #t))))
-
-;; the hidden window that NEW took the pane of, or #f
-(define (layout-displaced-by new)
-  (let ((e (assoc new (or (frame-local 'layout-displaced) '()))))
-    (and e (member (cadr e) (map car (window-hidden-list))) (cadr e))))
-
-;; Results replace the least recently used other work pane. Ties keep order.
-(define (layout-replacement-window selected)
-  (let ((mru (buffer-list-mru)))
-    (define (rank buf)
-      (let loop ((rest mru) (n 0))
-        (cond ((null? rest) n)
-              ((equal? (car rest) buf) n)
-              (else (loop (cdr rest) (+ n 1))))))
-    (let loop ((windows (display--work-windows)) (best #f) (age -1))
-      (if (null? windows)
-          best
-          (let* ((win (car windows))
-                 (score (rank (window-buffer win))))
-            (if (and (not (equal? win selected)) (> score age))
-                (loop (cdr windows) win score)
-                (loop (cdr windows) best age)))))))
-
-;; Window changes reflow occupied slots. Closing a pane does not reopen hidden work.
-(define (layout-target-on-change!)
-  (layout-target-modeline!)
-  ;; under the window model the model owns the shape: its doors arrange
-  (when (and (layout-target) (not (layout-arranging?))
-             (not (and (boundp 'panes-mode) panes-mode))
-             (not (minibuffer-state)) (not (float-open?)))
-    (let ((panes (layout-target-visible-buffers))
-          (focus (window-buffer (active-window))))
-      (when (pair? panes)
-        (unless (equal? (length panes) (frame-local 'layout-target-count))
-          (layout-target-arrange! panes focus))))))
-
-(add-hook! 'window-configuration-change-hook 'layout-target-on-change!)
-;; A walk along the ring changes no pane count, so the dots follow the state.
-(add-hook! 'window-state-change-hook 'layout-target-modeline!)
-
-(define (display--keep-shape actions)
-  (if (layout-target)
-      (map (lambda (a) (if (equal? a 'pop-up-window) 'use-some-window a)) actions)
-      actions))
-
-;; the chain for NAME: the rule's actions, then the base, then the fallback
-(define (display-buffer-actions-for name &optional alist)
-  (let* ((a (display--alist-with-category name (or alist '())))
-         (rule (cadr (display-rule-for name a)))
-         (own (cond ((null? rule) '())
-                    ((pair? rule) rule)
-                    (else (list rule)))))
-    (display--keep-shape
-      (append own *display-buffer-base-action* *display-buffer-fallback-action*))))
+;; the actions of NAME's rule, in order; () when no rule names one
+(define (display--rule-actions name &optional alist)
+  (let ((rule (cadr (display-rule-for name (display--alist-with-category name (or alist '()))))))
+    (cond ((null? rule) '())
+          ((pair? rule) rule)
+          (else (list rule)))))
 
 ;;; what a display did to a window, for quit-window: (WIN KIND PREV).
 ;;; KIND 'window: the display made the window, and quit deletes it.
@@ -854,7 +556,7 @@
               (window-fill-decide
                 (window-fill-snapshot win #f 'restore rec 'previous '() 'refill #f
                   'others (and (equal? (car rec) 'window)
-                               (or (layout-displaced-by win) (other-window-id win))
+                               (other-window-id win)
                                #t))
                 (window-fill-buffers)))))))
 
@@ -868,63 +570,6 @@
                              (not (window-dock? w (window-buffer w)))
                              (not (peek-buffer? (window-buffer w)))))
             (map car (window-list)))))
-
-;; (ROWS COLS) of WIN, as the frame measures them
-(define (window-size-of win)
-  (let* ((rs (window-rects))
-         (me (assoc (active-window) rs))
-         (r (assoc win rs)))
-    (if (and me r (> (nth 5 me) 0))
-        (list (* (nth 5 r) (/ (window-rows) (nth 5 me)))
-              (* (nth 4 r) (frame-cols)))
-        (list (window-rows) (window-cols)))))
-
-;; the largest work window by area, else the selected one
-(define (display--largest-work-window)
-  (let ((rs (window-rects)))
-    (let loop ((ws (display--work-windows)) (best #f) (area 0))
-      (cond ((null? ws) (or best (active-window)))
-            (else
-              (let* ((r (assoc (car ws) rs))
-                     (a (if r (* (nth 4 r) (nth 5 r)) 0)))
-                (if (> a area)
-                    (loop (cdr ws) (car ws) a)
-                    (loop (cdr ws) best area))))))))
-
-;; Emacs window-splittable-p: 'v is one above the other, 'h side by side
-(define (window-splittable? win dir)
-  (let* ((size (window-size-of win))
-         (rows (car size))
-         (cols (cadr size)))
-    (if (equal? dir 'v)
-        (and (>= rows split-height-threshold) (>= rows (* 2 window-min-height)))
-        (and (>= cols split-width-threshold) (>= cols (* 2 window-min-width))))))
-
-;; split WIN, which need not be the selected window, and answer the new
-;; window. The selection is where it was.
-(define (split-window-in! win dir)
-  (let ((me (active-window))
-        (before (map car (window-list))))
-    (unless (equal? win me) (select-window! win))
-    (split-window! dir 0.5)
-    (let ((new (let loop ((ws (window-list)))
-                 (cond ((null? ws) #f)
-                       ((member (car (car ws)) before) (loop (cdr ws)))
-                       (else (car (car ws)))))))
-      (unless (equal? (active-window) me) (select-window! me))
-      new)))
-
-;; Emacs split-window-sensibly: below when WIN is tall enough, else
-;; beside when it is wide enough, else below anyway when WIN is the only
-;; work window and can hold two. The new window, or #f.
-(define (split-window-sensibly win)
-  (let ((dir (cond ((window-splittable? win 'v) 'v)
-                   ((window-splittable? win 'h) 'h)
-                   ((and (null? (cdr (display--work-windows)))
-                         (>= (car (window-size-of win)) (* 2 window-min-height)))
-                    'v)
-                   (else #f))))
-    (and dir (split-window-in! win dir))))
 
 ;; show NAME in window WIN, selecting nothing. A buffer the user can see
 ;; is a buffer the user can switch to; a floating buffer shown anywhere
@@ -965,10 +610,6 @@
     (active-window)))
 
 (define-display-action! 'same (display-action-fn 'same-window))
-
-(define-display-action! 'reuse-window
-  (lambda (name alist)
-    (window-showing name)))
 
 ;; A window prefers the mode of its work buffer. Temporary covers keep the
 ;; preference of the nearest work buffer in its own history. This uses the
@@ -1032,43 +673,18 @@
 ;; gains a pane with the most recent buffer not on screen, and that pane
 ;; answers. Otherwise the window whose buffer the user saw longest ago.
 (define (get-other-window)
+  ;; the model opens a pane while the layout has room; else the window you
+  ;; looked at longest ago
   (let* ((me (active-window))
-         (target (layout-target))
-         (capacity (and target (layout-target-capacity target)))
-         (panes (layout-target-visible-buffers))
-         (spares (if (and capacity (< (length panes) capacity))
-                     (filter (lambda (b) (and (fill-candidate? b) (not (member b panes))))
-                             (buffer-list-mru))
-                     '()))
+         (l (panes-layout))
          (others (filter (lambda (r) (not (equal? (car r) me))) (window-list))))
     (define (seen r) (or (buffer-last-seen (cadr r)) 0))
-    (cond ((pair? spares)
-           (layout-target-arrange! (append panes (list (car spares))) (window-buffer me))
-           (window-showing (car spares)))
-          ((null? others) (split-window! 'h) (other-window-id me))
-          (else
-           (let loop ((rs (cdr others)) (best (car others)))
-             (cond ((null? rs) (car best))
-                   ((< (seen (car rs)) (seen best)) (loop (cdr rs) (car rs)))
-                   (else (loop (cdr rs) best))))))))
-
-(define-display-action! 'mode-window
-  (lambda (name alist)
-    (let ((win (window-showing-mode (display-buffer-mode name))))
-      (and win (display-buffer-in-window! win name)))))
-
-(define-display-action! 'pop-up-window
-  (lambda (name alist)
-    (let* ((me (active-window))
-           (largest (display--largest-work-window))
-           (win (or (split-window-sensibly largest)
-                    (and (not (equal? largest me)) (split-window-sensibly me)))))
-      (and win (display-buffer-in-window! win name)))))
-
-(define-display-action! 'use-some-window
-  (lambda (name alist)
-    (let ((win (layout-replacement-window (active-window))))
-      (and win (display-buffer-in-window! win name)))))
+    (if (or (null? others) (and l (panes-under-capacity? l)))
+        (panes--split-window!)
+        (let loop ((rs (cdr others)) (best (car others)))
+          (cond ((null? rs) (car best))
+                ((< (seen (car rs)) (seen best)) (loop (cdr rs) (car rs)))
+                (else (loop (cdr rs) best)))))))
 
 ;; show NAME where the chain says, selecting nothing; the window, or #f
 (define (display-buffer-run-actions name alist actions)
@@ -1078,8 +694,8 @@
              (win (and fn (fn name alist))))
         (or win (display-buffer-run-actions name alist (cdr actions))))))
 
-;; the actions that place a buffer themselves: the layout target does not
-;; take their displays. A package adds its own (popper.scm).
+;; the actions that place a buffer themselves, off the panes. A package
+;; adds its own (popper.scm).
 (define *display-buffer-outside-layout* '(shaped same same-window))
 
 ;; An agent never puts its work in the user's window by accident. It works
@@ -1103,15 +719,10 @@
   (if (display-buffer-agent-refuses? name (or alist '()))
       (begin (display-buffer-agent-refusal name) #f)
       (let* ((a (or alist '()))
-             (actions (display-buffer-actions-for name a)))
-        (window-display!
-          (lambda ()
-            (or (and (boundp 'group-panes-open!) (not (layout-arranging?))
-                     (group-panes-open! name #f))
-                (and (layout-target) (not (layout-arranging?)) (pair? actions)
-                     (not (member (car actions) *display-buffer-outside-layout*))
-                     (layout-target-open! name #f))
-                (display-buffer-run-actions name a actions)))))))
+             (actions (display--rule-actions name a)))
+        (if (and (pair? actions) (member (car actions) *display-buffer-outside-layout*))
+            (window-display! (lambda () (display-buffer-run-actions name a actions)))
+            (panes-display! name)))))
 
 ;; show NAME and select its window (Emacs pop-to-buffer)
 (define (pop-to-buffer name &optional alist)
@@ -1551,145 +1162,6 @@ keeps the buffer you were in and your point.")
 (define (layout--dir spec) (if (pair? spec) (car spec) 'h))
 (define (layout--ratio spec) (if (pair? spec) (cadr spec) 0.5))
 
-;; Return the window made by one split. Window ids are stable, so the new id
-;; is the only id that was not present before the split.
-(define (layout--new-window before)
-  (let loop ((windows (window-list)))
-    (cond ((null? windows) #f)
-          ((not (member (car (car windows)) before)) (car (car windows)))
-          (else (loop (cdr windows))))))
-
-(define (layout--valid-ratio ratio fallback)
-  (if (and (number? ratio) (> ratio 0) (< ratio 1)) ratio fallback))
-
-;; Fill the selected leaf with BUFFERS along DIR. FIRST-RATIO controls the
-;; first pane. Each later split divides the remaining space evenly. Three
-;; panes therefore use 1/3, then 1/2, and finish as equal thirds.
-(define (layout--fill-line! buffers dir first-ratio)
-  (when (pair? buffers)
-    (switch-to-buffer-here! (car buffers))
-    (let loop ((rest (cdr buffers)) (first? #t))
-      (when (pair? rest)
-        (let* ((count (+ 1 (length rest)))
-               (ratio (if first?
-                          (layout--valid-ratio first-ratio (/ 1 count))
-                          (/ 1 count)))
-               (before (map car (window-list))))
-          (split-window! dir ratio)
-          (let ((new (layout--new-window before)))
-            (when new
-              (select-window! new)
-              (switch-to-buffer-here! (car rest))
-              (loop (cdr rest) #f)))))))
-  buffers)
-
-;;; A build makes its windows from one survivor: delete-other-windows!
-;;; keeps one, and each split copies that one's history into the new
-;;; window. Without a repair every pane remembers the survivor's past,
-;;; a kill in a pane then shows the survivor's previous buffer, and the
-;;; panes that went away take their pasts with them. So a build captures
-;;; every window's (BUFFER . HISTORY) first and hands each new pane the
-;;; history of the pane that showed its buffer. A pane on a buffer no
-;;; window showed takes a pane that went away, that buffer first, so a
-;;; kill there falls back to what the frame lost (Emacs prev-buffers).
-(define (layout--capture-histories)
-  (map (lambda (row)
-         (list (cadr row) (window-prev-buffers (car row))
-               (window-point (car row)) (window-restore (car row))))
-       (window-list)))
-
-(define (layout--drop-record record records)
-  (cond ((null? records) '())
-        ((equal? record (car records)) (cdr records))
-        (else (cons (car records) (layout--drop-record record (cdr records))))))
-
-(define (layout--restore-histories! captured)
-  (let ((shown (map cadr (window-list))))
-    (let loop ((rows (window-list)) (remaining captured))
-      (when (pair? rows)
-        (let* ((win (car (car rows)))
-               (buf (cadr (car rows)))
-               (own (assoc buf remaining))
-               (gone (filter (lambda (e) (not (member (car e) shown))) remaining))
-               (record (or own (and (pair? gone) (car gone)))))
-          (set-window-restore! win (and own (nth 3 own)))
-          (cond (own
-                 (set-window-prev-buffers! win (cadr own))
-                 (when (number? (caddr own)) (window-set-point! win (caddr own))))
-                (record (set-window-prev-buffers! win (cons (car record) (cadr record))))
-                (else (set-window-prev-buffers! win '())))
-          ;; Rebuilt panes cannot inherit a foreign group's stack or return.
-          (set-window-prev-buffers! win (window-eligible-history win))
-          (let ((quit (window-restore win)))
-            (when (and quit (equal? (car quit) 'other)
-                       (not (window-history-member? win (cadr quit))))
-              (set-window-restore! win #f)))
-          (loop (cdr rows) (if record (layout--drop-record record remaining) remaining)))))))
-
-;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
-;; buffer, which re-runs its mode setups; without this flag that wake would ask
-;; for another layout in the middle of this one.
-(define *layout-busy* #f)
-
-;; *layout-busy* holds #f or the monotonic-ms the flag went up. A build that
-;; dies with no unwind (a heap kill) or two lanes that restore each other's
-;; flag can leave it up; a flag older than this counts as stale and clears.
-(define layout-busy-stale-ms 5000)
-
-;; Run THUNK with the engine standing down. Desktop restore uses this: it
-;; rebuilds the exact windows it saved, and a mode setup that runs inside it
-;; must not arrange the frame a second way.
-;; Is the engine arranging the frame right now? A package that moves
-;; windows of its own — a preview that opens beside its index, say — must
-;; ask this and stand down: the engine is mid-build, it will place every
-;; declared pane itself, and a split landing inside that build leaves the
-;; frame neither arrangement.
-(define (layout-arranging?)
-  (cond ((not *layout-busy*) #f)
-        ((and (number? *layout-busy*)
-              (< (- (monotonic-ms) *layout-busy*) layout-busy-stale-ms)) #t)
-        (else (set! *layout-busy* #f) #f)))
-
-;; This Scheme has no unwind form, so a throw inside a build leaves the
-;; flag raised and every later arrangement returns early — the frame
-;; quietly stops obeying its layouts. A top-level, user-initiated build
-;; clears it first: nothing can legitimately be arranging the frame at
-;; the moment somebody asks for an arrangement.
-(define (layout-abort!) (set! *layout-busy* #f))
-
-(define (with-layout-suppressed thunk)
-  (let ((was *layout-busy*))
-    (set! *layout-busy* (monotonic-ms))
-    (unwind-protect thunk (lambda () (set! *layout-busy* was)))))
-
-;; Put the frame where SPEC says. The anchor keeps focus: a mode that arranges
-;; the frame must not move the user out of the buffer they are in.
-(define (apply-layout! anchor spec)
-  (if (layout-arranging?)
-      (layout--panes anchor spec)
-      (begin
-        ;; the flag goes up BEFORE the panes resolve: an ensure pane runs a
-        ;; command, that command switches buffers and sets a mode, and a
-        ;; mode setup asks the engine for a layout of its own. One
-        ;; arrangement at a time, materialising included.
-        (set! *layout-busy* (monotonic-ms))
-        (unwind-protect
-         (lambda ()
-           (let ((panes (layout--panes anchor spec))
-                 (histories (layout--capture-histories)))
-             (when (pair? panes)
-               (delete-other-windows!)
-               (layout--fill-line! panes (layout--dir spec) (layout--ratio spec))
-               (layout--restore-histories! histories)
-               (let ((w (window-showing anchor)))
-                 (when w (select-window! w))))
-             panes))
-         (lambda () (set! *layout-busy* #f))))))
-
- ;; Visible panes keep tree order. Selecting a pane does not promote it.
-(define (layout-visible-buffers)
-  (map cadr
-    (filter layout-visible-window? (window-list))))
 (domain! 'files)
 (effects! '(read))
 
@@ -1805,7 +1277,7 @@ keeps the buffer you were in and your point.")
                 'previous (window-prev-buffers win)
                 'shown (window-fill-shown-elsewhere win)
                 'dying dying
-                'others (and (or (layout-displaced-by win) (other-window-id win)) #t))))
+                'others (and (other-window-id win) #t))))
 
 ;; apply ACTION, an answer of window-fill-decide, to WIN. #t when the
 ;; window changed: (blank) leaves it as it is, and so does a (delete) no
@@ -1819,8 +1291,7 @@ keeps the buffer you were in and your point.")
            (window-state-changed!)
            #t)
           ((equal? what 'delete)
-           (cond ((layout-give-back! win) #t)
-                 ((other-window-id win)
+           (cond ((other-window-id win)
                   (if (equal? win (active-window)) (delete-window!) (delete-window-id! win))
                   #t)
                  (else #f)))
@@ -1835,130 +1306,9 @@ keeps the buffer you were in and your point.")
 ;; shape without a buffer from outside.
 (define window-fill-blank (lambda () #f))
 
-;; Explicit fixed layouts fill with hidden work from the same context.
-;; Keep the focused buffer when a smaller target hides surplus panes.
-(define (layout--fit buffers capacity)
-  (let* ((kept (take buffers capacity))
-         (focus (window-buffer (active-window))))
-    (if (and (member focus buffers) (not (member focus kept)))
-        (append (take kept (- capacity 1)) (list focus))
-        kept)))
+;;; --- the windows of the frame ---------------------------------------------
 
-;; A pane that holds a mode (consolidate, or a chosen preference)
-;; keeps that mode's buffers in its history. A layout that needs a new
-;; window fills it from the rest, so the pane loses no member.
-(define (layout-held-buffers)
-  (fold (lambda (held win)
-          (if (window-mode-preference win)
-              (append (filter (lambda (b) (window-prefers-buffer? win b))
-                              (window-prev-buffers win))
-                      held)
-              held))
-        '()
-        (display--work-windows)))
-
-(define (layout-unheld buffers)
-  (let ((held (layout-held-buffers)))
-    (if (null? held)
-        buffers
-        (filter (lambda (b) (not (member b held))) buffers))))
-
-(define (layout--fill-to buffers capacity)
-  ;; The fill list costs a walk of every live buffer, so only pay for it when
-  ;; the fit actually came up short. The common case -- more buffers than
-  ;; panes -- now costs nothing.
-  (let ((fitted (layout--fit buffers capacity)))
-    (if (>= (length fitted) capacity)
-        fitted
-        ;; each spare pane asks the one rule, with the panes so far as shown
-        (let ((pool (layout-unheld (filter window-fill-primary? (window-fill-buffers)))))
-          (let loop ((result fitted))
-            (if (>= (length result) capacity)
-                result
-                (let ((action (window-fill-decide (list 'shown result) pool)))
-                  (if (equal? (car action) 'show)
-                      (loop (append result (list (cadr action))))
-                      result))))))))
-
-;; Validate each requested pane without removing duplicate buffer names.
-(define (layout--known-buffers buffers)
-  (let loop ((rest buffers) (acc '()))
-    (if (null? rest)
-        (reverse acc)
-        (let ((buf (car rest)))
-          (loop (cdr rest)
-            (if (and (string? buf) (buffer-known? buf))
-                (cons buf acc)
-                acc))))))
-
-;;; --- the five layouts -------------------------------------------------------
-;;; A layout is a shape and a capacity, and nothing else. There are five:
-;;;
-;;;   single     one window
-;;;   two-pane   two side by side, the first takes two thirds
-;;;   halves     two side by side, equal
-;;;   columns    three side by side, equal
-;;;   rows       two stacked, equal
-;;;
-;;; Every layout is a window on the strip (below), so a frame is never
-;;; short of buffers and never out of room for one: the panes show a run
-;;; of the strip, and a scroll moves the run.
-
-(define *window-layout-algorithms* '(single two-pane halves columns rows two-chat))
-
-;; the panes a layout holds
-(define (layout-capacity algorithm)
-  (cond ((equal? algorithm 'single) 1)
-        ((equal? algorithm 'columns)
-         (if (and (integer? window-layout-columns) (> window-layout-columns 0)) window-layout-columns 3))
-        ((equal? algorithm 'two-chat) 3)
-        ((member algorithm *window-layout-algorithms*) 2)
-        (else #f)))
-
-;; the direction a layout splits in, and the first pane's share
-(define (layout-split-dir algorithm) (if (equal? algorithm 'rows) 'v 'h))
-
-;; The first pane's share of COUNT panes. two-pane is the one layout that
-;; does not divide evenly. Every other layout gives each pane 1/COUNT, so
-;; a layout short of buffers still shares the frame evenly: three columns
-;; holding two buffers are two halves, not a third and two thirds.
-(define (layout-first-ratio algorithm count)
-  (cond ((equal? algorithm 'two-pane)
-         (layout--valid-ratio window-layout-main-ratio (/ 2 3)))
-        ;; two equal panes and a narrow chat: a share for each pane
-        ((equal? algorithm 'two-chat)
-         (let ((chat (layout--valid-ratio window-layout-chat-ratio (/ 1 4))))
-           (cond ((= count 3) (list (/ (- 1 chat) 2) (/ (- 1 chat) 2) chat))
-                 ((= count 2) (- 1 chat))
-                 (else 1))))
-        (else (/ 1 count))))
-
-;;; --- the ring ---------------------------------------------------------------
-;;; The frame's windows make one cyclic ring, and the layout shows a run of
-;;; it. A window that leaves the screen does not die: it becomes hidden,
-;;; and it keeps its buffer, history and point. A window joins the ring
-;;; when it is made. Right is forwards, left is backwards.
-;;;
-;;; A walk takes the order of the ring when it starts: the panes on screen,
-;;; in screen order, then the hidden windows, most recently used first. The
-;;; walk keeps that order while it goes on. A selection changes the recent
-;;; order, and a ring read again on each step would reorder itself under
-;;; the walk: back would not return where forward came from.
-
-;; the commands that continue a walk
-(define *layout-walk-commands*
-  '("previous-pane" "next-pane" "focus-up" "focus-down"
-    "layout-forward" "layout-backward" "buffer-next-pane" "buffer-previous-pane"))
-
-(define (layout-strip) (or (frame-local 'layout-strip) '()))
-(define (layout-offset) (or (frame-local 'layout-offset) 0))
-
-(define (layout-strip-set! ids offset)
-  (set-frame-local! 'layout-strip ids)
-  (set-frame-local! 'layout-offset (if (pair? ids) (modulo offset (length ids)) 0))
-  ids)
-
-;; the layout's panes, as window ids, in screen order
+;; the work windows on screen, as window ids, in screen order
 (define (layout-pane-windows)
   (map car (filter layout-visible-window? (window-list))))
 
@@ -1977,336 +1327,21 @@ keeps the buffer you were in and your point.")
 (define (window-hidden-clear!)
   (for-each (lambda (row) (window-hidden-delete! (car row))) (window-hidden-list)))
 
-;; A kill can delete a hidden window. Every frame reads its ring again on
-;; the next walk.
-(define (layout-strip-forget! name)
-  (for-each (lambda (frame) (set-frame-local-in! frame 'layout-strip '()))
-            (frame-list)))
-
-(public! 'layout-strip-forget!
-  "(layout-strip-forget! NAME) — make every frame read its window ring again; a kill runs this")
-
-(define (layout-strip-rebuild!)
-  (layout-strip-set! (append (layout-pane-windows) (layout-hidden-windows)) 0))
-
-;; the run of COUNT windows the ring shows now
-(define (layout-strip-run count)
-  (let* ((strip (layout-strip))
-         (n (length strip)))
-    (let loop ((i 0) (out '()))
-      (if (>= i (min count n))
-          (reverse out)
-          (loop (+ i 1) (cons (nth (modulo (+ (layout-offset) i) n) strip) out))))))
-
-;; The ring of this walk. A new walk reads the ring again. So does a walk
-;; whose ring no longer matches the frame: a window died or was made, or
-;; the panes changed under it.
-(define (layout-strip-current count)
-  (let* ((strip (layout-strip))
-         (live (append (layout-pane-windows) (layout-hidden-windows)))
-         (valid (and (member (last-command) *layout-walk-commands*)
-                     (= (length strip) (length live))
-                     (null? (filter (lambda (w) (not (member w live))) strip))
-                     (equal? (layout-strip-run count) (layout-pane-windows)))))
-    (unless valid (layout-strip-rebuild!))
-    (layout-strip)))
-
-;; Move the run by DELTA and lay the frame out again. Answers #f when the
-;; ring holds no more windows than the layout shows: there is nothing to
-;; scroll to.
-(define (layout-scroll! delta)
-  (let* ((algorithm (or (layout-target) 'single))
-         (capacity (layout-capacity algorithm))
-         (strip (and capacity (layout-strip-current capacity)))
-         (n (if strip (length strip) 0)))
-    (cond ((not capacity) #f)
-          ((<= n capacity) #f)
-          (else
-            (layout-strip-set! strip (+ (layout-offset) delta))
-            (layout-arrange-windows! algorithm (layout-strip-run capacity))))))
-
-;;; --- the tiler --------------------------------------------------------------
-
-;; Lay the frame out as ALGORITHM over the windows IDS. A pane that is not
-;; in IDS becomes hidden; it is not deleted.
-(define (layout-arrange-windows! algorithm ids)
-  (float-close!)
-  (set! *layout-busy* (monotonic-ms))
-  (let ((ok (unwind-protect
-             (lambda ()
-               (window-arrange-line! (layout-split-dir algorithm)
-                                     (layout-first-ratio algorithm (length ids))
-                                     ids))
-             (lambda () (set! *layout-busy* #f)))))
-    (when ok
-      ;; columns keeps no ring: a window it does not show is deleted
-      (when (equal? algorithm 'columns)
-        (for-each window-hidden-delete! (layout-hidden-windows)))
-      (window-state-changed!)
-      (layout-target-note-slots! (map window-buffer ids)))
-    (and ok ids)))
-
-;; The window a layout uses for BUF: a pane that shows it, then a hidden
-;; window that shows it, else a new window. TAKEN holds the windows this
-;; layout uses already, so two panes on one buffer are two windows.
-(define (layout-window-for buf taken)
-  (let ((free (lambda (rows)
-                (let loop ((rows rows))
-                  (cond ((null? rows) #f)
-                        ((and (equal? (cadr (car rows)) buf)
-                              (not (member (car (car rows)) taken)))
-                         (car (car rows)))
-                        (else (loop (cdr rows))))))))
-    (or (free (filter layout-visible-window? (window-list)))
-        (free (window-hidden-list))
-        ;; a dormant buffer wakes whole, as switch-to-buffer-here! makes it
-        (let* ((restoring (not (buffer-exists? buf)))
-               (win (window-new-hidden! buf)))
-          (when (and win restoring) (restore-buffer-runtime! buf))
-          win))))
-
-;; two-chat keeps the first chat of the frame's group in its last pane
-(define (layout--chat-last algorithm buffers)
-  (let* ((g (and (equal? algorithm 'two-chat) (frame-group)))
-         (chats (if g (filter (lambda (b) (equal? (buffer-group-role b g) "chat")) buffers) '())))
-    (if (null? chats)
-        buffers
-        (append (take (filter (lambda (b) (not (equal? b (car chats)))) buffers)
-                      (- (layout-capacity algorithm) 1))
-                (list (car chats))))))
-
-;; Arrange explicit buffers with a named layout. The first buffer is the main
-;; buffer and keeps focus. This is the stable agent-facing entry point.
-;; Each pane is a window: one that shows the buffer is used again, and a
-;; window that loses its pane becomes hidden, with its history and point.
-(define (tile-windows! algorithm buffers)
-  (let* ((capacity (layout-capacity algorithm))
-         (known (layout--chat-last algorithm (layout--known-buffers buffers)))
-         (panes (if capacity (take known capacity) known)))
-    (cond
-      ((not capacity) (message "Unknown window layout") #f)
-      ((null? panes) (message "No live buffers to arrange") #f)
-      ((layout-arranging?) panes)
-      (else
-        (let ((ids (let loop ((rest panes) (taken '()))
-                     (if (null? rest)
-                         (reverse taken)
-                         (let ((w (layout-window-for (car rest) taken)))
-                           (loop (cdr rest) (if w (cons w taken) taken)))))))
-          (and (pair? ids)
-               (layout-arrange-windows! algorithm ids)
-               (begin
-                 (select-window! (car ids))
-                 panes)))))))
-
-;; The buffers a layout asks for: the panes, then the buffers of the
-;; hidden windows, then (in a group) the group's other work.
-(define (layout-request-buffers)
-  (let* ((visible (layout-target-visible-buffers))
-         (hidden (map window-buffer-any (layout-hidden-windows)))
-         (work (if (frame-group) (layout-unheld (window-fill-buffers)) '())))
-    ;; Existing panes keep their buffers, including deliberate duplicates,
-    ;; transient lists and visible non-members. Each further pane asks the
-    ;; one rule: a hidden window's buffer first, then unheld work.
-    (let loop ((out (reverse visible)))
-      (let ((action (window-fill-decide (list 'shown out) (append hidden work))))
-        (if (equal? (car action) 'show)
-            (loop (cons (cadr action) out))
-            (reverse out))))))
-
-;; Apply ALGORITHM to the frame. This is the top of a layout change, so the
-;; next walk reads the ring again from the new panes.
-(define (tile-visible-windows! algorithm &optional requested)
-  (let* ((focus (layout-focus-token))
-         (visible (layout--chat-last algorithm (or requested (layout-request-buffers))))
-         (capacity (or (layout-capacity algorithm) 1))
-         (panes (take (layout--known-buffers (layout--fill-to visible capacity)) capacity))
-         (result (and (pair? panes) (tile-windows! algorithm panes))))
-    (when result
-      (layout-strip-rebuild!)
-      (layout-focus-restore! focus))
-    result))
-
-;; The layout that fits COUNT panes: the frame takes the smallest of the
-;; five that holds them all, and three is the most any of them holds.
-(define (layout-for-count count)
-  (cond ((<= count 1) 'single)
-        ((<= count 2) 'two-pane)
-        (else 'columns)))
-
-;; Tile PANES with the frame's chosen layout, or with the one that fits
-;; them when the frame never chose. The caller has panes in hand and wants
-;; them on screen; it does not name a shape.
-(define (tile-default-windows! buffers)
-  (let ((panes (layout--known-buffers buffers)))
-    (and (pair? panes)
-         (tile-visible-windows! (or (layout-target) (layout-for-count (length panes)))
-                                panes))))
-
-(define (window-layout-command algorithm)
-  (lambda ()
-    (when (tile-visible-windows! algorithm)
-      (layout-target-set! algorithm))))
-
-;; Layout selection is a live preview. Keep the complete frame arrangement so
-;; cancelling the prompt returns both the windows and the selected window.
-(define (window-layout-preview! name &optional requested)
-  ;; A failed earlier arrangement must not disable a later interactive
-  ;; preview. This command is a new top-level layout request.
-  (layout-abort!)
-  (tile-visible-windows! (string->symbol name) requested))
-
-;; a look at layout NAME: the frame's look (preview-show ... 'frame)
-(define (window-layout-preview-without-history! name &optional requested)
-  (let ((result #f))
-    (preview-show (lambda () (set! result (window-layout-preview! name requested))) 'frame)
-    result))
-
-(define-command "window-layout-single" "Show one window"
-  (window-layout-command 'single))
-(define-command "window-layout-two-pane"
-  "Show two panes side by side; the first pane takes two thirds"
-  (window-layout-command 'two-pane))
-(define-command "window-layout-halves" "Show two equal panes side by side"
-  (window-layout-command 'halves))
-(define-command "window-layout-columns" "Show three equal columns"
-  (window-layout-command 'columns))
-(define-command "window-layout-rows" "Show two equal panes, one above the other"
-  (window-layout-command 'rows))
-(define-command "window-layout-two-chat"
-  "Show two equal panes and the group's chat in a narrow pane on the right"
-  (window-layout-command 'two-chat))
-
-;; the commit: the chosen layout is the frame's target from here on
-(define (window-layout-choose! saved name &optional requested)
-  ;; One visible step: the choice applies from wherever the preview left
-  ;; the panes (applying a layout is idempotent), and winner gets the
-  ;; arrangement the prompt started from by hand, so one undo returns to
-  ;; it. Restoring first and applying again was the two-step flash.
-  (debounce-cancel! "window-layout-preview")
-  (cond ((equal? name "free")
-         (preview-end #f)
-         (layout-target-set! #f)
-         (message "Layout free: a display may split a window again"))
-        (else
-          (if (let ((ok (window-layout-preview-without-history! name requested)))
-                (preview-end #t)
-                ok)
-              (begin
-                (layout-target-set! (string->symbol name))
-                (message (string-append "Layout " name " is the target")))
-              #f))))
-
-;; the rest an arrow takes before the prompt applies its candidate
-(define window-layout-preview-delay-ms 120)
-
-(define-command "window-layout" "Choose a tiling layout for visible buffers; the choice is the frame's target layout"
-  (lambda ()
-    (let ((saved (window-tree))
-          (saved-panes (layout-target-visible-buffers))
-          (saved-order (layout-request-buffers)))
-      (define (restore-preview!)
-        (debounce-cancel! "window-layout-preview")
-        (preview-end #f)
-        (layout-target-note-slots! saved-panes))
-      (minibuffer-read-preview "Window layout: "
-        '(("single" "one window")
-          ("two-pane" "2/3 + 1/3 side by side")
-          ("halves" "two equal panes side by side")
-          ("columns" "three equal columns, no hidden windows")
-          ("rows" "two equal panes, stacked")
-          ("two-chat" "2 + chat: two equal panes and a narrow chat")
-          ("free" "no target: a display may split a window"))
-        ;; A move applies the candidate from the same buffer order the
-        ;; choice uses, so the preview is what you get: applying a layout
-        ;; is idempotent, so no restore comes first and the choice adds no
-        ;; pane. The panes keep their windows, and a pane keeps its
-        ;; window's render. The original arrangement comes back once, on
-        ;; cancel, or under the choice. and it waits for the arrow to
-        ;; rest: a held key applies one layout, not one per step (the
-        ;; owner's ruling, 2026-09-19)
-        (lambda (name)
-          (unless (equal? name "free")
-            (debounce! "window-layout-preview" window-layout-preview-delay-ms
-              (lambda (n) (window-layout-preview-without-history! n saved-order))
-              name)))
-        ;; the choice applies from the preview, one step; cancel restores
-        (lambda (name) (window-layout-choose! saved name saved-order))
-        (lambda () (restore-preview!))
-        #f #f #f #f
-        '(("1" "single") ("2" "two-pane") ("=" "halves")
-          ("c" "columns") ("r" "rows") ("+" "two-chat") ("f" "free"))))))
-
-(define-command "window-layout-free"
-  "Drop the frame's target layout: a display may split a window again"
-  (lambda ()
-    (layout-target-set! #f)
-    (message "Layout free: a display may split a window again")))
-
-;;; --- scrolling the ring -----------------------------------------------------
-;;; The layout shows a run of the window ring, and these move the run.
-;;; Forward is right, backward is left, and the ring is cyclic, so neither
-;;; one reaches an end. A frame with no more windows than panes says so.
-
-;; Scroll by DELTA and stand at EDGE: the window that arrived.
-;; The client slides the panes, so the user sees which buffer went out
-;; and which came in.
-(define (layout-scroll-to! delta edge)
-  (and (layout-scroll! delta)
-       (let ((panes (layout-pane-windows)))
-         (client-slide! (if (> delta 0) "forward" "backward"))
-         (when (pair? panes)
-           (select-window! (if (equal? edge 'last) (car (reverse panes)) (car panes))))
-         #t)))
-
-;; A focus move that finds no window scrolls the strip instead: the frame's
-;; edge is not the end of the buffers. Right and down go forwards, left and
-;; up go backwards.
-(define (layout-edge-scroll! dir)
-  (and (layout-target)
-       (if (member dir '(right down next))
-           (layout-scroll-to! 1 'last)
-           (layout-scroll-to! -1 'first))))
-
-(define (layout-scroll-command delta edge)
-  (lambda ()
-    (unless (layout-scroll-to! delta edge)
-      (message "No hidden windows in this frame"))))
-
-(define-command "layout-forward"
-  "Move the layout one window forward through the frame's window ring"
-  (layout-scroll-command 1 'last))
-(define-command "layout-backward"
-  "Move the layout one window backward through the frame's window ring"
-  (layout-scroll-command -1 'first))
-
-(for-each
-  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("window-layout" "window-layout-free" "window-layout-single"
-    "window-layout-two-pane" "window-layout-halves"
-    "window-layout-columns" "window-layout-rows" "window-layout-two-chat"
-    "layout-forward" "layout-backward"))
-
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
 ;; when BUF is the buffer the user is looking at.
 (define (layout-enter! buf)
   (let ((spec (buffer-layout buf)))
     (if (and spec
-             (not (layout-target))
-             (not (layout-arranging?))
+             (not (panes-current-layout))
              (equal? (window-buffer (active-window)) buf))
         (apply-layout! buf spec)
         #f)))
 
 (define-command "reset-layout" "Arrange the frame the way this buffer's mode asks"
   (lambda ()
-    (layout-abort!)
     (let ((spec (buffer-layout (current-buffer))))
       (if spec
-          ;; also the way back from an arrangement that failed part way: the
-          ;; flag never outlives the command the user runs to fix the frame
-          (begin (set! *layout-busy* #f)
-                 (apply-layout! (current-buffer) spec))
+          (apply-layout! (current-buffer) spec)
           (message "This buffer's modes declare no layout")))))
 
 ;; Kill every buffer a window holds: the one it shows and its whole
@@ -2336,13 +1371,12 @@ keeps the buffer you were in and your point.")
 (global-set-key "C-x K" "window-kill-buffers")
 
 (define (window-unwind-or-close! win)
-  ;; q never closes a pane: it gives back the arrangement a display made,
-  ;; else steps back in the window's history, else fills the window with
-  ;; the next work buffer
+  ;; q never closes a pane: the model steps back in the window's stack
+  ;; (panes-quit!); a window the model does not hold steps back in its
+  ;; history, else shows the next work buffer
   (let* ((cur (window-buffer win))
-         (history (window-eligible-history win))
-         (record (window-restore win)))
-    (cond ((and record (equal? (car record) 'window) (layout-give-back! win)) #t)
+         (history (window-eligible-history win)))
+    (cond ((panes-quit! win) #t)
           ((pair? history)
            (display-buffer-in-window! win (car history))
            (set-window-restore! win #f)
@@ -2401,116 +1435,12 @@ keeps the buffer you were in and your point.")
 (effects! '(write execute))
 
 ;;; --- winner: layout undo ------------------------------------------------------
-;;; Winner records itself (Emacs winner-mode): a command that changed the
-;;; frame's windows puts the arrangement it started from on a per-frame
-;;; ring, once. C-c <left> walks back through the ring, C-c <right> walks
-;;; forward. A change between commands (a reflow, an agent's display) is
-;;; where the next command starts, not a command. A look, the pop of a
-;;; stack entry and a winner walk settle the screen, so they push nothing
-;;; and undo cannot pollute its own history. The record is written only
-;;; in the command's own lane: the configuration hook runs in another.
+;;; C-c <left> and C-c <right> walk the window model's layout history
+;;; (panes-history.scm); winner is the Emacs name for the walk.
 
-;;; The same two steps are the one recording point for every completed
-;;; window change: window-change-recorded-hook runs with the group the
-;;; frame stood in when the change began (groups.scm saves its layout).
+(define (winner-previous!) (run-command "layout-undo"))
+(define (winner-next!) (run-command "layout-redo"))
 
-(define *winner-depth* 12)
-
-;; the screen now is not a change the user made: winner takes it as settled
-(define (winner--settle-screen!)
-  (set-frame-local! 'winner-last
-    (list (window-list) (window-tree) (frame-local 'current-group))))
-
-;; a change between commands is recorded for the group, not for winner
-(define (winner--pre-command!)
-  (let ((last (frame-local 'winner-last)))
-    (unless (and last (equal? (car last) (window-list)))
-      (when last (run-hook-with-args 'window-change-recorded-hook (caddr last)))
-      (winner--settle-screen!))))
-
-(define (winner--post-command!)
-  (let ((last (frame-local 'winner-last)))
-    (unless (or (not last) (equal? (car last) (window-list)))
-      (winner-push! (cadr last))
-      (run-hook-with-args 'window-change-recorded-hook (caddr last))
-      (winner--settle-screen!))))
-
-(add-hook! 'pre-command-hook 'winner--pre-command!)
-(add-hook! 'post-command-hook 'winner--post-command!)
-
-(define (winner-save!) (winner-push! (window-tree)))
-
-;; TREE goes onto the ring as the arrangement a command destroyed
-(define (winner-push! tree)
-  (let ((ring (or (frame-local 'winner-ring) '())))
-    (unless (and (pair? ring) (equal? (car ring) tree))
-      (set-frame-local! 'winner-ring (take (cons tree ring) *winner-depth*)))
-    (set-frame-local! 'winner-pos #f)))
-
-(define (winner--restore idx)
-  (let ((ring (or (frame-local 'winner-ring) '())))
-    (if (or (< idx 0) (>= idx (length ring)))
-        (message (if (< idx 0) "at the latest layout" "no earlier layout"))
-        (begin
-          (set-frame-local! 'winner-pos idx)
-          ;; the configuration hook runs in another lane and may run before
-          ;; the settle: it must already count the panes the walk restores
-          (set-frame-local! 'layout-target-count (length (window-tree-buffers (nth idx ring))))
-          (window-tree-set! (nth idx ring))
-          (winner--settle-screen!)
-          (winner--settle!)
-          (message (string-append "layout "
-                     (number->string (+ idx 1)) "/"
-                     (number->string (length ring))))))))
-
-;; The restored arrangement is the one the user asked for. The layout
-;; engine reflows when the panes change: a target compares its slot
-;; count. The walk tells it that the restored panes are current, so the
-;; configuration hook that follows the restore has nothing to reflow and
-;; the undo stands. winner-restore-hook carries the news to packages that
-;; keep an arrangement of their own.
-(define (winner--settle!)
-  (when (layout-target)
-    (layout-target-note-slots! (layout-target-visible-buffers)))
-  (run-hooks 'winner-restore-hook))
-
-(define (winner-previous!)
-  (let ((pos (frame-local 'winner-pos)))
-    (if pos
-        (winner--restore (+ pos 1))
-        ;; entering the walk: the CURRENT arrangement joins the ring
-        ;; first, so next can return to it.
-        (begin
-          (winner-save!)
-          (winner--restore 1)))))
-
-(define (winner-next!)
-  (let ((pos (frame-local 'winner-pos)))
-    (if (and pos (> pos 0))
-        (winner--restore (- pos 1))
-        (message "at the latest layout"))))
-
-;; The ring holds layouts, and a layout names its buffers. A rename that
-;; does not reach the ring makes winner-undo restore a window on a dead
-;; name. Every frame keeps its own ring, so the sweep walks them all.
-(add-hook! 'buffer-renamed-hook
-  (lambda (old new)
-    (set! *frame-locals*
-      (map (lambda (frame-entry)
-             (list (car frame-entry)
-                   (map (lambda (item)
-                          (cond ((equal? (car item) 'winner-ring)
-                                 (list 'winner-ring
-                                       (map (lambda (tree)
-                                              (window-tree-rename tree old new))
-                                            (car (cdr item)))))
-                                ((equal? (car item) 'winner-last) (list 'winner-last #f))
-                                (else item)))
-                        (car (cdr frame-entry)))))
-           *frame-locals*))))
-
-;; These names describe the operation as a desktop switch: the saved tree
-;; contains both the window arrangement and the buffer shown in each window.
 (define-command "winner-previous" "Switch to the previous window and buffer arrangement"
   (lambda () (winner-previous!)))
 (define-command "winner-next" "Switch to the next window and buffer arrangement"
@@ -2524,33 +1454,13 @@ keeps the buffer you were in and your point.")
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("winner-previous" "winner-next" "winner-undo" "winner-redo"))
 
-;; the window mutators the keyboard reaches (C-x 1/2/3/0) push
-;; the arrangement they are about to destroy
-(define (window-tree-set! tree)
-  (builtin-window-tree-set! tree)
-  (window-state-changed!))
+;; C-x 1, C-x 2 and 3, C-x 0 are model edits (panes-mode.scm): the frame
+;; shows what the model then says
+(define (delete-other-windows!) (panes--delete-other-windows!))
 
-;; a look at an arrangement, the way window-preview-buffer! is a look at
-;; a buffer: the windows change, the MRU ring does not
-(define (window-tree-preview! tree)
-  (builtin-window-tree-preview! tree)
-  (window-state-changed!))
+(define (split-window! dir &optional ratio) (panes--split-window!))
 
-(define (delete-other-windows!)
-  (builtin-delete-other-windows!)
-  (window-state-changed!))
-
-(define (split-window! dir &optional ratio)
-  (let ((result (if ratio
-                    (builtin-split-window! dir ratio)
-                    (builtin-split-window! dir))))
-    (window-state-changed!)
-    result))
-
-(define (delete-window!)
-  (let ((result (builtin-delete-window!)))
-    (window-state-changed!)
-    result))
+(define (delete-window!) (panes--delete-window!))
 
 (define (delete-window-id! id)
   (let ((result (builtin-delete-window-id! id)))
@@ -2576,44 +1486,6 @@ keeps the buffer you were in and your point.")
                     (window-list))))
     (if (null? ws) #f (car (car ws)))))
 
-;; A buffer is on screen in one pane, never two. After any change to a
-;; frame's panes, a pane that repeats a buffer another pane shows (the
-;; selected one wins) turns to its own previous buffer that is not on
-;; screen, else to the frame's next fill buffer, else it closes.
-(define *window-unique-busy* #f)
-
-(define (window-unique-panes!)
-  ;; under the window model a buffer is in one window already (panes-apply!)
-  (unless (or *window-unique-busy* (and (boundp 'panes-mode) panes-mode))
-    (set! *window-unique-busy* #t)
-    (unwind-protect
-      (lambda ()
-        (let* ((me (active-window))
-               (rows (window-list))
-               (ordered (append (filter (lambda (r) (equal? (car r) me)) rows)
-                                (filter (lambda (r) (not (equal? (car r) me))) rows))))
-          (let loop ((rows ordered) (seen '()))
-            (when (pair? rows)
-              (let ((win (car (car rows))) (buf (cadr (car rows))))
-                (if (not (member buf seen))
-                    (loop (cdr rows) (cons buf seen))
-                    (let* ((shown (map cadr (window-list)))
-                           (free (lambda (c) (and (fill-candidate? c) (not (member c shown)))))
-                           (prev (window-prev-buffers win))
-                           (next (or (find free prev) (find free (window-fill-buffers)))))
-                      (cond (next
-                              (display-buffer-in-window! win next)
-                              (set-window-prev-buffers! win
-                                (filter (lambda (p) (not (or (equal? p next) (equal? p buf)))) prev))
-                              (loop (cdr rows) (cons next seen)))
-                            ((> (length (window-list)) 1)
-                              (delete-window-id! win)
-                              (loop (cdr rows) seen))
-                            (else (loop (cdr rows) seen))))))))))
-      (lambda () (set! *window-unique-busy* #f)))))
-
-(add-hook! 'window-configuration-change-hook 'window-unique-panes!)
-
 ;; the buffer a window is showing, or #f
 (define (window-buffer id)
   (let ((w (assoc id (window-list))))
@@ -2634,15 +1506,9 @@ keeps the buffer you were in and your point.")
 
 ;;; --- tiling windows --------------------------------------------------------
 
+;; C-x 2 and C-x 3: an empty pane beside this one, filled by the fill rule
 (define (split-window-with-other-buffer! direction)
-  (let* ((before (map car (window-list)))
-         (action (window-fill-decide (list 'shown (map cadr (window-list)))
-                                     (window-fill-buffers))))
-    (split-window! direction)
-    (let ((created (layout--new-window before)))
-      (when (and created (equal? (car action) 'show))
-        (display-buffer-in-window! created (cadr action)))
-      created)))
+  (panes--split-window!))
 
 (define-command "split-window-below" "Split the window in two, one above the other"
   (lambda () (split-window-with-other-buffer! 'v)))
@@ -2692,80 +1558,6 @@ keeps the buffer you were in and your point.")
   '("split-window-below" "split-window-right" "delete-window"
     "delete-other-windows" "other-window"))
 
-;; Cmd-arrows (s- = super) move the focus geometrically: window-rects gives each
-;; leaf's normalized frame rectangle, and the neighbor in DIR is the nearest
-;; window past the active edge whose span contains the active center — so
-;; motion follows what's on screen, not the split tree's shape.
-(define (window-in-order step)
-  "The pane STEP places along from this one, left to right and top to
-bottom, as a window-rects row; #f past either end."
-  (let* ((rs (map (lambda (k) (list-ref k 2))
-                  (sort (map (lambda (r) (list (list-ref r 2) (list-ref r 3) r))
-                             (window-rects)))))
-         (ids (map car rs))
-         (me (let find ((l ids) (i 0))
-               (cond ((null? l) #f)
-                     ((equal? (car l) (active-window)) i)
-                     (else (find (cdr l) (+ i 1)))))))
-    (and me
-         (let ((i (+ me step)))
-           (and (>= i 0) (< i (length rs)) (list-ref rs i))))))
-
-(define (window-in-direction dir)
-  (cond ((equal? dir 'next) (window-in-order 1))
-        ((equal? dir 'previous) (window-in-order -1))
-        (else (window-in-geometry dir))))
-
-(define (window-in-geometry dir)
-  (let* ((rs (window-rects))
-         (me (let find ((l rs))
-               (cond ((null? l) #f)
-                     ((equal? (car (car l)) (active-window)) (car l))
-                     (else (find (cdr l)))))))
-    (and me
-         (let* ((mx (list-ref me 2)) (my (list-ref me 3))
-                (cx (+ mx (/ (list-ref me 4) 2)))
-                (cy (+ my (/ (list-ref me 5) 2)))
-                (eps 0.000001))
-           (let loop ((l rs) (best #f) (bestd 999))
-             (if (null? l)
-                 best
-                 (let* ((r (car l))
-                        (x (list-ref r 2)) (y (list-ref r 3))
-                        (w (list-ref r 4)) (h (list-ref r 5))
-                        (d (cond ((equal? dir 'left)
-                                  (and (<= (+ x w) (+ mx eps)) (<= y cy) (< cy (+ y h))
-                                       (- mx (+ x w))))
-                                 ((equal? dir 'right)
-                                  (and (>= (+ x eps) (+ mx (list-ref me 4))) (<= y cy) (< cy (+ y h))
-                                       (- x (+ mx (list-ref me 4)))))
-                                 ((equal? dir 'up)
-                                  (and (<= (+ y h) (+ my eps)) (<= x cx) (< cx (+ x w))
-                                       (- my (+ y h))))
-                                 (else
-                                  (and (>= (+ y eps) (+ my (list-ref me 5))) (<= x cx) (< cx (+ x w))
-                                       (- y (+ my (list-ref me 5))))))))
-                   (if (and d (< d bestd))
-                       (loop (cdr l) r d)
-                       (loop (cdr l) best bestd)))))))))
-
-(define (focus-move! dir)
-  ;; focus moves between the windows on screen; at the edge it stays put and
-  ;; the ring does not slide
-  (let ((w (window-in-direction dir)))
-    (cond (w (select-window! (car w))
-             (chat-snap-to-input!))
-          (else (message (string-append "No window " (symbol->string dir)))))))
-
-;; a move that lands on a peek's window goes back: a preview takes no
-;; focus. M-<down> scrolls it; RET on its row opens it.
-(define (focus-move-safe! dir)
-  (let ((from (active-window)))
-    (focus-move! dir)
-    (unless (window-focusable? (active-window))
-      (select-window! from)
-      (message "A peek: RET on its row opens it, M-<down> scrolls it"))))
-
 (define-command "previous-pane" "Select the previous pane"
   (lambda () (focus-move-safe! 'previous)))
 (define-command "next-pane" "Select the next pane"
@@ -2775,214 +1567,23 @@ bottom, as a window-rects row; #f past either end."
 (define-command "focus-down" "Select the window below"
   (lambda () (focus-move-safe! 'down)))
 
-;; Move the buffer onto the neighboring stack; consume the source's previous
-;; entry instead of exchanging the two visible buffers. Splits stay intact.
-(define (buffer-move! dir)
-  (let* ((source (active-window))
-         (neighbor (window-in-direction dir))
-         (buf (window-buffer source))
-         (point (window-point source))
-         (past (window-prev-buffers source))
-         ;; what fills the pane the buffer leaves: only the pane's own
-         ;; stack, with the neighbor's buffer free since the moved buffer
-         ;; takes its place; an emptied stack closes the pane
-         (action (window-fill-decide
-                   (window-fill-snapshot source buf 'others #f 'refill #f
-                     'shown (filter (lambda (b)
-                                      (not (and neighbor (equal? b (window-buffer (car neighbor))))))
-                                    (window-fill-shown-elsewhere source)))
-                   (window-fill-buffers)))
-         (reveal (and (member (car action) '(show restore)) (cadr action))))
-    (define (reveal-previous!)
-      (switch-to-buffer-here! reveal)
-      (set-window-prev-buffers! source
-        (filter (lambda (b) (not (equal? b buf))) past)))
-    (cond ((and (not neighbor) (buffer-move-spare-pane? dir))
-           (cond ((or (not (layout-visible-window? (list source buf)))
-                      (not (window-fill-member? buf)))
-                  (message "Cannot move this buffer into a new pane"))
-                 ((not reveal) (message "No previous buffer to reveal"))
-                 (else
-                   (let ((i (window-pane-index source)))
-                     (reveal-previous!)
-                     (let ((panes (layout-target-visible-buffers)))
-                       (layout-target-arrange!
-                         (append (take panes (if (equal? dir 'next) (+ i 1) i))
-                                 (list buf)
-                                 (list-tail panes (if (equal? dir 'next) (+ i 1) i)))
-                         buf)
-                       (let ((w (window-showing buf)))
-                         (when w (window-set-point! w point))))))))
-          ;; The layout is full: the buffer takes a new window in the ring and
-          ;; the layout walks one window along to show it.
-          ((and (not neighbor) (member dir '(previous next)) (layout-target)
-                (not (equal? (layout-target) 'columns)))
-           (cond ((or (not (layout-visible-window? (list source buf)))
-                      (not (window-fill-member? buf)))
-                  (message "Cannot move this buffer into a new pane"))
-                 ((not reveal) (message "No previous buffer to reveal"))
-                 (else (buffer-move-into-ring! dir source buf point reveal-previous!))))
-          ((not neighbor) (message "No neighboring pane"))
-          ((or (not (window-focusable? (car neighbor)))
-               (not (layout-visible-window? neighbor))
-               (not (layout-visible-window? (list source buf)))
-               (not (window-fill-member? buf)))
-           (message "Cannot move this buffer into that pane"))
-          ;; Nothing below it: the source pane closes and the buffer moves over.
-          ((not reveal)
-           (select-window! (car neighbor))
-           (switch-to-buffer-here! buf)
-           (window-set-point! (car neighbor) point)
-           (buffer-move-close-source! source))
-          (else
-            (reveal-previous!)
-            (select-window! (car neighbor))
-            (switch-to-buffer-here! buf)
-            (window-set-point! (car neighbor) point)))))
-
-;; The emptied pane closes; when the ring holds more windows than the layout
-;; shows, the next one in the ring takes the freed pane.
-(define (buffer-move-close-source! source)
-  (let* ((algorithm (layout-target))
-         (capacity (and algorithm (layout-capacity algorithm)))
-         (strip (if capacity (layout-strip-current capacity) '()))
-         (panes (filter (lambda (w) (not (equal? w source))) (layout-pane-windows)))
-         (rest (filter (lambda (w) (not (equal? w source))) strip)))
-    (delete-window-id! source)
-    (when (and (pair? panes) (> (length rest) (length panes)) (member (car panes) rest))
-      (layout-strip-set! rest (- (length rest) (length (member (car panes) rest))))
-      (layout-arrange-windows! algorithm (layout-strip-run capacity)))))
-
-;; A full layout gives the buffer a new window in the ring and walks to it.
-(define (buffer-move-into-ring! dir source buf point reveal-previous!)
-  (let* ((algorithm (layout-target))
-         (capacity (layout-capacity algorithm))
-         (panes (layout-pane-windows))
-         (at (if (equal? dir 'next) (+ (window-pane-index source) 1) (window-pane-index source)))
-         (fresh (and capacity (window-new-hidden! buf))))
-    (if (not fresh)
-        (message "Cannot move this buffer into a new pane")
-        (let ((others (filter (lambda (w) (and (not (member w panes)) (not (equal? w fresh))))
-                              (layout-hidden-windows))))
-          (reveal-previous!)
-          (layout-strip-set! (append (take panes at) (list fresh) (list-tail panes at) others)
-                             (if (equal? dir 'next) (max 0 (- (+ at 1) capacity)) at))
-          (layout-arrange-windows! algorithm (layout-strip-run capacity))
-          (select-window! fresh)
-          (window-set-point! fresh point)))))
-
-;; At the edge of the row, a layout below its capacity grows a pane there.
-(define (buffer-move-spare-pane? dir)
-  (let* ((target (layout-target))
-         (capacity (and target (layout-target-capacity target))))
-    (and (member dir '(previous next))
-         capacity
-         (< (length (layout-target-visible-buffers)) capacity))))
-
-;; SOURCE's position among the visible work panes.
-(define (window-pane-index source)
-  (let loop ((rows (filter layout-visible-window? (window-list))) (i 0))
-    (cond ((null? rows) 0)
-          ((equal? (car (car rows)) source) i)
-          (else (loop (cdr rows) (+ i 1))))))
-
 (for-each
   (lambda (spec)
     (let ((name (car spec)) (dir (cadr spec)))
       (define-command name "Move this buffer to the neighboring pane and reveal its previous buffer"
         (lambda () (buffer-move! dir)))
       (catalog-meta! 'command name 'domain 'windows 'effects '(write display))))
-  '(("buffer-previous-pane" previous) ("buffer-next-pane" next)
-    ("buffer-up" up) ("buffer-down" down)))
-
-;; The buffers a moving window carries, the shown one first, at most six:
-;; the page draws one trailing sheet for each one under the shown one.
-(define (window-swap--stack win)
-  (let* ((here (window-buffer win))
-         (rows (cons here (filter (lambda (b) (and (buffer-known? b) (not (equal? b here))))
-                                  (window-prev-buffers win)))))
-    (if (> (length rows) 6) (list-head rows 6) rows)))
-
-;; Move this logical window into the directional neighbor's pane and follow it.
-;; The neighboring logical window moves into this pane; both complete stacks stay whole.
-;; (window-left/right/up/down — the window family)
-(define (window-swap! dir)
-  "Move this logical window to the neighboring pane, carrying its complete stack and state."
-  (let ((nb (window-in-direction dir))
-        (win (active-window)))
-    (if nb
-        (if (window-swap-id! win (car nb))
-            (begin
-              ;; the page sweeps the window over with its stack trailing,
-              ;; one sheet per buffer under the shown one, each with its name
-              (client-slide! (json-encode (list 'move (symbol->string dir) 'win win
-                                                'rows (window-swap--stack win))))
-              (chat-snap-to-input!))
-            (message "Could not move window"))
-        (message (string-append "No window " (symbol->string dir))))))
+  '(("buffer-previous-pane" previous) ("buffer-next-pane" next)))
 
 (define-command "window-previous-pane" "Move this window to the front of the previous pane with its complete buffer stack"
   ;; the window model moves it (panes--shift-window!, panes-mode.scm)
   (lambda () (panes--shift-window! -1)))
 (define-command "window-next-pane" "Move this window to the front of the next pane with its complete buffer stack"
   (lambda () (panes--shift-window! 1)))
-(define-command "window-up" "Move this window upward with its complete buffer stack"
-  (lambda () (window-swap! 'up)))
-(define-command "window-down" "Move this window downward with its complete buffer stack"
-  (lambda () (window-swap! 'down)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("previous-pane" "next-pane" "focus-up" "focus-down"
-    "window-previous-pane" "window-next-pane"
-    "window-up" "window-down"))
-
-;; Eat the pane next door: it goes away and this window takes exactly its
-;; rectangle. Only a neighbor that shares a whole edge is a meal, so the
-;; panes that are not eaten keep the space they had — the space does not
-;; fall to whichever sibling the split tree favours, the way a delete
-;; leaves it. Without a direction the first neighbor that merges is
-;; eaten, right and down first.
-(define *window-eat-order* '(right down left up))
-
-(define (window--rect id)
-  (let loop ((l (window-rects)))
-    (cond ((null? l) #f)
-          ((equal? (car (car l)) id) (car l))
-          (else (loop (cdr l))))))
-
-;; two panes make one rectangle when they meet along a whole shared edge
-(define (window-rects-merge? a b)
-  (let* ((eps 1.0e-6)
-         (near? (lambda (p q) (< (abs (- p q)) eps)))
-         (ax (list-ref a 2)) (ay (list-ref a 3))
-         (aw (list-ref a 4)) (ah (list-ref a 5))
-         (bx (list-ref b 2)) (by (list-ref b 3))
-         (bw (list-ref b 4)) (bh (list-ref b 5)))
-    (or (and (near? ay by) (near? ah bh)
-             (or (near? (+ ax aw) bx) (near? (+ bx bw) ax)))
-        (and (near? ax bx) (near? aw bw)
-             (or (near? (+ ay ah) by) (near? (+ by bh) ay))))))
-
-(define (window-eat! &optional dir)
-  (let ((me (active-window))
-        (mine (window--rect (active-window)))
-        (dirs (if dir (list dir) *window-eat-order*)))
-    (let loop ((l dirs) (refused #f))
-      (if (null? l)
-          (message (if refused
-                       "That pane and this one make no rectangle"
-                       "No neighboring pane"))
-          (let ((n (window-in-direction (car l))))
-            (cond ((not n) (loop (cdr l) refused))
-                  ((or (not (window-focusable? (car n)))
-                       (not (layout-visible-window? n))
-                       (not (window-rects-merge? mine n)))
-                   (loop (cdr l) #t))
-                  (else
-                    ;; an eat is a delete: C-c <left> brings the pane back
-                    (window-eat-id! me (car n))
-                    (window-state-changed!)
-                    (message (string-append "Ate " (cadr n))))))))))
+    "window-previous-pane" "window-next-pane"))
 
 (define-command "window-eat" "Eat the neighboring pane and take its space"
   (lambda () (window-eat!)))
@@ -3011,19 +1612,21 @@ bottom, as a window-rects row; #f past either end."
 
 (define (arrow-command family dir)
   "The command FAMILY (focus, window or buffer) runs on the arrow DIR: left
-and right walk the panes, up and down move by geometry."
+and right walk the panes. The panes are one row, so up and down move only
+the focus; #f for a window or a buffer."
   (let ((pane (cond ((equal? dir "left") "previous-pane")
                     ((equal? dir "right") "next-pane")
                     (else #f))))
-    (cond ((not pane) (string-append family "-" dir))
+    (cond ((and (not pane) (equal? family "focus")) (string-append family "-" dir))
+          ((not pane) #f)
           ((equal? family "focus") pane)
           (else (string-append family "-" pane)))))
 
 (define (install-arrow-keys! modifiers family)
   (for-each
     (lambda (dir)
-      (global-set-key (arrow-chord modifiers (string-append "<" dir ">"))
-                      (arrow-command family dir)))
+      (let ((cmd (arrow-command family dir)))
+        (when cmd (global-set-key (arrow-chord modifiers (string-append "<" dir ">")) cmd))))
     *direction-names*))
 
 (define (focus-default-keybindings &optional modifiers)
@@ -3075,15 +1678,9 @@ and right walk the panes, up and down move by geometry."
 (public! 'delete-window-id! "(delete-window-id! ID)")
 (public! 'delete-other-windows! "Make the active window the only one")
 (public! 'display-buffer
-  "(display-buffer NAME [ALIST]) — show NAME where the display rules and the action chain say, selecting nothing; returns the window. ALIST is a plist: 'category KIND, 'requested #t (an agent shows what the user asked to see)")
+  "(display-buffer NAME [ALIST]) — show NAME where the window model places it, or where a rule's own action puts it (the float, the dock, a popup), selecting nothing; returns the window. ALIST is a plist: 'category KIND, 'requested #t (an agent shows what the user asked to see)")
 (public! 'pop-to-buffer
   "(pop-to-buffer NAME [ALIST]) — display-buffer, then select the window it used")
-(public! 'display-buffer-actions-for
-  "(display-buffer-actions-for NAME [ALIST]) — the action chain a display of NAME would try, in order")
-(public! 'layout-target
-  "(layout-target) — the frame's target layout, the name chosen at window-layout, or #f")
-(public! 'layout-target-set!
-  "(layout-target-set! NAME) — keep NAME as the target algorithm as panes open or close; #f frees the frame")
 (public! 'define-display-action!
   "(define-display-action! NAME FN) — register a display action; FN takes NAME and ALIST and returns a window or #f")
 (public! 'window-mode
@@ -3099,26 +1696,12 @@ and right walk the panes, up and down move by geometry."
 (catalog-meta! 'function "get-visible-buffers" 'effects '(read))
 (effects! '(write display))
 (public! 'get-other-window
-  "(get-other-window) — the window to show a buffer in for the user, never the active one; below the target layout's capacity the layout gains a pane")
+  "(get-other-window) — the window to show a buffer in for the user, never the active one; below the layout's capacity the model adds a pane")
 (effects! '(read))
-(public! 'split-window-sensibly
-  "(split-window-sensibly WIN) — split WIN below when it is tall enough, beside when wide enough; the new window or #f")
 (public! 'window-quit-restore!
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
-(public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window: the display chain with the selected window kept out of it")
+(public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window, as the user asked: an agent's way to show a buffer")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
-(public! 'tile-windows!
-  "(tile-windows! ALGORITHM BUFFERS) — arrange names with single, two-pane, halves, columns, or rows")
-(public! 'tile-visible-windows!
-  "(tile-visible-windows! ALGORITHM) — rearrange visible work windows with a named layout and lay the strip again")
-(public! 'tile-default-windows!
-  "(tile-default-windows! BUFFERS) — tile BUFFERS with the frame's chosen layout, or the one that fits them")
-(public! 'layout-capacity
-  "(layout-capacity ALGORITHM) — the number of panes a layout holds: 1, 2 or 3, or #f when the name is not a layout")
-(public! 'layout-strip
-  "(layout-strip) — the window ring of the current walk: window ids in one cyclic order; the layout shows a run of this list")
-(public! 'layout-scroll!
-  "(layout-scroll! DELTA) — move the run DELTA windows along the ring, forwards or backwards; #f when the ring is no longer than the layout")
 (public! 'window-hidden-clear!
   "(window-hidden-clear!) — delete every hidden window of the selected frame")
 (public! 'window-buffer-any
@@ -3133,7 +1716,6 @@ and right walk the panes, up and down move by geometry."
 (effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
-(public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
 ;;; The flat window list. M-x windows-list-ring opens *windows*: the windows of the
 ;;; selected frame in ring order, the ones on screen filled, the ones
 ;;; waiting off it hollow. RET goes to one, k closes it, c consolidates
@@ -3149,24 +1731,17 @@ and right walk the panes, up and down move by geometry."
 (defface! 'win-name 'fg "#26356b" 'weight "600")
 
 (define (windows-list-ids buf)
-  ;; the windows on screen first, left to right; then the waiting ones,
-  ;; pane by pane when the group has panes, else in ring order
-  (let* ((ring (layout-ring-order))
-         (shown (filter (lambda (w) (member w ring)) (layout-pane-windows)))
-         (rows (and (boundp 'group-panes-windows) (group-panes-windows)))
-         (paned (if (pair? rows) (apply append (map cdr rows)) '()))
-         (waiting (filter (lambda (w) (not (member w shown)))
-                          (append (filter (lambda (w) (member w ring)) paned)
-                                  (filter (lambda (w) (not (member w paned))) ring)))))
-    (map number->string (append shown waiting))))
+  ;; the windows on screen first, left to right; then the waiting ones
+  (map number->string (append (layout-pane-windows) (layout-hidden-windows))))
 
 (define (windows-list-window id)
   (let ((win (string->number id)))
     (and win (or (window-exists? win) (assoc win (window-hidden-list))) win)))
 
 (define (windows-list-pane win)
-  (let ((row (and win (boundp 'group-panes-row-of) (group-panes-row-of win))))
-    (if row (let ((p (car row))) (if (symbol? p) (symbol->string p) p)) "")))
+  (let* ((l (panes-layout))
+         (k (and l win (panes-key-of-handle l win))))
+    (or (and k (panes-pane-of l k)) "")))
 
 (define (windows-list-narrow-cells buf id)
   (let ((cells (windows-list-cells buf id)))
@@ -3194,20 +1769,8 @@ and right walk the panes, up and down move by geometry."
     (if win (fn win) (message "no window on this line — g refreshes"))))
 
 (define (windows-list-take! win)
-  ;; the chosen window takes the pane the list is in; one on screen is only selected
-  (let ((here (active-window)))
-    (cond ((member win (layout-pane-windows)) (select-window! win))
-          ((window-swap-hidden! here win)
-           (let ((row (and (boundp 'group-panes-row-of) (group-panes-row-of here))))
-             (when row
-               ;; the window moves to this pane, and the list waits behind it
-               (group-panes-set-rows!
-                 (map (lambda (r) (if (equal? (car r) (car row)) r (cons (car r) (filter (lambda (x) (not (equal? x win))) (cdr r)))))
-                      (group-panes-windows)))
-               (group-panes-record! (car row) win #t)))
-           (select-window! win)
-           (window-state-changed!))
-          (else (layout-ring-show! win)))))
+  ;; the chosen window comes to the front of its pane and takes the focus
+  (panes-raise-window! win))
 
 (define-command "windows-list-visit" "Show the window on this line in the list's pane"
   (lambda () (windows-list-on-current windows-list-take!)))
@@ -3216,9 +1779,10 @@ and right walk the panes, up and down move by geometry."
   (lambda ()
     (windows-list-on-current
       (lambda (win)
-        (if (member win (layout-pane-windows))
-            (buffer-move-close-source! win)
-            (window-hidden-delete! win))
+        (let* ((l (panes--ensure-layout!)) (k (panes-key-of-handle l win)))
+          (if k
+              (panes-apply! (panes-remove-window l k))
+              (window-hidden-delete! win)))
         (list-refresh! *windows-list-buffer*)))))
 
 (define-command "windows-list-consolidate"
@@ -3227,17 +1791,10 @@ and right walk the panes, up and down move by geometry."
     (windows-list-on-current
       (lambda (win)
         (let ((list-win (active-window)))
-          (if (and (boundp 'panes-mode) panes-mode)
+          (begin
               ;; the panes model consolidates every window it holds, shown or not
-              (begin
-                (when (member win (map car (window-list))) (select-window! win))
-                (consolidate!))
-              (begin
-                (unless (member win (layout-pane-windows))
-                  (layout-ring-show! win))
-                (when (member win (layout-pane-windows))
-                  (select-window! win)
-                  (consolidate!))))
+              (when (member win (map car (window-list))) (select-window! win))
+              (consolidate!))
           (when (window-exists? list-win) (select-window! list-win))
           (list-refresh! *windows-list-buffer*))))))
 
@@ -3305,10 +1862,9 @@ and right walk the panes, up and down move by geometry."
 
 ;; The list follows the ring while it is on screen.
 (define (windows-list-follow!)
-  ;; only a list on screen follows, and not while the overview lays its
-  ;; tiles: a hidden window holding the list does not count as showing it
+  ;; only a list on screen follows: a hidden window holding the list does
+  ;; not count as showing it
   (when (and (buffer-known? *windows-list-buffer*)
-             (not (frame-local 'windows-overview-rows))
              (find (lambda (w) (equal? (cadr w) *windows-list-buffer*)) (window-list)))
     (list-refresh! *windows-list-buffer*)))
 
@@ -3321,11 +1877,9 @@ and right walk the panes, up and down move by geometry."
 (catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
 (category! 'commands)
 (public! 'focus-default-keybindings "(focus-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to previous-pane/next-pane and focus-up/down")
-(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-previous-pane/next-pane and window-up/down; the logical windows exchange panes with their complete stacks and focus follows")
-(public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-previous-pane/next-pane and buffer-up/down; the buffer moves to the neighbor and its previous buffer shows here")
+(public! 'window-default-keybindings "(window-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to window-previous-pane/next-pane; the window moves to the neighboring pane with its complete stack and focus follows")
+(public! 'buffer-default-keybindings "(buffer-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to buffer-previous-pane/next-pane; the buffer moves to the neighboring pane's front window")
 (public! 'arrow-chord "(arrow-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (arrow-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
-(public! 'layout-arranging? "(layout-arranging?) — #t while the layout engine is building the frame; a package that moves windows must stand down")
-(public! 'layout-abort! "(layout-abort!) — clear a layout build left in progress by a failure; a top-level build calls this first")
 
 (domain! 'unknown)
 (effects! '(unknown))

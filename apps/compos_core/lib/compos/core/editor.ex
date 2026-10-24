@@ -466,16 +466,12 @@ defmodule Compos.Core.Editor do
 
   def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
-  def eat_window(id, victim), do: GenServer.call(__MODULE__, {:eat_window, id, victim})
   def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})
   def window_rects(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rects, fid(fid)})
 
   @doc "Selecting a window selects its frame (Emacs: windows live on frames)."
   def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
 
-  @doc "Exchange two logical windows' pane positions without changing either window."
-  def swap_windows(first, second),
-    do: GenServer.call(__MODULE__, {:swap_windows, first, second})
   def active_window(fid \\ nil), do: GenServer.call(__MODULE__, {:active_window, fid(fid)})
 
   @doc """
@@ -494,9 +490,8 @@ defmodule Compos.Core.Editor do
   def new_hidden_window(buffer, fid \\ nil, want \\ nil),
     do: GenServer.call(__MODULE__, {:new_hidden_window, buffer, fid(fid), want})
 
-  @doc "Put hidden window HIDDEN in the pane of VISIBLE; VISIBLE becomes hidden."
-  def swap_hidden_window(visible, hidden),
-    do: GenServer.call(__MODULE__, {:swap_hidden_window, visible, hidden})
+  @doc "A window id no window holds and none will be given again; it makes no window."
+  def new_window_id, do: GenServer.call(__MODULE__, :new_window_id)
 
   @doc """
   Lay the frame out as one line of the windows IDS, visible or hidden,
@@ -547,14 +542,6 @@ defmodule Compos.Core.Editor do
   @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
   def restore_tree(spec, active_buffer, fid \\ nil),
     do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
-
-  @doc """
-  Arrange a frame as SPEC without touching the MRU ring: a look at a layout,
-  not a switch into it. The group switcher previews a whole group this way,
-  and puts the arrangement you came from back when it closes.
-  """
-  def preview_tree(spec, active_buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), false})
 
   @doc """
   Replace a frame's windows, on screen and hidden, from one saved layout:
@@ -2034,32 +2021,6 @@ defmodule Compos.Core.Editor do
   def handle_call({:list_windows, fid}, _from, state),
     do: {:reply, leaf_ids_buffers(frame(state, fid).tree), state}
 
-  # An eat is a delete that hands the freed space to the eater instead of
-  # to whichever sibling the split tree happens to favour. Only two panes
-  # that make one rectangle can merge, so every other pane keeps the
-  # rectangle it had; the tree is rebuilt around the new set of
-  # rectangles, leaves and all, so points, scroll and history survive.
-  def handle_call({:eat_window, id, victim}, _from, state) do
-    f = find_window_frame(state, id)
-    boxes = if f, do: leaf_boxes(f.tree, {0.0, 0.0, 1.0, 1.0}), else: []
-
-    with true <- id != victim,
-         {me, my_rect} <- Enum.find(boxes, fn {leaf, _} -> leaf.id == id end),
-         {eaten, their_rect} <- Enum.find(boxes, fn {leaf, _} -> leaf.id == victim end),
-         union when not is_nil(union) <- rect_union(my_rect, their_rect),
-         rest = Enum.reject(boxes, fn {leaf, _} -> leaf.id in [id, victim] end),
-         tree when not is_nil(tree) <- regrow([{me, union} | rest], {0.0, 0.0, 1.0, 1.0}) do
-      if Buffer.exists?(eaten.buffer),
-        do: wp_safely(fn -> Buffer.drop_win_point(eaten.buffer, victim) end)
-
-      active = if f.active == victim, do: id, else: f.active
-
-      changed(:ok, state |> put_frame(%{f | tree: tree, active: active}) |> resync_swap(), f.id)
-    else
-      _ -> {:reply, {:error, :cannot_eat}, state}
-    end
-  end
-
   def handle_call({:window_rects, fid}, _from, state),
     do: {:reply, leaf_rects(frame(state, fid).tree, {0.0, 0.0, 1.0, 1.0}), state}
 
@@ -2070,6 +2031,9 @@ defmodule Compos.Core.Editor do
     rows = for leaf <- hidden(frame(state, fid)), do: {leaf.id, leaf.buffer}
     {:reply, rows, state}
   end
+
+  def handle_call(:new_window_id, _from, state),
+    do: {:reply, state.next_win, %{state | next_win: state.next_win + 1}}
 
   def handle_call({:new_hidden_window, buffer, fid}, from, state),
     do: handle_call({:new_hidden_window, buffer, fid, nil}, from, state)
@@ -2082,9 +2046,9 @@ defmodule Compos.Core.Editor do
       _started ->
         f = frame(state, fid)
         held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
-        # a wanted id below next_win is one this editor gave out, so no
-        # fresh id can meet it later
-        id = if is_integer(want) and want > 0 and want < state.next_win and want not in held,
+        # a wanted id no window holds is taken; next_win moves past it, so
+        # no fresh id can meet it later
+        id = if is_integer(want) and want > 0 and want not in held,
                do: want,
                else: state.next_win
 
@@ -2098,25 +2062,8 @@ defmodule Compos.Core.Editor do
         }
 
         f = Map.put(f, :hidden, [leaf | hidden(f)])
-        next_win = if id == state.next_win, do: state.next_win + 1, else: state.next_win
+        next_win = max(state.next_win, id + 1)
         changed(leaf.id, put_frame(%{state | next_win: next_win}, f), f.id)
-    end
-  end
-
-  def handle_call({:swap_hidden_window, visible, hidden_id}, _from, state) do
-    with %{} = f <- find_window_frame(state, visible),
-         %{} = out <- find_leaf(f.tree, visible),
-         %{} = inn <- Enum.find(hidden(f), &(&1.id == hidden_id)) do
-      rest = Enum.reject(hidden(f), &(&1.id == hidden_id))
-      active = if f.active == visible, do: hidden_id, else: f.active
-
-      f =
-        %{f | tree: replace_leaf(f.tree, visible, inn), active: active}
-        |> Map.put(:hidden, [out | rest])
-
-      changed(:ok, state |> put_frame(f) |> resync_swap(), f.id)
-    else
-      _ -> {:reply, {:error, :no_window}, state}
     end
   end
 
@@ -2172,18 +2119,6 @@ defmodule Compos.Core.Editor do
 
   # selecting a window selects its frame: bare window ids arrive from Scheme
   # (ibuffer buffer-locals, agent closures) with no frame attached
-  def handle_call({:swap_windows, first, second}, _from, state) do
-    with %{} = f <- find_window_frame(state, first),
-         ^f <- find_window_frame(state, second),
-         %{} = left <- find_leaf(f.tree, first),
-         %{} = right <- find_leaf(f.tree, second) do
-      tree = swap_leaves(f.tree, first, left, second, right)
-      changed(:ok, state |> put_frame(%{f | tree: tree}) |> resync_swap(), f.id)
-    else
-      _ -> {:reply, {:error, :no_window}, state}
-    end
-  end
-
   def handle_call({:set_active, id}, _from, state) do
     case find_window_frame(state, id) do
       nil ->
@@ -2842,18 +2777,6 @@ defmodule Compos.Core.Editor do
   defp wins_showing(%{type: :split, children: cs}, buf),
     do: Enum.flat_map(cs, &wins_showing(&1, buf))
 
-  defp swap_leaves(%{type: :leaf, id: id} = leaf, first, left, second, right) do
-    cond do
-      id == first -> right
-      id == second -> left
-      true -> leaf
-    end
-  end
-
-  defp swap_leaves(%{type: :split} = split, first, left, second, right) do
-    %{split | children: Enum.map(split.children, &swap_leaves(&1, first, left, second, right))}
-  end
-
   defp find_leaf(%{type: :leaf} = leaf, id), do: if(leaf.id == id, do: leaf, else: nil)
 
   defp find_leaf(%{type: :split, children: children}, id),
@@ -3307,80 +3230,6 @@ defmodule Compos.Core.Editor do
 
   defp leaf_rects(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
     do: leaf_rects(a, {x, y, w, h * r}) ++ leaf_rects(b, {x, y + h * r, w, h * (1 - r)})
-
-  # the same walk, keeping the leaf itself: a rebuild puts the very same
-  # leaves back, so nothing a window remembers is lost on the way
-  defp leaf_boxes(%{type: :leaf} = leaf, rect), do: [{leaf, rect}]
-
-  defp leaf_boxes(%{type: :split, dir: :h, ratio: r, children: [a, b]}, {x, y, w, h}),
-    do: leaf_boxes(a, {x, y, w * r, h}) ++ leaf_boxes(b, {x + w * r, y, w * (1 - r), h})
-
-  defp leaf_boxes(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
-    do: leaf_boxes(a, {x, y, w, h * r}) ++ leaf_boxes(b, {x, y + h * r, w, h * (1 - r)})
-
-  @rect_eps 1.0e-6
-
-  # the one rectangle two panes make when they share a whole edge, or nil
-  defp rect_union({x1, y1, w1, h1}, {x2, y2, w2, h2}) do
-    same = fn a, b -> abs(a - b) < @rect_eps end
-
-    cond do
-      same.(y1, y2) and same.(h1, h2) and (same.(x1 + w1, x2) or same.(x2 + w2, x1)) ->
-        {min(x1, x2), y1, w1 + w2, h1}
-
-      same.(x1, x2) and same.(w1, w2) and (same.(y1 + h1, y2) or same.(y2 + h2, y1)) ->
-        {x1, min(y1, y2), w1, h1 + h2}
-
-      true ->
-        nil
-    end
-  end
-
-  # rebuild a split tree that gives every leaf the rectangle it is paired
-  # with: cut the region where no pane straddles the line, and recurse.
-  # nil when those rectangles are no guillotine tiling of the region.
-  defp regrow([{leaf, _rect}], _region), do: leaf
-
-  defp regrow(boxes, {x, y, w, h}) do
-    case first_cut(boxes, :h, x, w) || first_cut(boxes, :v, y, h) do
-      nil ->
-        nil
-
-      {dir, at, near, far} ->
-        {ra, rb} =
-          if dir == :h,
-            do: {{x, y, at - x, h}, {at, y, x + w - at, h}},
-            else: {{x, y, w, at - y}, {x, at, w, y + h - at}}
-
-        a = regrow(near, ra)
-        b = regrow(far, rb)
-
-        if a && b do
-          ratio = if dir == :h, do: (at - x) / w, else: (at - y) / h
-          %{type: :split, dir: dir, ratio: ratio, children: [a, b]}
-        end
-    end
-  end
-
-  # the first line across the region that every pane lies wholly on one
-  # side of, with panes on both sides
-  defp first_cut(boxes, dir, lo, len) do
-    span = fn {_leaf, {rx, ry, rw, rh}} ->
-      if dir == :h, do: {rx, rx + rw}, else: {ry, ry + rh}
-    end
-
-    boxes
-    |> Enum.map(&elem(span.(&1), 1))
-    |> Enum.filter(&(&1 > lo + @rect_eps and &1 < lo + len - @rect_eps))
-    |> Enum.uniq()
-    |> Enum.sort()
-    |> Enum.find_value(fn at ->
-      {near, far} = Enum.split_with(boxes, &(elem(span.(&1), 1) <= at + @rect_eps))
-
-      if near != [] and far != [] and Enum.all?(far, &(elem(span.(&1), 0) >= at - @rect_eps)),
-        do: {dir, at, near, far}
-    end)
-  end
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)

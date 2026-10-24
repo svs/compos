@@ -91,7 +91,7 @@ defmodule Compos.GroupSwitchCommandTest do
     eval!(~s{(switch-to-buffer! "#{first}")})
     eval!(~s{(group-move-buffers-to! (list "#{first}") "#{destination}")})
 
-    assert eval!("(layout-visible-buffers)") =~ first,
+    assert eval!("(panes-shown-buffers)") =~ first,
            "the moved buffer is not on screen in the group it moved to"
 
     assert eval!("(current-buffer)") == ~s("#{first}")

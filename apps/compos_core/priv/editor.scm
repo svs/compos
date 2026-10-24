@@ -2107,16 +2107,13 @@
 
 ;; desktop restore's entry: set BUF's mode with BUF current, so the setup
 ;; fn rebuilds presentation from the locals restore already laid down.
-;; The desktop restores its own saved windows, so the layout engine stands
-;; down for the whole call.
 (define (desktop-apply-mode! buf mode)
-  (with-layout-suppressed
-    (lambda ()
+  (begin
       (with-current-buffer buf (lambda () (set-mode! mode)))
       ;; The compact dashboard is derived state. Rebuild it during restore so
       ;; a saved desktop shows it before the first command runs.
       (when (boundp (quote dashboard--sync!))
-        (dashboard--sync! buf)))))
+        (dashboard--sync! buf))))
 
 ;;; --- globals that outlive a restart (savehist) ---------------------------------
 ;;; The desktop saves buffers, windows and buffer-locals. A global was
@@ -2137,7 +2134,7 @@
 ;;; then writes that '() over the good file, and the state is gone for real.
 ;;; defvar binds only when the name is free, so a reload keeps the value.
 ;;; A state fn that derives its value from live frames or buffers, as
-;;; layout-targets-state does, holds no such variable and needs nothing.
+;;; panes-layouts-state does, holds no such variable and needs nothing.
 
 (define *desktop-globals* '())   ; ((KEY GET PUT CLEAR) ...)
 
@@ -2527,8 +2524,7 @@
 ;; logical current buffer: restoration must not display or select BUF.
 (define (restore-buffer-runtime! buf)
   (runtime--mark! buf)
-  (with-layout-suppressed
-    (lambda ()
+  (begin
       (with-current-buffer buf
         (lambda ()
           (with-buffer-waking
@@ -2538,7 +2534,7 @@
               (run-hook-with-args 'buffer-restore-hook buf)
               (let ((mode (buffer-local buf 'mode-name)))
                 (when mode (set-mode! mode)))
-              (restore-minor-modes! buf)))))))
+              (restore-minor-modes! buf))))))
   ;; The modeline is derived state. Rebuild it here so a restored desktop
   ;; shows its top line and its short name before the first command runs.
   (when (boundp (quote dashboard--sync!))
@@ -2660,28 +2656,12 @@
   ;; from on the way in, so the layout in front of you never changes under
   ;; you and the frame never follows a buffer home (docs/groups.md, "A buffer
   ;; opens in the current group").
-  (when (and (not (buffer-context?)) (not (layout-arranging?))
-             (boundp 'buffer-join-here!))
+  (when (and (not (buffer-context?)) (boundp 'buffer-join-here!))
     (buffer-join-here! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
-        ;; what cannot join is a chat, whose group is its identity. It still
-        ;; opens in the pane you are in. The panes of its own group stay
-        ;; sealed, saved as they stood.
-        ((display-foreign? buf)
-         (switch-to-buffer-here! buf)
-         buf)
-        ((and (not (layout-arranging?)) (layout-target)
-              (not (float--class? (window-buffer (active-window))))
-              (window-display! (lambda () (layout-target-open! buf #t #f)))) buf)
-        ((and (not (layout-arranging?)) (not (layout-target))
-              (not (float--class? (window-buffer (active-window))))
-              (let ((win (or (window-showing buf)
-                             (window-showing-mode (buffer-local buf 'mode-name)))))
-                (and win
-                     (begin
-                       (window-display! (lambda () (display-buffer-in-window! win buf)))
-                       (select-window! win)
-                       #t)))) buf)
+        ;; the window model places it (panes-mode.scm)
+        ((boundp 'panes-visit!) (panes-visit! buf) buf)
+        ;; at boot, before the model loads, the selected window shows it
         (else
           (window-display!
             (lambda ()
@@ -5200,8 +5180,8 @@
 ;; redefinition that loses their catalog domain still counts as a landing.
 (define *direction-command-names*
   '("previous-pane" "next-pane" "focus-up" "focus-down"
-    "window-previous-pane" "window-next-pane" "window-up" "window-down"
-    "buffer-previous-pane" "buffer-next-pane" "buffer-up" "buffer-down"))
+    "window-previous-pane" "window-next-pane"
+    "buffer-previous-pane" "buffer-next-pane"))
 
 (define (editing--window-command? cmd)
   (and (string? cmd)
@@ -5701,9 +5681,9 @@
     ("2" "window-layout-two-pane")
     ("=" "window-layout-halves")
     ("c" "window-layout-columns")
-    ("r" "window-layout-rows")
+    ("+" "window-layout-two-chat")
     ("f" "window-layout-free")
-    ;; the layouts go on for ever: these move the panes along the strip
+    ;; the arrows walk the stack of this pane
     ("<right>" "layout-forward")
     ("<left>" "layout-backward")))
 ;; The arrows with Cmd or Shift are the pane motion keys (window.scm)
@@ -5849,9 +5829,9 @@
   (lambda (name) (catalog-meta! 'function name 'domain 'windows 'effects '(write display)))
   '("select-window!" "split-window!" "delete-window-id!"
     "delete-other-windows!" "other-window!" "display-buffer" "pop-to-buffer"
-    "define-display-action!" "split-window-sensibly" "window-quit-restore!"
+    "define-display-action!" "window-quit-restore!"
     "display-buffer-other-window!" "apply-layout!"
-    "tile-windows!" "tile-visible-windows!" "window-eat!"))
+    "panes-tile!" "panes-tile!" "window-eat!"))
 (effects! '(write))
 (effects! '(read))
 (effects! '(write))

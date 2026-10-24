@@ -116,13 +116,10 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x C-g l` | `groups` | The groups board: switch, describe, set noise |
 | `C-x C-g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
 | `C-x C-g p` | `group-pin` | Toggle a frame pin that keeps the current group through window changes |
-| `C-x C-g s` | `tile-all` | Open the current group or project in locked columns |
 | `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
 | `C-x l` | `window-layout` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
 | `C-x m` | `jump-to-mode` | Pick a major mode among this frame's windows and go to its window |
 | `C-x j` | `switch-window` | Pick a window of this frame by name and go to it |
-| `s-S-<down>` | `windows-overview` | Show every window of this frame at once; again goes back to the panes |
-| `s-S-<up>` | `windows-overview-exit` | Back from the all-windows view to the panes |
 | `C-x n N` | `narrow-context-also` | Narrow the view and the LLM context to the same region or Morg section |
 | `C-x n n` | `narrow-to-region` | Show only the text between point and mark |
 | `C-x n w` | `widen` | Show the complete current buffer |
@@ -208,9 +205,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `s-<right>` | `focus-right` | Select the window to the right |
 | `s-<up>` | `group-previous-buffer` | Walk every buffer in this group, the other way |
 | `s-=` | `ui-scale-increase` | Make the whole application's text larger |
-| `s-S-<down>` | `window-down` | Move this window downward with its complete buffer stack |
 | `s-S-<left>` | `window-left` | Move this window leftward with its complete buffer stack |
 | `s-S-<right>` | `window-right` | Move this window rightward with its complete buffer stack |
-| `s-S-<up>` | `window-up` | Move this window upward with its complete buffer stack |
 | `s-_` | `text-scale-decrease` | Make this buffer's text smaller |
 | `s-p` | `command-palette` | Find an action by intent across command docs and recipes |

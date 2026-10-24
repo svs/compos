@@ -83,18 +83,15 @@
 
 ;; where a window is: on screen, behind a pane, or waiting on the ring
 (define (window-where win)
-  (let ((row (and (boundp 'group-panes-row-of) (group-panes-row-of win))))
+  (let* ((l (panes-layout))
+         (k (and l (panes-key-of-handle l win))))
     (cond ((member win (layout-pane-windows)) "on screen")
-          (row (string-append "behind " (let ((p (car row))) (if (symbol? p) (symbol->string p) p))))
+          (k (string-append "behind " (panes-pane-of l k)))
           (else "waiting"))))
 
 ;; go to WIN: to the front of its pane, or along the ring
 (define (window-go! win)
-  (let ((row (and (boundp 'group-panes-row-of) (group-panes-row-of win))))
-    (cond ((not (window-live? win)) #f)
-          (row (group-panes-show! (car row) win) (select-window! win) win)
-          ((member win (layout-pane-windows)) (select-window! win) win)
-          (else (layout-ring-show! win)))))
+  (and (window-live? win) (panes-raise-window! win)))
 
 (define-command "switch-window"
   "Pick a window of this frame by name and go to it"

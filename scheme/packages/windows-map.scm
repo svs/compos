@@ -156,7 +156,7 @@
 
 (define (windows-map-open!)
   (let* ((shown (map car (window-list)))
-         (model (windows-overview-model-as-shown (panes-board-layout) shown))
+         (model (panes-board-layout))
          (me (panes-key-of-handle model (active-window)))
          (width (max 60 (- (apply + (map window-cols shown)) 2))))
     (when (transient-frame-enter! 'windows-map)

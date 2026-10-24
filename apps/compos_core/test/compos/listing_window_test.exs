@@ -31,7 +31,7 @@ defmodule Compos.ListingWindowTest do
             '("*zz-lw-left*" "*zz-lw-right*"))
           (set-frame-local! 'current-group *lw-group*)
           (set-frame-local! 'pinned-group *lw-group*)
-          (tile-windows! 'two-pane '("*zz-lw-left*" "*zz-lw-right*"))
+          (panes-tile! 'two-pane '("*zz-lw-left*" "*zz-lw-right*"))
           (select-window! (window-showing "*zz-lw-right*"))
           (window-set-point! (window-showing "*zz-lw-left*") 3)
           (define *lw-window* (active-window))

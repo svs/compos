@@ -140,131 +140,14 @@
 ;; show NAME in the window OWNER opens its rows into, keep that window for
 ;; the next row, and select nothing: point stays in the list. OWNER names
 ;; the list, and defaults to the buffer that is asking.
-;; two details of one family (an app's pages of different kinds) share a pane
-(define (detail-kin? a b)
-  (let ((fa (buffer-local a 'detail-family)))
-    (and fa (equal? fa (buffer-local b 'detail-family)))))
-
-;; A pane that holds a mode (consolidate, or a chosen preference) that
-;; NAME is not of. A page never covers a pane another mode holds.
-(define (detail--foreign-pane? win name)
-  (let ((held (window-mode-preference win)))
-    (and held (not (window-prefers-buffer? win name)))))
-
-;; some other work pane holds another mode: the display chain could land
-;; on it, so the detail picks its window itself
-(define (detail--held-elsewhere? name me)
-  (and (find (lambda (w) (and (not (equal? w me)) (detail--foreign-pane? w name)))
-             (display--work-windows))
-       #t))
-
-;; The fallback: a new pane beside the list while the layout has room for
-;; one, else the pane closest to the list. A detail waiting in a hidden
-;; window comes to the front there instead of opening again.
-(define (detail--nearest ws ow)
-  (let* ((i (let find-ow ((l ws) (k 0))
-              (cond ((null? l) 0) ((equal? (car l) ow) k) (else (find-ow (cdr l) (+ k 1))))))
-         (n (length ws)))
-    (let loop ((d 1))
-      (cond ((> d n) #f)
-            ((< (+ i d) n) (list-ref ws (+ i d)))
-            ((>= (- i d) 0) (list-ref ws (- i d)))
-            (else (loop (+ d 1)))))))
-
-(define (detail--place-beside! name o me)
-  (let* ((ws (map car (window-list)))
-         (ow (or (find (lambda (w) (equal? (window-buffer w) o)) ws) me))
-         (target (layout-target))
-         (room (or (not target) (< (length ws) (layout-target-capacity target))))
-         (hidden (let ((h (find (lambda (p) (equal? (cadr p) name)) (window-hidden-list))))
-                   (and h (car h)))))
-    (or (and room
-             (let ((nw (split-window-in! ow 'h)))
-               (and nw (window-display! (lambda () (display-buffer-in-window! nw name))))))
-        ;; a pane that holds another mode, a chat pane say, refuses the detail
-        (let ((near (detail--nearest (filter (lambda (w) (or (equal? w ow) (not (detail--foreign-pane? w name)))) ws) ow)))
-          (and near
-               (if (and hidden (window-swap-hidden! near hidden))
-                   hidden
-                   (window-display! (lambda () (display-buffer-in-window! near name)))))))))
-
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
          (me (active-window))
          ;; already where you stand, or already in another window: a display
          ;; never moves a buffer that is on screen
          (shown (if (equal? (window-buffer me) name) me (window-showing-other name me)))
-         ;; you stand in one of this list's children: its sibling takes your
-         ;; window, so walking the list from a detail stays where you are
-         (here (and (not shown) (equal? (buffer-local (window-buffer me) 'detail-of) o) me))
-         ;; a pane you set to prefer this mode beats the remembered one, so
-         ;; window-mode-preference moves where a list opens its rows
-         (pinned (and (not shown) (not here)
-                      (find (lambda (w)
-                              (and (not (equal? w me))
-                                   (window-mode-preference w)
-                                   (window-prefers-buffer? w name)))
-                            (display--work-windows))))
-         ;; the last detail of this list still on screen: the next row covers it
-         ;; wherever it went, even when the remembered window shows something else
-         (sibling (and (not shown) (not here) (not pinned)
-                       (find (lambda (w)
-                               (and (not (equal? w me))
-                                    (equal? (buffer-local (window-buffer w) 'detail-of) o)))
-                             (display--work-windows))))
-         ;; a pane of the same mode, a detail of another list of the same app:
-         ;; the mode's window beats the window the list remembers
-         (kin (and (not shown) (not here) (not pinned) (not sibling)
-                   (find (lambda (w)
-                           (and (not (equal? w me))
-                                (not (equal? (window-buffer w) o))
-                                (or (window-prefers-buffer? w name)
-                                    (detail-kin? (window-buffer w) name))))
-                         (display--work-windows))))
-         ;; the remembered window only while the layout has no free pane: a
-         ;; layout with room opens a new pane instead of covering what you
-         ;; put in that window since
-         (room (and (layout-target)
-                    (< (length (layout-target-visible-buffers))
-                       (layout-target-capacity (layout-target)))))
-         (kept (and (not shown) (not here) (not pinned) (not sibling) (not kin) (not room) (detail-window o)))
-         (win (cond
-                (shown shown)
-                ;; under the window model a buffer slots into its mode's
-                ;; window, as the window policy places it
-                ((and (boundp 'panes-mode) panes-mode) (panes-display! name))
-                (here (window-display! (lambda () (display-buffer-in-window! here name))))
-                (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))
-                (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
-                (kin (window-display! (lambda () (display-buffer-in-window! kin name))))
-                (kept (window-display! (lambda () (display-buffer-in-window! kept name))))
-                ;; the list's own pane is the only work pane: the chain would end
-                ;; on same-window and cover the list, so the detail opens beside it
-                ((not (find (lambda (w) (and (not (equal? w me)) (not (equal? (window-buffer w) o))))
-                            (display--work-windows)))
-                 (let* ((ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me))
-                        (nw (split-window-in! ow 'h)))
-                   (if nw
-                       (window-display! (lambda () (display-buffer-in-window! nw name)))
-                       (display-buffer name '(category detail)))))
-                ;; a pane that holds another mode is never covered: the layout
-                ;; grows a pane while it has room, else the page goes on a
-                ;; free pane, else on the app's own stack, over the list
-                ((and room (detail--held-elsewhere? name me))
-                 (let* ((ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me))
-                        (nw (split-window-in! ow 'h)))
-                   (if nw
-                       (window-display! (lambda () (display-buffer-in-window! nw name)))
-                       (window-display! (lambda () (display-buffer-in-window! ow name))))))
-                ((detail--held-elsewhere? name me)
-                 (let ((free (find (lambda (w)
-                                     (and (not (equal? w me))
-                                          (not (equal? (window-buffer w) o))
-                                          (not (detail--foreign-pane? w name))))
-                                   (display--work-windows)))
-                       (ow (or (find (lambda (w) (equal? (window-buffer w) o)) (display--work-windows)) me)))
-                   (window-display! (lambda () (display-buffer-in-window! (or free ow) name)))))
-                (else (detail--place-beside! name o me)))))
+         ;; else it opens in the pane beside its list, never on top of it
+         (win (or shown (panes-display-beside! name o))))
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name))
@@ -372,18 +255,3 @@
 (public! 'detail-window-forget!
   "(detail-window-forget! OWNER) — drop the window OWNER opens its rows into; the next row picks one again")
 
-;; A group that declares its panes opens a list's rows in its own detail
-;; pane: the page is adopted first, so the group's function sees a detail.
-(advice-add! 'display-buffer-detail! 'around 'group-panes
-  (lambda (next name &optional owner)
-    (let* ((o (or owner (window-buffer (active-window))))
-           ;; the window model places details itself; the group's panes
-           ;; are the old path
-           (panes (and (boundp 'group-panes-open!)
-                       (not (and (boundp 'panes-mode) panes-mode))
-                       (group-panes-of (frame-group)))))
-      (when panes (detail-adopt! o name))
-      (let ((win (and panes (not (layout-arranging?)) (group-panes-open! name #f))))
-        (cond (win (detail-window-note! o win) win)
-              (owner (next name owner))
-              (else (next name)))))))

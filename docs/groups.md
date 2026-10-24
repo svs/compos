@@ -350,7 +350,7 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 | `group-switch-last` | Swap `destination` and `previous`. |
 | `buffer-context-switch!` | Read the current buffer's group. None, in a project: enter a group named for the root, and take the project's ungrouped open buffers along. None, no project: prompt for a name and start a group with the buffer. One: switch to it. |
 | `group-new` G | Create G with its chat buffer. Add the seed. Save a layout built from the seed. Switch to G. |
-| `group-dissolve` G | When G has a live parent (see "The overview"): every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
+| `group-dissolve` G | When G has a live parent: every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
 | `group-kill` G | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
 | `group-rename` G NAME | Change the name. The ID, members, layouts, and MRU do not change. |
 | `group-revive` G | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
@@ -453,28 +453,14 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`) uses visible panes and eligible hidden group work. Unused capacity stays empty; it never imports a foreign buffer or manufactures a scratch pane.
 
-### The overview
+### Kill repair
 
 When a member is killed, its window stays in the group. The window shows the member it showed before, from its own history, most recent first. A member another window of the frame shows is not shown twice. When the history offers no member, the window uses hidden ordinary group work in MRU order, then an existing group chat or scratch. If the surviving group has no companion, repair creates its chat. A dying group gives up the pane. A buffer from another group never comes in.
 
-### The target layout
+### The layout
 
-The layout chosen at `window-layout` (`C-x l`), or a `window-layout-*` command, is a persistent target. There are five, and each holds a fixed number of panes: `single` one, `two-pane` two, `halves` two, `columns` three, `rows` two. A layout works with one buffer and grows as work opens, up to its capacity. At capacity, a visit replaces the buffer of the selected slot. A passive result opens a new window in the least recently used other pane, and the window that had the pane becomes hidden. Focus changes do not reorder slots. Closing a pane reflows the survivors without reopening hidden work.
+The window model of a group names its layout: `single`, `two-pane`, `halves`, `columns`, `two-chat` or `free`. `C-x l` (`window-layout`) or a `window-layout-*` command chooses it. A layout holds a fixed number of panes; a buffer of a new mode takes a new pane while there is room. The group record keeps the newest model of the group, so a frame that enters the group takes it. See [Panes](PANES.md).
 
-Every layout shows a run of the frame's window ring. The ring holds windows, not buffers: the panes, then the hidden windows. A hidden window has no pane, and it keeps its buffer, history, and point. A window joins the ring when it is made, and a smaller layout hides windows instead of deleting them. `layout-forward` moves the run one window forward and `layout-backward` one back (neither has a stock key), so each layout goes on for ever in both directions. A Cmd-arrow that finds no window does the same. A walk takes the order of the ring when it starts: the panes in screen order, then the hidden windows, most recently used first. The hidden windows belong to the group: `switch` saves them with the group's layout and restores them, and the desktop saves them.
-
-Targets belong to the group's saved layout on each frame, and the active target also survives desktop save. A new group starts without inheriting the outgoing target. `window-layout-free` drops the target. See [Display buffer](DISPLAY-BUFFER.md#layout-presets) for eligibility, ordering, replacement, preview, and measured geometry rules.
-
-A tile uses the window that shows each buffer: a pane first, then a hidden window, else a new window. So each pane keeps its own history. A pane that the tile leaves out becomes a hidden window.
-
-The frame has no other layouts. `window-layout-free` releases the target, and a display may split a window again.
-
-`tile-all` opens the context overview. It is available only in a group or project. A group takes priority and supplies all its buffers, including chats. Otherwise, the current project supplies all its open buffers. The overview locks the frame: keys select a tile and do not edit. It saves no group layout and changes no membership by itself.
-
-- Arrow keys select a tile. `m` marks a tile. `q`, `C-g`, and `ESC` quit.
-- Quit restores the saved window tree and the saved current group.
-- `SPC` or `RET` pops the marked buffers, else the selected one, into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group when one exists.
-- The new group records the origin group as its **parent**. `dissolve` on a group with a live parent merges the members back into the parent and the frame follows. A parent that is gone makes the child an ordinary group.
 
 ### Save
 
@@ -622,7 +608,7 @@ Rename and restart never change a group's ID.
 
 These are not in this specification. The design leaves room for them.
 
-- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. The general mechanism is `transient-frame-enter!` / `transient-frame-exit!` (layouts.scm): a mode records the arrangement and group it found, by name, and leaving puts them back exactly. The chat list and the `ibuffer` window form use it. `tile-all` still carries its own base save and restore and could move onto it.
+- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. The general mechanism is `transient-frame-enter!` / `transient-frame-exit!` (layouts.scm): a mode records the arrangement and group it found, by name, and leaving puts them back exactly. The chat list, the `ibuffer` window form and the windows map use it; a record keeps the group's window model.
 - **Landing.** `switch G` may take an optional landing layout to show instead of the saved one, without saving it.
 - **Narrow.** A hard scope on top of the soft sections is parked.
 
@@ -633,7 +619,7 @@ These are not in this specification. The design leaves room for them.
 - Every group has one immutable opaque ID and one durable record.
 - Names are unique after trimming and are mutable.
 - A record survives with no members. `dissolve` and `kill` retire it.
-- A record made by an overview pop-out stores the parent group's ID. The reference is weak: a retired parent makes the child ordinary.
+- A record can store a parent group's ID. The reference is weak: a retired parent makes the child ordinary.
 - Code uses the ID for membership, MRU, layouts, and frame slots. Names are for display and completion.
 
 ### Membership storage

@@ -159,11 +159,12 @@ defmodule Compos.ChatCompactTest do
       eval!(~s{(set-symbol-value! 'chat-compact-threshold #{old})})
     end
 
-    test "a model the catalog does not know gets no suggestion" do
+    test "a model the catalog does not know assumes the default limit" do
       chat_with_turns!(4)
       eval!(~s{(buffer-set-local! (current-buffer) 'agent-model "openai:no-such-model")})
 
-      assert eval!(~s{(chat-compact-limit (current-buffer))}) == "#f"
+      # 70% of chat-context-limit-default
+      assert eval!(~s{(chat-compact-limit (current-buffer))}) == "140000"
       assert eval!(~s{(if (chat-should-compact? (current-buffer)) #t #f)}) == "#f"
     end
 

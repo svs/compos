@@ -167,3 +167,20 @@ llm_db_snapshot = Path.expand("~/.compos/llm_db/snapshot.json")
 if File.exists?(llm_db_snapshot) do
   config :llm_db, snapshot_path: llm_db_snapshot
 end
+
+# Models newer than the newest published catalog. llm_db merges these over
+# the snapshot, so a refresh keeps them; drop an entry once the catalog has it.
+config :llm_db,
+  custom: %{
+    openrouter: [
+      models: %{
+        "moonshotai/kimi-k3.1-pro" => %{
+          name: "MoonshotAI: Kimi K3.1 Pro",
+          capabilities: %{chat: true, tools: %{enabled: true}, streaming: %{tool_calls: true}},
+          limits: %{context: 1_048_576},
+          cost: %{input: 2.0, output: 10.0, cache_read: 0.2},
+          modalities: %{input: [:text], output: [:text]}
+        }
+      }
+    ]
+  }

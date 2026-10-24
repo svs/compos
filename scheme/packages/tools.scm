@@ -1943,6 +1943,10 @@
   "Suggest compacting at this flat token count, whatever the model allows. 0 uses chat-compact-percent."
   'group 'chat 'type 'integer)
 
+(defcustom 'chat-context-limit-default 200000
+  "The input limit chat-compact-percent assumes for a model the catalog does not know."
+  'group 'chat 'type 'integer)
+
 (defcustom 'chat-compact-keep 8
   "How many recent turns a compaction keeps verbatim."
   'group 'chat 'type 'integer)

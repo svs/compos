@@ -1401,12 +1401,15 @@
          ((eval (buffer-local buf 'imenu-index-function)) buf))
         ;; a buffer with anchors is indexed by them
         ((pair? (anchor-list buf)) (anchor-imenu-rows buf))
+        ;; the lines are BUF's: line-number-at-pos counts in the current buffer
         ((buffer-derived-mode? buf "morg-mode")
-         (map (lambda (e)
-                (list (line-number-at-pos (car e)) "heading"
-                      (string-trim (cadr e)) ""))
-              (filter (lambda (e) (equal? (morg-kind e) 'heading))
-                      (morg-scan buf))))
+         (with-current-buffer buf
+           (lambda ()
+             (map (lambda (e)
+                    (list (line-number-at-pos (car e)) "heading"
+                          (string-trim (cadr e)) ""))
+                  (filter (lambda (e) (equal? (morg-kind e) 'heading))
+                          (morg-scan buf))))))
         (else
          (let ((rows (code-outline buf)))
            (if (string? rows) '() rows)))))

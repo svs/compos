@@ -1944,7 +1944,7 @@
               (lambda (tab) (loop (cdr rest) tab))))))))
 
 (define (site-app-detail-mode-name spec page)
-  ;; one major mode for every detail of the app, so mode affinity sends them all
+  ;; one major mode for every detail of the app, so the mode's window takes them all
   ;; to one pane; else the page's own
   (or (plist-get spec 'detail-mode) (plist-get page 'detail-mode) "site-app-detail-mode"))
 

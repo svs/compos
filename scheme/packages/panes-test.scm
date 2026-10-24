@@ -8,10 +8,10 @@
 
 ;; open BUF of MODE as a visit from window SEL: (LAYOUT KEY)
 (define (pt-visit layout buf mode &optional sel)
-  (panes-open layout buf (list 'mode mode 'kind 'visit 'selected sel)))
+  (panes-show-buffer layout buf mode (and sel (panes-pane-of layout sel))))
 
 (define (pt-display layout buf mode sel recent)
-  (panes-open layout buf (list 'mode mode 'kind 'display 'selected sel 'recent recent)))
+  (pt-visit layout buf mode sel))
 
 (deftest 'a-new-mode-takes-a-pane-while-there-is-room
   "W01, O05: the first buffer of a mode makes a pane and is that mode's preferred window; the shares stay equal"
@@ -82,7 +82,7 @@
            (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
            (o3 (pt-visit (car o2) "b.scm" "scheme-mode" (cadr o2)))
            (ka (cadr o1)) (kc (cadr o2))
-           (moved (panes-move-buffer (car o3) "b.scm" ka kc))
+           (moved (panes-move-buffer (car o3) "b.scm" kc))
            (o4 (pt-visit moved "c.scm" "scheme-mode" kc))
            (o5 (pt-visit (car o4) "b.scm" "scheme-mode" ka)))
       (check-equal! (panes-window-buffers moved kc) '("b.scm" "*chat*") "b.scm sits on the chat window")
@@ -98,7 +98,7 @@
            (o3 (pt-visit (car o2) "b.scm" "scheme-mode" (cadr o2)))
            (ka (cadr o1)) (kc (cadr o2))
            ;; b.scm moved onto the chat window, then a dired visit stacks on the chat window too
-           (l (panes-move-buffer (car o3) "b.scm" ka kc))
+           (l (panes-move-buffer (car o3) "b.scm" kc))
            (o4 (pt-visit (panes-set-capacity l 2) "*dired*" "dired-mode" kc))
            (l (car o4))
            (mode-of (lambda (b) (cond ((string-suffix? ".scm" b) "scheme-mode")
@@ -143,7 +143,7 @@
       (check-equal! (panes-pane-count (car q3)) 1 "the other pane remains"))))
 
 (deftest 'windows-move-between-panes-with-their-stacks
-  "I01, L09: a window moves whole; a pane left empty goes; a pane can be widened and the shares still sum to one"
+  "I01, L09: a window moves whole; a pane left empty stays; a pane can be widened and the shares still sum to one"
   (lambda ()
     (let* ((o1 (pt-visit (panes-empty 3) "a" "m1"))
            (o2 (pt-visit (car o1) "b" "m2" (cadr o1)))
@@ -151,42 +151,26 @@
            (ka (cadr o1)) (kb (cadr o2))
            (pb (panes-pane-of (car o3) kb))
            (m (panes-move-window (car o3) ka pb)))
-      (check-equal! (panes-pane-count m) 1 "the emptied pane went")
-      (check-equal! (plist-get (panes-pane m pb) 'windows) (list ka kb) "the moved window is at the front of its new pane")
+      (check-equal! (panes-pane-count m) (panes-pane-count (car o3)) "a pane left empty stays")
+      (check-equal! (panes-pane-keys m pb) (list ka kb) "the moved window is at the front of its new pane")
       (check-equal! (panes-window-buffers m ka) '("a2" "a") "with its stack")
       (let ((w (panes-set-share (car o3) pb 3)))
         (check-equal! (apply + (panes-shares w)) 1 "shares sum to one")
         (check-equal! (car (panes-shares w)) (/ 1 4) "the other pane shrank")))))
 
-(deftest 'a-rename-reaches-every-stack-and-handles-do-not-save
-  "Q16, H05: a renamed buffer keeps its places; a saved value carries no renderer handle; a dead buffer leaves on validation"
+(deftest 'handles-do-not-save
+  "H05: a saved value carries no renderer handle; a dead buffer leaves on validation"
   (lambda ()
     (let* ((o1 (pt-visit (panes-empty 3) "old" "m"))
            (o2 (pt-visit (car o1) "other" "m" (cadr o1)))
            (k (cadr o1))
-           (r (panes-rename (car o2) "old" "new"))
+           (r (car o2))
            (h (panes-set-handle r k 42)))
-      (check-equal! (panes-window-buffers r k) '("other" "new") "renamed in place")
       (check-equal! (panes-handle h k) 42 "a handle attaches")
       (check-equal! (panes-key-of-handle h 42) k "and answers its key")
       (check-equal! (panes-handle (panes-strip-handles h) k) #f "and does not save")
       (check-equal! (panes-window-buffers (panes-validate h (lambda (b) (equal? b "other"))) k) '("other") "a dead buffer leaves"))))
 
-(deftest 'the-emacs-policy-places-as-emacs-does
-  "a visit takes the selected window; a display reuses, pops a pane while there is room, then takes the least recently used other window"
-  (lambda ()
-    (let* ((o1 (panes-open (panes-empty 2) "a" '(mode "m" kind visit) 'emacs))
-           (ka (cadr o1))
-           (d1 (panes-decide (car o1) "b" (list 'mode "m" 'kind 'visit 'selected ka) 'emacs))
-           (d2 (panes-decide (car o1) "b" (list 'mode "m" 'kind 'display 'selected ka) 'emacs))
-           (o2 (panes-open (car o1) "b" (list 'mode "m" 'kind 'display 'selected ka) 'emacs))
-           (kb (cadr o2))
-           (d3 (panes-decide (car o2) "c" (list 'mode "m" 'kind 'display 'selected kb 'recent (list kb ka)) 'emacs))
-           (d4 (panes-decide (car o2) "b" (list 'mode "m" 'kind 'display 'selected ka) 'emacs)))
-      (check-equal! d1 (list 'window ka) "a visit takes the selected window")
-      (check-equal! d2 '(new-pane) "a display pops a pane while there is room")
-      (check-equal! d3 (list 'window ka) "at capacity the least recently used other window takes it")
-      (check-equal! d4 (list 'window kb) "a buffer on screen is reused"))))
 
 (deftest 'a-stray-in-another-modes-stack-opens-in-its-mode-window
   "a buffer another mode's window kept in its stack, from a stray display, opens in the window of its own mode and leaves that window as it was"

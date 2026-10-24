@@ -3,18 +3,25 @@
 ;;;
 ;;; The value is plain data, so it saves with the group and reads back:
 ;;;
-;;;   LAYOUT = (panes (PANE ...) windows (WINDOW ...) next N capacity C)
-;;;   PANE   = (id ID share S windows (KEY ...))       the first KEY is on screen;
-;;;                                                   no KEY is an empty pane
+;;;   LAYOUT = (panes (PANE ...) focus ID next-pane N next-window N capacity C)
+;;;   PANE   = (id ID share S windows (WINDOW ...))    the first WINDOW is on
+;;;                                                   screen; none is an empty pane
 ;;;   WINDOW = (key KEY win HANDLE mode MODE buffers (B ...) preferred BOOL)
 ;;;                                                   the first B is shown
+;;;
+;;; A window lives in its pane, so removing a pane or moving a window is one
+;;; change. The layout is a tree (tree.scm) of the shape panes--shape, and
+;;; the adds, removes, moves and lookups here are tree calls with the
+;;; model's rules around them.
 ;;;
 ;;; A window's KEY is its identity; HANDLE is the renderer's window id,
 ;;; attached while the window is on screen and dropped when the value is
 ;;; saved. Every function here is pure: it takes a layout and answers a
 ;;; new one. The applier (panes-apply!) is the one place that touches the
-;;; frame. A policy (define-window-policy!) decides where a buffer opens;
-;;; the model does not.
+;;; frame. panes-show-buffer says where a buffer opens: in its mode's
+;;; window, else in a new window where the user is.
+
+(require 'tree)
 
 (domain! 'windows)
 (effects! '(pure))
@@ -50,6 +57,70 @@
           ((member (car l) acc) (loop (cdr l) acc))
           (else (loop (cdr l) (cons (car l) acc))))))
 
+;;; --- buffer ids -------------------------------------------------------------
+;;; A window's stack holds buffer ids, not names: a name changes when the
+;;; buffer is renamed, and a new buffer can take a dead one's name. The
+;;; model's calls take and give names; these turn one into the other. A
+;;; name no buffer has is its own id, so a layout of made-up names (a
+;;; test's) still works.
+
+(effects! '(read))
+
+(define (panes--ids bufs)
+  "The ids of the buffers BUFS, in order, in one read. An entry no
+   buffer is named stays as it is: an id already, or a made-up name."
+  (if (null? bufs)
+      '()
+      (map (lambda (row) (or (cadr row) (car row))) (buffer-read-many bufs '(id) '()))))
+
+(define (panes--id buf)
+  "The id of buffer BUF; BUF itself when no buffer has that name."
+  (car (panes--ids (list buf))))
+
+;; ((ID NAME) ...) and the buffer count it was read at. A miss reads it
+;; again only when buffers came or went; a rename clears it
+(define panes--names '())
+(define panes--names-count -1)
+
+(define (panes--names-forget!)
+  "Forget the id-to-name map; the next panes--name reads it again."
+  (set! panes--names '())
+  (set! panes--names-count -1))
+
+(define (panes--name id)
+  "The name of the buffer whose id is ID; ID itself when no buffer has
+   that id."
+  (let ((e (assoc id panes--names)))
+    (if e
+        (cadr e)
+        (let ((all (buffer-list)))
+          (unless (= (length all) panes--names-count)
+            (set! panes--names-count (length all))
+            (set! panes--names
+              (map (lambda (r) (list (cadr r) (car r)))
+                   (filter cadr (buffer-read-many all '(id) '())))))
+          (let ((e (assoc id panes--names))) (if e (cadr e) id))))))
+
+(define (panes--with-ids layout)
+  "LAYOUT with every stack entry an id: a name some buffer has becomes
+   that buffer's id, in one read. A layout saved with names reads this
+   way."
+  (let* ((all (panes--uniq (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows layout)))))
+         (ids (panes--ids all)))
+    (if (equal? all ids)
+        layout
+        (let ((pairs (let zip ((a all) (i ids)) (if (null? a) '() (cons (list (car a) (car i)) (zip (cdr a) (cdr i)))))))
+          (panes--map-windows layout
+            (lambda (w) (panes--put w 'buffers (panes--uniq (map (lambda (b) (cadr (assoc b pairs))) (or (plist-get w 'buffers) '()))))))))))
+
+(define (panes--entry-is? entry buf id)
+  "#t when stack ENTRY stands for buffer BUF, whose id is ID: the id
+   itself, or an id whose name is BUF (a killed buffer keeps its name
+   in the map until it is read again)."
+  (or (equal? entry id) (equal? (panes--name entry) buf)))
+
+(effects! '(pure))
+
 ;;; --- the layout -------------------------------------------------------------
 
 (define panes-default-capacity 3)
@@ -58,7 +129,7 @@
   "An empty layout: no pane, no window. CAPACITY is the most panes it
    shows, panes-default-capacity when absent. The pane and window
    counters start at 1."
-  (list 'panes '() 'windows '() 'next-pane 1 'next-window 1 'capacity (or capacity panes-default-capacity)))
+  (list 'panes '() 'next-pane 1 'next-window 1 'capacity (or capacity panes-default-capacity)))
 
 (define (panes-capacity layout)
   "The most panes LAYOUT shows side by side, panes-default-capacity
@@ -70,12 +141,30 @@
   (panes--put layout 'capacity n))
 
 (define (panes-panes layout)
-  "The panes of LAYOUT, left to right; () when it has none."
-  (or (plist-get layout 'panes) '()))
+  "The panes of LAYOUT, left to right; () when it has none. A layout
+   saved in the old shape, its windows in a list of their own and its
+   panes naming them by key, reads in the new shape."
+  (let ((ps (or (plist-get layout 'panes) '()))
+        (old (plist-get layout 'windows)))
+    (if (pair? old)
+        (map (lambda (p)
+               (panes--put p 'windows
+                 (filter (lambda (w) w)
+                         (map (lambda (k) (if (string? k) (find (lambda (w) (equal? (plist-get w 'key) k)) old) k))
+                              (or (plist-get p 'windows) '())))))
+             ps)
+        ps)))
+(define panes--shape '((panes id) (windows key) (buffers #f)))
+
+(define (panes--normal layout)
+  "LAYOUT in the current shape: one saved with its windows in a list of
+   their own reads as a tree."
+  (if (pair? (plist-get layout 'windows)) (panes--set-panes layout (panes-panes layout)) layout))
+
 (define (panes-windows layout)
-  "Every window of LAYOUT, in the order they were made; () when it has
-   none. The order on screen is in the panes, not here."
-  (or (plist-get layout 'windows) '()))
+  "Every window of LAYOUT, pane by pane, left to right; in each pane
+   the window on screen comes first. () when it has none."
+  (tree-nodes panes--shape (panes--normal layout) 2))
 (define (panes-pane-ids layout)
   "The ids of the panes of LAYOUT, left to right."
   (map (lambda (p) (plist-get p 'id)) (panes-panes layout)))
@@ -94,31 +183,46 @@
 (define (panes-window-keys layout)
   "The keys of every window, pane by pane, left to right. In each pane
    the window on screen comes first."
-  (apply append (map (lambda (p) (or (plist-get p 'windows) '())) (panes-panes layout))))
+  (map (lambda (w) (plist-get w 'key)) (panes-windows layout)))
+
+(define (panes--pane-windows pane)
+  "The windows of PANE, the one on screen first."
+  (or (plist-get pane 'windows) '()))
+
+(define (panes-keys pane)
+  "The keys of the windows of PANE, the one on screen first."
+  (map (lambda (w) (plist-get w 'key)) (panes--pane-windows pane)))
+
+(define (panes-pane-keys layout id)
+  "The keys of the windows of pane ID, the one on screen first; () for
+   an unknown ID."
+  (let ((p (panes-pane layout id))) (if p (panes-keys p) '())))
 
 (define (panes-pane-of layout key)
   "The id of the pane that holds window KEY, or #f."
-  (let ((p (find (lambda (p) (member key (or (plist-get p 'windows) '()))) (panes-panes layout))))
-    (and p (plist-get p 'id))))
+  (let ((p (tree-parent panes--shape (panes--normal layout) key)))
+    (and (string? p) (panes-pane layout p) p)))
 
 (define (panes--set-panes layout panes)
-  "LAYOUT with PANES as its panes."
-  (panes--put layout 'panes panes))
-(define (panes--set-windows layout windows)
-  "LAYOUT with WINDOWS as its windows."
-  (panes--put layout 'windows windows))
+  "LAYOUT with PANES as its panes. The old shape's list of windows goes:
+   the windows are in the panes now."
+  (let loop ((l layout) (out '()))
+    (cond ((or (null? l) (null? (cdr l))) (panes--put (reverse out) 'panes panes))
+          ((equal? (car l) 'windows) (loop (cddr l) out))
+          (else (loop (cddr l) (cons (cadr l) (cons (car l) out)))))))
+(define (panes--map-windows layout fn)
+  "LAYOUT with every window replaced by (FN WINDOW), each in its place."
+  (tree-map panes--shape (panes--normal layout) 2 fn))
 
 (define (panes--update-pane layout id fn)
   "LAYOUT with the pane whose id is ID replaced by (FN PANE). The other
    panes stay."
-  (panes--set-panes layout
-    (map (lambda (p) (if (equal? (plist-get p 'id) id) (fn p) p)) (panes-panes layout))))
+  (tree-update panes--shape (panes--normal layout) id fn))
 
 (define (panes--update-window layout key fn)
   "LAYOUT with the window whose key is KEY replaced by (FN WINDOW). The
    other windows stay."
-  (panes--set-windows layout
-    (map (lambda (w) (if (equal? (plist-get w 'key) key) (fn w) w)) (panes-windows layout))))
+  (tree-update panes--shape (panes--normal layout) key fn))
 
 (define (panes--fresh layout counter prefix)
   "A new id and LAYOUT with COUNTER moved on: (NAME LAYOUT). NAME is
@@ -141,23 +245,57 @@
          (shares (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1)))
                       (panes-panes layout)))
          (share (if (null? shares) 1 (/ (apply + shares) (length shares))))
-         (pane (list 'id id 'share share 'windows '()))
-         (panes (panes--insert-at (panes-panes layout)
-                                  (if (number? at) at (panes-pane-count layout))
-                                  pane)))
-    (list (panes--set-panes layout panes) id)))
+         (pane (list 'id id 'share share 'windows '())))
+    (list (tree-insert panes--shape (panes--normal layout) 'root pane at) id)))
 
 (define (panes-remove-pane layout id)
-  "Pane ID goes, and its windows go with it. The last pane stays. An
-   unknown ID changes nothing."
-  (let ((pane (panes-pane layout id)))
-    (if (or (not pane) (<= (panes-pane-count layout) 1))
-        layout
-        (let ((keys (or (plist-get pane 'windows) '())))
-          (panes--set-windows
-            (panes--set-panes layout
-              (filter (lambda (p) (not (equal? (plist-get p 'id) id))) (panes-panes layout)))
-            (filter (lambda (w) (not (member (plist-get w 'key) keys))) (panes-windows layout)))))))
+  "Pane ID goes, and its windows go with it. The last pane stays. When
+   ID had the focus, the pane that takes its place does, else the new
+   last pane. An unknown ID changes nothing."
+  (if (or (not (panes-pane layout id)) (<= (panes-pane-count layout) 1))
+      layout
+      (let* ((i (panes--index-of id (panes-pane-ids layout)))
+             (focused (equal? (panes-focus layout) id))
+             (layout (tree-remove panes--shape (panes--normal layout) id))
+             (left (panes-pane-ids layout)))
+        (if focused
+            (panes-set-focus layout (list-ref left (min i (- (length left) 1))))
+            layout))))
+
+;;; --- focus ------------------------------------------------------------------
+;;; The layout knows the pane the user is in. Its front window is the
+;;; focused window: only a front window is on screen. A command changes
+;;; the focus here and the draw selects it; nothing else selects.
+
+(define (panes-focus layout)
+  "The id of the focused pane. A layout that names none, or a pane it
+   no longer has, answers its first pane; #f with no pane. A focus saved
+   in the old shape, (window KEY) or (pane ID), reads too."
+  (let* ((f (plist-get layout 'focus))
+         (id (cond ((string? f) f)
+                   ((and (pair? f) (eq? (car f) 'window)) (panes-pane-of layout (cadr f)))
+                   ((and (pair? f) (eq? (car f) 'pane)) (cadr f))
+                   (else #f))))
+    (if (and id (panes-pane layout id))
+        id
+        (let ((ids (panes-pane-ids layout))) (and (pair? ids) (car ids))))))
+
+(define (panes-set-focus layout id)
+  "LAYOUT with pane ID focused. An unknown ID changes nothing."
+  (if (panes-pane layout id) (panes--put layout 'focus id) layout))
+
+(define (panes-focus-window layout key)
+  "Window KEY comes to the front of its pane, and its pane takes the
+   focus. An unknown KEY changes nothing."
+  (let ((p (panes-pane-of layout key)))
+    (if p (panes-set-focus (panes-raise layout key) p) layout)))
+
+(define (panes--prune-pane layout id)
+  "LAYOUT without pane ID when ID holds no window and is not the last
+   pane: what a command does after it moves a pane's last window out."
+  (if (and (panes-pane layout id) (null? (panes-pane-keys layout id)))
+      (panes-remove-pane layout id)
+      layout))
 
 (define (panes-shares layout)
   "The shares of the panes in pane order, normalized to sum 1. A share
@@ -178,22 +316,19 @@
 
 (define (panes-equalize layout)
   "Every pane takes an equal share."
-  (panes--set-panes layout (map (lambda (p) (panes--put p 'share 1)) (panes-panes layout))))
+  (tree-map panes--shape (panes--normal layout) 1 (lambda (p) (panes--put p 'share 1))))
 
 (define (panes-move-pane layout id at)
   "Pane ID moves to index AT among the panes, with all its windows. An
    AT out of range goes to the start or the end. An unknown ID changes
    nothing."
-  (let ((pane (panes-pane layout id)))
-    (if (not pane)
-        layout
-        (panes--set-panes layout
-          (panes--insert-at (filter (lambda (p) (not (equal? (plist-get p 'id) id))) (panes-panes layout))
-                            at pane)))))
+  (if (panes-pane layout id)
+      (tree-move panes--shape (panes--normal layout) id 'root (max 0 at))
+      layout))
 
 ;;; --- windows ----------------------------------------------------------------
 
-(define (panes-new-window layout pane-id buf mode &optional behind)
+(define (panes-add-window layout pane-id buf mode &optional behind)
   "A new window of MODE on BUF in pane PANE-ID: (LAYOUT KEY). It goes to
    the front of the pane, so it is on screen, or to the back when
    BEHIND. The first window of a mode is that mode's preferred window.
@@ -203,26 +338,19 @@
          (layout (cadr made))
          (first-of-mode (and mode (not (panes-mode-window layout mode))))
          (window (list 'key key 'win #f 'mode mode
-                       'buffers (if buf (list buf) '())
-                       'preferred (and first-of-mode #t)))
-         (layout (panes--set-windows layout (append (panes-windows layout) (list window))))
-         (layout (panes--update-pane layout pane-id
-                   (lambda (p)
-                     (let ((keys (or (plist-get p 'windows) '())))
-                       (panes--put p 'windows (if behind (append keys (list key)) (cons key keys))))))))
-    (list layout key)))
+                       'buffers (if buf (list (panes--id buf)) '())
+                       'preferred (and first-of-mode #t))))
+    (list (tree-insert panes--shape (panes--normal layout) pane-id window (if behind #f 0)) key)))
 
 (define (panes-swap-windows layout a b)
   "Windows A and B trade places: each takes the other's spot in the
    other's pane. Nothing changes when A and B are the same, or when no
    pane holds one of them."
-  (let ((pa (panes-pane-of layout a)) (pb (panes-pane-of layout b)))
-    (if (or (not pa) (not pb) (equal? a b))
+  (let ((wa (panes-window layout a)) (wb (panes-window layout b)))
+    (if (or (not wa) (not wb) (equal? a b))
         layout
-        (let ((trade (lambda (k) (cond ((equal? k a) b) ((equal? k b) a) (else k)))))
-          (fold (lambda (l id) (panes--update-pane l id (lambda (p) (panes--put p 'windows (map trade (or (plist-get p 'windows) '()))))))
-                layout
-                (panes--uniq (list pa pb)))))))
+        (panes--map-windows layout
+          (lambda (w) (let ((k (plist-get w 'key))) (cond ((equal? k a) wb) ((equal? k b) wa) (else w))))))))
 
 (define (panes-adopt-buffers layout bufs mode-of)
   "No buffer is without a window: each of BUFS the layout does not hold
@@ -239,9 +367,9 @@
           (let ((m (mode-of b)))
             (cond ((and m (panes-mode-window l m))
                    (panes--update-window l (panes-mode-window l m)
-                     (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list b))))))
+                     (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list (panes--id b)))))))
                   ((pair? (panes-panes l))
-                   (car (panes-new-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
+                   (car (panes-add-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
                   (else l))))
         layout missing))
 
@@ -265,36 +393,32 @@
             (let* ((bufs (panes-window-buffers l k))
                    (mine (filter (lambda (b) (equal? (cadr (assoc b owner)) k)) bufs)))
               (cond ((= (length mine) (length bufs)) l)
-                    ((null? mine) (panes-close-window l k))
-                    (else (panes--update-window l k (lambda (w) (panes--put w 'buffers mine)))))))
+                    ((null? mine) (panes-remove-window l k))
+                    (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids mine))))))))
           layout keys)))
 
-(define (panes-close-window layout key)
+(define (panes-remove-window layout key)
   "Window KEY goes; its pane stays, empty when it held nothing else.
    In a bare layout (the overview's) an emptied pane goes too. An
    unknown KEY changes nothing."
   (let ((pane (panes-pane-of layout key)))
-    (if (not pane)
-        layout
-        (let* ((layout (panes--set-windows layout
-                         (filter (lambda (w) (not (equal? (plist-get w 'key) key))) (panes-windows layout))))
-               (layout (panes--update-pane layout pane
-                         (lambda (p) (panes--put p 'windows (panes--without key (or (plist-get p 'windows) '()))))))
-               (left (plist-get (panes-pane layout pane) 'windows)))
-          ;; an emptied pane stays, empty, as a group with no buffers stays; a
-          ;; 'bare layout keeps no count of panes (the overview's): there it goes
-          (if (and (null? left) (plist-get layout 'bare))
-              (panes-remove-pane layout pane)
-              layout)))))
+    (if pane
+        (panes--bare-prune (tree-remove panes--shape (panes--normal layout) key) pane)
+        layout)))
+
+(define (panes--bare-prune layout pane)
+  "A bare layout (the overview's) keeps no empty pane: PANE goes when
+   it is empty. Any other layout as it is."
+  (if (and (plist-get layout 'bare) (null? (panes-pane-keys layout pane)))
+      (panes-remove-pane layout pane)
+      layout))
+
 
 (define (panes-raise layout key)
   "KEY comes to the front of its pane, so it is on screen. Its stack
    does not change. An unknown KEY changes nothing."
   (let ((pane (panes-pane-of layout key)))
-    (if (not pane)
-        layout
-        (panes--update-pane layout pane
-          (lambda (p) (panes--put p 'windows (cons key (panes--without key (or (plist-get p 'windows) '())))))))))
+    (if pane (tree-move panes--shape (panes--normal layout) key pane 0) layout)))
 
 (define (panes-show layout key buf)
   "BUF comes to the front of window KEY, and KEY to the front of its
@@ -304,7 +428,7 @@
       layout
       (panes-raise
         (panes--update-window layout key
-          (lambda (w) (panes--put w 'buffers (cons buf (panes--without buf (or (plist-get w 'buffers) '()))))))
+          (lambda (w) (let ((id (panes--id buf))) (panes--put w 'buffers (cons id (panes--without id (or (plist-get w 'buffers) '())))))))
         key)))
 
 (define (panes-pop layout key)
@@ -316,56 +440,42 @@
           (else
             (let ((rest (cdr (or (plist-get w 'buffers) '(#f)))))
               (if (null? rest)
-                  (list (panes-close-window layout key) #f)
+                  (list (panes-remove-window layout key) #f)
                   (list (panes--update-window layout key (lambda (w) (panes--put w 'buffers rest)))
-                        (car rest))))))))
+                        (panes--name (car rest)))))))))
 
 (define (panes-drop-buffer layout buf)
   "BUF leaves every window, as for a kill. Emptied windows close; their
    panes stay."
-  (let loop ((keys (panes-window-keys layout)) (layout layout))
+  (let loop ((keys (panes-window-keys layout)) (layout layout) (id (panes--id buf)))
     (if (null? keys)
         layout
         (let* ((w (panes-window layout (car keys)))
                (bufs (or (plist-get w 'buffers) '()))
-               (left (panes--without buf bufs)))
+               (left (filter (lambda (e) (not (panes--entry-is? e buf id))) bufs)))
           (loop (cdr keys)
                 (cond ((= (length left) (length bufs)) layout)
-                      ((null? left) (panes-close-window layout (car keys)))
-                      (else (panes--update-window layout (car keys) (lambda (w) (panes--put w 'buffers left))))))))))
+                      ((null? left) (panes-remove-window layout (car keys)))
+                      (else (panes--update-window layout (car keys) (lambda (w) (panes--put w 'buffers left)))))
+                id)))))
 
 (define (panes-move-window layout key pane-id &optional index)
-  "Window KEY moves to pane PANE-ID, at INDEX (the front when absent).
-   A pane it leaves empty goes, unless it is the last pane. In its own
-   pane it only moves to INDEX. An unknown KEY or PANE-ID changes
-   nothing."
+  "Window KEY moves to pane PANE-ID, at INDEX (the front when absent);
+   in its own pane it only moves to INDEX. A pane it leaves empty
+   stays, as after panes-remove-window, except in a bare layout (the
+   overview's). An unknown KEY or PANE-ID changes nothing."
   (let ((from (panes-pane-of layout key)))
-    (cond ((or (not from) (not (panes-pane layout pane-id))) layout)
-          ((equal? from pane-id)
-           (panes--update-pane layout pane-id
-             (lambda (p) (panes--put p 'windows (panes--insert-at (panes--without key (plist-get p 'windows)) (or index 0) key)))))
-          (else
-            (let* ((layout (panes--update-pane layout from
-                             (lambda (p) (panes--put p 'windows (panes--without key (plist-get p 'windows))))))
-                   (layout (panes--update-pane layout pane-id
-                             (lambda (p) (panes--put p 'windows (panes--insert-at (or (plist-get p 'windows) '()) (or index 0) key)))))
-                   (left (plist-get (panes-pane layout from) 'windows)))
-              (if (and (null? left) (> (panes-pane-count layout) 1))
-                  (panes-remove-pane layout from)
-                  layout))))))
+    (if (and from (panes-pane layout pane-id))
+        (panes--bare-prune (tree-move panes--shape (panes--normal layout) key pane-id (or index 0)) from)
+        layout)))
 
-(define (panes-move-buffer layout buf from to)
-  "BUF leaves window FROM and shows in window TO; an emptied FROM
-   closes. Nothing changes when FROM or TO is not a window, or when
-   they are the same."
-  (if (or (not (panes-window layout from)) (not (panes-window layout to)) (equal? from to))
-      layout
-      (let* ((w (panes-window layout from))
-             (left (panes--without buf (or (plist-get w 'buffers) '())))
-             (layout (if (null? left)
-                         (panes-close-window layout from)
-                         (panes--update-window layout from (lambda (w) (panes--put w 'buffers left))))))
-        (panes-show layout to buf))))
+(define (panes-move-buffer layout buf to)
+  "BUF leaves the window that holds it and comes to the front of window
+   TO, and TO to the front of its pane. A window BUF leaves empty
+   closes. An unknown TO changes nothing."
+  (cond ((not (panes-window layout to)) layout)
+        ((member buf (panes-window-buffers layout to)) (panes-show layout to buf))
+        (else (panes-show (panes-drop-buffer layout buf) to buf))))
 (define (panes-split-off layout bufs from)
   "BUFS leave every window for a new window beside FROM, of FROM's mode.
    The new window goes in a new pane to the right of FROM's pane while
@@ -386,19 +496,14 @@
                             ((< (+ i 1) (length ids)) (list layout (list-ref ids (+ i 1))))
                             ((> i 0) (list layout (list-ref ids (- i 1))))
                             (else (list layout pid))))
-               (made (panes-new-window (car added) (cadr added) (car bufs) (plist-get w 'mode))))
+               (made (panes-add-window (car added) (cadr added) (car bufs) (plist-get w 'mode))))
           (list (panes-set-buffers (car made) (cadr made) bufs) (cadr made))))))
 
-(define (panes-rename layout old new)
-  "A renamed buffer keeps its places: OLD becomes NEW in every stack."
-  (panes--set-windows layout
-    (map (lambda (w) (panes--put w 'buffers (map (lambda (b) (if (equal? b old) new b)) (or (plist-get w 'buffers) '()))))
-         (panes-windows layout))))
 
 (define (panes-set-buffers layout key bufs)
   "BUFS become the whole stack of KEY, the shown buffer first. Repeats
    go. The pane order does not change."
-  (panes--update-window layout key (lambda (w) (panes--put w 'buffers (panes--uniq bufs)))))
+  (panes--update-window layout key (lambda (w) (panes--put w 'buffers (panes--uniq (panes--ids bufs))))))
 
 (define (panes-set-mode layout key mode)
   "Window KEY takes MODE as its mode. Its stack and its preference do
@@ -413,12 +518,11 @@
          (mode (and w (plist-get w 'mode))))
     (if (not w)
         layout
-        (panes--set-windows layout
-          (map (lambda (x)
-                 (cond ((equal? (plist-get x 'key) key) (panes--put x 'preferred #t))
-                       ((equal? (plist-get x 'mode) mode) (panes--put x 'preferred #f))
-                       (else x)))
-               (panes-windows layout))))))
+        (panes--map-windows layout
+          (lambda (x)
+            (cond ((equal? (plist-get x 'key) key) (panes--put x 'preferred #t))
+                  ((equal? (plist-get x 'mode) mode) (panes--put x 'preferred #f))
+                  (else x)))))))
 
 ;;; --- questions --------------------------------------------------------------
 
@@ -426,18 +530,18 @@
   "The keys of the windows on screen, one for each pane that holds a
    window, in pane order. An empty pane gives none."
   (filter (lambda (k) k)
-          (map (lambda (p) (let ((ks (or (plist-get p 'windows) '()))) (and (pair? ks) (car ks))))
+          (map (lambda (p) (let ((ks (panes-keys p))) (and (pair? ks) (car ks))))
                (panes-panes layout))))
 
 (define (panes-window-buffer layout key)
   "The buffer window KEY shows, the front of its stack, or #f."
   (let ((w (panes-window layout key)))
-    (and w (pair? (plist-get w 'buffers)) (car (plist-get w 'buffers)))))
+    (and w (pair? (plist-get w 'buffers)) (panes--name (car (plist-get w 'buffers))))))
 
 (define (panes-window-buffers layout key)
   "The stack of window KEY, the shown buffer first; () for an unknown
    KEY."
-  (let ((w (panes-window layout key))) (if w (or (plist-get w 'buffers) '()) '())))
+  (let ((w (panes-window layout key))) (if w (map panes--name (or (plist-get w 'buffers) '())) '())))
 
 (define (panes-window-mode layout key)
   "The mode of window KEY, or #f. A window with no mode, or with
@@ -448,7 +552,7 @@
   (let* ((w (panes-window layout key))
          (m (and w (plist-get w 'mode))))
     (if (and w (or (not m) (equal? m "fundamental-mode")))
-        (let* ((top (let ((bs (plist-get w 'buffers))) (and (pair? bs) (car bs))))
+        (let* ((top (let ((bs (plist-get w 'buffers))) (and (pair? bs) (panes--name (car bs)))))
                (tm (and top (buffer-known? top) (buffer-local top 'mode-name))))
           (or tm m))
         m)))
@@ -458,7 +562,7 @@
    empty pane gives no row."
   (filter (lambda (row) (cadr row))
           (map (lambda (p)
-                 (let ((ks (or (plist-get p 'windows) '())))
+                 (let ((ks (panes-keys p)))
                    (list (plist-get p 'id) (and (pair? ks) (car ks))
                          (and (pair? ks) (panes-window-buffer layout (car ks))))))
                (panes-panes layout))))
@@ -540,9 +644,9 @@
                                (cond ((or (not m) (member b (panes-buffers l)) (and modes (not (member m modes)))) l)
                                      ((panes-mode-window l m)
                                       (panes--update-window l (panes-mode-window l m)
-                                        (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list b))))))
+                                        (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list (panes--id b)))))))
                                      ((pair? (panes-panes l))
-                                      (car (panes-new-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
+                                      (car (panes-add-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
                                      (else l))))
                            layout (or extra '())))
              (wanted (panes--uniq (filter (lambda (m) (and m (or (not modes) (member m modes))))
@@ -552,7 +656,7 @@
                     l
                     (let ((k (find (lambda (k) (find (lambda (b) (equal? (mode-of b) m)) (panes-window-buffers l k)))
                                    (panes-window-keys l))))
-                      (if k (car (panes-new-window l (panes-pane-of l k) #f m #t)) l))))
+                      (if k (car (panes-add-window l (panes-pane-of l k) #f m #t)) l))))
               layout wanted))))
 
 (define (panes-consolidate layout &optional mode-of modes extra)
@@ -618,12 +722,12 @@
                                      l
                                      (let ((left (filter (lambda (b) (not (mine b))) (panes-window-buffers l k))))
                                        (cond ((= (length left) (length (panes-window-buffers l k))) l)
-                                             ((null? left) (panes-close-window l k))
-                                             (else (panes--update-window l k (lambda (w) (panes--put w 'buffers left))))))))
+                                             ((null? left) (panes-remove-window l k))
+                                             (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids left)))))))))
                                layout (panes-window-keys layout)))
                  (layout (if (panes-window layout home)
                              (panes--update-window layout home
-                               (lambda (w) (panes--put w 'buffers (append gathered (filter (lambda (b) (not (mine b))) (plist-get w 'buffers))))))
+                               (lambda (w) (panes--put w 'buffers (panes--ids (append gathered (filter (lambda (b) (not (mine b))) (map panes--name (plist-get w 'buffers))))))))
                              layout)))
             (loop (cdr ms) layout))))))
 
@@ -666,242 +770,69 @@
 (define (panes-strip-handles layout)
   "LAYOUT as it is saved: every handle is #f, so no handle outlives the
    frame."
-  (panes--set-windows layout (map (lambda (w) (panes--put w 'win #f)) (panes-windows layout))))
+  (panes--map-windows layout (lambda (w) (panes--put w 'win #f))))
 
 (define (panes-layout? x)
-  "#t when X is a well-formed layout, else #f."
-  ;; a plist whose panes and windows, when present, are lists of plists
-  ;; with an id and a key. This Scheme has no list?, so the shapes are
-  ;; walked by hand
+  "#t when X is a well-formed layout, else #f. A layout saved in the
+   old shape, its windows in a list of their own, is well formed too."
+  ;; a plist whose panes are plists with an id, each holding windows that
+  ;; are plists with a key (or keys, in the old shape). This Scheme has no
+  ;; list?, so the shapes are walked by hand
   (let* ((plist? (lambda (v)
                    (let loop ((v v))
                      (cond ((null? v) #t)
                            ((and (pair? v) (symbol? (car v)) (pair? (cdr v))) (loop (cddr v)))
                            (else #f)))))
-         (rows? (lambda (v key)
+         (rows? (lambda (v ok?)
                   (or (not v)
                       (and (or (null? v) (pair? v))
-                           (null? (filter (lambda (r) (not (and (plist? r) (plist-get r key)))) v)))))))
+                           (null? (filter (lambda (r) (not (ok? r))) v))))))
+         (window? (lambda (w) (or (string? w) (and (plist? w) (plist-get w 'key) #t))))
+         (pane? (lambda (p) (and (plist? p) (plist-get p 'id) (rows? (plist-get p 'windows) window?)))))
     (and (plist? x)
-         (rows? (plist-get x 'panes) 'id)
-         (rows? (plist-get x 'windows) 'key)
+         (rows? (plist-get x 'panes) pane?)
+         (rows? (plist-get x 'windows) (lambda (w) (and (plist? w) (plist-get w 'key) #t)))
          #t)))
 
-;;; --- policies ---------------------------------------------------------------------
-;;; A policy answers one question: where does BUF open? It reads the layout
-;;; and a context, and answers a decision; the model applies it. So a
-;;; policy is swappable, and every door (a visit, a display, a list row,
-;;; an agent) asks the same one.
+;;; --- the api ------------------------------------------------------------
+;;; Each level of the data has the same verbs. Every call takes a layout
+;;; and answers a new one; one that makes something answers (LAYOUT NEW).
 ;;;
-;;; CTX is a plist:
-;;;   mode          BUF's major mode, or #f
-;;;   selected      the key of the selected window, or #f
-;;;   kind          visit (the user goes there) or display (a result shows)
-;;;   inhibit-same  #t when the selected window may not take it
-;;;   recent        window keys, most recently used first; a pane is as
-;;;                 recent as its newest window
+;;;   panes    panes-add-pane LAYOUT [AT]           -> (LAYOUT ID)
+;;;            panes-remove-pane LAYOUT ID          its windows go with it
+;;;            panes-move-pane LAYOUT ID AT         reorder
+;;;   windows  panes-add-window LAYOUT PANE BUF MODE [BEHIND] -> (LAYOUT KEY)
+;;;            panes-remove-window LAYOUT KEY       its pane stays
+;;;            panes-move-window LAYOUT KEY PANE [AT]
+;;;   buffers  panes-show-buffer LAYOUT BUF MODE [PANE] -> (LAYOUT KEY)
+;;;            panes-remove-buffer LAYOUT BUF
+;;;            panes-move-buffer LAYOUT BUF KEY
+;;;   focus    panes-focus LAYOUT                   -> the focused pane's ID
+;;;            panes-set-focus LAYOUT ID
+;;;            panes-focus-window LAYOUT KEY        raise KEY, focus its pane
 ;;;
-;;; A decision is one of:
-;;;   (window KEY)       BUF comes to the front of KEY, and KEY to its pane's front
-;;;   (new-window PANE)  a new window on BUF at the front of PANE
-;;;   (new-pane)         a new pane at the end, with a new window on BUF
-
-(domain! 'windows)
-(effects! '(write))
-
-(define (define-window-policy! name doc place)
-  "Registers window policy NAME with DOC. PLACE is
-   (lambda (layout buf ctx) decision); panes-decide calls it."
-  (registry-register! 'window-policy name (list 'doc doc 'place place)))
-
-(define (window-policy-names)
-  "The names of every registered window policy."
-  (registry-names 'window-policy))
-
-(define (window-policy-place name)
-  "The PLACE procedure of window policy NAME, or #f when no policy has
-   that name."
-  (let ((e (registry-lookup 'window-policy name)))
-    (and e (plist-get e 'place))))
+;;; A window is locked to its mode, so panes-show-buffer puts a buffer in
+;;; its mode's window; a pane mixes modes by holding windows of different
+;;; modes. panes-move-buffer is the explicit exception.
 
 (domain! 'windows)
 (effects! '(pure))
 
-(define (panes--lru-pane layout ctx except)
-  "The pane of the least recently used window that is not in pane
-   EXCEPT. A window that CTX recent does not name counts as older than
-   every one it names. When every window is in EXCEPT, that pane; #f
-   when the layout has no window. Empty panes do not count."
-  (let* ((recent (or (plist-get ctx 'recent) '()))
-         (keys (panes-window-keys layout))
-         (unseen (filter (lambda (k) (not (member k recent))) keys))
-         (order (append unseen (reverse (filter (lambda (k) (member k keys)) recent))))
-         (panes (panes--uniq (map (lambda (k) (panes-pane-of layout k)) order)))
-         (other (filter (lambda (p) (not (equal? p except))) panes)))
-    (cond ((pair? other) (car other))
-          ((pair? panes) (car panes))
-          (else #f))))
-
-(define (panes--empty-pane layout ctx)
-  "An empty pane a buffer can open in: the selected one (CTX
-   selected-pane) when it is empty, else the first empty one; #f when
-   every pane holds a window."
-  (let ((sel (plist-get ctx 'selected-pane))
-        (empty (filter (lambda (id) (null? (or (plist-get (panes-pane layout id) 'windows) '())))
-                       (panes-pane-ids layout))))
-    (cond ((null? empty) #f)
-          ((member sel empty) sel)
-          (else (car empty)))))
-
-(define (panes--selected-pane layout ctx)
-  "The pane the selection is in: the pane of the selected window (CTX
-   selected), else the empty pane the selection stands in (CTX
-   selected-pane) when the layout still has it, else the first pane,
-   else #f."
-  (let ((sel (plist-get ctx 'selected)))
-    (or (and sel (panes-pane-of layout sel))
-        (let ((p (plist-get ctx 'selected-pane))) (and p (panes-pane layout p) p))
-        (let ((ids (panes-pane-ids layout))) (and (pair? ids) (car ids))))))
-
-(define (panes-place-mode-affinity layout buf ctx)
-  "The mode-affinity policy: a buffer belongs with its kind. The rules,
-   in order; the first that matches decides:
-   1. A visit from the selected empty pane fills that pane with a new
-      window, unless a window has BUF in front already.
-   2. The window that holds BUF: one that has it in front, else one of
-      its mode that keeps it in its stack. A window of another mode
-      that kept it from a stray display does not pull it back.
-   3. The preferred window of BUF's mode.
-   4. An empty pane: a new window in it.
-   5. No pane, or the layout is under capacity: a new pane.
-   6. A display, or inhibit-same: a new window in the least recently
-      used pane other than the selected one, else the selected pane.
-   7. Else a new window in the selected pane.
-   With inhibit-same, rule 1 does not apply, and rules 2 and 3 do not
-   take the selected window."
-  (let* ((mode (plist-get ctx 'mode))
-         (selected (plist-get ctx 'selected))
-         (inhibit (plist-get ctx 'inhibit-same))
-         (display? (equal? (plist-get ctx 'kind) 'display))
-         ;; a window holds the buffer when it shows it, or keeps it in its
-         ;; stack and is of its mode; a stack another mode kept from a stray
-         ;; display does not pull the buffer back
-         (held (or (panes-window-showing layout buf)
-                   (find (lambda (k) (equal? (panes-window-mode layout k) mode))
-                         (panes-windows-holding layout buf))))
-         (kin (panes-mode-window layout mode))
-         (sel-pane (panes--selected-pane layout ctx))
-         (empty (panes--empty-pane layout ctx)))
-    (cond ;; a visit from an empty pane fills it
-          ((and empty (not display?) (not inhibit) (equal? empty (plist-get ctx 'selected-pane))
-                (not (panes-window-showing layout buf)))
-           (list 'new-window empty))
-          ((and held (not (and inhibit (equal? held selected)))) (list 'window held))
-          ((and kin (not (and inhibit (equal? kin selected)))) (list 'window kin))
-          (empty (list 'new-window empty))
-          ((or (null? (panes-panes layout)) (panes-under-capacity? layout)) '(new-pane))
-          ((or display? inhibit)
-           (list 'new-window (or (panes--lru-pane layout ctx sel-pane) sel-pane)))
-          (else (list 'new-window sel-pane)))))
-
-(define (panes-place-emacs layout buf ctx)
-  "The emacs policy: placement as Emacs does it. The rules, in order;
-   the first that matches decides:
-   1. No pane: a new pane.
-   2. A visit with a selected window: that window.
-   3. A visit from the selected empty pane: a new window in it.
-   4. The window that has BUF in front.
-   5. An empty pane: a new window in it.
-   6. The layout is under capacity: a new pane.
-   7. The front window of the least recently used pane other than the
-      selected one, else the selected window, else a new window in the
-      least recently used pane or the selected pane.
-   With inhibit-same, rules 2 and 3 do not apply, and rules 4 and 7
-   do not take the selected window."
-  (let* ((selected (plist-get ctx 'selected))
-         (inhibit (plist-get ctx 'inhibit-same))
-         (display? (equal? (plist-get ctx 'kind) 'display))
-         (shown (panes-window-showing layout buf))
-         (sel-pane (panes--selected-pane layout ctx))
-         (empty (panes--empty-pane layout ctx)))
-    (cond ((null? (panes-panes layout)) '(new-pane))
-          ((and (not display?) (not inhibit) selected) (list 'window selected))
-          ((and empty (not display?) (not inhibit) (equal? empty (plist-get ctx 'selected-pane))) (list 'new-window empty))
-          ((and shown (not (and inhibit (equal? shown selected)))) (list 'window shown))
-          (empty (list 'new-window empty))
-          ((panes-under-capacity? layout) '(new-pane))
-          (else
-            (let* ((lru (panes--lru-pane layout ctx sel-pane))
-                   (ks (and lru (plist-get (panes-pane layout lru) 'windows))))
-              (cond ((and ks (pair? ks) (not (equal? lru sel-pane))) (list 'window (car ks)))
-                    ((and selected (not inhibit)) (list 'window selected))
-                    (else (list 'new-window (or lru sel-pane)))))))))
-
-(define-window-policy! 'mode-affinity
-  "Each mode has one window: a buffer opens in the window of its mode, a new mode takes a pane while there is room, else a window of its own in the selected pane."
-  panes-place-mode-affinity)
-
-(define-window-policy! 'emacs
-  "Emacs placement: a visit takes the selected window; a display reuses, pops a pane while there is room, else takes the least recently used window."
-  panes-place-emacs)
-
-(defcustom 'window-policy 'mode-affinity
-  "Where a buffer opens: 'mode-affinity keeps one window per mode, 'emacs places as Emacs does. define-window-policy! adds another."
-  'group 'windows 'type 'symbol)
-
-(define (panes-decide layout buf ctx &optional policy)
-  "The decision for BUF under POLICY, window-policy when absent. A name
-   no policy has falls back to mode-affinity. It only decides;
-   panes-apply-decision applies."
-  (let ((place (or (window-policy-place (or policy window-policy))
-                   panes-place-mode-affinity)))
-    (place layout buf ctx)))
-
-(define (panes-apply-decision layout buf mode decision)
-  "Applies DECISION: (LAYOUT KEY) with BUF at the front of KEY, and KEY
-   at the front of its pane.
-   (window KEY): BUF comes to the front of KEY.
-   (new-window PANE): a new window of MODE on BUF, at the front of PANE.
-   Any other decision, (new-pane) too: a new pane at the end, with a
-   new window of MODE on BUF."
-  (let ((what (car decision)))
-    (cond ((equal? what 'window) (list (panes-show layout (cadr decision) buf) (cadr decision)))
-          ((equal? what 'new-window) (panes-new-window layout (cadr decision) buf mode))
-          (else
-            (let ((added (panes-add-pane layout)))
-              (panes-new-window (car added) (cadr added) buf mode))))))
-
-(define (panes-open layout buf ctx &optional policy)
-  "BUF opens where the policy says: (LAYOUT KEY). It is panes-decide,
-   then panes-apply-decision with the mode in CTX."
-  (panes-apply-decision layout buf (plist-get ctx 'mode) (panes-decide layout buf ctx policy)))
-
-;;; --- the panes api -------------------------------------------------------
-;;; Four calls are the whole of what a caller does to the model:
-;;; panes-show-buffer, panes-remove-buffer, panes-move-window and
-;;; panes-move-pane. A window is locked to its mode, so every buffer goes
-;;; to its mode's window; a pane mixes modes by holding windows of
-;;; different modes.
-
 (define (panes-show-buffer layout buf mode &optional pane)
   "BUF shows, new or known: (LAYOUT KEY). The window of MODE that holds
    BUF, else MODE's window, takes BUF to its front and comes to the
-   front of its pane; it does not leave that pane. Only when MODE has no
-   window does a new one open: in PANE when given, else in an empty pane,
-   else in a new pane when one fits, else in the last pane."
+   front of its pane; it does not leave that pane. When MODE has no
+   window, a new one opens where the user is: in PANE, else in the
+   first pane, else in a new pane."
   (let ((key (or (find (lambda (k) (equal? (panes-window-mode layout k) mode))
                        (panes-windows-holding layout buf))
-                 (panes-mode-window layout mode))))
-    (if key
-        (list (panes-show layout key buf) key)
-        (let* ((ids (panes-pane-ids layout))
-               (home (or (and pane (panes-pane layout pane) pane)
-                         (find (lambda (id) (null? (or (plist-get (panes-pane layout id) 'windows) '()))) ids))))
-          (cond (home (panes-new-window layout home buf mode))
-                ((or (null? ids) (panes-under-capacity? layout))
-                 (let ((added (panes-add-pane layout)))
-                   (panes-new-window (car added) (cadr added) buf mode)))
-                (else (panes-new-window layout (list-ref ids (- (length ids) 1)) buf mode)))))))
+                 (panes-mode-window layout mode)))
+        (ids (panes-pane-ids layout)))
+    (cond (key (list (panes-show layout key buf) key))
+          ((and pane (panes-pane layout pane)) (panes-add-window layout pane buf mode))
+          ((pair? ids) (panes-add-window layout (car ids) buf mode))
+          (else (let ((added (panes-add-pane layout)))
+                  (panes-add-window (car added) (cadr added) buf mode))))))
 
 (define (panes-remove-buffer layout buf)
   "BUF leaves its window, and the next buffer of that window shows. A
@@ -909,14 +840,33 @@
    to the front; the pane stays."
   (panes-drop-buffer layout buf))
 
-(public! 'panes-open "(panes-open LAYOUT BUF CTX [POLICY]) -> (LAYOUT KEY): BUF opens where the window policy says; pure")
-(catalog-meta! 'function "panes-open" 'effects '(pure))
-(public! 'panes-show-buffer "(panes-show-buffer LAYOUT BUF MODE [PANE]) -> (LAYOUT KEY): BUF to the front of its mode's window, that window to the front of its pane; a new window only when MODE has none")
+(public! 'panes-show-buffer "(panes-show-buffer LAYOUT BUF MODE [PANE]) -> (LAYOUT KEY): BUF to the front of its mode's window, that window to the front of its pane; a mode with no window gets a new one in PANE")
 (catalog-meta! 'function "panes-show-buffer" 'effects '(read))
 (public! 'panes-remove-buffer "(panes-remove-buffer LAYOUT BUF) -> LAYOUT: BUF leaves its window; the next buffer shows, an emptied window closes and the next window of its pane shows; pure")
 (catalog-meta! 'function "panes-remove-buffer" 'effects '(pure))
-(public! 'panes-decide "(panes-decide LAYOUT BUF CTX [POLICY]) -> (window KEY) | (new-window PANE) | (new-pane): where BUF would open; pure")
-(catalog-meta! 'function "panes-decide" 'effects '(pure))
 (public! 'panes-split-off "(panes-split-off LAYOUT BUFS FROM) -> (LAYOUT KEY) | #f: BUFS move to a new window of FROM's mode beside FROM; pure")
 (catalog-meta! 'function "panes-split-off" 'effects '(pure))
-(public! 'define-window-policy! "(define-window-policy! NAME DOC PLACE) -- register a window policy; PLACE is (lambda (layout buf ctx) decision)")
+(public! 'panes-keys "(panes-keys PANE) -> (KEY ...): the keys of PANE's windows, the one on screen first; pure")
+(catalog-meta! 'function "panes-keys" 'effects '(pure))
+(public! 'panes-pane-keys "(panes-pane-keys LAYOUT ID) -> (KEY ...): the keys of pane ID's windows, the one on screen first; pure")
+(catalog-meta! 'function "panes-pane-keys" 'effects '(pure))
+(public! 'panes-add-pane "(panes-add-pane LAYOUT [AT]) -> (LAYOUT ID): a new empty pane at index AT, the end when absent; pure")
+(catalog-meta! 'function "panes-add-pane" 'effects '(pure))
+(public! 'panes-remove-pane "(panes-remove-pane LAYOUT ID) -> LAYOUT: pane ID goes with its windows; the last pane stays; pure")
+(catalog-meta! 'function "panes-remove-pane" 'effects '(pure))
+(public! 'panes-move-pane "(panes-move-pane LAYOUT ID AT) -> LAYOUT: pane ID moves to index AT with its windows; pure")
+(catalog-meta! 'function "panes-move-pane" 'effects '(pure))
+(public! 'panes-add-window "(panes-add-window LAYOUT PANE BUF MODE [BEHIND]) -> (LAYOUT KEY): a new window of MODE on BUF at the front of PANE, or the back when BEHIND")
+(catalog-meta! 'function "panes-add-window" 'effects '(read))
+(public! 'panes-remove-window "(panes-remove-window LAYOUT KEY) -> LAYOUT: window KEY goes with its stack; its pane stays; pure")
+(catalog-meta! 'function "panes-remove-window" 'effects '(pure))
+(public! 'panes-move-window "(panes-move-window LAYOUT KEY PANE [AT]) -> LAYOUT: window KEY moves to PANE at index AT, the front when absent; the pane it leaves stays; pure")
+(catalog-meta! 'function "panes-move-window" 'effects '(pure))
+(public! 'panes-move-buffer "(panes-move-buffer LAYOUT BUF KEY) -> LAYOUT: BUF leaves its window for the front of window KEY; a window left empty closes")
+(catalog-meta! 'function "panes-move-buffer" 'effects '(read))
+(public! 'panes-focus "(panes-focus LAYOUT) -> ID: the focused pane; its front window is the focused window; pure")
+(catalog-meta! 'function "panes-focus" 'effects '(pure))
+(public! 'panes-set-focus "(panes-set-focus LAYOUT ID) -> LAYOUT: pane ID takes the focus; the draw selects it; pure")
+(catalog-meta! 'function "panes-set-focus" 'effects '(pure))
+(public! 'panes-focus-window "(panes-focus-window LAYOUT KEY) -> LAYOUT: KEY to the front of its pane, and its pane takes the focus; pure")
+(catalog-meta! 'function "panes-focus-window" 'effects '(pure))

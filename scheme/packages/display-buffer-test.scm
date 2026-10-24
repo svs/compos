@@ -205,8 +205,8 @@
           (check-equal! (caddr (display-buffer-actions-for "*zz-db-b*")) 'pop-up-window
                         "free restores sensible splitting"))))))
 
-(deftest 'same-window-is-the-last-resort-and-inhibit-keeps-it-out
-  "with the same window inhibited and nothing else, the display fails rather than covers"
+(deftest 'a-same-window-rule-shows-it-here
+  "a same-window rule shows the buffer in the selected window"
   (lambda ()
     (t--db-with t--db-never
       (lambda ()
@@ -215,14 +215,7 @@
         (let ((me (active-window)))
           (check-equal! (display-buffer "*zz-db-a*") me "a same-window rule shows it here")
           (check-equal! (current-buffer) "*zz-db-a*" "and it is current")
-          (check-equal! (length (window-list)) 1 "no split"))
-        (set! *display-buffer-alist* (list (list "*zz-db" '(same-window) '())))
-        (set! *display-buffer-fallback-action* '())
-        (buffer-create "*zz-db-b*")
-        (check-false! (display-buffer "*zz-db-b*" '(inhibit-same-window #t))
-                      "inhibited, with no other action, there is no window")
-        (set! *display-buffer-fallback-action*
-              '(reuse-window pop-up-window use-some-window same-window))))))
+          (check-equal! (length (window-list)) 1 "no split"))))))
 
 (deftest 'pop-to-buffer-shows-and-selects
   "display-buffer selects nothing; pop-to-buffer selects the window it used"

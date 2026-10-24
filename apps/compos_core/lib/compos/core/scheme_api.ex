@@ -2582,7 +2582,7 @@ defmodule Compos.Core.SchemeAPI do
       # annotation, so a prompt matches what a candidate MEANS. #t means
       # the first field; an integer N means the first N fields.
       {"minibuffer-read*",
-       "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail."} =>
+       "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, selected (the label of the row it opens on), style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail."} =>
         fn [prompt, candidates, handlers] ->
           map =
             Map.new(handlers, fn [k, v] ->
@@ -2610,6 +2610,8 @@ defmodule Compos.Core.SchemeAPI do
                 # and a key legend for the head row, ((KEY LABEL) ...)
                 "note" -> {:note, v}
                 "legend" -> {:legend, v}
+                # the row the prompt opens on: imenu opens on the definition point is in
+                "selected" -> {:selected, v}
                 key -> {String.to_existing_atom("on_" <> key), v}
               end
             end)

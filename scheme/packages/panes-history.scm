@@ -19,7 +19,7 @@
 
 ;; the arrangement alone: each pane as (ID SHARE (WINDOW-KEY ...))
 (define (panes-shape layout)
-  (map (lambda (p) (list (plist-get p 'id) (plist-get p 'share) (or (plist-get p 'windows) '())))
+  (map (lambda (p) (list (plist-get p 'id) (plist-get p 'share) (panes-keys p)))
        (panes-panes layout)))
 
 ;; a history: the states, newest first, the current one at the head;

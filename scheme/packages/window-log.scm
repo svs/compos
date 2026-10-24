@@ -93,7 +93,7 @@
                  (string-append (plist-get p 'id) "("
                                 (string-join (map (lambda (k) (string-append k ":" (or (panes-window-buffer l k) "-")
                                                                             (let ((n (length (panes-window-buffers l k)))) (if (> n 1) (string-append "+" (number->string (- n 1))) ""))))
-                                                  (or (plist-get p 'windows) '()))
+                                                  (panes-keys p))
                                              " ")
                                 ")"))
                (panes-panes l))

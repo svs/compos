@@ -89,7 +89,7 @@
     (cons id (if (and (not force) (panes-board--shut? buf id))
                  '()
                  (apply append (map (lambda (k) (panes-board--window-rows buf g l k #f))
-                                    (or (plist-get (panes-pane l pid) 'windows) '())))))))
+                                    (panes-pane-keys l pid)))))))
 
 (define (panes-board--group-rows buf g)
   (let ((l (panes-board-layout-of g)))
@@ -209,12 +209,12 @@
                   (i (panes--index-of pid (panes-pane-ids l)))
                   ;; this group's panes as the frame draws them, the layout target's share included
                   (shares (if (and here? (= (length (panes--top-shares l)) (panes-pane-count l))) (panes--top-shares l) (panes-shares l)))
-                  (share (list-ref shares i))
-                  (me (and here? (any (lambda (k) (equal? (panes-handle l k) (active-window))) (or (plist-get p 'windows) '())))))
+                  (share (if (and i (< i (length shares))) (list-ref shares i) 0))
+                  (me (and here? (any (lambda (k) (equal? (panes-handle l k) (active-window))) (panes-keys p)))))
              (list (list (if here? "■" "□") (if here? "ok" "faint"))
                    (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) (if me "accent" #f))
                    (list (panes-board--pct share) "faint")
-                   (list (let ((n (length (or (plist-get p 'windows) '())))) (if (= n 0) "empty" (string-append (number->string n) " windows"))) "dim"))))
+                   (list (let ((n (length (panes-keys p)))) (if (= n 0) "empty" (string-append (number->string n) " windows"))) "dim"))))
           ((equal? kind "w")
            (let* ((k (panes-board-key id))
                   (h (and here? (panes-handle l k)))
@@ -280,7 +280,7 @@
               (let* ((l (panes-board-layout))
                      (kind (panes-board-kind id))
                      (key (if (equal? kind "p")
-                              (let ((ks (plist-get (panes-pane l (panes-board-key id)) 'windows))) (and (pair? ks) (car ks)))
+                              (let ((ks (panes-pane-keys l (panes-board-key id)))) (and (pair? ks) (car ks)))
                               (panes-board-key id)))
                      ;; here: the pane the list stands in; the window takes its place
                      (me (panes-key-of-handle l (active-window)))
@@ -310,11 +310,11 @@
                        (from (panes-pane-of l key))
                        (ids (panes-pane-ids l))
                        (i (+ dir (panes--index-of from ids))))
-                  (cond ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i)))
+                  (cond ((and (>= i 0) (< i (length ids))) (panes--prune-pane (panes-move-window l key (list-ref ids i)) from))
                         ((not (panes-under-capacity? l)) (message "no pane that way") l)
                         (else
                           (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
-                            (panes-move-window (car added) key (cadr added))))))))))))
+                            (panes--prune-pane (panes-move-window (car added) key (cadr added)) from)))))))))))
 
 (define-command "panes-board-left" "Move this window to the pane on its left; a pane row moves the pane"
   (lambda () (panes-board-shift! -1)))
@@ -329,11 +329,11 @@
         (let ((kind (panes-board-kind id)))
           (cond ((equal? kind "g") l)
                 ((equal? kind "p") (panes-remove-pane l (panes-board-key id)))
-                ((equal? kind "w") (panes-close-window l (panes-board-key id)))
+                ((equal? kind "w") (panes-remove-window l (panes-board-key id)))
                 (else
                   (let* ((key (panes-board-key id)) (b (panes-board-buffer-of id))
                          (left (panes--without b (panes-window-buffers l key))))
-                    (if (null? left) (panes-close-window l key) (panes-set-buffers l key left))))))))))
+                    (if (null? left) (panes-remove-window l key) (panes-set-buffers l key left))))))))))
 
 (define-command "panes-board-add-pane" "Add an empty pane after the pane on this row"
   (lambda ()
@@ -467,9 +467,11 @@
   (let ((buf (panes-board-buffer))
         (here (and (panes-layout) (panes-key-of-handle (panes-layout) (active-window)))))
     (buffer-create buf)
-    (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
+    ;; the view and root first: the mode draws the rows when it starts, and
+    ;; a root left from an older model is not a row it can draw
     (buffer-set-local! buf 'panes-board-view view)
     (buffer-set-local! buf 'panes-board-root root)
+    (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
     ;; a buffer like any other: it opens in this window, and q goes back
     (switch-to-buffer! buf)
     (list-refresh! buf)

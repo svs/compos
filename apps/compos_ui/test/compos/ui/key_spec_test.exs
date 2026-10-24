@@ -29,6 +29,7 @@ defmodule Compos.Ui.KeySpecTest do
     const cases = #{Jason.encode!(cases)};
     const out = cases.map((c) => {
       globalThis.document = {
+        documentElement: { classList: { contains: () => false } },
         querySelector: (s) => s === ".window.active .cap-pop" && c.completion ? {} : null,
         activeElement: c.editable
           ? { closest: (s) => (
@@ -187,14 +188,22 @@ defmodule Compos.Ui.KeySpecTest do
     end
 
     test "a plain arrow on an editable surface is native motion" do
-      [plain, shifted] =
+      [plain] = run([%{event: event("ArrowLeft", "ArrowLeft"), editable: true}])
+      assert plain["native"] == true
+    end
+
+    test "a Shift-arrow is the window motion until editing, and arms nothing" do
+      [moving, editing] =
         run([
-          %{event: event("ArrowLeft", "ArrowLeft"), editable: true},
-          %{event: event("ArrowLeft", "ArrowLeft", [:shiftKey]), editable: true}
+          %{event: event("ArrowLeft", "ArrowLeft", [:shiftKey]), editable: true, editing: false},
+          %{event: event("ArrowLeft", "ArrowLeft", [:shiftKey]), editable: true, editing: true}
         ])
 
-      assert plain["native"] == true
-      assert shifted["native"] == true
+      assert moving["native"] == false
+      assert moving["spec"] == "S-<left>"
+      assert moving["after"] == false
+      assert editing["native"] == true
+      assert editing["after"] == true
     end
 
     test "PageDown and PageUp are keys on an editable surface" do

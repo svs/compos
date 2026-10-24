@@ -1572,7 +1572,13 @@
                         (l (goto-char! (line-start-position l)) (mark!)))))
               on-confirm
               (lambda () (when restore (restore)) (goto-char! orig) (mark!))
-              #t #f #f #f (keys))
+              #t #f #f #f (keys)
+              ;; it opens on the row point is in: the last one that starts at or above it
+              (let ((here (line-number-at-pos orig)))
+                (let find ((cs (cands)) (best #f))
+                  (cond ((null? cs) best)
+                        ((<= (cadr (car cs)) here) (find (cdr cs) (car (car cs))))
+                        (else (find (cdr cs) best))))))
             (set! *mb-change-fn*
               (lambda (input)
                 (let ((now (not (equal? input ""))))

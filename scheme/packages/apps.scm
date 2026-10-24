@@ -218,7 +218,7 @@
                    (let* ((layout (panes-validate layout buffer-known?))
                           (l (fold (lambda (l b) (if (equal? (app-id b) id) (panes-drop-buffer l b) l))
                                    layout (panes-buffers layout))))
-                     (fold (lambda (l k) (if (member (panes-window-mode l k) modes) (panes-close-window l k) l))
+                     (fold (lambda (l k) (if (member (panes-window-mode l k) modes) (panes-remove-window l k) l))
                            l (panes-window-keys l)))
                    #f))
          (screen (if kept
@@ -240,7 +240,7 @@
              (if (or (null? fill) (>= (panes-pane-count l) room))
                  (and (pair? (panes-panes l)) (begin (panes-apply! l) (map caddr (panes-visible l))))
                  (let* ((added (panes-add-pane l))
-                        (made (panes-new-window (car added) (cadr added) (car fill) (panes--buffer-mode (car fill)))))
+                        (made (panes-add-window (car added) (cadr added) (car fill) (panes--buffer-mode (car fill)))))
                    (loop (car made) (cdr fill))))))
           (else
            (let* ((more (append screen fill))

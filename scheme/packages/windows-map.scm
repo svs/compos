@@ -24,7 +24,7 @@
 (define (windows-map--get k) (buffer-local *windows-map-buffer* k))
 (define (windows-map--set! k v) (buffer-set-local! *windows-map-buffer* k v))
 
-(define (windows-map--keys l pid) (or (plist-get (panes-pane l pid) 'windows) '()))
+(define (windows-map--keys l pid) (panes-pane-keys l pid))
 
 ;; the selection: (PANE WINDOW-KEY), the key #f on an empty pane. A pane
 ;; or window an edit removed falls back to the nearest one left.
@@ -122,10 +122,10 @@
       (let* ((key (cadr sel)) (ids (panes-pane-ids l))
              (i (+ dir (or (windows-map--index (car sel) ids) 0))))
         (cond ((not key) l)
-              ((and (>= i 0) (< i (length ids))) (panes-move-window l key (list-ref ids i) 0))
+              ((and (>= i 0) (< i (length ids))) (panes--prune-pane (panes-move-window l key (list-ref ids i) 0) (car sel)))
               ((not (panes-under-capacity? l)) (message "no pane that way") l)
               (else (let ((added (panes-add-pane l (if (< i 0) 0 (length ids)))))
-                      (panes-move-window (car added) key (cadr added) 0))))))))
+                      (panes--prune-pane (panes-move-window (car added) key (cadr added) 0) (car sel)))))))))
 
 (define (windows-map--reorder! dir)
   (windows-map--edit!
@@ -147,7 +147,7 @@
 (define (windows-map--close!)
   (windows-map--edit!
     (lambda (l sel)
-      (cond ((cadr sel) (panes-close-window l (cadr sel)))
+      (cond ((cadr sel) (panes-remove-window l (cadr sel)))
             ((> (panes-pane-count l) 1) (panes-remove-pane l (car sel)))
             (else l)))))
 

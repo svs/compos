@@ -417,7 +417,7 @@
                        (there (window-showing-other buf from))
                        (w (or own (with-display-preview
                                     (lambda ()
-                                      (display-buffer buf '(category preview inhibit-same-window #t)))))))
+                                      (display-buffer buf '(category preview)))))))
                   ;; the next look takes over the last one's record
                   (when own
                     (window-preview-buffer! buf own)
@@ -499,8 +499,7 @@
 ;;;   shaped           the dock or the float, by the buffer's window-shape
 ;;;
 ;;; ALIST is a plist the caller passes. 'category names the kind of display,
-;;; and a rule (category KIND) matches it. 'inhibit-same-window #t keeps
-;;; the selected window out of the chain. A window the chain made or took
+;;; and a rule (category KIND) matches it. A window the chain made or took
 ;;; is noted for quit-window: q deletes the window the display made, or
 ;;; puts back the buffer the display replaced.
 ;;;
@@ -696,20 +695,17 @@
       (select-window! (car (nth (min (cadr token) (- (length matches) 1)) matches))))))
 
 ;; A user open selects its result. A display records how to quit and keeps focus.
-(define (layout-target-open! name select? inhibit-same?)
+(define (layout-target-open! name select?)
   (and (fill-candidate? name) (window-fill-member? name)
        (not (buffer-context?))
        (let* ((selected (active-window))
               (focus (window-buffer selected))
-              (shown (if inhibit-same?
-                         (window-showing-other name selected)
-                         (window-showing name)))
+              (shown (window-showing name))
               ;; One window per mode outranks the target's spare capacity. A
               ;; three-column target is no licence to show two chats: the
               ;; second one takes the pane the first one already holds.
               (kin (and (not shown)
-                        (window-showing-mode (display-buffer-mode name)
-                                             (and inhibit-same? selected))))
+                        (window-showing-mode (display-buffer-mode name))))
               (panes (layout-target-visible-buffers))
               (capacity (layout-target-capacity (layout-target))))
          (cond (shown
@@ -968,17 +964,14 @@
 
 (define-display-action! 'same-window
   (lambda (name alist)
-    (if (plist-get alist 'inhibit-same-window)
-        #f
-        (begin (switch-to-buffer-here! name) (active-window)))))
+    (switch-to-buffer-here! name)
+    (active-window)))
 
 (define-display-action! 'same (display-action-fn 'same-window))
 
 (define-display-action! 'reuse-window
   (lambda (name alist)
-    (if (plist-get alist 'inhibit-same-window)
-        (window-showing-other name (active-window))
-        (window-showing name))))
+    (window-showing name)))
 
 ;; A window prefers the mode of its work buffer. Temporary covers keep the
 ;; preference of the nearest work buffer in its own history. This uses the
@@ -1064,9 +1057,7 @@
 
 (define-display-action! 'mode-window
   (lambda (name alist)
-    (let ((win (window-showing-mode
-                 (display-buffer-mode name)
-                 (and (plist-get alist 'inhibit-same-window) (active-window)))))
+    (let ((win (window-showing-mode (display-buffer-mode name))))
       (and win (display-buffer-in-window! win name)))))
 
 (define-display-action! 'pop-up-window
@@ -1096,12 +1087,12 @@
 
 ;; An agent never puts its work in the user's window by accident. It works
 ;; on a file buffer, or on a buffer it made, by name. When the user asks to
-;; see a buffer, the agent shows it in the other window
-;; (inhibit-same-window), whoever made the buffer. Any other display of
+;; see a buffer, the agent shows it with display-buffer-other-window!,
+;; which marks the display 'requested, whoever made the buffer. Any other display of
 ;; such a buffer gets #f, so the agent can tell nothing was shown.
 (define (display-buffer-agent-refuses? name alist)
   (and (agent-edit-author? (current-edit-author))
-       (not (plist-get alist 'inhibit-same-window))
+       (not (plist-get alist 'requested))
        (buffer-known? name)
        (or (buffer-path name) (buffer-local name 'context-only))
        #t))
@@ -1122,7 +1113,7 @@
                      (group-panes-open! name #f))
                 (and (layout-target) (not (layout-arranging?)) (pair? actions)
                      (not (member (car actions) *display-buffer-outside-layout*))
-                     (layout-target-open! name #f (plist-get a 'inhibit-same-window)))
+                     (layout-target-open! name #f))
                 (display-buffer-run-actions name a actions)))))))
 
 ;; show NAME and select its window (Emacs pop-to-buffer)
@@ -1142,7 +1133,7 @@
 ;; The one exception is a list's detail window, which is remembered on
 ;; purpose so every row lands in the same place (packages/detail.scm).
 (define (display-buffer-other-window! name)
-  (display-buffer name '(inhibit-same-window #t)))
+  (display-buffer name '(requested #t)))
 (domain! 'files)
 (effects! '(read))
 
@@ -2932,12 +2923,11 @@ bottom, as a window-rects row; #f past either end."
             (message "Could not move window"))
         (message (string-append "No window " (symbol->string dir))))))
 
-(define-command "window-previous-pane" "Move this window to the previous pane with its complete buffer stack"
-  ;; under the window model it goes on top of that pane's windows
-  (lambda () (if (and (boundp 'panes-mode) panes-mode) (panes--shift-window! -1) (window-swap! 'previous))))
-(define-command "window-next-pane" "Move this window to the next pane with its complete buffer stack"
-  ;; under the window model it goes on top of that pane's windows
-  (lambda () (if (and (boundp 'panes-mode) panes-mode) (panes--shift-window! 1) (window-swap! 'next))))
+(define-command "window-previous-pane" "Move this window to the front of the previous pane with its complete buffer stack"
+  ;; the window model moves it (panes--shift-window!, panes-mode.scm)
+  (lambda () (panes--shift-window! -1)))
+(define-command "window-next-pane" "Move this window to the front of the next pane with its complete buffer stack"
+  (lambda () (panes--shift-window! 1)))
 (define-command "window-up" "Move this window upward with its complete buffer stack"
   (lambda () (window-swap! 'up)))
 (define-command "window-down" "Move this window downward with its complete buffer stack"
@@ -3087,7 +3077,7 @@ and right walk the panes, up and down move by geometry."
 (public! 'delete-window-id! "(delete-window-id! ID)")
 (public! 'delete-other-windows! "Make the active window the only one")
 (public! 'display-buffer
-  "(display-buffer NAME [ALIST]) — show NAME where the display rules and the action chain say, selecting nothing; returns the window. ALIST is a plist: 'category KIND, 'inhibit-same-window #t")
+  "(display-buffer NAME [ALIST]) — show NAME where the display rules and the action chain say, selecting nothing; returns the window. ALIST is a plist: 'category KIND, 'requested #t (an agent shows what the user asked to see)")
 (public! 'pop-to-buffer
   "(pop-to-buffer NAME [ALIST]) — display-buffer, then select the window it used")
 (public! 'display-buffer-actions-for

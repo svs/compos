@@ -132,9 +132,9 @@
   // the Cmd-arrows are then the platform's line start and end and
   // document start and end, native, because a server round trip
   // for them read as lag.
-  // ESC or C-g returns it to the movement state. A modifier alone
-  // and a plain Cmd-arrow change nothing: they are the window
-  // motion itself, or the shift before a chord.
+  // ESC or C-g returns it to the movement state. A modifier alone,
+  // a plain Cmd-arrow and a plain Shift-arrow change nothing: they are
+  // the window motion itself, or the shift before a chord.
   function editingAfterKey(e, editing) {
     if (document.documentElement.classList.contains("windows-overview")) return false;
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return editing;
@@ -142,6 +142,8 @@
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === "g") return false;
     if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey &&
         NAMED[e.key] && e.key.startsWith("Arrow")) return editing;
+    if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
+        e.key.startsWith("Arrow")) return editing;
     return true;
   }
   function nativeTextKey(e, editing) {
@@ -165,6 +167,9 @@
     if (e.ctrlKey || e.altKey || e.metaKey) return false;
     if (e.key === "Dead" || e.key === "Process" || e.key === "Unidentified") return true;
     if (e.key.length === 1) return true;
+    // Shift-arrows select in the editing state; in the movement state
+    // they are keys, the window motion
+    if (e.shiftKey && e.key.startsWith("Arrow")) return editing === true;
     if (NATIVE_MOTION.includes(e.key)) return true;
     return !e.shiftKey && (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete");
   }

@@ -8,10 +8,10 @@
 (define (pht-layout)
   ;; two panes: a holds x over y, b holds z
   (let* ((r (panes-add-pane (panes-empty))) (l (car r)) (pa (cadr r))
-         (r (panes-new-window l pa "x" "m-mode")) (l (car r)) (wa (cadr r))
+         (r (panes-add-window l pa "x" "m-mode")) (l (car r)) (wa (cadr r))
          (l (panes-set-buffers l wa '("x" "y")))
          (r (panes-add-pane l)) (l (car r)) (pb (cadr r))
-         (r (panes-new-window l pb "z" "n-mode")) (l (car r)))
+         (r (panes-add-window l pb "z" "n-mode")) (l (car r)))
     (list l wa pb)))
 
 (deftest 'layout-history-records-shapes-not-buffers
@@ -47,7 +47,7 @@
   (lambda ()
     (let* ((made (pht-layout)) (l (car made)) (wa (cadr made)) (pb (caddr made))
            (recorded l)
-           (now (panes-show (panes-close-window l (car (plist-get (panes-pane l pb) 'windows))) wa "y"))
+           (now (panes-show (panes-remove-window l (car (panes-pane-keys l pb))) wa "y"))
            (merged (panes-history-merge now recorded (lambda (b) (not (equal? b "z"))))))
       (check-equal! (length (panes-panes merged)) 1 "the pane whose only buffer is gone does not come back")
       (check-equal! (panes-window-buffer merged wa) "y" "the surviving window shows what it shows now")

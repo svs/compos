@@ -22,6 +22,13 @@ Almost every editor task should be completed in Scheme. Write Scheme unless the 
 - Query apropos-components and read `docs/COMPONENTS.md` before choosing UI. Reuse a catalogued component when it fits.
 - Read `docs/PROMPTS.md` before changing prompt composition.
 
+## Apps
+
+Before you build new functionality, decide if it should be an app, and lean toward an app. An app is a listing with one row per thing, a detail buffer for each row, and the same actions on both, opened by one command. A list with details, a dashboard, and a view of an outside service are apps.
+
+- When the request could be an app, tell the user that you recommend an app and ask before you build. If the user says no, build what they asked for.
+- Load `(skill "app-creator")` before you write an app.
+
 ## Async
 
 Never block the editor lane waiting for a slow answer. `(wait-until ...)`, a bare blocking read, and a poll loop stall every buffer, every keystroke, and every other session until they return. Run the slow work in a task:

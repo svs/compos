@@ -129,6 +129,14 @@ defmodule Compos.Core.Candidates do
   def put_query(list, query),
     do: refilter(%{list | query: query, sel: 0, touched: false})
 
+  @doc "Put the selection on the row LABEL; a label the list does not show leaves it."
+  def select_label(list, label) do
+    case Enum.find_index(list.filtered, &(Map.get(&1, :label) == label)) do
+      nil -> list
+      i -> %{list | sel: i}
+    end
+  end
+
   @doc """
   Move the selection; marks the list as explicitly touched by the user.
 

@@ -1065,7 +1065,7 @@ the next row down. STEP is kept for the callers."
          (pane (and k (panes-pane-of l k))))
     (if pane
         (panes--uniq (apply append (map (lambda (key) (panes-window-buffers l key))
-                                        (or (plist-get (panes-pane l pane) 'windows) '()))))
+                                        (panes-pane-keys l pane))))
         (switch-pane-buffers win))))
 
 ;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...)

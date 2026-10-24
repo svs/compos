@@ -1568,6 +1568,12 @@ defmodule Compos.Core.Editor do
         )
       )
 
+    mb =
+      case mb[:selected] do
+        label when is_binary(label) -> %{mb | list: Candidates.select_label(mb.list, label)}
+        _ -> mb
+      end
+
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 

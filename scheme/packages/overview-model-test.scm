@@ -31,7 +31,7 @@
 (define (t--ov-run from keys) (windows-overview-session t--ov-model t--ov-rows from keys t--ov-buffer-of))
 
 (define (t--ov-fronts m)
-  (map (lambda (p) (panes-handle m (car (plist-get p 'windows)))) (panes-panes m)))
+  (map (lambda (p) (panes-handle m (car (panes-keys p)))) (panes-panes m)))
 
 (deftest 'overview-grid-is-even
   "the tiles lay in rows that differ by one at most"
@@ -129,5 +129,4 @@
     (let ((m t--ov-model))
       (check-equal! (panes-model-faults m) '() "the sample model is whole")
       (check-equal! (length (panes-model-faults (panes-set-handle (panes-set-handle m "w4" 10) "w6" 10))) 1 "window 10 held three times is one fault")
-      (check-true! (pair? (panes-model-faults (panes--put m 'panes (cons (list 'windows '("w1") 'id "p9" 'share 1) (panes-panes m))))) "w1 in two panes")
-      (check-true! (pair? (panes-model-faults (panes--put m 'panes (cons (list 'windows '("w99") 'id "p9" 'share 1) (panes-panes m))))) "a pane names w99"))))
+      (check-true! (pair? (panes-model-faults (panes--put m 'panes (cons (list 'windows (list (panes-window m "w1")) 'id "p9" 'share 1) (panes-panes m))))) "w1 in two panes"))))

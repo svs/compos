@@ -591,7 +591,7 @@
        cands))
 
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint style complete collect shortcuts)
+                                 &optional match-hint style complete collect shortcuts selected)
   ;; the outer prompt's cancel handler clears *mb-select-fn*, so let it run
   ;; BEFORE this prompt installs its own. minibuffer-read* would quit the
   ;; outer prompt for us, but by then the new hook is already in place and
@@ -627,7 +627,9 @@
               (list 'match-hint (if match-hint match-hint #f))
               (list 'style style))
         (if complete (list (list 'complete complete)) '())
-        (if collect (list (list 'collect collect)) '())))))
+        (if collect (list (list 'collect collect)) '())
+        ;; SELECTED is the label of the row the prompt opens on
+        (if selected (list (list 'selected selected)) '())))))
 
 ;;; --- minibuffer-mode ---------------------------------------------------------
 ;;; The prompt's input is a buffer, because typing, DEL, yank and undo are

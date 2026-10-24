@@ -225,10 +225,11 @@
     (if (null? ws)
         l
         (let* ((w (car ws)) (k (plist-get w 'key))
-               (bufs (filter (lambda (b) (not (equal? b buf))) (or (plist-get w 'buffers) '()))))
+               (all (panes-window-buffers l k))
+               (bufs (filter (lambda (b) (not (equal? b buf))) all)))
           (loop (cdr ws)
-                (cond ((equal? bufs (or (plist-get w 'buffers) '())) l)
-                      ((null? bufs) (panes-close-window l k))
+                (cond ((equal? bufs all) l)
+                      ((null? bufs) (panes-remove-window l k))
                       (else (panes-set-buffers l k bufs))))))))
 
 (define (windows-overview-session model rows from keys buffer-of)
@@ -391,10 +392,7 @@
 
 (define (windows-overview--swap-keys model a b)
   ;; pure: windows A and B trade places in the panes
-  (let ((sw (lambda (k) (cond ((equal? k a) b) ((equal? k b) a) (else k)))))
-    (panes--put model 'panes
-                (map (lambda (p) (panes--put p 'windows (map sw (or (plist-get p 'windows) '()))))
-                     (panes-panes model)))))
+  (panes-swap-windows model a b))
 
 (define (windows-overview-return-model model from chosen bufs mode)
   ;; pure: the window model after the overview, from the window it opened
@@ -407,7 +405,7 @@
     (cond ((or (not chosen) (equal? chosen from) (member chosen tops) (not kf)) model)
           (kc (windows-overview--swap-keys model kf kc))
           (else
-            (let* ((made (panes-new-window model (panes-pane-of model kf) (and (pair? bufs) (car bufs)) mode))
+            (let* ((made (panes-add-window model (panes-pane-of model kf) (and (pair? bufs) (car bufs)) mode))
                    (l (panes-set-buffers (car made) (cadr made) bufs)))
               (panes-set-handle l (cadr made) chosen))))))
 
@@ -422,11 +420,11 @@
                  (if (null? ks) l (loop (cdr ks) (windows-overview-model-kill l (car (car ks)) (cadr (car ks)))))))
          (handles (filter (lambda (h) h) (map (lambda (w) (plist-get w 'win)) (panes-windows after))))
          (keys (map (lambda (w) (plist-get w 'key)) (panes-windows after)))
-         (placed (apply append (map (lambda (p) (or (plist-get p 'windows) '())) (panes-panes after))))
-         (shown (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows after))))
+         (placed (apply append (map (lambda (p) (panes-keys p)) (panes-panes after))))
+         (shown (apply append (map (lambda (k) (panes-window-buffers after k)) (panes-window-keys after))))
          (count (lambda (x xs) (length (filter (lambda (y) (equal? x y)) xs))))
          (shape (lambda (m) (map (lambda (p) (list (plist-get p 'id) (plist-get p 'share))) (panes-panes m))))
-         (front (lambda (m) (map (lambda (p) (let ((ks (or (plist-get p 'windows) '())))
+         (front (lambda (m) (map (lambda (p) (let ((ks (panes-keys p)))
                                                (list (plist-get p 'id) (and (pair? ks) (panes-handle m (car ks))))))
                                  (panes-panes m))))
          (kf (panes-key-of-handle base from))

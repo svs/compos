@@ -213,7 +213,7 @@
                                     (equal? (buffer-local (window-buffer w) 'detail-of) o)))
                              (display--work-windows))))
          ;; a pane of the same mode, a detail of another list of the same app:
-         ;; mode affinity beats the window the list remembers
+         ;; the mode's window beats the window the list remembers
          (kin (and (not shown) (not here) (not pinned) (not sibling)
                    (find (lambda (w)
                            (and (not (equal? w me))
@@ -232,7 +232,7 @@
                 (shown shown)
                 ;; under the window model a buffer slots into its mode's
                 ;; window, as the window policy places it
-                ((and (boundp 'panes-mode) panes-mode) (panes-display! name #t))
+                ((and (boundp 'panes-mode) panes-mode) (panes-display! name))
                 (here (window-display! (lambda () (display-buffer-in-window! here name))))
                 (pinned (window-display! (lambda () (display-buffer-in-window! pinned name))))
                 (sibling (window-display! (lambda () (display-buffer-in-window! sibling name))))
@@ -246,7 +246,7 @@
                         (nw (split-window-in! ow 'h)))
                    (if nw
                        (window-display! (lambda () (display-buffer-in-window! nw name)))
-                       (display-buffer name '(category detail inhibit-same-window #t)))))
+                       (display-buffer name '(category detail)))))
                 ;; a pane that holds another mode is never covered: the layout
                 ;; grows a pane while it has room, else the page goes on a
                 ;; free pane, else on the app's own stack, over the list

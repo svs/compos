@@ -413,6 +413,21 @@ body {
 .window.active:has(.dash-state-editing) {
   box-shadow: none;
 }
+/* The focus tag is an icon, the four arrows: the window can move.
+   The word stays in the text for a reader; the mask draws the
+   arrows in the tag's own ink. */
+.dash-state-mark.dash-state-focus {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-indent: 200%;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='5 9 2 12 5 15'/><polyline points='9 5 12 2 15 5'/><polyline points='15 19 12 22 9 19'/><polyline points='19 9 22 12 19 15'/><line x1='2' y1='12' x2='22' y2='12'/><line x1='12' y1='2' x2='12' y2='22'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='5 9 2 12 5 15'/><polyline points='9 5 12 2 15 5'/><polyline points='15 19 12 22 9 19'/><polyline points='19 9 22 12 19 15'/><line x1='2' y1='12' x2='22' y2='12'/><line x1='12' y1='2' x2='12' y2='22'/></svg>") center / contain no-repeat;
+}
 
 .window.preview-highlight {
   outline: 1px solid color-mix(in srgb, var(--accent-fg, #8f9cdb) 65%, transparent);

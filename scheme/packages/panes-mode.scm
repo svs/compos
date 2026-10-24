@@ -180,6 +180,69 @@
 ;; never in the model: ((GROUP PANE) . WIN) rows
 (define panes-empty-buffer " *pane*")
 
+;; the blank window says what it is and shows its keymap: the text muted, the keys not
+(defface! 'pane-empty-text 'fg "var(--dim-fg)")
+(defface! 'pane-empty-key 'inherit 'mono 'fg "var(--default-fg)" 'weight "600" 'priority 10)
+
+;; ((COMMAND (KEY ...)) ...) in the order the keys were bound
+(define (panes--empty-keys)
+  (let loop ((bs (reverse (keymap-bindings (mode-keymap "pane-empty-mode")))) (rows '()))
+    (if (null? bs)
+        (reverse rows)
+        (let* ((k (car (car bs))) (c (cadr (car bs))))
+          (loop (cdr bs)
+                (if (assoc c rows)
+                    (map (lambda (r) (if (equal? (car r) c) (list c (append (cadr r) (list k))) r)) rows)
+                    (cons (list c (list k)) rows)))))))
+
+(define (panes--empty-render!)
+  (let loop ((rows (panes--empty-keys)) (text "\n   Empty pane\n\n") (spans '()))
+    (if (null? rows)
+        (begin
+          (buffer-set-text! panes-empty-buffer text #t)
+          (overlay-set! panes-empty-buffer 'pane-empty
+                        (cons (list 0 (string-length text) "pane-empty-text") spans)))
+        (let* ((keys (string-join (cadr (car rows)) " "))
+               (start (+ (string-length text) 3))
+               (doc (or (command-doc (car (car rows))) (car (car rows)))))
+          (loop (cdr rows)
+                (string-append text "   " (string-pad-right keys (max 8 (+ 2 (string-length keys)))) doc "\n")
+                (cons (list start (+ start (string-length keys)) "pane-empty-key") spans))))))
+
+(define-mode "pane-empty-mode"
+  (lambda () (panes--empty-render!)))
+
+(define-command "pane-take-window" "Move a window of this group into this pane"
+  (lambda ()
+    (let* ((l (panes--ensure-layout!))
+           (pid (panes--current-pane l))
+           (rows (filter (lambda (r) (car r))
+                         (map (lambda (k) (list (panes-window-buffer l k) k))
+                              (filter (lambda (k) (not (equal? (panes-pane-of l k) pid))) (panes-window-keys l))))))
+      (if (or (not pid) (null? rows))
+          (message "No window to move here")
+          (completing-read "Move window here: " (map car rows)
+            (lambda (choice)
+              (let ((row (assoc choice rows)))
+                (when row
+                  (let ((moved (panes-apply! (panes-move-window (panes-layout) (cadr row) pid))))
+                    (let ((h (and moved (panes-handle moved (cadr row)))))
+                      (when (and h (window-exists? h)) (select-window! h)))))))
+            'require-match #t)))))
+
+(define-command "pane-remove" "Remove this empty pane"
+  (lambda () (run-command "delete-window")))
+
+(mode-keys! "pane-empty-mode"
+  '(("b" "pane-take-window") ("RET" "pane-take-window")
+    ("f" "find-file") ("k" "pane-remove")))
+
+(define (panes--empty-buffer!)
+  (unless (and (buffer-exists? panes-empty-buffer)
+               (equal? (buffer-local panes-empty-buffer 'mode-name) "pane-empty-mode"))
+    (buffer-create panes-empty-buffer)
+    (with-current-buffer panes-empty-buffer (lambda () (set-mode! "pane-empty-mode")))))
+
 (define (panes--empty-rows) (or (frame-local 'panes-empty-windows) '()))
 (define (panes--empty-key pid) (list (panes--group-key) pid))
 
@@ -194,7 +257,7 @@
 (define (panes--empty-handle! pid)
   (or (panes--empty-handle pid)
       (begin
-        (unless (buffer-exists? panes-empty-buffer) (buffer-create panes-empty-buffer))
+        (panes--empty-buffer!)
         (let ((h (window-new-hidden! panes-empty-buffer)))
           (when h
             (panes--forget-empty! pid)
@@ -283,6 +346,25 @@
 ;; share, showing the front of its stack, the rest waiting behind; an empty
 ;; pane shows its blank window. Answers
 ;; the layout with the handles the draw took or made. Nothing is recorded.
+;; coming back to a group, focus goes where it was when you left: the model
+;; records it the moment it changes, (window KEY) or (pane PID) for a blank one
+(define (panes--note-focus!)
+  (unless (or (not panes-mode) panes--applying (layout-arranging?))
+    (let ((l (panes-layout)))
+      (when l
+        (let* ((w (active-window))
+               (k (panes-key-of-handle l w))
+               (p (and (not k) (panes--empty-pane-of w)))
+               (f (cond (k (list 'window k)) (p (list 'pane p)) (else #f))))
+          (when (and f (not (equal? f (plist-get l 'focus))))
+            (panes--layout-store! (panes--group-key) (plist-put l 'focus f))))))))
+
+(define (panes--focus-handle layout handles)
+  (let* ((f (plist-get layout 'focus))
+         (h (and (pair? f)
+                 (if (eq? (car f) 'window) (panes-handle layout (cadr f)) (panes--empty-handle (cadr f))))))
+    (if (and h (member h handles)) h (car handles))))
+
 (define (panes--draw! layout)
   (let* ((layout (panes--claim-empty-windows (panes--attach-handles layout)))
          (tops (panes-top-windows layout))
@@ -294,16 +376,18 @@
         (with-layout-suppressed
           (lambda ()
             (when (and (pair? handles) (null? (filter (lambda (h) (not h)) handles)))
-              (window-arrange-line! 'h (panes--top-shares layout) handles)
-              (for-each
-                (lambda (k)
-                  (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))
-                    (when (and h (pair? bufs) (window-exists? h))
-                      (unless (equal? (window-buffer h) (car bufs))
-                        (window-set-buffer! h (car bufs)))
-                      (set-window-prev-buffers! h (cdr bufs)))))
-                tops)
-              (unless (member (active-window) handles) (select-window! (car handles))))
+              ;; asked before the arrange: the arrange selects a window of its own
+              (let ((stays (member (active-window) handles)))
+                (window-arrange-line! 'h (panes--top-shares layout) handles)
+                (for-each
+                  (lambda (k)
+                    (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))
+                      (when (and h (pair? bufs) (window-exists? h))
+                        (unless (equal? (window-buffer h) (car bufs))
+                          (window-set-buffer! h (car bufs)))
+                        (set-window-prev-buffers! h (cdr bufs)))))
+                  tops)
+                (unless stays (select-window! (panes--focus-handle layout handles)))))
             (panes--drop-stale-empty-windows! layout))))
       (lambda () (set! panes--applying #f)))
     layout))
@@ -712,7 +796,8 @@
             r))))
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (add-hook! 'buffer-renamed-hook 'panes--rename!)
-  (add-hook! 'window-configuration-change-hook 'panes--reconcile!))
+  (add-hook! 'window-configuration-change-hook 'panes--reconcile!)
+  (add-hook! 'window-state-change-hook 'panes--note-focus!))
 
 (define (panes-mode-enable!)
   (panes-mode--install!)
@@ -727,6 +812,7 @@
   (remove-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   (remove-hook! 'buffer-renamed-hook 'panes--rename!)
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
+  (remove-hook! 'window-state-change-hook 'panes--note-focus!)
   (message "panes-mode off"))
 
 ;; the pane of the selected window, an empty pane's blank window included

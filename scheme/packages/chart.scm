@@ -2,7 +2,8 @@
 ;;;
 ;;; A chart is a plist. chart-svg turns it into SVG text; chart-save!
 ;;; writes that text to a file; chart-show! writes it and shows the image
-;;; in the other window, where browser-file-mode views it.
+;;; in the other window, where browser-file-mode views it. chart-block
+;;; gives the same chart as a block for a page, drawn in the theme's colors.
 ;;;
 ;;;   (chart-show! '(type line title "Requests" x-label "day"
 ;;;                  series (("api" (3 5 4 8 7)) ("web" (2 2 3 4 6)))))
@@ -149,6 +150,35 @@
   (let loop ((xs xs) (i 0))
     (cond ((null? xs) #f) ((equal? (car xs) x) i) (else (loop (cdr xs) (+ i 1))))))
 
+;;; Nodes
+
+;; A chart is drawn as nodes, (TAG ATTRS KIDS); a kid is a node or text.
+;; chart--xml writes them as SVG text, chart--block as a page block.
+(define (chart--el tag attrs &rest kids) (list tag attrs kids))
+
+(define (chart--xml node)
+  (if (string? node)
+      (html-escape node)
+      (let ((tag (car node)) (attrs (cadr node)) (kids (caddr node)))
+        (string-append "<" tag
+                       (apply string-append
+                              (map (lambda (a) (string-append " " (car a) "=\"" (html-escape (cadr a)) "\"")) attrs))
+                       (if (null? kids)
+                           "/>"
+                           (string-append ">" (apply string-append (map chart--xml kids)) "</" tag ">"))))))
+
+(define (chart--block node)
+  (let* ((tag (car node)) (attrs (cadr node)) (kids (caddr node))
+         (cls (assoc "class" attrs))
+         (base (append (list 'tag tag)
+                       (if cls (list 'class (cadr cls)) '())
+                       (list 'attrs (filter (lambda (a) (not (equal? (car a) "class"))) attrs)))))
+    (cond ((null? kids) base)
+          ((and (null? (cdr kids)) (string? (car kids))) (append base (list 'text (car kids))))
+          (else (append base (list 'children
+                                   (map (lambda (k) (if (string? k) (list 'tag "tspan" 'text k) (chart--block k)))
+                                        kids)))))))
+
 ;;; Colors
 
 (define *chart-palette-light*
@@ -159,12 +189,12 @@
 (define (chart--ink surface edge t1 t2 muted grid base palette)
   (apply string-append
     (append
-      (list ".sf{fill:" surface "}.ring{stroke:" surface "}.bd{stroke:" edge "}"
-            ".t1{fill:" t1 "}.t2{fill:" t2 "}.mu{fill:" muted "}"
-            ".grid{stroke:" grid "}.base{stroke:" base "}")
+      (list ".chart-sf{fill:" surface "}.chart-ring{stroke:" surface "}.chart-bd{stroke:" edge "}"
+            ".chart-t1{fill:" t1 "}.chart-t2{fill:" t2 "}.chart-mu{fill:" muted "}"
+            ".chart-grid{stroke:" grid "}.chart-base{stroke:" base "}")
       (map (lambda (row)
              (let ((c (car row)) (n (number->string (+ 1 (cadr row)))))
-               (string-append ".f" n "{fill:" c "}.k" n "{stroke:" c "}")))
+               (string-append ".chart-f" n "{fill:" c "}.chart-k" n "{stroke:" c "}")))
            (chart--zip palette (iota (length palette)))))))
 
 (define (chart--style theme)
@@ -173,19 +203,35 @@
         (dark (chart--ink "#1a1a19" "rgba(255,255,255,0.10)" "#ffffff" "#c3c2b7" "#898781" "#2c2c2a" "#383835"
                           *chart-palette-dark*)))
     (string-append
-      "<style>text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:12px}"
-      ".tn{font-variant-numeric:tabular-nums}.ti{font-size:14px;font-weight:600}"
+      ".chart text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:12px}"
+      ".chart .chart-tn{font-variant-numeric:tabular-nums}.chart .chart-ti{font-size:14px;font-weight:600}"
       (cond ((eq? theme 'dark) dark)
             ((eq? theme 'light) light)
-            (else (string-append light "@media (prefers-color-scheme: dark){" dark "}")))
-      "</style>")))
+            (else (string-append light "@media (prefers-color-scheme: dark){" dark "}"))))))
+
+;; The same ink from the theme's own CSS variables, for a chart drawn in a
+;; page: it follows the editor's theme and changes with it.
+(define *chart-palette-editor*
+  '("var(--group-color-2-fg, #2a78d6)" "var(--group-color-5-fg, #eb6834)" "var(--group-color-3-fg, #1baf7a)"
+    "var(--group-color-4-fg, #eda100)" "var(--group-color-6-fg, #e87ba4)" "var(--group-color-1-fg, #008300)"
+    "var(--ansi-color-yellow-fg, #4a3aa7)" "var(--ansi-color-magenta-fg, #e34948)"))
+
+(define (chart--editor-style)
+  (string-append
+    ".chart{display:block;width:100%;max-width:640px;height:auto}"
+    ".chart text{font-family:inherit;font-size:12px}"
+    ".chart .chart-tn{font-variant-numeric:tabular-nums}.chart .chart-ti{font-size:14px;font-weight:600}"
+    (chart--ink "var(--default-bg)" "var(--border-bg)" "var(--default-fg)" "var(--dim-fg)"
+                "var(--faint-fg, var(--dim-fg))" "var(--border-soft-bg, var(--border-bg))" "var(--border-bg)"
+                *chart-palette-editor*)))
 
 ;;; Drawing
 
-(define (chart--text x y cls anchor s &optional extra)
-  (string-append "<text x='" (chart--n x) "' y='" (chart--n y) "' class='" cls
-                 "' text-anchor='" anchor "'" (if extra extra "") ">"
-                 (html-escape s) "</text>"))
+(define (chart--text x y cls anchor s &optional attrs)
+  (chart--el "text" (append (list (list "x" (chart--n x)) (list "y" (chart--n y)) (list "class" cls)
+                               (list "text-anchor" anchor))
+                         (if attrs attrs '()))
+             s))
 
 (define (chart--width-of s) (* 6.6 (string-length s)))
 
@@ -205,13 +251,13 @@
           (loop (cdr ns) (+ i 1) (+ x w) y (cons (list x y (car ns) i) acc))))))
 
 (define (chart--legend-svg items)
-  (apply string-append
+  (apply append
     (map (lambda (it)
            (let ((x (car it)) (y (cadr it)) (i (+ 1 (car (cdr (cddr it))))))
-             (string-append
-               "<rect x='" (chart--n x) "' y='" (chart--n (- y 9))
-               "' width='10' height='10' rx='2' class='f" (number->string i) "'/>"
-               (chart--text (+ x 16) y "t2" "start" (caddr it)))))
+             (list (chart--el "rect" (list (list "x" (chart--n x)) (list "y" (chart--n (- y 9)))
+                                           (list "width" "10") (list "height" "10") (list "rx" "2")
+                                           (list "class" (string-append "chart-f" (number->string i)))))
+                   (chart--text (+ x 16) y "chart-t2" "start" (caddr it)))))
          items)))
 
 ;; A bar from the baseline Y0 to Y1 with its far end rounded.
@@ -262,7 +308,57 @@
                    all)
               all))))
 
-(define (chart-svg spec)
+;; The marks of every series, as nodes.
+(define (chart--marks type all names count sx sy base-y band cat-labels yfmt)
+  (let ((out '()))
+    (define (emit! node) (set! out (cons node out)))
+    (cond
+      ((eq? type 'bar)
+       (let* ((group-w (* band 0.7))
+              (w (max 1 (/ (- group-w (* 2 (- count 1))) count))))
+         (chart--each
+           (lambda (pts k name)
+             (for-each
+               (lambda (p)
+                 (let ((x (+ (- (sx (car p)) (/ group-w 2)) (* k (+ w 2))))
+                       (cat (if (< (car p) (length cat-labels)) (list-ref cat-labels (car p)) "")))
+                   (emit! (chart--el "path" (list (list "class" (string-append "chart-f" (number->string (+ k 1))))
+                                                  (list "d" (chart--bar-path x w base-y (sy (cadr p)))))
+                                     (chart--el "title" '()
+                                                (string-append (if (string=? name "") "" (string-append name ", "))
+                                                               cat ": " (yfmt (cadr p))))))))
+               pts))
+           all (iota count) names)))
+      ((eq? type 'scatter)
+       (chart--each
+         (lambda (pts k)
+           (for-each
+             (lambda (p)
+               (emit! (chart--el "circle" (list (list "cx" (chart--n (sx (car p)))) (list "cy" (chart--n (sy (cadr p))))
+                                                (list "r" "4") (list "stroke-width" "2")
+                                                (list "class" (string-append "chart-ring chart-f" (number->string (+ k 1))))))))
+             pts))
+         all (iota count)))
+      (else
+       (chart--each
+         (lambda (pts k)
+           (let ((xy (map (lambda (p) (list (sx (car p)) (sy (cadr p)))) pts))
+                 (n (number->string (+ k 1))))
+             (when (and (eq? type 'area) (pair? xy))
+               (emit! (chart--el "path" (list (list "class" (string-append "chart-f" n)) (list "fill-opacity" "0.14")
+                                              (list "d" (string-append (chart--poly xy)
+                                                                       "L" (chart--n (car (car (reverse xy)))) "," (chart--n base-y)
+                                                                       "L" (chart--n (car (car xy))) "," (chart--n base-y) "Z"))))))
+             (emit! (chart--el "path" (list (list "class" (string-append "chart-k" n)) (list "fill" "none")
+                                            (list "stroke-width" "2") (list "stroke-linejoin" "round")
+                                            (list "stroke-linecap" "round") (list "d" (chart--poly xy)))))
+             (when (= (length xy) 1)
+               (emit! (chart--el "circle" (list (list "cx" (chart--n (car (car xy)))) (list "cy" (chart--n (cadr (car xy))))
+                                                (list "r" "4") (list "class" (string-append "chart-f" n))))))))
+         all (iota count))))
+    (reverse out)))
+
+(define (chart--tree spec inline?)
   (let* ((type (chart--type spec))
          (series (chart--series spec))
          (count (length series))
@@ -311,102 +407,73 @@
                  (chart--scale (car xticks) (car (reverse xticks)) left right)))
          (base-y (sy (if (<= ymin 0 ymax) 0 ymin)))
          (out '()))
-    (define (emit! &rest parts) (set! out (cons (apply string-append parts) out)))
+    (define (emit! &rest nodes) (set! out (append (reverse nodes) out)))
     (define (hline y cls)
-      (emit! "<line x1='" (chart--n left) "' x2='" (chart--n right) "' y1='" (chart--n y)
-             "' y2='" (chart--n y) "' class='" cls "' stroke-width='1'/>"))
-    (emit! "<svg xmlns='http://www.w3.org/2000/svg' width='" (number->string width)
-           "' height='" (number->string height) "' viewBox='0 0 " (number->string width) " "
-           (number->string height) "' role='img'>")
-    (emit! "<title>" (html-escape (or title "chart")) "</title>" (chart--style theme))
+      (emit! (chart--el "line" (list (list "x1" (chart--n left)) (list "x2" (chart--n right))
+                                     (list "y1" (chart--n y)) (list "y2" (chart--n y))
+                                     (list "class" cls) (list "stroke-width" "1")))))
+    (emit! (chart--el "title" '() (or title "chart")))
+    (unless inline? (emit! (chart--el "style" '() (chart--style theme))))
     ;; The card: rounded, with a hairline edge and a soft shadow under it.
-    (emit! "<defs><filter id='lift' x='-5%' y='-5%' width='110%' height='120%'>"
-           "<feDropShadow dx='0' dy='1.5' stdDeviation='2.5' flood-color='#000' flood-opacity='0.14'/>"
-           "</filter></defs>")
-    (emit! "<rect class='sf bd' x='5' y='4' width='" (number->string (- width 10))
-           "' height='" (number->string (- height 12)) "' rx='12' stroke-width='1' filter='url(#lift)'/>")
-    (when title (emit! (chart--text left0 32 "t1 ti" "start" title)))
-    (when legend? (emit! (chart--legend-svg legend)))
+    (emit! (chart--el "defs" '()
+                      (chart--el "filter" '(("id" "chart-lift") ("x" "-5%") ("y" "-5%") ("width" "110%") ("height" "120%"))
+                                 (chart--el "feDropShadow" '(("dx" "0") ("dy" "1.5") ("stdDeviation" "2.5")
+                                                              ("flood-color" "#000") ("flood-opacity" "0.14"))))))
+    (emit! (chart--el "rect" (list (list "class" "chart-sf chart-bd") (list "x" "5") (list "y" "4")
+                                   (list "width" (number->string (- width 10))) (list "height" (number->string (- height 12)))
+                                   (list "rx" "12") (list "stroke-width" "1") (list "filter" "url(#chart-lift)"))))
+    (when title (emit! (chart--text left0 32 "chart-t1 chart-ti" "start" title)))
+    (when legend? (apply emit! (chart--legend-svg legend)))
     ;; The grid and the y labels
     (chart--each (lambda (v s)
-                (hline (sy v) "grid")
-                (emit! (chart--text (- left 8) (+ (sy v) 4) "mu tn" "end" s)))
+                (hline (sy v) "chart-grid")
+                (emit! (chart--text (- left 8) (+ (sy v) 4) "chart-mu chart-tn" "end" s)))
               yticks ylabels)
-    (hline base-y "base")
+    (hline base-y "chart-base")
     ;; The x labels. Categories thin out when they do not fit their band.
     (if category?
         (let ((every (max 1 (ceiling (/ (+ 8 (chart--widest cat-labels)) band)))))
           (chart--each (lambda (s i)
                       (when (= 0 (remainder i every))
-                        (emit! (chart--text (sx i) (+ bottom 18) "mu" "middle" s))))
+                        (emit! (chart--text (sx i) (+ bottom 18) "chart-mu" "middle" s))))
                     cat-labels (iota (length cat-labels))))
-        (for-each (lambda (v) (emit! (chart--text (sx v) (+ bottom 18) "mu tn" "middle" (xfmt v))))
+        (for-each (lambda (v) (emit! (chart--text (sx v) (+ bottom 18) "chart-mu chart-tn" "middle" (xfmt v))))
                   xticks))
     (when x-label
-      (emit! (chart--text (/ (+ left right) 2) (- height 18) "t2" "middle" x-label)))
+      (emit! (chart--text (/ (+ left right) 2) (- height 18) "chart-t2" "middle" x-label)))
     (when y-label
       (let ((cy (/ (+ top bottom) 2)))
-        (emit! (chart--text 22 cy "t2" "middle" y-label
-                            (string-append " transform='rotate(-90 22 " (chart--n cy) ")'")))))
-    ;; The marks
-    (cond
-      ((eq? type 'bar)
-       (let* ((group-w (* band 0.7))
-              (w (max 1 (/ (- group-w (* 2 (- count 1))) count))))
-         (chart--each
-           (lambda (pts k name)
-             (for-each
-               (lambda (p)
-                 (let ((x (+ (- (sx (car p)) (/ group-w 2)) (* k (+ w 2))))
-                       (cat (if (< (car p) (length cat-labels)) (list-ref cat-labels (car p)) "")))
-                   (emit! "<path class='f" (number->string (+ k 1)) "' d='"
-                          (chart--bar-path x w base-y (sy (cadr p))) "'><title>"
-                          (html-escape (string-append (if (string=? name "") "" (string-append name ", "))
-                                                      cat ": " (yfmt (cadr p))))
-                          "</title></path>")))
-               pts))
-           all (iota count) names)))
-      ((eq? type 'scatter)
-       (chart--each
-         (lambda (pts k)
-           (for-each
-             (lambda (p)
-               (emit! "<circle cx='" (chart--n (sx (car p))) "' cy='" (chart--n (sy (cadr p)))
-                      "' r='4' stroke-width='2' class='ring f" (number->string (+ k 1)) "'/>"))
-             pts))
-         all (iota count)))
-      (else
-       (chart--each
-         (lambda (pts k)
-           (let ((xy (map (lambda (p) (list (sx (car p)) (sy (cadr p)))) pts))
-                 (n (number->string (+ k 1))))
-             (when (and (eq? type 'area) (pair? xy))
-               (emit! "<path class='f" n "' fill-opacity='0.14' d='" (chart--poly xy)
-                      "L" (chart--n (car (car (reverse xy)))) "," (chart--n base-y)
-                      "L" (chart--n (car (car xy))) "," (chart--n base-y) "Z'/>"))
-             (emit! "<path class='k" n
-                    "' fill='none' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' d='"
-                    (chart--poly xy) "'/>")
-             (when (= (length xy) 1)
-               (emit! "<circle cx='" (chart--n (car (car xy))) "' cy='" (chart--n (cadr (car xy)))
-                      "' r='4' class='f" n "'/>"))))
-         all (iota count))))
+        (emit! (chart--text 22 cy "chart-t2" "middle" y-label
+                            (list (list "transform" (string-append "rotate(-90 22 " (chart--n cy) ")")))))))
+    (apply emit! (chart--marks type all names count sx sy base-y band cat-labels yfmt))
     (when direct?
-      (for-each (lambda (l) (emit! (chart--text (+ right 10) (+ (car l) 4) "t2" "start" (cadr l))))
+      (for-each (lambda (l) (emit! (chart--text (+ right 10) (+ (car l) 4) "chart-t2" "start" (cadr l))))
                 (chart--spread
                   (fold (lambda (acc row)
                           (let ((pts (car row)) (name (cadr row)))
                             (if (null? pts) acc (cons (list (sy (cadr (car (reverse pts)))) name) acc))))
                         '() (chart--zip all names))
                   (+ top 4) bottom)))
-    (emit! "</svg>")
-    (apply string-append (reverse out))))
+    (list "svg"
+          (list (list "xmlns" "http://www.w3.org/2000/svg") (list "width" (number->string width))
+                (list "height" (number->string height))
+                (list "viewBox" (string-append "0 0 " (number->string width) " " (number->string height)))
+                (list "role" "img") (list "class" "chart"))
+          (reverse out))))
+
+(define (chart-svg spec) (chart--xml (chart--tree spec #f)))
+
+;; The chart as a block for a page: the SVG lives in the page itself, so its
+;; colors are the theme's and change with it.
+(define (chart-block spec) (chart--block (chart--tree spec #t)))
 
 ;;; Files and showing
 
 (effects! '(write))
 
 (defgroup 'chart "Charts drawn from a Scheme spec.")
+
+(define-style! 'chart (chart--editor-style))
 
 (defcustom 'chart-directory "~/.compos/charts"
   "Where chart-show! writes the SVG file of a chart."
@@ -445,6 +512,8 @@
 (effects! '(pure))
 (public! 'chart-svg
   "(chart-svg SPEC) — the SVG text of the chart SPEC describes: a plist of type (line area bar scatter), series ((NAME DATA) ...), data, categories, title, x-label, y-label, width, height, y-zero, y-format, x-format, theme")
+(public! 'chart-block
+  "(chart-block SPEC) — the chart SPEC describes as a page block: inline SVG in the theme's colors, which follow a theme change")
 (public! 'chart-ticks
   "(chart-ticks LO HI [N]) — about N round tick values that cover LO..HI, in steps of 1, 2 or 5 times a power of ten")
 (effects! '(write))

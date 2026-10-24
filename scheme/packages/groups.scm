@@ -3059,10 +3059,9 @@ is forgotten and that group falls back to creation order in the switcher."
                (modes (cons m (filter (lambda (x) x)
                                       (map panes--buffer-mode
                                            (apply append (map (lambda (k) (panes-window-buffers l k)) touched))))))
-               ;; the group's buffers of the mode that no window holds join too,
-               ;; dormant ones included: buffer-list names only the live ones
+               ;; the group's buffers of the mode that no window holds join too
                (extra (filter (lambda (b) (equal? (panes--buffer-mode b) m))
-                              (panes--group-buffers (panes-buffers l))))
+                              (group-buffers (frame-group) #t)))
                (after (panes-consolidate l panes--buffer-mode modes extra)))
           (panes-apply! after)
           (when (window-exists? me) (select-window! me))
@@ -3666,11 +3665,14 @@ is forgotten and that group falls back to creation order in the switcher."
                                                 'groups (cons "slow" keys)))))))
     (dedupe-names (filter (lambda (n) (member n hits)) names))))
 
-(define (group-buffers g)
+(define (group-buffers g &optional all)
+  ;; the live buffers of G; with ALL, also the ones whose memory waits
+  ;; on disk, which buffer-list does not name
   (let ((id (group-resolve-id g)))
-    (if (pseudo-group-id? id)
-        (pseudo-group-buffers id)
-        (group-members-of (buffer-list) id))))
+    (cond ((pseudo-group-id? id) (pseudo-group-buffers id))
+          ((and all id)
+           (map car (cadr (buffer-rows (list 'groups (list id) 'hidden #t 'context-only #t 'fields '(name))))))
+          (else (group-members-of (buffer-list) id)))))
 
 ;; group-buffers answers the live members only. A kill must reach the
 ;; dormant ones too: they stay asleep in the listings, and a group killed
@@ -5149,7 +5151,7 @@ is forgotten and that group falls back to creation order in the switcher."
   "(buffer-filename-face NAME) -> the group color face for a buffer filename, or #f"
   'buffers)
 (effects! '(write))
-(public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
+(public! 'group-buffers "(group-buffers G [ALL]) -> names of the live buffers of group G; ALL adds the ones unloaded to disk")
 (public! 'define-pseudo-group!
   "(define-pseudo-group! NAME FN) — a group whose members FN answers, best first")
 (public! 'undefine-pseudo-group! "(undefine-pseudo-group! G) — take a pseudo group away again")

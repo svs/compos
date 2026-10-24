@@ -264,6 +264,7 @@ defmodule Compos.Core.Agent do
        next_steer_id: 1,
        steering: steering,
        pending_permission: nil,
+       waiting_permissions: [],
        pending_question: nil,
        # which turn a context fetch belongs to (see send_prompt)
        epoch: 0,
@@ -475,7 +476,8 @@ defmodule Compos.Core.Agent do
     if ms = req[:timeout_ms], do: Process.send_after(self(), {:permission_timeout, id}, ms)
 
     state =
-      %{state | next_rpc_id: id + 1, pending_permission: pending}
+      %{state | next_rpc_id: id + 1}
+      |> add_permission(pending)
       |> set_status(:needs_attention)
       |> enqueue(
         Backend.plist(
@@ -497,10 +499,7 @@ defmodule Compos.Core.Agent do
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
     # CAS on rpc_id: only the request still pending resolves, and a stale
     # answer is a silent no-op
-    case state.pending_permission do
-      %{rpc_id: ^rpc_id} -> {:reply, :ok, resolve_permission(state, option_id)}
-      _ -> {:reply, :ok, state}
-    end
+    {:reply, :ok, resolve_permission(state, rpc_id, option_id)}
   end
 
   # A question is a tool call, not a permission request. It has its own
@@ -702,12 +701,12 @@ defmodule Compos.Core.Agent do
   # nobody is looking at this chat and nobody answered — deny and say so,
   # rather than leaving the turn wedged forever
   def handle_info({:permission_timeout, id}, state) do
-    case state.pending_permission do
-      %{rpc_id: ^id, title: title} ->
+    case Enum.find(permissions(state), &(&1.rpc_id == id)) do
+      %{title: title} ->
         state =
           state
           |> enqueue(Backend.plist(type: :"permission-timeout", title: title))
-          |> resolve_permission(nil)
+          |> resolve_permission(id, nil)
 
         {:noreply, state}
 
@@ -816,7 +815,7 @@ defmodule Compos.Core.Agent do
   def terminate(_reason, state) do
     # a killed thread must never leave anyone blocked on an answer: not an
     # adapter waiting on the wire, and not a turn task waiting on us
-    if state.pending_permission, do: resolve_permission(state, nil)
+    resolve_all_permissions(state)
     if state.pending_question, do: resolve_question(state, state.pending_question.id, nil)
 
     if state.handle, do: state.backend.close(state.handle)
@@ -827,18 +826,73 @@ defmodule Compos.Core.Agent do
   # to the turn task that is blocked on us, or answer the adapter that
   # asked. Then clear the slot and go back to running.
   defp resolve_permission(state, option_id) do
+    answer_permission(state, state.pending_permission, option_id)
+
+    state
+    |> next_permission()
+    |> attention_resolved_status()
+  end
+
+  # An answer names its request. The request that waits behind the first
+  # one resolves alone and leaves the first one pending.
+  defp resolve_permission(state, rpc_id, option_id) do
     case state.pending_permission do
-      %{from: from} = pending when not is_nil(from) ->
+      %{rpc_id: ^rpc_id} ->
+        resolve_permission(state, option_id)
+
+      _ ->
+        case Enum.split_with(waiting_permissions(state), &(&1.rpc_id == rpc_id)) do
+          {[pending | _], rest} ->
+            answer_permission(state, pending, option_id)
+            Map.put(state, :waiting_permissions, rest)
+
+          {[], _} ->
+            state
+        end
+    end
+  end
+
+  defp resolve_all_permissions(state) do
+    if state.pending_permission,
+      do: state |> resolve_permission(nil) |> resolve_all_permissions(),
+      else: state
+  end
+
+  defp answer_permission(state, pending, option_id) do
+    case pending do
+      %{from: from} when not is_nil(from) ->
         GenServer.reply(from, verdict_of(pending, option_id))
 
       pending ->
         state.backend.respond_permission(state.handle, pending.rpc_id, option_id)
     end
-
-    state
-    |> Map.put(:pending_permission, nil)
-    |> attention_resolved_status()
   end
+
+  # An adapter asks about parallel tool calls at the same time. The second
+  # request waits behind the first. It never replaces the first: a replaced
+  # request gets no answer, and its tool call waits forever.
+  defp add_permission(state, pending) do
+    if state.pending_permission,
+      do: Map.put(state, :waiting_permissions, waiting_permissions(state) ++ [pending]),
+      else: Map.put(state, :pending_permission, pending)
+  end
+
+  defp next_permission(state) do
+    case waiting_permissions(state) do
+      [next | rest] ->
+        state |> Map.put(:pending_permission, next) |> Map.put(:waiting_permissions, rest)
+
+      [] ->
+        Map.put(state, :pending_permission, nil)
+    end
+  end
+
+  # read with Map.get: a running agent holds the state shape from before
+  # this field existed
+  defp waiting_permissions(state), do: Map.get(state, :waiting_permissions, [])
+
+  defp permissions(state),
+    do: List.wrap(state.pending_permission) ++ waiting_permissions(state)
 
   defp resolve_question(%{pending_question: %{id: id} = pending} = state, id, answer) do
     answer = if is_nil(answer), do: nil, else: to_string(answer)
@@ -977,7 +1031,8 @@ defmodule Compos.Core.Agent do
           options: options
         }
 
-        %{state | pending_permission: pending}
+        state
+        |> add_permission(pending)
         |> set_status(:needs_attention)
         |> enqueue(event)
 
@@ -1097,7 +1152,7 @@ defmodule Compos.Core.Agent do
     |> cancel_steering_settle_timer()
     |> restore_boundary_steering()
     |> restore_push_fallbacks()
-    |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
+    |> resolve_all_permissions()
     |> then(fn s ->
       if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
     end)

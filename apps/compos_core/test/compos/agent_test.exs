@@ -1574,6 +1574,37 @@ defmodule Compos.AgentTest do
            end)
   end
 
+  test "parallel permission requests each get their own answer" do
+    {slug, _buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    for {id, title} <- [{81, "Read a"}, {82, "Read b"}] do
+      inject(agent, %{
+        "jsonrpc" => "2.0",
+        "id" => id,
+        "method" => "session/request_permission",
+        "params" => %{
+          "sessionId" => "sess-1",
+          "toolCall" => %{"title" => title, "kind" => "read"},
+          "options" => [%{"optionId" => "ok", "name" => "Allow", "kind" => "allow_once"}]
+        }
+      })
+    end
+
+    assert eventually(fn -> match?(%{permission: %{rpc_id: 81}}, Agent.info(slug)) end)
+
+    # the second answer comes first; the first request stays pending
+    Agent.respond_permission(slug, 82, "ok")
+    assert_receive {:frame, %{"id" => 82, "result" => _}}, 1_000
+    assert %{status: :needs_attention, permission: %{rpc_id: 81}} = Agent.info(slug)
+
+    Agent.respond_permission(slug, 81, "ok")
+    assert_receive {:frame, %{"id" => 81, "result" => _}}, 1_000
+    assert eventually(fn -> match?(%{status: :running, permission: nil}, Agent.info(slug)) end)
+  end
+
   test "allow-always picks the allow_always option" do
     {slug, _buf, agent} = boot("")
 

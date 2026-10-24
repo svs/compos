@@ -1950,6 +1950,26 @@ refresh the index. Answers how many matched."
 (define (nm--curl-text url)
   (shell-command->string (string-append "curl -sL --max-time 15 " (sh-quote url)) (default-directory)))
 
+(define (nm--unsubscribe-by-agent! url why)
+  "Hand URL to a Haiku chat that unsubscribes in a browser tab. WHY is the verdict so
+far; the answer says the agent took over, or WHY again when the browser is away."
+  (if (not (browser-connected?))
+      (string-append why " (no browser connected for a fallback agent)")
+      (begin
+        (execute*
+          (string-append
+            "Unsubscribe me from a mailing list in my own Chrome. The unsubscribe page is:\n"
+            url "\n\n"
+            "Use the compos editor through eval-scheme. Check (browser-connected?), open the page in a "
+            "background tab with (tab-open URL #f #t), find it with (tab-list K), read it with (tab-read TAB K) "
+            "and click with (tab-eval TAB JS K). These are async: let K write into a scratch buffer and read it "
+            "on the next call. Press whatever unsubscribes from everything (an unsubscribe or opt-out button, "
+            "an 'all emails' choice, a confirm). Never sign in, never type a password or card, never subscribe "
+            "to anything. When the page confirms, or you give up, close the tab with (tab-close TAB), kill your "
+            "scratch buffer, and say the outcome with (message \"unsubscribe: ...\"). Reply in one line.")
+          (list 'connector "claude-code" 'model "haiku" 'title "Unsubscribe in browser"))
+        (string-append why "; a Haiku agent is unsubscribing in a browser tab"))))
+
 (define (nm--purge-unsubscribe! msg-id)
   (let* ((links (and msg-id (nm--unsubscribe-header-links msg-id)))
          (https (and links (car links)))
@@ -1965,11 +1985,11 @@ refresh the index. Answers how many matched."
                       (default-directory)))))
          (if (member code '("200" "202" "204"))
              (string-append "unsubscribed (RFC 8058 one-click, " code ")")
-             (string-append "tried the one-click unsubscribe but got HTTP " code " — check by hand: " https))))
+             (nm--unsubscribe-by-agent! https (string-append "one-click unsubscribe got HTTP " code)))))
       (https
        (if (nm--looks-unsubscribed? (nm--curl-text https))
            "unsubscribed (confirmed)"
-           (string-append "visited " https " but couldn't confirm — check by hand")))
+           (nm--unsubscribe-by-agent! https "couldn't confirm the unsubscribe link")))
       (mailto
        (string-append "unsubscribe is by email only, not sent: " mailto))
       (else
@@ -1978,7 +1998,7 @@ refresh the index. Answers how many matched."
             ((not body-link) "no unsubscribe link found")
             ((nm--looks-unsubscribed? (nm--curl-text body-link))
              "unsubscribed (found in body, confirmed)")
-            (else (string-append "found a possible link in the body but couldn't confirm — check by hand: " body-link))))))))
+            (else (nm--unsubscribe-by-agent! body-link "couldn't confirm the link in the body"))))))))
 
 (define (nm--purge-phish? thread-id)
   "#t when this thread is a fake. A phisher's unsubscribe link is bait: it tells

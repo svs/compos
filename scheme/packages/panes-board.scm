@@ -100,7 +100,13 @@
   (let ((l (panes-board-layout-of g)))
     (if (not l)
         '()
-        (apply append (map (lambda (p) (panes-board--pane-rows buf g l (plist-get p 'id) #f)) (panes-panes l))))))
+        (append (apply append (map (lambda (p) (panes-board--pane-rows buf g l (plist-get p 'id) #f)) (panes-panes l)))
+                (panes-board--float-rows g)))))
+
+(define (panes-board--float-rows g)
+  ;; the floating preview is its own entry: a window of the frame, in no pane
+  (let ((w (and (equal? g (panes-board-here-group)) (boundp 'float-window) (float-window))))
+    (if w (list (panes-board--id "f" g w)) '())))
 
 (define (panes-board--root-valid? root)
   (let* ((kind (panes-board-kind root)) (l (panes-board-row-layout root)))
@@ -179,7 +185,7 @@
 (define (panes-board--depth buf id)
   ;; how far in a row sits below the top of what is shown
   (let* ((kind (panes-board-kind id))
-         (d (cond ((equal? kind "g") 0) ((equal? kind "p") 1) ((equal? kind "w") 2) (else 3)))
+         (d (cond ((equal? kind "g") 0) ((member kind '("p" "f")) 1) ((equal? kind "w") 2) (else 3)))
          (root (panes-board-root buf))
          (top (cond (root (let ((k (panes-board-kind root))) (cond ((equal? k "g") 0) ((equal? k "p") 1) (else 2))))
                     ((equal? (panes-board-view buf) 'all) 0)
@@ -211,6 +217,12 @@
                            (string-append (number->string (length (panes-window-keys l))) " windows")
                            "no layout yet")
                        "dim")))
+          ((equal? kind "f")
+           (let* ((w (panes-board-key id)) (b (and (window-exists? w) (window-buffer w))))
+             (list (list (if (equal? w (active-window)) "●" "◆") "ok")
+                   (list (string-append pad "floating") (if (equal? w (active-window)) "accent" #f))
+                   (list (if b (buffer-modeline-name b) "") "dim")
+                   (list "preview" "faint"))))
           ((not l) (list (list "" #f) (list id "faint") (list "" #f) (list "" #f)))
           ((equal? kind "p")
            (let* ((pid (panes-board-key id))
@@ -285,6 +297,9 @@
             ((not (equal? (panes-board-group id) (panes-board-here-group)))
              (message "That window is in another group"))
             ((equal? (panes-board-kind id) "g") (message "This is the group you are in"))
+            ((equal? (panes-board-kind id) "f")
+             (let ((w (panes-board-key id)))
+               (if (window-exists? w) (select-window! w) (message "The floating preview is gone"))))
             (else
               (let* ((l (panes-board-layout))
                      (kind (panes-board-kind id))
@@ -384,6 +399,13 @@
 (define-command "panes-board-close"
   "Close this window (its buffers stay open), take this buffer out of its window, or remove this pane"
   (lambda ()
+    (let ((id (list-current (panes-board-buffer))))
+      ;; the floating preview closes as a preview does; no layout changes
+      (if (and id (equal? (panes-board-kind id) "f"))
+          (begin (if (preview-slot) (preview-end #f) (float-close!)) (panes-board-refresh!))
+          (panes-board-close--pane!)))))
+
+(define (panes-board-close--pane!)
     (panes-board-edit!
       (lambda (l id)
         (let ((kind (panes-board-kind id)))
@@ -393,7 +415,7 @@
                 (else
                   (let* ((key (panes-board-key id)) (b (panes-board-buffer-of id))
                          (left (panes--without b (panes-window-buffers l key))))
-                    (if (null? left) (panes-remove-window l key) (panes-set-buffers l key left))))))))))
+                    (if (null? left) (panes-remove-window l key) (panes-set-buffers l key left)))))))))
 
 (define-command "panes-board-add-pane" "Add an empty pane after the pane on this row"
   (lambda ()

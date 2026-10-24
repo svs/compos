@@ -454,7 +454,12 @@
         (begin
             (when (and (pair? handles) (null? (filter (lambda (h) (not h)) handles)))
               (begin
-                (window-arrange-line! 'h (panes-layout-shares layout) handles)
+                ;; the floating preview is no pane: it stays on screen, first in the
+                ;; line, where its split takes no room and it floats over the frame
+                (let ((float (and (boundp 'float-window) (float-window))))
+                  (if (and float (not (member float handles)))
+                      (window-arrange-line! 'h (cons 0.001 (panes-layout-shares layout)) (cons float handles))
+                      (window-arrange-line! 'h (panes-layout-shares layout) handles)))
                 (for-each
                   (lambda (k)
                     (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))

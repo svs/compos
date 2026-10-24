@@ -288,6 +288,8 @@
                     (begin
                       (buffer-create name)
                       (when group (buffer-move-to-group! name group))
+                      ;; what the mode sets on a new view of its list
+                      (buffer-set-locals! name ((mode-list-opt mode 'locals (lambda () '()))))
                       name))))))))
 
 (define (mode-list mode &optional query)

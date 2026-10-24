@@ -236,10 +236,11 @@
           (when (and was (not (equal? was name)) (not *display-preview*)
                      (buffer-exists? was))
             (window-float-class! was #f)))
-        (begin
-          (split-window! (if (member side '(top bottom)) 'v 'h) (- 1 size))
-          (other-window!)
-          (set! w (active-window))
+        ;; the float is a frame window outside the panes model: the raw
+        ;; split, not split-window!, which adds a pane to the model
+        (let ((before (map car (window-list))))
+          (builtin-split-window! (if (member side '(top bottom)) 'v 'h) (- 1 size))
+          (set! w (find (lambda (x) (not (member x before))) (map car (window-list))))
           (window-show-buffer! w name)
           ;; the split made this window: the end of a look deletes it
           (set-window-restore! w '(window #f #f))))

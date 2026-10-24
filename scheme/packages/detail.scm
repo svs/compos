@@ -146,8 +146,17 @@
          ;; already where you stand, or already in another window: a display
          ;; never moves a buffer that is on screen
          (shown (if (equal? (window-buffer me) name) me (window-showing-other name me)))
+         ;; else over the list's last detail, or any detail of it on screen
+         (last (and (not shown)
+                    (or (detail-window o)
+                        (find (lambda (w)
+                                (and (not (equal? w me))
+                                     (equal? (buffer-local (window-buffer w) 'detail-of) o)))
+                              (display--work-windows)))))
          ;; else it opens in the pane beside its list, never on top of it
-         (win (or shown (panes-display-beside! name o))))
+         (win (or shown
+                  (and last (window-set-buffer! last name) last)
+                  (panes-display-beside! name o))))
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name))

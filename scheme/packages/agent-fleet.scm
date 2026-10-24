@@ -85,6 +85,11 @@
   "How many saved chats the candidate prompt shows below the live ones."
   'group 'chat 'type 'integer)
 
+(defcustom 'chat-list-preview #f
+  "Whether the chat list floats a preview card of the chat at point.
+   ibuffer-toggle-preview turns it on or off in one list."
+  'group 'chat)
+
 (define (chats-live-log-paths)
   ;; every open chat's log, from one read of the buffer rows: a chat's log
   ;; lies in its group's folder, and each folder is looked up once
@@ -838,6 +843,8 @@
   (list
     ;; an agent is listed with the chats even where its buffer is no chat
     'member-locals '("agent-slug")
+    ;; a new chat list previews only when chat-list-preview says so
+    'locals (lambda () (list 'listing-peek-disabled (not chat-list-preview)))
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
     'defaults '(sort recent grouping group)
     ;; a chat you archived is still a chat you switch to: the saved

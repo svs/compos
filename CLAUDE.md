@@ -151,6 +151,10 @@ loader; call `namespace!` only when the public vocabulary differs.
     the error", not "the row that went red can say why".
   - Do not remove articles or other words to make a sentence shorter.
   - This applies to replies, commit messages, and comments in code.
+- Commit messages are the changelog for users and their agents. Follow
+  `docs/COMMITS.md` for every jj description and every git commit. The git
+  committer makes each commit message complete, also when a jj description
+  is empty.
 - Plain ASCII in replies, commits, comments, and docs: `-` or `--`, straight
   quotes, `->`, `...`. No em dash, en dash, curly quote, arrow, or ellipsis
   character. In prose docs one paragraph is one line; a newline ends a

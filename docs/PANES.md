@@ -48,8 +48,9 @@ Every way to change the windows is a model edit:
 - a visit (`switch-to-buffer`) and a display (`display-buffer`,
   `pop-to-buffer`). Only a display rule whose action places a buffer off the
   panes (the float, the dock, the selected window, a popup) runs that action.
-- a detail of a list (`display-buffer-detail!`) opens in the pane beside the
-  list (`panes-display-beside!`), never on top of it.
+- a detail of a list (`display-buffer-detail!`) opens over the list's last
+  detail while one is on screen, else in the pane beside the list
+  (`panes-display-beside!`), never on top of it.
 - `C-x 0`, `C-x 1`, `C-x 2` and `C-x 3`, `q`, a kill, a group switch.
 - the motion: focus, window shift and swap, buffer move, eat.
 - `select-window!` and `window-set-buffer!` outside a draw write the model

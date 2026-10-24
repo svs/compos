@@ -218,7 +218,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   defp run_turn(backend, slug, model, effort, text, ctx) do
     ev = fn kvs -> GenServer.cast(backend, {:turn_event, kvs}) end
     display = Map.get(ctx, :display, text)
-    messages = Enum.map(ctx.turns, &turn_to_message/1)
+    messages = Enum.flat_map(ctx.turns, &turn_to_messages/1)
     sent_at = Map.get(ctx, :sent_at)
     first = :atomics.new(1, [])
 
@@ -406,13 +406,26 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   # ("tool-result" ID OUTPUT ERROR?). WIRE is the exact user text that was
   # sent, when it differs from what the transcript shows.
 
-  defp turn_to_message(turn) do
+  defp turn_to_messages(turn) do
     blocks = Backend.plist_get(turn, "blocks") || []
 
     case Backend.plist_get(turn, "role") do
-      "user" -> user_message(blocks, Backend.plist_get(turn, "wire"))
-      _ -> %{role: "assistant", content: Enum.map(blocks, &block_to_wire/1)}
+      "user" -> [user_message(blocks, Backend.plist_get(turn, "wire"))]
+      _ -> assistant_messages(blocks)
     end
+  end
+
+  # An ACP turn records a call and its result in one assistant turn. On the
+  # wire a result belongs to the user, right after its call; an OpenAI-shaped
+  # provider drops a result inside an assistant message and then refuses the
+  # unanswered call. So each run of results becomes its own user message.
+  defp assistant_messages(blocks) do
+    blocks
+    |> Enum.chunk_by(&match?(["tool-result" | _], &1))
+    |> Enum.map(fn
+      [["tool-result" | _] | _] = rs -> %{role: "user", content: Enum.map(rs, &block_to_wire/1)}
+      bs -> %{role: "assistant", content: Enum.map(bs, &block_to_wire/1)}
+    end)
   end
 
   # a user turn is either prose (one string, so the wire text wins when we

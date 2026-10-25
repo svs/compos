@@ -752,9 +752,6 @@
 ;;;   'collection semantic collection tag; 'composml (buf entry) -> block
 ;;;              Optional semantic row projection; keys must be strings.
 ;;;   'composml-head (buf head) -> (BLOCK ...)
-;;;   'composml-tail (buf) -> (BLOCK ...)
-;;;              Optional blocks under the rows: the figures, charts or
-;;;              tables that sum the rows up.
 ;;;              Optional head of that projection. The default draws the
 ;;;              head's own lines as text; a mode answering this draws it
 ;;;              as blocks, so a tab bar can be tabs.
@@ -2103,8 +2100,7 @@
                 'render-root (let ((root (list-opt buf 'composml-root)))
                                (if root (root buf) (list 'tag "c-buffer")))
                 'render-blocks
-                (append
-                 (list
+                (list
                   (list 'tag "c-headerline" 'class "semantic-list-header"
                         ;; the head is text and its faces. A mode that wants
                         ;; its own head -- tabs as tabs, a title as a title --
@@ -2133,11 +2129,7 @@
                                           'attrs (append (list (list "record-id" key) (list "role" "listitem"))
                                                          (or (plist-get block 'attrs) '())))
                                     block)
-                                  out))))))
-                  ;; 'composml-tail: the blocks under the rows, such as
-                  ;; the figures and charts that sum them up
-                  )
-                (let ((f (list-opt buf 'composml-tail))) (if f (or (f buf) '()) '())))))))))
+                                  out)))))))))))))
 
 (define (list-zip-prepared rows prepared)
   (if (null? rows) '()

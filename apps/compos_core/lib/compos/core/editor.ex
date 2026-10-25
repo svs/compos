@@ -498,8 +498,7 @@ defmodule Compos.Core.Editor do
   along DIR (:h or :v). The first pane takes RATIO; each later split
   divides the rest evenly. A visible window not in IDS becomes hidden.
   """
-  def arrange_line(dir, ratio, ids, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:arrange_line, dir, ratio, ids, fid(fid)})
+  def arrange(spec, fid \\ nil), do: GenServer.call(__MODULE__, {:arrange, spec, fid(fid)})
 
   @doc "Delete hidden window ID."
   def delete_hidden_window(id), do: GenServer.call(__MODULE__, {:delete_hidden_window, id})
@@ -2088,7 +2087,7 @@ defmodule Compos.Core.Editor do
       next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
 
       f =
-        %{f | tree: line_tree(chosen, dir, ratio), active: active}
+        %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
         |> Map.put(:hidden, sel ++ others ++ left)
 
       changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
@@ -2474,6 +2473,15 @@ defmodule Compos.Core.Editor do
   # One line of LEAVES, nested to the right: the first takes RATIO, and
   # each later split gives its first pane 1/COUNT of what is left. This is
   # the tree layout--fill-line! makes with split-window!.
+  # a spec is a window id, or {dir, shares, children}: the children in a line
+  defp arrange_ids({_dir, _shares, children}), do: Enum.flat_map(children, &arrange_ids/1)
+  defp arrange_ids(id), do: [id]
+
+  defp arrange_tree({dir, shares, children}, by_id),
+    do: line_tree(Enum.map(children, &arrange_tree(&1, by_id)), dir, shares)
+
+  defp arrange_tree(id, by_id), do: Map.fetch!(by_id, id)
+
   defp line_tree([leaf], _dir, _ratio), do: leaf
 
   # RATIO may be a list of shares, one for each pane: each split takes its

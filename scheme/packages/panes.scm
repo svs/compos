@@ -411,6 +411,17 @@
         (tree-move panes--shape (panes--normal layout) id 'root at))
       layout))
 
+(define (panes-swap-panes layout a b)
+  "Panes A and B trade their windows. Each pane keeps its place and its
+   size, so a move never splits a column. An unknown pane, or A and B
+   the same, changes nothing."
+  (let ((pa (panes-pane layout a)) (pb (panes-pane layout b)))
+    (if (and pa pb (not (equal? a b)))
+        (panes--update-pane
+          (panes--update-pane layout a (lambda (p) (panes--put p 'windows (or (plist-get pb 'windows) '()))))
+          b (lambda (p) (panes--put p 'windows (or (plist-get pa 'windows) '()))))
+        layout)))
+
 (define (panes-move-column layout id step)
   "The column of pane ID moves STEP columns, -1 left or 1 right, with
    every pane in it. At the edge nothing changes."
@@ -1053,6 +1064,8 @@
 (catalog-meta! 'function "panes-split-below" 'effects '(pure))
 (public! 'panes-move-column "(panes-move-column LAYOUT ID STEP) -> LAYOUT: pane ID's column moves STEP columns with all its panes; pure")
 (catalog-meta! 'function "panes-move-column" 'effects '(pure))
+(public! 'panes-swap-panes "(panes-swap-panes LAYOUT A B) -> LAYOUT: panes A and B trade their windows, each keeping its place and size; pure")
+(catalog-meta! 'function "panes-swap-panes" 'effects '(pure))
 (public! 'panes-add-window "(panes-add-window LAYOUT PANE BUF MODE [BEHIND]) -> (LAYOUT KEY): a new window of MODE on BUF at the front of PANE, or the back when BEHIND")
 (catalog-meta! 'function "panes-add-window" 'effects '(read))
 (public! 'panes-remove-window "(panes-remove-window LAYOUT KEY) -> LAYOUT: window KEY goes with its stack; its pane stays; pure")

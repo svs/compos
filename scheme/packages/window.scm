@@ -1571,6 +1571,12 @@ keeps the buffer you were in and your point.")
   (lambda () (focus-move-safe! 'previous)))
 (define-command "next-pane" "Select the next pane"
   (lambda () (focus-move-safe! 'next)))
+(define-command "focus-left" "Select the pane to the left, across the columns"
+  (lambda () (focus-move-safe! 'left)))
+
+(define-command "focus-right" "Select the pane to the right, across the columns"
+  (lambda () (focus-move-safe! 'right)))
+
 (define-command "focus-up" "Select the window above"
   (lambda () (focus-move-safe! 'up)))
 (define-command "focus-down" "Select the window below"
@@ -1586,9 +1592,15 @@ keeps the buffer you were in and your point.")
 
 (define-command "window-previous-pane" "Move this window to the front of the previous pane with its complete buffer stack"
   ;; the window model moves it (panes--shift-window!, panes-mode.scm)
-  (lambda () (panes--shift-window! -1)))
+  (lambda () (panes--shift-window! 'left)))
 (define-command "window-next-pane" "Move this window to the front of the next pane with its complete buffer stack"
-  (lambda () (panes--shift-window! 1)))
+  (lambda () (panes--shift-window! 'right)))
+
+(define-command "window-pane-above" "Move this window to the front of the pane above with its complete buffer stack"
+  (lambda () (panes--shift-window! 'up)))
+
+(define-command "window-pane-below" "Move this window to the front of the pane below with its complete buffer stack"
+  (lambda () (panes--shift-window! 'down)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("previous-pane" "next-pane" "focus-up" "focus-down"
@@ -1658,16 +1670,23 @@ the focus; #f for a window or a buffer."
 ;; keeps these keys for CUA motion and selection.
 (for-each
   (lambda (k) (global-set-key (car k) (cadr k)))
-  '(("s-<left>" "previous-pane")
-    ("s-<right>" "next-pane")
+  '(("s-<left>" "focus-left")
+    ("s-<right>" "focus-right")
     ("s-S-<left>" "pane-move-left")
     ("s-S-<right>" "pane-move-right")
+    ("s-S-<up>" "pane-move-up")
+    ("s-S-<down>" "pane-move-down")
     ("S-<left>" "window-previous-pane")
     ("S-<right>" "window-next-pane")
-    ("S-<up>" "pane-previous-window")
-    ("S-<down>" "pane-next-window")
-    ("s-<up>" "window-previous-mode-buffer")
-    ("s-<down>" "window-next-mode-buffer")))
+    ("S-<up>" "window-pane-above")
+    ("S-<down>" "window-pane-below")
+    ("s-<up>" "focus-up")
+    ("s-<down>" "focus-down")
+    ("s-[" "window-previous-mode-buffer")
+    ("s-]" "window-next-mode-buffer")
+    ;; the client spells Cmd-Opt as s-M-, Cmd outermost
+    ("s-M-[" "pane-previous-window")
+    ("s-M-]" "pane-next-window")))
 
 ;;; --- the public API of this file ----------------------------------------------
 ;;; The catalog scope of each entry is the one it had in editor.scm.

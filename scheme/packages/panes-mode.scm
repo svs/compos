@@ -713,19 +713,27 @@
                  (lambda (p) (panes--put p 'blank #f)))))))))
 
 (define (panes--delete-window!)
-  "C-x 0: the pane of the selected window goes with its windows; in the
-   last pane only the window goes, when another window waits behind it.
-   An empty pane's blank window takes its pane. Answers #f, and nothing
-   changes, for the sole window."
+  "C-x 0: the pane of the selected window goes, and its windows wait
+   behind the windows of the pane that takes the focus, so no buffer
+   leaves the layout. In the last pane the window goes behind the others
+   in its pane, when another window waits there. An empty pane's blank
+   window takes its pane. Answers #f, and nothing changes, for the sole
+   window."
   (let* ((l (panes--ensure-layout!))
          (me (active-window))
          (k (panes-key-of-handle l me))
          (pid (if k (panes-pane-of l k) (panes--empty-pane-of me)))
-         (gone (and pid (panes-remove-pane l pid)))
+         (gone (and pid (panes-remove-pane (panes-set-focus l pid) pid)))
+         (heir (and gone (not (equal? gone l)) (panes-focus gone)))
+         (keys (if pid (panes-pane-keys l pid) '()))
          (after (cond ((not pid) l)
-                      ((not (equal? gone l)) gone)
-                      ;; the last pane loses a window only when another waits behind it
-                      ((and k (> (length (panes-pane-keys l pid)) 1)) (panes-remove-window l k))
+                      (heir
+                       (panes-remove-pane
+                         (fold (lambda (l key) (panes-move-window l key heir (length (panes-pane-keys l heir))))
+                               (panes-set-focus l pid) keys)
+                         pid))
+                      ;; the last pane: the window goes behind the next one waiting there
+                      ((and k (> (length keys) 1)) (panes-move-window l k pid (length keys)))
                       (else l))))
     ;; Emacs deletes the window: its frame window goes, its buffers stay open
     (and (not (equal? after l))
@@ -1006,37 +1014,29 @@
     (list (if (> (panes-column-count l) (panes-capacity l)) (panes-set-capacity l (panes-column-count l)) l)
           (cadr added))))
 
-(define (panes--move-current-pane! step)
-  "s-S-<left> and s-S-<right>: the column of the selected window moves
-   one column, STEP -1 left and 1 right, every pane and window in it
-   going along. #t when it moved; at the edge, a message and #f."
+(define (panes--move-current-pane! dir)
+  "s-S-<arrow>: the windows of the selected pane trade places with those
+   of the pane DIR of it (left, right, up or down), and the focus goes
+   with them. The panes keep their places and sizes. #t when it moved;
+   at the edge, a message and #f."
   (let* ((l (panes--ensure-layout!))
          (pid (panes--current-pane l))
-         (moved (and pid (panes-move-column l pid step))))
-    (if (and moved (not (equal? moved l)))
-        (begin (panes-apply! moved) #t)
+         (to (and pid (panes--pane-toward l dir))))
+    (if to
+        (begin (panes-apply! (panes-set-focus (panes-swap-panes l pid to) to)) #t)
         (begin (message "No pane that way") #f))))
 
 (define (panes--shift-window! dir)
-  "S-<left> and S-<right>: the focused window moves to the front of the
-   neighbouring pane, DIR -1 left and 1 right, and that pane takes the
-   focus. At the edge it takes a new pane while there is room. A pane
-   it leaves empty stays, and shows the empty pane. #t when it moved;
-   else a message and #f."
+  "S-<arrow>: the focused window moves to the front of the pane DIR of
+   it (left, right, up or down), and that pane takes the focus. A move
+   never makes a pane: at the edge, a message and #f. A pane it leaves
+   empty stays, and shows the empty pane. #t when it moved."
   (let* ((l (panes--ensure-layout!))
          (key (panes-key-of-handle l (active-window)))
-         (from (and key (panes-pane-of l key)))
-         (ids (panes-pane-ids l))
-         (i (and from (+ dir (panes--index-of from ids))))
-         (to (cond ((not i) #f)
-                   ((and (>= i 0) (< i (length ids))) (list l (list-ref ids i)))
-                   ((panes-under-capacity? l) (panes-add-pane l (if (< i 0) 0 (length ids))))
-                   (else #f))))
+         (to (and key (panes--pane-toward l dir))))
     (if (not to)
         (begin (message "No pane that way") #f)
-        (let ((moved (panes-set-focus (panes-move-window (car to) key (cadr to)) (cadr to))))
-          (panes-apply! moved)
-          #t))))
+        (begin (panes-apply! (panes-set-focus (panes-move-window l key to) to)) #t))))
 
 ;;; --- motion between panes ------------------------------------------------------
 ;;; The panes are one row: left and previous are the pane before, right and
@@ -1113,11 +1113,17 @@
               nb)
             me)))))
 
-(define-command "pane-move-left" "Move this pane left, with all its windows"
-  (lambda () (panes--move-current-pane! -1)))
+(define-command "pane-move-left" "Swap this pane's windows with the pane to the left"
+  (lambda () (panes--move-current-pane! 'left)))
 
-(define-command "pane-move-right" "Move this pane right, with all its windows"
-  (lambda () (panes--move-current-pane! 1)))
+(define-command "pane-move-right" "Swap this pane's windows with the pane to the right"
+  (lambda () (panes--move-current-pane! 'right)))
+
+(define-command "pane-move-up" "Swap this pane's windows with the pane above"
+  (lambda () (panes--move-current-pane! 'up)))
+
+(define-command "pane-move-down" "Swap this pane's windows with the pane below"
+  (lambda () (panes--move-current-pane! 'down)))
 
 (define (panes--cycle-pane-window! step)
   "The next window of the focused pane comes to its front; the one that

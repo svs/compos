@@ -83,14 +83,15 @@
 
   // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
   // paste event) — except the arrows, claimed for window motion,
-  // and cmd-p, claimed for the command palette, and cmd-i for imenu
+  // and cmd-p, claimed for the command palette, and cmd-i for imenu,
+  // and cmd-[ and cmd-], which walk a window's buffers
   // ...and the text-scale chords, claimed from the browser's
   // whole-page zoom: cmd-=/-/0 scale the application (appearance.scm
   // ui-scale), and their shifted shapes cmd-+/_/) scale ONE buffer.
   // The list names the BASE the key travels as (baseKey), so a
   // named key appears in its Emacs spelling: "<up>", not "ArrowUp".
   const CMD_KEYS = ["<left>", "<right>", "<up>", "<down>",
-                    "a", "i", "p", "+", "=", "-", "0", "_", ")", "RET"];
+                    "a", "i", "p", "[", "]", "+", "=", "-", "0", "_", ")", "RET"];
 
   function keySpec(e) {
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;

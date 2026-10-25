@@ -2067,11 +2067,13 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  def handle_call({:arrange_line, dir, ratio, ids, fid}, _from, state) when dir in [:h, :v] do
+  def handle_call({:arrange_line, dir, ratio, items, fid}, _from, state) when dir in [:h, :v] do
     f = frame(state, fid)
     visible = leaves(f.tree)
     pool = visible ++ hidden(f)
-    chosen = ids |> Enum.uniq() |> Enum.map(fn id -> Enum.find(pool, &(&1.id == id)) end)
+    held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
+    items = Enum.uniq_by(items, &line_item_id/1)
+    chosen = Enum.map(items, &line_leaf(&1, pool, held))
 
     if chosen == [] or Enum.any?(chosen, &is_nil/1) do
       {:reply, {:error, :no_window}, state}
@@ -2083,12 +2085,13 @@ defmodule Compos.Core.Editor do
 
       left = hidden(f) |> Enum.reject(&MapSet.member?(used, &1.id))
       active = if MapSet.member?(used, f.active), do: f.active, else: hd(chosen).id
+      next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
 
       f =
         %{f | tree: line_tree(chosen, dir, ratio), active: active}
         |> Map.put(:hidden, sel ++ others ++ left)
 
-      changed(:ok, state |> put_frame(f) |> resync_swap(), f.id)
+      changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
     end
   end
 
@@ -2451,6 +2454,22 @@ defmodule Compos.Core.Editor do
   defp drop_point(%{buffer: b, id: id}) do
     if Buffer.exists?(b), do: wp_safely(fn -> Buffer.drop_win_point(b, id) end)
   end
+
+  # A line item is a window id, or [ID, BUFFER]: the window ID, made on
+  # BUFFER when this frame has no window ID and no frame holds the id.
+  defp line_item_id([id, _buffer]), do: id
+  defp line_item_id(id), do: id
+
+  defp line_leaf([id, buffer], pool, held) when is_integer(id) and id > 0 and is_binary(buffer) do
+    cond do
+      leaf = Enum.find(pool, &(&1.id == id)) -> leaf
+      id in held -> nil
+      match?({:error, _}, Compos.Core.ensure_buffer(buffer)) -> nil
+      true -> %{type: :leaf, id: id, buffer: buffer, history: [], top: 0, manual: false}
+    end
+  end
+
+  defp line_leaf(id, pool, _held), do: Enum.find(pool, &(&1.id == id))
 
   # One line of LEAVES, nested to the right: the first takes RATIO, and
   # each later split gives its first pane 1/COUNT of what is left. This is

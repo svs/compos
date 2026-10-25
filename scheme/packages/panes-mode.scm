@@ -157,9 +157,9 @@
   (and (string? b) (buffer-known? b) (or (buffer-local b 'mode-name) "fundamental-mode")))
 
 (define (panes--live-handle? h)
-  "#t when H is a frame window that still exists, on screen or hidden,
-   else #f."
-  (and h (or (window-exists? h) (assoc h (window-hidden-list))) #t))
+  "#t when H is a frame window on screen, else #f. A window off the
+   screen is the model's alone: it has no frame window."
+  (and h (window-exists? h) #t))
 
 (define (panes--frame-row)
   "The work windows on screen, left to right by their left edge:
@@ -357,42 +357,42 @@
     (and p (plist-get p 'id))))
 
 (define (panes--blanks layout)
-  "LAYOUT with a live blank window on every empty pane: the one it keeps,
-   else a new hidden window on the blank buffer, with the id it had when
-   no window holds it."
+  "LAYOUT with a blank window id on every empty pane: the one it keeps,
+   else a new one. The draw makes the frame window on the blank buffer."
   (fold (lambda (l p)
           (let ((pid (plist-get p 'id)) (h (plist-get p 'blank)))
-            (if (or (pair? (panes-keys p)) (panes--live-handle? h))
-                l
-                (begin
-                  (panes--empty-buffer!)
-                  (let ((nh (window-new-hidden! panes-empty-buffer h)))
-                    (if nh (panes--update-pane l pid (lambda (p) (panes--put p 'blank nh))) l))))))
+            (cond ((pair? (panes-keys p)) l)
+                  (else
+                    (panes--empty-buffer!)
+                    (if h l (panes--update-pane l pid (lambda (p) (panes--put p 'blank (window-id-new!)))))))))
         layout (panes-panes layout)))
 
 (define (panes--claim-empty-windows layout)
   "A pane that took a window gives its blank window to that window, so
    the frame window stays: the front window takes the blank id as its key
    when it has no live frame window. A pane with a window keeps no
-   blank; a blank window nothing took is deleted."
+   blank; a blank window nothing took leaves the screen with the draw."
   (fold (lambda (l p)
           (let* ((ks (panes-keys p)) (pid (plist-get p 'id)) (h (plist-get p 'blank)))
             (cond ((or (not h) (null? ks)) l)
                   ((and (panes--live-handle? h) (not (panes--live-handle? (car ks))))
                    (panes--update-pane (panes-set-handle l (car ks) h) pid (lambda (p) (panes--put p 'blank #f))))
-                  (else
-                    (unless (member h (panes-window-keys l))
-                      (when (assoc h (window-hidden-list)) (window-hidden-delete! h)))
-                    (panes--update-pane l pid (lambda (p) (panes--put p 'blank #f)))))))
+                  (else (panes--update-pane l pid (lambda (p) (panes--put p 'blank #f)))))))
         layout (panes-panes layout)))
 
 (define (panes--pane-handles layout)
-  "A frame window for every pane, left to right: its front window, else
-   its blank one (panes--blanks made it). A front window with no handle
-   gives #f."
+  "A line item for every pane, left to right: the frame window of its
+   front window, else of its blank one (panes--blanks gave the id). A
+   window off the screen gives (ID BUFFER), so the arrange makes it. A
+   front window whose buffer is not known gives #f."
   (map (lambda (p)
-         (let ((ks (panes-keys p)))
-           (if (pair? ks) (panes-handle layout (car ks)) (plist-get p 'blank))))
+         (let* ((ks (panes-keys p))
+                (h (if (pair? ks) (panes-handle layout (car ks)) (plist-get p 'blank)))
+                (buf (if (pair? ks) (panes-window-buffer layout (car ks)) panes-empty-buffer)))
+           (cond ((not h) #f)
+                 ((window-exists? h) h)
+                 ((and buf (buffer-known? buf)) (list h buf))
+                 (else #f))))
        (panes-panes layout)))
 
 (define (panes--materialize layout keys)

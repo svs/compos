@@ -2334,7 +2334,7 @@ defmodule Compos.Core.SchemeAPI do
        "(window-id-new!) — a window id no window holds and none will be given again; it makes no window."} =>
         fn [] -> Editor.new_window_id() end,
       {"window-arrange-line!",
-       "(window-arrange-line! DIR RATIO IDS) — lay the frame out as one line of windows IDS, visible or hidden; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a visible window not in IDS becomes hidden; #t when it did."} =>
+       "(window-arrange-line! DIR RATIO ITEMS) — lay the frame out as one line of windows; an item is a window id, visible or hidden, or (ID BUFFER), the window ID made on BUFFER when no window holds ID; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a visible window not in ITEMS becomes hidden; #t when it did."} =>
         fn [dir, ratio, ids] ->
           dir = if plain(dir) == "v", do: :v, else: :h
           Editor.arrange_line(dir, ratio, ids) == :ok

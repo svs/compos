@@ -513,6 +513,17 @@
    go. The pane order does not change."
   (panes--update-window layout key (lambda (w) (panes--put w 'buffers (panes--uniq (panes--ids bufs))))))
 
+(define (panes-window-point layout key)
+  "The point window KEY had in the buffer it shows when it last left
+   the screen, or #f: also when it shows another buffer now."
+  (let* ((w (panes-window layout key)) (p (and w (plist-get w 'point))))
+    (and (pair? p) (equal? (car p) (panes-window-buffer layout key)) (cadr p))))
+
+(define (panes-set-window-point layout key buf pos)
+  "Window KEY keeps POS as its point in BUF while it is off the screen.
+   An unknown KEY changes nothing."
+  (panes--update-window layout key (lambda (w) (panes--put w 'point (list buf pos)))))
+
 (define (panes-set-mode layout key mode)
   "Window KEY takes MODE as its mode. Its stack and its preference do
    not change, so a window can be preferred for a mode it is no longer

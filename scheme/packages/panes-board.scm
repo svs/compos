@@ -51,7 +51,7 @@
 (define (panes-board-key id)
   (let ((ps (panes-board--split id)))
     (and (> (length ps) 2)
-         (let ((s (caddr ps))) (if (equal? (car ps) "p") s (or (string->number s) s))))))
+         (let ((s (caddr ps))) (if (member (car ps) '("p" "c")) s (or (string->number s) s))))))
 (define (panes-board-buffer-of id) (let ((ps (panes-board--split id))) (and (> (length ps) 3) (cadddr ps))))
 
 (define (panes-board-here-group) (panes--group-key))
@@ -100,8 +100,31 @@
   (let ((l (panes-board-layout-of g)))
     (if (not l)
         '()
-        (append (apply append (map (lambda (p) (panes-board--pane-rows buf g l (plist-get p 'id) #f)) (panes-panes l)))
+        (append (apply append (map (lambda (c) (panes-board--column-rows buf g l c #f)) (panes-columns l)))
                 (panes-board--float-rows g)))))
+
+;; a column of stacked panes is a row of its own, its panes under it; a
+;; column of one pane is that pane's row. Its key is its top pane's id
+(define (panes-board--column-rows buf g l col force)
+  (if (null? (cdr col))
+      (panes-board--pane-rows buf g l (plist-get (car col) 'id) force)
+      (let ((id (panes-board--id "c" g (plist-get (car col) 'id))))
+        (cons id (if (and (not force) (panes-board--shut? buf id))
+                     '()
+                     (apply append (map (lambda (p) (panes-board--pane-rows buf g l (plist-get p 'id) #f)) col)))))))
+
+(define (panes-board--column-of l pid)
+  (and l pid (find (lambda (c) (member pid (map (lambda (p) (plist-get p 'id)) c))) (panes-columns l))))
+
+(define (panes-board--stacked? l pid)
+  (let ((c (panes-board--column-of l pid))) (and c (pair? (cdr c)))))
+
+(define (panes-board--column-row id)
+  ;; the column row above a pane, window or buffer row, or #f
+  (let* ((l (panes-board-row-layout id))
+         (pid (and (member (panes-board-kind id) '("p" "w" "b")) (panes-board-pane-of id))))
+    (and (panes-board--stacked? l pid)
+         (panes-board--id "c" (panes-board-group id) (plist-get (car (panes-board--column-of l pid)) 'id)))))
 
 (define (panes-board--float-rows g)
   ;; the floating preview is its own entry: a window of the frame, in no pane
@@ -111,6 +134,7 @@
 (define (panes-board--root-valid? root)
   (let* ((kind (panes-board-kind root)) (l (panes-board-row-layout root)))
     (cond ((equal? kind "g") (and l #t))
+          ((equal? kind "c") (and l (panes-board--stacked? l (panes-board-key root)) #t))
           ((equal? kind "p") (and l (panes-pane l (panes-board-key root)) #t))
           ((equal? kind "w") (and l (panes-window l (panes-board-key root)) #t))
           (else #f))))
@@ -125,6 +149,7 @@
           (root
            (let* ((kind (panes-board-kind root)) (g (panes-board-group root)) (l (panes-board-layout-of g)))
              (cond ((equal? kind "g") (cons root (panes-board--group-rows buf g)))
+                   ((equal? kind "c") (panes-board--column-rows buf g l (panes-board--column-of l (panes-board-key root)) #t))
                    ((equal? kind "p") (panes-board--pane-rows buf g l (panes-board-key root) #t))
                    (else (panes-board--window-rows buf g l (panes-board-key root) #t)))))
           ((equal? (panes-board-view buf) 'all)
@@ -141,11 +166,13 @@
 ;; ends at its window
 (define (panes-board--chain buf id)
   (let* ((kind (panes-board-kind id)) (g (panes-board-group id))
-         (top (if (equal? (panes-board-view buf) 'all) (list (panes-board--id "g" g)) '())))
+         (top (if (equal? (panes-board-view buf) 'all) (list (panes-board--id "g" g)) '()))
+         (col (let ((c (panes-board--column-row id))) (if c (list c) '()))))
     (cond ((equal? kind "g") (list id))
-          ((equal? kind "p") (append top (list id)))
+          ((member kind '("c" "f")) (append top (list id)))
+          ((equal? kind "p") (append top col (list id)))
           (else (let ((pid (panes-board-pane-of id)))
-                  (append top (if pid (list (panes-board--id "p" g pid)) '())
+                  (append top col (if pid (list (panes-board--id "p" g pid)) '())
                           (list (panes-board--id "w" g (panes-board-key id)))))))))
 
 ;; one level below the root on the way to the row; a buffer row in a view not
@@ -161,12 +188,15 @@
 (define (panes-board-zoom-parent buf root)
   (let ((kind (panes-board-kind root)) (g (panes-board-group root)))
     (cond ((equal? kind "w") (let ((pid (panes-board-pane-of root))) (and pid (panes-board--id "p" g pid))))
-          ((equal? kind "p") (and (equal? (panes-board-view buf) 'all) (panes-board--id "g" g)))
+          ((and (equal? kind "p") (panes-board--column-row root)) (panes-board--column-row root))
+          ((member kind '("p" "c")) (and (equal? (panes-board-view buf) 'all) (panes-board--id "g" g)))
           (else #f))))
 
 (define (panes-board--label id)
   (let ((kind (panes-board-kind id)) (l (panes-board-row-layout id)))
     (cond ((equal? kind "g") (let ((g (panes-board-group id))) (or (and (string? g) (group-name g)) "no group")))
+          ((equal? kind "c") (let ((i (and l (panes--index-of #t (map (lambda (c) (equal? (plist-get (car c) 'id) (panes-board-key id))) (panes-columns l))))))
+                                (if i (string-append "column " (number->string (+ 1 i))) "column")))
           ;; a row drawn after its pane went, from a list not yet refreshed, says pane
           ((equal? kind "p") (let ((i (and l (panes--index-of (panes-board-key id) (panes-pane-ids l)))))
                                 (if i (string-append "pane " (number->string (+ 1 i))) "pane")))
@@ -182,15 +212,19 @@
   (let loop ((r (panes-board-root buf)) (acc '()))
     (if (not r) acc (loop (panes-board-zoom-parent buf r) (cons (panes-board--label r) acc)))))
 
+(define (panes-board--level id)
+  ;; how deep a row sits in the whole tree; a stacked pane is one deeper
+  (let* ((kind (panes-board-kind id))
+         (s (if (and (member kind '("p" "w" "b")) (panes-board--column-row id)) 1 0)))
+    (cond ((equal? kind "g") 0) ((member kind '("c" "f")) 1) ((equal? kind "p") (+ 1 s)) ((equal? kind "w") (+ 2 s)) (else (+ 3 s)))))
+
 (define (panes-board--depth buf id)
   ;; how far in a row sits below the top of what is shown
-  (let* ((kind (panes-board-kind id))
-         (d (cond ((equal? kind "g") 0) ((member kind '("p" "f")) 1) ((equal? kind "w") 2) (else 3)))
-         (root (panes-board-root buf))
-         (top (cond (root (let ((k (panes-board-kind root))) (cond ((equal? k "g") 0) ((equal? k "p") 1) (else 2))))
+  (let* ((root (panes-board-root buf))
+         (top (cond (root (panes-board--level root))
                     ((equal? (panes-board-view buf) 'all) 0)
                     (else 1))))
-    (max 0 (- d top))))
+    (max 0 (- (panes-board--level id) top))))
 
 (define (panes-board--indent buf id)
   (let loop ((n (* 2 (panes-board--depth buf id))) (s ""))
@@ -201,6 +235,14 @@
 (define (panes-board--short mode)
   (let ((m (or mode "")))
     (if (string-suffix? "-mode" m) (substring m 0 (- (string-length m) 5)) m)))
+
+(define (panes-board--share l col pid)
+  ;; PID's height in a stacked COL, else COL's width; 0 when it is gone
+  (let ((ci (and col (panes--index-of col (panes-columns l))))
+        (ri (and col pid (panes--index-of pid (map (lambda (p) (plist-get p 'id)) col)))))
+    (cond ((not ci) 0)
+          ((and ri (pair? (cdr col))) (list-ref (panes-vshares col) ri))
+          (else (let ((ws (panes-layout-shares l #t))) (if (< ci (length ws)) (list-ref ws ci) 0))))))
 
 (define (panes-board-cells buf id)
   (let* ((kind (panes-board-kind id))
@@ -224,13 +266,20 @@
                    (list (if b (buffer-modeline-name b) "") "dim")
                    (list "preview" "faint"))))
           ((not l) (list (list "" #f) (list id "faint") (list "" #f) (list "" #f)))
+          ((equal? kind "c")
+           (let* ((col (panes-board--column-of l (panes-board-key id)))
+                  (me (and here? col (any (lambda (p) (any (lambda (k) (equal? (panes-handle l k) (active-window))) (panes-keys p))) col))))
+             (list (list (if here? "■" "□") (if here? "ok" "faint"))
+                   (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) (if me "accent" #f))
+                   (list (panes-board--pct (panes-board--share l col #f)) "faint")
+                   (list (string-append (number->string (if col (length col) 0)) " panes") "dim"))))
           ((equal? kind "p")
            (let* ((pid (panes-board-key id))
                   (p (panes-pane l pid))
-                  (i (panes--index-of pid (panes-pane-ids l)))
-                  ;; the panes as the frame draws them, the layout's shares included
-                  (shares (panes-layout-shares l))
-                  (share (if (and i (< i (length shares))) (list-ref shares i) 0))
+                  (col (panes-board--column-of l pid))
+                  ;; as the frame draws it: a stacked pane's height in its column,
+                  ;; else its column's width, the layout's shares included
+                  (share (panes-board--share l col pid))
                   (me (and here? (any (lambda (k) (equal? (panes-handle l k) (active-window))) (panes-keys p)))))
              (list (list (if here? "■" "□") (if here? "ok" "faint"))
                    (list (string-append pad (if (panes-board--shut? buf id) "▸ " "▾ ") (panes-board--label id)) (if me "accent" #f))
@@ -303,7 +352,7 @@
             (else
               (let* ((l (panes-board-layout))
                      (kind (panes-board-kind id))
-                     (key (if (equal? kind "p")
+                     (key (if (member kind '("p" "c"))
                               (let ((ks (panes-pane-keys l (panes-board-key id)))) (and (pair? ks) (car ks)))
                               (panes-board-key id)))
                      ;; here: the pane the list stands in; the window takes its place
@@ -326,9 +375,7 @@
     (lambda (l id)
       (let ((kind (panes-board-kind id)))
         (cond ((equal? kind "g") l)
-              ((equal? kind "p")
-               (let* ((pid (panes-board-key id)) (i (panes--index-of pid (panes-pane-ids l))))
-                 (panes-move-pane l pid (+ i dir))))
+              ((member kind '("p" "c")) (panes-move-column l (panes-board-key id) dir))
               (else
                 (let* ((key (panes-board-key id))
                        (from (panes-pane-of l key))
@@ -409,7 +456,7 @@
     (panes-board-edit!
       (lambda (l id)
         (let ((kind (panes-board-kind id)))
-          (cond ((equal? kind "g") l)
+          (cond ((member kind '("g" "c")) l)
                 ((equal? kind "p") (panes-remove-pane l (panes-board-key id)))
                 ((equal? kind "w") (panes-remove-window l (panes-board-key id)))
                 (else
@@ -452,7 +499,7 @@
            (id (list-current buf)))
       (when id
         (let ((kind (panes-board-kind id)))
-          (cond ((member kind '("g" "p")) (panes-board--toggle! buf 'panes-board-shut id))
+          (cond ((member kind '("g" "c" "p")) (panes-board--toggle! buf 'panes-board-shut id))
                 ((equal? kind "w") (panes-board--toggle! buf 'panes-board-open id))
                 (else (panes-board--toggle! buf 'panes-board-open (panes-board--id "w" (panes-board-group id) (panes-board-key id))))))
         (panes-board-refresh!)))))

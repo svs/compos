@@ -1456,7 +1456,18 @@ keeps the buffer you were in and your point.")
 ;; shows what the model then says
 (define (delete-other-windows!) (panes--delete-other-windows!))
 
-(define (split-window! dir &optional ratio) (panes--split-window!))
+(define (split-window! dir &optional ratio) (panes--split-window! dir))
+
+(define (window-arrange-line! dir ratio items)
+  "Lay the frame out as one line of the window ITEMS: window-arrange!
+   with a single line. A repeated window counts once."
+  (let ((id (lambda (i) (if (pair? i) (car i) i))))
+    (window-arrange!
+      (list dir ratio
+            (let loop ((is items) (seen '()) (acc '()))
+              (cond ((null? is) (reverse acc))
+                    ((member (id (car is)) seen) (loop (cdr is) seen acc))
+                    (else (loop (cdr is) (cons (id (car is)) seen) (cons (car is) acc)))))))))
 
 (define (delete-window!) (panes--delete-window!))
 
@@ -1506,7 +1517,7 @@ keeps the buffer you were in and your point.")
 
 ;; C-x 2 and C-x 3: an empty pane beside this one, filled by the fill rule
 (define (split-window-with-other-buffer! direction)
-  (panes--split-window!))
+  (panes--split-window! direction))
 
 (define-command "split-window-below" "Split the window in two, one above the other"
   (lambda () (split-window-with-other-buffer! 'v)))

@@ -430,6 +430,17 @@
               (panes--store))
     (park layout)))
 
+(define (panes--column-items layout items)
+  "ITEMS, one line item for each pane in pane order, as one arrange spec
+   for each column: a column of one pane is its item, a stacked column
+   is a line, top to bottom, of its items at their heights."
+  (let loop ((cols (panes-columns layout)) (items items) (acc '()))
+    (if (null? cols)
+        (reverse acc)
+        (let* ((n (length (car cols))) (mine (list-head items n)))
+          (loop (cdr cols) (list-tail items n)
+                (cons (if (= n 1) (car mine) (list 'v (panes-vshares (car cols)) mine)) acc))))))
+
 (define (panes--draw! layout)
   "The frame drawn as LAYOUT: every top window on screen with its
    pane's share, showing the front of its stack, the rest waiting
@@ -459,9 +470,10 @@
                    (made (filter (lambda (h) (not (window-exists? h))) handles)))
               ;; the floating preview is no pane: it stays on screen, first in the
               ;; line, where its split takes no room and it floats over the frame
-              (if (and float (not (member float handles)))
-                  (window-arrange-line! 'h (cons 0.001 (panes-layout-shares layout)) (cons float items))
-                  (window-arrange-line! 'h (panes-layout-shares layout) items))
+              (let ((shares (panes-layout-shares layout #t)) (cols (panes--column-items layout items)))
+                (if (and float (not (member float handles)))
+                    (window-arrange! (list 'h (cons 0.001 shares) (cons float cols)))
+                    (window-arrange! (list 'h shares cols))))
               (for-each
                 (lambda (k)
                   (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))
@@ -736,15 +748,16 @@
     (panes-apply! (panes-set-focus moved pid))
     #t))
 
-(define (panes--split-window!)
-  "C-x 3 and C-x 2: an empty pane opens right of the focused pane, and
-   the next fill buffer shows in it when the fill rule names one. The
-   selection stays. Answers the new pane's frame window, or #f."
+(define (panes--split-window! &optional dir)
+  "C-x 3, and C-x 2 when DIR is v: an empty pane opens right of the
+   focused pane, or under it in its column, and the next fill buffer
+   shows in it when the fill rule names one. The selection stays.
+   Answers the new pane's frame window, or #f."
   (let* ((l (panes--ensure-layout!))
          (me (active-window))
          (k (panes-key-of-handle l me))
          (pid (or (and k (panes-pane-of l k)) (panes--empty-pane-of me) (panes-focus l)))
-         (added (panes-add-empty-pane l pid))
+         (added (if (equal? dir 'v) (panes-split-below l pid) (panes-add-empty-pane l pid)))
          (action (window-fill-decide (list 'shown (panes-buffers l)) (window-fill-buffers)))
          (buf (and (equal? (car action) 'show) (cadr action)))
          (after (if buf
@@ -984,24 +997,24 @@
     (or (and k (panes-pane-of l k)) (panes--empty-pane-of (active-window)))))
 
 (define (panes-add-empty-pane l pid)
-  "An empty pane right after PID (the end when #f): (LAYOUT ID). The
-   capacity grows to hold it."
-  (let* ((i (and pid (panes--index-of pid (panes-pane-ids l))))
+  "An empty pane right of PID's column (the end when #f): (LAYOUT ID).
+   The capacity grows to hold it."
+  (let* ((col (and pid (find (lambda (c) (member pid (map (lambda (p) (plist-get p 'id)) c))) (panes-columns l))))
+         (i (and col (panes--index-of (plist-get (car (reverse col)) 'id) (panes-pane-ids l))))
          (added (panes-add-pane l (if i (+ i 1) (panes-pane-count l))))
          (l (car added)))
-    (list (if (> (panes-pane-count l) (panes-capacity l)) (panes-set-capacity l (panes-pane-count l)) l)
+    (list (if (> (panes-column-count l) (panes-capacity l)) (panes-set-capacity l (panes-column-count l)) l)
           (cadr added))))
 
 (define (panes--move-current-pane! step)
-  "s-S-<left> and s-S-<right>: the pane of the selected window moves one
-   place, STEP -1 left and 1 right, every window in it going along. #t
-   when it moved; at the edge, a message and #f."
+  "s-S-<left> and s-S-<right>: the column of the selected window moves
+   one column, STEP -1 left and 1 right, every pane and window in it
+   going along. #t when it moved; at the edge, a message and #f."
   (let* ((l (panes--ensure-layout!))
          (pid (panes--current-pane l))
-         (i (and pid (panes--index-of pid (panes-pane-ids l))))
-         (to (and i (+ i step))))
-    (if (and to (>= to 0) (< to (panes-pane-count l)))
-        (begin (panes-apply! (panes-move-pane l pid to)) #t)
+         (moved (and pid (panes-move-column l pid step))))
+    (if (and moved (not (equal? moved l)))
+        (begin (panes-apply! moved) #t)
         (begin (message "No pane that way") #f))))
 
 (define (panes--shift-window! dir)
@@ -1031,13 +1044,25 @@
 ;;; the model and the draw shows it.
 
 (define (panes--pane-toward l dir)
-  "The pane DIR of the focused one, or #f at the edge and for up or down."
+  "The pane DIR of the focused one, or #f at the edge. Left and right
+   step to the next column, to the pane level with this one or its
+   last; up and down step in the column; previous and next step in
+   pane order."
   (let* ((pid (panes--current-pane l))
          (ids (panes-pane-ids l))
-         (i (and pid (panes--index-of pid ids)))
-         (step (cond ((member dir '(left previous)) -1) ((member dir '(right next)) 1) (else #f)))
-         (j (and i step (+ i step))))
-    (and j (>= j 0) (< j (length ids)) (list-ref ids j))))
+         (cols (map (lambda (c) (map (lambda (p) (plist-get p 'id)) c)) (panes-columns l)))
+         (ci (and pid (panes--index-of #t (map (lambda (c) (and (member pid c) #t)) cols))))
+         (ri (and ci (panes--index-of pid (list-ref cols ci))))
+         (at (lambda (lst j) (and j (>= j 0) (< j (length lst)) (list-ref lst j)))))
+    (and pid
+         (cond ((member dir '(previous next))
+                (at ids (+ (panes--index-of pid ids) (if (equal? dir 'next) 1 -1))))
+               ((member dir '(left right))
+                (let ((c (at cols (+ ci (if (equal? dir 'right) 1 -1)))))
+                  (and c (list-ref c (min ri (- (length c) 1))))))
+               ((member dir '(up down))
+                (at (list-ref cols ci) (+ ri (if (equal? dir 'down) 1 -1))))
+               (else #f)))))
 
 (define (focus-move! dir)
   "The focus goes to the pane DIR; at the edge a message."

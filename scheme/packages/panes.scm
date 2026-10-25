@@ -6,6 +6,10 @@
 ;;;   LAYOUT = (panes (PANE ...) focus ID next-pane N next-window N capacity C)
 ;;;   PANE   = (id ID share S windows (WINDOW ...))    the first WINDOW is on
 ;;;                                                   screen; none is an empty pane
+;;;            column C vshare V                      optional: panes next to each
+;;;                                                   other with one C stack, top to
+;;;                                                   bottom, V their heights; the
+;;;                                                   first one's S is the width
 ;;;   WINDOW = (key KEY win HANDLE mode MODE buffers (B ...) preferred BOOL)
 ;;;                                                   the first B is shown
 ;;;
@@ -254,8 +258,7 @@
          (layout (cadr made))
          ;; the average share, so an equal row stays equal and a widened
          ;; pane keeps its width
-         (shares (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1)))
-                      (panes-panes layout)))
+         (shares (map (lambda (c) (panes--positive (plist-get (car c) 'share))) (panes-columns layout)))
          (share (if (null? shares) 1 (/ (apply + shares) (length shares))))
          (pane (list 'id id 'share share 'windows '())))
     (list (tree-insert panes--shape (panes--normal layout) 'root pane at) id)))
@@ -268,7 +271,7 @@
       layout
       (let* ((i (panes--index-of id (panes-pane-ids layout)))
              (focused (equal? (panes-focus layout) id))
-             (layout (tree-remove panes--shape (panes--normal layout) id))
+             (layout (tree-remove panes--shape (panes--normal (panes--detach layout id)) id))
              (left (panes-pane-ids layout)))
         (if focused
             (panes-set-focus layout (list-ref left (min i (- (length left) 1))))
@@ -321,16 +324,103 @@
       layout))
 
 (define (panes-equalize layout)
-  "Every pane takes an equal share."
-  (tree-map panes--shape (panes--normal layout) 1 (lambda (p) (panes--put p 'share 1))))
+  "Every pane takes an equal share, and every stacked pane an equal
+   height."
+  (tree-map panes--shape (panes--normal layout) 1 (lambda (p) (panes--put (panes--put p 'share 1) 'vshare 1))))
+
+;;; --- columns ------------------------------------------------------------
+;;; Panes next to each other with the same column stack top to bottom, as
+;;; Emacs's C-x 2 stacks windows. A pane without a column is a column of
+;;; its own, so a layout with no column draws as a row of panes.
+
+(define (panes-column-of pane)
+  "The column PANE stands in: its column, else its own id."
+  (or (plist-get pane 'column) (plist-get pane 'id)))
+
+(define (panes-columns layout)
+  "The panes of LAYOUT in columns, left to right: a list of columns, each
+   the list of its panes, top to bottom."
+  (let loop ((ps (panes-panes layout)) (acc '()))
+    (cond ((null? ps) (reverse (map reverse acc)))
+          ((and (pair? acc) (equal? (panes-column-of (car ps)) (panes-column-of (caar acc))))
+           (loop (cdr ps) (cons (cons (car ps) (car acc)) (cdr acc))))
+          (else (loop (cdr ps) (cons (list (car ps)) acc))))))
+
+(define (panes-column-count layout)
+  "How many columns LAYOUT has."
+  (length (panes-columns layout)))
+
+(define (panes--positive v)
+  "V when it is a positive number, else 1."
+  (if (and (number? v) (> v 0)) v 1))
+
+(define (panes-vshares column)
+  "The heights of the panes of COLUMN, top to bottom, normalized to
+   sum 1. A height that is not a positive number counts as 1."
+  (let* ((raw (map (lambda (p) (panes--positive (plist-get p 'vshare))) column))
+         (total (apply + raw)))
+    (map (lambda (v) (/ v total)) raw)))
+
+(define (panes--detach layout id)
+  "LAYOUT with pane ID out of its column: the pane above it takes its
+   height, else the pane below; a pane that was stacked under it takes
+   its width; and ID has no column."
+  (let* ((col (find (lambda (c) (member id (map (lambda (p) (plist-get p 'id)) c))) (panes-columns layout)))
+         (ids (if col (map (lambda (p) (plist-get p 'id)) col) '()))
+         (i (panes--index-of id ids))
+         (me (and col (list-ref col i)))
+         (heir (and col (pair? (cdr col)) (list-ref ids (if (> i 0) (- i 1) 1))))
+         (layout (if heir
+                     (panes--update-pane layout heir
+                       (lambda (p) (panes--put p 'vshare (+ (panes--positive (plist-get p 'vshare))
+                                                             (panes--positive (plist-get me 'vshare))))))
+                     layout))
+         (layout (if (and heir (= i 0))
+                     (panes-set-share layout heir (panes--positive (plist-get me 'share)))
+                     layout)))
+    (if col (panes--update-pane layout id (lambda (p) (panes--put p 'column #f))) layout)))
+
+(define (panes-split-below layout id)
+  "A new empty pane under pane ID, in ID's column: (LAYOUT NEW-ID). ID
+   and the new pane share ID's height, as C-x 2 halves a window. An
+   unknown ID answers (LAYOUT #f)."
+  (let ((pane (panes-pane layout id)))
+    (if (not pane)
+        (list layout #f)
+        (let* ((col (panes-column-of pane))
+               (half (/ (panes--positive (plist-get pane 'vshare)) 2))
+               (made (panes--fresh layout 'next-pane "p"))
+               (layout (panes--update-pane (cadr made) id
+                         (lambda (p) (panes--put (panes--put p 'column col) 'vshare half))))
+               (new (list 'id (car made) 'column col 'vshare half 'windows '()))
+               (at (+ 1 (panes--index-of id (panes-pane-ids layout)))))
+          (list (tree-insert panes--shape (panes--normal layout) 'root new at) (car made))))))
 
 (define (panes-move-pane layout id at)
-  "Pane ID moves to index AT among the panes, with all its windows. An
-   AT out of range goes to the start or the end. An unknown ID changes
-   nothing."
+  "Pane ID moves to index AT among the panes, with all its windows, as a
+   column of its own. An AT inside another column goes to that column's
+   end, and an AT out of range to the start or the end. An unknown ID
+   changes nothing."
   (if (panes-pane layout id)
-      (tree-move panes--shape (panes--normal layout) id 'root (max 0 at))
+      (let* ((layout (panes--detach layout id))
+             (others (tree-remove panes--shape (panes--normal layout) id))
+             ;; the indexes between columns: 0, then the end of each column
+             (edges (let loop ((cs (panes-columns others)) (n 0) (acc '(0)))
+                      (if (null? cs) (reverse acc) (let ((n (+ n (length (car cs))))) (loop (cdr cs) n (cons n acc))))))
+             (at (or (find (lambda (e) (>= e (max 0 at))) edges) (car (reverse edges)))))
+        (tree-move panes--shape (panes--normal layout) id 'root at))
       layout))
+
+(define (panes-move-column layout id step)
+  "The column of pane ID moves STEP columns, -1 left or 1 right, with
+   every pane in it. At the edge nothing changes."
+  (let* ((cols (panes-columns layout))
+         (ci (panes--index-of #t (map (lambda (c) (and (member id (map (lambda (p) (plist-get p 'id)) c)) #t)) cols)))
+         (to (and ci (+ ci step))))
+    (if (or (not to) (< to 0) (>= to (length cols)))
+        layout
+        (let ((col (list-ref cols ci)))
+          (panes--set-panes layout (apply append (panes--insert-at (panes--without col cols) to col)))))))
 
 ;;; --- windows ----------------------------------------------------------------
 
@@ -615,23 +705,24 @@
   (panes--uniq (apply append (map (lambda (k) (panes-window-buffers layout k)) (panes-window-keys layout)))))
 
 (define (panes-under-capacity? layout)
-  "#t when LAYOUT has fewer panes than its capacity: one more pane fits."
-  (< (panes-pane-count layout) (panes-capacity layout)))
+  "#t when LAYOUT has fewer columns than its capacity: one more pane
+   fits beside them. Panes stacked in a column count once."
+  (< (panes-column-count layout) (panes-capacity layout)))
 
 (define (panes-fit-capacity layout)
-  "Panes past the capacity fold into the last pane that fits: their
+  "Columns past the capacity fold into the last pane that fits: their
    windows go behind the windows of that pane, in order, so they are
    hidden. Then the panes left share the frame equally. A layout within
    its capacity does not change, its shares included."
-  (let ((ps (panes-panes layout)) (cap (panes-capacity layout)))
-    (if (<= (length ps) cap)
+  (let ((cols (panes-columns layout)) (cap (panes-capacity layout)))
+    (if (<= (length cols) cap)
         layout
-        (let* ((kept (list-head ps cap))
-               (extra (list-tail ps cap))
+        (let* ((kept (apply append (list-head cols cap)))
+               (extra (apply append (list-tail cols cap)))
                (moved (apply append (map (lambda (p) (or (plist-get p 'windows) '())) extra)))
                (last (car (reverse kept)))
                (last (panes--put last 'windows (append (or (plist-get last 'windows) '()) moved))))
-          (panes-equalize (panes--set-panes layout (append (list-head kept (- cap 1)) (list last))))))))
+          (panes-equalize (panes--set-panes layout (append (list-head kept (- (length kept) 1)) (list last))))))))
 
 ;;; --- consolidation ------------------------------------------------------------
 ;;; Every mode has one window: the preferred window of a mode gathers every
@@ -683,13 +774,14 @@
         layout
         (panes-equalize (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap))))))
 
-(define (panes-layout-shares layout)
-  "The share of each pane, normalized to sum 1. A pane resized by hand
-   keeps its own share; while every pane keeps the default, the shares
-   of LAYOUT's layout hold, else they are equal. A share that is not a
+(define (panes-layout-shares layout &optional columns?)
+  "The share of each pane, normalized to sum 1; with COLUMNS?, the width
+   of each column, its first pane's share. A pane resized by hand keeps
+   its own share; while every one keeps the default, the shares of
+   LAYOUT's layout hold, else they are equal. A share that is not a
    positive number counts as 1."
-  (let* ((raw (map (lambda (p) (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1)))
-                   (panes-panes layout)))
+  (let* ((ps (if columns? (map car (panes-columns layout)) (panes-panes layout)))
+         (raw (map (lambda (p) (panes--positive (plist-get p 'share))) ps))
          (n (length raw))
          (plain (null? (filter (lambda (s) (not (= s 1))) raw)))
          (spec (panes-layout-spec (panes-layout-name layout)))
@@ -955,6 +1047,12 @@
 (catalog-meta! 'function "panes-remove-pane" 'effects '(pure))
 (public! 'panes-move-pane "(panes-move-pane LAYOUT ID AT) -> LAYOUT: pane ID moves to index AT with its windows; pure")
 (catalog-meta! 'function "panes-move-pane" 'effects '(pure))
+(public! 'panes-columns "(panes-columns LAYOUT) -> ((PANE ...) ...): the panes in columns, left to right, each top to bottom; pure")
+(catalog-meta! 'function "panes-columns" 'effects '(pure))
+(public! 'panes-split-below "(panes-split-below LAYOUT ID) -> (LAYOUT NEW-ID): an empty pane under pane ID in its column, the two halving ID's height; pure")
+(catalog-meta! 'function "panes-split-below" 'effects '(pure))
+(public! 'panes-move-column "(panes-move-column LAYOUT ID STEP) -> LAYOUT: pane ID's column moves STEP columns with all its panes; pure")
+(catalog-meta! 'function "panes-move-column" 'effects '(pure))
 (public! 'panes-add-window "(panes-add-window LAYOUT PANE BUF MODE [BEHIND]) -> (LAYOUT KEY): a new window of MODE on BUF at the front of PANE, or the back when BEHIND")
 (catalog-meta! 'function "panes-add-window" 'effects '(read))
 (public! 'panes-remove-window "(panes-remove-window LAYOUT KEY) -> LAYOUT: window KEY goes with its stack; its pane stays; pure")

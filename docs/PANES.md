@@ -36,7 +36,7 @@ always ends on the front window of the focused pane.
    and free. The model of a group names its layout in `layout`. `C-x l`
    chooses one and shows each as you move to it.
 3. **The applier** (`panes-mode.scm`) lays the frame out as the model says,
-   with one call: `window-arrange-line!` over the top windows and the
+   with one call: `window-arrange!` over the columns of top windows and the
    shares. Every other window waits behind its pane in the model alone,
    with its id, stack and point: the frame has no window for it. The draw
    deletes a frame window that leaves the screen, after it keeps the

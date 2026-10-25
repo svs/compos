@@ -484,8 +484,7 @@ defmodule Compos.Core.Editor do
   divides the rest evenly. A window not in ITEMS is deleted: the panes
   model keeps what it needs of a window off the screen.
   """
-  def arrange_line(dir, ratio, items, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:arrange_line, dir, ratio, items, fid(fid)})
+  def arrange(spec, fid \\ nil), do: GenServer.call(__MODULE__, {:arrange, spec, fid(fid)})
 
   def delete_other_windows(fid \\ nil),
     do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
@@ -1996,14 +1995,15 @@ defmodule Compos.Core.Editor do
   def handle_call(:new_window_id, _from, state),
     do: {:reply, state.next_win, %{state | next_win: state.next_win + 1}}
 
-  def handle_call({:arrange_line, dir, ratio, items, fid}, _from, state) when dir in [:h, :v] do
+  def handle_call({:arrange, spec, fid}, _from, state) do
     f = frame(state, fid)
     visible = leaves(f.tree)
     held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
-    items = Enum.uniq_by(items, &line_item_id/1)
+    items = arrange_items(spec)
     chosen = Enum.map(items, &line_leaf(&1, visible, held))
+    ids = Enum.map(items, &line_item_id/1)
 
-    if chosen == [] or Enum.any?(chosen, &is_nil/1) do
+    if chosen == [] or Enum.any?(chosen, &is_nil/1) or Enum.uniq(ids) != ids do
       {:reply, {:error, :no_window}, state}
     else
       used = MapSet.new(chosen, & &1.id)
@@ -2013,7 +2013,7 @@ defmodule Compos.Core.Editor do
       next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
 
       f =
-        %{f | tree: line_tree(chosen, dir, ratio), active: active}
+        %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
         |> Map.delete(:hidden)
 
       changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
@@ -2360,6 +2360,15 @@ defmodule Compos.Core.Editor do
   # One line of LEAVES, nested to the right: the first takes RATIO, and
   # each later split gives its first pane 1/COUNT of what is left. This is
   # the tree layout--fill-line! makes with split-window!.
+  # a spec is a line item, or {dir, shares, children}: the children in a line
+  defp arrange_items({_dir, _shares, children}), do: Enum.flat_map(children, &arrange_items/1)
+  defp arrange_items(item), do: [item]
+
+  defp arrange_tree({dir, shares, children}, by_id),
+    do: line_tree(Enum.map(children, &arrange_tree(&1, by_id)), dir, shares)
+
+  defp arrange_tree(item, by_id), do: Map.fetch!(by_id, line_item_id(item))
+
   defp line_tree([leaf], _dir, _ratio), do: leaf
 
   # RATIO may be a list of shares, one for each pane: each split takes its

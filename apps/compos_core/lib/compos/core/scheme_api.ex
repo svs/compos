@@ -2319,12 +2319,9 @@ defmodule Compos.Core.SchemeAPI do
         fn [] -> Editor.new_window_id() end,
       # a window off the screen is the panes model's alone: the line makes
       # a window when it comes back, and deletes one that leaves
-      {"window-arrange-line!",
-       "(window-arrange-line! DIR RATIO ITEMS) — lay the frame out as one line of windows; an item is a window id on screen, or (ID BUFFER), the window ID made on BUFFER when no window holds ID; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a window not in ITEMS is deleted; #t when it did."} =>
-        fn [dir, ratio, ids] ->
-          dir = if plain(dir) == "v", do: :v, else: :h
-          Editor.arrange_line(dir, ratio, ids) == :ok
-        end,
+      {"window-arrange!",
+       "(window-arrange! SPEC) — lay the frame out as SPEC: (DIR SHARES (SPEC ...)) puts the specs in one line, DIR h side by side or v stacked, SHARES the first one's ratio or a share for each; a leaf is a window id on screen, or (ID BUFFER), the window ID made on BUFFER when no window holds ID; a window not in SPEC is deleted; #t when it did."} =>
+        fn [spec] -> Editor.arrange(arrange_spec(spec)) == :ok end,
       {"window-list",
        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
         Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
@@ -3433,6 +3430,16 @@ defmodule Compos.Core.SchemeAPI do
     |> Jason.decode!()
     |> Compos.Core.LLM.json_to_scheme()
   end
+
+  # (DIR SHARES (SPEC ...)) is a line; anything else is a line item
+  defp arrange_spec([dir, shares, children]) when is_list(children) do
+    case plain(dir) do
+      d when d in ["h", "v"] -> {String.to_atom(d), shares, Enum.map(children, &arrange_spec/1)}
+      _ -> [dir, shares, children]
+    end
+  end
+
+  defp arrange_spec(item), do: item
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v

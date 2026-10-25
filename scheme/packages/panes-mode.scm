@@ -185,24 +185,11 @@
 
 (define (panes-adopt)
   "The frame as it stands: one pane per window on screen, left to right,
-   each holding that window, with the window's width as its share. The
-   hidden windows wait behind the last pane. A hidden window whose
-   buffer fill-candidate? rejects stays out, and with no window on
-   screen there is no pane, so no hidden window comes in. It reads the
-   frame and stores nothing: panes-adopt! stores."
+   each holding that window, with the window's width as its share. It
+   reads the frame and stores nothing: panes-adopt! stores."
   (let loop ((rows (panes--frame-row)) (layout (panes-empty)))
     (if (null? rows)
-        ;; the windows behind the panes keep their place in the model
-        (let hidden ((hs (window-hidden-list)) (layout layout))
-          (cond ((null? hs) layout)
-                ((not (fill-candidate? (cadr (car hs)))) (hidden (cdr hs) layout))
-                ((null? (panes-panes layout)) (hidden (cdr hs) layout))
-                (else
-                  (let* ((win (car (car hs))) (buf (cadr (car hs)))
-                         (last (car (reverse (panes-pane-ids layout))))
-                         (made (panes-add-window layout last buf (panes--buffer-mode buf) #t))
-                         (l (panes-set-buffers (car made) (cadr made) (panes--window-stack win buf))))
-                    (hidden (cdr hs) (panes-set-handle l (cadr made) win))))))
+        layout
         (let* ((win (car (car rows))) (buf (cadr (car rows))) (width (caddr (car rows)))
                (added (panes-add-pane layout))
                (l (panes-set-share (car added) (cadr added) width))
@@ -499,31 +486,25 @@
 
 (define (panes-apply! layout)
   "The frame follows LAYOUT and it becomes this group's model. In
-   order: each buffer goes to one window, every window of the model
-   gets a frame window (panes--materialize!), the frame is drawn
+   order: each buffer goes to one window, the frame is drawn
    (panes--draw!), the layout is stored (panes-layout-set!), the
-   hidden windows no model holds go (panes--collect-hidden!), and
+   frame windows that left the screen go (panes--collect-hidden!), and
    window-state-changed! runs. It stores the layout also when the draw
    did not arrange the frame. Answers the drawn layout."
-  ;; a buffer is in one window, whatever made this layout, and every window of
-  ;; the layout is a window of the frame: one the screen does not show waits hidden.
-  ;; Only the layout's own windows are drawn: a member of the group with no
-  ;; window stays without one until the user opens it
-  (let ((layout (panes--draw! (panes--materialize! (panes-unique-buffers layout)))))
+  ;; a buffer is in one window, whatever made this layout. Only the
+  ;; layout's own windows are drawn: a member of the group with no window
+  ;; stays without one until the user opens it
+  (let ((layout (panes--draw! (panes-unique-buffers layout))))
     (panes-layout-set! layout)
     (panes--collect-hidden!)
     (window-state-changed!)
     layout))
 
 (define (panes--collect-hidden!)
-  "Every hidden window of this frame that no model window of any of its
-   groups is, and no empty pane shows, is deleted: the model is the one
-   record of the windows, so nothing else can want it. Answers how many
-   went."
-  (let* ((keys (apply append (map (lambda (e) (panes-window-keys (cadr e))) (panes--store))))
-         (blank (apply append (map (lambda (e) (filter (lambda (h) h) (map (lambda (p) (plist-get p 'blank)) (panes-panes (cadr e))))) (panes--store))))
-         (gone (filter (lambda (h) (not (or (member h keys) (member h blank))))
-                       (map car (window-hidden-list)))))
+  "Every hidden frame window of this frame is deleted: a window off the
+   screen is the model's alone, which keeps its id, stack and point.
+   Answers how many went."
+  (let ((gone (map car (window-hidden-list))))
     (for-each window-hidden-delete! gone)
     (length gone)))
 
@@ -636,25 +617,6 @@
     (message (string-append "Consolidated into " (number->string (length (panes-window-keys after))) " windows"))
     me))
 
-(define (panes--materialize! layout)
-  "A frame window, hidden, for every window of the model that has none:
-   a consolidate makes windows the frame never drew. A handle two keys
-   share counts once. The window takes its stack, so it walks as the
-   model says. A window that had an id gets it again when no window
-   holds it. A window whose buffer is not known stays without one."
-  (let loop ((ks (panes-window-keys layout)) (l layout) (used '()))
-    (if (null? ks)
-        l
-        (let* ((k (car ks)) (h (panes-handle l k)) (buf (panes-window-buffer l k)))
-          (if (and (panes--live-handle? h) (not (member h used)))
-              (loop (cdr ks) l (cons h used))
-              (let ((nh (and buf (buffer-known? buf) (window-new-hidden! buf (and (not (member h used)) h)))))
-                (if nh
-                    (begin
-                      (set-window-prev-buffers! nh (cdr (panes-window-buffers l k)))
-                      (loop (cdr ks) (panes-set-handle l k nh) (cons nh used)))
-                    (loop (cdr ks) l used))))))))
-
 (define (panes-quit! win)
   "q in WIN: its shown buffer leaves that window and the next one shows;
    an exhausted window closes. The pane where the buffer stood keeps
@@ -754,13 +716,9 @@
                       ;; the last pane loses a window only when another waits behind it
                       ((and k (> (length (panes-pane-keys l pid)) 1)) (panes-remove-window l k))
                       (else l))))
+    ;; Emacs deletes the window: its frame window goes, its buffers stay open
     (and (not (equal? after l))
-         (let ((gone-handles (filter (lambda (h) (and h (not (member h (map (lambda (k) (panes-handle after k)) (panes-window-keys after))))))
-                                     (map (lambda (k) (panes-handle l k)) (panes-window-keys l)))))
-           (panes-apply! after)
-           ;; Emacs deletes the window: its frame window goes, its buffers stay open
-           (for-each (lambda (h) (when (assoc h (window-hidden-list)) (window-hidden-delete! h))) gone-handles)
-           #t))))
+         (begin (panes-apply! after) #t))))
 
 (define (panes--delete-other-windows!)
   "C-x 1: the focused pane is the one pane. The windows of the other
@@ -1199,7 +1157,7 @@
 (public! 'panes-layout "(panes-layout) -> the window model of this frame's group, or #f")
 (catalog-meta! 'function "panes-layout" 'effects '(read))
 (public! 'panes-apply! "(panes-apply! LAYOUT) -> lay the frame out as LAYOUT and keep it as this group's model")
-(public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen, the hidden windows behind the last")
+(public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen")
 (catalog-meta! 'function "panes-adopt" 'effects '(read))
 
 ;; --- the default -------------------------------------------------------------

@@ -37,9 +37,11 @@ always ends on the front window of the focused pane.
    chooses one and shows each as you move to it.
 3. **The applier** (`panes-mode.scm`) lays the frame out as the model says,
    with one call: `window-arrange-line!` over the top windows and the
-   shares. Every other window waits hidden behind its pane, with its point
-   and history. A hidden window that no model holds is deleted after each
-   draw.
+   shares. Every other window waits behind its pane in the model alone,
+   with its id, stack and point: the frame has no window for it. The draw
+   deletes a frame window that leaves the screen, after it keeps the
+   window's point in the model, and makes it again, with that id and
+   point, when it comes back.
 
 ## The doors
 

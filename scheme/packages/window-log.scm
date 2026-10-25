@@ -22,14 +22,13 @@
 ;; the frame's windows now, as one plain value
 (define (window-log-snapshot)
   (list 'windows (window-list)
-        'hidden (window-hidden-list)
         'active (active-window)
         'group (and (boundp 'frame-group) (frame-group))
         'layout (and (boundp 'panes-layout) (panes-layout))))
 
 ;; the parts of a snapshot that mean the windows changed
 (define (window-log--shape snap)
-  (list (plist-get snap 'windows) (plist-get snap 'hidden) (plist-get snap 'active)))
+  (list (plist-get snap 'windows) (plist-get snap 'active)))
 
 (define (window-log) (or (frame-local 'window-log) '()))
 
@@ -80,11 +79,6 @@
            (plist-get snap 'windows))
       " ")))
 
-(define (window-log--hidden snap)
-  (let ((hs (plist-get snap 'hidden)))
-    (if (null? hs) "none"
-        (string-join (map (lambda (r) (string-append "[" (number->string (car r)) " " (cadr r) "]")) hs) " "))))
-
 (define (window-log--layout snap)
   (let ((l (plist-get snap 'layout)))
     (if (not l) "none"
@@ -127,9 +121,7 @@
               (string-append "  after:  " (window-log--row after)))
         (window-log--changes before after)
         (map (lambda (n) (string-append "  note: " n)) (plist-get entry 'notes))
-        (list (string-append "  hidden before: " (window-log--hidden before))
-              (string-append "  hidden after:  " (window-log--hidden after))
-              (string-append "  layout before: " (window-log--layout before))
+        (list (string-append "  layout before: " (window-log--layout before))
               (string-append "  layout after:  " (window-log--layout after))))
       "\n")))
 

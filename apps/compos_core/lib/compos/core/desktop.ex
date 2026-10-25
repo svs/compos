@@ -209,7 +209,6 @@ defmodule Compos.Core.Desktop do
         %{
           id: fid,
           tree: serialize(view.tree),
-          hidden: Enum.map(Map.get(view, :hidden, []), &serialize/1),
           active_buffer: view.active_buffer
         }
       end
@@ -493,7 +492,7 @@ defmodule Compos.Core.Desktop do
     do:
       frames
       |> Enum.flat_map(fn f ->
-        leaf_names(Map.get(f, :tree)) ++ Enum.flat_map(Map.get(f, :hidden, []), &leaf_names/1)
+        leaf_names(Map.get(f, :tree))
       end)
       |> Enum.uniq()
 
@@ -644,11 +643,11 @@ defmodule Compos.Core.Desktop do
   # before restore ran gets its same-id frame overwritten and re-renders.
   # v1 (single :tree key): one frame, restored into the default.
   defp restore_frames(%{frames: frames}) do
-    for %{id: fid, tree: tree, active_buffer: active} = frame <- Enum.reverse(frames) do
+    for %{id: fid, tree: tree, active_buffer: active} <- Enum.reverse(frames) do
       # no client: the frame waits for its tab to reconnect, and expires
       # on the editor's grace when none does
       {:ok, ^fid} = Editor.attach_frame(fid, client: nil)
-      Editor.restore_layout(tree, Map.get(frame, :hidden, []), active, fid)
+      Editor.restore_tree(tree, active, fid)
     end
   end
 

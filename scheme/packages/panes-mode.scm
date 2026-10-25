@@ -183,6 +183,17 @@
   (panes--uniq (cons buf (filter (lambda (b) (and (buffer-known? b) (fill-candidate? b)))
                                  (window-prev-buffers win)))))
 
+(define (panes-waiting-windows)
+  "The windows of this frame's layout that wait off the screen, pane by
+   pane, as (KEY BUFFER) rows. A window off the screen has no frame
+   window: the model alone keeps it."
+  (let ((l (panes-layout)))
+    (if (not l)
+        '()
+        (filter (lambda (r) (cadr r))
+                (map (lambda (k) (list k (panes-window-buffer l k)))
+                     (filter (lambda (k) (not (window-exists? k))) (panes-window-keys l)))))))
+
 (define (panes-adopt)
   "The frame as it stands: one pane per window on screen, left to right,
    each holding that window, with the window's width as its share. It
@@ -487,8 +498,7 @@
 (define (panes-apply! layout)
   "The frame follows LAYOUT and it becomes this group's model. In
    order: each buffer goes to one window, the frame is drawn
-   (panes--draw!), the layout is stored (panes-layout-set!), the
-   frame windows that left the screen go (panes--collect-hidden!), and
+   (panes--draw!), the layout is stored (panes-layout-set!), and
    window-state-changed! runs. It stores the layout also when the draw
    did not arrange the frame. Answers the drawn layout."
   ;; a buffer is in one window, whatever made this layout. Only the
@@ -496,17 +506,8 @@
   ;; stays without one until the user opens it
   (let ((layout (panes--draw! (panes-unique-buffers layout))))
     (panes-layout-set! layout)
-    (panes--collect-hidden!)
     (window-state-changed!)
     layout))
-
-(define (panes--collect-hidden!)
-  "Every hidden frame window of this frame is deleted: a window off the
-   screen is the model's alone, which keeps its id, stack and point.
-   Answers how many went."
-  (let ((gone (map car (window-hidden-list))))
-    (for-each window-hidden-delete! gone)
-    (length gone)))
 
 (define (panes-look! layout &optional g)
   "A look: the frame shows LAYOUT and nothing is recorded as a change.
@@ -602,9 +603,7 @@
   (panes-place! buf 'display))
 
 (define (panes-consolidate!)
-  "Consolidate on the model: every mode one window. The frame-level
-   consolidate makes hidden windows the model does not know, and the
-   next redraw throws them away. The buffers of the frame's group that
+  "Consolidate on the model: every mode one window. The buffers of the frame's group that
    no window holds join too, except context-only ones. The selected
    window stays selected when it still exists. Answers that window."
   (let* ((me (active-window))
@@ -1157,6 +1156,8 @@
 (public! 'panes-layout "(panes-layout) -> the window model of this frame's group, or #f")
 (catalog-meta! 'function "panes-layout" 'effects '(read))
 (public! 'panes-apply! "(panes-apply! LAYOUT) -> lay the frame out as LAYOUT and keep it as this group's model")
+(public! 'panes-waiting-windows "(panes-waiting-windows) -> (KEY BUFFER) for each window of this frame's layout that waits off the screen")
+(catalog-meta! 'function "panes-waiting-windows" 'effects '(read))
 (public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen")
 (catalog-meta! 'function "panes-adopt" 'effects '(read))
 

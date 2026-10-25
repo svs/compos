@@ -2931,47 +2931,18 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; a buffer that never set a mode is fundamental, and consolidates like any other
   (and (buffer-known? buf) (or (buffer-local buf 'mode-name) "fundamental-mode")))
 
-;; What consolidation will do, as (MODE WINDOW) per major mode: the
-;; selected window's mode, the other panes', then every other mode the
-;; group has open. WINDOW is the pane or hidden window that already holds
-;; the mode, or #f when the mode gets a new hidden window. Changes nothing.
-(define (mode-consolidate-plan me)
-  (let* ((group (or (frame-group) (group-cycle-group)))
-         (eligible (filter (lambda (b)
-                             (and (group-cycle-member? b group)
-                                  (not (string-prefix? " " b))
-                                  (not (buffer-context-only? b))
-                                  (mode-consolidate-mode-of b)))
-                           (buffer-list-mru)))
-         (has (map mode-consolidate-mode-of eligible))
-         (panes (cons me (filter (lambda (w) (not (equal? w me))) (display--work-windows))))
-         (hidden (map car (window-hidden-list)))
-         (homes (filter (lambda (row) (and (cadr row) (member (cadr row) has)))
-                        (map (lambda (w) (list w (mode-consolidate-window-mode w)))
-                             (append panes hidden)))))
-    (let loop ((modes (append (map cadr homes) has)) (taken '()) (plan '()))
-      (cond ((null? modes) (reverse plan))
-            ((assoc (car modes) plan) (loop (cdr modes) taken plan))
-            (else
-              (let ((home (let find ((rows homes))
-                            (cond ((null? rows) #f)
-                                  ((and (equal? (cadr (car rows)) (car modes))
-                                        (not (member (car (car rows)) taken)))
-                                   (car (car rows)))
-                                  (else (find (cdr rows)))))))
-                (loop (cdr modes)
-                      (if home (cons home taken) taken)
-                      (cons (list (car modes) home) plan))))))))
-
 (define (consolidate!)
   (panes-consolidate!))
 
 ;; The mode a window holds: that of the buffer it shows, else the one it
 ;; was given, else that of its nearest work buffer beneath temporary covers.
+;; A window waiting off the screen holds the mode the panes model gives it.
 (define (mode-consolidate-window-mode win)
   (let ((shown (window-buffer-any win))
-        (held (window-mode-preference win)))
-    (cond ((and shown (buffer-known? shown) (not (window-preference-cover? shown)))
+        (held (and (window-exists? win) (window-mode-preference win)))
+        (l (and (not (window-exists? win)) (panes-layout))))
+    (cond ((and l (panes-window l win)) (panes-window-mode l win))
+          ((and shown (buffer-known? shown) (not (window-preference-cover? shown)))
            ;; what the pane shows wins over a preference left from before
            (mode-consolidate-mode-of shown))
           (held
@@ -2983,62 +2954,6 @@ is forgotten and that group falls back to creation order in the switcher."
                           (not (window-preference-cover? (car buffers))))
                      (mode-consolidate-mode-of (car buffers)))
                     (else (loop (cdr buffers)))))))))
-
-;; Gather MODE's open group buffers into DESTINATION's history; how many.
-(define (mode-consolidate-into! destination mode)
-  (let* ((group (or (frame-group) (group-cycle-group)))
-         (open (buffer-list-mru)))
-    (define (matches? buf)
-      (and (member buf open)
-           (group-cycle-member? buf group)
-           (equal? (mode-consolidate-mode-of buf) mode)
-           (not (string-prefix? " " buf))
-           (not (buffer-context-only? buf))))
-    (define (unique bufs)
-      (let loop ((bufs bufs) (acc '()))
-        (cond ((null? bufs) (reverse acc))
-              ((member (car bufs) acc) (loop (cdr bufs) acc))
-              (else (loop (cdr bufs) (cons (car bufs) acc))))))
-    (let* ((buffers (filter matches? open))
-           (shown (window-buffer-any destination))
-           (stack (cons shown (window-prev-buffers destination)))
-           (matching (unique (append (filter matches? stack) buffers))))
-      (when (pair? buffers)
-        (begin
-            ;; hidden windows give their buffers up too: a mode has one
-            ;; window, on screen or not
-            (for-each
-              (lambda (win)
-                (unless (equal? win destination)
-                  (let* ((buf (window-buffer-any win))
-                         (history (window-prev-buffers win))
-                         (remaining (filter (lambda (b) (not (matches? b))) history)))
-                    (when (or (matches? buf) (not (equal? history remaining)))
-                      (set-window-restore! win #f)
-                      (cond ((not (matches? buf))
-                             (set-window-prev-buffers! win remaining))
-                            ((pair? remaining)
-                             (display-buffer-in-window! win (car remaining))
-                             (set-window-prev-buffers! win (cdr remaining))
-                             (window-mode-preference! win #f))
-                            (else
-                              (window-mode-preference! win #f)
-                              ;; delete-window-id! refuses a hidden window
-                              (if (assoc win (window-hidden-list))
-                                  (window-hidden-delete! win)
-                                  (delete-window-id! win))))))))
-              (append (display--work-windows) (map car (window-hidden-list))))
-            (let ((top (if (matches? shown) shown (car matching))))
-              (unless (equal? top shown)
-                (display-buffer-in-window! destination top))
-              (set-window-prev-buffers! destination
-                (filter (lambda (b) (not (equal? b top))) matching)))
-            ;; the pane now holds the mode: a layout that needs a new
-            ;; window never takes one of these out of its history
-            (window-mode-preference! destination mode)
-            (set-window-restore! destination #f)))
-      (length buffers))))
-
 
 (define-command "consolidate"
   "Give every major mode of this group one window: behind its pane, or on the layout ring"
@@ -3073,10 +2988,7 @@ is forgotten and that group falls back to creation order in the switcher."
   mode-consolidate!)
 (global-set-key "C-x C" "consolidate")
 (public! 'consolidate!
-  "(consolidate!) — give every major mode of the group one window: in a group with panes each mode's window waits behind its pane; elsewhere a mode with a pane gathers there, one without gets a hidden window the layout ring reaches")
-(public! 'mode-consolidate-plan
-  "(mode-consolidate-plan WIN) — what mode-consolidate! from WIN would do, as (MODE WINDOW) per major mode; WINDOW #f means a new hidden window. Changes nothing")
-(catalog-meta! 'function "mode-consolidate-plan" 'effects '(read))
+  "(consolidate!) — give every major mode of the group one window; each mode's window waits behind its pane")
 
 ;;; Jump to mode: C-x m picks a major mode among this frame's windows and
 ;;; goes to its window, bringing it to the front of its pane or the ring.

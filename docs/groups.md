@@ -729,9 +729,8 @@ A window with no remaining buffer closes, reducing the visible layout. No buffer
 Matching destination history keeps its order; additional buffers follow in most-recent order.
 The command is also available as `(mode-consolidate!)` in Scheme.
 
-`(window-hidden-list)` lists the hidden windows of the selected frame as `(WIN BUFFER)` pairs, most recently used first.
-`(layout-hidden-windows)` keeps the ones that this frame's group may show.
-`(window-hidden-delete! WIN)` deletes one. `layout-forward` and `layout-backward` bring a hidden window into a pane.
+`(panes-waiting-windows)` lists the windows of this frame's layout that wait off the screen, as `(WIN BUFFER)` pairs.
+`(layout-hidden-windows)` keeps the ones that this frame's group may show. `layout-forward` and `layout-backward` bring a waiting window into a pane.
 
 Quitting a listing restores only its own window history. If that history is empty,
 the window closes instead of refilling from group recency or another window's buffers.

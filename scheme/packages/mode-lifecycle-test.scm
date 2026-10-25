@@ -563,10 +563,9 @@
     (ml--major! "zz-ml-hr-visible" 1)
     (test-buffer! ml--hr-a "alpha\n")
     (with-current-buffer ml--hr-a (lambda () (set-mode! "zz-ml-hr-visible")))
-    ;; the visible half rebuilds every window's buffer, hidden ones too:
-    ;; show this one alone, and give the frame back after
+    ;; the visible half rebuilds every window's buffer: show this one
+    ;; alone, and give the frame back after
     (delete-other-windows!)
-    (window-hidden-clear!)
     (switch-to-buffer! ml--hr-a)
     (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 1 "the mode set the buffer up once")
 

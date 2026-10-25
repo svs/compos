@@ -102,10 +102,10 @@
       (or (buffer-local buf 'detail-family) (buffer-local buf 'mode-name))
       (buffer-local buf 'mode-name)))
 
-;; the window that holds BUF, on screen or in the ring
+;; the window that holds BUF, on screen or waiting behind its pane
 (define (app-window-of buf)
   (or (window-showing buf)
-      (let ((row (find (lambda (r) (equal? (cadr r) buf)) (window-hidden-list))))
+      (let ((row (find (lambda (r) (equal? (cadr r) buf)) (panes-waiting-windows))))
         (and row (car row)))))
 
 ;; Lay the app out by role: one window for its index, one for its pages,
@@ -164,13 +164,14 @@
                    (let* ((top (car row))
                           (theirs (cdr (cadr row)))
                           (win (app-window-of top)))
-                     (when win
+                     ;; the stacks of windows on screen; the model keeps the rest
+                     (when (and win (window-exists? win))
                        (for-each
                          (lambda (w)
                            (unless (equal? w win)
                              (set-window-prev-buffers! w
                                (filter (lambda (b) (not (member b theirs))) (window-prev-buffers w)))))
-                         (append (display--work-windows) (map car (window-hidden-list))))
+                         (display--work-windows))
                        (set-window-prev-buffers! win
                          (append (filter (lambda (b) (not (equal? b top))) theirs)
                                  (filter (lambda (b) (not (member b theirs))) (window-prev-buffers win))))
@@ -190,15 +191,11 @@
             ((not (app-layout! id)) (message "Nothing of this app to lay out"))))))
 (catalog-meta! 'command "app-layout" 'domain 'windows 'effects '(write display))
 
-(define (app--drop-hidden-windows! id shown)
-  ;; a dismissed app leaves no windows waiting behind the panes: its buffers
-  ;; stay alive, and the next visit opens what it needs
+(define (app--forget-windows! id shown)
+  ;; a dismissed app leaves no windows behind: the model dropped them, its
+  ;; buffers stay alive, and the next visit opens what it needs
   (when shown
-    (for-each (lambda (b) (detail-window-forget! b)) (app-buffers id))
-    (for-each (lambda (row)
-                (when (equal? (app-id (cadr row)) id)
-                  (window-hidden-delete! (car row))))
-              (window-hidden-list)))
+    (for-each (lambda (b) (detail-window-forget! b)) (app-buffers id)))
   shown)
 
 ;; Put the app away: its windows leave the screen and its buffers stay alive,
@@ -231,7 +228,7 @@
                               (fill-candidate? b)
                               (or (not group) (buffer-in-group? b group))))
                        (buffer-list-mru))))
-    (app--drop-hidden-windows!
+    (app--forget-windows!
      id
      (cond ((not (pair? (app-windows id))) #f)
           (kept

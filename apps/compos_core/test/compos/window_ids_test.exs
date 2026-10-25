@@ -1,8 +1,8 @@
 defmodule Compos.WindowIdsTest do
   @moduledoc """
   A window id is immutable. A layout saved with its ids comes back with
-  the same windows, on screen and hidden, so every record keyed by window
-  id stays true across a restore. An id another frame holds is not taken.
+  the same windows, so every record keyed by window id stays true across
+  a restore. An id another frame holds is not taken.
   """
 
   use ExUnit.Case, async: false
@@ -27,7 +27,6 @@ defmodule Compos.WindowIdsTest do
                  (test-buffer! \"#{@b}\" \"\")
                  (test-buffer! \"#{@c}\" \"\")
                  (delete-other-windows!)
-                 (window-hidden-clear!)
                  (switch-to-buffer-here! \"#{@a}\")
                  """,
                  frame
@@ -37,7 +36,6 @@ defmodule Compos.WindowIdsTest do
     after
       Session.eval(
         """
-        (window-hidden-clear!)
         (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
                   '(\"#{@a}\" \"#{@b}\" \"#{@c}\"))
         """,
@@ -52,21 +50,18 @@ defmodule Compos.WindowIdsTest do
   test "a layout comes back with the window ids it was saved with" do
     with_frame(fn frame ->
       [{pane, @a}] = Editor.list_windows(frame)
-      hidden = Editor.new_hidden_window(@c, frame)
       tree = {:split, :h, 0.5, leaf(@a, pane), leaf(@b, pane + 1000)}
 
-      assert :ok = Editor.restore_layout(tree, [leaf(@c, hidden)], @a, frame)
+      assert :ok = Editor.restore_tree(tree, @a, frame)
       assert [{^pane, @a}, {second, @b}] = Editor.list_windows(frame)
       assert second == pane + 1000
-      assert [{^hidden, @c}] = Editor.hidden_windows(frame)
 
       # the same layout again changes nothing
-      assert :ok = Editor.restore_layout(tree, [leaf(@c, hidden)], @a, frame)
+      assert :ok = Editor.restore_tree(tree, @a, frame)
       assert [{^pane, @a}, {^second, @b}] = Editor.list_windows(frame)
-      assert [{^hidden, @c}] = Editor.hidden_windows(frame)
 
       # fresh ids start above every kept one
-      assert Editor.new_hidden_window(@a, frame) > second
+      assert Editor.new_window_id() > second
     end)
   end
 
@@ -76,7 +71,7 @@ defmodule Compos.WindowIdsTest do
 
       try do
         [{foreign, _}] = Editor.list_windows(other)
-        assert :ok = Editor.restore_layout(leaf(@b, foreign), [], @b, frame)
+        assert :ok = Editor.restore_tree(leaf(@b, foreign), @b, frame)
         assert [{id, @b}] = Editor.list_windows(frame)
         refute id == foreign
         assert [{^foreign, _}] = Editor.list_windows(other)
@@ -92,27 +87,6 @@ defmodule Compos.WindowIdsTest do
       old = {:leaf, @a, 0, 0, false, 0, [], nil, nil}
       assert :ok = Editor.restore_tree({:split, :h, 0.5, old, {:leaf, @b}}, @a, frame)
       assert [{^pane, @a}, {_, @b}] = Editor.list_windows(frame)
-    end)
-  end
-
-  test "window-tree and builtin-window-tree-set! round-trip the ids" do
-    with_frame(fn frame ->
-      {:ok, _} =
-        Session.eval(
-          ~s|(begin (split-window! 'h 0.5) (switch-to-buffer-here! "#{@b}") (window-new-hidden! "#{@c}"))|,
-          frame
-        )
-
-      before = {Editor.list_windows(frame), Editor.hidden_windows(frame)}
-      assert {[_, _], [_]} = before
-
-      {:ok, _} =
-        Session.eval(
-          ~s|(let ((l (window-tree))) (delete-other-windows!) (window-hidden-clear!) (builtin-window-tree-set! l))|,
-          frame
-        )
-
-      assert before == {Editor.list_windows(frame), Editor.hidden_windows(frame)}
     end)
   end
 

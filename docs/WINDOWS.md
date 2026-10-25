@@ -40,14 +40,14 @@ and the tutorial comes back in the same window, at the same place.
 Each window has its own stack. Closing a buffer in one window never brings
 back a buffer from another window.
 
-## Hidden windows
+## Waiting windows
 
-A window can exist without a pane. This is a hidden window. It keeps its
-buffers, its point and its history.
+A window can wait behind a pane, off the screen. It keeps its id, its
+buffers and its point in the panes model; the frame has no window for it.
 
-When you change to a layout with fewer panes, the extra windows become
-hidden. They do not close. When you change back to a layout with more
-panes, they come back as they were.
+When you change to a layout with fewer panes, the extra windows wait.
+They do not close. When you change back to a layout with more panes,
+they come back as they were. `(panes-waiting-windows)` lists them.
 
 ## Closing is not killing
 

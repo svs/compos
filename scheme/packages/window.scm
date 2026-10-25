@@ -1313,20 +1313,17 @@ keeps the buffer you were in and your point.")
 (define (layout-pane-windows)
   (map car (filter layout-visible-window? (window-list))))
 
-;; The hidden windows that this frame may show, most recently used first.
-;; The fill policy decides: a hidden window of another group is not one.
+;; The windows that wait off the screen and this frame may show, pane by
+;; pane. The fill policy decides: a window of another group is not one.
 (define (layout-hidden-windows)
   (map car (filter (lambda (row)
                      (and (fill-candidate? (cadr row)) (window-fill-member? (cadr row))))
-                   (window-hidden-list))))
+                   (panes-waiting-windows))))
 
-;; the buffer of a window, visible or hidden
+;; the buffer of a window, on screen or waiting in the model
 (define (window-buffer-any win)
-  (let ((row (or (assoc win (window-list)) (assoc win (window-hidden-list)))))
+  (let ((row (or (assoc win (window-list)) (assoc win (panes-waiting-windows)))))
     (and row (cadr row))))
-
-(define (window-hidden-clear!)
-  (for-each (lambda (row) (window-hidden-delete! (car row))) (window-hidden-list)))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
 ;; when BUF is the buffer the user is looking at.
@@ -1703,10 +1700,8 @@ the focus; #f for a window or a buffer."
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window, as the user asked: an agent's way to show a buffer")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
-(public! 'window-hidden-clear!
-  "(window-hidden-clear!) — delete every hidden window of the selected frame")
 (public! 'window-buffer-any
-  "(window-buffer-any WIN) — the buffer of window WIN, visible or hidden, or #f")
+  "(window-buffer-any WIN) — the buffer of window WIN, on screen or waiting in the panes model, or #f")
 (public! 'window-eat!
   "(window-eat! [DIR]) — the neighboring pane goes away and this window takes its rectangle; DIR is left, right, up or down")
 (effects! '(write))
@@ -1737,7 +1732,7 @@ the focus; #f for a window or a buffer."
 
 (define (windows-list-window id)
   (let ((win (string->number id)))
-    (and win (or (window-exists? win) (assoc win (window-hidden-list))) win)))
+    (and win (or (window-exists? win) (assoc win (panes-waiting-windows))) win)))
 
 (define (windows-list-pane win)
   (let* ((l (panes-layout))
@@ -1754,7 +1749,10 @@ the focus; #f for a window or a buffer."
          (on (and win (member win (layout-pane-windows)) #t))
          (here (and win (equal? win (active-window))))
          (top (if win (or (window-buffer-any win) "") ""))
-         (more (if win (length (window-prev-buffers win)) 0)))
+         (l (panes-layout))
+         (more (cond ((not win) 0)
+                     ((and l (panes-window l win)) (max 0 (- (length (panes-window-buffers l win)) 1)))
+                     (else (length (window-prev-buffers win))))))
     (list (list (cond (here "●") (on "■") (else "□")) (if on "ok" "faint"))
           (list (if win (window-name win) "") #f)
           (list (windows-list-pane win) "faint")
@@ -1781,9 +1779,7 @@ the focus; #f for a window or a buffer."
     (windows-list-on-current
       (lambda (win)
         (let* ((l (panes--ensure-layout!)) (k (panes-key-of-handle l win)))
-          (if k
-              (panes-apply! (panes-remove-window l k))
-              (window-hidden-delete! win)))
+          (when k (panes-apply! (panes-remove-window l k))))
         (list-refresh! *windows-list-buffer*)))))
 
 (define-command "windows-list-consolidate"
@@ -1847,7 +1843,7 @@ the focus; #f for a window or a buffer."
     ;; a list that waits behind a pane comes to this one: popping to it
     ;; would leave it hidden in its own window
     (let ((waiting (find (lambda (w) (equal? (window-buffer-any w) *windows-list-buffer*))
-                         (map car (window-hidden-list)))))
+                         (map car (panes-waiting-windows)))))
       (if waiting
           (begin (windows-list-take! waiting) (list-refresh! *windows-list-buffer*))
           ;; else it opens in this pane: popping lets display send it to another group's window
@@ -1863,8 +1859,8 @@ the focus; #f for a window or a buffer."
 
 ;; The list follows the ring while it is on screen.
 (define (windows-list-follow!)
-  ;; only a list on screen follows: a hidden window holding the list does
-  ;; not count as showing it
+  ;; only a list on screen follows: a window waiting behind a pane with
+  ;; the list does not count as showing it
   (when (and (buffer-known? *windows-list-buffer*)
              (find (lambda (w) (equal? (cadr w) *windows-list-buffer*)) (window-list)))
     (list-refresh! *windows-list-buffer*)))

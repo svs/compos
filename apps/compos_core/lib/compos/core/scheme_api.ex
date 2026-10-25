@@ -2314,34 +2314,17 @@ defmodule Compos.Core.SchemeAPI do
         fn [] -> Editor.delete_window() == :ok end,
       {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
         fn [id] -> Editor.delete_window_by_id(id) == :ok end,
-      # hidden windows: a window with no pane keeps its id, buffer, history
-      # and point. Which window hides, and when, is Scheme's decision.
-      {"window-hidden-list",
-       "(window-hidden-list) — return (WIN BUFFER) pairs for the selected frame's hidden windows, most recently used first."} =>
-        fn [] -> Enum.map(Editor.hidden_windows(), fn {id, b} -> [id, b] end) end,
-      {"window-new-hidden!",
-       "(window-new-hidden! BUFFER [ID]) — make a hidden window on BUFFER; return its id, or #f. It takes ID when no window holds it, so a window keeps the id the window model gave it."} =>
-        fn args ->
-          [buffer | rest] = args
-          want = Enum.find(rest, &is_integer/1)
-
-          case Editor.new_hidden_window(buffer, nil, want) do
-            id when is_integer(id) -> id
-            _ -> false
-          end
-        end,
       {"window-id-new!",
        "(window-id-new!) — a window id no window holds and none will be given again; it makes no window."} =>
         fn [] -> Editor.new_window_id() end,
+      # a window off the screen is the panes model's alone: the line makes
+      # a window when it comes back, and deletes one that leaves
       {"window-arrange-line!",
-       "(window-arrange-line! DIR RATIO ITEMS) — lay the frame out as one line of windows; an item is a window id, visible or hidden, or (ID BUFFER), the window ID made on BUFFER when no window holds ID; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a visible window not in ITEMS becomes hidden; #t when it did."} =>
+       "(window-arrange-line! DIR RATIO ITEMS) — lay the frame out as one line of windows; an item is a window id on screen, or (ID BUFFER), the window ID made on BUFFER when no window holds ID; DIR h is side by side, v is stacked; the first pane takes RATIO, or each pane its share when RATIO is a list; a window not in ITEMS is deleted; #t when it did."} =>
         fn [dir, ratio, ids] ->
           dir = if plain(dir) == "v", do: :v, else: :h
           Editor.arrange_line(dir, ratio, ids) == :ok
         end,
-      {"window-hidden-delete!",
-       "(window-hidden-delete! WIN) — delete hidden window WIN; #t when it did."} =>
-        fn [id] -> Editor.delete_hidden_window(id) == :ok end,
       {"window-list",
        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
         Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
@@ -2357,8 +2340,7 @@ defmodule Compos.Core.SchemeAPI do
 
           %{
             tree: tree_spec(v.tree),
-            active: v.active_buffer,
-            hidden: Enum.map(Map.get(v, :hidden, []), &tree_spec/1)
+            active: v.active_buffer
           }
         end,
       # A saved layout names buffers, and a name can outlive its buffer.

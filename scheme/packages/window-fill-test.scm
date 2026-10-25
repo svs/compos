@@ -103,7 +103,6 @@
       (buffer-add-group! a id) (buffer-add-group! b id)
       (panes-choose-layout! #f)
       (delete-other-windows!)
-      (window-hidden-clear!)
       (switch-to-buffer-here! b)
       (switch-to-buffer-here! a)
       (set-frame-local! 'current-group id)

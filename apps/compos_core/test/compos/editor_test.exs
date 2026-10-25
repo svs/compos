@@ -4099,8 +4099,7 @@ defmodule Compos.EditorTest do
         Compos.Core.Session.eval("""
         (begin (switch-to-buffer! "#{companion}")
                (switch-to-buffer! "#{buf}")
-               (delete-other-windows!)
-               (window-hidden-clear!))
+               (delete-other-windows!))
         """)
 
       run("window-layout-two-pane")

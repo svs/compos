@@ -66,8 +66,8 @@ The core applies these rules to each frame:
 4. Drop the saved window point of the killed buffer for every such window.
 5. A float (popup) window that showed the buffer closes when a work window
    survives in the frame.
-6. A hidden window on the buffer takes a live buffer from its own history. With
-   none, the hidden window goes.
+6. A window that waits off the screen is the panes model's: the buffer leaves
+   its stack, and a window with an empty stack goes.
 
 When a window's history has no candidate, the fallback order is:
 

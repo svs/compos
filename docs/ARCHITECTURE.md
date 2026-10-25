@@ -134,7 +134,8 @@ dispatch it to another worker.
 - **Reactor** — debounced buffer-change rules (the agent trigger primitive).
 - **LLM** — one async primitive; provider routing; key resolution.
 - **Desktop** — snapshot/restore of every frame's window tree (with
-  per-window points), its hidden windows, and declared Scheme globals. Each
+  per-window points) and declared Scheme globals; the panes model, a
+  global, keeps the windows off the screen. Each
   buffer process checkpoints and restores its own state. The desktop does
   not restore faces: `themes.scm` derives them from the saved theme name.
   v3 format; reads v1 single-tree files.

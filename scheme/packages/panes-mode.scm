@@ -395,21 +395,6 @@
                  (else #f))))
        (panes-panes layout)))
 
-(define (panes--materialize layout keys)
-  "Every window in KEYS that shows a buffer has a live handle: one
-   without gets a hidden frame window, with the id its handle names
-   when no window holds it. Unlike panes--materialize!,
-   it does not set the window history and does not look for shared
-   handles."
-  (fold (lambda (l k)
-          (let ((h (panes-handle l k)) (buf (panes-window-buffer l k)))
-            (cond ((panes--live-handle? h) l)
-                  ((not (and buf (buffer-known? buf))) l)
-                  ;; a window that had an id comes back with it
-                  (else (let ((nw (window-new-hidden! buf h)))
-                          (if nw (panes-set-handle l k nw) l))))))
-        layout keys))
-
 (define (panes--focus-follows! win)
   "A selection is a focus change in the model: the pane of WIN, an
    empty pane's blank window included, takes the focus, and WIN comes
@@ -433,49 +418,71 @@
          (h (and p (if (pair? ks) (panes-handle layout (car ks)) (panes--blank layout p)))))
     (if (and h (member h handles)) h (car handles))))
 
+(define (panes--park-points! layout leaving)
+  "Every window in LEAVING that a layout of this frame holds keeps its
+   point there, as LAYOUT does: the window leaves the screen and only
+   the model remembers it. Answers LAYOUT with the points."
+  (let ((park (lambda (l)
+                (fold (lambda (l h)
+                        (if (panes-window l h) (panes-set-window-point l h (window-buffer h) (window-point h)) l))
+                      l leaving))))
+    (for-each (lambda (e)
+                (let ((after (park (cadr e))))
+                  (unless (equal? after (cadr e)) (panes--layout-store! (car e) after))))
+              (panes--store))
+    (park layout)))
+
 (define (panes--draw! layout)
   "The frame drawn as LAYOUT: every top window on screen with its
    pane's share, showing the front of its stack, the rest waiting
    behind; an empty pane shows its blank window. First the panes take
-   their blank windows, and every top window and every pane gets a frame
-   window. It arranges the frame only when every pane has a frame
-   window; else the screen stays as it was. The focused pane's window
-   is selected (panes--focus-handle), whatever was selected before.
-   Answers the layout with the handles
-   the draw took or made. Nothing is recorded: panes-apply! stores the
-   model anyway, also when the draw did not arrange."
-  (let* ((layout (panes--claim-empty-windows layout))
+   their blank windows. A window that leaves the screen keeps its point
+   in the model (panes--park-points!) and its frame window goes; one
+   that comes back is made with its id and takes that point again. It
+   arranges the frame only when every pane has a line item; else the
+   screen stays as it was. The focused pane's window is selected
+   (panes--focus-handle), whatever was selected before. Answers the
+   layout with the handles the draw took or made. Nothing is recorded:
+   panes-apply! stores the model anyway, also when the draw did not
+   arrange."
+  (let* ((layout (panes--blanks (panes--claim-empty-windows layout)))
          (tops (panes-top-windows layout))
-         (layout (panes--blanks (panes--materialize layout tops)))
-         (handles (panes--pane-handles layout)))
+         (items (panes--pane-handles layout))
+         (handles (map (lambda (i) (if (pair? i) (car i) i)) items))
+         (drawn layout))
     (set! panes--applying #t)
     (unwind-protect
       (lambda ()
-        (begin
-            (when (and (pair? handles) (null? (filter (lambda (h) (not h)) handles)))
-              (begin
-                ;; the floating preview is no pane: it stays on screen, first in the
-                ;; line, where its split takes no room and it floats over the frame
-                (let ((float (and (boundp 'float-window) (float-window))))
-                  (if (and float (not (member float handles)))
-                      (window-arrange-line! 'h (cons 0.001 (panes-layout-shares layout)) (cons float handles))
-                      (window-arrange-line! 'h (panes-layout-shares layout) handles)))
-                (for-each
-                  (lambda (k)
-                    (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))
-                      ;; an id no buffer has is no name: showing it would make a buffer of it
-                      (when (and h (pair? bufs) (window-exists? h) (buffer-known? (car bufs)))
-                        (unless (equal? (window-buffer h) (car bufs))
-                          (window-set-buffer! h (car bufs)))
-                        (set-window-prev-buffers! h (cdr bufs)))))
-                  tops)
-                ;; the screen is a projection of the model: whatever the arrange
-                ;; selected, the draw ends on the focused pane's window
-                (let ((target (panes--focus-handle layout handles)))
-                  (unless (or (not target) (not (window-exists? target)) (equal? (active-window) target))
-                    (select-window! target)))))))
+        (when (and (pair? items) (null? (filter (lambda (i) (not i)) items)))
+            (let* ((float (and (boundp 'float-window) (float-window)))
+                   (leaving (filter (lambda (w) (not (or (member w handles) (equal? w float))))
+                                    (map car (window-list))))
+                   (layout (panes--park-points! layout leaving))
+                   (made (filter (lambda (h) (not (window-exists? h))) handles)))
+              ;; the floating preview is no pane: it stays on screen, first in the
+              ;; line, where its split takes no room and it floats over the frame
+              (if (and float (not (member float handles)))
+                  (window-arrange-line! 'h (cons 0.001 (panes-layout-shares layout)) (cons float items))
+                  (window-arrange-line! 'h (panes-layout-shares layout) items))
+              (for-each
+                (lambda (k)
+                  (let ((h (panes-handle layout k)) (bufs (panes-window-buffers layout k)))
+                    ;; an id no buffer has is no name: showing it would make a buffer of it
+                    (when (and h (pair? bufs) (window-exists? h) (buffer-known? (car bufs)))
+                      (unless (equal? (window-buffer h) (car bufs))
+                        (window-set-buffer! h (car bufs)))
+                      (set-window-prev-buffers! h (cdr bufs))
+                      (let ((pos (and (member h made) (panes-window-point layout k))))
+                        (when pos (window-set-point! h pos))))))
+                tops)
+              ;; the screen is a projection of the model: whatever the arrange
+              ;; selected, the draw ends on the focused pane's window
+              (let ((target (panes--focus-handle layout handles)))
+                (unless (or (not target) (not (window-exists? target)) (equal? (active-window) target))
+                  (select-window! target)))
+              (set! drawn layout))))
       (lambda () (set! panes--applying #f)))
-    layout))
+    drawn))
 
 (define (panes--group-buffers &optional held)
   "The open buffers of this frame's group, each to be in a window. The

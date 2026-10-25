@@ -2978,6 +2978,7 @@ defmodule Compos.Ui.EditorLive do
             tree: tree,
             overlays: leaf.overlays,
             whitespace: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
+            line_numbers: Compos.Core.Buffer.get_local(leaf.buffer, "line-numbers") == "on",
             hidden_lines: leaf.hidden_lines
           ]
       )

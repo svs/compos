@@ -1103,6 +1103,7 @@ defmodule Compos.Core.Markdown.Html do
       {:ok, html} =
         preview_doc_ts(tree, text, point, mark, faces,
           whitespace: opts[:whitespace] == true,
+          line_numbers: opts[:line_numbers] == true,
           hidden_lines: opts[:hidden_lines] || MapSet.new(),
           image_src: opts[:image_src] || (&local_image_src(&1, opts)),
           url_embed: opts[:url_embed] || (&youtube_embed_html/1),
@@ -1136,6 +1137,13 @@ defmodule Compos.Core.Markdown.Html do
     _ -> "<pre>" <> html_escape(md) <> "</pre>"
   end
 
+  # the gutter: each source line's mark draws its number in the left margin
+  @line_numbers_css """
+  <style>body{padding-left:3.6em}
+  .ln::before{content:attr(data-n);position:absolute;left:0;width:2.8em;text-align:right;
+  font-size:.75em;line-height:inherit;opacity:.4;pointer-events:none;user-select:none}</style>
+  """
+
   @doc """
   Render a Markdown preview through the tree-sitter renderer.
 
@@ -1154,6 +1162,7 @@ defmodule Compos.Core.Markdown.Html do
         if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
 
     body = render_tree(tree, text, marks, opts)
+    body = if opts[:line_numbers], do: @line_numbers_css <> body, else: body
 
     {:ok, page(body, faces)}
   end
@@ -1161,7 +1170,8 @@ defmodule Compos.Core.Markdown.Html do
   defp ts_line_marks(text) do
     [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
     |> Enum.reject(&(&1 > byte_size(text)))
-    |> Enum.map(fn at -> {at, ~s(<span class="ln" data-p="#{at}"></span>)} end)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {at, n} -> {at, ~s(<span class="ln" data-p="#{at}" data-n="#{n}"></span>)} end)
   end
 
   @doc """

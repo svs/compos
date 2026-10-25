@@ -99,7 +99,7 @@
 ;; link at point, and n, p and TAB walk the links. Those modes get caret
 ;; browsing when they become dismissible, once per mode, so a later
 ;; M-x caret-browsing-mode is still the reader's answer.
-(define *dismiss-caret-modes* '("browse-mode"))
+(define *dismiss-caret-modes* '("browse-mode" "help-mode"))
 
 (define (dismiss-keep-caret! mode)
   (unless (member mode *dismiss-caret-modes*)

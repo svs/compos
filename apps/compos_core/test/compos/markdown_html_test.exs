@@ -516,7 +516,7 @@ defmodule Compos.MarkdownHtmlTest do
     # the caret sits between the bytes it names, and the line anchor names
     # the answer's own first byte
     assert bare(html) =~ "An a"
-    assert html =~ ~s(<span class="ln" data-p="#{start}"></span>)
+    assert html =~ ~s(<span class="ln" data-p="#{start}")
     assert html =~ ~r{An </span><span class="pt"></span><span class="s" data-s="#{at}">answer}
   end
 

@@ -54,6 +54,20 @@
                  (url-encode name) ")"))
 
 ;; TITLE names the page in the modeline; MARKDOWN is the page.
+;; every heading down to ## is a part of the page: TAB walks them, and a
+;; long page (the system prompt) scrolls part by part
+(define (help--heading-anchors buf)
+  (let ((hs (filter (lambda (h) (<= (cadr h) 2)) (markdown-outline buf)))
+        (pos (lambda (l) (with-current-buffer buf (lambda () (line-start-position l))))))
+    (let loop ((hs hs) (out '()))
+      (if (null? hs)
+          (reverse out)
+          (loop (cdr hs)
+                (cons (list (caddr (car hs))
+                            (pos (car (car hs)))
+                            (if (null? (cdr hs)) (buffer-size buf) (pos (car (cadr hs)))))
+                      out))))))
+
 (define (help-doc! title markdown)
   (let ((from (active-window)))
     (buffer-create *help-buffer*)
@@ -73,6 +87,9 @@
     ;; reapplies preserve this mode membership exactly as the user left it.
     (unless (minor-mode-on? *help-buffer* "preview-mode")
       (enable-minor-mode! *help-buffer* "preview-mode"))
+    (anchor-set! *help-buffer* (help--heading-anchors *help-buffer*))
+    (unless (minor-mode-on? *help-buffer* "anchor-mode")
+      (enable-minor-mode! *help-buffer* "anchor-mode"))
     (goto-char! 0)
     *help-buffer*))
 
@@ -85,6 +102,9 @@
     (let ((buf (current-buffer)))
       ;; the buffer has no ".md" to read a renderer from — it says so
       (buffer-set-local! buf 'preview-renderer "markdown")
+      ;; the rendered page numbers its source lines; M-x display-line-numbers-mode hides them
+      (unless (buffer-local buf 'line-numbers)
+        (buffer-set-local! buf 'line-numbers "on"))
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf))
       (buffer-set-read-only! buf #t)

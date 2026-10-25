@@ -1051,9 +1051,12 @@ the next row down. STEP is kept for the callers."
 ;; C-x b has three tabs over one list: every buffer, the current group's,
 ;; and the ones this window showed. The side arrows move between them and
 ;; typing filters the tab you are on. Each prompt opens on the same tab.
-(defcustom 'switch-buffer-initial-tab 'group
-  "The tab C-x b opens on: 'all, 'group, or 'window. The left and right arrows move to the others while the prompt is open."
+(defcustom 'switch-buffer-initial-tab 'last
+  "The tab C-x b opens on: 'last, the tab it showed the last time; or 'all, 'group, 'window or 'pane. The left and right arrows move to the others while the prompt is open."
   'group 'buffers 'type 'choice)
+
+;; the tab C-x b showed the last time, for 'last
+(defvar '*switch-last-tab* 'group)
 
 (define *switch-tabs* '((all "All") (group "Group") (window "Window") (pane "Pane")))
 
@@ -1130,7 +1133,8 @@ the next row down. STEP is kept for the callers."
          (sleep-woken! (lambda (keep)
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
-    (let* ((tab (if (assoc switch-buffer-initial-tab *switch-tabs*) switch-buffer-initial-tab 'group))
+    (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
+           (tab (if (assoc want *switch-tabs*) want 'group))
            ;; DISPLAY and CANDIDATES come in the same order, so one walk
            ;; keeps the rows of a tab
            (tab-display (lambda (tab)
@@ -1164,6 +1168,7 @@ the next row down. STEP is kept for the callers."
       (minibuffer-tabs! (switch-tab-row tab))
       (set! *mb-tab-fn* (lambda (step)
                           (set! tab (switch-tab-step tab step))
+                          (set! *switch-last-tab* tab)
                           (minibuffer-tabs! (switch-tab-row tab))
                           (minibuffer-preview-candidates! (tab-display tab) on-confirm)
                           #t)))

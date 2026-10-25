@@ -1513,7 +1513,10 @@
                         buf (cond ((not i) 0)
                                   ((>= i n) (- n 1))
                                   (else i)))))
-          (when target (list-goto-index! buf target)))))))
+          ;; point on a selectable row stays: a move here costs a
+          ;; selection redraw and unpins the windows that show the list
+          (when (and target (not (and i (= target i))))
+            (list-goto-index! buf target)))))))
 
 (define (list-restamp! buf)
   (let ((f (list-opt buf 'stamp)))

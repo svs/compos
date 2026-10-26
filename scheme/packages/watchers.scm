@@ -65,6 +65,12 @@
               (map cadr (sort (map (lambda (r) (list (- 0 (or (plist-get r 'last) 0)) r))
                                    (filter (lambda (r) (not (equal? (plist-get r 'state) "listening"))) rows))))))))
 
+;; the group the watcher's task shows in, by name
+(define (watchers--task-group row)
+  (let* ((id (plist-get row 'task)) (t (and (not (watchers--blank? id)) (todo-get id)))
+         (g (and t (plist-get t 'group))))
+    (and g (or (group-name g) g))))
+
 (define (watchers--chat-buffer row)
   (let ((id (plist-get row 'chat)))
     (and id (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list)))))
@@ -106,6 +112,7 @@
       (line "chat        " (or (watchers--chat-buffer row) (plist-get row 'chat)))
       (line "task        " (and (plist-get row 'task)
                               (string-append (plist-get row 'task) (if task-title (string-append "  " task-title) ""))))
+      (line "task group  " (watchers--task-group row))
       (line "created     " (and (plist-get row 'created) (string-append (watchers--age (plist-get row 'created)) " ago")))
       (line "waiting     " (and (pair? (plist-get row 'pending))
                               (string-append (number->string (length (plist-get row 'pending))) " event(s) for a chat that is not open")))

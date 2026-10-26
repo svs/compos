@@ -1114,7 +1114,7 @@
       (if use-worktree "worktree" "current"))
     (enable-minor-mode! target "code-mode")
     (message (string-append (code-mode--label target)
-                            " · C-c s scratch · M-o sends it"))))
+                            " · C-c s scratch · C-RET sends it"))))
 
 (define-command "code-mode" "Toggle the agent coding workspace in this buffer"
   (lambda ()

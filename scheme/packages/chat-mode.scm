@@ -256,7 +256,7 @@
 
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
 (minor-mode-keys! "llm-mode"
-  '(("M-o" "llm-send-buffer") ("C-g" "llm-mode-abort")
+  '(("C-RET" "llm-send-buffer") ("C-g" "llm-mode-abort")
     ("C-c m" "llm-set-model") ("C-c b" "llm-configure")))
 
 (define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"
@@ -266,7 +266,7 @@
         (message "LLM mode disabled"))))
 
 (mode-doc! "llm-mode"
-  "In-buffer LLM interaction. `M-o` shows transient thinking/tool activity at point, then streams the durable result there. `C-g` cancels an in-flight reply and restores the prompt face; `C-c b` chooses backend, model, effort, tools, and prompt sections.")
+  "In-buffer LLM interaction. `C-RET` asks the LLM at point: it shows transient thinking/tool activity at point, then streams the durable result there; `C-u C-RET` chooses where the reply goes. `M-o` opens the document's own chat, starting one when it has none. `C-g` cancels an in-flight reply and restores the prompt face; `C-c b` chooses backend, model, effort, tools, and prompt sections.")
 
 ;; Inline sessions are durable agent conversations by default, matching
 ;; Codex's editor integrations: one native thread stays attached to the
@@ -352,7 +352,7 @@
   (buffer-set-local! buf 'llm-session-dirty #f)
   #t)
 
-(define-command "llm-set-model" "Choose the model for M-o in this buffer"
+(define-command "llm-set-model" "Choose the model for C-RET in this buffer"
   (lambda ()
     (let ((buf (current-buffer)))
       (minibuffer-read
@@ -364,7 +364,7 @@
             ;; Codex fixes model identity in the thread instructions. Resume
             ;; the same thread through a fresh runtime with the new override.
             (llm-mode-reset-runtime! buf #t)
-            (message (string-append "M-o · " model))))))))
+            (message (string-append "C-RET · " model))))))))
 
 ;; The live inline turn is data on the document's chat, not a registry of
 ;; its own: the chat knows its document ('inline-target) and its session,
@@ -724,6 +724,8 @@
 (public! 'chat-opening-prompt
   "(chat-opening-prompt SOURCE) — the opening prompt SOURCE's modes give a new chat, or #f")
 
+(public! 'llm-reply-format!
+  "(llm-reply-format! MODE PROC) — in a buffer of MODE, a finished C-RET reply is written as (PROC TEXT)")
 (public! 'mode-chat-setup!
   "(mode-chat-setup! MODE PROC) — PROC (CHAT SOURCE) sets up a chat made for a buffer in MODE")
 (public! 'chat-take-modes!
@@ -954,6 +956,24 @@
               (block-close-end! buf id))))
         (llm-mode--blocks buf)))))
 
+;; A mode may write a finished reply in its own form: morg quotes it, so the
+;; mark that says the agent wrote it lives in the file. PROC takes the reply's
+;; text and answers the text the document keeps.
+(define *llm-reply-formats* '())
+(define (llm-reply-format! mode proc)
+  (set! *llm-reply-formats* (alist-put *llm-reply-formats* mode proc)))
+
+(define (llm-mode--format-reply! buf response-id)
+  (let* ((hit (filter (lambda (row) (buffer-derived-mode? buf (car row))) *llm-reply-formats*))
+         (response (and (pair? hit) (block-resolve-id buf response-id))))
+    (when response
+      (let* ((start (plist-get response 'start))
+             (end (plist-get response 'end))
+             (text (with-current-buffer buf (lambda () (buffer-substring start end))))
+             (new ((cadr (car hit)) text)))
+        (unless (equal? new text)
+          (buffer-replace-range! buf start (- end start) new))))))
+
 (define (llm-mode--finish-response! buf response-id streamed error)
   (let* ((response (block-resolve-id buf response-id))
          (end (plist-get response 'end))
@@ -967,6 +987,7 @@
     ;; The final line break belongs to the document, not to either result span.
     (block-close-end! buf response-id end)
     (when result-id (block-close-end! buf result-id end))
+    (llm-mode--format-reply! buf response-id)
     (block-set-state! buf response-id state)
     (when result-id (block-set-state! buf result-id state))
     (when prompt-id (block-set-state! buf prompt-id 'complete))
@@ -1024,7 +1045,7 @@
             (llm-mode--sync-addressable-responses! buf)
             (message "LLM response cancelled"))))))
 ;;; --- where the reply goes -----------------------------------------------------
-;;; M-o answers at point. C-u M-o asks where (gptel: the send menu directs
+;;; C-RET answers at point. C-u C-RET asks where (gptel: the send menu directs
 ;;; the output): at point, in the document's chat shown in the other
 ;;; window, in a new document, or over the region as a rewrite. Every
 ;;; target talks through the document's hidden chat; only the landing
@@ -1130,11 +1151,19 @@
           ((buffer-read-only? (current-buffer)) (llm-companion-open! (current-buffer)))
           (else (llm-send-at-point! (current-buffer) (point))))))
 
-(global-set-key "M-o" "llm-send-buffer")
+(define-command "llm-companion-open" "Open this document's own chat, starting one when it has none"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (chat-buffer? buf)
+          (message "Already in a chat")
+          (llm-companion-open! buf)))))
+
+(global-set-key "C-RET" "llm-send-buffer")
+(global-set-key "M-o" "llm-companion-open")
 (global-set-key "C-c m" "llm-set-model")
 (global-set-key "C-c b" "llm-configure")
 (for-each (lambda (c) (catalog-meta! 'command c 'domain "llm" 'effects '("write" "external" "spend")))
-  '("llm-send-buffer" "llm-send-here" "llm-send-chat" "llm-send-new-document"))
+  '("llm-send-buffer" "llm-send-here" "llm-send-chat" "llm-send-new-document" "llm-companion-open"))
 (catalog-meta! 'command "llm-send-to" 'domain "llm" 'effects '("read"))
 (catalog-meta! 'command "llm-mode" 'domain "llm" 'effects '("write"))
 (catalog-meta! 'mode "llm-mode" 'domain "llm" 'effects '("write"))

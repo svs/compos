@@ -1183,7 +1183,7 @@
                     'eager)))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page. A ```table fence colors its cells by rules on the fence: `green=strong,1.00` matches a value, and `red<.4` or `green>=.7` match a number. The first rule that matches wins. Colors: red, green, yellow, blue, purple, cyan, gray.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block, or fills a `:show-source PATH::NAME` block from its file. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page. `C-RET` asks the LLM, and its reply is a `> [!agent]` quote: inside one, `c` copies it, `e` makes it your prose, `r` asks again, `d` dismisses it, `s` splits it into a chat of its own, `RET` answers it, `TAB` folds it, `n` and `p` go to the next and previous reply, and `C-x n n` shows only it. `M-o` opens the document's chat. A ```table fence colors its cells by rules on the fence: `green=strong,1.00` matches a value, and `red<.4` or `green>=.7` match a number. The first rule that matches wins. Colors: red, green, yellow, blue, purple, cyan, gray.")
 
 (mode-icon! "morg-mode" "")
 
@@ -1191,9 +1191,22 @@
 ;; the block: the keymap at point, ahead of the buffer's own map. It is
 ;; set after every command, so it follows point; a buffer with no block
 ;; at point has none.
+;; Other places in a document can carry keys too: a provider takes the
+;; buffer and point and answers a keymap name, or #f. A reply quote is one.
+(define *morg-point-maps* '())
+(define (morg-point-map-provider! name proc)
+  (set! *morg-point-maps* (alist-put *morg-point-maps* name proc)))
+
+(define (morg--provided-map buf pos)
+  (let loop ((ps *morg-point-maps*))
+    (cond ((null? ps) #f)
+          (((cadr (car ps)) buf pos))
+          (else (loop (cdr ps))))))
+
 (define (morg-point-map! buf)
   (let* ((b (and (buffer-exists? buf) (block-at buf (point))))
-         (map (and b (fence-kind-keymap (block-lang b)))))
+         (map (or (and b (fence-kind-keymap (block-lang b)))
+                  (and (buffer-exists? buf) (morg--provided-map buf (point))))))
     (unless (equal? map (buffer-at-point-map buf))
       (buffer-at-point-map! buf map))))
 

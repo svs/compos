@@ -111,6 +111,32 @@
       (check-equal! (panes-window-buffer c1 (cadr o4)) "*dired*" "dired stays in its own window")
       (check-equal! c2 c1 "a second consolidation changes nothing"))))
 
+(deftest 'consolidation-sends-stray-buffers-home-from-a-window-on-screen
+  "A window on screen of another mode keeps only the buffer it shows; an empty second window of a mode closes"
+  (lambda ()
+    (let* ((o1 (pt-visit (panes-empty 2) "*todos*" "todo-mode"))
+           (kt (cadr o1))
+           (o2 (pt-visit (car o1) "*list*" "list-mode" kt))
+           (kl (cadr o2))
+           ;; the chat shows in the todo window; the other chats and a dired sit behind the list
+           (l (panes-move-buffer (car o2) "*chat*" kt))
+           (l (panes-move-buffer l "*chat2*" kl))
+           (l (panes-move-buffer l "*dired*" kl))
+           (l (panes-move-buffer l "*list*" kl))
+           (mode-of (lambda (b) (cond ((string-prefix? "*chat" b) "chat-mode")
+                                      ((equal? b "*todos*") "todo-mode")
+                                      ((equal? b "*dired*") "dired-mode")
+                                      (else "list-mode"))))
+           (c1 (panes-consolidate l mode-of))
+           (c2 (panes-consolidate c1 mode-of))
+           (where (lambda (b) (filter (lambda (k) (member b (panes-window-buffers c1 k))) (panes-window-keys c1))))
+           (windows (lambda (l) (map (lambda (k) (list k (panes-window-mode l k) (panes-window-buffers l k))) (panes-window-keys l)))))
+      (check-equal! (panes-window-buffers c1 kl) '("*list*") "the list window keeps only the list")
+      (check-equal! (where "*chat*") (where "*chat2*") "the chats share one window")
+      (check-equal! (length (filter (lambda (k) (equal? (panes-window-mode c1 k) "chat-mode")) (panes-window-keys c1))) 1 "one chat window")
+      (check-false! (member "*todos*" (panes-window-buffers c1 (car (where "*chat*")))) "the todos leave the chat window")
+      (check-equal! (windows c2) (windows c1) "a second consolidation changes nothing"))))
+
 (deftest 'a-kill-consults-only-each-windows-own-stack
   "Q13, Q14, rule 10 and 11: the killed buffer leaves every stack; a window falls to its own next buffer; an emptied window closes and its pane goes"
   (lambda ()

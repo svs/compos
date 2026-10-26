@@ -849,9 +849,9 @@
       else the preferred window.
    3. The home gathers every buffer of the mode: its own first, then
       the others' in pane order. A window on screen of another mode
-      keeps its buffers, and a buffer it shows stays there.
+      keeps the buffer it shows; the rest of the mode's buffers go home.
    4. Every other window gives those buffers up, a second window of
-      the mode on screen too; a window left empty closes.
+      the mode on screen too; a window of the mode left empty closes.
    5. panes--fill-empty-panes fills the panes left empty.
    Without MODE-OF a buffer has the mode of the window that shows it,
    else of the first window that holds it. MODES limits the work to
@@ -894,15 +894,19 @@
                  (gathered (panes--uniq
                              (append (filter mine (panes-window-buffers layout home))
                                      (apply append
-                                            (map (lambda (k) (if (kept layout k) '() (filter mine (panes-window-buffers layout k))))
+                                            (map (lambda (k) (filter mine (panes-window-buffers layout k)))
                                                  (panes-window-keys layout))))))
                  (gathered (filter (lambda (b) (not (member b fronts))) gathered))
-                 ;; the hidden windows give those buffers up; one left empty closes
+                 ;; every other window gives those buffers up, but one on screen of
+                 ;; another mode keeps the buffer it shows; a window of the mode
+                 ;; left empty closes, one that was empty already too
                  (layout (fold (lambda (l k)
-                                 (if (kept l k)
+                                 (if (equal? k home)
                                      l
-                                     (let ((left (filter (lambda (b) (not (mine b))) (panes-window-buffers l k))))
-                                       (cond ((= (length left) (length (panes-window-buffers l k))) l)
+                                     (let* ((shown (and (kept l k) (panes-window-buffer l k)))
+                                            (left (filter (lambda (b) (or (not (mine b)) (equal? b shown))) (panes-window-buffers l k))))
+                                       (cond ((and (null? left) (equal? (panes-window-mode l k) mode)) (panes-remove-window l k))
+                                             ((= (length left) (length (panes-window-buffers l k))) l)
                                              ((null? left) (panes-remove-window l k))
                                              (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids left)))))))))
                                layout (panes-window-keys layout)))

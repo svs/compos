@@ -11,12 +11,6 @@
 ;;; sheets that read the pages are web/parsers/spotify-rows.xsl and
 ;;; web/parsers/spotify-detail.xsl.
 
-;; the major modes this file defines: a buffer restored in one loads the file
-;;;###autoload
-(autoload-modes
-  "spotify-mode" "spotify-detail-mode" "spotify-playing-mode" "spotify-home-mode"
-  "spotify-liked-mode" "spotify-playlists-mode" "spotify-results-mode")
-
 (package! 'spotify)
 (require 'site-app)
 (require 'cell)
@@ -3072,14 +3066,14 @@
 (define-key "spotify-map" "l" "spotify-like")
 (define (spotify--section-ready! id)
   ;; what site-app-open! does to a section, without showing it anywhere
-  (let ((buf (site-app-page-buffer 'spotify id))
-        (mode (site-app-page-mode 'spotify id)))
+  (let ((buf (site-app-page-buffer 'spotify id)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf)
+    ;; the list mode first, every section shares it, its section a minor mode
+    ;; on it; the locals after, so the mode's entry does not drop them
+    (site-app-index-enter! buf 'spotify id)
     (buffer-set-local! buf 'site-app-spec (site-app-spec 'spotify))
     (buffer-set-local! buf 'site-app-page id)
-    (unless (buffer-derived-mode? buf mode)
-      (with-current-buffer buf (lambda () (set-mode! mode))))
     buf))
 
 (define-command "spotify-search" "Search Spotify and show the results in the app"

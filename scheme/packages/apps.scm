@@ -254,6 +254,32 @@
             ((not (app-dismiss! id)) (message "Nothing else to show in its place"))))))
 (catalog-meta! 'command "app-dismiss" 'domain 'windows 'effects '(write display))
 
+(define (app-push-read! id)
+  (minibuffer-read "Push app to group: " (group-names)
+    (lambda (input)
+      (let ((name (string-trim input)))
+        (if (equal? name "")
+            (message "Group needs a name")
+            (let ((gid (or (group-resolve-id name) (group-record-create! name))))
+              (app-move-buffers! id gid)
+              (message (string-append "App pushed to " name))))))))
+
+(define-command "app-pull"
+  "Pull this app into this group: every one of its buffers comes along"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (cond ((not id) (message "This buffer belongs to no app"))
+            ((not (app-move-buffers! id (frame-group))) (message "Nothing of this app to pull"))
+            (else (message "App pulled into this group"))))))
+(catalog-meta! 'command "app-pull" 'domain 'windows 'effects '(write display))
+
+(define-command "app-push"
+  "Push this app to another group: every one of its buffers goes there"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (if id (app-push-read! id) (message "This buffer belongs to no app")))))
+(catalog-meta! 'command "app-push" 'domain 'windows 'effects '(write display))
+
 (effects! '(read))
 
 ;; The page open beside a listing, or #f. The detail contract already

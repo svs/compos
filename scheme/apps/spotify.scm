@@ -1615,7 +1615,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
                               'position (car (cell-ref 'spotify/position)) 'duration (or (plist-get now 'duration) ""))
                         (spotify--staged (spotify--get 'stages (spotify--stage-key name title))
                                          (spotify--ambient-images name artist now liner) cover facts)))
-                title)))))))
+                (string-join (filter (lambda (s) (not (equal? s ""))) (list title (or (plist-get now 'artists) "") album)) " · "))))))))
 
 (define *spotify-ambient-tab*
   (list 'id "ambient" 'label "ambient" 'from '() 'draw (lambda (buf b) (spotify--ambient-draw buf b))))

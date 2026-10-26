@@ -912,6 +912,8 @@
     'locals (lambda () (list 'listing-peek-disabled (not chat-list-preview)))
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
     'defaults '(sort recent grouping group)
+    ;; a subject runs through every group: < puts the chats under their subjects
+    'groupings (list (list 'subject (lambda (b) (or (chat-subject b) "no subject")) "no subject"))
     ;; a chat you archived is still a chat you switch to: the saved
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
@@ -931,7 +933,7 @@
                "The chats, as ibuffer lists buffers: the recent ones at rest, the "
                "chat you used last at the top. f filters every chat, by title, "
                "state, model, and by a word somebody said in it. < cycles the "
-               "sections (group, none: the most recent first), > the order, t "
+               "sections (group, subject, none: the most recent first), > the order, t "
                "turns the sections off and on. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "

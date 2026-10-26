@@ -1075,27 +1075,86 @@ the next row down. STEP is kept for the callers."
 (define (switch-tab-row tab &optional tabs)
   (map (lambda (t) (list (cadr t) (equal? (car t) tab))) (or tabs *switch-tabs*)))
 
-;; a chat another chat spawned
-(define (switch-child? name)
-  (and (buffer-known? name) (buffer-local name 'subagent-parent) #t))
+;; the slug of the chat that spawned chat NAME, and NAME's own slug
+(define (switch-chat-parent name)
+  (let ((p (and (buffer-known? name) (buffer-local name 'subagent-parent))))
+    (and (string? p) p)))
 
-;; the fixed tabs; Children when the group holds a chat another chat
-;; spawned; then one for each subject of the group's chats: a subject tab
-;; is its name, a string, where the others are symbols
+(define (switch-chat-slug name)
+  (let ((s (and (buffer-known? name) (buffer-local name 'agent-slug))))
+    (and (string? s) s)))
+
+;; the Family tab: the group's chats that spawned a chat or were spawned,
+;; and the parents of the spawned ones, wherever those are
+(define (switch-family-rows rows group)
+  (let* ((mine (if group (filter (lambda (r) (switch-row-in-group? r group)) rows) '()))
+         (parents (filter string? (map (lambda (r) (switch-chat-parent (car r))) mine))))
+    (filter (lambda (r)
+              (or (and (member r mine)
+                       (or (switch-chat-parent (car r))
+                           (member (switch-chat-slug (car r)) parents)))
+                  (member (switch-chat-slug (car r)) parents)))
+            rows)))
+
+;; the Family tab as a tree: (NAME DEPTH), each chat before the chats it
+;; spawned, the roots in the order the prompt lists them
+(define (switch-family-tree rows group)
+  (let* ((names (map car (switch-family-rows rows group)))
+         (slugs (filter string? (map switch-chat-slug names)))
+         (children (lambda (n)
+                     (let ((s (switch-chat-slug n)))
+                       (if s (filter (lambda (c) (equal? (switch-chat-parent c) s)) names) '())))))
+    (define (walk n depth seen)
+      (if (member n seen)
+          '()
+          (cons (list n depth)
+                (apply append (map (lambda (c) (walk c (+ depth 1) (cons n seen))) (children n))))))
+    (apply append
+           (map (lambda (n) (walk n 0 '()))
+                (filter (lambda (n) (not (member (switch-chat-parent n) slugs))) names)))))
+
+;; a child's label sits under its parent's: a step in for each generation
+(define (switch-family-label label depth)
+  (if (< depth 1)
+      label
+      (let loop ((i 1) (pad ""))
+        (if (>= i depth)
+            (string-append pad "└ " label)
+            (loop (+ i 1) (string-append pad "   "))))))
+
+;; the Family tab's (CANDIDATE DISPLAY) pairs, in tree order, labels indented
+(define (switch-family-entries tree candidates display)
+  (let ((pairs (let zip ((cs candidates) (ds display) (out '()))
+                 (if (or (null? cs) (null? ds)) (reverse out)
+                     (zip (cdr cs) (cdr ds) (cons (list (car cs) (car ds)) out))))))
+    (filter (lambda (x) x)
+            (map (lambda (e)
+                   (let ((hit (find (lambda (p) (equal? (cadr (car p)) (car e))) pairs)))
+                     (and hit
+                          (let ((label (switch-family-label (car (cadr hit)) (cadr e))))
+                            (list (list label (car e)) (cons label (cdr (cadr hit))))))))
+                 tree))))
+
+;; the fixed tabs; Family when the group holds a chat another chat
+;; spawned; then a separator and one tab for each subject of the group's
+;; chats. A subject tab is its name, a string, where the others are
+;; symbols; the separator is 'sep with no label, and a step skips it.
 (define (switch-tab-list rows group)
-  (let ((mine (if group (map car (filter (lambda (r) (switch-row-in-group? r group)) rows)) '())))
+  (let ((mine (if group (map car (filter (lambda (r) (switch-row-in-group? r group)) rows)) '()))
+        (subjects (lambda (names) (if (boundp 'chat-subjects) (chat-subjects names) '()))))
     (append *switch-tabs*
-            (if (find switch-child? mine) '((children "Children")) '())
-            (if (boundp 'chat-subjects)
-                (map (lambda (c) (list c c)) (chat-subjects mine))
-                '()))))
+            (if (find switch-chat-parent mine) '((family "Family")) '())
+            (let ((ss (subjects mine)))
+              (if (null? ss) '() (cons '(sep "") (map (lambda (s) (list s s)) ss)))))))
 
 (define (switch-tab-step tab step &optional tabs)
   (let* ((keys (map car (or tabs *switch-tabs*)))
          (n (length keys))
          (i (let loop ((ks keys) (i 0))
-              (cond ((null? ks) 0) ((equal? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
-    (nth (modulo (+ i step n) n) keys)))
+              (cond ((null? ks) 0) ((equal? (car ks) tab) i) (else (loop (cdr ks) (+ i 1))))))
+         (next (nth (modulo (+ i step n) n) keys)))
+    ;; the separator is no tab: step over it
+    (if (eq? next 'sep) (switch-tab-step next step tabs) next)))
 
 ;; a row's group from the fields it carries: every buffer holds one group
 ;; id. A file that is no buffer is in no group.
@@ -1114,10 +1173,7 @@ the next row down. STEP is kept for the callers."
         ((eq? tab 'pane)
          (let ((mine (if (and win (window-exists? win)) (switch-pane-tab-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
-        ((eq? tab 'children)
-         (if group
-             (filter (lambda (r) (and (switch-row-in-group? r group) (switch-child? (car r)))) rows)
-             '()))
+        ((eq? tab 'family) (switch-family-rows rows group))
         ((string? tab)
          (if group
              (filter (lambda (r) (and (switch-row-in-group? r group)
@@ -1161,24 +1217,31 @@ the next row down. STEP is kept for the callers."
     (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
            (tabs (switch-tab-list rows group))
            (tab (if (assoc want tabs) want 'group))
+           (family (if (assoc 'family tabs)
+                       (switch-family-entries (switch-family-tree rows group) candidates display)
+                       '()))
+           ;; the Family rows answer to their indented labels too
+           (choices (append candidates (map car family)))
            ;; DISPLAY and CANDIDATES come in the same order, so one walk
            ;; keeps the rows of a tab
            (tab-display (lambda (tab)
-                          (let ((keep (map car (switch-tab-rows tab rows group home))))
-                            (let loop ((ds display) (cs candidates) (out '()))
-                              (if (null? ds)
-                                  (reverse out)
-                                  (loop (cdr ds) (cdr cs)
-                                        (if (member (cadr (car cs)) keep) (cons (car ds) out) out)))))))
+                          (if (eq? tab 'family)
+                              (map cadr family)
+                              (let ((keep (map car (switch-tab-rows tab rows group home))))
+                                (let loop ((ds display) (cs candidates) (out '()))
+                                  (if (null? ds)
+                                      (reverse out)
+                                      (loop (cdr ds) (cdr cs)
+                                            (if (member (cadr (car cs)) keep) (cons (car ds) out) out))))))))
            (on-confirm (lambda (label)
-                         (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+                         (let* ((entry (assoc label choices)) (target (and entry (cadr entry))))
                            (restore!)
                            (when target (ibuffer-pick! target (lambda () #f))
                                         (group-current-recalculate!))
                            (sleep-woken! target)))))
       (minibuffer-read-preview "Switch to: " (tab-display tab)
         (lambda (label)
-          (let* ((entry (assoc label candidates)) (target (and entry (cadr entry))))
+          (let* ((entry (assoc label choices)) (target (and entry (cadr entry))))
             (if (and target (buffer-known? target) (window-exists? home))
                 (let ((sleeping? (not (buffer-exists? target))))
                   (preview-show target 'here home)

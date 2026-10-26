@@ -12,7 +12,8 @@
 ;;;   'recent-limit   (THUNK) how many rows the list shows at rest;
 ;;;                   a filter reads every one
 ;;;   'defaults       the resting sort and grouping, as ibuffer-view! takes
-;;;   'groupings      ((SYMBOL KEY-OF) ...): sections beyond none, group
+;;;   'groupings      ((SYMBOL KEY-OF [LAST]) ...): sections beyond none, group;
+;;;                   LAST is the key whose section goes at the end
 ;;;                   and directory; KEY-OF names the section of a row
 ;;;   'extra-rows     (BUF) rows after the buffers, such as saved files
 ;;;   'text           (NAME) the text a filter also reads, in a task
@@ -94,7 +95,8 @@
                    (let ((source (ibuffer-source buf)))
                      (ibuffer-columns-clear!)
                      (ibuffer-note-kinds! source)
-                     (ibuffer-keyed-sections buf source (cadr keyed) (lambda (k) "faint") #f))
+                     (ibuffer-keyed-sections buf source (cadr keyed) (lambda (k) "faint")
+                                            (and (> (length keyed) 2) (nth 2 keyed))))
                    (ibuffer-rows buf))))
     (if extra (append rows (extra buf)) rows)))
 

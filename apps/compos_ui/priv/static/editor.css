@@ -1996,6 +1996,11 @@ c-action-key {
   flex: 1 1 auto; margin: 0 0 -1px; padding: 0; border-bottom: none;
 }
 .mb-label-row .mb-tabs .c-tab { color: var(--text-faint); }
+/* a tab with no label is a separator between groups of tabs */
+.mb-label-row .mb-tabs .c-tab:empty {
+  width: 1px; min-width: 0; padding: 0; margin: 4px 8px 5px;
+  align-self: stretch; background: var(--edge); border: none; pointer-events: none;
+}
 .mb-label-row .mb-tabs .c-tab-on {
   color: var(--text-strong); font-weight: 600;
   background: var(--surface-select); border-color: var(--edge);

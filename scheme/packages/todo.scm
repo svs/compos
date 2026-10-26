@@ -47,10 +47,10 @@
 (define *todo-states* '("inbox" "todo" "doing" "waiting" "review" "done" "cancelled"))
 (define *todo-closed* '("done" "cancelled"))
 ;; the #+ lines, in the order they are written
-(define *todo-fields* '(id state assignee chats priority source parent depends created by group))
+(define *todo-fields* '(id state assignee chats priority urgent source parent depends created by group))
 ;; what todo-update may change
 (define *todo-settable*
-  '(title state project assignee chats priority deadline scheduled tags source parent depends notes group))
+  '(title state project assignee chats priority urgent deadline scheduled tags source parent depends notes group))
 
 ;;; --- small helpers -----------------------------------------------------------
 
@@ -532,6 +532,8 @@
         ((equal? k 'tags) (todo--tags v))
         ((member k '(depends chats)) (todo--ids v))
         ((equal? k 'priority) (todo--priority v))
+        ;; time-sensitive or not: "yes" or nothing
+        ((equal? k 'urgent) (if (or (equal? v #t) (and (string? v) (member (string-downcase (string-trim v)) '("yes" "y" "t" "true")))) "yes" #f))
         ((equal? k 'notes) (or v ""))
         ((equal? k 'title) (if (todo--blank? v) (todo--fail "a task needs a title") (string-trim v)))
         ((todo--blank? v) #f)
@@ -546,7 +548,7 @@
         (else (string-append (symbol->string k) " " (todo--show new)))))
 
 (define (todo-update id props)
-  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
+  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
          (who (or (plist-get props 'by) todo-user)))
     (let loop ((ps props) (new t) (changes '()))
@@ -705,13 +707,16 @@
                    (else (has? hay w))))
            (string-split input " ")))))
 
-(define *todo-sorts* '("urgency" "deadline" "created"))
+(define *todo-sorts* '("status" "urgency" "deadline" "created"))
 
-(define (todo--sort-by buf) (or (buffer-local buf 'todo-sort) "urgency"))
+(define (todo--sort-by buf) (or (buffer-local buf 'todo-sort) "status"))
 
 (define (todo--resort ts by)
-  "deadline: soonest first, undated last. created: newest first. urgency: todo-list's own order."
-  (cond ((equal? by "deadline")
+  "urgency: time-sensitive first, then status. deadline: soonest first, undated last. created: newest first. status: todo-list's own order."
+  (cond ((equal? by "urgency")
+         (append (filter (lambda (t) (plist-get t 'urgent)) ts)
+                 (filter (lambda (t) (not (plist-get t 'urgent))) ts)))
+        ((equal? by "deadline")
          (map cadr (sort (map (lambda (t) (list (list (todo--date-num (plist-get t 'deadline))
                                                       (or (plist-get t 'created) ""))
                                                 t))
@@ -791,6 +796,7 @@
     (filter (lambda (s) (not (equal? s "")))
             (list (plist-get t 'state)
                   (let ((p (plist-get t 'priority))) (if p (string-append "#" p) ""))
+                  (if (plist-get t 'urgent) "urgent" "")
                   (plist-get t 'project)
                   (if (plist-get t 'deadline) (string-append "due " (todo--due t)) "")
                   (if (plist-get t 'scheduled) (string-append "scheduled " (plist-get t 'scheduled)) "")
@@ -905,7 +911,7 @@
 (define (todo--wide-columns buf)
   ;; plain fixed columns, as ibuffer draws them; the title takes what is left
   (list (list "STATE" 7)
-        (list "P" 1)
+        (list "P" 2)
         (list "TODO" #f 'left 'end)
         (list "PROJECT" 14 'left 'end)
         (list "WHO" 24 'left 'end)
@@ -914,7 +920,7 @@
 (define (todo--narrow-columns buf)
   ;; a narrow window keeps ibuffer's one line a task, without who and when
   (list (list "STATE" 7)
-        (list "P" 1)
+        (list "P" 2)
         (list "TODO" #f 'left 'end)
         (list "PROJECT" 12 'left 'end)))
 
@@ -933,7 +939,8 @@
       (list "" "" (list (plist-get t 'title) "list-section-name") "" "" "")
   (let ((s (or (plist-get t 'state) "inbox")))
     (list (list s (string-append "todo-dot-" s))
-          (list (or (plist-get t 'priority) "") "org-priority")
+          (list (string-append (if (plist-get t 'urgent) "!" "") (or (plist-get t 'priority) ""))
+                (if (plist-get t 'urgent) "todo-overdue" "org-priority"))
           (list (plist-get t 'title) (if (member s *todo-closed*) "f-dim" "ibuffer-name"))
           (list (todo--short-project t) "f-dim")
           ;; a chat that closed leaves only its id behind, which says nothing
@@ -1067,6 +1074,12 @@
 (define-command "todo-mark-doing" "Mark the task in progress"
   (lambda () (todo--set-at! 'state "doing")))
 
+(define-command "todo-toggle-urgent" "Mark the task time-sensitive, or not"
+  (lambda ()
+    (todo--with-tasks "Toggle urgent on"
+      (lambda (t)
+        (todo-update (plist-get t 'id) (list 'urgent (not (plist-get t 'urgent))))))))
+
 (define-command "todo-cycle-priority" "Cycle the task's priority: A, B, C, none"
   (lambda ()
     (todo--with-tasks "Cycle the priority of"
@@ -1091,7 +1104,8 @@
      "- (todo-review \"" id "\" SUMMARY \"" chat "\") before anything goes out, and stop there\n"
      "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
      "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
-     "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n")))
+     "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n"
+     "When done, close this chat with (run-command \"chat-dismiss\").\n")))
 
 (define (todo-assign-chat! id group &optional who)
   "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief when the chat is new; return the chat"
@@ -1408,6 +1422,7 @@
          (segs (filter pair?
                  (list (let ((pr (plist-get t 'project))) (and (not (todo--blank? pr)) (list "" pr)))
                        (and p (list "c-badge" p))
+                       (and (plist-get t 'urgent) (list "c-warn" "urgent"))
                        (and d (list (if (todo--overdue? t) "c-warn" "")
                                     (string-append "due " (todo--short-date d) (if (todo--overdue? t) " — overdue" ""))))
                        (and s (list "" (string-append "scheduled " (todo--short-date s))))
@@ -1785,7 +1800,7 @@
 (define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
   (lambda () (todo--refresh-all!) (todo--rescan!)))
 
-(define-command "todo-next-sort" "Cycle the order: urgency, deadline, created"
+(define-command "todo-next-sort" "Cycle the order: status, urgency, deadline, created"
   (lambda ()
     (let* ((buf (todo--list-buffer))
            (i (todo--rank (todo--sort-by buf) *todo-sorts*))
@@ -1827,11 +1842,12 @@
     'filter todo--filter
     'facets *todo-facets*
     'regroup todo--regroup!
+    'resort (lambda (buf) (run-command "todo-next-sort"))
     'separator? (lambda (buf t) (todo--sep? t))
     'section? (lambda (buf t) (todo--sep? t))
     'footer (lambda (buf)
               '(("←→" "status") ("RET" "open") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
-                ("a" "assign") ("C" "attach chat") ("D" "deadline") ("P" "project") ("!" "priority")
+                ("a" "assign") ("C" "attach chat") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
                 ("c" "capture") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
@@ -1852,6 +1868,7 @@
             ("P" "todo-set-project")
             ("N" "todo-add-note")
             ("!" "todo-cycle-priority")
+            ("T" "todo-toggle-urgent")
             ("c" "todo-capture")
             ("v" "todo-next-view")
             ("<right>" "todo-next-view")
@@ -1860,7 +1877,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `a` hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N` and `!` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: urgency, deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `a` hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

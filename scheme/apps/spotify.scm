@@ -470,7 +470,8 @@
                           (spotify--text "sp-news-snippet" (component--get p 'snippet ""))))))
 
 (define-style! 'spotify "
-.sp-track, .sp-tile { display: flex; align-items: center; gap: 12px; padding: 5px 8px; border-radius: 6px; font-family: var(--font-sans); font-size: 13px; min-width: 0; }
+.sp-track, .sp-tile { display: flex; align-items: center; gap: 12px; padding: 5px 8px; border-radius: 6px; font-family: var(--font-sans); font-size: 16px; min-width: 0; }
+c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist) .c-tabs .c-tab { font-size: .65em; }
 .semantic-list > .semantic-item.sp-track { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-left: 0; border-radius: 6px; }
 .sp-track:hover, .sp-tile:hover { background: var(--hl-line-bg); } .current > .sp-track, .current > .sp-tile, .sp-track.current, .sp-tile.current { background: color-mix(in srgb, var(--ok-fg) 22%, var(--hl-line-bg)); box-shadow: inset 3px 0 0 var(--ok-fg); }
 .sp-idx { flex: none; width: 2ch; text-align: right; color: var(--dim-fg); font-variant-numeric: tabular-nums; }
@@ -501,7 +502,7 @@
 .sp-hero-art { flex: none; width: 168px; height: 168px; border-radius: 8px; object-fit: cover; box-shadow: 0 8px 28px rgba(0,0,0,.45); background: var(--hl-line-bg); font-size: 64px; }
 .sp-hero-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .sp-hero-kind { font-size: .8em; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--default-fg); opacity: .8; }
-.sp-hero-name { font-size: 2.6em; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; color: var(--default-fg); overflow-wrap: anywhere; }
+.sp-hero-name { font-size: 1.8em; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; color: var(--default-fg); overflow-wrap: anywhere; }
 .sp-hero-desc { color: var(--dim-fg); font-size: .95em; }
 .sp-hero-release { color: var(--dim-fg); font-size: .82em; }
 .sp-year { flex: none; font-size: .78em; font-weight: 600; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-bg); color: var(--default-fg); font-variant-numeric: tabular-nums; }

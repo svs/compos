@@ -766,6 +766,7 @@
 .c-tab:hover { background: var(--hl-line-bg); color: var(--fg); }
 .c-tab-on { color: var(--fg); border-color: var(--border-bg); background: var(--hl-line-bg); }
 .c-tab-key { color: var(--accent-fg); font-weight: 600; }
+.c-tab-pick { color: var(--fg); outline: 1px solid var(--accent-fg); outline-offset: -1px; }
 .c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: .85em; }
 .c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
 .c-action-key { color: var(--accent-fg); font-weight: 600; }

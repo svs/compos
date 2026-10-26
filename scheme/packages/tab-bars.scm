@@ -140,6 +140,31 @@
         (string-append label " · " (cadr entry))
         label)))
 
+;; the tab the prompt is on wears c-tab-pick in its bar, in the index or the
+;; detail beside it; ID #f clears it
+(define (tab-bars--lit blocks id)
+  (map (lambda (blk)
+         (if (not (pair? blk)) blk
+             (let ((blk (if (equal? (plist-get blk 'tag) "c-tab")
+                            (let ((class (re-replace " c-tab-pick" (or (plist-get blk 'class) "") "")))
+                              (plist-put blk 'class (if (and id (equal? (plist-get blk 'click) id))
+                                                        (string-append class " c-tab-pick")
+                                                        class)))
+                            blk)))
+               (if (pair? (plist-get blk 'children))
+                   (plist-put blk 'children (tab-bars--lit (plist-get blk 'children) id))
+                   blk))))
+       blocks))
+
+(define (tab-bars--light! buf entry)
+  (for-each (lambda (b)
+              (when b
+                (let ((blocks (buffer-local b 'render-blocks)))
+                  (when (pair? blocks)
+                    (buffer-set-local! b 'render-blocks
+                      (tab-bars--lit blocks (and entry (equal? (car entry) b) (car (caddr entry)))))))))
+            (tab-bars-pair buf)))
+
 (define (tab-bars-pick! buf)
   (let* ((entries (tab-bars--entries buf))
          (bars (let loop ((es entries) (acc '()))
@@ -167,7 +192,13 @@
                                (loop (cdr bs) (+ i 1) (cons (list (car bs) (= i tab)) out))))))
          ;; text that names no tab narrows the index's rows, as / does in a list
          (ix (car (tab-bars-pair buf)))
+         ;; the candidate each minibuffer tab was on, so coming back to it lands there
+         (picked '())
+         (light! (lambda (name)
+                   (set! picked (cons (list (list-ref bars tab) name) picked))
+                   (tab-bars--light! buf (find (lambda (e) (equal? (tab-bars--name e entries) name)) entries))))
          (on-confirm (lambda (name)
+                       (tab-bars--light! buf #f)
                        (let ((hit (find (lambda (e) (equal? (tab-bars--name e entries) name)) entries))
                              (text (string-trim name)))
                          (cond (hit (tab-bars-take! (car hit) (caddr hit)))
@@ -178,13 +209,20 @@
     (if (null? entries)
         (message "No tab bars here")
         (begin
-          (minibuffer-read-preview "Tab: " (cands) (lambda (name) #f) on-confirm (lambda () #f) #f "minibuffer")
+          (minibuffer-read-preview "Tab: " (cands) light! on-confirm (lambda () (tab-bars--light! buf #f)) #f "minibuffer")
           (minibuffer-tabs! (row))
+          (light! (car (car (cands))))
           (set! *mb-tab-fn* (lambda (step)
                               (set! tab (modulo (+ tab step) (length bars)))
                               (mb-tab-remember! (string-append "tab-bars:" buf) (list-ref bars tab))
                               (minibuffer-tabs! (row))
-                              (minibuffer-preview-candidates! (cands) on-confirm)
+                              (let ((want (let ((p (assoc (list-ref bars tab) picked))) (and p (cadr p)))))
+                                (minibuffer-preview-candidates! (cands) on-confirm)
+                                (let step ((n (length (cands))))
+                                  (when (and want (> n 0) (not (equal? (minibuffer-selected) want)))
+                                    (minibuffer-next!)
+                                    (step (- n 1))))
+                                (light! (or (minibuffer-selected) (car (car (cands))))))
                               #t))))))
 
 (public! 'tab-bars-pick! "(tab-bars-pick! BUF) — one minibuffer over every tab bar of BUF and the pane paired with it; typing filters them all")

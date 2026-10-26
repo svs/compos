@@ -605,11 +605,21 @@
 
 (define (site-app-row-anchor buf row)
   ;; a section's row is an anchor named for it, filed under its kind, so a list
-  ;; of tracks and albums gives imenu a tab of each
-  (let ((name (or (site-app-field row 'name) ""))
-        (kind (or (site-app-field row 'kind) "")))
+  ;; of tracks and albums gives imenu a tab of each. A row with no name field
+  ;; (an approval names its candidate) is named as its page is, by 'detail-name
+  (let* ((spec (buffer-local buf 'site-app-spec))
+         (namer (and spec (plist-get spec 'detail-name)))
+         (name (let ((n (or (site-app-field row 'name) "")))
+                 (if (and (equal? n "") namer) (or (namer row) "") n)))
+         (kind (or (site-app-field row 'kind) ""))
+         (sub (or (site-app-field row 'sub) ""))
+         (doc (if (equal? sub "")
+                  (string-join (filter (lambda (s) (and (string? s) (not (equal? s ""))))
+                                       (map (lambda (f) (site-app-field row f)) '(rating company proposal fit when)))
+                               " · ")
+                  sub)))
     (and (not (equal? name ""))
-         (list name (list 'kind (if (equal? kind "") "item" kind) 'doc (or (site-app-field row 'sub) ""))))))
+         (list name (list 'kind (if (equal? kind "") "item" kind) 'doc doc)))))
 
 (define (site-app-open! name &optional id)
   ;; each section is its own buffer; one already read is shown as it stands, g rereads it
@@ -2627,7 +2637,8 @@
         ;; rows and head as blocks, so the sections and status tabs are tabs
         'collection "c-list"
         'composml site-app-composml
-        'anchor site-app-row-anchor
+        ;; by name, so a reload of site-app reaches the modes already made
+        'anchor (lambda (b row) (site-app-row-anchor b row))
         'composml-head site-app-composml-head
         'preview site-app-show-detail!
         'debounce #t

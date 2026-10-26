@@ -55,8 +55,19 @@
 (define (panes-board-buffer-of id) (let ((ps (panes-board--split id))) (and (> (length ps) 3) (cadddr ps))))
 
 (define (panes-board-here-group) (panes--group-key))
+(define panes-board--layouts-store #f)
+(define panes-board--layouts '())
 (define (panes-board-layout-of g)
-  (if (equal? g (panes-board-here-group)) (panes-board-layout) (panes-layout-of g)))
+  (let ((store (panes--store)))
+    (unless (eq? store panes-board--layouts-store)
+      (set! panes-board--layouts-store store)
+      (set! panes-board--layouts '()))
+    (let ((hit (assoc g panes-board--layouts)))
+      (if hit
+          (cadr hit)
+          (let ((l (if (equal? g (panes-board-here-group)) (panes-board-layout) (panes-layout-of g))))
+            (set! panes-board--layouts (cons (list g l) panes-board--layouts))
+            l)))))
 (define (panes-board-row-layout id) (panes-board-layout-of (panes-board-group id)))
 
 (define (panes-board-pane-of id)
@@ -504,17 +515,26 @@
                 (else (panes-board--toggle! buf 'panes-board-open (panes-board--id "w" (panes-board-group id) (panes-board-key id))))))
         (panes-board-refresh!)))))
 
-(define-command "panes-board-fold-all" "Unfold every window, or fold them all when any is open"
+(define-command "panes-board-fold-all" "Fold every row below the top level of the zoom, or unfold them all when some are folded"
   (lambda ()
-    (let ((buf (panes-board-buffer)))
-      (buffer-set-local! buf 'panes-board-shut '())
-      (buffer-set-local! buf 'panes-board-open
-        (if (pair? (or (buffer-local buf 'panes-board-open) '()))
-            '()
-            (apply append
-              (map (lambda (g) (let ((l (panes-board-layout-of g)))
-                                 (if l (map (lambda (k) (panes-board--id "w" g k)) (panes-window-keys l)) '())))
-                   (panes-board--groups)))))
+    (let* ((buf (panes-board-buffer))
+           (ids (panes-board-ids buf))
+           (body (if (panes-board-root buf) (cdr ids) ids))
+           (top (if (pair? body) (apply min (map panes-board--level body)) 0))
+           (below? (any (lambda (id) (> (panes-board--level id) top)) body)))
+      (if below?
+          (begin
+            (buffer-set-local! buf 'panes-board-open '())
+            (buffer-set-local! buf 'panes-board-shut
+              (filter (lambda (id) (member (panes-board-kind id) '("g" "c" "p")))
+                      (filter (lambda (id) (= (panes-board--level id) top)) body))))
+          (begin
+            (buffer-set-local! buf 'panes-board-shut '())
+            (buffer-set-local! buf 'panes-board-open
+              (apply append
+                (map (lambda (g) (let ((l (panes-board-layout-of g)))
+                                   (if l (map (lambda (k) (panes-board--id "w" g k)) (panes-window-keys l)) '())))
+                     (panes-board--groups))))))
       (panes-board-refresh!))))
 
 (define (panes-board--rezoom! buf root keep)
@@ -557,7 +577,7 @@
 (define-list-mode! "panes-list-mode"
   (list
     'doc (string-append
-           "The windows as the model holds them, one section for every group, as ibuffer has: this group first, then the rest most recent first. `<left>`/`<right>` switch to Group, this group's panes alone, and back to All. `M-n`/`M-p` go from group to group. "
+           "The windows as the model holds them, one section for every group, as ibuffer has: this group first, then the rest most recent first. `<left>`/`<right>` switch to Group, this group's panes alone, and back to All. `n`/`p` go from group to group. "
            "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
            "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
            "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `m` moves a window to a pane or a buffer to a window, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
@@ -581,12 +601,12 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("M-n/M-p" "group") ("TAB" "fold") ("k" "close")
+              '(("RET" "go") ("+/-" "zoom") ("<left>/<right>" "view") ("n/p" "group") ("TAB" "fold") ("k" "close")
                 ("K" "kill") ("m" "move") ("a" "add pane") ("c" "consolidate") ("{/}" "resize") ("q" "quit")))
     'keys '(("RET" "panes-board-visit") ("+" "panes-board-zoom-in") ("-" "panes-board-zoom-out")
             ("<left>" "panes-board-view-next") ("<right>" "panes-board-view-next")
             ("TAB" "panes-board-fold") ("S-TAB" "panes-board-fold-all")
-            ("M-n" "panes-board-next-group") ("M-p" "panes-board-previous-group")
+            ("n" "panes-board-next-group") ("p" "panes-board-previous-group") ("M-n" "panes-board-next-group") ("M-p" "panes-board-previous-group")
             ("m" "panes-board-move") ("k" "panes-board-close") ("K" "panes-board-kill") ("a" "panes-board-add-pane") ("c" "panes-board-consolidate")
             ("}" "panes-board-wider") ("{" "panes-board-narrower") ("=" "panes-board-equalize")
             ("g" "panes-board-refresh") ("q" "quit-window"))))

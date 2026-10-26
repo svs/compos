@@ -93,7 +93,7 @@
     (let ((text (buffer-text "*notmuch*")))
       (check-contains! text "Mail" "the title")
       (check-contains! text "5 messages" "the message count")
-      (check-contains! text "tag:inbox" "the query")
+      (check-contains! text "Mail · Inbox" "the account, then the query by name")
       (check-contains! text "Hello world" "the first subject")
       (check-contains! text "Quarterly report" "the second")
       (check-contains! text "Alice" "and an author"))
@@ -161,7 +161,7 @@
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (t--nm-run! "notmuch-open-thread")
-    (check-equal! (current-buffer) "*mail*" "the mail view is current")
+    (check-equal! (current-buffer) (nm--thread-buffer "0001") "the thread's page is current")
     (let ((text (buffer-text (current-buffer))))
       (check-contains! text "From: Alice <alice@example.com>" "the header")
       (check-contains! text "Hi there, this is the body." "the text/plain body")
@@ -179,7 +179,7 @@
     (t--nm-run! "notmuch-next")
     (t--nm-run! "notmuch-open-thread")
 
-    (check-equal! (current-buffer) "*mail*" "the mail view is current")
+    (check-equal! (current-buffer) (nm--thread-buffer "0002") "the thread's page is current")
     (check-equal! (buffer-local (current-buffer) 'render-mode) "html" "rendered as html")
     (let ((text (buffer-text (current-buffer))))
       (check-contains! text "<!DOCTYPE html" "a whole document")
@@ -195,23 +195,30 @@
     (check-equal! (buffer-local (current-buffer) 'render-mode) "html" "and back again")
     (t--nm-done!)))
 
-(deftest 'one-mail-buffer-is-reused-and-its-content-is-transient
-  "the mail view is derived, so the desktop saves the query and not the text"
+(deftest 'every-thread-opens-its-own-page
+  "a list's rows are its pages: two threads read are two pages, and going back reuses the first"
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
     (t--nm-run! "notmuch-open-thread")
-    (check-contains! (buffer-text "*mail*") "Hi there, this is the body." "the first thread")
+    (let ((first (nm--thread-buffer "0001")))
+      (check-contains! (buffer-text first) "Hi there, this is the body." "the first thread")
 
-    (switch-to-buffer! "*notmuch*")
-    (list-goto-first-entry "*notmuch*")
-    (t--nm-run! "notmuch-next")
-    (t--nm-run! "notmuch-open-thread")
-    (check-contains! (buffer-text "*mail*") "Quarterly report" "the second thread")
-    (check-false! (string-contains? (buffer-text "*mail*") "Hi there") "and not the first")
+      (switch-to-buffer! "*notmuch*")
+      (list-goto-first-entry "*notmuch*")
+      (t--nm-run! "notmuch-next")
+      (t--nm-run! "notmuch-open-thread")
+      (let ((second (nm--thread-buffer "0002")))
+        (check-true! (and second (not (equal? first second))) "the second thread has a page of its own")
+        (check-contains! (buffer-text second) "Quarterly report" "the second thread")
+        (check-contains! (buffer-text first) "Hi there" "and the first page still holds the first"))
+      (check-equal! (length (nm--show-buffers)) 2 "two threads read, two pages")
 
-    (check-equal! (length (filter (lambda (b) (string-prefix? "*mail" b)) (buffer-list))) 1
-                  "exactly one mail view")
+      (switch-to-buffer! "*notmuch*")
+      (list-goto-first-entry "*notmuch*")
+      (t--nm-run! "notmuch-open-thread")
+      (check-equal! (nm--thread-buffer "0001") first "going back opens the same page")
+      (check-equal! (length (nm--show-buffers)) 2 "and makes no new one"))
     (t--nm-done!)))
 
 ;;; --- the row verbs -------------------------------------------------------------
@@ -311,7 +318,7 @@
       (run-command "notmuch-quit")
       (check-false! (buffer-exists? "*notmuch*") "the listing is gone")
       (check-false! (buffer-exists? "*mailboxes*") "the mailboxes are gone")
-      (check-false! (buffer-exists? "*mail*") "the mail view is gone")
+      (check-true! (null? (nm--show-buffers)) "the thread pages are gone")
       (check-equal! (current-buffer) work "and the work buffer is current")
 
       (when (buffer-known? work) (buffer-kill! work))
@@ -620,32 +627,25 @@
     (check-contains! (t--nm-calls) "show --format=json --include-html thread:0001" "the fetch")
     (t--nm-done!)))
 
-(deftest 'a-scene-role-routes-open-to-show-without-evicting-chat
-  "index, show and chat are semantic panes, not positions guessed by a command"
+(deftest 'mail-opens-in-the-group-you-are-in
+  "mail is an app: it lays out where you stand, its buffers join that group, and opening keeps the index focused"
   (lambda ()
     (t--nm-setup!)
-    (define-scene! "zz-nm-role-scene"
-      '(h 0.32 (as index (ensure "*notmuch*" "notmuch-inbox"))
-               (as show (ensure "*mail*" "notmuch-show-current"))
-               (as chat group-chat)))
-    (scene-open! "zz-nm-role-scene")
-    (let* ((id (group-resolve-id "zz-nm-role-scene"))
-           (index-window (group-window-as id 'index))
-           (show-window (group-window-as id 'show))
-           (chat-window (group-window-as id 'chat))
-           (chat (group-buffer-as id 'chat)))
-      (check-equal! (window-buffer index-window) "*notmuch*" "index names the inbox pane")
-      (check-equal! (window-buffer show-window) "*mail*" "show names the message pane")
-      (check-equal! (window-buffer chat-window) chat "chat names the companion pane")
-      (select-window! index-window)
-      (run-command "notmuch-open-thread")
-      (check-equal! (active-window) index-window "open kept focus in the index")
-      (check-equal! (window-buffer index-window) "*notmuch*" "the index stayed put")
-      (check-contains! (buffer-text "*mail*") "Hi there" "the show pane opened the mail")
-      (check-equal! (window-buffer chat-window) chat "the chat stayed put")
-      (group-dissolve! id))
-    (set! *scenes*
-      (remove (lambda (entry) (equal? (car entry) "zz-nm-role-scene")) *scenes*))
+    (let ((group (frame-group)))
+      (run-command "mail")
+      (check-equal! (frame-group) group "mail did not move the frame to a group of its own")
+      (let ((index (window-showing "*notmuch*")))
+        (check-true! (and index #t) "the index is on screen")
+        (check-equal! (active-window) index "and focused")
+        (when group
+          (check-true! (buffer-in-group? "*notmuch*" group) "the index joined the group"))
+        (run-command "notmuch-open-thread")
+        (let ((page (nm--thread-buffer "0001")))
+          (check-contains! (buffer-text page) "Hi there" "the thread opened as its page")
+          (check-equal! (window-buffer index) "*notmuch*" "the index stayed put")
+          (check-equal! (app-id page) "mail" "the page is part of the mail app")
+          (when group
+            (check-true! (buffer-in-group? page group) "and joined the group too")))))
     (t--nm-done!)))
 
 (deftest 'moving-the-highlight-updates-the-shown-mail-and-marks-it-read
@@ -711,11 +711,13 @@
   "no verb says preview: the pane follows point after every command and every landing"
   (lambda ()
     (t--nm-setup!)
-    (let ((saved notmuch-auto-preview))
+    (let ((saved notmuch-auto-preview)
+          (shown (lambda () (let ((p (find window-showing (nm--show-buffers))))
+                              (and p (buffer-local p 'notmuch-thread))))))
       (set! notmuch-auto-preview #t)
       (t--nm-run! "notmuch-inbox")
       (t--nm-run! "notmuch-next")
-      (check-equal! (buffer-local "*mail*" 'notmuch-thread) "0002"
+      (check-equal! (shown) "0002"
                     "a move previews, so the pane holds the thread at point")
       ;; the state a return lands in: point is on a row nothing previewed
       (list-goto-first-entry "*notmuch*")
@@ -730,14 +732,17 @@
                         #t)
                    "and on every landing, which is not a command")
       (nm--follow-point!)
-      (check-equal! (buffer-local "*mail*" 'notmuch-thread) "0001"
+      (check-equal! (shown) "0001"
                     "and it fills the pane from point")
-      ;; q closes the pane, and the same hook fires on the kill. A rule
-      ;; that reopened it would make the dismissal unusable.
-      (buffer-kill! "*mail*")
+      ;; q closes the pane on this thread. A rule that reopened it would
+      ;; make the dismissal unusable; a move to another thread reopens it.
+      (with-current-buffer (nm--thread-buffer "0001")
+        (lambda () (run-command "notmuch-show-quit")))
       (nm--follow-point!)
-      (check-false! (buffer-known? "*mail*")
+      (check-false! (nm--pane-at-point? "*notmuch*")
                     "a dismissed pane stays dismissed")
+      (t--nm-run! "notmuch-next")
+      (check-equal! (shown) "0002" "and a move brings it back")
       (set! notmuch-auto-preview saved))
     (t--nm-done!)))
 

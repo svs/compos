@@ -235,6 +235,34 @@ when a message has no text/plain part." 'group 'notmuch)
                        (string-append " [" notmuch-profile "]"))
                    (if (equal? path "") "" (string-append ":" path)))))
 
+;; The header names the account first, then where its mail lives.
+(define (nm--account-label)
+  (if (and (string? notmuch-profile) (not (equal? notmuch-profile "")))
+      notmuch-profile
+      "Mail"))
+
+(define (nm--short-path path)
+  ;; /home/svs/Mail/x and /Users/svs/Mail/x read as ~/Mail/x
+  (let ((parts (string-split path "/")))
+    (if (and (> (length parts) 3) (member (cadr parts) '("home" "Users")))
+        (string-join (cons "~" (cdddr parts)) "/")
+        path)))
+
+(define (nm--where-label)
+  (if (not (string? notmuch-host))
+      (nm--host-label)
+      (let ((path (nm--db-path)))
+        (string-append "on " (nm--host-label)
+                       (if (equal? path "") "" (string-append " · " (nm--short-path path)))))))
+
+(define (nm--query-label query)
+  ;; a lone tag:NAME reads as its name
+  (if (and (string-prefix? "tag:" query) (> (string-length query) 4)
+           (not (string-contains? query " ")))
+      (string-append (string-upcase (substring query 4 5))
+                     (substring query 5 (string-length query)))
+      query))
+
 ;; Tag writes must report failure before callers refresh or say Done.
 (define (nm--tag-result output)
   (let* ((lines (string-split output "\n"))
@@ -415,11 +443,10 @@ when a message has no text/plain part." 'group 'notmuch)
             (string-append (number->string n) (if (= n 1) " thread selected" " threads selected")))))))
 
 (define (nm--search-meta buf)
-  (let ((query (nm--query-of buf)))
-    (string-append (let ((selection (nm--selection-label buf)))
-                     (if (equal? selection "") "" (string-append selection " · ")))
-                   (nm--count-for buf query) " messages · "
-                   (nm--source-label) " · " query)))
+  (let ((selection (nm--selection-label buf)))
+    (string-append (if (equal? selection "") "" (string-append selection " · "))
+                   (nm--count-for buf (nm--query-of buf)) " messages · "
+                   (nm--where-label))))
 
 ;; the list machinery owns the refresh, the row lookup and the header
 ;; offset (R8); these names stay for the commands and tests that call them
@@ -495,9 +522,7 @@ when a message has no text/plain part." 'group 'notmuch)
     'row-columns (lambda (buf) (nm--search-columns buf))
     'row-cells (lambda (buf th) (nm--search-cells buf th))
     'title (lambda (buf)
-               (if (equal? notmuch-host "")
-                   "Mail"
-                   (string-append "Mail on " notmuch-host)))
+             (string-append (nm--account-label) " · " (nm--query-label (nm--query-of buf))))
     'meta (lambda (buf) (nm--search-meta buf))
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
@@ -722,13 +747,10 @@ when a message has no text/plain part." 'group 'notmuch)
                (list (list "mailbox" 16) (list "unread" 7 'right)
                      (list "total" 7 'right) (list "query" #f)))
     'cells (lambda (buf row) (nm--hello-cells buf row))
-    'title (lambda (buf)
-               (if (equal? notmuch-host "")
-                   "Mailboxes"
-                   (string-append "Mailboxes on " notmuch-host)))
+    'title (lambda (buf) (string-append (nm--account-label) " · Mailboxes"))
     'meta (lambda (buf)
             (string-append (number->string (length (list-entries buf)))
-                           " mailboxes · " (nm--source-label)
+                           " mailboxes · " (nm--where-label)
                            (or (buffer-local buf 'nm-hello-status) "")))
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
@@ -805,10 +827,8 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; chat survives (it holds a conversation); a scene toggle in init.scm
 ;; can lean on this for teardown.
 (define (nm--view-buffers)
-  (filter (lambda (b) (member b (list *notmuch-search-buffer*
-                                      *notmuch-hello-buffer*
-                                      *notmuch-show-buffer*)))
-          (buffer-list)))
+  (append (filter buffer-exists? (list *notmuch-search-buffer* *notmuch-hello-buffer*))
+          (nm--show-buffers)))
 
 (define-command "notmuch-quit" "Close mail: kill the view buffers, back to work"
   (lambda ()
@@ -833,67 +853,66 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; shown and SPC/n/p keep filling that pane. Per-account profile commands
 ;; and keybindings stay personal; the arrangement below does not.
 
-;;; --- the mail scene: index | message | chat -----------------------------------
-;;; Mail is not one buffer, so the package does not ship one. It ships the
-;;; whole arrangement, and it ships it as a DECLARATION: the editor puts the
-;;; panes where this says, in this order, every time. Kill any pane's buffer
-;;; and the next run makes it again.
-;;;
-;;; (ensure "NAME" "COMMAND") runs COMMAND when NAME is absent. group-chat is
-;;; this group's own chat. Every pane joins the group, so the index and the
-;;; open message are its documents and the chat beside them reads both
-;;; through the context providers above.
-;;;
-;;; A builder would not do this correctly. The index previews into a window
-;;; of its own while it opens, so a builder and the preview both split one
-;;; frame and the panes land in whatever order wins.
+;;; --- mail as an app: index | thread | chat ------------------------------------
+;;; Mail opens in the group you are in, as every app does: no group of its
+;;; own and no jump. Its buffers join that group, so the group saves and
+;;; restores the arrangement. app-layout! gives each role its pane: the
+;;; index, the page of the thread at point, and the group's chat beside them.
 
-(define notmuch-scene-name "mail")   ; the scene, and the group it lives in
+(define (nm--app-showing?)
+  (and (window-showing *notmuch-search-buffer*) #t))
 
-(define-scene! notmuch-scene-name
-  '(h 0.32 (as index (ensure "*notmuch*" "notmuch-inbox"))
-           (as show (ensure "*mail*" "notmuch-show-current"))
-           (as chat group-chat)))
+(define (nm--open-app!)
+  (if (buffer-exists? *notmuch-search-buffer*)
+      (nm--join-group! *notmuch-search-buffer* 'list)
+      (nm--open-index! notmuch-default-query))
+  (let ((page (nm--show-buffer)))
+    (when page (nm--join-group! page 'detail)))
+  (let* ((group (frame-group))
+         (chat (and group (group-chat group))))
+    (app-layout! *nm-app-id* (if (and chat (buffer-exists? chat)) (list chat) '())))
+  (let ((win (window-showing *notmuch-search-buffer*)))
+    (when win (select-window! win))))
 
-;; buffer-exists? is the wrong question: a *notmuch* survives a closed
-;; window, a crash and a desktop restore while no scene is on screen. The
-;; scene is up when this frame stands in its group and both panes show. Less
-;; than that is drift, and scene-open! rebuilds the declared arrangement out
-;; of whatever state the frame is in, so drift routes there and not to quit.
-(define (notmuch-scene-showing?)
-  (and (equal? (frame-local 'current-group) (group-resolve-id notmuch-scene-name))
-       (scene-window 'index)
-       (scene-window 'show)
-       #t))
-
-(define-command "mail" "Toggle the three-pane mail scene: index, message, chat"
+(define-command "mail" "Toggle mail in the group you are in: index, thread, chat"
   (lambda ()
-    (if (notmuch-scene-showing?)
+    (if (nm--app-showing?)
         (run-command "notmuch-quit")
-        (scene-open! notmuch-scene-name))))
+        (nm--open-app!))))
 (catalog-meta! 'command "mail" 'domain 'mail
                'effects '(write display external execute))
 
+;; Mail on one account, opened where you are: the account's inbox, laid out
+;; as the app. Personal commands (mail-recruiting, ...) are this one call.
+(define (mail-open! &optional profile)
+  (let* ((buf *notmuch-search-buffer*)
+         (existed? (buffer-exists? buf)))
+    (when profile
+      (set! notmuch-profile profile)
+      (set! *nm-db-paths* '())
+      (for-each (lambda (b)
+                  (when (buffer-exists? b)
+                    (buffer-set-local! b 'list-entries '())
+                    (buffer-set-local! b 'list-source-entries '())))
+                (list buf *notmuch-hello-buffer*)))
+    (nm--open-app!)
+    (when existed?
+      (nm--query-reset! buf notmuch-default-query)
+      (nm--refresh! buf)
+      (list-goto-first-entry buf))
+    buf))
+(public! 'mail-open! "(mail-open! [PROFILE]) — open mail in the group you are in, on PROFILE's inbox when given")
+
 ;;; --- preview: thread in the other window, focus stays --------------------------
 
-;; Render into the mail pane. A window already showing the mail view IS
-;; that pane — reuse it. other-window! only means "the mail pane" in a
-;; two-window frame; in a three-pane scene it can be the chat, and the
-;; preview would then evict the chat and leave the frame a window short.
-;; Only when no pane shows the mail view does this fall back to making
-;; one, and it always puts focus back where it started.
+;; The thread opens as the index's detail (packages/detail.scm): beside the
+;; list, in the pane its last thread took, and it selects nothing, so focus
+;; and point stay put.
 (define (nm--show-pane! buf &optional index)
-  (let ((scene (scene-window 'show)))
-    (if scene
-        ;; a scene names its mail pane: fill it, select nothing
-        (begin (window-set-buffer! scene buf) scene)
-        ;; otherwise the index's detail (packages/detail.scm): the mail view
-        ;; opens beside the list, and it selects nothing, so focus and point
-        ;; stay put
-        (display-buffer-detail! buf (or index (current-buffer))))))
+  (display-buffer-detail! buf (or index (current-buffer))))
 
-;; One mail view holds one thread at a time. M-RET keeps the one on screen:
-;; it takes the subject for a name, which frees *mail* for the next thread.
+;; Every thread has its own page. M-RET keeps the one on screen: it leaves
+;; the list, so q on the list no longer takes it along.
 (detail-name!
   "notmuch-show-mode"
   (lambda (buf)
@@ -934,29 +953,16 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-preview" "Preview the thread at point in the other window"
   (lambda () (nm--preview! (current-buffer))))
 
-;; The pane-builder form of the same thing. A scene declares its panes as
-;; (ensure "*mail*" "notmuch-show-current"), and an ensure command has one
-;; job: make that buffer exist. So it reads the index by name and never
-;; consults the current buffer, point, or the windows — none of which mean
-;; anything while a layout is being built.
+;; The index's current thread as its page, read by name: it never consults
+;; the current buffer, point or the windows. Answers the page, or #f while
+;; the index has no rows yet; the first move fills the pane then.
 (define-command "notmuch-show-current"
-  "Make the mail pane, showing the index's current thread if there is one"
+  "Open the page of the index's current thread, if there is one"
   (lambda ()
     (let ((th (and (buffer-exists? *notmuch-search-buffer*)
                    (with-current-buffer *notmuch-search-buffer*
                      (lambda () (nm--thread-at *notmuch-search-buffer*))))))
-      (if th
-          (nm--open-thread! (nm--th-id th) (nm--th-subject th))
-          ;; The index fetches its rows off this lane, so a freshly built
-          ;; index has none yet and there is no thread to open. The pane is
-          ;; part of the declared shape all the same: make it now and let
-          ;; the first move in the index fill it. An ensure command that
-          ;; only sometimes makes its buffer is not an ensure command.
-          (unless (buffer-exists? *notmuch-show-buffer*)
-            (buffer-create *notmuch-show-buffer*)
-            ;; no mode yet: the empty pane says for itself that it is a view
-            (buffer-set-local! *notmuch-show-buffer* 'special #t)
-            (buffer-append! *notmuch-show-buffer* "No message selected.\n"))))))
+      (and th (nm--open-thread! (nm--th-id th) (nm--th-subject th))))))
 
 ;; The row the highlight RESTS on is the one worth fetching. A move
 ;; schedules the fetch and the next move cancels it, so holding n costs
@@ -977,12 +983,10 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; fires the configuration hook often, and a preview is an ssh round trip,
 ;; so only a pane that disagrees with point is worth refilling.
 (define (nm--pane-at-point? buf)
-  (let ((th (nm--thread-at buf))
-        (pane *notmuch-show-buffer*))
+  (let* ((th (nm--thread-at buf))
+         (pane (and th (nm--thread-buffer (nm--th-id th)))))
     (or (not th)
-        (and (buffer-exists? pane)
-             (window-showing pane)
-             (equal? (buffer-local pane 'notmuch-thread) (nm--th-id th))))))
+        (and pane (window-showing pane) #t))))
 
 ;; ONE rule decides what the mail pane shows, and no verb states it.
 ;; The pane holds the thread the list has at point; whenever it does not,
@@ -1014,20 +1018,17 @@ when a message has no text/plain part." 'group 'notmuch)
                  (nm--mail-window? buf)
                  (not (minibuffer-active?))))
        #f)
-      ;; q closed the pane. The first pass after the kill records WHICH
-      ;; thread was dismissed: while point stays on it nothing reopens,
-      ;; and a move to any other thread brings the pane back.
-      ((and *notmuch-pane-shown* (not (buffer-exists? *notmuch-show-buffer*)))
-       (let ((id (nm--id-at buf)))
-         (cond
-           ((not *nm-dismissed*) (set! *nm-dismissed* id))
-           ((equal? *nm-dismissed* id) #f)
-           (else (set! *nm-dismissed* #f)
-                 (nm--preview-soon! buf)))))
-      (else
-        (set! *nm-dismissed* #f)
-        ;; a highlight on its way somewhere else should not cost a fetch
-        (unless (nm--pane-at-point? buf) (nm--preview-soon! buf))))))
+      ;; q closed the pane on a thread: while point stays on it nothing
+      ;; reopens, and a move to any other thread brings the pane back.
+      (*nm-dismissed*
+       (unless (equal? *nm-dismissed* (nm--id-at buf))
+         (set! *nm-dismissed* #f)
+         (nm--preview-soon! buf)))
+      ;; the pane went some other way than q: that is a dismissal too
+      ((and *notmuch-pane-shown* (not (find window-showing (nm--show-buffers))))
+       (set! *nm-dismissed* (nm--id-at buf)))
+      ;; a highlight on its way somewhere else should not cost a fetch
+      ((not (nm--pane-at-point? buf)) (nm--preview-soon! buf)))))
 
 (define (nm--id-at buf)
   (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))
@@ -1036,7 +1037,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; changes the list too, so the pane follows from either window.
 (define (nm--mail-window? buf)
   (let ((w (window-buffer (active-window))))
-    (or (equal? w buf) (equal? w *notmuch-show-buffer*))))
+    (or (equal? w buf) (nm--show-buffer? w))))
 
 (add-hook! 'post-command-hook 'nm--follow-point!)
 (add-hook! 'window-configuration-change-hook 'nm--follow-point!)
@@ -2284,13 +2285,13 @@ them the address is live, so a purge never follows one."
            (th (if (equal? buf *notmuch-search-buffer*)
                    (let ((row (nm--thread-at buf))) (and row (nm--th-id row)))
                    (buffer-local buf 'notmuch-thread)))
-           (cached? (and (buffer-exists? *notmuch-show-buffer*)
-                         (equal? th (buffer-local *notmuch-show-buffer* 'notmuch-thread))
-                         (buffer-local *notmuch-show-buffer* 'nm-attachment-source)
-                         (or (equal? buf *notmuch-show-buffer*)
-                             (equal? (nm--db-key) (buffer-local *notmuch-show-buffer* 'nm-attachment-source)))))
+           (page (if (nm--show-buffer? buf) buf (nm--thread-buffer th)))
+           (cached? (and page
+                         (buffer-local page 'nm-attachment-source)
+                         (or (equal? buf page)
+                             (equal? (nm--db-key) (buffer-local page 'nm-attachment-source)))))
            (attachments (if cached?
-                            (or (buffer-local *notmuch-show-buffer* 'notmuch-attachments) '())
+                            (or (buffer-local page 'notmuch-attachments) '())
                             (if th (nm--attachment-options (nm--show-msgs th)) '())))
            (choices (let loop ((rest attachments) (i 1) (acc '()))
                       (if (null? rest) (reverse acc)
@@ -2537,18 +2538,50 @@ them the address is live, so a purge never follows one."
     ("j" "notmuch-jump")
     ("C-c a" "notmuch-open-attachment")
     ("A" "notmuch-open-attachment")
-    ("q" "quit-window")))
+    ("q" "notmuch-show-quit")))
 
 ;; ONE show buffer, reused — it is a view, not a document. The subject
 ;; lives in the modeline; 'special says so (the mode re-renders from
 ;; 'notmuch-thread on restore).
-(define *notmuch-show-buffer* "*mail*")
+(define (nm--show-buffer? b)
+  (equal? (buffer-local b 'mode-name) "notmuch-show-mode"))
+
+(define (nm--show-buffers) (filter nm--show-buffer? (buffer-list-mru)))
+
+;; the page of a thread in the selected database, or #f
+(define (nm--thread-buffer thread-id)
+  (and thread-id
+       (find (lambda (b) (and (equal? (buffer-local b 'notmuch-thread) thread-id)
+                              (equal? (buffer-local b 'nm-db) (nm--db-key))))
+             (nm--show-buffers))))
+
+;; the page on screen, else the one read last
+(define (nm--show-buffer)
+  (let ((all (nm--show-buffers)))
+    (or (find window-showing all) (and (pair? all) (car all)))))
+
+(define (nm--thread-buffer-name subject)
+  (let* ((s (if (equal? subject "") "(no subject)" subject))
+         (base (string-append "*mail: "
+                              (if (> (string-length s) 60) (string-append (substring s 0 60) "...") s)
+                              "*")))
+    (let loop ((n 1))
+      (let ((name (if (= n 1) base (string-append base "<" (number->string n) ">"))))
+        (if (buffer-known? name) (loop (+ n 1)) name)))))
+
+;; a page read this recently is drawn from what it holds
+(define nm--page-fresh-ms 60000)
 
 (define (nm--open-thread! thread-id subject &rest opts)
-  (let ((buf *notmuch-show-buffer*))
-    (unless (buffer-exists? buf) (buffer-create buf))
+  ;; One page per thread, like every app's rows: C-` walks the threads read
+  ;; from this list, and going back to one draws it at once.
+  (let* ((old (nm--thread-buffer thread-id))
+         (buf (or old (let ((name (nm--thread-buffer-name subject))) (buffer-create name) name)))
+         (read-at (buffer-local buf 'nm-read-at))
+         (fresh? (and old (number? read-at) (< (- (monotonic-ms) read-at) nm--page-fresh-ms))))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
+    (buffer-set-local! buf 'nm-db (nm--db-key))
     ;; the thread view is the same app as the index, so it carries the same
     ;; app id and joins the group the index is in. Membership is 'group-id
     ;; and joining is buffer-add-group!: writing the legacy 'group local here
@@ -2558,26 +2591,26 @@ them the address is live, so a purge never follows one."
     ;; render into the buffer and into no window at all. Placement belongs
     ;; to the caller (nm--show-pane!): a switch here takes whichever window
     ;; happens to be current, which is the index's own window.
-    (with-current-buffer buf (lambda () (set-mode! "notmuch-show-mode")))
+    (unless fresh?
+      (with-current-buffer buf (lambda () (set-mode! "notmuch-show-mode")))
+      (buffer-set-local! buf 'nm-read-at (monotonic-ms)))
     ;; reading marks read, like every mail client
     (when (null? opts)
       (nm--run (string-append "tag -unread -- thread:" thread-id)))
     buf))
 
-(define-command "notmuch-open-thread" "Open the thread at point in the mail pane"
+(define-command "notmuch-open-thread" "Open the thread at point beside the index and go to it"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (nm--thread-at buf)
-          ;; The thread never takes the index's window: it is rendered into
-          ;; the mail pane exactly as SPC renders it. RET then goes to that
-          ;; pane, so `a`, `r` and `v` act on the message that was opened.
-          ;; A scene is the exception — its panes are all on screen at once
-          ;; and the reading is done from the index, so focus stays there.
-          (let ((scene (scene-window 'show)))
+          ;; The thread never takes the index's window: it opens beside the
+          ;; list exactly as a move previews it. RET then goes to that page,
+          ;; so `a`, `r` and `v` act on the thread that was opened.
+          (let ((id (nm--id-at buf)))
             (nm--preview! buf)
-            (unless scene
-              (let ((pane (window-showing *notmuch-show-buffer*)))
-                (when pane (select-window! pane)))))
+            (let* ((page (nm--thread-buffer id))
+                   (pane (and page (window-showing page))))
+              (when pane (select-window! pane))))
           (message "No thread on this line")))))
 
 (define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"
@@ -2586,6 +2619,13 @@ them the address is live, so a purge never follows one."
       (buffer-set-local! buf 'notmuch-view
         (if (equal? (buffer-local buf 'notmuch-view) "text") "html" "text"))
       (set-mode! "notmuch-show-mode"))))
+
+(define-command "notmuch-show-quit" "Close this thread's pane; it stays closed until you move to another thread"
+  (lambda ()
+    (set! *nm-dismissed* (or (and (buffer-exists? *notmuch-search-buffer*)
+                                  (nm--id-at *notmuch-search-buffer*))
+                             (buffer-local (current-buffer) 'notmuch-thread)))
+    (run-command "quit-window")))
 
 (define-command "notmuch-show-archive" "Archive this thread and go back"
   (lambda ()

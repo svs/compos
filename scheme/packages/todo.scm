@@ -1582,6 +1582,7 @@
     ("w" "todo-detail-goto-chat")
     ("C" "todo-detail-attach-chat")
     ("e" "todo-detail-visit")
+    ("M-o" "todo-detail-task-chat")
     ("g" "todo-detail-refresh")
     ("q" "quit-window")))
 
@@ -1634,6 +1635,23 @@
              (group-read-or-create! "Assign to a new chat in group: "
                (lambda (g) (assign-one! g))))
             (else (assign-one! here))))))
+(define (todo--task-chat! t)
+  (if (todo--revive-chat t)
+      (todo--show-chat! (todo--revive-chat t))
+      (let ((here (or (todo--home-group t) (group-here))))
+        (define (start! g)
+          (let ((chat #f))
+            (todo--keep-place! (lambda () (set! chat (todo-assign-chat! (plist-get t 'id) g))))
+            (when (plist-get t 'parent) (todo-attach-chat! (plist-get t 'parent) chat))
+            (todo--show-chat! chat)))
+        (if here (start! here) (group-read-or-create! "Start a chat in group: " start!)))))
+
+(define-command "todo-task-chat" "Open the task's chat, or start one titled with the task; the chat is also attached to the task's parent"
+  (lambda () (let ((t (todo--at))) (if t (todo--task-chat! t) (message "No task at point")))))
+
+(define-command "todo-detail-task-chat" "Open this task's chat, or start one titled with the task; the chat is also attached to the task's parent"
+  (lambda () (let ((t (todo--detail-task (current-buffer)))) (if t (todo--task-chat! t) (message "The task is gone")))))
+
 ;; a card follows its chat: an event on a chat topic redraws the list
 ;; when a window shows it, and marks it stale when none does
 (define (todo--on-chat-event e)
@@ -1806,6 +1824,7 @@
     ;; arrow remap misses it at open; the mode states it
     'remap '(("next-line" "list-next") ("previous-line" "list-prev"))
     'keys '(("RET" "todo-show")
+            ("M-o" "todo-task-chat")
             ("e" "todo-visit")
             ("t" "todo-accept")
             ("d" "todo-mark-done")

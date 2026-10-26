@@ -85,33 +85,21 @@
 (public! 'app-group "(app-group TITLE) — the id of the app's own group, named TITLE; made the first time")
 (public! 'app-join-group! "(app-join-group! BUF TITLE) — BUF joins the app's own group; answers its id")
 
-;;; Opening an app shows its listing and its detail, and nothing else
-;;; moves. Each one takes its own window when one shows it, else a pane
-;;; that is not the one you are in and does not show the other. No pane is re-tiled
-;;; and the group's layout is not saved; arranging the app is the
-;;; separate app-layout command.
+;;; Opening an app shows its listing in the window you called it from
+;;; and its detail in the pane beside it, as display-buffer-detail! puts
+;;; every later page. Nothing else moves: no pane is re-tiled and no
+;;; saved layout comes back; arranging the app is the separate
+;;; app-layout command, and app-left / app-right move it.
 (define (app-open! listing &optional detail)
-  (let* ((ls (window-showing listing))
-         (ds (and detail (window-showing detail)))
-         ;; two free panes: the listing takes the left one, the detail the right
-         (free (if (or ls ds (not detail)) '() (panes-apart-panes '())))
-         (ids (panes-pane-ids (panes--ensure-layout!)))
-         (two (and (>= (length free) 2)
-                   (let ((a (car free)) (b (cadr free)))
-                     (if (< (panes--index-of a ids) (panes--index-of b ids)) (list a b) (list b a)))))
-         (lw (cond (ls ls)
-                   (two (panes-display-in-pane! listing (car two)))
-                   (else (panes-display-apart! listing '()))))
-         (dw (and detail
-                  (cond (ds ds)
-                        (two (panes-display-in-pane! detail (cadr two)))
-                        (else (panes-display-apart! detail (list listing)))))))
-    (when dw (detail-window-note! listing dw) (detail-adopt! listing detail))
-    (when (and lw (window-exists? lw) (not (equal? lw (active-window))))
-      (select-window! lw))
+  (let* ((l (and (boundp 'panes--ensure-layout!) (panes--ensure-layout!)))
+         (here (and l (panes-focus l)))
+         (lw (cond ((equal? (window-buffer (active-window)) listing) (active-window))
+                   (here (panes-display-in-pane! listing here))
+                   (else (switch-to-buffer-here! listing) (active-window)))))
+    (when detail (display-buffer-detail! detail listing))
     lw))
 
-(public! 'app-open! "(app-open! LISTING &optional DETAIL) — show LISTING and DETAIL in panes other than yours and select LISTING; no pane re-tiles, nothing is saved")
+(public! 'app-open! "(app-open! LISTING &optional DETAIL) — show LISTING in the window you are in and DETAIL in the pane beside it; no pane re-tiles, no layout is restored")
 
 ;; An app's buffers fall in three roles: its index (the home and its
 ;; lists), its pages, and the rest, like a player. Each role takes one
@@ -136,19 +124,28 @@
       (let ((row (find (lambda (r) (equal? (cadr r) buf)) (panes-waiting-windows))))
         (and row (car row)))))
 
-;; Lay the app out by role: one window for its index, one for its pages,
-;; one for the rest, in that order. Each shows the buffer of its role you
-;; see now, else the last one used. EXTRA names panes that are not the
-;; app's, the group's chat the usual one; they go first. Every other pane
-;; on screen stays where it is, and the app's windows join after them; the
-;; layout fits them all. Answers the panes it tiled, or #f when the app has
-;; nothing open in this group.
-(define (app-layout! id &optional extra)
+;; Lay the app out by role, on demand and never on open: its index window
+;; goes to the app's starting pane (the first unless app-start-pane! named
+;; another), its pages' window to the next pane and the rest to the one
+;; after, a pane added while the layout has room. Each shows the buffer of
+;; its role you see now, else the last one used. A window that was in front
+;; of such a pane stays behind it; no other pane moves or re-tiles, and the
+;; focus stays on its window. Answers the buffers it placed, or #f when the
+;; app has nothing open in this group.
+(define *app-start-panes* (if (boundp '*app-start-panes*) *app-start-panes* '()))
+
+(define (app-start-pane id)
+  (let ((hit (assoc id *app-start-panes*))) (if hit (cdr hit) 0)))
+
+(define (app-start-pane! id index)
+  (set! *app-start-panes*
+        (cons (cons id index) (filter (lambda (p) (not (equal? (car p) id))) *app-start-panes*)))
+  index)
+
+(define (app-layout! id &optional start)
   (let* ((group (frame-group))
-         (extras (filter buffer-known? (or extra '())))
          (mine (filter (lambda (b)
                          (and (equal? (app-id b) id)
-                              (not (member b extras))
                               (or (not group) (buffer-in-group? b group))))
                        (buffer-list-mru)))
          (shown (map cadr (window-list)))
@@ -156,59 +153,52 @@
                           (map (lambda (class)
                                  (cons class (filter (lambda (b) (eq? (app-role-class b) class)) mine)))
                                '(index detail other))))
-         ;; a role shows the one of its buffers you see now, else its last used:
-         ;; (TOP CLASS) per role, map and for-each taking one list here
+         ;; a role shows the one of its buffers you see now, else its last used
          (rows (map (lambda (c) (list (or (find (lambda (b) (member b shown)) (cdr c)) (cadr c)) c))
                     classes))
-         (tops (map car rows))
-         ;; what is on screen stays there, and the app joins it
-         (screen (let loop ((ws (display--work-windows)) (acc '()))
-                   (if (null? ws)
-                       (reverse acc)
-                       (let ((b (window-buffer (car ws))))
-                         (loop (cdr ws)
-                               (if (or (not b) (equal? (app-id b) id) (member b extras) (member b acc))
-                                   acc
-                                   (cons b acc)))))))
-         ;; the app's roles always get their panes; what was on screen fills
-         ;; the room left, the selected window's buffer first, in screen order
-         (capacity (and (panes-current-layout) (panes-layout-capacity (panes-current-layout))))
-         (room (and capacity (max 0 (- capacity (length extras) (length tops)))))
-         (here (window-buffer (active-window)))
-         (kept (if room
-                   (let ((ranked (if (member here screen)
-                                     (cons here (filter (lambda (b) (not (equal? b here))) screen))
-                                     screen)))
-                     (take ranked (min room (length ranked))))
-                   screen))
-         (others (filter (lambda (b) (member b kept)) screen))
-         (panes (append extras others tops)))
-    (and (pair? tops)
-         (begin
-           (panes-tile-default! panes)
-           (begin
-               (for-each
-                 (lambda (row)
-                   (let* ((top (car row))
-                          (theirs (cdr (cadr row)))
-                          (win (app-window-of top)))
-                     ;; the stacks of windows on screen; the model keeps the rest
-                     (when (and win (window-exists? win))
-                       (for-each
-                         (lambda (w)
-                           (unless (equal? w win)
-                             (set-window-prev-buffers! w
-                               (filter (lambda (b) (not (member b theirs))) (window-prev-buffers w)))))
-                         (display--work-windows))
-                       (set-window-prev-buffers! win
-                         (append (filter (lambda (b) (not (equal? b top))) theirs)
-                                 (filter (lambda (b) (not (member b theirs))) (window-prev-buffers win))))
-                       ;; the pane keeps its role: the next page of any list opens there
-                       (window-mode-preference! win (app-class-mode top)))))
-                 rows))
-           panes))))
+         (l0 (panes--ensure-layout!))
+         (focus (app--front l0 (panes-focus l0))))
+    (and (pair? rows)
+         (let loop ((l l0) (rs rows) (i (or start (app-start-pane id))) (placed '()))
+           (let* ((ids (panes-pane-ids l))
+                  (slot (and (pair? rs)
+                             (cond ((< i (length ids)) (list l (list-ref ids i)))
+                                   ((panes-under-capacity? l) (panes-add-pane l))
+                                   (else #f)))))
+             (if slot
+                 (let* ((l (car slot)) (pid (cadr slot)) (top (car (car rs)))
+                        (key (panes-find l top))
+                        (made (if key
+                                  (list (panes-move-window l key pid 0) key)
+                                  (panes-add-window l pid top (app-class-mode top)))))
+                   (loop (car made) (cdr rs) (+ i 1) (cons (car rs) placed)))
+                 (let ((p (and focus (panes-pane-of l focus))))
+                   (panes-apply! (if p (panes-set-focus l p) l))
+                   (for-each app--gather-role! (reverse placed))
+                   (map car (reverse placed)))))))))
 
-(public! 'app-layout! "(app-layout! ID &optional EXTRA) — one window per role of app ID: its index, its pages, the rest; each gathers its role's buffers. EXTRA panes go first; answers the panes")
+;; the role's window shows TOP and holds the rest of its role behind it,
+;; and keeps its role: the next page of any list opens there
+(define (app--gather-role! row)
+  (let* ((top (car row))
+         (theirs (cdr (cadr row)))
+         (win (app-window-of top)))
+    (when (and win (window-exists? win))
+      (unless (equal? (window-buffer win) top) (window-set-buffer! win top))
+      (for-each
+        (lambda (w)
+          (unless (equal? w win)
+            (set-window-prev-buffers! w
+              (filter (lambda (b) (not (member b theirs))) (window-prev-buffers w)))))
+        (display--work-windows))
+      (set-window-prev-buffers! win
+        (append (filter (lambda (b) (not (equal? b top))) theirs)
+                (filter (lambda (b) (not (member b theirs))) (window-prev-buffers win))))
+      (window-mode-preference! win (app-class-mode top)))))
+
+(public! 'app-layout! "(app-layout! ID &optional START) — on demand: app ID's index window to pane START (app-start-pane ID by default), its pages' to the next, the rest after; no other pane moves; answers the buffers placed")
+(public! 'app-start-pane "(app-start-pane ID) — the pane index app-layout! starts app ID at; 0 unless named")
+(public! 'app-start-pane! "(app-start-pane! ID INDEX) — app-layout! starts app ID at pane INDEX")
 (public! 'app-role-class "(app-role-class BUF) — BUF's role in app-layout!: index, detail or other")
 
 (define-command "app-layout"
@@ -307,6 +297,71 @@
     (let ((id (app-id (current-buffer))))
       (if id (app-push-read! id) (message "This buffer belongs to no app")))))
 (catalog-meta! 'command "app-push" 'domain 'windows 'effects '(write display))
+
+;;; The app's own windows, and nothing else: app-swap-windows trades the
+;;; panes of its listing's window and its pages' window, each pane keeping
+;;; its place and size; app-hide-detail-buffers takes its pages off the
+;;; screen, each of their windows going back to what it showed before or
+;;; closing, the pages alive for the next RET. Other apps' windows stay, and
+;;; the focus stays on its window.
+(effects! '(pure))
+
+(define (app--front l pid)
+  (let ((ws (plist-get (panes-pane l pid) 'windows)))
+    (and (pair? ws) (plist-get (car ws) 'key))))
+
+(define (app-swap-layout l a b)
+  (let ((pa (and a (panes-pane-of l a))) (pb (and b (panes-pane-of l b))))
+    (and pa pb (not (equal? pa pb))
+         (panes-move-window (panes-move-window l a pb 0) b pa 0))))
+
+(effects! '(write display))
+
+(define (app--role-key id class)
+  (let ((row (find (lambda (w) (eq? (app-role-class (cadr w)) class)) (or (app-windows id) '()))))
+    (and row (car row))))
+
+(define (app--apply-focused! l key)
+  (let ((p (and key (panes-pane-of l key))))
+    (panes-apply! (if p (panes-set-focus l p) l))))
+
+(define (app-swap-windows! id)
+  (let* ((l (panes--ensure-layout!))
+         (focus (app--front l (panes-focus l)))
+         (swapped (app-swap-layout l (app--role-key id 'index) (app--role-key id 'detail))))
+    (and swapped (begin (app--apply-focused! swapped focus) #t))))
+
+(define (app-hide-detail-buffers! id)
+  (let* ((l (panes--ensure-layout!))
+         (focus (app--front l (panes-focus l)))
+         (pages (filter (lambda (b) (eq? (app-role-class b) 'detail)) (or (app-buffers id) '())))
+         (held (filter (lambda (b) (panes-find l b)) pages))
+         (kept (fold (lambda (l b) (panes-drop-buffer l b)) l held)))
+    (and (pair? held)
+         (begin
+           ;; a focus whose window closed goes to the listing
+           (app--apply-focused! kept (if (and focus (panes-pane-of kept focus)) focus (app--role-key id 'index)))
+           held))))
+
+(define-command "app-swap-windows"
+  "Swap this app's listing and page windows between their panes"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (cond ((not id) (message "This buffer belongs to no app"))
+            ((not (app-swap-windows! id)) (message "This app needs its listing and a page in two panes"))))))
+(catalog-meta! 'command "app-swap-windows" 'domain 'windows 'effects '(write display))
+
+(define-command "app-hide-detail-buffers"
+  "Hide this app's pages: each of their windows goes back to what it showed before, or closes"
+  (lambda ()
+    (let ((id (app-id (current-buffer))))
+      (cond ((not id) (message "This buffer belongs to no app"))
+            ((not (app-hide-detail-buffers! id)) (message "No page of this app is open"))))))
+(catalog-meta! 'command "app-hide-detail-buffers" 'domain 'windows 'effects '(write display))
+
+(public! 'app-swap-layout "(app-swap-layout LAYOUT A B) — LAYOUT with windows A and B in each other's panes, at the front; #f when they share a pane; pure")
+(public! 'app-swap-windows! "(app-swap-windows! ID) — app ID's listing and page windows trade panes; the focus stays on its window")
+(public! 'app-hide-detail-buffers! "(app-hide-detail-buffers! ID) — app ID's pages leave the screen, their windows going back or closing; answers the pages hidden")
 
 (effects! '(read))
 

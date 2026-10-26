@@ -634,8 +634,8 @@
     (site-app-index-enter! buf name pid)
     ;; an app with a group of its own is opened there
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
-    ;; a page of the app turns over in its mode's window (the window model)
-    (switch-to-buffer! buf)
+    ;; a page of the app opens in the window you are in, as every app's does
+    (if (boundp 'app-open!) (app-open! buf) (switch-to-buffer! buf))
     (when (null? (site-app-rows buf))
       (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page))))
     buf))

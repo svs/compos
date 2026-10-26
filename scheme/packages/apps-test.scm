@@ -100,8 +100,8 @@
           (check-equal! (window-list) before "the same windows show the same buffers")
           (check-equal! (active-window) here "and focus never left"))))))
 
-(deftest 'app-layout-gives-its-roles-panes-before-what-was-on-screen
-  "a full layout keeps the app's index and page; the screen fills what is left, the selected buffer first"
+(deftest 'app-layout-starts-at-the-app-start-pane
+  "the index goes to the starting pane and the page to the next; what was there waits behind, no pane re-tiles"
   (lambda ()
     (t--apps-with
       (lambda ()
@@ -118,13 +118,19 @@
           (select-window! (window-showing "*zz-app-work-b*"))
           (app-layout! "zz-app:three")
           (check-equal! (map cadr (window-list))
-                        '("*zz-app-work-b*" "*zz-app-three-home*" "*zz-app-three-detail*")
-                        "three columns: the selected work buffer, the index, the page")
+                        '("*zz-app-three-home*" "*zz-app-three-detail*")
+                        "the first pane holds the index and the next the page")
+          (app-start-pane! "zz-app:three" 1)
+          (app-layout! "zz-app:three")
+          (check-equal! (map cadr (window-list))
+                        '("*zz-app-work-a*" "*zz-app-three-home*" "*zz-app-three-detail*")
+                        "from pane 1 the index goes there, the page to a pane added after it, and the first pane shows what waited")
+          (set! *app-start-panes* '())
           (panes-choose-layout! target)
           (set-frame-local! 'current-group group))))))
 
-(deftest 'app-open-leaves-the-window-you-are-in
-  "from the middle pane, the listing and the detail take the other two panes; the selected window keeps its buffer"
+(deftest 'app-open-shows-the-listing-in-the-window-you-are-in
+  "from the middle pane, the listing takes your pane and the detail the pane beside it; swap and hide touch only the app's windows"
   (lambda ()
     (t--apps-with
       (lambda ()
@@ -135,16 +141,25 @@
           (test-buffer! "*zz-app-work-c*" "c")
           (test-buffer! "*zz-app-open-home*" "home")
           (test-buffer! "*zz-app-open-detail*" "detail")
+          (app-claim! "*zz-app-open-home*" "zz-app:open" 'home)
+          (app-claim! "*zz-app-open-detail*" "zz-app:open" 'detail)
           (panes-tile! 'columns '("*zz-app-work-a*" "*zz-app-work-b*" "*zz-app-work-c*"))
           (panes-choose-layout! 'columns)
-          (let ((b (window-showing "*zz-app-work-b*")))
-            (select-window! b)
-            (app-open! "*zz-app-open-home*" "*zz-app-open-detail*")
-            (check-equal! (window-buffer b) "*zz-app-work-b*" "the window you were in keeps its buffer")
-            (check-equal! (map cadr (window-list))
-                          '("*zz-app-open-home*" "*zz-app-work-b*" "*zz-app-open-detail*")
-                          "the listing takes the left free pane and the detail the right one")
-            (check-equal! (window-buffer (active-window)) "*zz-app-open-home*" "the listing has the focus")
-            (check-equal! (panes-current-layout) 'columns "the layout is the one you chose"))
+          (select-window! (window-showing "*zz-app-work-b*"))
+          (app-open! "*zz-app-open-home*" "*zz-app-open-detail*")
+          (check-equal! (map cadr (window-list))
+                        '("*zz-app-work-a*" "*zz-app-open-home*" "*zz-app-open-detail*")
+                        "the listing takes the window you were in and the detail the pane beside it")
+          (check-equal! (window-buffer (active-window)) "*zz-app-open-home*" "the listing has the focus")
+          (check-equal! (panes-current-layout) 'columns "the layout is the one you chose")
+          (check-equal! (app-swap-windows! "zz-app:open") #t "app-swap-windows swaps")
+          (check-equal! (map cadr (window-list))
+                        '("*zz-app-work-a*" "*zz-app-open-detail*" "*zz-app-open-home*")
+                        "the listing and the page trade panes; the other pane stays")
+          (check-equal! (window-buffer (active-window)) "*zz-app-open-home*" "the focus stays on the listing")
+          (check-equal! (app-hide-detail-buffers! "zz-app:open") '("*zz-app-open-detail*") "the page is hidden")
+          (check-equal! (window-showing "*zz-app-open-detail*") #f "no window shows the page")
+          (check-true! (buffer-exists? "*zz-app-open-detail*") "the page stays alive")
+          (check-equal! (window-buffer (active-window)) "*zz-app-open-home*" "the listing keeps the focus")
           (panes-choose-layout! target)
           (set-frame-local! 'current-group group))))))

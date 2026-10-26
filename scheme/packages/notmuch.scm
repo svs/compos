@@ -855,9 +855,9 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- mail as an app: index | thread | chat ------------------------------------
 ;;; Mail opens in the group you are in, as every app does: no group of its
-;;; own and no jump. Its buffers join that group, so the group saves and
-;;; restores the arrangement. app-layout! gives each role its pane: the
-;;; index, the page of the thread at point, and the group's chat beside them.
+;;; own and no jump. Its buffers join that group. The index opens in the
+;;; window you are in and the page of the thread at point in the pane
+;;; beside it; M-x app-layout gives each role its pane when you want it.
 
 (define (nm--app-showing?)
   (and (window-showing *notmuch-search-buffer*) #t))
@@ -867,12 +867,8 @@ when a message has no text/plain part." 'group 'notmuch)
       (nm--join-group! *notmuch-search-buffer* 'list)
       (nm--open-index! notmuch-default-query))
   (let ((page (nm--show-buffer)))
-    (when page (nm--join-group! page 'detail)))
-  (let* ((group (frame-group))
-         (chat (and group (group-chat group))))
-    (app-layout! *nm-app-id* (if (and chat (buffer-exists? chat)) (list chat) '())))
-  (let ((win (window-showing *notmuch-search-buffer*)))
-    (when win (select-window! win))))
+    (when page (nm--join-group! page 'detail))
+    (app-open! *notmuch-search-buffer* (and page (buffer-exists? page) page))))
 
 (define-command "mail" "Toggle mail in the group you are in: index, thread, chat"
   (lambda ()

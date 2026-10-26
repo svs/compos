@@ -1891,10 +1891,8 @@
     (let* ((group (group-here))
            (fresh (not (find (lambda (b) (equal? (buffer-group b) group)) (todo--buffers))))
            (buf (todo--group-buffer "todo-mode" *todo-buffer* group)))
-      ;; the list and its page take their panes as an app's do
-      (if (and (boundp 'app-layout!) (app-layout! (todo--app-id group)))
-          (let ((win (app-window-of buf))) (when win (select-window! win)))
-          (switch-to-buffer! buf))
+      ;; the list opens in the window you are in, as an app's does
+      (if (boundp 'app-open!) (app-open! buf) (switch-to-buffer! buf))
       ;; it opens on the group you are in; / picks another one, or All
       (when fresh
         (list-facet-set! buf (list-facet buf "group") group))

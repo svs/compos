@@ -141,13 +141,13 @@ Give the kept name a rule, or it takes a number:
 
 Never move a detail with `switch-to-buffer!`, `pop-to-buffer` or a bare `display-buffer`. Each bypasses the remembered window, and the app grows a pane per row.
 
-### 4. Open beside, never re-tile
+### 4. Open here, never re-tile
 
-Opening an app shows its buffers and changes nothing else. The window you are in keeps its buffer. No pane is re-tiled, and the group's layout is not saved.
+An app always opens in the window it was called from. Nothing else changes: no pane is re-tiled and no saved layout is restored.
 
-`(app-open! LISTING)` shows the listing in its own window when one shows it, else in the pane beside the window you are in. `(app-open! LISTING DETAIL)` also shows the detail in a third pane, never in yours. It selects the listing. Later rows open their detail with `display-buffer-detail!`, which reuses that window.
+`(app-open! LISTING)` shows the listing in the window you are in. `(app-open! LISTING DETAIL)` also shows the detail in the pane beside it, with `display-buffer-detail!`. The listing keeps the focus. Later rows open their detail with `display-buffer-detail!`, which reuses that window.
 
-Do not call `panes-tile-default!`, `app-layout!`, `group-layout-save!` or `switch-to-buffer!` from the entry command. Each one moves windows that the user did not ask to move. The user arranges the app with `M-x app-layout` when they want its columns. That command needs `(app-claim! BUF ID ROLE)` on each app buffer.
+Do not call `panes-tile-default!`, `app-layout!`, `group-layout-save!` or `switch-to-buffer!` from the entry command. Each one moves windows that the user did not ask to move. The user arranges the app with `M-x app-layout` when they want it: the listing goes to the app's starting pane, the first unless `(app-start-pane! ID INDEX)` names another, and its pages to the next pane. No other pane moves. `M-x app-swap-windows` swaps the listing's window and the pages' window between their panes. `M-x app-hide-detail-buffers` takes the pages off the screen: each of their windows shows what it showed before, or closes, and the pages come back on the next RET. These commands need `(app-claim! BUF ID ROLE)` on each app buffer.
 
 ## Apps from a website
 

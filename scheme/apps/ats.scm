@@ -929,6 +929,21 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                  (when (and ok (buffer-exists? buf))
                    (with-current-buffer buf (lambda () (run-command "site-app-detail-reload")))))))))))
 
+;; ↓ and ↑ on a job page: a candidate they land on opens beside, as RET opens it
+(define (ats-job-step! dir)
+  (site-app-detail-stop! dir)
+  (let ((buf (current-buffer)))
+    (cond ((ats-application-at buf) (run-command "ats-application-open"))
+          ((ats-suggestion-at buf) (run-command "ats-suggestion-open")))))
+
+(define-command "ats-job-next" "Go to the next piece of this job page; a candidate opens beside it"
+  (lambda () (ats-job-step! 1)))
+(define-command "ats-job-prev" "Go to the previous piece of this job page; a candidate opens beside it"
+  (lambda () (ats-job-step! -1)))
+(catalog-meta! 'command "ats-job-next" 'domain 'web 'effects '(write external display))
+(catalog-meta! 'command "ats-job-prev" 'domain 'web 'effects '(write external display))
+(mode-keys! "ats-job-mode" '(("<down>" "ats-job-next") ("<up>" "ats-job-prev")))
+
 ;; A chat made for an ATS page works the case on it, as svs would
 (mode-chat-setup! "ats-detail-mode"
   (lambda (chat src)

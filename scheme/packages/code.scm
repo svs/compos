@@ -1515,9 +1515,10 @@
            (kinds (imenu--kinds all))
            (tabbed? (> (length kinds) 1))
            ;; a page names the tab imenu opens on, its own, in 'imenu-tab
-           (tab (let ((want (buffer-local source 'imenu-tab)))
-                  (let loop ((ks kinds) (i 0))
-                    (cond ((null? ks) 0) ((equal? (car ks) want) i) (else (loop (cdr ks) (+ i 1)))))))
+           (tab (mb-tab-recall (string-append "imenu:" source) kinds
+                  (let ((want (buffer-local source 'imenu-tab)))
+                    (let loop ((ks kinds) (i 0))
+                      (cond ((null? ks) 0) ((equal? (car ks) want) i) (else (loop (cdr ks) (+ i 1))))))))
            ;; TAB folds a row with rows under it, and unfolds it. It opens all
            ;; folded; a filter typed searches every row, folded or not
            (folded (filter (lambda (r) (imenu--opens? all r)) all))
@@ -1607,6 +1608,7 @@
               (minibuffer-tabs! (tab-row))
               (set! *mb-tab-fn* (lambda (step)
                                   (set! tab (modulo (+ tab step) (length kinds)))
+                                  (mb-tab-remember! (string-append "imenu:" source) (nth tab kinds))
                                   (minibuffer-tabs! (tab-row))
                                   (minibuffer-preview-candidates! (shown) on-confirm (keys))
                                   #t))))))))

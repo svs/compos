@@ -149,7 +149,8 @@
          ;; the prompt opens on the bar of the pane it was asked from
          (own (tab-bars buf))
          (here (if (pair? own) (car (car own)) (and (pair? bars) (car bars))))
-         (tab (let loop ((bs bars) (i 0)) (cond ((null? bs) 0) ((equal? (car bs) here) i) (else (loop (cdr bs) (+ i 1))))))
+         (tab (mb-tab-recall (string-append "tab-bars:" buf) bars
+                (let loop ((bs bars) (i 0)) (cond ((null? bs) 0) ((equal? (car bs) here) i) (else (loop (cdr bs) (+ i 1)))))))
          ;; every tab stays a candidate; the minibuffer tab's bar comes first
          (ordered (lambda ()
                     (let ((bar (list-ref bars tab)))
@@ -181,6 +182,7 @@
           (minibuffer-tabs! (row))
           (set! *mb-tab-fn* (lambda (step)
                               (set! tab (modulo (+ tab step) (length bars)))
+                              (mb-tab-remember! (string-append "tab-bars:" buf) (list-ref bars tab))
                               (minibuffer-tabs! (row))
                               (minibuffer-preview-candidates! (cands) on-confirm)
                               #t))))))

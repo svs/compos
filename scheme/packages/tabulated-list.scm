@@ -1794,7 +1794,8 @@
 
 (define (list-facet-prompt! buf)
   (let* ((facets (list-facets buf))
-         (tab 0)
+         (labels (map (lambda (f) (plist-get f 'label)) facets))
+         (tab (mb-tab-recall (string-append "list-facet:" buf) labels 0))
          (facet (lambda () (nth tab facets)))
          (cands (lambda ()
                   (let ((now (list-facet-value buf (facet))))
@@ -1814,6 +1815,7 @@
     (minibuffer-tabs! (row))
     (set! *mb-tab-fn* (lambda (step)
                         (set! tab (modulo (+ tab step) (length facets)))
+                        (mb-tab-remember! (string-append "list-facet:" buf) (nth tab labels))
                         (minibuffer-tabs! (row))
                         (minibuffer-preview-candidates! (cands) on-confirm)
                         #t))))

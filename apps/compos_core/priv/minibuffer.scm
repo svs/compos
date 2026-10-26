@@ -87,6 +87,22 @@
 (define (mb-tab-step! step)
   (and *mb-tab-fn* (minibuffer-active?) (*mb-tab-fn* step)))
 
+;; a tabbed prompt opens on the tab it showed the last time: KEY names the
+;; prompt, the tab is kept by label, so a prompt whose tabs change keeps
+;; what still is there. RECALL answers the index of the remembered tab in
+;; LABELS, else DEFAULT
+(define *mb-tab-memory* '())
+
+(define (mb-tab-recall key labels default)
+  (let ((want (assoc key *mb-tab-memory*)))
+    (let loop ((ls labels) (i 0))
+      (cond ((or (not want) (null? ls)) default)
+            ((equal? (car ls) (cadr want)) i)
+            (else (loop (cdr ls) (+ i 1)))))))
+
+(define (mb-tab-remember! key label)
+  (set! *mb-tab-memory* (cons (list key label) (filter (lambda (e) (not (equal? (car e) key))) *mb-tab-memory*))))
+
 (define-command "minibuffer-rail-enter"
   "Move the arrows into the list on the right of the palette, or to the next tab"
   (lambda () (cond ((mb-rail-enter!) #t) ((mb-tab-step! 1) #t) (else (run-command "forward-char")))))

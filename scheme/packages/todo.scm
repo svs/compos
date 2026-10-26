@@ -1474,63 +1474,88 @@
                   (list 'tag "c-text" 'text (or (plist-get l 'note) "")))))))
 
 (define (todo--detail-blocks t)
+  ;; (TEXT BLOCKS): every part of the page is one line of TEXT and an anchor
+  ;; on it, so the arrows walk the page part by part and it scrolls along
   (let* ((chat (todo--chat-of t))
          (logs (or (plist-get t 'log) '()))
          (notes (plist-get t 'notes))
          (tags (plist-get t 'tags))
          (state (or (plist-get t 'state) "inbox"))
-         (pair (lambda (k v) (if (todo--blank? v) '() (list (list k v))))))
+         (lines '())
+         (line! (lambda (text) (set! lines (cons text lines)) (length lines)))
+         (stop (lambda (blk name first last) (append blk (list 'anchor-name name 'lines (list first last)))))
+         (pair (lambda (k v) (if (todo--blank? v) '() (list (list k v)))))
+         (part (lambda (title name blks)
+                 ;; a titled group: its heading is a line, and each of BLKS one more
+                 (let* ((first (line! title))
+                        (body (let loop ((bs blks) (i 1) (acc '()))
+                                (if (null? bs) (reverse acc)
+                                    (loop (cdr bs) (+ i 1)
+                                          (cons (let ((n (line! name))) (stop (car bs) (string-append name " " (number->string i)) n n)) acc))))))
+                   (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
+         (head (let ((n (line! (plist-get t 'title))))
+                 (stop (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state))) "Title" n n)))
+         (notes-part (if (todo--blank? notes) '()
+                         (let ((n (line! "Notes")))
+                           (list (stop (component 'ui/group
+                                         (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose" 'text notes))))
+                                       "Notes" n n)))))
+         (details (let ((n (line! "Details")))
+                    (stop (component 'ui/group
+                            (list 'title "Details"
+                                  'body
+                                  (list
+                                    (component 'ui/kv
+                                      (list 'pairs
+                                        (append
+                                          (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
+                                          (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
+                                                         (if (null? more) ""
+                                                             (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
+                                                                            "  ·  w picks, C attaches"))))
+                                          (pair "Status" (todo--status t))
+                                          (pair "Group" (group-name (plist-get t 'group)))
+                                          (pair "Filed by" (plist-get t 'by))
+                                          (pair "Source" (plist-get t 'source))
+                                          (pair "Created" (plist-get t 'created))
+                                          (pair "Id" (plist-get t 'id))))))))
+                          "Details" n n)))
+         (listening (let ((ls (todo--listeners t)))
+                      (if (null? ls) '()
+                          (list (part (string-append "Listening  ·  " (number->string (length ls))) "Listening"
+                                      (map todo--detail-listener ls))))))
+         (log (if (null? logs) '()
+                  (list (part (string-append "Log  ·  " (number->string (length logs))) "Log"
+                              (map todo--detail-entry (reverse logs)))))))
     (list
-      (component 'ui/page
-        (list 'body
-          (append
-            (list (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state)))
-                  (component 'ui/meta (list 'segs (todo--detail-facts t))))
-            (if (pair? tags) (list (component 'ui/chips (list 'items tags))) '())
-            (if (todo--blank? notes)
-                '()
-                (list (component 'ui/group
-                        (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose" 'text notes))))))
-            (list
-              (component 'ui/group
-                (list 'title "Details"
-                      'body
-                      (list
-                        (component 'ui/kv
-                          (list 'pairs
-                            (append
-                              (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
-                              (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
-                                             (if (null? more) ""
-                                                 (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
-                                                                "  ·  w picks, C attaches"))))
-                              (pair "Status" (todo--status t))
-                              (pair "Group" (group-name (plist-get t 'group)))
-                              (pair "Filed by" (plist-get t 'by))
-                              (pair "Source" (plist-get t 'source))
-                              (pair "Created" (plist-get t 'created))
-                              (pair "Id" (plist-get t 'id)))))))))
-            (let ((ls (todo--listeners t)))
-              (if (null? ls)
-                  '()
-                  (list (component 'ui/group
-                          (list 'title (string-append "Listening  ·  " (number->string (length ls)))
-                                'body (map todo--detail-listener ls))))))
-            (if (null? logs)
-                '()
-                (list (component 'ui/group
-                        (list 'title (string-append "Log  ·  " (number->string (length logs)))
-                              'body (map todo--detail-entry (reverse logs))))))))))))
+      (string-join (reverse lines) "\n")
+      (list
+        (component 'ui/page
+          (list 'body
+            (append
+              (list head (component 'ui/meta (list 'segs (todo--detail-facts t))))
+              (if (pair? tags) (list (component 'ui/chips (list 'items tags))) '())
+              notes-part
+              (list details)
+              listening
+              log)))))))
 
 (define (todo--detail-render! buf)
-  (let ((t (todo--detail-task buf)))
+  (let* ((t (todo--detail-task buf))
+         (page (and t (todo--detail-blocks t)))
+         (text (if page (car page) ""))
+         (line (car (buffer-line-at-point buf))))
     (buffer-set-read-only! buf #f)
-    (buffer-set-text! buf (if t (plist-get t 'title) "") #t)
+    (buffer-set-text! buf text #t)
+    (buffer-goto-line! buf (max 1 line))
     (buffer-set-local! buf 'render-mode "blocks")
     (buffer-set-local! buf 'render-blocks
-      (if t
-          (todo--detail-blocks t)
+      (if page
+          (cadr page)
           (list (component 'ui/empty (list 'text "The task is gone")))))
+    (if page (anchor-set-blocks! buf text (cadr page)) (anchor-clear! buf))
+    (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
+    (anchor-sync! buf)
     ;; the page's keys: the same keys bar the list carries
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar

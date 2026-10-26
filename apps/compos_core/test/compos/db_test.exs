@@ -2,7 +2,8 @@ defmodule Compos.DBTest do
   @moduledoc """
   The database mechanism, driven the way a Scheme package drives it.
 
-  These run against the local PostgreSQL and are skipped without one. The
+  The PostgreSQL ones run against the local server and are skipped
+  without one; the SQLite ones run on a temporary file. The
   point of each is a promise the README made: one live connection across
   many queries, parameters bound rather than spliced, results that keep
   their column names, and errors that carry SQLSTATE.
@@ -67,6 +68,7 @@ defmodule Compos.DBTest do
 
     test "the adapter list names what this build can open" do
       assert eval!("(db-adapters)") =~ "postgres"
+      assert eval!("(db-adapters)") =~ "sqlite"
     end
   end
 
@@ -240,6 +242,62 @@ defmodule Compos.DBTest do
         assert got ==
                  ~s|(#t (columns ("id" "name" "ok") rows ((1 "a" #t) (2 "b" #f)) count 2 command "select"))|
       end
+    end
+  end
+
+  describe "with SQLite" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "compos-sqlite-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(dir) end)
+      {:ok, dir: dir}
+    end
+
+    defp open_sqlite!(name, path) do
+      eval!(~s|(db-connect! "#{name}" '(adapter "sqlite" database "#{path}"))|)
+      on_exit(fn -> DB.disconnect(name) end)
+    end
+
+    test "opening creates the file, and parameters bind", %{dir: dir} do
+      path = Path.join([dir, "sub", "t.db"])
+      open_sqlite!("t-sq", path)
+
+      assert eval!(
+               ~s|(db-command (db-query "t-sq" "create table g (id integer primary key, t text, ok integer)"))|
+             ) ==
+               ~s|"create"|
+
+      assert File.exists?(path)
+
+      assert eval!(
+               ~s|(db-query "t-sq" "insert into g (t, ok) values (?, ?), (?, ?)" (list "a'; drop table g --" #t "b" 'null))|
+             ) ==
+               ~s|(columns () rows () count 2 command "insert")|
+
+      assert eval!(~s|(db-query "t-sq" "select t, ok from g order by id")|) ==
+               ~s|(columns ("t" "ok") rows (("a'; drop table g --" 1) ("b" #f)) count 2 command "select")|
+    end
+
+    test "a transaction commits its value and rolls back a failure", %{dir: dir} do
+      open_sqlite!("t-sq-tx", Path.join(dir, "tx.db"))
+      eval!(~s|(db-query "t-sq-tx" "create table n (v integer)")|)
+
+      assert eval!("""
+             (db-with-transaction "t-sq-tx"
+               (lambda (tx) (db-query tx "insert into n values (?)" (list 7)) 'kept))
+             """) == "kept"
+
+      assert {:error, _} =
+               Session.eval("""
+               (db-with-transaction "t-sq-tx"
+                 (lambda (tx) (db-query tx "insert into n values (9)") (error "boom")))
+               """)
+
+      assert eval!(~s|(db-value (db-query "t-sq-tx" "select count(*) from n"))|) == "1"
+    end
+
+    test "a sqlite spec without a database is refused" do
+      assert {:error, msg} = DB.connect("t-sq-none", %{"adapter" => "sqlite"})
+      assert msg =~ "needs 'database"
     end
   end
 end

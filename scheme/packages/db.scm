@@ -39,6 +39,21 @@
           ((db-connected? name) name)
           (else (db-connect! name (db-resolve-spec spec)) name))))
 
+;;; --- sqlite ------------------------------------------------------------------
+
+;; A SQLite database is a file, so its path is enough to name it. The
+;; connection name comes from the file name, which keeps one open
+;; connection per file; opening creates the file and its directory.
+(define (sqlite--name path)
+  (string-append "sqlite."
+                 (re-replace-all "[^a-z0-9._@-]" (string-downcase (file-name-nondirectory path)) "-")))
+
+(define (sqlite-open! path &optional name)
+  (let ((name (or name (sqlite--name path))))
+    (unless (db-spec name)
+      (db-register! name (list 'adapter "sqlite" 'database path)))
+    (db-ensure! name)))
+
 ;;; --- reading a result --------------------------------------------------------
 
 (define (db-columns result) (plist-get result 'columns))
@@ -119,7 +134,9 @@
 ;;; --- catalog -----------------------------------------------------------------
 
 (public! 'db-register!
-  "(db-register! NAME SPEC) — name a database; SPEC has 'adapter 'database 'user 'password 'host or 'socket_dir 'port 'ssl")
+  "(db-register! NAME SPEC) — name a database; SPEC has 'adapter (postgres or sqlite) 'database 'user 'password 'host or 'socket_dir 'port 'ssl; a sqlite 'database is a file path, made when missing")
+(public! 'sqlite-open!
+  "(sqlite-open! PATH [NAME]) — open the SQLite file at PATH, creating it when missing, and answer the connection name for db-query")
 (public! 'db-ensure!
   "(db-ensure! NAME) — open the registered database once and reuse the live connection")
 (public! 'db-spec "(db-spec NAME) — the spec registered for NAME, or #f")
@@ -154,5 +171,8 @@
 (defrecipe! "connect to a postgres database"
   "(db-register! {{name}} (list 'adapter \"postgres\" 'database {{database}}))"
   (list (list 'name "Connection name: ") (list 'database "Database: ")))
+(defrecipe! "open a sqlite database file"
+  "(sqlite-open! {{path}})"
+  (list (list 'path "SQLite file: ")))
 (defrecipe! "see the open databases"
   "(conn-list 'db)" '())

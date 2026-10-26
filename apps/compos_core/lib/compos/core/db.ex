@@ -11,7 +11,8 @@ defmodule Compos.Core.DB do
   in two wire formats; a Scheme implementation would be slower and wrong in
   more places. The adapter boundary keeps that from becoming a vendor list:
   an adapter belongs here only when it is a BEAM-native driver that Scheme
-  could not supply.
+  could not supply. SQLite is the other one: Exqlite links the C library,
+  and a database is a file that opening creates.
 
   One connection per name, not a pool. The editor runs queries with little
   concurrency, and a single connection is what makes a scoped transaction
@@ -24,7 +25,12 @@ defmodule Compos.Core.DB do
 
   require Logger
 
-  @adapters %{"postgres" => Postgrex, "postgresql" => Postgrex}
+  @adapters %{
+    "postgres" => Postgrex,
+    "postgresql" => Postgrex,
+    "sqlite" => Exqlite,
+    "sqlite3" => Exqlite
+  }
 
   defmodule Transaction do
     @moduledoc false
@@ -42,6 +48,9 @@ defmodule Compos.Core.DB do
 
       not Map.has_key?(@adapters, adapter) ->
         {:error, "unknown db adapter #{inspect(adapter)}; known: #{known_adapters()}"}
+
+      @adapters[adapter] == Exqlite and not is_binary(spec["database"]) ->
+        {:error, "db #{name}: a sqlite spec needs 'database, a file path or :memory:"}
 
       whereis(name) != nil ->
         {:ok, :already}
@@ -71,6 +80,21 @@ defmodule Compos.Core.DB do
       {:error, reason} ->
         {:error, "db #{name}: #{inspect(reason)}"}
     end
+  end
+
+  # Exqlite makes the file and its directory when they are missing. The
+  # journal stays in rollback mode unless the spec asks: a WAL file beside
+  # a database in a synced folder is a second file to sync.
+  defp adapter_opts(Exqlite, name, spec) do
+    [
+      name: {:via, Registry, {Compos.Core.DBRegistry, name}},
+      database: sqlite_path(spec["database"]),
+      pool_size: 1,
+      timeout: int(spec["timeout"], 15_000),
+      busy_timeout: int(spec["busy_timeout"], 5_000),
+      journal_mode: journal_mode(spec["journal_mode"]),
+      backoff_type: :rand_exp
+    ]
   end
 
   # A unix socket needs socket_dir; a host needs hostname. PostgreSQL on a
@@ -106,6 +130,16 @@ defmodule Compos.Core.DB do
   end
 
   defp default_socket_dir, do: System.get_env("PGHOST") || "/tmp"
+
+  defp sqlite_path(":memory:"), do: ":memory:"
+  defp sqlite_path(path), do: Path.expand(path)
+
+  defp journal_mode(mode) when mode in ["wal", "WAL"], do: :wal
+
+  defp journal_mode(mode) when mode in ["memory", "truncate", "persist", "off"],
+    do: String.to_existing_atom(mode)
+
+  defp journal_mode(_), do: :delete
 
   defp ssl_opt(nil), do: nil
   defp ssl_opt(false), do: nil
@@ -174,7 +208,7 @@ defmodule Compos.Core.DB do
 
       pid ->
         Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-          cb.(run(pid, sql, params))
+          cb.(run(name, pid, sql, params))
         end)
 
         :ok
@@ -184,14 +218,14 @@ defmodule Compos.Core.DB do
   @doc "Run SQL on the calling process. The caller must choose a non-UI lane."
   def query(%Transaction{} = transaction, sql, params) do
     with :ok <- active_transaction(transaction) do
-      run(Process.get(transaction_key(transaction.ref)), sql, params)
+      run(transaction.name, Process.get(transaction_key(transaction.ref)), sql, params)
     end
   end
 
   def query(name, sql, params) do
     case whereis(name) do
       nil -> {:error, "db: no connection #{name}"}
-      pid -> run(pid, sql, params)
+      pid -> run(name, pid, sql, params)
     end
   end
 
@@ -202,7 +236,7 @@ defmodule Compos.Core.DB do
         {:error, "db: no connection #{name}"}
 
       pid ->
-        case Postgrex.transaction(pid, fn conn -> in_transaction(name, conn, fun) end) do
+        case DBConnection.transaction(pid, fn conn -> in_transaction(name, conn, fun) end) do
           {:ok, result} -> {:ok, result}
           {:error, msg} -> {:error, to_string(msg)}
         end
@@ -233,25 +267,81 @@ defmodule Compos.Core.DB do
 
   defp transaction_key(ref), do: {__MODULE__, :transaction, ref}
 
-  defp run(pid, sql, params) do
-    case Postgrex.query(pid, sql, params) do
-      {:ok, %Postgrex.Result{} = r} ->
-        {:ok,
-         %{
-           columns: r.columns || [],
-           rows: r.rows || [],
-           num_rows: r.num_rows || 0,
-           command: to_string(r.command || "")
-         }}
+  # Postgrex and Exqlite both answer through DBConnection, so one run
+  # serves both; only the result and error structs differ.
+
+  defp run(name, conn, sql, params) do
+    adapter = (last(name) || %{adapter: "postgres"}).adapter
+
+    case adapter_query(@adapters[adapter], conn, sql, params) do
+      {:ok, r} ->
+        {:ok, r}
 
       {:error, %Postgrex.Error{postgres: pg}} when is_map(pg) ->
         {:error, pg_error(pg)}
 
-      {:error, e} ->
+      {:error, e} when is_exception(e) ->
         {:error, Exception.message(e)}
+
+      {:error, e} ->
+        {:error, inspect(e)}
     end
   catch
     :exit, _ -> {:error, "db: connection is not available"}
+  end
+
+  defp adapter_query(Postgrex, conn, sql, params) do
+    with {:ok, r} <- Postgrex.query(conn, sql, params) do
+      {:ok,
+       %{
+         columns: r.columns || [],
+         rows: r.rows || [],
+         num_rows: r.num_rows || 0,
+         command: to_string(r.command || "")
+       }}
+    end
+  end
+
+  # SQLite has no boolean type, and Exqlite would bind #t as the text
+  # "true". Its result says "execute" for every statement and counts no
+  # changed rows, so the command comes from the SQL and the count from
+  # changes(), which is what psql-style callers read.
+  defp adapter_query(Exqlite, conn, sql, params) do
+    params = Enum.map(params, &sqlite_param/1)
+
+    with {:ok, r} <- Exqlite.query(conn, sql, params) do
+      rows = r.rows || []
+      command = sql_command(sql)
+
+      {:ok,
+       %{
+         columns: r.columns || [],
+         rows: rows,
+         num_rows: sqlite_count(conn, command, rows),
+         command: command
+       }}
+    end
+  end
+
+  defp sqlite_param(true), do: 1
+  defp sqlite_param(false), do: 0
+  defp sqlite_param(v), do: v
+
+  defp sqlite_count(conn, command, _rows)
+       when command in ["insert", "update", "delete", "replace"] do
+    case Exqlite.query(conn, "select changes()", []) do
+      {:ok, %{rows: [[n]]}} -> n
+      _ -> 0
+    end
+  end
+
+  defp sqlite_count(_conn, _command, rows), do: length(rows)
+
+  defp sql_command(sql) do
+    case Regex.run(~r/^\s*([A-Za-z]+)/, sql) do
+      [_, word] -> String.downcase(word)
+      _ -> ""
+    end
   end
 
   # The fields the README promised: SQLSTATE, message, detail, hint, position.

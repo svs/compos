@@ -1072,14 +1072,24 @@ the next row down. STEP is kept for the callers."
         (switch-pane-buffers win))))
 
 ;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...)
-(define (switch-tab-row tab)
-  (map (lambda (t) (list (cadr t) (eq? (car t) tab))) *switch-tabs*))
+(define (switch-tab-row tab &optional tabs)
+  (map (lambda (t) (list (cadr t) (equal? (car t) tab))) (or tabs *switch-tabs*)))
 
-(define (switch-tab-step tab step)
-  (let* ((keys (map car *switch-tabs*))
+;; the fixed tabs, then one for each subject of the group's chats: a
+;; subject tab is its name, a string, where the fixed ones are symbols
+(define (switch-tab-list rows group)
+  (append *switch-tabs*
+          (if (and group (boundp 'chat-subjects))
+              (map (lambda (c) (list c c))
+                   (chat-subjects
+                     (map car (filter (lambda (r) (switch-row-in-group? r group)) rows))))
+              '())))
+
+(define (switch-tab-step tab step &optional tabs)
+  (let* ((keys (map car (or tabs *switch-tabs*)))
          (n (length keys))
          (i (let loop ((ks keys) (i 0))
-              (cond ((null? ks) 0) ((eq? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
+              (cond ((null? ks) 0) ((equal? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
     (nth (modulo (+ i step n) n) keys)))
 
 ;; a row's group from the fields it carries: every buffer holds one group
@@ -1099,6 +1109,12 @@ the next row down. STEP is kept for the callers."
         ((eq? tab 'pane)
          (let ((mine (if (and win (window-exists? win)) (switch-pane-tab-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
+        ((string? tab)
+         (if group
+             (filter (lambda (r) (and (switch-row-in-group? r group)
+                                      (equal? (chat-subject (car r)) tab)))
+                     rows)
+             '()))
         (else rows)))
 
 ;; the buffers of every window in WIN's pane, the window on screen first:
@@ -1134,7 +1150,8 @@ the next row down. STEP is kept for the callers."
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
     (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
-           (tab (if (assoc want *switch-tabs*) want 'group))
+           (tabs (switch-tab-list rows group))
+           (tab (if (assoc want tabs) want 'group))
            ;; DISPLAY and CANDIDATES come in the same order, so one walk
            ;; keeps the rows of a tab
            (tab-display (lambda (tab)
@@ -1165,11 +1182,11 @@ the next row down. STEP is kept for the callers."
         ;; a modified buffer's annotation leads with *, so match three
         ;; fields to keep its mode and group in reach
         (if ibuffer-info 3 #t) "minibuffer")
-      (minibuffer-tabs! (switch-tab-row tab))
+      (minibuffer-tabs! (switch-tab-row tab tabs))
       (set! *mb-tab-fn* (lambda (step)
-                          (set! tab (switch-tab-step tab step))
+                          (set! tab (switch-tab-step tab step tabs))
                           (set! *switch-last-tab* tab)
-                          (minibuffer-tabs! (switch-tab-row tab))
+                          (minibuffer-tabs! (switch-tab-row tab tabs))
                           (minibuffer-preview-candidates! (tab-display tab) on-confirm)
                           #t)))
     (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))

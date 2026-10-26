@@ -264,6 +264,7 @@
   ;; explain which source matched without scanning the text again.
   (string-append (chats-title b) " "
                  (or (chats-summary b) "") " "
+                 (or (chat-subject b) "") " "
                  (chats-model b) " "
                  (chats-state-label (chat-row-status b)) " "
                  (or (buffer-local b 'agent-slug) "")))
@@ -407,6 +408,70 @@
           (chat-retitle! b agents-relist!)))))
 
 (catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
+
+;; A chat's subject tells the chats of one group apart: the goal chats
+;; from the editor chats, say. It rides in the .chat header beside the
+;; title, so a kill, an archive and a restart keep it. C-x b shows one tab
+;; for each subject of the group's chats.
+(effects! '(read))
+
+(define (chat-subject buf)
+  (let ((c (and (buffer-known? buf) (buffer-local buf 'chat-subject))))
+    (and (string? c) (not (equal? c "")) c)))
+
+(define (chat-subjects &optional bufs)
+  (sort (dedupe-names (filter string? (map chat-subject (or bufs (chat-list-bufs)))))))
+
+;; the subject whose chats share the most title words with BUF's title
+(define (chat-subject-suggest buf)
+  (let* ((words (lambda (s)
+                  (filter (lambda (w) (> (string-length w) 3))
+                          (string-split (string-downcase (or s "")) " "))))
+         (mine (words (chats-title buf)))
+         (others (filter (lambda (b) (not (equal? b buf))) (chat-list-bufs)))
+         (score (lambda (s)
+                  (fold (lambda (n b)
+                          (+ n (length (filter (lambda (w) (member w mine)) (words (chats-title b))))))
+                        (if (member (string-downcase s) mine) 1 0)
+                        (filter (lambda (b) (equal? (chat-subject b) s)) others)))))
+    (let loop ((cs (chat-subjects)) (best #f) (top 0))
+      (if (null? cs)
+          best
+          (let ((n (score (car cs))))
+            (if (> n top) (loop (cdr cs) (car cs) n) (loop (cdr cs) best top)))))))
+
+(effects! '(write))
+
+;; a blank SUBJECT takes the chat out of its subject
+(define (chat-subject-set! buf subject)
+  (let ((c (string-trim (or subject ""))))
+    (buffer-set-local! buf 'chat-subject (if (equal? c "") #f c))
+    (chat-log-save! buf)
+    (chat-subject buf)))
+
+(define (chat-subject-read! buf &optional after)
+  (completing-read (string-append "Subject for " (chats-title buf) ": ")
+    (chat-subjects)
+    (lambda (c)
+      (when (string? c)
+        (let ((now (chat-subject-set! buf c)))
+          (message (if now (string-append "Subject: " now) "No subject")))
+        (when after (after))))
+    'initial (or (chat-subject buf) (chat-subject-suggest buf) "")))
+
+(define-command "chat-set-subject" "Give this chat a subject; C-x b shows each subject as a tab"
+  (lambda ()
+    (let ((b (current-buffer)))
+      (if (chat-buffer? b)
+          (chat-subject-read! b)
+          (message "not a chat")))))
+
+(define-command "chat-set-subject-at-point" "Give the chat at point a subject"
+  (lambda ()
+    (let ((b (ibuffer-current (chat-list-buffer))))
+      (if (not (and (string? b) (buffer-known? b)))
+          (message "no chat here")
+          (chat-subject-read! b agents-relist!)))))
 
 (define (agents-live-slug buf)
   (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))

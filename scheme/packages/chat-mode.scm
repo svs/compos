@@ -1501,7 +1501,7 @@
 (define (chat-header-string v)
   (if (symbol? v) (symbol->string v) v))
 
-(define *chat-header-strings* '(connector model effort title summary directory slug companion-of))
+(define *chat-header-strings* '(connector model effort title summary subject directory slug companion-of))
 
 (define (chat-header-line buf)
   (string-append *chat-file-header* " (connector "
@@ -1521,6 +1521,10 @@
     (let ((s (buffer-local buf 'chat-summary)))
       (if (and (string? s) (not (equal? s "")))
           (string-append " summary " (value->string s))
+          ""))
+    (let ((c (buffer-local buf 'chat-subject)))
+      (if (and (string? c) (not (equal? c "")))
+          (string-append " subject " (value->string c))
           ""))
     ;; who this chat is: its spawn slug and the page it is the companion of,
     ;; so an archived chat comes back linked to its parent and its page
@@ -1620,7 +1624,7 @@
                     v)))))
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
-          (title chat-title) (summary chat-summary)
+          (title chat-title) (summary chat-summary) (subject chat-subject)
           (directory chat-directory) (slug agent-slug)
           (companion-of chat-companion-of)))
       (let ((slug (buffer-local buf 'agent-slug)))

@@ -144,6 +144,7 @@
 (require 'self-healing)
 (require 'events-demo)
 (require 'events-list)
+(require 'watchers)
 (require 'notifications)
 (require 'jj)
 (require 'keys)

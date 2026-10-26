@@ -112,7 +112,30 @@
                 (list l)))
   (agent-listen--save!))
 
+;; what happened to a listener goes in the log as agent-listen:ID, so M-x
+;; watchers can show every listener and its firings after it is gone. The
+;; publish waits for the delivery in hand to end
+(define (agent-listen--record! l what &optional e)
+  (let ((id (plist-get l 'id))
+        (data (list 'id (plist-get l 'id) 'chat (plist-get l 'chat) 'topic (plist-get l 'topic)
+                    'only-kind (plist-get l 'kind) 'match (plist-get l 'match) 'note (plist-get l 'note)
+                    'task (plist-get l 'task) 'keep (plist-get l 'keep) 'created (plist-get l 'created)
+                    'event-seq (and e (plist-get e 'seq)) 'event-topic (and e (plist-get e 'topic))
+                    'from (and e (agent-listen--who e)))))
+    (debounce! (string->symbol (string-append "agent-listen-record:" id ":" (symbol->string what) ":"
+                                              (number->string (if e (plist-get e 'seq) 0))))
+               0
+               (lambda (_)
+                 (event-publish! (agent-listen--name id) what data)
+                 (let ((task (plist-get l 'task)))
+                   (when (and e (not (agent-listen--blank? task)) (todo-get task))
+                     (todo-log task (string-append "watcher " id " fired: " (plist-get e 'topic)
+                                                   (let ((who (agent-listen--who e))) (if who (string-append " from " who) "")))
+                               "watcher"))))
+               #f)))
+
 (define (agent-listen--deliver! l buf e)
+  (agent-listen--record! l 'fired e)
   (unless (plist-get l 'keep) (agent-unlisten! (plist-get l 'id)))
   (agent-continue! buf (agent-listen--brief l e)))
 
@@ -159,7 +182,14 @@
                     'keep (and (plist-get spec 'keep) #t) 'pending '() 'created (current-time))))
       (agent-listen--put! l)
       (agent-listen--subscribe! l)
+      (agent-listen--record! l 'created)
       id)))
+
+(define (agent-listen-cancel! id)
+  "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log"
+  (let ((l (agent-listen--find id)))
+    (when l (agent-listen--record! l 'cancelled))
+    (agent-unlisten! id)))
 
 (define (agent-unlisten! id)
   "(agent-unlisten! ID) — stop the listener ID"
@@ -180,6 +210,7 @@
 
 (public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply; it gets the event as a message. SPEC: topic, kind, match, task, keep, chat")
 (public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID")
+(public! 'agent-listen-cancel! "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log")
 (public! 'agent-listeners "(agent-listeners [CHAT]) — the listeners, each a plist; only CHAT's when given")
 
 (effects! '(write))

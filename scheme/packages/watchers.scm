@@ -35,7 +35,7 @@
   (list 'id (plist-get d 'id) 'chat (plist-get d 'chat) 'topic (plist-get d 'topic)
         'only-kind (or (plist-get d 'only-kind) (plist-get d 'kind)) 'match (plist-get d 'match)
         'note (plist-get d 'note) 'task (plist-get d 'task) 'keep (plist-get d 'keep)
-        'created (plist-get d 'created) 'pending (plist-get d 'pending)
+        'created (plist-get d 'created) 'pending (plist-get d 'pending) 'due (plist-get d 'due)
         'state state 'fired '() 'last (plist-get d 'created)))
 
 ;; every listener: the live ones, then the ones the log remembers
@@ -71,6 +71,13 @@
          (g (and t (plist-get t 'group))))
     (and g (or (group-name g) g))))
 
+;; how long until a live watcher is due, or how late it is
+(define (watchers--due-label row)
+  (if (not (equal? (plist-get row 'state) "listening"))
+      ""
+      (let ((left (- (agent-listen-due row) (current-time))))
+        (if (< left 0) (string-append "late " (ibuffer-age-label (- 0 left))) (ibuffer-age-label left)))))
+
 (define (watchers--chat-buffer row)
   (let ((id (plist-get row 'chat)))
     (and id (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list)))))
@@ -83,6 +90,7 @@
   (list (watchers--state-label row)
         (number->string (length (plist-get row 'fired)))
         (watchers--age (plist-get row 'last))
+        (watchers--due-label row)
         (or (plist-get row 'topic) "")
         (or (plist-get row 'match) "")
         (or (watchers--task-title row) (plist-get row 'note) "")))
@@ -113,6 +121,7 @@
       (line "task        " (and (plist-get row 'task)
                               (string-append (plist-get row 'task) (if task-title (string-append "  " task-title) ""))))
       (line "task group  " (watchers--task-group row))
+      (line "due         " (let ((d (watchers--due-label row))) (and (not (equal? d "")) (if (string-prefix? "late" d) d (string-append "in " d)))))
       (line "created     " (and (plist-get row 'created) (string-append (watchers--age (plist-get row 'created)) " ago")))
       (line "waiting     " (and (pair? (plist-get row 'pending))
                               (string-append (number->string (length (plist-get row 'pending))) " event(s) for a chat that is not open")))
@@ -163,7 +172,7 @@
     'local-filter #t
     'no-marks #t
     'columns (lambda (buf)
-               (list (list "state" 10) (list "fired" 6) (list "last" 6) (list "listens to" 26)
+               (list (list "state" 10) (list "fired" 6) (list "last" 6) (list "due" 9) (list "listens to" 26)
                      (list "match" 20) (list "for" #f)))
     'cells watchers--cells
     'preview (lambda (buf row) (watchers-show-detail! row))
@@ -219,5 +228,80 @@
       (if (and (not (watchers--blank? id)) (todo-get id))
           (todo-show-detail! id)
           (message "no task for this watcher")))))
+
+;; ---- the daily sweep ------------------------------------------------------
+;; Once a day the live watchers past due go to one agent. It reads each
+;; source itself, to tell a reply that never came from a pipe that broke:
+;; a feed that stopped, a mailbox not indexed, a match that cannot hit.
+;; No watcher past due, no agent.
+
+(defcustom 'watchers-sweep-spec "0 9 * * *"
+  "When the daily sweep of watchers past due runs, as a cron time in the local zone.")
+
+(defcustom 'watchers-sweep-days 3
+  "How many days the sweep gives a watcher it found still waiting on a working pipe.")
+
+(effects! '(read))
+
+(define (watchers-overdue)
+  "the live watchers past due, as listener plists"
+  (filter (lambda (l) (< (agent-listen-due l) (current-time))) (agent-listeners)))
+
+;; the group the sweep runs in: the first late watcher's task's, else its chat's, else the frame's
+(define (watchers--sweep-group late)
+  (let loop ((ls late))
+    (if (null? ls)
+        (frame-group)
+        (let* ((l (car ls))
+               (t (and (not (watchers--blank? (plist-get l 'task))) (todo-get (plist-get l 'task))))
+               (chat (watchers--chat-buffer l)))
+          (or (and t (plist-get t 'group)) (and chat (buffer-group chat)) (loop (cdr ls)))))))
+
+(define (watchers--sweep-prompt late)
+  (string-append
+    "Daily watcher sweep. These " (number->string (length late))
+    " watchers (agent-listen!) are past due: what each waits for has not reached its chat. "
+    "For each one, find out why and fix what you can.\n\n"
+    (apply string-append
+           (map (lambda (l)
+                  (string-append
+                    "- " (plist-get l 'id) ": topic " (plist-get l 'topic)
+                    (if (watchers--blank? (plist-get l 'kind)) "" (string-append ", kind " (plist-get l 'kind)))
+                    (if (watchers--blank? (plist-get l 'match)) "" (string-append ", match \"" (plist-get l 'match) "\""))
+                    ", chat " (plist-get l 'chat)
+                    (if (watchers--blank? (plist-get l 'task)) "" (string-append ", task " (plist-get l 'task)))
+                    ", made " (watchers--age (plist-get l 'created)) " ago"
+                    (if (watchers--blank? (plist-get l 'note)) "" (string-append "\n  note: " (plist-get l 'note)))
+                    "\n"))
+                late))
+    "\nFor each watcher:\n"
+    "1. Read the source itself, not the event log: mail-search for mail, the WhatsApp MCP for WhatsApp, the ATS for candidate messages. Did what it waits for happen?\n"
+    "2. If it happened and the watcher missed it, find out why: the feed stopped, the mailbox was not indexed, the topic or match text is wrong. Fix the pipe if you can (restart a feed, reconnect a server). Then hand what happened to the watcher's chat with (agent-continue! CHAT TEXT), and (agent-listen-cancel! ID).\n"
+    "3. If it did not happen, check the pipe is alive: (event-log-newest TOPIC-PREFIX 3) should show recent events. Fix it if not. A wrong topic or match: make a new watcher with the same task and note, and cancel the old one. Then (agent-listen-extend! ID " (number->string watchers-sweep-days) ").\n"
+    "4. Write one line of what you found on the watcher's task with (todo-log TASK TEXT WHO).\n\n"
+    "Do not message any person and do not move any application. If a watcher waits on something only svs can decide, say so. "
+    "End with a short table: watcher, what you found, what you did."))
+
+(effects! '(write external spend))
+
+(define (watchers-sweep! &optional _event)
+  "hand the watchers past due to one agent chat; answer its slug, or #f when none is past due"
+  (let ((late (watchers-overdue)))
+    (if (null? late)
+        (begin (message "watchers: none past due") #f)
+        (let ((chat (group-chat (watchers--sweep-group late))))
+          (with-current-buffer chat
+            (lambda ()
+              (execute* (watchers--sweep-prompt late)
+                        (list 'title (string-append "Watcher sweep " (format-time (current-time) "%Y-%m-%d"))))))))))
+
+(define-command "watchers-sweep" "Hand the watchers past due to an agent, which looks again and fixes broken pipes"
+  (lambda () (watchers-sweep!)))
+
+(when (boundp 'cron-define!)
+  (cron-define! "watchers-sweep" watchers-sweep-spec 'call 'watchers-sweep! 'save #f))
+
+(public! 'watchers-overdue "(watchers-overdue) — the live watchers past due")
+(public! 'watchers-sweep! "(watchers-sweep!) — hand the watchers past due to one agent chat, which looks again and fixes broken pipes")
 
 (public! 'watchers-show-detail! "(watchers-show-detail! ROW) — show the page of the watcher ROW beside the watchers list")

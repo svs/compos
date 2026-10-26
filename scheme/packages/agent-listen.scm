@@ -13,6 +13,7 @@
 ;;;   match "Vipul"                   only events whose data holds this text
 ;;;   task ID                         the task the agent waits on, for its brief
 ;;;   keep #t                         listen on after the first event
+;;;   days 3 / due SECS               when it is due; past due, the daily sweep looks again
 ;;;   chat CHAT                       a chat other than the one it runs in
 ;;;
 ;;; Each listener is a subscriber of its own, agent-listen:ID, so it keeps
@@ -27,7 +28,10 @@
 (defcustom 'agent-listen-file (string-append (compos-home) "/agent-listeners.scd")
   "The file that keeps the agents' event listeners, one form each. Not .scm: hotload evaluates a .scm saved under ~/.compos.")
 
-;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B pending SEQS created SECS)
+(defcustom 'agent-listen-default-days 3
+  "How long a listener waits before it is due, when its SPEC names no due or days. M-x watchers-sweep looks again at the ones past due.")
+
+;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B pending SEQS created SECS due SECS)
 (defvar '*agent-listeners* '())
 
 (define (agent-listen--name id) (string-append "agent-listen:" id))
@@ -120,6 +124,7 @@
         (data (list 'id (plist-get l 'id) 'chat (plist-get l 'chat) 'topic (plist-get l 'topic)
                     'only-kind (plist-get l 'kind) 'match (plist-get l 'match) 'note (plist-get l 'note)
                     'task (plist-get l 'task) 'keep (plist-get l 'keep) 'created (plist-get l 'created)
+                    'due (plist-get l 'due)
                     'event-seq (and e (plist-get e 'seq)) 'event-topic (and e (plist-get e 'topic))
                     'from (and e (agent-listen--who e)))))
     (debounce! (string->symbol (string-append "agent-listen-record:" id ":" (symbol->string what) ":"
@@ -179,11 +184,22 @@
            (l (list 'id id 'chat chat 'topic topic
                     'kind (and kind (format "~a" kind))
                     'match (plist-get spec 'match) 'note note 'task (plist-get spec 'task)
-                    'keep (and (plist-get spec 'keep) #t) 'pending '() 'created (current-time))))
+                    'keep (and (plist-get spec 'keep) #t) 'pending '() 'created (current-time)
+                    'due (or (plist-get spec 'due)
+                             (+ (current-time) (* 86400 (or (plist-get spec 'days) agent-listen-default-days)))))))
       (agent-listen--put! l)
       (agent-listen--subscribe! l)
       (agent-listen--record! l 'created)
       id)))
+
+(define (agent-listen-extend! id days)
+  "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now; it listens on as it did"
+  (let ((l (agent-listen--find id)))
+    (when l
+      (let ((l (plist-put l 'due (+ (current-time) (* 86400 days)))))
+        (agent-listen--put! l)
+        (agent-listen--record! l 'extended)))
+    id))
 
 (define (agent-listen-cancel! id)
   "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log"
@@ -203,6 +219,10 @@
 
 (effects! '(read))
 
+(define (agent-listen-due l)
+  "(agent-listen-due L) — when the listener L is due, in unix seconds; one made before due times counts from its creation"
+  (or (plist-get l 'due) (+ (or (plist-get l 'created) 0) (* 86400 agent-listen-default-days))))
+
 (define (agent-listeners &optional chat)
   "(agent-listeners [CHAT]) — the listeners, each a plist; only CHAT's when given"
   (let ((id (and chat (agent-listen--chat-id chat))))
@@ -210,6 +230,8 @@
 
 (public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply; it gets the event as a message. SPEC: topic, kind, match, task, keep, chat")
 (public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID")
+(public! 'agent-listen-extend! "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now")
+(public! 'agent-listen-due "(agent-listen-due L) — when the listener L is due, in unix seconds")
 (public! 'agent-listen-cancel! "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log")
 (public! 'agent-listeners "(agent-listeners [CHAT]) — the listeners, each a plist; only CHAT's when given")
 

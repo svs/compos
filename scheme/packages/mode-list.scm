@@ -337,8 +337,11 @@
            (open-row (mode-list-opt mode 'visit-row))
            (after (mode-list-opt mode 'after-visit)))
       (cond ((and (string? row) (not (buffer-known? row)) open-row)
+             ;; the list stays; the saved chat opens beside it
              (listing-preview-dismiss! view)
-             (transient-frame-exit! 'ibuffer)
+             (transient-frame-abandon! 'ibuffer)
+             (let ((home (window-showing view)))
+               (when home (select-window! home) (select-window! (get-other-window))))
              (open-row row))
             (else
              (run-command "ibuffer-visit")

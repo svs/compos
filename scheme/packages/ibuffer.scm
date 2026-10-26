@@ -1969,6 +1969,20 @@
 (public! 'listing-preview! "(listing-preview! OWNER TARGET) — show an inert floating card anchored to OWNER; focus stays in the list")
 (public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current card preview")
 (public! 'listing-visit! "(listing-visit! VIEW TARGET) — leave VIEW and visit TARGET in its owning group")
+
+(define (listing-visit-beside! view target)
+  ;; the list stays where it is: the pick goes to the window already
+  ;; showing it, else another one, split off when the list stands alone.
+  ;; RET forgets the arrangement the list took; q no longer gives it back.
+  (transient-frame-abandon! 'ibuffer)
+  (listing-preview-dismiss! view)
+  (let ((shown (and (buffer-known? target) (window-showing target)))
+        (home (window-showing view)))
+    (cond (shown (select-window! shown))
+          (home (select-window! home) (select-window! (get-other-window)))))
+  (listing-visit! view target))
+
+(public! 'listing-visit-beside! "(listing-visit-beside! VIEW TARGET) — visit TARGET in another window and keep VIEW where it is")
 (public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")
 
 ;; open (or re-open) a view on SCOPE: *ibuffer* in ibuffer-mode unless a
@@ -2276,12 +2290,8 @@
       (if (ibuffer-heading? b)
           (ibuffer-toggle-fold! (ibuffer-heading-key b))
           (begin
-            ;; leaving is leaving, by RET as much as by q: the frame goes
-            ;; back to what the table covered and the buffer you picked
-            ;; lands in the arrangement you were working in
-            (listing-preview-dismiss! view)
-            (transient-frame-exit! 'ibuffer)
-            (listing-visit! view b))))))
+            ;; RET opens the pick beside the table; only q leaves it
+            (listing-visit-beside! view b))))))
 
 (define-command "ibuffer-quit" "Dismiss the preview, else give the frame back"
   (lambda ()

@@ -14,11 +14,14 @@
 ;;;   task ID                         the task the agent waits on, for its brief
 ;;;   keep #t                         listen on after the first event
 ;;;   days 3 / due SECS               when it is due; past due, the daily sweep looks again
+;;;   at "2026-10-27 10:00" / SECS     wake at this local time; no topic needed
 ;;;   chat CHAT                       a chat other than the one it runs in
 ;;;
 ;;; Each listener is a subscriber of its own, agent-listen:ID, so it keeps
 ;;; its place in the log: an event that came while the editor was down
-;;; arrives after the restart. agent-listen-file keeps the listeners. An
+;;; arrives after the restart. An at listener publishes its own event on
+;; time:ID when the time comes; its timer is armed again at boot, and fires
+;; at once when the time passed while the editor was down. agent-listen-file keeps the listeners. An
 ;;; event for a chat that is not open waits in its listener until the chat
 ;;; opens.
 
@@ -139,6 +142,35 @@
                                "watcher"))))
                #f)))
 
+;; "YYYY-MM-DD HH:MM" in local time, or unix seconds, as unix seconds
+(define (agent-listen--at at)
+  (cond ((not at) #f)
+        ((number? at) at)
+        (else
+         (let* ((dt (string-split (string-trim at) " "))
+                (d (map string->number (string-split (car dt) "-")))
+                (t (if (pair? (cdr dt)) (map string->number (string-split (cadr dt) ":")) '(0 0))))
+           (unless (and (= (length d) 3) (= (length t) 2) (not (memv #f (append d t))))
+             (error "agent-listen!: at wants \"YYYY-MM-DD HH:MM\" or unix seconds"))
+           (parts->time (car d) (cadr d) (caddr d) (car t) (cadr t))))))
+
+;; an at listener's timer publishes on its topic when the time comes; a
+;; long wait sleeps in steps a timer can hold
+(define (agent-listen--arm! l)
+  (let ((at (plist-get l 'at)))
+    (when (and at (null? (or (plist-get l 'pending) '())))
+      (debounce! (string->symbol (string-append "agent-listen-at:" (plist-get l 'id)))
+                 (* 1000 (min 86400 (max 0 (- at (current-time)))))
+                 (lambda (id)
+                   (let ((l (agent-listen--find id)))
+                     (when l
+                       (if (< (current-time) (plist-get l 'at))
+                           (agent-listen--arm! l)
+                           (event-publish! (plist-get l 'topic) 'due
+                                           (list 'at (format-time (plist-get l 'at) "%Y-%m-%d %H:%M")
+                                                 'task (plist-get l 'task)))))))
+                 (plist-get l 'id)))))
+
 (define (agent-listen--deliver! l buf e)
   (agent-listen--record! l 'fired e)
   (unless (plist-get l 'keep) (agent-unlisten! (plist-get l 'id)))
@@ -172,23 +204,26 @@
     *agent-listeners*))
 
 (define (agent-listen! spec &optional note)
-  "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event; answer the listener's id. SPEC is a plist: topic (required; a trailing * matches a prefix), kind, match (text the event's data must hold), task, keep, chat"
-  (let ((topic (plist-get spec 'topic))
+  "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event; answer the listener's id. SPEC is a plist: topic (required unless at; a trailing * matches a prefix), kind, match (text the event's data must hold), task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local, or unix seconds: wake then)"
+  (let ((at (agent-listen--at (plist-get spec 'at)))
         (chat (agent-listen--chat-id (plist-get spec 'chat))))
-    (when (agent-listen--blank? topic)
-      (error "agent-listen!: SPEC needs a topic, such as \"whatsapp:919902020677\""))
+    (when (and (not at) (agent-listen--blank? (plist-get spec 'topic)))
+      (error "agent-listen!: SPEC needs a topic, such as \"whatsapp:919902020677\", or an at"))
     (unless chat
       (error "agent-listen!: run it from a chat, or name one with 'chat"))
     (let* ((id (string-append "l" (number->string (current-time)) "-" (number->string (random 10000))))
+           (topic (if at (string-append "time:" id) (plist-get spec 'topic)))
            (kind (plist-get spec 'kind))
            (l (list 'id id 'chat chat 'topic topic
                     'kind (and kind (format "~a" kind))
                     'match (plist-get spec 'match) 'note note 'task (plist-get spec 'task)
-                    'keep (and (plist-get spec 'keep) #t) 'pending '() 'created (current-time)
-                    'due (or (plist-get spec 'due)
+                    'keep (and (not at) (plist-get spec 'keep) #t) 'pending '() 'created (current-time)
+                    'at at
+                    'due (or at (plist-get spec 'due)
                              (+ (current-time) (* 86400 (or (plist-get spec 'days) agent-listen-default-days)))))))
       (agent-listen--put! l)
       (agent-listen--subscribe! l)
+      (agent-listen--arm! l)
       (agent-listen--record! l 'created)
       id)))
 
@@ -211,6 +246,7 @@
   "(agent-unlisten! ID) — stop the listener ID"
   (set! *agent-listeners* (filter (lambda (l) (not (equal? (plist-get l 'id) id))) *agent-listeners*))
   (agent-listen--save!)
+  (debounce-cancel! (string->symbol (string-append "agent-listen-at:" id)))
   ;; a delivery sets the subscriber's position after its handler returns,
   ;; so the subscriber goes once that is done
   (debounce! (string->symbol (agent-listen--name id)) 0
@@ -228,7 +264,7 @@
   (let ((id (and chat (agent-listen--chat-id chat))))
     (filter (lambda (l) (or (not id) (equal? (plist-get l 'chat) id))) *agent-listeners*)))
 
-(public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply; it gets the event as a message. SPEC: topic, kind, match, task, keep, chat")
+(public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply, or wake at a time; it gets the event as a message. SPEC: topic, kind, match, task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local)")
 (public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID")
 (public! 'agent-listen-extend! "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now")
 (public! 'agent-listen-due "(agent-listen-due L) — when the listener L is due, in unix seconds")
@@ -247,5 +283,6 @@
            (lambda (_)
              (agent-listen--load!)
              (for-each agent-listen--subscribe! *agent-listeners*)
+             (for-each agent-listen--arm! *agent-listeners*)
              (agent-listen--flush! #f))
            #f)

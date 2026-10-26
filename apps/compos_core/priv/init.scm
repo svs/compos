@@ -111,6 +111,8 @@
 (require 'panes-mode)
 ;; the model as a list: M-x windows-list (C-x w)
 (require 'panes-board)
+;; every window of a pane as tiles in the pane: M-x pane-overview
+(require 'pane-overview)
 ;; undo and redo over the pane arrangement alone: M-x layout-undo, layout-redo
 (require 'panes-history)
 ;; app identity: an app names the buffers of one instance, and a move

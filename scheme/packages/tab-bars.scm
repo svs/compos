@@ -176,11 +176,10 @@
          (here (if (pair? own) (car (car own)) (and (pair? bars) (car bars))))
          (tab (mb-tab-recall (string-append "tab-bars:" buf) bars
                 (let loop ((bs bars) (i 0)) (cond ((null? bs) 0) ((equal? (car bs) here) i) (else (loop (cdr bs) (+ i 1)))))))
-         ;; every tab stays a candidate; the minibuffer tab's bar comes first
+         ;; each minibuffer tab holds one bar's tabs
          (ordered (lambda ()
                     (let ((bar (list-ref bars tab)))
-                      (append (filter (lambda (e) (equal? (cadr e) bar)) entries)
-                              (filter (lambda (e) (not (equal? (cadr e) bar))) entries)))))
+                      (filter (lambda (e) (equal? (cadr e) bar)) entries))))
          (cands (lambda ()
                   (map (lambda (e)
                          (let ((t (caddr e)))
@@ -192,10 +191,17 @@
                                (loop (cdr bs) (+ i 1) (cons (list (car bs) (= i tab)) out))))))
          ;; text that names no tab narrows the index's rows, as / does in a list
          (ix (car (tab-bars-pair buf)))
-         ;; the candidate each minibuffer tab was on, so coming back to it lands there
-         (picked '())
+         ;; each minibuffer tab starts on its bar's selected tab
+         (selected (lambda ()
+                     (let ((on (find (lambda (e) (let ((t (caddr e))) (and (> (length t) 2) (list-ref t 2)))) (ordered))))
+                       (and on (tab-bars--name on entries)))))
+         (land! (lambda ()
+                  (let ((want (selected)))
+                    (let step ((n (length (cands))))
+                      (when (and want (> n 0) (not (equal? (minibuffer-selected) want)))
+                        (minibuffer-next!)
+                        (step (- n 1)))))))
          (light! (lambda (name)
-                   (set! picked (cons (list (list-ref bars tab) name) picked))
                    (tab-bars--light! buf (find (lambda (e) (equal? (tab-bars--name e entries) name)) entries))))
          (on-confirm (lambda (name)
                        (tab-bars--light! buf #f)
@@ -211,18 +217,15 @@
         (begin
           (minibuffer-read-preview "Tab: " (cands) light! on-confirm (lambda () (tab-bars--light! buf #f)) #f "minibuffer")
           (minibuffer-tabs! (row))
-          (light! (car (car (cands))))
+          (land!)
+          (light! (or (minibuffer-selected) (car (car (cands)))))
           (set! *mb-tab-fn* (lambda (step)
                               (set! tab (modulo (+ tab step) (length bars)))
                               (mb-tab-remember! (string-append "tab-bars:" buf) (list-ref bars tab))
                               (minibuffer-tabs! (row))
-                              (let ((want (let ((p (assoc (list-ref bars tab) picked))) (and p (cadr p)))))
-                                (minibuffer-preview-candidates! (cands) on-confirm)
-                                (let step ((n (length (cands))))
-                                  (when (and want (> n 0) (not (equal? (minibuffer-selected) want)))
-                                    (minibuffer-next!)
-                                    (step (- n 1))))
-                                (light! (or (minibuffer-selected) (car (car (cands))))))
+                              (minibuffer-preview-candidates! (cands) on-confirm)
+                              (land!)
+                              (light! (or (minibuffer-selected) (car (car (cands)))))
                               #t))))))
 
 (public! 'tab-bars-pick! "(tab-bars-pick! BUF) — one minibuffer over every tab bar of BUF and the pane paired with it; typing filters them all")

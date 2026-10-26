@@ -47,6 +47,11 @@
                             (list 'tag "div" 'class "ats-card-headline" 'text (field 'headline))))))))
 
 (define-style! 'ats "
+.ats-card.ats-candidate { display: flex; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--hl-line-bg); border-radius: 8px; font-family: var(--font-sans); font-size: 12.5px; }
+.ats-candidate .sa-name-cell { font-weight: 600; }
+.ats-candidate .ats-card-top, .ats-candidate .ats-app-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.ats-candidate .ats-card-avatar.ats-app-letter { display: flex; align-items: center; justify-content: center; font-weight: 600; }
+.ats-candidate .ats-card-top, .ats-candidate .ats-card-headline { white-space: normal; }
 .semantic-item.ats-card { display: flex; gap: 12px; align-items: center; padding: 6px 0; font-family: var(--font-sans); font-size: 12.5px; }
 .ats-card-face { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; width: 56px; }
 .ats-card-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
@@ -434,6 +439,65 @@
                'children (cons head body))))
 (ats-component-as! 'ats/assessment 'ui/callout "assessment" "A take on a candidate for a job, quick or deep: its verdict as the label, the reasoning as the body.")
 (ats-component-as! 'ats/job-context 'ui/group "job-context" "The job a candidate page is opened against: the job, the assessment and the application.")
+
+;; a candidate as a chat card: the list row's face, name and numbers, then its fit and tags. o opens the candidate beside the chat.
+(defcomponent 'ats/candidate
+  "One candidate as a card: the photo or initial with the rating, the name, experience and CTC, the headline, then fit and tags. In a chat, o opens the candidate's ATS page."
+  '((id string optional "the ATS candidate key, as \"cNbTgiW\"; Open needs it")
+    (name string required "as the ATS names them")
+    (headline string optional "the current role and company")
+    (experience string optional "years, as \"4.8y\"")
+    (ctc string optional "current to expected, as \"13→24 LPA\"")
+    (notice string optional "the notice period, as \"30 days\"")
+    (location string optional "the city they work from")
+    (rating string optional "the ATS rating, as \"3.0\"")
+    (fit string optional "Strong fit, Potential fit or Unfit")
+    (tags list optional "short facts, as strings")
+    (photo string optional "an avatar URL; the initial shows without it"))
+  '(id "cNbTgiW" name "Priya Nair" headline "Senior Backend Engineer at Razorpay"
+    experience "6.2y" ctc "38→55 LPA" notice "60 days" location "Bengaluru" rating "4.0"
+    fit "Strong fit" tags ("Go" "payments" "distributed systems"))
+  (lambda (p)
+    (let* ((get (lambda (k) (component--get p k "")))
+           (name (get 'name))
+           (pill (lambda (text tone) (list 'tag "c-text" 'class (string-append "ats-pill " tone) 'text text)))
+           (dim (lambda (k) (if (component--has? p k) (string-append "   " (get k)) "")))
+           (photo (if (component--has? p 'photo)
+                      (list 'tag "img" 'class "ats-card-avatar"
+                            'attrs (list (list "src" (get 'photo)) (list "alt" "") (list "referrerpolicy" "no-referrer")))
+                      (list 'tag "c-text" 'class "ats-card-avatar ats-app-letter"
+                            'text (if (> (string-length name) 0) (substring name 0 1) "?")))))
+      (list 'tag "c-card" 'class "c-card ats-card ats-candidate"
+            'children
+            (list (list 'tag "c-group" 'class "ats-card-face"
+                        'children (append (list photo)
+                                          (if (component--has? p 'rating)
+                                              (map (lambda (s) (list 'tag "c-text" 'class (string-append "sa-stars-cell " (car s)) 'text (cadr s)))
+                                                   (site-app-stars-segs (get 'rating) #f))
+                                              '())))
+                  (list 'tag "c-group" 'class "ats-card-main"
+                        'children
+                        (append
+                          (list (list 'tag "c-group" 'class "ats-card-top"
+                                      'children (list (list 'tag "c-text" 'class "sa-name-cell" 'text name)
+                                                      (list 'tag "c-text" 'class "c-dim"
+                                                            'text (string-append (dim 'experience) (dim 'ctc) (dim 'notice) (dim 'location))))))
+                          (if (component--has? p 'headline) (list (list 'tag "c-text" 'class "ats-card-headline" 'text (get 'headline))) '())
+                          (if (or (component--has? p 'fit) (component--has? p 'tags))
+                              (list (list 'tag "c-group" 'class "ats-app-meta"
+                                          'children (append (if (component--has? p 'fit) (list (pill (get 'fit) (ats-application-tone-fit (get 'fit)))) '())
+                                                            (map (lambda (t) (list 'tag "c-text" 'class "ats-app-fact" 'text t))
+                                                                 (component--get p 'tags '())))))
+                              '()))))))))
+
+(component-actions! 'ats/candidate
+  (list (list 'open "Open" "o" '(display external)
+              (lambda (p)
+                (if (component--has? p 'id)
+                    (display-buffer-other-window! (ats-candidate-show! (component--get p 'id) (component--get p 'name #f) #t))
+                    (message "ats: this card has no candidate id"))))))
+
+(component-chat! 'ats/candidate)
 
 (define-style! 'ats-elements "
 :where(work-experiences, work-experience, applications, application, assessment, job-context) { display: block; }

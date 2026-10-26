@@ -671,6 +671,27 @@
     (list 'tag "c-group" 'class "c-chips"
           'children (map (lambda (t) (component 'ui/badge (list 'text t))) (component--get p 'items)))))
 
+(defcomponent 'ui/chart
+  "A line, area, bar or scatter chart of up to eight series, drawn in the theme's colours."
+  '((kind string optional "line (the default), area, bar or scatter")
+    (series list required "((NAME (Y ...)) ...); a point may be (X Y) to set its x")
+    (categories list optional "the x labels, as strings, one for each Y; bars need them")
+    (title string optional "one line above the chart")
+    (x-label string optional "what the x axis counts")
+    (y-label string optional "what the y axis counts, with its unit")
+    (y-zero boolean optional "start the y axis at 0; bars and areas always do"))
+  '(kind "bar" title "Emergent SDE-2 pipeline" y-label "candidates"
+    categories ("sourced" "applied" "shortlisted" "interviewing" "offer")
+    series (("this month" (42 18 9 4 1)) ("last month" (35 12 6 3 0))))
+  (lambda (p)
+    (chart-block (list 'type (component--get p 'kind "line")
+                       'series (component--get p 'series)
+                       'categories (component--get p 'categories #f)
+                       'title (component--get p 'title #f)
+                       'x-label (component--get p 'x-label #f)
+                       'y-label (component--get p 'y-label #f)
+                       'y-zero (component--get p 'y-zero #f)))))
+
 ;; each one's imenu entry: a heading, group or card by its title, a callout by
 ;; its label, a person's head by who they are and their role
 (for-each (lambda (r) (component-imenu! (car r) (cadr r)))
@@ -684,7 +705,7 @@
                                            (if (equal? title "") "" (string-append " · " title))))))))
 
 ;; the ones whose props are plain data, so a chat reply may draw them
-(for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/chips))
+(for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/chips ui/chart))
 
 (define *component-gallery-buffer* "*Components*")
 

@@ -924,7 +924,11 @@
     ;; made an empty file buffer in its place
     'visit-row (lambda (path)
                  (if (and (string-prefix? "/" path) (file-exists? path))
-                     (begin (visit-in-group path (group-here)) (end-of-buffer!))
+                     (let ((buf (visit-in-group path (group-here))))
+                       (end-of-buffer!)
+                       ;; the chats it spawned come back with it
+                       (when (and buf (boundp 'chat-open-children))
+                         (chat-open-children buf)))
                      (message (string-append path " is gone; g reads the chats again"))))
     'after-visit (lambda (b) (end-of-buffer!))
     'opts

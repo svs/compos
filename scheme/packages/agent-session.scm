@@ -1318,6 +1318,48 @@
     (let ((bs (chat-open-children)))
       (message (string-append (number->string (length bs)) " children open")))))
 
+(effects! '(destroy))
+
+;; Killing a chat kills the chats it spawned, and theirs. The quiet ones go
+;; with it; when one is busy -- a turn in flight, or waiting on you -- the
+;; kill asks first, and no kills only the parent. Each child is archived, so
+;; restoring the parent reads it back (chat-open-children).
+(define (subagent-live-descendants chat)
+  (apply append
+    (map (lambda (c)
+           (let ((b (subagent-live-buffer c)))
+             (if b (cons b (subagent-live-descendants c)) '())))
+         (subagent-children chat))))
+
+(define (subagent-kill-confirm! next target done)
+  (let* ((kids (if (and (buffer-known? target) (chat-buffer? target))
+                   (subagent-live-descendants target)
+                   '()))
+         (busy (filter (lambda (b) (memq (subagent-status-of b) '(running wait))) kids))
+         (alone! (lambda () (next target done)))
+         ;; the children go only once the parent did: a kill declined
+         ;; further in (unsaved text, the group's last buffer) keeps them
+         (with-kids! (lambda ()
+                       (next target
+                             (lambda (killed?)
+                               (when killed?
+                                 (for-each (lambda (b)
+                                             (when (buffer-known? b)
+                                               (subagent-archive! (subagent-slug b))))
+                                           kids))
+                               (when done (done killed?)))))))
+    (cond ((null? kids) (alone!))
+          ((null? busy) (with-kids!))
+          (else
+           (y-or-n (string-append "Kill " (number->string (length kids))
+                                  " children too? (" (number->string (length busy)) " busy)")
+                   with-kids! alone!)))))
+
+(advice-add! 'kill-buffer-confirm! 'around 'subagent-children
+  (lambda (next target done) (subagent-kill-confirm! next target done)))
+
+(effects! '(read))
+
 (define (subagent-log chat)
   (subagent-log-entries (subagent-slug chat)))
 

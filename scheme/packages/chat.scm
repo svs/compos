@@ -1004,6 +1004,9 @@
                           ;; again instead of leaving it named after its file.
                           (when (and (string? title) (not (equal? title "")))
                             (chat-title buf title))
+                          ;; the chats it spawned come back with it
+                          (when (and buf (boundp 'chat-open-children))
+                            (chat-open-children buf))
                           buf)
                         (message "No such archived chat")))))))))))
 

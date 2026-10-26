@@ -1075,15 +1075,20 @@ the next row down. STEP is kept for the callers."
 (define (switch-tab-row tab &optional tabs)
   (map (lambda (t) (list (cadr t) (equal? (car t) tab))) (or tabs *switch-tabs*)))
 
-;; the fixed tabs, then one for each subject of the group's chats: a
-;; subject tab is its name, a string, where the fixed ones are symbols
+;; a chat another chat spawned
+(define (switch-child? name)
+  (and (buffer-known? name) (buffer-local name 'subagent-parent) #t))
+
+;; the fixed tabs; Children when the group holds a chat another chat
+;; spawned; then one for each subject of the group's chats: a subject tab
+;; is its name, a string, where the others are symbols
 (define (switch-tab-list rows group)
-  (append *switch-tabs*
-          (if (and group (boundp 'chat-subjects))
-              (map (lambda (c) (list c c))
-                   (chat-subjects
-                     (map car (filter (lambda (r) (switch-row-in-group? r group)) rows))))
-              '())))
+  (let ((mine (if group (map car (filter (lambda (r) (switch-row-in-group? r group)) rows)) '())))
+    (append *switch-tabs*
+            (if (find switch-child? mine) '((children "Children")) '())
+            (if (boundp 'chat-subjects)
+                (map (lambda (c) (list c c)) (chat-subjects mine))
+                '()))))
 
 (define (switch-tab-step tab step &optional tabs)
   (let* ((keys (map car (or tabs *switch-tabs*)))
@@ -1109,6 +1114,10 @@ the next row down. STEP is kept for the callers."
         ((eq? tab 'pane)
          (let ((mine (if (and win (window-exists? win)) (switch-pane-tab-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
+        ((eq? tab 'children)
+         (if group
+             (filter (lambda (r) (and (switch-row-in-group? r group) (switch-child? (car r)))) rows)
+             '()))
         ((string? tab)
          (if group
              (filter (lambda (r) (and (switch-row-in-group? r group)

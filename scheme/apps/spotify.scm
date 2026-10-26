@@ -1610,7 +1610,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
       (spotify-stage! name album title facts)
       (car (spotify--claim-all b
         (list (spotify--lined (component 'spotify/ambient
-                (append (list 'title title 'artists (or (plist-get now 'artists) "") 'art cover
+                (append (list 'title title 'artists (or (plist-get now 'artists) "") 'album album 'art cover
                               'playing? (eq? (plist-get *spotify-now* 'playing) #t)
                               'position (car (cell-ref 'spotify/position)) 'duration (or (plist-get now 'duration) ""))
                         (spotify--staged (spotify--get 'stages (spotify--stage-key name title))

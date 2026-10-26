@@ -133,7 +133,7 @@
 
 (defcomponent 'spotify/ambient
   "The page of what plays, to glance at: one photo fills the stage and breathes, the facts swirl over it a few at a time, and the title sits under them. PACE is slow, medium or fast; HEADLINE the index of the fact told largest; TINT the colour of the veil. FACTS is ((LABEL TEXT) ...)."
-  '((title string required) (artists string optional) (art string optional) (images list optional)
+  '((title string required) (artists string optional) (album string optional) (art string optional) (images list optional)
     (facts list optional) (headline number optional) (pace string optional) (tint string optional)
     (playing? boolean optional) (position string optional) (duration string optional))
   '(title "Windowpane" artists "Opeth" playing? #t pace "slow" headline 0 facts (("From" "Damnation · 2003") ("On the record" "Steven Wilson — producer")) position "2:10" duration "7:44")
@@ -153,6 +153,7 @@
                                 'children (list (list 'tag "div" 'class "sp-ambient-side"
                                                       'children (list (spotify--text "sp-ambient-title" (component--get p 'title ""))
                                                                       (spotify--text "sp-ambient-artists" (component--get p 'artists ""))
+                                                                      (spotify--text "sp-ambient-artists" (component--get p 'album ""))
                                                                       (cell-part 'spotify/progress
                                                                         (spotify--progress "sp-np-progress" (component--get p 'position "") (component--get p 'duration "")))))))))))))
 

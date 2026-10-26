@@ -2759,7 +2759,7 @@ defmodule Compos.Ui.EditorLive do
           nil ->
             {v, _} = block_build(c, text, {%{}, win}, {0, %{}})
             v = %{v | attrs: v.attrs ++ [{"data-index", Integer.to_string(i)}]}
-            Map.put(v, :frozen, frozen_html(v, win))
+            v |> Map.put(:index, i) |> Map.put(:frozen, frozen_html(v, win))
 
           v ->
             v

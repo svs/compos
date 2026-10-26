@@ -95,7 +95,7 @@
 
 (define (todo--ids v)
   (cond ((pair? v) v)
-        ((todo--blank? v) '())
+        ((or (null? v) (todo--blank? v)) '())
         (else (todo--words v))))
 
 (define (todo--priority p)
@@ -565,7 +565,7 @@
                (todo--fail "cannot set " (symbol->string k)))
               (else
                (let ((v (todo--norm k v)))
-                 (if (equal? v (plist-get new k))
+                 (if (equal? v (todo--norm k (plist-get new k)))
                      (loop (cddr ps) new changes)
                      (loop (cddr ps) (plist-put new k v) (cons (todo--change k (plist-get new k) v) changes)))))))
           (let* ((text (plist-get props 'log))

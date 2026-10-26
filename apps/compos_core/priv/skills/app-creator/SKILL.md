@@ -141,33 +141,13 @@ Give the kept name a rule, or it takes a number:
 
 Never move a detail with `switch-to-buffer!`, `pop-to-buffer` or a bare `display-buffer`. Each bypasses the remembered window, and the app grows a pane per row.
 
-### 4. Three columns
+### 4. Open beside, never re-tile
 
-Do not split by hand. Hand the app's panes to the tiler and the columns come out on their own:
+Opening an app shows its buffers and changes nothing else. The window you are in keeps its buffer. No pane is re-tiled, and the group's layout is not saved.
 
-```scheme
-(define (amazon-layout!)
-  (panes-tile-default!
-    (filter buffer-exists?
-            (list (group-chat (frame-group))
-                  *amazon-buffer*
-                  (amazon-current-detail)))))
-```
+`(app-open! LISTING)` shows the listing in its own window when one shows it, else in the pane beside the window you are in. `(app-open! LISTING DETAIL)` also shows the detail in a third pane, never in yours. It selects the listing. Later rows open their detail with `display-buffer-detail!`, which reuses that window.
 
-`panes-tile-default!` uses the frame's chosen layout. A frame that never
-chose gets the layout that fits the panes:
-
-| panes | layout |
-|---|---|
-| 1 | `single` |
-| 2 | `two-pane` |
-| 3 or more | `columns` |
-
-So the app's three panes — the group's chat, the listing, the current detail —
-are three columns. A fourth pane does not make a fourth column: the layouts hold
-at most three, and the extra buffers sit on the frame's strip, where Cmd-left and
-Cmd-right reach them. That is the whole layout policy. Save the arrangement with
-`(group-layout-save! id)` once the panes stand.
+Do not call `panes-tile-default!`, `app-layout!`, `group-layout-save!` or `switch-to-buffer!` from the entry command. Each one moves windows that the user did not ask to move. The user arranges the app with `M-x app-layout` when they want its columns. That command needs `(app-claim! BUF ID ROLE)` on each app buffer.
 
 ## Apps from a website
 
@@ -340,10 +320,8 @@ One command named after the app, and it is the only way in:
 (define-command "amazon" "Open the Amazon app"
   (lambda ()
     (let ((buf (amazon-listing!)))   ;; creates, joins, sets the mode, renders
-      (amazon-show-detail! (list-current buf))
-      (amazon-layout!)
-      (group-layout-save! (frame-group))
-      (switch-to-buffer! buf))))
+      (app-open! buf)
+      (amazon-show-detail! (list-current buf)))))
 ```
 
 ## Verify

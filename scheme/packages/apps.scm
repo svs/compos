@@ -85,6 +85,34 @@
 (public! 'app-group "(app-group TITLE) — the id of the app's own group, named TITLE; made the first time")
 (public! 'app-join-group! "(app-join-group! BUF TITLE) — BUF joins the app's own group; answers its id")
 
+;;; Opening an app shows its listing and its detail, and nothing else
+;;; moves. Each one takes its own window when one shows it, else a pane
+;;; that is not the one you are in and does not show the other. No pane is re-tiled
+;;; and the group's layout is not saved; arranging the app is the
+;;; separate app-layout command.
+(define (app-open! listing &optional detail)
+  (let* ((ls (window-showing listing))
+         (ds (and detail (window-showing detail)))
+         ;; two free panes: the listing takes the left one, the detail the right
+         (free (if (or ls ds (not detail)) '() (panes-apart-panes '())))
+         (ids (panes-pane-ids (panes--ensure-layout!)))
+         (two (and (>= (length free) 2)
+                   (let ((a (car free)) (b (cadr free)))
+                     (if (< (panes--index-of a ids) (panes--index-of b ids)) (list a b) (list b a)))))
+         (lw (cond (ls ls)
+                   (two (panes-display-in-pane! listing (car two)))
+                   (else (panes-display-apart! listing '()))))
+         (dw (and detail
+                  (cond (ds ds)
+                        (two (panes-display-in-pane! detail (cadr two)))
+                        (else (panes-display-apart! detail (list listing)))))))
+    (when dw (detail-window-note! listing dw) (detail-adopt! listing detail))
+    (when (and lw (window-exists? lw) (not (equal? lw (active-window))))
+      (select-window! lw))
+    lw))
+
+(public! 'app-open! "(app-open! LISTING &optional DETAIL) — show LISTING and DETAIL in panes other than yours and select LISTING; no pane re-tiles, nothing is saved")
+
 ;; An app's buffers fall in three roles: its index (the home and its
 ;; lists), its pages, and the rest, like a player. Each role takes one
 ;; window; its other buffers wait in that window's history.

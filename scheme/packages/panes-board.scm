@@ -343,9 +343,13 @@
             (let* ((l (panes-board-layout))
                    (next (fn l id)))
               (when (and next (not (equal? next l)))
-                (let ((me (active-window)))
+                ;; the draw may hand the old window to the moved buffer,
+                ;; so the focus comes back to the board, wherever it is now
+                (let ((me (active-window)) (board (panes-board-buffer)))
                   (panes-apply! next)
-                  (when (window-exists? me) (select-window! me))))
+                  (let ((w (window-showing board)))
+                    (cond (w (select-window! w))
+                          ((window-exists? me) (select-window! me))))))
               (panes-board-refresh!))))))
 
 ;;; --- the verbs -------------------------------------------------------------------

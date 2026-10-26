@@ -571,6 +571,25 @@
     (window-log-note! "panes" kind buf mode "->" (cadr shown))
     (panes-handle layout (cadr shown))))
 
+(define (panes--show-in-pane! to buf note)
+  "TO is (LAYOUT PANE-ID). BUF takes the window of its mode in that pane,
+   else a new window at the front. The focus stays. NOTE goes to the
+   window log. Answers the window's handle."
+  (let* ((mode (panes--buffer-mode buf))
+         (l (car to)) (pid (cadr to))
+         (same (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid)))
+         (placed (if same
+                     (list (if (member buf (panes-window-buffers l same))
+                               (panes-show l same buf)
+                               (panes-show (panes-drop-buffer l buf) same buf))
+                           same)
+                     (panes-add-window (panes-drop-buffer l buf) pid buf mode)))
+         ;; the window comes to the front of its pane; the focus stays
+         (l (panes-raise (car placed) (cadr placed)))
+         (drawn (panes-apply! l)))
+    (window-log-note! note buf "->" (cadr placed))
+    (panes-handle drawn (cadr placed))))
+
 (define (panes-display-beside! buf owner)
   "A display of BUF in the pane beside OWNER's, never on top of OWNER:
    the pane after it, else a new pane after it while the layout has
@@ -590,20 +609,41 @@
                    (else #f))))
     (if (not to)
         (panes-display! buf)
-        (let* ((mode (panes--buffer-mode buf))
-               (l (car to)) (pid (cadr to))
-               (same (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid)))
-               (placed (if same
-                           (list (if (member buf (panes-window-buffers l same))
-                                     (panes-show l same buf)
-                                     (panes-show (panes-drop-buffer l buf) same buf))
-                                 same)
-                           (panes-add-window (panes-drop-buffer l buf) pid buf mode)))
-               ;; the window comes to the front of its pane; the focus stays
-               (l (panes-raise (car placed) (cadr placed)))
-               (drawn (panes-apply! l)))
-          (window-log-note! "panes display beside" buf owner "->" (cadr placed))
-          (panes-handle drawn (cadr placed))))))
+        (panes--show-in-pane! to buf (string-append "panes display beside " (or owner ""))))))
+
+(define (panes-apart-panes avoid)
+  "The panes that are not the selected one and show none of the buffers
+   AVOID: the ones to the right of the selected pane, nearest first, then
+   the ones to its left, nearest first."
+  (let* ((l (panes--ensure-layout!))
+         (ids (panes-pane-ids l))
+         (here (panes--selected-pane l))
+         (i (and here (panes--index-of here ids)))
+         (order (if i (append (list-tail ids (+ i 1)) (reverse (take ids i))) ids))
+         (taken (cons here
+                      (map (lambda (w)
+                             (let ((k (panes-key-of-handle l (car w))))
+                               (and k (panes-pane-of l k))))
+                           (filter (lambda (w) (member (cadr w) avoid)) (window-list))))))
+    (filter (lambda (p) (not (member p taken))) order)))
+
+(define (panes-display-in-pane! buf pid)
+  "A display of BUF in pane PID: the window of its mode there, else a
+   new window at the front. The focus stays. Answers the window's handle."
+  (panes--show-in-pane! (list (panes--ensure-layout!) pid) buf "panes display in pane"))
+
+(define (panes-display-apart! buf avoid)
+  "A display of BUF in the first of panes-apart-panes, else in a new
+   pane at the end while the layout has room. The focus stays. With no
+   such pane, a plain display. Answers the window's handle, or #f."
+  (let* ((l (panes--ensure-layout!))
+         (free (panes-apart-panes avoid))
+         (to (cond ((pair? free) (list l (car free)))
+                   ((panes-under-capacity? l) (panes-add-pane l))
+                   (else #f))))
+    (if (not to)
+        (panes-display! buf)
+        (panes--show-in-pane! to buf "panes display apart"))))
 
 (define (panes-visit! buf)
   "A visit: BUF shows and its window takes the focus. Answers the
@@ -878,6 +918,10 @@
 (public! 'panes-tile! "(panes-tile! LAYOUT BUFFERS) -> BUFFERS front the panes of LAYOUT")
 (public! 'panes-tile-default! "(panes-tile-default! BUFFERS) -> BUFFERS front the panes of this group's layout")
 (public! 'panes-raise-window! "(panes-raise-window! WIN) -> WIN comes to the front of its pane and takes the focus")
+(public! 'panes-display-apart! "(panes-display-apart! BUF AVOID) -> show BUF in a pane that is not the selected one and shows none of AVOID; the focus stays")
+(public! 'panes-apart-panes "(panes-apart-panes AVOID) -> the panes that are not the selected one and show none of AVOID, nearest to the right first")
+(catalog-meta! 'function "panes-apart-panes" 'effects '(read))
+(public! 'panes-display-in-pane! "(panes-display-in-pane! BUF PANE) -> show BUF at the front of PANE; the focus stays")
 
 (define (apply-layout! anchor spec)
   "The frame as SPEC says (define-mode-layout!): its buffers front the

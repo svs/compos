@@ -2511,9 +2511,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
         (when (null? (site-app-rows home))
           (site-app-find-tab! 'spotify
             (lambda (tab) (site-app-read-page! 'spotify (site-app-page spec 'home)))))
-        (app-layout! "spotify")
-        (let ((win (app-window-of home)))
-          (when (and win (window-buffer win)) (select-window! win)))
+        (app-open! home)
         (spotify-now-refresh!)))))
 
 (define-command "spotify-play" "Play the row, track or page at point in your Spotify tab"

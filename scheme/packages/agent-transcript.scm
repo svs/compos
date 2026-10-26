@@ -846,6 +846,9 @@
        (list 'tag "details" 'class "ag-thought"
              'children (list (list 'tag "summary" 'text "thought")
                              (list 'tag "c-group" 'class "ag-thought-text" 'range (list s e)))))
+      ;; a cancelled call ran nowhere: one quiet line, not a card
+      ((and (equal? kind "tool") (> (length b) 6) (equal? (nth 6 b) "cancelled"))
+       (list 'tag "c-info" 'class "ag-meta" 'attrs '(("kind" "meta")) 'text "cancelled"))
       ((equal? kind "tool") (chat-view--tool buf b open-cards))
       ((equal? kind "plan")
        (list 'tag "c-plan" 'children (list (list 'tag "pre" 'class "ag-plan" 'range (list s e)))))

@@ -17,6 +17,10 @@
   "From this width, *Messages* adds the mode and source columns."
   'group 'messages 'type 'number)
 
+(defcustom 'messages-page-size 60
+  "Rows of *Messages* that one draw writes. A message while the list is shown redraws the page and sends it to the browser."
+  'group 'messages 'type 'number)
+
 ;; A log is read in bulk, so it wears a smaller face than a document. The
 ;; step is the one C-+ and C-_ move, and the buffer's own value wins once
 ;; it has one: a reader who resized this list keeps their size, including
@@ -362,6 +366,9 @@
     'filter messages--filter
     'local-filter #t
     'stamp messages--stamp
+    ;; A shown list redraws on every message. Without a page, each message
+    ;; sends every row of the log to the browser.
+    'page-size (lambda (buf) messages-page-size)
     'no-marks #t
     ;; The keys live in the shared ui/keymap component, pinned under the
     ;; rows: it wraps at the window width instead of dropping hints off

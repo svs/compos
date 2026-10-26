@@ -38,28 +38,9 @@ defmodule Compos.Ui.BlockList do
       data-scroll-offset={@follow && @follow.offset}
       data-follow-seq={@follow && @follow.seq}
       {@b.attrs}
-    ><.frozen :for={c <- @children} :key={c.index} html={c.frozen} /></.dynamic_tag>
+    ><%= for c <- @children do %>{Phoenix.HTML.raw(c.frozen)}<% end %></.dynamic_tag>
     </c-list>
     """
-  end
-
-  # One child's HTML. The comprehension is keyed by the child's index in
-  # the whole list, so a changed list sends only the children that changed.
-  # An unkeyed comprehension sends every child again: a streaming reply then
-  # sends the whole transcript on each chunk.
-  defp frozen(assigns), do: ~M"{Phoenix.HTML.raw(@html)}"
-
-  @impl true
-  def update(new, socket) do
-    old = socket.assigns[:children]
-    if old && System.get_env("PROBE") do
-      same = Enum.zip(old, new.children) |> Enum.count(fn {a, b} -> a == b end)
-      diffk = Enum.zip(old, new.children) |> Enum.find(fn {a, b} -> a != b end)
-      IO.inspect({length(old), length(new.children), same,
-        diffk && (for k <- Map.keys(elem(diffk, 0)), Map.get(elem(diffk, 0), k) != Map.get(elem(diffk, 1), k), do: k)}, label: "PROBE children")
-      IO.inspect(for k <- [:b, :win, :buf, :follow], Map.get(socket.assigns, k) != Map.get(new, k), do: k)
-    end
-    {:ok, Phoenix.Component.assign(socket, new)}
   end
 
   @impl true

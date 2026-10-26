@@ -937,7 +937,10 @@
           (list (plist-get t 'title) (if (member s *todo-closed*) "f-dim" "ibuffer-name"))
           (list (todo--short-project t) "f-dim")
           ;; a chat that closed leaves only its id behind, which says nothing
-          (list (let ((w (todo--who t))) (if (string-prefix? "chat:" w) "chat closed" w))
+          (list (let* ((w (todo--who t))
+                       (w (if (string-prefix? "chat:" w) "chat closed" w))
+                       (n (length (todo--attached t))))
+                  (if (> n 0) (string-append w " +" (number->string n)) w))
                 (if (todo--stalled? t) "todo-overdue" "f-dim"))
           (todo--when t)))))
 
@@ -988,6 +991,7 @@
         (list (list (todo--dot t) (list (plist-get t 'title) "todo-title"))
               (list "" meta (todo--tag-text t))
               (list "" (todo--chips (list (if (pair? who) (todo--chip (car who) (cadr who)) "")
+                                        (todo--chip (todo--attached-text t) "todo-date")
                                         (todo--chip (todo--last-update t) "org-meta"))))
               (list "")))))
 
@@ -1309,6 +1313,16 @@
                               (message (string-append "Attached to " (car hit)))))))))))))
 
 (define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
+
+(define (todo--attached t)
+  ;; the chats attached beside the assignee, by title while they live
+  (map (lambda (c) (or (todo--live-chat c) "chat closed"))
+       (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
+
+(define (todo--attached-text t)
+  (let ((more (todo--attached t)))
+    (if (null? more) ""
+        (string-append "+ " (string-join (map (lambda (c) (format-elide c 24)) more) ", ")))))
 
 ;; a card says how its chat is doing. The event log's chat-status view
 ;; knows it; the todo file does not hold it.

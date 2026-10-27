@@ -152,6 +152,16 @@
       (check-true! (assoc 'groups-v2 (desktop-globals)) "the desktop carries the records")
       (t--gs-drop! id))))
 
+(deftest 'parallel-setting-writes-keep-every-key
+  "chats on other lanes set their own keys at once; no write drops another's"
+  (lambda ()
+    (let ((id (group-record-create! "zzgs-race"))
+          (keys '(zzgs-a zzgs-b zzgs-c zzgs-d zzgs-e zzgs-f zzgs-g zzgs-h)))
+      (chat-parallel-map (lambda (k) (group-setting-set! id k #t)) keys)
+      (check-equal! (filter (lambda (k) (not (group-setting id k))) keys) '()
+                    "each key a lane set is still there")
+      (t--gs-drop! id))))
+
 ;;; --- the chats ----------------------------------------------------------------
 
 (deftest 'a-chat-answers-no-group-for-a-dead-group-id

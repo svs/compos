@@ -487,7 +487,8 @@ is forgotten and that group falls back to creation order in the switcher."
                    (path? (group-path-name? clean))
                    (record (list id clean #f #f "quiet" #f (group-next-color)
                                  #f (and path? clean))))
-              (set! *group-records* (append *group-records* (list record)))
+              (with-group-records-lock (lambda ()
+                (set! *group-records* (append *group-records* (list record)))))
               (when path? (group-assign-path-name! id clean))
               ;; the founding frame owns it; that counts only if the frame is isolated
               (group-frame-own! id (selected-frame))
@@ -511,9 +512,17 @@ is forgotten and that group falls back to creation order in the switcher."
            (not (group-id-string? value))
            (group-record-create! value))))
 
+;; Lanes share *group-records* with no atomic update: two chats that write
+;; the list at once each map over the copy they read, and the later set!
+;; drops the other's change. Every write, and every read-modify-write of a
+;; record's settings, runs under this lock. It is re-entrant on one lane.
+(define (with-group-records-lock thunk)
+  (with-scheme-lock 'group-records thunk))
+
 (define (group-record-update! value field new-value)
   (let ((id (group-resolve-id value)))
     (when id
+      (with-group-records-lock (lambda ()
       (set! *group-records*
         (map
           (lambda (record)
@@ -534,7 +543,7 @@ is forgotten and that group falls back to creation order in the switcher."
                           (group-record-origin record))
                       (if (equal? field 'settings) new-value
                           (group-record-settings record)))))
-          *group-records*))
+          *group-records*))))
       (desktop-dirty!)
       (when (member field '(name color))
         (group-frame-styles-refresh!)
@@ -545,9 +554,10 @@ is forgotten and that group falls back to creation order in the switcher."
     (when id
       (group-frame-context-remove-id! id)
       (set! *group-mru* (remove (lambda (x) (equal? x id)) *group-mru*))
-      (set! *group-records*
-        (remove (lambda (record) (equal? (group-record-id record) id))
-                *group-records*))
+      (with-group-records-lock (lambda ()
+        (set! *group-records*
+          (remove (lambda (record) (equal? (group-record-id record) id))
+                  *group-records*))))
       (group-reshorten-path-names!)
       (desktop-dirty!)
       (modeline-groups-refresh!))))
@@ -1073,14 +1083,17 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-setting-set! g key value)
   (let ((id (group-resolve-id g)))
+    ;; read the plist under the lock, so the write keeps every other key
+    ;; a sibling lane set since
     (when id
-      (let loop ((rest (group-setting-plist g)) (kept '()))
-        (cond ((or (null? rest) (null? (cdr rest)))
-               (group-record-update! id 'settings
-                 (append (reverse kept) (list key value))))
-              ((equal? (car rest) key) (loop (cdr (cdr rest)) kept))
-              (else (loop (cdr (cdr rest))
-                          (cons (car (cdr rest)) (cons (car rest) kept)))))))
+      (with-group-records-lock (lambda ()
+        (let loop ((rest (group-setting-plist g)) (kept '()))
+          (cond ((or (null? rest) (null? (cdr rest)))
+                 (group-record-update! id 'settings
+                   (append (reverse kept) (list key value))))
+                ((equal? (car rest) key) (loop (cdr (cdr rest)) kept))
+                (else (loop (cdr (cdr rest))
+                            (cons (car (cdr rest)) (cons (car rest) kept)))))))))
     id))
 
 
@@ -5024,6 +5037,8 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-setting-set! "(group-setting-set! G KEY VALUE) — durable per-group state in the group record")
 (catalog-meta! 'function "group-setting" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-setting-set!" 'domain 'buffers 'effects '(write))
+(public! 'with-group-records-lock "(with-group-records-lock THUNK) — run THUNK as the only writer of the group records; re-entrant")
+(catalog-meta! 'function "with-group-records-lock" 'domain 'buffers 'effects '(write))
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'switch-to-buffer-in-group!

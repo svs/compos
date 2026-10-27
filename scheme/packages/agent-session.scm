@@ -1081,11 +1081,12 @@
     slug))
 
 (define (subagent-slot-put! g slot)
-  (let ((rest (filter
-                (lambda (s) (not (equal? (subagent-slot-parent s)
-                                         (subagent-slot-parent slot))))
-                (subagent-slots g))))
-    (group-setting-set! g *subagent-setting* (append rest (list slot)))))
+  (with-group-records-lock (lambda ()
+    (let ((rest (filter
+                  (lambda (s) (not (equal? (subagent-slot-parent s)
+                                           (subagent-slot-parent slot))))
+                  (subagent-slots g))))
+      (group-setting-set! g *subagent-setting* (append rest (list slot)))))))
 
 ;; record PARENT -> CHILD. -> the group holding the edge, or #f when the
 ;; parent chat is not here to give the edge a durable home.
@@ -1095,16 +1096,20 @@
          (named (and pslug (agent-buf pslug)))
          (buf (and named (buffer-exists? named) named)))
     (and pslug cslug (not (equal? pslug cslug)) buf
-         (let* ((found (subagent-slot-of pslug))
-                (home (if found (car found) (group-ensure! buf)))
-                (slot (if found (nth 1 found) (list pslug "live")))
-                (kids (subagent-slot-children slot)))
+         ;; sibling chats record at once: read the slot and write it back
+         ;; under one lock, or one sibling's edge replaces the other's
+         (let ((home (with-group-records-lock (lambda ()
+                       (let* ((found (subagent-slot-of pslug))
+                              (home (if found (car found) (group-ensure! buf)))
+                              (slot (if found (nth 1 found) (list pslug "live")))
+                              (kids (subagent-slot-children slot)))
+                         (when (and home (not (member cslug kids)))
+                           (subagent-slot-put! home
+                             (append (list pslug (subagent-slot-state slot))
+                                     kids (list cslug))))
+                         home)))))
            (and home
                 (begin
-                  (unless (member cslug kids)
-                    (subagent-slot-put! home
-                      (append (list pslug (subagent-slot-state slot))
-                              kids (list cslug))))
                   (subagent-cache-rebuild! pslug)
                   (subagent-cache-rebuild! cslug)
                   ;; the parent counts its children in its header line
@@ -1121,9 +1126,12 @@
          (parent (and slug (subagent-parent slug)))
          (pbuf (and parent (subagent-live-buffer parent))))
     (when found
-      (let ((slot (nth 1 found)))
-        (subagent-slot-put! (car found)
-          (append (list slug "gone") (subagent-slot-children slot)))))
+      (with-group-records-lock (lambda ()
+        (let ((found (subagent-slot-of slug)))
+          (when found
+            (subagent-slot-put! (car found)
+              (append (list slug "gone")
+                      (subagent-slot-children (nth 1 found)))))))))
     ;; the parent counts its children in its header line, and the child is
     ;; still here while it dies: count again once the kill is done
     (when (and pbuf (boundp 'dashboard--sync!))
@@ -1215,12 +1223,13 @@
 (define (subagent-log-append! slug kind text)
   (let ((g (subagent-edge-group slug)))
     (when g
-      (let ((others (filter (lambda (row) (not (equal? (car row) slug)))
-                            (subagent-logs g)))
-            (entry (list (current-time) kind text)))
-        (group-setting-set! g *subagent-logs-setting*
-          (append others
-                  (list (cons slug (append (subagent-log-entries slug) (list entry))))))))))
+      (with-group-records-lock (lambda ()
+        (let ((others (filter (lambda (row) (not (equal? (car row) slug)))
+                              (subagent-logs g)))
+              (entry (list (current-time) kind text)))
+          (group-setting-set! g *subagent-logs-setting*
+            (append others
+                    (list (cons slug (append (subagent-log-entries slug) (list entry))))))))))))
 
 (define (subagent-result-paragraph text)
   (let ((paras (filter (lambda (p) (string-prefix? "RESULT:" p))

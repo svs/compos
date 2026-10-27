@@ -42,8 +42,8 @@
   "Where the digger reads: 'google, the search server; 'exa, Exa's search with page text (EXA_API_KEY); 'browser, a search page read in your own Chrome."
   'group 'spotify 'type 'choice)
 
-(defcustom 'spotify-dig-model "claude-haiku-4-5-20251001"
-  "The cheap model that turns what the digger reads into facts."
+(defcustom 'spotify-dig-role 'fast
+  "The llm-models! job that turns what the digger reads into facts."
   'group 'spotify)
 
 (defcustom 'spotify-dig-seconds 75
@@ -1513,7 +1513,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
                 (set! *spotify-dig-busy* #f)
                 (llm-with-model
                   (spotify--dig-prompt name album title angle (map cadr have) (if (> (string-length text) 9000) (substring text 0 9000) text))
-                  spotify-dig-model
+                  (llm-model-for spotify-dig-role)
                   (lambda (answer)
                     (set! *spotify-dig-busy* #f)
                     (let* ((known (map cadr (or (spotify--get 'facts key) '())))

@@ -128,6 +128,12 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> close_sheet() |> drain() |> refresh()}
   end
 
+  # a tap on a menu row: Scheme selects it and invokes it, as RET does
+  def handle_event("trow", %{"i" => i}, socket) do
+    with {i, ""} <- Integer.parse(to_string(i)), do: call(socket, "handheld-transient-tap!", [i])
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # a tap on a line: point goes there; on point's own line it opens
   def handle_event("line", %{"n" => n}, socket) do
     with {n, ""} <- Integer.parse(to_string(n)), do: call(socket, "handheld-tap-line!", [n])
@@ -679,7 +685,13 @@ defmodule Compos.Ui.MobileLive do
   end
 
   defp sheet(%{state: %{transient: t}} = assigns) do
-    assigns = assign(assigns, t: t)
+    # each row's place over every group, the index the menu selects by
+    {groups, _} =
+      Enum.map_reduce(t.groups, 0, fn g, i ->
+        {%{g | items: Enum.with_index(g.items, i)}, i + length(g.items)}
+      end)
+
+    assigns = assign(assigns, t: t, groups: groups)
 
     ~M"""
     <c-group class="hh-sheet-layer">
@@ -696,13 +708,13 @@ defmodule Compos.Ui.MobileLive do
           <c-text :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"}>{chip.label}</c-text>
         </c-group>
         <c-group class="hh-sheet-rows">
-          <%= for group <- @t.groups do %>
+          <%= for group <- @groups do %>
             <c-group class="hh-group-title">{group.title}</c-group>
             <c-group
-              :for={item <- group.items}
+              :for={{item, i} <- group.items}
               class={"hh-trow #{if item.selected, do: "on"} #{item.behavior}"}
-              phx-click="keys"
-              phx-value-ks={item.key}
+              phx-click="trow"
+              phx-value-i={i}
             >
               <c-text class="hh-tkey">{item.key}</c-text>
               <c-group class="hh-row-main">

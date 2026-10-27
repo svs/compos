@@ -212,7 +212,7 @@
   (let ((key (spotify--stage-key name title)))
     (when (and spotify-stage (not (equal? name "")) (not (equal? title "")) (>= (length facts) 4) (spotify--stage-playing? title)
                (not (spotify--get 'stages key)) (spotify--ask! (string-append "stage:" key)))
-      (llm-with-model (spotify--stage-prompt name album title facts) spotify-dig-model
+      (llm-with-model (spotify--stage-prompt name album title facts) (llm-model-for spotify-dig-role)
         (lambda (answer)
           (let ((plan (spotify--stage-parse answer (length facts))))
             (when (and plan (spotify--stage-playing? title))

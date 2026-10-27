@@ -126,19 +126,31 @@
 
 ;; every command TEXT names: each term must match the name or the first
 ;; doc line. The buffer's own commands come first.
+(define (handheld-search-rank name q terms here)
+  (let ((base (cond ((equal? name q) 0)
+                    ((string-prefix? q name) 1)
+                    ((handheld-terms-match? terms name) 2)
+                    (else 3))))
+    (if (member name here) (* 2 base) (+ (* 2 base) 1))))
+
 (define (handheld-search buf text)
   (let ((terms (handheld-terms text))
+        (q (string-downcase (string-trim text)))
         (here (handheld-buffer-command-names buf)))
     (if (null? terms)
         '()
-        (let loop ((names (command-names)) (near '()) (far '()) (n 0))
-          (if (or (null? names) (>= n *handheld-search-max*))
-              (map handheld-command-row (append (reverse near) (reverse far)))
+        (let loop ((names (command-names)) (hits '()))
+          (if (null? names)
+              (let ((ranked (sort hits)))
+                (map (lambda (h) (handheld-command-row (caddr h)))
+                     (take ranked (min (length ranked) *handheld-search-max*))))
               (let* ((name (car names))
-                     (hay (string-downcase (string-append name " " (handheld-doc-line name)))))
-                (cond ((not (handheld-terms-match? terms hay)) (loop (cdr names) near far n))
-                      ((member name here) (loop (cdr names) (cons name near) far (+ n 1)))
-                      (else (loop (cdr names) near (cons name far) (+ n 1))))))))))
+                     (doc (handheld-doc-line name))
+                     (hay (string-downcase (string-append name " " doc))))
+                (if (and (handheld-terms-match? terms hay)
+                         (or (not (equal? doc "")) (equal? name q)))
+                    (loop (cdr names) (cons (list (handheld-search-rank name q terms here) (string-length name) name) hits))
+                    (loop (cdr names) hits))))))))
 
 ;; What the header shows for BUF: (GROUP-LABEL CHAT?)
 (define (handheld-view buf)
@@ -216,6 +228,16 @@
       (begin (dispatch-keys (list "RET")) 'open)
       (begin (handheld-scrub! n) 'move)))
 
+;; A tap on row N of the open menu, counted over every group as the menu
+;; draws them: the row is selected, then invoked, as RET does. A row with
+;; no key of its own, such as a preset, has no other way in on a phone.
+(define (handheld-transient-tap! n)
+  (let ((state (transient--active)))
+    (when state
+      (transient--select! state n)
+      (run-command "transient-invoke-selected"))
+    (if state #t #f)))
+
 (effects! '(read))
 
 (public! 'handheld-view
@@ -253,4 +275,7 @@
 (catalog-meta! 'function "handheld-tap-line!" 'domain 'interaction 'effects '(write))
 (public! 'handheld-scrub!
   "(handheld-scrub! N): move point to the start of line N; returns the line reached")
+(public! 'handheld-transient-tap!
+  "(handheld-transient-tap! N): select row N of the open menu and invoke it; #f with no menu open")
+(catalog-meta! 'function "handheld-transient-tap!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "handheld-scrub!" 'domain 'interaction 'effects '(write))

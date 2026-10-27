@@ -38,6 +38,9 @@
 (defcustom 'todo-directories '("~/.compos/**/todos.md")
   "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
 
+(defcustom 'todo-chat-follow #t
+  "When true, moving through the todo list shows the chat of the task at point beside it.")
+
 (defcustom 'todo-user "svs"
   "The name a change is logged under when the caller names nobody.")
 
@@ -1573,7 +1576,7 @@
 ;; taking focus: the pane already showing a chat, else a spare window, else
 ;; a split under the task's page
 (define (todo--preview-chat! t)
-  (let ((chat (todo--chat-of t)))
+  (let ((chat (and todo-chat-follow (todo--chat-of t))))
     (when (and chat (not (window-showing chat)))
       (display-buffer chat))))
 

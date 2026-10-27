@@ -153,7 +153,9 @@ defmodule Compos.Core.BufferStore do
         _ -> []
       end
 
-    locals |> Map.drop(skip) |> Map.filter(fn {_k, v} -> serializable?(v) end)
+    # A local set to #f reads as unset in Scheme, so a cleared key is not
+    # kept: dead keys leave the desktop at the next checkpoint.
+    locals |> Map.drop(skip) |> Map.filter(fn {_k, v} -> v != false and serializable?(v) end)
   end
 
   defp local_key({:sym, key}), do: key

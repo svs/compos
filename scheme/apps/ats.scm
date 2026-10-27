@@ -551,7 +551,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
     (string-append
       "You orchestrate the review of " n " pending approvals in the ATS. Their ids: " (string-join ids ", ") ".\n\n"
       "1. Now spawn one subagent per approval with this single eval, then end your turn. You review none yourself.\n"
-      "(for-each (lambda (id) (execute* (ats-approval-review-ask id) (list 'title (ats-case-buffer id) 'notify #t))) (list "
+      "(for-each (lambda (id) (execute* (ats-approval-review-ask id) (list 'title (ats-case-buffer id) 'companion (ats-case-buffer id) 'notify #t))) (list "
       (string-join (map (lambda (id) (string-append q id q)) ids) " ") "))\n"
       "(execute* PROMPT OPTS) starts a subagent chat and returns at once; 'notify #t wakes you when it answers. "
       "(ats-approval-review-ask ID) is that approval's prompt: it points the subagent at the page already open in a buffer.\n\n"
@@ -1083,6 +1083,10 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           ((equal? job "") who)
           ((equal? co "") (string-append who " (" job ")"))
           (else (string-append who " (" job " @ " co ")")))))
+;; a case page brings up the chat that works it
+(for-each (lambda (m) (mode-put! m 'chat-follow? #t) (mode-put! m 'chat-subject "ATS"))
+          '("ats-detail-mode" "ats-approval-mode" "ats-candidate-mode"))
+
 (mode-chat-title! "ats-detail-mode" ats-case-label)
 (mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"

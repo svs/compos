@@ -158,7 +158,8 @@
                   (panes-display-beside! name o))))
     (when win
       (detail-window-note! o win)
-      (detail-adopt! o name))
+      (detail-adopt! o name)
+      (when (boundp 'chat-follow!) (chat-follow! name)))
     win))
 
 ;;; --- keeping one ----------------------------------------------------------------

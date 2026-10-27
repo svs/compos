@@ -38,9 +38,6 @@
 (defcustom 'todo-directories '("~/.compos/**/todos.md")
   "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
 
-(defcustom 'todo-chat-follow #t
-  "When true, moving through the todo list shows the chat of the task at point beside it.")
-
 (defcustom 'todo-user "svs"
   "The name a change is logged under when the caller names nobody.")
 
@@ -1575,10 +1572,6 @@
 ;; highlighting a row also brings up its chat, where chats live, without
 ;; taking focus: the pane already showing a chat, else a spare window, else
 ;; a split under the task's page
-(define (todo--preview-chat! t)
-  (let ((chat (and todo-chat-follow (todo--chat-of t))))
-    (when (and chat (not (window-showing chat)))
-      (display-buffer chat))))
 
 
 (define-command "todo-show" "Show the task as its own page beside the list"
@@ -1627,6 +1620,10 @@
   (todo--detail-render! (current-buffer)))
 
 (define-mode "todo-detail-mode" todo--detail-setup!)
+(mode-put! "todo-detail-mode" 'chat-follow? #t)
+(mode-put! "todo-detail-mode" 'chat-subject "todos")
+(mode-put! "todo-detail-mode" 'agent-chat
+  (lambda (buf) (let ((t (todo--detail-task buf))) (and t (todo--chat-of t)))))
 
 ;; the gutter would count the text's lines, not the tasks, so the list and
 ;; the page draw none
@@ -1841,11 +1838,11 @@
   (list
     'buffer *todo-buffer*
     'special #f
-    ;; moving shows the row's page beside the list, and its chat, once the highlight rests
+    ;; moving shows the row's page beside the list once the highlight rests;
+    ;; the page's chat-follow? brings its chat
     'preview (lambda (buf t)
                 (unless (todo--sep? t)
-                  (todo-show-detail! (plist-get t 'id))
-                  (todo--preview-chat! t)))
+                  (todo-show-detail! (plist-get t 'id))))
     'debounce #t
     'head-blocks todo--tab-blocks
     'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))

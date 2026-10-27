@@ -715,6 +715,31 @@
 
 (define (chat-mode-title src) (chat-mode-pick src *chat-titles*))
 
+;; A mode with chat-follow? brings up the agent chat of its buffer whenever
+;; the buffer shows: (mode-put! MODE 'chat-follow? #t). The mode's
+;; 'agent-chat (BUF) names that chat; without one it is the buffer's companion.
+;; The chats collect in one window: one with no subject takes the mode's
+;; 'chat-subject, else the mode's name, and goes to the window that shows a
+;; chat of that subject.
+(define (buffer-agent-chat buf)
+  (let ((f (mode-get (buffer-local buf 'mode-name) 'agent-chat)))
+    (if f (f buf) (llm-mode--companion-existing buf))))
+
+(define (chat-follow! buf)
+  (let ((mode (and (string? buf) (buffer-local buf 'mode-name))))
+    (when (mode-get mode 'chat-follow?)
+      (let ((chat (buffer-agent-chat buf)))
+        (when (and chat (buffer-known? chat) (not (window-showing chat)))
+          (let* ((subject (or (chat-subject chat)
+                              (chat-subject-set! chat (or (mode-get mode 'chat-subject) mode))))
+                 (me (active-window))
+                 (win (find (lambda (w) (and (not (equal? w me))
+                                             (equal? (chat-subject (window-buffer w)) subject)))
+                            (display--work-windows))))
+            (if win (window-set-buffer! win chat) (display-buffer chat))))))))
+(public! 'buffer-agent-chat "(buffer-agent-chat BUF) — the agent chat of BUF: its mode's 'agent-chat, else its companion chat, or #f")
+(public! 'chat-follow! "(chat-follow! BUF) — when BUF's mode has chat-follow?, show BUF's agent chat too")
+
 (public! 'mode-chat-opening!
   "(mode-chat-opening! MODE TEXT) — TEXT, or (TEXT SOURCE), is the first prompt of a new chat made for a buffer in MODE")
 (public! 'mode-chat-title!

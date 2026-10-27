@@ -1647,6 +1647,9 @@
     ;; starts with the right extra servers and loses them at first revive.
     (let ((ps (plist-get opts 'presets)))
       (when ps (buffer-set-local! buf 'chat-presets ps)))
+    ;; 'companion BUF: the chat works BUF, and BUF's chat-follow? finds it
+    (let ((c (plist-get opts 'companion)))
+      (when c (buffer-set-local! buf 'chat-companion-of c)))
     ;; 'notify #t opts into a free-text wake: every turn this chat finishes
     ;; sends a message to the chat that spawned it, which costs that parent
     ;; a turn. The default is silence — the parent reads the child's result

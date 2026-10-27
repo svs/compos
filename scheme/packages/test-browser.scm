@@ -200,16 +200,55 @@ loads once, before its first test"
 (define (tb--root buf) (buffer-local buf 'test-browser-root))
 (define (tb--backend name) (cdr (assq name *test-browser-backends*)))
 (define (tb--all-rows buf) (or (buffer-local buf 'test-browser-tree) '()))
-(define (tb--results buf) (or (buffer-local buf 'test-browser-results) '()))
+;; results live on the rows
 
-(define (tb--result buf id)
-  (let ((r (assoc id (tb--results buf)))) (if r (cdr r) '())))
+(define (tb--row buf id)
+  (let loop ((rows (tb--all-rows buf)))
+    (cond ((null? rows) #f)
+          ((equal? (plist-get (car rows) 'id) id) (car rows))
+          (else (loop (cdr rows))))))
+
+;; Results live on the rows. A run answers in tree order, so one walk
+;; merges them, and one walk back up rolls a file's and a group's status
+;; out of its tests: with four thousand rows, nothing may look rows up.
+
+(define (tb--combine ss)
+  (cond ((null? ss) 'none)
+        ((member 'running ss) 'running)
+        ((member 'error ss) 'error)
+        ((member 'fail ss) 'fail)
+        ((member 'partial ss) 'partial)
+        ((member 'none ss) (if (or (member 'pass ss) (member 'skip ss)) 'partial 'none))
+        ((member 'pass ss) 'pass)
+        (else 'skip)))
+
+(define (tb--rollup rows)
+  "ROWS with each file's and group's status rolled up from its tests"
+  (let ((stack '()) (out '()))
+    (for-each
+      (lambda (r)
+        (let ((d (plist-get r 'depth)))
+          (if (eq? (plist-get r 'kind) 'test)
+              (begin (set! stack (cons (list d (or (plist-get r 'status) 'none)) stack))
+                     (set! out (cons r out)))
+              (let ((kids (filter (lambda (e) (> (car e) d)) stack)))
+                (set! stack (cons (list d (tb--combine (map cadr kids)))
+                                  (filter (lambda (e) (<= (car e) d)) stack)))
+                (set! out (cons (plist-put r 'status (cadr (car stack))) out))))))
+      (reverse rows))
+    out))
+
+(define (tb--plist-merge p q)
+  (if (null? q) p (tb--plist-merge (plist-put p (car q) (cadr q)) (cddr q))))
 
 (define (tb--set-results! buf pairs)
-  "PAIRS ((ID . PLIST) ...) replace those ids' results"
-  (let ((ids (map car pairs)))
-    (buffer-set-local! buf 'test-browser-results
-      (append pairs (filter (lambda (r) (not (member (car r) ids))) (tb--results buf))))))
+  "PAIRS ((ID PLIST) ...), in tree order, merge into those rows"
+  (let loop ((rows (tb--all-rows buf)) (ps pairs) (out '()))
+    (cond
+      ((null? rows) (buffer-set-local! buf 'test-browser-tree (tb--rollup (reverse out))))
+      ((and (pair? ps) (equal? (car (car ps)) (plist-get (car rows) 'id)))
+       (loop (cdr rows) (cdr ps) (cons (tb--plist-merge (car rows) (cadr (car ps))) out)))
+      (else (loop (cdr rows) ps (cons (car rows) out))))))
 
 (define (tb--tests-under rows row)
   "the tests ROW stands for: itself, a group's or a file's, or every test"
@@ -221,18 +260,7 @@ loads once, before its first test"
                        (else (equal? (plist-get r 'id) (plist-get row 'id))))))
           rows))
 
-(define (tb--status buf row)
-  "a test's own status; a group's or a file's from its tests"
-  (if (eq? (plist-get row 'kind) 'test)
-      (or (plist-get (tb--result buf (plist-get row 'id)) 'status) 'none)
-      (let ((ss (map (lambda (t) (tb--status buf t)) (tb--tests-under (tb--all-rows buf) row))))
-        (cond ((member 'running ss) 'running)
-              ((member 'error ss) 'error)
-              ((member 'fail ss) 'fail)
-              ((member 'none ss) (if (or (member 'pass ss) (member 'skip ss)) 'partial 'none))
-              ((member 'pass ss) 'pass)
-              ((null? ss) 'none)
-              (else 'skip)))))
+(define (tb--status buf row) (or (plist-get row 'status) 'none))
 
 (define (tb--glyph status)
   (cond ((eq? status 'pass) "✓") ((eq? status 'fail) "✗") ((eq? status 'error) "!")
@@ -244,13 +272,34 @@ loads once, before its first test"
 (define (tb--listing-name root)
   (string-append "*test-browser:" (file-name-nondirectory root) "*"))
 
-(define (tb--rows buf) (tb--all-rows buf))
+;; A project holds thousands of tests and a list draws a few hundred rows
+;; a second, so files start folded. A filter reads every row.
+
+(define (tb--opened buf) (or (buffer-local buf 'test-browser-open) '()))
+
+(define (tb--open! buf ids)
+  (let ((open (tb--opened buf)))
+    (buffer-set-local! buf 'test-browser-open
+      (append (filter (lambda (id) (not (member id open))) ids) open))))
+
+(define (tb--rows buf)
+  (let ((open (tb--opened buf)))
+    (if (pair? (list-filters buf))
+        (tb--all-rows buf)
+        (filter (lambda (r)
+                  (or (eq? (plist-get r 'kind) 'file)
+                      (and (member (plist-get r 'rel) open)
+                           (let loop ((gs (plist-get r 'groups)))
+                             (or (null? gs) (and (member (car gs) open) (loop (cdr gs))))))))
+                (tb--all-rows buf)))))
 
 (define (tb--cells buf row)
-  (let ((ms (plist-get (tb--result buf (plist-get row 'id)) 'ms)))
+  (let ((ms (plist-get row 'ms)) (kind (plist-get row 'kind)))
     (list (tb--glyph (tb--status buf row))
           (string-append (tb--indent (plist-get row 'depth))
-                         (if (eq? (plist-get row 'kind) 'group) "▸ " "")
+                         (cond ((eq? kind 'test) "")
+                               ((member (plist-get row 'id) (tb--opened buf)) "▾ ")
+                               (else "▸ "))
                          (plist-get row 'name))
           (if ms (string-append (number->string ms) "ms") ""))))
 
@@ -304,7 +353,7 @@ loads once, before its first test"
     (string-join (take (list-tail lines from) (max 0 (- to from))) "\n")))
 
 (define (tb--detail-text buf row)
-  (let* ((status (tb--status buf row)) (res (tb--result buf (plist-get row 'id)))
+  (let* ((row (or (tb--row buf (plist-get row 'id)) row)) (status (tb--status buf row)) (res row)
          (tests (tb--tests-under (tb--all-rows buf) row))
          (failing (filter (lambda (t) (memq (tb--status buf t) '(fail error))) tests)))
     (string-append
@@ -365,18 +414,19 @@ loads once, before its first test"
              (pairs (map (lambda (t)
                            (let* ((id (plist-get t 'id)) (f (assoc id fails))
                                   (tm (assoc id (plist-get res 'times))))
-                             (cons id
+                             (list id
                                (append
                                  (cond (f (list 'status 'fail 'output (cadr f)))
-                                       ((member id (plist-get res 'skipped)) (list 'status 'skip))
-                                       (complete (list 'status 'pass))
+                                       ((member id (plist-get res 'skipped)) (list 'status 'skip 'output #f))
+                                       (complete (list 'status 'pass 'output #f))
                                        (else (list 'status 'error 'output (plist-get res 'output))))
                                  (if tm (list 'ms (cadr tm)) '())))))
                          tests))
-             (failed (length (filter (lambda (p) (memq (plist-get (cdr p) 'status) '(fail error))) pairs))))
+             (failed (length (filter (lambda (p) (memq (plist-get (cadr p) 'status) '(fail error))) pairs))))
         (tb--set-results! buf pairs)
+        (tb--open! buf (apply append (map (lambda (t) (if (assoc (plist-get t 'id) fails) (cons (plist-get t 'rel) (plist-get t 'groups)) '())) tests)))
         (when (and scope (not (eq? (plist-get scope 'kind) 'test)))
-          (tb--set-results! buf (list (cons (plist-get scope 'id)
+          (tb--set-results! buf (list (list (plist-get scope 'id)
                                             (list 'ms ms 'output (plist-get res 'output))))))
         (list-refresh! buf)
         (tb--redraw-details! buf)
@@ -393,7 +443,7 @@ each backend runs its own share"
     (if (null? tests)
         (message "test-browser: nothing to run")
         (begin
-          (tb--set-results! buf (map (lambda (t) (cons (plist-get t 'id) (list 'status 'running))) tests))
+          (tb--set-results! buf (map (lambda (t) (list (plist-get t 'id) (list 'status 'running))) tests))
           (list-refresh! buf)
           (message (string-append "test-browser: running " (number->string (length tests)) " tests…"))
           (for-each
@@ -436,6 +486,15 @@ each backend runs its own share"
 (define-command "test-browser-show" "Show the row at point beside the list"
   (lambda () (let ((h (tb--here))) (test-browser-show-detail! (car h) (cdr h)))))
 
+(define-command "test-browser-toggle" "Open or fold the file or group at point"
+  (lambda ()
+    (let* ((h (tb--here)) (buf (car h)) (row (cdr h)))
+      (when (and row (not (eq? (plist-get row 'kind) 'test)))
+        (let ((id (plist-get row 'id)) (open (tb--opened buf)))
+          (buffer-set-local! buf 'test-browser-open
+            (if (member id open) (filter (lambda (x) (not (equal? x id))) open) (cons id open)))
+          (list-refresh! buf))))))
+
 (define-command "test-browser-refresh" "Read the test tree again"
   (lambda () (tb--discover! (car (tb--here)))))
 
@@ -444,9 +503,10 @@ each backend runs its own share"
     'doc (string-append
            "A project's tests as a tree: files, their groups and tests, each with its last result "
            "(✓ pass, ✗ fail, ! error, - skipped, … running, ◐ partly run, · not run). "
+           "Files start folded; TAB opens or folds the file or group at point, and a failure opens its file. "
            "Moving the point shows the row's source and output beside the list, and RET shows it too. "
            "r runs the test, group or file at point, R runs everything, F runs the failures again. "
-           "o opens the source in the other window. / narrows the rows; is:fail keeps the failures. "
+           "o opens the source in the other window. / narrows every row, folded or not; is:fail keeps the failures. "
            "g reads the tree again, and q quits.")
     'transient #f
     'rows tb--rows
@@ -460,9 +520,9 @@ each backend runs its own share"
     'total (lambda (buf) (length (tb--tests-under (tb--all-rows buf) #f)))
     'noun "row"
     'footer (lambda (buf)
-              '(("r" "run") ("R" "run all") ("F" "failed") ("o" "source")
+              '(("TAB" "fold") ("r" "run") ("R" "run all") ("F" "failed") ("o" "source")
                 ("/" "filter") ("g" "reread") ("q" "quit")))
-    'keys '(("RET" "test-browser-show") ("r" "test-browser-run") ("R" "test-browser-run-all")
+    'keys '(("RET" "test-browser-show") ("TAB" "test-browser-toggle") ("r" "test-browser-run") ("R" "test-browser-run-all")
             ("F" "test-browser-run-failed") ("o" "test-browser-visit") ("g" "test-browser-refresh")
             ("q" "quit-window"))))
 

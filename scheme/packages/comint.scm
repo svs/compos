@@ -67,15 +67,44 @@
 (mode-doc! "term-mode"
   "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, `C-g`, the focus key the title shows, or a window command takes the keyboard back. `ESC` stays the terminal's.")
 
-(define-command "shell" "Open a raw PTY shell in the *shell* buffer"
+(define (shell--fresh-name base)
+  (let loop ((n 2))
+    (let ((name (string-append base "<" (number->string n) ">")))
+      (if (buffer-known? name) (loop (+ n 1)) name))))
+
+;; A group has one shell of each kind, *PREFIX:GROUP*, found by its role so
+;; a renamed group keeps it. FRESH (C-u) gives a new one beside it instead.
+(define (shell--buffer prefix role group fresh)
+  (let ((base (if group
+                  (string-append "*" prefix ":" (group-name group) "*")
+                  (string-append "*" prefix "*"))))
+    (cond (fresh (if (buffer-known? base) (shell--fresh-name base) base))
+          ((and group (group-buffer-as group role)))
+          (else base))))
+
+;; the shell starts in the group's directory, else in this buffer's
+(define (shell--command group command)
+  (let ((dir (or (and group (group-cwd group)) (default-directory))))
+    (string-append "cd -- " (sh-quote dir) " && " command)))
+
+(define-command "shell" "Open this group's raw PTY shell; with C-u, a new one"
   (lambda ()
-    (buffer-create "*shell*")
-    (buffer-set-local! "*shell*" 'mode-name "term-mode")
-    (with-current-buffer "*shell*"
-      (lambda () (terminal-mode-init! "*shell*")))
-    ;; a shell is a place you type: it takes the window you stand in and
-    ;; the keyboard with it. display-buffer only showed it somewhere else
-    (switch-to-buffer! "*shell*")))
+    (let* ((group (frame-group))
+           (fresh (current-prefix-arg))
+           (buf (shell--buffer "shell" 'shell group fresh)))
+      (buffer-create buf)
+      (unless (buffer-local buf 'terminal-command)
+        (buffer-set-local! buf 'terminal-command
+          (shell--command group *terminal-command*)))
+      (buffer-set-local! buf 'mode-name "term-mode")
+      ;; the group's own shell carries the role, even when C-u made it first
+      (when (and group (equal? buf (shell--buffer "shell" 'shell group #f)))
+        (buffer-add-group-as! buf group 'shell))
+      (with-current-buffer buf
+        (lambda () (terminal-mode-init! buf)))
+      ;; a shell is a place you type: it takes the window you stand in and
+      ;; the keyboard with it. display-buffer only showed it somewhere else
+      (switch-to-buffer! buf))))
 
 ;; OpenCode is a terminal application, not an editor mode: it gets the same
 ;; fast raw PTY, ANSI colour, keyboard routing, and readable transcript as
@@ -138,13 +167,21 @@
 (mode-doc! "comint-shell-mode"
   "A shell under the editor. `RET` sends the text after the process mark to the shell. A restart keeps the transcript and starts a new shell.")
 
-(define-command "comint-shell" "Open a text-buffer shell in *comint-shell*"
+(define-command "comint-shell"
+  "Open this group's text-buffer shell; with C-u, a new one"
   (lambda ()
-    (if (not (process-running? "*comint-shell*"))
-        (start-process! "*comint-shell*" *shell-command*))
-    (pop-to-buffer "*comint-shell*")
-    (buffer-set-local! "*comint-shell*" 'mode-name "comint-shell-mode")
-    (end-of-buffer!)))
+    (let* ((group (frame-group))
+           (fresh (current-prefix-arg))
+           (buf (shell--buffer "comint-shell" 'comint-shell group fresh)))
+      (buffer-create buf)
+      (if (not (process-running? buf))
+          (start-process! buf (shell--command group *shell-command*)))
+      (when (and group
+                 (equal? buf (shell--buffer "comint-shell" 'comint-shell group #f)))
+        (buffer-add-group-as! buf group 'comint-shell))
+      (pop-to-buffer buf)
+      (buffer-set-local! buf 'mode-name "comint-shell-mode")
+      (end-of-buffer!))))
 
 (define-command "newline-or-send" "Send input to the process, or insert a newline"
   (lambda ()

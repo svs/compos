@@ -67,22 +67,16 @@ const Hooks = {
       this.bootCheck();
       this.viewport();
       this.dock();
-      this.resizeH = () => { this.viewport(); this.dock(); this.bindKey(); };
+      this.resizeH = () => { this.viewport(); this.dock(); };
       window.addEventListener("resize", this.resizeH);
       this.handleEvent("navigate", ({ url }) => { window.location.href = url; });
-      this.loadKeyPos();
-      this.bindKey();
       this.bindRail();
       this.bindComposer();
-      this.bindTabs();
-      this.bindFilter();
     },
     updated() {
       this.remember();
       this.bootCheck();
       this.dock();
-      this.bindFilter();
-      this.bindKey();
       this.bindRail();
       this.bindComposer();
       if (this.el.dataset.mb !== this.mbWas) {
@@ -105,125 +99,23 @@ const Hooks = {
       const boot = meta && meta.getAttribute("content");
       if (boot && this.el.dataset.boot && boot !== this.el.dataset.boot) window.location.reload();
     },
-    // how tall the composer and the tab rail are together, so a
-    // sheet stops above them
+    // how tall the composer and the bar are: a prompt's sheet stops
+    // above both, so the field stays under the thumb; a sheet of rows
+    // stops above the bar alone
     dock() {
       const c = this.el.querySelector(".hh-composer");
-      const t = this.el.querySelector(".hh-tabs");
-      const h = (c ? c.offsetHeight : 0) + (t ? t.offsetHeight : 0);
+      const n = this.el.querySelector(".hh-nav");
+      const nh = n ? n.offsetHeight : 0;
+      const h = (c ? c.offsetHeight : 0) + nh;
       if (h && h !== this.dockH) { this.dockH = h; this.el.style.setProperty("--dock-h", h + "px"); }
+      if (nh && nh !== this.navH) { this.navH = nh; this.el.style.setProperty("--nav-h", nh + "px"); }
     },
     viewport() {
-      const rows = Math.max(8, Math.floor((window.innerHeight - 260) / 19.5));
+      // the window's own height when it is drawn, else the screen less the chrome
+      const body = this.el.querySelector(".hh-body");
+      const h = body && body.clientHeight > 0 ? body.clientHeight - 26 : window.innerHeight - 200;
+      const rows = Math.max(8, Math.floor(h / 19.5));
       if (rows !== this.rows) { this.rows = rows; this.push("viewport", { rows }); }
-    },
-
-    // ── the chord key: a tap toggles the panel, a drag moves it ──
-    // Called after every patch and every resize: it places the key
-    // and binds it once. The place is a property of the hook, not
-    // of the element, because a re-render writes the element's
-    // attributes again and an inline style set here does not
-    // survive that.
-    bindKey() {
-      const key = document.getElementById("chord-key");
-      if (!key) return;
-      this.placeKey(key);
-      if (key.hhBound) return;
-      key.hhBound = true;
-      let moved = false, startX = 0, startY = 0, offsetX = 0, offsetY = 0;
-      key.addEventListener("pointerdown", (e) => {
-        e.preventDefault(); key.setPointerCapture(e.pointerId);
-        const r = key.getBoundingClientRect(); startX = e.clientX; startY = e.clientY;
-        offsetX = e.clientX - r.left; offsetY = e.clientY - r.top;
-        this.keyDrag = true; moved = false; key.classList.add("dragging");
-      });
-      key.addEventListener("pointermove", (e) => {
-        if (!this.keyDrag) return;
-        if (Math.abs(e.clientX - startX) > 6 || Math.abs(e.clientY - startY) > 6) moved = true;
-        if (!moved) return;
-        this.keyPos = { x: e.clientX - offsetX, y: e.clientY - offsetY };
-        this.placeKey(key);
-      });
-      const stop = (e) => {
-        if (!this.keyDrag) return;
-        this.keyDrag = false; key.classList.remove("dragging");
-        if (e.pointerId != null && key.hasPointerCapture(e.pointerId)) key.releasePointerCapture(e.pointerId);
-        if (moved) this.saveKeyPos();
-        else this.push("fan", { open: !key.classList.contains("on") });
-      };
-      key.addEventListener("pointerup", stop); key.addEventListener("pointercancel", stop);
-    },
-    // the key stays inside the window: a smaller window, or a
-    // turn of the phone, brings it back in without losing where
-    // the user put it
-    placeKey(key) {
-      if (!this.keyPos) return;
-      const maxX = Math.max(0, window.innerWidth - key.offsetWidth);
-      const maxY = Math.max(0, window.innerHeight - key.offsetHeight);
-      key.style.left = Math.max(0, Math.min(maxX, this.keyPos.x)) + "px";
-      key.style.top = Math.max(0, Math.min(maxY, this.keyPos.y)) + "px";
-      key.style.right = "auto"; key.style.bottom = "auto";
-    },
-    // the place survives a reload, like the frame does
-    loadKeyPos() {
-      try {
-        const raw = localStorage.getItem("compos-key-pos");
-        const pos = raw && JSON.parse(raw);
-        if (pos && typeof pos.x === "number" && typeof pos.y === "number") this.keyPos = pos;
-      } catch (e) {}
-    },
-    saveKeyPos() {
-      try { localStorage.setItem("compos-key-pos", JSON.stringify(this.keyPos)); } catch (e) {}
-    },
-
-    // ── the keys panel's filter: type, and Scheme searches every command ──
-    // The field is outside the patch (phx-update="ignore"), so
-    // its text survives a re-render. Each edit goes to the
-    // server after a short pause; the reply is the list.
-    bindFilter() {
-      const input = document.getElementById("keys-filter-input");
-      if (!input || input.dataset.bound) return;
-      input.dataset.bound = "1";
-      input.addEventListener("input", () => this.pushFilter());
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") { e.preventDefault(); input.value = ""; this.pushFilter(); input.blur(); }
-      });
-    },
-    pushFilter() {
-      const input = document.getElementById("keys-filter-input");
-      if (!input) return;
-      clearTimeout(this.filterT);
-      this.filterT = setTimeout(() => this.push("fan_filter", { q: input.value }), 60);
-    },
-
-    // ── the tab rail: a tap is the group, a hold is its buffers ──
-    // One listener on the rail, so re-rendered tabs need no
-    // rebinding. A hold that moves is a scroll, not a press.
-    bindTabs() {
-      const rail = this.el.querySelector(".hh-tabs");
-      if (!rail || rail.dataset.bound) return;
-      rail.dataset.bound = "1";
-      const cancel = () => { clearTimeout(this.holdT); this.holdT = null; };
-      rail.addEventListener("pointerdown", (e) => {
-        const tab = e.target.closest && e.target.closest("[data-tab]");
-        if (!tab) return;
-        this.holdX = e.clientX; this.holdY = e.clientY; this.held = false;
-        cancel();
-        this.holdT = setTimeout(() => {
-          this.held = true;
-          this.push("tab_hold", { buf: tab.dataset.tab });
-        }, 450);
-      });
-      rail.addEventListener("pointermove", (e) => {
-        if (this.holdT && (Math.abs(e.clientX - this.holdX) > 8 || Math.abs(e.clientY - this.holdY) > 8)) cancel();
-      });
-      rail.addEventListener("pointerup", cancel);
-      rail.addEventListener("pointercancel", cancel);
-      // the tap that ends a hold is not a tap on the tab
-      rail.addEventListener("click", (e) => {
-        if (this.held) { this.held = false; e.stopPropagation(); e.preventDefault(); }
-      }, true);
-      rail.addEventListener("contextmenu", (e) => e.preventDefault());
     },
 
     // ── the rail: a drag is point ──────────────────────────

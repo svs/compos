@@ -1115,6 +1115,7 @@
      "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
      "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n"
+     "Never end a turn while you wait on background work (tests, a task) without a wake-up: first (agent-listen! '(at \"YYYY-MM-DD HH:MM\") NOTE), or a listener on the event you wait for. Else nothing wakes you.\n"
      "When done, close this chat with (run-command \"chat-dismiss\").\n")))
 
 (define (todo-assign-chat! id group &optional who)

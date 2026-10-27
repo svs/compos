@@ -507,7 +507,7 @@ defmodule Compos.PresetTest do
       )
 
     assert servers =~ ~s{"compos"}
-    assert servers =~ "nc -U"
+    assert servers =~ "compos-mcp-shim"
   end
 
   test "the intrinsic editor surface freezes without any optional preset" do

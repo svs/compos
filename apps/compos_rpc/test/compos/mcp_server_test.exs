@@ -1,18 +1,11 @@
 defmodule Compos.McpServerTest do
   @moduledoc """
-  The MCP socket end to end through the nc shim mcp.scm registers: a real
-  subprocess speaking MCP on stdio, copied to this node's MCP socket. This
-  is what an ACP adapter starts.
+  The MCP socket end to end through compos-mcp-shim: a real subprocess
+  speaking MCP on stdio, copied to this node's MCP socket. This is what an
+  ACP adapter starts.
   """
 
   use ExUnit.Case
-
-  # the shim command line exactly as mcp.scm registers it
-  defp shim do
-    {:ok, printed} = Compos.Core.Session.eval("mcp-compos-shim")
-    {:ok, shim} = Code.string_to_quoted(printed)
-    shim
-  end
 
   test "initialize, tools/list, and a live tools/call against the registry" do
     slug = "proxy-ask-#{System.unique_integer([:positive])}"
@@ -33,10 +26,9 @@ defmodule Compos.McpServerTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(buffer-append! "*proxy-doc*" "hello from compos")})
 
     port =
-      Port.open({:spawn_executable, System.find_executable("sh")}, [
+      Port.open({:spawn_executable, Compos.Core.McpShim.path()}, [
         :binary,
         :exit_status,
-        args: ["-c", shim()],
         env: [
           {~c"COMPOS_MCP_SOCK", String.to_charlist(Compos.Rpc.McpServer.default_socket_path())},
           {~c"COMPOS_AGENT", String.to_charlist(slug)}

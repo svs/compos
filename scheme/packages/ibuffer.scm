@@ -336,12 +336,7 @@
 ;;; --- what a row shows: the kind's answer, else the buffer's ------------------
 
 (define (ibuffer-row-dot b) (ibuffer-ask b 'dot ibuffer-buffer-dot))
-(define (ibuffer-row-name b)
-  (let ((parts (ibuffer-ask b 'name ibuffer-buffer-name))
-        (depth (ibuffer-row-depth b)))
-    (if (and (> depth 0) (pair? parts) (pair? (cdr parts)) (string? (cadr parts)))
-        (list (car parts) (string-append (ibuffer-nest-indent depth) (cadr parts)))
-        parts)))
+(define (ibuffer-row-name b) (ibuffer-ask b 'name ibuffer-buffer-name))
 (define (ibuffer-row-size b) (ibuffer-ask b 'size ibuffer-buffer-size))
 (define (ibuffer-row-label b) (ibuffer-ask b 'label ibuffer-buffer-label))
 (define (ibuffer-row-last b) (ibuffer-ask b 'last ibuffer-buffer-last))
@@ -749,43 +744,15 @@
   (map cadr (sort (map (lambda (row) (list (- 0 (or (ibuffer-row-size row) 0)) row))
                        rows))))
 
-;; Nesting: a row whose parent is listed follows it, indented, in the
-;; order the view sorts. The parent is the kind's 'parent, else the buffer's
-;; dismissal parent; a child whose parent is not listed stays where it sorts.
+;; Nesting is list-mode's ('parent in *ibuffer-opts*): a row whose parent
+;; is listed follows it, indented. The parent is the kind's 'parent, else
+;; the buffer's dismissal parent.
 (define (ibuffer-buffer-parent b) (and (buffer-known? b) (buffer-parent b)))
 (define (ibuffer-row-parent b) (ibuffer-ask b 'parent ibuffer-buffer-parent))
-(define *ibuffer-row-depths* '())
-(define (ibuffer-row-depth b)
-  (let ((d (and (string? b) (assoc b *ibuffer-row-depths*)))) (if d (cadr d) 0)))
-(define (ibuffer-nest rows)
-  (let* ((pairs (map (lambda (r) (list r (and (string? r) (ibuffer-row-parent r)))) rows))
-         (listed? (lambda (p) (and (string? p) (assoc p pairs) #t))))
-    (if (not (find (lambda (pr) (listed? (cadr pr))) pairs))
-        rows
-        (let ((out '()) (seen '()))
-          (define (walk r depth)
-            (unless (member r seen)
-              (set! seen (cons r seen))
-              (set! out (cons r out))
-              (when (> depth 0)
-                (set! *ibuffer-row-depths* (cons (list r depth) *ibuffer-row-depths*)))
-              (for-each (lambda (pr) (when (equal? (cadr pr) r) (walk (car pr) (+ depth 1))))
-                        pairs)))
-          (for-each (lambda (pr) (unless (listed? (cadr pr)) (walk (car pr) 0))) pairs)
-          ;; a cycle leaves rows no root reaches: they keep their place
-          (for-each (lambda (pr) (walk (car pr) 0)) pairs)
-          (reverse out)))))
 ;; the activity order keeps every row in its own place: a child is not
 ;; pulled under its parent, it only wears the nesting mark
-(define (ibuffer-mark-children rows)
-  (for-each (lambda (r)
-              (when (and (string? r) (ibuffer-row-parent r))
-                (set! *ibuffer-row-depths* (cons (list r 1) *ibuffer-row-depths*))))
-            rows)
-  rows)
-
-(define (ibuffer-nest-indent depth)
-  (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
+(define (ibuffer-nest-flat? buf)
+  (and (equal? (ibuffer-grouping buf) 'none) (equal? (ibuffer-sort buf) 'activity)))
 
 (define (ibuffer-sort-modes rows)
   (map (lambda (k) (list-ref k 2))
@@ -855,7 +822,7 @@
 (define (ibuffer-section buf label key members face &optional as-is?)
   (if (null? members)
       '()
-      (let ((ordered (ibuffer-nest (if as-is? members (ibuffer-sort-rows buf members)))))
+      (let ((ordered (if as-is? members (ibuffer-sort-rows buf members))))
         (if (ibuffer-folded? key buf)
             (list (ibuffer-heading label key "folded" ordered face))
             (cons (ibuffer-heading label key "separator" ordered face) ordered)))))
@@ -978,7 +945,6 @@
 ;; redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows buf)
   (ibuffer-columns-clear!)
-  (set! *ibuffer-row-depths* '())
   (ibuffer-title-memo-clear!)
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
@@ -992,9 +958,7 @@
           ;; rows in the view's own order. The switch prompts read this way
           ;; -- what you want is the buffer you used last, not its group.
           ((equal? grouping 'none)
-           (if (equal? (ibuffer-sort buf) 'activity)
-               (ibuffer-mark-children (ibuffer-sort-rows buf rows))
-               (ibuffer-nest (ibuffer-sort-rows buf rows))))
+           (ibuffer-sort-rows buf rows))
           (else (ibuffer-group-sections
                   buf rows (frame-group))))))
 
@@ -1061,7 +1025,7 @@
 (define (ibuffer-row-line-name buf row)
   (if (ibuffer-heading? row)
       (ibuffer-heading-plain buf row)
-      (ibuffer-row-title row)))
+      (string-append (list-nest-prefix buf row) (ibuffer-row-title row))))
 
 ;; The width the names ask for. A window with room to spare shows every
 ;; name whole: trimming a name while forty columns of the window stand
@@ -1393,7 +1357,8 @@
   (let ((dot (let ((d (ibuffer-cell-text (ibuffer-row-dot b))))
                (if (equal? d "") " " d)))
         (icon (let ((i (ibuffer-row-icon b))) (if (equal? i "") " " i))))
-    (+ off 2 (string-byte-length dot) 2 (string-byte-length icon) 2)))
+    (+ off 2 (string-byte-length dot) 2 (string-byte-length icon) 2
+       (string-byte-length (list-nest-prefix buf b)))))
 
 ;; the emphasis a Markdown name carries, as faces over the drawn name.
 ;; A name too long for its column loses its middle, and the spans with
@@ -1406,8 +1371,10 @@
         '()
         (let* ((cols (list-columns buf))
                (width (and (> (length cols) 2) (list-col-width (nth 2 cols))))
-               (fitted (if width (list-fit (car plain) width 'middle) (car plain))))
-          (if (not (equal? fitted (car plain)))
+               (pre (list-nest-prefix buf b))
+               (fitted (if width (list-fit (string-append pre (car plain)) width 'middle)
+                           (string-append pre (car plain)))))
+          (if (not (equal? fitted (string-append pre (car plain))))
               '()
               (let ((start (ibuffer-name-start buf b off)))
                 (map (lambda (s)
@@ -2329,12 +2296,16 @@
   (lambda () (ibuffer-refresh!)))
 
 (define-command "ibuffer-toggle-filter-group"
-  "Fold or unfold the section at point"
+  "Fold or unfold the rows under the row at point, else the section at point"
   (lambda ()
-    (let ((row (ibuffer-section-at)))
-      (if row
-          (ibuffer-toggle-fold! (ibuffer-heading-key row))
-          (message "no section here")))))
+    (let* ((buf (ibuffer-view))
+           (here (list-current buf)))
+      (if (and (string? here) (list-row-hidden buf here))
+          (list-toggle-children! buf)
+          (let ((row (ibuffer-section-at)))
+            (if row
+                (ibuffer-toggle-fold! (ibuffer-heading-key row))
+                (message "no section here")))))))
 
 (define-command "ibuffer-toggle-all-filter-groups"
   "Fold every section, or open them all when all are folded"
@@ -2671,7 +2642,7 @@
            "A traditional buffer management table. A section is a group, "
            "a mode, or a directory; < cycles the grouping. Rows inside a "
            "section sort by name, recency, or size; > cycles the sort. "
-           "TAB folds the section at point. A narrow window shows the "
+           "TAB folds the rows under a row that has children, else the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. f narrows the table by name, mode, or path, "
            "and \\ widens it. / filters as Emacs ibuffer does: / m mode, / n name, / f filename, / F directory, / . extension, / c contents (regexps fold case), / ! negates the newest filter, / | ors the two newest, / p pops one and / / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all, group, window. "
@@ -2687,6 +2658,10 @@
     'rows (lambda (buf) (ibuffer-rows buf))
     'separator? (lambda (buf b) (ibuffer-separator? buf b))
     'section? (lambda (buf b) (ibuffer-heading? b))
+    ;; a row sits under its listed parent; the name cell takes the indent
+    'parent (lambda (buf b) (and (string? b) (ibuffer-row-parent b)))
+    'nest-cell 2
+    'nest-flat? (lambda (buf) (ibuffer-nest-flat? buf))
     'markable? (lambda (buf b) (string? b))
     'key (lambda (buf b)
            (if (ibuffer-heading? b)

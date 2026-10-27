@@ -28,6 +28,14 @@ The list mode in `scheme/packages/tabulated-list.scm` draws every table in the e
 5. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
 6. The key bar shows only the main keys that the mode declares, and ends in `? all N`, where `?` shows every key. The card floats over the rows, so it does not push the rows down.
 7. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
+## Trees
+
+1. A list is a tree when its mode names `'parent`, `(lambda (buf row))` that answers the key of the row's parent, or `#f`. After every filter and every order, a row whose parent is listed in the same section follows that parent, one step deeper. A row whose parent is not listed (filtered out, or in another section) stays where it sorts, as a root. A separator or a `'section?` row ends a section.
+2. `'nest-cell N` names the cell of the row's first line that takes the indent: `└ ` at depth 1, two spaces more for each step deeper. `(list-row-depth BUF ROW)` gives the depth, and `(list-nest-prefix BUF ROW)` gives the text the cell starts with, for a mode that measures its own columns or places its own faces.
+3. `'nest-flat? (lambda (buf))` keeps the order as it is: a child wears the indent in its own place and is not moved. The ibuffer activity order uses it.
+4. `TAB` (`list-toggle-children`) folds the rows under the row at point; on a child it folds the child's parent. `S-TAB` (`list-toggle-all-children`) folds every parent, or opens them all when one is folded. A folded row says how many rows it hides: `▸ +11`. `(list-row-hidden BUF ROW)` answers `#f` for a row with no children, else that count (0 when open). The folds are the buffer's own (`'list-folded-rows`) and outlive a refresh.
+5. The todo list nests a sub-task under its task (the task's `parent`). ibuffer nests a buffer under its kind's `'parent`, else its dismissal parent: the chat list puts a spawned chat under the chat that spawned it. In ibuffer, `TAB` on a row with children folds them, and on any other row folds the section.
+
 ## Point
 
 1. The point belongs to the reader. No process moves it: a draw restores the row by its key, a preview card opening or closing over the listing moves nothing (docs/POPUPS.md rule 10), an open of a list you already have keeps the row you left it on. A narrowing lands on the first row because the old row may be gone; that is the reader's own act.

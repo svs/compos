@@ -546,18 +546,14 @@
 
 ;; the editor itself as an MCP server: the daemon serves the define-tool!
 ;; registry on its MCP socket (Compos.Rpc.McpServer), so external agents
-;; read and edit live buffers. Each agent starts this shim: it sends the
-;; agent's slug as the first line, then nc copies stdio to that socket.
-;; nc closes its write side on stdin EOF; the daemon answers the calls in
-;; flight and closes, and nc exits. The socket is named, not defaulted: a
-;; second daemon (COMPOS_HOME) listens on its own path, and its agents
+;; read and edit live buffers. Each agent starts compos-mcp-shim
+;; (native/compos_mcp_shim, about 1 MB): it sends the agent's slug as the
+;; first line, then copies stdio to that socket. The compos build makes
+;; it, so it needs nothing installed. The socket is named, not defaulted:
+;; a second daemon (COMPOS_HOME) listens on its own path, and its agents
 ;; must reach IT, not the default one.
-(define mcp-compos-shim
-  "{ printf '%s\\n' \"$COMPOS_AGENT\"; exec cat; } | exec nc -U \"$COMPOS_MCP_SOCK\"")
-
 (mcp-register! 'compos
-  (list 'command "sh"
-        'args (list "-c" mcp-compos-shim)
+  (list 'command (priv-path "native/compos-mcp-shim")
         'env (list 'COMPOS_MCP_SOCK (string-append (compos-socket-path) "-mcp"))))
 
 (define-preset! 'compos "Live compos editor tools" '(compos))

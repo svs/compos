@@ -212,9 +212,9 @@ half-built version of what W3 builds properly, and W3 deletes it.
   `mcp__<server>__<tool>`.
 - **`apps/compos_rpc/lib/compos/rpc/mcp_server.ex`** — the editor as an
   MCP *server* on the daemon's MCP socket (`sock-mcp`), exposing the
-  `define-tool!` registry. ACP agents get compos's tools through an
-  `nc -U` shim, an entry in `mcpServers` (`mcp.scm`) that copies stdio
-  to that socket.
+  `define-tool!` registry. ACP agents get compos's tools through
+  `compos-mcp-shim` (`native/compos_mcp_shim`), an entry in `mcpServers`
+  (`mcp.scm`) that copies stdio to that socket.
 - **`apps/compos_core/lib/compos/core/desktop.ex`** — persistence:
   file buffers save `{path, point, locals}`; non-file buffers save
   `{name, content, point, locals}` (`savable_locals` filters

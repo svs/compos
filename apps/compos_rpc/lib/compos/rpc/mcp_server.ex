@@ -4,12 +4,10 @@ defmodule Compos.Rpc.McpServer do
   every agent the daemon starts.
 
   An ACP adapter starts its MCP servers as stdio subprocesses. The compos
-  entry (mcp.scm) starts an `nc -U` shim: it sends the agent's slug as the
-  first line, then copies stdio to this socket and back. Each connection is
-  one agent session. The MCP work runs here, in the daemon, so an agent
-  costs no extra VM.
-
-      { printf '%s\n' "$COMPOS_AGENT"; exec cat; } | exec nc -U "$COMPOS_MCP_SOCK"
+  entry (mcp.scm) starts `compos-mcp-shim` (native/compos_mcp_shim): it
+  sends the agent's slug as the first line, then copies stdio to this
+  socket and back. Each connection is one agent session. The MCP work runs
+  here, in the daemon, so an agent costs about 1 MB and no extra VM.
 
   Frames are newline-delimited JSON-RPC, as on stdio. Consecutive read-only
   calls of one connection run together. Any other message is a barrier: it
@@ -47,7 +45,7 @@ defmodule Compos.Rpc.McpServer do
     File.mkdir_p!(Path.dirname(path))
     File.rm(path)
 
-    # exit_on_close false: nc half-closes on stdin EOF, and the
+    # exit_on_close false: the shim half-closes on stdin EOF, and the
     # replies to the calls in flight must still reach it
     {:ok, lsock} =
       :gen_tcp.listen(0, [

@@ -1,0 +1,15 @@
+[package]
+name = "compos_mcp_shim"
+version = "0.1.0"
+edition = "2021"
+
+# No dependencies: std has the Unix socket and the threads it needs.
+[[bin]]
+name = "compos-mcp-shim"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

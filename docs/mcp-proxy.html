@@ -48,7 +48,7 @@ Same registry, two consumers. The tool list an external agent gets from <code>to
 <pre><code>ACP agent (claude-code / codex)
    |  stdio MCP: initialize, tools/list, tools/call, ping
    v
-nc shim (mcp.scm)              sh + nc, about 3 MB per agent; sends the slug first
+compos-mcp-shim                about 1 MB per agent; sends the slug first
    |  the same MCP frames on ~/.compos/sock-mcp
    v
 Compos.Rpc.McpServer           one connection process per agent, in the daemon
@@ -59,12 +59,12 @@ Compos.Rpc.McpServer           one connection process per agent, in the daemon
    |     the Scheme handler runs
    '-- Agent.ask_user                          the ask tool</code></pre>
 
-<p>The <code>mcp</code> package registers the shim as the <code>compos</code> entry in each agent's <code>session/new</code>:</p>
-<pre><code>{ printf '%s\n' "$COMPOS_AGENT"; exec cat; } | exec nc -U "$COMPOS_MCP_SOCK"</code></pre>
-<p>The shim does no MCP work. It sends the agent's slug (<code>COMPOS_AGENT</code>, which the ACP backend sets) as the first line. Then <code>nc</code> copies stdin to the socket and the socket to stdout. An empty first line names no agent.</p>
+<p>The <code>mcp</code> package registers <code>priv/native/compos-mcp-shim</code> as the <code>compos</code> entry in each agent's <code>session/new</code>. The shim is a small Rust program with no dependencies (<code>native/compos_mcp_shim</code>). Compiling <code>Compos.Core.McpShim</code> builds it with cargo, as Rustler builds a NIF, so compos needs nothing more installed.</p>
+<p>The shim does no MCP work. It sends the agent's slug (<code>COMPOS_AGENT</code>, which the ACP backend sets) as the first line. Then it copies stdin to the socket and the socket to stdout. An empty first line names no agent.</p>
+<p>Why not <code>nc</code>: it is not on every system, and the versions differ. Debian's <code>netcat-openbsd</code> does not close its write side on stdin EOF without <code>-N</code>, and busybox often has no <code>-U</code>.</p>
 
 <h2>Why a socket, and not a process per agent</h2>
-<p>Until 2026-10-27, each agent started <code>compos-mcp-proxy.exs</code>: a complete BEAM VM that forwarded MCP to <code>~/.compos/sock</code>. Each VM took 63-80 MB and about one second of CPU to boot. A chat that started 15 subagents booted 15 VMs at the same time. The daemon is already a BEAM, so the MCP work now runs there. An agent costs <code>sh</code> and <code>nc</code>, about 3 MB together, and no boot.</p>
+<p>Until 2026-10-27, each agent started <code>compos-mcp-proxy.exs</code>: a complete BEAM VM that forwarded MCP to <code>~/.compos/sock</code>. Each VM took 63-80 MB and about one second of CPU to boot. A chat that started 15 subagents booted 15 VMs at the same time. The daemon is already a BEAM, so the MCP work now runs there. An agent costs one shim process, about 1 MB, and no boot.</p>
 <p>The transport stays stdio on the agent's side, so the agent behaves as before. A Unix socket has no idle timeout, so a long write and an <code>ask</code> that waits for the user keep working.</p>
 
 <h2>One connection</h2>
@@ -78,7 +78,7 @@ Compos.Rpc.McpServer           one connection process per agent, in the daemon
 <tr><td>author</td>
     <td>The slug goes into <code>mcp-proxy-call</code> as <code>agent:SLUG</code>, so the agent's edits land in <code>buffer-authors</code>.</td></tr>
 <tr><td>end</td>
-    <td>When the agent closes stdin, <code>nc</code> closes its write side. The server answers the calls in flight, then closes, and <code>nc</code> exits. The listener sets <code>exit_on_close: false</code> for this: without it, the half-close drops the replies.</td></tr>
+    <td>When the agent closes stdin, the shim closes its write side. The server answers the calls in flight, then closes, and the shim exits. The listener sets <code>exit_on_close: false</code> for this: without it, the half-close drops the replies.</td></tr>
 <tr><td>output</td>
     <td>Non-ASCII goes out as <code>\uXXXX</code>, because a strict client (Codex) rejects other escapes. A result that is not UTF-8 text returns an error. A result with the content prefix returns MCP content blocks (an image, for example).</td></tr>
 </table>
@@ -108,9 +108,12 @@ Compos.Rpc.McpServer           one connection process per agent, in the daemon
 <tr><td><code>Compos.Rpc.McpServer</code></td>
     <td><code>apps/compos_rpc/lib/compos/rpc/</code></td>
     <td>The MCP server on <code>sock-mcp</code> (the RPC socket path with <code>-mcp</code> added).</td></tr>
-<tr><td><code>mcp-compos-shim</code>, the <code>compos</code> entry</td>
+<tr><td><code>compos-mcp-shim</code></td>
+    <td><code>apps/compos_core/native/compos_mcp_shim/</code></td>
+    <td>The stdio program each agent starts; <code>Compos.Core.McpShim</code> builds it.</td></tr>
+<tr><td>the <code>compos</code> entry</td>
     <td><code>scheme/packages/mcp.scm</code></td>
-    <td>The stdio command each agent starts.</td></tr>
+    <td>Registers the shim as an MCP server for every agent.</td></tr>
 <tr><td><code>mcp-proxy-tools-json</code></td>
     <td><code>scheme/packages/tools.scm</code></td>
     <td>The registry as JSON, base64-wrapped, for <code>tools/list</code>.</td></tr>
@@ -119,7 +122,7 @@ Compos.Rpc.McpServer           one connection process per agent, in the daemon
     <td>Permission gate and dispatch, for <code>tools/call</code>.</td></tr>
 <tr><td><code>mcp_server_test.exs</code></td>
     <td><code>apps/compos_rpc/test/compos/</code></td>
-    <td>Runs the registered shim against the socket: tools, a large reply, <code>ask</code>, images, a large request, and the half-close.</td></tr>
+    <td>Runs the shim against the socket: tools, a large reply, <code>ask</code>, images, a large request, and the half-close.</td></tr>
 </table>
 
 <p class="sub">Read this in the editor: <code>C-x C-f docs/mcp-proxy.html RET</code> then <kbd>C-c C-v</kbd>.</p>

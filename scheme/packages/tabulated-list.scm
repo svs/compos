@@ -1204,9 +1204,10 @@
 (define (list-row-cells buf e &optional ctx)
   (let ((g (if ctx (list-ctx-row-cells ctx) (list-opt buf 'row-cells)))
         (f (if ctx (list-ctx-cells ctx) (list-opt buf 'cells))))
-    (cond (g (g buf e))
-          (f (list (f buf e)))
-          (else '()))))
+    (list-nest-cells buf e
+      (cond (g (g buf e))
+            (f (list (f buf e)))
+            (else '())))))
 
 ;; CTX is the answers every row of one draw shares: the mark column,
 ;; the column lines, the mode's cells, row-cells, render, and key fns,
@@ -2156,6 +2157,163 @@
 ;; During a narrowing burst the source is a snapshot. Reuse the previous
 ;; draw's rows when their layout/marks agree; widening computes missing rows.
 ;; Same-query redraws (such as fresh transcript hits) recompute their cells.
+;;; --- trees: a row under its parent ---------------------------------------
+;;; A list says how to find a row's parent with 'parent, (lambda (buf row))
+;;; that answers the parent's key or #f. A row whose parent is listed in
+;;; the same section follows it, one step deeper, after every filter and
+;;; every order. 'nest-cell names the cell of the row's first line that
+;;; carries the indent. 'nest-flat? (lambda (buf)) keeps the order as it
+;;; is: a row whose parent is listed is indented in its own place.
+
+(define (list-nest-indent depth)
+  (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
+
+(define (list-row-depth buf row)
+  (let ((d (and (list-opt buf 'parent)
+                (assoc (list-key buf row) (or (buffer-local buf 'list-row-depths) '())))))
+    (if d (cadr d) 0)))
+
+;; a row's children: #f for none, else how many a fold hides (0 when open)
+(define (list-row-hidden buf row)
+  (let ((p (and (list-opt buf 'parent)
+                (assoc (list-key buf row) (or (buffer-local buf 'list-row-parents) '())))))
+    (and p (cadr p))))
+
+(define (list-nest-boundary? buf row)
+  (or (list-separator? buf row)
+      (let ((f (list-opt buf 'section?))) (and f (f buf row) #t))))
+
+;; Fold: a folded row hides every row under it and says how many.
+(define (list-fold-toggle! buf key)
+  (let ((folded (or (buffer-local buf 'list-folded-rows) '())))
+    (buffer-set-local! buf 'list-folded-rows
+      (if (member key folded) (remove (lambda (k) (equal? k key)) folded) (cons key folded)))))
+
+;; the row TAB folds: the row itself when it has children, else its parent
+(define (list-fold-target buf row)
+  (cond ((not row) #f)
+        ((list-row-hidden buf row) row)
+        ((> (list-row-depth buf row) 0)
+         (let* ((key ((list-opt buf 'parent) buf row))
+                (i (list-index-of buf (list-entries buf) key)))
+           (and i (nth i (list-entries buf)))))
+        (else #f)))
+
+(define (list-toggle-children! buf)
+  (let ((row (list-fold-target buf (list-current buf))))
+    (if (not row)
+        (message "No rows under this one")
+        (let ((key (list-key buf row)))
+          (list-fold-toggle! buf key)
+          (list-redraw! buf)
+          (let ((i (list-index-of buf (list-entries buf) key)))
+            (when i (list-goto-index! buf i)))))))
+
+(define (list-toggle-all-children! buf)
+  (let* ((parents (or (buffer-local buf 'list-row-parents) '()))
+         (row (list-fold-target buf (list-current buf)))
+         (key (and row (list-key buf row))))
+    (buffer-set-local! buf 'list-folded-rows
+      (if (pair? (or (buffer-local buf 'list-folded-rows) '())) '() (map car parents)))
+    (list-redraw! buf)
+    (let ((i (and key (list-index-of buf (list-entries buf) key))))
+      (when i (list-goto-index! buf i)))))
+
+(define-command "list-toggle-children" "Fold or unfold the rows under this row, or under its parent"
+  (lambda () (list-toggle-children! (current-buffer))))
+
+(define-command "list-toggle-all-children" "Fold every row that has rows under it, or unfold them all"
+  (lambda () (list-toggle-all-children! (current-buffer))))
+
+;; the filter cache keys a row with its depth: a parent the filter drops
+;; lifts its child, and the child's cells change with it
+(define (list-prep-key buf row)
+  (if (list-opt buf 'parent) (list row (list-row-depth buf row) (list-row-hidden buf row)) row))
+
+;; one section: (ROWS DEPTHS), DEPTHS as (KEY DEPTH) for the rows deeper than 0
+(define (list-nest-run buf rows parent-of flat? folded)
+  (let* ((pairs (map (lambda (r) (list r (list-key buf r) (parent-of buf r))) rows))
+         (listed? (lambda (p) (and p (find (lambda (pr) (equal? (cadr pr) p)) pairs) #t)))
+         (kids (lambda (pr) (filter (lambda (c) (equal? (nth 2 c) (cadr pr))) pairs)))
+         (folded? (lambda (pr) (and (member (cadr pr) folded) #t))))
+    (cond ((not (find (lambda (pr) (listed? (nth 2 pr))) pairs)) (list rows '() '()))
+          (flat?
+           (let ((parents (filter (lambda (pr) (pair? (kids pr))) pairs)))
+             (list (map car (remove (lambda (pr) (and (listed? (nth 2 pr))
+                                                      (member (nth 2 pr) folded)))
+                                    pairs))
+                   (map (lambda (pr) (list (cadr pr) 1))
+                        (filter (lambda (pr) (listed? (nth 2 pr))) pairs))
+                   (map (lambda (pr) (list (cadr pr) (if (folded? pr) (length (kids pr)) 0)))
+                        parents))))
+          (else
+           (let ((out '()) (depths '()) (parents '()) (seen '()))
+             ;; a folded row's children are seen, never drawn: the count is
+             ;; what the row says it holds
+             (define (hide pr)
+               (if (member (cadr pr) seen) 0
+                   (begin (set! seen (cons (cadr pr) seen))
+                          (+ 1 (apply + (map hide (kids pr)))))))
+             (define (walk pr depth)
+               (unless (member (cadr pr) seen)
+                 (set! seen (cons (cadr pr) seen))
+                 (set! out (cons (car pr) out))
+                 (when (> depth 0) (set! depths (cons (list (cadr pr) depth) depths)))
+                 (let ((cs (kids pr)))
+                   (when (pair? cs)
+                     (if (folded? pr)
+                         (set! parents (cons (list (cadr pr) (apply + (map hide cs))) parents))
+                         (begin (set! parents (cons (list (cadr pr) 0) parents))
+                                (for-each (lambda (c) (walk c (+ depth 1))) cs)))))))
+             (for-each (lambda (pr) (unless (listed? (nth 2 pr)) (walk pr 0))) pairs)
+             ;; a cycle leaves rows no root reaches: they keep their place
+             (for-each (lambda (pr) (walk pr 0)) pairs)
+             (list (reverse out) depths parents))))))
+
+;; the rows in tree order and their depths, section by section
+(define (list-nest buf rows)
+  (let ((parent-of (list-opt buf 'parent)))
+    (if (not parent-of)
+        (list rows '() '())
+        (let ((flat? (let ((f (list-opt buf 'nest-flat?))) (and f (f buf))))
+              (folded (or (buffer-local buf 'list-folded-rows) '()))
+              (out '()) (depths '()) (parents '()) (run '()))
+          (define (flush!)
+            (let ((n (list-nest-run buf (reverse run) parent-of flat? folded)))
+              (set! out (append (reverse (car n)) out))
+              (set! depths (append (cadr n) depths))
+              (set! parents (append (caddr n) parents))
+              (set! run '())))
+          (for-each (lambda (r)
+                      (if (list-nest-boundary? buf r)
+                          (begin (flush!) (set! out (cons r out)))
+                          (set! run (cons r run))))
+                    rows)
+          (flush!)
+          (list (reverse out) depths parents)))))
+
+;; the indent on the cell 'nest-cell names, in the row's first line
+;; the text the nest cell starts with: the indent, then what a fold hides
+(define (list-nest-prefix buf row)
+  (let ((depth (list-row-depth buf row))
+        (hidden (list-row-hidden buf row)))
+    (string-append (if (> depth 0) (list-nest-indent depth) "")
+                   (if (and hidden (> hidden 0)) (string-append "▸ +" (number->string hidden) " ") ""))))
+
+(define (list-nest-cells buf row cells)
+  (let* ((i (list-opt buf 'nest-cell))
+         (pre (if i (list-nest-prefix buf row) "")))
+    (if (or (not i) (equal? pre "") (null? cells) (not (pair? (car cells))) (>= i (length (car cells))))
+        cells
+        (let* ((indent (lambda (c) (cond ((string? c) (string-append pre c))
+                                         ((and (pair? c) (string? (car c))) (cons (string-append pre (car c)) (cdr c)))
+                                         (else c)))))
+          (cons (let loop ((cs (car cells)) (n 0))
+                  (cond ((null? cs) '())
+                        ((= n i) (cons (indent (car cs)) (cdr cs)))
+                        (else (cons (car cs) (loop (cdr cs) (+ n 1))))))
+                (cdr cells))))))
+
 (define (list-prepare-rows! buf rows ctx fetch)
   (let* ((cache? (list-opt buf 'incremental-filter))
          (previous (and cache? (assoc buf *list-filter-row-cache*)))
@@ -2171,7 +2329,7 @@
          (ks (let ((cl (list-ctx-column-lines ctx))) (and (pair? cl) (car cl))))
          (prepared
            (map (lambda (row)
-                  (let ((hit (assoc row old)))
+                  (let ((hit (assoc (list-prep-key buf row) old)))
                     (if (and hit (not template)) (cadr hit)
                         (if template
                             (let* ((spec (template buf row))
@@ -2189,7 +2347,7 @@
     (when cache?
       (set! *list-filter-row-cache*
         (take
-          (cons (list buf q ctx (list-zip-prepared rows prepared))
+          (cons (list buf q ctx (list-zip-prepared (map (lambda (r) (list-prep-key buf r)) rows) prepared))
                 (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*))
           32)))
     prepared))
@@ -2228,7 +2386,9 @@
            (following? (and (list-opt buf 'follow-head) (or (not was) (= was 0))))
            (filtered (list-render-rows! buf fetch))
            (order (list-opt buf 'order-filtered))
-           (rows (if order (order buf filtered) filtered))
+           ;; a tree list puts each child under its parent, after the order
+           (nested (list-nest buf (if order (order buf filtered) filtered)))
+           (rows (car nested))
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
            ;; is current (a hook, a prompt), and that list keeps its place
@@ -2252,8 +2412,11 @@
         ;; rows this draw found are the rows the last one drew.
         (list-columns-forget! buf)
         (list-set-locals! buf
-          (list 'list-entries rows
-                'list-shown-count (length shown)))
+          (append (list 'list-entries rows
+                        'list-shown-count (length shown))
+                  (if (list-opt buf 'parent)
+                      (list 'list-row-depths (cadr nested) 'list-row-parents (caddr nested))
+                      '())))
         (let* (;; the header once: its lines and their count are one answer
                (head (list-head-lines buf))
                (stamp-fn (list-opt buf 'stamp))
@@ -2500,6 +2663,16 @@
 (public! 'list-define-filter!
   "(list-define-filter! MODE PREFIX FIELD [DOC]) — teach any list mode a filter: in its / filter, a word PREFIXtext keeps the rows whose FIELD (buf entry) -> text has text, e.g. (list-define-filter! \"todo-mode\" \"by:\" (lambda (b e) (plist-get e 'by)) \"filed by\")"
   'ui)
+(public! 'list-row-depth
+  "(list-row-depth BUF ROW) — how deep ROW sits in a tree list: 0 for a root. A list is a tree when its mode names 'parent (buf row -> parent key); 'nest-cell names the cell that takes the indent, 'nest-flat? (buf) keeps the order"
+  'ui)
+(public! 'list-row-hidden
+  "(list-row-hidden BUF ROW) — #f when ROW has no rows under it, else how many a fold hides (0 when open)"
+  'ui)
+(public! 'list-nest-prefix "(list-nest-prefix BUF ROW) — the text a tree list puts before ROW's nest cell: its indent and its fold count" 'ui)
+(public! 'list-nest-indent "(list-nest-indent DEPTH) — the text a row DEPTH deep starts with" 'ui)
+(public! 'list-toggle-children! "(list-toggle-children! BUF) — fold or unfold the rows under the row at point, or under its parent" 'ui)
+(public! 'list-toggle-all-children! "(list-toggle-all-children! BUF) — fold every parent row, or unfold them all when one is folded" 'ui)
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 
 (domain! 'unknown)

@@ -364,7 +364,7 @@ loads once, before its first test"
       "\n\n"
       (if (eq? (plist-get row 'kind) 'test)
           (string-append "── source\n\n" (tb--source row) "\n\n── output\n\n"
-                         (or (plist-get res 'output) "not run yet") "\n")
+                         (or (plist-get res 'output) (if (eq? status 'none) "not run yet" "no output")) "\n")
           (string-append
             (number->string (length tests)) " tests, "
             (number->string (length failing)) " failing\n\n"
@@ -375,7 +375,7 @@ loads once, before its first test"
                                     failing) "\n")
                   "\n\n"))
             "── last run output\n\n"
-            (or (plist-get res 'output) "not run yet") "\n")))))
+            (or (plist-get res 'output) (if (eq? status 'none) "not run yet" "no output")) "\n")))))
 
 (define (tb--render-detail! buf row)
   (let ((d (tb--detail-name buf row)))
@@ -542,6 +542,7 @@ each backend runs its own share"
   (lambda ()
     (app-open! (test-browser-open! (tb--strip-slash (git-root (default-directory)))))))
 
+(domain! 'testing)
 (effects! '(write))
 (public! 'test-browser-define-backend!
   "(test-browser-define-backend! NAME SPEC) — teach the test browser a kind of project: 'detect, 'files, 'discover and 'run")

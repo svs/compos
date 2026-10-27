@@ -775,6 +775,15 @@
           ;; a cycle leaves rows no root reaches: they keep their place
           (for-each (lambda (pr) (walk (car pr) 0)) pairs)
           (reverse out)))))
+;; the activity order keeps every row in its own place: a child is not
+;; pulled under its parent, it only wears the nesting mark
+(define (ibuffer-mark-children rows)
+  (for-each (lambda (r)
+              (when (and (string? r) (ibuffer-row-parent r))
+                (set! *ibuffer-row-depths* (cons (list r 1) *ibuffer-row-depths*))))
+            rows)
+  rows)
+
 (define (ibuffer-nest-indent depth)
   (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
 
@@ -786,10 +795,21 @@
                           row))
                   rows))))
 
+;; the row whose kind did something last comes first; a kind answers
+;; 'activity with a time, and a row with none keeps its recent place
+(define (ibuffer-sort-activity rows)
+  (let loop ((rs rows) (i 0) (keyed '()))
+    (if (null? rs)
+        (map (lambda (k) (nth 2 k)) (sort keyed))
+        (let ((t (ibuffer-ask (car rs) 'activity (lambda (b) #f))))
+          (loop (cdr rs) (+ i 1)
+                (cons (list (if (number? t) (- 0 t) 0) i (car rs)) keyed))))))
+
 (define (ibuffer-sort-rows buf rows)
   (let ((mode (ibuffer-sort buf)))
     (cond ((equal? mode 'size) (ibuffer-sort-sizes rows))
           ((equal? mode 'recent) rows)
+          ((equal? mode 'activity) (ibuffer-sort-activity rows))
           ((equal? mode 'mode) (ibuffer-sort-modes rows))
           (else (ibuffer-sort-names rows)))))
 
@@ -971,7 +991,10 @@
           ;; 'none says the table is one list: no heading, no section, the
           ;; rows in the view's own order. The switch prompts read this way
           ;; -- what you want is the buffer you used last, not its group.
-          ((equal? grouping 'none) (ibuffer-nest (ibuffer-sort-rows buf rows)))
+          ((equal? grouping 'none)
+           (if (equal? (ibuffer-sort buf) 'activity)
+               (ibuffer-mark-children (ibuffer-sort-rows buf rows))
+               (ibuffer-nest (ibuffer-sort-rows buf rows))))
           (else (ibuffer-group-sections
                   buf rows (frame-group))))))
 

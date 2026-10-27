@@ -1323,16 +1323,22 @@
 (define (list-write-text! buf text)
   (let ((old (buffer-text buf)))
     (unless (equal? old text)
+      ;; the lines both texts share at the head and the tail stay; only
+      ;; the middle is replaced, so a row that came or went is one line
+      ;; inserted or removed, not the whole buffer written again
       (let* ((a (string-split old "\n"))
              (b (string-split text "\n"))
-             (n (length a)))
-        (if (= n (length b))
-            (let* ((p (list-lines-shared a b))
-                   (s (min (- n p) (list-lines-shared (reverse a) (reverse b))))
-                   (start (list-lines-bytes a 0 p))
-                   (stop (- (buffer-size buf) (list-lines-bytes a (- n s) n))))
-              (buffer-replace-range! buf start (- stop start)
-                                     (list-lines-join b p (- n s))))
+             (n (length a))
+             (m (length b))
+             (p (list-lines-shared a b))
+             (s (min (- (min n m) p) (list-lines-shared (reverse a) (reverse b)))))
+        (if (> s 0)
+            (let* ((start (list-lines-bytes a 0 p))
+                   (stop (- (+ (buffer-size buf) 1) (list-lines-bytes a (- n s) n)))
+                   (new (if (< p (- m s))
+                            (string-append (list-lines-join b p (- m s)) "\n")
+                            "")))
+              (buffer-replace-range! buf start (- stop start) new))
             (buffer-replace-range! buf 0 (buffer-size buf) text))))))
 
 ;;; A local that holds its value is not a change: writing it again is a

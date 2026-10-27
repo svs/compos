@@ -301,6 +301,8 @@
         'face (lambda (b)
                 (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
         'modified? (lambda (b) #f)
+        ;; the watch puts the chat that did something last at the top
+        'activity (lambda (b) (chats-activity-at b))
         ;; a spawned chat sits under the chat that spawned it
         'parent (lambda (b)
                   (let ((p (buffer-local b 'subagent-parent)))
@@ -353,8 +355,12 @@
                 #t))))
 
 (define (agents-restate!)
-  (when (buffer-known? (chat-list-buffer))
-    (list-redraw! (chat-list-buffer))))
+  ;; a watched list reads the chats again, so a new chat gets its row and
+  ;; the order follows what moved; the write keeps only what changed
+  (for-each (lambda (b)
+              (when (buffer-known? b)
+                (if (buffer-local b 'chats-watch) (list-refresh! b) (list-redraw! b))))
+            (mode-list-views "chat-mode")))
 
 ;; the fleet's surfaces after an event batch: the modeline answers every
 ;; batch, and the list answers the state changes inside it.
@@ -571,6 +577,18 @@
 
 (define-command "agents-refresh" "Refresh the chat list"
   (lambda () (agents-refresh!)))
+
+(define-command "chats-watch" "Watch the chats: one list, the busiest first, kept up as they change"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (was (buffer-local buf 'chats-watch)))
+      (buffer-set-locals! buf
+        (if was
+            (list 'chats-watch #f 'ibuffer-sort (car was) 'ibuffer-grouping (cadr was))
+            (list 'chats-watch (list (ibuffer-sort buf) (ibuffer-grouping buf))
+                  'ibuffer-sort 'activity 'ibuffer-grouping 'none)))
+      (list-refresh! buf)
+      (message (if was "Chats: watch off" "Chats: watching")))))
 
 (define-command "chats-archive"
   "Archive the chat at point: the runtime stops, the buffer goes, the file stays"
@@ -855,6 +873,7 @@
 
 (category! 'chat)
 (catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-watch" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'command "chat-delete" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-kill-runtime" 'domain 'chat 'effects '(destroy))
 (catalog-meta! 'command "chats-stop-all" 'domain 'chat 'effects '(destroy))
@@ -942,7 +961,7 @@
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "
                "answer a permission, r gives a title, k kills, a archives, D deletes, "
-               "+ starts a chat, . shows the hidden chats too, the ones an agent "
+               "+ starts a chat, w watches: one list, the busiest first, kept up as chats change, . shows the hidden chats too, the ones an agent "
                "started for itself, and puts them away again, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
@@ -953,7 +972,7 @@
         'stamp #f
         'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
-                ("g" "agents-refresh")
+                ("g" "agents-refresh") ("w" "chats-watch")
                 ("+" "agent-open")
                 ("." "ibuffer-toggle-hidden")))))
 

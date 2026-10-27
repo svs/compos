@@ -169,6 +169,13 @@ cursor. A draw keeps the row you were on --
 it finds that chat again wherever the new order puts it. Closing the
 filter is not a move either: the rows widen back under the same cursor.
 
+`w` watches instead: the sections go away, the chat that did something
+last sits on top, and a chat that changes state, or a new one, makes the
+list read the chats again. The write keeps the lines both drawings share
+and replaces only the middle, so a new chat is one inserted row, not a
+redrawn list. A subagent keeps its `└` under the chat that spawned it, out of
+the activity order.
+
 ## The saved chats
 
 The last section holds the newest saved conversations. A chat you

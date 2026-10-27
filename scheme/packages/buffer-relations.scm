@@ -18,6 +18,8 @@
 ;;; and, for an owner, frees its children, so a buffer that reuses the
 ;;; name owns nothing. A rename rewrites both halves.
 
+(require 'advice)
+
 (domain! 'buffers)
 (effects! '(read))
 

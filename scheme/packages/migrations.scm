@@ -167,6 +167,36 @@
           (buffer-set-local! buf 'agent-saved-mark (chat-mark buf))
           (buffer-set-local! buf 'agent-marker-bytes 0))))))
 
+;;; --- the relations -----------------------------------------------------------------
+
+;; each parent/child link had a local of its own: the buffer's half of each
+;; becomes its half of 'relations (buffer-relations.scm). A child keeps the
+;; parent it named, a parent the children it listed.
+(define *migration-relation-keys*
+  '((dismiss-parent owner parent) (dismiss-children owner children)
+    (detail-of detail parent)
+    (chat-companion-of companion parent)
+    (inline-target inline parent) (llm-companion inline child)
+    (chat-linked-buffer linked parent)))
+
+(define-buffer-migration! 'buffer-relations "2026-10-28"
+  (lambda (buf)
+    (for-each
+      (lambda (m)
+        (let ((old (buffer-local buf (car m))) (kind (car (cdr m))) (side (car (cdr (cdr m)))))
+          (when (pair? (if (string? old) (list old) old))
+            (let* ((rs (or (buffer-local buf 'relations) '()))
+                   (e (or (assoc kind rs) (list kind #f '())))
+                   (parent (if (equal? side 'parent) old (car (cdr e))))
+                   (kids (cond ((equal? side 'children) old)
+                               ((equal? side 'child) (cons old (car (cdr (cdr e)))))
+                               (else (car (cdr (cdr e)))))))
+              (buffer-set-local! buf 'relations
+                (cons (list kind parent kids)
+                      (filter (lambda (x) (not (equal? (car x) kind))) rs)))))
+          (when old (buffer-set-local! buf (car m) #f))))
+      *migration-relation-keys*)))
+
 ;;; --- the terminal ------------------------------------------------------------------
 
 ;; an old desktop names a terminal buffer's mode shell-mode; term-mode is

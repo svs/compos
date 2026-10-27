@@ -6,6 +6,8 @@
 ;;; the .chat file format, the backends, and the C-c b setup. It loads
 ;;; from init.scm before every package that opens a chat.
 
+(require 'buffer-relations)
+
 (domain! 'chat)
 (effects! '(unknown))
 
@@ -367,7 +369,7 @@
             (message (string-append "C-RET · " model))))))))
 
 ;; The live inline turn is data on the document's chat, not a registry of
-;; its own: the chat knows its document ('inline-target) and its session,
+;; its own: the chat knows its document (its inline relation) and its session,
 ;; so the turn ('inline-turn, a runtime local) only says which response
 ;; block grows and what arrived. One entry exists while the session runs
 ;; a turn for the document; the finish clears it, not the session.
@@ -377,7 +379,7 @@
 
 (define (llm-inline--doc id)
   (let* ((chat (llm-inline--chat id))
-         (doc (and chat (buffer-local chat 'inline-target))))
+         (doc (and chat (buffer-relation chat 'inline))))
     (and doc (buffer-exists? doc) doc)))
 
 (define (llm-inline--turn id)
@@ -534,10 +536,9 @@
 ;; the document's chat as it is named now: a chat takes a title and its name
 ;; changes, so it is found by the document it is the companion of
 (define (llm-mode--companion-existing buf)
-  (let ((n (buffer-local buf 'llm-companion)))
-    (if (and n (buffer-exists? n))
-        n
-        (find (lambda (c) (equal? (buffer-local c 'chat-companion-of) buf))
+  (let ((n (find buffer-exists? (buffer-children buf 'inline))))
+    (or n
+        (find (lambda (c) (equal? (buffer-relation c 'companion) buf))
               (filter chat-buffer? (buffer-list))))))
 
 (define (llm-mode--companion! buf &optional model group)
@@ -567,13 +568,12 @@
             (buffer-set-local! name 'chat-presets (chat-presets-of buf))
             (let ((pm (buffer-local buf 'chat-permission-mode)))
               (when pm (buffer-set-local! name 'chat-permission-mode pm)))))
-      (buffer-set-local! name 'chat-companion-of buf)
+      (buffer-relate! name 'companion buf)
       (chat-task-init! name buf))
     ;; the chat is in its document's group, not the frame's, set before the
     ;; agent attaches so nothing starts a group of its own for it
     (when (and g (not (equal? (buffer-group name) g)))
       (chat-set-group! name g))
-    (buffer-set-local! buf 'llm-companion name)
     (let ((slug (buffer-local name 'agent-slug)))
       (unless (and slug (member slug (agent-list))
                    (not (equal? (agent-status slug) 'dead)))
@@ -582,7 +582,9 @@
     (unless (equal? (buffer-local name 'mode-name) "chat-mode")
       (with-current-buffer name (lambda () (set-mode! "chat-mode"))))
     (chat-take-modes! name buf)
-    (buffer-set-local! name 'inline-target buf)
+    ;; the document's hidden chat: the chat renders into it, and it finds
+    ;; the chat as its inline child
+    (buffer-relate! name 'inline buf)
     (buffer-set-local! buf 'llm-session-id (buffer-local name 'agent-slug))
     name))
 
@@ -598,8 +600,8 @@
 (define-command "llm-companion-show" "Show this document's hidden chat in the other window"
   (lambda ()
     (let* ((buf (current-buffer))
-           (name (buffer-local buf 'llm-companion)))
-      (if (and name (buffer-exists? name))
+           (name (find buffer-exists? (buffer-children buf 'inline))))
+      (if name
           (display-buffer-other-window! name)
           (message "This document has no chat yet: M-o starts one")))))
 
@@ -638,7 +640,7 @@
 
 ;; a restored chat takes its source's modes again
 (define (chat--source-modes-hook!)
-  (let ((src (buffer-local (current-buffer) 'chat-companion-of)))
+  (let ((src (buffer-relation (current-buffer) 'companion)))
     (when (and src (buffer-exists? src))
       (chat-take-modes! (current-buffer) src))))
 
@@ -1555,7 +1557,7 @@
     ;; so an archived chat comes back linked to its parent and its page
     (let ((sl (buffer-local buf 'agent-slug)))
       (if (string? sl) (string-append " slug " (value->string sl)) ""))
-    (let ((p (buffer-local buf 'chat-companion-of)))
+    (let ((p (buffer-relation buf 'companion)))
       (if (string? p) (string-append " companion-of " (value->string p)) ""))
     " permission-mode "
     (symbol->string (if (boundp (quote chat-permission-mode))
@@ -1650,8 +1652,9 @@
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary) (subject chat-subject)
-          (directory chat-directory) (slug agent-slug)
-          (companion-of chat-companion-of)))
+          (directory chat-directory) (slug agent-slug)))
+      (let ((doc (plist-get header 'companion-of)))
+        (when doc (buffer-relate! buf 'companion (chat-header-string doc))))
       (let ((slug (buffer-local buf 'agent-slug)))
         (when (and (string? slug) (boundp 'subagent-cache-rebuild!))
           (subagent-cache-rebuild! slug)))
@@ -1745,7 +1748,10 @@
     code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
-    workspace-isolation-choice project-defaults-inherited chat-companion-of
+    workspace-isolation-choice project-defaults-inherited
+    ;; the chat's links (buffer-relations.scm): the document it works;
+    ;; its inline link is runtime, and chat-clear-runtime! drops it
+    relations
     ;; the group whose group-on-chat hooks this chat already ran: a chat takes them
     ;; once, so the mark has to outlive a restart
     group-config-loaded))
@@ -1797,7 +1803,7 @@
 ;; are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-activity
-    inline-target inline-turn
+    inline-turn
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
@@ -1830,9 +1836,15 @@
            (or (not owner) (equal? owner buf)))
          #t)))
 
+;; the runtime locals, and the document the runtime renders into: a chat
+;; with no runtime renders nowhere
+(define (chat-clear-runtime! buf)
+  (chat-clear-locals! buf chat-runtime-locals)
+  (buffer-relate! buf 'inline #f))
+
 (define (chat-sweep-runtime-locals! buf)
   (unless (chat-live-runtime? buf)
-    (chat-clear-locals! buf chat-runtime-locals)
+    (chat-clear-runtime! buf)
     ;; chat-turn-active is a CONVERSATION local, so it outlives a restart --
     ;; and the process that was running the turn does not. No status event
     ;; can ever arrive for a runtime that is gone, so this is the one place
@@ -1863,7 +1875,7 @@
             ;; still mean anything
             (fold-clear! buf 'all)
             (chat-clear-locals! buf chat-conversation-locals)
-            (chat-clear-locals! buf chat-runtime-locals)
+            (chat-clear-runtime! buf)
             (buffer-delete-range! buf 0 (buffer-size buf))
             ;; the title named the old conversation: go back to a fresh
             ;; untitled name so the next prompt titles it again

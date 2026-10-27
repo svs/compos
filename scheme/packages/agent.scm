@@ -261,7 +261,7 @@
            ;; a hidden chat has no pane for a card: its document's frame
            ;; gets the question in the minibuffer, and the answer is the
            ;; same answer C-c C-y or C-c C-n would give
-           ((buffer-local buf 'inline-target)
+           ((buffer-relation buf 'inline)
             (buffer-set-local! buf 'permission-asked (list title kind raw))
             (y-or-n (string-append "Allow " title "?")
               (lambda () (agent-answer-permission! slug "allow_always" "allow"))
@@ -469,7 +469,7 @@
       (chat-view-sync! (agent-buf slug))
       ;; a document's hidden chat renders its reply into the document too:
       ;; every event but the permission, which this handler answered
-      (let ((target (buffer-local (agent-buf slug) 'inline-target)))
+      (let ((target (buffer-relation (agent-buf slug) 'inline)))
         (when (and target (buffer-exists? target))
           (llm-inline-events! slug
             (filter (lambda (e) (not (equal? (plist-get e 'type) 'permission))) events))))

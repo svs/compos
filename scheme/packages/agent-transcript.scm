@@ -1358,10 +1358,10 @@
 (define (chat-link-buffer! buf)
   (let ((chat (chat--author-chat)))
     (when (and chat (string? buf) (not (equal? buf chat)))
-      (buffer-set-local! chat 'chat-linked-buffer buf))))
+      (buffer-relate! chat 'linked buf))))
 
 (define (chat-linked-window &optional chat)
-  (let ((buf (buffer-local (or chat (current-buffer)) 'chat-linked-buffer))
+  (let ((buf (buffer-relation (or chat (current-buffer)) 'linked))
         (me (active-window)))
     (and buf
          (let loop ((ws (window-list)))

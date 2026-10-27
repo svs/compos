@@ -1119,11 +1119,9 @@
 
 (define (todo-assign-chat! id group &optional who)
   "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief when the chat is new; return the chat"
-  (let* ((caller (let ((s (subagent-spawner))) (and s (subagent-live-buffer s))))
-           ;; the chat that asks never gets the task back: an orchestrator
-           ;; that only noted or ordered the task is the last chat in its log
-           (held (let ((c (todo--chat-of t))) (and c (not (equal? c caller)) c)))
-           (got (assign-chat! #f g
+  (let* ((t (todo--must id))
+         (g (or (group-resolve-id group) (group-ensure-record! group))))
+    (let* ((got (assign-chat! #f g
                   (lambda (chat)
                     (todo-update id (list 'assignee (chat-stable-id! chat)
                                           'chats (todo--chats-keeping t (plist-get t 'assignee))
@@ -1131,13 +1129,8 @@
                                           'log (string-append "assigned to a chat in " (group-name g))
                                           'by (or who todo-user)))
                     (todo--brief (todo-get id) (chat-stable-id! chat)))
-                  held))
+                  (todo--chat-of t)))
            (chat (car got)))
-      ;; the chat that asked hears each turn the worker ends: an orchestrator
-      ;; knows the state of the chats it hands tasks to
-      (when (and caller (not (equal? chat caller)) (buffer-local chat 'agent-slug))
-        (subagent-record! (subagent-spawner) (buffer-local chat 'agent-slug))
-        (buffer-set-local! chat 'subagent-notify #t))
       ;; A new chat wears the task's title. Named here, after the brief went
       ;; out under the old name; the first-prompt title lands later and
       ;; leaves a titled chat alone.
@@ -1151,7 +1144,7 @@
                           (group-buffers g))
                     chat)
                 chat))
-          chat)))
+          chat))))
 
 ;; the assignee of a chat-held task is the chat's stable id, since the
 ;; chat renames itself after its first answer

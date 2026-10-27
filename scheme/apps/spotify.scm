@@ -2938,7 +2938,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
         (if pane
             (begin
               ;; the list's later pages land here again
-              (buffer-set-local! page 'detail-of (buffer-local from 'detail-of))
+              (buffer-relate! page 'detail (buffer-relation from 'detail))
               (with-frame-windows (lambda () (window-set-buffer! pane page))))
             (display-buffer-detail! page from)))))
 

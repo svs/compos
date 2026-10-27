@@ -547,10 +547,20 @@
         ((equal? k 'state) (string-append "state " (todo--show old) " -> " (todo--show new)))
         (else (string-append (symbol->string k) " " (todo--show new)))))
 
+(define (todo--split-log props)
+  ;; a log entry is one line: a longer text leaves its first line in the
+  ;; log and goes whole to the notes, where its line breaks stay
+  (let ((text (plist-get props 'log)))
+    (if (and (string? text) (string-contains? (string-trim text) "\n"))
+        (append (plist-put props 'log (string-append (first-line text) "  (more in notes)"))
+                (list 'note (string-trim text)))
+        props)))
+
 (define (todo-update id props)
   "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
-         (who (or (plist-get props 'by) todo-user)))
+         (who (or (plist-get props 'by) todo-user))
+         (props (todo--split-log props)))
     (let loop ((ps props) (new t) (changes '()))
       (if (pair? ps)
           (let ((k (car ps)) (v (cadr ps)))
@@ -1498,7 +1508,7 @@
          (notes-part (if (todo--blank? notes) '()
                          (let ((n (line! "Notes")))
                            (list (stop (component 'ui/group
-                                         (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose" 'text notes))))
+                                         (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text notes))))
                                        "Notes" n n)))))
          (details (let ((n (line! "Details")))
                     (stop (component 'ui/group

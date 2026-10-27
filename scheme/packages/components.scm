@@ -832,6 +832,7 @@ c-header.c-group { padding: 10px 14px; }
 .c-person-avatar { width: 64px; height: 64px; flex: none; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); }
 .c-meta { font-family: var(--font-sans); font-size: .88em; line-height: 1.5; color: var(--dim-fg); margin: .15em 0 .5em; }
 .c-prose { font-family: var(--font-sans); line-height: 1.6; margin: .15em 0 .7em; max-width: 75ch; }
+.c-lines { white-space: pre-line; }
 .c-bullet { font-family: var(--font-sans); line-height: 1.6; margin: 0 0 .25em; padding-left: 1.3em; text-indent: -1.3em; max-width: 80ch; }
 .c-bullet::before { content: '•'; display: inline-block; width: 1.3em; text-indent: 0; color: var(--accent-fg); }
 .c-prose.current, .c-bullet.current, .c-meta.current, .c-title.current { background: var(--hl-line-bg); }

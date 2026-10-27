@@ -503,8 +503,8 @@
 ;; already holds instead of asking every buffer twice
 ;; C-x C-b and the mode lists carry the tabs of C-x b: every buffer, the
 ;; current group's, and the ones the window showed before the list. The
-;; side arrows step through them; a view without 'ibuffer-tab has none.
-(define (ibuffer-tab buf) (buffer-local buf 'ibuffer-tab))
+;; side arrows step through them; a view without a list-tab has none.
+(define (ibuffer-tab buf) (list-tab buf))
 
 (define (ibuffer-tab-keep? buf name)
   (let ((tab (ibuffer-tab buf)))
@@ -529,23 +529,20 @@
 (define *ibuffer-tabs* '((all "All") (group "Group")))
 
 (define (ibuffer-tab-step-of tab step)
-  (let* ((keys (map car *ibuffer-tabs*))
-         (n (length keys))
-         (i (let loop ((ks keys) (i 0)) (cond ((null? ks) 0) ((eq? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
-    (nth (modulo (+ i step n) n) keys)))
+  (list-cycle tab (map car *ibuffer-tabs*) step))
 
 (define (ibuffer-tabs-start! buf from)
   ;; a frame outside every group has no Group tab to show: it would list
   ;; nothing, so the list opens on All
   (let ((tab (if (assoc switch-buffer-initial-tab *ibuffer-tabs*) switch-buffer-initial-tab 'group)))
-    (buffer-set-local! buf 'ibuffer-tab
+    (list-tab-set! buf
       (if (and (equal? tab 'group) (not (frame-group))) 'all tab)))
   (buffer-set-local! buf 'ibuffer-tab-window from)
   ;; the tabs are the scope now: no narrowing left over from before them
   (buffer-set-local! buf 'ibuffer-narrow-group #f))
 
 (define (ibuffer-tab-step! buf step)
-  (buffer-set-locals! buf (list 'ibuffer-tab (ibuffer-tab-step-of (ibuffer-tab buf) step)
+  (buffer-set-locals! buf (list 'list-tab (ibuffer-tab-step-of (ibuffer-tab buf) step)
                                 'ibuffer-narrow-group #f))
   (ibuffer-refresh! buf)
   (ibuffer-goto-first-row! buf))
@@ -572,7 +569,7 @@
          (ibuffer-tab buf)
          (let ((tab (string->symbol (substring id 12 (string-length id)))))
            (and (assoc tab *ibuffer-tabs*)
-                (begin (buffer-set-local! buf 'ibuffer-tab tab)
+                (begin (list-tab-set! buf tab)
                        (ibuffer-refresh! buf)
                        (ibuffer-goto-first-row! buf)
                        #t))))))
@@ -630,7 +627,7 @@
 
 (define (ibuffer-sort &optional buf)
   (let ((buf (or buf (ibuffer-view))))
-    (or (buffer-local buf 'ibuffer-sort)
+    (or (list-sort buf)
         (ibuffer-view-default buf 'sort)
         ibuffer-default-sorting-mode)))
 
@@ -645,9 +642,7 @@
 (define (ibuffer-collapsed &optional buf)
   (or (buffer-local (or buf (ibuffer-view)) 'ibuffer-collapsed) '()))
 
-(define (ibuffer-cycle-after item items)
-  (let ((rest (member item items)))
-    (if (and rest (pair? (cdr rest))) (cadr rest) (car items))))
+(define (ibuffer-cycle-after item items) (list-cycle item items 1))
 
 ;; A redraw leaves the highlight where the reader left it. The one
 ;; exception is the top of the table: a list drawn from its first row
@@ -662,7 +657,7 @@
 
 (define (ibuffer-set-sort! mode &optional buf)
   (let ((buf (or buf (ibuffer-view))))
-    (buffer-set-local! buf 'ibuffer-sort mode)
+    (list-sort-set! buf mode)
     (when (buffer-known? buf) (ibuffer-refresh! buf))))
 
 (define (ibuffer-set-grouping! mode &optional buf)
@@ -2022,7 +2017,7 @@
          (_opts (buffer-set-local! buf 'ibuffer-render-options (or options '())))
          (_tabs (if (plist-get (or options '()) 'tabs)
                     (ibuffer-tabs-start! buf from)
-                    (buffer-set-local! buf 'ibuffer-tab #f)))
+                    (list-tab-set! buf #f)))
          (_g (ibuffer-refresh! buf))
          (t4 (monotonic-ms))
          (_h (ibuffer-goto-first-row! buf))

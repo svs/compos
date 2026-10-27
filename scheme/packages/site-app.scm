@@ -170,7 +170,7 @@
   (let* ((spec (site-app-get buf 'spec))
          (current (site-app-get buf 'page))
          (filters (or (site-app-get buf 'filters) '()))
-         (query (site-app-get buf 'filter))
+         (query (list-tab buf))
          (sections (append (site-app-lead-tabs buf)
                            (map (lambda (page)
                                   (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
@@ -314,7 +314,7 @@
                      (caddr (car (site-app-index-bars buf))))
                 " "))
          (filters (or (site-app-get buf 'filters) '()))
-         (query (site-app-get buf 'filter)))
+         (query (list-tab buf)))
     (if (null? filters)
         nav
         (string-append nav "\n"
@@ -388,7 +388,7 @@
   (let* ((spec (site-app-spec name))
          (path (plist-get page 'path))
          (url (site-app-url spec (if (procedure? path) (path) path)))
-         (query (site-app-get (site-app-page-buffer name (plist-get page 'id)) 'filter)))
+         (query (list-tab (site-app-page-buffer name (plist-get page 'id)))))
     (if (plist-get page 'live)
         (site-app-navigate! name url (or (plist-get page 'wait) (plist-get spec 'ready))
           (lambda (tab answer) (k (and answer (plist-get answer 'html)))))
@@ -411,7 +411,7 @@
           (site-app-set! buf 'filters (if (pair? tabs) tabs '()))
           ;; the page says which of its tabs it drew; that is the one we are on.
           ;; Grouped filters are facets, several on at once: the query we read stands
-          (when (and on (not (plist-get on 'group))) (site-app-set! buf 'filter (plist-get on 'query)))
+          (when (and on (not (plist-get on 'group))) (list-tab-set! buf (plist-get on 'query)))
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf)
           ;; a page's 'after-fill (BUF ROWS) hears every read, to keep it
@@ -496,18 +496,12 @@
          (n (length filters)))
     (if (= n 0)
         (message "This section has no status tabs")
-        (let* ((query (site-app-get buf 'filter))
-               (at (let loop ((rest filters) (i 0))
-                     (cond ((null? rest) 0)
-                           ((equal? (plist-get (car rest) 'query) query) i)
-                           (else (loop (cdr rest) (+ i 1))))))
-               (next (list-ref filters (modulo (+ at delta) n))))
-          (site-app-set-filter! buf (plist-get next 'query))))))
+        (site-app-set-filter! buf (list-cycle (list-tab buf) (map (lambda (f) (plist-get f 'query)) filters) delta)))))
 
 (define (site-app-set-filter! buf query)
   ;; show one status tab of the section, then read the section at it
   (let ((spec (site-app-get buf 'spec)))
-    (site-app-set! buf 'filter query)
+    (list-tab-set! buf query)
     (list-refresh! buf)
     (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf))))
 
@@ -582,7 +576,7 @@
       ;; a list: the status tabs its page draws, a menu group for each facet; the
       ;; letters run across the whole menu, so every tab keeps its own
       (let* ((filters (or (site-app-get buf 'filters) '()))
-             (on (site-app-get buf 'filter))
+             (on (list-tab buf))
              (suffixes (site-app-tab-suffixes
                          (map (lambda (f) (plist-get f 'label)) filters)
                          (map (lambda (f) (or (equal? (plist-get f 'active) "yes") (equal? (plist-get f 'query) on))) filters)

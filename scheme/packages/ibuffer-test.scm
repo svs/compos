@@ -17,7 +17,7 @@
   (when (buffer-known? "*ibuffer*")
     ;; the view dies on the next line: no redraw for a cleared filter
     (buffer-set-locals! "*ibuffer*"
-      (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '() 'list-filters '()))
+      (list 'list-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '() 'list-filters '()))
     (buffer-kill! "*ibuffer*"))
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             '("*zz-ib-a*" "*zz-ib-b*" "*zz-ib-c*"))
@@ -35,7 +35,7 @@
   (run-command "ibuffer")
   ;; the filter and the options land together, then one draw
   (buffer-set-locals! "*ibuffer*"
-    (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()
+    (list 'ibuffer-grouping grouping 'list-sort sort 'ibuffer-collapsed '()
           'list-filters (list (list "match" "zz-ib-"))))
   (ibuffer-refresh!))
 
@@ -114,7 +114,7 @@
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-toggle-sorting-mode-cycles
-  "the cycle runs name, recent, size, name"
+  "the cycle runs name, recent, size, mode, name"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (run-command "ibuffer-toggle-sorting-mode")
@@ -122,7 +122,9 @@
     (run-command "ibuffer-toggle-sorting-mode")
     (check-equal! (ibuffer-sort) 'size "recent then size")
     (run-command "ibuffer-toggle-sorting-mode")
-    (check-equal! (ibuffer-sort) 'name "size then name")
+    (check-equal! (ibuffer-sort) 'mode "size then mode")
+    (run-command "ibuffer-toggle-sorting-mode")
+    (check-equal! (ibuffer-sort) 'name "mode then name")
     (run-command "ibuffer-toggle-grouping")
     (check-equal! (ibuffer-grouping) 'directory "mode then directory")
     (run-command "ibuffer-toggle-grouping")
@@ -235,7 +237,7 @@
       (switch-to-buffer! "*zz-ib-a*")
       (run-command "ibuffer")
       (buffer-set-locals! "*ibuffer*"
-        (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-collapsed '()))
+        (list 'ibuffer-grouping 'group 'list-sort 'name 'ibuffer-collapsed '()))
       (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-")))
       (ibuffer-refresh!)
       (ibuffer-goto-first-row! "*ibuffer*")
@@ -357,7 +359,7 @@
 (define (ibuffer-test-point-on! name)
   (run-command "ibuffer")
   (buffer-set-locals! "*ibuffer*"
-    (list 'ibuffer-grouping 'group 'ibuffer-sort 'name 'ibuffer-tab 'all 'ibuffer-collapsed '()))
+    (list 'ibuffer-grouping 'group 'list-sort 'name 'list-tab 'all 'ibuffer-collapsed '()))
   (list-set-filters! "*ibuffer*" (list (list "match" name)))
   (ibuffer-refresh!)
   (ibuffer-goto-first-row! "*ibuffer*")

@@ -28,6 +28,7 @@ The list mode in `scheme/packages/tabulated-list.scm` draws every table in the e
 5. A right-aligned last column pads on its left, so its text ends at the column's edge; its face span starts after the padding.
 6. The key bar shows only the main keys that the mode declares, and ends in `? all N`, where `?` shows every key. The card floats over the rows, so it does not push the rows down.
 7. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
+8. A list keeps its view state on its buffer, and list-mode owns it: the filters (`list-filters`), the tab (`list-tab`), and the sort (`list-sort`). Each persists with the buffer. `(list-tab BUF [DEFAULT])` and `(list-sort BUF [DEFAULT])` read; `(list-tab-set! BUF V)` and `(list-sort-set! BUF V)` write; `(list-tab-step! BUF VALUES STEP [DEFAULT])` and `(list-sort-step! BUF VALUES STEP [DEFAULT])` move round the ring. None of them redraws. ibuffer's All/Group tabs and sort, the todo list's status tabs and order, and a site-app's status tab use them; a list does not keep its own copy.
 ## Trees
 
 1. A list is a tree when its mode names `'parent`, `(lambda (buf row))` that answers the key of the row's parent, or `#f`. After every filter and every order, a row whose parent is listed in the same section follows that parent, one step deeper. A row whose parent is not listed (filtered out, or in another section) stays where it sorts, as a root. A separator or a `'section?` row ends a section.

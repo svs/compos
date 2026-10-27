@@ -84,7 +84,7 @@ defmodule Compos.ListingPreviewCardTest do
         KeyDispatch.handle_key(frame, "<f9>")
         eval!("""
         (define *card-owner* (window-buffer (active-window)))
-        (buffer-set-locals! *card-owner* '(ibuffer-grouping none ibuffer-sort name))
+        (buffer-set-locals! *card-owner* '(ibuffer-grouping none list-sort name))
         (list-set-query! *card-owner* "zz-card-target" #t)
         (ibuffer-goto-first-row! *card-owner*)
         (listing-preview! *card-owner* "*zz-card-target*")

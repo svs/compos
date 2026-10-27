@@ -502,6 +502,34 @@
   (buffer-set-local! buf 'list-filters '())
   (list-redraw! buf))
 
+;;; tab and sort — the view a list shows and the order it shows it in.
+;;; One of each per list, on the list's buffer, so they survive a quit
+;;; and a reopen the way the filters do. A list names its own values;
+;;; DEFAULT answers while none is chosen. Neither redraws: the caller
+;;; knows whether a fetch or a plain redraw follows.
+
+(define (list-tab buf &optional default) (or (buffer-local buf 'list-tab) default))
+
+(define (list-tab-set! buf tab) (buffer-set-local! buf 'list-tab tab) tab)
+
+(define (list-sort buf &optional default) (or (buffer-local buf 'list-sort) default))
+
+(define (list-sort-set! buf by) (buffer-set-local! buf 'list-sort by) by)
+
+;; the item STEP places after ITEM in ITEMS, round the ring; the first
+;; when ITEM is not one of them
+(define (list-cycle item items step)
+  (let loop ((rest items) (i 0))
+    (cond ((null? rest) (car items))
+          ((equal? (car rest) item) (nth (modulo (+ i step) (length items)) items))
+          (else (loop (cdr rest) (+ i 1))))))
+
+(define (list-tab-step! buf tabs step &optional default)
+  (list-tab-set! buf (list-cycle (list-tab buf default) tabs step)))
+
+(define (list-sort-step! buf sorts step &optional default)
+  (list-sort-set! buf (list-cycle (list-sort buf default) sorts step)))
+
 ;;; --- `/` narrows --------------------------------------------------------------
 ;;; One filter, for every list. You press `/` and type; the list narrows
 ;;; on every keystroke to the rows that match. The arrows move the rows

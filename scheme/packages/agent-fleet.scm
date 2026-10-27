@@ -584,9 +584,9 @@
            (was (buffer-local buf 'chats-watch)))
       (buffer-set-locals! buf
         (if was
-            (list 'chats-watch #f 'ibuffer-sort (car was) 'ibuffer-grouping (cadr was))
+            (list 'chats-watch #f 'list-sort (car was) 'ibuffer-grouping (cadr was))
             (list 'chats-watch (list (ibuffer-sort buf) (ibuffer-grouping buf))
-                  'ibuffer-sort 'activity 'ibuffer-grouping 'none)))
+                  'list-sort 'activity 'ibuffer-grouping 'none)))
       (list-refresh! buf)
       (message (if was "Chats: watch off" "Chats: watching")))))
 

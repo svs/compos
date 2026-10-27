@@ -21,7 +21,7 @@ defmodule Compos.ChosenPaneTest do
         (select-window! *chosen-first*)
         (run-command "ibuffer")
         (define *chosen-list* (current-buffer))
-        (buffer-set-locals! *chosen-list* '(ibuffer-grouping none ibuffer-sort name))
+        (buffer-set-locals! *chosen-list* '(ibuffer-grouping none list-sort name))
         (list-set-query! *chosen-list* "zz-chosen-detail" #t)
         (ibuffer-goto-first-row! *chosen-list*)
         (listing-preview! *chosen-list* "*zz-chosen-detail*")

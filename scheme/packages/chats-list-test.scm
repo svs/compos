@@ -26,7 +26,7 @@
   (when (buffer-known? *chat-list*)
     (run-command "ibuffer-quit")
     (buffer-set-locals! *chat-list*
-      (list 'ibuffer-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
+      (list 'list-sort #f 'ibuffer-grouping #f 'ibuffer-collapsed '()))
     (list-filter-clear! *chat-list*)
     (buffer-kill! *chat-list*))
   ;; the transcripts go before the buffers do: the path is read off the
@@ -67,7 +67,7 @@
     (run-command "chat-list")
     (set! *chat-list* (chat-list-buffer))
     (buffer-set-locals! *chat-list*
-      (list 'ibuffer-grouping grouping 'ibuffer-sort sort 'ibuffer-collapsed '()))
+      (list 'ibuffer-grouping grouping 'list-sort sort 'ibuffer-collapsed '()))
     (list-set-filters! *chat-list* (list (list "match" "zz-chats-")))
     (list-refresh! *chat-list*)
     (ibuffer-goto-first-row! *chat-list*)

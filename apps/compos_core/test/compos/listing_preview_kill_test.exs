@@ -16,7 +16,7 @@ defmodule Compos.ListingPreviewKillTest do
       (switch-to-buffer-here! "*zz-preview-kill-home*")
       (run-command "ibuffer")
       (define *pk-list* (current-buffer))
-      (buffer-set-locals! *pk-list* '(ibuffer-grouping none ibuffer-sort name))
+      (buffer-set-locals! *pk-list* '(ibuffer-grouping none list-sort name))
       (list-set-query! *pk-list* "zz-preview-kill-target" #t)
       (ibuffer-goto-first-row! *pk-list*)
       (listing-preview! *pk-list* "*zz-preview-kill-target*")

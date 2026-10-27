@@ -338,7 +338,7 @@
           (append
             (list 'path (lambda ()
                           (let* ((buf (site-app-page-buffer 'ats 'meetings))
-                                 (on (and (buffer-known? buf) (site-app-get buf 'filter)))
+                                 (on (and (buffer-known? buf) (list-tab buf)))
                                  (day (format-time (current-time) "%Y-%m-%d")))
                             (if (and (string? on) (> (string-length on) 0))
                                 "/staff/meetings"
@@ -588,7 +588,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 ;; / in the candidates list: the site's own search (?q=), over every candidate
 ;; and not only the page drawn. An empty answer shows them all again
 (define (ats-search-query buf)
-  (let ((q (site-app-get buf 'filter)))
+  (let ((q (list-tab buf)))
     (if (and (string? q) (string-prefix? "q=" q)) (url-decode (substring q 2 (string-length q))) "")))
 
 (define-command "ats-candidates-search" "Search every candidate on the site by name"

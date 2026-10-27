@@ -693,7 +693,7 @@
         (list "closed" '(state ("done" "cancelled")))
         (list "all" '(all #t))))
 
-(define (todo--view buf) (or (buffer-local buf 'todo-view) "open"))
+(define (todo--view buf) (list-tab buf "open"))
 
 (define (todo--view-spec buf)
   (let ((s (cadr (assoc (todo--view buf) *todo-views*))))
@@ -719,7 +719,7 @@
 
 (define *todo-sorts* '("status" "urgency" "deadline" "created"))
 
-(define (todo--sort-by buf) (or (buffer-local buf 'todo-sort) "status"))
+(define (todo--sort-by buf) (list-sort buf "status"))
 
 (define (todo--resort ts by)
   "urgency: time-sensitive first, then status. deadline: soonest first, undated last. created: newest first. status: todo-list's own order."
@@ -794,7 +794,7 @@
               'options (lambda (buf) (map (lambda (v) (list (car v) (car v)))
                                           (remove (lambda (v) (equal? (car v) "all")) *todo-views*)))
               'get (lambda (buf) (let ((v (todo--view buf))) (if (equal? v "all") #f v)))
-              'set (lambda (buf v) (buffer-set-local! buf 'todo-view (or v "all"))))))
+              'set (lambda (buf v) (list-tab-set! buf (or v "all"))))))
 
 (define (todo--due t)
   (let ((d (plist-get t 'deadline)))
@@ -1776,13 +1776,12 @@
                'initial chat))))))
 
 (define (todo--view-set! buf name)
-  (buffer-set-local! buf 'todo-view name)
+  (list-tab-set! buf name)
   (list-refresh! buf))
 
 (define (todo--view-step! buf step)
-  (let* ((names (map car *todo-views*))
-         (i (todo--rank (todo--view buf) names)))
-    (todo--view-set! buf (nth (modulo (+ i step) (length names)) names))))
+  (list-tab-step! buf (map car *todo-views*) step "open")
+  (list-refresh! buf))
 
 ;; a tab's count is what the tab would show under the list's group and
 ;; project filters. Reading the tasks is the slow part, so every tab counts
@@ -1835,9 +1834,7 @@
 (define-command "todo-next-sort" "Cycle the order: status, urgency, deadline, created"
   (lambda ()
     (let* ((buf (todo--list-buffer))
-           (i (todo--rank (todo--sort-by buf) *todo-sorts*))
-           (next (nth (modulo (+ i 1) (length *todo-sorts*)) *todo-sorts*)))
-      (buffer-set-local! buf 'todo-sort next)
+           (next (list-sort-step! buf *todo-sorts* 1 "status")))
       (list-refresh! buf)
       (message (string-append "Todos by " next)))))
 

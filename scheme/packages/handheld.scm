@@ -28,22 +28,35 @@
     (map (lambda (id) (list id (group-display-name id) (equal? id here)))
          (group-ids-mru))))
 
-;;; --- the buffers of the group ------------------------------------------------
-;;; Each row is (NAME TITLE MODE CURRENT?), most recent first. Without a
-;;; group the rows are every buffer.
+;;; --- the buffers ----------------------------------------------------------------
+;;; Two sections, most recent first: the frame group's buffers, then every
+;;; other buffer with its group named. Each row is (NAME TITLE SUB CURRENT?).
 
+(define *handheld-buffers-max* 200)
+
+(define (handheld-buffer-rows spec cur sub)
+  (map (lambda (r)
+         (let ((name (car r)))
+           (list name (or (nth 2 r) name) (sub r) (equal? name cur))))
+       (car (cdr (buffer-rows (append spec (list 'sort 'recent 'limit *handheld-buffers-max*
+                                                 'fields '(name title mode group))))))))
+
+(define (handheld-buffer-sub r)
+  (let ((mode (or (nth 3 r) "")) (g (nth 4 r)))
+    (if (and (string? g) (not (equal? g "")))
+        (string-append mode " · " (group-display-name g))
+        mode)))
+
+;; ((SECTION ROWS) ...)
 (define (handheld-buffers &optional cur)
   (let* ((g (frame-group))
-         (spec (append (if g (list 'groups (list g)) '())
-                       (list 'sort 'recent 'limit 200 'fields '(name title mode))))
-         (rows (car (cdr (buffer-rows spec)))))
-    (map (lambda (r)
-           (let ((name (car r)))
-             (list name
-                   (or (nth 2 r) name)
-                   (or (nth 3 r) "")
-                   (equal? name cur))))
-         rows)))
+         (here (if g (handheld-buffer-rows (list 'groups (list g)) cur (lambda (r) (or (nth 3 r) ""))) '()))
+         (names (map car here))
+         (rest (filter (lambda (row) (not (member (car row) names)))
+                       (handheld-buffer-rows '() cur handheld-buffer-sub))))
+    (filter (lambda (s) (pair? (car (cdr s))))
+            (list (list (if g (group-display-name g) "buffers") here)
+                  (list "everything else" rest)))))
 
 ;;; --- the commands ------------------------------------------------------------
 ;;; A command row is (NAME DOC). The sheet opens on two sections: the
@@ -159,11 +172,14 @@
           (else (unless (equal? id (frame-group)) (switch-to-group! id))
                 (handheld-chat!)))))
 
-;; A tap on a buffer of the group
+;; A tap on a buffer. One of another group takes the frame to that group
+;; first, as switch-to-buffer! does, so the header and the chat follow.
 (define (handheld-buffer! name)
-  (if (buffer-exists? name)
-      (handheld-show! name)
-      (begin (message (string-append "No buffer named " name)) #f)))
+  (let ((g (and (buffer-exists? name) (buffer-group name))))
+    (cond ((not (buffer-exists? name))
+           (message (string-append "No buffer named " name)) #f)
+          ((or (not g) (equal? g (frame-group))) (handheld-show! name))
+          (else (switch-to-buffer! name) name))))
 
 ;; Run a command by name and remember it. Returns #t, or #f for a name
 ;; that is not a command.
@@ -207,7 +223,7 @@
 (public! 'handheld-groups
   "(handheld-groups) -> ((ID LABEL CURRENT?) ...): the groups, most recent first")
 (public! 'handheld-buffers
-  "(handheld-buffers [CUR]) -> ((NAME TITLE MODE CURRENT?) ...): the frame group's buffers, most recent first; CUR is flagged")
+  "(handheld-buffers [CUR]) -> ((SECTION ((NAME TITLE SUB CURRENT?) ...)) ...): the frame group's buffers, then every other one, most recent first; CUR is flagged")
 (public! 'handheld-commands
   "(handheld-commands BUF) -> ((SECTION ((NAME DOC) ...)) ...): the commands the phone ran last, then the ones BUF's own keymaps bind")
 (public! 'handheld-search

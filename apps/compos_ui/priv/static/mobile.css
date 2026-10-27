@@ -43,44 +43,41 @@ body {
 /* no text selection on the chrome. Not on the root: an input under
    a -webkit-user-select:none ancestor never raises the keyboard
    on iOS. */
-.hh-modeline, .hh-tabs, .hh-key, .hh-fan, .hh-chips, .hh-rail, .hh-sheet-head, .hh-sheet-legend {
+.hh-head, .hh-nav, .hh-rail, .hh-sheet-head, .hh-sheet-legend, .hh-row {
   user-select: none; -webkit-user-select: none;
 }
 .hh-splash { display: flex; align-items: center; justify-content: center; height: 100%; opacity: .5; }
 .hh-spacer { flex: 1; }
 
-/* ── the modeline: one line, always ─────────────────────── */
-.hh-modeline {
-  flex: none; display: flex; align-items: center; gap: 8px;
-  padding: calc(7px + var(--safe-top)) 12px 7px;
+/* ── the header: the group above, the buffer below ───────── */
+.hh-head {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: calc(6px + var(--safe-top)) 14px 6px;
   background: var(--panel); border-bottom: 1px solid var(--rule);
-  font-size: 11px; letter-spacing: .04em; white-space: nowrap; overflow: hidden;
+  white-space: nowrap; overflow: hidden; cursor: pointer;
 }
-.hh-ml-flags { color: var(--faint); }
-.hh-ml-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.hh-ml-mode { color: var(--faint); }
-.hh-ml-info { color: var(--indigo); overflow: hidden; text-overflow: ellipsis; max-width: 34vw; }
-.hh-ml-pending {
-  padding: 2px 7px; background: var(--ink); color: var(--paper);
-  font-weight: 600; letter-spacing: .08em;
-}
+.hh-head:active { background: var(--panel-dim); }
+.hh-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.hh-head-group { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--indigo); overflow: hidden; text-overflow: ellipsis; }
+.hh-head-name { font-family: var(--font-serif); font-size: 16px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
+.hh-head-info { flex: none; max-width: 32vw; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: var(--faint); }
+.hh-head-dirty { flex: none; font-size: 9px; color: var(--amber); }
+.hh-head-chev { flex: none; font-size: 12px; color: var(--faint); }
 
 /* ── the body: the rail and the one window ──────────────── */
 .hh-body { flex: 1; min-height: 0; display: flex; }
 .hh-rail {
-  flex: none; width: 24px; position: relative;
+  flex: none; width: 18px; position: relative;
   border-right: 1px solid var(--rule-soft); background: var(--panel-dim);
   display: flex; flex-direction: column; align-items: center; justify-content: space-between;
   padding: 6px 0; touch-action: none;
 }
-.hh-rail-k { font-size: 8.5px; color: var(--dim); }
-.hh-rail-w { font-size: 8.5px; color: var(--dim); writing-mode: vertical-rl; letter-spacing: .16em; text-transform: uppercase; }
 .hh-rail-mark { position: absolute; left: 3px; right: 3px; height: 3px; background: var(--indigo); }
 .hh-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
 .hh-lines { padding: 10px 12px 16px; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; }
-.hh-line { display: flex; gap: 8px; padding: 1px 0 1px 6px; margin-left: -6px; border-left: 2px solid transparent; }
+.hh-line { display: flex; gap: 8px; padding: 1px 0 1px 6px; margin-left: -6px; border-left: 2px solid transparent; cursor: pointer; }
+.hh-line:active { background: var(--sand); }
 .hh-line.cur { background: var(--panel-dim); border-left-color: var(--indigo); }
-.hh-linenum { flex: none; width: 3ch; text-align: right; color: var(--dim); font-size: 10px; padding-top: 3px; }
 .hh-line-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hh-line-text .cursor { background: var(--cursor-bg, var(--ink)); color: var(--paper); }
 .hh-empty { padding: 20px 4px; color: var(--faint); font-size: 11px; }
@@ -152,15 +149,6 @@ body {
 
 /* ── the composer ───────────────────────────────────────── */
 .hh-composer { flex: none; background: var(--panel); border-top: 1px solid var(--rule); z-index: 6; }
-.hh-chips { display: flex; gap: 6px; padding: 7px 10px 3px; overflow-x: auto; scrollbar-width: none; }
-.hh-chips::-webkit-scrollbar { display: none; }
-.hh-chip {
-  flex: none; display: flex; align-items: baseline; gap: 7px; padding: 7px 10px;
-  border: 1px solid var(--rule); background: var(--paper); font-size: 11px;
-}
-.hh-chip:active { background: var(--sand); }
-.hh-chip-label { font-family: var(--font-serif); font-size: 13.5px; }
-.hh-chip-chord { color: var(--indigo); font-size: 9.5px; }
 .hh-input-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px; }
 .hh-prompt { flex: none; color: var(--indigo); font-size: 12px; font-weight: 600; max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hh-input {
@@ -180,77 +168,33 @@ body {
 }
 .hh-echo.err { color: var(--red); }
 
-/* ── the tab rail ───────────────────────────────────────── */
-.hh-tabs {
-  flex: none; height: calc(54px + var(--safe-bottom)); padding-bottom: var(--safe-bottom);
-  display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none;
-  background: var(--panel-dim); border-top: 1px solid var(--rule); z-index: 6;
+/* ── the bar: the chat, the buffers, the groups, the commands ── */
+.hh-nav {
+  flex: none; display: flex; align-items: stretch;
+  padding-bottom: var(--safe-bottom);
+  background: var(--panel-dim); border-top: 1px solid var(--rule); z-index: 24; position: relative;
 }
-.hh-tabs::-webkit-scrollbar { display: none; }
-.hh-tab {
-  flex: none; min-width: 104px; max-width: 46vw; padding: 8px 12px; border-right: 1px solid var(--rule-soft);
-  display: flex; flex-direction: column; justify-content: center; gap: 3px; color: var(--faint);
+.hh-nav-btn {
+  flex: 1; min-width: 0; min-height: 54px; padding: 7px 4px 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--faint); cursor: pointer;
 }
-.hh-tab.on { background: var(--paper); color: var(--ink); }
-.hh-tab-kind { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--indigo); }
-.hh-tab[data-kind="chat"] .hh-tab-kind { color: var(--indigo); }
-.hh-tab[data-kind="dir"] .hh-tab-kind { color: var(--green); }
-.hh-tab-title { font-family: var(--font-serif); font-size: 13.5px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* ── the chord key and the keys panel ───────────────────── */
-.hh-scrim { position: absolute; inset: 0; background: rgba(10, 10, 12, .28); z-index: 10; }
-.hh-keys {
-  position: absolute; left: 0; right: 0; bottom: var(--dock-h, 170px); z-index: 12;
-  max-height: 62%; display: flex; flex-direction: column;
-  background: var(--paper); border-top: 1px solid var(--ink);
-  box-shadow: 0 -6px 18px rgba(10, 10, 12, .12);
-}
-.hh-keys-tabs {
-  flex: none; display: flex; align-items: center; gap: 4px; padding: 8px 10px;
-  border-bottom: 1px solid var(--rule); background: var(--panel);
-  overflow-x: auto; scrollbar-width: none;
-}
-.hh-keys-tabs::-webkit-scrollbar { display: none; }
-.hh-keys-quit { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 10.5px; letter-spacing: .1em; color: var(--faint); }
-.hh-keys-filter { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 14px; border-bottom: 1px solid var(--rule-soft); }
-.hh-keys-filter .hh-input { font-size: 15px; padding: 7px 0; }
-.hh-keys-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.hh-keys-section-title { display: none; padding: 7px 14px 3px; background: var(--panel-dim); font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); }
-.hh-keys.filtering .hh-keys-section-title { display: block; }
-.hh-key-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid var(--rule-soft); }
-/* the filter hides rows with the hidden attribute; a display of
-   its own would win over the attribute */
-.hh-key-row[hidden], .hh-keys-section[hidden], .hh-keys-none[hidden] { display: none !important; }
-.hh-key-row:active { background: var(--sand); }
-.hh-key-box { flex: none; min-width: 34px; padding: 4px 7px; border: 1px solid var(--rule); text-align: center; font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
-.hh-key-cmd { font-family: var(--font-serif); font-size: 15.5px; line-height: 1.2; }
-.hh-key-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 1px; background: var(--rule-soft); border-bottom: 1px solid var(--rule-soft); }
-.hh-keycap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; aspect-ratio: 1; padding: 8px 6px; background: var(--panel); text-align: center; overflow: hidden; }
-.hh-keycap:active { background: var(--sand); }
-.hh-cap-key { font-size: 22px; font-weight: 600; line-height: 1; color: var(--indigo); white-space: nowrap; }
-.hh-cap-key.long { font-size: 13px; }
-.hh-cap-cmd { font-family: var(--font-serif); font-size: 11px; line-height: 1.15; color: var(--faint); overflow-wrap: anywhere; }
-.hh-keys-back { flex: none; padding: 5px 10px; border: 1px solid var(--rule); font-size: 12px; font-weight: 600; color: var(--indigo); white-space: nowrap; }
-.hh-keys-back:active { background: var(--indigo); color: var(--panel); }
-.hh-keys-release { flex: none; padding: 5px 10px; font-size: 11px; color: var(--faint); white-space: nowrap; }
-.hh-keys-release:active { color: var(--indigo); }
-.hh-key-doc { margin-top: 2px; font-size: 10.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hh-key {
-  position: absolute; z-index: 14; right: 18px; bottom: calc(200px + var(--safe-bottom));
-  width: 62px; height: 62px; border-radius: 31px;
-  background: var(--sand); color: var(--ink); border: 1px solid var(--ink);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  box-shadow: 0 8px 22px rgba(10, 10, 12, .22); touch-action: none; cursor: grab;
-}
-.hh-key.dragging { cursor: grabbing; }
-.hh-key.on { background: var(--ink); color: var(--paper); }
-.hh-key-glyph { font-size: 15px; font-weight: 600; letter-spacing: .02em; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hh-key-cap { font-size: 7.5px; letter-spacing: .12em; text-transform: uppercase; opacity: .72; white-space: nowrap; }
+.hh-nav-btn:active { background: var(--sand); }
+.hh-nav-btn.on { color: var(--indigo); background: var(--paper); }
+.hh-nav-glyph { font-size: 18px; line-height: 1; }
+.hh-nav-label { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; }
 
 /* ── sheets: a prompt or a transient ────────────────────── */
 /* a sheet ends where the composer starts: the field stays under
    the thumb, and typing there feeds the prompt */
-.hh-sheet-layer { position: absolute; left: 0; right: 0; top: 0; bottom: var(--dock-h, 170px); z-index: 20; display: flex; flex-direction: column; justify-content: flex-end; }
+.hh-sheet-layer { position: absolute; left: 0; right: 0; top: 0; bottom: var(--dock-h, 130px); z-index: 20; display: flex; flex-direction: column; justify-content: flex-end; }
+/* a sheet of rows covers the composer too and ends at the bar, which
+   stays so its button closes the sheet again */
+.hh-pick-layer { position: absolute; left: 0; right: 0; top: 0; bottom: var(--nav-h, 56px); z-index: 23; display: flex; flex-direction: column; justify-content: flex-end; }
+.hh-pick { max-height: 86%; min-height: 50%; padding-bottom: 0; }
+.hh-pick-filter { flex: none; display: flex; align-items: center; padding: 2px 14px; border-bottom: 1px solid var(--rule-soft); }
+.hh-pick-filter .hh-input { font-size: 16px; padding: 10px 0; }
+.hh-row-here { flex: none; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--indigo); }
 .hh-composer.prompting { position: relative; z-index: 22; border-top-color: var(--ink); }
 .hh-sheet-scrim { flex: 1; background: rgba(10, 10, 12, .34); }
 .hh-sheet {

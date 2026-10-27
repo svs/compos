@@ -107,8 +107,11 @@ const Hooks = {
       const n = this.el.querySelector(".hh-nav");
       const nh = n ? n.offsetHeight : 0;
       const h = (c ? c.offsetHeight : 0) + nh;
-      if (h && h !== this.dockH) { this.dockH = h; this.el.style.setProperty("--dock-h", h + "px"); }
-      if (nh && nh !== this.navH) { this.navH = nh; this.el.style.setProperty("--nav-h", nh + "px"); }
+      // on the document, not the frame: a patch writes the frame's own
+      // attributes again and an inline style there would not survive it
+      const root = document.documentElement.style;
+      if (h && h !== this.dockH) { this.dockH = h; root.setProperty("--dock-h", h + "px"); }
+      if (nh && nh !== this.navH) { this.navH = nh; root.setProperty("--nav-h", nh + "px"); }
     },
     viewport() {
       // the window's own height when it is drawn, else the screen less the chrome

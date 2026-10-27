@@ -367,12 +367,14 @@ defmodule Compos.Ui.MobileLive do
   end
 
   defp fetch_sheet(socket, "buffers", buf, _q) do
-    rows =
-      for [name, title, mode, cur] <- ok_list(call(socket, "handheld-buffers", [buf || false])) do
-        %{kind: "buffer", id: str(name), label: str(title), sub: str(mode), current: cur == true}
-      end
+    for [title, rows] <- ok_list(call(socket, "handheld-buffers", [buf || false])) do
+      rows =
+        for [name, label, sub, cur] <- list(rows) do
+          %{kind: "buffer", id: str(name), label: str(label), sub: str(sub), current: cur == true}
+        end
 
-    [%{title: "", rows: rows}]
+      %{title: str(title), rows: rows}
+    end
   end
 
   defp fetch_sheet(socket, "commands", buf, q) do
@@ -614,12 +616,6 @@ defmodule Compos.Ui.MobileLive do
             </c-group>
           <% end %>
           <c-group :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@sheet, @filter)}</c-group>
-          <c-group :if={@sheet == "buffers"} class="hh-row hh-row-more" phx-click="pick" phx-value-kind="command" phx-value-id="switch-to-buffer">
-            <c-group class="hh-row-main">
-              <c-group class="hh-row-label">Every buffer…</c-group>
-              <c-group class="hh-row-sub">other groups, files and tabs</c-group>
-            </c-group>
-          </c-group>
         </c-group>
       </c-group>
     </c-group>

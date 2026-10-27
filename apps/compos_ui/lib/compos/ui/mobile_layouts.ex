@@ -4,7 +4,7 @@ defmodule Compos.Ui.MobileLayouts do
   are static files: priv/static/mobile.css and mobile.js.
 
   The desktop layout is not shared. The phone has its own chrome (a
-  modeline, a composer, a tab rail, a chord key) and its own gestures,
+  header, a composer, a bar of four places) and its own gestures,
   and the two files stay apart so neither grows conditions for the other.
   The theme still comes from the faces: the design's tokens map onto the
   face variables the daemon sends.
@@ -19,6 +19,8 @@ defmodule Compos.Ui.MobileLayouts do
       # the stylesheet and the script are static files (priv/static); the
       # boot id in their URLs makes a new boot load them again
       |> assign(:boot_id, :persistent_term.get(:compos_boot_id, "dev"))
+      |> then(&assign(&1, :css_v, file_version(&1.boot_id, "mobile.css")))
+      |> then(&assign(&1, :js_v, file_version(&1.boot_id, "mobile.js")))
 
     ~M"""
     <!DOCTYPE html>
@@ -41,15 +43,26 @@ defmodule Compos.Ui.MobileLayouts do
           href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"
         />
-        <link rel="stylesheet" href={"/mobile.css?v=" <> @boot_id} />
+        <link rel="stylesheet" href={"/mobile.css?v=" <> @css_v} />
       </head>
       <body>
         {@inner_content}
         <script src="/phx/phoenix.min.js"></script>
         <script src="/lv/phoenix_live_view.min.js"></script>
-        <script src={"/mobile.js?v=" <> @boot_id}></script>
+        <script src={"/mobile.js?v=" <> @js_v}></script>
       </body>
     </html>
     """
+  end
+
+  # the boot and the file's own time: a saved change to the file reaches
+  # the phone at its next load, with no restart
+  defp file_version(boot, file) do
+    path = Application.app_dir(:compos_ui, ["priv", "static", file])
+
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: t}} -> boot <> "-" <> Integer.to_string(t)
+      _ -> boot
+    end
   end
 end

@@ -1717,23 +1717,20 @@
   (lambda () (let ((t (todo--detail-task (current-buffer)))) (if t (todo--task-chat! t) (message "The task is gone")))))
 
 ;; a card follows its chat: an event on a chat topic redraws the list
-;; when a window shows it, and marks it stale when none does
+;; when a window shows it, and marks it dirty when none does
 (define (todo--on-chat-event e)
   (for-each (lambda (b)
               (if (window-showing b)
                   (debounce! (string->symbol (string-append "todo-cards:" b)) 250 (lambda (_) (list-redraw! b)) #f)
-                  (buffer-set-local! b 'todo-stale #t)))
+                  (buffer-mark-dirty! b 'todo-cards)))
             (todo--buffers)))
 
-(define (todo--redraw-if-stale)
-  (for-each (lambda (b)
-              (when (and (buffer-local b 'todo-stale) (window-showing b))
-                (buffer-set-local! b 'todo-stale #f)
-                (list-redraw! b)))
-            (todo--buffers)))
+(define (todo--on-refresh! b keys)
+  (when (memq 'todo-cards keys)
+    (list-redraw! b)))
 
 (event-subscribe! "todo-cards" "chat:*" 'todo--on-chat-event)
-(add-hook! 'window-configuration-change-hook 'todo--redraw-if-stale)
+(add-hook! 'buffer-refresh-hook 'todo--on-refresh!)
 
 (define-command "todo-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w"
   (lambda () (todo--ask-at! "Deadline: " 'deadline)))

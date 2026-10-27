@@ -1322,13 +1322,12 @@
               (buffer-set-local! buf 'diff-watch #t)
               (message "watch on"))))))
 
-;; a stale diff catches up the moment the switcher shows it again
-(add-hook! 'buffer-shown-hook
-  (lambda (b)
-    (when (and (buffer-local b 'diff-stale)
-               (buffer-local b 'diff-watch))
-      (buffer-set-local! b 'diff-stale #f)
-      (diff-refresh b))))
+;; a dirty diff catches up the moment a window shows it again
+(define (diff--on-refresh! b keys)
+  (when (and (memq 'diff keys) (buffer-local b 'diff-watch))
+    (diff-refresh b)))
+
+(add-hook! 'buffer-refresh-hook 'diff--on-refresh!)
 
 ;; One handler for every diff buffer. Only the buffers ON SCREEN
 ;; refresh: re-rendering a background diff on every file change held
@@ -1343,9 +1342,9 @@
                    (buffer-local b 'diff-watch))
           (if (window-showing b)
               (begin
-                (buffer-set-local! b 'diff-stale #f)
+                (buffer-clear-dirty! b 'diff)
                 (diff-refresh b))
-              (buffer-set-local! b 'diff-stale #t))))
+              (buffer-mark-dirty! b 'diff))))
       (buffer-list))))
 
 ;;; --- the plain view -----------------------------------------------------------

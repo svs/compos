@@ -455,6 +455,41 @@
 (define (cache-wake! buf)
   (when (cache-stale? buf) (cache-refresh! buf)))
 
+;;; --- refresh when shown -------------------------------------------------------
+;;; A package that skips work on a hidden buffer marks it dirty under its own
+;;; KEY. The 'dirty? local holds the pending keys. When a window shows the
+;;; buffer, buffer-refresh-hook runs one time with (BUFFER KEYS), and each
+;;; handler acts on its own key. A handler that must wait marks again.
+
+;; note that KEY's work is pending on BUF until a window shows it
+(define (buffer-mark-dirty! buf key)
+  (let ((keys (or (buffer-local buf 'dirty?) '())))
+    (unless (memq key keys)
+      (desktop-skip! buf 'dirty?)
+      (buffer-set-local! buf 'dirty? (cons key keys)))))
+
+;; #t when BUF has pending work: KEY's, or any key without KEY
+(define (buffer-dirty? buf &optional key)
+  (let ((keys (buffer-local buf 'dirty?)))
+    (and (pair? keys) (or (not key) (and (memq key keys) #t)))))
+
+;; drop KEY's pending work: the package did it some other way
+(define (buffer-clear-dirty! buf key)
+  (let ((keys (buffer-local buf 'dirty?)))
+    (when (and (pair? keys) (memq key keys))
+      (buffer-set-local! buf 'dirty? (filter (lambda (k) (not (eq? k key))) keys)))))
+
+;; run buffer-refresh-hook for BUF when it has pending work; the keys go
+;; first, so a handler that marks again stays pending
+(define (buffer-refresh-pending! buf)
+  (let ((keys (and (buffer-exists? buf) (buffer-local buf 'dirty?))))
+    (when (pair? keys)
+      (buffer-set-local! buf 'dirty? '())
+      (run-hook-with-args 'buffer-refresh-hook buf keys))))
+
+(define (buffer-refresh-visible!)
+  (for-each (lambda (w) (buffer-refresh-pending! (cadr w))) (window-list-all)))
+
 ;;; --- plists ------------------------------------------------------------------
 ;;; Flat plists — (key value key value ...) with symbol keys — are the house
 ;;; record shape: events, configs, conversation turns. This dialect has no
@@ -864,6 +899,10 @@
 (define (on-buffer-woken! fn) (add-hook! 'buffer-woken-hook fn))
 (define (on-buffer-shown! fn) (add-hook! 'buffer-shown-hook fn))
 (define (on-buffer-renamed! fn) (add-hook! 'buffer-renamed-hook fn))
+
+;; refresh when shown (buffer-mark-dirty!): add-hook! is defined only here
+(add-hook! 'buffer-shown-hook 'buffer-refresh-pending!)
+(add-hook! 'window-configuration-change-hook 'buffer-refresh-visible!)
 (define (take-n lst n) (take lst n))
 
 ;; The first element of LST that PRED holds for, or #f: SRFI-1 find.

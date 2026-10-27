@@ -131,7 +131,7 @@ defmodule Compos.SwitcherPerformanceTest do
     """)
 
     assert eval!("*zz-hidden-dashboards*") == "0"
-    assert Buffer.get_local("*zz-perf-hidden*", "group-display-dirty") == true
+    assert eval!(~S{(buffer-dirty? "*zz-perf-hidden*" 'group-display)}) == "#t"
     assert eval!(~S{(buffer-in-group? "*zz-perf-hidden*" "zz-perf-group")}) == "#t"
     Editor.set_window_buffer("*zz-perf-hidden*")
     eval!("(windows-shown-catchup!)")

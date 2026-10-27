@@ -62,6 +62,7 @@ twice. registry-test.scm checks it.
 | `buffer-woken-hook` | NAME | a dormant buffer came back |
 | `buffer-renamed-hook` | OLD NEW | `rename-buffer!` |
 | `buffer-shown-hook` | BUFFER | the switcher filled a window |
+| `buffer-refresh-hook` | BUFFER KEYS | a window shows BUFFER, and `buffer-mark-dirty!` left KEYS pending |
 | `fs-change-hook` | ROOT | the watcher saw a change under ROOT |
 | `editing-state-hook` | BUF | the buffer entered or left the editing state |
 | `llm-config-changed-hook` | BUF | llm-config exited and the buffer's setup changed |
@@ -79,6 +80,16 @@ first that answers.
 ### Dashboard presentation
 
 `dashboard--sync!` rebuilds presentation only when a window in any frame shows the buffer.
-Hidden updates set the transient `dashboard-dirty` local. Repeated updates keep one pending refresh.
-The buffer-shown and window-configuration hooks consume that refresh when the buffer appears.
-Restore requests a new sync; the dirty flag is not saved in the desktop.
+Hidden updates call `(buffer-mark-dirty! BUF 'dashboard)`. Repeated updates keep one pending refresh.
+`buffer-refresh-hook` consumes that refresh when the buffer appears.
+Restore requests a new sync; the `dirty?` local is not saved in the desktop.
+
+### Refresh when shown
+
+A package that skips work on a hidden buffer calls `(buffer-mark-dirty! BUF KEY)`.
+The one `dirty?` local holds the pending keys. When a window shows the buffer
+(`buffer-shown-hook` or `window-configuration-change-hook`), the kernel clears the
+keys and runs `buffer-refresh-hook` one time with `(BUF KEYS)`. Each handler acts
+on its own key; a handler that must wait marks again. `(buffer-dirty? BUF [KEY])`
+asks, and `(buffer-clear-dirty! BUF KEY)` drops a key the package did another way.
+Keys today: `dashboard`, `group-display`, `todo-cards`, `diff`, `anon`.

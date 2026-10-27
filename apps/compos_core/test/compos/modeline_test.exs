@@ -23,7 +23,7 @@ defmodule Compos.ModelineTest do
     try do
       eval!(~s|(test-buffer! "#{name}" "")|)
       eval!(~s|(dashboard--sync! "#{name}")|)
-      assert Buffer.get_local(name, "dashboard-dirty") == true
+      assert eval!(~s|(buffer-dirty? "\#{name}" 'dashboard)|) == "#t"
       assert Buffer.get_local(name, "dashboard-line-blocks") == nil
 
       {window, _, ^frame} =
@@ -38,7 +38,7 @@ defmodule Compos.ModelineTest do
       eval!(~s|(buffer-set-local! "#{name}" 'minor-modes '("zz-cross-frame-mode"))|)
       eval!(~s|(dashboard--sync! "#{name}")|)
       assert Buffer.get_local(name, "dashboard-line") =~ "zz-cross-frame"
-      assert Buffer.get_local(name, "dashboard-dirty") == false
+      assert eval!(~s|(buffer-dirty? "\#{name}" 'dashboard)|) == "#f"
     after
       Editor.delete_frame(frame)
       Editor.select_frame(previous)
@@ -47,7 +47,7 @@ defmodule Compos.ModelineTest do
   end
 
   defp await_dashboard(name, attempts) do
-    if Compos.Core.Buffer.get_local(name, "dashboard-dirty") == false do
+    if eval!(~s|(buffer-dirty? "\#{name}" 'dashboard)|) == "#f" do
       :ok
     else
       assert attempts > 0, "configuration hook did not materialize the dashboard"

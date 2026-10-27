@@ -850,23 +850,18 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; buffer catches up when shown, rather than building an unseen dashboard.
   (if (or *group-current-inhibit*
           (not (member b (map cadr (window-list-all)))))
+      (buffer-mark-dirty! b 'group-display)
       (begin
-        (desktop-skip! b 'group-display-dirty)
-        (buffer-set-local! b 'group-display-dirty #t))
-      (begin
-        (buffer-set-local! b 'group-display-dirty #f)
+        (buffer-clear-dirty! b 'group-display)
         (dashboard--sync! b))))
 
-(define (group--display-catchup! b)
-  (when (buffer-local b 'group-display-dirty)
+;; a move under *group-current-inhibit* marks the buffer again, so it
+;; waits for the next show after the move
+(define (group--display-on-refresh! b keys)
+  (when (memq 'group-display keys)
     (buffer-group-display-refresh! b)))
 
-(define (group--visible-displays-catchup!)
-  (unless *group-current-inhibit*
-    (for-each (lambda (w) (group--display-catchup! (cadr w))) (window-list))))
-
-(add-hook! 'buffer-shown-hook 'group--display-catchup!)
-(add-hook! 'window-configuration-change-hook 'group--visible-displays-catchup!)
+(add-hook! 'buffer-refresh-hook 'group--display-on-refresh!)
 
 (define (modeline-groups-refresh!)
   ;; the list can name a buffer that sleeps or died: a local set there exits

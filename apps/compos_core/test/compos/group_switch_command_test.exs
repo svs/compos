@@ -126,7 +126,7 @@ defmodule Compos.GroupSwitchCommandTest do
              "#{buffer} did not move"
 
       unless Enum.any?(leaves(Editor.render_state().tree), &(&1.buffer == buffer)) do
-        assert eval!(~s{(buffer-local "#{buffer}" 'group-display-dirty)}) == "#t"
+        assert eval!(~s{(buffer-dirty? "#{buffer}" 'group-display)}) == "#t"
         Editor.set_window_buffer(buffer)
         eval!("(windows-shown-catchup!)")
       end

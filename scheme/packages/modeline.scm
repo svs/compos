@@ -1275,21 +1275,15 @@
 ;; Events invalidate hidden presentation. Any frame can supply a reader.
 (define (dashboard--sync! buf)
   (when (buffer-exists? buf)
-    (desktop-skip! buf 'dashboard-dirty)
     (if (member buf (map cadr (window-list-all)))
         (dashboard--render! buf)
-        (unless (buffer-local buf 'dashboard-dirty)
-          (buffer-set-local! buf 'dashboard-dirty #t)))))
+        (buffer-mark-dirty! buf 'dashboard))))
 
-(define (dashboard--catchup! buf)
-  (when (and (buffer-exists? buf) (buffer-local buf 'dashboard-dirty))
+(define (dashboard--on-refresh! buf keys)
+  (when (memq 'dashboard keys)
     (dashboard--sync! buf)))
 
-(define (dashboard--catchup-visible!)
-  (for-each (lambda (w) (dashboard--catchup! (cadr w))) (window-list)))
-
-(add-hook! 'buffer-shown-hook 'dashboard--catchup!)
-(add-hook! 'window-configuration-change-hook 'dashboard--catchup-visible!)
+(add-hook! 'buffer-refresh-hook 'dashboard--on-refresh!)
 ;; The state tag lives in this line and the window's ground reads it, so a
 ;; buffer that enters or leaves the editing state renders its line again at
 ;; once: a cua window sits, a focus window floats. Nothing else invalidates
@@ -1318,9 +1312,9 @@
   ;; one preset read for the line, the blocks and the facts; one change for
   ;; the six locals, so the frame refreshes once for the sync
   (let ((preset-cell (list (dash--preset buf))))
+    (buffer-clear-dirty! buf 'dashboard)
     (buffer-set-locals! buf
-      (list 'dashboard-dirty #f
-            'dashboard-line (dashboard-one-line buf preset-cell)
+      (list 'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
             ;; the state the window's mode line draws: mode, llm, lane
             'modeline-facts (dash--modeline-facts buf preset-cell)
@@ -1410,7 +1404,7 @@
     ;; keystroke derives nothing new: it was recomputed for every command
     ;; in the buffer the command ran in, at 16ms a key, and the line it
     ;; produced was almost always the line already there. It is rebuilt
-    ;; when a window shows a dirty buffer (dashboard--catchup!), and the
+    ;; when a window shows a dirty buffer (dashboard--on-refresh!), and the
     ;; event that changes a live buffer's line -- a jj change, a summary,
     ;; a restore, a group move -- calls dashboard--sync! on it itself.
     (list-post-command! buf)

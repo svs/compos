@@ -236,7 +236,7 @@
       (buffer-set-local! buf 'agent-blocks '())
       (chat-summary-land! buf "Adding titles to chats.")
       (chat-summary-land! buf "Rewriting the dashboard segment.")
-      (check-equal! (buffer-local buf 'dashboard-dirty) #t
+      (check-equal! (buffer-dirty? buf 'dashboard) #t
                     "background summaries leave one pending dashboard update")
       (check-equal! (buffer-local buf 'dashboard-line-blocks) #f
                     "background summaries build no dashboard blocks")
@@ -686,12 +686,12 @@
         (dashboard--sync! buf)
         (check-equal! (buffer-local buf 'dashboard-line-blocks) before
                       "hidden sync does not materialize blocks")
-        (check-equal! (buffer-local buf 'dashboard-dirty) #t "updates remain pending")
-        (check-true! (member 'dashboard-dirty (buffer-local buf 'desktop-skip-locals))
+        (check-equal! (buffer-local buf 'dirty?) '(dashboard) "updates remain pending, one time")
+        (check-true! (member 'dirty? (buffer-local buf 'desktop-skip-locals))
                      "the pending flag is transient")
         (switch-to-buffer! buf)
       (window-configuration-changed!)
-        (check-equal! (buffer-local buf 'dashboard-dirty) #f "showing consumes pending work")
+        (check-equal! (buffer-dirty? buf 'dashboard) #f "showing consumes pending work")
         (check-contains! (buffer-local buf 'dashboard-line) "zz-latest"
                          "showing renders the latest state")
         (buffer-set-local! buf 'minor-modes '("zz-visible-mode"))

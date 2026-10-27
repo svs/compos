@@ -573,7 +573,7 @@ from the buffer, so the redaction must reach that text through the tree"
 ;; New answers change what is barred: every drawn line paints again, and
 ;; every block view redacts again. jit-lock repaints only drawn lines.
 ;; Only a shown buffer repaints: a hidden one is marked stale, and
-;; anon--catchup! repaints it whole when a window shows it again. Given
+;; anon--on-refresh! repaints it whole when a window shows it again. Given
 ;; WORDS, the words an answer unbarred, a shown buffer whose text and view
 ;; hold none of them stays as it is.
 (define (anon--holds-any? buf words)
@@ -589,7 +589,7 @@ from the buffer, so the redaction must reach that text through the tree"
   (let ((shown (anon--visible)))
     (set! *anon-stale* #t)
     (for-each (lambda (b)
-                (cond ((not (member b shown)) (buffer-set-local! b 'anon-stale #t))
+                (cond ((not (member b shown)) (buffer-mark-dirty! b 'anon))
                       ((or (not words) (anon--holds-any? b words))
                        (jit-lock-refontify! b) (anon-view-redact! b))))
               (anon--buffers))
@@ -739,14 +739,9 @@ from the buffer, so the redaction must reach that text through the tree"
 ;; redaction. Text needs no hook: jit-lock asks for each drawn line.
 (define (anon--catchup! buf)
   (cond ((not (anon--shown? buf)) #f)
-        ((and (minor-mode-on? buf "anon-local-mode") (buffer-local buf 'anon-stale))
-         (buffer-set-local! buf 'anon-stale #f)
-         (set! *anon-stale* #t)
-         (jit-lock-refontify! buf)
-         (anon--view-catchup! buf)
-         (set! *anon-stale* #f))
         ((minor-mode-on? buf "anon-local-mode")
-         (anon--view-catchup! buf))
+         ;; a dirty buffer repaints whole in anon--on-refresh!
+         (unless (buffer-dirty? buf 'anon) (anon--view-catchup! buf)))
         ((and *anon-global* (anon--eligible? buf))
          (enable-minor-mode! buf "anon-local-mode"))))
 
@@ -754,6 +749,17 @@ from the buffer, so the redaction must reach that text through the tree"
 (define (anon--on-display!)
   (for-each anon--catchup! (anon--visible)))
 
+;; a buffer hidden while the words changed repaints whole when shown
+(define (anon--on-refresh! buf keys)
+  (cond ((not (memq 'anon keys)) #f)
+        ((not (anon--shown? buf)) (buffer-mark-dirty! buf 'anon))
+        ((minor-mode-on? buf "anon-local-mode")
+         (set! *anon-stale* #t)
+         (jit-lock-refontify! buf)
+         (anon--view-catchup! buf)
+         (set! *anon-stale* #f))))
+
+(add-hook! 'buffer-refresh-hook 'anon--on-refresh!)
 (add-hook! 'buffer-shown-hook 'anon--catchup!)
 (add-hook! 'window-configuration-change-hook 'anon--on-display!)
 

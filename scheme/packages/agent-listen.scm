@@ -171,10 +171,20 @@
                                                  'task (plist-get l 'task)))))))
                  (plist-get l 'id)))))
 
+;; the brief goes before the listener closes: an agent that cannot start
+;; (a spawn that fails, a dead backend) raises, and the event then waits in
+;; the listener for a retry instead of being lost
 (define (agent-listen--deliver! l buf e)
-  (agent-listen--record! l 'fired e)
-  (unless (plist-get l 'keep) (agent-unlisten! (plist-get l 'id)))
-  (agent-continue! buf (agent-listen--brief l e)))
+  (if (ignore-errors (lambda () (agent-continue! buf (agent-listen--brief l e)) #t))
+      (begin
+        (agent-listen--record! l 'fired e)
+        (unless (plist-get l 'keep) (agent-listen--drop! (plist-get l 'id))))
+      (let* ((cur (or (agent-listen--find (plist-get l 'id)) l))
+             (seqs (or (plist-get cur 'pending) '())))
+        (agent-listen--record! l 'undelivered e)
+        (unless (member (plist-get e 'seq) seqs)
+          (agent-listen--put! (plist-put cur 'pending (append seqs (list (plist-get e 'seq))))))
+        (debounce! 'agent-listen-retry 60000 agent-listen--flush! #f))))
 
 (define (agent-listen--heard id e)
   (let ((l (agent-listen--find id)))
@@ -238,12 +248,17 @@
 
 (define (agent-listen-cancel! id)
   "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log"
+  (agent-unlisten! id))
+
+;; every stop but a firing says so in the log, so M-x watchers shows why a
+;; listener went
+(define (agent-unlisten! id)
+  "(agent-unlisten! ID) — stop the listener ID, and say so in the log"
   (let ((l (agent-listen--find id)))
     (when l (agent-listen--record! l 'cancelled))
-    (agent-unlisten! id)))
+    (agent-listen--drop! id)))
 
-(define (agent-unlisten! id)
-  "(agent-unlisten! ID) — stop the listener ID"
+(define (agent-listen--drop! id)
   (set! *agent-listeners* (filter (lambda (l) (not (equal? (plist-get l 'id) id))) *agent-listeners*))
   (agent-listen--save!)
   (debounce-cancel! (string->symbol (string-append "agent-listen-at:" id)))
@@ -265,7 +280,7 @@
     (filter (lambda (l) (or (not id) (equal? (plist-get l 'chat) id))) *agent-listeners*)))
 
 (public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply, or wake at a time; it gets the event as a message. SPEC: topic, kind, match, task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local)")
-(public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID")
+(public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID, and say so in the log")
 (public! 'agent-listen-extend! "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now")
 (public! 'agent-listen-due "(agent-listen-due L) — when the listener L is due, in unix seconds")
 (public! 'agent-listen-cancel! "(agent-listen-cancel! ID) — stop the listener ID by hand, and say so in the log")

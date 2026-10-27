@@ -7,7 +7,8 @@ defmodule Compos.Rpc.Application do
   def start(_type, _args) do
     children = [
       {Task.Supervisor, name: Compos.Rpc.ConnSupervisor},
-      {Compos.Rpc.Server, []}
+      {Compos.Rpc.Server, []},
+      {Compos.Rpc.McpServer, []}
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Compos.Rpc.Supervisor)

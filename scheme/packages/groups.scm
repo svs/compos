@@ -1607,7 +1607,9 @@ is forgotten and that group falls back to creation order in the switcher."
           ;; An explicit switch moves an active pin. The frame stays pinned,
           ;; but it does not trap the user in the old group.
           (when (group-pinned) (set-frame-local! 'pinned-group id))
-          (frame-group-label-refresh!)
+          ;; a switch changes no buffer's group, name or color: the frame's
+          ;; style is all that moves, not every buffer's modeline label
+          (group-frame-style-set! (selected-frame) id)
           (group-layout-enter! id (group-layout id))
           (set! *group-current-inhibit* #f)
           (group-current-recalculate!)

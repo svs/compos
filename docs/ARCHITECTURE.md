@@ -213,7 +213,7 @@ built:
    An agent that cannot load says so in the transcript and starts fresh.
 
 Inverse direction: **MCP server** over the existing RPC core, so external agents
-drive *us* (`priv/compos-mcp-proxy.exs`, a stdio bridge to `~/.compos/sock`) — tools = the semantic layer (`buffer-read`, `ts-query`,
+drive *us* (`Compos.Rpc.McpServer` on `~/.compos/sock-mcp`, reached through an `nc -U` stdio shim registered in `mcp.scm`) — tools = the semantic layer (`buffer-read`, `ts-query`,
 `semantic-replace`), with `eval` gated behind confirmation.
 
 ## Ordering principle

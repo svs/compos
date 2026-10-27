@@ -13,7 +13,7 @@ The rules each subsystem keeps are beside it: ARCHITECTURE.md names them.
 - [UI components](COMPONENTS.md) — agent-facing component contract.
 - [Org-mode plan](ORG-MODE-PLAN.md) — Org implementation status and design.
 - [Code browser](CODEBROWSER.md) and its [plan](CODE-BROWSER-PLAN.md).
-- [MCP proxy](mcp-proxy.html) — rendered MCP proxy documentation.
+- [MCP server](mcp-proxy.html) - how external agents reach the editor tools over the daemon MCP socket.
 
 Essays: [The New Browser Was Emacs All Along](EMACS-AS-AGENT-HARNESS.md),
 [Cordis, Lisp, and JavaScript](CORDIS-VS-EMACS.md), [Beyond tools](BEYOND-TOOLS.md),

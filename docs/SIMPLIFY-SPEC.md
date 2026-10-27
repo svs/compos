@@ -210,10 +210,11 @@ half-built version of what W3 builds properly, and W3 deletes it.
 - **`apps/compos_core/lib/compos/core/mcp.ex` + `mcp/conn.ex`** — MCP
   *client*: stdio/http servers, tools bridged into the registry as
   `mcp__<server>__<tool>`.
-- **`apps/compos_core/priv/compos-mcp-proxy.exs`** — the editor as an
-  MCP *server*: stdio bridge to the daemon socket exposing the
-  `define-tool!` registry (base64 payloads both ways). ACP agents get
-  compos's tools by receiving this proxy as an entry in `mcpServers`.
+- **`apps/compos_rpc/lib/compos/rpc/mcp_server.ex`** — the editor as an
+  MCP *server* on the daemon's MCP socket (`sock-mcp`), exposing the
+  `define-tool!` registry. ACP agents get compos's tools through an
+  `nc -U` shim, an entry in `mcpServers` (`mcp.scm`) that copies stdio
+  to that socket.
 - **`apps/compos_core/lib/compos/core/desktop.ex`** — persistence:
   file buffers save `{path, point, locals}`; non-file buffers save
   `{name, content, point, locals}` (`savable_locals` filters

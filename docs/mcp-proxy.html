@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>compos.el — the MCP proxy</title>
+<title>compos.el - the MCP server</title>
 <style>
   :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
         --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
@@ -32,112 +32,97 @@
 </head>
 <body>
 
-<h1>The MCP proxy</h1>
-<p class="sub">How an external agent gets the editor's tools ·
-<code>priv/compos-mcp-proxy.exs</code> + <code>priv/packages/tools.scm</code> ·
-updated 2026-08-14</p>
+<h1>The MCP server</h1>
+<p class="sub">How an external agent gets the editor's tools -
+<code>apps/compos_rpc/lib/compos/rpc/mcp_server.ex</code> + <code>scheme/packages/tools.scm</code> -
+updated 2026-10-27</p>
 
 <h2>What it is</h2>
-<p>The editor keeps ONE tool registry in Scheme (<code>define-tool!</code>,
-served by <code>llm-tool-specs</code>). The in-editor chat reads that registry
-directly. An external ACP agent (claude-code, codex) runs as a subprocess and
-cannot — it speaks MCP. The proxy is the bridge: a small stdio MCP server that
-forwards each MCP request to the daemon's JSON-RPC socket. The agent sees a
-normal MCP server named <code>compos</code>. The editor sees two evals.</p>
+<p>The editor keeps ONE tool registry in Scheme (<code>define-tool!</code>, served by <code>llm-tool-specs</code>). The in-editor chat reads that registry directly. An external ACP agent (claude-code, codex) runs as a subprocess and speaks MCP. The daemon serves the registry as MCP on its own Unix socket, <code>~/.compos/sock-mcp</code>. The agent sees a normal MCP server named <code>compos</code>. The editor sees two Scheme calls.</p>
 
 <div class="box">
-Same registry, two consumers. The tool list an external agent gets from
-<code>tools/list</code> is byte-for-byte the list the companion chat sends to
-the model. A tool added with <code>define-tool!</code> appears in both, with
-no second registration.
+Same registry, two consumers. The tool list an external agent gets from <code>tools/list</code> is the list the companion chat sends to the model. A tool added with <code>define-tool!</code> appears in both, with no second registration.
 </div>
 
 <h2>The pipeline</h2>
 <pre><code>ACP agent (claude-code / codex)
-   │  stdio MCP: initialize · tools/list · tools/call
-   ▼
-compos-mcp-proxy.exs           one process per agent session; OTP :json, no deps
-   │  JSON-RPC eval on ~/.compos/sock (COMPOS_SOCK overrides)
-   ▼
-daemon Session ── (mcp-proxy-tools-json)          tools/list
-              └── (mcp-proxy-call name args-b64)  tools/call
-                     │ permission gate (*permission-policy*)
-                     ▼
-                  llm-tool-call → the Scheme handler runs</code></pre>
+   |  stdio MCP: initialize, tools/list, tools/call, ping
+   v
+nc shim (mcp.scm)              sh + nc, about 3 MB per agent; sends the slug first
+   |  the same MCP frames on ~/.compos/sock-mcp
+   v
+Compos.Rpc.McpServer           one connection process per agent, in the daemon
+   |-- (mcp-proxy-tools-json)                  tools/list
+   |-- (mcp-proxy-call name args-b64 author)   tools/call
+   |        | permission gate (*permission-policy*)
+   |        v
+   |     the Scheme handler runs
+   '-- Agent.ask_user                          the ask tool</code></pre>
 
-<p>The <code>mcp</code> package registers the proxy as the <code>compos</code>
-entry in each agent's <code>session/new</code>, so every agent session spawns
-its own proxy process. The proxy handles four methods:
-<code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, and
-<code>ping</code>. Everything else gets <code>-32601</code>.</p>
+<p>The <code>mcp</code> package registers the shim as the <code>compos</code> entry in each agent's <code>session/new</code>:</p>
+<pre><code>{ printf '%s\n' "$COMPOS_AGENT"; exec cat; } | exec nc -U "$COMPOS_MCP_SOCK"</code></pre>
+<p>The shim does no MCP work. It sends the agent's slug (<code>COMPOS_AGENT</code>, which the ACP backend sets) as the first line. Then <code>nc</code> copies stdin to the socket and the socket to stdout. An empty first line names no agent.</p>
+
+<h2>Why a socket, and not a process per agent</h2>
+<p>Until 2026-10-27, each agent started <code>compos-mcp-proxy.exs</code>: a complete BEAM VM that forwarded MCP to <code>~/.compos/sock</code>. Each VM took 63-80 MB and about one second of CPU to boot. A chat that started 15 subagents booted 15 VMs at the same time. The daemon is already a BEAM, so the MCP work now runs there. An agent costs <code>sh</code> and <code>nc</code>, about 3 MB together, and no boot.</p>
+<p>The transport stays stdio on the agent's side, so the agent behaves as before. A Unix socket has no idle timeout, so a long write and an <code>ask</code> that waits for the user keep working.</p>
+
+<h2>One connection</h2>
+<p>A connection is one agent session. The server reads the slug line, then one JSON-RPC frame per line. A Unix socket is a stream, so both ends assemble a frame until the newline.</p>
+<table>
+<tr><th>rule</th><th>what happens</th></tr>
+<tr><td>order</td>
+    <td>Consecutive read-only calls run together, each in its own process and lane. Any other message is a barrier: it waits for earlier reads and blocks later reads until it is done. <code>readOnlyHint</code> in the <code>tools/list</code> reply decides which calls are reads.</td></tr>
+<tr><td>time limit</td>
+    <td>60 s for a read and 600 s for a write. A call past its limit returns an error that the model can retry. <code>ask</code> has no limit.</td></tr>
+<tr><td>author</td>
+    <td>The slug goes into <code>mcp-proxy-call</code> as <code>agent:SLUG</code>, so the agent's edits land in <code>buffer-authors</code>.</td></tr>
+<tr><td>end</td>
+    <td>When the agent closes stdin, <code>nc</code> closes its write side. The server answers the calls in flight, then closes, and <code>nc</code> exits. The listener sets <code>exit_on_close: false</code> for this: without it, the half-close drops the replies.</td></tr>
+<tr><td>output</td>
+    <td>Non-ASCII goes out as <code>\uXXXX</code>, because a strict client (Codex) rejects other escapes. A result that is not UTF-8 text returns an error. A result with the content prefix returns MCP content blocks (an image, for example).</td></tr>
+</table>
 
 <h2>Why base64</h2>
-<p>The RPC socket's <code>eval</code> returns <em>printed</em> Scheme values.
-Printed-string escaping is not JSON-safe for every byte, so a raw JSON payload
-can break in either direction. Both entry points therefore move payloads as
-base64: the proxy encodes the MCP <code>arguments</code> before the eval, and
-the Scheme side encodes its result before the print. The proxy strips the
-quotes from the printed value and decodes. Base64 survives both transports
-untouched.</p>
+<p>The server calls the Scheme side through an eval, and an eval returns a <em>printed</em> Scheme value. Printed-string escaping is not JSON-safe for every byte. So the server encodes the MCP <code>arguments</code> as base64 before the eval, and the Scheme side encodes its result before the print. The server strips the quotes from the printed value and decodes.</p>
 
-<h2>The permission gate — the third chokepoint</h2>
-<p>Every deny-listed verb reaches the world through one of three gates: the
-api lane's tool loop, the ACP permission banner, and this proxy.
-<code>mcp-proxy-call</code> asks the SAME <code>*permission-policy*</code> the
-other two ask. It used to apply the deny-list alone — which meant a chat in
-<code>ask</code> mode was in ask mode everywhere except here.</p>
+<h2>The permission gate - the third chokepoint</h2>
+<p>Every deny-listed verb reaches the world through one of three gates: the api lane's tool loop, the ACP permission banner, and this server. <code>mcp-proxy-call</code> asks the SAME <code>*permission-policy*</code> the other two ask.</p>
 
 <table>
 <tr><th>verdict</th><th>what happens</th></tr>
 <tr><td><code>allow</code> / <code>allow-always</code></td>
-    <td>The call dispatches to the Scheme handler.</td></tr>
+    <td>The call dispatches to the Scheme handler. An "always" answer is kept for the verb in the chat's group.</td></tr>
 <tr><td><code>ask</code></td>
-    <td>Refused, fail-closed. A proxy call arrives on the socket from an
-    agent the editor does not render — there is no chat to raise an
-    Allow/Deny banner in, so nobody can answer one. The refusal text tells
-    the agent to ask the user to run it, or to approve it in the chat.</td></tr>
+    <td>The call raises a card in the agent's chat, through the same door the ACP lane uses. The user answers it as any other card. With no chat to ask in, the call is refused.</td></tr>
 <tr><td><code>deny</code></td>
-    <td>Refused, with the deny-listed verb named
-    (<code>permission-denied-verb?</code>).</td></tr>
+    <td>Refused, with the deny-listed verb named (<code>permission-denied-verb?</code>).</td></tr>
 </table>
 
-<h2>The open edge (R5)</h2>
-<div class="box warn">
-<p><strong><code>mcp-proxy-dispatch</code> runs the handler in the
-session.</strong> The names it dispatches come from the Scheme registry, and
-a Scheme handler runs in the Session GenServer by definition — the same
-single-threaded interpreter every keystroke goes through. The
-"never dispatch in the session" rule in <code>mcp.ex</code> is about MCP
-tools on other servers; <code>mcp-call!</code> obeys it for those by running
-in a Task. This surface cannot: the handlers ARE Scheme.</p>
-<p>Consequence: a slow handler stalls the editor while it runs, because the
-socket's request holds the session until the eval returns. The fix needs a
-deferred-reply RPC design — the socket request returns at once, the session
-queues the work, and the reply is delivered when the handler finishes. This
-is the last open piece of the AI-native refactor.</p>
-</div>
+<h2>The Session</h2>
+<p>A read-only call and an eval whose whole program is one shell command do not hold the Session. <code>mcp-proxy-call</code> takes a deferred reply (<code>eval-defer!</code>), runs the work in a Task, and answers with <code>eval-resolve!</code>. Keys and redraws run meanwhile. A write runs in the Session, in the agent's chat frame, with the edit author set.</p>
 
 <h2>Where the code is</h2>
 <table>
 <tr><th>piece</th><th>file</th><th>role</th></tr>
-<tr><td><code>compos-mcp-proxy.exs</code></td>
-    <td><code>apps/compos_core/priv/</code></td>
-    <td>The stdio MCP server. Spawned per agent session; forwards to the
-    socket.</td></tr>
+<tr><td><code>Compos.Rpc.McpServer</code></td>
+    <td><code>apps/compos_rpc/lib/compos/rpc/</code></td>
+    <td>The MCP server on <code>sock-mcp</code> (the RPC socket path with <code>-mcp</code> added).</td></tr>
+<tr><td><code>mcp-compos-shim</code>, the <code>compos</code> entry</td>
+    <td><code>scheme/packages/mcp.scm</code></td>
+    <td>The stdio command each agent starts.</td></tr>
 <tr><td><code>mcp-proxy-tools-json</code></td>
-    <td><code>priv/packages/tools.scm</code></td>
+    <td><code>scheme/packages/tools.scm</code></td>
     <td>The registry as JSON, base64-wrapped, for <code>tools/list</code>.</td></tr>
 <tr><td><code>mcp-proxy-call</code></td>
-    <td><code>priv/packages/tools.scm</code></td>
-    <td>Permission gate + dispatch, for <code>tools/call</code>.</td></tr>
-<tr><td><code>permission_test.exs</code> "one gate"</td>
-    <td><code>apps/compos_core/test/</code></td>
-    <td>Asserts the same payload is refused at all three chokepoints, and
-    that ask mode holds on the proxy.</td></tr>
+    <td><code>scheme/packages/tools.scm</code></td>
+    <td>Permission gate and dispatch, for <code>tools/call</code>.</td></tr>
+<tr><td><code>mcp_server_test.exs</code></td>
+    <td><code>apps/compos_rpc/test/compos/</code></td>
+    <td>Runs the registered shim against the socket: tools, a large reply, <code>ask</code>, images, a large request, and the half-close.</td></tr>
 </table>
 
-<p class="sub">Read this in the editor: <code>C-x C-f docs/mcp-proxy.html RET</code>
-then <kbd>C-c C-v</kbd>.</p>
+<p class="sub">Read this in the editor: <code>C-x C-f docs/mcp-proxy.html RET</code> then <kbd>C-c C-v</kbd>.</p>
 
 </body>
 </html>

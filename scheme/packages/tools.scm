@@ -1519,9 +1519,8 @@
 (effects! '(unknown))
 
 ;;; --- the MCP proxy surface ----------------------------------------------------
-;;; External ACP agents get this same registry over MCP: the bundled
-;;; compos-mcp-proxy.exs bridges stdio MCP to the daemon socket and calls
-;;; these two. Payloads are base64 both ways — RPC eval returns printed
+;;; External ACP agents get this same registry over MCP: the daemon's MCP
+;;; socket (Compos.Rpc.McpServer) calls these two. Payloads are base64 both ways — RPC eval returns printed
 ;;; values, and printed-string escaping is not JSON-safe for every byte.
 
 (define (mcp-proxy-tools-json)

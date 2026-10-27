@@ -544,14 +544,21 @@
 ;;; config files stay secret-free. The surface line shows the url the user
 ;;; wrote, cut at the query string: a key can ride there.
 
-;; the editor itself as an MCP server: the define-tool! registry bridged
-;; over the daemon socket, so external agents read and edit live buffers.
-;; The socket is named, not defaulted: a second daemon (COMPOS_HOME) listens
-;; on its own path, and its agents must reach IT, not the default one.
+;; the editor itself as an MCP server: the daemon serves the define-tool!
+;; registry on its MCP socket (Compos.Rpc.McpServer), so external agents
+;; read and edit live buffers. Each agent starts this shim: it sends the
+;; agent's slug as the first line, then nc copies stdio to that socket.
+;; nc closes its write side on stdin EOF; the daemon answers the calls in
+;; flight and closes, and nc exits. The socket is named, not defaulted: a
+;; second daemon (COMPOS_HOME) listens on its own path, and its agents
+;; must reach IT, not the default one.
+(define mcp-compos-shim
+  "{ printf '%s\\n' \"$COMPOS_AGENT\"; exec cat; } | exec nc -U \"$COMPOS_MCP_SOCK\"")
+
 (mcp-register! 'compos
-  (list 'command "elixir"
-        'args (list (priv-path "compos-mcp-proxy.exs"))
-        'env (list 'COMPOS_SOCK (compos-socket-path))))
+  (list 'command "sh"
+        'args (list "-c" mcp-compos-shim)
+        'env (list 'COMPOS_MCP_SOCK (string-append (compos-socket-path) "-mcp"))))
 
 (define-preset! 'compos "Live compos editor tools" '(compos))
 

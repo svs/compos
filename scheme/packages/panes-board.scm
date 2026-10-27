@@ -640,11 +640,15 @@
 (define panes-board--drawn #f)
 (define (panes-board-follow!)
   ;; the board is a projection of the models, the group and the focus: a
-  ;; window change that moved none of them draws nothing (a draw is ~70 ms)
-  (when (and (buffer-known? (panes-board-buffer)) (window-showing (panes-board-buffer)))
-    (let ((key (list (selected-frame) (panes--group-key) (active-window) (window-list)
-                     (frame-local 'panes-layouts))))
-      (unless (equal? key panes-board--drawn)
-        (set! panes-board--drawn key)
-        (panes-board-refresh!)))))
+  ;; window change that moved none of them draws nothing (a draw is ~70 ms).
+  ;; Only a board the frame shows follows; this runs on every window change,
+  ;; so it reads the shown windows, never every buffer, and makes no board.
+  (let ((board (find (lambda (b) (and (string? b) (buffer-derived-mode? b "panes-list-mode")))
+                     (map (lambda (w) (window-buffer (car w))) (window-list)))))
+    (when board
+      (let ((key (list (selected-frame) (panes--group-key) (active-window) (window-list)
+                       (frame-local 'panes-layouts))))
+        (unless (equal? key panes-board--drawn)
+          (set! panes-board--drawn key)
+          (list-refresh! board))))))
 (add-hook! 'window-state-change-hook 'panes-board-follow!)

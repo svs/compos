@@ -203,6 +203,9 @@
 ;; the shared todo list: it sets a prompt part on every chat, so it follows
 ;; prompts, chat and the event log
 (require 'todo)
+;; agents' listeners: a WhatsApp reply or a mail wakes the chat that waits on
+;; it; it loads at boot so the saved listeners subscribe again after a restart
+(require 'agent-listen)
 (require 'sockets)
 (require 'switch)
 (require 'handheld)

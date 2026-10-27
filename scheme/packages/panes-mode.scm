@@ -507,6 +507,27 @@
                                  (not (buffer-context-only? b)))))
             names)))
 
+(define (panes--own-keys layout)
+  "LAYOUT with a new key for every window whose key is a window of
+   another frame, and no blank an empty pane took from another frame: a
+   layout copied from another frame (panes--seed) keeps that frame's ids,
+   and the draw cannot make a window another frame has."
+  (let ((foreign (map car (filter (lambda (w) (not (equal? (caddr w) (selected-frame))))
+                                   (window-list-all)))))
+    (if (or (null? foreign) (not (procedure? panes-key-source)))
+        layout
+        (fold (lambda (l p)
+                (if (member (plist-get p 'blank) foreign)
+                    (panes--update-pane l (plist-get p 'id) (lambda (p) (panes--put p 'blank #f)))
+                    l))
+              (fold (lambda (l k)
+                      (if (member k foreign)
+                          (let ((new (panes-key-source)))
+                            (panes--update-window l k (lambda (w) (panes--put w 'key new))))
+                          l))
+                    layout (panes-window-keys layout))
+              (panes-panes layout)))))
+
 (define (panes-apply! layout)
   "The frame follows LAYOUT and it becomes this group's model. In
    order: each buffer goes to one window, the frame is drawn
@@ -516,7 +537,7 @@
   ;; a buffer is in one window, whatever made this layout. Only the
   ;; layout's own windows are drawn: a member of the group with no window
   ;; stays without one until the user opens it
-  (let ((layout (panes--draw! (panes-unique-buffers layout))))
+  (let ((layout (panes--draw! (panes-unique-buffers (panes--own-keys layout)))))
     (panes-layout-set! layout)
     (window-state-changed!)
     layout))

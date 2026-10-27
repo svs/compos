@@ -1,13 +1,18 @@
-defmodule Compos.McpProxyTest do
+defmodule Compos.McpServerTest do
   @moduledoc """
-  The bundled compos-mcp-proxy.exs end to end: a real subprocess speaking
-  MCP on stdio, bridged to this node's RPC socket — what an external ACP
-  agent actually spawns.
+  The MCP socket end to end through the nc shim mcp.scm registers: a real
+  subprocess speaking MCP on stdio, copied to this node's MCP socket. This
+  is what an ACP adapter starts.
   """
 
   use ExUnit.Case
 
-  @script Path.join(Application.app_dir(:compos_core, "priv"), "compos-mcp-proxy.exs")
+  # the shim command line exactly as mcp.scm registers it
+  defp shim do
+    {:ok, printed} = Compos.Core.Session.eval("mcp-compos-shim")
+    {:ok, shim} = Code.string_to_quoted(printed)
+    shim
+  end
 
   test "initialize, tools/list, and a live tools/call against the registry" do
     slug = "proxy-ask-#{System.unique_integer([:positive])}"
@@ -28,12 +33,12 @@ defmodule Compos.McpProxyTest do
     {:ok, _} = Compos.Core.Session.eval(~s{(buffer-append! "*proxy-doc*" "hello from compos")})
 
     port =
-      Port.open({:spawn_executable, System.find_executable("elixir")}, [
+      Port.open({:spawn_executable, System.find_executable("sh")}, [
         :binary,
         :exit_status,
-        args: [@script],
+        args: ["-c", shim()],
         env: [
-          {~c"COMPOS_SOCK", String.to_charlist(Compos.Rpc.Server.default_socket_path())},
+          {~c"COMPOS_MCP_SOCK", String.to_charlist(Compos.Rpc.McpServer.default_socket_path())},
           {~c"COMPOS_AGENT", String.to_charlist(slug)}
         ]
       ])
@@ -63,7 +68,7 @@ defmodule Compos.McpProxyTest do
     assert %{"id" => 3, "result" => %{"content" => [%{"text" => ~s{"hello from compos"}}]}} =
              recv(port)
 
-    # A response can exceed one socket read. The proxy must assemble the
+    # A response can exceed one socket read. Both ends must assemble the
     # newline-delimited frame instead of decoding the first received chunk.
     large = String.duplicate("large response line\n", 2_000)
     Compos.Core.create_buffer("*proxy-large*", text: large)
@@ -136,6 +141,43 @@ defmodule Compos.McpProxyTest do
     assert text =~ "is a binary file"
 
     Port.close(port)
+  end
+
+  test "a large request frame arrives whole, and a half-close ends the connection" do
+    {:ok, sock} =
+      :gen_tcp.connect(
+        {:local, String.to_charlist(Compos.Rpc.McpServer.default_socket_path())},
+        0,
+        [:binary, active: false, packet: :raw],
+        5_000
+      )
+
+    big = String.duplicate("x", 300_000)
+    code = ~s{(string-length "#{big}")}
+
+    frame =
+      Jason.encode!(%{
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: %{name: "eval-scheme", arguments: %{code: code}}
+      })
+
+    # no slug: an empty first line names no agent
+    :ok = :gen_tcp.send(sock, "\n" <> frame <> "\n")
+    :ok = :gen_tcp.shutdown(sock, :write)
+
+    {:ok, reply} = recv_all(sock, "")
+    assert %{"id" => 1, "result" => %{"content" => [%{"text" => "300000"}]}} = Jason.decode!(reply)
+  end
+
+  # the server closes after it answers the last call; read until it does
+  defp recv_all(sock, acc) do
+    case :gen_tcp.recv(sock, 0, 15_000) do
+      {:ok, chunk} -> recv_all(sock, acc <> chunk)
+      {:error, :closed} -> {:ok, String.trim(acc)}
+      error -> error
+    end
   end
 
   defp eventually(fun, tries \\ 40) do

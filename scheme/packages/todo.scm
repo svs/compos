@@ -1119,18 +1119,30 @@
      "When done, close this chat with (run-command \"chat-dismiss\").\n")))
 
 (define (todo-assign-chat! id group &optional who)
-  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: the one it holds, else a new one), make that chat the assignee and send it the brief when the chat is new; return the chat"
+  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new; a new chat is the calling chat's subagent with notify; return the chat"
   (let* ((t (todo--must id))
-         (g (or (group-resolve-id group) (group-ensure-record! group))))
+         (g (or (group-resolve-id group) (group-ensure-record! group)))
+         ;; the chat whose eval starts the task, if any
+         (caller (subagent-spawner))
+         ;; the task's own chat is its live assignee, never the chat that
+         ;; last logged on it: that one can be the orchestrator, the caller
+         (own (let ((a (plist-get t 'assignee)))
+                (and (string? a) (string-prefix? "chat:" a) (todo--live-chat a))))
+         (held (and own (not (and caller (equal? (subagent-slug own) caller))) own)))
     (let* ((got (assign-chat! #f g
                   (lambda (chat)
+                    ;; a new chat is the caller's subagent: the caller hears
+                    ;; when it stops
+                    (when caller
+                      (subagent-record! caller chat)
+                      (buffer-set-local! chat 'subagent-notify #t))
                     (todo-update id (list 'assignee (chat-stable-id! chat)
                                           'chats (todo--chats-keeping t (plist-get t 'assignee))
                                           'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
                                           'log (string-append "assigned to a chat in " (group-name g))
                                           'by (or who todo-user)))
                     (todo--brief (todo-get id) (chat-stable-id! chat)))
-                  (todo--chat-of t)))
+                  held))
            (chat (car got)))
       ;; A new chat wears the task's title. Named here, after the brief went
       ;; out under the old name; the first-prompt title lands later and

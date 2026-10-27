@@ -1620,11 +1620,21 @@
 
 (define (execute prompt) (execute* prompt '()))
 
+(define (execute--free-name base)
+  (let loop ((n 2) (name base))
+    (if (and (buffer-known? name) (< n 100))
+        (loop (+ n 1) (string-append base "<" (number->string n) ">"))
+        name)))
+
 (define (execute* prompt opts)
   ;; agent-next-slug only names the buffer now; the session slug is the
   ;; chat's durable id, assigned by chat-attach-agent!
   (let* ((name (agent-next-slug))
-         (buf (agent-chat-buffer name))
+         (title (let ((t (plist-get opts 'title)))
+                  (and (string? t) (not (equal? (string-trim t) "")) (string-trim t))))
+         ;; 'title names the buffer at birth: the chat never wears *chat:N*,
+         ;; so nothing has to rename it
+         (buf (if title (execute--free-name title) (agent-chat-buffer name)))
          ;; read before buffer-create, which makes the new chat current
          (spawner-group (buffer-group (current-buffer))))
     (buffer-create buf)
@@ -1682,12 +1692,11 @@
         (lambda ()
           (set-mode! "chat-mode")
           (end-of-buffer!)))
-      ;; 'title names the chat at spawn, before the prompt: the chat has its
-      ;; name from the first moment, and the first-prompt titler leaves a
-      ;; titled chat alone
-      (let ((title (plist-get opts 'title)))
-        (when (and (string? title) (boundp 'chat-title))
-          (chat-title buf title)))
+      ;; a chat born with its title keeps it: the titler and chat-title
+      ;; leave a chat with inhibit-retitle alone
+      (when title
+        (buffer-set-local! buf 'chat-title buf)
+        (buffer-set-local! buf 'inhibit-retitle #t))
       ;; the spawner in scope, if there is one: the chat that owns this
       ;; eval. With no parent in scope nothing is recorded and the spawn
       ;; is what it always was.

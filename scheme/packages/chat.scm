@@ -824,7 +824,9 @@
 ;; Set a chat's title by renaming its buffer in place.
 (define (chat-title buf title)
   (let ((base (string-trim title)))
-    (if (equal? base "")
+    (if (or (equal? base "")
+            ;; a chat born with its name keeps it
+            (buffer-local buf 'inhibit-retitle))
         #f
         ;; a name another buffer wears takes the next free <N>: a retitle
         ;; that fails quietly leaves the chat under its default name
@@ -843,7 +845,7 @@
             (else #f))))))
 
 (public! 'chat-title
-  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer")
+  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer; #f when BUF has inhibit-retitle")
 
 (define (chat-title--first-summary buf)
   ;; the label the chat wore first: chat-summary-log is newest-first, so

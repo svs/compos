@@ -156,9 +156,9 @@
   (lambda ()
     (let ((root (t--marg-project!)))
       (let ((buf (visit (string-append root "/top.txt"))))
-        (check-equal! (buffer-local buf 'modeline-file) "top.txt"
+        (check-equal! (modeline-cache-get buf 'file) "top.txt"
                       "the modeline uses the project-relative filename")
-        (check-equal! (buffer-local buf 'modeline-project) "zz-marg-proj"
+        (check-equal! (modeline-cache-get buf 'project) "zz-marg-proj"
                       "the modeline names the project"))
       (check-contains! (value->string (known-projects)) root "the project is remembered")
       (t--marg-project-done! root))))

@@ -467,7 +467,20 @@ from the buffer, so the redaction must reach that text through the tree"
 ;; A buffer's title reaches the mode line as these locals. Only the words of
 ;; the buffer's own name are barred in them, so the mode, group and preset
 ;; around the name stay readable.
-(define anon--title-keys '(modeline-name modeline-name-segments dashboard-line-blocks))
+(define anon--title-keys '(modeline-cache dashboard-line-blocks))
+
+;; the title in the modeline cache is its name and name-segments; the rest of
+;; the cache (facts, project, group) is not the title and stays as it is
+(define (anon--title-redact key val hide)
+  (let ((redact (lambda (v) (anon--tree-map (lambda (s) (anon--redact-string s hide)) v))))
+    (if (eq? (anon--key key) 'modeline-cache)
+        (let loop ((xs val) (acc '()))
+          (if (or (null? xs) (null? (cdr xs)))
+              (reverse acc)
+              (loop (cddr xs)
+                    (cons (if (memq (car xs) '(name name-segments)) (redact (cadr xs)) (cadr xs))
+                          (cons (car xs) acc)))))
+        (redact val))))
 
 (define (anon--key key)
   (if (string? key) (string->symbol key) key))
@@ -486,7 +499,7 @@ from the buffer, so the redaction must reach that text through the tree"
              (loop (cddr xs) (append (reverse (anon--view-plist buf (cadr xs))) acc)))
             ((and (member (anon--key (car xs)) anon--title-keys) (pair? hide))
              (loop (cddr xs)
-                   (cons (anon--tree-map (lambda (s) (anon--redact-string s hide)) (cadr xs))
+                   (cons (anon--title-redact (car xs) (cadr xs) hide)
                          (cons (car xs) acc))))
             (else (loop (cddr xs) (cons (cadr xs) (cons (car xs) acc))))))))
 

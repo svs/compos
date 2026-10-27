@@ -400,6 +400,36 @@
 ;; one table of change watches per buffer, (KEY ID) rows in 'change-watches:
 ;; KEY names the watch, so a mode that runs again keeps the one it has. The
 ;; ids die with the daemon, so the desktop does not save the table.
+;; The modeline's derived state is one local, 'modeline-cache, a flat plist:
+;; name, name-segments, file, project, facts, group, group-color, expanded,
+;; dash-blocks, dash-fp. Everything in it is rebuilt from the buffer, so the
+;; desktop skips it. What a mode writes for the modeline itself
+;; (modeline-info, modeline-info-command, modeline-preset) stays its own local.
+(define (modeline-cache buf) (or (buffer-local buf 'modeline-cache) '()))
+
+(define (modeline-cache-get buf key) (plist-get (modeline-cache buf) key))
+
+;; KEY replaced where it stands, so an unchanged value gives an equal plist
+(define (modeline-cache--put plist key val)
+  (cond ((null? plist) (list key val))
+        ((eq? (car plist) key) (cons key (cons val (cddr plist))))
+        (else (cons (car plist) (cons (cadr plist) (modeline-cache--put (cddr plist) key val))))))
+
+(define (modeline-cache-with buf kvs)
+  (let loop ((xs kvs) (acc (modeline-cache buf)))
+    (if (or (null? xs) (null? (cdr xs)))
+        acc
+        (loop (cddr xs) (modeline-cache--put acc (car xs) (cadr xs))))))
+
+;; one write, and none when nothing changed: a render reads this local
+(define (modeline-cache-set! buf &rest kvs)
+  (let* ((old (modeline-cache buf))
+         (new (modeline-cache-with buf kvs)))
+    (unless (equal? new old)
+      (desktop-skip! buf 'modeline-cache)
+      (buffer-set-local! buf 'modeline-cache new))
+    new))
+
 (define (buffer-watch-change! buf key cb)
   (let* ((cur (or (buffer-local buf 'change-watches) '()))
          (hit (assoc key cur)))
@@ -5776,6 +5806,14 @@
 (catalog-meta! 'function "buffer-note-seen!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-watch-change! "(buffer-watch-change! BUF KEY CB) — watch BUF's changes under KEY; a second call with KEY keeps the first watch; return its id")
 (catalog-meta! 'function "buffer-watch-change!" 'domain 'buffers 'effects '(write))
+(public! 'modeline-cache "(modeline-cache BUF) — BUF's derived modeline state as one plist: name, name-segments, file, project, facts, group, group-color, expanded, dash-blocks, dash-fp")
+(public! 'modeline-cache-get "(modeline-cache-get BUF KEY) — one value of BUF's modeline cache; #f when absent")
+(public! 'modeline-cache-with "(modeline-cache-with BUF KVS) — BUF's modeline cache with the KEY VALUE pairs of KVS put in; writes nothing")
+(public! 'modeline-cache-set! "(modeline-cache-set! BUF KEY VALUE ...) — put KEY VALUE pairs into BUF's modeline cache; no write when nothing changed")
+(catalog-meta! 'function "modeline-cache" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "modeline-cache-get" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "modeline-cache-with" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "modeline-cache-set!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-unwatch-change! "(buffer-unwatch-change! BUF KEY) — stop the change watch KEY on BUF")
 (catalog-meta! 'function "buffer-unwatch-change!" 'domain 'buffers 'effects '(write))
 (effects! '(read))

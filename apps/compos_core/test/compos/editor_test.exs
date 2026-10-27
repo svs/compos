@@ -3304,13 +3304,9 @@ defmodule Compos.EditorTest do
     press(["C-x", "?"])
     assert Editor.current_buffer() == b
     assert Compos.Core.Session.eval("(point)") == {:ok, "7"}
-    assert Compos.Core.Buffer.get_local(b, "modeline-expanded") == true
+    assert Compos.Core.Session.eval(~s{(modeline-cache-get "#{b}" 'expanded)}) == {:ok, "#t"}
 
-    blocks =
-      inspect(Compos.Core.Buffer.get_local(b, "modeline-dash-blocks"),
-        limit: :infinity,
-        printable_limit: :infinity
-      )
+    {:ok, blocks} = Compos.Core.Session.eval(~s{(modeline-cache-get "#{b}" 'dash-blocks)})
 
     assert blocks =~ "dashgrp-#{n}"
     assert blocks =~ "companion"
@@ -3319,7 +3315,7 @@ defmodule Compos.EditorTest do
 
     # the same key detaches it; the buffer never noticed
     press(["C-x", "?"])
-    assert Compos.Core.Buffer.get_local(b, "modeline-expanded") in [nil, false]
+    assert Compos.Core.Session.eval(~s{(modeline-cache-get "#{b}" 'expanded)}) == {:ok, "#f"}
     assert Editor.current_buffer() == b
     assert Compos.Core.Session.eval("(point)") == {:ok, "7"}
 

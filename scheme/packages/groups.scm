@@ -841,10 +841,7 @@ is forgotten and that group falls back to creation order in the switcher."
          (name (let ((n (and group (group-name group)))) (and (string? n) n)))
          (record (and group (group-record-by-id group)))
          (color (and record (group-color-hex (group-record-color record)))))
-    (unless (equal? (buffer-local b 'modeline-group) name)
-      (buffer-set-local! b 'modeline-group name))
-    (unless (equal? (buffer-local b 'modeline-group-color) color)
-      (buffer-set-local! b 'modeline-group-color color))
+    (modeline-cache-set! b 'group name 'group-color color)
     name))
 
 ;; A membership change rewrites the headline too: its group segment reads

@@ -400,10 +400,7 @@ defmodule Compos.GroupSwitchCommandTest do
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("?")
 
-    blocks =
-      first
-      |> Compos.Core.Buffer.get_local("modeline-dash-blocks")
-      |> inspect(limit: :infinity, printable_limit: :infinity)
+    blocks = eval!(~s{(modeline-cache-get "#{first}" 'dash-blocks)})
 
     assert blocks =~ "modeline-other"
     refute blocks =~ "modeline-here"

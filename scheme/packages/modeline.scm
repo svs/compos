@@ -310,7 +310,7 @@
 
 ;; the panel is derived state: an action that changed HERE redraws it
 (define (dash--refresh! buf)
-  (when (buffer-local buf 'modeline-expanded)
+  (when (modeline-cache-get buf 'expanded)
     (dashboard-panel-open! buf)))
 
 (define (dash--add-mode! buf)
@@ -1305,26 +1305,25 @@
 (define (dashboard--render! buf)
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
-  (desktop-skip! buf 'modeline-name)
-  (desktop-skip! buf 'modeline-name-segments)
-  (desktop-skip! buf 'modeline-project)
-  (desktop-skip! buf 'modeline-facts)
+  (desktop-skip! buf 'modeline-cache)
   ;; one preset read for the line, the blocks and the facts; one change for
-  ;; the six locals, so the frame refreshes once for the sync
+  ;; the three locals, so the frame refreshes once for the sync
   (let ((preset-cell (list (dash--preset buf))))
     (buffer-clear-dirty! buf 'dashboard)
     (buffer-set-locals! buf
       (list 'dashboard-line (dashboard-one-line buf preset-cell)
             'dashboard-line-blocks (dashboard-line-blocks buf preset-cell)
-            ;; the state the window's mode line draws: mode, llm, lane
-            'modeline-facts (dash--modeline-facts buf preset-cell)
-            'modeline-name (buffer-modeline-name buf)
-            ;; the same name as the spans that draw it: the client shows
-            ;; these and falls back to the plain string only without them
-            'modeline-name-segments (buffer-name-segments buf)
-            ;; The project stands beside a file name. A chat shows its
-            ;; working directory in the same context slot.
-            'modeline-project (buffer-modeline-context buf)))))
+            'modeline-cache
+            (modeline-cache-with buf
+              ;; the state the window's mode line draws: mode, llm, lane
+              (list 'facts (dash--modeline-facts buf preset-cell)
+                    'name (buffer-modeline-name buf)
+                    ;; the same name as the spans that draw it: the client shows
+                    ;; these and falls back to the plain string only without them
+                    'name-segments (buffer-name-segments buf)
+                    ;; The project stands beside a file name. A chat shows its
+                    ;; working directory in the same context slot.
+                    'project (buffer-modeline-context buf)))))))
 
 ;; The dirty flag is transient. Restore requests a sync again, and the
 ;; window hooks materialize only pending presentation. Group catchup can
@@ -1350,21 +1349,17 @@
           (and chat (map car (or (buffer-local chat 'chat-tool-specs) '()))))))
 
 (define (dashboard-panel-open! buf)
-  (desktop-skip! buf 'modeline-expanded)
-  (desktop-skip! buf 'modeline-dash-blocks)
-  (desktop-skip! buf 'modeline-dash-fp)
-  (buffer-set-locals! buf
-    (list 'modeline-dash-fp (dash--fingerprint buf)
-          'modeline-dash-blocks (dashboard-blocks buf)
-          'modeline-expanded #t)))
+  (modeline-cache-set! buf
+    'dash-fp (dash--fingerprint buf)
+    'dash-blocks (dashboard-blocks buf)
+    'expanded #t))
 
 ;; #t when a panel was open and is not any more, so a caller that closes
 ;; one of several things -- keyboard-quit does -- knows it closed this.
 (define (dashboard-panel-close! buf)
-  (and (buffer-local buf 'modeline-expanded)
+  (and (modeline-cache-get buf 'expanded)
        (begin
-         (buffer-set-locals! buf
-           (list 'modeline-expanded #f 'modeline-dash-blocks #f))
+         (modeline-cache-set! buf 'expanded #f 'dash-blocks #f)
          #t)))
 
 (define-command "modeline-expand"
@@ -1382,10 +1377,10 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (dashboard--render! buf)
-      (when (buffer-local buf 'modeline-expanded)
-        (buffer-set-locals! buf
-          (list 'modeline-dash-fp (dash--fingerprint buf)
-                'modeline-dash-blocks (dashboard-blocks buf))))
+      (when (modeline-cache-get buf 'expanded)
+        (modeline-cache-set! buf
+          'dash-fp (dash--fingerprint buf)
+          'dash-blocks (dashboard-blocks buf)))
       (message "Dashboard refreshed"))))
 
 (catalog-meta! 'command "buffer-dashboard-refresh" 'domain 'buffers 'effects '(write))
@@ -1414,11 +1409,10 @@
                 (unless (equal? (cadr w) buf)
                   (list-post-command! (cadr w))))
               (window-list))
-    (when (buffer-local buf 'modeline-expanded)
+    (when (modeline-cache-get buf 'expanded)
       (let ((fp (dash--fingerprint buf)))
-        (unless (equal? fp (buffer-local buf 'modeline-dash-fp))
-          (buffer-set-local! buf 'modeline-dash-fp fp)
-          (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf)))))
+        (unless (equal? fp (modeline-cache-get buf 'dash-fp))
+          (modeline-cache-set! buf 'dash-fp fp 'dash-blocks (dashboard-blocks buf)))))
     ;; the extension seam: packages react to the command that just ran
     ;; (paredit paints the matching delimiter here)
     (run-hooks 'post-command-hook)))

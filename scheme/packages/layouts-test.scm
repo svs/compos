@@ -91,7 +91,7 @@
       (dashboard--sync! buf)
       (check-true! (string? (buffer-local buf 'dashboard-line)) "the compact line landed")
       (check-true! (pair? (buffer-local buf 'dashboard-line-blocks)) "the blocks landed")
-      (check-equal! (buffer-local buf 'modeline-name) buf "the modeline name landed")
+      (check-equal! (modeline-cache-get buf 'name) buf "the modeline name landed")
       (check-true! (member 'dashboard-line (buffer-local buf 'desktop-skip-locals))
                    "the line is runtime state the desktop skips")
       (buffer-kill! buf))))

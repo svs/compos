@@ -78,7 +78,7 @@
       (buffer-set-read-only! movie #f)
       (buffer-replace-range! movie 0 (buffer-size movie) (movie-get frame 'text))
       (buffer-set-local! movie 'movie-index index)
-      (buffer-set-local! movie 'modeline-name
+      (modeline-cache-set! movie 'name
         (string-append "MOVIE " (number->string (+ index 1)) "/"
                        (number->string (length (buffer-local movie 'movie-frames)))
                        " · " (buffer-local movie 'movie-source)))

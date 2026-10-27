@@ -105,7 +105,7 @@ defmodule Compos.Ui.EditorLiveTest do
   test "a window applies its buffer group color", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     buf = Compos.Core.Editor.current_buffer()
-    Compos.Core.Buffer.set_local(buf, "modeline-group-color", "#9b6ab3")
+    Compos.Core.Buffer.set_local(buf, "modeline-cache", [{:sym, "group-color"}, "#9b6ab3"])
 
     html = render(view)
 
@@ -116,7 +116,7 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, view, mounted} = live(conn, "/")
     [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
     buf = Compos.Core.Editor.render_state(frame).tree.buffer
-    Compos.Core.Buffer.set_local(buf, "modeline-group", "pinned-group")
+    Compos.Core.Buffer.set_local(buf, "modeline-cache", [{:sym, "group"}, "pinned-group"])
     Compos.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
     html = render(view)
 

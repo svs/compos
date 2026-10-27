@@ -28,7 +28,7 @@ The fetch and cleanup pipeline produces Markdown. That Markdown is both the buff
 
 From outside `browse-mode`, a URL gets its own browse tab, and opening the same URL returns to that tab. From inside a browse tab, a URL navigates the tab in place.
 
-The buffer process keeps a stable identity during in-place navigation. Its visible `modeline-name` is recomputed from the URL, so the title follows the page. Browse tabs belong to the `browse` group, and `s` opens a switcher restricted to that group.
+The buffer process keeps a stable identity during in-place navigation. Its visible modeline name (the `name` in its `modeline-cache`) is recomputed from the URL, so the title follows the page. Browse tabs belong to the `browse` group, and `s` opens a switcher restricted to that group.
 
 ## Fetching HTML
 

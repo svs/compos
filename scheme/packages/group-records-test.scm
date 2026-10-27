@@ -362,7 +362,7 @@
       (buffer-set-local! a 'group name)
       (group-ids)
       (check-equal! (buffer-local a 'group-id) id "the first walk folded the name into the id")
-      (check-equal! (buffer-local a 'modeline-group) name "the first walk set the modeline segment")
+      (check-equal! (modeline-cache-get a 'group) name "the first walk set the modeline segment")
       (check-true! (member a *group-migrated-buffers*) "the buffer is on the migrated list")
       ;; the walk skips a migrated buffer: a name put back by hand stays
       (buffer-set-local! a 'group name)

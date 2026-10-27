@@ -3124,6 +3124,26 @@ defmodule Compos.Core.Editor do
     {a, max(rows - a, 3)}
   end
 
+  # the modeline's derived state: one plist local, KEY VALUE ... (editor.scm
+  # modeline-cache). A missing key reads nil, as a missing local did, and the
+  # first of two equal keys wins, as plist-get reads it.
+  defp modeline_cache(locals) do
+    case Map.get(locals, "modeline-cache") do
+      plist when is_list(plist) ->
+        plist
+        |> Enum.chunk_every(2, 2, :discard)
+        |> Enum.reverse()
+        |> Map.new(fn [k, v] -> {modeline_cache_key(k), v} end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp modeline_cache_key({:sym, k}), do: k
+  defp modeline_cache_key(k) when is_atom(k), do: Atom.to_string(k)
+  defp modeline_cache_key(k), do: k
+
   # The frame names its current group once, in the header line. A window
   # whose buffer is in that group wears no pin; a window from another group
   # wears that group's name. CURRENT is the frame's label, which may carry
@@ -3195,6 +3215,7 @@ defmodule Compos.Core.Editor do
     display_updating = Events.display_updating?(buffer)
     snap = safe_snapshot(buffer, id)
     %{text: text, point: point, locals: locals} = snap
+    ml = modeline_cache(locals)
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and
     # auto-follow math below then works unchanged. Line *numbers* stay
@@ -3276,15 +3297,15 @@ defmodule Compos.Core.Editor do
       mode: Map.get(locals, "mode-name") || "Fundamental",
       # what the modeline calls this buffer: project coordinates inside a
       # project, "~" for the home directory outside one. Scheme decides.
-      modeline_name: Map.get(locals, "modeline-name"),
+      modeline_name: Map.get(ml, "name"),
       # the same name as the spans that draw it: the buffer-name grammar
       # (editor.scm) names the classes, the client draws one span each
-      modeline_name_segments: Map.get(locals, "modeline-name-segments"),
-      modeline_file: Map.get(locals, "modeline-file"),
-      modeline_project: Map.get(locals, "modeline-project"),
+      modeline_name_segments: Map.get(ml, "name-segments"),
+      modeline_file: Map.get(ml, "file"),
+      modeline_project: Map.get(ml, "project"),
       # the state the mode line draws as key/value facts: mode, llm, lane.
       # Scheme builds them (dash--modeline-facts); each is (KEY VALUE TONE RANK).
-      modeline_facts: Map.get(locals, "modeline-facts"),
+      modeline_facts: Map.get(ml, "facts"),
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
       # the LLM tool preset alone, for a modeline too narrow for the line
@@ -3307,10 +3328,10 @@ defmodule Compos.Core.Editor do
       footer_line_blocks: Map.get(locals, "footer-line-blocks"),
       # the pin: the buffer's group only when it is not the frame's. The
       # frame names its group once; a window in that group does not repeat it.
-      pin: modeline_pin(Map.get(locals, "modeline-group"), frame_group),
+      pin: modeline_pin(Map.get(ml, "group"), frame_group),
       # Scheme selects the buffer-owned group that supplies its color.
       # The frame group remains separate context for the bottom bar.
-      group_color: Map.get(locals, "modeline-group-color"),
+      group_color: Map.get(ml, "group-color"),
       ts_lang: Map.get(locals, "ts-lang"),
       display_updating: display_updating or Events.display_updating?(buffer),
       overlays: snap.overlays,
@@ -3338,8 +3359,8 @@ defmodule Compos.Core.Editor do
       # the expanded modeline: a block tree pinned above the text,
       # rendered only while the buffer-local says so
       dash:
-        if(Map.get(locals, "modeline-expanded") == true,
-          do: Map.get(locals, "modeline-dash-blocks") || [],
+        if(Map.get(ml, "expanded") == true,
+          do: Map.get(ml, "dash-blocks") || [],
           else: nil
         ),
       preview_authored: Map.get(locals, "preview-authored") == true,

@@ -184,7 +184,7 @@
         (t--web-pin-group! "zzweb-home"
           (lambda ()
             (let ((a (browse "https://site.test/index.html")))
-              (check-contains! (buffer-local a 'modeline-name) "site.test/index.html"
+              (check-contains! (modeline-cache-get a 'name) "site.test/index.html"
                                "the visible title names the first page")
               (switch-to-buffer! "*scratch*")
               (let ((b (browse "https://site.test/second.html")))
@@ -206,7 +206,7 @@
                             "the relative target resolves against the page")
               (check-equal! (buffer-point a) 0
                             "new navigation starts at the top")
-              (check-contains! (buffer-local a 'modeline-name)
+              (check-contains! (modeline-cache-get a 'name)
                                "site.test/second.html"
                                "the visible title follows navigation"))))))
     (t--web-kill-tabs!)))

@@ -177,19 +177,19 @@
           (two (t--group "modeline-two")))
       (buffer-create buf)
       (buffer-modeline-group-refresh! buf)
-      (check-equal! (buffer-local buf 'modeline-group) #f
+      (check-equal! (modeline-cache-get buf 'group) #f
                     "an ungrouped buffer carries no modeline group")
       (buffer-add-group! buf one)
-      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-one"
+      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-one"
                     "the membership carries its name")
       (buffer-add-group! buf two)
-      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-two"
+      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-two"
                     "joining a group is leaving the last one")
       (group-rename! two "zztest-modeline-renamed")
-      (check-equal! (buffer-local buf 'modeline-group) "zztest-modeline-renamed"
+      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-renamed"
                     "renaming a group refreshes its member label")
       (buffer-remove-group! buf two)
-      (check-equal! (buffer-local buf 'modeline-group) #f
+      (check-equal! (modeline-cache-get buf 'group) #f
                     "leaving takes the name with it")
       (buffer-kill! buf)
       (t--drop! one)

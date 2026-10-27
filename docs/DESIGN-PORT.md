@@ -29,7 +29,7 @@ stage. Each stage is one commit, verified live and by a screenshot.
    the open change, the cua/focus tag, one switcher (`ⓘ`, M-x
    `buffer-switcher`: a narrow over buffer info, summary log, transcript
    verbosity). Mode line = state: dot, name, context, mode/llm/lane facts
-   (`dash--modeline-facts`, the `modeline-facts` local, ranked so the lane
+   (`dash--modeline-facts`, the `facts` of the `modeline-cache` local, ranked so the lane
    sheds first), position. A window at rest keeps both bars whole and
    steps its ink down. DONE.
 3. **Three window states.** At rest: kept down (`.window.inactive` remaps

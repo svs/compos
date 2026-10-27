@@ -1140,7 +1140,7 @@
     ;; The process keeps its stable buffer identity while the visible title
     ;; follows in-place navigation.
     (when url
-      (buffer-set-local! buf 'modeline-name
+      (modeline-cache-set! buf 'name
         (string-append "*browse:" (web--slug url) "*")))
     (web--calm-mark! buf)
     (buffer-set-local! buf 'modeline-info

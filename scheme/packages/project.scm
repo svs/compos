@@ -390,10 +390,9 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
   (let* ((buf (current-buffer))
          (path (buffer-path buf))
          (root (and path (project-root-cached (parent-dir path)))))
-    (buffer-set-local! buf 'modeline-file
-      (or (and root (project--relative root path)) path ""))
-    (buffer-set-local! buf 'modeline-project
-      (if root (project-name root) ""))))
+    (modeline-cache-set! buf
+      'file (or (and root (project--relative root path)) path "")
+      'project (if root (project-name root) ""))))
 
 ;; every visited file teaches the editor its project
 (define (project--remember-hook!)

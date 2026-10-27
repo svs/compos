@@ -21,7 +21,7 @@
       (dashboard--sync! path)
       (check-equal! (buffer-modeline-name path) "lib/example.scm"
                     "the buffer modeline policy returns project coordinates")
-      (check-equal! (buffer-local path 'modeline-name) "lib/example.scm"
+      (check-equal! (modeline-cache-get path 'name) "lib/example.scm"
                     "the rendered buffer modeline stores the compact name")
       (buffer-kill! path))
     (t--modeline-reset!)))
@@ -47,7 +47,7 @@
       (dashboard--sync! buf)
       (check-equal! (buffer-directory buf) dir
                     "the chat has its own working directory")
-      (check-equal! (buffer-local buf 'modeline-project)
+      (check-equal! (modeline-cache-get buf 'project)
                     (abbreviate-file-name dir)
                     "the compact modeline shows that directory")
       (buffer-kill! buf))))
@@ -528,10 +528,10 @@
       (buffer-set-local! buf 'name-format #f)
       (switch-to-buffer! buf)
       (dashboard--sync! buf)
-      (check-equal! (buffer-local buf 'modeline-name-segments)
+      (check-equal! (modeline-cache-get buf 'name-segments)
                     (buffer-name-segments buf)
                     "the sync stores the spans beside the plain name")
-      (check-equal! (name-text (buffer-local buf 'modeline-name-segments))
+      (check-equal! (name-text (modeline-cache-get buf 'name-segments))
                     (string-append (mode-icon "scheme-mode") " zz-name-render")
                     "and the plain reading of them keeps no asterisk")
       (buffer-kill! buf))))

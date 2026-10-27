@@ -134,7 +134,8 @@ defmodule Compos.ApiLaneTest do
 
     # both rounds' usage summed onto the chat (pricing itself depends on
     # the models.dev catalog, so 'chat-cost only lands for a priced model)
-    usage = Buffer.get_local(buf, "chat-last-usage")
+    record = Buffer.get_local(buf, "chat-usage")
+    usage = Enum.at(record, Enum.find_index(record, &(&1 == {:sym, "last"})) + 1)
     assert Enum.at(usage, Enum.find_index(usage, &(&1 == {:sym, "input"})) + 1) == 150
     assert Enum.at(usage, Enum.find_index(usage, &(&1 == {:sym, "output"})) + 1) == 30
 

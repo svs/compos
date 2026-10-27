@@ -20,8 +20,7 @@
   (buffer-set-local! t--as-buf 'agent-saved-mark (buffer-size t--as-buf))
   (buffer-set-local! t--as-buf 'chat-history-ring '())
   (chat-history-reset! t--as-buf)
-  (buffer-set-local! t--as-buf 'chat-queued-pos #f)
-  (buffer-set-local! t--as-buf 'chat-queued-draft #f)
+  (buffer-set-local! t--as-buf 'chat-queued-walk #f)
   (buffer-set-local! t--as-buf 'chat-queued (if (null? queued) #f queued))
   t--as-buf)
 
@@ -72,7 +71,7 @@
                         "only that row left the queue")
           (check-equal! (chat-input-text buf) "first queued"
                         "and it landed back in the input, ready to edit or resend")
-          (check-false! (buffer-local buf 'chat-queued-pos) "the walk ends: there is nothing left to stand on")))
+          (check-false! (buffer-local buf 'chat-queued-walk) "the walk ends: there is nothing left to stand on")))
       (buffer-kill! buf))))
 
 (deftest 'chat-unqueue-without-a-walk-takes-the-newest

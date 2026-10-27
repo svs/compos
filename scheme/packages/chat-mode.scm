@@ -1766,7 +1766,7 @@
     ;; The exact named system fragments this conversation sends. The first
     ;; turn sets them. Prompt refresh replaces them. Reset clears them.
     chat-prompt-snapshot
-    chat-cost chat-last-usage chat-usage-total
+    chat-cost chat-usage
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once
@@ -2564,7 +2564,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (c (buffer-local buf 'chat-cost))
-           (u (buffer-local buf 'chat-last-usage))
+           (u (chat-last-usage buf))
            (ctx (chat-context-tokens buf))
            (total (chat-usage-total buf))
            (rate (chat-hit-rate total)))

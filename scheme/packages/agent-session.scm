@@ -645,24 +645,24 @@
 
 (define (chat-queued-recall! buf dir)
   (let* ((q (chat-queued-for buf))
-         (pos (or (buffer-local buf 'chat-queued-pos) -1))
+         (walk (buffer-local buf 'chat-queued-walk))
+         (pos (or (plist-get walk 'pos) -1))
+         (draft (if walk (or (plist-get walk 'draft) "") (chat-input-text buf)))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
     (cond ((>= next (length q))
            ;; walked past the oldest queued row: restore the draft this walk
            ;; started from, so the sent-history walk starts from it too,
            ;; not from whatever queued text happens to be showing
-           (chat-replace-input! buf (or (buffer-local buf 'chat-queued-draft) ""))
-           (buffer-set-local! buf 'chat-queued-pos #f)
+           (chat-replace-input! buf draft)
+           (buffer-set-local! buf 'chat-queued-walk #f)
            (chat-history-recall! buf dir))
           ((< next -1) #f)
           (else
-            (when (= pos -1)
-              (buffer-set-local! buf 'chat-queued-draft (chat-input-text buf)))
-            (buffer-set-local! buf 'chat-queued-pos (if (= next -1) #f next))
-            (chat-replace-input! buf
-              (if (= next -1)
-                  (or (buffer-local buf 'chat-queued-draft) "")
-                  (nth next q)))
+            ;; the walk is one record, (pos P draft D): where it stands and
+            ;; the draft it started from. No record means no walk.
+            (buffer-set-local! buf 'chat-queued-walk
+              (and (>= next 0) (list 'pos next 'draft draft)))
+            (chat-replace-input! buf (if (= next -1) draft (nth next q)))
             (when (>= next 0)
               (message (string-append "queued " (number->string (+ next 1)) "/"
                                       (number->string (length q))
@@ -674,7 +674,7 @@
     (chat-history-seed! buf)
     (cond
       ;; already walking the queued rows: stay in that walk
-      ((buffer-local buf 'chat-queued-pos) (chat-queued-recall! buf dir))
+      ((buffer-local buf 'chat-queued-walk) (chat-queued-recall! buf dir))
       ((or (not (buffer-local buf 'agent-saved-mark))
            (not (chat-in-input? buf))
            ;; inside a multi-line input, up and down are still motion
@@ -793,7 +793,8 @@
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
            (q (chat-queued-for buf))
-           (walked (buffer-local buf 'chat-queued-pos))
+           (walk (buffer-local buf 'chat-queued-walk))
+           (walked (plist-get walk 'pos))
            (idx (if (and walked (< walked (length q))) walked 0)))
       (if (null? q)
           (message "no queued messages")
@@ -807,8 +808,8 @@
                   (buffer-set-local! buf 'chat-queued
                     (let ((kept (reverse (list-remove-at q idx))))
                       (if (null? kept) #f kept)))
-                  (buffer-set-local! buf 'chat-queued-pos #f)
-                  (let ((draft (if walked (or (buffer-local buf 'chat-queued-draft) "")
+                  (buffer-set-local! buf 'chat-queued-walk #f)
+                  (let ((draft (if walked (or (plist-get walk 'draft) "")
                                    (chat-input-text buf))))
                     (chat-replace-input! buf
                       (if (equal? (string-trim draft) "")

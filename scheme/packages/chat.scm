@@ -469,8 +469,19 @@
 ;; the chat's running totals, so C-c $ can state a hit rate over the whole
 ;; conversation rather than the last turn alone
 (define (chat-usage-total buf)
-  (or (buffer-local buf 'chat-usage-total)
+  (or (plist-get (buffer-local buf 'chat-usage) 'total)
       '(input 0 output 0 cache-read 0 cache-write 0)))
+
+;; the usage the backend reported for the last turn, or #f
+(define (chat-last-usage buf)
+  (plist-get (buffer-local buf 'chat-usage) 'last))
+
+;; One record holds what the backend reports: the last turn (last), the sum
+;; of every turn (total) and what the context holds now (context, as
+;; (used U size S)). A reset drops it with the conversation.
+(define (chat-usage-put! buf key val)
+  (buffer-set-local! buf 'chat-usage
+    (plist-put (or (buffer-local buf 'chat-usage) '()) key val)))
 
 (define (chat-usage-add total u key)
   (+ (or (plist-get total key) 0) (or (plist-get u key) 0)))
@@ -478,8 +489,8 @@
 (define (chat-usage-note! buf u)
   (let ((cost (plist-get u 'cost))
         (total (chat-usage-total buf)))
-    (buffer-set-local! buf 'chat-last-usage u)
-    (buffer-set-local! buf 'chat-usage-total
+    (chat-usage-put! buf 'last u)
+    (chat-usage-put! buf 'total
       (list 'input (chat-usage-add total u 'input)
             'output (chat-usage-add total u 'output)
             'cache-read (chat-usage-add total u 'cache-read)
@@ -497,9 +508,11 @@
 ;; latest one replaces the last; only chat-usage-total adds up.
 (define (chat-context-note! buf used size)
   (when (and (number? used) (> used 0))
-    (buffer-set-local! buf 'chat-context-used used)
-    (when (and (number? size) (> size 0))
-      (buffer-set-local! buf 'chat-context-size size))
+    (chat-usage-put! buf 'context
+      (list 'used used
+            'size (if (and (number? size) (> size 0))
+                      size
+                      (plist-get (plist-get (buffer-local buf 'chat-usage) 'context) 'size))))
     (agent-update-modeline! buf)))
 
 ;; 247773 of 1000000 reads as 248k/1M. The modeline has room for the shape
@@ -526,9 +539,8 @@
 
 ;; (used U size S), or #f when no backend has reported one
 (define (chat-context-tokens buf)
-  (let ((used (buffer-local buf 'chat-context-used)))
-    (and (number? used)
-         (list 'used used 'size (buffer-local buf 'chat-context-size)))))
+  (let ((ctx (plist-get (buffer-local buf 'chat-usage) 'context)))
+    (and (number? (plist-get ctx 'used)) ctx)))
 
 ;; the share of billed input that came from the cache, as a percentage
 ;; string, or #f when nothing was billed yet

@@ -279,7 +279,7 @@ defmodule Compos.ChatResetTest do
     # what "clean" means, checked the same way for every case
     defp assert_clean(buf) do
       # conversation gone...
-      for k <- ~w(chat-wire-turns chat-turns agent-folds chat-cost chat-last-usage chat-queued) do
+      for k <- ~w(chat-wire-turns chat-turns agent-folds chat-cost chat-usage chat-queued) do
         assert Compos.Core.Buffer.get_local(buf, k) in [nil, false, []],
                "#{k} survived the reset: #{inspect(Compos.Core.Buffer.get_local(buf, k))}"
       end

@@ -183,8 +183,14 @@
   (let ((own (plist-get (buffer-local buf 'site-app-spec) 'list-head)))
     (append
       (if own (own buf) '())
+      ;; the sections ride the window's header line; the status rows stay here
       (map (lambda (bar) (component 'ui/tabs (list 'class (cadr bar) 'tabs (caddr bar))))
-           (site-app-index-bars buf)))))
+           (cdr (site-app-index-bars buf))))))
+
+(define (site-app-list-head-blocks buf)
+  ;; the sections bar, in the window's header line as the todos keep their views
+  (let ((bar (car (site-app-index-bars buf))))
+    (list (component 'ui/tabs (list 'class (cadr bar) 'tabs (caddr bar))))))
 
 (define (site-app-stars text &optional confirmed?)
   ;; a rating in any shape the sheets give it, "4", "3.5", "★★★" or "★★★✓",
@@ -2544,6 +2550,9 @@
 (mode-keys! "site-app-detail-mode"
   (list (list "TAB" "site-app-detail-next-tab")
         (list "S-TAB" "site-app-detail-prev-tab")
+        ;; as on the list beside it
+        (list "M-<right>" "site-app-detail-next-tab")
+        (list "M-<left>" "site-app-detail-prev-tab")
         (list "t" "site-app-tabs")
         (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
@@ -2575,6 +2584,25 @@
               (when w (goto-char! (window-point (car w))))
               (run-command command)))
           (when w (window-set-point! (car w) (buffer-point d)))))))
+
+(define (site-app-detail-tab-step-beside! d)
+  ;; from the list, the page beside it takes its next or previous tab the way
+  ;; 6 to 0 take one (tab-bars-take!); the list keeps its row
+  (let* ((page (cadr (tab-bars-pair (current-buffer))))
+         (bars (if page (tab-bars page) '()))
+         (tabs (if (pair? bars) (cadr (car bars)) '()))
+         (n (length tabs)))
+    (if (= n 0)
+        (message "No page with tabs beside this list")
+        (let loop ((ts tabs) (i 0))
+          (cond ((null? ts) (tab-bars-take! page (car tabs)))
+                ((caddr (car ts)) (tab-bars-take! page (list-ref tabs (modulo (+ i d) n))))
+                (else (loop (cdr ts) (+ i 1))))))))
+
+(define-command "site-app-detail-tab-next-beside" "Show the next tab of the page beside the list"
+  (lambda () (site-app-detail-tab-step-beside! 1)))
+(define-command "site-app-detail-tab-prev-beside" "Show the previous tab of the page beside the list"
+  (lambda () (site-app-detail-tab-step-beside! -1)))
 
 (define-command "site-app-detail-anchor-next" "Go to the next part of the page beside the list"
   (lambda () (site-app-detail-anchor-step! "anchor-read-next")))
@@ -2639,9 +2667,10 @@
         ;; by name, so a reload of site-app reaches the modes already made
         'anchor (lambda (b row) (site-app-row-anchor b row))
         'composml-head site-app-composml-head
+        'head-blocks (lambda (b) (site-app-list-head-blocks b))
         'preview site-app-show-detail!
         'debounce #t
-        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "1–5" "sections") (list "6–0" "page tabs") (list "/" "any tab") (list "[ ]" "status") (list "M-↑↓" "page parts")
+        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "1–5" "sections") (list "6–0" "page tabs") (list "/" "any tab") (list "[ ]" "status") (list "M-↑↓" "page parts") (list "M-←→" "page tabs")
                                     (list "g" "refresh") (list "q" "quit"))))
         ;; The digits are the tab bars' (tab-bars.scm): 1-5 the sections,
         ;; 6-0 the page beside the list. M-digit still takes a section.
@@ -2654,6 +2683,8 @@
                             ;; the page beside the list, part by part, without leaving the row
                             (list "M-<down>" "site-app-detail-anchor-next")
                             (list "M-<up>" "site-app-detail-anchor-prev")
+                            (list "M-<right>" "site-app-detail-tab-next-beside")
+                            (list "M-<left>" "site-app-detail-tab-prev-beside")
                             (list "q" "quit-window"))
                       ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
                       (map (lambda (k) (list (car k) (cadr k))) list-keys)

@@ -9,8 +9,8 @@
 (effects! '(write))
 
 ;;; --- durable group records and buffer-local membership -------------------------
-;;; Every buffer keeps its one group in 'group-id. Work buffers add 'group-roles,
-;;; chats one 'chat-id. The older 'group and 'companion-of names migrate on
+;;; Every buffer keeps its one group in 'group-id, and nothing else names it.
+;;; Work buffers may add 'group-roles, a role in that one group; chats one 'chat-id. The older 'group and 'companion-of names migrate on
 ;;; the first membership read; a 'group-ids list from an old desktop is folded
 ;;; into 'group-id by a one-shot migration on restore (migrations.scm).
 ;;; Group records persist independently, including empty and chatless groups.
@@ -787,9 +787,18 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; An id that does not resolve is inert — the read answers #f and the
 ;; local keeps the id. Only group-kill! and group-dissolve! clear
 ;; members, and they sweep explicitly.
-;; write a buffer's one group
-(define (buffer-group-store! b id &optional more)
-  (buffer-set-locals! b (append (list 'group-id id) (or more '()))))
+;; write a buffer's one group, in one change. A role is a role in one
+;; group, so a move leaves it behind. The older names are cleared only
+;; where a buffer still holds one: a buffer that never had them gains no key.
+(define (buffer-group-store! b id)
+  (buffer-set-locals! b
+    (append (list 'group-id id)
+            (if (and (buffer-local b 'group-roles)
+                     (not (equal? (buffer-local b 'group-id) id)))
+                (list 'group-roles #f)
+                '())
+            (if (buffer-local b 'group) (list 'group #f) '())
+            (if (buffer-local b 'companion-of) (list 'companion-of #f) '()))))
 
 (define (buffer-group-id-of b)
   (let ((held (buffer-local b 'group-id)))
@@ -803,7 +812,7 @@ is forgotten and that group falls back to creation order in the switcher."
         (let ((legacy (or (buffer-local b 'group) (buffer-local b 'companion-of))))
           (and legacy
                (let ((id (group-ensure-record! legacy)))
-                 (buffer-group-store! b id (list 'group #f 'group-inherited #f 'companion-of #f))
+                 (buffer-group-store! b id)
                  (when (chat-buffer? b) (group-migrate-chat-state! b id))
                  id)))))))
 
@@ -886,8 +895,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (chat-set-group! b value)
   (let ((id (and value (group-ensure-record! value))))
     ;; Publish ownership atomically; readers never see half a move.
-    (buffer-set-locals! b
-      (list 'group-id id 'group-roles '() 'group #f 'companion-of #f))
+    (buffer-group-store! b id)
     (buffer-group-display-refresh! b)
     (group-current-recalculate!)
     ;; the group's shared config is the chat's starting setup: what the
@@ -936,24 +944,16 @@ is forgotten and that group falls back to creation order in the switcher."
           ;; how a new chat gets its group, never how a live one travels.
           ((chat-buffer? b)
            (if (chat-group-id b) #f (chat-set-group! b id)))
-          ;; already a member, but asking for it is still a declaration:
-          ;; the membership stops being one the buffer merely inherited
+          ;; already a member: nothing moves, the label still refreshes
           ((buffer-in-group? b id)
-           (buffer-set-local! b 'group-inherited #f)
            (buffer-group-display-refresh! b)
            id)
           ;; ONE group at a time. Joining is leaving: a buffer that lived
           ;; somewhere else moves here rather than answering two questions
           ;; about where it lives. Only an explicit verb gets this far.
           (else
+            ;; the store takes the roles it left with it
             (buffer-group-store! b id)
-            ;; a role is a role in one group, so the roles it left go too
-            (buffer-set-local! b 'group-roles
-              (filter (lambda (entry) (equal? (car entry) id))
-                      (or (buffer-local b 'group-roles) '())))
-            (buffer-set-local! b 'group #f)
-            (buffer-set-local! b 'group-inherited #f)
-            (buffer-set-local! b 'companion-of #f)
             (buffer-group-display-refresh! b)
             (group-current-recalculate!)
             ;; joining is adopting: the group's config is this buffer's
@@ -970,8 +970,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (if (chat-buffer? b)
         (chat-set-group! b id)
         (begin
-          (buffer-group-store! b id
-            (list 'group-roles '() 'group #f 'group-inherited #f 'companion-of #f))
+          (buffer-group-store! b id)
           (buffer-group-display-refresh! b)
           ;; the destination's config takes over from the old group's
           (when id (buffer-joined-group! b id))))
@@ -983,10 +982,6 @@ is forgotten and that group falls back to creation order in the switcher."
     (when id
       (when (equal? (buffer-group-id-of b) id)
         (buffer-group-store! b #f))
-      (unless (chat-buffer? b)
-        (buffer-set-local! b 'group-roles
-          (remove (lambda (entry) (equal? (car entry) id))
-                  (or (buffer-local b 'group-roles) '()))))
       (buffer-group-display-refresh! b))
     (group-current-recalculate!)))
 
@@ -1845,8 +1840,7 @@ is forgotten and that group falls back to creation order in the switcher."
     ;; group.
     (let ((group (group-spawn-target buf)))
       (when (and group (group-work-buffer? buf))
-        (buffer-add-group! buf group)
-        (buffer-set-local! buf 'group-inherited group)))
+        (buffer-add-group! buf group)))
     ;; A buffer an agent makes is the agent's work, in a group or not. It
     ;; stays out of the user's walk and fill until something shows it.
     (when (and (group-work-buffer? buf)

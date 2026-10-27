@@ -55,7 +55,6 @@
   (for-each (lambda (b)
               (buffer-set-local! b 'group-id #f)
               (buffer-set-local! b 'group #f)
-              (buffer-set-local! b 'group-inherited #f)
               (buffer-set-local! b 'companion-of #f))
             (list t--sw-first t--sw-second t--sw-third)))
 

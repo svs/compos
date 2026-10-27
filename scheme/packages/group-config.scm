@@ -311,14 +311,13 @@
 ;; group reaches into a chat once, and never again on its own.
 (define (group-configure-buffer! buf)
   (let ((id (and buf (buffer-known? buf) (group-resolve-id (buffer-group buf)))))
-    (when id
-      ;; the directory is a group property, not a script, but it reaches in
-      ;; on the same terms: once, on the join, and never again on its own.
-      (unless (equal? (buffer-local buf 'group-cwd-loaded) id)
-        (buffer-set-local! buf 'group-cwd-loaded id)
-        (group-cwd-apply! buf))
-      (unless (equal? (group-config-loaded buf) id)
-        (group-config-apply! buf))))
+    ;; the directory is a group property, not a script, but it reaches in
+    ;; on the same terms as the chat hooks: once, on the join, and never
+    ;; again on its own. One mark says both were taken.
+    (when (and id (not (equal? (group-config-loaded buf) id)))
+      (group-cwd-apply! buf)
+      (group-config-apply! buf)
+      (buffer-set-local! buf 'group-config-loaded id)))
   buf)
 
 (add-hook! 'buffer-woken-hook 'group-configure-buffer!)
@@ -422,7 +421,7 @@
 (catalog-meta! 'function "group-config-hooks" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-config-file" 'domain 'buffers 'effects '(read))
 (public! 'group-config-loaded
-  "(group-config-loaded BUF) -> the group whose chat hooks BUF has run, or #f")
+  "(group-config-loaded BUF) -> the group whose directory and chat hooks BUF has taken, or #f")
 (catalog-meta! 'function "group-config-loaded" 'domain 'buffers 'effects '(read))
 (public! 'group-config-apply!
   "(group-config-apply! BUF) -- run BUF's group chat hooks on it, first time or not")

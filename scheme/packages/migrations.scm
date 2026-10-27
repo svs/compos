@@ -187,6 +187,16 @@
         (unless (buffer-local buf 'group-id)
           (buffer-set-local! buf 'group-id (car ids)))
         (buffer-set-local! buf 'group-ids #f)))))
+;; the group directory and the chat hooks were two marks; group-config-loaded
+;; holds both now, so a buffer that took the directory keeps it taken
+(define-buffer-migration! 'group-cwd-loaded-to-config-loaded "2026-10-28"
+  (lambda (buf)
+    (let ((id (buffer-local buf 'group-cwd-loaded)))
+      (when id
+        (unless (buffer-local buf 'group-config-loaded)
+          (buffer-set-local! buf 'group-config-loaded id))
+        (buffer-set-local! buf 'group-cwd-loaded #f)))))
+
 
 ;;; --- the diff ----------------------------------------------------------------------
 

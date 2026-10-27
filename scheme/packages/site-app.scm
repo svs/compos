@@ -2009,10 +2009,35 @@
   ;; Each Chrome profile is its own socket, and a call that names nothing goes
   ;; to whichever profile registered last -- often not the one logged in to the
   ;; site. The frame's own window names the profile this editor sits in.
+  ;; The extension's own fetch can miss the site's session and read the sign-in
+  ;; page; then a tab of the site that is open in that window reads it again.
   (browser-call "fetch" (chrome-here (list 'url url))
     (lambda (reply)
-      (let ((html (plist-get reply 'html)))
-        (k (and (string? html) (equal? (plist-get reply 'status) 200) html))))))
+      (let* ((html (plist-get reply 'html))
+             (html (and (string? html) (equal? (plist-get reply 'status) 200) html)))
+        (if (and html (not (site-app-signed-out? html)))
+            (k html)
+            (site-app-tab-fetch-html! url (lambda (again) (k (or again html)))))))))
+
+(define (site-app-signed-out? html)
+  ;; a staff page has no password field; the sign-in page has one
+  (and (string-contains? html "type=\"password\"") #t))
+
+(define (site-app-tab-fetch-html! url k)
+  ;; read URL from inside a tab of its site the user already has open, so the
+  ;; tab's session rides along. Nothing moves: the tab stays where it is.
+  (let ((origin (url-resolve "/" url)))
+    (tab-list
+      (lambda (tabs)
+        (let ((tab (find (lambda (t) (string-prefix? origin (or (plist-get t 'url) ""))) tabs)))
+          (if (not tab)
+              (k #f)
+              ;; tab-eval answers no promise, so the read is a synchronous request
+              (tab-eval tab
+                (string-append "(()=>{const x=new XMLHttpRequest();x.open('GET'," (json-encode url)
+                               ",false);x.send();return x.status===200?x.responseText:null})()")
+                (lambda (html)
+                  (k (and (string? html) (not (site-app-signed-out? html)) html))))))))))
 
 (define (site-app-fetch-tab! name buf row url page id gen)
   ;; Each page keeps its own read: an answer lands in its page whenever it comes,

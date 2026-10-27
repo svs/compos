@@ -1030,9 +1030,50 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (let ((b (ats-case-buffer id))) (and b (buffer-text b))))
 (define (ats-approval-buffer id) (ats-case-buffer id))
 (define (ats-approval-text id) (ats-case-text id))
+(domain! 'web)
+(effects! '(read))
+;; the application an approval page is about: its profile field links to it
+(define (ats-case-application-id src)
+  (let walk ((x (or (buffer-local src 'site-app-data) '())))
+    (cond ((and (string? x) (string-prefix? "/staff/applications/" x))
+           (car (string-split (substring x 20 (string-length x)) "?")))
+          ((pair? x) (or (walk (car x)) (walk (cdr x))))
+          (else #f))))
+
+;; the approval's ids as (approval-id A application-id P candidate-id C job-id J), once the page has read them
+(define (ats-case-ids id)
+  (let ((b (ats-case-buffer id))) (and b (buffer-local b 'ats-case-ids))))
+(define (ats-case-candidate-id id) (plist-get (or (ats-case-ids id) '()) 'candidate-id))
+(define (ats-case-job-id id) (plist-get (or (ats-case-ids id) '()) 'job-id))
+(public! 'ats-case-ids "(ats-case-ids APPROVAL-ID) — the approval, application, candidate and job ids of an open approval page")
+(public! 'ats-case-candidate-id "(ats-case-candidate-id APPROVAL-ID) — the candidate id of an open approval page")
+(public! 'ats-case-job-id "(ats-case-job-id APPROVAL-ID) — the job id of an open approval page")
+
+(domain! 'web)
+(effects! '(write external))
+;; the page names only its application, so the API names the candidate and the job
+(define (ats-case-ids-fetch! src)
+  (let ((app (ats-case-application-id src)))
+    (when (and app (not (buffer-local src 'ats-case-ids)))
+      (mcp-call! 'ats-ash "getApplication" (json-encode (list 'input (list 'application_id app)))
+        (lambda (ok text)
+          (let* ((v (and ok (string? text) (json-parse text)))
+                 (a (if (and (pair? v) (pair? (car v))) (car v) v)))
+            (when (and (pair? a) (buffer-known? src))
+              (buffer-set-local! src 'ats-case-ids
+                (list 'approval-id (ats-case-id src) 'application-id app
+                      'candidate-id (plist-get a 'candidate_id) 'job-id (plist-get a 'job_id))))))))))
+(add-hook! 'ats-approval-mode-hook (lambda () (ats-case-ids-fetch! (current-buffer))))
+
 (define (ats-case-handle src noun reader)
-  (string-append " " noun " id " (or (ats-case-id src) "?") ": its page is already open in the buffer " src
-    ", so read it with (" reader " \"" (or (ats-case-id src) "") "\") and do not list or search the lists."))
+  (let* ((ids (or (buffer-local src 'ats-case-ids) '()))
+         (cand (plist-get ids 'candidate-id))
+         (job (plist-get ids 'job-id)))
+    (ats-case-ids-fetch! src)
+    (string-append " " noun " id " (or (ats-case-id src) "?")
+      (if cand (string-append ", candidate id " cand ", job id " (or job "?")) "")
+      ": its page is already open in the buffer " src
+      ", so read it with (" reader " \"" (or (ats-case-id src) "") "\") and do not list or search the lists.")))
 (define (ats-row-label row fallback)
   (let* ((src fallback)
          (who (or (plist-get row 'candidate) ""))

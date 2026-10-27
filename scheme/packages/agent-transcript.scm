@@ -1343,6 +1343,57 @@
 (define-key "chat-mode-map" "M-S-<up>" "window-previous-child-chat")
 (define-key "chat-mode-map" "M-S-<down>" "window-next-child-chat")
 
+;;; The linked buffer: the last buffer this chat showed in another window.
+;;; M-u and M-d scroll the window that shows it, and the focus stays in
+;;; the chat. Without one, they scroll the other window.
+(domain! 'chat)
+(effects! '(write display))
+
+(define (chat--author-chat)
+  (let ((a (current-edit-author)))
+    (and (agent-edit-author? a)
+         (let ((b (agent-buf (substring a 6 (string-length a)))))
+           (and b (buffer-known? b) b)))))
+
+(define (chat-link-buffer! buf)
+  (let ((chat (chat--author-chat)))
+    (when (and chat (string? buf) (not (equal? buf chat)))
+      (buffer-set-local! chat 'chat-linked-buffer buf))))
+
+(define (chat-linked-window &optional chat)
+  (let ((buf (buffer-local (or chat (current-buffer)) 'chat-linked-buffer))
+        (me (active-window)))
+    (and buf
+         (let loop ((ws (window-list)))
+           (cond ((null? ws) #f)
+                 ((and (equal? (cadr (car ws)) buf) (not (equal? (car (car ws)) me)))
+                  (car (car ws)))
+                 (else (loop (cdr ws))))))))
+
+(define (chat-scroll-linked! sign)
+  (let ((win (chat-linked-window)))
+    (if win
+        (scroll-window! win (* sign (window-page-rows win)))
+        (scroll-other-window-page! sign))))
+
+(define-command "chat-scroll-linked-up" "Scroll up the window that shows the buffer this chat opened last"
+  (lambda () (chat-scroll-linked! -1)))
+(define-command "chat-scroll-linked-down" "Scroll down the window that shows the buffer this chat opened last"
+  (lambda () (chat-scroll-linked! 1)))
+(define-key "chat-mode-map" "M-u" "chat-scroll-linked-up")
+(define-key "chat-mode-map" "M-d" "chat-scroll-linked-down")
+
+(advice-add! 'display-buffer 'around 'chat-link
+  (lambda (next name &rest more)
+    (let ((r (apply next (cons name more))))
+      (when r (chat-link-buffer! name))
+      r)))
+(advice-add! 'window-set-buffer! 'around 'chat-link
+  (lambda (next win buf &rest more)
+    (when (or (not (boundp 'panes--door?)) (panes--door?)) (chat-link-buffer! buf))
+    (apply next (cons win (cons buf more)))))
+(public! 'chat-linked-window "(chat-linked-window [CHAT]) — the window, not the active one, that shows the buffer CHAT showed last, or #f")
+
 ;; An action runs with the props the fence holds now. Effects past read,
 ;; display and external ask first.
 (define (chat-component--asks? effects)

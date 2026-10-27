@@ -65,7 +65,7 @@
   (let loop ((ws (window-list)))
     (cond ((null? ws) #f)
           ((and (not (equal? (car (car ws)) (active-window)))
-                (equal? (buffer-local (cadr (car ws)) 'detail-of) owner))
+                (equal? (buffer-relation (cadr (car ws)) 'detail) owner))
            (cadr (car ws)))
           (else (loop (cdr ws))))))
 
@@ -89,9 +89,8 @@
 
 (define (detail-owner &optional buf)
   (let* ((b (or buf (current-buffer)))
-         (of (and (buffer-known? b) (buffer-local b 'detail-of))))
-    (or (and of (buffer-known? of) of)
-        (buffer-parent b))))
+         (of (and (buffer-known? b) (buffer-parent b 'detail))))
+    (or of (buffer-parent b))))
 
 ;; the walk order: this buffer, then the other details of the same list,
 ;; most recently used first. Open buffers only, exactly as a chat pane walks.
@@ -104,7 +103,7 @@
               '()
               (filter (lambda (b) (and (member b open)
                                        (not (equal? b buf))
-                                       (equal? (buffer-local b 'detail-of) owner)))
+                                       (equal? (buffer-relation b 'detail) owner)))
                       (buffer-list-mru))))))
 
 (public! 'detail-window
@@ -127,7 +126,7 @@
 ;; walks its siblings
 (define (detail-adopt! owner name)
   (when (and (buffer-known? owner) (buffer-known? name) (not (equal? owner name)))
-    (buffer-set-local! name 'detail-of owner)
+    (buffer-relate! name 'detail owner)
     (when (and (boundp 'buffer-child!)
                (not (buffer-local name 'detail-kept))
                (not (equal? (buffer-parent name) owner)))
@@ -150,7 +149,7 @@
                     (or (detail-window o)
                         (find (lambda (w)
                                 (and (not (equal? w me))
-                                     (equal? (buffer-local (window-buffer w) 'detail-of) o)))
+                                     (equal? (buffer-relation (window-buffer w) 'detail) o)))
                               (display--work-windows)))))
          ;; else it opens in the pane beside its list, never on top of it
          (win (or shown
@@ -208,7 +207,7 @@
           (cond
             ((not new) (message "That name is taken") #f)
             (else
-              (buffer-set-local! new 'detail-of owner)
+              (buffer-relate! new 'detail owner)
               (buffer-set-local! new 'detail-kept #t)
               (buffer-unchild! new)
               (message (string-append "Kept as " new))

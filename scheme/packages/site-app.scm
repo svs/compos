@@ -10,14 +10,15 @@
 (effects! '(read))
 
 (define *site-apps* '())
-;; each app's one hidden reader tab, kept on disk so a restart reuses it
+;; each app's one background tab in each browser window, kept on disk so a
+;; restart reuses it: keyed "NAME@WINDOW"
 ;; instead of opening another in the browser
 (define *site-app-tabs-file* (string-append (compos-home) "/site-app-tabs.json"))
 
 (define (site-app-tabs-load)
   (let ((text (and (file-exists? *site-app-tabs-file*) (read-file *site-app-tabs-file*))))
     (if (and (string? text) (> (string-length text) 2))
-        (map (lambda (e) (list (string->symbol (car e)) (cadr e)))
+        (map (lambda (e) (list (car e) (cadr e)))
              (filter (lambda (e) (and (pair? e) (string? (car e)) (number? (cadr e)))) (json-parse text)))
         '())))
 
@@ -51,14 +52,18 @@
 (define (site-app-put! name spec)
   (set! *site-apps* (alist-put *site-apps* name spec)) spec)
 
+(define (site-app-tab-key name)
+  ;; one tab per app in each browser window: the window this frame shows in
+  (let ((w (chrome-window-resolve!)))
+    (string-append (symbol->string name) "@" (if w (number->string w) ""))))
+
 (define (site-app-tab name)
-  (let ((hit (assoc name *site-app-tabs*))) (and hit (cadr hit))))
+  (let ((hit (assoc (site-app-tab-key name) *site-app-tabs*))) (and hit (cadr hit))))
 
 (define (site-app-note-tab! name tab)
-  (set! *site-app-tabs* (alist-put *site-app-tabs* name tab))
+  (set! *site-app-tabs* (alist-put *site-app-tabs* (site-app-tab-key name) tab))
   (write-file! *site-app-tabs-file*
-    (json-encode (map (lambda (e) (list (symbol->string (car e)) (cadr e)))
-                      (filter (lambda (e) (number? (cadr e))) *site-app-tabs*))))
+    (json-encode (filter (lambda (e) (number? (cadr e))) *site-app-tabs*)))
   tab)
 
 ;; The app's tab is disposable. When Chrome says it navigated away or closed,
@@ -432,18 +437,24 @@
     (and t (< (- (monotonic-ms) (cadr t)) 20000))))
 
 (define (site-app-find-tab! name k)
-  ;; the reader tab lives in its own window, so it is looked for in every
-  ;; window: a look in this frame's alone never found it, and opened another.
+  ;; One tab per app in each browser window, behind the tab you are on: every
+  ;; read and click on the site goes through it, and it never takes the focus.
+  ;; The tabs are asked of this window, so the call reaches the profile this
+  ;; editor sits in: asked of nothing, it went to whichever profile spoke last,
+  ;; never found the kept tab and opened another for every page.
   ;; An app with 'adopt takes a tab already on its site before it opens one,
   ;; and callers that ask while a tab is opening wait for that same tab
-  (let ((spec (site-app-spec name))
-        (remembered (site-app-tab name))
-        (waiting (and (site-app-opening-live? name) (assoc name *site-app-opening*))))
+  (let* ((spec (site-app-spec name))
+         (win (chrome-window-resolve!))
+         (key (site-app-tab-key name))
+         (remembered (site-app-tab name))
+         (waiting (and (site-app-opening-live? key) (assoc key *site-app-opening*))))
     (if waiting
-        (set! *site-app-opening* (alist-put *site-app-opening* name (cons k (cadr waiting))))
-        (chrome-call "tabs" '()
+        (set! *site-app-opening* (alist-put *site-app-opening* key (cons k (cadr waiting))))
+        (chrome-call "tabs" (chrome-here '())
           (lambda (reply)
-            (let* ((tabs (or (plist-get reply 'tabs) '()))
+            (let* ((tabs (filter (lambda (tab) (or (not win) (equal? (plist-get tab 'window) win)))
+                                 (or (plist-get reply 'tabs) '())))
                    (live (and remembered
                              (site-app-find
                                (lambda (tab) (equal? (plist-get tab 'id) remembered))
@@ -457,18 +468,17 @@
                 (live (k remembered))
                 (stray (k (site-app-note-tab! name (plist-get stray 'id))))
                 (else
-                 (set! *site-app-opening* (alist-put *site-app-opening* name (list k)))
-                 (set! *site-app-opening-at* (alist-put *site-app-opening-at* name (monotonic-ms)))
+                 (set! *site-app-opening* (alist-put *site-app-opening* key (list k)))
+                 (set! *site-app-opening-at* (alist-put *site-app-opening-at* key (monotonic-ms)))
                  (chrome-call "open"
-                   (chrome-here
-                     ;; the reader's minimized window: the app works the site out of sight
-                     (list 'url (site-app-url spec (plist-get spec 'home))
-                           'background #t
-                           'reader #t))
+                   ;; a frame no browser window shows has no strip to sit in:
+                   ;; its tab goes to the reader's minimized window
+                   (append (list 'url (site-app-url spec (plist-get spec 'home)) 'background #t)
+                           (if win (list 'window win) (list 'reader #t)))
                    (lambda (reply)
                      (let ((tab (plist-get reply 'tab))
-                           (ks (cadr (assoc name *site-app-opening*))))
-                       (set! *site-app-opening* (filter (lambda (e) (not (eq? (car e) name))) *site-app-opening*))
+                           (ks (cadr (assoc key *site-app-opening*))))
+                       (set! *site-app-opening* (filter (lambda (e) (not (equal? (car e) key))) *site-app-opening*))
                        (site-app-note-tab! name tab)
                        (for-each (lambda (f) (f tab)) (reverse ks)))))))))))))
 

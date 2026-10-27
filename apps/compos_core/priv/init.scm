@@ -205,6 +205,8 @@
 ;; agents' listeners: a WhatsApp reply or a mail wakes the chat that waits on
 ;; it; it loads at boot so the saved listeners subscribe again after a restart
 (require 'agent-listen)
+;; an orchestrator chat runs a todo tree; it advises the subagent turn end
+(require 'orchestrate)
 (require 'sockets)
 (require 'switch)
 (require 'handheld)

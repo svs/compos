@@ -66,12 +66,9 @@
 
 (define (capf-auto-watch! buf)
   "ask for completions while you type in BUF; a mode calls this once"
-  (unless (buffer-local buf 'capf-auto-watch)
-    (desktop-skip! buf 'capf-auto-watch)
-    (buffer-set-local! buf 'capf-auto-watch
-      (on-change! buf
-        ;; a person types into the current buffer, so ask it for its name:
-        ;; BUF is the name at watch time, and a chat that takes its title
-        ;; is renamed after that
-        (lambda (pos inserted deleted source)
-          (capf-auto--changed! (current-buffer) inserted deleted source))))))
+  (buffer-watch-change! buf 'capf-auto
+    ;; a person types into the current buffer, so ask it for its name:
+    ;; BUF is the name at watch time, and a chat that takes its title
+    ;; is renamed after that
+    (lambda (pos inserted deleted source)
+      (capf-auto--changed! (current-buffer) inserted deleted source))))

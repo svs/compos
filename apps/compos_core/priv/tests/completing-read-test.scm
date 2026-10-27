@@ -156,12 +156,12 @@
   "a mode may re-enter; the buffer keeps one rule"
   (lambda ()
     (let ((buf (test-buffer! "zz-cr-auto-watch" "x")))
-      (capf-auto-watch! buf)
-      (let ((id (buffer-local buf 'capf-auto-watch)))
+      (let ((id (capf-auto-watch! buf)))
         (check-true! (number? id) "the watch left its rule id")
-        (capf-auto-watch! buf)
-        (check-equal! (buffer-local buf 'capf-auto-watch) id "re-entry kept the same rule"))
-      (remove-on-change! (buffer-local buf 'capf-auto-watch))
+        (check-equal! (capf-auto-watch! buf) id "re-entry kept the same rule")
+        (check-equal! (length (buffer-local buf 'change-watches)) 1 "one row in the table"))
+      (buffer-unwatch-change! buf 'capf-auto)
+      (check-equal! (buffer-local buf 'change-watches) '() "the row left with its rule")
       (buffer-kill! buf))))
 
 (deftest 'keyboard-quit-cancels-the-prompt

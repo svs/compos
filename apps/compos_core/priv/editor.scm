@@ -397,6 +397,27 @@
     (unless (member key cur)
       (buffer-set-local! buf 'desktop-skip-locals (cons key cur)))))
 
+;; one table of change watches per buffer, (KEY ID) rows in 'change-watches:
+;; KEY names the watch, so a mode that runs again keeps the one it has. The
+;; ids die with the daemon, so the desktop does not save the table.
+(define (buffer-watch-change! buf key cb)
+  (let* ((cur (or (buffer-local buf 'change-watches) '()))
+         (hit (assoc key cur)))
+    (if hit
+        (cadr hit)
+        (let ((id (on-change! buf cb)))
+          (desktop-skip! buf 'change-watches)
+          (buffer-set-local! buf 'change-watches (alist-put cur key id))
+          id))))
+
+(define (buffer-unwatch-change! buf key)
+  (let* ((cur (or (buffer-local buf 'change-watches) '()))
+         (hit (assoc key cur)))
+    (when hit
+      (remove-on-change! (cadr hit))
+      (buffer-set-local! buf 'change-watches
+        (filter (lambda (row) (not (equal? (car row) key))) cur)))))
+
 (define (cache-declare! buf fetch render ttl)
   (desktop-skip! buf 'cache-spec)
   (desktop-skip! buf 'cache-inflight)
@@ -5753,6 +5774,10 @@
 (catalog-meta! 'function "buffer-last-seen" 'domain 'buffers 'effects '(read))
 (public! 'buffer-note-seen! "(buffer-note-seen! NAME) — stamp NAME as seen now, at most one write a minute")
 (catalog-meta! 'function "buffer-note-seen!" 'domain 'buffers 'effects '(write))
+(public! 'buffer-watch-change! "(buffer-watch-change! BUF KEY CB) — watch BUF's changes under KEY; a second call with KEY keeps the first watch; return its id")
+(catalog-meta! 'function "buffer-watch-change!" 'domain 'buffers 'effects '(write))
+(public! 'buffer-unwatch-change! "(buffer-unwatch-change! BUF KEY) — stop the change watch KEY on BUF")
+(catalog-meta! 'function "buffer-unwatch-change!" 'domain 'buffers 'effects '(write))
 (effects! '(read))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")
 (public! 'buffer-size "(buffer-size NAME) -> size in bytes")

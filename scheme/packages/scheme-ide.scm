@@ -258,15 +258,12 @@
           (buffer-set-local! buf 'capf-sources (cons scheme-ide--capf cur))))
       (desktop-skip! buf 'capf-sources)
       (capf-auto-watch! buf)
-      ;; squiggles follow edits, debounced like annotate's checker; the
-      ;; watch survives mode re-entry because on-change! ids are per call
-      (unless (buffer-local buf 'scheme-ide-watch)
-        (desktop-skip! buf 'scheme-ide-watch)
-        (buffer-set-local! buf 'scheme-ide-watch
-          (on-change! buf
-            (lambda (pos inserted deleted source)
-              (debounce! (string-append "scheme-ide:" buf) 400
-                         scheme-ide--check! buf)))))
+      ;; squiggles follow edits, debounced like annotate's checker; a mode
+      ;; that runs again keeps the one watch
+      (buffer-watch-change! buf 'scheme-ide
+        (lambda (pos inserted deleted source)
+          (debounce! (string-append "scheme-ide:" buf) 400
+                     scheme-ide--check! buf)))
       (scheme-ide--check! buf)))
 
 (mode-keys! "scheme-mode"

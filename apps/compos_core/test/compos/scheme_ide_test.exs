@@ -31,7 +31,10 @@ defmodule Compos.SchemeIdeTest do
 
   test "typing in Scheme mode automatically offers completions" do
     buf = scheme_buffer("")
-    assert is_integer(Buffer.get_local(buf, "capf-auto-watch"))
+    assert {:ok, "#t"} =
+             Compos.Core.Session.eval(
+               ~s{(number? (cadr (assoc 'capf-auto (buffer-local "#{buf}" 'change-watches))))}
+             )
     press(String.graphemes("buffer-te"))
     assert Buffer.text(buf) == "buffer-te"
     await_completion(100)

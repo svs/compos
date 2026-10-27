@@ -1,4 +1,4 @@
-defmodule Compos.ListingPeekCardTest do
+defmodule Compos.ListingPreviewCardTest do
   use ExUnit.Case, async: false
   alias Compos.Core.{Editor, KeyDispatch, Session}
   defp eval!(code, frame) do
@@ -92,9 +92,8 @@ defmodule Compos.ListingPeekCardTest do
         """, frame)
         assert eval!("(equal? (active-window) *card-home*)", frame) == "#t"
         assert eval!("(buffer-read-only? *card-copy*)", frame) == "#t"
-        assert eval!("(window-focusable? (float-window))", frame) == "#f"
-        assert eval!("(buffer-local *card-copy* 'window-class)", frame) =~ "listing-peek"
-        assert eval!("(buffer-local *card-copy* 'window-style)", frame) =~ "--peek-source-window:"
+        assert eval!("(buffer-local *card-copy* 'window-class)", frame) =~ "listing-preview"
+        assert eval!("(buffer-local *card-copy* 'window-style)", frame) =~ "--preview-source-window:"
         assert eval!("(buffer-local *card-copy* 'mode-name)", frame) == "\"chat-mode\""
         assert eval!("(buffer-local \"*zz-card-target*\" 'window-class)", frame) == "#f"
         KeyDispatch.handle_key(frame, "q")

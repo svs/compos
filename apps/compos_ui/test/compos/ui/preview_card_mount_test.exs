@@ -1,7 +1,7 @@
-defmodule Compos.Ui.PeekCardMountTest do
+defmodule Compos.Ui.PreviewCardMountTest do
   @moduledoc """
   The card is split first and shows the list's buffer for one render. Under
-  the window's own id the client patched the PeekCard hook onto that
+  the window's own id the client patched the PreviewCard hook onto that
   element, and LiveView mounts a hook only on insert, so the card stayed
   hidden. The card renders under an id of its own, which the client inserts.
   """
@@ -31,7 +31,7 @@ defmodule Compos.Ui.PeekCardMountTest do
       state = Editor.render_state(frame)
 
       card =
-        Enum.find(leaves(state.tree), &String.contains?(&1.window_class || "", "listing-peek"))
+        Enum.find(leaves(state.tree), &String.contains?(&1.window_class || "", "listing-preview"))
 
       assert card
 
@@ -42,8 +42,8 @@ defmodule Compos.Ui.PeekCardMountTest do
           completion: nil
         )
 
-      assert as_card =~ ~s(id="peek-#{card.id}")
-      assert as_card =~ ~s(phx-hook="PeekCard")
+      assert as_card =~ ~s(id="preview-#{card.id}")
+      assert as_card =~ ~s(phx-hook="PreviewCard")
       # the same window as a pane: the id the split rendered first
       assert Compos.Ui.EditorLive.window_dom_id(card.id, false) == "win-#{card.id}"
     after

@@ -30,12 +30,12 @@
     return v.endsWith('ms') ? n : n * 1000;
   }
 
-  // the tiled panes; a peek or a popup floats and does not move
+  // the tiled panes; a preview card or a popup floats and does not move
   const panes = (root) =>
     [...root.querySelectorAll('c-window.window')].filter(
       (w) =>
         !w.closest('.strip-ghost, .motion-ghost') &&
-        !w.classList.contains('listing-peek') &&
+        !w.classList.contains('listing-preview') &&
         ![...w.classList].some((c) => c.startsWith('popup'))
     );
 
@@ -412,7 +412,7 @@
     const next = to.getAttribute('data-panes');
     if (!was || !next || was === next) return;
     if (fresh && !walk && !move) return;
-    if (from.querySelector('.listing-peek')) return;
+    if (from.querySelector('.listing-preview')) return;
     const ms = duration();
     const prev = parse(was);
     const after = parse(next);

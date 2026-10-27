@@ -143,7 +143,10 @@
 (define (find-file-read-only? buf)
   (let ((rule (and (boundp 'find-file-read-only) (symbol-value 'find-file-read-only)))
         (mode (buffer-local buf 'mode-name)))
-    (cond ((equal? rule #t) #t)
+    ;; A chat is a conversation you type into, not a page you read. A
+    ;; restored .chat file opens writable whatever the rule says.
+    (cond ((and (string? mode) (derived-mode? mode "chat-mode")) #f)
+          ((equal? rule #t) #t)
           ((pair? rule)
            (and (string? mode)
                 (let loop ((ms rule))

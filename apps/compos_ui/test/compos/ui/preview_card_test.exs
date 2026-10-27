@@ -1,4 +1,4 @@
-defmodule Compos.Ui.PeekCardTest do
+defmodule Compos.Ui.PreviewCardTest do
   use ExUnit.Case, async: false
   import Phoenix.LiveViewTest
   alias Compos.Core.{Editor, Session}
@@ -21,7 +21,7 @@ defmodule Compos.Ui.PeekCardTest do
       (other-window!)
       (switch-to-buffer-here! "*zz-visible-target*")
       (select-window! *visible-preview-home*)
-      (local-set-key "q" "listing-peek-dismiss")
+      (local-set-key "q" "listing-preview-dismiss")
       (listing-preview! "*zz-visible-owner*" "*zz-visible-target*")
       """, frame)
       assert {:ok, "#f"} = Session.eval("(float-open?)", frame)
@@ -33,7 +33,7 @@ defmodule Compos.Ui.PeekCardTest do
       html = render_component(&Compos.Ui.EditorLive.window/1,
         node: Map.put(target, :lines, []), active: state.active, completion: nil)
       assert html =~ "preview-highlight"
-      refute html =~ "peek-card-body"
+      refute html =~ "preview-card-body"
 
       assert {:ok, _} = Session.eval(~S{(listing-preview! "*zz-visible-owner*" "*zz-hidden-target*")}, frame)
       refute Enum.find(leaves(Editor.render_state(frame).tree), &(&1.id == target.id)).highlighted
@@ -51,39 +51,39 @@ defmodule Compos.Ui.PeekCardTest do
     end
   end
 
-  test "a peek renders only an inert card body and its dismiss button" do
+  test "a preview renders only an inert card body and its dismiss button" do
     previous = Editor.last_active_frame()
     {:ok, frame} = Editor.attach_frame(nil)
     try do
       assert {:ok, _} = Session.eval("""
-      (test-buffer! "*zz-ui-peek-owner*" "row")
-      (test-buffer! "*zz-ui-peek-target*" "<script>unsafe()</script>")
-      (switch-to-buffer-here! "*zz-ui-peek-owner*")
-      (listing-preview! "*zz-ui-peek-owner*" "*zz-ui-peek-target*")
+      (test-buffer! "*zz-ui-preview-owner*" "row")
+      (test-buffer! "*zz-ui-preview-target*" "<script>unsafe()</script>")
+      (switch-to-buffer-here! "*zz-ui-preview-owner*")
+      (listing-preview! "*zz-ui-preview-owner*" "*zz-ui-preview-target*")
       """, frame)
       state = Editor.render_state(frame)
-      card = Enum.find(leaves(state.tree), &String.contains?(&1.window_class || "", "listing-peek"))
+      card = Enum.find(leaves(state.tree), &String.contains?(&1.window_class || "", "listing-preview"))
       assert card
       html = render_component(&Compos.Ui.EditorLive.window/1,
         node: Map.put(card, :lines, []), active: state.active, completion: nil)
-      assert html =~ ~s(phx-hook="PeekCard")
-      assert html =~ ~s(class="peek-card-body")
+      assert html =~ ~s(phx-hook="PreviewCard")
+      assert html =~ ~s(class="preview-card-body")
       assert html =~ "&lt;script&gt;"
       assert html =~ "Dismiss preview (q)"
-      assert html =~ "--peek-source-window:"
+      assert html =~ "--preview-source-window:"
       refute html =~ "contenteditable"
       refute html =~ "modeline"
       refute html =~ "<script>"
       assert length(Regex.scan(~r/<button\b/, html)) == 1
       assert {:ok, _} = Session.eval("""
-      (buffer-set-locals! "*zz-ui-peek-target*"
+      (buffer-set-locals! "*zz-ui-preview-target*"
         '(mode-name "chat-mode" render-mode "agent" agent-saved-mark 25
           agent-blocks ((0 25 "prose"))))
-      (listing-preview! "*zz-ui-peek-owner*" "*zz-ui-peek-target*")
+      (listing-preview! "*zz-ui-preview-owner*" "*zz-ui-preview-target*")
       """, frame)
       state = Editor.render_state(frame)
       {tree, _} = Compos.Ui.EditorLive.decorate_tree(state.tree, %{}, %{}, state.active)
-      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-peek"))
+      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-preview"))
       rich = render_component(&Compos.Ui.EditorLive.window/1,
         node: card, active: state.active, completion: nil)
       assert rich =~ "ag-prose"
@@ -91,44 +91,44 @@ defmodule Compos.Ui.PeekCardTest do
       refute rich =~ "contenteditable"
 
       assert {:ok, _} = Session.eval(~S"""
-      (buffer-set-locals! "*zz-ui-peek-target*"
+      (buffer-set-locals! "*zz-ui-preview-target*"
         '(mode-name "linkedin-detail-mode" render-mode "html" preview-renderer "html"))
-      (buffer-replace-range! "*zz-ui-peek-target*" 0 (buffer-size "*zz-ui-peek-target*")
+      (buffer-replace-range! "*zz-ui-preview-target*" 0 (buffer-size "*zz-ui-preview-target*")
         "<h1>Saved LinkedIn detail</h1>")
-      (buffer-sleep! "*zz-ui-peek-target*")
-      (listing-preview! "*zz-ui-peek-owner*" "*zz-ui-peek-target*")
+      (buffer-sleep! "*zz-ui-preview-target*")
+      (listing-preview! "*zz-ui-preview-owner*" "*zz-ui-preview-target*")
       """, frame)
       state = Editor.render_state(frame)
       {tree, _} = Compos.Ui.EditorLive.decorate_tree(state.tree, %{}, %{}, state.active)
-      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-peek"))
+      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-preview"))
       rich = render_component(&Compos.Ui.EditorLive.window/1,
         node: card, active: state.active, completion: nil)
-      assert rich =~ "peek-document"
+      assert rich =~ "preview-document"
       assert rich =~ "Saved LinkedIn detail"
       assert rich =~ ~s(sandbox="allow-same-origin")
       refute rich =~ "allow-scripts"
-      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-peek-target*")}, frame)
+      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-preview-target*")}, frame)
 
       assert {:ok, _} = Session.eval(~S"""
-      (buffer-create "*zz-ui-peek-target*")
-      (sentry--apply-detail! "*zz-ui-peek-target*"
+      (buffer-create "*zz-ui-preview-target*")
+      (sentry--apply-detail! "*zz-ui-preview-target*"
         '(id "123" shortId "TEST-1" title "Saved Sentry detail"
           metadata (type "Error" value "failure <tag>") status "unresolved"))
-      (buffer-set-locals! "*zz-ui-peek-target*"
+      (buffer-set-locals! "*zz-ui-preview-target*"
         '(mode-name "sentry-detail-mode" render-blocks #f sentry-detail-issue #f))
-      (buffer-sleep! "*zz-ui-peek-target*")
-      (listing-preview! "*zz-ui-peek-owner*" "*zz-ui-peek-target*")
+      (buffer-sleep! "*zz-ui-preview-target*")
+      (listing-preview! "*zz-ui-preview-owner*" "*zz-ui-preview-target*")
       """, frame)
       state = Editor.render_state(frame)
       {tree, _} = Compos.Ui.EditorLive.decorate_tree(state.tree, %{}, %{}, state.active)
-      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-peek"))
+      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-preview"))
       rich = render_component(&Compos.Ui.EditorLive.window/1,
         node: card, active: state.active, completion: nil)
       assert rich =~ "Saved Sentry detail"
       assert rich =~ "c-card"
       assert rich =~ "failure &lt;tag&gt;"
       refute rich =~ "Raw issue JSON"
-      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-peek-target*")}, frame)
+      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-preview-target*")}, frame)
 
       assert {:ok, _} = Session.eval(~S"""
       (define-list-mode! "zz-saved-card-mode"
@@ -138,28 +138,28 @@ defmodule Compos.Ui.PeekCardTest do
               'collection "c-list"
               'composml (lambda (buf row)
                 (list 'tag "c-card" 'text row))))
-      (buffer-create "*zz-ui-peek-target*")
-      (buffer-set-locals! "*zz-ui-peek-target*"
+      (buffer-create "*zz-ui-preview-target*")
+      (buffer-set-locals! "*zz-ui-preview-target*"
         '(mode-name "zz-saved-card-mode" list-mode "zz-saved-card-mode"
           list-entries ("Saved project card") render-mode "blocks" render-blocks #f))
-      (buffer-sleep! "*zz-ui-peek-target*")
-      (listing-preview! "*zz-ui-peek-owner*" "*zz-ui-peek-target*")
+      (buffer-sleep! "*zz-ui-preview-target*")
+      (listing-preview! "*zz-ui-preview-owner*" "*zz-ui-preview-target*")
       """, frame)
       state = Editor.render_state(frame)
       {tree, _} = Compos.Ui.EditorLive.decorate_tree(state.tree, %{}, %{}, state.active)
-      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-peek"))
+      card = Enum.find(leaves(tree), &String.contains?(&1.window_class || "", "listing-preview"))
       rich = render_component(&Compos.Ui.EditorLive.window/1,
         node: card, active: state.active, completion: nil)
       assert rich =~ "Saved project card"
       assert rich =~ "semantic-list"
       assert rich =~ "semantic-item"
-      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-peek-target*")}, frame)
+      assert {:ok, "#f"} = Session.eval(~S{(buffer-exists? "*zz-ui-preview-target*")}, frame)
 
     after
       Session.eval("""
-      (listing-preview-dismiss! "*zz-ui-peek-owner*")
-      (buffer-kill! "*zz-ui-peek-owner*")
-      (buffer-kill! "*zz-ui-peek-target*")
+      (listing-preview-dismiss! "*zz-ui-preview-owner*")
+      (buffer-kill! "*zz-ui-preview-owner*")
+      (buffer-kill! "*zz-ui-preview-target*")
       """, frame)
       Editor.delete_frame(frame)
       Editor.select_frame(previous)

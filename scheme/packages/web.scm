@@ -2383,12 +2383,12 @@ the tabs. C-s searches to any link.")
     (switch-to-buffer! tab)
     tab))
 
-;; the tab beside this window, as a PEEK: the next peek replaces it, and
-;; the same link again keeps it. A tab that already existed is only
-;; shown. The selected window and its point stay.
+;; the tab beside this window, opened normally. A tab that already
+;; existed is only shown. The selected window and its point stay.
 (define (web--show-tab-other-window! url)
-  (peek-or-keep! (web--buffer-for url) (lambda () (web--tab-for! url)))
-  (web--buffer-for url))
+  (let ((name (web--tab-for! url)))
+    (when (string? name) (display-buffer-other-window! name))
+    (web--buffer-for url)))
 
 ;;; --- what the person typed ------------------------------------------------------
 ;;; One prompt takes both a page and a question, the way a browser's
@@ -2431,16 +2431,6 @@ the tabs. C-s searches to any link.")
 ;; you are in keeps its buffer and its point
 (define (browse-other-window url)
   (web--show-tab-other-window! (web--target url)))
-
-;; the peek half of the same shape, for a list that previews as the
-;; highlight moves: a look that the next move replaces. Not
-;; browse-other-window, because its keep step takes the focus the moment
-;; the row already on screen is the row you are on.
-(define (browse-peek url)
-  (let* ((u (web--target url))
-         (name (web--buffer-for u)))
-    (peek! name (lambda () (web--tab-for! u)))
-    name))
 
 ;; one prompt for both commands: it completes over the history, a title
 ;; matches what you type, and a fresh URL still goes through as typed
@@ -2595,9 +2585,6 @@ the tabs. C-s searches to any link.")
 
 (public! 'browse-other-window
   "(browse-other-window URL) — read URL as text in its tab, shown in another window; the selected window and its point stay")
-(public! 'browse-peek
-  "(browse-peek URL) — peek URL's tab beside the selected window; the next peek replaces it and the focus never moves")
-
 (public! 'url-resolve
   "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")
 

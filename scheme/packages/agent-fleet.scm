@@ -909,7 +909,7 @@
     ;; an agent is listed with the chats even where its buffer is no chat
     'member-locals '("agent-slug")
     ;; a new chat list previews only when chat-list-preview says so
-    'locals (lambda () (list 'listing-peek-disabled (not chat-list-preview)))
+    'locals (lambda () (list 'listing-preview-disabled (not chat-list-preview)))
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
     'defaults '(sort recent grouping group)
     ;; a subject runs through every group: < puts the chats under their subjects

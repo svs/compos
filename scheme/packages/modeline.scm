@@ -944,7 +944,7 @@
          (file (if (dash--summary buf) (list #f #f) (dash--file-parts buf)))
          (title (or (dash--summary buf)
                     (and (car file)
-                         (if (peek-buffer? buf) (string-append "peek · " (car file)) (car file)))
+                         (car file))
                     (buffer-modeline-name buf)))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          ;; every segment carries its name, so a narrow window keeps the
@@ -1111,10 +1111,7 @@
                            (string-prefix? (string-append root "/") path))
                       (substring path (+ 1 (string-length root)) (string-length path)))
                      (else (abbreviate-file-name path)))))
-    ;; a peek says so where the name is: the one mark the feature has
-    (if (peek-buffer? buf)
-        (string-append "peek · " name)
-        name)))
+    name))
 
 ;; A file names its project beside its modeline name. A chat has no file,
 ;; so that same context slot names the directory where its tools run.

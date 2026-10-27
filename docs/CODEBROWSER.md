@@ -16,7 +16,7 @@ mechanism and the build order.
 > **Status (2026-09-24):** this is a design. `scope-mode`, the `*scope*` side
 > window, the summary store, and the `scope-*` commands and tools are not
 > built. `diff-explain` exists on `?` in diff-mode, not `e`. It shows the
-> explanation in another window and updates no summary. `definition-peek`
+> explanation in another window and updates no summary. `definition-show`
 > exists and shows the definition in the other window, not in a popup.
 
 This document is in this order:
@@ -69,7 +69,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 #### I want to check that a change did what the explanation says
 
 - In the explanation, `M-.` on a name shows the definition as it is now, in the popup over the explanation. `q` brings the explanation back. `M-.` again on the same name goes to the code.
-- **Command:** `definition-peek`.
+- **Command:** `definition-show`.
 
 #### I want to catch up on one directory, not the whole tree
 
@@ -86,7 +86,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to walk down to the code without losing my place
 
-- `RET` on a directory opens it here. `RET` on a file peeks it in the popup; `RET` again opens it beside the listing, as Dired does today (`M-RET` opens directly; an edit keeps the peek). `^` goes up. Point returns to the row I came from.
+- `RET` on a directory opens it here. `RET` on a file opens it in the other window, as Dired does today (`M-RET` opens it there and goes). `^` goes up. Point returns to the row I came from.
 - **Commands:** `dired-visit`, `dired-up`.
 
 #### I want to read a file's summary before its code
@@ -96,14 +96,14 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to see a file's definitions with what each one does
 
-- `RET` peeks the file; `M-x imenu` lists its definitions with line, kind, name, and doc. `M-x code-browse` turns on structural keys in it: `j` and `k` walk the definitions, and the side window shows the file's summary with the paragraph about the definition at point on top.
+- `RET` opens the file; `M-x imenu` lists its definitions with line, kind, name, and doc. `M-x code-browse` turns on structural keys in it: `j` and `k` walk the definitions, and the side window shows the file's summary with the paragraph about the definition at point on top.
 - **Commands:** `imenu`, `code-browse`.
 
 #### I want to find the code behind a name I just read
 
 - In the side window, `M-.` on the name shows the definition in the popup over the summary. A path shows the file, `path:42` the line, `Mod.fun` the function. `M-.` again goes there; `q` brings the summary back.
 - A name that reaches nothing says "No definition of NAME" and opens nothing.
-- **Command:** `definition-peek`.
+- **Command:** `definition-show`.
 
 #### I want to jump to any definition in the project by name
 
@@ -213,10 +213,10 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 | > code.scm     58K  Aug 30  -rw-r--r-- modified   read a source f   | It exists because an agent writes code faster    |
 |   diff-mode.scm 40K Aug 30  -rw-r--r--            the git diff as   | than a person reads it. code-browse is the       |
 |   lsp.scm      22K  Aug 20  -rw-r--r--            diagnostics, def  | reader's verb set; imenu reads its outline       |
-|   peek.scm      7K  Aug 30  -rw-r--r--            look at a defini  | through imenu-rows, and an agent reads the same  |
+|   definition.scm 7K Aug 30  -rw-r--r--            look at a defini  | through imenu-rows, and an agent reads the same  |
 |   scope.scm     3K  Aug 30  -rw-r--r-- untracked ?                  | outline through code-outline.                    |
 |                                                                     |                                                  |
-| RET peek  m mark  d flag  x trash  s sort  / filter  ^ up  g revert | Watch: nested tree-sitter nodes can share one    |
+| RET open  m mark  d flag  x trash  s sort  / filter  ^ up  g revert | Watch: nested tree-sitter nodes can share one    |
 +---------------------------------------------------------------------+ byte range, so a node is (kind start end).       |
                                                                       +--------------------------------------------------+
 ```
@@ -225,7 +225,7 @@ The `summary` column is the first sentence of the entry's summary, or a badge: `
 
 ### A file with scope-mode on
 
-`RET` on `code.scm` peeks it; `RET` again opens it beside the listing. scope-mode is on in it because the listing had it on. The side window shows the file's summary, with the paragraph about the definition at point first.
+`RET` on `code.scm` opens it beside the listing. scope-mode is on in it because the listing had it on. The side window shows the file's summary, with the paragraph about the definition at point first.
 
 ```
 +-- code.scm --------------------------------------------+-- *scope* ---------------------------------------+
@@ -291,7 +291,7 @@ The same call rewrites the file's summary, so after `e` the file's row is fresh 
 ### The side window
 
 1. The side window is the popup, on the right by default (docs/POPUPS.md). Its buffer is `*scope*`. It is a morg buffer in `scope-doc-mode`: rendered, foldable, editable, `M-.` on every name.
-2. It follows point: the list `'preview` hook in Dired and the post-command hook in a file buffer, with the same debounce the switcher's peek uses. It does not follow point in any other window.
+2. It follows point: the list `'preview` hook in Dired and the post-command hook in a file buffer, with the same debounce the switcher's preview uses. It does not follow point in any other window.
 3. In a file, the page starts with the outline row of the definition at point (line, kind, name), then the summary's paragraph about that definition when the summary has one, then the summary.
 4. `M-x scope-doc` selects the side window. `q` there returns to the buffer it follows. Saving it writes the summary file.
 5. Closing the popup (`C-\``) does not turn scope-mode off; the next `n` or `p` opens it again. `M-x scope-mode` off closes it.
@@ -299,7 +299,7 @@ The same call rewrites the file's summary, so after `e` the file's row is fresh 
 
 ### The popup
 
-1. `M-.` in the side window, in a change explanation, and in any morg document is `definition-peek`. It shows the definition in the popup, over the summary (popper's stack, POPUPS.md rule 4).
+1. `M-.` in the side window, in a change explanation, and in any morg document is `definition-show`. It shows the definition in the popup, over the summary (popper's stack, POPUPS.md rule 4).
 2. `q` in the definition popup brings the summary back. `M-.` again on the same name goes to the definition in a work window and leaves the popup on the summary. `M-,` returns.
 3. `M-.` in a file buffer is unchanged: `code-goto-definition`, LSP when attached.
 
@@ -330,7 +330,7 @@ The same call rewrites the file's summary, so after `e` the file's row is fresh 
 
 ### Links
 
-1. `definition-peek`'s providers, in order: a path (`code.scm`, `code.scm:423`, `lib/foo.ex#L42`), a Scheme name, an LSP `workspace/symbol` when a server is attached, the project outline index.
+1. `definition-show`'s providers, in order: a path (`code.scm`, `code.scm:423`, `lib/foo.ex#L42`), a Scheme name, an LSP `workspace/symbol` when a server is attached, the project outline index.
 2. A path resolves against the document's directory and then the project root. It is a link only when the file exists.
 3. A name with a module (`Compos.Core.Git.diff`, `Mod.fun/2`) resolves through the outline index and LSP. A bare name resolves in the same order and takes the first hit.
 4. A name that resolves nowhere says "No definition of NAME" and opens nothing.
@@ -356,7 +356,7 @@ The same call rewrites the file's summary, so after `e` the file's row is fresh 
 
 1. `M-x scope` in a project opens Dired at the root with scope-mode on, the `summary` column filled, and `*scope*` in the popup showing `project.md`; a project without a store shows `?` in the column and an empty-state page.
 2. `n` and `p` in the listing move the side window to the row's summary; `RET` on a directory keeps scope-mode on in it.
-3. `RET` on a file peeks it with scope-mode on; the side window shows the file's summary; moving point across definitions changes the outline row and the first paragraph.
+3. `RET` on a file opens it with scope-mode on; the side window shows the file's summary; moving point across definitions changes the outline row and the first paragraph.
 4. `M-x scope-mode` in a plain file buffer opens the side window with its summary; again closes it.
 5. `M-.` on a path in the side window shows the file in the popup; on `Compos.Core.Git.diff` shows git.ex; on a Scheme name shows its definition; `q` brings the summary back; `M-.` again goes to the code; `M-,` returns.
 6. Saving a file marks its row `stale` on the next draw; with auto-refresh on and budget left, the row shows `~` and then a fresh one-liner; the directory's summary refreshes after.

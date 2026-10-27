@@ -9,8 +9,8 @@
 ;;; The rows are the C-x b pool in sections by group, as ibuffer sections
 ;;; them: the current group's buffers, every other group's buffers under
 ;;; its name, the ungrouped buffers (and whatever the switch-buffer-source
-;;; seam adds — chrome adds browser tabs), the other groups' cards, then
-;;; what peeks let go. Inside a section the order is recency. A heading
+;;; seam adds — chrome adds browser tabs), then the other groups' cards.
+;;; Inside a section the order is recency. A heading
 ;;; is not a choice: the highlight steps over it, and a filter that
 ;;; empties a section drops its heading too.
 ;;;
@@ -82,8 +82,7 @@
 ;; the C-x b pool: MRU-woven buffers and group cards, plus the seam's
 ;; rows (chrome tabs). The place you stand is not an offer — HERE, and
 ;; the seam's own standing (from a page, the tab you pressed the key
-;; in) — and neither is this list itself. A peek is a look, not a
-;; buffer of yours. WIN's own history leads: the buffers this window
+;; in) — and neither is this list itself. WIN's own history leads: the buffers this window
 ;; showed, newest first, then the editor's one stream — another window
 ;; cannot reorder this window's previous buffers (Emacs other-buffer).
 (define (switch-pool here my-group win)
@@ -94,8 +93,7 @@
          ;; it reads wrong. It only never LEADS, so the default pick and
          ;; the first row are still somewhere else
          (self? (lambda (c) (or (equal? (car c) here) (equal? (car c) standing))))
-         (cands (filter (lambda (c) (and (not (equal? (car c) *switch-buffer*))
-                                         (not (peek-buffer? (car c)))))
+         (cands (filter (lambda (c) (not (equal? (car c) *switch-buffer*)))
                         (car source)))
          (pool (filter (lambda (c) (not (self? c))) cands))
          (self (filter self? cands))
@@ -129,8 +127,7 @@
 ;; the pool in sections, the ibuffer way: this group's buffers, then
 ;; every other group's buffers under the group's name, then the buffers
 ;; no group claims (and whatever the switch-buffer-source seam adds —
-;; chrome adds browser tabs), then the other groups' cards, then what
-;; peeks let go. Inside a section the order is the window's history.
+;; chrome adds browser tabs), then the other groups' cards. Inside a section the order is the window's history.
 ;; WIN is the window the rows are for.
 (define (switch-sectioned-rows here my-group &optional win)
   (let* ((pool (switch-pool here my-group win))
@@ -142,27 +139,13 @@
               (append out (switch-section (car bucket) (nth 2 bucket))))
             '()
             (ibuffer-group-buckets bufs id (lambda (c) (switch-group (car c)))))
-      (switch-section (if id "other groups" "groups") cards)
-      (switch-section "recent" (switch-recent-rows)))))
+      (switch-section (if id "other groups" "groups") cards))))
 
 ;; the buffers view of the modal: the rows are for the home window
 (define (switch-buffer-rows buf)
   (switch-sectioned-rows (buffer-local buf 'switch-here)
                          (buffer-local buf 'switch-group)
                          (switch-home-window buf)))
-
-;; what peeks showed and let go, below the live buffers. RET peeks it
-;; again; a row that is live again is not repeated.
-(define (switch-recent-row? e)
-  (and (> (length e) 2) (equal? (nth 2 e) "recent")))
-
-(define (switch-recent-rows)
-  (map (lambda (e)
-         (list (car e)
-               (string-append "recent · " (symbol->string (nth 1 e)))
-               "recent" (nth 2 e)))
-       (filter (lambda (e) (not (buffer-known? (car e))))
-               *peek-recent*)))
 
 ;; the locked view: ONE group, whole. The card leads as the default —
 ;; RET there keeps the group as it stands, or opens dired on a project
@@ -283,8 +266,6 @@
                    "dim")))
       ((switch-file-row? e)
        (list "" (list name #f) (list "file" "dim")))
-      ((switch-recent-row? e)
-       (list "" (list name "faint") (list ann "dim")))
       ((buffer-known? name)
        (list (if (and (buffer-exists? name) (buffer-modified? name))
                  (list "●" "warn") "")
@@ -450,12 +431,6 @@
          ;; default. A card in the recency stream stays a plain switch.
          (when groups-view?
            (switch-open! (list 'locked (nth 1 target))))))
-      ;; a recent row: what a peek let go comes back as a peek, in the
-      ;; home window's frame, beside where you were
-      ((switch-recent-row? e)
-       (let ((entry (peek-recent-find (nth 3 e))))
-         (close! #f)
-         (when entry (peek-revive! entry))))
       ;; a project file nobody has open: visit it — it joins the group
       ((switch-file-row? e)
        (let* ((path (switch-file-path e))
@@ -640,7 +615,7 @@
     'doc (string-append
            "The buffer switcher. Type to narrow; DEL widens by one "
            "character. The rows are this group's buffers, the other groups' "
-           "cards, every other buffer and browser tab, then recent peeks, "
+           "cards, then every other buffer and browser tab, "
            "each section in most-recently-used order. The highlight "
            "previews its row "
            "in the window you came from. RET visits the row; with no match, "
@@ -732,13 +707,11 @@
 ;;; a prompt: a browser page under the chrome extension. RET, C-RET and
 ;;; C-c C-o mean what they mean in the modal.
 
-;; a recent row carries its peek entry in the 4th slot and a file row
-;; its root; the prompt's candidate encoder reads a 4th slot as chips,
+;; a file row carries its root in the 4th slot; the prompt's candidate encoder reads a 4th slot as chips,
 ;; so the prompt gets the row without it and the confirm looks the full
 ;; row up by name
 (define (switch-prompt-row e)
-  (cond ((switch-recent-row? e) (list (car e) (nth 1 e) "recent"))
-        ((switch-file-row? e) (list (car e) (string-append "file · " (nth 3 e)) "file"))
+  (cond ((switch-file-row? e) (list (car e) (string-append "file · " (nth 3 e)) "file"))
         ((buffer-known? (car e)) (cons (switch-chat-label (car e)) (cdr e)))
         (else e)))
 
@@ -786,22 +759,20 @@
 
 ;; the buffers C-x b offers, in the order the pool keeps: the window's
 ;; own history first, then the editor's recency, the buffer you are on
-;; last, then the files a peek let go. Names only: the pool annotates
+;; last. Names only: the pool annotates
 ;; every buffer for the candidate panel, and that cost 800ms the table
 ;; never shows.
 (define (switch-prompt-buffers here my-group win)
   (let* ((bufs (filter (lambda (b)
                          (and (not (string-prefix? " " b))
                               (not (equal? b *switch-buffer*))
-                              (not (buffer-context-only? b))
-                              (not (peek-buffer? b))))
+                              (not (buffer-context-only? b))))
                        (buffer-list-mru)))
          (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
          (led (filter (lambda (n) (and (member n bufs) (not (equal? n here)))) mine))
          (rest (filter (lambda (b) (and (not (member b led)) (not (equal? b here)))) bufs)))
     (append led rest
-            (if (member here bufs) (list here) '())
-            (map car (switch-recent-rows)))))
+            (if (member here bufs) (list here) '()))))
 
 ;; the wall time of the last C-x b, key dispatch to a usable minibuffer:
 ;; (ibuffer-prompt-last-ms) reads it back for a measurement outside eval
@@ -1029,13 +1000,11 @@ the next row down. STEP is kept for the callers."
 
 (define (switch-prompt-rows here win)
   ;; switch-prompt-buffers' order from one read of the buffer rows: the
-  ;; buffers WIN showed before, every other buffer by recent use, HERE,
-  ;; then the recent files. A row is (NAME PATH MODIFIED MODE GROUP-ID
+  ;; buffers WIN showed before, every other buffer by recent use, then
+  ;; HERE. A row is (NAME PATH MODIFIED MODE GROUP-ID
   ;; GROUP); a file that is no buffer has #f for each.
-  (let* ((all (filter (lambda (r) (or (equal? (car r) here) (not (and (nth 6 r) (nth 7 r)))))
-                      (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
-                                               'fields '(path modified mode group-id group
-                                                         live preview-opened))))))
+  (let* ((all (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
+                                        'fields '(path modified mode group-id group)))))
          (row-of (lambda (r) (list-head r 6)))
          (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
          (led (filter (lambda (r) r)
@@ -1044,9 +1013,7 @@ the next row down. STEP is kept for the callers."
          (rest (filter (lambda (r) (not (or (equal? (car r) here) (member (car r) led-names)))) all))
          (self (let ((r (assoc here all))) (if r (list r) '())))
          (buffers (map row-of (append led rest self))))
-    (append buffers
-            (map (lambda (f) (list (car f) #f #f #f #f #f))
-                 (filter (lambda (f) (not (assoc (car f) buffers))) (switch-recent-rows))))))
+    buffers))
 
 ;; C-x b has three tabs over one list: every buffer, the current group's,
 ;; and the ones this window showed. The side arrows move between them and

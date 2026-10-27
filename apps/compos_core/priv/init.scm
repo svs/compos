@@ -35,7 +35,7 @@
 (require 'migrations)
 (require 'transient)
 (require 'tabulated-list)
-; windows: display-buffer, the float, peek, layouts, tiling;
+; windows: display-buffer, the float, previews, layouts, tiling;
 ; it precedes dired
 (require 'window)
 (require 'tramp)
@@ -181,7 +181,7 @@
 ;; the REPL is scheme-mode's other buffer: it derives its mode from scheme-mode
 ;; and binds C-c C-z and C-c C-e in it
 (require 'repl)
-(require 'peek)
+(require 'definition)
 ;; popups after popper.el; its keys take the backtick family from groups.scm
 (require 'popper)
 (require 'scratch)

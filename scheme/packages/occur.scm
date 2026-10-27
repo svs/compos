@@ -81,8 +81,8 @@
          (source (buffer-local results 'occur-ts-source))
          (start (occur-ts--value entry 'start)))
     (when (buffer-exists? source)
-      ;; a peek of the searched buffer: it exists, so it is only shown
-      (peek! source (lambda () source))
+      ;; the searched buffer exists, so it is only shown
+      (display-buffer-other-window! source)
       (let ((win (window-showing source)))
         (buffer-goto! source start)
         (when (and select? win (window-exists? win))

@@ -10,9 +10,9 @@
 
 (defgroup 'windows "Window layout and responsive popup policy.")
 
-;; peek! and the ripgrep preview (editor.scm) read this one.
-(defcustom 'peek-max-file-size 1048576
-  "The largest file a look opens. A peek or a ripgrep preview of a bigger file shows nothing and says the size; RET still opens it. 0 removes the cap."
+;; the ripgrep and lsp previews (window.scm) read this one.
+(defcustom 'preview-max-file-size 1048576
+  "The largest file a preview opens. A preview of a bigger file shows nothing and says the size; RET still opens it. 0 removes the cap."
   'group 'windows 'type 'number)
 
 ;; visit and visit-quietly (editor.scm) read this one.

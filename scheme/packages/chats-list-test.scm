@@ -139,9 +139,9 @@
   (lambda ()
     (chats-test-open! 'none 'name)
     (let ((row (list-current *chat-list*)))
-      (buffer-set-local! *chat-list* 'listing-peek-dismissed-row row)
+      (buffer-set-local! *chat-list* 'listing-preview-dismissed-row row)
       (run-command "chat-list")
-      (check-equal! (buffer-local *chat-list* 'listing-peek-dismissed-row) #f
+      (check-equal! (buffer-local *chat-list* 'listing-preview-dismissed-row) #f
                     "arriving looks again at the row you left on")
       (listing-preview! *chat-list* row)
       (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row

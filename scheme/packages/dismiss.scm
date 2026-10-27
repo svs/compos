@@ -56,7 +56,7 @@
                   (or (dismiss--declared-mode? buf)
                       (member cmd '("quit-window" "dired-quit" "collect-quit"
                                     "switch-quit" "notmuch-back"
-                                    "notmuch-quit" "peek-dismiss"))))))
+                                    "notmuch-quit"))))))
        #t))
 
 (public! 'buffer-parent "(buffer-parent BUF) — BUF's live dismissal parent, or #f")
@@ -198,7 +198,7 @@
 (define-command "dismiss-buffer" "Dismiss a child first, otherwise run this buffer's normal q action"
   (lambda ()
     (let* ((buf (current-buffer)) (child (dismiss--child-target buf)))
-      (cond ((equal? (listing-preview-owner) buf) (listing-peek-dismiss!))
+      (cond ((equal? (listing-preview-owner) buf) (listing-preview-hide!))
             (child (dismiss--close-child! child))
             ((and (buffer-parent buf) (buffer-dismissible? buf)) (dismiss--close-child! buf))
             (else
@@ -238,8 +238,8 @@
 (advice-add! 'buffer-set-read-only! 'after 'dismiss-presentation 'dismiss--after-mode!)
 ;; A prompt is not a reading surface, so the flag that makes one never
 ;; lands there. A mode setup that runs while a prompt is up takes the
-;; prompt for the current buffer, and list-mode, collect-mode and peek
-;; all end in a read-only flag: that is how q and the Reading bar reached
+;; prompt for the current buffer, and list-mode and collect-mode
+;; both end in a read-only flag: that is how q and the Reading bar reached
 ;; a minibuffer. The mode is the whole test.
 (advice-add! 'buffer-set-read-only! 'around 'minibuffer-never-read-only
   (lambda (next &rest args)

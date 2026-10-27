@@ -73,12 +73,11 @@
             (else (loop (cdr refs)))))))
 
 ;; A popup. The buffer's own status wins over the list: popper-toggle-type
-;; writes 'popper-popup-status, 'popup or 'raised. A hidden buffer, a peek
-;; and a float are never popups: each has its own window.
+;; writes 'popper-popup-status, 'popup or 'raised. A hidden buffer and a
+;; float are never popups: each has its own window.
 (define (popper-popup? buf)
   (and (string? buf) (buffer-known? buf)
        (not (string-prefix? " " buf))
-       (not (peek-buffer? buf))
        (not (float--class? buf))
        (let ((status (buffer-local buf 'popper-popup-status)))
          (cond ((equal? status 'popup) #t)

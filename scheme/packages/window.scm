@@ -1,7 +1,7 @@
-;;; window.scm --- windows: display-buffer, the float, peek, layouts, tiling.
+;;; window.scm --- windows: display-buffer, the float, previews, layouts, tiling.
 ;;;
 ;;; Emacs's window.el, in one file: the display-buffer chain and its actions,
-;;; the float and the look, peek, the mode layouts, quit-window, winner,
+;;; the float and the preview, the mode layouts, quit-window, winner,
 ;;; and the tiling commands. init.scm loads it second, before dired.
 
 (domain! 'files)
@@ -15,7 +15,7 @@
 ;;;
 ;;; read in order, first match wins. PATTERN is a substring of the buffer
 ;;; name, (category KIND) for a kind of display the caller names
-;;; ((category preview) is a peek; (category foreign) is a buffer from
+;;; ((category preview) is a preview; (category foreign) is a buffer from
 ;;; outside the frame's group), or a procedure of NAME and ALIST. ACTION
 ;;; is one action name or a list of them, tried in order; the
 ;;; display-buffer section below lists them.
@@ -58,7 +58,7 @@
         ;; a preview takes another window, and buffer replacement puts
         ;; the window back. A buffer from outside the frame's group
         ;; takes a window the same way.
-        ;; A peek goes to the window of its own mode first, so a Markdown
+        ;; A preview goes to the window of its own mode first, so a Markdown
         ;; file from Dired replaces the Markdown file shown, not the chat.
         ;; Last, so a rule for a name wins, and a rule of your own
         ;; (add-display-rule! conses in front) wins too
@@ -268,8 +268,8 @@
 ;;;
 ;;; While this flag stands, a display sets the window's buffer through
 ;;; window-preview-buffer!, which changes the window and leaves the ring
-;;; alone. peek-show! binds it, so every look goes this way: the buffer
-;;; table, dired, occur, and every list mode that peeks a row.
+;;; alone. with-display-preview binds it, so every preview of a row goes
+;;; this way.
 
 (define *display-preview* #f)
 
@@ -277,7 +277,7 @@
 ;;; One buffer, one window. A display of NAME in WIN takes NAME away from
 ;;; every other window of the frame, and each of those reveals what it showed
 ;;; before — the same move buffer-previous-pane and buffer-next-pane make, done for you.
-;;; A preview is a look, not a place, so the peek path never evicts.
+;;; A preview is a look, not a place, so it never evicts.
 (define (window-eviction-buffer win name)
   (let ((action (window-fill-decide
                   (window-fill-snapshot win name 'restore #f 'others #f)
@@ -416,10 +416,10 @@
                   w))
                ;; the side away from the source decides, every time: reusing
                ;; the open float's side left the card at the far edge of a
-               ;; wide frame. The card is placed by the PeekCard hook; the
+               ;; wide frame. The card is placed by the PreviewCard hook; the
                ;; side only names the tree slot the float hangs from.
                ((equal? where 'float)
-                (float-show! buf (peek-side-away-from from)
+                (float-show! buf (preview-side-away-from from)
                              (plist-get *display-buffer-defaults* 'size)))
                (else (buf) (active-window)))))
       ;; a frame look draws the focus with the frame
@@ -563,13 +563,12 @@
 
 ;;; geometry, from the selected window's measure and the fractional rects
 
-;; the work windows: not the float, not a dock, not a peek
+;; the work windows: not the float, not a dock
 (define (display--work-windows)
   (let ((float (float-window)))
     (filter (lambda (w) (and (not (equal? w float))
                              (window-work-buffer? (window-buffer w))
-                             (not (window-dock? w (window-buffer w)))
-                             (not (peek-buffer? (window-buffer w)))))
+                             (not (window-dock? w (window-buffer w)))))
             (map car (window-list)))))
 
 ;; show NAME in window WIN, selecting nothing. A buffer the user can see
@@ -640,7 +639,7 @@
 ;; The selected window comes first, so a command that opens one thing still
 ;; opens it where you are: you are already in the window of its mode.
 ;; the major mode NAME has, or the one it is about to open in: a file a
-;; peek just read has no mode yet, and it still belongs beside its kin
+;; listing just read has no mode yet, and it still belongs beside its kin
 (define (display-buffer-mode name)
   (or (buffer-local name 'mode-name)
       (and (buffer-known? name) (auto-mode-for-buffer name))))
@@ -746,246 +745,66 @@
 (domain! 'files)
 (effects! '(read))
 
-;;; --- peek -----------------------------------------------------------------------
-;;; A peek shows a buffer to look at it, without adopting it into the
-;;; workspace. RET on a row peeks; RET again keeps. The rules:
-;;;
-;;;   ONE peek at a time. The next peek replaces the last one. A buffer
-;;;     that a peek MADE is killed when it is replaced. A buffer that
-;;;     existed before the peek is only shown, never killed.
-;;;   THE PEEK WINDOW is another window, never the float. A look goes
-;;;     beside the listing: the peek takes a window that is not the
-;;;     reader's, and the next peek takes that same window again. The
-;;;     buffer it replaced comes back when the peek goes.
-;;;   A PEEK IS READ-ONLY (peek-mode, a minor mode): a stray key changes
-;;;     nothing, and q dismisses it.
-;;;   OPEN is M-RET on the row (peek-open!): the mark goes, the peek
-;;;     window gives the buffer up, and the selected window shows it as
-;;;     a visit would. KEEP alone is M-x keep-buffer, or a change from
-;;;     outside the keyboard.
-;;;   A replaced peek leaves a row in RECENT. The switcher lists recent
-;;;     below the live buffers, and RET there peeks it again.
-;;;
-;;; The mark is the minor mode, and it is saved with the buffer: a peek
-;;; on screen at a restart comes back as a peek, read-only.
-
-;; The mode. A peek is read-only: a look changes nothing, and the
-;; read-only keymap gives it q. The setup runs on enable and again on a
-;; restore, so it records the buffer's own state once; keep puts that
-;; state back.
-(register-minor-mode! "peek-mode"
-  (lambda (buf)
-    (unless (buffer-local buf 'peek-own-read-only)
-      (buffer-set-local! buf 'peek-own-read-only
-        (if (buffer-read-only? buf) 'yes 'no)))
-    (buffer-set-read-only! buf #t))
-  (lambda (buf)
-    (buffer-set-read-only! buf (equal? (buffer-local buf 'peek-own-read-only) 'yes))
-    (buffer-set-local! buf 'peek-own-read-only #f)))
-
-(mode-doc! "peek-mode"
-  "Deprecated and no longer turned on. A preview now shows an ordinary
-buffer in an ordinary window: focusable, editable, and yours. The window
-keeps the buffer you were in and your point.")
-
-(define (peek-buffer? name)
-  (and (string? name) (buffer-exists? name)
-       (buffer-local name 'preview-opened) #t))
-
-(define (peek-buffers) (filter peek-buffer? (buffer-list)))
-
-;;; recent: what a peek showed and let go. An entry is
-;;; (LABEL KIND KEY TIME): KIND names the reviver, KEY is what it needs.
-
-(defvar '*peek-recent* '() 'persist #t)
-(define *peek-recent-max* 50)
-
-(define (peek-recent-find key)
-  (let ((hits (filter (lambda (x) (equal? (nth 2 x) key)) *peek-recent*)))
-    (and (pair? hits) (car hits))))
-
-;; how NAME comes back: a file by its path, a page by its URL, a
-;; directory by its dir. #f for a buffer nothing can rebuild.
-(define (peek-recent-entry name)
-  (let ((path (buffer-path name))
-        (url (buffer-local name 'browse-url))
-        (dir (buffer-local name 'dired-dir)))
-    (cond ((and (string? url) (not (equal? url "")))
-           (list name 'browse url (current-time)))
-          ((and (string? dir) (not (equal? dir "")))
-           (list name 'dired dir (current-time)))
-          ((and (string? path) (not (equal? path "")))
-           (list name 'file path (current-time)))
-          (else #f))))
-
-(define (peek-remember! name)
-  (let ((e (peek-recent-entry name)))
-    (when e
-      (set! *peek-recent*
-        (take (cons e (filter (lambda (x) (not (equal? (nth 2 x) (nth 2 e))))
-                                *peek-recent*))
-                *peek-recent-max*)))))
-
-(define (peek-forget-recent! key)
-  (set! *peek-recent*
-    (filter (lambda (x) (not (equal? (nth 2 x) key))) *peek-recent*)))
-
-;; a recent row comes back as a peek: the same look, the same choice
-(define (peek-revive! entry)
-  (let ((kind (nth 1 entry))
-        (key (nth 2 entry)))
-    (cond ((and (equal? kind 'browse) (boundp 'web--tab-for!))
-           (peek! (web--buffer-for key) (lambda () (web--tab-for! key))))
-          ((equal? kind 'dired)
-           (peek! key (lambda () (dired-open key))))
-          ((equal? kind 'file)
-           (peek-file! key))
-          (else #f))))
-
-;; let NAME go: remember it, kill it. A buffer with a live process is
-;; never a peek, so nothing here stops one.
-;; A buffer the preview opened goes when it leaves the slot. A buffer with
-;; unsaved changes never goes: the reader entered it and worked in it, so it
-;; stopped being a preview the moment they typed.
-(define (peek-drop! name)
-  (when (and (peek-buffer? name) (not (buffer-modified? name)))
-    (peek-remember! name)
-    (buffer-kill! name)))
-
-;; every peek but KEEP-ONE and the buffer the reader is in goes
-(define (peek-drop-others! keep-one)
-  (let ((here (current-buffer)))
-    (for-each (lambda (b)
-                (unless (or (equal? b keep-one) (equal? b here)
-                            ;; a peek the reader put in a second window
-                            ;; is theirs to look at
-                            (window-showing b))
-                  (peek-drop! b)))
-              (peek-buffers))))
+;;; --- previews ----------------------------------------------------------------
+;;; Every buffer opens normally, in a window, as your own. A preview is an
+;;; overlay: the card a listing floats over the frame for its row
+;;; (preview-show ... 'float), or the look a prompt puts in the window you
+;;; came from. Nothing marks a buffer as a look and nothing kills it later.
 
 ;; the side away from the window a look was asked from: the side the
 ;; card floats against. A window on the right half of the frame gets
 ;; the card on the left; any other, the right.
-(define (peek-side-away-from win)
+(define (preview-side-away-from win)
   (let ((r (assoc win (window-rects))))
     (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
 
-;; show NAME as the peek: the frame's look, in a window the selected one
-;; owns (preview-show ... 'other). The next peek takes that window again,
-;; and the buffer it replaced comes back when the peek goes. The selected
-;; window and its point stay. Returns the window the peek took.
-(define (peek-show! name)
-  ;; Peeks are deprecated: a show is an ordinary display in another window
-  (display-buffer-other-window! name))
-
-;; a window the focus commands may land on: not a peek's
-;; Peeks are deprecated, so no window refuses the focus. A preview shows
-;; an ordinary buffer in an ordinary window, and Cmd-arrow lands in it
-;; like any other.
-(define (window-focusable? w) (and w #t))
-
-;; the peek verb. OPEN makes or finds the buffer and returns its name.
-;; KNOWN is the name it will have, so "did the peek make it" is answered
-;; before OPEN runs: a buffer that was known stays a real buffer. OPEN
-;; may move the selected window (visit does); the window is put back.
-;; A look is transparent to the point: nothing in this path
-;; selects a window. OPEN opens the buffer, best without a window
-;; (visit-quietly); an opener that showed it in the selected window has
-;; the listing put back there, in place, with no selection change.
-(define (peek! known open)
-  ;; Peeks are deprecated. The peek verbs stay for their callers, and each
-  ;; one opens an ordinary buffer in another window by the display chain:
-  ;; the window of its own mode first. Nothing marks it, nothing kills it
-  ;; later, and the focus stays where it is.
-  (let* ((here (current-buffer))
-         (buf (open)))
-    (when (and (string? buf) (not (equal? buf here)))
-      (display-buffer-other-window! buf))
-    buf))
-(domain! 'files)
-(effects! '(read))
-
-;;; --- how big a file a look opens --------------------------------------------
-;;; A look is not an open. Reading the file costs its bytes, the mode costs
-;;; a parse of them, and the window costs one line structure per line. A
-;;; listing of machine-generated files can put an 18 MB blob under the
-;;; point, and a look there is seconds of work for a row the reader passes
-;;; over. Above the cap a look shows nothing and says the size.
+;;; --- how big a file a preview opens -----------------------------------------
+;;; A preview is not an open. Reading the file costs its bytes, the mode
+;;; costs a parse of them, and the window costs one line structure per
+;;; line. A listing of machine-generated files can put an 18 MB blob under
+;;; the point, and a preview there is seconds of work for a row the reader
+;;; passes over. Above the cap a preview shows nothing and says the size.
 ;;;
-;;; The cap holds a LOOK only. RET opens the file, whatever its size: the
+;;; The cap holds a PREVIEW only. RET opens the file, whatever its size: the
 ;;; reader asked for that one. A buffer that is open already is shown as
 ;;; before, because the work is paid.
 ;;;
 ;;; layouts.scm makes the variable customizable.
 
-(define peek-max-file-size 1048576)
+(define preview-max-file-size 1048576)
 
-;; #t when a look at PATH would open a file too big to look at. A path
+;; #t when a preview of PATH would open a file too big to preview. A path
 ;; with a buffer already, a directory, and a remote path all answer #f:
 ;; file-size reads local files, and a remote stat answers 0. So does a
-;; file shown from disk: a look at a video reads none of it.
-(define (peek-too-big? path)
-  (and (> peek-max-file-size 0)
+;; file shown from disk: a preview of a video reads none of it.
+(define (preview-too-big? path)
+  (and (> preview-max-file-size 0)
        (string? path)
        (not (file-shown-from-disk? path))
        (let ((p (normalize-file-input path)))
          (and (not (buffer-known? p))
               (not (file-directory? p))
-              (> (file-size p) peek-max-file-size)))))
+              (> (file-size p) preview-max-file-size)))))
 
 ;; Say why the window did not change. The size is the whole reason, so the
-;; message carries it and the name of the variable that sets the cap.
-(define (peek-say-too-big! path)
+;; message carries it.
+(define (preview-say-too-big! path)
   (let ((p (normalize-file-input path)))
     (message (string-append (cadr (path-split p)) " is " (cadr (file-stat p))
-                            ", too big to look at. RET opens it."))
+                            ", too big to preview. RET opens it."))
     #f))
 
-;; a file, previewed: the one opener every listing of files shares
-(define (peek-file! path)
-  (if (peek-too-big? path)
-      (peek-say-too-big! path)
-      (peek! path (lambda () (visit-quietly path)))))
-
-;; Peeks are deprecated, so there is no keep step and no second gesture.
-;; This is the C-x 4 door: an ask to open something shows it in the other
-;; window and it is yours from that moment — never a buffer some later
-;; preview may dispose of. The window you are in keeps its buffer and its
-;; point. peek! is the other door, for a listing that shows a row as the
-;; highlight moves; only that one leaves the buffer disposable.
-(define (peek-or-keep! known open)
-  (peek! known open)
-  'shown)
-
-;; RET on a row: preview KNOWN, or open it when it is the one on screen
-(define (peek-or-open! known open)
-  (peek! known open)
-  'open)
-
-;; the buffer the frame's look shows beside the reader or in the card,
-;; while it still shows: a peek, or a buffer that existed before
-(define (peek-shown)
+;; the buffer the frame's preview overlay shows, while it still shows it
+(define (preview-shown)
   (let ((s (preview-slot)))
     (and s (member (nth 1 s) '(other float))
          (window-exists? (nth 3 s)) (equal? (window-buffer (nth 3 s)) (car s))
          (car s))))
 
-;; dismiss the look on screen: its window goes or gives back what it
-;; covered, and a buffer the peek made goes to recent. #t when there was one.
-(define (peek-dismiss!)
-  (let* ((b (peek-shown))
-         (shown (dedupe-names (append (if b (list b) '())
-                                      (filter window-showing (peek-buffers))))))
-    (when b (preview-end #f))
-    (for-each (lambda (p)
-                (unless (equal? p b)
-                  (if (equal? (float-buffer) p)
-                      (float-close!)
-                      (let ((w (window-showing p)))
-                        (when w (window-quit-restore! w)))))
-                (when (peek-buffer? p) (peek-drop! p)))
-              shown)
-    (pair? shown)))
+;; dismiss the preview on screen: the card goes, or its window gives back
+;; what it covered. #t when there was one.
+(define (preview-dismiss!)
+  (and (preview-shown) (begin (preview-end #f) #t)))
 
 ;; any work window that is not ME: the float is not one
 (define (other-work-window-id me)
@@ -1008,52 +827,6 @@ keeps the buffer you were in and your point.")
           (else (split-window! 'h 0.5) (other-window!) (switch-to-buffer-here! name)))
     (active-window)))
 
-;; open KNOWN as a buffer of your own, beside the listing: the float
-;; gives it up, the mark goes, and the other work window shows it. Not a
-;; peek yet, it opens the same way.
-(define (peek-open! known open)
-  (let ((me (active-window)))
-    (when (and (string? known) (peek-buffer? known))
-      (peek-keep! known)
-      (when (equal? (float-buffer) known) (float-close!))
-      (when (window-exists? me) (select-window! me)))
-    (let ((buf (if (and (string? known) (buffer-known? known)) known (open))))
-      (when (string? buf)
-        ;; an opener may have shown it here; the listing takes its window back
-        (when (and (window-exists? me) (not (equal? (window-buffer me) (current-buffer))))
-          #t)
-        (show-in-other-work-window! buf)))
-    'open))
-
-(define (peek-keep! name)
-  (when (peek-buffer? name)
-    (buffer-set-local! name 'preview-opened #f)
-    ;; a kept buffer keeps its window: the look is over
-    (when (equal? (peek-shown) name) (preview-end #t))
-    (peek-forget-recent! (or (buffer-path name)
-                             (buffer-local name 'browse-url)
-                             (buffer-local name 'dired-dir)
-                             name))
-    (message (string-append "kept " name))))
-
-;; an edit keeps: a file you typed in is yours. A listing reports itself
-;; as modified and has no path, so only a file answers here.
-(define (peek-keep-if-edited! b)
-  (when (and (peek-buffer? b) (buffer-path b) (buffer-modified? b))
-    (peek-keep! b)))
-
-(define (peek--keep-if-edited-hook!)
-    (peek-keep-if-edited! (current-buffer)))
-
-(add-hook! 'post-command-hook 'peek--keep-if-edited-hook!)
-
-(define-command "keep-buffer" "Keep this peek: it becomes an ordinary buffer"
-  (lambda ()
-    (let ((b (current-buffer)))
-      (if (peek-buffer? b)
-          (peek-keep! b)
-          (message "not a peek")))))
-
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
 (public! 'window-fill-decide
@@ -1065,27 +838,15 @@ keeps the buffer you were in and your point.")
 (public! 'window-fill-blank
   "(window-fill-blank) — context scratch fallback, or #f; fixed target layouts leave spare capacity empty")
 (public! 'fill-candidate?
-  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, context-only, floating or peek")
-(public! 'peek!
-  "(peek! KNOWN OPEN) — deprecated name: open the buffer OPEN returns in another window by the display chain, its own mode's window first; the focus stays")
-(public! 'peek-or-keep!
-  "(peek-or-keep! KNOWN OPEN) — deprecated name: open KNOWN in another window, as peek! does")
-(public! 'peek-or-open!
-  "(peek-or-open! KNOWN OPEN) — deprecated name: open KNOWN in another window, as peek! does")
-(public! 'peek-dismiss!
-  "(peek-dismiss!) — dismiss every peek on screen; #t when there was one")
-(public! 'peek-open!
-  "(peek-open! KNOWN OPEN) — open KNOWN as your own in the selected window: a peek is kept and the float gives it up; not a peek yet, OPEN runs")
-(public! 'peek-file!
-  "(peek-file! PATH) — deprecated name: open the file at PATH in another window, as peek! does")
-(public! 'peek-keep!
-  "(peek-keep! NAME) — keep a peek: clear the mark; the buffer and its window stay")
-(public! 'peek-buffer?
-  "(peek-buffer? NAME) — #t when NAME is a peek: shown to look at, killed when the next peek replaces it")
-(public! 'peek-too-big?
-  "(peek-too-big? PATH) — #t when a look at PATH would open a file over peek-max-file-size; a path with a buffer already, a directory, and a remote path answer #f")
-(public! 'peek-say-too-big!
-  "(peek-say-too-big! PATH) — say that PATH is too big to look at, and answer #f; the message names the size")
+  "(fill-candidate? NAME) — eligible ordinary buffer: known, not hidden, not context-only, not floating")
+(public! 'preview-dismiss!
+  "(preview-dismiss!) — dismiss the preview overlay on screen; #t when there was one")
+(public! 'preview-shown
+  "(preview-shown) — the buffer the frame's preview overlay shows, or #f")
+(public! 'preview-too-big?
+  "(preview-too-big? PATH) — #t when a preview of PATH would open a file over preview-max-file-size; a path with a buffer already, a directory, and a remote path answer #f")
+(public! 'preview-say-too-big!
+  "(preview-say-too-big! PATH) — say that PATH is too big to preview, and answer #f; the message names the size")
 (public! 'file-shown-from-disk?
   "(file-shown-from-disk? PATH) — #t when PATH opens in a viewer that reads the file from disk: the buffer holds no bytes, and no size cap applies")
 (public! 'buffer-unread-file?
@@ -1176,19 +937,16 @@ keeps the buffer you were in and your point.")
 ;;; empties, the buffer q falls to. A layout that read the ring pulled
 ;;; buffers in from other groups.
 
-;; a buffer a window may be filled with: known, not hidden, not floating,
-;; not a peek (a look, not a place)
+;; a buffer a window may be filled with: known, not hidden, not floating
 (domain! 'files)
 (effects! '(read))
 
-;; a buffer a window may be filled with: known, not hidden, not floating,
-;; not a peek (a look, not a place)
+;; a buffer a window may be filled with: known, not hidden, not floating
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
        (not (buffer-local b 'context-only))
-       (not (float--class? b))
-       (not (peek-buffer? b))))
+       (not (float--class? b))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))
 (define window-fill-primary? (lambda (buffer) #t))
@@ -1393,24 +1151,9 @@ keeps the buffer you were in and your point.")
 (define-command "quit-window" "Kill this buffer and go back"
   (lambda ()
     (cond
-      ;; a peek goes with its window: the look is over, and the layout
-      ;; is what it was. In a split the split closes; alone, the window
-      ;; falls to the next buffer.
-      ((peek-buffer? (current-buffer))
-        (let* ((cur (current-buffer))
-               (win (active-window))
-               (rec (window-restore win)))
-          (if (and rec (equal? (car rec) 'preview))
-              (window-quit-restore! win)
-              (begin
-                (set-window-restore! win #f)
-                (window-fill-apply! win
-                  (window-fill-decide (window-fill-snapshot win cur 'restore rec)
-                                      (window-fill-buffers)))))
-          (peek-drop! cur)))
-      ;; from any other buffer, a peek on screen goes first: q in the
-      ;; listing that peeked takes the look, then the listing
-      ((peek-dismiss!) #t)
+      ;; a preview on screen goes first: q in the listing that shows
+      ;; one takes the preview, then the listing
+      ((preview-dismiss!) #t)
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and
@@ -1553,14 +1296,7 @@ keeps the buffer you were in and your point.")
 
 (define-command "other-window" "Select another window in cyclic order"
   (lambda ()
-    ;; a peek's window is passed by: a preview takes no focus
-    (let ((start (active-window)))
-      (other-window!)
-      (let loop ((n (length (window-list))))
-        (when (and (> n 0) (not (window-focusable? (active-window)))
-                   (not (equal? (active-window) start)))
-          (other-window!)
-          (loop (- n 1)))))
+    (other-window!)
     (chat-snap-to-input!)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))

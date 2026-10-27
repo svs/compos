@@ -1373,8 +1373,8 @@
   (lambda ()
     (t--sw-setup!)
     (let ((style group-switch-style)
-          (here (group-record-create! "zzsw-peek-here"))
-          (there (group-record-create! "zzsw-peek-there")))
+          (here (group-record-create! "zzsw-look-here"))
+          (there (group-record-create! "zzsw-look-there")))
       ;; the default shape: a modal is a panel with the frame around it,
       ;; so it previews in the frame like every other shape
       (set! group-switch-style "modal")
@@ -1389,7 +1389,7 @@
       (group-mru-note! here)
 
       (run-command "group-switch")
-      (t--sw-type! "zzsw-peek-there")
+      (t--sw-type! "zzsw-look-there")
       ;; the look waits for the highlight to rest
       (check-true!
         (wait-until (lambda ()
@@ -1491,16 +1491,16 @@
       (set! group-switch-style style))
     (t--sw-done!)))
 
-(deftest 'a-zero-peek-keeps-the-frame-still
-  "group-switch-peek-ms 0 highlights groups without drawing a frame"
+(deftest 'a-zero-preview-keeps-the-frame-still
+  "group-switch-preview-ms 0 highlights groups without drawing a frame"
   (lambda ()
     (t--sw-setup!)
     (let ((style group-switch-style)
-          (ms group-switch-peek-ms)
+          (ms group-switch-preview-ms)
           (here (group-record-create! "zzsw-still-here"))
           (there (group-record-create! "zzsw-still-there")))
       (set! group-switch-style "popup")
-      (set! group-switch-peek-ms 0)
+      (set! group-switch-preview-ms 0)
       (buffer-add-group! t--sw-first here)
       (buffer-add-group! t--sw-second there)
       (delete-other-windows!)
@@ -1523,7 +1523,7 @@
       (t--sw-key! "cancel")
       (check-equal! (map cadr (window-list)) (list t--sw-first)
                     "and closing it moves nothing either")
-      (set! group-switch-peek-ms ms)
+      (set! group-switch-preview-ms ms)
       (set! group-switch-style style))
     (t--sw-done!)))
 
@@ -1595,7 +1595,7 @@
     (t--sw-done!)))
 
 (deftest 'switch-to-group-enters-the-group-it-previewed
-  "the peek is a look; RET is the switch, and it saves the layout you had"
+  "the preview is a look; RET is the switch, and it saves the layout you had"
   (lambda ()
     (t--sw-setup!)
     (let ((here (group-record-create! "zzsw-enter-here"))

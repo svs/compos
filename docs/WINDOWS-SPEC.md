@@ -452,9 +452,9 @@ layout, hidden record, or quit route reintroduces chats into another window.
 points, quit records, and cycle-mode settings. Re-entry preserves the invoking window's predecessor.
 A second quit does nothing. Exit never reconstructs the layout from one remembered buffer.
 
-Chat-list covers only the invoking window. Its read-only peek floats above the workspace and never takes focus. Ordinary window history owns return; there is no frame-wide snapshot to replay. The return tests exercise grouped and ungrouped windows, duplicate displays, re-entry, and two frames.
+Chat-list covers only the invoking window. Its read-only preview card floats above the workspace and never takes focus. Ordinary window history owns return; there is no frame-wide snapshot to replay. The return tests exercise grouped and ungrouped windows, duplicate displays, re-entry, and two frames.
 
-### R07 — Floating peek cards
+### R07 — Floating preview cards
 
 | Case | Commands | Expected result |
 |---|---|---|
@@ -464,7 +464,7 @@ Chat-list covers only the invoking window. Its read-only peek floats above the w
 | R07d — Exit | `q` again | Reveal the source window's predecessor normally. |
 | R07e — Select | `RET` in the source list | Close the card and open the original buffer through the selection rules. |
 | R07f — Isolated view | Preview a buffer already visible elsewhere | Original text, point, mode, group and window classes remain untouched. |
-| R07g — Delayed callback | Move a row and immediately dismiss/leave | Cancel the queued peek. It cannot recreate the dismissed card. |
+| R07g — Delayed callback | Move a row and immediately dismiss/leave | Cancel the queued preview. It cannot recreate the dismissed card. |
 | R07h — Geometry | Resize or scroll at different editor zoom levels | Keep the card inset and its connector attached to the visible source row and card edge. |
 | R07i — Picker exit | `C-g` in `C-x b` | Remove both picker and card; restore the invoking buffer. |
 
@@ -593,7 +593,7 @@ This supersedes older cases describing `C-x b` as following a mode window.
 | E04 — Same pane | `C-x b`, choose another buffer of this mode | Keep the window in place. |
 | E05 — Foreign group | `C-x b`, choose a foreign buffer | Enter its group; only move windows belonging to that group. |
 | E06 — Return | `ibuffer`, `RET` on Amazon detail, `q` | Return to the same-group ibuffer, even after moving the mode window. |
-| E07 — Open elsewhere | `C-x o` or `Cmd-RET` while peeking | Dismiss the copy and open the original in another work window; split if needed. |
+| E07 — Open elsewhere | `C-x o` or `Cmd-RET` while a preview shows | Dismiss the copy and open the original in another work window; split if needed. |
 | E08 — Scroll | Wheel or trackpad over the preview | Each new preview starts at the bottom and scrolls independently, without focus. |
 | E09 — Cross headings | `n` / `p` across group sections | Keep the pane-sized card and normal font size; no ibuffer animation. |
 | E10 — Rich mode | `n` / `p` onto chats and block views | Preserve source mode and rich presentation without copying chat runtime identity. |

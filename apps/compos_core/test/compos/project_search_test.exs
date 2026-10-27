@@ -110,8 +110,8 @@ defmodule Compos.ProjectSearchTest do
       # steps over. The look leaves the window alone and says the size.
       big = Path.join(root, "lib/big.txt")
       File.write!(big, String.duplicate("needle in a haystack\n", 400))
-      saved = eval!("peek-max-file-size")
-      eval!("(set! peek-max-file-size 1024)")
+      saved = eval!("preview-max-file-size")
+      eval!("(set! preview-max-file-size 1024)")
 
       eval!(~s{(begin (buffer-create "*zz-ps*") (switch-to-buffer! "*zz-ps*"))})
       eval!(~s{(project-ripgrep-in "#{root}" "needle")})
@@ -130,7 +130,7 @@ defmodule Compos.ProjectSearchTest do
       press("RET")
       assert eval!("(current-buffer)") == ~s{"#{big}"}
 
-      eval!("(set! peek-max-file-size #{saved})")
+      eval!("(set! preview-max-file-size #{saved})")
       Compos.Core.kill_buffer(big)
     end
 

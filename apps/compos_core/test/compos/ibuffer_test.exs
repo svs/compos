@@ -260,7 +260,7 @@ defmodule Compos.IbufferTest do
     refute text =~ "*zz-unrelated*"
 
     # The window form previews too: the row under the highlight shows in
-    # another window as a peek, and q gives that window back.
+    # a card over the frame, and q takes the card.
     assert eval!("(listing-preview-owner)") == "#f"
 
     # The reused ibuffer owns ordinary marks and moves the whole marked set.

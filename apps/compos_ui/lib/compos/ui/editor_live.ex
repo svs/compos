@@ -1738,7 +1738,7 @@ defmodule Compos.Ui.EditorLive do
 
   # The panes as window-motion.js sees them: the shape of the tree and
   # the buffer of each window. A change in this string is a change the
-  # user sees move. A float (a peek, a popup) is not a pane. A prompt
+  # user sees move. A float (a preview card, a popup) is not a pane. A prompt
   # previews its rows in a window, and a preview does not move: the
   # attribute is absent while a minibuffer is open, and a window that a
   # list previews in (highlighted) has no buffer here.
@@ -1776,7 +1776,7 @@ defmodule Compos.Ui.EditorLive do
 
   defp motion_float?(%{type: :leaf} = node) do
     class = Map.get(node, :window_class) || ""
-    String.contains?(class, "popup") or String.contains?(class, "listing-peek")
+    String.contains?(class, "popup") or String.contains?(class, "listing-preview")
   end
 
   defp motion_float?(_), do: false
@@ -1820,7 +1820,7 @@ defmodule Compos.Ui.EditorLive do
   # client patched the phx-hook onto that element, and LiveView mounts a
   # hook only when its element is inserted, so the card never placed
   # itself and stayed hidden. A new id makes the client insert the card.
-  def window_dom_id(id, true), do: "peek-#{id}"
+  def window_dom_id(id, true), do: "preview-#{id}"
   def window_dom_id(id, _), do: "win-#{id}"
 
   @doc """
@@ -1840,7 +1840,7 @@ defmodule Compos.Ui.EditorLive do
         path: assigns.node.path,
         read_only: assigns.node.read_only,
         dismissible?: Map.get(assigns.node, :dismissible, false),
-        peek?: String.contains?(assigns.node.window_class || "", "listing-peek"),
+        preview?: String.contains?(assigns.node.window_class || "", "listing-preview"),
         # the state the mode line draws, normalised: (KEY VALUE TONE RANK)
         facts: ml_facts(assigns.node),
         active?: assigns.node.id == assigns.active
@@ -1848,7 +1848,7 @@ defmodule Compos.Ui.EditorLive do
 
     ~M"""
     <c-window
-      id={window_dom_id(@node.id, @peek?)}
+      id={window_dom_id(@node.id, @preview?)}
       class={"window #{if Map.get(@node, :highlighted, false), do: "preview-highlight"} #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       active={to_string(@active?)}
@@ -1858,21 +1858,21 @@ defmodule Compos.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
       data-editing={to_string(Map.get(@node, :editing, false))}
-      phx-hook={if @peek?, do: "PeekCard"}
-      role={if @peek?, do: "note"}
-      aria-label={if @peek?, do: "Preview"}
+      phx-hook={if @preview?, do: "PreviewCard"}
+      role={if @preview?, do: "note"}
+      aria-label={if @preview?, do: "Preview"}
     >
-      <%= if @peek? do %>
-        <c-group class="peek-card-header">
-          <c-text class="peek-card-label">Preview</c-text>
-          <c-text class="peek-card-title">{@node.header_line || @node.buffer}</c-text>
-          <button type="button" tabindex="-1" class="peek-card-dismiss" aria-label="Dismiss preview (q)"><kbd>q</kbd></button>
+      <%= if @preview? do %>
+        <c-group class="preview-card-header">
+          <c-text class="preview-card-label">Preview</c-text>
+          <c-text class="preview-card-title">{@node.header_line || @node.buffer}</c-text>
+          <button type="button" tabindex="-1" class="preview-card-dismiss" aria-label="Dismiss preview (q)"><kbd>q</kbd></button>
         </c-group>
-        <c-group class="peek-card-body">
+        <c-group class="preview-card-body">
           <c-group inert>
             <%= cond do %>
               <% @node.render_mode in ["html", "markdown"] and Map.has_key?(@node, :preview) -> %>
-                <iframe class="peek-document" srcdoc={@node.preview}
+                <iframe class="preview-document" srcdoc={@node.preview}
                   sandbox="allow-same-origin" tabindex="-1" title={@node.header_line || @node.buffer}></iframe>
               <% @node.render_mode == "blocks" and Map.has_key?(@node, :blk) -> %>
                 <.dynamic_tag tag_name={@node.blk_root.tag} {@node.blk_root.attrs}
@@ -1880,9 +1880,9 @@ defmodule Compos.Ui.EditorLive do
                   <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
                 </.dynamic_tag>
               <% Map.get(@node, :semantic_records) not in [nil, false, []] -> %>
-                <.peek_text node={@node} />
+                <.preview_text node={@node} />
               <% true -> %>
-                <pre class="peek-plain">{@node.text}</pre>
+                <pre class="preview-plain">{@node.text}</pre>
             <% end %>
           </c-group>
         </c-group>
@@ -2359,7 +2359,7 @@ defmodule Compos.Ui.EditorLive do
   defp blk_node(%{b: %{empty: true}} = assigns), do: ~M||
 
   # An isolated list: its children draw inside the list component, so a
-  # render that does not change them diffs to a skip placeholder. A peek
+  # render that does not change them diffs to a skip placeholder. A preview
   # or a header has no component, and draws the list in place.
   defp blk_node(%{b: %{isolate: true}, ctx: %{live: true}} = assigns) do
     ~M"""
@@ -2612,15 +2612,15 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # Wrap existing lines without introducing layout boxes or replacing text nodes.
-  defp peek_text(assigns) do
+  defp preview_text(assigns) do
     ~M"""
     <.dynamic_tag tag_name={block_root(Map.get(@node, :text_root)).tag}
-      {block_root(Map.get(@node, :text_root)).attrs} class="peek-text">
+      {block_root(Map.get(@node, :text_root)).attrs} class="preview-text">
       <%= for group <- semantic_line_groups(@node.lines, @node.semantic_records) do %>
         <.dynamic_tag tag_name={group.tag} {group.attrs} class="semantic-record">
           <c-text :for={ln <- group.lines}
             class={"line line-content #{if group.direct, do: "semantic-direct"}"}>
-            <.semantic_line id_prefix={"peek-#{@node.id}-#{ln.num}"} segs={ln.segs}
+            <.semantic_line id_prefix={"preview-#{@node.id}-#{ln.num}"} segs={ln.segs}
               start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={group.direct} />
           </c-text>
         </.dynamic_tag>

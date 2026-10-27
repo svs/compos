@@ -62,7 +62,7 @@ The core applies these rules to each frame:
 2. Every work window that shows the killed buffer stays, and shows another
    buffer. The layout does not change.
 3. A window first takes a live buffer from its own history that no other window
-   of the frame shows. A buffer that a display or a peek covered comes first.
+   of the frame shows. A buffer that a display or a preview covered comes first.
 4. Drop the saved window point of the killed buffer for every such window.
 5. A float (popup) window that showed the buffer closes when a work window
    survives in the frame.

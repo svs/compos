@@ -96,12 +96,12 @@
 
 
 
-(deftest 'a-definition-peek-is-the-frames-look
+(deftest 'a-definition-shows-beside-the-reader
   "the definition shows beside the reader, and the reader keeps focus"
   (lambda ()
     (t--wr-setup!)
     (let ((me (active-window)))
-      (let ((w (peek--show! "zz-name" '(buffer "zz-wr-b" 0))))
+      (let ((w (definition--show! "zz-name" '(buffer "zz-wr-b" 0))))
         (check-equal! (window-buffer w) "zz-wr-b" "the definition shows beside")
         (check-equal! (active-window) me "the reader stays")))
     (t--wc-done!)))

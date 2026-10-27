@@ -77,7 +77,7 @@ defmodule Compos.Core.Display do
   end
 
   # A window builds the rows it ships: its viewport and two more screens
-  # for the client to scroll through. A peek card scrolls on its own and
+  # for the client to scroll through. A preview card scrolls on its own and
   # takes more, up to a bound: a whole large file is never built.
   #
   # A window under the bound ships every line. The server windows a buffer
@@ -92,7 +92,7 @@ defmodule Compos.Core.Display do
 
   defp want(leaf) do
     cond do
-      String.contains?(leaf.window_class || "", "listing-peek") ->
+      String.contains?(leaf.window_class || "", "listing-preview") ->
         leaf.total_lines |> min(@ship_all_max_lines) |> max(1)
 
       leaf.total_lines <= @ship_all_max_lines ->

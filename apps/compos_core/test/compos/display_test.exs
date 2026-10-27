@@ -46,8 +46,8 @@ defmodule Compos.DisplayTest do
     assert :erts_debug.same(visible, again)
   end
 
-  test "a peek card takes more rows, up to a bound" do
-    leaf = %{Editor.render_state().tree | window_class: "listing-peek"}
+  test "a preview card takes more rows, up to a bound" do
+    leaf = %{Editor.render_state().tree | window_class: "listing-preview"}
     {drawn, _} = Display.window(leaf, nil)
 
     assert length(drawn.lines) == 2_000

@@ -387,7 +387,7 @@ The kill buries a tombstone: the name, the record's fields, and each member's na
 
 `group-switch` prompts with one container card per group, every group the editor holds. The group you stand in is a card like the others: it goes last in its section and never leads, so the default an empty `RET` takes is still a switch. A card says the group's name and how many buffers it holds. It shows no member chips.
 
-The prompt previews the WHOLE group, never one buffer of it. The preview draws the group in the frame: the layout the group saved, else the arrangement arrival would build for it. It draws in every shape `group-switch-style` takes - `"modal"` (the default, a centered panel with the frame around it), `"popup"` (an overlay on the bottom edge), or `"minibuffer"` (the bottom rows) - because a prompt previews into the frame whatever shape it wears, the way the buffer switcher does. The modal's facts panel says what the group holds and the shape it opens in. It lists no members. Pseudo groups (`Last chats`, the `mode:` groups) come after the real groups; an empty one is left out. The preview waits for the highlight to rest (`group-switch-peek-ms`, 120 ms) before it draws, so holding `C-n` moves through the list without a draw per row. A look is not an arrival: it writes no winner entry, moves no MRU, and leaves the frame's own group alone, and the prompt puts the whole arrangement you came from back when it closes.
+The prompt previews the WHOLE group, never one buffer of it. The preview draws the group in the frame: the layout the group saved, else the arrangement arrival would build for it. It draws in every shape `group-switch-style` takes - `"modal"` (the default, a centered panel with the frame around it), `"popup"` (an overlay on the bottom edge), or `"minibuffer"` (the bottom rows) - because a prompt previews into the frame whatever shape it wears, the way the buffer switcher does. The modal's facts panel says what the group holds and the shape it opens in. It lists no members. Pseudo groups (`Last chats`, the `mode:` groups) come after the real groups; an empty one is left out. The preview waits for the highlight to rest (`group-switch-preview-ms`, 120 ms) before it draws, so holding `C-n` moves through the list without a draw per row. A look is not an arrival: it writes no winner entry, moves no MRU, and leaves the frame's own group alone, and the prompt puts the whole arrangement you came from back when it closes.
 
 ### The seed of `new`
 
@@ -429,7 +429,7 @@ every other buffer
 ```
 
 - Typing filters all three sections at once.
-- The project section follows the current buffer's root. Peek at a file in another project and the middle section shows that project.
+- The project section follows the current buffer's root. Open a file in another project and the middle section shows that project.
 - With a destination and no project: two sections. With no destination in a project: two sections. With neither: one section.
 
 In the switcher, `RET` shows the buffer and puts it in the current group. `C-RET` goes to the buffer's own group (`buffer-context-switch!`). `C-t` puts the selection in a group. The same verbs apply to every buffer list.
@@ -451,7 +451,7 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 `switch G` restores, per frame: the window tree, the buffer in each window, point and scroll per window, and the selected window. A group with no layout on this frame shows its scratch buffer in one window.
 
-A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`) uses visible panes and eligible hidden group work. Unused capacity stays empty; it never imports a foreign buffer or manufactures a scratch pane.
+A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved stray heals on the next switch. A layout that tiles the group (`window-layout`) uses visible panes and eligible hidden group work. Unused capacity stays empty; it never imports a foreign buffer or manufactures a scratch pane.
 
 ### Kill repair
 
@@ -482,7 +482,7 @@ A pinned frame shows a foreign buffer in the selected window: the pin keeps G th
 
 ### Window fill
 
-One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`scheme/packages/window.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, the popup's buffer, or a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
+One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`scheme/packages/window.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, or the popup's buffer. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
 
 `kill-buffer` fills each affected window in this order:
 
@@ -490,11 +490,11 @@ One pool answers which buffers may fill a window in this frame: `window-fill-buf
 2. When the frame has no destination: the next MRU open file under the current buffer's root.
 3. When a destination or a root exists and offers nothing: delete the window. The last window shows the group's scratch buffer.
 4. When neither a destination nor a root exists: `other-buffer`, as in Emacs.
-5. A popup does not count as another window: a window is deleted only when another work window can preserve the frame. A listing under a peek falls to its next buffer; the peek never becomes the only window. A peek is never a fill candidate, and the selection stays in the window that was selected.
+5. A popup does not count as another window: a window is deleted only when another work window can preserve the frame. A floating card is never a fill candidate, and the selection stays in the window that was selected.
 
-Rule 1 is what returns a peek to the previous state. Nothing else is needed.
+Rule 1 is what returns a window to its previous state. Nothing else is needed.
 
-The choice is one pure function, `window-fill-decide SNAPSHOT POOL`. The snapshot holds the window's restore record, its history, the buffers other windows show, the dying buffer, and whether other windows exist. The answer is `(restore B)`, `(show B)`, `(delete)` or `(blank)`. `window-fill-snapshot` reads the snapshot and `window-fill-apply!` acts on the answer. Every fill site asks this one function: kill, `q`, a peek quit, a move, and the group restore that clears foreign buffers out of the windows. window-fill-test holds the table of cases.
+The choice is one pure function, `window-fill-decide SNAPSHOT POOL`. The snapshot holds the window's restore record, its history, the buffers other windows show, the dying buffer, and whether other windows exist. The answer is `(restore B)`, `(show B)`, `(delete)` or `(blank)`. `window-fill-snapshot` reads the snapshot and `window-fill-apply!` acts on the answer. Every fill site asks this one function: kill, `q`, a move, and the group restore that clears foreign buffers out of the windows. window-fill-test holds the table of cases.
 
 ### Frames
 
@@ -680,7 +680,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 19b. A chat never floats. A chat belongs to exactly one group, so a switch to a chat outside this frame's group enters the chat's group first and opens the chat as an ordinary buffer there. The panes stay sealed: the frame follows the chat home instead of the chat hanging over another group's windows.
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
-22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and a floating buffer fill no window.
+22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a floating buffer fills no window.
 
 ## Application entry destinations
 

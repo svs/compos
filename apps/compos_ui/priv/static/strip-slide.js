@@ -22,10 +22,10 @@
     return v.endsWith("ms") ? n : n * 1000;
   }
 
-  // the panes in screen order; a peek floats and does not scroll
+  // the panes in screen order; a preview card floats and does not scroll
   const panes = (root) =>
     [...root.querySelectorAll("c-window.window")].filter(
-      (w) => !w.classList.contains("listing-peek")
+      (w) => !w.classList.contains("listing-preview")
     );
 
   // The axis and the distance of one pane-step. Panes that share one left

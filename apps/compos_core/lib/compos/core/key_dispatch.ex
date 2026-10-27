@@ -411,7 +411,7 @@ defmodule Compos.Core.KeyDispatch do
     end
 
     # Emacs runs post-command-hook after self-insert-command like after
-    # any command: the paren highlight and the peek follow typing too.
+    # any command: the paren highlight and the preview follow typing too.
     _ = Session.call_named("post-command!", [])
     note("after-command", "self-insert-command")
   end

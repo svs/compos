@@ -1824,11 +1824,11 @@
     // when it actually changed, or every unrelated re-render would
     // yank the view back.
 
-    PeekCard: {
+    PreviewCard: {
       mounted() {
         const ns = "http://www.w3.org/2000/svg";
         this.wire = document.createElementNS(ns, "svg");
-        this.wire.classList.add("peek-connector");
+        this.wire.classList.add("preview-connector");
         this.wire.setAttribute("aria-hidden", "true");
         this.path = document.createElementNS(ns, "path");
         this.path.setAttribute("fill", "none");
@@ -1846,17 +1846,17 @@
         this.block = e => { e.preventDefault(); e.stopPropagation(); };
         this.click = e => {
           this.block(e);
-          if (e.target.closest(".peek-card-dismiss")) {
-            const owner = this.el.style.getPropertyValue("--peek-source-window").trim();
-            this.pushEvent("ui_cmd", {win: owner, cmd: "listing-peek-dismiss"});
+          if (e.target.closest(".preview-card-dismiss")) {
+            const owner = this.el.style.getPropertyValue("--preview-source-window").trim();
+            this.pushEvent("ui_cmd", {win: owner, cmd: "listing-preview-dismiss"});
           }
         };
-        this.scrollPeek = e => {
-          const body = this.el.querySelector(".peek-card-body");
+        this.scrollPreview = e => {
+          const body = this.el.querySelector(".preview-card-body");
           if (body) body.scrollTop += e.deltaY;
           e.preventDefault(); e.stopPropagation();
         };
-        this.el.addEventListener("wheel", this.scrollPeek, {passive: false});
+        this.el.addEventListener("wheel", this.scrollPreview, {passive: false});
         this.el.addEventListener("pointerdown", this.block);
         this.el.addEventListener("mousedown", this.block);
         this.el.addEventListener("click", this.click);
@@ -1870,12 +1870,12 @@
         this.schedule();
       },
       beforeUpdate() {
-        this.savedScroll = this.el.querySelector(".peek-card-body")?.scrollTop;
+        this.savedScroll = this.el.querySelector(".preview-card-body")?.scrollTop;
       },
       updated() { this.place(); },
       place() {
-        const ownerId = this.el.style.getPropertyValue("--peek-source-window").trim();
-        const point = Number(this.el.style.getPropertyValue("--peek-source-point"));
+        const ownerId = this.el.style.getPropertyValue("--preview-source-window").trim();
+        const point = Number(this.el.style.getPropertyValue("--preview-source-point"));
         const owner = document.getElementById("win-" + ownerId);
         if (this.owner !== owner) {
           this.mutations.disconnect();
@@ -1892,9 +1892,9 @@
         }
         row ||= owner.querySelector("[data-current], .line.hl-line, .selected");
         if (this.row !== row) {
-          this.row?.classList.remove("peek-source-row");
+          this.row?.classList.remove("preview-source-row");
           this.row = row;
-          row?.classList.add("peek-source-row");
+          row?.classList.add("preview-source-row");
         }
         const r = row ? row.getBoundingClientRect() : o;
         const pad = 10;
@@ -1904,7 +1904,7 @@
         // frame, lay the card over the list's own right half.
         const neighbours = Array.from((owner.closest(".windows") || document.body)
             .querySelectorAll(".window"))
-          .filter(w => w !== owner && w !== this.el && !w.classList.contains("listing-peek"))
+          .filter(w => w !== owner && w !== this.el && !w.classList.contains("listing-preview"))
           .map(w => w.getBoundingClientRect())
           .filter(b => b.width > 80 && b.height > 60
                     && b.top < o.bottom - 8 && b.bottom > o.top + 8);
@@ -1935,10 +1935,10 @@
         Object.assign(this.el.style, {left: (left / zoom) + "px", top: (top / zoom) + "px",
           width: (width / zoom) + "px", height: (height / zoom) + "px", right: "auto", bottom: "auto",
           visibility: "visible"});
-        const body = this.el.querySelector(".peek-card-body");
-        const doc = body?.querySelector(".peek-document");
-        if (doc && !doc.dataset.peekSized) {
-          doc.dataset.peekSized = "true";
+        const body = this.el.querySelector(".preview-card-body");
+        const doc = body?.querySelector(".preview-document");
+        if (doc && !doc.dataset.previewSized) {
+          doc.dataset.previewSized = "true";
           const size = () => {
             const root = doc.contentDocument?.documentElement;
             if (root) doc.style.height = Math.max(300, root.scrollHeight) + "px";
@@ -1968,11 +1968,11 @@
       destroyed() {
         cancelAnimationFrame(this.raf);
         this.resize.disconnect(); this.mutations.disconnect();
-        this.row?.classList.remove("peek-source-row");
+        this.row?.classList.remove("preview-source-row");
         this.wire.remove();
         window.removeEventListener("resize", this.schedule);
         document.removeEventListener("scroll", this.schedule, true);
-        this.el.removeEventListener("wheel", this.scrollPeek);
+        this.el.removeEventListener("wheel", this.scrollPreview);
         this.el.removeEventListener("pointerdown", this.block);
         this.el.removeEventListener("mousedown", this.block);
         this.el.removeEventListener("click", this.click);
@@ -3024,7 +3024,7 @@
           return { line: parseInt(lineEl.dataset.line || numEl.textContent, 10), col };
         };
         this.mouseH = (e) => {
-          if (e.target.closest(".listing-peek")) return;
+          if (e.target.closest(".listing-preview")) return;
           if (e.button !== 0) return;
           if (e.target.closest("button, [phx-click]")) return;
           const winEl = e.target.closest(".window[data-win-id]");
@@ -3371,7 +3371,7 @@
           this.wheelPending.clear();
         };
         this.wheelH = (e) => {
-          if (e.target.closest?.(".listing-peek")) return;
+          if (e.target.closest?.(".listing-preview")) return;
           // followed block lists (a chat transcript), diff cards
           // (.diff-scroll) and buffers under the ship-all threshold
           // (.buf.client-scroll) own their scrolling natively — the

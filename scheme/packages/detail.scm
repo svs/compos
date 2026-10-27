@@ -5,13 +5,12 @@
 ;;; shows that row's buffer beside the list, and the NEXT row takes the
 ;;; same window. Each row is a new buffer name, so display-buffer's
 ;;; reuse-window never matches: without this the layout grows a pane per
-;;; row, or the row has to be a peek to stay in one place.
+;;; row.
 ;;;
-;;; A detail is not a peek. It is kept, it is writable, and it stays when
-;;; the list goes. Three things make it:
+;;; A detail is an ordinary buffer. It is kept, it is writable, and it
+;;; stays when the list goes. Three things make it:
 ;;;
-;;;   THE WINDOW IS REMEMBERED, per list, the way a peek remembers its own
-;;;     (docs/PEEK.md). The first row picks one through the display chain
+;;;   THE WINDOW IS REMEMBERED, per list. The first row picks one through the display chain
 ;;;     as category detail; every row after it retakes that window. This is
 ;;;     the one place a window is remembered rather than chosen at display
 ;;;     time, and the memory lapses on its own.

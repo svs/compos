@@ -81,7 +81,7 @@ keep their file-type filters. `RET` on `..` goes up; `^` is the same shortcut.
 The parent row cannot be marked or included in file actions.
 Directory navigation replaces the buffer in the current window. `q` returns
 through that window's history, so `q q` backs out two levels. Directory buffers
-remain alive with their selection and marks. If a file peek is open, the first
+remain alive with their selection and marks. If a file preview is open, the first
 `q` dismisses it.
 `RET` opens files, `m`/`SPC` marks, `u` unmarks, and `*` toggles all marks.
 `C` copies selected files into a folder chosen by name. `R` offers rename or move;

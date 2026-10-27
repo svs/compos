@@ -12,7 +12,7 @@ A popup is an ordinary buffer in an ordinary window. The model is popper.el from
 
 The list is empty by default, so no buffer is a popup until you name it. `popper-toggle-type` overrides the list for one buffer. It writes the buffer-local `popper-popup-status`: `popup` or `raised`.
 
-A buffer with a leading space, a peek, and a float are never popups. Each of them has its own window.
+A buffer with a leading space and a float are never popups. Each of them has its own window.
 
 ## Where a popup shows
 
@@ -24,7 +24,7 @@ A display of a popup goes through `display-buffer`. popper.scm adds one display 
 
 The popup window then has the selection, as in popper. It is an ordinary window with normal focus. Every window command reaches it.
 
-A look at a popup (a peek or a row preview) is not a popper display. It takes the preview rule, as any other look does.
+A row preview is not a popper display. It takes the preview rule, as any other look does.
 
 The layout does not tile a popup window. `window-work-buffer?` answers false for a popup, so the layout target does not count it and a display of another buffer does not take it.
 

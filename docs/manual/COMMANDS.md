@@ -62,8 +62,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `ibuffer-toggle-sorting-mode` |  | Cycle the order inside a section: name, recent, size |
 | `ibuffer-visit` |  | Enter the selected buffer's group and show it; on a heading, open the section |
 | `ibuffer-widen-group` |  | Show every group, keeping the text filter |
-| `listing-peek-dismiss` |  | Dismiss the preview card or window highlight; keep focus in its source |
-| `listing-peek-open-other` |  | Open the selected preview in another work window |
+| `listing-preview-dismiss` |  | Dismiss the preview card or window highlight; keep focus in its source |
+| `listing-preview-open-other` |  | Open the selected preview in another work window |
 | `narrow-to-region` | `C-x n n` | Show only the text between point and mark |
 | `next-buffer` | `S-<right>` | Walk back toward the most recently used buffer |
 | `previous-buffer` | `S-<left>` | Switch to the previously used buffer (again = deeper) |
@@ -199,9 +199,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `browser-mode` |  | Toggle agent browser access for this workspace |
 | `code-agent-mode` |  | Toggle the coding preset and prompts for this chat |
 | `code-mode` |  | Toggle the agent coding workspace in this buffer |
-| `definition-peek` |  | Show the definition of the name at point in the other window; run again to go there; a link there is followed |
-| `definition-peek-discard` |  | Forget the last definition shown; its window stays |
-| `definition-peek-go` |  | Go to the definition the peek window shows |
+| `definition-go` |  | Go to the definition the other window shows |
+| `definition-show` |  | Show the definition of the name at point in the other window; run again to go there; a link there is followed |
 | `imenu` | `M-g i` | Jump to a definition in this buffer |
 | `lsp-diag-refresh` |  | Refresh the diagnostics list |
 | `lsp-diag-visit` |  | Visit the diagnostic on this row |
@@ -426,9 +425,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `dired-filter-dotfiles` |  | Toggle hiding dotfiles |
 | `dired-mkdir` |  | Prompt for a name and create a directory here |
 | `dired-next` |  | Move down to the next line in the Dired buffer |
-| `dired-open` |  | Open the file on this line as your own, here: a peek is kept |
+| `dired-open` |  | Open the file on this line beside the listing and go there |
 | `dired-prev` |  | Move up to the previous line in the Dired buffer |
-| `dired-quit` |  | Dismiss the peek, otherwise return through this window's directory history |
+| `dired-quit` |  | Return through this window's directory history |
 | `dired-rename` |  | Rename or move the file at point |
 | `dired-revert` |  | Re-read the directory and refresh the listing |
 | `dired-sort-cycle` |  | Sort by the next field: name, size, modified, type, or VC |
@@ -441,7 +440,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `jj-push` |  | Advance the tracked bookmark to the tip and push to git |
 | `jj-recheck` |  | Look for the jj binary again |
 | `json-pretty-print-buffer` |  | Indent the current JSON buffer without changing its values or key order |
-| `keep-buffer` |  | Keep this peek: it becomes an ordinary buffer |
 | `kill-buffer` | `C-x k` | Kill a buffer, defaulting to the current one |
 | `list-flag-!` |  | Flag the entry at point with ! |
 | `minibuffer-collect` |  | Write the prompt's candidates into a buffer |

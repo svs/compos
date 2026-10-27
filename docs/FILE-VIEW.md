@@ -39,7 +39,7 @@ recording opens as fast as a thumbnail, writes an empty checkpoint, and costs
 no later boot anything. Reading one was how a 189 MB recording crashed the
 editor.
 
-Three things follow. `large-file-warning-threshold` and `peek-max-file-size`
+Three things follow. `large-file-warning-threshold` and `preview-max-file-size`
 do not apply to these files, because neither of them is a cost here. Nothing
 in such a buffer can be written over the file: the `unread-file` write rule
 refuses it, and no answer sets that rule aside. And auto-revert leaves these

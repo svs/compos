@@ -434,8 +434,8 @@ body {
   outline-offset: -1px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-fg, #8f9cdb) 20%, transparent);
 }
-/* A peek is a detached card, never a pane or editable surface. */
-.window.listing-peek {
+/* A preview is a detached card, never a pane or editable surface. */
+.window.listing-preview {
   position: fixed; z-index: 50; inset: auto;
   visibility: hidden; width: auto; height: auto;
   max-width: calc(100vw - 48px); min-width: 0;
@@ -446,32 +446,32 @@ body {
               0 2px 3px #0005, inset 0 1px 0 #ffffff30;
   transform: none; overflow: hidden; user-select: none;
 }
-.peek-card-header {
+.preview-card-header {
   display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
   padding: 12px 16px; border-bottom: 1px solid #ffffff18;
   background: color-mix(in srgb, var(--accent-fg, #8f9cdb) 12%, transparent);
 }
-.peek-card-label { text-transform: uppercase; font-size: 10px; letter-spacing: .14em;
+.preview-card-label { text-transform: uppercase; font-size: 10px; letter-spacing: .14em;
   font-weight: 700; color: var(--accent-fg, #aab5ef); }
-.peek-card-title { flex: 1; min-width: 0; overflow: hidden;
+.preview-card-title { flex: 1; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .8; }
-.peek-card-dismiss { border: 1px solid #ffffff30; border-radius: 0;
+.preview-card-dismiss { border: 1px solid #ffffff30; border-radius: 0;
   background: transparent; color: inherit; padding: 2px 7px; cursor: pointer; }
-.peek-card-dismiss:hover { background: #ffffff16; }
-.peek-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
+.preview-card-dismiss:hover { background: #ffffff16; }
+.preview-card-body { margin: 0; padding: 18px 20px 34px; flex: 1; min-height: 0;
   font: inherit; font-size: 1em; line-height: 1.6;
   overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain; }
-.peek-document { display: block; width: 100%; min-height: 300px; border: 0; pointer-events: none; }
-.peek-card-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
-.peek-card-body .peek-plain, .peek-text { font-family: var(--font-mono); }
-.peek-text .line { display: block; white-space: pre; }
-.peek-text .semantic-record { display: contents; }
-.windows:has(.listing-peek) * { transition: none !important; animation: none !important; }
-.peek-card-body .ag-scroll { overflow: visible; flex: none; }
-.peek-connector { position: fixed; inset: 0; width: 100vw; height: 100vh;
+.preview-document { display: block; width: 100%; min-height: 300px; border: 0; pointer-events: none; }
+.preview-card-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
+.preview-card-body .preview-plain, .preview-text { font-family: var(--font-mono); }
+.preview-text .line { display: block; white-space: pre; }
+.preview-text .semantic-record { display: contents; }
+.windows:has(.listing-preview) * { transition: none !important; animation: none !important; }
+.preview-card-body .ag-scroll { overflow: visible; flex: none; }
+.preview-connector { position: fixed; inset: 0; width: 100vw; height: 100vh;
   z-index: 49; overflow: visible; pointer-events: none;
   color: var(--accent-fg, #aab5ef); filter: drop-shadow(0 2px 3px #0008); }
-.peek-source-row { outline: 1px solid color-mix(in srgb, var(--accent-fg, #aab5ef) 60%, transparent);
+.preview-source-row { outline: 1px solid color-mix(in srgb, var(--accent-fg, #aab5ef) 60%, transparent);
   outline-offset: -1px; background: color-mix(in srgb, var(--accent-fg, #aab5ef) 12%, transparent); }
 
 .window.workspace-pending {

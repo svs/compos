@@ -25,8 +25,8 @@
       (buffer-kill! a) (buffer-kill! b) (buffer-kill! c)
       (group-record-delete! id))))
 
-(deftest 'a-peek-and-a-popup-are-not-fill-candidates
-  "a look, a floating buffer, a view and a context-only buffer never fill a window"
+(deftest 'a-popup-is-not-a-fill-candidate
+  "a floating buffer, a view and a context-only buffer never fill a window"
   (lambda ()
     (buffer-create "*zz-fill-popup*")
     (buffer-set-local! "*zz-fill-popup*" 'window-class "popup popup-right")

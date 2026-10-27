@@ -10,8 +10,8 @@ Where a buffer lands follows from what you did, not from what the buffer is.
   **selected window**. That is `switch-to-buffer!`, verb 1 below.
 - You opened a row from a list — dired, ibuffer, a table, a search result:
   it takes the **other window**, the one the list was previewing it in. The
-  list keeps its own window until it closes. That is the peek chain
-  (docs/PEEK.md) and `show-in-other-work-window!`.
+  list keeps its own window until it closes. That is
+  `display-buffer-other-window!` and `show-in-other-work-window!`.
 - You opened a row whose detail is its own buffer — a Sentry issue, a
   WhatsApp chat: it takes the list's **detail window**, and every later row
   takes that same window. `display-buffer-detail!`, below.
@@ -62,7 +62,7 @@ The actions:
 | `reuse-window` | a window that shows the buffer already |
 | `mode-window` | a work window whose buffer has the same major mode; the selected window first |
 | `pop-up-window` | split the largest work window when it is big enough (`split-window-sensibly`), else the selected one |
-| `use-some-window` | the least recently used other work window; excludes the float, popups and peeks |
+| `use-some-window` | the least recently used other work window; excludes the float and popups |
 | `same-window` | the selected window (`same` is the same action) |
 | `shaped` | the dock or the float, by the buffer's `window-shape` |
 | `popper-bottom` | the popup window at the bottom of the frame (popper.scm, docs/POPUPS.md) |
@@ -77,7 +77,7 @@ window reveals what it showed before — the move `buffer-left` and
 `buffer-right` make, done for you. `window-show-buffer!` enforces it, so
 every path that gives a window a buffer obeys the same rule.
 
-Two exemptions, both of them arrangement rather than display: a peek is a
+Two exemptions, both of them arrangement rather than display: a preview is a
 look, not a place, and the layout engine is left alone while it arranges
 (`*layout-busy*`). One degenerate case remains: when every eligible buffer is
 already on screen there is nothing else to reveal, and the other window keeps
@@ -115,7 +115,7 @@ visible non-members. A layout change never
 substitutes hidden work for an already occupied slot. The float and popup
 windows are excluded from the base arrangement.
 
-Only hidden fillers are subject to eligibility: no peeks, floating buffers,
+Only hidden fillers are subject to eligibility: no floating buffers,
 special buffers, context-only buffers or foreign group members. Existing
 group chats and scratch buffers are eligible fillers. Fixed targets cap the
 sequence at their capacity. With no group, flexible layouts use visible panes
@@ -170,13 +170,13 @@ with a disposable-frame runner and keyboard-path test in
 
 The callers pass an alist, a plist:
 
-- `'category KIND`: the kind of display. A peek passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window mode-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
+- `'category KIND`: the kind of display. A row preview passes `preview`, a list's row detail passes `detail`. The stock rule `((category preview) (reuse-window mode-window use-some-window pop-up-window))` is last in the alist, so a rule for a name wins over it.
 - A display of a buffer from outside the frame's group that names no category is a display of category `foreign` (`display-foreign?`, answered by groups.scm). The stock rule sends it through the window chain (docs/groups.md). `switch-to-buffer!` obeys this rule (Emacs `switch-to-buffer-obey-display-actions`); a mechanism that fills a window it chose calls `switch-to-buffer-here!`. To split a new window for foreign buffers instead: `(add-display-rule! '(category foreign) 'pop-up-window)`.
 - `'inhibit-same-window #t`: keep the selected window out of the chain. `display-buffer-other-window!` is `display-buffer` with this set.
 
 ## Previews are a rule
 
-A peek (docs/PEEK.md) is a display of category `preview`. By the stock rule it goes through the window chain: dired and the browser show a file beside the listing without keeping it, in a window that is not the reader's. A popup rule does not take a look (docs/POPUPS.md). The next peek takes the same window, and dismissing the peek puts the window back. Point stays in the listing.
+There is no peek. Every buffer opens normally, in a window, as your own: dired and the browser show a file beside the listing through the window chain, in a window that is not the reader's, and point stays in the listing. A preview is an overlay: the card a list of buffers floats over the frame (`preview-show ... 'float`), dismissed with `q`. A display of category `preview` takes the stock rule; a popup rule does not take it (docs/POPUPS.md).
 
 ## Details are a rule and a memory
 
@@ -192,7 +192,7 @@ This is the one place a window is remembered rather than chosen at display
 time, and it lapses on its own: when the window goes, when it holds the list
 itself, or when the list asks from it.
 
-A detail is not a peek. It is kept, it is writable, and it stays when the
+A detail is an ordinary buffer. It is kept, it is writable, and it stays when the
 list goes. The list owns it (`buffer-child!`, `packages/dismiss.scm`), so `q` on the
 list takes the detail with it, and the details of one list are siblings:
 `C-\`` in the detail window walks them, most recent first, the way it walks

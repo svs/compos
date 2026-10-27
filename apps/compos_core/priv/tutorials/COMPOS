@@ -51,7 +51,7 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 11. Files and buffers
 12. Help
 13. Modes and keymaps
-14. Lists and peeks
+14. Lists and previews
 15. Browsing the web
 16. Groups
 17. Agents
@@ -74,7 +74,7 @@ Compos keeps that idea and adds a graphical display, work that runs at the same 
 
 Every one of them has a name, named commands, a place on the screen, and state that you and an agent can both change.
 
-Every window, list and page uses the same movement and editing keys. So the next sections teach those keys, on the text in front of you. When they are familiar, the sections on Windows, Lists and peeks, Groups and Agents show the idea above in action.
+Every window, list and page uses the same movement and editing keys. So the next sections teach those keys, on the text in front of you. When they are familiar, the sections on Windows, Lists and previews, Groups and Agents show the idea above in action.
 
 The tutorial is a buffer too. You are learning Compos from inside Compos.
 
@@ -185,7 +185,7 @@ One small command shows the whole idea:
 
 > **Try it.** Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
 
-You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a peek (a preview beside the work, covered later), the messages buffer or any other useful neighbour.
+You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a file beside the work, the messages buffer or any other useful neighbour.
 
 > **Try it.** Type `C-x 1` to return to one window.
 
@@ -317,7 +317,7 @@ When you type a key, Compos looks for it in this order: temporary maps, the thin
 
 So a list, a source file, a chat and a browser page can differ where they should, and stay consistent where they can.
 
-## Lists and peeks
+## Lists and previews
 
 Compos applications share one list interface:
 
@@ -334,7 +334,7 @@ A list mode adds its own actions, such as `RET` to visit a row and `q` to quit. 
 
 > **Try it.** Type `M-x ibuffer`. This list manages buffers. Move through the rows with `C-n` and `C-p`. In ibuffer, `p` turns the row preview on and off. Type `/` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
 
-A **peek** shows you something without switching context. A list such as dired can show the row at point in another window, while your selection stays in the list. The next peek replaces the previous one, and `q` dismisses it. `M-<down>` and `M-<up>` scroll the peek without taking your focus.
+Every buffer opens normally, in a window, as your own. A list such as dired opens the file at point in another window with `RET`, while your selection stays in the list. A list of buffers shows the row at point as a **preview**: a card that floats over the frame and follows the highlight. `q` dismisses the card. `M-<down>` and `M-<up>` scroll the other window without taking your focus.
 
 This is `scroll-other-window` made into a pattern: look at nearby context without losing the work that led you there.
 
@@ -352,7 +352,7 @@ In browse mode:
 | --- | --- |
 | `RET` | Follow a link in the current browse tab |
 | `s-RET` | Open a separate browse tab (Command-RET on macOS) |
-| `M-RET` | Peek the link in another window |
+| `M-RET` | Open the link in another window |
 | `l` | Go back (Meta-Left does the same) |
 | Meta-Right | Go forward |
 | `R` | Toggle calm and full readings |
@@ -497,7 +497,7 @@ The browser is a renderer and a client, not the editor. The headless daemon is t
 
 You have practised the main ideas:
 
-- Information comes to you, through buffers, windows, peeks, browser tabs and groups.
+- Information comes to you, through buffers, windows, previews, browser tabs and groups.
 - Named commands give people and agents one place to act.
 - Modes and keymaps specialize a common interface without splitting it.
 - A conversation lives beside the state it discusses.

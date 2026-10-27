@@ -162,7 +162,7 @@ Successful renders enter persistent web history with URL, title, and time. `H` o
 | --- | --- |
 | `RET` | Follow the link at point |
 | `s-RET` | Open the link in its own browse tab |
-| `M-RET` | Peek the link in another window |
+| `M-RET` | Open the link in another window |
 | `TAB`, `n`, `p` | Move among links |
 | `l`, `M-Left` | Back |
 | `M-Right` | Forward |

@@ -30,7 +30,7 @@ The list mode in `scheme/packages/tabulated-list.scm` draws every table in the e
 7. A mode's `'meta` answers a string, or `(TEXT SPANS)` with its own faces. The ibuffer wide head says the grouping and the sort as chips this way, the current one lit.
 ## Point
 
-1. The point belongs to the reader. No process moves it: a draw restores the row by its key, a peek popup opening or closing beside the listing moves nothing (docs/POPUPS.md rule 10), an open of a list you already have keeps the row you left it on. A narrowing lands on the first row because the old row may be gone; that is the reader's own act.
+1. The point belongs to the reader. No process moves it: a draw restores the row by its key, a preview card opening or closing over the listing moves nothing (docs/POPUPS.md rule 10), an open of a list you already have keeps the row you left it on. A narrowing lands on the first row because the old row may be gone; that is the reader's own act.
 2. Remembering is enough. Dired: a listing opened for the first time starts on its first entry; opened again, it is where you left it. `^` and `RET` on `..` open the parent listing where it was — the row you left it on is the directory you went into, so nothing needs computing.
 
 ## Narrowing
@@ -66,7 +66,7 @@ Ibuffer and ichat bind `C-x n n` to the group at point and `C-x n w` to all grou
 
 Ibuffer also coalesces filter redraws over 60 ms while input updates immediately. A complete mode name such as `chat-mode` matches that exact major mode; ordinary text remains a substring search across name, title, mode and metadata. Filtered group counts and membership describe the matching subset, while the source retains all rows for widening and unfolding.
 
-Chat peek copies retain the rich renderer's block ranges and input boundary from live sources. Saved transcript files are projected into user/status/prose blocks without restoring chat identity or a runtime. Preview buffers enable the source major mode and remain read-only through peek-mode. Source render projections are preserved for rich modes; list modes skip refetching during preview setup. Switching modes clears the old chat rendering locals.
+Chat preview copies retain the rich renderer's block ranges and input boundary from live sources. Saved transcript files are projected into user/status/prose blocks without restoring chat identity or a runtime. Preview buffers enable the source major mode and stay read-only. Source render projections are preserved for rich modes; list modes skip refetching during preview setup. Switching modes clears the old chat rendering locals.
 
 Ibuffer's searchable marginalia includes the row title/name, mode, path, kind metadata, size and age. It excludes transcript hits from chat-list. Search data is cached per source snapshot (up to 16 views, 2048 rows each); changing the query reuses it and refreshing the source invalidates it. Chat-list adds transcript snippets through its own matcher.
 

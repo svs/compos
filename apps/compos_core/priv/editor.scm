@@ -916,7 +916,7 @@
         (lambda (v) (set-symbol-value! name (if (equal? v #f) default v)))))
     name))
 
-;; the desktop key of a variable: *peek-recent* rides as peek-recent
+;; the desktop key of a variable: *minibuffer-history* rides as minibuffer-history
 (define (defvar--key name)
   (string->symbol
     (string-join (filter (lambda (s) (not (equal? s "")))
@@ -4379,7 +4379,7 @@
 ;;;
 ;;; So a visit REFUSES, and the reader who means it answers a question. The
 ;;; refusal is the mechanism, the question is the policy, and a caller that
-;;; cannot ask one — an agent, a restore, a peek — gets the refusal.
+;;; cannot ask one — an agent, a restore, a preview — gets the refusal.
 ;;;
 ;;; layouts.scm makes the variable customizable.
 
@@ -4486,7 +4486,7 @@
 
 ;; The same open, without a window: the buffer is made, joins the
 ;; group, and takes its mode with the buffer current but not shown. A
-;; peek opens this way, so the selected window never shows the file on
+;; preview opens this way, so the selected window never shows the file on
 ;; its way to the look (find-file-noselect).
 (define (visit-quietly path0 &optional group)
   (let* ((path (normalize-file-input path0))
@@ -5396,7 +5396,7 @@
         ((equal? cmd "modeline-expand") (run-command cmd))
         ;; the header line's theme word opens the theme picker
         ;; a release of Cmd ends a walk of the window's stack
-        ((member cmd '("dismiss-buffer" "listing-peek-dismiss" "load-theme" "window-walk-end"))
+        ((member cmd '("dismiss-buffer" "listing-preview-dismiss" "load-theme" "window-walk-end"))
          (run-command cmd))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))

@@ -67,7 +67,7 @@ has never been displayed has no point yet; asking where that point fell
 in the text raised out of the open. `line-index-at` answers for a list
 with no point now.
 
-## Listing buffers and floating peek cards
+## Listing buffers and floating preview cards
 
 `M-x ibuffer` opens an ordinary listing buffer in the window that invoked
 it, reusing a matching one in the current group without selecting another
@@ -109,8 +109,8 @@ card's restore put the list back on screen, and the second `q` found
 nothing recorded and deleted the window instead of giving the
 arrangement back. Dismissing a card suppresses it for that
 row until selection changes. `RET` in the source list opens the real buffer.
-Closing a picker removes its card too. `C-x o` or `Cmd-RET` while peeking
-opens the original buffer in another work window. Showing a peek never animates
+Closing a picker removes its card too. `C-x o` or `Cmd-RET` while a preview shows
+opens the original buffer in another work window. Showing a preview never animates
 the listing. `RET` opens in the selected pane, moving the mode's window there
 when necessary; `q` returns to the same-group listing.
 In both ibuffer and ichat, `C-x n n` narrows to the group heading at point

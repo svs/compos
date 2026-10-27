@@ -85,8 +85,7 @@
 ;; layout-targets is absent on purpose: its state fn derives the value
 ;; from the live frames and holds no variable a reload can reset.
 (define t--reload-persisted
-  '(("window.scm" "*peek-recent*")
-    ("chat-mode.scm" "*llm-config-history*")
+  '(("chat-mode.scm" "*llm-config-history*")
     ("chat-mode.scm" "*llm-bundles*")
     ("chat-mode.scm" "*llm-connector-models*")
     ("minibuffer.scm" "*minibuffer-history*")

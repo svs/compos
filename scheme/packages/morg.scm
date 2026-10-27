@@ -1255,7 +1255,7 @@
     ("C-x n n" "morg-narrow")
     ("C-x n N" "narrow-context-also")
     ("C-x n w" "morg-widen")
-    ("M-." "definition-peek")))
+    ("M-." "definition-show")))
 
 (register-context-provider! "morg-mode"
   (lambda (buf)

@@ -2727,7 +2727,7 @@ is forgotten and that group falls back to creation order in the switcher."
                    (set! *group-switch-rows* '())
                    (set! *group-switch-restore* #f)
                    (group-preview-forget!)))
-               (peek-now!
+               (preview-now!
                  (lambda (name)
                    (when open
                      (let ((id (group-switch-id name)))
@@ -2746,20 +2746,20 @@ is forgotten and that group falls back to creation order in the switcher."
                ;; a look per highlight that RESTS: C-n held down moves the
                ;; highlight faster than a frame draws, and each look is a
                ;; draw (and a wake, for a dormant member)
-               (peek!
+               (preview!
                  (lambda (name)
                    ;; 0 keeps the frame still: the card already says what a
                    ;; group holds, and a look is a whole-frame draw per
                    ;; highlight, panes and all
-                   (when (and (number? group-switch-peek-ms)
-                              (> group-switch-peek-ms 0))
-                     (debounce! "group-switch-peek" group-switch-peek-ms
-                                peek-now! name)))))
+                   (when (and (number? group-switch-preview-ms)
+                              (> group-switch-preview-ms 0))
+                     (debounce! "group-switch-preview" group-switch-preview-ms
+                                preview-now! name)))))
           (set! *group-switch-rows* (cdr prompt-rows))
           (set! *group-switch-restore* restore!)
           (begin
               (minibuffer-read-preview "Switch group: " candidates
-                peek!
+                preview!
                 (lambda (name)
                   (let ((id (group-switch-id name)))
                     (close!)
@@ -2788,7 +2788,7 @@ is forgotten and that group falls back to creation order in the switcher."
                 (cons "group-switch-modal-map"
                       (buffer-minor-maps (minibuffer-buffer)))))))))
 
-(defcustom 'group-switch-peek-ms 120
+(defcustom 'group-switch-preview-ms 120
   "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still."
   'group 'groups 'type 'number)
 
@@ -2863,7 +2863,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; The walk holds every buffer the USER has in the group, a dormant one
 ;; too: a step onto it wakes it. It leaves out a buffer only an agent
 ;; opened (a context buffer), and the names that are not a buffer you can
-;; stand in -- a hidden buffer, a float and a peek.
+;; stand in -- a hidden buffer and a float.
 ;; With MODE-ONLY the ring keeps the buffers of this buffer's major mode
 ;; (a derived mode counts). A buffer with no mode walks the others with none.
 (define (group-cycle-ring &optional mode-only)
@@ -2880,7 +2880,6 @@ is forgotten and that group falls back to creation order in the switcher."
                          (not (string-prefix? " " b))
                          (not (buffer-context-only? b))
                          (not (float--class? b))
-                         (not (peek-buffer? b))
                          (not (equal? b here))))
                   (buffer-list-mru)))))
 
@@ -3737,7 +3736,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; stay; anything else gives way to the group's scratch (made now, from a
 ;; member that survived), else the window closes. The last window
 ;; of a frame cannot close: it shows *scratch*. A window in no group
-;; keeps the core's fallback, unless that fallback is a peek.
+;; keeps the core's fallback.
 ;;
 ;; The selection stays in the window that was selected: the core hands
 ;; it to another window while the buffer dies, and that window was the

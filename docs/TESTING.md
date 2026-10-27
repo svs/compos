@@ -40,6 +40,6 @@ Files converted so far: anchor, anon, apropos, chat-name, chat-scheme,
 chat-unstick, chat-view, decide, display-buffer, do, doom, fast-code,
 file-group-context, group-membership, group-prompt, keys, layouts,
 list-redraw-read-only, llm-config, lsp, messages, modeline, needle,
-paredit, peek, peek-md, perf, permission, popper, profile, prompt,
+paredit, perf, permission, popper, profile, prompt,
 recording, repl, sentry, setup, skills, transient, window-config. The
 rest still hand-roll their setup and can be converted the same way.

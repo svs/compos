@@ -8,7 +8,7 @@ Check the user's real page, not a mock. `(dom-measure SELECTOR [LIMIT])` gives t
 
 - The fetch runs in the background, so the buffer is empty at first. Read it with `(buffer-text NAME)` on a later call, not in the same call. A page with too little text stays empty.
 - `(buffer-local NAME 'browse-html)` gives the page source that the buffer holds.
-- Use `(browse-other-window URL)` or `(browse-peek URL)` only when the user asks to see the page.
+- Use `(browse-other-window URL)` only when the user asks to see the page.
 - For the raw body, use `(http-text URL)`. For status, headers and body, use `(http-get URL [OPTS])`.
 
 ## Site parsers

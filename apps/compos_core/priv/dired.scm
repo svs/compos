@@ -289,7 +289,7 @@
 (define (dired-compact-cells buf e) (dired-cells-pick buf e '(0 1 3 4 6)))
 
 (define (dired-narrow-footer buf)
-  '(("RET" "peek") ("SPC" "select") ("x" "trash")
+  '(("RET" "open") ("SPC" "select") ("x" "trash")
     ("/" "filter") ("^" "up") ("q" "quit")))
 
 ;;; --- filters ------------------------------------------------------------------
@@ -480,48 +480,19 @@
 
 ;; ".." is entry zero, so RET on it works through the same list-current
 ;; path as every real row; marks skip it
-;; The peek opens on RET. While a peek shows, the highlight drives it:
-;; rest on a file and the peek shows that file instead, so RET on it
-;; opens. Held down, the arrows move faster than a file opens, so the
-;; look waits for the highlight to rest. With no peek showing, moving
-;; the highlight shows nothing.
-;; plain defines: dired loads before custom.scm, so defcustom is not
-;; here yet. Set them in init.scm.
-(define dired-peek-on-move #t)   ; a shown peek follows the highlight
-(define dired-peek-ms 120)       ; how long the highlight rests first, in ms
-
-;; the look the rest scheduled: only if the reader is still where the
-;; highlight rested. The rest fires later, and a reader who moved to
-;; another window or buffer must not be pulled back.
-(define (dired--peek-now! args)
-  (let ((p (car args)) (g (cadr args)) (me (caddr args)) (here (nth 3 args)))
-    (when (and (equal? (active-window) me) (equal? (current-buffer) here)
-               (not (and (peek-buffer? p) (window-showing p))))
-      (peek! p (lambda () (visit-quietly p g))))))
-
-(define (dired--preview buf entry)
-  (when (and dired-peek-on-move (equal? (current-buffer) buf)
-             ;; only a peek already on screen follows
-             (pair? (filter window-showing (peek-buffers))))
-    (let ((p (dired-path-at-point)))
-      (when (and p (string? entry) (not (equal? entry ".."))
-                 (not (dired-directory? entry)))
-        (debounce! "dired-peek" dired-peek-ms dired--peek-now!
-                   (list p (buffer-group buf) (active-window) buf))))))
 
 (define-list-mode! "Dired"
   (list
     'composml-root (lambda (buf) (list 'tag "directory" 'attrs (list (list "path" (dired-dir buf)))))
     'composml-record (lambda (buf entry) (dired-composml-record buf entry))
     'composml-fields (lambda (buf entry) (dired-composml-fields buf entry))
-    'preview dired--preview
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
            "git says. Select files with `SPC` (or `m`) and the whole listing with `* s`; "
            "`x` trashes what you marked, and `d` flags a file for the same "
-           "`x`. `D` flags permanent deletion. `RET` on a file peeks it in the other window, "
-           "read-only; `RET` again or `M-RET` opens it here as your own; `q` dismisses "
-           "the peek, and with none showing leaves dired. "
+           "`x`. `D` flags permanent deletion. `RET` on a file opens it in the other window, "
+           "the one of its own mode first; `M-RET` opens it beside the listing and goes there. "
+           "`q` leaves dired. "
            "`RET` on a directory opens it here. `^` goes up. `/` narrows as you type — it matches the "
            "perms, the size, the date, the name and the mode the file would "
            "open in. The arrows move the rows while you type, and `RET` "
@@ -576,11 +547,11 @@
     'meta (lambda (buf) (dired-meta buf))
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
-              '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("* s" "all") ("d" "flag")
+              '(("RET" "open") ("M-RET" "open and go") ("SPC" "select") ("* s" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles") ("% m" "mark regexp") ("t" "toggle")
                 ("!" "shell") ("C-x C-q" "edit names")
-                ("^" "up") ("g" "revert") ("q" "quit peek, then dired")))
+                ("^" "up") ("g" "revert") ("q" "quit")))
     ;; Marked rows go to trash by default. Permanent deletion uses `D`.
     'flags (list (list "d" "D" "trash"
                        (lambda (buf e)
@@ -798,9 +769,9 @@
 (define-command "dired-prev" "Move up to the previous line in the Dired buffer"
   (lambda () (list-move! -1)))
 
-;; A directory opens in place: a listing is yours. A file is a PEEK: RET
-;; shows it in the other window, read-only, and M-RET opens it as your own,
-;; here. A file that already had a buffer is only shown.
+;; A directory opens in place. A file opens normally: RET shows it in
+;; the other window and Dired keeps the focus; M-RET opens it there and
+;; goes. A file that already had a buffer is only shown.
 (define (dired-visit-with-group group)
   (let ((p (dired-path-at-point))
         (entry (dired-entry)))
@@ -822,9 +793,9 @@
     ;; fallback. An explicit visit also replaces inherited placement.
     (dired-visit-with-group (buffer-group (current-buffer)))))
 
-(define-command "dired-quit" "Dismiss the peek, otherwise return through this window's directory history"
+(define-command "dired-quit" "Return through this window's directory history"
   (lambda ()
-    (unless (peek-dismiss!)
+    (unless (preview-dismiss!)
       (let* ((win (active-window)) (cur (current-buffer))
              (history (window-eligible-history win)))
         (if (pair? history)
@@ -835,7 +806,7 @@
               (set-window-prev-buffers! win (cdr history)))
             (run-command "quit-window"))))))
 
-(define-command "dired-open" "Open the file on this line as your own, here: a peek is kept"
+(define-command "dired-open" "Open the file on this line beside the listing and go there"
   (lambda ()
     (let ((p (dired-path-at-point))
           (entry (dired-entry))
@@ -843,7 +814,8 @@
       (if p
           (if (or (equal? entry "..") (dired-directory? entry))
               (visit p group)
-              (peek-open! p (lambda () (visit p group))))
+              (let ((buf (visit-quietly p group)))
+                (when buf (show-in-other-work-window! buf))))
           (message "No file on this line")))))
 
 (define-command "dired-visit-in-group"

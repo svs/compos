@@ -640,7 +640,7 @@
         ibuffer-default-grouping)))
 
 (define (ibuffer-collapsed &optional buf)
-  (or (buffer-local (or buf (ibuffer-view)) 'ibuffer-collapsed) '()))
+  (fold-keys (or buf (ibuffer-view)) 'ibuffer-collapsed))
 
 (define (ibuffer-cycle-after item items) (list-cycle item items 1))
 
@@ -667,7 +667,7 @@
     (when (buffer-known? buf) (ibuffer-refresh! buf))))
 
 (define (ibuffer-folded? key &optional buf)
-  (if (member key (ibuffer-collapsed buf)) #t #f))
+  (fold-key? (or buf (ibuffer-view)) 'ibuffer-collapsed key))
 
 (define (ibuffer-fold-source rows key folded?)
   (cond ((null? rows) '())
@@ -686,11 +686,7 @@
 
 (define (ibuffer-toggle-fold! key &optional buf)
   (let* ((buf (or buf (ibuffer-view)))
-         (now (ibuffer-collapsed buf))
-         (folded? (not (member key now))))
-    (buffer-set-local! buf 'ibuffer-collapsed
-      (if folded? (cons key now)
-          (filter (lambda (k) (not (equal? k key))) now)))
+         (folded? (fold-key-toggle! buf 'ibuffer-collapsed key)))
     ;; The source already holds ordered members and heading statistics.
     ;; Folding changes only their visibility; do not refetch or sort them.
     (buffer-set-local! buf 'list-source-entries
@@ -704,7 +700,7 @@
   (let* ((buf (or buf (ibuffer-view)))
          (keys (map ibuffer-heading-key (filter ibuffer-heading? (list-source-entries buf))))
          (folded? (not (null? (filter (lambda (k) (not (ibuffer-folded? k buf))) keys)))))
-    (buffer-set-local! buf 'ibuffer-collapsed (if folded? keys '()))
+    (fold-keys-set! buf 'ibuffer-collapsed (if folded? keys '()))
     (buffer-set-local! buf 'list-source-entries
       (fold (lambda (rows k) (ibuffer-fold-source rows k folded?))
             (list-source-entries buf) keys))

@@ -331,8 +331,7 @@
                         (plist-get op 'params) (plist-get op 'body)
                         (lambda (r)
                           (when (and (plist-get r 'ok) (buffer-exists? buf))
-                            (buffer-set-local! buf 'list-marks
-                              (filter (lambda (m) (not (equal? (car m) (plist-get op 'id)))) (list-marks buf))))
+                            (list-unmark-key! buf (plist-get op 'id)))
                           (loop (cdr remaining)
                             (if (plist-get r 'ok) failed
                                 (cons (string-append (plist-get op 'name) ": " (plist-get r 'error)) failed)))))))))))))))

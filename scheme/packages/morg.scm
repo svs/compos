@@ -356,9 +356,7 @@
 
 (effects! '(write))
 
-(define (morg-folds buf)
-  (let ((f (buffer-local buf 'morg-folds)))
-    (if f f '())))
+(define (morg-folds buf) (fold-keys buf 'morg-folds))
 
 (define (morg-outline? buf)
   (equal? (buffer-local buf 'morg-outline) #t))
@@ -394,26 +392,19 @@
                    (else
                     (list eol (morg-block-close-end scan buf h))))))
              valid)))
-    (buffer-set-local! buf 'morg-folds valid)
+    (fold-keys-set! buf 'morg-folds valid)
     (fold-set! buf 'morg
       (filter (lambda (r) (< (car r) (cadr r))) ranges))))
 
 (define (morg-set-folds! buf folds)
   (buffer-set-local! buf 'morg-outline #f)
-  (buffer-set-local! buf 'morg-folds folds)
+  (fold-keys-set! buf 'morg-folds folds)
   (morg-apply-folds! buf))
 
 (define (morg-toggle-fold buf h)
-  (let ((folds
-          (if (member h (morg-folds buf))
-              (filter (lambda (x) (not (equal? x h))) (morg-folds buf))
-              (cons h (morg-folds buf)))))
-    (if (morg-outline? buf)
-        (begin
-          ;; Keep body-only geometry while one heading changes visibility.
-          (buffer-set-local! buf 'morg-folds folds)
-          (morg-apply-folds! buf))
-        (morg-set-folds! buf folds))))
+  ;; one heading changes visibility; an outline keeps its body-only geometry
+  (fold-key-toggle! buf 'morg-folds h)
+  (morg-apply-folds! buf))
 
 ;;; --- cosmetic narrowing ------------------------------------------------------
 ;;; Narrowing changes the visible document only. The context provider adds a
@@ -481,7 +472,7 @@
            (scan (morg-scan buf))
            (headings
              (map car (filter (lambda (e) (equal? (morg-kind e) 'heading)) scan))))
-      (buffer-set-local! buf 'morg-folds headings)
+      (fold-keys-set! buf 'morg-folds headings)
       (buffer-set-local! buf 'morg-outline #t)
       (morg-apply-folds! buf)
       ;; Point may be in a now-hidden body. Surface it on its heading.
@@ -932,7 +923,7 @@
     ;; re-anchor folds through the edit, then validation prunes the dead
     (let ((delta (- (string-byte-length inserted) deleted)))
       (unless (= delta 0)
-        (buffer-set-local! buf 'morg-folds
+        (fold-keys-set! buf 'morg-folds
           (map (lambda (h) (if (>= h pos) (max pos (+ h delta)) h))
                (morg-folds buf)))
         (let ((anchor (morg-narrow-anchor buf)))

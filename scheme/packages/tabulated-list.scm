@@ -169,6 +169,10 @@
 
 (define (list-marks buf) (or (buffer-local buf 'list-marks) '()))
 
+;; the one writer of 'list-marks: a mode that draws its own selection
+;; (notmuch) hands the whole set here
+(define (list-marks-set! buf marks) (buffer-set-local! buf 'list-marks marks))
+
 (define (list-mark-of buf e &optional ctx)
   (let* ((key (if ctx
                   (let ((f (list-ctx-key ctx))) (if f (f buf e) e))
@@ -179,17 +183,17 @@
 (define (list-mark! buf e ch)
   (let* ((k (list-key buf e))
          (rest (filter (lambda (m) (not (equal? (car m) k))) (list-marks buf))))
-    (buffer-set-local! buf 'list-marks (if ch (cons (list k ch) rest) rest))))
+    (list-marks-set! buf (if ch (cons (list k ch) rest) rest))))
 
 (define (list-marked buf ch)
   (map car (filter (lambda (m) (equal? (car (cdr m)) ch)) (list-marks buf))))
 
-(define (list-clear-marks! buf) (buffer-set-local! buf 'list-marks '()))
+(define (list-clear-marks! buf) (list-marks-set! buf '()))
 
 ;; unmark by the stored KEY — the execute loop holds keys, not entries,
 ;; and list-mark! would run the mode's 'key fn on one
 (define (list-unmark-key! buf k)
-  (buffer-set-local! buf 'list-marks
+  (list-marks-set! buf
     (filter (lambda (m) (not (equal? (car m) k))) (list-marks buf))))
 
 ;;; --- flag, then execute ------------------------------------------------------
@@ -307,7 +311,7 @@
       ;; it hides would ride along unseen into the next command
       (unless all-marked?
         (let ((shown (map (lambda (e) (list-key buf e)) markable)))
-          (buffer-set-local! buf 'list-marks
+          (list-marks-set! buf
             (filter (lambda (m) (or (member (car m) shown)
                                     (not (equal? (car (cdr m)) *list-mark-char*))))
                     (list-marks buf)))))
@@ -2212,10 +2216,7 @@
       (let ((f (list-opt buf 'section?))) (and f (f buf row) #t))))
 
 ;; Fold: a folded row hides every row under it and says how many.
-(define (list-fold-toggle! buf key)
-  (let ((folded (or (buffer-local buf 'list-folded-rows) '())))
-    (buffer-set-local! buf 'list-folded-rows
-      (if (member key folded) (remove (lambda (k) (equal? k key)) folded) (cons key folded)))))
+(define (list-fold-toggle! buf key) (fold-key-toggle! buf 'list-folded-rows key))
 
 ;; the row TAB folds: the row itself when it has children, else its parent
 (define (list-fold-target buf row)
@@ -2241,8 +2242,8 @@
   (let* ((parents (or (buffer-local buf 'list-row-parents) '()))
          (row (list-fold-target buf (list-current buf)))
          (key (and row (list-key buf row))))
-    (buffer-set-local! buf 'list-folded-rows
-      (if (pair? (or (buffer-local buf 'list-folded-rows) '())) '() (map car parents)))
+    (fold-keys-set! buf 'list-folded-rows
+      (if (pair? (fold-keys buf 'list-folded-rows)) '() (map car parents)))
     (list-redraw! buf)
     (let ((i (and key (list-index-of buf (list-entries buf) key))))
       (when i (list-goto-index! buf i)))))
@@ -2304,7 +2305,7 @@
     (if (not parent-of)
         (list rows '() '())
         (let ((flat? (let ((f (list-opt buf 'nest-flat?))) (and f (f buf))))
-              (folded (or (buffer-local buf 'list-folded-rows) '()))
+              (folded (fold-keys buf 'list-folded-rows))
               (out '()) (depths '()) (parents '()) (run '()))
           (define (flush!)
             (let ((n (list-nest-run buf (reverse run) parent-of flat? folded)))
@@ -2701,6 +2702,11 @@
 (public! 'list-nest-indent "(list-nest-indent DEPTH) — the text a row DEPTH deep starts with" 'ui)
 (public! 'list-toggle-children! "(list-toggle-children! BUF) — fold or unfold the rows under the row at point, or under its parent" 'ui)
 (public! 'list-toggle-all-children! "(list-toggle-all-children! BUF) — fold every parent row, or unfold them all when one is folded" 'ui)
+(public! 'list-marks-set! "(list-marks-set! BUF MARKS) - replace a list's marks, a list of (KEY CHAR); list-mark! and list-unmark-key! change one" 'ui)
+(public! 'list-unmark-key! "(list-unmark-key! BUF KEY) - drop the mark on the row whose key is KEY" 'ui)
+(effects! '(read))
+(public! 'list-marks "(list-marks BUF) - a list's marks, a list of (KEY CHAR)" 'ui)
+(effects! '(write))
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 
 (domain! 'unknown)

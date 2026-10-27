@@ -2099,7 +2099,7 @@ them the address is live, so a purge never follows one."
     (and s (or (caddr s) (pair? (list-ref s 3))))))
 
 (define (nm--draw-marks! buf rows)
-  (buffer-set-local! buf 'list-marks
+  (list-marks-set! buf
     (map (lambda (th) (list (nm--th-id th) *list-mark-char*))
          (filter (lambda (th) (nm--row-marked? buf th)) rows))))
 

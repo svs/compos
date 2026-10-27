@@ -41,3 +41,19 @@ Never block the editor lane waiting for a slow answer. `(wait-until ...)`, a bar
 A callback-shaped API, anything whose last argument is a continuation K, becomes a value with `(app-await (lambda (k) (CALL ARGS k)))`. That call blocks, so it belongs inside a task, never on the lane. Poll only what will never notify you, and poll from a task.
 
 Never add a sleep. Take the answer the moment it is ready: a sleep, a retry delay, or a poll interval is latency you inflicted on the caller, and it hides in a measurement as if it were the work. Time a call you care about with `(monotonic-ms)` on both sides and report the elapsed number with the result.
+
+## Listeners
+
+Reactivity is a core capability. A turn that waits on slow work ends at once, and the work wakes the chat when it is done. Never end a turn on a clock to look again later.
+
+- `(agent-listen! '(topic "TOPIC" kind KIND) NOTE)` wakes this chat when an event on TOPIC arrives; a trailing `*` matches a prefix, and 'match needs text in the event's data.
+- `(event-publish! TOPIC KIND DATA)` sends the event. Put it in the callback of your slow work, so that the end of the work is the wake.
+- `(shell-command->string CMD DIR CALLBACK)` runs a long command in a task and gives CALLBACK the output. Without CALLBACK, the shell time limit kills it.
+- `(agent-listeners)` lists the listeners, each with its chat and topic; `(agent-unlisten! ID)` stops one.
+- `'(at "YYYY-MM-DD HH:MM")` is only for a real time, such as a meeting or a deadline, or a fallback for work that cannot notify you.
+
+```scheme
+(agent-listen! '(topic "job:tests" kind done) "read the test result")
+(shell-command->string "mix test ..." (default-directory)
+  (lambda (out) (event-publish! "job:tests" 'done out)))
+```

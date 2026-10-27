@@ -1076,6 +1076,28 @@
           (filter (lambda (r) (not (equal? r range))) cur)
           (cons range cur)))))
 
+;;; Fold keys. Most owners keep WHICH parts are folded, by a key of their
+;;; own: a heading offset (morg), a section key (ibuffer), a card id (the
+;;; agent transcript). Each owner names its one buffer-local, and these
+;;; calls are the only readers and writers of it. A set of OPEN parts, as
+;;; the agent's cards keep, is the same set read the other way.
+
+(define (fold-keys buf local) (or (buffer-local buf local) '()))
+
+(define (fold-key? buf local key) (if (member key (fold-keys buf local)) #t #f))
+
+(define (fold-keys-set! buf local keys) (buffer-set-local! buf local keys) keys)
+
+(define (fold-key-set! buf local key on?)
+  (let ((keys (fold-keys buf local)))
+    (cond ((and on? (not (member key keys))) (fold-keys-set! buf local (cons key keys)))
+          ((and (not on?) (member key keys))
+           (fold-keys-set! buf local (filter (lambda (k) (not (equal? k key))) keys))))
+    on?))
+
+(define (fold-key-toggle! buf local key)
+  (fold-key-set! buf local key (not (fold-key? buf local key))))
+
 ;;; --- overlay chrome ----------------------------------------------------------
 ;;; A chrome attachment draws text the buffer does not hold: a badge, a key
 ;;; hint, a chip. It stands at one byte, holds zero bytes, and the caret
@@ -6104,6 +6126,16 @@
 (public! 'fold-get "(fold-get BUF [TAG]) -> TAG's hidden ranges; no TAG, or 'all, gives the union")
 (public! 'fold-clear! "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every owner's")
 (public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
+(domain! 'buffers)
+(effects! '(read))
+(public! 'fold-keys "(fold-keys BUF LOCAL) -> the keys of the parts BUF's LOCAL holds folded (or open), '() when none")
+(public! 'fold-key? "(fold-key? BUF LOCAL KEY) -> #t when LOCAL holds KEY")
+(effects! '(write))
+(public! 'fold-keys-set! "(fold-keys-set! BUF LOCAL KEYS) - replace every key LOCAL holds")
+(public! 'fold-key-set! "(fold-key-set! BUF LOCAL KEY ON?) - add KEY to LOCAL, or take it out; answers ON?")
+(public! 'fold-key-toggle! "(fold-key-toggle! BUF LOCAL KEY) - flip KEY in LOCAL; answers #t when it is in now")
+(domain! 'unknown)
+(effects! '(unknown))
 (namespace! 'core)
 (effects! '(write display))
 (public! 'buffer-narrow! "(buffer-narrow! BUF START END) — narrow visible text to the exclusive byte range without changing buffer access" 'buffers)

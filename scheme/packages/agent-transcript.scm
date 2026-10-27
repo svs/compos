@@ -80,16 +80,12 @@
     (cons (list s e #f) (or (buffer-local buf 'agent-folds) '())))
   (agent-apply-folds! buf))
 
-(define (agent-open-cards buf) (or (buffer-local buf 'agent-open-cards) '()))
+(define (agent-open-cards buf) (fold-keys buf 'agent-open-cards))
 
-(define (agent-card-open? buf id) (and (member id (agent-open-cards buf)) #t))
+(define (agent-card-open? buf id) (fold-key? buf 'agent-open-cards id))
 
 (define (agent-card-set-open! buf id open?)
-  (let ((cards (agent-open-cards buf)))
-    (buffer-set-local! buf 'agent-open-cards
-      (if open?
-          (if (member id cards) cards (cons id cards))
-          (filter (lambda (c) (not (equal? c id))) cards))))
+  (fold-key-set! buf 'agent-open-cards id open?)
   ;; the plain view's fold over the tool body follows, when one exists
   (let ((entry (assoc id (or (buffer-local buf 'agent-tool-bodies) '()))))
     (when entry
@@ -283,7 +279,7 @@
                          (nth 4 b) (nth 5 b) status (nth 7 b))
                    b))
              (agent-blocks buf)))
-      (buffer-set-local! buf 'agent-open-cards
+      (fold-keys-set! buf 'agent-open-cards
         (filter (lambda (id) (not (member id ids)))
                 (agent-open-cards buf))))))
 

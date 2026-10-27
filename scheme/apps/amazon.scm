@@ -362,7 +362,7 @@
 (define (amazon-touch! asin)
   (for-each amazon--redraw! (list *amazon-buffer* *amazon-cart-buffer*))
   (for-each (lambda (b)
-              (let ((row (buffer-local b 'site-app-row)))
+              (let ((row (site-app-get b 'row)))
                 (when (and row (equal? (plist-get row 'asin) asin))
                   (amazon-detail-refresh! b))))
             (amazon--pages)))
@@ -395,7 +395,7 @@
 (define-command "amazon-reload-detail" "Read this product's page again"
   (lambda ()
     (let* ((buf (current-buffer))
-           (row (buffer-local buf 'site-app-row)))
+           (row (site-app-get buf 'row)))
       (if row
           (begin (amazon-detail-reload! buf row)
                  (amazon-detail-refresh! buf)
@@ -526,7 +526,7 @@
 (define (amazon-detail-state buf) (or (buffer-local buf 'amazon-detail-state) 'cold))
 
 (define (amazon-detail-refresh! buf)
-  (when (and (buffer-exists? buf) (buffer-local buf 'site-app-data))
+  (when (and (buffer-exists? buf) (site-app-get buf 'data))
     (site-app-draw! buf)))
 
 (define (amazon-detail-load! buf row &optional fresh?)
@@ -765,7 +765,7 @@
   ;; hero over it, then the tab's own parts
   (list 'id id 'label label 'from '()
         'draw (lambda (buf b)
-                (let ((row (buffer-local buf 'site-app-row)))
+                (let ((row (site-app-get buf 'row)))
                   (amazon--claimed b (cons (append (amazon--head-block row buf) (list 'imenu-name "Product"))
                                            (blocks buf row)))))))
 
@@ -873,7 +873,7 @@
                       all
                       (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))
            (rows (if (equal? (buffer-local buf 'amazon-sort) 'delivery) (amz-sort-by-delivery shown) shown)))
-      (buffer-set-local! buf 'site-app-rows (map amazon--cells-of rows))
+      (site-app-set! buf 'rows (map amazon--cells-of rows))
       (buffer-set-local! buf 'list-layout-cache #f)
       (list-refresh! buf))))
 
@@ -1124,8 +1124,8 @@
 (define (amazon-row-here)
   ;; the product of the page you are on, else of the row
   (let ((buf (current-buffer)))
-    (or (buffer-local buf 'site-app-row)
-        (and (equal? (buffer-local buf 'site-app-name) 'amazon) (list-current buf)))))
+    (or (site-app-get buf 'row)
+        (and (equal? (site-app-get buf 'name) 'amazon) (list-current buf)))))
 
 
 (define-command "amazon-add-to-cart" "Add this product to the Amazon cart"
@@ -1547,7 +1547,7 @@
 ;; product's own verb. One hook: a second of the same name replaces the first
 (add-hook! (list 'block-click 'amazon)
   (lambda (buf id)
-    (let ((row (and (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-row))))
+    (let ((row (and (site-app-get buf 'data) (site-app-get buf 'row))))
       (cond ((not (string? id)) #f)
             ((string-prefix? "amazon:" id) (run-command (substring id 7 (string-length id))) #t)
             ((string-prefix? "amazon-remove:" id)
@@ -1577,8 +1577,8 @@
   (let ((buf (site-app-page-buffer 'amazon id)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf 'amazon)
-    (buffer-set-local! buf 'site-app-spec (site-app-spec 'amazon))
-    (buffer-set-local! buf 'site-app-page id)
+    (site-app-set! buf 'spec (site-app-spec 'amazon))
+    (site-app-set! buf 'page id)
     (site-app-index-enter! buf 'amazon id)))
 
 (define (amazon--navigate! url wait k)
@@ -1592,7 +1592,7 @@
   ;; takes its ASIN too
   (let* ((title (amz-page-title row))
          (name (string-append "*amazon: " title "*"))
-         (held (and (buffer-exists? name) (buffer-local name 'site-app-row)))
+         (held (and (buffer-exists? name) (site-app-get name 'row)))
          (theirs (and held (plist-get held 'asin))))
     (if (or (not theirs) (equal? theirs (plist-get row 'asin)))
         title
@@ -1602,12 +1602,12 @@
   ;; a page draws from its row at once; the product page behind it comes from
   ;; the cache, or is read once you have rested on the row. The engine names
   ;; the page's list only after this, and the page finds its tabs through it
-  (let ((row (buffer-local buf 'site-app-row)))
-    (when (and row (not (buffer-local buf 'site-app-list)) (plist-get row 'detail-page))
-      (buffer-set-local! buf 'site-app-list (site-app-page-buffer 'amazon (plist-get row 'detail-page))))
-    (unless (buffer-local buf 'site-app-data)
+  (let ((row (site-app-get buf 'row)))
+    (when (and row (not (site-app-get buf 'list)) (plist-get row 'detail-page))
+      (site-app-set! buf 'list (site-app-page-buffer 'amazon (plist-get row 'detail-page))))
+    (unless (site-app-get buf 'data)
       ;; no title of the site's: the hero under the tabs carries the product's
-      (buffer-set-local! buf 'site-app-data (list 'title "" 'tabs '()))
+      (site-app-set! buf 'data (list 'title "" 'tabs '()))
       (site-app-draw! buf))
     (when row
       (if (amazon--cached *amazon-details* (plist-get row 'asin))
@@ -1712,7 +1712,7 @@
 ;; a kept page takes the product's name, not a number
 (detail-name! "amazon-detail-mode"
   (lambda (buf)
-    (let ((row (buffer-local buf 'site-app-row)))
+    (let ((row (site-app-get buf 'row)))
       (string-append "*" (if row (amz-page-title row) "amazon") "*"))))
 
 ;; the listing and every page it opens wear the Amazon mark
@@ -1737,8 +1737,8 @@
   (let ((shown (let loop ((ws (window-list)))
                  (cond ((null? ws) #f)
                        ((let ((b (car (cdr (car ws)))))
-                          (and (equal? (buffer-local b 'site-app-name) 'amazon)
-                               (buffer-local b 'site-app-row)))
+                          (and (equal? (site-app-get b 'name) 'amazon)
+                               (site-app-get b 'row)))
                         (car (cdr (car ws))))
                        (else (loop (cdr ws)))))))
     (or shown
@@ -1750,8 +1750,8 @@
          (chat (and id (boundp 'group-chat) (group-chat id)))
          ;; the section you are in leads: the results, or the cart
          (here (window-buffer (active-window)))
-         (index (if (and (equal? (buffer-local here 'site-app-name) 'amazon)
-                         (not (buffer-local here 'site-app-row)))
+         (index (if (and (equal? (site-app-get here 'name) 'amazon)
+                         (not (site-app-get here 'row)))
                     here
                     *amazon-buffer*))
          (panes (filter (lambda (b) (and b (buffer-exists? b)))

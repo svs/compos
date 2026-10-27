@@ -772,12 +772,12 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
          (rows (if (buffer-exists? list-buf) (site-app-rows list-buf) '())))
     (or (and (string? href) (not (equal? href ""))
              (find (lambda (r) (equal? (site-app-field r 'href) href)) rows))
-        (buffer-local b 'site-app-row))))
+        (site-app-get b 'row))))
 
 (define (spotify--tab-inputs b &optional given)
   ;; GIVEN the row about to be drawn; else the one drawn
-  (let* ((active (buffer-local b 'site-app-active))
-         (row (spotify--as-track b (if (equal? active "ambient") (spotify--playing-row b) (or given (buffer-local b 'site-app-row)))))
+  (let* ((active (site-app-get b 'active))
+         (row (spotify--as-track b (if (equal? active "ambient") (spotify--playing-row b) (or given (site-app-get b 'row)))))
          (href (or (site-app-field row 'href) "")))
     (cond
       ((equal? active "ambient")
@@ -807,7 +807,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
        (let* ((key (string-append (car (string-split (or (site-app-field row 'artists) "") ",")) " | " (or (site-app-field row 'album) ""))))
          (list active href key (spotify--get 'liners key) (spotify--now-field 'trackHref)
                (spotify--get 'albums (or (plist-get (spotify--row-now row) 'albumHref) ""))
-               (buffer-local b 'site-app-data)))))))
+               (site-app-get b 'data)))))))
 
 (define (spotify--same-inputs? a b)
   (and (pair? b) (= (length a) (length b))
@@ -820,7 +820,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   ;; every read ends here, so this is where what it read goes to disk
   (spotify--cache-touch!)
   (for-each (lambda (b)
-              (when (member (buffer-local b 'site-app-active) '("ambient" "artist" "album"))
+              (when (member (site-app-get b 'active) '("ambient" "artist" "album"))
                 (let ((now (spotify--tab-inputs b)))
                   (unless (spotify--same-inputs? now (buffer-local b 'sp-drawn))
                     (buffer-set-local! b 'sp-drawn now)
@@ -837,7 +837,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 
 (define (spotify--as-track buf row)
   (let ((href (or (site-app-field row 'href) ""))
-        (d (buffer-local buf 'site-app-data)))
+        (d (site-app-get buf 'data)))
     (cond
       ;; a track from a list that did not carry its album: the page of the track names it
       ((and (string-prefix? "/track/" href) (equal? (or (site-app-field row 'album) "") ""))
@@ -921,7 +921,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 (define (spotify--artist-draw buf b)
   ;; the artist of the track on BUF's row: their photo over the bio (the
   ;; brief once it is written), then their tours and the news
-  (let* ((row (spotify--as-track buf (buffer-local buf 'site-app-row)))
+  (let* ((row (spotify--as-track buf (site-app-get buf 'row)))
          (href (or (site-app-field row 'href) ""))
          (links (spotify--links href))
          (artist-href (spotify--artist-href row links))
@@ -1411,8 +1411,8 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 (define (spotify--album-draw buf b)
   ;; the album of the track on BUF's row, as its liner notes: the cover,
   ;; AllMusic's review, who played, the release, and the story behind it
-  (let* ((row (spotify--as-track buf (buffer-local buf 'site-app-row)))
-         (href (or (site-app-field (buffer-local buf 'site-app-row) 'href) ""))
+  (let* ((row (spotify--as-track buf (site-app-get buf 'row)))
+         (href (or (site-app-field (site-app-get buf 'row) 'href) ""))
          (album (or (site-app-field row 'album) ""))
          (artist (car (string-split (or (site-app-field row 'artists) "") ",")))
          (key (string-append artist " | " album))
@@ -1533,7 +1533,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   ;; the next round, while the ambient page is on screen; off screen it stops
   (set! *spotify-digging* #f)
   (when (and spotify-dig (buffer-exists? *spotify-now-detail*)
-             (equal? (buffer-local *spotify-now-detail* 'site-app-active) "ambient")
+             (equal? (site-app-get *spotify-now-detail* 'active) "ambient")
              (member *spotify-now-detail* (get-visible-buffers)))
     (spotify--dig! (spotify--dig-name) (spotify--now-field 'album) (spotify--now-field 'title))
     (spotify--dig-start!)))
@@ -1656,7 +1656,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
                                      (or (equal? (or (site-app-field r 'art) "") "") (equal? (or (site-app-field r 'album) "") "")))))
              (filled (map (lambda (r) (if (missing? r) (plist-put (plist-put r 'art (if (equal? (or (site-app-field r 'art) "") "") art (site-app-field r 'art))) 'album (if (equal? (or (site-app-field r 'album) "") "") album (site-app-field r 'album))) r)) rows)))
         (when (find missing? rows)
-          (buffer-set-local! buf 'site-app-rows filled)
+          (site-app-set! buf 'rows filled)
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf))))))
 
@@ -1718,7 +1718,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 ;; what the list played from is called: the page's own name when it is one buffer
 ;; for every page, else the buffer's
 (define (spotify--origin-label buf)
-  (let* ((row (and (buffer-exists? buf) (buffer-local buf 'site-app-row)))
+  (let* ((row (and (buffer-exists? buf) (site-app-get buf 'row)))
          (n (and row (spotify--detail? buf) (site-app-field row 'name))))
     (if (and (string? n) (not (equal? n ""))) n (spotify--origin-name buf))))
 
@@ -2079,7 +2079,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 
 
 (define (spotify--detail? buf)
-  (and (eq? (buffer-local buf 'site-app-name) 'spotify) (buffer-local buf 'site-app-row) #t))
+  (and (eq? (site-app-get buf 'name) 'spotify) (site-app-get buf 'row) #t))
 
 (define (spotify--card-title node)
   (let ((kids (site-app-real (plist-get node 'children))))
@@ -2087,7 +2087,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 
 (define (spotify--play-here! buf)
   ;; on an item's page: the track or tile at point, else the page itself
-  (let* ((row (buffer-local buf 'site-app-row))
+  (let* ((row (site-app-get buf 'row))
          (page-href (site-app-field row 'href))
          (node (site-app-card-at buf))
          (class (and node (plist-get node 'class))))
@@ -2357,7 +2357,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   (buffer-set-local! buf 'anchor-imenu-index 'spotify-list-imenu-rows)
   (buffer-set-local! buf 'imenu-snapshot 'spotify-list-imenu-snapshot)
   (buffer-set-local! buf 'imenu-tab
-    (plist-get (site-app-page (site-app-spec 'spotify) (buffer-local buf 'site-app-page)) 'label)))
+    (plist-get (site-app-page (site-app-spec 'spotify) (site-app-get buf 'page)) 'label)))
 
 ;;; --- the app ------------------------------------------------------------------
 
@@ -2527,7 +2527,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
     (let* ((buf (current-buffer))
            (node (site-app-card-at buf))
            (href (and node (plist-get node 'href)))
-           (list-buf (buffer-local buf 'site-app-list)))
+           (list-buf (site-app-get buf 'list)))
       (if (and href list-buf (buffer-exists? list-buf))
           (site-app-show-detail! list-buf (list 'key href 'href href 'name (spotify--card-title node) 'kind (plist-get node 'tier)))
           (message "Nothing to open here")))))
@@ -2624,7 +2624,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 
 (define (spotify--artist-here buf)
   ;; the artist whose page this is, else the one that plays: (HREF NAME)
-  (let* ((row (and (spotify--detail? buf) (buffer-local buf 'site-app-row)))
+  (let* ((row (and (spotify--detail? buf) (site-app-get buf 'row)))
          (href (and row (or (site-app-field row 'href) ""))))
     (if (and href (string-prefix? "/artist/" href))
         (list href (or (site-app-field row 'name) ""))
@@ -3073,8 +3073,8 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
     ;; the list mode first, every section shares it, its section a minor mode
     ;; on it; the locals after, so the mode's entry does not drop them
     (site-app-index-enter! buf 'spotify id)
-    (buffer-set-local! buf 'site-app-spec (site-app-spec 'spotify))
-    (buffer-set-local! buf 'site-app-page id)
+    (site-app-set! buf 'spec (site-app-spec 'spotify))
+    (site-app-set! buf 'page id)
     buf))
 
 (define-command "spotify-search" "Search Spotify and show the results in the app"
@@ -3093,7 +3093,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
               (set! *spotify-query* (string-trim q))
               ;; a search asked before shows what it found at once; g reads it again
               (let ((kept (spotify--get 'searches *spotify-query*)))
-                (buffer-set-local! buf 'site-app-rows (or kept '()))
+                (site-app-set! buf 'rows (or kept '()))
                 (buffer-set-local! buf 'list-layout-cache #f)
                 (list-refresh! buf)
                 (if pane

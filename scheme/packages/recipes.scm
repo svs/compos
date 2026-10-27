@@ -168,8 +168,6 @@
   (list (list 'colour "Colour: ")))
 (defrecipe! "load a theme"
   "(run-command \"load-theme\")")
-(recipe-aliases! "load a theme"
-  "apply theme switch theme choose theme select theme change theme theme appearance colours colors")
 
 ;;; --- telling the user something -----------------------------------------------
 
@@ -189,6 +187,9 @@
 
 (define (recipe-aliases! title words)
   (catalog-meta! 'recipe title 'aliases words))
+
+(recipe-aliases! "load a theme"
+  "apply theme switch theme choose theme select theme change theme theme appearance colours colors")
 
 (recipe-aliases! "show a buffer in the other window"
   "beside side by side next pane other pane second window adjacent over there elsewhere alongside right left split view without switching keep focus display show put open preview")

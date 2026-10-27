@@ -338,7 +338,7 @@
           (append
             (list 'path (lambda ()
                           (let* ((buf (site-app-page-buffer 'ats 'meetings))
-                                 (on (and (buffer-known? buf) (buffer-local buf 'site-app-filter)))
+                                 (on (and (buffer-known? buf) (site-app-get buf 'filter)))
                                  (day (format-time (current-time) "%Y-%m-%d")))
                             (if (and (string? on) (> (string-length on) 0))
                                 "/staff/meetings"
@@ -588,7 +588,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 ;; / in the candidates list: the site's own search (?q=), over every candidate
 ;; and not only the page drawn. An empty answer shows them all again
 (define (ats-search-query buf)
-  (let ((q (buffer-local buf 'site-app-filter)))
+  (let ((q (site-app-get buf 'filter)))
     (if (and (string? q) (string-prefix? "q=" q)) (url-decode (substring q 2 (string-length q))) "")))
 
 (define-command "ats-candidates-search" "Search every candidate on the site by name"
@@ -693,8 +693,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
          (page (site-app-href-page spec href))
          (own (and page (site-app-page-buffer 'ats (plist-get page 'id))))
          (list-buf (cond ((and own (buffer-known? own)) own)
-                         ((buffer-local from 'site-app-spec) from)
-                         (else (buffer-local from 'site-app-list)))))
+                         ((site-app-get from 'spec) from)
+                         (else (site-app-get from 'list)))))
     (if (and page list-buf (buffer-known? list-buf))
         (site-app-show-detail! list-buf (list 'href href 'key (list-ref hit 2) 'name (list-ref hit 3)) page)
         (tab-open (site-app-url spec href)))))
@@ -731,8 +731,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (let ((buf (site-app-page-buffer 'ats kind)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf 'ats)
-    (buffer-set-local! buf 'site-app-spec (site-app-spec 'ats))
-    (buffer-set-local! buf 'site-app-page kind)
+    (site-app-set! buf 'spec (site-app-spec 'ats))
+    (site-app-set! buf 'page kind)
     (site-app-index-enter! buf 'ats kind)))
 
 ;; the row the list holds for ID, else one made from it; NAME titles a page the list does not
@@ -856,7 +856,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (let ((buf (ats-pipeline-buffer title)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf)
-    (buffer-set-local! buf 'site-app-spec (site-app-spec 'ats))
+    (site-app-set! buf 'spec (site-app-spec 'ats))
     (buffer-set-local! buf 'ats-pipeline-job job)
     (buffer-set-local! buf 'ats-pipeline-title title)
     (unless (buffer-derived-mode? buf "ats-pipeline-mode")
@@ -869,9 +869,9 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (define (ats-pipeline-job-at buf)
   (if (minor-mode-on? buf "ats-jobs-mode")
       (let ((row (list-current buf))) (and row (list row buf)))
-      (let ((row (buffer-local buf 'site-app-row)))
+      (let ((row (site-app-get buf 'row)))
         (and row (string-prefix? "/staff/jobs/" (or (plist-get row 'href) ""))
-             (list row (buffer-local buf 'site-app-list))))))
+             (list row (site-app-get buf 'list))))))
 
 (define-command "ats-pipeline" "Open the job's candidates: its applications by stage, then its suggestions"
   (lambda ()
@@ -949,10 +949,10 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (lambda ()
     (let* ((buf (current-buffer))
            (card (ats-application-at buf))
-           (here (buffer-local buf 'site-app-row)))
+           (here (site-app-get buf 'row)))
       (if (not card)
           (message "No application here")
-          (site-app-show-detail! (buffer-local buf 'site-app-list)
+          (site-app-show-detail! (site-app-get buf 'list)
             (list 'key (plist-get card 'aid)
                   'candidate (or (plist-get card 'name) (site-app-field here 'name))
                   'job (or (plist-get card 'job) (site-app-field here 'name))
@@ -963,10 +963,10 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (lambda ()
     (let* ((buf (current-buffer))
            (card (ats-suggestion-at buf))
-           (job (buffer-local buf 'site-app-row)))
+           (job (site-app-get buf 'row)))
       (if (not card)
           (message "No suggestion here")
-          (site-app-show-detail! (buffer-local buf 'site-app-list)
+          (site-app-show-detail! (site-app-get buf 'list)
             (list 'key (plist-get card 'cid)
                   'candidate (plist-get card 'name)
                   'job (site-app-field job 'name)
@@ -977,7 +977,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
   (lambda ()
     (let* ((buf (current-buffer))
            (card (ats-suggestion-at buf))
-           (job (buffer-local buf 'site-app-row))
+           (job (site-app-get buf 'row))
            (name (and card (plist-get card 'name))))
       (cond ((not card) (message "No suggestion here"))
             ((not (equal? (or (plist-get card 'state) "") ""))
@@ -1019,9 +1019,9 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 ;; what a new chat for an ATS page asks first; the page's own kind wins
 ;; a case chat says whose case it is: "Approval: Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
-(define (ats-case-label src) (ats-row-label (or (buffer-local src 'site-app-row) '()) src))
+(define (ats-case-label src) (ats-row-label (or (site-app-get src 'row) '()) src))
 ;;;###autoload
-(define (ats-case-id src) (plist-get (or (buffer-local src 'site-app-row) '()) 'key))
+(define (ats-case-id src) (plist-get (or (site-app-get src 'row) '()) 'key))
 ;;;###autoload
 (define (ats-case-buffer id)
   (let ((hit (filter (lambda (b) (equal? (ats-case-id b) id)) (buffer-list))))
@@ -1034,7 +1034,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (effects! '(read))
 ;; the application an approval page is about: its profile field links to it
 (define (ats-case-application-id src)
-  (let walk ((x (or (buffer-local src 'site-app-data) '())))
+  (let walk ((x (or (site-app-get src 'data) '())))
     (cond ((and (string? x) (string-prefix? "/staff/applications/" x))
            (car (string-split (substring x 20 (string-length x)) "?")))
           ((pair? x) (or (walk (car x)) (walk (cdr x))))
@@ -1153,7 +1153,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (define (ats-draft-open! ctx)
   (let* ((src (plist-get ctx 'buf))
          (id (ats-case-id src))
-         (name (string-append "*ats-draft: " (ats-row-label (buffer-local src 'site-app-row) src) "*")))
+         (name (string-append "*ats-draft: " (ats-row-label (site-app-get src 'row) src) "*")))
     (message "Edit draft…")
     ((plist-get ctx 'live)
      (lambda (tab)
@@ -1176,7 +1176,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (define (ats-draft-push! name)
   (let* ((id (buffer-local name 'ats-draft-id))
          (src (buffer-local name 'ats-draft-source))
-         (url (site-app-url (site-app-spec 'ats) (plist-get (buffer-local src 'site-app-row) 'href)))
+         (url (site-app-url (site-app-spec 'ats) (plist-get (site-app-get src 'row) 'href)))
          (form (ats-draft-form id))
          (fill (string-append "(() => { const f = " form "; if (!f) return 'no form'; "
                               "const t = f.querySelector('textarea[name=comment]'); t.value = " (json-encode (buffer-text name)) "; "

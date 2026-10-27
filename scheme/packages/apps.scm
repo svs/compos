@@ -17,10 +17,10 @@
 (effects! '(read))
 
 (define (app-id buf)
-  ;; a site app's buffers name their app in 'site-app-name, the one
+  ;; a site app's buffers name their app in their state's 'name, the one
   ;; truth for them; any other app tags its buffers with app-claim!
   (and buf (buffer-known? buf)
-       (let ((nm (buffer-local buf 'site-app-name)))
+       (let ((nm (plist-get (or (buffer-local buf 'site-app) '()) 'name)))
          (cond ((symbol? nm) (symbol->string nm))
                ((string? nm) nm)
                (else (buffer-local buf 'app-id))))))

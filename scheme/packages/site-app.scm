@@ -29,6 +29,22 @@
           ((pred (car rest)) (car rest))
           (else (loop (cdr rest))))))
 
+;; a buffer's site-app state is one plist in its local 'site-app
+(define (site-app-get buf key) (plist-get (or (buffer-local buf 'site-app) '()) key))
+
+(effects! '(write))
+(define (site-app-set! buf key val)
+  (buffer-set-local! buf 'site-app (plist-put (or (buffer-local buf 'site-app) '()) key val))
+  val)
+
+(define (site-app-merge! buf plist)
+  ;; set several keys in one change, so the frame refreshes once
+  (let loop ((st (or (buffer-local buf 'site-app) '())) (rest plist))
+    (if (null? rest)
+        (buffer-set-local! buf 'site-app st)
+        (loop (plist-put st (car rest) (cadr rest)) (cddr rest)))))
+(effects! '(read))
+
 (define (site-app-spec name)
   (let ((hit (assoc name *site-apps*))) (and hit (cadr hit))))
 
@@ -87,9 +103,9 @@
 
 (define (site-app-current-page buf)
   ;; the live spec by name: a reloaded app must not keep serving the old one
-  (let* ((kept (buffer-local buf 'site-app-spec))
+  (let* ((kept (site-app-get buf 'spec))
          (spec (or (and kept (site-app-spec (plist-get kept 'name))) kept)))
-    (site-app-page spec (buffer-local buf 'site-app-page))))
+    (site-app-page spec (site-app-get buf 'page))))
 
 (define (site-app-url spec path)
   (if (or (string-prefix? "http://" path) (string-prefix? "https://" path))
@@ -139,17 +155,17 @@
 (define (site-app-lead-tabs buf)
   ;; an app's 'lead-tabs (buf) gives tabs of its own before the sections, as
   ;; (CLICK LABEL ACTIVE KEY); its block-click hook takes the CLICK
-  (let ((lead (plist-get (buffer-local buf 'site-app-spec) 'lead-tabs)))
+  (let ((lead (plist-get (site-app-get buf 'spec) 'lead-tabs)))
     (if lead (lead buf) '())))
 
 (define (site-app-index-bars buf)
   ;; the list's tab bars as (LABEL CLASS TABS): the site's navbar, then one row
   ;; of status tabs per group of filters, in the page's order. The navbar's
   ;; first five take the left hand's keys, 1 to 5; the rest keep their own
-  (let* ((spec (buffer-local buf 'site-app-spec))
-         (current (buffer-local buf 'site-app-page))
-         (filters (or (buffer-local buf 'site-app-filters) '()))
-         (query (buffer-local buf 'site-app-filter))
+  (let* ((spec (site-app-get buf 'spec))
+         (current (site-app-get buf 'page))
+         (filters (or (site-app-get buf 'filters) '()))
+         (query (site-app-get buf 'filter))
          (sections (append (site-app-lead-tabs buf)
                            (map (lambda (page)
                                   (list (string-append site-app-section-click (symbol->string (plist-get page 'id)))
@@ -180,7 +196,7 @@
 (define (site-app-composml-head buf head)
   ;; the list's tab bars, each a row of tabs. An app's 'list-head (buf) puts
   ;; blocks of its own above them
-  (let ((own (plist-get (buffer-local buf 'site-app-spec) 'list-head)))
+  (let ((own (plist-get (site-app-get buf 'spec) 'list-head)))
     (append
       (if own (own buf) '())
       ;; the sections ride the window's header line; the status rows stay here
@@ -225,7 +241,7 @@
 
 (define (site-app-avatar-url buf src)
   (if (string-prefix? "/" src)
-      (string-append (plist-get (buffer-local buf 'site-app-spec) 'base-url) src)
+      (string-append (plist-get (site-app-get buf 'spec) 'base-url) src)
       src))
 
 (define (site-app-cell buf col row)
@@ -237,7 +253,7 @@
         (class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")))
     (cond ((equal? text "") (list 'tag "span" 'class class 'text ""))
           ((eq? kind 'badge)
-           (let ((tone (site-app-tone-class (plist-get (buffer-local buf 'site-app-spec) 'tones) text)))
+           (let ((tone (site-app-tone-class (plist-get (site-app-get buf 'spec) 'tones) text)))
              (list 'tag "span" 'class (string-append class " sa-badge-cell")
                    'segs (list (list (if tone (string-append "c-badge sa-pill " tone) "c-badge sa-pill") text)))))
           ((eq? kind 'stars)
@@ -275,15 +291,15 @@
                              cols)))))
 
 (define (site-app-title buf)
-  (let* ((spec (buffer-local buf 'site-app-spec))
+  (let* ((spec (site-app-get buf 'spec))
          (page (site-app-current-page buf)))
     (string-append (or (plist-get spec 'title) (symbol->string (plist-get spec 'name)))
                    " · " (or (plist-get page 'label) ""))))
 
 (define (site-app-header buf)
   ;; the site's navbar, then the section's own status tabs when it has them
-  (let* ((spec (buffer-local buf 'site-app-spec))
-         (current (buffer-local buf 'site-app-page))
+  (let* ((spec (site-app-get buf 'spec))
+         (current (site-app-get buf 'page))
          (mark (lambda (text on) (if on (string-append "[" text "]") (string-append " " text " "))))
          ;; the keys the sections bar binds, 1 to 5, so the header names the same ones
          (nav (string-join
@@ -292,8 +308,8 @@
                              (caddr tab)))
                      (caddr (car (site-app-index-bars buf))))
                 " "))
-         (filters (or (buffer-local buf 'site-app-filters) '()))
-         (query (buffer-local buf 'site-app-filter)))
+         (filters (or (site-app-get buf 'filters) '()))
+         (query (site-app-get buf 'filter)))
     (if (null? filters)
         nav
         (string-append nav "\n"
@@ -326,19 +342,19 @@
                               name)
               tabs))))
 
-(define (site-app-rows buf) (or (buffer-local buf 'site-app-rows) '()))
+(define (site-app-rows buf) (or (site-app-get buf 'rows) '()))
 
 ;; A site-app's buffers are one app, named for it: a page is its detail,
 ;; a section its list. app-layout! lays them out by that. Answers the name.
 (define (site-app-claim! buf &optional name)
-  ;; 'site-app-name is the buffer's app: app-id reads it, so only the role
+  ;; the state's 'name is the buffer's app: app-id reads it, so only the role
   ;; is written here
-  (let ((nm (or name (buffer-local buf 'site-app-name)
-                (let ((sp (buffer-local buf 'site-app-spec))) (and sp (plist-get sp 'name))))))
+  (let ((nm (or name (site-app-get buf 'name)
+                (let ((sp (site-app-get buf 'spec))) (and sp (plist-get sp 'name))))))
     (when (and nm (buffer-known? buf))
-      (buffer-set-local! buf 'site-app-name (if (string? nm) (string->symbol nm) nm))
+      (site-app-set! buf 'name (if (string? nm) (string->symbol nm) nm))
       (buffer-set-local! buf 'app-id #f)
-      (buffer-set-local! buf 'app-role (if (buffer-local buf 'site-app-row) 'detail 'list)))
+      (buffer-set-local! buf 'app-role (if (site-app-get buf 'row) 'detail 'list)))
     nm))
 
 ;; buffers open before apps were claimed take their claim on load
@@ -367,7 +383,7 @@
   (let* ((spec (site-app-spec name))
          (path (plist-get page 'path))
          (url (site-app-url spec (if (procedure? path) (path) path)))
-         (query (buffer-local (site-app-page-buffer name (plist-get page 'id)) 'site-app-filter)))
+         (query (site-app-get (site-app-page-buffer name (plist-get page 'id)) 'filter)))
     (if (plist-get page 'live)
         (site-app-navigate! name url (or (plist-get page 'wait) (plist-get spec 'ready))
           (lambda (tab answer) (k (and answer (plist-get answer 'html)))))
@@ -385,12 +401,12 @@
     (if (not (or (pair? rows) (null? rows)))
         (message (string-append (symbol->string name) ": stylesheet did not return rows"))
         (begin
-          (buffer-set-local! buf 'site-app-page (plist-get page 'id))
-          (buffer-set-local! buf 'site-app-rows rows)
-          (buffer-set-local! buf 'site-app-filters (if (pair? tabs) tabs '()))
+          (site-app-set! buf 'page (plist-get page 'id))
+          (site-app-set! buf 'rows rows)
+          (site-app-set! buf 'filters (if (pair? tabs) tabs '()))
           ;; the page says which of its tabs it drew; that is the one we are on.
           ;; Grouped filters are facets, several on at once: the query we read stands
-          (when (and on (not (plist-get on 'group))) (buffer-set-local! buf 'site-app-filter (plist-get on 'query)))
+          (when (and on (not (plist-get on 'group))) (site-app-set! buf 'filter (plist-get on 'query)))
           (buffer-set-local! buf 'list-layout-cache #f)
           (list-refresh! buf)
           ;; a page's 'after-fill (BUF ROWS) hears every read, to keep it
@@ -457,7 +473,7 @@
                        (for-each (lambda (f) (f tab)) (reverse ks)))))))))))))
 
 (define (site-app-select-page! index)
-  (let* ((spec (buffer-local (current-buffer) 'site-app-spec))
+  (let* ((spec (site-app-get (current-buffer) 'spec))
          (pages (site-app-pages spec)))
     (when (< index (length pages))
       (site-app-open! (plist-get spec 'name) (plist-get (list-ref pages index) 'id)))))
@@ -465,12 +481,12 @@
 (define (site-app-filter-step! delta)
   ;; walk the section's status tabs, then read the section at the new one
   (let* ((buf (current-buffer))
-         (spec (buffer-local buf 'site-app-spec))
-         (filters (or (buffer-local buf 'site-app-filters) '()))
+         (spec (site-app-get buf 'spec))
+         (filters (or (site-app-get buf 'filters) '()))
          (n (length filters)))
     (if (= n 0)
         (message "This section has no status tabs")
-        (let* ((query (buffer-local buf 'site-app-filter))
+        (let* ((query (site-app-get buf 'filter))
                (at (let loop ((rest filters) (i 0))
                      (cond ((null? rest) 0)
                            ((equal? (plist-get (car rest) 'query) query) i)
@@ -480,8 +496,8 @@
 
 (define (site-app-set-filter! buf query)
   ;; show one status tab of the section, then read the section at it
-  (let ((spec (buffer-local buf 'site-app-spec)))
-    (buffer-set-local! buf 'site-app-filter query)
+  (let ((spec (site-app-get buf 'spec)))
+    (site-app-set! buf 'filter query)
     (list-refresh! buf)
     (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf))))
 
@@ -496,7 +512,7 @@
 (define-command "site-app-filter-choose" "Ask for a status tab of this section and show it"
   (lambda ()
     (let* ((buf (current-buffer))
-           (filters (or (buffer-local buf 'site-app-filters) '())))
+           (filters (or (site-app-get buf 'filters) '())))
       (if (null? filters)
           (run-command "list-filter")
           (completing-read "State: " (map site-app-filter-label filters)
@@ -544,7 +560,7 @@
                     acc)))))
 
 (define (site-app-tab-groups buf)
-  (if (buffer-local buf 'site-app-row)
+  (if (site-app-get buf 'row)
       ;; a page: its tabs
       (let ((tabs (site-app-detail-tabs buf))
             (active (site-app-detail-active buf)))
@@ -555,8 +571,8 @@
                       (map (lambda (t) (lambda () (site-app-detail-select! buf (plist-get t 'id)))) tabs)))))
       ;; a list: the status tabs its page draws, a menu group for each facet; the
       ;; letters run across the whole menu, so every tab keeps its own
-      (let* ((filters (or (buffer-local buf 'site-app-filters) '()))
-             (on (buffer-local buf 'site-app-filter))
+      (let* ((filters (or (site-app-get buf 'filters) '()))
+             (on (site-app-get buf 'filter))
              (suffixes (site-app-tab-suffixes
                          (map (lambda (f) (plist-get f 'label)) filters)
                          (map (lambda (f) (or (equal? (plist-get f 'active) "yes") (equal? (plist-get f 'query) on))) filters)
@@ -583,11 +599,11 @@
 
 (define (site-app-section-groups buf)
   ;; the sections open in the list's own window, wherever the menu was asked from
-  (let* ((list-buf (or (buffer-local buf 'site-app-list) buf))
-         (spec (buffer-local list-buf 'site-app-spec))
+  (let* ((list-buf (or (site-app-get buf 'list) buf))
+         (spec (site-app-get list-buf 'spec))
          (name (plist-get spec 'name))
          (pages (site-app-pages (site-app-spec name)))
-         (here (buffer-local list-buf 'site-app-page)))
+         (here (site-app-get list-buf 'page)))
     (list (cons "Sections"
                 (site-app-tab-suffixes
                   (map (lambda (p) (plist-get p 'label)) pages)
@@ -605,14 +621,14 @@
 (define-command "site-app-refresh" "Read this website app tab again"
   (lambda ()
     (let* ((buf (current-buffer))
-           (spec (buffer-local buf 'site-app-spec)))
+           (spec (site-app-get buf 'spec)))
       (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf)))))
 
 (define (site-app-row-anchor buf row)
   ;; a section's row is an anchor named for it, filed under its kind, so a list
   ;; of tracks and albums gives imenu a tab of each. A row with no name field
   ;; (an approval names its candidate) is named as its page is, by 'detail-name
-  (let* ((spec (buffer-local buf 'site-app-spec))
+  (let* ((spec (site-app-get buf 'spec))
          (namer (and spec (plist-get spec 'detail-name)))
          (name (let ((n (or (site-app-field row 'name) "")))
                  (if (and (equal? n "") namer) (or (namer row) "") n)))
@@ -634,8 +650,8 @@
          (buf (site-app-page-buffer name pid)))
     (unless (buffer-exists? buf) (buffer-create buf))
     (site-app-join-group! buf name)
-    (buffer-set-local! buf 'site-app-spec spec)
-    (buffer-set-local! buf 'site-app-page pid)
+    (site-app-set! buf 'spec spec)
+    (site-app-set! buf 'page pid)
     (site-app-index-enter! buf name pid)
     ;; an app with a group of its own is opened there
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
@@ -763,7 +779,7 @@
 ;; Ornament the site draws for looks, dropped: the spec's 'ornament is a regex
 ;; for such text, read from the spec of the page being drawn.
 (define (site-app-ornament? text)
-  (let* ((spec (and *site-app-folding* (site-app-spec (buffer-local *site-app-folding* 'site-app-name))))
+  (let* ((spec (and *site-app-folding* (site-app-spec (site-app-get *site-app-folding* 'name))))
          (re (and spec (plist-get spec 'ornament))))
     (and re (re-match? re text) #t)))
 
@@ -838,8 +854,8 @@
 
 ;; the page a detail shows, by its minor mode
 (define (site-app-detail-page buf)
-  (let ((spec (site-app-spec (buffer-local buf 'site-app-name)))
-        (kind (buffer-local buf 'site-app-detail-kind)))
+  (let ((spec (site-app-spec (site-app-get buf 'name)))
+        (kind (site-app-get buf 'detail-kind)))
     (and spec kind (site-app-find (lambda (p) (equal? (plist-get p 'detail-kind) kind)) (site-app-pages spec)))))
 
 ;; keys a page adds of the app's own, beside its buttons: 'detail-extra-keys ((KEY COMMAND LABEL) ...)
@@ -858,9 +874,9 @@
 (require 'chat-mode)
 
 (define (site-app-chat-facts src)
-  (let* ((spec (site-app-spec (buffer-local src 'site-app-name)))
-         (data (or (buffer-local src 'site-app-data) '()))
-         (row (or (buffer-local src 'site-app-row) '()))
+  (let* ((spec (site-app-spec (site-app-get src 'name)))
+         (data (or (site-app-get src 'data) '()))
+         (row (or (site-app-get src 'row) '()))
          (href (plist-get row 'href))
          (fields (let loop ((r row) (acc '()))
                    (if (or (null? r) (null? (cdr r))) (reverse acc)
@@ -873,7 +889,7 @@
               (if (and spec href) (list (string-append "On the site: " (plist-get spec 'base-url) href)) '())
               fields
               (list (string-append "Its parts, by (buffer-section \"" src "\" NAME): "
-                                   (string-join (map car (or (buffer-local src 'site-app-sections) '())) ", "))))
+                                   (string-join (map car (or (site-app-get src 'sections) '())) ", "))))
       "\n")))
 
 (mode-chat-setup! "site-app-detail-mode"
@@ -897,7 +913,7 @@
 ;; a page's composed tabs ('detail-composed): each drawn from the sections of its
 ;; other tabs ('from), by its 'build, and read from no URL. They come first, on 0
 (define (site-app-composed-tabs buf)
-  (let ((page (or (buffer-local buf 'site-app-for-page) (site-app-detail-page buf))))
+  (let ((page (or (site-app-get buf 'for-page) (site-app-detail-page buf))))
     (or (and page (plist-get page 'detail-composed)) '())))
 
 (define (site-app-composed-tab buf id)
@@ -908,7 +924,7 @@
 (define (site-app-composed-lead buf)
   ;; how many composed tabs come before 1: all of them, on 0 and below, unless
   ;; the page numbers every tab from 1 ('detail-count-from-one)
-  (let ((page (or (buffer-local buf 'site-app-for-page) (site-app-detail-page buf))))
+  (let ((page (or (site-app-get buf 'for-page) (site-app-detail-page buf))))
     (if (and page (plist-get page 'detail-count-from-one)) 0 (length (site-app-composed-tabs buf)))))
 
 (define (site-app-composed-draw buf id)
@@ -916,7 +932,7 @@
     (and t (plist-get t 'draw))))
 
 (define (site-app-detail-tabs buf)
-  (let ((data (buffer-local buf 'site-app-data))
+  (let ((data (site-app-get buf 'data))
         (lead? (> (site-app-composed-lead buf) 0)))
     (if data
         (append (map (lambda (t) (list 'id (plist-get t 'id) 'label (plist-get t 'label) 'composed lead?))
@@ -946,7 +962,7 @@
                              '())))))
 
 (define (site-app-detail-active buf)
-  (or (buffer-local buf 'site-app-active)
+  (or (site-app-get buf 'active)
       (let ((hit (site-app-find (lambda (t) (plist-get t 'active)) (site-app-detail-tabs buf))))
         (and hit (plist-get hit 'id)))))
 
@@ -959,15 +975,15 @@
              (begin (set! *site-app-composing* buf) #t)
              ((or (plist-get composed 'build) (lambda (section) '()))
               (lambda (src) (let ((s (site-app-detail-section buf src))) (if (equal? s 'failed) '() s)))))
-        (let ((hit (assoc id (or (buffer-local buf 'site-app-sections) '()))))
+        (let ((hit (assoc id (or (site-app-get buf 'sections) '()))))
           (and hit (cdr hit))))))
 
 (define (site-app-detail-put-section! buf id nodes &optional quiet)
   (when (buffer-known? buf)
-    (buffer-set-local! buf 'site-app-sections
+    (site-app-set! buf 'sections
       (cons (cons id (if (equal? nodes 'failed) 'failed (or nodes '())))
             (filter (lambda (e) (not (equal? (car e) id)))
-                    (or (buffer-local buf 'site-app-sections) '()))))
+                    (or (site-app-get buf 'sections) '()))))
     (unless quiet (site-app-draw! buf))
     (site-app-stage-skip-empty! buf id)))
 
@@ -975,15 +991,15 @@
 ;; "new [0]" with "recommended [22]") takes the first stage that has rows, once
 (define (site-app-stage-skip-empty! buf id)
   (when (and (equal? id (site-app-detail-active buf))
-             (not (member id (or (buffer-local buf 'site-app-stage-skipped) '()))))
+             (not (member id (or (site-app-get buf 'stage-skipped) '()))))
     (let* ((st (site-app-detail-stages buf))
            (items (if st (site-app-real (plist-get st 'items)) '()))
            (count (lambda (s) (or (string->number (or (plist-get s 'count) "")) 0)))
            (on (site-app-find (lambda (s) (plist-get s 'active)) items))
            (full (site-app-find (lambda (s) (> (count s) 0)) items)))
       (when (and on full (= (count on) 0))
-        (buffer-set-local! buf 'site-app-stage-skipped
-          (cons id (or (buffer-local buf 'site-app-stage-skipped) '())))
+        (site-app-set! buf 'stage-skipped
+          (cons id (or (site-app-get buf 'stage-skipped) '())))
         (site-app-stage-select! buf (plist-get full 'status))))))
 
 
@@ -1017,7 +1033,7 @@
 (define (site-app-action-bar buf)
   ;; (LABEL KEY KIND IN-APP?): every button the page has, each with its key
   ;; a button's kind is the tone the spec's 'tones give a word of its label
-  (let* ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+  (let* ((spec (site-app-spec (site-app-get buf 'name)))
          (tones (and spec (plist-get spec 'tones))))
     (map (lambda (k)
            (let ((tone (site-app-find (lambda (x) x)
@@ -1226,29 +1242,29 @@
 ;; folds the reader set on this page's cards, by title: (TITLE OPEN?)
 (define *site-app-folding* #f)
 (define (site-app-open? title default)
-  (let ((hit (and *site-app-folding* (assoc title (or (buffer-local *site-app-folding* 'site-app-folds) '())))))
+  (let ((hit (and *site-app-folding* (assoc title (or (site-app-get *site-app-folding* 'folds) '())))))
     (if hit (cadr hit) default)))
 
 ;; A kind of card can read more of itself from the site when it opens: the
 ;; spec's 'card-details is ((CLASS FN) ...), FN taking the card's record to
 ;; ((LABEL PATH SHEET) ...). Each read lands under its label, on this page's
-;; 'site-app-card-more as (TITLE LABEL NODES), NODES being 'loading, 'failed
+;; the state's 'card-more as (TITLE LABEL NODES), NODES being 'loading, 'failed
 ;; or 'none until the page answers.
 (define (site-app-card-details node)
   (let* ((buf *site-app-folding*)
-         (spec (and buf (buffer-exists? buf) (site-app-spec (buffer-local buf 'site-app-name))))
+         (spec (and buf (buffer-exists? buf) (site-app-spec (site-app-get buf 'name))))
          (hit (and spec (assoc (plist-get node 'class) (or (plist-get spec 'card-details) '())))))
     (if hit ((cadr hit) node) '())))
 
 (define (site-app-card-put! buf title label value)
-  (buffer-set-local! buf 'site-app-card-more
+  (site-app-set! buf 'card-more
     (cons (list title label value)
           (filter (lambda (e) (not (and (equal? (car e) title) (equal? (cadr e) label))))
-                  (or (buffer-local buf 'site-app-card-more) '())))))
+                  (or (site-app-get buf 'card-more) '())))))
 
 (define (site-app-card-fetch! buf title detail)
   (site-app-card-put! buf title (car detail) 'loading)
-  (site-app-fetch-html! (site-app-url (site-app-spec (buffer-local buf 'site-app-name)) (cadr detail))
+  (site-app-fetch-html! (site-app-url (site-app-spec (site-app-get buf 'name)) (cadr detail))
     (lambda (html)
       (when (buffer-known? buf)
         (let* ((data (and html (site-app-parse (caddr detail) html)))
@@ -1266,7 +1282,7 @@
     (apply append
       (map (lambda (detail)
              (let* ((hit (site-app-find (lambda (e) (and (equal? (car e) title) (equal? (cadr e) (car detail))))
-                                        (or (buffer-local buf 'site-app-card-more) '())))
+                                        (or (site-app-get buf 'card-more) '())))
                     (got (and hit (caddr hit))))
                ;; imenu reading a tab aside fetches nothing
                (unless (or hit *site-app-indexing*) (site-app-card-fetch! buf title detail))
@@ -1631,7 +1647,7 @@
   ;; the next stop past point, or a plain line when there is none that way
   (let* ((buf (current-buffer))
          (line (car (buffer-line-at-point buf)))
-         (stops (or (buffer-local buf 'site-app-stops) '()))
+         (stops (or (site-app-get buf 'stops) '()))
          (next (if (> dir 0)
                    (let ((after (filter (lambda (n) (> n line)) stops)))
                      (and (pair? after) (car after)))
@@ -1652,9 +1668,9 @@
 (define (site-app-index-parts! buf head body)
   ;; the page drawn, its head and the tab showing kept apart for imenu
   (let ((tabs (site-app-find site-app-c-tabs? head)))
-    (buffer-set-locals! buf (list 'site-app-index-head (filter (lambda (x) (not (site-app-c-tabs? x))) head)
-                                  'site-app-index-body body
-                                  'site-app-tab-line (and tabs (plist-get tabs 'lines) (car (plist-get tabs 'lines)))))
+    (site-app-merge! buf (list 'index-head (filter (lambda (x) (not (site-app-c-tabs? x))) head)
+                              'index-body body
+                              'tab-line (and tabs (plist-get tabs 'lines) (car (plist-get tabs 'lines)))))
     (append head body)))
 
 ;; imenu of a page: its head, then each of its tabs with the parts in it, the
@@ -1671,8 +1687,8 @@
 
 (define (site-app-tab-blocks buf id)
   ;; the parts tab ID would draw, built aside with their own text: (BLOCKS TEXT), or #f
-  (let ((spec (site-app-spec (buffer-local buf 'site-app-name)))
-        (data (buffer-local buf 'site-app-data)))
+  (let ((spec (site-app-spec (site-app-get buf 'name)))
+        (data (site-app-get buf 'data)))
     (and data (not (site-app-composed-draw buf id))
          (let ((section (site-app-detail-section buf id)))
            (and (pair? section) (pair? (site-app-real section))
@@ -1689,7 +1705,7 @@
 (define (site-app-imenu-goto! buf path)
   ;; after a tab is taken: point to its part at PATH
   (let ((hit (site-app-find (lambda (e) (equal? (nth 4 e) path))
-                            (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '())))))
+                            (anchor-block-entries (or (site-app-get buf 'index-body) '())))))
     (when hit
       (buffer-goto-line! buf (car hit))
       (anchor-sync! buf))))
@@ -1704,15 +1720,15 @@
     (lambda () (unless (equal? (site-app-detail-active buf) id) (site-app-detail-select! buf id)))))
 
 (define (site-app-imenu-rows buf)
-  (let* ((spec (site-app-spec (buffer-local buf 'site-app-name)))
+  (let* ((spec (site-app-spec (site-app-get buf 'name)))
          (rename (site-app-imenu-rename spec))
          (active (site-app-detail-active buf))
-         (tab-line (or (buffer-local buf 'site-app-tab-line) 1))
+         (tab-line (or (site-app-get buf 'tab-line) 1))
          (tabs (site-app-detail-tabs buf))
          ;; each tab's key, as the page's own: the site's tabs from 1, composed ones before
          (first (- 1 (length (filter (lambda (t) (plist-get t 'composed)) tabs)))))
     (append
-      (anchor-entry-rows buf (anchor-block-entries (or (buffer-local buf 'site-app-index-head) '())) (list 'rename rename))
+      (anchor-entry-rows buf (anchor-block-entries (or (site-app-get buf 'index-head) '())) (list 'rename rename))
       (apply append
         (map (lambda (t)
                (let* ((id (plist-get t 'id))
@@ -1725,7 +1741,7 @@
                       (key (number->string (+ first (- (length tabs) (length (member t tabs)))))))
                  (cons (list tab-line "" label "" (lambda () (take) (buffer-goto-line! buf tab-line) (anchor-sync! buf)) "" key)
                        (if here?
-                           (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (or (buffer-local buf 'site-app-index-body) '())))
+                           (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (or (site-app-get buf 'index-body) '())))
                                               (list 'rename rename 'depth 1 'where label 'target go))
                            (let ((built (site-app-tab-blocks buf id)))
                              (if (not built)
@@ -1737,10 +1753,10 @@
 
 (define (site-app-draw! buf)
   (set! *site-app-folding* buf)
-  (buffer-set-locals! buf (list 'site-app-index-head '() 'site-app-index-body '() 'site-app-tab-line #f))
-  (let* ((data (buffer-local buf 'site-app-data))
-         (row (buffer-local buf 'site-app-row))
-         (spec (site-app-spec (buffer-local buf 'site-app-name)))
+  (site-app-merge! buf (list 'index-head '() 'index-body '() 'tab-line #f))
+  (let* ((data (site-app-get buf 'data))
+         (row (site-app-get buf 'row))
+         (spec (site-app-spec (site-app-get buf 'name)))
          (tones (and spec (plist-get spec 'tones)))
          (b (site-app-builder))
          (blocks
@@ -1774,8 +1790,8 @@
       (buffer-set-local! buf 'imenu-snapshot 'site-app-imenu-snapshot))
     ;; anchor-mode's f hands a card back to the page, which folds it by its own state
     (buffer-set-local! buf 'anchor-fold-handler site-app-fold-anchor!)
-    (buffer-set-local! buf 'site-app-links (b 'links #f #f))
-    (buffer-set-local! buf 'site-app-stops (site-app-stops blocks))
+    (site-app-set! buf 'links (b 'links #f #f))
+    (site-app-set! buf 'stops (site-app-stops blocks))
     (buffer-set-locals! buf
       (list 'render-mode "blocks"
             'render-blocks (list (component 'ui/page (list 'body blocks)))))
@@ -1789,13 +1805,13 @@
     buf))
 
 (define (site-app-detail-link-at buf)
-  (let ((hit (assoc (car (buffer-line-at-point buf)) (or (buffer-local buf 'site-app-links) '()))))
+  (let ((hit (assoc (car (buffer-line-at-point buf)) (or (site-app-get buf 'links) '()))))
     (and hit (list 0 0 (cadr hit)))))
 
 (add-hook! (list 'block-click 'site-app-list)
   ;; a click on a section or status tab is the same move as its key
   (lambda (buf id)
-    (let ((spec (buffer-local buf 'site-app-spec)))
+    (let ((spec (site-app-get buf 'spec)))
       (cond ((not (and spec (string? id))) #f)
             ((string-prefix? site-app-section-click id)
              (site-app-open! (plist-get spec 'name)
@@ -1808,7 +1824,7 @@
 
 (add-hook! (list 'block-click 'site-app)
   (lambda (buf id)
-    (cond ((not (and (string? id) (buffer-local buf 'site-app-data))) #f)
+    (cond ((not (and (string? id) (site-app-get buf 'data))) #f)
           ((string-prefix? site-app-tab-click id)
            (site-app-detail-select! buf (substring id (string-length site-app-tab-click) (string-length id)))
            #t)
@@ -1821,7 +1837,7 @@
                (lambda () (site-app-detail-act! key))))
            #t)
           ((string-prefix? site-app-link-click id)
-           (tab-open (site-app-url (site-app-spec (buffer-local buf 'site-app-name))
+           (tab-open (site-app-url (site-app-spec (site-app-get buf 'name))
                                    (substring id (string-length site-app-link-click) (string-length id))))
            #t)
           (else #f))))
@@ -1856,21 +1872,21 @@
 (define (site-app-render-detail! name row data)
   (let ((buf (site-app-detail-buffer name row)))
     (unless (buffer-exists? buf) (buffer-create buf))
-    (buffer-set-local! buf 'site-app-name name)
-    (buffer-set-local! buf 'site-app-row row)
-    (when data (buffer-set-local! buf 'site-app-data data))
+    (site-app-set! buf 'name name)
+    (site-app-set! buf 'row row)
+    (when data (site-app-set! buf 'data data))
     ;; a page saved before kinds were modes kept its kind as a minor mode
-    (let ((old (buffer-local buf 'site-app-detail-minor)))
+    (let ((old (site-app-get buf 'detail-minor)))
       (when old
-        (buffer-set-local! buf 'site-app-detail-kind old)
-        (buffer-set-local! buf 'site-app-detail-minor #f)))
+        (site-app-set! buf 'detail-kind old)
+        (site-app-set! buf 'detail-minor #f)))
     (let ((minors (buffer-local buf 'minor-modes)))
       (when (pair? minors)
         (buffer-set-local! buf 'minor-modes (filter (lambda (m) (not (equal? (mode-get m 'kind) 'major))) minors))))
     ;; The page's kind is its major mode, derived from the app's detail mode. The
     ;; app's details are one family, so the next row of any list takes their pane.
     (let ((mode (site-app-detail-major buf)))
-      (buffer-set-local! buf 'detail-family (or (buffer-local buf 'site-app-detail-mode) "site-app-detail-mode"))
+      (buffer-set-local! buf 'detail-family (or (site-app-get buf 'detail-mode) "site-app-detail-mode"))
       (unless (equal? (buffer-local buf 'mode-name) mode)
         (with-current-buffer buf (lambda () (set-mode! mode)))))
     (site-app-draw! buf)
@@ -1958,28 +1974,28 @@
 ;; mode; it carries the page's own keys
 ;; the page's major mode: its kind (ats-approval-mode), else the app's detail mode
 (define (site-app-detail-major buf)
-  (or (buffer-local buf 'site-app-detail-kind)
-      (buffer-local buf 'site-app-detail-mode)
+  (or (site-app-get buf 'detail-kind)
+      (site-app-get buf 'detail-mode)
       "site-app-detail-mode"))
 
 (define (site-app-prepare-detail! name row page)
   (let ((buf (site-app-detail-buffer name row)))
     (unless (buffer-exists? buf) (buffer-create buf))
     ;; a page a namer reuses for another row starts empty, not with the last row's data
-    (let ((old (buffer-local buf 'site-app-row)))
+    (let ((old (site-app-get buf 'row)))
       (when (and old (not (equal? (site-app-field old 'href) (site-app-field row 'href))))
         ;; the page leaves what it read behind, and takes what the new row's last read
-        (when (and (buffer-local buf 'site-app-data) (not (buffer-local buf 'site-app-stub)))
+        (when (and (site-app-get buf 'data) (not (site-app-get buf 'stub)))
           (site-app-cache-put! name 'pages (site-app-field old 'href)
-            (list (buffer-local buf 'site-app-data) (buffer-local buf 'site-app-fetched-at) (buffer-local buf 'site-app-sections))))
+            (list (site-app-get buf 'data) (site-app-get buf 'fetched-at) (site-app-get buf 'sections))))
         (let ((hit (site-app-cache-get name 'pages (site-app-field row 'href))))
-          (cond (hit (buffer-set-locals! buf (list 'site-app-data (car hit) 'site-app-fetched-at (cadr hit)
-                                                   'site-app-sections (or (caddr hit) '()) 'site-app-stub #f)))
+          (cond (hit (site-app-merge! buf (list 'data (car hit) 'fetched-at (cadr hit)
+                                               'sections (or (caddr hit) '()) 'stub #f)))
                 ;; a page drawn without its read holds nothing of the last row's
-                ((buffer-local buf 'site-app-stub) #f)
-                (else (buffer-set-locals! buf (list 'site-app-data #f 'site-app-fetched-at #f 'site-app-sections '())))))))
-    (buffer-set-local! buf 'site-app-detail-mode (site-app-detail-mode-name (site-app-spec name) page))
-    (buffer-set-local! buf 'site-app-detail-kind (plist-get page 'detail-kind))
+                ((site-app-get buf 'stub) #f)
+                (else (site-app-merge! buf (list 'data #f 'fetched-at #f 'sections '())))))))
+    (site-app-set! buf 'detail-mode (site-app-detail-mode-name (site-app-spec name) page))
+    (site-app-set! buf 'detail-kind (plist-get page 'detail-kind))
     (buffer-set-local! buf 'detail-family (site-app-detail-mode-name (site-app-spec name) page))
     buf))
 
@@ -2004,13 +2020,13 @@
   (let* ((sheet (plist-get page 'detail-sheet))
          (tab-url (site-app-with-param url (plist-get page 'detail-tab-param) id))
          (file! (lambda (html)
-                  (when (and (buffer-known? buf) (equal? gen (buffer-local buf 'site-app-gen)))
+                  (when (and (buffer-known? buf) (equal? gen (site-app-get buf 'gen)))
                     (let ((data (and html (site-app-parse sheet html)))
                           (shown (member buf (get-visible-buffers))))
-                      (when (and data (not (equal? (buffer-local buf 'site-app-data-gen) gen)))
-                        (buffer-set-local! buf 'site-app-data-gen gen)
-                        (if shown (site-app-render-detail! name row data) (buffer-set-local! buf 'site-app-data data)))
-                      (when data (buffer-set-local! buf 'site-app-fetched-at (monotonic-ms)))
+                      (when (and data (not (equal? (site-app-get buf 'data-gen) gen)))
+                        (site-app-set! buf 'data-gen gen)
+                        (if shown (site-app-render-detail! name row data) (site-app-set! buf 'data data)))
+                      (when data (site-app-set! buf 'fetched-at (monotonic-ms)))
                       (site-app-detail-put-section! buf id (if data (plist-get data 'section) 'failed) (not shown)))))))
     (site-app-fetch-html! tab-url
       (lambda (html)
@@ -2019,15 +2035,15 @@
 (define (site-app-warm! name list-buf row page)
   ;; read a row's page before it is asked for, filed off screen, unless it is fresh
   (let* ((buf (site-app-prepare-detail! name row page))
-         (at (buffer-local buf 'site-app-fetched-at)))
-    (unless (and at (buffer-local buf 'site-app-data) (< (- (monotonic-ms) at) 60000))
+         (at (site-app-get buf 'fetched-at)))
+    (unless (and at (site-app-get buf 'data) (< (- (monotonic-ms) at) 60000))
       (let ((gen (monotonic-ms))
             (url (site-app-url (site-app-spec name) (plist-get row 'href))))
-        (buffer-set-local! buf 'site-app-name name)
-        (buffer-set-local! buf 'site-app-row row)
-        (buffer-set-local! buf 'site-app-list list-buf)
-        (buffer-set-local! buf 'site-app-gen gen)
-        (buffer-set-local! buf 'site-app-data-gen #f)
+        (site-app-set! buf 'name name)
+        (site-app-set! buf 'row row)
+        (site-app-set! buf 'list list-buf)
+        (site-app-set! buf 'gen gen)
+        (site-app-set! buf 'data-gen #f)
         (for-each (lambda (t) (site-app-fetch-tab! name buf row url page (plist-get t 'id) gen))
                   (or (plist-get page 'detail-tabs) '()))))))
 
@@ -2047,7 +2063,7 @@
   ;; FOR-PAGE: the page the row belongs to, when the list is not one of the app's sections.
   ;; QUIET makes the page without showing it, and reads it only when that needs no live tab.
   (when row
-    (let* ((name (plist-get (buffer-local list-buf 'site-app-spec) 'name))
+    (let* ((name (plist-get (site-app-get list-buf 'spec) 'name))
            (spec (site-app-spec name))
            (page (or for-page (site-app-current-page list-buf)))
            ;; which page the row is shown for: an app with a buffer for each can name it so
@@ -2059,19 +2075,19 @@
            (valid (append (map (lambda (t) (plist-get t 'id)) (or (plist-get page 'detail-composed) '())) ids))
            ;; a page drawn again (the music moved on) stays on the tab it was on; a page
            ;; that declares no tabs takes them from its read, so any tab it was on is one
-           (kept (buffer-local made 'site-app-active))
-           (opened (buffer-set-local! made 'site-app-active
+           (kept (site-app-get made 'active))
+           (opened (site-app-set! made 'active
                      (if (and kept (or (member kept valid) (null? ids))) kept
                          (or (plist-get page 'detail-default)
                              (site-app-chosen-tab name page list-buf valid)))))
            ;; what this page last read draws at once; a read under a minute old stands
-           (cached (buffer-local made 'site-app-data))
-           (fresh (and cached (buffer-local made 'site-app-fetched-at)
-                       (< (- (monotonic-ms) (buffer-local made 'site-app-fetched-at)) (or (plist-get spec 'fresh-ms) 60000))))
+           (cached (site-app-get made 'data))
+           (fresh (and cached (site-app-get made 'fetched-at)
+                       (< (- (monotonic-ms) (site-app-get made 'fetched-at)) (or (plist-get spec 'fresh-ms) 60000))))
            ;; a page that would draw just as it last did is left as it is
-           (same? (let ((f (plist-get spec 'drawn-same?))) (and f cached (buffer-local made 'site-app-active) (f made row))))
+           (same? (let ((f (plist-get spec 'drawn-same?))) (and f cached (site-app-get made 'active) (f made row))))
            (buf (if same?
-                    (begin (buffer-set-local! made 'site-app-row row) made)
+                    (begin (site-app-set! made 'row row) made)
                     (let ((r (site-app-render-detail! name row #f)))
                       (let ((f (plist-get spec 'drawn!))) (when f (f r)))
                       r)))
@@ -2079,13 +2095,13 @@
            (wait (plist-get page 'detail-wait))
            (url (site-app-url spec (plist-get row 'href)))
            (gen (site-app-next-gen! name)))
-      (buffer-set-local! buf 'site-app-list list-buf)
-      (buffer-set-local! buf 'site-app-for-page for-page)
+      (site-app-set! buf 'list list-buf)
+      (site-app-set! buf 'for-page for-page)
       (unless fresh
-        (buffer-set-local! buf 'site-app-gen gen)
+        (site-app-set! buf 'gen gen)
         ;; the old read stays on screen until this one's answers replace it
-        (unless cached (buffer-set-local! buf 'site-app-sections '()))
-        (buffer-set-local! buf 'site-app-data-gen #f))
+        (unless cached (site-app-set! buf 'sections '()))
+        (site-app-set! buf 'data-gen #f))
       (unless quiet (display-buffer-detail! buf list-buf))
       (cond
         ((not sheet) #f)
@@ -2094,10 +2110,10 @@
         ;; to show one: it draws at once, and reads the page only when its own tab is asked for.
         ;; 'detail-lazy may be a procedure of the row, for a page whose rows do not all hold enough
         ((and (let ((lazy (plist-get page 'detail-lazy))) (if (procedure? lazy) (lazy row) lazy))
-              (member (buffer-local made 'site-app-active) valid)
-              (or (not cached) (buffer-local made 'site-app-stub))
-              (site-app-composed-tab buf (buffer-local made 'site-app-active)))
-         (buffer-set-local! buf 'site-app-stub #t)
+              (member (site-app-get made 'active) valid)
+              (or (not cached) (site-app-get made 'stub))
+              (site-app-composed-tab buf (site-app-get made 'active)))
+         (site-app-set! buf 'stub #t)
          (unless same?
            (site-app-render-detail! name row
              (list 'title (or (site-app-field row 'name) "") 'tabs (list (list 'active "yes" 'id "main" 'label "Tracks")) 'section '()))
@@ -2108,7 +2124,7 @@
          (site-app-fetch-html! url
            (lambda (html)
              (let ((data (and html (site-app-parse sheet html))))
-               (when (and data (buffer-known? buf) (equal? gen (buffer-local buf 'site-app-gen)))
+               (when (and data (buffer-known? buf) (equal? gen (site-app-get buf 'gen)))
                  (site-app-render-detail! name row data))))))
         ((plist-get page 'detail-tab-param)
          (for-each (lambda (id) (site-app-fetch-tab! name buf row url page id gen)) ids)
@@ -2123,12 +2139,12 @@
                (when (and data (buffer-known? buf) (equal? gen (site-app-gen name)))
                  (let ((open (site-app-find (lambda (t) (plist-get t 'active))
                                             (site-app-real (plist-get data 'tabs)))))
-                   (buffer-set-local! buf 'site-app-sections
+                   (site-app-set! buf 'sections
                      (if open (list (cons (plist-get open 'id) (plist-get data 'section))) '()))
-                   (buffer-set-local! buf 'site-app-stub #f)
+                   (site-app-set! buf 'stub #f)
                    (site-app-render-detail! name row data)
                    ;; so the page is not read again while it stands
-                   (buffer-set-local! buf 'site-app-fetched-at (monotonic-ms))
+                   (site-app-set! buf 'fetched-at (monotonic-ms))
                    (site-app-collect-detail! name buf tab url wait page gen))))))))
       buf)))
 
@@ -2143,31 +2159,31 @@
           (else #f))))
 
 (define (site-app-detail-select! buf id)
-  (buffer-set-local! buf 'site-app-active id)
+  (site-app-set! buf 'active id)
   ;; a page drawn without its read reads it now, for a tab that needs it
-  (when (and (buffer-local buf 'site-app-stub) (not (site-app-composed-tab buf id)))
-    (buffer-set-local! buf 'site-app-stub #f)
-    (buffer-set-local! buf 'site-app-data #f)
-    (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row) (buffer-local buf 'site-app-for-page)))
-  (let* ((list-buf (buffer-local buf 'site-app-list))
+  (when (and (site-app-get buf 'stub) (not (site-app-composed-tab buf id)))
+    (site-app-set! buf 'stub #f)
+    (site-app-set! buf 'data #f)
+    (site-app-show-detail! (site-app-get buf 'list) (site-app-get buf 'row) (site-app-get buf 'for-page)))
+  (let* ((list-buf (site-app-get buf 'list))
          (g (and list-buf (buffer-group list-buf))))
     (when g
-      (group-setting-set! g (site-app-tab-key (buffer-local buf 'site-app-name) (site-app-current-page list-buf)) id)))
+      (group-setting-set! g (site-app-tab-key (site-app-get buf 'name) (site-app-current-page list-buf)) id)))
   (site-app-draw! buf)
   ;; The background collection moved on to another item: fetch this one again.
-  (let ((name (buffer-local buf 'site-app-name)))
+  (let ((name (site-app-get buf 'name)))
     (when (and (not (site-app-detail-section buf id))
-               (not (equal? (buffer-local buf 'site-app-gen) (site-app-gen name))))
-      (let* ((list-buf (buffer-local buf 'site-app-list))
+               (not (equal? (site-app-get buf 'gen) (site-app-gen name))))
+      (let* ((list-buf (site-app-get buf 'list))
              (spec (site-app-spec name))
              (page (site-app-current-page list-buf))
              (wait (plist-get page 'detail-wait))
-             (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
+             (url (site-app-url spec (plist-get (site-app-get buf 'row) 'href)))
              (gen (site-app-next-gen! name)))
-        (buffer-set-local! buf 'site-app-gen gen)
+        (site-app-set! buf 'gen gen)
         (if (plist-get page 'detail-tab-param)
             ;; a composed tab reads the tabs it draws from
-            (for-each (lambda (src) (site-app-fetch-tab! name buf (buffer-local buf 'site-app-row) url page src gen))
+            (for-each (lambda (src) (site-app-fetch-tab! name buf (site-app-get buf 'row) url page src gen))
                       (let ((composed (site-app-composed-tab buf id)))
                         (if composed (plist-get composed 'from) (list id))))
             (site-app-navigate! name url wait
@@ -2208,20 +2224,20 @@
 (define (site-app-button-selector action) (plist-get action 'selector))
 
 (define (site-app-detail-actions buf)
-  (let ((data (buffer-local buf 'site-app-data)))
+  (let ((data (site-app-get buf 'data)))
     (if data
         (filter (lambda (n) (plist-get n 'selector))
                 (append (site-app-real (plist-get data 'actions))
-                        (site-app-real (plist-get (site-app-head (site-app-spec (buffer-local buf 'site-app-name)) data) 'head))))
+                        (site-app-real (plist-get (site-app-head (site-app-spec (site-app-get buf 'name)) data) 'head))))
         '())))
 
 ;; after an action: read the page and the list again, the way the site redraws
 (define (site-app-detail-after! buf note &optional advance)
   ;; ADVANCE: the press did its job, so go on to the next row, as the site does
   (message note)
-  (let* ((list-buf (buffer-local buf 'site-app-list))
-         (name (buffer-local buf 'site-app-name))
-         (row (buffer-local buf 'site-app-row))
+  (let* ((list-buf (site-app-get buf 'list))
+         (name (site-app-get buf 'name))
+         (row (site-app-get buf 'row))
          (es (list-entries list-buf))
          (i (let loop ((rs es) (i 0))
               ;; a reread row may differ in its timestamps, so its key names it
@@ -2236,7 +2252,7 @@
          (site-app-show-detail! list-buf (nth j es)))
       ;; the press changed the page: the minute-old read no longer stands
       ((buffer-known? buf)
-       (buffer-set-local! buf 'site-app-fetched-at #f)
+       (site-app-set! buf 'fetched-at #f)
        (site-app-show-detail! list-buf row)))
     (site-app-read-page! name (site-app-current-page list-buf))))
 
@@ -2255,10 +2271,10 @@
       ;; a button the app does not press: its form is on the site
       ((not action) (run-command "site-app-detail-open") (message (string-append (cadr keyed) ": on the site")))
       (else
-        (let* ((name (buffer-local buf 'site-app-name))
+        (let* ((name (site-app-get buf 'name))
                (spec (site-app-spec name))
                (page (site-app-detail-page buf))
-               (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
+               (url (site-app-url spec (plist-get (site-app-get buf 'row) 'href)))
                (hit (assoc (site-app-without-key (or (plist-get action 'text) "")) (or (plist-get page 'detail-actions) '())))
                (label (site-app-without-key (or (plist-get action 'text) "")))
                (selector (site-app-button-selector action))
@@ -2298,7 +2314,7 @@
   ;; without a key. The site's own key comes first, else the first free letter
   ;; of the label. The page spec's 'detail-keys names the buttons the app
   ;; presses itself; the rest open the page on the site, where their forms are
-  (let* ((list-buf (buffer-local buf 'site-app-list))
+  (let* ((list-buf (site-app-get buf 'list))
          (page (and list-buf (site-app-current-page list-buf)))
          (allowed (and page (plist-get page 'detail-keys))))
     (let loop ((as (site-app-detail-actions buf)) (used '()) (acc '()))
@@ -2332,7 +2348,7 @@
       (mode-keys! mode keys)
       ;; the index answers the page's button keys too, where it has none of its own
       (when (boundp 'app-detail-keys!)
-        (let ((name (buffer-local buf 'site-app-name)))
+        (let ((name (site-app-get buf 'name)))
           (for-each (lambda (index) (app-detail-keys! index mode))
                     (site-app-index-modes name)))))))
 
@@ -2350,9 +2366,9 @@
   (let ((fold (and a (plist-get (or (anchor-data a) '()) 'fold))))
     (and fold
          (let ((title (car fold)) (open? (cadr fold)))
-           (buffer-set-local! buf 'site-app-folds
+           (site-app-set! buf 'folds
              (cons (list title (not open?))
-                   (filter (lambda (f) (not (equal? (car f) title))) (or (buffer-local buf 'site-app-folds) '()))))
+                   (filter (lambda (f) (not (equal? (car f) title))) (or (site-app-get buf 'folds) '()))))
            (site-app-draw! buf)
            ;; point stays on the card's title
            (let ((back (anchor-find buf (anchor-name a))))
@@ -2390,16 +2406,16 @@
 ;; the page a detail was drawn for: the one it was opened as (a job opened from a
 ;; company is a jobs page), else the page its list is on
 (define (site-app-detail-page buf)
-  (or (buffer-local buf 'site-app-for-page)
-      (site-app-current-page (buffer-local buf 'site-app-list))))
+  (or (site-app-get buf 'for-page)
+      (site-app-current-page (site-app-get buf 'list))))
 
 (define (site-app-stage-select! buf status)
   (let* ((stages (site-app-detail-stages buf))
-         (name (buffer-local buf 'site-app-name))
+         (name (site-app-get buf 'name))
          (spec (site-app-spec name))
          (page (site-app-detail-page buf))
          (id (site-app-detail-active buf))
-         (url (site-app-url spec (plist-get (buffer-local buf 'site-app-row) 'href)))
+         (url (site-app-url spec (plist-get (site-app-get buf 'row) 'href)))
          (param (plist-get page 'detail-tab-param))
          (tab-url (if param (site-app-with-param url param id) url))
          (label (string-replace status "_" " ")))
@@ -2468,7 +2484,7 @@
 
 (define (site-app-card-kinds)
   (let* ((buf *site-app-folding*)
-         (spec (and buf (buffer-exists? buf) (site-app-spec (buffer-local buf 'site-app-name)))))
+         (spec (and buf (buffer-exists? buf) (site-app-spec (site-app-get buf 'name)))))
     (or (and spec (plist-get spec 'card-keys)) '())))
 
 (define (site-app-card-map-for class)
@@ -2489,7 +2505,7 @@
 ;; the keys of the card point is on, when its kind has keys of its own
 (define (site-app-card-key-labels buf)
   (let* ((at (buffer-at-point-map buf))
-         (spec (site-app-spec (buffer-local buf 'site-app-name)))
+         (spec (site-app-spec (site-app-get buf 'name)))
          (kind (and at spec (site-app-find (lambda (k) (equal? (site-app-card-map-name (car k)) at))
                                            (or (plist-get spec 'card-keys) '())))))
     (if kind (map (lambda (k) (list (car k) (caddr k))) (cadr kind)) '())))
@@ -2497,10 +2513,10 @@
 ;; the keys bar follows point: on a card with keys of its own it leads with them
 (define (site-app-footer-sync!)
   (let ((buf (current-buffer)))
-    (when (and (buffer-local buf 'site-app-name) (buffer-local buf 'site-app-data))
+    (when (and (site-app-get buf 'name) (site-app-get buf 'data))
       (let ((at (buffer-at-point-map buf)))
-        (unless (equal? at (buffer-local buf 'site-app-footer-map))
-          (buffer-set-local! buf 'site-app-footer-map at)
+        (unless (equal? at (site-app-get buf 'footer-map))
+          (site-app-set! buf 'footer-map at)
           (buffer-set-local! buf 'footer-line-blocks
             (list (component 'ui/keys-bar (list 'main (site-app-detail-keys buf))))))))))
 
@@ -2519,9 +2535,9 @@
     (let* ((buf (current-buffer))
            (hit (site-app-detail-link-at buf))
            (href (and hit (caddr hit)))
-           (spec (site-app-spec (buffer-local buf 'site-app-name)))
+           (spec (site-app-spec (site-app-get buf 'name)))
            (page (and href spec (site-app-href-page spec href)))
-           (list-buf (buffer-local buf 'site-app-list)))
+           (list-buf (site-app-get buf 'list)))
       (cond ((not hit) (message "No link here"))
             ((and page list-buf (buffer-known? list-buf))
              (let* ((path (car (string-split href "?")))
@@ -2534,18 +2550,18 @@
   (lambda ()
     (let ((buf (current-buffer)))
       ;; a reload reads now, and the page the detail was opened as
-      (buffer-set-local! buf 'site-app-fetched-at #f)
+      (site-app-set! buf 'fetched-at #f)
       ;; and an open card reads its details again
-      (buffer-set-local! buf 'site-app-card-more '())
+      (site-app-set! buf 'card-more '())
       ;; and a tab that opens on an empty stage may skip it again
-      (buffer-set-local! buf 'site-app-stage-skipped '())
-      (site-app-show-detail! (buffer-local buf 'site-app-list) (buffer-local buf 'site-app-row)
-                             (buffer-local buf 'site-app-for-page)))))
+      (site-app-set! buf 'stage-skipped '())
+      (site-app-show-detail! (site-app-get buf 'list) (site-app-get buf 'row)
+                             (site-app-get buf 'for-page)))))
 (define-command "site-app-detail-open" "Open this page on the site"
   (lambda ()
     (let ((buf (current-buffer)))
-      (tab-open (site-app-url (site-app-spec (buffer-local buf 'site-app-name))
-                              (plist-get (buffer-local buf 'site-app-row) 'href))))))
+      (tab-open (site-app-url (site-app-spec (site-app-get buf 'name))
+                              (plist-get (site-app-get buf 'row) 'href))))))
 
 (mode-keys! "site-app-detail-mode"
   (list (list "TAB" "site-app-detail-next-tab")
@@ -2569,7 +2585,7 @@
 
 (define (site-app-list-detail list-buf)
   ;; the page the list shows beside it
-  (site-app-find (lambda (b) (equal? (buffer-local b 'site-app-list) list-buf)) (get-visible-buffers)))
+  (site-app-find (lambda (b) (equal? (site-app-get b 'list) list-buf)) (get-visible-buffers)))
 
 (define (site-app-detail-anchor-step! command)
   ;; from the list, walk the page beside it by its parts: the list keeps its row.
@@ -2627,7 +2643,7 @@
 (define-command "site-app-bulk-agents" "Hand the top rows to their pages' own chats, with one orchestrator to report"
   (lambda ()
     (let* ((buf (current-buffer))
-           (spec (site-app-spec (plist-get (buffer-local buf 'site-app-spec) 'name)))
+           (spec (site-app-spec (plist-get (site-app-get buf 'spec) 'name)))
            (bulk (or (plist-get spec 'bulk) '()))
            (size (or (plist-get bulk 'size) 10))
            (rows (let loop ((es (filter (lambda (e) (list-selectable? buf e)) (list-entries buf))) (acc '()))

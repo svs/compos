@@ -181,7 +181,6 @@
 ;; the REPL is scheme-mode's other buffer: it derives its mode from scheme-mode
 ;; and binds C-c C-z and C-c C-e in it
 (require 'repl)
-(require 'definition)
 ;; popups after popper.el; its keys take the backtick family from groups.scm
 (require 'popper)
 (require 'scratch)

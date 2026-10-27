@@ -213,7 +213,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 | > code.scm     58K  Aug 30  -rw-r--r-- modified   read a source f   | It exists because an agent writes code faster    |
 |   diff-mode.scm 40K Aug 30  -rw-r--r--            the git diff as   | than a person reads it. code-browse is the       |
 |   lsp.scm      22K  Aug 20  -rw-r--r--            diagnostics, def  | reader's verb set; imenu reads its outline       |
-|   definition.scm 7K Aug 30  -rw-r--r--            look at a defini  | through imenu-rows, and an agent reads the same  |
+|   scheme-ide.scm 9K Aug 30  -rw-r--r--            scheme ide, defi  | through imenu-rows, and an agent reads the same  |
 |   scope.scm     3K  Aug 30  -rw-r--r-- untracked ?                  | outline through code-outline.                    |
 |                                                                     |                                                  |
 | RET open  m mark  d flag  x trash  s sort  / filter  ^ up  g revert | Watch: nested tree-sitter nodes can share one    |

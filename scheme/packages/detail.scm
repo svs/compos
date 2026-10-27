@@ -26,6 +26,8 @@
 ;;; name. Such a list may still call display-buffer-detail! for the window,
 ;;; and the walk then has one buffer and says so.
 
+(require 'buffer-relations)
+
 (domain! 'windows)
 (effects! '(read))
 

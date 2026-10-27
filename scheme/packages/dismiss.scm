@@ -1,18 +1,13 @@
 ;;; dismiss.scm --- child-first dismissal and reading surfaces.
 
+;;; The parent and its children are the owner kind of the buffer's
+;;; relations (buffer-relations.scm): buffer-parent and buffer-children
+;;; read them, and buffer-relations unlinks them on kill and on rename.
+
+(require 'buffer-relations)
+
 (domain! 'windows)
 (effects! '(read))
-
-(define (buffer-parent buf)
-  (let ((parent (buffer-local buf 'dismiss-parent)))
-    (and parent (buffer-known? parent)
-         (member buf (or (buffer-local parent 'dismiss-children) '()))
-         parent)))
-
-(define (buffer-children buf)
-  (filter (lambda (child)
-            (and (buffer-known? child) (equal? (buffer-parent child) buf)))
-          (or (buffer-local buf 'dismiss-children) '())))
 
 (define (dismiss--descendants buf)
   (fold (lambda (out child)
@@ -59,8 +54,6 @@
                                     "notmuch-quit"))))))
        #t))
 
-(public! 'buffer-parent "(buffer-parent BUF) — BUF's live dismissal parent, or #f")
-(public! 'buffer-children "(buffer-children BUF) — BUF's live children, newest first")
 (public! 'buffer-dismissible? "(buffer-dismissible? BUF) — whether BUF offers child-first q dismissal")
 
 (effects! '(write display))
@@ -71,12 +64,8 @@
   (when (or (equal? parent child) (member parent (dismiss--descendants child)))
     (error "A buffer cannot be its own descendant"))
   (let ((old (buffer-parent child)))
-    (when old
-      (buffer-set-local! old 'dismiss-children
-        (remove (lambda (b) (equal? b child)) (buffer-children old)))))
-  (buffer-set-local! child 'dismiss-parent parent)
-  (buffer-set-local! parent 'dismiss-children
-    (cons child (remove (lambda (b) (equal? b child)) (buffer-children parent))))
+    (buffer-relate! child 'owner parent)
+    (when (and old (not (equal? old parent))) (dismiss--sync! old)))
   (dismiss--sync! parent)
   (dismiss--sync! child)
   child)
@@ -86,11 +75,8 @@
 ;; (packages/detail.scm).
 (define (buffer-unchild! child)
   (let ((parent (buffer-parent child)))
-    (when parent
-      (buffer-set-local! parent 'dismiss-children
-        (remove (lambda (b) (equal? b child)) (buffer-children parent)))
-      (dismiss--sync! parent))
-    (buffer-set-local! child 'dismiss-parent #f)
+    (buffer-relate! child 'owner #f)
+    (when parent (dismiss--sync! parent))
     (dismiss--sync! child)
     child))
 
@@ -211,29 +197,7 @@
                   (when (and (string? cmd) (not (equal? cmd "dismiss-buffer")))
                     (run-command cmd)))))))))
 
-;; Reciprocal links prevent a reused buffer name from inheriting ownership.
-;; Clean both sides on kill and rewrite both sides on rename.
-(define (dismiss--before-kill! buf)
-  (let ((parent (buffer-parent buf)))
-    (when parent
-      (buffer-set-local! parent 'dismiss-children
-        (remove (lambda (b) (equal? b buf)) (buffer-children parent)))))
-  (for-each (lambda (child) (buffer-set-local! child 'dismiss-parent #f))
-            (buffer-children buf)))
-
-(define (dismiss--renamed! old new)
-  (for-each
-    (lambda (buf)
-      (when (equal? (buffer-local buf 'dismiss-parent) old)
-        (buffer-set-local! buf 'dismiss-parent new))
-      (let ((children (buffer-local buf 'dismiss-children)))
-        (when (and children (member old children))
-          (buffer-set-local! buf 'dismiss-children
-            (map (lambda (b) (if (equal? b old) new b)) children)))))
-    (buffer-list)))
-
 (define (dismiss--after-mode! &rest args) (dismiss-sync-visible!))
-(advice-add! 'buffer-kill! 'before 'dismiss-unlink 'dismiss--before-kill!)
 (advice-add! 'set-mode! 'after 'dismiss-presentation 'dismiss--after-mode!)
 (advice-add! 'buffer-set-read-only! 'after 'dismiss-presentation 'dismiss--after-mode!)
 ;; A prompt is not a reading surface, so the flag that makes one never
@@ -247,7 +211,6 @@
              (minibuffer-buffer? (car args)))
         #f
         (apply next args))))
-(add-hook! 'buffer-renamed-hook 'dismiss--renamed!)
 ;; Every cause of a change already says so: a window shows a different
 ;; buffer, a mode is set, a read-only flag is flipped, a child is claimed
 ;; or released, a buffer is renamed or dismissed. A keystroke is not one

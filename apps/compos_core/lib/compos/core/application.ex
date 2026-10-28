@@ -75,6 +75,8 @@ defmodule Compos.Core.Application do
       # init, so the table must already exist when the first one starts
       Compos.Core.BufferView,
       Compos.Core.BufferStore,
+      # every buffer's metadata changes, batched, to the Scheme handler
+      Compos.Core.BufferMeta,
       Compos.Core.Reactor,
       Compos.Core.Watch,
       Compos.Core.Editor,

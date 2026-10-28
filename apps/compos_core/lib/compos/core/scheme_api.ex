@@ -1981,6 +1981,12 @@ defmodule Compos.Core.SchemeAPI do
           {total, rows} = Compos.Core.BufferRows.query(opts)
           [total, rows]
         end,
+      {"buffer-meta-handler!",
+       "(buffer-meta-handler! FN) — FN gets every batch of buffer metadata changes as ((NAME DIFF) ...), oldest first: one call per burst, on the ui lane. DIFF is a plist of the new values: name, was (the old name), path, read-only, modified, locals (a plist; #f for a local that went). Text, point and display never send one. #f clears it."} =>
+        fn [handler] ->
+          Compos.Core.BufferMeta.set_handler(handler)
+          :void
+        end,
       {"buffer-read-many",
        "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id."} =>
         fn [names, fields, keys] ->

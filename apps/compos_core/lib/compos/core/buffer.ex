@@ -1147,6 +1147,7 @@ defmodule Compos.Core.Buffer do
 
   defp publish_and_notify(state, before) do
     state = publish(state, before)
+    notify_meta(state, before)
 
     if state.fontify.cache != before.fontify.cache do
       Events.broadcast_display(state.name)
@@ -1166,6 +1167,46 @@ defmodule Compos.Core.Buffer do
   @view_fields ~w(name id rope bin version saved_version path read_only
                   point mark locals overlays overlay_gen hidden props narrow_range win_points fontify
                   persistent discard dirty)a
+
+  # The facts a listing reads. A change to one is a `buffer_meta`
+  # broadcast holding only what changed (`Events.broadcast_meta/2`). A text
+  # edit moves marker locals with it, so locals count only when the text
+  # stayed, and a local too big to index is never metadata.
+  @meta_fields ~w(name path read_only)a
+  @meta_local_bytes 1024
+
+  defp notify_meta(%{discard: true}, _before), do: :ok
+
+  defp notify_meta(state, before) do
+    diff =
+      for f <- @meta_fields, Map.fetch!(state, f) !== Map.fetch!(before, f),
+          into: %{},
+          do: {f, Map.fetch!(state, f)}
+
+    diff = if state.name != before.name, do: Map.put(diff, :was, before.name), else: diff
+
+    modified = state.version != state.saved_version
+    was_modified = before.version != before.saved_version
+    diff = if modified != was_modified, do: Map.put(diff, :modified, modified), else: diff
+
+    locals = meta_locals(state, before)
+    diff = if map_size(locals) > 0, do: Map.put(diff, :locals, locals), else: diff
+
+    if map_size(diff) > 0, do: Events.broadcast_meta(state.name, diff)
+    :ok
+  end
+
+  defp meta_locals(%{version: v}, %{version: w}) when v != w, do: %{}
+  defp meta_locals(%{locals: now}, %{locals: was}) when now === was, do: %{}
+
+  defp meta_locals(%{locals: now}, %{locals: was}) do
+    set =
+      for {k, v} <- now, Map.get(was, k) !== v, :erlang.external_size(v) <= @meta_local_bytes,
+          into: %{},
+          do: {k, v}
+
+    for k <- Map.keys(was), not Map.has_key?(now, k), into: set, do: {k, nil}
+  end
 
   # A killed buffer publishes nothing more: the kill forgot its row, and a
   # late write must not put the row back for the moment before it dies.

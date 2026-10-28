@@ -117,6 +117,28 @@ defmodule Compos.Core.Events do
   end
 
   @doc """
+  A buffer's metadata changed: its name, path, read-only flag, modified
+  flag or a small local. The buffer sends it from the one place it
+  publishes its row, so no other code has to remember to. DIFF holds only
+  what changed, the new values. Text, point and display state never send
+  one; read the row (`BufferView`) for the rest.
+
+      {:buffer_meta, name, %{path: "/new", locals: %{"group-id" => "grp:1"}}}
+  """
+  def subscribe_meta do
+    {:ok, _} = Registry.register(@registry, :buffer_meta, nil)
+    :ok
+  end
+
+  def unsubscribe_meta, do: Registry.unregister(@registry, :buffer_meta)
+
+  def broadcast_meta(name, diff) do
+    Registry.dispatch(@registry, :buffer_meta, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:buffer_meta, name, diff})
+    end)
+  end
+
+  @doc """
   Append an event to the durable log (`Compos.Core.Events.Log`) and answer
   its seq. The rest of this module is live only; this is what is kept.
   Scheme subscribers (`scheme/packages/events.scm`) get the event shortly

@@ -1220,24 +1220,55 @@
                 (if (null? ws) '() (cdr ws))
                 (if (equal? out "") txt (string-append out "  " txt)))))))
 
+;; One annotate pass works a label out once for each key it depends on: a
+;; prompt over a thousand buffers names a handful of groups, modes and
+;; folders. An annotator or a face asks with (annotate-once KEY THUNK);
+;; outside a pass the thunk just runs.
+(define *annotate-memo* #f)
+
+;; KEY is (KIND K): one short list per kind, so a lookup walks the few
+;; groups, not every label the pass has seen.
+(define (annotate-once key thunk)
+  (if (not *annotate-memo*)
+      (thunk)
+      (let* ((kind (car key))
+             (k (cadr key))
+             (bucket (assq kind *annotate-memo*))
+             (hit (and bucket (assoc k (cadr bucket)))))
+        (if hit
+            (cadr hit)
+            (let ((v (thunk)))
+              (set! *annotate-memo*
+                    (cons (list kind (cons (list k v) (if bucket (cadr bucket) '())))
+                          (if bucket
+                              (filter (lambda (b) (not (eq? (car b) kind))) *annotate-memo*)
+                              *annotate-memo*)))
+              v)))))
+
 ;; a category with no annotator hands its candidates back as plain labels
 (define (annotate category names)
-  (let ((f (marginalia-for category)))
+  (let ((f (marginalia-for category))
+        (outer *annotate-memo*))
     (if (not f)
         names
-        (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
-               (ws (marginalia-widths rows)))
-          (let loop ((ns names) (rs rows) (out '()))
-            (if (null? ns)
-                (reverse out)
-                (let* ((name (car ns))
-                       (hint (marginalia-join (marginalia-trim (car rs)) ws))
-                       (face (candidate-face-for category name)))
-                  (loop (cdr ns) (cdr rs)
-                        (cons (if face
-                                  (list name hint "candidate" '() face)
-                                  (list name hint))
-                              out)))))))))
+        (begin
+          (set! *annotate-memo* '())
+          (unwind-protect
+            (lambda ()
+              (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
+                     (ws (marginalia-widths rows)))
+                (let loop ((ns names) (rs rows) (out '()))
+                  (if (null? ns)
+                      (reverse out)
+                      (let* ((name (car ns))
+                             (hint (marginalia-join (marginalia-trim (car rs)) ws))
+                             (face (candidate-face-for category name)))
+                        (loop (cdr ns) (cdr rs)
+                              (cons (if face
+                                        (list name hint "candidate" '() face)
+                                        (list name hint))
+                                    out)))))))
+            (lambda () (set! *annotate-memo* outer)))))))
 
 ;;; --- connections --------------------------------------------------------------
 ;;; conn-list, conn-detail and conn-log answer for every connection kind
@@ -4679,17 +4710,21 @@
 ;; (match-hint), so a group or project name finds every member.
 (marginalia! 'buffer
   (lambda (b)
-    (list (buffer-icon b)
-          (or (buffer-local b 'mode-name) "Fundamental")
-          (buffer-group-summary b)
-          (buffer-project-label b)
-          (buffer-workspace-label b)
-          ;; a chat has no file: its last column is the group's
-          ;; metadata, so the group says what it is for
-          (or (buffer-path b)
-              (and (chat-buffer? b) (buffer-group b)
-                   (group-meta (buffer-group b)))
-              ""))))
+    (let ((mode (or (buffer-local b 'mode-name) "Fundamental"))
+          (path (buffer-path b)))
+      (list (buffer-icon b)
+            mode
+            (annotate-once (list 'group (buffer-color-group b))
+                           (lambda () (buffer-group-summary b)))
+            (buffer-project-label b)
+            (buffer-workspace-label b)
+            ;; a chat has no file: its last column is the group's
+            ;; metadata, so the group says what it is for
+            (or path
+                (and (chat-buffer? b)
+                     (let ((g (buffer-group b)))
+                       (and g (annotate-once (list 'meta g) (lambda () (group-meta g))))))
+                "")))))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
 ;; marginalia annotator supplies the rest, MRU-ordered — the recency

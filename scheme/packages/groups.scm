@@ -126,7 +126,9 @@ is forgotten and that group falls back to creation order in the switcher."
 (add-hook! '(candidate-face groups)
   (lambda (category name)
     (and (equal? category 'buffer) (buffer-known? name)
-         (buffer-filename-face name))))
+         (let ((g (buffer-color-group name)))
+           (annotate-once (list 'group-face g)
+                          (lambda () (and g (group-color-face g))))))))
 
 (define (group-next-color)
   (+ 1 (modulo (- *group-next-id* 1) *group-colors*)))

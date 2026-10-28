@@ -746,23 +746,94 @@
           #t)
         (not win))))
 
-(define (chat-dismiss--close! buf slug ok?)
-  (if ok?
-      (begin
-        (when (and slug (not (equal? (agent-status slug) 'dead)))
-          (llm-session-close! slug))
-        (message "chat dismissed"))
-      (message "chat run ended unsuccessfully; chat remains dismissed")))
+;; A chat ends itself. The agent says how its work ended with chat-finish!,
+;; and at the end of the turn the chat is archived and killed only when the
+;; agent said done and nothing argues against it: a failed or cancelled
+;; run, a waiting permission, unsaved edits, or an open todo of the chat.
+;; Anything else keeps the chat, and a notice says why.
+(define *chat-finish-outcomes* '(done blocked needs-user))
 
-(add-hook! (list 'agent-turn-end 'chat-dismiss)
-  (lambda (slug stop-reason ok?)
-    (let ((buf (agent-buf slug)))
-      (when (buffer-local buf 'chat-dismiss-pending)
-        (buffer-set-local! buf 'chat-dismiss-pending #f)
-        (chat-dismiss--close! buf slug ok?)))))
+(define *chat-finish-ask*
+  "This chat is dismissed. When your work is complete, call (chat-finish! 'done \"one-line summary\") and the chat closes. If you cannot complete it, call (chat-finish! 'blocked \"why\") or (chat-finish! 'needs-user \"what you need\") and the chat stays.")
+
+(define (chat-finish--open-todos buf)
+  (let ((id (buffer-local buf 'chat-id)))
+    (if (string? id)
+        (filter (lambda (t) (member id (todo-chats t)))
+                (or (ignore-errors (lambda () (todo-list))) '()))
+        '())))
+
+(define (chat-finish--blockers buf slug ok? stop-reason)
+  (let ((info (and slug (agent-info slug)))
+        (work (ignore-errors (lambda () (chat-work-state buf)))))
+    (append
+     (if (and ok? (not (equal? stop-reason "cancelled")))
+         '()
+         (list (string-append "the run ended: " (if (string? stop-reason) stop-reason "error"))))
+     (if (and (pair? info) (plist-get info 'permission)) (list "a permission request waits") '())
+     (if (and (pair? work) (eq? (plist-get work 'verdict) 'unsaved)) (list "it has unsaved edits") '())
+     (map (lambda (t) (string-append "todo " (plist-get t 'id) " is " (plist-get t 'state)))
+          (chat-finish--open-todos buf)))))
+
+(define (chat-finish--settle! buf slug ok? stop-reason)
+  (let* ((fin (buffer-local buf 'chat-finish))
+         (outcome (and (pair? fin) (car fin)))
+         (summary (if (pair? fin) (cadr fin) ""))
+         (title (chats-title buf))
+         (blockers (chat-finish--blockers buf slug ok? stop-reason)))
+    (buffer-set-local! buf 'chat-dismiss-pending #f)
+    (buffer-set-local! buf 'chat-finish-asked #f)
+    (buffer-set-local! buf 'chat-finish #f)
+    (if (and (eq? outcome 'done) (null? blockers))
+        (begin
+          (ignore-errors (lambda () (chat-log-save! buf)))
+          (agents-archive! buf)
+          (notify! "chat" (string-append "Done: " title) summary)
+          'closed)
+        (begin
+          (notify! "chat" (string-append "Kept: " title)
+                   (string-join
+                    (append (cond ((not outcome) '("the agent did not say it is done"))
+                                  ((eq? outcome 'done) '())
+                                  (else (list (string-append (symbol->string outcome) ": " summary))))
+                            blockers)
+                    "; "))
+          'kept))))
+
+(define (chat-finish-turn-end! slug stop-reason ok?)
+  (let ((buf (agent-buf slug)))
+    (when (and (string? buf) (buffer-exists? buf))
+      (cond ((buffer-local buf 'chat-finish)
+             (chat-finish--settle! buf slug ok? stop-reason))
+            ((buffer-local buf 'chat-dismiss-pending)
+             ;; a dismissed chat that has not said how it ended is asked once
+             (if (and ok? (not (buffer-local buf 'chat-finish-asked)))
+                 (begin
+                   (buffer-set-local! buf 'chat-finish-asked #t)
+                   (agent-send-msg! slug *chat-finish-ask*))
+                 (chat-finish--settle! buf slug ok? stop-reason)))))))
+
+(define (chat-finish! outcome summary &optional buf0)
+  (let* ((buf (or buf0 (current-buffer)))
+         (slug (agent-slug-of buf))
+         (outcome (if (string? outcome) (string->symbol outcome) outcome)))
+    (cond ((not slug) (error "chat-finish!: not a chat"))
+          ((not (memq outcome *chat-finish-outcomes*))
+           (error "chat-finish!: OUTCOME is done, blocked or needs-user"))
+          (else
+           (buffer-set-local! buf 'chat-finish (list outcome (if (string? summary) summary "")))
+           (if (member (agent-status slug) '(running starting))
+               (if (eq? outcome 'done)
+                   "the chat closes when this turn ends, unless something holds it"
+                   "the chat stays; the user gets a notice")
+               (chat-finish--settle! buf slug #t #f))))))
+
+(public! 'chat-finish!
+  "(chat-finish! OUTCOME SUMMARY [BUF]) -- a chat says how its work ended: done, blocked or needs-user. At the turn end a done chat is archived and killed, unless a failed run, a waiting permission, unsaved edits or an open todo holds it")
+(catalog-meta! 'function "chat-finish!" 'domain 'chat 'effects '(destroy))
 
 (define-command "chat-dismiss"
-  "Hide this chat, optionally send a final instruction, and dismiss after the current run"
+  "Hide this chat, optionally send a final instruction; it closes when the agent says it is done"
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
@@ -771,15 +842,16 @@
       (if (not (chat-dismiss--hide! buf))
           (message "could not hide chat: no other buffer is available")
           (begin
-            (when (and slug (not (equal? input "")))
-              (chat-clear-input! buf)
-              (agent-send-msg! slug input))
-            (if running
-                (buffer-set-local! buf 'chat-dismiss-pending #t)
-                (chat-dismiss--close! buf slug #t))
-            (message (if running
-                         "chat hidden; dismissing after the current run"
-                         "chat dismissed")))))))
+            (when slug
+              (buffer-set-local! buf 'chat-dismiss-pending #t)
+              (cond ((not (equal? input ""))
+                     (chat-clear-input! buf)
+                     (buffer-set-local! buf 'chat-finish-asked #t)
+                     (agent-send-msg! slug (string-append input "\n\n" *chat-finish-ask*)))
+                    ((not running)
+                     (buffer-set-local! buf 'chat-finish-asked #t)
+                     (agent-send-msg! slug *chat-finish-ask*))))
+            (message "chat hidden; it closes when the agent says it is done"))))))
 
 (define (list-remove-at lst i)
   (let loop ((l lst) (n 0) (acc '()))
@@ -1495,6 +1567,10 @@
 ;; by name, not by value: a reload then reaches the new procedure
 (add-hook! (list 'agent-turn-end "subagents")
   (lambda (slug stop-reason ok?) (subagent-turn-end! slug stop-reason ok?)))
+
+;; after the subagent listener, which reads the chat before a finish kills it
+(add-hook! (list 'agent-turn-end "chat-finish")
+  (lambda (slug stop-reason ok?) (chat-finish-turn-end! slug stop-reason ok?)))
 
 (category! 'chat)
 

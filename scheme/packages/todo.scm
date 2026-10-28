@@ -1145,7 +1145,7 @@
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n"
      "If you saved files, call (jj-describe! TEXT) before todo-review or todo-done; TEXT follows docs/COMMITS.md.\n"
      "Never end a turn while you wait on background work (tests, a task) without a wake-up: first (agent-listen! '(at \"YYYY-MM-DD HH:MM\") NOTE), or a listener on the event you wait for. Else nothing wakes you.\n"
-     "When done, close this chat with (run-command \"chat-dismiss\").\n")))
+     "When it is finished, call (chat-finish! 'done RESULT): the chat closes itself. If it cannot finish, call (chat-finish! 'blocked WHY) or (chat-finish! 'needs-user WHAT).\n")))
 
 (define (todo-assign-chat! id group &optional who)
   "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new; a new chat is the calling chat's subagent with notify; return the chat"

@@ -3572,11 +3572,10 @@ is forgotten and that group falls back to creation order in the switcher."
                  '("mode-name" "group-id" "group" "companion-of")))))))
 
 (define (group-index-candidates names keys)
-  ;; the buffer rows carry the group key each buffer's locals name, so the
-  ;; rule above reads a handful of rows, not every buffer; a key the rows
-  ;; cannot settle ("slow") is always a candidate
+  ;; the buffer rows carry each buffer's group, so the rule above reads a
+  ;; handful of rows, not every buffer
   (let ((hits (map car (cadr (buffer-rows (list 'names names 'hidden #t 'context-only #t
-                                                'groups (cons "slow" keys)))))))
+                                                'groups keys))))))
     (dedupe-names (filter (lambda (n) (member n hits)) names))))
 
 (define (group-buffers g &optional all)

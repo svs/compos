@@ -41,7 +41,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `ibuffer` | `C-x C-b` | List buffers by group in a buffer |
 | `ibuffer-do-sort-by-alphabetic` |  | Order the rows of a section by name |
 | `ibuffer-do-sort-by-recency` |  | Order the rows of a section by last use |
-| `ibuffer-do-sort-by-size` |  | Order the rows of a section by size, largest first |
 | `ibuffer-group-kill` |  | Kill the group at point: every member, then the group itself |
 | `ibuffer-kill` |  | Kill the marked buffers, the row at point, or the group at point |
 | `ibuffer-narrow-group` |  | Narrow this list to the group at point |

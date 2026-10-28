@@ -91,11 +91,10 @@
   'group 'chat)
 
 (define (chats-live-log-paths)
-  ;; every open chat's log, from one read of the buffer rows: a chat's log
-  ;; lies in its group's folder, and each folder is looked up once
+  ;; every open chat's log, from one read of the chats' locals: a chat's
+  ;; log lies in its group's folder, and each folder is looked up once
   (let ((known (group-ids)) (dirs '()))
-    (let loop ((rows (cadr (buffer-rows (list 'names (chat-list-bufs) 'hidden #t 'context-only #t
-                                              'fields '(chat-log-id group-id mode)))))
+    (let loop ((rows (buffer-read-many (chat-list-bufs) '() '(chat-log-id group-id mode-name)))
                (acc '()))
       (if (null? rows)
           acc
@@ -122,8 +121,9 @@
       ;; the 600 are never shown, so they are never checked. A log is open
       ;; when an open chat holds its id, and its file is named for the id.
       (let ((live (filter string? (map (lambda (r) (nth 1 r))
-                                       (cadr (buffer-rows (list 'hidden #t 'context-only #t
-                                                                'fields '(chat-log-id))))))))
+                                       (buffer-read-many
+                                         (map car (cadr (buffer-rows '(hidden #t context-only #t))))
+                                         '() '(chat-log-id))))))
         (let loop ((paths (chat-log-files-newest)) (n 0) (out '()))
           (if (or (null? paths) (>= n chats-archived-limit))
               (reverse out)
@@ -926,7 +926,7 @@
 (mode-list-define! "chat-mode"
   (list
     ;; an agent is listed with the chats even where its buffer is no chat
-    'member-locals '("agent-slug")
+    'agents #t
     ;; a new chat list previews only when chat-list-preview says so
     'locals (lambda () (list 'listing-preview-disabled (not chat-list-preview)))
     'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))

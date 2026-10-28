@@ -1966,7 +1966,7 @@ defmodule Compos.Core.SchemeAPI do
         Buffer.get_local(buf, plain(k)) || false
       end,
       {"buffer-rows",
-       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, read from the buffer read model, live and dormant, with no cache. SPEC is a plist: names, modes, exclude-modes, exclude-names, groups, dirs, hidden, context-only, match, sort (recent name size), group-by (group mode), offset, limit, fields. A field is name, path, size, modified, live, mode, title, group, used (ms), windows, or any buffer local. A row is (NAME FIELD-VALUES...); missing values are #f."} =>
+       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, modes, agents (#t: every agent's buffer too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, path, mode, title, group (group-id), group-label, modified, read-only, used, agent, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
         fn args ->
           spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
 
@@ -1978,8 +1978,9 @@ defmodule Compos.Core.SchemeAPI do
               [k] -> {plain(k), true}
             end)
 
-          {total, rows} = Compos.Core.BufferRows.query(opts)
-          [total, rows]
+          Compos.Core.MetaDb.ensure_started()
+          {total, rows} = Compos.Core.MetaDb.query(opts)
+          [total, Enum.map(rows, fn row -> Enum.map(row, &(&1 || false)) end)]
         end,
       {"buffer-meta-handler!",
        "(buffer-meta-handler! FN) — FN gets every batch of buffer metadata changes as ((NAME DIFF) ...), oldest first: one call per burst, on the ui lane. DIFF is a plist of the new values: name, was (the old name), path, read-only, modified, locals (a plist; #f for a local that went). Text, point and display never send one. #f clears it."} =>

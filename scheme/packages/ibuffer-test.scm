@@ -101,28 +101,24 @@
     (check-equal! (ibuffer-test-names) '("*zz-ib-a*" "*zz-ib-b*" "*zz-ib-c*") "by name inside it")
     (ibuffer-test-reset!)))
 
-(deftest 'ibuffer-sorts-a-section-by-name-recency-or-size
-  "the three orders, on the same three rows"
+(deftest 'ibuffer-sorts-a-section-by-name-or-recency
+  "the two orders, on the same three rows"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (check-equal! (ibuffer-test-names) '("*zz-ib-a*" "*zz-ib-b*" "*zz-ib-c*") "name order")
     (ibuffer-set-sort! 'recent)
     (check-equal! (ibuffer-test-names) '("*zz-ib-b*" "*zz-ib-c*" "*zz-ib-a*") "recent order is MRU")
-    (ibuffer-set-sort! 'size)
-    (check-equal! (ibuffer-test-names) '("*zz-ib-b*" "*zz-ib-c*" "*zz-ib-a*") "largest first")
-    (check-contains! (car (ibuffer-meta "*ibuffer*")) "by mode · size" "the meta names the order")
+    (check-contains! (car (ibuffer-meta "*ibuffer*")) "by mode · recent" "the meta names the order")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-toggle-sorting-mode-cycles
-  "the cycle runs name, recent, size, mode, name"
+  "the cycle runs name, recent, mode, name"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (run-command "ibuffer-toggle-sorting-mode")
     (check-equal! (ibuffer-sort) 'recent "name then recent")
     (run-command "ibuffer-toggle-sorting-mode")
-    (check-equal! (ibuffer-sort) 'size "recent then size")
-    (run-command "ibuffer-toggle-sorting-mode")
-    (check-equal! (ibuffer-sort) 'mode "size then mode")
+    (check-equal! (ibuffer-sort) 'mode "recent then mode")
     (run-command "ibuffer-toggle-sorting-mode")
     (check-equal! (ibuffer-sort) 'name "mode then name")
     (run-command "ibuffer-toggle-grouping")

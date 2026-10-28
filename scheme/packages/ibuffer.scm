@@ -4,7 +4,7 @@
 ;;; *chat-list*, the same table over the chat buffers. The table shows one
 ;;; row per buffer under a heading per section. A section is a group, a
 ;;; mode, or a directory; `;` cycles the grouping. Inside a section the
-;;; rows sort by name, by recency, or by size; `,` cycles the sort. TAB
+;;; rows sort by name or by recency; `,` cycles the sort. TAB
 ;;; folds the section at point, and a folded heading stays as a row that
 ;;; carries its counts. A row shows a dot, the icon, the directory in dim
 ;;; and the name in the colour of its kind, and on the right the size,
@@ -61,7 +61,7 @@
 (define *ibuffer-buffer* "*ibuffer*")
 
 ;; the sort modes and the groupings, in the order the toggles cycle
-(define *ibuffer-sorts* '(name recent size mode))
+(define *ibuffer-sorts* '(name recent mode))
 (define *ibuffer-groupings* '(group mode directory none))
 
 ;; the tint under a marked row: a background alone, so the row's own
@@ -119,7 +119,7 @@
 ;;;   'when?     (b) -> #t            this kind owns the row
 ;;;   'dot       (b) -> CELL          the one-character state column
 ;;;   'name      (b) -> (DIR BASE)    the name, its dim head and its base
-;;;   'size      (b) -> number or #f  what the size column and the sort read
+;;;   'size      (b) -> number or #f  what the size column reads
 ;;;   'label     (b) -> string        the mode column, and the mode grouping key
 ;;;   'last      (b) -> string        the age label
 ;;;   'match     (b) -> string        what / reads beside the name
@@ -603,8 +603,7 @@
   ;; kinds and the name ranks of this draw, so neither reads them again.
   ;; A context-only buffer, an agent's own work, stays out until the list
   ;; is asked to show the hidden ones (ibuffer-toggle-hidden).
-  (let* ((sort-by (if (equal? (ibuffer-sort buf) 'size) 'size
-                      (if (equal? (ibuffer-sort buf) 'recent) 'recent 'name)))
+  (let* ((sort-by (if (equal? (ibuffer-sort buf) 'recent) 'recent 'name))
          (rows (filter (lambda (r)
                          (ibuffer-workspace-path? (or (nth 2 r) (and (string-prefix? "/" (car r)) (car r)))))
                        (cadr (buffer-rows (list 'names (filter string? (ibuffer-scope-names buf))
@@ -740,10 +739,6 @@
                           (list 1 (string-downcase (ibuffer-row-title row)) row))))
                   rows))))
 
-(define (ibuffer-sort-sizes rows)
-  (map cadr (sort (map (lambda (row) (list (- 0 (or (ibuffer-row-size row) 0)) row))
-                       rows))))
-
 ;; Nesting is list-mode's ('parent in *ibuffer-opts*): a row whose parent
 ;; is listed follows it, indented. The parent is the kind's 'parent, else
 ;; the buffer's dismissal parent.
@@ -774,8 +769,7 @@
 
 (define (ibuffer-sort-rows buf rows)
   (let ((mode (ibuffer-sort buf)))
-    (cond ((equal? mode 'size) (ibuffer-sort-sizes rows))
-          ((equal? mode 'recent) rows)
+    (cond ((equal? mode 'recent) rows)
           ((equal? mode 'activity) (ibuffer-sort-activity rows))
           ((equal? mode 'mode) (ibuffer-sort-modes rows))
           (else (ibuffer-sort-names rows)))))
@@ -949,7 +943,7 @@
   (let ((rows (ibuffer-source buf))
         (grouping (ibuffer-grouping buf)))
     (ibuffer-note-kinds! rows)
-    (if (member (ibuffer-sort buf) '(size recent))
+    (if (equal? (ibuffer-sort buf) 'recent)
         (set! *ibuffer-name-ranks* #f)
         (ibuffer-note-name-ranks! rows))
     (cond ((equal? grouping 'mode) (ibuffer-mode-sections buf rows))
@@ -2403,9 +2397,6 @@
 (define-command "ibuffer-do-sort-by-recency" "Order the rows of a section by last use"
   (lambda () (ibuffer-set-sort! 'recent)))
 
-(define-command "ibuffer-do-sort-by-size" "Order the rows of a section by size, largest first"
-  (lambda () (ibuffer-set-sort! 'size)))
-
 (define-command "ibuffer-toggle-grouping"
   "Cycle what a section is: group, mode, directory"
   (lambda ()
@@ -2645,7 +2636,7 @@
     'doc (string-append
            "A traditional buffer management table. A section is a group, "
            "a mode, or a directory; < cycles the grouping. Rows inside a "
-           "section sort by name, recency, or size; > cycles the sort. "
+           "section sort by name or recency; > cycles the sort. "
            "TAB folds the rows under a row that has children, else the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. f narrows the table by name, mode, or path, "
@@ -2949,8 +2940,6 @@
     (let* ((data (cdr (assoc buf *ibuffer-table-snapshots*)))
            (ordered
              (cond ((equal? order 'recent) data)
-                   ((equal? order 'size)
-                    (map cadr (sort (map (lambda (r) (list (- 0 (nth 7 r)) r)) data))))
                    (else (map cadr (sort (map (lambda (r) (list (string-downcase (nth 1 r)) r)) data)))))))
       (ibuffer-table-sections buf ordered (ibuffer-grouping buf)))))
 
@@ -3101,7 +3090,7 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-refresh! "(ibuffer-refresh! [BUF]) — rebuild the table BUF, else the view at hand")
 (public! 'ibuffer-open! "(ibuffer-open! SCOPE [VIEW MODE]) — open a table on SCOPE: #f for every buffer, a list, or a scope name")
 (public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")
-(public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE [BUF]) — order the rows of a section by 'name, 'recent, 'size, or 'mode (mode, then name)")
+(public! 'ibuffer-set-sort! "(ibuffer-set-sort! MODE [BUF]) — order the rows of a section by 'name, 'recent, or 'mode (mode, then name)")
 (public! 'ibuffer-set-grouping! "(ibuffer-set-grouping! MODE [BUF]) — section the table by 'group, 'mode, or 'directory")
 (public! 'ibuffer-toggle-fold! "(ibuffer-toggle-fold! KEY [BUF]) — fold or unfold the section KEY names")
 (public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")

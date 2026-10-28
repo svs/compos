@@ -29,6 +29,24 @@ defmodule Compos.Core.MetaDb do
                        "b.project, b.workspace, b.path FROM buffers b " <>
                        "LEFT JOIN groups g ON g.id = b.group_id"
 
+  # the fields a row can carry, each a column; any other name is #f
+  @columns %{
+    "name" => "b.name",
+    "path" => "b.path",
+    "mode" => "b.mode",
+    "title" => "coalesce(b.title, b.name)",
+    "group" => "b.group_id",
+    "group-id" => "b.group_id",
+    "group-label" => "g.label",
+    "modified" => "b.modified",
+    "read-only" => "b.read_only",
+    "used" => "b.used",
+    "agent" => "b.agent",
+    "icon" => "b.icon",
+    "project" => "b.project",
+    "workspace" => "b.workspace"
+  }
+
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path, do: Path.join(Compos.Core.home(), "meta.db")
@@ -109,7 +127,7 @@ defmodule Compos.Core.MetaDb do
         name TEXT PRIMARY KEY,
         path TEXT, mode TEXT, title TEXT, group_id TEXT,
         modified INTEGER, read_only INTEGER, context_only INTEGER,
-        icon TEXT, project TEXT, workspace TEXT, used INTEGER);
+        icon TEXT, project TEXT, workspace TEXT, used INTEGER, agent TEXT);
       CREATE INDEX IF NOT EXISTS buffers_mode ON buffers (mode);
       CREATE INDEX IF NOT EXISTS buffers_group ON buffers (group_id);
       CREATE INDEX IF NOT EXISTS buffers_path ON buffers (path);
@@ -119,6 +137,7 @@ defmodule Compos.Core.MetaDb do
 
     # a file from before the recent order gets the column once
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN used INTEGER")
+    _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN agent TEXT")
     :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_used ON buffers (used)")
 
     Events.subscribe_meta()
@@ -180,6 +199,7 @@ defmodule Compos.Core.MetaDb do
 
   @impl true
   def handle_call({:annotations, names, pinned, pin_icon}, _from, state) do
+    catch_up(state)
     rows = annotation_rows(state)
     missing = Enum.reject(names, &Map.has_key?(rows, &1))
 
@@ -195,29 +215,47 @@ defmodule Compos.Core.MetaDb do
   end
 
   def handle_call({:candidates, opts, pinned, pin_icon}, _from, state) do
+    catch_up(state)
     {where, args} = where(opts)
     rows = all(state, @annotation_select <> where <> order(opts["sort"]), args)
     {:reply, render(Enum.map(rows, fn [n | r] -> {n, r} end), pinned, pin_icon), state}
   end
 
   def handle_call({:query, opts}, _from, state) do
+    catch_up(state)
     {where, args} = where(opts)
     from = " FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <> where
     [[total]] = all(state, "SELECT count(*)" <> from, args)
+    fields = List.wrap(opts["fields"] || [])
+    bucket = opts["bucket"]
+    cols = Enum.map(fields ++ List.wrap(bucket || []), &Map.get(@columns, &1, "NULL"))
 
     sql =
-      "SELECT b.name, b.path, b.mode, b.title, b.group_id, g.label, b.modified, b.read_only, " <>
-        "b.icon, b.project, b.workspace" <> from <> order(opts["sort"]) <> " LIMIT ? OFFSET ?"
+      "SELECT " <> Enum.join(["b.name" | cols], ", ") <> from <>
+        order(opts["sort"], opts["group-by"]) <> " LIMIT ? OFFSET ?"
 
     rows = all(state, sql, args ++ [opts["limit"] || -1, opts["offset"] || 0])
-    fields = List.wrap(opts["fields"] || [])
-    {:reply, {total, Enum.map(rows, &row_out(&1, fields))}, state}
+
+    reply =
+      if is_binary(bucket),
+        do: buckets(rows),
+        else: Enum.map(rows, fn [n | vs] -> [n | Enum.zip_with(fields, vs, &out/2)] end)
+
+    {:reply, {total, reply}, state}
   end
 
   @impl true
   def handle_info({:buffer_meta, name, diff}, state) do
-    events = drain([{name, diff}])
+    write_events(state, drain([{name, diff}]))
+    {:noreply, state}
+  end
 
+  def handle_info(_, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state), do: Sqlite3.close(state.db)
+
+  defp write_events(state, events) do
     transaction(state, fn ->
       # a rename moves the old row, so the buffer keeps its place in the
       # recent order; a row for the new name already there wins
@@ -227,14 +265,17 @@ defmodule Compos.Core.MetaDb do
 
       events |> Enum.flat_map(fn {n, d} -> names_of(n, d) end) |> Enum.uniq() |> Enum.each(&sync(state, &1))
     end)
-
-    {:noreply, state}
   end
 
-  def handle_info(_, state), do: {:noreply, state}
-
-  @impl true
-  def terminate(_reason, state), do: Sqlite3.close(state.db)
+  # A buffer reports a change before it answers whoever changed it, so a
+  # reader that has just changed a buffer finds the report queued here.
+  # Every read writes what is queued first, and never answers stale.
+  defp catch_up(state) do
+    case drain([]) do
+      [] -> :ok
+      events -> write_events(state, events)
+    end
+  end
 
   # everything already queued joins the burst, oldest first
   defp drain(acc) do
@@ -260,11 +301,12 @@ defmodule Compos.Core.MetaDb do
     case facts(name) do
       {:ok, facts} ->
         run(state, """
-        INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only, agent)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT (name) DO UPDATE SET path = excluded.path, mode = excluded.mode,
           title = excluded.title, group_id = excluded.group_id, modified = excluded.modified,
-          read_only = excluded.read_only, context_only = excluded.context_only
+          read_only = excluded.read_only, context_only = excluded.context_only,
+          agent = excluded.agent
         """, facts)
 
       :error ->
@@ -273,13 +315,13 @@ defmodule Compos.Core.MetaDb do
   end
 
   defp facts(name) do
-    keys = ~w(mode-name group-id list-title chat-title context-only)
+    keys = ~w(mode-name group-id list-title chat-title context-only agent-slug)
 
     case BufferView.project(name, [:path, :modified, :read_only], keys) do
-      {:ok, [path, modified, ro, mode, gid, title, chat_title, ctx]} ->
+      {:ok, [path, modified, ro, mode, gid, title, chat_title, ctx, agent]} ->
         {:ok,
          [name, str(path), str(mode), title_of(name, title, chat_title), str(gid),
-          flag(modified), flag(ro), flag(ctx)]}
+          flag(modified), flag(ro), flag(ctx), str(agent)]}
 
       _ ->
         :error
@@ -396,9 +438,11 @@ defmodule Compos.Core.MetaDb do
     {clauses, args} =
       [
         in_clause("b.name", opts["names"]),
-        in_clause("b.mode", opts["modes"]),
+        modes_clause(opts["modes"], opts["agents"] == true),
+        in_clause("coalesce(b.mode, '')", opts["exclude-modes"], "NOT IN"),
         in_clause("b.group_id", opts["groups"]),
         in_clause("b.name", opts["exclude-names"], "NOT IN"),
+        dirs_clause(opts["dirs"]),
         if(opts["hidden"] == true, do: nil, else: {"substr(b.name, 1, 1) <> ' '", []}),
         if(opts["context-only"] == true, do: nil, else: {"coalesce(b.context_only, 0) = 0", []})
         | match_clauses(opts["match"])
@@ -410,6 +454,25 @@ defmodule Compos.Core.MetaDb do
       [] -> {"", args}
       cs -> {" WHERE " <> Enum.join(Enum.reverse(cs), " AND "), args}
     end
+  end
+
+  # the modes, and with AGENTS every agent's buffer whatever its mode
+  defp modes_clause(modes, agents?) do
+    case {in_clause("b.mode", modes), agents?} do
+      {nil, false} -> nil
+      {nil, true} -> {"b.agent IS NOT NULL", []}
+      {c, false} -> c
+      {{c, a}, true} -> {"(" <> c <> " OR b.agent IS NOT NULL)", a}
+    end
+  end
+
+  # a buffer with no path is under every directory
+  defp dirs_clause(v) when v in [nil, false, []], do: nil
+
+  defp dirs_clause(dirs) do
+    ds = List.wrap(dirs)
+    c = Enum.map_join(ds, " OR ", fn _ -> "substr(b.path, 1, length(?)) = ?" end)
+    {"(b.path IS NULL OR " <> c <> ")", Enum.flat_map(ds, &[&1, &1])}
   end
 
   defp in_clause(col, v, op \\ "IN")
@@ -432,19 +495,38 @@ defmodule Compos.Core.MetaDb do
 
   defp match_clauses(_), do: []
 
-  defp order("name"), do: " ORDER BY lower(coalesce(b.title, b.name)), b.name"
-  defp order(_recent), do: " ORDER BY coalesce(b.used, 0) DESC, b.name"
+  # the sections first, when the rows come section by section
+  defp order(sort, section \\ nil) do
+    by =
+      case sort do
+        "name" -> "lower(coalesce(b.title, b.name)), b.name"
+        _recent -> "coalesce(b.used, 0) DESC, b.name"
+      end
 
-  @out ~w(name path mode title group group-label modified read-only icon project workspace)
-
-  defp row_out([n | _] = r, fields) do
-    by = Map.new(Enum.zip(@out, r))
-
-    [n | Enum.map(fields, fn
-       f when f in ["modified", "read-only"] -> by[f] == 1
-       f -> by[f]
-     end)]
+    case section do
+      "group" -> " ORDER BY coalesce(b.group_id, ''), " <> by
+      "mode" -> " ORDER BY coalesce(b.mode, ''), " <> by
+      _ -> " ORDER BY " <> by
+    end
   end
+
+  # rows whose last value is the key, as `[KEY | NAMES]` in the order of
+  # their first row; a row with no key is in none
+  defp buckets(rows) do
+    {order, by} =
+      Enum.reduce(rows, {[], %{}}, fn [n | vs], {order, acc} ->
+        case List.last(vs) do
+          nil -> {order, acc}
+          k when is_map_key(acc, k) -> {order, Map.update!(acc, k, &[n | &1])}
+          k -> {[k | order], Map.put(acc, k, [n])}
+        end
+      end)
+
+    order |> Enum.reverse() |> Enum.map(&[&1 | Enum.reverse(by[&1])])
+  end
+
+  defp out(f, v) when f in ["modified", "read-only"], do: v == 1
+  defp out(_f, v), do: v
 
   defp str(v) when is_binary(v), do: v
   defp str(_), do: nil

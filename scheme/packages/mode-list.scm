@@ -6,9 +6,10 @@
 ;;; ibuffer's. A mode registers only what is its own, with
 ;;; (mode-list-define! MODE SPEC). SPEC is a plist; every key is optional:
 ;;;
-;;;   'member-locals  buffer-locals the snapshot reads beside mode-name
+;;;   'agents         #t: every agent's buffer is a candidate too,
+;;;                   whatever its mode
 ;;;   'member?        (ROW) whether a snapshot row (NAME MODE-NAME
-;;;                   LOCALS...) is listed; the default is its mode
+;;;                   AGENT) is listed; the default is its mode
 ;;;   'recent-limit   (THUNK) how many rows the list shows at rest;
 ;;;                   a filter reads every one
 ;;;   'defaults       the resting sort and grouping, as ibuffer-view! takes
@@ -62,13 +63,13 @@
 (define (mode-list-buffers mode)
   ;; read again each time: a buffer can change its mode, or become an
   ;; agent, without the buffer list changing. One read of the buffer rows
-  ;; names the buffers in MODE or holding a member local, most recent
-  ;; first, as (NAME MODE LOCALS...) rows for the rule below.
-  (let* ((extra (mode-list-opt mode 'member-locals '()))
+  ;; names the buffers in MODE, and every agent's when the list takes
+  ;; agents, most recent first, as (NAME MODE AGENT) rows for the rule below.
+  (let* ((agents? (mode-list-opt mode 'agents #f))
          (member? (mode-list-opt mode 'member?
                     (lambda (row) (equal? (cadr row) mode))))
-         (rows (cadr (buffer-rows (list 'modes (list mode) 'has extra 'context-only #t
-                                        'fields (cons 'mode extra))))))
+         (rows (cadr (buffer-rows (list 'modes (list mode) 'agents agents? 'context-only #t
+                                        'fields '(mode agent))))))
     (map car (filter member? rows))))
 
 (define (mode-list--blank? q) (equal? (string-trim q) ""))

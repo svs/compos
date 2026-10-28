@@ -541,28 +541,115 @@
         (find (lambda (c) (equal? (buffer-relation c 'companion) buf))
               (filter chat-buffer? (buffer-list))))))
 
-(define (llm-mode--companion-index-path g) (string-append (group-home-dir g) "/chats/companions.scm"))
+;;; A chat kept for a thing. KEY names the thing: a page's chat-key, a task
+;;; id. The group's chats/companions.scm maps KEY to the chat's .chat file,
+;;; so the thing gets the same chat back: live when it is open, read back
+;;; from its file when it was archived or the daemon restarted. One chat,
+;;; one key.
 
-(define (llm-mode--companion-index g)
-  (let* ((path (llm-mode--companion-index-path g))
+(define (chat-for--index-path g) (string-append (group-home-dir g) "/chats/companions.scm"))
+
+(define (chat-for--index g)
+  (let* ((path (chat-for--index-path g))
          (forms (and (file-exists? path) (scheme-read (read-file path)))))
     (if (pair? forms) (car forms) '())))
 
+(define (chat-for--path chat)
+  ;; the chat's file, without giving a chat that has no file an id
+  (and (buffer-exists? chat) (buffer-local chat 'chat-log-id) (chat-log-path chat)))
+
+(define (chat-for--live path)
+  (find (lambda (b) (equal? (chat-for--path b) path)) (buffer-list)))
+
+(define (chat-for-key chat &optional group)
+  (let* ((g (or group (buffer-group chat))) (path (and g (chat-for--path chat))))
+    (and path
+         (let ((hit (find (lambda (row) (equal? (cadr row) path)) (chat-for--index g))))
+           (and hit (car hit))))))
+
+(define (chat-for! key chat &optional group)
+  (let* ((g (or group (buffer-group chat)))
+         (path (and g (chat-log-path chat)))
+         (ix (if g (chat-for--index g) (error (string-append "chat-for!: " chat " has no group"))))
+         (other (find (lambda (row) (and (equal? (cadr row) path) (not (equal? (car row) key)))) ix)))
+    (when other
+      (error (string-append "chat-for!: " chat " is the chat of " (car other))))
+    (unless (equal? (alist-get ix key) path)
+      (write-file! (chat-for--index-path g) (value->string (alist-put ix key path))))
+    ;; the chat KEY had before is no longer its chat
+    (for-each (lambda (b) (when (and (equal? (buffer-local b 'chat-for-key) key) (not (equal? b chat)))
+                            (buffer-set-local! b 'chat-for-key #f)))
+              (buffer-list))
+    (buffer-set-local! chat 'chat-for-key key)
+    chat))
+
+(define (chat-for--keep-file! c path)
+  ;; a chat read back goes on writing the file it came from, not a new one
+  (unless (buffer-local c 'chat-log-id)
+    (let ((leaf (car (reverse (string-split path "/")))))
+      (when (and (string-suffix? ".chat" leaf)
+                 (equal? (string-append (chat-log-dir-for c) "/" leaf) path))
+        (buffer-set-local! c 'chat-log-id (substring leaf 0 (- (string-length leaf) 5)))))))
+
+(define (chat-for--open key path g)
+  ;; the chat whose file is PATH: live, else the live chat the file's header
+  ;; names (a restart brings a chat back without its file), else the file
+  ;; read back in G and named after its title, as chat-restore names it
+  (or (chat-for--live path)
+      (let* ((header (and (file-exists? path)
+                          (ignore-errors (lambda () (cadr (memq 'header (chat-log-read path)))))))
+             (slug (and header (plist-get header 'slug)))
+             (live (and (string? slug)
+                        (find (lambda (b) (and (chat-buffer? b) (equal? (buffer-local b 'agent-slug) slug)))
+                              (buffer-list))))
+             (c (or live (and header (visit-in-group path g)))))
+        (and c
+             (begin
+               (buffer-set-local! c 'chat-for-key key)
+               (chat-for--keep-file! c path)
+               (let ((title (plist-get header 'title)))
+                 (when (and (not live) (string? title)) (chat-title c title)))
+               ;; the title renamed it; the thing's chat is a chat in its
+               ;; own right, also when an agent's visit read it back
+               (buffer-promote!
+                 (or (chat-for--live path)
+                     (find (lambda (b) (equal? (buffer-local b 'chat-for-key) key)) (buffer-list))
+                     c)))))))
+
+(define (chat-for key &optional group)
+  ;; GROUP's index, else every group's
+  (let loop ((gs (if group (list group) (group-ids))))
+    (and (pair? gs)
+         (let ((path (alist-get (chat-for--index (car gs)) key)))
+           (or (and (string? path) (chat-for--open key path (car gs)))
+               (loop (cdr gs)))))))
+
+(public! 'chat-for!
+  "(chat-for! KEY CHAT [GROUP]) — keep CHAT as the chat of the thing KEY names, on disk in GROUP (CHAT's group by default), so (chat-for KEY) finds it after an archive or a restart; refused when CHAT is the chat of another key; returns CHAT")
+(catalog-meta! 'function "chat-for!" 'domain 'chat 'effects '(write))
+(public! 'chat-for
+  "(chat-for KEY [GROUP]) — the chat kept for KEY: live when open, else read back from its archived file, else #f; looks in GROUP, else in every group")
+(catalog-meta! 'function "chat-for" 'domain 'chat 'effects '(write))
+(public! 'chat-for-key
+  "(chat-for-key CHAT [GROUP]) — the key CHAT is kept for, or #f")
+(catalog-meta! 'function "chat-for-key" 'domain 'chat 'effects '(read))
+
 (define (llm-mode--companion-remember! buf chat g)
-  ;; the page's chat file, so the page finds the same chat after it is archived
-  (when (and g (not (equal? (alist-get (llm-mode--companion-index g) (chat-key buf)) (chat-log-path chat))))
-    (write-file! (llm-mode--companion-index-path g)
-      (value->string (alist-put (llm-mode--companion-index g) (chat-key buf) (chat-log-path chat))))))
+  ;; the page keeps its chat, so it finds the same chat after it is archived;
+  ;; a chat kept for another thing stays that thing's
+  (when g
+    (let ((k (chat-for-key chat g)))
+      (when (or (not k) (equal? k (chat-key buf)))
+        (chat-for! (chat-key buf) chat g)))))
 
 (define (llm-mode--companion-recall! buf &optional group)
   ;; no live chat: the archived chat the page had comes back, so a page keeps one chat
   (or (llm-mode--companion-existing buf)
       (let* ((g (or group (buffer-group buf)))
-             (path (and g (alist-get (llm-mode--companion-index g) (chat-key buf)))))
-        (and (string? path) (file-exists? path)
-             (let ((c (visit-in-group path g)))
-               (when c (buffer-relate! c 'companion buf))
-               c)))))
+             (c (and g (chat-for (chat-key buf) g))))
+        ;; relinked by the page's key, not by a name the chat once had
+        (when c (buffer-relate! c 'companion buf))
+        c)))
 
 (define (llm-mode--companion! buf &optional model group)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
@@ -1307,7 +1394,8 @@
 (define-mode "chat-mode"
   (lambda ()
     (let ((buf (current-buffer))
-          (interrupted? (buffer-local (current-buffer) 'chat-turn-active)))
+          (interrupted? (buffer-local (current-buffer) 'chat-turn-active))
+          (opened #f))
       (buffer-provenance-stop! buf "mode:chat-mode" "mode-policy" "mode")
       ;; On desktop restore EVERY runtime local is a lie: the process it
       ;; described died with the daemon. Clear the whole class — not just
@@ -1333,7 +1421,7 @@
       (when (and (buffer-path buf)
                  (not (buffer-local buf 'agent-saved-mark))
                  (boundp (quote chat-file-init!)))
-        (chat-file-init! buf))
+        (set! opened (chat-file-init! buf)))
       (when (buffer-local buf 'agent-saved-mark)
         ;; the view is identity: default it only when never chosen (S11)
         (when (member (buffer-local buf 'render-mode) '(#f "agent"))
@@ -1382,7 +1470,9 @@
           (agent-install-keys! buf))
         ;; a restored point can land inside the marker — typing/pasting
         ;; there corrupts the input boundary (bytes end up pre-marker)
-        (chat-snap-to-input!)))))
+        (chat-snap-to-input!))
+      ;; a chat read from its file takes its title once it is set up
+      (when opened (chat-file-retitle-later! buf)))))
 
 ;; the chat's editor keys; agent-session.scm adds the send and permission
 ;; keys to the same map
@@ -1667,6 +1757,24 @@
 ;; identity comes back, its turns become the conversation of record (the
 ;; truth every backend runs against), and the rich surface is rebuilt from
 ;; those turns so RET continues the conversation.
+(define (chat-file-retitle-later! buf)
+  ;; A chat wears its title, not its file name. chat-restore renamed
+  ;; the buffer itself; every other door into an archived conversation
+  ;; -- the desktop, the chats list, plain find-file -- left it named
+  ;; after the .chat path, so the modeline said the path. The rename
+  ;; waits until the mode is set: the setup and the mode hooks after it
+  ;; still address the buffer by its path, and renaming under them
+  ;; left a raw file with the chat's name. So the delay starts when the
+  ;; setup ends: started when the file was read, a long transcript
+  ;; outlasted it and the visit lost its buffer.
+  (let ((title (buffer-local buf 'chat-title)))
+    (when (and (string? title) (not (equal? (string-trim title) "")))
+      (debounce! (string-append "chat-title:" buf) 250
+                 (lambda (old)
+                   (when (and (buffer-known? old) (not (buffer-known? title)))
+                     (rename-buffer! old title)))
+                 buf))))
+
 (define (chat-file-init! buf)
   (let* ((text (buffer-text buf))
          (nl (string-index text "\n"))
@@ -1737,20 +1845,6 @@
                (not (chat-stateless? buf))))
         ;; the rewrite is presentation, not an edit the user made
         (buffer-mark-saved! buf))
-      ;; A chat wears its title, not its file name. chat-restore renamed
-      ;; the buffer itself; every other door into an archived conversation
-      ;; -- the desktop, the chats list, plain find-file -- left it named
-      ;; after the .chat path, so the modeline said the path. The rename
-      ;; waits until the mode is set: the setup and the mode hooks after it
-      ;; still address the buffer by its path, and renaming under them
-      ;; left a raw file with the chat's name.
-      (let ((title (buffer-local buf 'chat-title)))
-        (when (and (string? title) (not (equal? (string-trim title) "")))
-          (debounce! (string-append "chat-title:" buf) 250
-                     (lambda (old)
-                       (when (and (buffer-known? old) (not (buffer-known? title)))
-                         (rename-buffer! old title)))
-                     buf)))
       buf)))
 
 ;;; --- what a chat is made of -----------------------------------------------------

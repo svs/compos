@@ -1153,10 +1153,12 @@
          (g (or (group-resolve-id group) (group-ensure-record! group)))
          ;; the chat whose eval starts the task, if any
          (caller (subagent-spawner))
-         ;; the task's own chat is its live assignee, never the chat that
-         ;; last logged on it: that one can be the orchestrator, the caller
-         (own (let ((a (plist-get t 'assignee)))
-                (and (string? a) (string-prefix? "chat:" a) (todo--live-chat a))))
+         ;; the task's own chat is the one kept for it, read back when it was
+         ;; archived, else its live assignee, never the chat that last logged
+         ;; on it: that one can be the orchestrator, the caller
+         (own (or (todo--kept-chat t g)
+                  (let ((a (plist-get t 'assignee)))
+                    (and (string? a) (string-prefix? "chat:" a) (todo--live-chat a)))))
          (held (and own (not (and caller (equal? (subagent-slug own) caller))) own)))
     (let* ((got (assign-chat! #f g
                   (lambda (chat)
@@ -1173,6 +1175,7 @@
                     (todo--brief (todo-get id) (chat-stable-id! chat)))
                   held))
            (chat (car got)))
+      (todo--keep-chat! t chat g)
       ;; A new chat wears the task's title. Named here, after the brief went
       ;; out under the old name; the first-prompt title lands later and
       ;; leaves a titled chat alone.
@@ -1270,10 +1273,25 @@
                (set! *todo-chat-index* #f)
                (todo--live-chat c))))))
 
+(define (todo--kept-chat t &optional group)
+  ;; the chat kept for the task, in GROUP or its home group: live, else read
+  ;; back from its file, else #f
+  (let ((home (todo--home-group t)))
+    (or (and group (chat-for (plist-get t 'id) group))
+        (and home (not (equal? home group)) (chat-for (plist-get t 'id) home)))))
+
+(define (todo--keep-chat! t chat g)
+  ;; the task keeps CHAT across archives and restarts, unless CHAT is kept
+  ;; for another thing
+  (let ((k (chat-for-key chat g)))
+    (when (or (not k) (equal? k (plist-get t 'id)))
+      (chat-for! (plist-get t 'id) chat g))))
+
 (define (todo--revive-chat t)
-  ;; the task's chat: live, else its archived conversation read back in the
-  ;; task's group, else #f
+  ;; the task's chat: live, else the chat kept for it, else its archived
+  ;; conversation read back in the task's group, else #f
   (or (todo--chat-of t)
+      (todo--kept-chat t)
       (let ((a (plist-get t 'assignee)))
         (and (string? a) (string-prefix? "chat:" a)
              (todo--open-chat a (or (todo--home-group t) (frame-group)))))))

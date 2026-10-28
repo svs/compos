@@ -830,11 +830,10 @@ defmodule Compos.Core.Editor do
         {:reply, {:error, reason}, state}
 
       {f, _started} ->
-        Buffer.touch(buffer)
         leaf = find_leaf(f.tree, win_id)
         tree = replace_leaf(f.tree, win_id, visit_buffer(leaf, buffer))
-        mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-        changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
+        # a use like any other: the ring, the saved history and meta.db
+        changed(:ok, resync_swap(put_frame(bump_mru(state, buffer), %{f | tree: tree})), f.id)
     end
   end
 
@@ -1652,6 +1651,7 @@ defmodule Compos.Core.Editor do
     known = MapSet.new(Compos.Core.buffer_names())
     live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
     rest = Enum.sort(Compos.Core.buffer_names() -- live)
+    Compos.Core.MetaDb.bury(buffer)
     {:reply, :ok, %{state | mru: List.delete(live ++ rest, buffer) ++ [buffer]}}
   end
 
@@ -2095,12 +2095,10 @@ defmodule Compos.Core.Editor do
         {:reply, {:error, reason}, state}
 
       _started ->
-        Buffer.touch(buffer)
         f = frame(state, fid)
         leaf = find_leaf(f.tree, f.active)
         tree = replace_leaf(f.tree, f.active, visit_buffer(leaf, buffer))
-        mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-        changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
+        changed(:ok, resync_swap(put_frame(bump_mru(state, buffer), %{f | tree: tree})), f.id)
     end
   end
 

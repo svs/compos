@@ -24,6 +24,11 @@ defmodule Compos.Core.MetaDb do
   alias Compos.Core.{BufferView, Events}
   alias Exqlite.Sqlite3
 
+  # what a buffer's annotation reads; `where/1` filters it
+  @annotation_select "SELECT b.name, b.icon, b.mode, b.group_id, g.label, g.face, g.note, " <>
+                       "b.project, b.workspace, b.path FROM buffers b " <>
+                       "LEFT JOIN groups g ON g.id = b.group_id"
+
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path, do: Path.join(Compos.Core.home(), "meta.db")
@@ -47,6 +52,15 @@ defmodule Compos.Core.MetaDb do
   def put_groups(groups), do: GenServer.cast(__MODULE__, {:groups, groups})
 
   @doc """
+  NAME was used at MS, system milliseconds: the recent order. Uses in the
+  same millisecond keep the order they came in.
+  """
+  def note_used(name, ms), do: GenServer.cast(__MODULE__, {:used, name, ms})
+
+  @doc "NAME goes to the end of the recent order, below the buffers never used."
+  def bury(name), do: GenServer.cast(__MODULE__, {:bury, name})
+
+  @doc """
   The finished annotation of each of NAMES, in order, as `[name, hint,
   face]`: the columns icon, mode, group, project, workspace and path (a
   chat with no path shows its group's note), padded to the widest of each,
@@ -57,14 +71,25 @@ defmodule Compos.Core.MetaDb do
     do: GenServer.call(__MODULE__, {:annotations, names, pinned, pin_icon})
 
   @doc """
+  `annotations/3` for the rows OPTS selects (`query/1`'s filters and
+  sort), in the database's order: a buffer prompt's whole candidate list
+  from one query.
+  """
+  def candidates(opts, pinned, pin_icon),
+    do: GenServer.call(__MODULE__, {:candidates, opts, pinned, pin_icon})
+
+  @doc """
   `{TOTAL, ROWS}` for OPTS, a map with string keys:
 
     * `names`, `modes`, `groups` - only these
+    * `exclude-names` - leave these out
     * `match` - space-separated terms; each is a case-blind substring of
       the name, title, path, mode, group label, project or workspace
     * `hidden`, `context-only` - keep those buffers too
-    * `sort` - `recent` (default) or `name`
+    * `sort` - `recent` (default: last used first) or `name`
     * `offset`, `limit` - the page
+
+  The filter, the sort and the page are SQL, all of them.
     * `fields` - what each row carries after its name: path mode title
       group group-label modified read-only icon project workspace
   """
@@ -84,7 +109,7 @@ defmodule Compos.Core.MetaDb do
         name TEXT PRIMARY KEY,
         path TEXT, mode TEXT, title TEXT, group_id TEXT,
         modified INTEGER, read_only INTEGER, context_only INTEGER,
-        icon TEXT, project TEXT, workspace TEXT);
+        icon TEXT, project TEXT, workspace TEXT, used INTEGER);
       CREATE INDEX IF NOT EXISTS buffers_mode ON buffers (mode);
       CREATE INDEX IF NOT EXISTS buffers_group ON buffers (group_id);
       CREATE INDEX IF NOT EXISTS buffers_path ON buffers (path);
@@ -92,8 +117,12 @@ defmodule Compos.Core.MetaDb do
         id TEXT PRIMARY KEY, label TEXT, face TEXT, note TEXT);
       """)
 
+    # a file from before the recent order gets the column once
+    _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN used INTEGER")
+    :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_used ON buffers (used)")
+
     Events.subscribe_meta()
-    {:ok, %{db: db, groups: nil}, {:continue, :rebuild}}
+    {:ok, %{db: db, groups: nil, used: 0}, {:continue, :rebuild}}
   end
 
   @impl true
@@ -101,7 +130,9 @@ defmodule Compos.Core.MetaDb do
     names = BufferView.table() |> :ets.select([{{:"$1", :_}, [{:is_binary, :"$1"}], [:"$1"]}])
     known = state |> all("SELECT name FROM buffers", []) |> Enum.map(&hd/1)
     transaction(state, fn -> Enum.each(Enum.uniq(names ++ known), &sync(state, &1)) end)
-    {:noreply, state}
+    seed_used(state)
+    [[top]] = all(state, "SELECT coalesce(max(used), 0) FROM buffers", [])
+    {:noreply, %{state | used: top}}
   rescue
     ArgumentError -> {:noreply, state}
   end
@@ -117,6 +148,18 @@ defmodule Compos.Core.MetaDb do
       end
     end)
 
+    {:noreply, state}
+  end
+
+  def handle_cast({:used, name, ms}, state) do
+    used = max(ms, state.used + 1)
+    if absent?(state, name), do: sync(state, name)
+    run(state, "UPDATE buffers SET used = ?2 WHERE name = ?1", [name, used])
+    {:noreply, %{state | used: used}}
+  end
+
+  def handle_cast({:bury, name}, state) do
+    run(state, "UPDATE buffers SET used = (SELECT min(0, coalesce(min(used), 0)) - 1 FROM buffers) WHERE name = ?1", [name])
     {:noreply, state}
   end
 
@@ -148,44 +191,43 @@ defmodule Compos.Core.MetaDb do
         annotation_rows(state)
       end
 
-    cols =
-      Enum.map(names, fn n ->
-        case rows[n] do
-          [icon | _] = r when is_binary(icon) -> {n, columns(r, pinned, pin_icon), face(r)}
-          _ -> {n, nil, nil}
-        end
-      end)
+    {:reply, render(Enum.map(names, &{&1, rows[&1]}), pinned, pin_icon), state}
+  end
 
-    widths = widths(for {_, c, _} <- cols, c, do: c)
-
-    reply =
-      Enum.map(cols, fn
-        {n, nil, _} -> [n, nil, nil]
-        {n, c, face} -> [n, join(trim(c), widths), face]
-      end)
-
-    {:reply, reply, state}
+  def handle_call({:candidates, opts, pinned, pin_icon}, _from, state) do
+    {where, args} = where(opts)
+    rows = all(state, @annotation_select <> where <> order(opts["sort"]), args)
+    {:reply, render(Enum.map(rows, fn [n | r] -> {n, r} end), pinned, pin_icon), state}
   end
 
   def handle_call({:query, opts}, _from, state) do
     {where, args} = where(opts)
+    from = " FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <> where
+    [[total]] = all(state, "SELECT count(*)" <> from, args)
 
     sql =
       "SELECT b.name, b.path, b.mode, b.title, b.group_id, g.label, b.modified, b.read_only, " <>
-        "b.icon, b.project, b.workspace FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <>
-        where
+        "b.icon, b.project, b.workspace" <> from <> order(opts["sort"]) <> " LIMIT ? OFFSET ?"
 
-    rows = state |> all(sql, args) |> sort(opts["sort"] || "recent")
-    total = length(rows)
-    page = Enum.slice(rows, opts["offset"] || 0, opts["limit"] || total)
+    rows = all(state, sql, args ++ [opts["limit"] || -1, opts["offset"] || 0])
     fields = List.wrap(opts["fields"] || [])
-    {:reply, {total, Enum.map(page, &row_out(&1, fields))}, state}
+    {:reply, {total, Enum.map(rows, &row_out(&1, fields))}, state}
   end
 
   @impl true
   def handle_info({:buffer_meta, name, diff}, state) do
-    names = drain(names_of(name, diff))
-    transaction(state, fn -> Enum.each(names, &sync(state, &1)) end)
+    events = drain([{name, diff}])
+
+    transaction(state, fn ->
+      # a rename moves the old row, so the buffer keeps its place in the
+      # recent order; a row for the new name already there wins
+      for {n, d} <- events, {was, now} <- renames(n, d) do
+        run(state, "UPDATE OR IGNORE buffers SET name = ?2 WHERE name = ?1", [was, now])
+      end
+
+      events |> Enum.flat_map(fn {n, d} -> names_of(n, d) end) |> Enum.uniq() |> Enum.each(&sync(state, &1))
+    end)
+
     {:noreply, state}
   end
 
@@ -194,17 +236,23 @@ defmodule Compos.Core.MetaDb do
   @impl true
   def terminate(_reason, state), do: Sqlite3.close(state.db)
 
-  # everything already queued joins the burst; a rename names both rows
+  # everything already queued joins the burst, oldest first
   defp drain(acc) do
     receive do
-      {:buffer_meta, name, diff} -> drain(names_of(name, diff) ++ acc)
+      {:buffer_meta, name, diff} -> drain([{name, diff} | acc])
     after
-      0 -> Enum.uniq(acc)
+      0 -> Enum.reverse(acc)
     end
   end
 
+  # a rename names both rows
+
+
   defp names_of(name, %{was: was}) when is_binary(was), do: [name, was]
   defp names_of(name, _), do: [name]
+
+  defp renames(name, %{was: was}) when is_binary(was), do: [{was, name}]
+  defp renames(_, _), do: []
 
   # The row BufferView holds now is the truth: written when it is there,
   # deleted when it is gone. The labels stay with a written row.
@@ -245,13 +293,51 @@ defmodule Compos.Core.MetaDb do
   defp absent?(state, name), do: all(state, "SELECT 1 FROM buffers WHERE name = ?1", [name]) == []
 
   defp annotation_rows(state) do
-    state
-    |> all(
-      "SELECT b.name, b.icon, b.mode, b.group_id, g.label, g.face, g.note, b.project, " <>
-        "b.workspace, b.path FROM buffers b LEFT JOIN groups g ON g.id = b.group_id",
-      []
-    )
-    |> Map.new(fn [n | r] -> {n, r} end)
+    state |> all(@annotation_select, []) |> Map.new(fn [n | r] -> {n, r} end)
+  end
+
+  # PAIRS is `[{name, row | nil}]` in the order to answer; a row with no
+  # labels yet answers a nil hint
+  defp render(pairs, pinned, pin_icon) do
+    cols =
+      Enum.map(pairs, fn
+        {n, [icon | _] = r} when is_binary(icon) -> {n, columns(r, pinned, pin_icon), face(r)}
+        {n, _} -> {n, nil, nil}
+      end)
+
+    widths = widths(for {_, c, _} <- cols, c, do: c)
+
+    Enum.map(cols, fn
+      {n, nil, _} -> [n, nil, nil]
+      {n, c, face} -> [n, join(trim(c), widths), face]
+    end)
+  end
+
+  # The saved history is the editor's recent list (`Editor` starts its
+  # ring from it, and every use touches both), so a start takes the order
+  # from it: newest just below now, so every use from here on ranks above.
+  # A buffer it does not name has no use, and sorts by name below them all.
+  defp seed_used(state) do
+    # the editor's own list when it runs; at boot it has not started, and
+    # the history is what it will start from
+    history =
+      if Process.whereis(Compos.Core.Editor),
+        do: Compos.Core.Editor.buffer_mru(),
+        else: Compos.Core.BufferStore.history()
+
+    now = System.system_time(:millisecond)
+
+    transaction(state, fn ->
+      run(state, "UPDATE buffers SET used = NULL", [])
+
+      history
+      |> Enum.with_index()
+      |> Enum.each(fn {name, i} ->
+        run(state, "UPDATE buffers SET used = ?2 WHERE name = ?1", [name, now - 1 - i])
+      end)
+    end)
+  catch
+    :exit, _ -> :ok
   end
 
   # the buffer annotator's columns (`marginalia! 'buffer` in editor.scm)
@@ -312,6 +398,7 @@ defmodule Compos.Core.MetaDb do
         in_clause("b.name", opts["names"]),
         in_clause("b.mode", opts["modes"]),
         in_clause("b.group_id", opts["groups"]),
+        in_clause("b.name", opts["exclude-names"], "NOT IN"),
         if(opts["hidden"] == true, do: nil, else: {"substr(b.name, 1, 1) <> ' '", []}),
         if(opts["context-only"] == true, do: nil, else: {"coalesce(b.context_only, 0) = 0", []})
         | match_clauses(opts["match"])
@@ -325,11 +412,12 @@ defmodule Compos.Core.MetaDb do
     end
   end
 
-  defp in_clause(_col, v) when v in [nil, false, []], do: nil
+  defp in_clause(col, v, op \\ "IN")
+  defp in_clause(_col, v, _op) when v in [nil, false, []], do: nil
 
-  defp in_clause(col, v) do
+  defp in_clause(col, v, op) do
     vs = List.wrap(v)
-    {col <> " IN (" <> Enum.map_join(vs, ", ", fn _ -> "?" end) <> ")", vs}
+    {col <> " " <> op <> " (" <> Enum.map_join(vs, ", ", fn _ -> "?" end) <> ")", vs}
   end
 
   @searched ~w(b.name b.title b.path b.mode g.label b.project b.workspace)
@@ -344,24 +432,8 @@ defmodule Compos.Core.MetaDb do
 
   defp match_clauses(_), do: []
 
-  defp sort(rows, "name"), do: Enum.sort_by(rows, fn [n, _, _, t | _] -> {String.downcase(t || n), n} end)
-
-  # recent is the editor's own ring first, then the use times
-  defp sort(rows, _recent) do
-    rank =
-      try do
-        Compos.Core.Editor.buffer_mru() |> Enum.with_index() |> Map.new()
-      catch
-        :exit, _ -> %{}
-      end
-
-    Enum.sort_by(rows, fn [n | _] ->
-      case Map.get(rank, n) do
-        nil -> {1, -(BufferView.use_of(n)[:used] || 0), n}
-        i -> {0, i, n}
-      end
-    end)
-  end
+  defp order("name"), do: " ORDER BY lower(coalesce(b.title, b.name)), b.name"
+  defp order(_recent), do: " ORDER BY coalesce(b.used, 0) DESC, b.name"
 
   @out ~w(name path mode title group group-label modified read-only icon project workspace)
 

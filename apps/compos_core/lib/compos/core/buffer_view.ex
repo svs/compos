@@ -89,7 +89,11 @@ defmodule Compos.Core.BufferView do
   knows of a buffer's use sits beside its row, under `{:use, NAME}`:
   `used` and `windows`. `Compos.Core.Editor` is its only writer.
   """
-  def note_used(name, ms) when is_binary(name), do: update_use(name, &Map.put(&1, :used, ms))
+  def note_used(name, ms) when is_binary(name) do
+    # meta.db sorts by it: the recent order lives there
+    Compos.Core.MetaDb.note_used(name, ms)
+    update_use(name, &Map.put(&1, :used, ms))
+  end
   def note_used(_, _), do: :ok
 
   @doc """

@@ -1995,6 +1995,22 @@ defmodule Compos.Core.SchemeAPI do
           Compos.Core.MetaDb.annotations(names, pinned, pin_icon)
           |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
         end,
+      {"meta-db-candidates",
+       "(meta-db-candidates SPEC PINNED PIN-ICON) — a buffer prompt's whole candidate list from meta.db in one query: ((NAME HINT FACE) ...) for the rows SPEC selects (meta-query's filters and sort; recent by default), in that order. HINT is #f for a buffer with no labels yet."} =>
+        fn [spec, pinned, pin_icon] ->
+          Compos.Core.MetaDb.ensure_started()
+
+          opts =
+            (spec || [])
+            |> Enum.chunk_every(2)
+            |> Map.new(fn
+              [k, v] -> {plain(k), rows_opt(v)}
+              [k] -> {plain(k), true}
+            end)
+
+          Compos.Core.MetaDb.candidates(opts, pinned, pin_icon)
+          |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
+        end,
       {"meta-db-labels!",
        "(meta-db-labels! ROWS) — write what only Scheme knows of some buffers into meta.db: ROWS is ((NAME ICON PROJECT WORKSPACE) ...)."} =>
         fn [rows] ->

@@ -4756,14 +4756,19 @@
 ;; the buffer annotator's rows, from meta.db; a buffer with no labels yet
 ;; gets them now, once
 (define (buffer-annotations-db names)
+  (meta-db-rows
+    (lambda (pinned icon) (meta-db-annotations names pinned icon))))
+
+;; ASK answers ((NAME HINT FACE) ...); a buffer with no labels yet gets
+;; them now, once, and ASK runs again
+(define (meta-db-rows ask)
   (meta-db-groups-sync!)
-  (let* ((ask (lambda ()
-                (meta-db-annotations names
-                                    (or (group-pinned-in (selected-frame)) #f)
-                                    *group-pin-icon*)))
-         (rows (ask))
+  (let* ((pinned (or (group-pinned-in (selected-frame)) #f))
+         (rows (ask pinned *group-pin-icon*))
          (bare (map car (filter (lambda (r) (not (cadr r))) rows)))
-         (rows (if (null? bare) rows (begin (buffer-meta-label! bare) (ask)))))
+         (rows (if (null? bare)
+                   rows
+                   (begin (buffer-meta-label! bare) (ask pinned *group-pin-icon*)))))
     (map (lambda (r)
            (let ((hint (or (cadr r) "")) (face (caddr r)))
              (if face (list (car r) hint "candidate" '() face) (list (car r) hint))))
@@ -4775,17 +4780,15 @@
 ;; ride ABOVE this stream in the switcher; see switch-to-buffer.
 ;; Internals (space-prefixed) stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
-  (annotate 'buffer
-    (filter (lambda (b)
-              (and (not (string-prefix? " " b))
-                   (not (buffer-context-only? b))))
-            (buffer-list-mru))))
+  (meta-db-rows
+    (lambda (pinned icon) (meta-db-candidates '() pinned icon))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
 (define (buffer-candidates)
-  (filter (lambda (c) (not (equal? (car c) (current-buffer))))
-          (buffer-candidates-all)))
+  (meta-db-rows
+    (lambda (pinned icon)
+      (meta-db-candidates (list 'exclude-names (list (current-buffer))) pinned icon))))
 
 ;; the buffer prompt's extension seam (dup #6). The command calls this
 ;; at prompt open with the base candidates; it returns (pool standing

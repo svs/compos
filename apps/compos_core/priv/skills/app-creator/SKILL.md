@@ -159,6 +159,8 @@ A website app is one engine plus one site Scheme per site. The engine is written
 
 **Repeated actions become code.** When the same steps happen twice (a click sequence, a fetch and parse, a form fill, a run of MCP calls), write them once as a named function in the site Scheme, stamped with `domain!` and `effects!`, and call it from the listing key, the detail key and the agent alike. An agent never works out a site action again by hand at run time.
 
+**The app gets better and faster with use.** Each time an agent or the user does something by hand on the site, the next time should be a call. Slow paths (a browser tab, a sheet, a model guessing at a page) get replaced by direct code as soon as they repeat, and the agent does that itself rather than waiting to be asked. Someone using the app should notice it getting quicker and more capable week by week, never the same and never slower.
+
 **When a page needs the live tab.** For a page with no other door, the app keeps one background tab of the user's own Chrome on the site, with their login, reads the page from that tab, and an action clicks the real button there. That is what works on LiveView, React and the rest, where the buttons are events and not links. Even then the reads and clicks are wrapped in site Scheme functions, never left loose in the spec.
 
 **Every page kind reads into the same small vocabulary**, whether a site Scheme function builds it from an API answer or, as the fallback, an extractive sheet emits it:

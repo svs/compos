@@ -8,7 +8,8 @@
 ;;;     (lambda (request) (message (plist-get (plist-get request 'json) 'action)) "ok"))
 ;;;
 ;;; An endpoint without a handler publishes each request to the event log
-;;; as topic webhook:NAME, kind received.
+;;; as topic webhook:NAME, kind received. With 'data 'json the event's data
+;;; is the parsed JSON body alone, so a listener's 'match reads the payload.
 
 (package! "webhooks")
 (category! 'system)
@@ -99,13 +100,15 @@
 
 (define (webhooks--publish! hook request json)
   (event-publish! (string-append "webhook:" (plist-get hook 'name)) 'received
-                  (list 'method (plist-get request 'method)
-                        'path (plist-get request 'path)
-                        'query (plist-get request 'query)
-                        'headers (plist-get request 'headers)
-                        'body (plist-get request 'body)
-                        'json json
-                        'remote-address (plist-get request 'remote-address))))
+                  (if (and json (equal? (plist-get hook 'data) 'json))
+                      json
+                      (list 'method (plist-get request 'method)
+                            'path (plist-get request 'path)
+                            'query (plist-get request 'query)
+                            'headers (plist-get request 'headers)
+                            'body (plist-get request 'body)
+                            'json json
+                            'remote-address (plist-get request 'remote-address)))))
 
 (define (webhooks--handle request)
   "(webhooks--handle REQUEST) — route one request to its endpoint and answer the response"
@@ -127,7 +130,7 @@
                         (webhooks--reply 200 "ok"))))))))
 
 (define (define-webhook! name &optional opts handler)
-  "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace endpoint NAME; OPTS is a plist of 'path (default /hooks/NAME), 'methods (default POST only), 'token and 'peers"
+  "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace endpoint NAME; OPTS is a plist of 'path (default /hooks/NAME), 'methods (default POST only), 'token, 'peers and 'data ('json: the event's data is the JSON body alone)"
   (let* ((opts (or opts '()))
          (path (or (plist-get opts 'path) (string-append "/hooks/" name)))
          (hook (list 'name name
@@ -135,6 +138,7 @@
                      'methods (or (plist-get opts 'methods) (list "POST"))
                      'token (plist-get opts 'token)
                      'peers (plist-get opts 'peers)
+                     'data (plist-get opts 'data)
                      'handler handler))
          (clash (filter (lambda (e) (and (not (equal? (car e) name))
                                          (equal? (plist-get (cadr e) 'path) (plist-get hook 'path))))
@@ -195,10 +199,13 @@
   #t)
 
 (define-command "webhooks-start" "Start the webhook server"
-  (lambda () (message (string-append "webhooks on " (webhooks-start!)))))
+  (lambda ()
+    (let ((url (webhooks-start!)))
+      (customize-save! 'webhooks-enabled #t)
+      (message (string-append "webhooks on " url)))))
 
 (define-command "webhooks-stop" "Stop the webhook server"
-  (lambda () (webhooks-stop!) (message "webhooks off")))
+  (lambda () (webhooks-stop!) (customize-save! 'webhooks-enabled #f) (message "webhooks off")))
 
 (define-command "webhooks-list" "Say every webhook endpoint and where it listens"
   (lambda ()
@@ -221,7 +228,8 @@
                (lambda ()
                  (let ((opts (if (> (length row) 3) (list-ref row 3) '())))
                    (define-webhook! (car row) (list 'path (cadr row) 'token (caddr row)
-                                                    'methods (plist-get opts 'methods)))
+                                                    'methods (plist-get opts 'methods)
+                                                    'data (plist-get opts 'data)))
                    (when (plist-get opts 'workflow)
                      (webhook-attach-workflow! (car row) (string->symbol (plist-get opts 'workflow))))))))
             webhooks-saved))
@@ -236,6 +244,7 @@
                        (if hook
                            (append rest (list (list name (plist-get hook 'path) (plist-get hook 'token)
                                                     (list 'methods (plist-get hook 'methods)
+                                                          'data (plist-get hook 'data)
                                                           'workflow (if wf (symbol->string wf) #f)))))
                            rest)))))
 
@@ -393,8 +402,11 @@
 (define-command "webhooks-toggle-server" "Start the webhook server, or stop it"
   (lambda ()
     (if (webhooks-running?)
-        (begin (webhooks-stop!) (message "webhook server stopped"))
-        (message (string-append "webhooks listen on " (webhooks-start!))))
+        (begin (webhooks-stop!) (customize-save! 'webhooks-enabled #f)
+               (message "webhook server stopped"))
+        (let ((url (webhooks-start!)))
+          (customize-save! 'webhooks-enabled #t)
+          (message (string-append "webhooks listen on " url))))
     (webhooks-refresh!)))
 
 (define-command "webhooks-refresh" "Redraw the webhook list"

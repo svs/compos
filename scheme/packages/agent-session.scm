@@ -754,7 +754,9 @@
 (define *chat-finish-outcomes* '(done blocked needs-user))
 
 (define *chat-finish-ask*
-  "This chat is dismissed. When your work is complete, call (chat-finish! 'done \"one-line summary\") and the chat closes. If you cannot complete it, call (chat-finish! 'blocked \"why\") or (chat-finish! 'needs-user \"what you need\") and the chat stays.")
+  "When your work is complete, call (chat-finish! 'done \"one-line summary\") and the chat closes. If you cannot complete it, call (chat-finish! 'blocked \"why\") or (chat-finish! 'needs-user \"what you need\") and the chat stays.")
+
+(define (chat-dismiss--ask) (string-append "This chat is dismissed. " *chat-finish-ask*))
 
 (define (chat-finish--open-todos buf)
   (let ((id (buffer-local buf 'chat-id)))
@@ -780,29 +782,38 @@
          (outcome (and (pair? fin) (car fin)))
          (summary (if (pair? fin) (cadr fin) ""))
          (title (chats-title buf))
+         (reap? (buffer-local buf 'chat-reap))
          (blockers (chat-finish--blockers buf slug ok? stop-reason)))
     (buffer-set-local! buf 'chat-dismiss-pending #f)
     (buffer-set-local! buf 'chat-finish-asked #f)
     (buffer-set-local! buf 'chat-finish #f)
+    (buffer-set-local! buf 'chat-reap #f)
     (if (and (eq? outcome 'done) (null? blockers))
         (begin
           (ignore-errors (lambda () (chat-log-save! buf)))
           (agents-archive! buf)
           (notify! "chat" (string-append "Done: " title) summary)
           'closed)
-        (begin
-          (notify! "chat" (string-append "Kept: " title)
-                   (string-join
+        (let ((why (string-join
                     (append (cond ((not outcome) '("the agent did not say it is done"))
                                   ((eq? outcome 'done) '())
                                   (else (list (string-append (symbol->string outcome) ": " summary))))
                             blockers)
-                    "; "))
+                    "; ")))
+          ;; a chat the reaper asked stays without a notice
+          (if reap?
+              (begin
+                (buffer-set-local! buf 'chat-reaped #t)
+                (message (string-append "Kept: " title ": " why)))
+              (notify! "chat" (string-append "Kept: " title) why))
           'kept))))
 
 (define (chat-finish-turn-end! slug stop-reason ok?)
   (let ((buf (agent-buf slug)))
     (when (and (string? buf) (buffer-exists? buf))
+      ;; a turn the reaper did not start makes a kept chat one it may ask again
+      (when (and (buffer-local buf 'chat-reaped) (not (buffer-local buf 'chat-dismiss-pending)))
+        (buffer-set-local! buf 'chat-reaped #f))
       (cond ((buffer-local buf 'chat-finish)
              (chat-finish--settle! buf slug ok? stop-reason))
             ((buffer-local buf 'chat-dismiss-pending)
@@ -810,7 +821,7 @@
              (if (and ok? (not (buffer-local buf 'chat-finish-asked)))
                  (begin
                    (buffer-set-local! buf 'chat-finish-asked #t)
-                   (agent-send-msg! slug *chat-finish-ask*))
+                   (agent-send-msg! slug (chat-dismiss--ask)))
                  (chat-finish--settle! buf slug ok? stop-reason)))))))
 
 (define (chat-finish! outcome summary &optional buf0)
@@ -832,6 +843,53 @@
   "(chat-finish! OUTCOME SUMMARY [BUF]) -- a chat says how its work ended: done, blocked or needs-user. At the turn end a done chat is archived and killed, unless a failed run, a waiting permission, unsaved edits or an open todo holds it")
 (catalog-meta! 'function "chat-finish!" 'domain 'chat 'effects '(destroy))
 
+;; An idle chat is asked to finish. A chat that no window shows, with no
+;; turn in flight, no listener waiting for it and nothing typed in its
+;; input, that has heard nothing for chat-idle-reap-minutes, is asked one
+;; time. A done answer closes it through chat-finish!; any other answer
+;; keeps it with no notice, and only a later turn lets the reaper ask again.
+(defcustom 'chat-idle-reap-minutes 30
+  "Ask a chat to finish after this many idle minutes; it closes when it says it is done. 0 never asks."
+  'group 'chat 'type 'integer)
+
+(define (chat-reap--candidates)
+  (let ((limit (* 60 chat-idle-reap-minutes))
+        (now (current-time)))
+    (filter (lambda (b)
+              (let ((slug (agent-slug-of b))
+                    (seen (alist-get *chats-activity* b)))
+                (and slug (buffer-exists? b)
+                     (equal? (agent-status slug) 'idle)
+                     (number? seen) (>= (- now seen) limit)
+                     (not (buffer-local b 'chat-reaped))
+                     (not (buffer-local b 'chat-dismiss-pending))
+                     (not (window-showing b))
+                     (null? (agent-listeners b))
+                     (equal? (string-trim (chat-input-text b)) ""))))
+            (map car *chats-activity*))))
+
+(define (chat-reap! &optional _event)
+  "ask each idle chat to finish; answer the chats asked"
+  (if (not (and (number? chat-idle-reap-minutes) (> chat-idle-reap-minutes 0)))
+      '()
+      (let ((bs (chat-reap--candidates)))
+        (for-each (lambda (b)
+                    (buffer-set-local! b 'chat-reap #t)
+                    (buffer-set-local! b 'chat-dismiss-pending #t)
+                    (buffer-set-local! b 'chat-finish-asked #t)
+                    (agent-send-msg! (agent-slug-of b)
+                                     (string-append "This chat has been idle for "
+                                                    (number->string chat-idle-reap-minutes)
+                                                    " minutes. " *chat-finish-ask*)))
+                  bs)
+        bs)))
+
+(public! 'chat-reap! "(chat-reap!) -- ask each idle chat to finish; answer the chats asked")
+(catalog-meta! 'function "chat-reap!" 'domain 'chat 'effects '(write spend))
+
+(when (boundp 'cron-define!)
+  (cron-define! "chat-reap" "*/5 * * * *" 'call 'chat-reap! 'save #f))
+
 (define-command "chat-dismiss"
   "Hide this chat, optionally send a final instruction; it closes when the agent says it is done"
   (lambda ()
@@ -847,10 +905,10 @@
               (cond ((not (equal? input ""))
                      (chat-clear-input! buf)
                      (buffer-set-local! buf 'chat-finish-asked #t)
-                     (agent-send-msg! slug (string-append input "\n\n" *chat-finish-ask*)))
+                     (agent-send-msg! slug (string-append input "\n\n" (chat-dismiss--ask))))
                     ((not running)
                      (buffer-set-local! buf 'chat-finish-asked #t)
-                     (agent-send-msg! slug *chat-finish-ask*))))
+                     (agent-send-msg! slug (chat-dismiss--ask)))))
             (message "chat hidden; it closes when the agent says it is done"))))))
 
 (define (list-remove-at lst i)

@@ -4920,11 +4920,16 @@
     (let* ((cur (current-buffer))
            (head (list (list cur "current"))))
       ;; current buffer is the default: first candidate, RET kills it
-      (minibuffer-read (string-append "Kill buffer (default " cur "): ")
+      ;; the annotation matches too: a mode, group, project or workspace
+      ;; name finds every buffer in it
+      (minibuffer-read* (string-append "Kill buffer (default " cur "): ")
         (append head (buffer-candidates-live))
-        (lambda (name)
-          (kill-buffer-confirm! (if (equal? name "") cur name)
-                                (lambda (killed?) #t))))
+        (list (list 'confirm
+                    (lambda (name)
+                      (kill-buffer-confirm! (if (equal? name "") cur name)
+                                            (lambda (killed?) #t))))
+              (list 'match-hint 5)
+              (list 'style #f)))
       (buffer-candidates-fill! head))))
 
 (domain! 'processes)

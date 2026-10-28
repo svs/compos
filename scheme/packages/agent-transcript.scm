@@ -760,6 +760,42 @@
                           (list 'tag "c-message-body" 'class "ag-user-text"
                                 'text (string-join (cdr lines) "\n"))))))
 
+;; a listener's wake (agent-listen.scm) reaches the model as a prompt, but
+;; nobody typed it: it draws as the agent's own update, one line naming the
+;; event, folded over the whole brief
+(define (chat-view--event-notice? text)
+  (and (string? text) (string-prefix? "[event] " text)))
+
+(define (chat-view--event-summary text)
+  (let* ((lines (string-split text "\n"))
+         (head (if (> (length lines) 1) (nth 1 lines) (car lines)))
+         ;; the event's own lines, newest first: past the two head lines,
+         ;; less the closing line that says what became of the listener
+         (body (let loop ((ls (if (> (length lines) 3) (list-tail lines 3) '())) (acc '()))
+                 (cond ((null? ls) (if (pair? acc) (cdr acc) acc))
+                       ((equal? (string-trim (car ls)) "") (loop (cdr ls) acc))
+                       (else (loop (cdr ls) (cons (string-trim (car ls)) acc))))))
+         ;; a short message is itself; long output says its outcome in a
+         ;; result line ("31 tests, 0 failures"), else in its last line
+         (line (cond ((null? body) #f)
+                     ((let loop ((ls body))
+                        (cond ((null? ls) #f)
+                              ((re-match? "[0-9]+ (tests?|failures?|passed|failed|errors?)\\b" (car ls)) (car ls))
+                              (else (loop (cdr ls))))))
+                     (else (car body)))))
+    (string-append "⚡ " head
+                   (if line
+                       (string-append " — " (if (> (string-length line) 96)
+                                                (string-append (substring line 0 96) "…")
+                                                line))
+                       ""))))
+
+(define (chat-view--event-notice text)
+  (list 'tag "details" 'class "ag-thought ag-event"
+        'attrs '(("author" "agent") ("kind" "event"))
+        'children (list (list 'tag "summary" 'text (chat-view--event-summary text))
+                        (list 'tag "c-message-body" 'class "ag-user-text" 'text text))))
+
 (define (chat-view--user-text buf b)
   (if (and (> (length b) 3) (string? (nth 3 b)))
       (nth 3 b)
@@ -833,9 +869,9 @@
     (cond
       ((equal? kind "user")
        (let ((text (chat-view--user-text buf b)))
-         (if (chat-view--subagent-notice? text)
-             (chat-view--subagent-notice text)
-             (chat-view--user "user" "ag-user" text))))
+         (cond ((chat-view--subagent-notice? text) (chat-view--subagent-notice text))
+               ((chat-view--event-notice? text) (chat-view--event-notice text))
+               (else (chat-view--user "user" "ag-user" text)))))
       ((equal? kind "queued") (chat-view--user "queued" "ag-user ag-queued" (chat-view--user-text buf b)))
       ((equal? kind "prose") (chat-view--prose buf s e))
       ((equal? kind "thought")

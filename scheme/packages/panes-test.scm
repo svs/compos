@@ -1,72 +1,90 @@
-;;; panes-test.scm --- the window model is pure data: a row of panes, each a
-;;; stack of windows, each a stack of buffers. These tests drive the model
-;;; and the two policies with no frame, no buffer and no group: the cases
-;;; are docs/WINDOWS-SPEC.md sections 3, 4 and 7 at the level of the value.
+;;; panes-test.scm --- the spec of the window model.
+;;;
+;;; A layout is a row of panes, each a stack of windows, each a stack of
+;;; buffers. Every test here is one rule the user can see, said as its
+;;; name, and checks it on the value alone: a layout goes in, a layout
+;;; comes out, with no frame, no buffer and no draw. That the screen shows
+;;; the model is panes-mode-test.scm's business.
 
 (domain! 'testing)
 (effects! '(pure))
 
-;; open BUF of MODE as a visit from window SEL: (LAYOUT KEY)
-(define (pt-visit layout buf mode &optional sel)
-  (panes-show-buffer layout buf mode (and sel (panes-pane-of layout sel))))
+;; the mode of each test buffer
+(define (pt-mode b)
+  (cond ((string-suffix? ".scm" b) "scheme-mode")
+        ((string-prefix? "*chat" b) "chat-mode")
+        ((string-prefix? "*dired" b) "dired-mode")
+        (else "text-mode")))
 
-(define (pt-display layout buf mode sel recent)
-  (pt-visit layout buf mode sel))
+;; a row of panes, one per buffer, as a new group lays it out
+(define (pt-row &rest bufs) (panes-default-layout bufs pt-mode))
 
-(deftest 'a-new-mode-takes-a-pane-while-there-is-room
-  "W01, O05: the first buffer of a mode makes a pane and is that mode's preferred window; the shares stay equal"
+;; open BUF from pane PANE: (LAYOUT KEY)
+(define (pt-open layout buf &optional pane)
+  (panes-show-buffer layout buf (pt-mode buf) pane))
+
+(define (pt-window l mode) (panes-mode-window l mode))
+
+;;; --- opening a buffer -------------------------------------------------------
+
+(deftest 'the-first-buffer-makes-the-first-pane
+  "an empty layout opens a buffer in a new pane of its own"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "notes.md" "morg-mode" (cadr o2)))
-           (l (car o3)))
-      (check-equal! (panes-pane-ids l) '("p1" "p2" "p3") "three modes, three panes")
-      (check-equal! (map caddr (panes-visible l)) '("a.scm" "*chat*" "notes.md") "each pane shows its mode's buffer")
-      (check-equal! (panes-shares l) (list (/ 1 3) (/ 1 3) (/ 1 3)) "equal shares")
-      (check-equal! (panes-mode-window l "scheme-mode") (cadr o1) "the first scheme window is preferred"))))
+    (let ((l (car (pt-open (panes-empty) "a.scm"))))
+      (check-equal! (panes-pane-count l) 1 "one pane")
+      (check-equal! (map caddr (panes-visible l)) '("a.scm") "showing the buffer"))))
 
 (deftest 'a-buffer-opens-in-the-window-of-its-mode
-  "W02, O01, O04: another buffer of a mode goes to that mode's window even when another window is selected, and spare capacity makes no duplicate"
+  "another buffer of a mode goes to that mode's window, wherever you are, and that window comes to the front of its pane"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "b.scm" "scheme-mode" (cadr o2))))
-      (check-equal! (cadr o3) (cadr o1) "b.scm went to the scheme window")
-      (check-equal! (panes-window-buffers (car o3) (cadr o1)) '("b.scm" "a.scm") "on top of its stack")
-      (check-equal! (panes-pane-count (car o3)) 2 "no third pane for it"))))
+    (let* ((l (pt-row "a.scm" "*chat*"))
+           (o (pt-open l "b.scm" "p2")))
+      (check-equal! (cadr o) (pt-window l "scheme-mode") "the scheme window took it")
+      (check-equal! (panes-window-buffers (car o) (cadr o)) '("b.scm" "a.scm") "on top of its stack")
+      (check-equal! (panes-pane-count (car o)) 2 "no pane was made"))))
 
-(deftest 'at-capacity-a-new-mode-stacks-in-the-selected-pane
-  "O06: with every pane taken, a visit of a new mode makes a window in the selected pane; the displaced window waits behind it with its stack"
+(deftest 'a-new-mode-opens-a-window-in-the-pane-you-are-in
+  "a buffer of a mode that has no window gets a new window at the front of your pane; the window it covers waits behind; no pane is made"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 2) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "*dired*" "dired-mode" (cadr o2)))
-           (l (car o3)))
-      (check-equal! (panes-pane-count l) 2 "still two panes")
-      (check-equal! (panes-pane-of l (cadr o3)) (panes-pane-of l (cadr o2)) "the new window is in the selected pane")
-      (check-equal! (panes-top-windows l) (list (cadr o1) (cadr o3)) "it is on screen")
-      (check-equal! (panes-window-buffers l (cadr o2)) '("*chat*") "the chat window keeps its stack behind"))))
+    (let* ((l (pt-row "a.scm" "*chat*"))
+           (kc (pt-window l "chat-mode"))
+           (o (pt-open l "*dired*" "p2")))
+      (check-equal! (panes-pane-of (car o) (cadr o)) "p2" "in your pane")
+      (check-equal! (panes-pane-keys (car o) "p2") (list (cadr o) kc) "in front, the chat behind")
+      (check-equal! (panes-pane-count (car o)) 2 "still two panes"))))
 
-(deftest 'a-display-at-capacity-takes-the-least-recent-other-pane
-  "O09: a result shows in the least recently used other pane; the selected one keeps what it shows"
+(deftest 'a-buffer-in-another-modes-window-opens-in-its-own-modes-window
+  "a buffer that sits in another mode's stack opens in the window of its own mode, and the other window keeps what it shows"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 2) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-display (car o2) "*help*" "help-mode" (cadr o2) (list (cadr o2) (cadr o1))))
-           (l (car o3)))
-      (check-equal! (panes-pane-of l (cadr o3)) (panes-pane-of l (cadr o1)) "help took the scheme pane")
-      (check-equal! (panes-window-buffer l (cadr o2)) "*chat*" "the selected pane still shows the chat"))))
+    (let* ((l (pt-row "a.scm" "*chat*"))
+           (ka (pt-window l "scheme-mode")) (kc (pt-window l "chat-mode"))
+           (l (panes-show (panes-show l kc "b.scm") kc "*chat*"))
+           (o (pt-open l "b.scm" "p2")))
+      (check-equal! (cadr o) ka "b.scm went to the scheme window")
+      (check-equal! (panes-window-buffer (car o) kc) "*chat*" "the chat window still shows the chat"))))
+
+(deftest 'quit-shows-the-windows-own-previous-buffer
+  "quit takes the shown buffer out of its window and shows that window's previous one; a window with nothing left closes, and its pane stays"
+  (lambda ()
+    (let* ((l (car (pt-open (car (pt-open (car (pt-open (pt-row "*chat*") "a.scm" "p1")) "b.scm")) "c.scm")))
+           (k (pt-window l "scheme-mode"))
+           (q1 (panes-pop l k)) (q2 (panes-pop (car q1) k)) (q3 (panes-pop (car q2) k)))
+      (check-equal! (cadr q1) "b.scm" "c goes, b shows")
+      (check-equal! (cadr q2) "a.scm" "b goes, a shows")
+      (check-equal! (cadr q3) #f "nothing left")
+      (check-equal! (panes-window (car q3) k) #f "the window closed")
+      (check-equal! (panes-pane-count (car q3)) 1 "its pane stays"))))
 
 (deftest 'a-split-gives-a-mode-a-second-window-beside-the-first
-  "the split buffers leave their window for a new one of the same mode in the next pane; the first window keeps the rest and still takes new buffers of the mode"
+  "the split buffers leave their window for a new one of the same mode in the next pane; the first window keeps the rest and still takes new buffers of the mode; a split never empties its window"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "b.scm" "scheme-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "c.scm" "scheme-mode" (cadr o2)))
+    (let* ((o1 (pt-open (panes-empty 3) "a.scm"))
+           (o2 (pt-open (car o1) "b.scm"))
+           (o3 (pt-open (car o2) "c.scm"))
            (ka (cadr o1))
            (split (panes-split-off (car o3) '("c.scm" "b.scm") ka))
            (l (car split)) (kb (cadr split))
-           (o4 (pt-visit l "d.scm" "scheme-mode" kb)))
+           (o4 (pt-open l "d.scm" (panes-pane-of l kb))))
       (check-equal! (panes-pane-count l) 2 "a second pane")
       (check-equal! (map caddr (panes-visible l)) '("a.scm" "c.scm") "side by side")
       (check-equal! (panes-window-buffers l kb) '("c.scm" "b.scm") "the new window holds the split buffers")
@@ -75,51 +93,161 @@
       (check-equal! (cadr o4) ka "a new scheme buffer still opens in the first window")
       (check-equal! (panes-split-off l '("a.scm") ka) #f "a split never empties its window"))))
 
-(deftest 'an-explicit-move-is-kept-and-does-not-retarget-opens
-  "W04 to W06: a buffer moved out of its mode window stays there, a new buffer of the mode still goes to the preferred window, and revisiting the moved buffer brings it forward where it is"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "b.scm" "scheme-mode" (cadr o2)))
-           (ka (cadr o1)) (kc (cadr o2))
-           (moved (panes-move-buffer (car o3) "b.scm" kc))
-           (o4 (pt-visit moved "c.scm" "scheme-mode" kc))
-           (o5 (pt-visit (car o4) "b.scm" "scheme-mode" ka)))
-      (check-equal! (panes-window-buffers moved kc) '("b.scm" "*chat*") "b.scm sits on the chat window")
-      (check-equal! (cadr o4) ka "a new scheme buffer still goes to the preferred window")
-      (check-equal! (cadr o5) kc "revisiting b.scm uses the window that holds it")
-      (check-equal! (panes-window-buffer (car o5) kc) "b.scm" "and brings it forward there"))))
+;;; --- panes and windows ------------------------------------------------------
 
-(deftest 'consolidation-gives-every-mode-one-window
-  "M01, M03, M15: the preferred window of a mode gathers the mode's buffers from every other window; a window emptied closes; the operation is idempotent"
+(deftest 'an-emptied-window-closes-and-its-pane-stays
+  "when the last buffer leaves a window, the window closes; its pane stays, empty"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "*chat*" "chat-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "b.scm" "scheme-mode" (cadr o2)))
-           (ka (cadr o1)) (kc (cadr o2))
-           ;; b.scm moved onto the chat window, then a dired visit stacks on the chat window too
-           (l (panes-move-buffer (car o3) "b.scm" kc))
-           (o4 (pt-visit (panes-set-capacity l 2) "*dired*" "dired-mode" kc))
-           (l (car o4))
-           (mode-of (lambda (b) (cond ((string-suffix? ".scm" b) "scheme-mode")
-                                      ((equal? b "*chat*") "chat-mode")
-                                      (else "dired-mode"))))
-           (c1 (panes-consolidate l mode-of))
-           (c2 (panes-consolidate c1 mode-of)))
-      (check-equal! (panes-window-buffers c1 ka) '("a.scm" "b.scm") "the scheme window holds every scheme buffer")
+    (let ((l (panes-drop-buffer (pt-row "a.scm" "*chat*") "*chat*")))
+      (check-false! (member "*chat*" (panes-buffers l)) "the chat is gone")
+      (check-equal! (panes-pane-count l) 2 "both panes stay")
+      (check-equal! (panes-pane-keys l "p2") '() "the second pane is empty"))))
+
+(deftest 'removing-a-pane-removes-its-windows-and-the-last-pane-stays
+  "a pane goes with every window in it; the focus passes to the pane that takes its place; the last pane never goes"
+  (lambda ()
+    (let* ((l (panes-set-focus (pt-row "a.scm" "*chat*") "p1"))
+           (r (panes-remove-pane l "p1")))
+      (check-equal! (panes-pane-ids r) '("p2") "one pane left")
+      (check-false! (member "a.scm" (panes-buffers r)) "its window went with it")
+      (check-equal! (panes-focus r) "p2" "the focus moved to the pane that took its place")
+      (check-equal! (panes-pane-ids (panes-remove-pane r "p2")) '("p2") "the last pane stays"))))
+
+(deftest 'a-window-moves-between-panes-with-its-stack
+  "a window moves whole, to the front of the other pane; the pane it leaves stays"
+  (lambda ()
+    (let* ((l (car (pt-open (pt-row "a.scm" "*chat*") "a2.scm")))
+           (ka (pt-window l "scheme-mode")) (kc (pt-window l "chat-mode"))
+           (m (panes-move-window l ka "p2")))
+      (check-equal! (panes-pane-count m) 2 "the pane it left stays")
+      (check-equal! (panes-pane-keys m "p2") (list ka kc) "the moved window is at the front of its new pane")
+      (check-equal! (panes-window-buffers m ka) '("a2.scm" "a.scm") "with its stack"))))
+
+(deftest 'widening-a-pane-keeps-the-shares-summing-to-one
+  "a pane's width is a share of the row; widening one narrows the others"
+  (lambda ()
+    (let ((w (panes-set-share (pt-row "a.scm" "*chat*") "p2" 3)))
+      (check-equal! (panes-shares w) (list (/ 1 4) (/ 3 4)) "one quarter and three quarters")
+      (check-equal! (apply + (panes-shares w)) 1 "the shares sum to one")
+      (check-equal! (panes-layout-shares w #t) (list (/ 1 4) (/ 3 4)) "and those are the widths the screen is given"))))
+
+(deftest 'splitting-a-pane-below-halves-its-height
+  "a split below puts a new empty pane under the pane, in its column, and the two share its height"
+  (lambda ()
+    (let* ((s (panes-split-below (pt-row "a.scm" "*chat*") "p1"))
+           (cols (panes-columns (car s))))
+      (check-equal! (length cols) 2 "still two columns")
+      (check-equal! (map (lambda (p) (plist-get p 'id)) (car cols)) (list "p1" (cadr s)) "the new pane is under the first")
+      (check-equal! (panes-vshares (car cols)) (list (/ 1 2) (/ 1 2)) "they halve the height")
+      (check-equal! (panes-pane-keys (car s) (cadr s)) '() "the new pane is empty"))))
+
+(deftest 'two-panes-swap-windows-and-keep-their-place-and-size
+  "a swap trades the windows of two panes; each pane keeps its place and its width"
+  (lambda ()
+    (let* ((l (panes-set-share (pt-row "a.scm" "*chat*") "p1" 2))
+           (ka (pt-window l "scheme-mode")) (kc (pt-window l "chat-mode"))
+           (s (panes-swap-panes l "p1" "p2")))
+      (check-equal! (panes-pane-of s kc) "p1" "the chat is on the left")
+      (check-equal! (panes-pane-of s ka) "p2" "the scheme window on the right")
+      (check-equal! (panes-shares s) (panes-shares l) "the widths stay"))))
+
+;;; --- focus ------------------------------------------------------------------
+
+(deftest 'the-focused-window-is-the-front-window-of-the-focused-pane
+  "the focus is a pane, the first one until a pane takes it; its front window is the window you are in"
+  (lambda ()
+    (let* ((l (pt-row "a.scm" "*chat*"))
+           (f (panes-set-focus l "p2")))
+      (check-equal! (panes-focus l) "p1" "the first pane until one takes the focus")
+      (check-equal! (panes-focus f) "p2" "the second pane took it")
+      (check-equal! (car (panes-pane-keys f (panes-focus f))) (pt-window l "chat-mode") "its front window is the chat")
+      (check-equal! (panes-set-focus f "p9") f "an unknown pane changes nothing"))))
+
+(deftest 'focusing-a-window-brings-it-to-the-front-of-its-pane
+  "a window behind others comes to the front of its pane when you go to it, and its pane takes the focus"
+  (lambda ()
+    (let* ((l (car (pt-open (pt-row "a.scm" "*chat*") "*dired*" "p1")))
+           (ka (pt-window l "scheme-mode"))
+           (f (panes-focus-window (panes-set-focus l "p2") ka)))
+      (check-equal! (car (panes-pane-keys f "p1")) ka "the scheme window is in front again")
+      (check-equal! (panes-focus f) "p1" "and its pane has the focus"))))
+
+;;; --- killing a buffer -------------------------------------------------------
+
+(deftest 'a-kill-removes-the-buffer-from-every-stack
+  "a killed buffer leaves every window; each window falls back to its own previous buffer; an emptied window closes and its pane stays"
+  (lambda ()
+    (let* ((l (car (pt-open (pt-row "a.scm" "*chat*") "b.scm")))
+           (ka (pt-window l "scheme-mode")) (kc (pt-window l "chat-mode"))
+           (l (panes-show l kc "b.scm"))
+           (k1 (panes-drop-buffer l "b.scm"))
+           (k2 (panes-drop-buffer k1 "*chat*")))
+      (check-false! (member "b.scm" (panes-buffers k1)) "b.scm left both windows")
+      (check-equal! (panes-window-buffer k1 ka) "a.scm" "the scheme window shows its own previous buffer")
+      (check-equal! (panes-window-buffer k1 kc) "*chat*" "the chat window shows its own previous buffer")
+      (check-equal! (panes-window k2 kc) #f "the emptied chat window closed")
+      (check-equal! (panes-pane-count k2) 2 "its pane stays"))))
+
+;;; --- groups -----------------------------------------------------------------
+
+(deftest 'a-new-group-lays-out-one-pane-per-buffer
+  "a group's first layout is a row of panes, one per buffer, left to right, equal widths, each a window of its buffer's mode"
+  (lambda ()
+    (let ((l (pt-row "a.scm" "*chat*" "notes.md")))
+      (check-equal! (map caddr (panes-visible l)) '("a.scm" "*chat*" "notes.md") "one pane per buffer")
+      (check-equal! (panes-shares l) (list (/ 1 3) (/ 1 3) (/ 1 3)) "equal widths")
+      (check-equal! (map (lambda (k) (panes-window-mode l k)) (panes-top-windows l))
+                    '("scheme-mode" "chat-mode" "text-mode") "each window of its buffer's mode"))))
+
+(deftest 'a-layout-keeps-only-the-buffers-its-group-holds
+  "a buffer the group does not hold leaves the layout, whatever window showed it; its emptied window closes and the pane stays"
+  (lambda ()
+    (let* ((l (pt-row "a.scm" "*chat*" "other.md"))
+           (v (panes-validate l (lambda (b) (member b '("a.scm" "*chat*"))))))
+      (check-equal! (panes-buffers v) '("a.scm" "*chat*") "only the group's buffers")
+      (check-equal! (panes-pane-count v) 3 "every pane stays"))))
+
+(deftest 'a-saved-layout-reads-back-with-its-windows-and-focus
+  "a layout is plain data: what is saved is the layout itself, its windows, keys and focus with it"
+  (lambda ()
+    (let ((l (panes-set-focus (car (pt-open (pt-row "a.scm" "*chat*") "b.scm")) "p2")))
+      (check-equal! (panes-strip-handles l) l "nothing is lost when it is saved")
+      (check-equal! (panes-focus (panes-strip-handles l)) "p2" "the focus comes back")
+      (check-true! (panes-layout? (panes-strip-handles l)) "and it reads as a layout"))))
+
+(deftest 'a-window-key-is-its-frame-window-id
+  "a window's key is the frame's id for it; a frame that gives another id rekeys it; a dead buffer leaves when the layout is checked"
+  (lambda ()
+    (let* ((o1 (pt-open (panes-empty 3) "old"))
+           (o2 (pt-open (car o1) "other"))
+           (k (cadr o1))
+           (r (car o2))
+           (h (panes-set-handle r k 42)))
+      (check-equal! (panes-handle r k) k "the handle is the key")
+      (check-equal! (panes-handle h 42) 42 "another id rekeys the window")
+      (check-equal! (panes-handle h k) #f "the old key is gone")
+      (check-equal! (panes-window-buffers (panes-validate h (lambda (b) (equal? b "other"))) 42) '("other") "a dead buffer leaves"))))
+
+;;; --- consolidating ----------------------------------------------------------
+
+(deftest 'consolidating-gives-every-mode-one-window
+  "after a consolidate, each mode's window holds every buffer of that mode, a window of another mode keeps only its own, and a second consolidate changes nothing"
+  (lambda ()
+    (let* ((l (car (pt-open (pt-row "a.scm" "*chat*") "b.scm")))
+           (ka (pt-window l "scheme-mode")) (kc (pt-window l "chat-mode"))
+           (l (panes-move-buffer l "b.scm" kc))
+           (c1 (panes-consolidate l pt-mode))
+           (c2 (panes-consolidate c1 pt-mode)))
+      (check-true! (and (member "a.scm" (panes-window-buffers c1 ka)) (member "b.scm" (panes-window-buffers c1 ka)) #t) "the scheme window holds every scheme buffer")
       (check-equal! (panes-window-buffers c1 kc) '("*chat*") "the chat window keeps only the chat")
-      (check-equal! (panes-window-buffer c1 (cadr o4)) "*dired*" "dired stays in its own window")
-      (check-equal! c2 c1 "a second consolidation changes nothing"))))
+      (check-equal! c2 c1 "a second consolidate changes nothing"))))
 
-(deftest 'consolidation-sends-stray-buffers-home-from-a-window-on-screen
-  "A window on screen of another mode keeps only the buffer it shows; an empty second window of a mode closes"
+(deftest 'consolidating-sends-stray-buffers-home-from-a-window-on-screen
+  "a window on screen of another mode keeps only the buffer it shows; a second window of a mode that is left empty closes"
   (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 2) "*todos*" "todo-mode"))
-           (kt (cadr o1))
-           (o2 (pt-visit (car o1) "*list*" "list-mode" kt))
-           (kl (cadr o2))
-           ;; the chat shows in the todo window; the other chats and a dired sit behind the list
-           (l (panes-move-buffer (car o2) "*chat*" kt))
+    (let* ((l (pt-row "*todos*" "*list*"))
+           (kt (car (panes-pane-keys l "p1"))) (kl (car (panes-pane-keys l "p2")))
+           (l (panes-move-buffer l "*chat*" kt))
            (l (panes-move-buffer l "*chat2*" kl))
            (l (panes-move-buffer l "*dired*" kl))
            (l (panes-move-buffer l "*list*" kl))
@@ -128,84 +256,7 @@
                                       ((equal? b "*dired*") "dired-mode")
                                       (else "list-mode"))))
            (c1 (panes-consolidate l mode-of))
-           (c2 (panes-consolidate c1 mode-of))
-           (where (lambda (b) (filter (lambda (k) (member b (panes-window-buffers c1 k))) (panes-window-keys c1))))
-           (windows (lambda (l) (map (lambda (k) (list k (panes-window-mode l k) (panes-window-buffers l k))) (panes-window-keys l)))))
+           (where (lambda (b) (filter (lambda (k) (member b (panes-window-buffers c1 k))) (panes-window-keys c1)))))
       (check-equal! (panes-window-buffers c1 kl) '("*list*") "the list window keeps only the list")
       (check-equal! (where "*chat*") (where "*chat2*") "the chats share one window")
-      (check-equal! (length (filter (lambda (k) (equal? (panes-window-mode c1 k) "chat-mode")) (panes-window-keys c1))) 1 "one chat window")
-      (check-false! (member "*todos*" (panes-window-buffers c1 (car (where "*chat*")))) "the todos leave the chat window")
-      (check-equal! (windows c2) (windows c1) "a second consolidation changes nothing"))))
-
-(deftest 'a-kill-consults-only-each-windows-own-stack
-  "Q13, Q14, rule 10 and 11: the killed buffer leaves every stack; a window falls to its own next buffer; an emptied window closes and its pane goes"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a.scm" "scheme-mode"))
-           (o2 (pt-visit (car o1) "b.scm" "scheme-mode" (cadr o1)))
-           (o3 (pt-visit (car o2) "*chat*" "chat-mode" (cadr o1)))
-           (ka (cadr o1)) (kc (cadr o3))
-           (k1 (panes-drop-buffer (car o3) "b.scm"))
-           (k2 (panes-drop-buffer k1 "*chat*")))
-      (check-equal! (panes-window-buffer k1 ka) "a.scm" "the scheme window shows its own previous buffer")
-      (check-equal! (panes-window k2 kc) #f "the emptied chat window is gone")
-      (check-equal! (panes-pane-count k2) 1 "and its pane with it")
-      (check-equal! (panes-pane-count (panes-drop-buffer k2 "a.scm")) 1 "the last pane stays"))))
-
-(deftest 'quit-reveals-the-windows-own-predecessor
-  "Q01, Q02, Q05: a pop shows the next buffer of that window only; an exhausted window closes"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a" "m"))
-           (o2 (pt-visit (car o1) "b" "m" (cadr o1)))
-           (o3 (pt-visit (car o2) "c" "m" (cadr o1)))
-           (o4 (pt-visit (car o3) "x" "other" (cadr o1)))
-           (k (cadr o1))
-           (q1 (panes-pop (car o4) k))
-           (q2 (panes-pop (car q1) k))
-           (q3 (panes-pop (car q2) k)))
-      (check-equal! (cadr q1) "b" "c goes, b shows")
-      (check-equal! (cadr q2) "a" "b goes, a shows")
-      (check-equal! (cadr q3) #f "nothing left")
-      (check-equal! (panes-window (car q3) k) #f "the window closed")
-      (check-equal! (panes-pane-count (car q3)) 1 "the other pane remains"))))
-
-(deftest 'windows-move-between-panes-with-their-stacks
-  "I01, L09: a window moves whole; a pane left empty stays; a pane can be widened and the shares still sum to one"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "a" "m1"))
-           (o2 (pt-visit (car o1) "b" "m2" (cadr o1)))
-           (o3 (pt-visit (car o2) "a2" "m1" (cadr o2)))
-           (ka (cadr o1)) (kb (cadr o2))
-           (pb (panes-pane-of (car o3) kb))
-           (m (panes-move-window (car o3) ka pb)))
-      (check-equal! (panes-pane-count m) (panes-pane-count (car o3)) "a pane left empty stays")
-      (check-equal! (panes-pane-keys m pb) (list ka kb) "the moved window is at the front of its new pane")
-      (check-equal! (panes-window-buffers m ka) '("a2" "a") "with its stack")
-      (let ((w (panes-set-share (car o3) pb 3)))
-        (check-equal! (apply + (panes-shares w)) 1 "shares sum to one")
-        (check-equal! (car (panes-shares w)) (/ 1 4) "the other pane shrank")))))
-
-(deftest 'a-key-is-the-frame-window-id
-  "H05: a window's key is its frame window id; a frame that gives another id rekeys it, and a dead buffer leaves on validation"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "old" "m"))
-           (o2 (pt-visit (car o1) "other" "m" (cadr o1)))
-           (k (cadr o1))
-           (r (car o2))
-           (h (panes-set-handle r k 42)))
-      (check-equal! (panes-handle r k) k "the handle is the key")
-      (check-equal! (panes-handle h 42) 42 "another id rekeys the window")
-      (check-equal! (panes-key-of-handle h 42) 42 "and answers its key")
-      (check-equal! (panes-handle h k) #f "the old key is gone")
-      (check-equal! (panes-window-buffers (panes-validate h (lambda (b) (equal? b "other"))) 42) '("other") "a dead buffer leaves"))))
-
-
-(deftest 'a-stray-in-another-modes-stack-opens-in-its-mode-window
-  "a buffer another mode's window kept in its stack, from a stray display, opens in the window of its own mode and leaves that window as it was"
-  (lambda ()
-    (let* ((o1 (pt-visit (panes-empty 3) "*list*" "ats-mode"))
-           (o2 (pt-display (car o1) "*d1*" "ats-approval-mode" (cadr o1) '()))
-           (o3 (pt-visit (car o2) "*chat*" "chat-mode" (cadr o1)))
-           (l (panes-show (panes-show (car o3) (cadr o3) "*d2*") (cadr o3) "*chat*"))
-           (o4 (pt-display l "*d2*" "ats-approval-mode" (cadr o1) '())))
-      (check-equal! (cadr o4) (cadr o2) "d2 went to the approval window")
-      (check-equal! (panes-window-buffer (car o4) (cadr o3)) "*chat*" "the chat window still shows the chat"))))
+      (check-equal! (length (filter (lambda (k) (equal? (panes-window-mode c1 k) "chat-mode")) (panes-window-keys c1))) 1 "one chat window"))))

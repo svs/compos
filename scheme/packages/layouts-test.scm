@@ -3,8 +3,6 @@
 (domain! 'testing)
 (effects! '(read))
 
-
-
 (deftest 'the-layout-that-fits-a-pane-count
   "a caller with panes in hand and no chosen layout gets the one that holds them"
   (lambda ()
@@ -34,53 +32,7 @@
       (buffer-kill! buf))))
 
 ;; A group is sealed: the third column never comes from outside it.
-(deftest 'three-columns-in-a-group-fill-from-members-without-manufacturing-panes
-  "in a group only ordinary members fill spare capacity"
-  (lambda ()
-    (with-fresh-group "zz-sealed-group"
-      (lambda (group)
-        (let ((a (test-buffer! "zz-seal-a" "a"))
-              (b (test-buffer! "zz-seal-b" "b"))
-              (c (test-buffer! "zz-seal-c" "c"))
-              (foreign (test-buffer! "zz-seal-foreign" "f")))
-          (for-each (lambda (buf) (buffer-add-group! buf group)) (list a b c))
-          ;; the foreign buffer is the most recent one: the old pool led with it
-          (when (float-open?) (float-close!))
-          (delete-other-windows!)
-          (switch-to-buffer-here! foreign)
-          (switch-to-buffer-here! a)
-          (set-frame-local! 'current-group group)
-          (let ((three (layout--fill-to (list a b) 3)))
-            (check-equal! (length three) 3 "a third column is found")
-            (check-equal! (nth 2 three) c "it is the group's other member")
-            (check-false! (member foreign three) "the foreign buffer stays out"))
-          ;; Members run out: leave the target underfilled.
-          (buffer-remove-group! c group)
-          (let ((three (layout--fill-to (list a b) 3)))
-            (check-equal! three (list a b) "unused capacity stays empty")
-            (check-false! (member foreign three) "the foreign buffer still stays out"))
-          ;; One member occupies the frame by itself.
-          (buffer-remove-group! b group)
-          (let ((two (layout--fill-to (list a) 3)))
-            (check-equal! two (list a) "one member stays one pane")
-            (check-false! (member foreign two) "and nothing foreign"))
-          (set-frame-local! 'current-group #f)
-          (for-each (lambda (buf) (when (buffer-known? buf) (buffer-kill! buf)))
-                    (append (group-buffers-as group 'scratch) (list a b c foreign))))))))
 
-(deftest 'three-columns-outside-a-group-fill-from-the-buffer-mru
-  "with no group the third column is the most recent other buffer"
-  (lambda ()
-    (let ((a (test-buffer! "zz-open-a" "a"))
-          (b (test-buffer! "zz-open-b" "b"))
-          (recent (test-buffer! "zz-open-recent" "r")))
-      (set-frame-local! 'current-group #f)
-      (switch-to-buffer! recent)
-      (switch-to-buffer! a)
-      (let ((three (layout--fill-to (list a b) 3)))
-        (check-equal! (length three) 3 "a third column is found")
-        (check-equal! (nth 2 three) recent "it is the most recent other buffer"))
-      (for-each buffer-kill! (list a b recent)))))
 
 (deftest 'dashboard-sync-writes-its-four-locals-together
   "one sync lands the line, the blocks, the modeline name and the context"

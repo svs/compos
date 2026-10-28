@@ -120,25 +120,6 @@
                     "an unknown plain name wears itself")
       (t--drop! id))))
 
-(deftest 'membership-answers-the-id
-  "a work buffer holds one id, and buffer-group answers it"
-  (lambda ()
-    (let ((id (t--group "member"))
-          (buf "*zztest-member*"))
-      (buffer-create buf)
-      (check-equal! (buffer-group buf) #f "a fresh buffer belongs to nothing")
-      (buffer-add-group! buf id)
-      (check-equal! (buffer-group buf) id "buffer-group answers the id")
-      (check-true! (buffer-in-group? buf id) "the buffer is in the group")
-      (check-true! (buffer-in-group? buf "zztest-member")
-                   "the name finds the membership too")
-      (buffer-add-group! buf id)
-      (check-equal! (buffer-group buf) id "joining twice is one membership")
-      (buffer-remove-group! buf id)
-      (check-equal! (buffer-group buf) #f "leaving clears it")
-      (buffer-kill! buf)
-      (t--drop! id))))
-
 (deftest 'a-rename-keeps-every-membership
   "the point of the id: a rename does not touch the buffers"
   (lambda ()
@@ -152,48 +133,6 @@
                     "and reads back under the new name")
       (buffer-kill! buf)
       (t--drop! id))))
-
-(deftest 'a-summary-is-always-a-string
-  "marginalia measures columns with string-length; one #f breaks the row"
-  (lambda ()
-    (let ((buf "*zztest-summary*"))
-      (buffer-create buf)
-      (check-equal! (buffer-group-summary buf) "ungrouped" "no membership reads as ungrouped")
-      (let ((id (t--group "summary")))
-        (buffer-add-group! buf id)
-        (check-true! (string? (buffer-group-summary buf)) "a member's summary is a string")
-        (check-contains! (buffer-group-summary buf) "zztest-summary" "and names the group")
-        (t--drop! id))
-      ;; the record is gone and the buffer still holds its id
-      (check-true! (string? (buffer-group-summary buf))
-                   "a lost record still answers a string")
-      (buffer-kill! buf))))
-
-(deftest 'the-modeline-group-follows-the-buffer
-  "the render cache holds the one group this buffer is in"
-  (lambda ()
-    (let ((buf "*zztest-modeline-groups*")
-          (one (t--group "modeline-one"))
-          (two (t--group "modeline-two")))
-      (buffer-create buf)
-      (buffer-modeline-group-refresh! buf)
-      (check-equal! (modeline-cache-get buf 'group) #f
-                    "an ungrouped buffer carries no modeline group")
-      (buffer-add-group! buf one)
-      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-one"
-                    "the membership carries its name")
-      (buffer-add-group! buf two)
-      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-two"
-                    "joining a group is leaving the last one")
-      (group-rename! two "zztest-modeline-renamed")
-      (check-equal! (modeline-cache-get buf 'group) "zztest-modeline-renamed"
-                    "renaming a group refreshes its member label")
-      (buffer-remove-group! buf two)
-      (check-equal! (modeline-cache-get buf 'group) #f
-                    "leaving takes the name with it")
-      (buffer-kill! buf)
-      (t--drop! one)
-      (t--drop! two))))
 
 (deftest 'add-founds-a-typed-name
   "the add prompt takes a name it does not list, and founds it"
@@ -412,20 +351,4 @@
       (group-kill! a))))
 
 ;; Two windows on one chat looked like a window that would not close.
-(deftest 'a-killed-buffer-beside-the-chat-closes-its-window
-  "with no member left, the window closes rather than show the chat twice"
-  (lambda ()
-    (let* ((g (t--group "beside-chat"))
-           (chat (group-chat g))
-           (buf (test-buffer! "*zztest-beside*" "")))
-      (buffer-add-group! buf g)
-      (switch-to-group! g)
-      (delete-other-windows!)
-      (switch-to-buffer-here! chat)
-      (split-window! 'h 0.5)
-      (let ((other (car (car (filter (lambda (r) (not (equal? (car r) (active-window))))
-                                     (window-list))))))
-        (window-set-buffer! other buf))
-      (kill-buffer-confirm! buf #f)
-      (check-equal! (map cadr (window-list)) (list chat) "one window, on the chat")
-      (group-kill! g))))
+

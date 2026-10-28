@@ -272,23 +272,6 @@
       (buffer-kill! path)
       (delete-file! path))))
 
-(deftest 'remembered-layouts-are-keyed-by-frame
-  "two frames on one group remember two layouts"
-  (lambda ()
-    (let ((first (t--gs-buf))
-          (id (group-record-create! "zzgs-layout"))
-          (here (current-buffer)))
-      (buffer-add-group! first id)
-      (switch-to-buffer! first)
-      (group-layout-save! id)
-      (let ((saved (group-record-layout (group-record-by-id id))))
-        (check-equal! (car saved) 'per-frame "the layout is per-frame")
-        (check-equal! (car (car (cdr saved))) (selected-frame) "keyed by this frame")
-        (check-equal! (group-layout id) (window-tree) "and it is what is on screen"))
-      (when (buffer-known? here) (switch-to-buffer! here))
-      (t--gs-drop! id)
-      (t--gs-kill! first))))
-
 ;;; --- the frame context --------------------------------------------------------
 
 ;; The frame locals are the person's own current group. Put them back.

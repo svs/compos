@@ -744,12 +744,7 @@
 (define (panes--default-layout bufs)
   "One pane per buffer of BUFS, left to right, equal shares: a group's
    first layout. It does not fold to the capacity."
-  (fold (lambda (l b)
-          (let* ((added (panes-add-pane l))
-                 (made (panes-add-window (car added) (cadr added) b (panes--buffer-mode b))))
-            (car made)))
-        (panes-empty)
-        bufs))
+  (panes-default-layout bufs panes--buffer-mode))
 
 ;;; --- the frame primitives are doors ----------------------------------------------
 ;;; A primitive that changes the frame changes the

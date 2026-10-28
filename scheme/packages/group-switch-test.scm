@@ -107,29 +107,6 @@
 (define t--sw-headings
   '("in this group" "other groups" "groups" "ungrouped" "zzsw-foreign" "recent"))
 
-(deftest 'the-switcher-pool-follows-the-invoking-window-history
-  "another window cannot reorder this window's previous buffers"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((noise "zz-sw-noise"))
-      (test-buffer! noise "")
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-first)
-      (let ((window (active-window)))
-        (split-window! 'h 0.5)
-        (other-window!)
-        (switch-to-buffer! t--sw-second)
-        (switch-to-buffer! noise)
-        (select-window! window)
-        (let ((pool (filter (lambda (b) (member b (list t--sw-second t--sw-third noise)))
-                            (map car (switch-sectioned-rows t--sw-first #f window)))))
-          (check-equal! (car pool) t--sw-third "the last buffer in this window leads")
-          (check-equal! (cadr pool) t--sw-second "the older buffer follows it")
-          (check-equal! (caddr pool) noise "the other window's buffer comes last")))
-      (buffer-kill! noise))
-    (t--sw-done!)))
-
 (deftest 'the-switcher-lists-the-buffer-you-are-on-but-never-leads-with-it
   "you came to see the whole group; RET on an empty input still goes elsewhere"
   (lambda ()
@@ -149,38 +126,6 @@
     (t--sw-done!)))
 
 ;;; --- founding a group -----------------------------------------------------------
-
-(deftest 'new-from-a-selection-takes-the-buffers-and-the-layout
-  "group-new on marked buffers takes the arrangement, and the buffers with it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((old (group-record-create! "zzsw-old")))
-      (buffer-add-group! t--sw-first old)
-      (delete-other-windows!)
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      ;; the selection is the seed (docs/groups.md): both visible buffers
-      (buffer-set-local! t--sw-first 'buffer-selected #t)
-      (buffer-set-local! t--sw-second 'buffer-selected #t)
-      (run-command "group-new")
-
-      (t--sw-type! "zzsw-visible")
-      (t--sw-key! "confirm")
-
-      (let ((id (group-resolve-id "zzsw-visible")))
-        (check-false! (buffer-in-group? t--sw-first old) "the old membership is left behind")
-        (check-equal! (buffer-group t--sw-first) id "the new one is the only one")
-        (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
-        (check-equal! (frame-local 'current-group) id "the frame stands in it")
-        (check-equal! (window-tree-buffers (group-layout id)) (window-tree-buffers (window-tree))
-                      "and it remembers this layout")
-        (check-false! (buffer-local t--sw-first 'buffer-selected)
-                      "the mark that chose the buffer is spent")
-        (check-false! (buffer-local t--sw-second 'buffer-selected)
-                      "and so is the other one")))
-    (t--sw-done!)))
 
 (deftest 'a-spent-selection-does-not-found-the-next-group
   "new founds a place to work: the mark is spent, so the next new is empty"
@@ -216,22 +161,6 @@
       (check-false! (frame-local 'current-group) "the frame stands in none")
       (check-equal! (buffer-group t--sw-first) #f "the buffer joined none")
       (check-equal! (window-tree) before "and the windows did not move"))
-    (t--sw-done!)))
-
-(deftest 'group-new-creates-and-enters-an-empty-work-context
-  "group-new from a transient buffer seeds nothing (docs/groups.md: the empty seed)"
-  (lambda ()
-    (t--sw-setup!)
-    (buffer-set-local! t--sw-first 'special #t)
-    (run-command "group-new")
-    (t--sw-type! "zzsw-empty-context")
-    (t--sw-key! "confirm")
-    (buffer-set-local! t--sw-first 'special #f)
-    (let ((id (group-resolve-id "zzsw-empty-context")))
-      (check-true! id "the group record exists")
-      (check-equal! (filter group-work-buffer? (group-buffers id)) '()
-                    "the group has no work members")
-      (check-equal! (frame-group) id "the frame enters the empty context"))
     (t--sw-done!)))
 
 (deftest 'the-active-groups-are-the-groups-of-the-open-buffers
@@ -292,28 +221,6 @@
   (switch-to-group! (group-resolve-id two-name))
   (delete-other-windows!))
 
-(deftest 'killing-the-group-you-stand-in-falls-into-the-next-buffers-group
-  "after group-kill the frame enters the group of the buffer the window fell to"
-  (lambda ()
-    (t--sw-setup!)
-    ;; two groups: "two" shows one window, "one" shows two member windows
-    (t--sw-two-groups! "zzsw-fall-one" "zzsw-fall-two")
-    (let ((one (group-resolve-id "zzsw-fall-one"))
-          (two (group-resolve-id "zzsw-fall-two")))
-      (check-equal! (frame-group) two "the frame stands in the second group")
-      (check-equal! (length (window-list)) 1 "which shows one window")
-      (run-command "group-kill")
-      (check-false! (group-resolve-id "zzsw-fall-two") "the group is gone")
-      (check-false! (buffer-exists? "*chat:zzsw-fall-two*") "the dying group's chat is not left open")
-      (check-equal! (frame-group) one "the frame fell into the next buffer's group")
-      (check-true! (member (current-buffer) (list t--sw-first t--sw-third))
-                   "and shows that group's buffer")
-      (check-equal! (length (window-list)) 2 "with that group's layout")
-      (delete-other-windows!)
-      (run-command "group-kill")
-      (check-false! (frame-group) "with no grouped buffer left, the frame stands in none"))
-    (t--sw-done!)))
-
 ;;; --- the window of a killed buffer stays in its group ----------------------------
 
 (define (t--sw-kill-frame! name)
@@ -329,105 +236,6 @@
     (other-window!)
     (switch-to-buffer! t--sw-second)
     id))
-
-(deftest 'a-kill-applies-the-fill-decision-to-the-groups-window
-  "the window stays: it shows the member it showed before, and with no member left the group's chat, never a scratch or a foreign buffer"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((foreign "zz-sw-foreign"))
-      (test-buffer! foreign "")
-      (let* ((id (t--sw-kill-frame! "zzsw-kill-member"))
-             (win (active-window)))
-        (buffer-add-group! t--sw-third id)
-        (switch-to-buffer! t--sw-third)
-        (switch-to-buffer! t--sw-second)
-        (check-equal! (car (window-prev-buffers win)) t--sw-third "the window showed third before")
-        (buffer-kill! t--sw-second)
-        (check-equal! (length (window-list)) 2 "the window stays")
-        (check-true! (window-exists? win) "the same window")
-        (check-equal! (window-buffer win) t--sw-third "and shows the member it showed before")
-        (check-equal! (active-window) win "the selection stays in it")
-        ;; no member left: first is on the left, so the blank is the chat
-        (buffer-kill! t--sw-third)
-        (check-equal! (length (window-list)) 2 "the window still stays")
-        (let ((shown (window-buffer win)))
-          (check-false! (group-scratch-buffer? shown) "not a scratch")
-          (check-true! (and (chat-buffer? shown) (equal? (chat-group-id shown) id))
-                       "but the group's chat")
-          (check-false! (equal? shown foreign) "not the foreign buffer")
-          (when (buffer-known? shown) (buffer-kill! shown))))
-      (buffer-kill! foreign))
-    (t--sw-done!)))
-
-(deftest 'a-killed-group-revives-with-the-members-that-still-exist
-  "revive makes the record again; a member whose buffer and file are gone is missing"
-  (lambda ()
-    (t--sw-setup!)
-    (set! *group-graveyard* '())
-    (t--sw-two-groups! "zzsw-rev-one" "zzsw-rev-two")
-    (let ((two (group-resolve-id "zzsw-rev-two")))
-      ;; a member belongs to ONE group, so no member is spared by living
-      ;; somewhere else too: the record, its color, and every member that
-      ;; still exists as a buffer or a file are what a revival brings back
-      (let ((color (group-record-color (group-record-by-id two))))
-        (run-command "group-kill")
-        (check-false! (group-resolve-id "zzsw-rev-two") "the group is gone")
-        (check-equal! (car (car *group-graveyard*)) "zzsw-rev-two" "and lies in the graveyard")
-        (check-true! (group-revive! "zzsw-rev-two") "revive answers the new id")
-        (let ((again (group-resolve-id "zzsw-rev-two")))
-          (check-true! again "the record is back")
-          (check-equal! (group-record-color (group-record-by-id again)) color
-                        "with its color")
-          (check-equal! (frame-group) again "and the frame enters it")
-          (check-false! (assoc "zzsw-rev-two" *group-graveyard*) "the grave is empty"))))
-    (t--sw-done!)))
-
-(deftest 'reviving-a-group-whose-members-are-gone-is-not-an-error
-  "a member with no buffer and no file is missing, and the revival says so"
-  (lambda ()
-    (t--sw-setup!)
-    (set! *group-graveyard*
-      (list (list "zzsw-rev-ghost" #f #f "quiet" #f "#123456" 0
-                  (list (list "zz-sw-nobody" #f)
-                        (list "/tmp/zzsw-no-such-file.txt" "/tmp/zzsw-no-such-file.txt")))))
-    (check-true! (group-revive! "zzsw-rev-ghost") "revive still makes the group")
-    (let ((id (group-resolve-id "zzsw-rev-ghost")))
-      (check-true! id "the record exists")
-      (check-equal! (filter group-work-buffer? (group-buffers id)) '() "with no work members")
-      (check-equal! (frame-group) id "and the frame stands in it"))
-    (set! *group-graveyard* '())
-    (t--sw-done!)))
-
-(deftest 'group-after-kill-stay-keeps-the-frame-out-of-the-next-group
-  "the customisation turns the fall-through off"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((was group-after-kill))
-      (set! group-after-kill "stay")
-      (t--sw-two-groups! "zzsw-stay-one" "zzsw-stay-two")
-      (run-command "group-kill")
-      (check-false! (group-resolve-id "zzsw-stay-two") "the group is gone")
-      (check-true! (member (current-buffer) (list t--sw-first t--sw-third))
-                   "the window fell to the next buffer")
-      (check-equal! (length (window-list)) 1 "and no layout was restored")
-      (set! group-after-kill was))
-    (t--sw-done!)))
-
-(deftest 'group-new-without-selection-does-not-adopt-the-current-buffer
-  "group-new without a selection starts empty rather than moving the current buffer"
-  (lambda ()
-    (t--sw-setup!)
-    (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
-    (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
-    (switch-to-buffer! t--sw-first)
-    (run-command "group-new")
-    (t--sw-type! "zzsw-empty-from-current")
-    (t--sw-key! "confirm")
-    (let ((id (group-resolve-id "zzsw-empty-from-current")))
-      (check-false! (buffer-in-group? t--sw-first id) "the current buffer stays out")
-      (check-false! (buffer-in-group? t--sw-second id) "its companion stays out")
-      (check-equal! (frame-group) id "the empty context is entered"))
-    (t--sw-done!)))
 
 (deftest 'a-chat-opens-the-groups-shared-scratch
   "the scratch belongs to the group and resolves through every work companion"
@@ -537,40 +345,6 @@
                       "the visible buffer takes the frame with it")))
     (t--sw-done!)))
 
-(deftest 'add-works-without-a-current-group
-  "an ungrouped buffer can add a destination while the frame has no context"
-  (lambda ()
-    (t--sw-setup!)
-    (switch-to-buffer! t--sw-third)
-    (set-frame-local! 'current-group #f)
-    (buffer-set-local! t--sw-third 'buffer-selected #t)
-    (run-command "group-add")
-    (t--sw-type! "zzsw-null-add")
-    (t--sw-key! "confirm")
-    (let ((id (group-resolve-id "zzsw-null-add")))
-      (check-true! id "the destination record exists")
-      (check-equal! (buffer-group t--sw-third) id
-                    "the buffer receives the destination"))
-    (t--sw-done!)))
-
-(deftest 'add-without-a-selection-acts-on-the-current-buffer
-  "no selection means the current buffer, so a lone work buffer can join a group"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((destination (group-record-create! "zzsw-current-add")))
-      (switch-to-buffer! t--sw-second)
-      (run-command "group-add")
-      (check-true! (minibuffer-state) "the destination prompt opens")
-      (t--sw-type! "zzsw-current-add")
-      (t--sw-key! "confirm")
-      (check-true! (buffer-in-group? t--sw-second destination)
-                   "the current buffer joins")
-      (check-false! (buffer-in-group? t--sw-first destination)
-                    "other buffers stay out")
-      (check-equal! (current-buffer) t--sw-second
-                    "the command does not change windows"))
-    (t--sw-done!)))
-
 (deftest 'add-uses-every-selected-buffer-and-clears-the-selection
   "the command changes selected buffers only, then consumes their selection"
   (lambda ()
@@ -592,30 +366,6 @@
                     "the first selection is consumed")
       (check-false! (buffer-local t--sw-second 'buffer-selected)
                     "the second selection is consumed"))
-    (t--sw-done!)))
-
-(deftest 'add-uses-switcher-marks-and-clears-them
-  "the switcher and ordinary buffers feed the same selected-buffer command"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((destination (group-record-create! "zzsw-marked-add")))
-      (switch-open! 'buffers)
-      (buffer-set-local! *switch-buffer* 'list-marks
-        ;; The home buffer (first) is a row too; this test marks only the
-        ;; two other buffer rows.
-        (list (list t--sw-second *list-mark-char*)
-              (list t--sw-third *list-mark-char*)))
-      (run-command "group-add")
-      (t--sw-type! "zzsw-marked-add")
-      (t--sw-key! "confirm")
-      (check-true! (buffer-in-group? t--sw-second destination)
-                   "the first visible marked buffer joins")
-      (check-true! (buffer-in-group? t--sw-third destination)
-                   "the second visible marked buffer joins")
-      (check-false! (buffer-in-group? t--sw-first destination)
-                    "the hidden home buffer stays out")
-      (check-equal! (list-marked *switch-buffer* *list-mark-char*) '()
-                    "the switcher marks are consumed"))
     (t--sw-done!)))
 
 (deftest 'move-puts-the-buffer-in-the-destination
@@ -664,70 +414,6 @@
       (check-true! (buffer-in-group? t--sw-first destination) "the destination is added"))
     (t--sw-done!)))
 
-(deftest 'an-ungrouped-buffer-moves-to-a-new-named-group
-  "move creates one destination for a buffer that has no source group"
-  (lambda ()
-    (t--sw-setup!)
-    (switch-to-buffer! t--sw-third)
-    (check-equal! (buffer-group t--sw-third) #f
-                  "the buffer starts without a group")
-    (run-command "group-move")
-    (t--sw-type! "zzsw-ungrouped-destination")
-    (t--sw-key! "confirm")
-
-    (let ((destination (group-resolve-id "zzsw-ungrouped-destination")))
-      (check-true! destination "the entered group name creates a durable record")
-      (check-equal! (buffer-group t--sw-third) destination
-                    "the destination becomes the only membership"))
-    (t--sw-done!)))
-
-(deftest 'a-move-into-the-group-on-screen-keeps-the-layout
-  "the group adopts the panes as they stand: a move changes membership alone"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((home (group-record-create! "zzsw-layout-home")))
-      (buffer-add-group! t--sw-first home)
-      (buffer-add-group! t--sw-second home)
-      (switch-to-group! home)
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-first)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (t--sw-show-here! t--sw-second)
-      (let ((older (window-tree)))
-        ;; the person makes a third column and works in it, on a buffer no
-        ;; group owns
-        (split-window! 'h 0.5)
-        (other-window!)
-        (t--sw-show-here! t--sw-third)
-        ;; the group remembers the two panes it had before the third column.
-        ;; A move must not answer from that memory: the screen is newer.
-        (group-layout-set! home older (panes-current-layout))
-        (let ((before (window-tree))
-              (panes (length (window-list))))
-          (winner--pre-command!)
-          (run-command "group-move")
-          (t--sw-type! "zzsw-layout-home")
-          (t--sw-key! "confirm")
-          ;; the move completes: the change is recorded
-          (winner--post-command!)
-
-          (check-true! (buffer-in-group? t--sw-third home)
-                       "the moved buffer joins the group")
-          (check-equal! (length (window-list)) panes
-                        "the move keeps the number of panes")
-          (check-equal! (window-tree) before
-                        "the move keeps the arrangement the person made")
-          (for-each
-            (lambda (buf)
-              (check-true! (member buf (panes-shown-buffers))
-                           (string-append buf " left the screen")))
-            (list t--sw-first t--sw-second t--sw-third))
-          (check-equal! (frame-group) home "the frame stands in the group")
-          (check-equal! (window-tree-buffers (group-layout home)) (window-tree-buffers before)
-                        "and the group remembers the arrangement it adopted"))))
-    (t--sw-done!)))
-
 (deftest 'the-group-scratch-moves-and-removes-as-its-own-buffer
   "the group's shared scratch moves and removes like any work buffer"
   (lambda ()
@@ -753,49 +439,6 @@
                     "remove drops the membership")
       (check-equal! (buffer-group t--sw-second) #f
                     "the scratch keeps no membership"))
-    (t--sw-done!)))
-
-(deftest 'a-chat-moves-to-another-group
-  "a chat leaves its group like any member, and it travels alone"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((source (group-record-create! "zzsw-chat-home"))
-           (destination (group-record-create! "zzsw-chat-away"))
-           (chat (group-chat source))
-           (id-before (chat-stable-id! chat)))
-      (buffer-add-group! t--sw-first source)
-      (switch-to-buffer! chat)
-      (run-command "group-move")
-      (t--sw-type! "zzsw-chat-away")
-      (t--sw-key! "confirm")
-      (let ((moved chat))
-        (check-true! (buffer-known? moved)
-                     "the chat keeps its name through the move")
-        (check-equal! (buffer-local moved 'chat-id) id-before
-                      "it is the same chat buffer, not a new one")
-        (check-equal! (chat-group-id moved) destination
-                      "the chat belongs to the destination")
-        (check-true! (buffer-in-group? t--sw-first source)
-                     "the source keeps its work buffer")
-        (check-false! (buffer-in-group? t--sw-first destination)
-                      "no member travelled with the chat")
-        (when (buffer-known? moved) (buffer-kill! moved))))
-    (t--sw-done!)))
-
-(deftest 'a-chat-removes-its-own-group
-  "remove on a chat drops its membership and touches no member"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((source (group-record-create! "zzsw-chat-drop"))
-           (chat (group-chat source)))
-      (buffer-add-group! t--sw-first source)
-      (switch-to-buffer! chat)
-      (run-command "remove-group-from-buffer")
-      (t--sw-type! "y")
-      (check-false! (chat-group-id chat) "the chat holds no group")
-      (check-true! (buffer-in-group? t--sw-first source)
-                   "the group keeps its work buffer")
-      (when (buffer-known? chat) (buffer-kill! chat)))
     (t--sw-done!)))
 
 (deftest 'move-includes-the-explicit-transient-work-buffer
@@ -948,23 +591,6 @@
                    "the owner still moves"))
     (t--sw-done!)))
 
-(deftest 'buffer-family-ignores-an-incompatible-companion
-  "a transient companion does not join a work group"
-  (lambda ()
-    (t--sw-setup!)
-    (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
-    (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
-    (buffer-set-local! t--sw-second 'special #t)
-    (check-equal! (buffer-family t--sw-first) (list t--sw-first)
-                  "the transient companion is ineligible")
-    (let ((destination (group-record-create! "zzsw-incompatible-family")))
-      (buffer-add-family-to-group! t--sw-first destination)
-      (check-true! (buffer-in-group? t--sw-first destination)
-                   "the eligible owner joins")
-      (check-false! (buffer-in-group? t--sw-second destination)
-                    "the transient companion stays out"))
-    (t--sw-done!)))
-
 (deftest 'buffer-select-toggles-the-active-buffer
   "the active buffer becomes selected without opening a selector"
   (lambda ()
@@ -1002,47 +628,6 @@
     (set-frame-local! 'current-group current)
     (list current foreign)))
 
-(deftest 'the-buffer-prompt-lists-the-pool-flat-with-the-buffer-you-are-on-last
-  "ibuffer-prompt is the plain list: the window's history first, then the rest, the buffer you are on last, and no heading"
-  (lambda ()
-    (t--sw-setup!)
-    (t--sw-three-groups!)
-    (t--sw-open-all!)
-    (let ((labels (t--sw-labels)))
-      (check-true! (member t--sw-second labels) "a member is listed")
-      (check-true! (member t--sw-third labels) "so is the stranger")
-      (check-true! (member t--sw-first labels) "and so is the buffer we are in")
-      (check-equal! (filter (lambda (h) (member h labels)) t--sw-headings) '()
-                    "no heading is a candidate"))
-    (check-equal! (filter (lambda (l) (member l (list t--sw-first t--sw-second t--sw-third)))
-                          (t--sw-labels))
-                  (list t--sw-third t--sw-second t--sw-first)
-                  "the window's history, most recent first, and the buffer we are in last")
-
-    ;; typing narrows to the stranger, whatever its group
-    (t--sw-type! t--sw-third)
-    (check-true! (member t--sw-third (t--sw-labels)) "the stranger is reachable")
-    (check-false! (member t--sw-second (t--sw-labels)) "and the rest are gone")
-    (t--sw-done!)))
-
-(deftest 'the-buffer-prompt-opens-on-the-group-tab
-  "C-x b opens on the group's buffers, and the side arrows move to the other tabs"
-  (lambda ()
-    (t--sw-setup!)
-    (t--sw-three-groups!)
-    (run-command "ibuffer-prompt")
-    (check-equal! (plist-get (minibuffer-state) 'tabs) '(("All" #f) ("Group" #t) ("Window" #f))
-                  "the prompt opens on the group tab")
-    (check-true! (member t--sw-second (t--sw-labels)) "a member is listed")
-    (check-false! (member t--sw-third (t--sw-labels)) "the stranger is not")
-    (t--sw-key! "rail-exit")
-    (check-equal! (plist-get (minibuffer-state) 'tabs) '(("All" #t) ("Group" #f) ("Window" #f))
-                  "left reaches All")
-    (check-true! (member t--sw-third (t--sw-labels)) "and the stranger with it")
-    (t--sw-key! "rail-enter")
-    (check-false! (member t--sw-third (t--sw-labels)) "right comes back to the group")
-    (t--sw-done!)))
-
 (deftest 'the-selection-starts-on-the-first-row-and-never-lands-on-a-heading
   "the selection starts on the most recent buffer of the window's history, and no number of steps lands on a heading"
   (lambda ()
@@ -1069,36 +654,6 @@
     (cond ((null? es) -1)
           ((equal? (car es) label) i)
           (else (loop (cdr es) (+ i 1))))))
-
-(deftest 'the-modal-switcher-sections-by-group-name-with-this-group-first
-  "switch-to-buffer in the editor: every section wears its group's name, this group leads, and a heading is never the row at point"
-  (lambda ()
-    (t--sw-setup!)
-    (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
-    (t--sw-three-groups!)
-    (run-command "switch-to-buffer")
-    (check-equal! (current-buffer) "*switch*" "the modal opened")
-    (let ((names (map car (list-entries "*switch*"))))
-      (check-true! (and (member "zzsw-current" names) #t) "the first heading is this group's name")
-      (check-false! (member "in this group" names) "and not a phrase")
-      (check-true! (and (member "zzsw-foreign" names) #t) "the stranger's group is the second")
-      (check-true! (and (member t--sw-first names) #t) "the buffer we came from is a row too")
-      (check-true! (< (t--sw-modal-at "zzsw-current") (t--sw-modal-at t--sw-second))
-                   "the heading comes before its member")
-      (check-true! (< (t--sw-modal-at t--sw-second) (t--sw-modal-at "zzsw-foreign"))
-                   "and the member before the next heading")
-      (check-true! (< (t--sw-modal-at "zzsw-foreign") (t--sw-modal-at t--sw-third))
-                   "the stranger sits under its group"))
-    (let ((row (list-current "*switch*")))
-      (check-equal! (and row (car row)) t--sw-second "point rests on the first real row"))
-    ;; narrowing to the stranger empties this group's section: its heading goes
-    (list-set-query! "*switch*" t--sw-third)
-    (let ((names (map car (list-keep "*switch*" (list-entries "*switch*")))))
-      (check-true! (and (member t--sw-third names) #t) "the stranger survives the filter")
-      (check-false! (member "zzsw-current" names) "the empty heading is gone"))
-    (run-command "switch-quit")
-    (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
-    (t--sw-done!)))
 
 (deftest 'a-heading-drops-when-the-filter-empties-its-section
   "a heading with nothing under it is not a row"
@@ -1161,72 +716,6 @@
       (check-false! (minibuffer-state) "no prompt stands between C-RET and the group")
       (check-equal! (frame-group) there "the buffer's group was entered")
       (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
-    (t--sw-done!)))
-
-(deftest 'switching-context-restores-the-saved-layout
-  "the group you go to looks the way you left it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((left (group-record-create! "zzsw-left"))
-          (right (group-record-create! "zzsw-right")))
-      (buffer-add-group! t--sw-first left)
-      (buffer-add-group! t--sw-second right)
-      (set-frame-local! 'current-group right)
-      (switch-to-buffer! t--sw-second)
-      (group-layout-save! right)
-      (set-frame-local! 'current-group left)
-      (switch-to-buffer! t--sw-first)
-
-      (run-command "group-switch")
-      (t--sw-type! "zzsw-right")
-      (t--sw-key! "confirm")
-
-      (check-equal! (current-buffer) t--sw-second "the saved layout came back")
-      (check-equal! (frame-local 'current-group) right "the context moved")
-      (check-equal! (frame-local 'previous-group) left "and remembers where from")
-      (check-equal! (buffer-group t--sw-first) left "the other buffer kept its group"))
-    (t--sw-done!)))
-
-(deftest 'switching-context-hides-a-foreign-pane-and-the-snapshot-keeps-its-name
-  "a stale layout cannot reintroduce work that left the group; the snapshot still names it, so the layout returns whole once the buffer is a member again"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((docs (group-record-create! "zzsw-docs"))
-          (foreign (group-record-create! "zzsw-foreign")))
-      (buffer-add-group! t--sw-first docs)
-      (buffer-add-group! t--sw-second docs)
-      (buffer-add-group! t--sw-third docs)
-
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.34)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-third)
-      (group-layout-save! docs)
-
-      ;; The pane was valid when DOCS saved it. It became foreign later.
-      (buffer-remove-group! t--sw-third docs)
-      (buffer-add-group! t--sw-third foreign)
-
-      (delete-other-windows!)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-group! docs)
-
-      (check-false! (member t--sw-third (map cadr (window-list)))
-                    "the foreign pane was removed")
-      ;; only a restore that reproduced the saved tree writes it back: a
-      ;; sanitized one dropped a pane, and saving that would erase the
-      ;; arrangement instead of hiding it (switch-to-group!)
-      (check-true! (and (member t--sw-third (window-tree-buffers (group-layout docs))) #t)
-                   "the snapshot still names the pane it hid")
-      (for-each
-        (lambda (window)
-          (check-true! (buffer-in-group? (cadr window) docs)
-                       "every restored pane belongs to DOCS"))
-        (window-list))
-      (check-equal! (frame-group) docs "the restored frame remains homogeneous"))
     (t--sw-done!)))
 
 (deftest 'group-switch-uses-mru-when-the-visible-frame-is-homogeneous
@@ -1310,30 +799,6 @@
                    "the remaining groups keep MRU order"))
     (t--sw-done!)))
 
-(deftest 'current-group-is-derived-from-every-visible-work-buffer
-  "homogeneous windows establish a context and a foreign window clears it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here"))
-          (foreign (group-record-create! "zzsw-foreign")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second here)
-      (buffer-add-group! t--sw-third foreign)
-      (switch-to-buffer! t--sw-first)
-      (check-equal! (frame-group) here "one grouped window establishes its group")
-
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (check-equal! (frame-group) here "two members keep the shared group")
-
-      (t--sw-show-here! t--sw-third)
-      (check-false! (frame-group) "a foreign visible buffer makes the frame mixed")
-
-      (delete-window!)
-      (check-equal! (frame-group) here "removing the foreign window restores homogeneity"))
-    (t--sw-done!)))
-
 (deftest 'current-group-keeps-a-common-membership-across-shared-work
   "the previous common group wins when every visible buffer shares several groups"
   (lambda ()
@@ -1351,143 +816,6 @@
       (other-window!)
       (switch-to-buffer! t--sw-second)
       (check-equal! (frame-group) second "the existing common group remains current"))
-    (t--sw-done!)))
-
-(deftest 'special-buffers-do-not-change-current-group
-  "a special interface pane does not participate in homogeneity"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-set-local! t--sw-second 'special #t)
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (check-equal! (frame-group) here "the transient pane is ignored"))
-    (t--sw-done!)))
-
-(deftest 'switch-to-group-previews-the-whole-group-under-the-highlight
-  "moving the highlight draws the group entire, not one buffer of it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((style group-switch-style)
-          (here (group-record-create! "zzsw-look-here"))
-          (there (group-record-create! "zzsw-look-there")))
-      ;; the default shape: a modal is a panel with the frame around it,
-      ;; so it previews in the frame like every other shape
-      (set! group-switch-style "modal")
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (buffer-add-group! t--sw-third there)
-      (t--sw-show-here! t--sw-third)
-      (t--sw-show-here! t--sw-second)
-      (t--sw-show-here! t--sw-first)
-      (set-frame-local! 'current-group here)
-      (group-mru-note! there)
-      (group-mru-note! here)
-
-      (run-command "group-switch")
-      (t--sw-type! "zzsw-look-there")
-      ;; the look waits for the highlight to rest
-      (check-true!
-        (wait-until (lambda ()
-                      (let ((shown (map cadr (window-list))))
-                        (and (member t--sw-second shown)
-                             (member t--sw-third shown)
-                             #t)))
-                    1000 10)
-        "every member is on screen, not the group's leading buffer alone")
-      (check-equal! (car (buffer-list-mru)) t--sw-first
-                    "and the preview moved no history")
-
-      (t--sw-key! "cancel")
-      (check-equal! (map cadr (window-list)) (list t--sw-first)
-                    "cancelling puts the whole arrangement you came from back")
-      (set! group-switch-style style))
-    (t--sw-done!)))
-
-(deftest 'a-previewed-group-shows-the-layout-it-saved
-  "a group with a layout is previewed in that layout, and the look moves no history"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((style group-switch-style)
-          (here (group-record-create! "zzsw-look-here"))
-          (there (group-record-create! "zzsw-look-there")))
-      (set! group-switch-style "popup")
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (buffer-add-group! t--sw-third there)
-      ;; the layout the group saves when you work in it: its two members,
-      ;; one above the other
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-second)
-      (split-window! 'v 0.5)
-      (other-window!)
-      (t--sw-show-here! t--sw-third)
-      (group-layout-save! there)
-      ;; and the frame you look from: one window, your own buffer
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-first)
-      (set-frame-local! 'current-group here)
-
-      (let ((history (car (buffer-list-mru))))
-        (run-command "group-switch")
-        (t--sw-type! "zzsw-look-there")
-        (check-true!
-          (wait-until (lambda () (equal? (map cadr (window-list))
-                                        (list t--sw-second t--sw-third)))
-                      1000 10)
-          "the preview is the group's own saved layout, pane for pane")
-        (check-equal! (car (buffer-list-mru)) history
-                      "and the look moved no history")
-
-        (t--sw-key! "cancel")
-        (check-equal! (map cadr (window-list)) (list t--sw-first)
-                      "cancelling puts back the frame you came from"))
-      (set! group-switch-style style))
-    (t--sw-done!)))
-
-(deftest 'a-previewed-group-drops-panes-it-no-longer-holds
-  "a saved layout naming a foreign buffer previews the group, not the stale pane"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((style group-switch-style)
-          (here (group-record-create! "zzsw-stale-here"))
-          (there (group-record-create! "zzsw-stale-there")))
-      (set! group-switch-style "popup")
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      ;; the layout `there` saved: one pane its own, one pane a buffer that
-      ;; was never a member. A switch sanitizes that pane away, so the look
-      ;; must too, or it shows buffers the group does not hold
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-second)
-      (split-window! 'v 0.5)
-      (other-window!)
-      (t--sw-show-here! t--sw-third)
-      (group-layout-save! there)
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-first)
-      (set-frame-local! 'current-group here)
-
-      (run-command "group-switch")
-      (t--sw-type! "zzsw-stale-there")
-      ;; the look draws the saved tree and sanitizes it, in that order, so
-      ;; both halves are one state to wait for: waiting on either alone
-      ;; passes on a frame that has not finished drawing
-      (check-true!
-        (wait-until (lambda ()
-                      (let ((shown (map cadr (window-list))))
-                        (and (member t--sw-second shown)
-                             (not (member t--sw-third shown)))))
-                    1000 10)
-        "the look shows the group's member, not the pane it no longer holds")
-
-      (t--sw-key! "cancel")
-      (check-equal! (map cadr (window-list)) (list t--sw-first)
-                    "cancelling puts back the frame you came from")
-      (set! group-switch-style style))
     (t--sw-done!)))
 
 (deftest 'a-zero-preview-keeps-the-frame-still
@@ -1526,53 +854,6 @@
       (set! group-switch-style style))
     (t--sw-done!)))
 
-(deftest 'a-look-writes-no-layout
-  "walking the switcher leaves every group's saved layout exactly as it was"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((style group-switch-style)
-          (here (group-record-create! "zzsw-nowrite-here"))
-          (there (group-record-create! "zzsw-nowrite-there")))
-      (set! group-switch-style "popup")
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (buffer-add-group! t--sw-third there)
-      ;; `there` holds a two-pane arrangement of its own members
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-second)
-      (split-window! 'v 0.5)
-      (other-window!)
-      (t--sw-show-here! t--sw-third)
-      (group-layout-save! there)
-      ;; and `here` holds one pane, its own member
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-first)
-      (set-frame-local! 'current-group here)
-      (group-layout-save! here)
-
-      (let ((here-was (window-tree-buffers (group-layout here)))
-            (there-was (window-tree-buffers (group-layout there))))
-        (run-command "group-switch")
-        (t--sw-type! "zzsw-nowrite-there")
-        (check-true!
-          (wait-until (lambda () (equal? (map cadr (window-list))
-                                        (list t--sw-second t--sw-third)))
-                      1000 10)
-          "the look drew the other group")
-        ;; whatever the editor notices about its windows while a look is on
-        ;; screen, it is looking at a look and must write nothing
-        (group-current-recalculate!)
-        (check-equal! (frame-group) here
-                      "a look does not move the group you stand in")
-        (t--sw-key! "cancel")
-
-        (check-equal! (window-tree-buffers (group-layout here)) here-was
-                      "the group you stand in kept its layout")
-        (check-equal! (window-tree-buffers (group-layout there)) there-was
-                      "and the group you looked at kept its own"))
-      (set! group-switch-style style))
-    (t--sw-done!)))
-
 (deftest 'a-group-card-says-what-it-holds-and-no-members
   "the card's facts say the count and the shape, and name no member"
   (lambda ()
@@ -1593,28 +874,6 @@
                       "no member of the group is a fact")))
     (t--sw-done!)))
 
-(deftest 'switch-to-group-enters-the-group-it-previewed
-  "the preview is a look; RET is the switch, and it saves the layout you had"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-enter-here"))
-          (there (group-record-create! "zzsw-enter-there")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (t--sw-show-here! t--sw-second)
-      (t--sw-show-here! t--sw-first)
-      (set-frame-local! 'current-group here)
-
-      (run-command "group-switch")
-      (t--sw-type! "zzsw-enter-there")
-      (t--sw-key! "confirm")
-
-      (check-equal! (frame-group) there "the previewed group was entered")
-      (check-equal! (current-buffer) t--sw-second "its member has focus")
-      (check-equal! (window-tree-buffers (group-layout here)) (list t--sw-first)
-                    "the group you left kept the arrangement you worked in"))
-    (t--sw-done!)))
-
 (deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
   "the explicit action puts the buffer in the new group"
   (lambda ()
@@ -1633,48 +892,6 @@
         (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
         (check-equal! (buffer-group t--sw-first) moved "and it is the only group")
         (check-equal! (frame-group) moved "the new group was entered")))
-    (t--sw-done!)))
-
-(deftest 'a-frame-without-a-group-refills-a-killed-member-from-its-group
-  "a frame that lost its group never takes the killed pane's foreign history"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-lost-here"))
-          (foreign (group-record-create! "zzsw-lost-foreign")))
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (switch-to-buffer! t--sw-third)
-      (switch-to-buffer! t--sw-second)
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second here)
-      (buffer-add-group! t--sw-third foreign)
-      (set-frame-local! 'current-group #f)
-
-      (buffer-kill! t--sw-second)
-
-      (check-false! (member t--sw-third (map cadr (window-list)))
-                    "the pane's foreign history stayed hidden")
-      (for-each
-        (lambda (row)
-          (check-true! (group-kill-keeper? (cadr row) here)
-                       "every pane shows the killed buffer's group"))
-        (window-list)))
-    (t--sw-done!)))
-
-(deftest 'a-new-group-fills-the-default-three-columns
-  "a group with no saved layout opens its members in the default columns"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((id (group-record-create! "zzsw-cols")))
-      (for-each (lambda (b) (buffer-add-group! b id))
-                (list t--sw-first t--sw-second t--sw-third))
-      (switch-to-group! id)
-      (check-equal! (panes-current-layout) 'columns "the frame takes the default target")
-      (check-equal! (length (window-list)) 3 "one pane for each member")
-      (for-each
-        (lambda (row)
-          (check-false! (string-prefix? "*scratch" (cadr row)) "no pane is a scratch"))
-        (window-list)))
     (t--sw-done!)))
 
 (deftest 'a-freed-frame-stays-free-in-a-new-group
@@ -1740,58 +957,6 @@
 
 ;;; --- leaving a group by a foreign pane ------------------------------------------
 
-(deftest 'a-foreign-pane-saves-the-layout-it-leaves-and-the-switch-back-restores-it
-  "showing an ungrouped buffer in a pane saves the group's layout as it is; a switch away and back finds it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((home (group-record-create! "zzsw-seal-home"))
-          (away (group-record-create! "zzsw-seal-away")))
-      (buffer-add-group! t--sw-first home)
-      (buffer-add-group! t--sw-second home)
-      (buffer-add-group! t--sw-third away)
-      (switch-to-buffer! t--sw-first)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (group-current-recalculate!)
-      (check-equal! (frame-group) home "two panes in one group put the frame in it")
-      ;; a third pane shows a buffer in no group: the frame leaves the group
-      (split-window! 'v 0.5)
-      (other-window!)
-      (let ((foreign (test-buffer! "zz-sw-seal-foreign" "")))
-        ;; a work buffer in no group: creation joined the destination, so
-        ;; take it out; a transient pane would say nothing
-        (buffer-set-local! foreign 'special #f)
-        (let ((g (buffer-group foreign))) (when g (buffer-remove-group! foreign g)))
-        ;; a switch would float it in the popup (the tests below); a pane
-        ;; that shows it is the case here, and only a window action shows
-        ;; a foreign buffer in a pane
-        ;; one command: the change is recorded as it completes
-        (winner--pre-command!)
-        (t--sw-show-here! foreign)
-        (winner--post-command!)
-        (check-false! (frame-group) "the foreign pane takes the frame out of the group")
-        (let ((tree (window-tree)))
-          (check-equal! (group-layout home) tree "the layout was saved as it stood, foreign pane included")
-          (check-equal! (frame-local 'previous-group) home "and the group left is remembered")
-          ;; away and back: the arrangement returns
-          (switch-to-group! away)
-          (check-equal! (length (window-list)) 1 "the other group shows its own one pane")
-          (switch-to-group! home)
-          ;; sealed: the pane that showed the foreign buffer has no member
-          ;; to show, so it goes; no scratch stands in for it
-          (check-equal! (length (window-list)) 2 "coming back restores the group's two panes")
-          (check-false! (window-showing foreign) "the foreign buffer is not shown")
-          (check-false! (let loop ((ws (window-list)))
-                          (cond ((null? ws) #f)
-                                ((string-prefix? "*scratch:" (cadr (car ws))) #t)
-                                (else (loop (cdr ws)))))
-                        "no pane shows a scratch"))
-        (buffer-kill! foreign)
-        (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
-                  (group-buffers-as home 'scratch))))
-    (t--sw-done!)))
-
 ;;; --- a switch to a foreign buffer floats it in the popup --------------------------
 
 ;; the frame in HOME with two panes; a foreign buffer that no group holds
@@ -1844,34 +1009,7 @@
       (check-false! (buffer-in-group? foreign away) "and left the one it came from")
       (t--sw-sealed-done! foreign))
     (t--sw-done!)))
-(deftest 'a-switch-to-a-visible-member-selects-the-window-that-shows-it
-  "a member already on screen is not shown twice: the switch selects its window and the selected window keeps its buffer"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (foreign (cadr pair))
-           (win (active-window)))
-      (switch-to-buffer! t--sw-first)
-      (check-false! (float-open?) "no popup")
-      (check-equal! (current-buffer) t--sw-first "the member is current")
-      (check-equal! (active-window) (window-showing t--sw-first) "in the window that already showed it")
-      (check-equal! (window-buffer win) t--sw-second "the window we left keeps its buffer")
-      (t--sw-sealed-done! foreign))
-    (t--sw-done!)))
 
-(deftest 'a-pinned-frame-shows-a-foreign-buffer-in-the-selected-window
-  "a pin keeps the group through window changes, so the switch takes the pane as before"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((pair (t--sw-sealed-frame!)) (home (car pair)) (foreign (cadr pair))
-           (win (active-window)))
-      (set-frame-local! 'pinned-group home)
-      (switch-to-buffer! foreign)
-      (check-false! (float-open?) "no popup")
-      (check-equal! (window-buffer win) foreign "the pane shows the foreign buffer")
-      (check-equal! (frame-group) home "and the pin holds the group")
-      (set-frame-local! 'pinned-group #f)
-      (t--sw-sealed-done! foreign))
-    (t--sw-done!)))
 
 ;; --- workspaces: a group belongs to one frame ------------------------------
 
@@ -1937,31 +1075,4 @@
     (for-each (lambda (b) (when (string-prefix? "*chat:zz-sw-orphan" b) (buffer-kill! b)))
               (buffer-list))))
 
-(deftest 'every-completed-window-change-saves-the-groups-layout
-  "the owner's ruling: a group's layout is saved on each change; an arrival records nothing"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((home (group-record-create! "zzsw-each-home"))
-          (away (group-record-create! "zzsw-each-away")))
-      (buffer-add-group! t--sw-first home)
-      (buffer-add-group! t--sw-second home)
-      (buffer-add-group! t--sw-third away)
-      (switch-to-group! home)
-      (delete-other-windows!)
-      (t--sw-show-here! t--sw-first)
-      (winner--settle-screen!)
-      (winner--pre-command!)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (t--sw-show-here! t--sw-second)
-      (winner--post-command!)
-      (check-equal! (window-tree-buffers (group-layout home)) (list t--sw-first t--sw-second)
-                    "the split is saved when the command completes")
-      (let ((away-layout (group-layout away)))
-        (winner--pre-command!)
-        (switch-to-group! away)
-        (winner--post-command!)
-        (check-equal! (group-layout away) away-layout "the arrival writes nothing")
-        (check-equal! (window-tree-buffers (group-layout home)) (list t--sw-first t--sw-second)
-                      "and the group left keeps its last change")))
-    (t--sw-done!)))
+

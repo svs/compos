@@ -1040,6 +1040,17 @@
           (else (let ((added (panes-add-pane layout)))
                   (panes-add-window (car added) (cadr added) buf mode))))))
 
+(define (panes-default-layout bufs mode-of)
+  "A group's first layout: one pane per buffer of BUFS, left to right,
+   with equal shares, each pane a window of the buffer's mode (MODE-OF).
+   It does not fold to the capacity."
+  (fold (lambda (l b)
+          (let* ((added (panes-add-pane l))
+                 (made (panes-add-window (car added) (cadr added) b (mode-of b))))
+            (car made)))
+        (panes-empty)
+        bufs))
+
 (define (panes-remove-buffer layout buf)
   "BUF leaves its window, and the next buffer of that window shows. A
    window it leaves empty closes, and the next window of its pane comes
@@ -1048,6 +1059,7 @@
 
 (public! 'panes-show-buffer "(panes-show-buffer LAYOUT BUF MODE [PANE]) -> (LAYOUT KEY): BUF to the front of its mode's window, that window to the front of its pane; a mode with no window gets a new one in PANE")
 (catalog-meta! 'function "panes-show-buffer" 'effects '(read))
+(public! 'panes-default-layout "(panes-default-layout BUFS MODE-OF) -> LAYOUT: one pane per buffer, left to right, equal shares, each a window of the buffer's mode; pure")
 (public! 'panes-remove-buffer "(panes-remove-buffer LAYOUT BUF) -> LAYOUT: BUF leaves its window; the next buffer shows, an emptied window closes and the next window of its pane shows; pure")
 (catalog-meta! 'function "panes-remove-buffer" 'effects '(pure))
 (public! 'panes-split-off "(panes-split-off LAYOUT BUFS FROM) -> (LAYOUT KEY) | #f: BUFS move to a new window of FROM's mode beside FROM; pure")

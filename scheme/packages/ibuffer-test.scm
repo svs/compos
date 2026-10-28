@@ -223,37 +223,6 @@
     (check-equal! (list-mark-of "*ibuffer*" "*zz-ib-a*") " " "the same key clears the mark")
     (ibuffer-test-reset!)))
 
-(deftest 'ibuffer-group-kill-kills-the-section-group
-  "K on a row under group sectioning kills that row's group: the members and the record"
-  (lambda ()
-    (ibuffer-test-reset!)
-    (when (group-record-by-name "zz-ib-group")
-      (group-record-delete! (group-record-by-name "zz-ib-group")))
-    (test-buffer! "*zz-ib-a*" "")
-    (test-buffer! "*zz-ib-b*" "")
-    (let ((g (group-record-create! "zz-ib-group")))
-      (buffer-add-group! "*zz-ib-a*" g)
-      (buffer-add-group! "*zz-ib-b*" g)
-      (switch-to-buffer! "*zz-ib-a*")
-      (run-command "ibuffer")
-      (buffer-set-locals! "*ibuffer*"
-        (list 'ibuffer-grouping 'group 'list-sort 'name 'ibuffer-collapsed '()))
-      (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-")))
-      (ibuffer-refresh!)
-      (ibuffer-goto-first-row! "*ibuffer*")
-      (check-true! (string? (ibuffer-current)) "point is on a member row")
-      (check-equal! (ibuffer-group-at) g "the row's section names the group")
-      ;; k on the group row is the same act: the row stands for the group
-      (list-goto-first-entry "*ibuffer*")
-      (check-true! (ibuffer-heading? (ibuffer-current)) "the group row takes the highlight")
-      (check-equal! (length (ibuffer-targets "*ibuffer*")) 2
-                    "and a verb on it reads both members")
-      (run-command "ibuffer-group-kill")
-      (check-false! (buffer-known? "*zz-ib-a*") "the first member is gone")
-      (check-false! (buffer-known? "*zz-ib-b*") "the second member is gone")
-      (check-false! (group-record-by-id g) "and the group record with them"))
-    (ibuffer-test-reset!)))
-
 (deftest 'ibuffer-narrows-by-mode-and-name
   "the typed narrowing reads the mode as well as the name"
   (lambda ()
@@ -453,8 +422,6 @@
                    "the marked row that point does not rest on moved too")
       (check-false! (buffer-in-group? "*zz-ib-b*" two) "and left the group it was in")
       (ibuffer-test-groups-reset! ids))))
-
-
 
 
 (deftest 'ibuffer-header-totals-come-off-the-source

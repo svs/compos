@@ -541,11 +541,32 @@
         (find (lambda (c) (equal? (buffer-relation c 'companion) buf))
               (filter chat-buffer? (buffer-list))))))
 
+(define (llm-mode--companion-index-path g) (string-append (group-home-dir g) "/chats/companions.scm"))
+
+(define (llm-mode--companion-index g)
+  (let* ((path (llm-mode--companion-index-path g))
+         (forms (and (file-exists? path) (scheme-read (read-file path)))))
+    (if (pair? forms) (car forms) '())))
+
+(define (llm-mode--companion-remember! buf chat g)
+  ;; the page's chat file, so the page finds the same chat after it is archived
+  (when (and g (not (equal? (alist-get (llm-mode--companion-index g) buf) (chat-log-path chat))))
+    (write-file! (llm-mode--companion-index-path g)
+      (value->string (alist-put (llm-mode--companion-index g) buf (chat-log-path chat))))))
+
+(define (llm-mode--companion-recall! buf &optional group)
+  ;; no live chat: the archived chat the page had comes back, so a page keeps one chat
+  (or (llm-mode--companion-existing buf)
+      (let* ((g (or group (buffer-group buf)))
+             (path (and g (alist-get (llm-mode--companion-index g) buf))))
+        (and (string? path) (file-exists? path)
+             (begin (visit-in-group path g) (llm-mode--companion-existing buf))))))
+
 (define (llm-mode--companion! buf &optional model group)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
   ;; document chose its own model or connector. GROUP, when given, is the chat's
   ;; group in place of the document's.
-  (let* ((name (or (llm-mode--companion-existing buf) (llm-mode--companion-name buf)))
+  (let* ((name (or (llm-mode--companion-recall! buf group) (llm-mode--companion-name buf)))
          (g (or group (buffer-group buf)))
          (bundle (and g (boundp 'llm-group-bundle) (llm-group-bundle g)))
          (bundle-model (and bundle (let ((m (llm-bundle-model bundle))) (if (equal? m "default") #f m))))
@@ -574,6 +595,7 @@
     ;; agent attaches so nothing starts a group of its own for it
     (when (and g (not (equal? (buffer-group name) g)))
       (chat-set-group! name g))
+    (llm-mode--companion-remember! buf name g)
     (let ((slug (buffer-local name 'agent-slug)))
       (unless (and slug (member slug (agent-list))
                    (not (equal? (agent-status slug) 'dead)))
@@ -652,7 +674,7 @@
 (define (llm-companion-ensure! buf &optional group)
   ;; BUF's chat, the one M-o opens, made quietly when it has none: (CHAT NEW?).
   ;; Nothing shows and nothing is sent. GROUP puts the chat in that group.
-  (let* ((new? (not (llm-mode--companion-existing buf)))
+  (let* ((new? (not (llm-mode--companion-recall! buf group)))
          (made (llm-mode--companion! buf (buffer-llm-model buf) group))
          ;; a mode that names its chats names this one before it speaks, so no title is guessed from the opening
          (title (and new? (chat-mode-title buf)))

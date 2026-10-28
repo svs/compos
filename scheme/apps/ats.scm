@@ -312,6 +312,10 @@
         'tones '(("^★+✓?$" warn)
                  ("^(?i)(unfit|withdrawn|withdraw|reject|rejected|declined|dropped|delete)$" bad)
                  ("^(?i)(potential|pending|snoozed|scheduled|maybe)$" warn)
+                 ;; the meeting chip's word, toned as the site tones it (tones go word by word)
+                 ("^requested$" warn)
+                 ("^happened$" good)
+                 ("^(no_show|cancelled)$" bad)
                  ("^(?i)(elite|strong|fit|advance|advanced|approve|approved|hired|shortlisted|offer)$" good)
                  ("^(new|applied|create|created|prospect)$" info))
         ;; the site's navbar, in its order; M-key switches to a section
@@ -1091,6 +1095,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
+(mode-chat-opening! "ats-application-mode"
+  (lambda (src) (string-append "Load (skill \"process-application\") and work " (ats-case-label src) " by it: it routes to the skill for the application's state. Brief me on where it stands, then take the step the skill calls for; show me anything going to a candidate or client before it goes." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"
   (lambda (src) (string-append "The approval for " (ats-case-label src) " is waiting on me. What's proposed, would you approve it, and why?" (ats-case-handle src "Approval" "ats-approval-text") " Only if the candidate is rated 4 stars or above, then search the open jobs for other roles that suit them, with findJobsForCandidate, and say which are worth putting them forward for and why; below 4, skip the job search.")))
 

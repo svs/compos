@@ -579,14 +579,15 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
         (q "\""))
     (string-append
       "You orchestrate the review of " n " pending approvals in the ATS. Their ids: " (string-join ids ", ") ".\n\n"
-      "1. Now spawn one subagent per approval with this single eval, then end your turn. You review none yourself.\n"
-      "(for-each (lambda (id) (execute* (ats-approval-review-ask id) (list 'title (ats-case-buffer id) 'companion (ats-case-buffer id) 'notify #t))) (list "
+      "1. Now hand each approval to its application's own chat with this single eval, then end your turn. You review none yourself.\n"
+      "(for-each (lambda (id) (let* ((page (ats-case-buffer id)) (app (and page (ats-case-application-id page)))) (if app (ats-application-chat! app (ats-approval-review-ask id)) (execute* (ats-approval-review-ask id) (list 'title page 'companion page 'notify #t))))) (list "
       (string-join (map (lambda (id) (string-append q id q)) ids) " ") "))\n"
-      "(execute* PROMPT OPTS) starts a subagent chat and returns at once; 'notify #t wakes you when it answers. "
-      "(ats-approval-review-ask ID) is that approval's prompt: it points the subagent at the page already open in a buffer.\n\n"
+      "(ats-application-chat! APP TEXT) sends TEXT to the chat pinned to that application, which keeps the case across reviews, and its answer wakes you; execute* starts a fresh chat only when the page has not named its application. "
+      "(ats-approval-review-ask ID) is that approval's prompt: it points the chat at the page already open in a buffer. "
+      "If an answer lacks context you hold (what svs said, the client's position, a sibling application), send it with (ats-application-chat! APP TEXT) and wait for the new answer.\n\n"
       "2. Each answer wakes you. Until all " n " have answered, end your turn without a reply.\n\n"
       "3. When all have answered, mark every one that answered in one eval: (subagent-verdict! SLUG 'done ONE-LINE). "
-      "That stops it and archives its chat with its history. Leave one that is stuck or asks something.\n\n"
+      "That stops it and archives its chat with its history; the application finds it again by its id. Leave one that is stuck or asks something.\n\n"
       "4. Then reply once: a table of candidate and job, what's proposed, the subagent's call, why in one line, and the link it gave. "
       "After it, list the subagents you left open.")))
 
@@ -1157,6 +1158,21 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-key! "ats-application-mode" (lambda (src) (ats-case-id src)))
+
+;; One chat per application: the one M-o on its page opens, kept under the
+;; application id, so it holds the case across turns, archives and restarts.
+(define (ats-application-chat! id &optional text)
+  "the application's own chat, made quietly when it has none; TEXT goes to it.
+An agent that calls it becomes the chat's parent: the chat's answers wake it."
+  (let ((chat (or (chat-for id)
+                  (car (llm-companion-ensure! (ats-application-show! id #f #t)))))
+        (parent (subagent-spawner)))
+    (when parent
+      (buffer-set-local! chat 'subagent-notify #t)
+      (subagent-record! parent chat))
+    (when text (agent-continue! chat text))
+    chat))
+(public! 'ats-application-chat! "(ats-application-chat! APPLICATION-ID [TEXT]) — the application's own chat, the one M-o on its page opens; TEXT is sent to it")
 (mode-chat-opening! "ats-application-mode"
   (lambda (src) (string-append "Load (skill \"process-application\") and work " (ats-case-label src) " by it: it routes to the skill for the application's state. Brief me on where it stands, then take the step the skill calls for. If we met the candidate, read the meeting's full transcript over the fireflies MCP (fireflies_search by their email, then fireflies_get_transcript), not just its summary, and tell me my impressions of them from what I said on the call; those impressions decide the step over the skill's default. Use the MCP tools (ats-ash, fireflies, whatsapp and the rest) wherever one covers the step, before any other route." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"

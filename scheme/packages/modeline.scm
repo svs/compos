@@ -840,9 +840,9 @@
     (list (list "buffer info" "modeline-expand"))
     (if (chat-buffer? buf) (list (list "summary log" "buffer-summary-log")) '())
     (if (chat-rich-view? buf)
-        (list (list "transcript: info" "agent-verbosity-info")
-              (list "transcript: log" "agent-verbosity-log")
-              (list "transcript: debug" "agent-verbosity-debug"))
+        (list (list "transcript: summary" "agent-verbosity-summary")
+              (list "transcript: info" "agent-verbosity-info")
+              (list "transcript: log" "agent-verbosity-log"))
         '())))
 
 (define-command "buffer-switcher"
@@ -1019,7 +1019,7 @@
                             'text level
                             'click (string-append "agent-verbosity-" level)
                             'attrs (list (list "title" (string-append "show " level)))))
-                    '("info" "log" "debug"))))))
+                    '("summary" "info" "log"))))))
 
 ;; what the buffer asks its header line to carry: a list's tabs. They sit
 ;; at the tail, where a chat keeps its verbosity switch.

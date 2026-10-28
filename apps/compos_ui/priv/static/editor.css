@@ -1065,7 +1065,8 @@ body.unfocused .window.active .cursor {
 .ag-prose th { font-weight: 600; white-space: nowrap; }
 /* Transcript verbosity is deliberately local and CSS-driven: info
    keeps only the last title row in each live tool burst, log keeps
-   every compact card, and debug opens the call contents visually.
+   every compact card, and summary keeps only the prompts, the summaries and
+   what waits on the user.
    Thought is supporting machinery, not a fourth reader mode.
    The picker itself is .dash-verbosity, drawn in the dashboard
    headline (editor.scm); only these reader rules live here. */
@@ -1080,8 +1081,7 @@ body.unfocused .window.active .cursor {
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-preview,
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-duration,
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-tokens { display: none; }
-.ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool > c-result > .ag-body { display: block; }
-.ag-scroll.ag-verbosity-debug > c-toolcall > .ag-tool .ag-preview { display: none; }
+.ag-scroll.ag-verbosity-summary > :is(c-agent, c-toolcall, c-info, c-eval, c-plan, details) { display: none; }
 .ag-tool, .ag-thought {
   margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
   border-radius: 0; font-family: var(--font-mono); font-size: var(--ag-base);

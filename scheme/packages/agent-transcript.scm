@@ -111,8 +111,8 @@
 (define-command "agent-verbosity-log" "Show summaries and every compact tool call"
   (lambda () (agent-set-verbosity! "log")))
 
-(define-command "agent-verbosity-debug" "Show summaries and full tool-call details"
-  (lambda () (agent-set-verbosity! "debug")))
+(define-command "agent-verbosity-summary" "Show only the prompts and the summaries"
+  (lambda () (agent-set-verbosity! "summary")))
 
 (define (agent-card-at-fold buf s)
   (let loop ((es (or (buffer-local buf 'agent-tool-bodies) '())))

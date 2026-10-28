@@ -1820,7 +1820,9 @@
     code-agent-switch-pending prompt-parts editing-state
     ;; set by a turn the connector answered with silence, read once by the
     ;; reconnect at the end of that batch
-    chat-connector-suspect))
+    chat-connector-suspect
+    ;; tool calls that closed with no input in this turn (agent.scm)
+    agent-orphan-tools))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))

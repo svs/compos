@@ -245,20 +245,45 @@
 ;; a fence-aware line walk does the same.
 (define todo--ts-sections "(section (atx_heading (atx_h2_marker))) @task")
 
+;; each file's sections as (TEXT TASK), in file order. A section whose text
+;; has not changed keeps its task and only moves, so an edit to one task
+;; parses that task alone. Most sections stay where they were, so the walk
+;; tries the next old one before it searches the rest.
+(define *todo-section-cache* '())
+
+(define (todo--moved t line pos)
+  (let ((d (- line (plist-get t 'from))))
+    (plist-put (plist-put (plist-put t 'from line) 'to (+ (plist-get t 'to) d)) 'pos pos)))
+
+(define (todo--section-tail sec old)
+  (cond ((null? old) '())
+        ((equal? (car (car old)) sec) old)
+        (else (todo--section-tail sec (cdr old)))))
+
 (define (todo--parse path text)
   (if (not (member "markdown" (ts-installed-grammars)))
       (todo--parse-lines path text)
       (let loop ((caps (filter (lambda (c) (equal? (car c) "task"))
                                (ts-query-string "markdown" text todo--ts-sections)))
-                 (line 0) (at 0) (acc '()))
+                 (line 0) (at 0)
+                 (old (let ((hit (assoc path *todo-section-cache*))) (if hit (cadr hit) '())))
+                 (secs '()))
         (if (null? caps)
-            (filter (lambda (t) (plist-get t 'id)) (reverse acc))
+            (let ((secs (reverse secs)))
+              (set! *todo-section-cache*
+                    (cons (list path secs)
+                          (remove (lambda (e) (equal? (car e) path)) *todo-section-cache*)))
+              (filter (lambda (t) (and t (plist-get t 'id))) (map cadr secs)))
             (let* ((s (cadr (car caps)))
                    (line (+ line (- (length (string-split (substring-bytes text at s) "\n")) 1)))
-                   (ls (split-lines (substring-bytes text s (caddr (car caps)))))
-                   (head (and (pair? ls) (todo--heading (car ls)))))
-              (loop (cdr caps) line s
-                    (if head (cons (todo--task path (list line s head (cdr ls))) acc) acc)))))))
+                   (sec (substring-bytes text s (caddr (car caps))))
+                   (rest (todo--section-tail sec old))
+                   (t (if (pair? rest)
+                          (let ((t (cadr (car rest)))) (and t (todo--moved t line s)))
+                          (let* ((ls (split-lines sec))
+                                 (head (and (pair? ls) (todo--heading (car ls)))))
+                            (and head (todo--task path (list line s head (cdr ls))))))))
+              (loop (cdr caps) line s (if (pair? rest) (cdr rest) old) (cons (list sec t) secs)))))))
 
 (define (todo--parse-lines path text)
   (let loop ((ls (split-lines text)) (i 0) (pos 0) (fence #f) (cur #f) (acc '()))

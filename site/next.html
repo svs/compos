@@ -340,16 +340,23 @@
 </div>
 </main>
 
-<footer>
+<footer aria-label='Site footer'>
   <div class='foot'>
-    <span>Compos</span>
-    <span>the hackable harness for power users</span>
+    <a class='brand' href='#main' aria-label='Compos home'><img src='images/compos-logo-clear.png' width='22' height='22' alt=''><span>Compos</span></a>
+    <span>Flow state has a home.</span>
+    <span class='spacer'></span>
+    <a href='mailto:hello@compos.in?subject=Compos%20access' class='btn-line'>request access</a>
+  </div>
+  <nav class='foot' aria-label='Explore Compos'>
+    <a href='#how'>how it works</a>
+    <a href='#apps'>apps</a>
+    <a href='#features'>features</a>
     <span class='spacer'></span>
     <a href='https://github.com/svs/compos'>source</a>
     <a href='https://github.com/svs/compos/tree/main/docs/manual'>manual</a>
     <a href='mailto:hello@compos.in'>contact</a>
-    <span class='egg' title='the bird on the branch'>ko.el</span>
-  </div>
+    <a href='#main'>back to top</a>
+  </nav>
 </footer>
 
 <script src='next.js?v=gallery-refresh-1' defer></script>

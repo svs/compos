@@ -261,6 +261,27 @@
          (to (car (string-split to " "))))
     (if (equal? to "") from (string-append from " → " to))))
 
+;; an application's head: the name, then its stars, state, meeting and fit on one line,
+;; then its history under them. The site glues the fit to the history ("potential Applied 4 days ago")
+(define (ats-application-head profile title)
+  (let* ((text (lambda (n) (or (plist-get n 'text) "")))
+         (stars (site-app-find (lambda (n) (re-match? "^★+✓?$" (text n))) profile))
+         (fit (site-app-find (lambda (n) (re-match? "^(?i)(elite|strong|potential|unfit|maybe) Applied" (text n))) profile)))
+    (if (not fit)
+        profile
+        (let* ((fields (filter (lambda (n) (and (equal? (plist-get n 'tag) "c-field") (not (equal? n stars))
+                                                (not (equal? (text n) title))))
+                               profile))
+               (name (car fields))
+               (before (let loop ((ns (cdr fields)) (acc '()))
+                         (if (or (null? ns) (equal? (car ns) fit)) (reverse acc) (loop (cdr ns) (cons (car ns) acc)))))
+               (after (cdr (member fit fields)))
+               (words (string-split (text fit) " "))
+               (line (string-join (append (if stars (list (text stars)) '()) (map text before) (list "fit:" (car words))) " "))
+               (history (string-join (cons (string-join (cdr words) " ") (map text after)) " · ")))
+          (append (list name (list 'tag "c-field" 'text line) (list 'tag "c-paragraph" 'text history))
+                  (filter (lambda (n) (not (equal? (plist-get n 'tag) "c-field"))) profile))))))
+
 (define *ats-spec*
   (list 'name 'ats
         'title "ATS"
@@ -286,7 +307,8 @@
                          (list 'title (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))
                                'title-href (plist-get data 'job_href)
                                'state (and state-node (ats-transition (plist-get state-node 'text)))
-                               'head (filter (lambda (n) (not (equal? n state-node))) profile))))
+                               'head (ats-application-head (filter (lambda (n) (not (equal? n state-node))) profile)
+                                                           (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))))))
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"

@@ -1355,6 +1355,37 @@
 ;; How much of a finished turn the card writer reads when it says what the agent did.
 (define chat-summary-turn-bytes 1400)
 
+;; How long one entry of the summary log may be. The bar clips what it
+;; shows; the log keeps the whole action and its result.
+(define chat-summary-turn-max-bytes 360)
+
+;; The word a summary line starts with in the chat's text.
+(define chat-summary-prefix "summary: ")
+
+(define (chat-summary--one-line s n)
+  (let loop ((cur s))
+    (let ((next (re-replace "[\\s][\\s]+|[\\n\\t\\r]" cur " ")))
+      (if (equal? next cur)
+          (chat-summary--clip (string-trim cur) n)
+          (loop next)))))
+
+;; The prompt for one log entry. The log is read top to bottom as the
+;; story of the chat, so each entry says what was done and what came of it.
+(define (chat-summary--turn-prompt passage)
+  (string-append
+    "You write one entry of a work log for a chat between a person and a"
+    " coding agent. Below is the person's request and the agent's work on it.\n"
+    "Answer with exactly two lines and nothing else.\n"
+    "TITLE: three to six words naming the subject (files, features, people).\n"
+    "DESC: what the agent did and what came of it, in past tense, as one or"
+    " two short sentences: the action first, then the result. Name the"
+    " files, functions and commands. If the agent only answered a question,"
+    " give the answer. If it asks the person something or is waiting, say"
+    " what for. Do not start with The agent, The assistant or The user;"
+    " start with the verb, e.g. Added X to Y; the picker now shows Z.\n"
+    "Plain text only: no markdown, no emoji. Write in the passage's language."
+    "\n\nPASSAGE:\n" passage))
+
 (define (chat-summary--first-ask buf)
   ;; the record is newest-first, so the first ask is at the far end
   (let loop ((ts (reverse (chat-record buf))))
@@ -1480,8 +1511,9 @@
        (let ((passage (chat-summary--turn-passage buf)))
          (and (not (equal? passage ""))
               (begin
-                (title-card passage
-                  (lambda (card)
+                (llm-with-model (chat-summary--turn-prompt passage) chat-summary-model
+                  (lambda (raw)
+                   (let ((card (and (string? raw) (not (equal? raw "")) (title--parse raw))))
                     (when (and (pair? card) (buffer-known? buf))
                       (let* ((desc (and (pair? (cdr card)) (car (cdr card))))
                              (text (if (and (string? desc)
@@ -1498,8 +1530,7 @@
                                             chat-title-max-bytes))))
                              (b (if (and name (chat-title buf name)) name buf)))
                         (chat-summary-land! b
-                          (chat-summary--flatten
-                            (chat-summary--first-sentence text)))))))
+                          (chat-summary--one-line text chat-summary-turn-max-bytes)))))))
                 #t)))))
 
 (define (chat-summary-refresh! buf &optional force?)
@@ -1595,10 +1626,12 @@
   (chat-record-push! buf "status" (list (list "text" text)) #f)
   (when (buffer-local buf 'agent-saved-mark)
     (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
-    (let* ((rendered (string-append "\n" text "\n\n"))
+    ;; the line wears its kind, as an ask wears >>> you:, so the chat's
+    ;; outline names every summary; the block starts after the word
+    (let* ((rendered (string-append "\n" chat-summary-prefix text "\n\n"))
            (start (chat-render! buf rendered))
            (end (+ start (string-byte-length rendered))))
-      (agent-block-push! buf start end "status" '())
+      (agent-block-push! buf (+ start 1 (string-byte-length chat-summary-prefix)) end "status" '())
       (when (boundp 'agent-add-overlay!)
         (agent-add-overlay! buf start end "agent-meta"))))
   ;; the bar shows the paragraph now, not after the next command
@@ -1649,6 +1682,31 @@
 (define-command "buffer-summary-log"
   "Show this buffer's summaries and jj changes, interleaved by time"
   (lambda () (buffer-summary-log! (current-buffer))))
+
+;; The chat as an agent reads it cheaply: the title, then each ask and
+;; the summaries of the work it started, oldest first. It reads the
+;; chat's outline: an ask is a >>> you: line, a summary a summary: line,
+;; so (code-outline CHAT) gives the same story to any reader.
+(define chat-read-summary-ask-bytes 300)
+
+(effects! '(read))
+(public! 'chat-read-summary
+  "(chat-read-summary BUF [N]) -- the chat's title, asks and turn summaries as text, oldest first; N keeps the newest N entries")
+(define (chat-read-summary buf &optional n)
+  (let* ((lines (filter (lambda (s) s) (map
+                  (lambda (row)
+                    (let ((text (nth 3 row)))
+                      (cond ((string-prefix? ">>> you: " text)
+                             (string-append "> " (chat-summary--one-line (substring-bytes text 9 (string-byte-length text))
+                                                                     chat-read-summary-ask-bytes)))
+                            ((string-prefix? chat-summary-prefix text)
+                             (string-append "- " (substring-bytes text (string-byte-length chat-summary-prefix)
+                                                                (string-byte-length text))))
+                            (else #f))))
+                  (code-outline buf))))
+         (kept (if (and n (> (length lines) n)) (list-tail lines (- (length lines) n)) lines)))
+    (string-join (cons (string-append "# " (or (chat-title-of buf) buf)) kept) "\n")))
+(effects! '(write external spend))
 
 ;; the wide segment of the bar opens the log for the window's buffer
 (add-hook! (list 'block-click 'summary-log)

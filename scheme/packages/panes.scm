@@ -841,6 +841,17 @@
               layout wanted))))
 
 (define (panes-consolidate layout &optional mode-of modes extra)
+  "Every mode has one window: one pass of panes--consolidate-once, again
+   until the layout stops changing, at most three. A pass relabels each
+   window by the buffer it shows before it gathers, so a window that
+   showed a stray shows its own buffer again only after the pass; the
+   next pass gives it back its own mode and drops the empty window the
+   first one made."
+  (let loop ((l (panes--consolidate-once layout mode-of modes extra)) (n 1))
+    (let ((again (if (< n 3) (panes--consolidate-once l mode-of modes) l)))
+      (if (or (>= n 3) (equal? again l)) l (loop again (+ n 1))))))
+
+(define (panes--consolidate-once layout &optional mode-of modes extra)
   "Every mode has one window. In this order:
    1. panes--consolidate-homes gives every mode a window (only with
       MODE-OF).

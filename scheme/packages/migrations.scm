@@ -197,6 +197,65 @@
           (when old (buffer-set-local! buf (car m) #f))))
       *migration-relation-keys*)))
 
+;;; --- the buffer-local records ------------------------------------------------------
+
+;; a chat's usage was four locals; one 'chat-usage record holds them now:
+;; (last U total T context (used N size S))
+(define-buffer-migration! 'chat-usage-record "2026-10-28"
+  (lambda (buf)
+    (let ((last (buffer-local buf 'chat-last-usage))
+          (total (buffer-local buf 'chat-usage-total))
+          (used (buffer-local buf 'chat-context-used))
+          (size (buffer-local buf 'chat-context-size)))
+      (when (or last total used)
+        (let* ((u (or (buffer-local buf 'chat-usage) '()))
+               (u (if (and last (not (plist-get u 'last))) (plist-put u 'last last) u))
+               (u (if (and total (not (plist-get u 'total))) (plist-put u 'total total) u))
+               (u (if (and (number? used) (not (plist-get u 'context)))
+                      (plist-put u 'context (list 'used used 'size size))
+                      u)))
+          (buffer-set-local! buf 'chat-usage u)))
+      (for-each (lambda (k) (when (buffer-local buf k) (buffer-set-local! buf k #f)))
+                '(chat-last-usage chat-usage-total chat-context-used chat-context-size)))))
+
+;; a site app buffer kept each piece of its state in a 'site-app-KEY local;
+;; one 'site-app plist holds them under KEY now, and its tab is the list's
+;; own (list-tab)
+(define *migration-site-app-keys*
+  '(active card-more data data-gen detail-kind detail-minor detail-mode fetched-at
+    filters folds footer-map for-page gen index-body index-head links list name
+    page row rows sections spec stage-skipped stops stub tab-line))
+
+(define-buffer-migration! 'site-app-plist "2026-10-28"
+  (lambda (buf)
+    (let ((p (or (buffer-local buf 'site-app) '())) (moved #f))
+      (for-each
+        (lambda (k)
+          (let* ((old (string->symbol (string-append "site-app-" (symbol->string k))))
+                 (v (buffer-local buf old)))
+            (when v
+              (unless (plist-get p k) (set! p (plist-put p k v)))
+              (buffer-set-local! buf old #f)
+              (set! moved #t))))
+        *migration-site-app-keys*)
+      (when moved (buffer-set-local! buf 'site-app p))
+      (let ((tab (buffer-local buf 'site-app-filter)))
+        (when tab
+          (unless (buffer-local buf 'list-tab) (buffer-set-local! buf 'list-tab tab))
+          (buffer-set-local! buf 'site-app-filter #f))))))
+
+;; ibuffer and the todo list kept their tab and sort under their own names;
+;; list-mode owns them now as 'list-tab and 'list-sort
+(define-buffer-migration! 'list-tab-and-sort "2026-10-28"
+  (lambda (buf)
+    (for-each
+      (lambda (m)
+        (let ((v (buffer-local buf (car m))))
+          (when v
+            (unless (buffer-local buf (cadr m)) (buffer-set-local! buf (cadr m) v))
+            (buffer-set-local! buf (car m) #f))))
+      '((ibuffer-tab list-tab) (todo-view list-tab) (ibuffer-sort list-sort) (todo-sort list-sort)))))
+
 ;;; --- the terminal ------------------------------------------------------------------
 
 ;; an old desktop names a terminal buffer's mode shell-mode; term-mode is

@@ -600,7 +600,9 @@
 (define-command "llm-companion-show" "Show this document's hidden chat in the other window"
   (lambda ()
     (let* ((buf (current-buffer))
-           (name (find buffer-exists? (buffer-children buf 'inline))))
+           ;; the inline link is runtime, so after a restart the companion
+           ;; scan finds the chat
+           (name (llm-mode--companion-existing buf)))
       (if name
           (display-buffer-other-window! name)
           (message "This document has no chat yet: M-o starts one")))))

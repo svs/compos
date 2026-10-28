@@ -397,9 +397,6 @@
     (unless (member key cur)
       (buffer-set-local! buf 'desktop-skip-locals (cons key cur)))))
 
-;; one table of change watches per buffer, (KEY ID) rows in 'change-watches:
-;; KEY names the watch, so a mode that runs again keeps the one it has. The
-;; ids die with the daemon, so the desktop does not save the table.
 ;; The modeline's derived state is one local, 'modeline-cache, a flat plist:
 ;; name, name-segments, file, project, facts, group, group-color, expanded,
 ;; dash-blocks, dash-fp. Everything in it is rebuilt from the buffer, so the
@@ -430,6 +427,9 @@
       (buffer-set-local! buf 'modeline-cache new))
     new))
 
+;; one table of change watches per buffer, (KEY ID) rows in 'change-watches:
+;; KEY names the watch, so a mode that runs again keeps the one it has. The
+;; ids die with the daemon, so the desktop does not save the table.
 (define (buffer-watch-change! buf key cb)
   (let* ((cur (or (buffer-local buf 'change-watches) '()))
          (hit (assoc key cur)))
@@ -512,6 +512,9 @@
 ;;; buffer, buffer-refresh-hook runs one time with (BUFFER KEYS), and each
 ;;; handler acts on its own key. A handler that must wait marks again.
 
+(domain! 'buffers)
+(effects! '(write))
+
 ;; note that KEY's work is pending on BUF until a window shows it
 (define (buffer-mark-dirty! buf key)
   (let ((keys (or (buffer-local buf 'dirty?) '())))
@@ -519,11 +522,13 @@
       (desktop-skip! buf 'dirty?)
       (buffer-set-local! buf 'dirty? (cons key keys)))))
 
+(effects! '(read))
 ;; #t when BUF has pending work: KEY's, or any key without KEY
 (define (buffer-dirty? buf &optional key)
   (let ((keys (buffer-local buf 'dirty?)))
     (and (pair? keys) (or (not key) (and (memq key keys) #t)))))
 
+(effects! '(write))
 ;; drop KEY's pending work: the package did it some other way
 (define (buffer-clear-dirty! buf key)
   (let ((keys (buffer-local buf 'dirty?)))
@@ -540,6 +545,9 @@
 
 (define (buffer-refresh-visible!)
   (for-each (lambda (w) (buffer-refresh-pending! (cadr w))) (window-list-all)))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;;; --- plists ------------------------------------------------------------------
 ;;; Flat plists — (key value key value ...) with symbol keys — are the house

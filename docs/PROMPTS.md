@@ -111,6 +111,14 @@ The `ats` preset tells its chats to look for an `ats-` function before an
 ats-ash tool. `(preset-prompt! 'NAME TEXT)` sets the prompt alone; like
 `define-preset!`, an agent cannot call it.
 
+A preset also steers discovery. `apropos` answers the calling chat's skills
+(its group's own and the global ones) as `kind "skill"` hits, and ranks first
+the exact name, the group's own skills, and the hits whose name starts with,
+or whose package or domain is, one of the chat's preset focus names:
+`'focus (NAME ...)` on `define-preset!`, by default the preset's name. Nothing
+is hidden; the focus only orders. So a preset prompt can say "run apropos
+first" and trust the answer to lead with that preset's code and skills.
+
 A project's `compos.scm`, or a `group-on-chat` hook in a group's `group.scm`,
 runs with the chat current, and turns one section off or on:
 

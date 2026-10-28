@@ -777,6 +777,10 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (define (ats-approval-show! id &optional name quiet) (ats-show! 'approvals id name quiet))
 (define (ats-application-show! id &optional name quiet) (ats-show! 'applications id name quiet))
 (define (ats-candidate-show! id &optional name quiet) (ats-show! 'candidates id name quiet))
+(public! 'ats-job-show! "(ats-job-show! ID [NAME] [QUIET]) — open an ATS job as its page")
+(public! 'ats-approval-show! "(ats-approval-show! ID [NAME] [QUIET]) — open an ATS approval as its page")
+(public! 'ats-application-show! "(ats-application-show! ID [NAME] [QUIET]) — open an ATS application as its page")
+(public! 'ats-candidate-show! "(ats-candidate-show! ID [NAME] [QUIET]) — open an ATS candidate as its page")
 
 (domain! 'web)
 (effects! '(write external display))
@@ -1186,6 +1190,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
             (message (string-append verb " failed: " (if (string? text) text ""))))))))
 (define (ats-approve! id &optional note) (ats-approval-resolve! id #t note))
 (define (ats-reject! id &optional note action) (ats-approval-resolve! id #f note action))
+(public! 'ats-approve! "(ats-approve! APPROVAL-ID [NOTE]) — approve an ATS approval and move the view on to the next")
+(public! 'ats-reject! "(ats-reject! APPROVAL-ID [NOTE] [ACTION]) — reject an ATS approval; ACTION is what the ATS does instead, as no_action or withdraw")
 
 ;; what the ATS should do instead of the proposal; no_action only drops it, the rest run at once
 (define *ats-correct-actions*

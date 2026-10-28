@@ -101,12 +101,18 @@
 ;; holding the preset gets PROMPT as its own section, "preset:NAME", in both
 ;; lanes. A define-preset! without PROMPT keeps the one the preset already has,
 ;; so the app that owns the guidance can set it apart with preset-prompt!
-(define (define-preset! name description servers &optional prompt)
+(define (define-preset! name description servers &rest opts)
+  ;; OPTS is the prompt, then keys: 'focus (NAME ...) names what apropos ranks
+  ;; first for a chat holding the preset; by default the preset's own name, so
+  ;; an ats preset lifts the ats package and every ats- function
   (mcp-refuse-agent! 'define-preset!)
-  (set! *chat-presets*
-        (alist-put *chat-presets* name
-                   (list 'description description 'servers servers
-                         'prompt (or prompt (preset-get name 'prompt)))))
+  (let* ((prompt (and (pair? opts) (string? (car opts)) (car opts)))
+         (keys (if prompt (cdr opts) opts)))
+    (set! *chat-presets*
+          (alist-put *chat-presets* name
+                     (list 'description description 'servers servers
+                           'prompt (or prompt (preset-get name 'prompt))
+                           'focus (or (plist-get keys 'focus) (preset-get name 'focus))))))
   name)
 
 (define (preset-prompt! name text)
@@ -123,6 +129,16 @@
             (if (and (string? text) (not (equal? text "")))
                 (append acc (list (list (string-append "preset:" (symbol->string p)) text)))
                 acc)))
+        '() (or presets '())))
+
+;; what apropos ranks first for a chat holding PRESETS: each preset's 'focus,
+;; else its name
+(define (preset-focus presets)
+  ;; compos is in every chat, so it lifts nothing
+  (fold (lambda (acc p)
+          (if (eq? p 'compos)
+              acc
+              (append acc (or (preset-get p 'focus) (list (symbol->string p))))))
         '() (or presets '())))
 
 (define (preset-servers name)
@@ -550,7 +566,8 @@
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
 (public! 'preset-prompt! "(preset-prompt! 'name TEXT) — set a preset's prompt: a section every chat holding the preset gets")
 (public! 'preset-prompt-parts "(preset-prompt-parts PRESETS) — the prompt sections PRESETS bring, as (NAME TEXT)")
-(public! 'define-preset! "(define-preset! 'name DESC SERVERS [PROMPT]) — name a loadable tool collection and the prompt that says how to use it")
+(public! 'define-preset! "(define-preset! 'name DESC SERVERS [PROMPT] ['focus (NAME ...)]) — name a loadable tool collection, the prompt that says how to use it, and what apropos ranks first for it")
+(public! 'preset-focus "(preset-focus PRESETS) — the names apropos ranks first for a chat holding PRESETS")
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")

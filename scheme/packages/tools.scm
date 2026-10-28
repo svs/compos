@@ -1068,9 +1068,64 @@
 (define (apropos query &rest filters)
   ;; Build rows first. Their single-flight refresh also publishes the index.
   ;; The next lookup is then a cheap read of the same catalog generation.
-  (let ((rows (apropos--rows-cached)))
-    (map apropos--public-hit
-         (apropos--search query filters (apropos--index-cached) rows))))
+  ;; The skills and the focus belong to the caller, so they join after the cache
+  (let* ((rows (apropos--rows-cached))
+         (hits (apropos--search query filters (apropos--index-cached) rows))
+         (skills (filter (lambda (h) (apropos--filter-match? h filters))
+                         (apropos--skill-hits query))))
+    (map apropos--public-hit (apropos--focus (append hits skills) query))))
+
+;; The skills the calling chat can load, as hits: its group's own and the
+;; global ones. They are found by their name and description
+(define (apropos--skill-hits query)
+  (let ((words (apropos--words query))
+        (own (apropos--group-skills-dir)))
+    (if (or (null? words) (not (boundp 'skills--here)))
+        '()
+        (apropos--compact
+          (map (lambda (s)
+                 (and (apropos--hit? (string-append (car s) " " (cadr s)) words)
+                      (list 'kind "skill" 'name (car s) 'doc (cadr s)
+                            'domain "skills"
+                            'scope (if (and own (string? (caddr s)) (string-prefix? own (caddr s)))
+                                       "group" "global")
+                            'use (string-append "(skill \"" (car s) "\")"))))
+               (skills--here))))))
+
+(define (apropos--group-skills-dir)
+  (let ((g (buffer-group (current-buffer))))
+    (and g (boundp 'skills-group-dir) (skills-group-dir g))))
+
+;; What the caller works with comes first: the exact name, then the group's
+;; own skills and whatever the chat's presets focus on, then the rest, each
+;; part in the order ranking gave it
+(define (apropos--focus hits query)
+  (let* ((q (string-downcase (string-trim query)))
+         (focus (apropos--chat-focus))
+         (exact? (lambda (h) (equal? q (string-downcase (apropos--name-of h)))))
+         (focused? (lambda (h)
+                     (or (equal? (plist-get h 'scope) "group")
+                         (let ((name (apropos--name-of h)))
+                           (any (lambda (f)
+                                  (or (string-prefix? (string-append f "-") name)
+                                      (equal? (plist-get h 'package) f)
+                                      (equal? (plist-get h 'domain) f)))
+                                focus)))))
+         (exact (filter exact? hits))
+         (lifted (filter (lambda (h) (and (not (exact? h)) (focused? h))) hits))
+         (rest (filter (lambda (h) (not (or (exact? h) (focused? h)))) hits)))
+    (append exact lifted rest)))
+
+(define (apropos--name-of h)
+  (let ((n (plist-get h 'name)))
+    (cond ((string? n) n) ((symbol? n) (symbol->string n)) (else ""))))
+
+(define (apropos--chat-focus)
+  (let ((buf (current-buffer)))
+    (if (and (boundp 'preset-focus) (boundp 'chat-presets-of)
+             (boundp 'chat-buffer?) (chat-buffer? buf))
+        (preset-focus (chat-presets-of buf))
+        '())))
 
 ;; 'lexical #t asks for the catalog alone. The semantic pass embeds the
 ;; query through an external service: it spends money and waits for the
@@ -1519,8 +1574,9 @@
 (effects! '(unknown))
 
 ;;; --- the MCP proxy surface ----------------------------------------------------
-;;; External ACP agents get this same registry over MCP: the daemon's MCP
-;;; socket (Compos.Rpc.McpServer) calls these two. Payloads are base64 both ways — RPC eval returns printed
+;;; External ACP agents get this same registry over MCP: the bundled
+;;; compos-mcp-proxy.exs bridges stdio MCP to the daemon socket and calls
+;;; these two. Payloads are base64 both ways — RPC eval returns printed
 ;;; values, and printed-string escaping is not JSON-safe for every byte.
 
 (define (mcp-proxy-tools-json)

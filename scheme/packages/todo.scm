@@ -1695,19 +1695,16 @@
 (mode-doc! "todo-detail-mode"
   "One task as its own page: state, the chat working it, notes and log. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
 
-(define (todo-spawn-chat! group title)
-  "(todo-spawn-chat! GROUP TITLE) — file TITLE as a task and hand it to a new chat in GROUP. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
+(define (todo-spawn-chat! id group)
+  "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
   (let* ((g (or (group-resolve-id group) (group-ensure-record! group)))
-         (name (group-name g))
-         (id (todo-create title (list 'project (if (member name (todo-projects)) name todo-default-project)
-                                      'state "todo" 'group g)))
          (first? (not (group-primary-chat g)))
          (chat (todo-assign-chat! id g)))
     ;; a group made here has no chat yet: this one becomes its chat pane
     (when first? (group-record-update! g 'primary-chat-id (chat-stable-id! chat)))
     (list id chat)))
 
-(public! 'todo-spawn-chat! "(todo-spawn-chat! GROUP TITLE) — file a task and hand it to a new chat in GROUP without showing it; answers (ID CHAT)")
+(public! 'todo-spawn-chat! "(todo-spawn-chat! ID GROUP) — hand an existing task to a new chat in GROUP without showing it; answers (ID CHAT)")
 
 (define-command "todo-assign" "Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane, the chat it already has when it has one; C-u asks for the group"
   (lambda ()

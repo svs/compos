@@ -2657,7 +2657,10 @@
               (lambda (task)
                 (if (equal? (string-trim task) "")
                     (message "No task, no chat")
-                    (let ((r (todo-spawn-chat! g task)))
+                    (let ((r (todo-spawn-chat!
+                               (todo-create task (list 'project (if (member (group-name g) (todo-projects)) (group-name g) todo-default-project)
+                                                       'state "todo" 'group g))
+                               g)))
                       (message (string-append "Task " (car r) " handed to " (cadr r)))))))))
         (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
           (if (not g)

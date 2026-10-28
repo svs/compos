@@ -10,6 +10,7 @@
 (category! 'system)
 
 (define *events-buffer* "*events*")
+(define *events-app-id* "events")
 
 (defcustom 'events-list-limit 500
   "How many of the newest events M-x events shows.")
@@ -71,6 +72,12 @@
 (define (events-list--shown?)
   (pair? (filter (lambda (w) (equal? (nth 1 w) *events-buffer*)) (window-list-all))))
 
+(effects! '(write))
+
+(define (events-list--claim! buf role)
+  "make BUF part of the events app, so app-dismiss and app-layout know it"
+  (when (boundp 'app-claim!) (app-claim! buf *events-app-id* role)))
+
 (effects! '(write display))
 
 (define (events-list-show-detail! e)
@@ -80,6 +87,7 @@
       (buffer-create buf)
       (buffer-set-text! buf (events-list--detail-text e) #t)
       (buffer-set-local! buf 'group (buffer-local *events-buffer* 'group))
+      (events-list--claim! buf 'detail)
       (display-buffer-detail! buf *events-buffer*))))
 
 (effects! '(write))
@@ -135,6 +143,7 @@
   (buffer-create *events-buffer*)
   (unless (buffer-local *events-buffer* 'group)
     (buffer-set-local! *events-buffer* 'group (frame-group)))
+  (events-list--claim! *events-buffer* 'list)
   *events-buffer*)
 
 (define (events-list-set-topic! pattern)

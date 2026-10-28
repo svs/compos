@@ -663,6 +663,11 @@
              (boundp (quote chat-tool-system-parts)))
         (chat-tool-system-parts buf)
         '())
+    (if (and tools?
+             (boundp (quote preset-prompt-parts))
+             (boundp (quote chat-presets-of)))
+        (preset-prompt-parts (chat-presets-of buf))
+        '())
     (list (list "chat-preamble" (chat-preamble buf))
           (list "code" (chat-code-prompt buf)))))
 

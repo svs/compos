@@ -98,6 +98,23 @@
   (set! *chat-presets* (alist-put *chat-presets* name (list 'description description 'servers servers)))
   name)
 
+;; A preset may bring guidance with its tools: a chat holding the preset gets
+;; TEXT as its own prompt section, "preset:NAME", in both lanes. Kept apart from
+;; *chat-presets* so a later define-preset! of the same name does not drop it
+(define *preset-prompts* '())
+
+(define (preset-prompt! name text)
+  (set! *preset-prompts* (alist-put *preset-prompts* name text))
+  name)
+
+(define (preset-prompt-parts presets)
+  (fold (lambda (acc p)
+          (let ((e (assoc p *preset-prompts*)))
+            (if e
+                (append acc (list (list (string-append "preset:" (symbol->string p)) (cadr e))))
+                acc)))
+        '() (or presets '())))
+
 (define (preset-servers name)
   ;; A named bundle resolves to its server list; a name the hub registered
   ;; directly (no bundle) resolves to just itself, so toggling a bare
@@ -521,6 +538,8 @@
 (category! 'mcp)
 (public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
+(public! 'preset-prompt! "(preset-prompt! 'name TEXT) — a prompt section every chat holding the preset gets")
+(public! 'preset-prompt-parts "(preset-prompt-parts PRESETS) — the prompt sections PRESETS bring, as (NAME TEXT)")
 (public! 'define-preset! "(define-preset! 'name DESC SERVERS) — name a loadable tool collection")
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
@@ -544,17 +563,14 @@
 ;;; config files stay secret-free. The surface line shows the url the user
 ;;; wrote, cut at the query string: a key can ride there.
 
-;; the editor itself as an MCP server: the daemon serves the define-tool!
-;; registry on its MCP socket (Compos.Rpc.McpServer), so external agents
-;; read and edit live buffers. Each agent starts compos-mcp-shim
-;; (native/compos_mcp_shim, about 1 MB): it sends the agent's slug as the
-;; first line, then copies stdio to that socket. The compos build makes
-;; it, so it needs nothing installed. The socket is named, not defaulted:
-;; a second daemon (COMPOS_HOME) listens on its own path, and its agents
-;; must reach IT, not the default one.
+;; the editor itself as an MCP server: the define-tool! registry bridged
+;; over the daemon socket, so external agents read and edit live buffers.
+;; The socket is named, not defaulted: a second daemon (COMPOS_HOME) listens
+;; on its own path, and its agents must reach IT, not the default one.
 (mcp-register! 'compos
-  (list 'command (priv-path "native/compos-mcp-shim")
-        'env (list 'COMPOS_MCP_SOCK (string-append (compos-socket-path) "-mcp"))))
+  (list 'command "elixir"
+        'args (list (priv-path "compos-mcp-proxy.exs"))
+        'env (list 'COMPOS_SOCK (compos-socket-path))))
 
 (define-preset! 'compos "Live compos editor tools" '(compos))
 

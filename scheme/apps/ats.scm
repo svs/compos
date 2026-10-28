@@ -1038,12 +1038,23 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (mode-keys! "ats-job-mode" '(("<down>" "ats-job-next") ("<up>" "ats-job-prev")))
 
 ;; A chat made for an ATS page works the case on it, as svs would
+;; every chat that holds the ATS reaches for its Scheme before the raw tools
+(define *ats-preset-prompt*
+  (string-append
+    "The ATS (svsrecruiting.com) has its own Scheme, the ats- functions in apps/ats.scm. "
+    "Before you call an ats-ash tool, run (apropos \"ats-WHAT\"), as (apropos \"ats-approve\"). "
+    "When an ats- function does the job, call it: it carries the steps and rules the tool alone does not. "
+    "Use the ats-ash tool only when none does. When the same ats-ash steps come up twice, add them to apps/ats.scm as a named ats- function."))
+
+(when (boundp 'preset-prompt!)
+  (for-each (lambda (p) (preset-prompt! p *ats-preset-prompt*)) '(ats recruiting)))
+
 (mode-chat-setup! "ats-detail-mode"
   (lambda (chat src)
     (prompt-part-set! chat "ats-case"
       (string-append
         "This chat works one case in svs's recruiting ATS (svsrecruiting.com). "
-        "Its page is a companion buffer (ats-case-text ID reads it); use the ats-ash MCP tools (mcp-find \"ats-ash ...\") only to change it or for what the page lacks; "
+        "Its page is a companion buffer (ats-case-text ID reads it); to change it or for what the page lacks, look for an ats- function first (apropos \"ats-WHAT\"), then the ats-ash tools; "
         "the page's buttons are the same actions. Show a message to a candidate or client before it goes out."))))
 
 ;; what a new chat for an ATS page asks first; the page's own kind wins

@@ -103,6 +103,12 @@ The todo package adds `todo`. Section names are unique: the last fragment of a
 name wins, in the place the name first took, so a buffer part replaces a prompt
 file of that name.
 
+A preset brings guidance with its tools. `(preset-prompt! 'NAME TEXT)` gives
+every chat that holds preset NAME a section `preset:NAME`, after `mcp`, in both
+lanes. A site's app registers it, so the guidance lives beside the code it
+points to: `apps/ats.scm` tells chats holding `ats` to look for an `ats-`
+function before an ats-ash tool.
+
 A project's `compos.scm`, or a `group-on-chat` hook in a group's `group.scm`,
 runs with the chat current, and turns one section off or on:
 

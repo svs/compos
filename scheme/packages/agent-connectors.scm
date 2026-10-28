@@ -397,6 +397,9 @@ nonstandard install out of the built-in connector catalog."
       (append
         (compos-acp-prompt-parts)
         (list (list "mcp" mcp-note))
+        (if (boundp (quote preset-prompt-parts))
+            (preset-prompt-parts (plist-get conf 'presets))
+            '())
         (if buf
             (list (list "chat-preamble" (chat-preamble buf))
                   (list "code" (chat-code-prompt buf)))

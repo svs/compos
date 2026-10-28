@@ -660,7 +660,10 @@
       (current-buffer)
       (let ((bs (todo--buffers))) (and (pair? bs) (car bs)))))
 
-(define (todo--refresh-all!) (for-each list-refresh! (todo--buffers)))
+(define (todo--refresh-all!)
+  (for-each (lambda (b)
+              (if (window-showing b) (list-refresh! b) (buffer-mark-dirty! b 'todo-list)))
+            (todo--buffers)))
 
 ;; the list and its task page are one app, an instance per group, laid out
 ;; by role as apps are: the list in one window, the page in the next
@@ -1115,6 +1118,7 @@
      "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
      "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n"
+     "If you saved files, call (jj-describe! TEXT) before todo-review or todo-done; TEXT follows docs/COMMITS.md.\n"
      "Never end a turn while you wait on background work (tests, a task) without a wake-up: first (agent-listen! '(at \"YYYY-MM-DD HH:MM\") NOTE), or a listener on the event you wait for. Else nothing wakes you.\n"
      "When done, close this chat with (run-command \"chat-dismiss\").\n")))
 
@@ -1739,8 +1743,8 @@
             (todo--buffers)))
 
 (define (todo--on-refresh! b keys)
-  (when (memq 'todo-cards keys)
-    (list-redraw! b)))
+  (cond ((memq 'todo-list keys) (list-refresh! b))
+        ((memq 'todo-cards keys) (list-redraw! b))))
 
 (event-subscribe! "todo-cards" "chat:*" 'todo--on-chat-event)
 (add-hook! 'buffer-refresh-hook 'todo--on-refresh!)

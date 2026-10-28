@@ -15,4 +15,4 @@ Use `(code-replace! BUF LINE NEW)` for a definition or `(code-sexp-replace! BUF 
 
 ## Versioning
 
-Saves flow into jj. Never run jj mutation commands in a shell. After saving the completed change, call `(jj-describe! TEXT)` once; leave its Agent line intact. TEXT follows `docs/COMMITS.md`: an `area: summary` subject in the user's words, then a short body on what the user sees, then `For agents:` with the public API that changed. One change per description.
+Saves flow into jj. Never run jj mutation commands in a shell. Before every turn that saved files ends, call `(jj-describe! TEXT)`; leave its Agent line intact. TEXT follows `docs/COMMITS.md`: an `area: summary` subject in the user's words, then a short body on what the user sees, then `For agents:` with the public API that changed. One change per description.

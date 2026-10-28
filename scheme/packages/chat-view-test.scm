@@ -257,3 +257,20 @@
     (check-equal! (keymap-lookup "chat-mode-map" "M-<up>") "chat-previous-block" "up the history")
     (check-equal! (keymap-lookup "chat-mode-map" "M-<down>") "chat-next-block" "down to the bottom")
     (check-equal! (keymap-lookup "chat-mode-map" "M-S-<down>") "window-next-child-chat" "the family")))
+
+(deftest 'chat-view-listener-wake-is-a-folded-agent-update
+  "a listener's wake draws as the agent's own update, one line over the whole brief, not as YOU"
+  (lambda ()
+    (let* ((brief (string-append
+                    "[event] What you were listening for arrived: tests finished; read output\n"
+                    "job:tests done\n\n"
+                    "Compiling 3 files\n31 tests, 0 failures\n\n"
+                    "That listener is closed. Decide whether this is the answer."))
+           (view (chat-view-block "*zz-unused*" (list 0 10 "user" brief) '()))
+           (summary (car (plist-get view 'children))))
+      (check-equal! (plist-get view 'tag) "details" "folded")
+      (check-equal! (plist-get view 'attrs) '(("author" "agent") ("kind" "event")) "the agent's, not the user's")
+      (check-equal! (plist-get summary 'text) "⚡ job:tests done — 31 tests, 0 failures" "the summary on top")
+      (check-equal! (plist-get (cadr (plist-get view 'children)) 'text) brief "the whole brief inside")
+      (check-equal! (plist-get (chat-view-block "*zz-unused*" (list 0 10 "user" "hello") '()) 'tag)
+                    "c-user" "a typed message stays YOU"))))

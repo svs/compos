@@ -49,11 +49,12 @@ Reactivity is a core capability. A turn that waits on slow work ends at once, an
 - `(agent-listen! '(topic "TOPIC" kind KIND) NOTE)` wakes this chat when an event on TOPIC arrives; a trailing `*` matches a prefix, and 'match needs text in the event's data.
 - `(event-publish! TOPIC KIND DATA)` sends the event. Put it in the callback of your slow work, so that the end of the work is the wake.
 - `(shell-command->string CMD DIR CALLBACK)` runs a long command in a task and gives CALLBACK the output. Without CALLBACK, the shell time limit kills it.
+- The event's data is what wakes you, so send only what you will act on. Write the command so its output is the answer: the result line and the failures, not the build log.
 - `(agent-listeners)` lists the listeners, each with its chat and topic; `(agent-unlisten! ID)` stops one.
 - `'(at "YYYY-MM-DD HH:MM")` is only for a real time, such as a meeting or a deadline, or a fallback for work that cannot notify you.
 
 ```scheme
 (agent-listen! '(topic "job:tests" kind done) "read the test result")
-(shell-command->string "mix test ..." (default-directory)
+(shell-command->string "mix test ... 2>&1 | grep -A20 -E '^  [0-9]+\\) |tests?, ' | tail -80" (default-directory)
   (lambda (out) (event-publish! "job:tests" 'done out)))
 ```

@@ -552,7 +552,7 @@
                                      ((equal? state "frozen") "good")
                                      (else "dim"))))
               (if (equal? state "stale")
-                  (list (dash--row "adopt" "C-c t"))
+                  (list (dash--row "adopt" "M-x chat-refresh-tools"))
                   '())
               ;; a server that is not ready serves nothing, and the count
               ;; above says so without saying why. Name it at any count:

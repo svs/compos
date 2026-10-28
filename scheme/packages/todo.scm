@@ -1770,7 +1770,7 @@
 
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway
-(define-command "chat-todo" "File a task for this chat: assigned to it, in doing, titled after it"
+(define-command "chat-todo" "Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes"
   (lambda ()
     (let* ((chat (current-buffer))
            (who (and (chat-buffer? chat) (chat-stable-id! chat)))
@@ -1778,14 +1778,20 @@
       (cond ((not who) (message "Not a chat"))
             ((pair? held) (message (string-append "This chat holds " (plist-get (car held) 'id))))
             (else
-             (read-string "Task: "
+             (read-string "Task (blank: from the chat): "
                (lambda (s)
-                 (let* ((g (buffer-group chat))
+                 (let* ((blank? (todo--blank? s))
+                        (title (if blank? (chat-title-of chat) s))
+                        (summary (buffer-local chat 'chat-summary))
+                        (g (buffer-group chat))
                         (name (and g (group-name g)))
-                        (id (todo-create s (list 'project (if (member name (todo-projects)) name todo-default-project)
-                                                 'state "doing" 'assignee who 'group g))))
+                        (id (todo-create title (append (list 'project (if (member name (todo-projects)) name todo-default-project)
+                                                             'state "doing" 'assignee who 'group g)
+                                                       (if (and blank? (string? summary) (not (todo--blank? summary)))
+                                                           (list 'notes summary)
+                                                           '())))))
                    (todo--refresh-all!)
-                   (message (string-append "Filed " id))))
+                   (message (string-append "Filed " id ": " title))))
                'initial chat))))))
 
 (define (todo--view-set! buf name)

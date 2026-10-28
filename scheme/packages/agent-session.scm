@@ -981,7 +981,7 @@
     ("C-c C-a" "agent-permission-always")
     ("C-c C-n" "agent-permission-deny")
     ("C-c p" "chat-set-permission-mode")
-    ("C-c t" "chat-refresh-tools")
+    ("C-c t" "chat-todo")
     ("C-c C-d" "chat-unqueue")
     ("C-c C-v" "chat-toggle-view")))
 

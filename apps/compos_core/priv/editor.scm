@@ -4787,44 +4787,6 @@
   (filter (lambda (c) (not (equal? (car c) (current-buffer))))
           (buffer-candidates-all)))
 
-;; A prompt over every buffer opens on the live ones alone and gains the
-;; sleeping ones after its first draw. The draw then waits on ~100
-;; annotations, not ~1000, and every row is annotated before the filter
-;; needs it.
-(define (buffer-candidate-names)
-  (filter (lambda (b)
-            (and (not (string-prefix? " " b))
-                 (not (buffer-context-only? b))
-                 (not (equal? b (current-buffer)))))
-          (buffer-list-mru)))
-
-(define (buffer-candidates-live)
-  (let ((live (buffer-list)))
-    (annotate 'buffer (filter (lambda (b) (member b live)) (buffer-candidate-names)))))
-
-(define (buffer-candidates-fill! head)
-  ;; HEAD is the rows the prompt shows above the buffers. The live rows keep
-  ;; their order at the top, so the highlight finds its row again.
-  (let* ((frame (selected-frame))
-         (live (buffer-list))
-         (names (buffer-candidate-names))
-         (awake (filter (lambda (b) (member b live)) names)))
-    (debounce! 'buffer-candidates-fill 0
-      (lambda (_)
-        (with-selected-frame frame
-          (lambda ()
-            (when (minibuffer-active?)
-              (let ((sel (minibuffer-selected)))
-                (minibuffer-set-candidates!
-                  (append head
-                          (annotate 'buffer
-                            (append awake (remove (lambda (b) (member b live)) names)))))
-                (let loop ((n (+ (length head) (length awake))))
-                  (when (and (> n 0) (string? sel) (not (equal? (minibuffer-selected) sel)))
-                    (minibuffer-next!)
-                    (loop (- n 1)))))))))
-      #f)))
-
 ;; the buffer prompt's extension seam (dup #6). The command calls this
 ;; at prompt open with the base candidates; it returns (pool standing
 ;; pick). POOL is the full candidate list. STANDING is where you are
@@ -4966,14 +4928,13 @@
       ;; the annotation matches too: a mode, group, project or workspace
       ;; name finds every buffer in it
       (minibuffer-read* (string-append "Kill buffer (default " cur "): ")
-        (append head (buffer-candidates-live))
+        (append head (buffer-candidates))
         (list (list 'confirm
                     (lambda (name)
                       (kill-buffer-confirm! (if (equal? name "") cur name)
                                             (lambda (killed?) #t))))
               (list 'match-hint 5)
-              (list 'style #f)))
-      (buffer-candidates-fill! head))))
+              (list 'style #f))))))
 
 (domain! 'processes)
 (effects! '(write execute))

@@ -287,18 +287,23 @@
 
 ;; the preset palette, with the glyphs following the box, not the chat
 (define (llm-config--preset-candidates)
+  ;; presets (servers bundled with their prompt) above the bare MCP servers,
+  ;; each under its own separator
   (let* ((loaded (llm-config--with-compos (llm-config--box-get 'presets)))
-         (names (map car *chat-presets*)))
+         (names (map car *chat-presets*))
+         (servers (filter (lambda (srv) (not (member (car srv) names))) *mcp-registry*)))
     (append
+      (list (list "Presets" "" "separator"))
       (map (lambda (e)
              (list (symbol->string (car e))
                    (string-append (if (member (car e) loaded) "● " "○ ")
                                   (plist-get (car (cdr e)) 'description))))
            *chat-presets*)
+      (if (null? servers) '() (list (list "MCP servers" "" "separator")))
       (map (lambda (srv)
              (list (symbol->string (car srv))
                    (string-append (if (member (car srv) loaded) "● " "○ ") "server")))
-           (filter (lambda (srv) (not (member (car srv) names))) *mcp-registry*)))))
+           servers))))
 
 (define (llm-config--toggle-preset! name)
   (let ((loaded (llm-config--with-compos (llm-config--box-get 'presets))))

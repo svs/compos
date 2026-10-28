@@ -1987,6 +1987,45 @@ defmodule Compos.Core.SchemeAPI do
           Compos.Core.BufferMeta.set_handler(handler)
           :void
         end,
+      {"meta-db-annotations",
+       "(meta-db-annotations NAMES PINNED PIN-ICON) — ((NAME HINT FACE) ...) in the order of NAMES, read from meta.db in one query: the buffer annotator's columns, padded. HINT is #f for a buffer with no labels yet; FACE is #f for a buffer in no group. PINNED is the frame's pinned group id, which PIN-ICON follows."} =>
+        fn [names, pinned, pin_icon] ->
+          Compos.Core.MetaDb.ensure_started()
+
+          Compos.Core.MetaDb.annotations(names, pinned, pin_icon)
+          |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
+        end,
+      {"meta-db-labels!",
+       "(meta-db-labels! ROWS) — write what only Scheme knows of some buffers into meta.db: ROWS is ((NAME ICON PROJECT WORKSPACE) ...)."} =>
+        fn [rows] ->
+          Compos.Core.MetaDb.ensure_started()
+          Compos.Core.MetaDb.put_labels(rows)
+          :void
+        end,
+      {"meta-db-groups!",
+       "(meta-db-groups! GROUPS) — every group into meta.db: GROUPS is ((ID LABEL FACE NOTE) ...). An unchanged list writes nothing."} =>
+        fn [groups] ->
+          Compos.Core.MetaDb.ensure_started()
+          Compos.Core.MetaDb.put_groups(groups)
+          :void
+        end,
+      {"meta-query",
+       "(meta-query [SPEC]) — (TOTAL ROWS) from meta.db, one SQL query. SPEC is a plist: names, modes, groups (ids), match (space-separated terms, each a case-blind substring of the name, title, path, mode, group label, project or workspace), hidden, context-only, sort (recent name), offset, limit, fields (path mode title group group-label modified read-only icon project workspace). A row is (NAME FIELD-VALUES...); missing values are #f."} =>
+        fn args ->
+          Compos.Core.MetaDb.ensure_started()
+          spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
+
+          opts =
+            spec
+            |> Enum.chunk_every(2)
+            |> Map.new(fn
+              [k, v] -> {plain(k), rows_opt(v)}
+              [k] -> {plain(k), true}
+            end)
+
+          {total, rows} = Compos.Core.MetaDb.query(opts)
+          [total, Enum.map(rows, fn row -> Enum.map(row, &(&1 || false)) end)]
+        end,
       {"buffer-read-many",
        "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id."} =>
         fn [names, fields, keys] ->

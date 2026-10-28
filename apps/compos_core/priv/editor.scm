@@ -1245,12 +1245,15 @@
                               *annotate-memo*)))
               v)))))
 
-;; a category with no annotator hands its candidates back as plain labels
+;; a category with no annotator hands its candidates back as plain labels;
+;; buffers read theirs from meta.db (buffer-annotations-db)
 (define (annotate category names)
   (let ((f (marginalia-for category))
         (outer *annotate-memo*))
-    (if (not f)
-        names
+    (cond
+      ((not f) names)
+      ((eq? category 'buffer) (buffer-annotations-db names))
+      (else
         (begin
           (set! *annotate-memo* '())
           (unwind-protect
@@ -1268,7 +1271,7 @@
                                         (list name hint "candidate" '() face)
                                         (list name hint))
                                     out)))))))
-            (lambda () (set! *annotate-memo* outer)))))))
+            (lambda () (set! *annotate-memo* outer))))))))
 
 ;;; --- connections --------------------------------------------------------------
 ;;; conn-list, conn-detail and conn-log answer for every connection kind
@@ -4725,6 +4728,46 @@
                      (let ((g (buffer-group b)))
                        (and g (annotate-once (list 'meta g) (lambda () (group-meta g))))))
                 "")))))
+
+;; meta.db holds a row for every buffer, which core keeps (MetaDb). Scheme
+;; adds what only it knows: a buffer's icon, project and workspace, written
+;; when core reports the buffer changed, and each group's label, face and
+;; note. A buffer prompt then reads its annotations in one query, not by
+;; working out every column of every buffer each time it opens.
+(define (buffer-meta-label! names)
+  (let ((known (filter buffer-known? names)))
+    (unless (null? known)
+      (meta-db-labels!
+        (map (lambda (b)
+               (list b (buffer-icon b) (buffer-project-label b) (buffer-workspace-label b)))
+             known)))))
+
+(buffer-meta-handler! (lambda (batch) (buffer-meta-label! (map car batch))))
+
+(define (meta-db-groups-sync!)
+  (meta-db-groups!
+    (map (lambda (r)
+           (let ((id (group-record-id r))
+                 (note (group-record-meta r)))
+             (list id (group-short-name id) (group-color-face id)
+                   (if (string? note) note #f))))
+         *group-records*)))
+
+;; the buffer annotator's rows, from meta.db; a buffer with no labels yet
+;; gets them now, once
+(define (buffer-annotations-db names)
+  (meta-db-groups-sync!)
+  (let* ((ask (lambda ()
+                (meta-db-annotations names
+                                    (or (group-pinned-in (selected-frame)) #f)
+                                    *group-pin-icon*)))
+         (rows (ask))
+         (bare (map car (filter (lambda (r) (not (cadr r))) rows)))
+         (rows (if (null? bare) rows (begin (buffer-meta-label! bare) (ask)))))
+    (map (lambda (r)
+           (let ((hint (or (cadr r) "")) (face (caddr r)))
+             (if face (list (car r) hint "candidate" '() face) (list (car r) hint))))
+         rows)))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
 ;; marginalia annotator supplies the rest, MRU-ordered — the recency

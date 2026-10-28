@@ -76,6 +76,8 @@ defmodule Compos.Core.BufferView do
     :ets.delete(@table, {:use, name})
     :ets.match_delete(@table, {{:big_local, name, :_}, :_})
     Process.delete({__MODULE__, :big, name})
+    # the one place a row goes: a kill or the name a rename leaves
+    Compos.Core.Events.broadcast_meta(name, %{killed: true})
     :ok
   rescue
     # the table is gone (see `lookup/1`) — there is no row to drop

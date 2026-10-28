@@ -77,6 +77,8 @@ defmodule Compos.Core.Application do
       Compos.Core.BufferStore,
       # every buffer's metadata changes, batched, to the Scheme handler
       Compos.Core.BufferMeta,
+      # the buffer metadata as SQLite rows, meta.db
+      Compos.Core.MetaDb,
       Compos.Core.Reactor,
       Compos.Core.Watch,
       Compos.Core.Editor,

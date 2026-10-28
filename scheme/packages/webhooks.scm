@@ -32,6 +32,14 @@
   "The webhooks M-x webhook-define made, as (NAME PATH TOKEN) rows; each one publishes webhook:NAME events."
   'group 'webhooks 'type 'sexp)
 
+(defcustom 'webhooks-tunnel-host #f
+  "The public hostname of the Cloudflare tunnel in front of the server, such as compos.example.com; #f when there is none."
+  'group 'webhooks 'type 'string)
+
+(defcustom 'webhooks-tunnel-token #f
+  "The connector token of that Cloudflare tunnel; cloudflared runs with it while the server listens."
+  'group 'webhooks 'type 'secret 'env "WEBHOOKS_TUNNEL_TOKEN")
+
 (defcustom 'webhooks-enabled #f
   "Start the webhook server when this package loads."
   'group 'webhooks 'type 'boolean)
@@ -61,6 +69,10 @@
   (let ((peers (plist-get hook 'peers)))
     (or (not peers) (and (member (plist-get request 'remote-address) peers) #t))))
 
+(define (webhooks--tunneled? request)
+  "(webhooks--tunneled? REQUEST) — #t when REQUEST came in through the Cloudflare tunnel"
+  (and (webhooks--header request "cf-ray") #t))
+
 (define (webhooks--json request)
   "(webhooks--json REQUEST) — the parsed body when it is JSON, else #f"
   (let ((type (or (webhooks--header request "content-type") ""))
@@ -87,14 +99,21 @@
        (registry-list 'webhook)))
 
 (define (webhook-url name)
-  "(webhook-url NAME) — the URL of endpoint NAME on the running server, or #f"
+  "(webhook-url NAME) — the URL of endpoint NAME on the running server, the tunnel's when it is up, or #f"
   (let ((hook (webhook-get name)))
     (and hook *webhooks-server*
-         (string-append (plist-get *webhooks-server* 'url) (plist-get hook 'path)))))
+         (string-append (if (and (plist-get hook 'public) (webhooks-tunnel-up?))
+                            (string-append "https://" webhooks-tunnel-host)
+                            (plist-get *webhooks-server* 'url))
+                        (plist-get hook 'path)))))
 
 (define (webhooks-running?)
   "(webhooks-running?) — #t while the webhook server listens"
   (and *webhooks-server* #t))
+
+(define (webhooks-tunnel-up?)
+  "(webhooks-tunnel-up?) — #t while cloudflared carries the tunnel"
+  (and webhooks-tunnel-host (endpoint-connected? "webhooks-tunnel")))
 
 (effects! '(write))
 
@@ -115,7 +134,8 @@
   (let* ((path (plist-get request 'path))
          (hit (filter (lambda (e) (equal? (plist-get (cadr e) 'path) path)) (registry-list 'webhook)))
          (hook (and (pair? hit) (cadr (car hit)))))
-    (cond ((not hook) (webhooks--reply 404 "not found"))
+    (cond ((or (not hook) (and (webhooks--tunneled? request) (not (plist-get hook 'public))))
+           (webhooks--reply 404 "not found"))
           ((not (member (plist-get request 'method) (plist-get hook 'methods)))
            (webhooks--reply 405 "method not allowed"))
           ((not (webhooks--peer-ok? hook request)) (webhooks--reply 403 "forbidden"))
@@ -130,7 +150,7 @@
                         (webhooks--reply 200 "ok"))))))))
 
 (define (define-webhook! name &optional opts handler)
-  "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace endpoint NAME; OPTS is a plist of 'path (default /hooks/NAME), 'methods (default POST only), 'token, 'peers and 'data ('json: the event's data is the JSON body alone)"
+  "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace endpoint NAME; OPTS is a plist of 'path (default /hooks/NAME), 'methods (default POST only), 'token, 'peers, 'data ('json: the event's data is the JSON body alone) and 'public (#t: it answers through the tunnel too)"
   (let* ((opts (or opts '()))
          (path (or (plist-get opts 'path) (string-append "/hooks/" name)))
          (hook (list 'name name
@@ -139,6 +159,7 @@
                      'token (plist-get opts 'token)
                      'peers (plist-get opts 'peers)
                      'data (plist-get opts 'data)
+                     'public (and (plist-get opts 'public) #t)
                      'handler handler))
          (clash (filter (lambda (e) (and (not (equal? (car e) name))
                                          (equal? (plist-get (cadr e) 'path) (plist-get hook 'path))))
@@ -190,11 +211,27 @@
                                (list 'host webhooks-host 'port webhooks-port
                                      'max-body webhooks-max-body)
                                (lambda (request) (webhooks--handle request)))))))
+  (webhooks--tunnel-start!)
   (plist-get *webhooks-server* 'url))
+
+(define (webhooks--tunnel-start!)
+  (let ((token (secret-value 'webhooks-tunnel-token)))
+    (when (and webhooks-tunnel-host token)
+      (ignore-errors (lambda () (endpoint-stop! "webhooks-tunnel")))
+      ;; from a task, like the server: the caller's lane may be gone after its turn
+      (task-await
+       (task-spawn
+        (lambda ()
+          (endpoint-start! "webhooks-tunnel"
+                           (list 'command "cloudflared"
+                                 'args (list "tunnel" "--no-autoupdate" "run")
+                                 'env (list 'TUNNEL_TOKEN token)
+                                 'framing "raw"))))))))
 
 (define (webhooks-stop!)
   "(webhooks-stop!) — stop the webhook server; the endpoints stay defined"
   (web-server-stop! "webhooks")
+  (ignore-errors (lambda () (endpoint-stop! "webhooks-tunnel")))
   (set! *webhooks-server* #f)
   #t)
 
@@ -229,7 +266,8 @@
                  (let ((opts (if (> (length row) 3) (list-ref row 3) '())))
                    (define-webhook! (car row) (list 'path (cadr row) 'token (caddr row)
                                                     'methods (plist-get opts 'methods)
-                                                    'data (plist-get opts 'data)))
+                                                    'data (plist-get opts 'data)
+                                                    'public (plist-get opts 'public)))
                    (when (plist-get opts 'workflow)
                      (webhook-attach-workflow! (car row) (string->symbol (plist-get opts 'workflow))))))))
             webhooks-saved))
@@ -245,6 +283,7 @@
                            (append rest (list (list name (plist-get hook 'path) (plist-get hook 'token)
                                                     (list 'methods (plist-get hook 'methods)
                                                           'data (plist-get hook 'data)
+                                                          'public (plist-get hook 'public)
                                                           'workflow (if wf (symbol->string wf) #f)))))
                            rest)))))
 
@@ -309,18 +348,22 @@
   (let ((hook (webhook-get name)))
     (if (not hook)
         (list (list name "webhooks-name") (list "" "faint") (list "" "faint")
-              (list "" "faint") (list "" "faint") (list "" "faint"))
+              (list "" "faint") (list "" "faint") (list "" "faint") (list "" "faint"))
         (list (list name "webhooks-name")
               (list (plist-get hook 'path) "webhooks-path")
               (list (string-join (plist-get hook 'methods) ",") "dim")
               (list (if (plist-get hook 'token) "yes" "-") "dim")
+              (list (if (plist-get hook 'public) "public" "local") "dim")
               (list (webhooks--last name) "dim")
               (list (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)) "default")))))
 
 (define (webhooks--meta buf)
   (string-append (number->string (length (registry-names 'webhook))) " endpoints · "
                  (if (webhooks-running?)
-                     (string-append "listening on " webhooks-host ":" (number->string webhooks-port))
+                     (string-append "listening on " webhooks-host ":" (number->string webhooks-port)
+                                    (cond ((webhooks-tunnel-up?) (string-append " · tunnel https://" webhooks-tunnel-host))
+                                          (webhooks-tunnel-host " · tunnel down")
+                                          (else "")))
                      "server stopped, s starts it")))
 
 (define (webhooks--on-current fn)
@@ -354,7 +397,9 @@
                         (list 'path (if (webhooks--blank? path) #f (string-trim path))
                               'methods (webhooks--methods methods)
                               'token (if (webhooks--blank? token) #f (string-trim token))
-                              'peers (plist-get hook 'peers))
+                              'peers (plist-get hook 'peers)
+                              'data (plist-get hook 'data)
+                              'public (plist-get hook 'public))
                         (plist-get hook 'handler))
                       (webhooks--keep! name)
                       (webhooks--said name "changed"))
@@ -399,6 +444,19 @@
               (begin (kill-new url) (message (string-append "copied " url)))
               (message "the server is stopped, s starts it")))))))
 
+(define-command "webhooks-toggle-public" "Let the webhook on this line answer through the tunnel, or keep it local"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (let ((hook (webhook-get name)))
+          (define-webhook! name
+            (list 'path (plist-get hook 'path) 'methods (plist-get hook 'methods)
+                  'token (plist-get hook 'token) 'peers (plist-get hook 'peers)
+                  'data (plist-get hook 'data) 'public (not (plist-get hook 'public)))
+            (plist-get hook 'handler))
+          (webhooks--keep! name)
+          (webhooks--said name (if (plist-get (webhook-get name) 'public) "is public" "is local")))))))
+
 (define-command "webhooks-toggle-server" "Start the webhook server, or stop it"
   (lambda ()
     (if (webhooks-running?)
@@ -418,14 +476,14 @@
            "The webhook endpoints: path, methods, whether a token guards it, the last request, "
            "and the workflow that handles its events. c defines one, e edits the path, "
            "methods and token, w attaches a workflow handler, W stops it, k removes the "
-           "endpoint, y copies its URL, s starts or stops the server, g redraws, "
+           "endpoint, p makes it public through the tunnel or local again, y copies its URL, s starts or stops the server, g redraws, "
            "/ narrows, and q quits.")
     'buffer *webhooks-buffer*
     'transient #f
     'rows (lambda (buf) (registry-names 'webhook))
     'columns (lambda (buf)
                (list (list "webhook" 16) (list "path" 22) (list "methods" 10)
-                     (list "token" 6) (list "last request" 17) (list "workflow" #f)))
+                     (list "token" 6) (list "reach" 7) (list "last request" 17) (list "workflow" #f)))
     'cells webhooks--cells
     'title (lambda (buf) "Webhooks")
     'meta webhooks--meta
@@ -433,10 +491,10 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("c" "define") ("e" "edit") ("w" "workflow") ("k" "remove")
-                ("s" "server") ("/" "filter") ("q" "quit")))
+                ("p" "public") ("s" "server") ("/" "filter") ("q" "quit")))
     'keys '(("c" "webhook-define") ("e" "webhooks-edit")
             ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
-            ("k" "webhooks-remove") ("y" "webhooks-copy-url")
+            ("k" "webhooks-remove") ("p" "webhooks-toggle-public") ("y" "webhooks-copy-url")
             ("s" "webhooks-toggle-server") ("g" "webhooks-refresh")
             ("q" "quit-window"))))
 
@@ -444,7 +502,7 @@
   (lambda () (list-mode-show! "webhooks-mode")))
 
 (effects! '(write))
-(public! 'define-webhook! "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace webhook endpoint NAME. OPTS: 'path (default /hooks/NAME), 'methods (default POST only), 'token (checked against the x-webhook-token header or Authorization: Bearer), 'peers (the remote addresses allowed). HANDLER gets the request plist plus 'webhook and 'json, and answers a response plist, a body string, or anything else for ok. Without HANDLER each request becomes a webhook:NAME event")
+(public! 'define-webhook! "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace webhook endpoint NAME. OPTS: 'path (default /hooks/NAME), 'methods (default POST only), 'token (checked against the x-webhook-token header or Authorization: Bearer), 'peers (the remote addresses allowed), 'data ('json: the event data is the JSON body alone), 'public (#t: it answers through the Cloudflare tunnel; else a tunneled request gets 404). HANDLER gets the request plist plus 'webhook and 'json, and answers a response plist, a body string, or anything else for ok. Without HANDLER each request becomes a webhook:NAME event")
 (public! 'webhook-remove! "(webhook-remove! NAME) — drop webhook endpoint NAME")
 (public! 'webhook-attach-workflow! "(webhook-attach-workflow! NAME HANDLER) — run (HANDLER KEY EVENTS) on every webhook:NAME event, as the workflow webhook-NAME; give HANDLER as a quoted name")
 (public! 'webhook-detach-workflow! "(webhook-detach-workflow! NAME) — stop the workflow on webhook NAME")
@@ -452,6 +510,7 @@
 (public! 'webhook-get "(webhook-get NAME) — the webhook endpoint plist named NAME, or #f")
 (public! 'webhook-list "(webhook-list) — every webhook endpoint as (NAME METHODS PATH)")
 (public! 'webhook-url "(webhook-url NAME) — the URL of webhook NAME on the running server, or #f")
+(public! 'webhooks-tunnel-up? "(webhooks-tunnel-up?) — #t while cloudflared carries the tunnel to webhooks-tunnel-host")
 (public! 'webhooks-running? "(webhooks-running?) — #t while the webhook server listens")
 (public! 'webhook-workflow "(webhook-workflow NAME) — the handler of the workflow attached to webhook NAME, or #f")
 (effects! '(write external))

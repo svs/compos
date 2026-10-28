@@ -54,6 +54,21 @@
       (check-false! (plist-get (plist-get (car es) 'data) 'headers) "the headers stay out"))
     (webhook-remove! "zz-test-json")))
 
+(deftest 'webhooks-only-public-endpoints-answer-the-tunnel
+  "a request through the tunnel reaches a public endpoint; a local one answers it 404"
+  (lambda ()
+    (define-webhook! "zz-test-local" '())
+    (define-webhook! "zz-test-public" (list 'public #t))
+    (let ((tunneled '(("cf-ray" "8f00-DXB"))))
+      (check-true! (equal? 404 (webhooks-test--status (webhooks--handle (webhooks-test--request "POST" "/hooks/zz-test-local" tunneled ""))))
+                   "a local endpoint is 404 through the tunnel")
+      (check-true! (equal? 200 (webhooks-test--status (webhooks--handle (webhooks-test--request "POST" "/hooks/zz-test-local"))))
+                   "a local endpoint answers on this machine")
+      (check-true! (equal? 200 (webhooks-test--status (webhooks--handle (webhooks-test--request "POST" "/hooks/zz-test-public" tunneled ""))))
+                   "a public endpoint answers through the tunnel"))
+    (webhook-remove! "zz-test-local")
+    (webhook-remove! "zz-test-public")))
+
 (deftest 'webhooks-saved-endpoints-come-back
   "an endpoint webhook-define kept is defined again from webhooks-saved"
   (lambda ()
@@ -73,17 +88,18 @@
   (lambda ()
     (let ((saved webhooks-saved))
       (set! webhooks-saved (list (list "zz-test-wf" "/hooks/zz-test-wf" #f
-                                       (list 'methods (list "POST" "PUT") 'data 'json
+                                       (list 'methods (list "POST" "PUT") 'data 'json 'public #t
                                              'workflow "webhooks-test--handler"))))
       (webhooks--define-saved!)
       (set! webhooks-saved saved))
     (check-true! (equal? (list "POST" "PUT") (plist-get (webhook-get "zz-test-wf") 'methods))
                  "it keeps its methods")
     (check-true! (eq? 'json (plist-get (webhook-get "zz-test-wf") 'data)) "it keeps its data shape")
+    (check-true! (plist-get (webhook-get "zz-test-wf") 'public) "it stays public")
     (check-true! (eq? 'webhooks-test--handler (webhook-workflow "zz-test-wf")) "it keeps its workflow")
     (check-true! (member "webhook-zz-test-wf" (workflow-names)) "the workflow runs")
     (check-true! (string-prefix? "webhooks-test--handler"
-                                 (car (list-ref (webhooks--cells #f "zz-test-wf") 5)))
+                                 (car (list-ref (webhooks--cells #f "zz-test-wf") 6)))
                  "the row names the handler")
     (webhook-detach-workflow! "zz-test-wf")
     (check-false! (webhook-workflow "zz-test-wf") "detach forgets the workflow")

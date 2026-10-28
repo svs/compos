@@ -2756,8 +2756,6 @@ is forgotten and that group falls back to creation order in the switcher."
                               (> group-switch-preview-ms 0))
                      (debounce! "group-switch-preview" group-switch-preview-ms
                                 preview-now! name)))))
-          (set! *group-switch-rows* (cdr prompt-rows))
-          (set! *group-switch-restore* restore!)
           (begin
               (minibuffer-read-preview "Switch group: " candidates
                 preview!
@@ -2784,6 +2782,11 @@ is forgotten and that group falls back to creation order in the switcher."
                   (sleep-woken!))
                 #f
                 group-switch-style)
+              ;; after the prompt opens: opening it cancels an outer
+              ;; switcher, whose close! empties these, and RET on
+              ;; "compos" then found no row and tried to create it
+              (set! *group-switch-rows* (cdr prompt-rows))
+              (set! *group-switch-restore* restore!)
               (set-frame-local! 'group-switch-new-action action)
               (buffer-minor-maps! (minibuffer-buffer)
                 (cons "group-switch-modal-map"

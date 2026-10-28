@@ -944,9 +944,12 @@
 ;;; --- housekeeping ---------------------------------------------------------------
 
 (define (panes-validate layout live?)
-  "Buffers that LIVE? rejects leave every stack; emptied windows close.
-   Their panes stay."
-  (fold (lambda (l b) (if (live? b) l (panes-drop-buffer l b))) layout (panes-buffers layout)))
+  "Buffers that LIVE? rejects leave every stack; emptied windows close,
+   and so does a window saved with no buffer, which would leave its pane
+   nothing to draw and the whole draw undone. Their panes stay."
+  (let ((l (fold (lambda (l b) (if (live? b) l (panes-drop-buffer l b))) layout (panes-buffers layout))))
+    (fold (lambda (l k) (if (null? (panes-window-buffers l k)) (panes-remove-window l k) l))
+          l (panes-window-keys l))))
 
 (define (panes-handle layout key)
   "The frame window of window KEY: KEY itself, the key is the frame

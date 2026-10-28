@@ -1152,6 +1152,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
+(mode-chat-key! "ats-application-mode" (lambda (src) (ats-case-id src)))
 (mode-chat-opening! "ats-application-mode"
   (lambda (src) (string-append "Load (skill \"process-application\") and work " (ats-case-label src) " by it: it routes to the skill for the application's state. Brief me on where it stands, then take the step the skill calls for. If we met the candidate, read the meeting's full transcript over the fireflies MCP (fireflies_search by their email, then fireflies_get_transcript), not just its summary, and tell me my impressions of them from what I said on the call; those impressions decide the step over the skill's default. Use the MCP tools (ats-ash, fireflies, whatsapp and the rest) wherever one covers the step, before any other route." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-opening! "ats-approval-mode"

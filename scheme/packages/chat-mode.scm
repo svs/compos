@@ -550,17 +550,19 @@
 
 (define (llm-mode--companion-remember! buf chat g)
   ;; the page's chat file, so the page finds the same chat after it is archived
-  (when (and g (not (equal? (alist-get (llm-mode--companion-index g) buf) (chat-log-path chat))))
+  (when (and g (not (equal? (alist-get (llm-mode--companion-index g) (chat-key buf)) (chat-log-path chat))))
     (write-file! (llm-mode--companion-index-path g)
-      (value->string (alist-put (llm-mode--companion-index g) buf (chat-log-path chat))))))
+      (value->string (alist-put (llm-mode--companion-index g) (chat-key buf) (chat-log-path chat))))))
 
 (define (llm-mode--companion-recall! buf &optional group)
   ;; no live chat: the archived chat the page had comes back, so a page keeps one chat
   (or (llm-mode--companion-existing buf)
       (let* ((g (or group (buffer-group buf)))
-             (path (and g (alist-get (llm-mode--companion-index g) buf))))
+             (path (and g (alist-get (llm-mode--companion-index g) (chat-key buf)))))
         (and (string? path) (file-exists? path)
-             (begin (visit-in-group path g) (llm-mode--companion-existing buf))))))
+             (let ((c (visit-in-group path g)))
+               (when c (buffer-relate! c 'companion buf))
+               c)))))
 
 (define (llm-mode--companion! buf &optional model group)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
@@ -733,6 +735,12 @@
               (loop (cdr modes)))))))
 
 (define (chat-opening-prompt src) (chat-mode-pick src *chat-openings*))
+
+;; what a page's chat is filed under: a mode names the thing the page shows,
+;; as an ATS application's id, so a rebuilt or renamed page finds the same chat
+(define *chat-keys* (if (boundp '*chat-keys*) *chat-keys* '()))
+(define (mode-chat-key! mode f) (set! *chat-keys* (alist-put *chat-keys* mode f)))
+(define (chat-key src) (or (chat-mode-pick src *chat-keys*) src))
 
 ;; the title a new chat for a buffer takes, the same way: the most specific of its modes that names one
 (define *chat-titles* (if (boundp '*chat-titles*) *chat-titles* '()))

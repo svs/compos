@@ -38,11 +38,10 @@
   (string-join (cons kind (cons (panes-board--gs g) (map (lambda (x) (if (number? x) (number->string x) x)) more))) "|"))
 (define (panes-board--split id)
   ;; at most four parts: a buffer name may hold the separator itself
-  (let loop ((i 0) (start 0) (acc '()))
-    (cond ((= (length acc) 3) (reverse (cons (substring id start (string-length id)) acc)))
-          ((>= i (string-length id)) (reverse (cons (substring id start i) acc)))
-          ((equal? (substring id i (+ i 1)) "|") (loop (+ i 1) (+ i 1) (cons (substring id start i) acc)))
-          (else (loop (+ i 1) start acc)))))
+  (let ((ps (string-split id "|")))
+    (if (> (length ps) 4)
+        (append (list-head ps 3) (list (string-join (list-tail ps 3) "|")))
+        ps)))
 
 (define (panes-board-kind id) (car (panes-board--split id)))
 (define (panes-board-group id) (panes-board--g (cadr (panes-board--split id))))
@@ -57,11 +56,13 @@
 (define (panes-board-here-group) (panes--group-key))
 (define panes-board--layouts-store #f)
 (define panes-board--layouts '())
+(define panes-board--panes '())
 (define (panes-board-layout-of g)
   (let ((store (panes--store)))
     (unless (eq? store panes-board--layouts-store)
       (set! panes-board--layouts-store store)
-      (set! panes-board--layouts '()))
+      (set! panes-board--layouts '())
+      (set! panes-board--panes '()))
     (let ((hit (assoc g panes-board--layouts)))
       (if hit
           (cadr hit)
@@ -73,7 +74,16 @@
 (define (panes-board-pane-of id)
   (let ((kind (panes-board-kind id)))
     (cond ((equal? kind "p") (panes-board-key id))
-          ((member kind '("w" "b")) (let ((l (panes-board-row-layout id))) (and l (panes-pane-of l (panes-board-key id)))))
+          ;; panes-pane-of normalizes and walks the whole tree, ~2 ms; a row asks
+          ;; several times a draw, so remember it as long as the layouts are
+          ((member kind '("w" "b"))
+           (let* ((l (panes-board-row-layout id)) (at (list (panes-board-group id) (panes-board-key id)))
+                  (hit (assoc at panes-board--panes)))
+             (if hit
+                 (cadr hit)
+                 (let ((pid (and l (panes-pane-of l (panes-board-key id)))))
+                   (set! panes-board--panes (cons (list at pid) panes-board--panes))
+                   pid))))
           (else #f))))
 
 (define (panes-board-view buf) (or (buffer-local buf 'panes-board-view) 'all))
@@ -624,10 +634,14 @@
     ;; a root left from an older model is not a row it can draw
     (buffer-set-local! buf 'panes-board-view view)
     (buffer-set-local! buf 'panes-board-root root)
-    (with-current-buffer buf (lambda () (set-mode! "panes-list-mode")))
+    ;; a board already in its mode draws once, below; set-mode! would draw too
+    (unless (buffer-derived-mode? buf "panes-list-mode")
+      (with-current-buffer buf (lambda () (set-mode! "panes-list-mode"))))
     ;; a buffer like any other: it opens in this window, and q goes back
     (switch-to-buffer! buf)
     (list-refresh! buf)
+    ;; drawn on the frame as it is now: the follow after this command has nothing to add
+    (set! panes-board--drawn (panes-board--key))
     ;; the list opens on the window you are in
     (let ((i (and here (list-index-of buf (list-entries buf) (panes-board--id "w" (panes-board-here-group) here)))))
       (when i (list-goto-index! buf i)))
@@ -638,6 +652,8 @@
 
 ;; the board follows the frame while it is on screen
 (define panes-board--drawn #f)
+(define (panes-board--key)
+  (list (selected-frame) (panes--group-key) (active-window) (window-list) (frame-local 'panes-layouts)))
 (define (panes-board-follow!)
   ;; the board is a projection of the models, the group and the focus: a
   ;; window change that moved none of them draws nothing (a draw is ~70 ms).
@@ -646,8 +662,7 @@
   (let ((board (find (lambda (b) (and (string? b) (buffer-derived-mode? b "panes-list-mode")))
                      (map (lambda (w) (window-buffer (car w))) (window-list)))))
     (when board
-      (let ((key (list (selected-frame) (panes--group-key) (active-window) (window-list)
-                       (frame-local 'panes-layouts))))
+      (let ((key (panes-board--key)))
         (unless (equal? key panes-board--drawn)
           (set! panes-board--drawn key)
           (list-refresh! board))))))

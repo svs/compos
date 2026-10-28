@@ -40,6 +40,20 @@
                   "the second endpoint on a path is refused")
     (webhook-remove! "zz-test-a")))
 
+(deftest 'webhooks-json-data-is-the-payload
+  "an endpoint with 'data 'json publishes the parsed body alone as the event's data"
+  (lambda ()
+    (define-webhook! "zz-test-json" (list 'data 'json))
+    (webhooks--handle (webhooks-test--request "POST" "/hooks/zz-test-json"
+                                              '(("content-type" "application/json"))
+                                              "{\"kind\":\"transition\",\"application_id\":\"a1\"}"))
+    (let ((es (event-log-newest "webhook:zz-test-json" 1)))
+      (check-true! (pair? es) "the request is an event")
+      (check-true! (equal? "a1" (plist-get (plist-get (car es) 'data) 'application_id))
+                   "the data is the JSON body")
+      (check-false! (plist-get (plist-get (car es) 'data) 'headers) "the headers stay out"))
+    (webhook-remove! "zz-test-json")))
+
 (deftest 'webhooks-saved-endpoints-come-back
   "an endpoint webhook-define kept is defined again from webhooks-saved"
   (lambda ()
@@ -59,12 +73,13 @@
   (lambda ()
     (let ((saved webhooks-saved))
       (set! webhooks-saved (list (list "zz-test-wf" "/hooks/zz-test-wf" #f
-                                       (list 'methods (list "POST" "PUT")
+                                       (list 'methods (list "POST" "PUT") 'data 'json
                                              'workflow "webhooks-test--handler"))))
       (webhooks--define-saved!)
       (set! webhooks-saved saved))
     (check-true! (equal? (list "POST" "PUT") (plist-get (webhook-get "zz-test-wf") 'methods))
                  "it keeps its methods")
+    (check-true! (eq? 'json (plist-get (webhook-get "zz-test-wf") 'data)) "it keeps its data shape")
     (check-true! (eq? 'webhooks-test--handler (webhook-workflow "zz-test-wf")) "it keeps its workflow")
     (check-true! (member "webhook-zz-test-wf" (workflow-names)) "the workflow runs")
     (check-true! (string-prefix? "webhooks-test--handler"

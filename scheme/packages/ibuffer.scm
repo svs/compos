@@ -519,9 +519,18 @@
           (else #t))))
 
 (define (ibuffer-tab-filter buf names)
-  (if (member (ibuffer-tab buf) '(group window pane))
-      (filter (lambda (n) (or (not (string? n)) (ibuffer-tab-keep? buf n))) names)
-      names))
+  ;; the group tab asks meta.db for the group's members once, not each
+  ;; buffer for its group
+  (let ((tab (ibuffer-tab buf)))
+    (cond ((equal? tab 'group)
+           (let* ((g (frame-group))
+                  (in (if g
+                          (map car (cadr (meta-query (list 'groups (list g) 'hidden #t 'context-only #t))))
+                          '())))
+             (filter (lambda (n) (or (not (string? n)) (member n in))) names)))
+          ((member tab '(window pane))
+           (filter (lambda (n) (or (not (string? n)) (ibuffer-tab-keep? buf n))) names))
+          (else names))))
 
 ;; each opening starts on the tab C-x b opens on
 ;; ibuffer's views: All and Group. A pane's or a window's buffers are the
@@ -1731,7 +1740,11 @@
                   (and (buffer-known? b)
                        (equal? (buffer-local b 'mode-name) mode)
                        (equal? (buffer-group b) group))))
-         (existing (filter fits? (buffer-list-mru))))
+         ;; meta.db: this group's views in that mode, last used first
+         (existing (filter fits?
+                     (map car (cadr (meta-query (list 'modes (list mode)
+                                                      'groups (if group (list group) '())
+                                                      'hidden #t 'context-only #t)))))))
     (cond ((fits? here) here)
           ((pair? existing) (car existing))
           (else

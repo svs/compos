@@ -263,7 +263,7 @@
 
 ;; an application's head: the name, then its stars, state, meeting and fit on one line,
 ;; then its history under them. The site glues the fit to the history ("potential Applied 4 days ago")
-(define (ats-application-head profile title)
+(define (ats-application-head profile title &optional facts)
   (let* ((text (lambda (n) (or (plist-get n 'text) "")))
          (stars (site-app-find (lambda (n) (re-match? "^★+✓?$" (text n))) profile))
          (fit (site-app-find (lambda (n) (re-match? "^(?i)(elite|strong|potential|unfit|maybe) Applied" (text n))) profile)))
@@ -277,7 +277,8 @@
                          (if (or (null? ns) (equal? (car ns) fit)) (reverse acc) (loop (cdr ns) (cons (car ns) acc)))))
                (after (cdr (member fit fields)))
                (words (string-split (text fit) " "))
-               (line (string-join (append (if stars (list (text stars)) '()) (map text before) (list "fit:" (car words))) " "))
+               (line (string-append (string-join (append (if stars (list (text stars)) '()) (map text before) (list "fit:" (car words))) " ")
+                          (if (and facts (not (equal? facts ""))) (string-append " · " facts) "")))
                (history (string-join (cons (string-join (cdr words) " ") (map text after)) " · ")))
           (append (list name (list 'tag "c-field" 'text line) (list 'tag "c-paragraph" 'text history))
                   (filter (lambda (n) (not (equal? (plist-get n 'tag) "c-field"))) profile))))))
@@ -308,7 +309,9 @@
                                'title-href (plist-get data 'job_href)
                                'state (and state-node (ats-transition (plist-get state-node 'text)))
                                'head (ats-application-head (filter (lambda (n) (not (equal? n state-node))) profile)
-                                                           (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))))))
+                                                           (if (equal? job "") "" (string-append job " at " (or (plist-get data 'company) "")))
+                                                           (let ((slug (car (string-split (car (reverse (string-split (or (plist-get data 'candidate_href) "") "/"))) "?"))))
+                                                             (ats-candidate-facts-of slug))))))
         ;; every detail derives from ats-detail-mode and they share a pane; each
         ;; page's kind is a mode derived from it (ats-approval-mode, ats-application-mode, ...)
         'detail-mode "ats-detail-mode"
@@ -1078,18 +1081,50 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (domain! 'web)
 (effects! '(write external))
 ;; the page names only its application, so the API names the candidate and the job
+;; a candidate's years and CTC for the application header, as "4.8y · 16→20 LPA", by slug and by id;
+;; the staff page doesn't show them, so they come from the ATS once per candidate. They live in a
+;; registry: a set! of a package global from an MCP callback does not hold
+(define (ats-candidate-facts c)
+  (let* ((num (lambda (k) (let ((v (plist-get c k))) (and (number? v) (number->string v)))))
+         (yoe (num 'years_of_experience))
+         (now (num 'current_ctc))
+         (want (num 'expected_ctc)))
+    (string-join (append (if yoe (list (string-append yoe "y")) '())
+                         (if (or now want) (list (string-append (or now "?") "→" (or want "?") " LPA")) '()))
+                 " · ")))
+
+(define (ats-candidate-facts-of key)
+  (let ((hit (assoc key (registry-list 'ats-candidate-facts)))) (and hit (cadr hit))))
+
+(define (ats-candidate-facts-fetch! src cand)
+  (unless (ats-candidate-facts-of cand)
+    (mcp-call! 'ats-ash "getCandidateProfile" (json-encode (list 'input (list 'candidate_id cand)))
+      (lambda (ok text)
+        (let* ((v (and ok (string? text) (json-parse text)))
+               (c (if (and (pair? v) (pair? (car v))) (car v) v)))
+          (when (pair? c)
+            (let ((facts (ats-candidate-facts c)))
+              (registry-register! 'ats-candidate-facts cand facts)
+              (registry-register! 'ats-candidate-facts (or (plist-get c 'slug) cand) facts))
+            (when (buffer-known? src) (site-app-draw! src))))))))
+
 (define (ats-case-ids-fetch! src)
-  (let ((app (ats-case-application-id src)))
-    (when (and app (not (buffer-local src 'ats-case-ids)))
-      (mcp-call! 'ats-ash "getApplication" (json-encode (list 'input (list 'application_id app)))
-        (lambda (ok text)
-          (let* ((v (and ok (string? text) (json-parse text)))
-                 (a (if (and (pair? v) (pair? (car v))) (car v) v)))
-            (when (and (pair? a) (buffer-known? src))
-              (buffer-set-local! src 'ats-case-ids
-                (list 'approval-id (ats-case-id src) 'application-id app
-                      'candidate-id (plist-get a 'candidate_id) 'job-id (plist-get a 'job_id))))))))))
+  (let ((app (ats-case-application-id src))
+        (ids (buffer-local src 'ats-case-ids)))
+    (cond ((and ids (plist-get ids 'candidate-id))
+           (ats-candidate-facts-fetch! src (plist-get ids 'candidate-id)))
+          (app
+           (mcp-call! 'ats-ash "getApplication" (json-encode (list 'input (list 'application_id app)))
+             (lambda (ok text)
+               (let* ((v (and ok (string? text) (json-parse text)))
+                      (a (if (and (pair? v) (pair? (car v))) (car v) v)))
+                 (when (and (pair? a) (buffer-known? src))
+                   (buffer-set-local! src 'ats-case-ids
+                     (list 'approval-id (ats-case-id src) 'application-id app
+                           'candidate-id (plist-get a 'candidate_id) 'job-id (plist-get a 'job_id)))
+                   (ats-candidate-facts-fetch! src (plist-get a 'candidate_id))))))))))
 (add-hook! 'ats-approval-mode-hook (lambda () (ats-case-ids-fetch! (current-buffer))))
+(add-hook! 'ats-application-mode-hook (lambda () (ats-case-ids-fetch! (current-buffer))))
 
 (define (ats-case-handle src noun reader)
   (let* ((ids (or (buffer-local src 'ats-case-ids) '()))

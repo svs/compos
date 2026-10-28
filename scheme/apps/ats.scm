@@ -614,6 +614,34 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
             (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
 (minor-mode-keys! "ats-approvals-mode" '(("M-O" "ats-approvals-review")))
+;; the applications list hands its top rows, filtered to a job, to their own chats
+(minor-mode-keys! "ats-applications-mode" '(("M-O" "site-app-bulk-agents")))
+
+;; @ narrows applications and approvals to the job of the row at point. A row's job is one word, the
+;; job's slug, so the list's own filter takes it as job:SLUG and \ pops it.
+(define (ats-slug s)
+  (ats-trim-dashes (re-replace-all "[^a-z0-9]+" (string-downcase (or s "")) "-")))
+(define (ats-trim-dashes s) (re-replace-all "^-+|-+$" s ""))
+(define (ats-row-job buf e)
+  (let ((href (plist-get e 'job_href)))
+    (if (and (string? href) (string-prefix? "/staff/jobs/" href))
+        (substring href 12 (string-length href))
+        (ats-slug (string-append (or (plist-get e 'job) "") " at " (or (plist-get e 'company) ""))))))
+(list-define-filter! "ats-mode" "job:" ats-row-job "the job, as its slug")
+
+(define (ats-job-filter? f) (and (pair? f) (equal? (car f) "match") (string-prefix? "job:" (cadr f))))
+(define-command "ats-filter-job" "Show only the rows of this row's job; again shows every job"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (row (list-current buf))
+           (on? (find ats-job-filter? (list-filters buf))))
+      (buffer-set-local! buf 'list-filters (remove ats-job-filter? (list-filters buf)))
+      (if (or on? (not row))
+          (list-redraw! buf)
+          (list-filter-push! buf (list "match" (string-append "job:" (ats-row-job buf row))))))))
+(catalog-meta! 'command "ats-filter-job" 'domain 'web 'effects '(write display))
+(minor-mode-keys! "ats-applications-mode" '(("@" "ats-filter-job")))
+(minor-mode-keys! "ats-approvals-mode" '(("@" "ats-filter-job")))
 
 ;; / in the candidates list: the site's own search (?q=), over every candidate
 ;; and not only the page drawn. An empty answer shows them all again

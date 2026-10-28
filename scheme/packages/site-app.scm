@@ -347,7 +347,8 @@
                               name)
               tabs))))
 
-(define (site-app-rows buf) (or (site-app-get buf 'rows) '()))
+;; the rows the list shows: the site's rows, narrowed by the list's own filters
+(define (site-app-rows buf) (list-keep buf (or (site-app-get buf 'rows) '())))
 
 ;; A site-app's buffers are one app, named for it: a page is its detail,
 ;; a section its list. app-layout! lays them out by that. Answers the name.
@@ -2700,7 +2701,7 @@
         'buffer buffer
         'transient #f
         'noun "item"
-        'rows site-app-rows
+        'rows (lambda (b) (site-app-rows b))
         'key site-app-row-key
         'columns site-app-columns
         'cells site-app-cells

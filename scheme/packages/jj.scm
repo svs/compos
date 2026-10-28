@@ -111,7 +111,8 @@
 (define (jj-open! root author)
   (let ((want (jj-author-slug author))
         (have (jj-tag root)))
-    (unless (equal? want have)
+    ;; #t when @ changed hands, so the save may fold it into the run's change
+    (and (not (equal? want have))
       (let* ((d (string-trim (jj-at root "description")))
              (retag (and (equal? (jj-at root "empty") "true")
                          (or (equal? d "") (string-prefix? "Agent: " d)))))
@@ -122,7 +123,8 @@
             (begin
               (jj-sh root "jj new 2>&1")
               (when want
-                (jj-sh root (string-append "jj describe -m 'Agent: " want "' 2>&1")))))))))
+                (jj-sh root (string-append "jj describe -m 'Agent: " want "' 2>&1")))))
+        #t))))
 
 (define (jj-snapshot! root)
   (jj-sh root "jj util snapshot 2>&1"))
@@ -170,8 +172,7 @@
   (if (jj-savable? buf)
       (with-current-buffer buf
         (lambda ()
-          ;; open the change before the bytes land, not after
-          (jj-before-save!)
+          ;; buffer-save! opens the change and snapshots: jj-save-around
           (let ((path (buffer-save!)))
             (when path (run-hooks 'after-save-hook))
             path)))
@@ -280,15 +281,42 @@
 ;; whoever last wrote the buffer, which is not always whoever pressed C-x C-s.
 ;; The change opens before the write and the snapshot closes after it, because
 ;; jj reads only what is on disk when a command runs.
-(define (jj-before-save!)
-  (when jj-autosave
-    (let* ((buf (current-buffer))
-           (path (buffer-path buf))
-           (root (and path (jj-root path))))
-      (when root
-        (unless (jj-lock! root)
-          (message "jj: flush lock stuck; continuing unlocked"))
-        (jj-open! root (or (jj-last-author buf) (current-edit-author)))))))
+(define (jj-save-author buf)
+  (or (jj-last-author buf) (current-edit-author)))
+
+;; @ just changed hands and took this run's burst. Move the burst into the
+;; run's own change below, so parallel runs saving in turn still leave one
+;; change each. Only an undescribed change takes it: a described one is
+;; finished work. A change between them that touched the same files keeps
+;; the burst in @, because moving it under that change would conflict.
+(define (jj-fold! root slug)
+  (when (and slug (equal? (jj-at root "empty") "false"))
+    (let ((x (jj-revs root (string-append "latest(remote_bookmarks()..@- & "
+                                          (jj-agent-revset slug)
+                                          " & description(regex:\"^Agent: \"))"))))
+      (when (pair? x)
+        (jj-fold-into! root "@" (car x))))))
+
+;; the files that changed from FROM to TO, as one net diff
+(define (jj-diff-files root from to)
+  (map (lambda (l) (string-trim (substring l 1 (string-length l))))
+       (jj-lines root (string-append "jj diff --from " from " --to " to
+                                     " --summary --color never 2>/dev/null"))))
+
+(define (jj-older? root a b)
+  (pair? (jj-revs root (string-append a " & ::" b " & ~" b))))
+
+;; Squash FROM into INTO, keeping INTO's message, when no change between
+;; them touched FROM's files; moving it past such a change would conflict.
+;; #t when it moved.
+(define (jj-fold-into! root from into)
+  (let* ((older (if (jj-older? root from into) from into))
+         (newer (if (equal? older from) into from))
+         (files (map cadr (jj-change-files root from)))
+         (between (jj-diff-files root older (string-append newer "-"))))
+    (and (null? (filter (lambda (f) (member f between)) files))
+         (begin (jj-sh root (string-append "jj squash --from " from " --into " into " -u 2>&1"))
+                #t))))
 
 ;; The repo each run saved into last, by its author slug. A chat's own buffer
 ;; often sits outside the repo it edits, so jj-describe! looks here when its
@@ -302,35 +330,45 @@
 (define (jj-run-root slug)
   (let ((e (and slug (assoc slug *jj-run-roots*)))) (and e (cadr e))))
 
-;; an agent's save skips after-save-hook, so the save itself notes the repo
-(advice-add! 'buffer-save! 'after 'jj-run-root
-  (lambda (&rest args)
-    (let* ((path (buffer-path (current-buffer)))
-           (root (and path (jj-root path))))
-      (when root (jj-note-run-root! (jj-author-slug (or (current-edit-author) "")) root)))))
+;; Every save is a buffer-save!: C-x C-s, an agent's own call, and the end
+;; of a burst. The save hooks miss an agent's call, so the save itself is
+;; where jj opens the change before the bytes land and snapshots after.
+(define (jj-save-around orig &rest args)
+  (let* ((buf (current-buffer))
+         (path (if (pair? args) (car args) (buffer-path buf)))
+         (root (and (string? path) (jj-root path)))
+         (author (jj-save-author buf))
+         (slug (jj-author-slug author)))
+    (if (not (and root jj-autosave))
+        (let ((r (apply orig args)))
+          (when root (jj-note-run-root! slug root))
+          r)
+        (begin
+          (unless (jj-lock! root)
+            (message "jj: flush lock stuck; continuing unlocked"))
+          (let* ((opened (jj-open! root author))
+                 (r (apply orig args)))
+            (jj-note-run-root! slug root)
+            (jj-snapshot! root)
+            (when opened (jj-fold! root slug))
+            (jj-unlock! root)
+            (jj-modeline-update! root slug)
+            r)))))
 
-(define (jj-after-save!)
-  (when jj-autosave
-    (let* ((buf (current-buffer))
-           (path (buffer-path buf))
-           (root (and path (jj-root path)))
-           (slug (jj-author-slug (or (jj-last-author buf) (current-edit-author)))))
-      (when root
-        (jj-note-run-root! slug root)
-        (jj-snapshot! root)
-        (jj-unlock! root)
-        (jj-modeline-update! root slug)))))
+(advice-remove! 'buffer-save! 'jj-run-root)
+(advice-add! 'buffer-save! 'around 'jj-save jj-save-around)
 
-;; Appended, so auto-revert's guard runs first: a save it refuses must not
-;; leave an opened change behind.
-(add-hook! 'before-save-hook 'jj-before-save! #t)
-(add-hook! 'after-save-hook 'jj-after-save!)
+
+;; the save hooks once did this; a reload takes them off
+(remove-hook! 'before-save-hook 'jj-before-save!)
+(remove-hook! 'after-save-hook 'jj-after-save!)
 
 ;;; --- the label ----------------------------------------------------------
 
 ;; A run can say what it was. The message lands on the caller's own run:
-;; the newest unpushed change carrying its Agent: line, found by trailer,
-;; so a label survives other sessions flushing past it. You describe @;
+;; every unpushed change carrying its Agent: line and nothing else, found by
+;; trailer, else its newest one, so a label survives other sessions flushing
+;; past it and no change of the run stays bare. You describe @;
 ;; an untagged @ is adopted by an agent with no change of its own yet.
 ;; The Agent: line stays under the message: label and identity are one
 ;; description.
@@ -343,20 +381,82 @@
     (if (not root)
         #f
         (let* ((slug (jj-author-slug (or (current-edit-author) "")))
-               (mine (and slug
-                          (let ((r (string-trim (jj-sh root (string-append
-                                     "jj log --no-graph --color never -T 'change_id.short()' "
-                                     "-r 'latest(remote_bookmarks()..@ & description(substring:\"Agent: "
-                                     slug "\"))' 2>/dev/null")))))
-                            (and (not (equal? r "")) r))))
-               (rev (or mine (and (not (jj-tag root)) "@"))))
-          (if (not rev)
+               (run (and slug (string-append "remote_bookmarks()..@ & " (jj-agent-revset slug))))
+               ;; every change of the run still bare, else its newest one
+               (bare (if run (jj-revs root (string-append run " & ~empty() & description(regex:\"^Agent: \")")) '()))
+               (newest (if run (jj-revs root (string-append "latest(" run ")")) '()))
+               (revs (cond ((pair? bare) bare)
+                           ((pair? newest) newest)
+                           ((not (jj-tag root)) (list "@"))
+                           (else '()))))
+          (if (null? revs)
               (begin (message "jj: no change of this run's to describe") #f)
               (let ((msg (if slug (string-append text "\n\nAgent: " slug) text)))
-                (jj-sh root (string-append "jj describe -r " rev " -m '" (jj-quote msg) "' 2>&1"))
+                (jj-sh root (string-append "jj describe"
+                                           (apply string-append (map (lambda (r) (string-append " -r " r)) revs))
+                                           " -m '" (jj-quote msg) "' 2>&1"))
+                ;; a described @ is finished work: the run's next save opens
+                ;; a change of its own rather than growing this one
+                (when (and slug (equal? (jj-tag root) slug)
+                           (equal? (jj-at root "empty") "false")
+                           (not (string-prefix? "Agent: " (string-trim (jj-at root "description")))))
+                  (jj-lock! root)
+                  (jj-sh root "jj new 2>&1")
+                  (jj-unlock! root))
                 (jj-modeline-update! root slug)
                 text))))))
 (public! 'jj-describe! "(jj-describe! TEXT [PATH]) — describe this run's jj change as TEXT, with its Agent line, in PATH's repo, else the chat's, else the one this run saved into last; TEXT, or #f when there is no repo or no change of this run's")
+
+(define (jj-change-tag root change)
+  (let loop ((ls (jj-lines root (string-append "jj log --ignore-working-copy --no-graph --color never -r "
+                                               change " -T description 2>/dev/null"))))
+    (cond ((null? ls) #f)
+          ((string-prefix? "Agent: " (car ls)) (substring (car ls) 7 (string-length (car ls))))
+          (else (loop (cdr ls))))))
+
+;; History from before every save went through jj holds bare changes: a run
+;; split by other runs' saves, its label on the newest piece only. Fold each
+;; bare change into the nearest described change of its run, else into the
+;; run's nearest bare one, wherever no change between touched its files.
+;; Unpushed changes only, and never @. Answers (CHANGE SLUG INTO-OR-#f) rows.
+(define (jj-fold-bare! &optional dir)
+  (let* ((root (if dir (jj-root-of-dir dir) (jj-here)))
+         (order (if root (jj-revs root "remote_bookmarks()..@- & ~empty()") '()))
+         (pos (lambda (c) (let loop ((l order) (i 0)) (cond ((null? l) 0) ((equal? (car l) c) i) (else (loop (cdr l) (+ i 1)))))))
+         (nearest (lambda (c cs) (let loop ((cs cs) (best #f))
+                                   (cond ((null? cs) best)
+                                         ((or (not best) (< (abs (- (pos (car cs)) (pos c))) (abs (- (pos best) (pos c)))))
+                                          (loop (cdr cs) (car cs)))
+                                         (else (loop (cdr cs) best)))))))
+    (if (not root)
+        '()
+        (jj-with-lock root
+          (lambda ()
+            (map (lambda (c)
+                   (let* ((slug (jj-change-tag root c))
+                          (run (string-append "remote_bookmarks()..@- & ~empty() & " (jj-agent-revset slug)))
+                          (done (jj-revs root (string-append run " & ~description(regex:\"^Agent: \")")))
+                          (bare (filter (lambda (x) (not (equal? x c)))
+                                        (jj-revs root (string-append run " & description(regex:\"^Agent: \")"))))
+                          (into (or (nearest c done) (nearest c bare))))
+                     (list c slug (and into (jj-fold-into! root c into) into))))
+                 (jj-revs root "remote_bookmarks()..@- & ~empty() & description(regex:\"^Agent: \")")))))))
+(public! 'jj-fold-bare! "(jj-fold-bare! [DIR]) — fold each bare unpushed change into its run's nearest change where nothing between touched its files; (CHANGE SLUG INTO-OR-#f) rows")
+
+(define (jj-with-lock root thunk)
+  (jj-lock! root)
+  (let ((r (thunk))) (jj-unlock! root) r))
+
+(define (jj-describe-change! change text &optional dir)
+  "(jj-describe-change! CHANGE TEXT [DIR]) — describe one unpushed change as TEXT and keep its Agent line"
+  (let* ((root (if dir (jj-root-of-dir dir) (jj-here)))
+         (slug (and root (jj-change-tag root change))))
+    (and root
+         (pair? (jj-revs root (string-append change " & remote_bookmarks()..@")))
+         (begin (jj-sh root (string-append "jj describe -r " change " -m '"
+                                           (jj-quote (if slug (string-append text "\n\nAgent: " slug) text)) "' 2>&1"))
+                text))))
+(public! 'jj-describe-change! "(jj-describe-change! CHANGE TEXT [DIR]) — describe one unpushed change as TEXT and keep its Agent line")
 
 ;;; --- the push -----------------------------------------------------------
 
@@ -562,3 +662,30 @@
       ;; pop-to-buffer displays nothing, so say which buffer it was
       (with-current-buffer name (lambda () (set-mode! "diff-show")))
       (message (jj-verdict-line (chat-work-state buf))))))
+
+;;; --- reading ------------------------------------------------------------
+
+;; The shell gate refuses jj, so these are how an agent reads history. They
+;; never snapshot: a read must not sweep anyone's unsaved bytes into @.
+(domain! 'files)
+(effects! '(read external execute))
+
+(define (jj-log &optional revset dir)
+  "(jj-log [REVSET] [DIR]) — one line per change in REVSET, default the unpushed work: change, time, subject and Agent line"
+  (let ((root (if dir (jj-root-of-dir dir) (jj-here))))
+    (and root
+         (jj-sh root (string-append
+           "jj log --ignore-working-copy --no-graph --color never -r '"
+           (jj-quote (or revset "remote_bookmarks()..@")) "' -T '"
+           "change_id.short() ++ \" \" ++ committer.timestamp().format(\"%m-%d %H:%M\") ++ \" \" "
+           "++ description.first_line() ++ \" | \" "
+           "++ description.lines().filter(|l| l.starts_with(\"Agent:\")).join(\",\") ++ \"\\n\"' 2>&1")))))
+(public! 'jj-log "(jj-log [REVSET] [DIR]) — one line per change in REVSET, default the unpushed work: change, time, subject and Agent line")
+
+(define (jj-show change &optional dir)
+  "(jj-show CHANGE [DIR]) — CHANGE's description, files and diff"
+  (let ((root (if dir (jj-root-of-dir dir) (jj-here))))
+    (and root
+         (jj-sh root (string-append "jj show --ignore-working-copy --color never --git -r '"
+                                    (jj-quote change) "' 2>&1")))))
+(public! 'jj-show "(jj-show CHANGE [DIR]) — CHANGE's description, files and diff")

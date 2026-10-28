@@ -406,6 +406,12 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
          (string-append
            "refused: the user denied this shell command, which writes files. "
            "Do not write files through the shell. " decide--edit-advice))
+        ((equal? kind 'jj)
+         (string-append
+           "refused by the shell gate: jj runs through jj.scm, never the shell. "
+           "Every save already lands in your run's jj change. "
+           "Label it with (jj-describe! TEXT); read with (jj-log [REVSET]), (jj-show CHANGE), "
+           "(chat-changes), (chat-diff) or (chat-changes-report)."))
         ((equal? kind 'denied)
          "refused: denied in the chat. Do not retry it — ask what to do instead.")
         (else
@@ -420,8 +426,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
   'group 'decide)
 
 (defcustom 'decide-shell-policy
-  '((edit ask) (read ask) (build allow) (git allow) (jj allow) (other allow))
-  "What each kind of shell command gets: allow, ask or refuse. Ask raises a permission card in the chat and refuses when nobody answers in permission-ask-timeout-ms, or when the lane has no chat to ask. The kinds: edit writes files, read reads or searches them, build runs the project's own build, test or format tool, git and jj run version control, other touches no file."
+  '((edit ask) (read ask) (build allow) (git allow) (jj refuse) (other allow))
+  "What each kind of shell command gets: allow, ask or refuse. Ask raises a permission card in the chat and refuses when nobody answers in permission-ask-timeout-ms, or when the lane has no chat to ask. The kinds: edit writes files, read reads or searches them, build runs the project's own build, test or format tool, git runs version control, jj is refused because jj.scm owns it, other touches no file."
   'group 'decide)
 
 (define decide--shell-primitives "shell-command->string|start-process!")
@@ -466,11 +472,17 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
         ((and (string? v) (not (equal? v ""))) (string->symbol v))
         (else #f)))
 
+(define decide--jj-command "(?:\"|;|&&|\\|\\||\\||\\$\\(|`)\\s*jj\\s")
+
 (define (decide-shell-kind code)
   "(decide-shell-kind CODE) — what the shell commands in CODE are for: edit, read, build, git, jj or other; #f when no backend answers"
-  (let* ((reply (ignore-errors (lambda () (decide code (decide--shell-questions) 'purpose 'fast))))
-         (row (and reply (assoc 'kind (plist-get reply 'answers)))))
-    (and row (decide--choice-symbol (plist-get (cadr row) 'choice)))))
+  ;; a jj command anywhere in a shell string is jj, with no round trip:
+  ;; jj.scm owns jj, so the gate need not weigh what else runs beside it
+  (if (re-match? decide--jj-command code)
+      'jj
+      (let* ((reply (ignore-errors (lambda () (decide code (decide--shell-questions) 'purpose 'fast))))
+             (row (and reply (assoc 'kind (plist-get reply 'answers)))))
+        (and row (decide--choice-symbol (plist-get (cadr row) 'choice))))))
 
 ;; One payload, one kind, kept: an agent retries the same probe more
 ;; often than it writes a new one, and a kept kind costs no round trip.

@@ -386,7 +386,10 @@
   (map (lambda (p)
          (let* ((ks (panes-keys p))
                 (h (if (pair? ks) (panes-handle layout (car ks)) (plist-get p 'blank)))
-                (buf (if (pair? ks) (panes-window-buffer layout (car ks)) panes-empty-buffer)))
+                ;; a front window saved with no buffer is blank, as an empty pane is
+                (buf (if (and (pair? ks) (pair? (panes-window-buffers layout (car ks))))
+                         (panes-window-buffer layout (car ks))
+                         (begin (panes--empty-buffer!) panes-empty-buffer))))
            (cond ((not h) #f)
                  ((window-exists? h) h)
                  ((and buf (buffer-known? buf)) (list h buf))

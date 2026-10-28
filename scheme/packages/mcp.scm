@@ -93,25 +93,35 @@
 
 (define *chat-presets* '())
 
-(define (define-preset! name description servers)
+(define (preset-get name key)
+  (let ((e (assoc name *chat-presets*)))
+    (and e (plist-get (cadr e) key))))
+
+;; A preset bundles servers and the prompt that says how to use them: a chat
+;; holding the preset gets PROMPT as its own section, "preset:NAME", in both
+;; lanes. A define-preset! without PROMPT keeps the one the preset already has,
+;; so the app that owns the guidance can set it apart with preset-prompt!
+(define (define-preset! name description servers &optional prompt)
   (mcp-refuse-agent! 'define-preset!)
-  (set! *chat-presets* (alist-put *chat-presets* name (list 'description description 'servers servers)))
+  (set! *chat-presets*
+        (alist-put *chat-presets* name
+                   (list 'description description 'servers servers
+                         'prompt (or prompt (preset-get name 'prompt)))))
   name)
 
-;; A preset may bring guidance with its tools: a chat holding the preset gets
-;; TEXT as its own prompt section, "preset:NAME", in both lanes. Kept apart from
-;; *chat-presets* so a later define-preset! of the same name does not drop it
-(define *preset-prompts* '())
-
 (define (preset-prompt! name text)
-  (set! *preset-prompts* (alist-put *preset-prompts* name text))
+  (mcp-refuse-agent! 'preset-prompt!)
+  (let ((e (assoc name *chat-presets*)))
+    (set! *chat-presets*
+          (alist-put *chat-presets* name
+                     (plist-put (if e (cadr e) (list 'description "" 'servers '())) 'prompt text))))
   name)
 
 (define (preset-prompt-parts presets)
   (fold (lambda (acc p)
-          (let ((e (assoc p *preset-prompts*)))
-            (if e
-                (append acc (list (list (string-append "preset:" (symbol->string p)) (cadr e))))
+          (let ((text (preset-get p 'prompt)))
+            (if (and (string? text) (not (equal? text "")))
+                (append acc (list (list (string-append "preset:" (symbol->string p)) text)))
                 acc)))
         '() (or presets '())))
 
@@ -538,9 +548,9 @@
 (category! 'mcp)
 (public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
-(public! 'preset-prompt! "(preset-prompt! 'name TEXT) — a prompt section every chat holding the preset gets")
+(public! 'preset-prompt! "(preset-prompt! 'name TEXT) — set a preset's prompt: a section every chat holding the preset gets")
 (public! 'preset-prompt-parts "(preset-prompt-parts PRESETS) — the prompt sections PRESETS bring, as (NAME TEXT)")
-(public! 'define-preset! "(define-preset! 'name DESC SERVERS) — name a loadable tool collection")
+(public! 'define-preset! "(define-preset! 'name DESC SERVERS [PROMPT]) — name a loadable tool collection and the prompt that says how to use it")
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")

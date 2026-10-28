@@ -103,11 +103,13 @@ The todo package adds `todo`. Section names are unique: the last fragment of a
 name wins, in the place the name first took, so a buffer part replaces a prompt
 file of that name.
 
-A preset brings guidance with its tools. `(preset-prompt! 'NAME TEXT)` gives
-every chat that holds preset NAME a section `preset:NAME`, after `mcp`, in both
-lanes. A site's app registers it, so the guidance lives beside the code it
-points to: `apps/ats.scm` tells chats holding `ats` to look for an `ats-`
-function before an ats-ash tool.
+A preset bundles MCP servers and the prompt that says how to use them:
+`(define-preset! 'NAME DESC SERVERS PROMPT)`. Every chat that holds the preset
+gets PROMPT as a section `preset:NAME`, after `mcp`, in both lanes. Presets load
+at startup from `ai-config.scm`, so the section is there before any app loads.
+The `ats` preset tells its chats to look for an `ats-` function before an
+ats-ash tool. `(preset-prompt! 'NAME TEXT)` sets the prompt alone; like
+`define-preset!`, an agent cannot call it.
 
 A project's `compos.scm`, or a `group-on-chat` hook in a group's `group.scm`,
 runs with the chat current, and turns one section off or on:

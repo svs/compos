@@ -686,7 +686,7 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
 }
 .line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
 .line.row-quote .line-content {
-  border-left: 3px solid var(--border-bg, #cfc8b6); padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, var(--dim-fg, #57534a) 50%, transparent); padding-left: 12px;
   color: var(--dim-fg, #57534a); font-style: italic;
 }
 .line.row-hr .line-content { position: relative; }

@@ -225,6 +225,7 @@
 (require 'writing)
 (require 'dismiss)
 (require 'content-scale)
+(require 'ghost-rewrite)
 (require 'screenshot)
 
 ;; the run and result blocks live with the other blocks and lean on

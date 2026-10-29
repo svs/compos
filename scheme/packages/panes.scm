@@ -81,13 +81,20 @@
   "The id of buffer BUF; BUF itself when no buffer has that name."
   (car (panes--ids (list buf))))
 
+(define (panes--names-of ids)
+  "The names of the buffers whose ids are IDS, in order, in one query;
+   an id no buffer has stays as it is. meta.db holds every buffer,
+   dormant ones too, by id: a model window holds a dormant buffer as
+   well, and a rename keeps the id."
+  (if (null? ids)
+      '()
+      (let ((rows (cadr (buffer-rows (list 'ids ids 'hidden #t 'context-only #t 'fields '(id))))))
+        (map (lambda (id) (let ((r (find (lambda (r) (equal? (cadr r) id)) rows))) (if r (car r) id))) ids))))
+
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has
-   that id. meta.db holds every buffer, dormant ones too, by id: a
-   model window holds a dormant buffer as well, and a rename keeps the
-   id."
-  (let ((rows (cadr (buffer-rows (list 'ids (list id) 'hidden #t 'context-only #t 'limit 1)))))
-    (if (pair? rows) (caar rows) id)))
+   that id."
+  (car (panes--names-of (list id))))
 
 (define (panes--with-ids layout)
   "LAYOUT with every stack entry an id: a name some buffer has becomes
@@ -633,7 +640,7 @@
 (define (panes-window-buffers layout key)
   "The stack of window KEY, the shown buffer first; () for an unknown
    KEY."
-  (let ((w (panes-window layout key))) (if w (map panes--name (or (plist-get w 'buffers) '())) '())))
+  (let ((w (panes-window layout key))) (if w (panes--names-of (or (plist-get w 'buffers) '())) '())))
 
 (define (panes-window-mode layout key)
   "The mode of window KEY, or #f. A window with no mode, or with
@@ -792,16 +799,21 @@
                              (let* ((top (panes-window-buffer l k)) (m (and top (mode-of top))))
                                (if m (panes-set-mode l k m) l)))
                            layout (panes-window-keys layout)))
-             (layout (fold (lambda (l b)
-                             (let ((m (mode-of b)))
-                               (cond ((or (not m) (member b (panes-buffers l)) (and modes (not (member m modes)))) l)
-                                     ((panes-mode-window l m)
-                                      (panes--update-window l (panes-mode-window l m)
-                                        (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list (panes--id b)))))))
-                                     ((pair? (panes-panes l))
-                                      (car (panes-add-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
-                                     (else l))))
-                           layout (or extra '())))
+             ;; what the layout holds is read once, and grows as each joins
+             (layout (let loop ((l layout) (bs (or extra '())) (held (panes-buffers layout)))
+                       (if (null? bs)
+                           l
+                           (let* ((b (car bs)) (m (mode-of b)))
+                             (if (or (not m) (member b held) (and modes (not (member m modes))))
+                                 (loop l (cdr bs) held)
+                                 (let ((home (panes-mode-window l m)))
+                                   (loop (cond (home
+                                                (panes--update-window l home
+                                                  (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list (panes--id b)))))))
+                                               ((pair? (panes-panes l))
+                                                (car (panes-add-window l (plist-get (car (reverse (panes-panes l))) 'id) b m #t)))
+                                               (else l))
+                                         (cdr bs) (cons b held))))))))
              (wanted (panes--uniq (filter (lambda (m) (and m (or (not modes) (member m modes))))
                                           (map mode-of (panes-buffers layout))))))
         (fold (lambda (l m)

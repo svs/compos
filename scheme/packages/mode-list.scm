@@ -16,7 +16,8 @@
 ;;;   'groupings      ((SYMBOL KEY-OF [LAST]) ...): sections beyond none, group;
 ;;;                   LAST is the key whose section goes at the end
 ;;;                   and directory; KEY-OF names the section of a row
-;;;   'extra-rows     (BUF) rows after the buffers, such as saved files
+;;;   'extra-rows     (BUF) rows after the buffers, such as saved files; the
+;;;                   buffer local mode-list-extra-only shows them alone
 ;;;   'text           (NAME) the text a filter also reads, in a task
 ;;;   'visit-row      (ROW) RET on a row that is no live buffer
 ;;;   'after-visit    (NAME) after RET showed a buffer
@@ -91,15 +92,18 @@
 (define (mode-list-rows buf)
   (let* ((mode (mode-list-of buf))
          (keyed (assoc (ibuffer-grouping buf) (mode-list-opt mode 'groupings '())))
-         (extra (mode-list-opt mode 'extra-rows))
-         (rows (if keyed
-                   (let ((source (ibuffer-source buf)))
-                     (ibuffer-columns-clear!)
-                     (ibuffer-note-kinds! source)
-                     (ibuffer-keyed-sections buf source (cadr keyed) (lambda (k) "faint")
-                                            (and (> (length keyed) 2) (nth 2 keyed))))
-                   (ibuffer-rows buf))))
-    (if extra (append rows (extra buf)) rows)))
+         (extra (mode-list-opt mode 'extra-rows)))
+    ;; mode-list-extra-only: the list shows its extra rows alone
+    (if (and extra (buffer-local buf 'mode-list-extra-only))
+        (extra buf)
+        (let ((rows (if keyed
+                        (let ((source (ibuffer-source buf)))
+                          (ibuffer-columns-clear!)
+                          (ibuffer-note-kinds! source)
+                          (ibuffer-keyed-sections buf source (cadr keyed) (lambda (k) "faint")
+                                                 (and (> (length keyed) 2) (nth 2 keyed))))
+                        (ibuffer-rows buf))))
+          (if extra (append rows (extra buf)) rows)))))
 
 (define (mode-list-regroup! buf)
   (let ((next (ibuffer-cycle-after (ibuffer-grouping buf)

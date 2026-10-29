@@ -114,7 +114,7 @@
                         (cons (string-append dir "/" id ".chat") acc))
                       acc)))))))
 
-(define (chats-archived-rows)
+(define (chats-archived-rows &optional limit)
   (if (not (boundp (quote chat-log-files-newest)))
       '()
       ;; the newest closed logs, read until there are enough: the rest of
@@ -125,7 +125,7 @@
                                          (map car (cadr (buffer-rows '(hidden #t context-only #t))))
                                          '() '(chat-log-id))))))
         (let loop ((paths (chat-log-files-newest)) (n 0) (out '()))
-          (if (or (null? paths) (>= n chats-archived-limit))
+          (if (or (null? paths) (>= n (or limit chats-archived-limit)))
               (reverse out)
               (let* ((path (car paths))
                      (leaf (file-name-nondirectory path))
@@ -923,6 +923,16 @@
 
 (mode-icon! "chat-list-mode" "")
 
+(define-command "chats-show-archived" "Show only the archived chats in the chat list, or the live ones again"
+  ;; under hundreds of live chats the archived section is never reached
+  (lambda ()
+    (let* ((buf (or (mb-list-target) (current-buffer)))
+           (on (not (buffer-local buf 'mode-list-extra-only))))
+      (buffer-set-local! buf 'mode-list-extra-only on)
+      (list-refresh! buf)
+      (list-goto-first-entry buf)
+      (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats")))))
+
 (mode-list-define! "chat-mode"
   (list
     ;; an agent is listed with the chats even where its buffer is no chat
@@ -936,7 +946,8 @@
     ;; a chat you archived is still a chat you switch to: the saved
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
-                  (ibuffer-section buf "archived" "archived" (chats-archived-rows) "faint" #t))
+                  (ibuffer-section buf "archived" "archived"
+                    (chats-archived-rows (and (buffer-local buf 'mode-list-extra-only) 100)) "faint" #t))
     'text (lambda (b) (chat-list--read-text b))
     ;; only a saved conversation is a file: a row whose chat was killed
     ;; since the list was drawn names no file, and visiting its title
@@ -962,7 +973,7 @@
                "ibuffer. s steers the chat at point or the marked ones, y and d "
                "answer a permission, r gives a title, k kills, a archives, D deletes, "
                "+ starts a chat, w watches: one list, the busiest first, kept up as chats change, . shows the hidden chats too, the ones an agent "
-               "started for itself, and puts them away again, g reads the "
+               "started for itself, and puts them away again, A shows the 100 newest archived chats alone and the live ones again, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
         'title (lambda (buf) "Chats")
@@ -974,7 +985,7 @@
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh") ("w" "chats-watch")
                 ("+" "agent-open")
-                ("." "ibuffer-toggle-hidden")))))
+                ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
 

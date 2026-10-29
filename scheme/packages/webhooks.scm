@@ -397,9 +397,9 @@
          (hook (and name (webhook-get name))))
     (if (not hook)
         '()
+        ;; the settings first: under the history tab the day headings then
+        ;; head their requests, and under the config tab they fall away
         (append
-          (map (lambda (e) (list 'request e))
-               (event-log-newest (string-append "webhook:" name) webhooks-history-shown))
           (map (lambda (p) (list 'setting p))
                (list (list "path" (plist-get hook 'path))
                      (list "URL" (or (webhook-url name) "none, the server is stopped"))
@@ -408,18 +408,45 @@
                      (list "reach" (if (plist-get hook 'public) "public, through the tunnel" "local only"))
                      (list "event data" (if (equal? (plist-get hook 'data) 'json) "the JSON body" "the whole request"))
                      (list "workflow" (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)))
-                     (list "topic" (string-append "webhook:" name))))))))
+                     (list "topic" (string-append "webhook:" name))))
+          (webhooks--by-day (event-log-newest (string-append "webhook:" name) webhooks-history-shown))))))
+
+;; the day a time falls on, as a heading says it
+(define (webhooks--day at)
+  (let ((d (format-time at "%Y-%m-%d"))
+        (now (current-time)))
+    (cond ((equal? d (format-time now "%Y-%m-%d")) "Today")
+          ((equal? d (format-time (- now 86400) "%Y-%m-%d")) "Yesterday")
+          (else (format-time at "%a %d %b")))))
+
+;; the requests, newest first, under a heading for each day
+(define (webhooks--by-day es)
+  (let loop ((es es) (day #f) (out '()))
+    (if (null? es)
+        (reverse out)
+        (let ((d (webhooks--day (plist-get (car es) 'at))))
+          (loop (cdr es) d
+                (cons (list 'request (car es))
+                      (if (equal? d day) out (cons (list 'day d) out))))))))
+
+(define (webhooks--day-row? r) (eq? (car r) 'day))
 
 (define (webhooks--page-columns buf)
   (if (equal? (car (list-tab-current buf)) "config")
       (list (list "setting" 12) (list "value" #f))
-      (list (list "when" 13) (list "kind" 20) (list "source" 10) (list "summary" #f))))
+      (list (list "when" 10) (list "kind" 20) (list "source" 10) (list "summary" #f))))
 
 (define (webhooks--page-cells buf r)
-  (if (webhooks--request-row? r)
-      (let ((p (webhooks--request-parts (cadr r))))
-        (list (list (nth 0 p) "dim") (list (nth 1 p) "webhooks-name") (list (nth 2 p) "dim") (nth 3 p)))
-      (list (list (car (cadr r)) "dim") (cadr (cadr r)))))
+  (cond ((webhooks--day-row? r)
+         (list (list (cadr r) "list-section-name") "" "" ""))
+        ((webhooks--request-row? r)
+         (let ((p (webhooks--request-parts (cadr r))))
+           (list (list (format-time (plist-get (cadr r) 'at) "%H:%M") "dim")
+                 ;; a request that names no source came from the endpoint's own sender
+                 (list (nth 1 p) "webhooks-name")
+                 (list (if (equal? (nth 2 p) "") (or (buffer-local buf 'webhook-name) "") (nth 2 p)) "dim")
+                 (nth 3 p))))
+        (else (list (list (car (cadr r)) "dim") (cadr (cadr r))))))
 
 (define (webhooks--page-meta buf)
   (let* ((name (buffer-local buf 'webhook-name))
@@ -677,14 +704,18 @@
     'transient #f
     'rows webhooks--page-rows
     'key (lambda (buf r)
-           (if (webhooks--request-row? r)
-               (number->string (plist-get (cadr r) 'seq))
-               (string-append "setting:" (car (cadr r)))))
+           (cond ((webhooks--request-row? r) (number->string (plist-get (cadr r) 'seq)))
+                 ((webhooks--day-row? r) (string-append "day:" (cadr r)))
+                 (else (string-append "setting:" (car (cadr r))))))
     'tabs (list (list "history" (lambda (buf r) (webhooks--request-row? r)))
-                (list "config" (lambda (buf r) (not (webhooks--request-row? r)))))
+                (list "config" (lambda (buf r) (eq? (car r) 'setting))))
+    'separator? (lambda (buf r) (webhooks--day-row? r))
+    'section? (lambda (buf r) (webhooks--day-row? r))
     'columns webhooks--page-columns
     'cells webhooks--page-cells
-    'body (lambda (buf r) (if (webhooks--request-row? r) (json-encode (plist-get (cadr r) 'data)) (cadr (cadr r))))
+    'body (lambda (buf r) (cond ((webhooks--request-row? r) (json-encode (plist-get (cadr r) 'data)))
+                                ((webhooks--day-row? r) "")
+                                (else (cadr (cadr r)))))
     'preview (lambda (buf r) (when (webhooks--request-row? r) (webhooks--show-payload! buf (cadr r))))
     'title (lambda (buf) (string-append "Webhook " (or (buffer-local buf 'webhook-name) "")))
     'meta webhooks--page-meta

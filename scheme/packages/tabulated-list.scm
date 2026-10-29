@@ -1910,18 +1910,20 @@
               (reverse out)
               (let ((values (fold (lambda (acc e)
                                     (let ((v (list-column-text buf e i)))
-                                      (if (or (equal? v "") (member v acc)) acc (cons v acc))))
+                                      (if (member v acc) acc (cons v acc))))
                                   '() rows))
                     (kind (string-append "column:" (number->string i))))
                 (loop (cdr cols) (+ i 1)
                       ;; a column that tells rows apart, or says the same of all, is no tab;
                       ;; the one this list is narrowed by stays, to be widened again
+                      ;; a tab's values each hold three rows or more, on the whole:
+                      ;; a time or a name column is no tab
                       (if (or (assoc kind (list-filters buf))
                               (and (> (length values) 1) (<= (length values) list-facet-max-values)
-                                   (< (length values) (length rows))))
+                                   (<= (* 3 (length values)) (length rows))))
                           (cons (list 'label (car (car cols)) 'kind kind
                                       'options (let ((vs (reverse values)))
-                                                 (lambda (buf) (map (lambda (v) (list v v)) vs))))
+                                                 (lambda (buf) (map (lambda (v) (list (if (equal? v "") "(blank)" v) v)) vs))))
                                 out)
                           out))))))))
 

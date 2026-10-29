@@ -1800,6 +1800,12 @@
       (let ((doc (plist-get header 'companion-of)))
         (when doc (buffer-relate! buf 'companion (chat-header-string doc))))
       (let ((slug (buffer-local buf 'agent-slug)))
+        ;; the slug names the chat's id: read back, it is the same chat, and
+        ;; what was keyed on that id (listeners, todos) finds it again
+        (when (and (string? slug) (string-prefix? "chat-" slug) (not (buffer-local buf 'chat-id)))
+          (let ((id (string-append "chat:" (string-join (cdr (string-split slug "-")) ":"))))
+            (unless (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list))
+              (buffer-set-local! buf 'chat-id id))))
         (when (and (string? slug) (boundp 'subagent-cache-rebuild!))
           (subagent-cache-rebuild! slug)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))

@@ -186,10 +186,27 @@
           (agent-listen--put! (plist-put cur 'pending (append seqs (list (plist-get e 'seq))))))
         (debounce! 'agent-listen-retry 60000 agent-listen--flush! #f))))
 
+(define (agent-listen--archive-group path)
+  ;; .../groups/grp-SECS-N/chats/X.chat names its group grp:SECS:N
+  (let ((tail (member "groups" (string-split path "/"))))
+    (and tail (pair? (cdr tail))
+         (string-join (string-split (cadr tail) "-") ":"))))
+
+(define (agent-listen--wake-chat l)
+  ;; the listener's chat; a killed one is read back from its archive in its
+  ;; own group, shown nowhere, so the event wakes it and it is in the chat list
+  (let ((chat (plist-get l 'chat)))
+    (or (agent-listen--chat chat)
+        (and (boundp 'todo--archived-chat)
+             (ignore-errors
+               (lambda ()
+                 (let ((path (todo--archived-chat chat)))
+                   (and path (todo--open-chat chat (agent-listen--archive-group path))))))))))
+
 (define (agent-listen--heard id e)
   (let ((l (agent-listen--find id)))
     (when (and l (agent-listen--wants? l e))
-      (let ((buf (agent-listen--chat (plist-get l 'chat))))
+      (let ((buf (agent-listen--wake-chat l)))
         (if buf
             (agent-listen--deliver! l buf e)
             (agent-listen--put! (plist-put l 'pending (append (or (plist-get l 'pending) '())
@@ -204,7 +221,7 @@
 (define (agent-listen--flush! _)
   (for-each
     (lambda (l)
-      (let ((buf (and (pair? (plist-get l 'pending)) (agent-listen--chat (plist-get l 'chat)))))
+      (let ((buf (and (pair? (plist-get l 'pending)) (agent-listen--wake-chat l))))
         (when buf
           (let ((events (filter (lambda (x) x)
                                 (map (lambda (seq) (agent-listen--event l seq)) (plist-get l 'pending)))))

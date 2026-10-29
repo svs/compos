@@ -602,12 +602,12 @@
             (agents-report "archived" bs))))))
 
 (define (agents-delete! b)
-  (let ((path (chat-log-path b)))
-    (agents-archive! b)
-    (delete-file-path! path #f)))
+  ;; a chat is never trashed: delete archives it, its .chat file stays
+  (ignore-errors (lambda () (chat-log-save! b)))
+  (agents-archive! b))
 
 (define-command "chat-delete"
-  "Delete this chat, or the chat at point: the runtime stops, the buffer goes, the file goes to the trash"
+  "Delete this chat, or the chat at point: the runtime stops, the buffer goes, the .chat file stays as its archive"
   (lambda ()
     (let ((bs (agents-targets)))
       (if (null? bs)

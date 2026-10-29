@@ -2002,6 +2002,11 @@
               (when (and slug (boundp (quote llm-session-close!)))
                 (unless (equal? (agent-status slug) 'dead)
                   (llm-session-close! slug))))
+            ;; a reset never throws a conversation away: write it to its
+            ;; .chat file, then forget the id so the next turn starts a new
+            ;; file and cannot overwrite this one
+            (ignore-errors (lambda () (chat-log-save! buf)))
+            (buffer-set-local! buf 'chat-log-id #f)
             (overlay-clear! buf "all")
             ;; every tag: a reset empties the buffer, so no owner's ranges
             ;; still mean anything

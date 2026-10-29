@@ -2061,6 +2061,13 @@ c-action-key {
 }
 .mb-cand.selected .mb-label:not([class*="f-group-color-"]) { color: var(--accent-fg, #26356b); }
 .mb-cand.selected .mb-label { font-weight: 600; }
+/* muted text on the highlighted row: --dim-fg sits too close to
+   --select-bg in dark themes (tokyo-night: #565f89 on #3f4a78), so the
+   marginalia vanished. Mix it toward the body ink instead. */
+.mb-cand.selected .mb-hint,
+.mb-cand.selected .mb-rail-hint {
+  color: color-mix(in srgb, var(--default-fg, #2b2a26) 78%, var(--select-bg, #e7e9f1));
+}
 /* the floor: the widest label in the WHOLE set, from the core.
    The ceiling matches the cap the core applies to that width —
    one very long name must not push the annotations off the

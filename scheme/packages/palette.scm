@@ -48,10 +48,12 @@
         (name (or (plist-get hit 'name) (plist-get hit 'task))))
     (cond
       ((equal? kind "command")
-       (list name
-             (string-append "command  "
-                            (let ((key (plist-get hit 'key))) (if key key ""))
-                            "  " (or (plist-get hit 'doc) ""))))
+       ;; the key leads in its own column, as in the resting list, so the
+       ;; eye finds it before the doc
+       (let ((key (or (plist-get hit 'key) (key-for-command name) "")))
+         (list name
+               (string-append (string-pad-right key 12) " "
+                              (or (plist-get hit 'doc) "")))))
       ((equal? kind "recipe")
        (let ((inputs (or (plist-get hit 'inputs) '())))
          (list name
@@ -123,13 +125,19 @@
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
-      ;; The resting palette is familiar and cheap: the past asks, then the
-      ;; same MRU command table as M-x. The search takes over as soon as the
-      ;; user states intent.
-      (append (map (lambda (h) (list h "past  ask"))
-                   (take (filter (lambda (h) (not (command-fn h))) (history-items 'M-x))
+      ;; The resting palette is familiar and cheap: what you ran or asked,
+      ;; newest first, then the rest of the M-x command table. The search
+      ;; takes over as soon as the user states intent.
+      (let* ((hist (history-items 'M-x))
+             (asks (take (filter (lambda (h) (not (command-fn h))) hist)
                          *command-palette-past-max*))
-              (annotate 'command (history-order 'M-x (command-names))))
+             (rows (annotate 'command (history-order 'M-x (command-names))))
+             (recent (filter (lambda (h) (or (command-fn h) (member h asks))) hist))
+             (top (filter (lambda (r) r)
+                          (map (lambda (h)
+                                 (if (command-fn h) (assoc h rows) (list h "past  ask")))
+                               recent))))
+        (append top (filter (lambda (r) (not (member (car r) recent))) rows)))
       (let ((past (command-palette--past query)))
         (append past
                 (filter (lambda (candidate)
@@ -147,7 +155,11 @@
                          (let ((l (string-downcase h)))
                            (null? (filter (lambda (w) (not (string-contains? l w))) words))))
                        (history-items 'M-x))))
-    (map (lambda (h) (list h (if (command-fn h) "past  command" "past  ask")))
+    ;; a command you ran before reads like any command row, key first
+    (map (lambda (h)
+           (if (command-fn h)
+               (command-palette--candidate (command-palette--command-hit h))
+               (list h "past  ask")))
          (take hits *command-palette-past-max*))))
 
 (define *command-palette-debounce-ms* 80)

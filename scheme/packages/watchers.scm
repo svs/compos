@@ -111,7 +111,7 @@
     (cond ((equal? g "chat") (let ((c (chat))) (or (and c (buffer-short-label c)) (plist-get row 'chat) "no chat")))
           ((equal? g "group") (let ((c (chat))) (or (and c (buffer-group c) (group-name (buffer-group c)))
                                                       (watchers--task-group row) "no group")))
-          ((equal? g "topic") (or (plist-get row 'topic) "no topic"))
+          ((equal? g "topic") (or (watchers--topic-family (plist-get row 'topic)) "no topic"))
           (else (watchers--state-label row)))))
 
 (define (watchers--sections buf rows)
@@ -136,16 +136,21 @@
                        (map cdr (filter (lambda (p) (equal? (car p) n)) tagged))))
                names)))))
 
+(define (watchers--row-group row)
+  (let ((c (watchers--chat-buffer row)))
+    (or (and c (buffer-group c) (group-name (buffer-group c)))
+        (watchers--task-group row))))
+
 (define (watchers--list-rows buf) (watchers--sections buf (watchers--rows buf)))
 
 (define (watchers--cells buf row)
   (if (watchers--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "")
+      (list "" "" "" "" "" "" (list (plist-get row 'title) "list-section-name"))
   (list (watchers--state-label row)
         (number->string (length (plist-get row 'fired)))
         (watchers--age (plist-get row 'last))
         (watchers--due-label row)
-        (or (plist-get row 'topic) "")
+        (or (watchers--topic-family (plist-get row 'topic)) "")
         (or (plist-get row 'match) "")
         (or (watchers--task-title row) (plist-get row 'note) ""))))
 
@@ -154,7 +159,7 @@
 ;; when it is due, what it listens to, and what it is for
 (define (watchers--narrow-cells buf row)
   (if (watchers--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "" "")
+      (list "" "" "" (list (plist-get row 'title) "list-section-name"))
       (let ((c (watchers--cells buf row)))
         (list (nth 0 c) (nth 3 c) (nth 4 c) (nth 6 c)))))
 
@@ -244,12 +249,33 @@
 (define (watchers--saw e)
   (debounce! 'watchers-draw 500 watchers--redraw! #f))
 
+(define (watchers--topic-family t)
+  (and (not (watchers--blank? t)) (car (string-split t ":"))))
+
+(define (watchers--filter buf r f)
+  (let ((k (car f)) (v (car (cdr f))))
+    (cond ((equal? k "group") (equal? (watchers--row-group r) v))
+          ((equal? k "topic") (equal? (watchers--topic-family (plist-get r 'topic)) v))
+          (else #t))))
+
+(define (watchers--distinct rows key)
+  (fold (lambda (acc r) (let ((v (key r))) (if (or (watchers--blank? v) (member v acc)) acc (cons v acc)))) '() rows))
+
+(define watchers--facets
+  (list (list 'label "Group" 'kind "group"
+              'options (lambda (buf) (map (lambda (g) (list g g)) (watchers--distinct (watchers--rows buf) watchers--row-group))))
+        (list 'label "Topic" 'kind "topic"
+              'options (lambda (buf) (map (lambda (t) (list t t)) (watchers--distinct (watchers--rows buf) (lambda (r) (watchers--topic-family (plist-get r 'topic)))))))))
+
+(list-define-filter! "watchers-mode" "g:" (lambda (buf r) (watchers--row-group r)) "group")
+(list-define-filter! "watchers-mode" "t:" (lambda (buf r) (watchers--topic-family (plist-get r 'topic))) "topic")
+
 (define-list-mode! "watchers-mode"
   (list
     'doc (string-append
            "The agents' watchers: every listener a chat set with agent-listen!, in sections as ibuffer has them. "
            "The tabs across the top keep the live ones, the ones that fired, the done ones, or all; "
-           "left and right step them, and a click takes one. / searches the whole page of each watcher. "
+           "left and right step them, and a click takes one. / picks a group or topic from its tabs, or searches the whole page of each watcher. "
            "< cycles the sections: state, chat, group, topic, none. Moving the point shows the watcher's page "
            "beside the list: what it waits for, its chat and task, and each time it fired. d flags a live "
            "watcher for cancel and x cancels the flagged ones; SPC marks, u unmarks, U drops every mark. "
@@ -260,6 +286,8 @@
     'rows watchers--list-rows
     'key (lambda (buf row) (plist-get row 'id))
     'local-filter #t
+    'filter watchers--filter
+    'facets watchers--facets
     ;; tabs across the top: the live ones first, as todo opens on the open ones
     'tabs (list (list "live" (lambda (buf r) (equal? (plist-get r 'state) "listening")))
                 (list "fired" (lambda (buf r) (pair? (plist-get r 'fired))))
@@ -268,6 +296,7 @@
     ;; / searches the whole page: the note, the task, and every firing
     'body (lambda (buf r) (if (watchers--sep? r) "" (watchers--detail-text r)))
     'separator? (lambda (buf row) (watchers--sep? row))
+    'section-label (lambda (buf row) (string-append (watchers--grouping buf) ": " (plist-get row 'title)))
     'section? (lambda (buf row) (watchers--sep? row))
     'regroup watchers--regroup!
     'markable? (lambda (buf row) (equal? (plist-get row 'state) "listening"))
@@ -297,7 +326,11 @@
 (define-command "watchers" "Open the agents' watchers: every listener, live or done, and its firings"
   (lambda ()
     (event-subscribe! "watchers" "agent-listen:*" 'watchers--saw)
-    (list-mode-show! "watchers-mode")))
+    (let ((buf (list-mode-show! "watchers-mode")))
+      (unless (buffer-local buf 'watchers-scoped)
+        (buffer-set-local! buf 'watchers-scoped #t)
+        (list-facet-set! buf (list-facet buf "group") (group-name (buffer-group buf))))
+      buf)))
 
 (define-command "watchers-show" "Show the watcher at point as its own page beside the list"
   (lambda () (watchers-show-detail! (watchers--at))))

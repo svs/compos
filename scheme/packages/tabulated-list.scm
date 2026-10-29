@@ -41,6 +41,7 @@
 ;;;             matches the annotation too — see list-match?
 ;;;   match   (buf entry input) -> #t to keep. What `/` means here.
 ;;;   filter  (buf entry filter) -> #t to keep. The mode's own filter kinds.
+;;;   section-label (buf entry) -> the text of a section heading drawn as one whole row, rule and all
 ;;;   separator? (buf entry) -> #t for a section heading. Headings are not
 ;;;              choices. Filtering drops a heading when its section is empty.
 ;;;   section? (buf entry) -> #t for a row that starts a section. Default:
@@ -1319,7 +1320,20 @@
 ;; three renders were each prepending their own. The mark goes on the
 ;; first line, and the lines under it start where it does.
 
+(define (list-section-line label w)
+  (let* ((head (string-append label " "))
+         (rule (max 1 (- w (string-length head)))))
+    (list (string-append head (string-repeat "─" rule))
+          (list (list 0 (string-byte-length label) "list-section-name")
+                (list (string-byte-length head) (+ (string-byte-length head) (* 3 rule)) "faint")))))
+
 (define (list-row-lines buf e &optional ctx cells laid)
+  (let ((label (and (list-separator? buf e) (list-opt buf 'section-label))))
+    (if label
+        (list (list-section-line (label buf e) (list-view-width buf)))
+        (list-row-table-lines buf e ctx cells laid))))
+
+(define (list-row-table-lines buf e &optional ctx cells laid)
   ;; LAID is the first line's layout, already worked out by the caller.
   ;; The composml pass needs the same layout to place its field ranges, so
   ;; a draw that did not share it laid every row out twice.

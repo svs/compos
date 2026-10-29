@@ -101,15 +101,18 @@
         (cadr e)
         ;; every buffer, dormant ones too: a model window holds a dormant
         ;; buffer as well, and buffer-list names only the live ones
-        (let ((all (map car (cadr (buffer-rows '(hidden #t context-only #t fields (name)))))))
+        ;; the count alone (limit 0) is cheap; a dead id in the layout asks
+        ;; on every lookup, so the full listing is read only to refresh the map
+        (let ((count (car (buffer-rows '(hidden #t context-only #t limit 0 fields (name))))))
           ;; a kill and a create keep the count, so a new id reads the map
           ;; again too; an id that missed once waits for the count to change
-          (unless (and (= (length all) panes--names-count) (member id panes--names-missed))
-            (unless (= (length all) panes--names-count) (set! panes--names-missed '()))
-            (set! panes--names-count (length all))
+          (unless (and (= count panes--names-count) (member id panes--names-missed))
+            (unless (= count panes--names-count) (set! panes--names-missed '()))
+            (set! panes--names-count count)
             (set! panes--names
-              (map (lambda (r) (list (cadr r) (car r)))
-                   (filter cadr (buffer-read-many all '(id) '())))))
+              (let ((all (map car (cadr (buffer-rows '(hidden #t context-only #t fields (name)))))))
+                (map (lambda (r) (list (cadr r) (car r)))
+                     (filter cadr (buffer-read-many all '(id) '()))))))
           (let ((e (assoc id panes--names)))
             (if e
                 (cadr e)

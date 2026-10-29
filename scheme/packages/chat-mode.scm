@@ -602,8 +602,9 @@
              (live (and (string? slug)
                         (find (lambda (b) (and (chat-buffer? b) (equal? (buffer-local b 'agent-slug) slug)))
                               (buffer-list))))
-             ;; a chat written before headers has none, and is still the chat
-             (c (or live (and (file-exists? path) (visit-in-group path g)))))
+             ;; a chat written before headers has none, and is still the chat;
+             ;; read without showing it, so M-o puts it in the chat window as a chat
+             (c (or live (and (file-exists? path) (visit-quietly path g)))))
         (and c
              (begin
                (buffer-set-local! c 'chat-for-key key)

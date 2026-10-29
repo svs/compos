@@ -895,13 +895,24 @@
 
 
 (define (chat-list--read-text b)
-  (let* ((id (buffer-local b 'chat-log-id))
-         (raw (if (buffer-exists? b)
-                  (buffer-text b)
-                  (and (string? id)
-                       (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
-                         (and (file-exists? path)
-                              (ignore-errors (lambda () (read-file path)))))))))
+  ;; a chat is found by what its summaries say, never by its whole transcript
+  (let ((raw (if (buffer-exists? b)
+                 (string-join
+                   (append (list (or (chat-title-of b) b) (or (buffer-local b 'chat-summary) ""))
+                           (map cadr (or (buffer-local b 'chat-summary-log) '())))
+                   "\n")
+                 (let ((id (buffer-local b 'chat-log-id)))
+                   (and (string? id)
+                        (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
+                          (and (file-exists? path)
+                               (let ((text (ignore-errors (lambda () (read-file path)))))
+                                 (and (string? text)
+                                      ;; the header holds the title and the last summary
+                                      (string-join
+                                        (filter (lambda (l) (or (string-prefix? "#+chat:" l)
+                                                                (string-prefix? chat-summary-prefix l)))
+                                                (string-split text "\n"))
+                                        "\n"))))))))))
     (string-downcase (if (string? raw) raw ""))))
 
 (define (chat-list-hit b) (mode-list-hit "chat-mode" b))

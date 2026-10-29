@@ -2471,8 +2471,10 @@
           ;; the tag's old ranges go with this set: one change, not a
           ;; clear and then a set
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
-          (list-composml! buf shown head)
-          (list-composml-text! buf shown prepared)
+          ;; the bare view is the text and its faces, nothing drawn over it
+          (unless (list-bare? buf)
+            (list-composml! buf shown head)
+            (list-composml-text! buf shown prepared))
           (list-anchors! buf shown)
           ;; the keys bar at the window's foot is the list's one keymap
           (desktop-skip! buf 'footer-line-blocks)
@@ -2634,6 +2636,88 @@
             (list-render! b 'cached))
           (plist-get opts 'cache-ttl))
         (cache-wake! buf)))))
+
+;;; Views. Every list has three: rendered (the default), bare -- the
+;;; text and its faces alone, fast -- and source, the buffer under the
+;;; view as ComposML, read-only. C-c C-v cycles them in the window you
+;;; are in.
+(define *list-views* '("rendered" "bare" "source"))
+
+(define (list-bare? buf) (equal? (buffer-local buf 'list-view) "bare"))
+
+(define (list-drop-render! buf)
+  (for-each (lambda (k) (buffer-set-local! buf k #f))
+            '(render-mode render-root render-blocks render-text-root render-records)))
+
+(define (list-source-escape s)
+  (fold (lambda (s p) (string-replace s (car p) (cadr p))) s '(("&" "&amp;") ("<" "&lt;") (">" "&gt;"))))
+
+(define (list-source-attrs p)
+  (string-append
+    (let ((c (plist-get p 'class))) (if c (string-append " class=\"" c "\"") ""))
+    (apply string-append
+      (map (lambda (a) (string-append " " (car a) "=\"" (list-source-escape (format "~a" (cadr a))) "\""))
+           (or (plist-get p 'attrs) '())))))
+
+(define (list-source-text buf)
+  "the buffer under the list's view: its text, each row wrapped in the record the rendered view draws"
+  (let* ((text (buffer-text buf))
+         (root (or (buffer-local buf 'render-text-root) (list 'tag "c-list")))
+         (records (or (buffer-local buf 'render-records) '()))
+         (tag (lambda (p) (or (plist-get p 'tag) "c-item"))))
+    (if (and (null? records) (buffer-local buf 'render-blocks))
+        (string-append ";; render blocks\n" (value->string (buffer-local buf 'render-blocks)))
+        (let loop ((rs records) (at 0) (out (list (string-append "<" (tag root) (list-source-attrs root) ">\n"))))
+          (if (null? rs)
+              (apply string-append
+                (reverse (cons (string-append "</" (tag root) ">\n")
+                               (cons (list-source-escape (substring-bytes text at (string-byte-length text))) out))))
+              (let* ((r (car rs)) (s (car r)) (e (cadr r)) (p (caddr r)))
+                (loop (cdr rs) e
+                      (cons (string-append "<" (tag p) (list-source-attrs p) ">"
+                                           (list-source-escape (substring-bytes text s e))
+                                           "</" (tag p) ">")
+                            (cons (list-source-escape (substring-bytes text at s)) out)))))))))
+
+(define (list-source-buffer buf) (string-append "*source: " buf "*"))
+
+(define (list-show-source! buf)
+  ;; the rendered records first: the source shows what the rendered view draws
+  (buffer-set-local! buf 'list-view "rendered")
+  (list-refresh! buf)
+  (let ((src (list-source-buffer buf)))
+    (buffer-create src)
+    (when (and (buffer-group buf) (not (equal? (buffer-group src) (buffer-group buf))))
+      (buffer-move-to-group! src (buffer-group buf)))
+    (with-current-buffer src (lambda () (set-mode! "composml-mode")))
+    (buffer-set-local! src 'list-source-of buf)
+    (buffer-set-local! buf 'list-view "source")
+    (buffer-set-text! src (list-source-text buf) #t)
+    (buffer-set-read-only! src #t)
+    (with-current-buffer src (lambda () (local-set-key "C-c C-v" "list-cycle-view")))
+    (switch-to-buffer-here! src)
+    src))
+
+(define (list-cycle-view! buf)
+  (let* ((list-buf (or (buffer-local buf 'list-source-of) buf))
+         (now (or (buffer-local list-buf 'list-view) "rendered"))
+         (next (list-cycle now *list-views* 1)))
+    (cond ((equal? next "source") (list-show-source! list-buf))
+          (else
+           (buffer-set-local! list-buf 'list-view next)
+           (when (equal? next "bare") (list-drop-render! list-buf))
+           (list-refresh! list-buf)
+           (unless (equal? buf list-buf) (switch-to-buffer-here! list-buf))))
+    (message (string-append "List view: " next))
+    next))
+
+(define-command "list-cycle-view" "Cycle this list's view: rendered, bare text, and the source under it"
+  (lambda () (list-cycle-view! (current-buffer))))
+
+(define-key "list-mode-map" "C-c C-v" "list-cycle-view")
+
+(public! 'list-cycle-view! "(list-cycle-view! BUF) — the next view of list BUF: rendered, bare, source; answers its name")
+(public! 'list-source-text "(list-source-text BUF) — the buffer under list BUF's view, as ComposML text")
 
 ;;; Tabs. An app has tabs across its top. A list declares
 ;;;   'tabs ((LABEL PRED) ...)    PRED (buf entry) -> #t keeps the row

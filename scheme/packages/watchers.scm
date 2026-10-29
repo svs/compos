@@ -231,6 +231,8 @@
   (list
     'doc (string-append
            "The agents' watchers: every listener a chat set with agent-listen!, in sections as ibuffer has them. "
+           "The tabs across the top keep the live ones, the ones that fired, the done ones, or all; "
+           "left and right step them, and a click takes one. / searches the whole page of each watcher. "
            "< cycles the sections: state, chat, group, topic, none. Moving the point shows the watcher's page "
            "beside the list: what it waits for, its chat and task, and each time it fired. d flags a live "
            "watcher for cancel and x cancels the flagged ones; SPC marks, u unmarks, U drops every mark. "
@@ -241,6 +243,13 @@
     'rows watchers--list-rows
     'key (lambda (buf row) (plist-get row 'id))
     'local-filter #t
+    ;; tabs across the top: the live ones first, as todo opens on the open ones
+    'tabs (list (list "live" (lambda (buf r) (equal? (plist-get r 'state) "listening")))
+                (list "fired" (lambda (buf r) (pair? (plist-get r 'fired))))
+                (list "done" (lambda (buf r) (member (plist-get r 'state) '("fired" "cancelled" "gone"))))
+                (list "all" (lambda (buf r) #t)))
+    ;; / searches the whole page: the note, the task, and every firing
+    'body (lambda (buf r) (if (watchers--sep? r) "" (watchers--detail-text r)))
     'separator? (lambda (buf row) (watchers--sep? row))
     'section? (lambda (buf row) (watchers--sep? row))
     'regroup watchers--regroup!

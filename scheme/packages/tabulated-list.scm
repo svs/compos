@@ -564,7 +564,10 @@
 ;; a row of two lines matches on both of them.
 (define (list-row-text buf e &optional ctx)
   (string-append (string-join (map car (list-row-lines buf e ctx)) " ")
-                 " " (list-annotation buf e)))
+                 " " (list-annotation buf e)
+                 ;; a list that declares 'body (buf entry) -> text is
+                 ;; searched in full: a word of the body keeps the row
+                 (let ((f (list-opt buf 'body))) (if f (string-append " " (or (f buf e) "")) ""))))
 
 ;; a list narrows the way a prompt does: one matcher, case-insensitive,
 ;; every term a substring of the row, and a "(" in the input is a
@@ -2632,7 +2635,83 @@
           (plist-get opts 'cache-ttl))
         (cache-wake! buf)))))
 
+;;; Tabs. An app has tabs across its top. A list declares
+;;;   'tabs ((LABEL PRED) ...)    PRED (buf entry) -> #t keeps the row
+;;; and the first tab is where it opens. The list draws the tabs with
+;;; their counts, keeps the rows of the tab it is on, drops a section
+;;; heading left empty, and <left> and <right> step the tabs.
+(define (list-tabs-of buf) (or (list-opt buf 'tabs) '()))
+
+(define (list-tab-current buf)
+  (let ((tabs (list-tabs-of buf)))
+    (or (assoc (list-tab buf (and (pair? tabs) (car (car tabs)))) tabs)
+        (and (pair? tabs) (car tabs)))))
+
+(define (list-tab-keep buf rows)
+  (let* ((tab (list-tab-current buf))
+         (sep? (lambda (e) (list-separator? buf e)))
+         (kept (filter (lambda (e) (or (sep? e) ((cadr tab) buf e))) rows)))
+    ;; a heading with no row under it goes
+    (let loop ((es kept) (out '()))
+      (cond ((null? es) (reverse out))
+            ((and (sep? (car es)) (or (null? (cdr es)) (sep? (cadr es)))) (loop (cdr es) out))
+            (else (loop (cdr es) (cons (car es) out)))))))
+
+(define (list-tab-blocks buf)
+  (let ((rows (filter (lambda (e) (not (list-separator? buf e)))
+                      (or (buffer-local buf 'list-tab-source) '())))
+        (here (car (list-tab-current buf))))
+    (list (component 'ui/tabs
+            (list 'class "list-tabs"
+                  'tabs (map (lambda (tab)
+                               (list (string-append "list-tab:" (car tab))
+                                     (string-append (car tab) " "
+                                                    (number->string (length (filter (lambda (e) ((cadr tab) buf e)) rows))))
+                                     (equal? (car tab) here)))
+                             (list-tabs-of buf)))))))
+
+(define (list-tab-go! buf label)
+  (list-tab-set! buf label)
+  (list-refresh! buf)
+  (list-goto-first-entry buf)
+  label)
+
+(define (list-tab-cycle! buf step)
+  (let ((labels (map car (list-tabs-of buf))))
+    (when (pair? labels)
+      (list-tab-go! buf (list-cycle (car (list-tab-current buf)) labels step)))))
+
+(define-command "list-tab-next" "Show the next tab of this list"
+  (lambda () (list-tab-cycle! (current-buffer) 1)))
+(define-command "list-tab-prev" "Show the previous tab of this list"
+  (lambda () (list-tab-cycle! (current-buffer) -1)))
+
+(add-hook! (list 'block-click 'list-tabs)
+  (lambda (buf id)
+    (and (string? id) (string-prefix? "list-tab:" id) (buffer-exists? buf)
+         (let ((label (substring id 9 (string-length id))))
+           (and (assoc label (list-tabs-of buf))
+                (begin (list-tab-go! buf label) #t))))))
+
+;; a list with 'tabs gets its rows kept by the tab and the tab row drawn
+;; over its own head blocks
+(define (list-mode-with-tabs opts)
+  (if (not (pair? (plist-get opts 'tabs)))
+      opts
+      (let* ((rows (plist-get opts 'rows))
+             (head (plist-get opts 'head-blocks))
+             (opts (plist-put opts 'rows
+                     (lambda (buf)
+                       (let ((all (rows buf)))
+                         (buffer-set-local! buf 'list-tab-source all)
+                         (list-tab-keep buf all)))))
+             (opts (plist-put opts 'head-blocks
+                     (lambda (buf) (append (list-tab-blocks buf) (or (and head (head buf)) '()))))))
+        (plist-put opts 'keys (append '(("<right>" "list-tab-next") ("<left>" "list-tab-prev"))
+                                      (or (plist-get opts 'keys) '()))))))
+
 (define (define-list-mode! name opts)
+  (set! opts (list-mode-with-tabs opts))
   (set! *list-modes* (alist-put *list-modes* name opts))
   ;; the list says what it is once, here — describe-mode reads it back
   (let ((d (plist-get opts 'doc)))

@@ -6,6 +6,9 @@
 ;;; they come; the first one shows as ghost text over it, M-n and M-p walk
 ;;; them, C-c i again asks for more, TAB takes the one shown and C-g lets
 ;;; them all go. Any edit to the buffer lets them go too.
+;;;
+;;; copilot-mode is the toggle. It holds C-c i, and it asks by itself: close a
+;;; [note] and stop typing, and the paragraph's rewrites come as ghost text.
 
 (require 'writing)
 (require 'content-scale)
@@ -25,19 +28,26 @@
 (define (ghost-rewrite--state buf) (buffer-local buf 'ghost-rewrite))
 (define (ghost-rewrite--set! buf st) (buffer-set-local! buf 'ghost-rewrite st))
 
-;; the region, else the paragraph at point, without its closing newline
-(define (ghost-rewrite--span buf)
-  (let* ((span (if (mark)
-                   (list (region-beginning) (region-end))
-                   (let ((pt (buffer-point buf)))
-                     (find (lambda (p) (and (<= (car p) pt) (<= pt (cadr p))))
-                           (content-scale-paragraphs buf)))))
-         (text (buffer-text buf)))
+;; SPAN without its closing newlines, or #f when nothing is left
+(define (ghost-rewrite--trim buf span)
+  (let ((text (buffer-text buf)))
     (and span
-         (let loop ((end (cadr span)))
+         (let loop ((end (min (cadr span) (string-byte-length text))))
            (cond ((<= end (car span)) #f)
                  ((equal? (substring-bytes text (- end 1) end) "\n") (loop (- end 1)))
                  (else (list (car span) end)))))))
+
+;; the paragraph that holds the byte PT
+(define (ghost-rewrite--paragraph buf pt)
+  (ghost-rewrite--trim buf
+    (find (lambda (p) (and (<= (car p) pt) (<= pt (cadr p))))
+          (content-scale-paragraphs buf))))
+
+;; the region, else the paragraph at point
+(define (ghost-rewrite--span buf)
+  (if (mark)
+      (ghost-rewrite--trim buf (list (region-beginning) (region-end)))
+      (ghost-rewrite--paragraph buf (buffer-point buf))))
 
 (define (ghost-rewrite-prompt buf passage n)
   (string-append
@@ -132,12 +142,13 @@
         (llm prompt land)
         (llm-with-model prompt writing-model land))))
 
-(define (ghost-rewrite--start! buf)
-  (let ((span (ghost-rewrite--span buf)))
+;; SPAN given is copilot-mode's paragraph: the mark is the user's and stays
+(define (ghost-rewrite--start! buf &optional given)
+  (let ((span (or given (ghost-rewrite--span buf))))
     (if (not span)
         (message "Nothing to rewrite here: select a passage")
         (let ((start (car span)) (end (cadr span)))
-          (set-mark! #f)
+          (unless given (set-mark! #f))
           (ghost-rewrite--dismiss! buf)
           (set! *ghost-rewrite-runs* (+ *ghost-rewrite-runs* 1))
           (buffer-set-local! buf 'ghost-rewrite-run *ghost-rewrite-runs*)
@@ -195,8 +206,63 @@
 (mode-doc! "ghost-rewrite-mode"
   "Rewrites of the lit passage wait as ghost text. `TAB` takes the one shown, `M-n` and `M-p` walk them, `C-c i` asks for more, and `C-g` or any edit lets them go.")
 
-(define-key "mode-specific-map" "i" "ghost-rewrite")
 (catalog-meta! 'command "ghost-rewrite" 'domain 'writing 'effects '(write external spend))
+
+(defcustom 'copilot-delay-ms 600
+  "Milliseconds of no typing after you close a [note] before copilot-mode asks for rewrites."
+  'group 'writing 'type 'integer)
+
+;; the byte of the [ that opens a note the ] at END closes, or #f. A
+;; [[link]] and a paragraph break are not a note.
+(define (copilot--note-open text end)
+  (let* ((before (substring-bytes text 0 end))
+         (open (string-rindex before "[")))
+    (and open
+         (> end (+ open 1))
+         (let ((note (substring-bytes text open end)))
+           (and (not (string-index note "]")) (not (string-index note "\n\n"))))
+         (not (and (> open 0) (equal? (substring-bytes text (- open 1) open) "[")))
+         open)))
+
+;; the ] at POS still closes a note, and no ( after it makes it a link
+(define (copilot--ask-maybe! buf pos)
+  (when (and (buffer-exists? buf) (minor-mode-on? buf "copilot-mode")
+             (not (ghost-rewrite--state buf)))
+    (let* ((text (buffer-text buf))
+           (n (string-byte-length text))
+           (at (lambda (i) (if (< i n) (substring-bytes text i (+ i 1)) ""))))
+      (when (and (equal? (at pos) "]")
+                 (not (equal? (at (+ pos 1)) "("))
+                 (copilot--note-open text pos))
+        (let ((span (ghost-rewrite--paragraph buf pos)))
+          (when span (ghost-rewrite--start! buf span)))))))
+
+;; every change starts the wait again; only a typed ] arms it
+(define (copilot--setup! buf)
+  (buffer-set-local! buf 'copilot-watch
+    (on-change! buf
+      (lambda (pos inserted deleted source)
+        (debounce! (string-append "copilot:" buf) copilot-delay-ms
+          (lambda (at) (when at (copilot--ask-maybe! buf at)))
+          (and (equal? inserted "]") pos))))))
+
+(define (copilot--teardown! buf)
+  (let ((w (buffer-local buf 'copilot-watch)))
+    (when w
+      (remove-on-change! w)
+      (buffer-set-local! buf 'copilot-watch #f)))
+  (when (ghost-rewrite--state buf) (ghost-rewrite--dismiss! buf)))
+
+(register-minor-mode! "copilot-mode" copilot--setup! copilot--teardown!)
+(minor-mode-keys! "copilot-mode" '(("C-c i" "ghost-rewrite")))
+(mode-doc! "copilot-mode"
+  "Rewrites come as ghost text, the way Copilot completes. Write what you want in [square brackets] and stop typing: the paragraph lights and its rewrites come. `C-c i` asks for the region or the paragraph at point, and again for more. `TAB` takes the one shown, `M-n` and `M-p` walk them, `C-g` lets them go.")
+(define-command "copilot-mode" "Toggle copilot-mode: rewrites come as ghost text when you close a [note]"
+  (lambda ()
+    (message (if (toggle-minor-mode! "copilot-mode")
+                 "copilot-mode on: close a [note] and pause, or C-c i"
+                 "copilot-mode off"))))
+(catalog-meta! 'command "copilot-mode" 'domain 'writing 'effects '(write))
 
 (effects! '(pure))
 (public! 'ghost-rewrite-diff "(ghost-rewrite-diff OLD NEW) — (P OLD-END NEW-END) in characters: OLD[P..OLD-END] gives way to NEW[P..NEW-END], cut on whitespace")

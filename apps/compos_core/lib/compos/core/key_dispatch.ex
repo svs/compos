@@ -90,9 +90,13 @@ defmodule Compos.Core.KeyDispatch do
     # a collapsed intent acts at point: the byte above has already moved
     # point to the caret whenever the client could prove it was current
     at_point? = from == to
+    # a pending prefix (C-c, C-x) waits for its next key. The letter typed
+    # over a selection comes as a ranged intent, and it is that key all the
+    # same: "C-c i" with a region must not type an i over the region.
+    chord? = Map.get(snapshot, :pending, []) != []
 
     cond do
-      at_point? and intent_key(type, text) != nil ->
+      (at_point? or chord?) and intent_key(type, text) != nil ->
         handle_key(intent_key(type, text))
 
       # a routed surface (minibuffer, completion) takes text one key at a

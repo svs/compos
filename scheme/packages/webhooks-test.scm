@@ -102,3 +102,17 @@
     (webhook-detach-workflow! "zz-test-wf")
     (check-false! (webhook-workflow "zz-test-wf") "detach forgets the workflow")
     (webhook-remove! "zz-test-wf")))
+
+(deftest 'webhooks-page-shows-config-and-requests
+  "an endpoint's page shows its config, then the requests it took, newest first"
+  (lambda ()
+    (define-webhook! "zz-test-page" (list 'token "t0k" 'data 'json))
+    (event-publish! "webhook:zz-test-page" 'received (list 'kind "first_kind" 'summary "the older one"))
+    (event-publish! "webhook:zz-test-page" 'received (list 'kind "second_kind" 'source "fireflies" 'summary "the newer one"))
+    (let ((text (webhooks--detail-text "zz-test-page")))
+      (check-true! (string-contains? text "/hooks/zz-test-page") "it shows the path")
+      (check-true! (string-contains? text "token       required") "it says a token guards it")
+      (check-true! (string-contains? text "second_kind · fireflies") "it shows a request's kind and source")
+      (check-true! (< (string-index text "the newer one") (string-index text "the older one"))
+                   "the newest request comes first"))
+    (webhook-remove! "zz-test-page")))

@@ -335,7 +335,82 @@
 (define *webhooks-buffer* "*webhooks*")
 
 (define (webhooks-refresh!)
-  (when (buffer-exists? *webhooks-buffer*) (list-refresh! *webhooks-buffer*)))
+  (when (buffer-exists? *webhooks-buffer*) (list-refresh! *webhooks-buffer*))
+  (for-each (lambda (b)
+              (let ((name (buffer-local b 'webhook-name)))
+                (when name (webhooks--draw-detail! b name))))
+            (mode-group-buffers "webhooks-detail-mode")))
+
+;; the page of one endpoint shows this many of its newest requests
+(define webhooks-history-shown 50)
+
+;; one request as its page lists it: when, what kind, from where, and its summary
+(define (webhooks--request-line e)
+  (let* ((d (plist-get e 'data))
+         (get (lambda (k) (and (pair? d) (plist-get d k))))
+         (kind (get 'kind))
+         (source (get 'source))
+         (what (cond ((string? (get 'summary)) (first-line (get 'summary)))
+                     ((get 'path) (string-append (format "~a" (or (get 'method) "")) " " (format "~a" (get 'path))))
+                     (else (first-line (format "~a" d))))))
+    (string-append "  " (format-time (plist-get e 'at) "%d %b %H:%M") "  "
+                   (if (string? kind) kind "request")
+                   (if (string? source) (string-append " · " source) "")
+                   (if (equal? what "") "" (string-append "\n      " what))
+                   "\n")))
+
+;; the page of one endpoint: its config, then the requests it took, newest first
+(define (webhooks--detail-text name)
+  (let ((hook (webhook-get name))
+        (line (lambda (k v) (string-append k v "\n"))))
+    (if (not hook)
+        (string-append "Webhook " name "\n\nThis endpoint is gone.\n")
+        (let ((es (event-log-newest (string-append "webhook:" name) webhooks-history-shown)))
+          (string-append
+            "Webhook " name "\n\n"
+            (line "path        " (plist-get hook 'path))
+            (line "URL         " (or (webhook-url name) "none, the server is stopped"))
+            (line "methods     " (string-join (plist-get hook 'methods) ", "))
+            (line "token       " (if (plist-get hook 'token) "required" "none"))
+            (line "reach       " (if (plist-get hook 'public) "public, through the tunnel" "local only"))
+            (line "event data  " (if (equal? (plist-get hook 'data) 'json) "the JSON body" "the whole request"))
+            (line "workflow    " (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)))
+            (line "topic       " (string-append "webhook:" name))
+            "\nRequests"
+            (if (= (length es) webhooks-history-shown)
+                (string-append ", the newest " (number->string webhooks-history-shown))
+                "")
+            "\n\n"
+            (if (null? es) "  none yet\n" (apply string-append (map webhooks--request-line es)))
+            "\n────\nend\n")))))
+
+(define (webhooks--draw-detail! buf name)
+  (buffer-set-local! buf 'webhook-name name)
+  (buffer-set-text! buf (webhooks--detail-text name) #t))
+
+(define (webhooks--list)
+  "the list at hand: this one, the one this page belongs to, else the first"
+  (if (equal? (buffer-local (current-buffer) 'mode-name) "webhooks-mode")
+      (current-buffer)
+      (or (buffer-local (current-buffer) 'webhooks-list) *webhooks-buffer*)))
+
+(define (webhooks-show-detail! name)
+  "show the page of webhook NAME beside the list; each group's list keeps its own pages"
+  (when name
+    (let* ((list-buf (webhooks--list))
+           (buf (string-append "*webhook:" name "*"
+                               (substring list-buf (string-length *webhooks-buffer*) (string-length list-buf)))))
+      (unless (buffer-known? buf)
+        (buffer-create buf)
+        (let ((g (buffer-group list-buf)))
+          (when g (buffer-move-to-group! buf g)))
+        (with-current-buffer buf (lambda () (set-mode! "webhooks-detail-mode"))))
+      (buffer-set-local! buf 'webhooks-list list-buf)
+      (webhooks--draw-detail! buf name)
+      (display-buffer-detail! buf list-buf))))
+
+(define (webhooks--saw e)
+  (debounce! 'webhooks-draw 500 (lambda (_) (webhooks-refresh!)) #f))
 
 (define (webhooks--last name)
   (let ((es (event-log-newest (string-append "webhook:" name) 1)))
@@ -373,7 +448,8 @@
                      "server stopped, s starts it")))
 
 (define (webhooks--on-current fn)
-  (let ((name (list-current *webhooks-buffer*)))
+  (let ((name (or (buffer-local (current-buffer) 'webhook-name)
+                  (let ((l (webhooks--list))) (and (buffer-exists? l) (list-current l))))))
     (if name (fn name) (message "no webhook on this line"))))
 
 (define (webhooks--said name what)
@@ -490,11 +566,13 @@
            "The webhook endpoints: path, methods, whether a token guards it, the last request, "
            "and the workflow that handles its events. c defines one, e edits the path, "
            "methods and token, w attaches a workflow handler, W stops it, k removes the "
-           "endpoint, p makes it public through the tunnel or local again, y copies its URL, h or RET shows its request history, s starts or stops the server, g redraws, "
+           "endpoint, p makes it public through the tunnel or local again, y copies its URL. Moving the point shows the endpoint's page beside the list: its config and its newest requests; RET shows it too, and h opens its requests in the event log. s starts or stops the server, g redraws, "
            "/ narrows, and q quits.")
     'buffer *webhooks-buffer*
     'transient #f
     'rows (lambda (buf) (registry-names 'webhook))
+    'key (lambda (buf name) name)
+    'preview (lambda (buf name) (webhooks-show-detail! name))
     'columns (lambda (buf)
                (list (list "webhook" 16) (list "path" 22) (list "methods" 10)
                      (list "token" 6) (list "reach" 7) (list "last request" 17) (list "workflow" #f)))
@@ -504,17 +582,32 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("c" "define") ("e" "edit") ("w" "workflow") ("k" "remove")
+              '(("RET" "page") ("c" "define") ("e" "edit") ("w" "workflow") ("k" "remove")
                 ("p" "public") ("h" "history") ("s" "server") ("/" "filter") ("q" "quit")))
     'keys '(("c" "webhook-define") ("e" "webhooks-edit")
             ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
             ("k" "webhooks-remove") ("p" "webhooks-toggle-public") ("y" "webhooks-copy-url")
-            ("h" "webhooks-history") ("RET" "webhooks-history")
+            ("h" "webhooks-history") ("RET" "webhooks-show")
             ("s" "webhooks-toggle-server") ("g" "webhooks-refresh")
             ("q" "quit-window"))))
 
+(define-mode "webhooks-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
+(mode-keys! "webhooks-detail-mode"
+            '(("e" "webhooks-edit") ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
+              ("k" "webhooks-remove") ("p" "webhooks-toggle-public") ("y" "webhooks-copy-url")
+              ("h" "webhooks-history") ("g" "webhooks-refresh")))
+(mode-doc! "webhooks-detail-mode" "One webhook endpoint: its path, URL, methods, token, reach, event data and workflow, then the requests it took, newest first. It follows new requests. e edits it, w attaches a workflow, W stops it, k removes it, p makes it public or local, y copies its URL, h opens its requests in the event log, g reads it again.")
+
+(define-command "webhooks-show" "Show the webhook at point as its own page beside the list: its config and its requests"
+  (lambda () (webhooks--on-current webhooks-show-detail!)))
+
 (define-command "webhooks" "List the webhook endpoints: define, edit, attach workflows"
-  (lambda () (list-mode-show! "webhooks-mode")))
+  (lambda ()
+    (event-subscribe! "webhooks" "webhook:*" 'webhooks--saw)
+    ;; the highlighted endpoint's page opens with the list, as a move opens the next
+    (let ((buf (list-mode-show! "webhooks-mode")))
+      (with-current-buffer buf (lambda () (webhooks-show-detail! (list-current buf))))
+      buf)))
 
 (effects! '(write))
 (public! 'define-webhook! "(define-webhook! NAME [OPTS] [HANDLER]) — define or replace webhook endpoint NAME. OPTS: 'path (default /hooks/NAME), 'methods (default POST only), 'token (checked against the x-webhook-token header or Authorization: Bearer), 'peers (the remote addresses allowed), 'data ('json: the event data is the JSON body alone), 'public (#t: it answers through the Cloudflare tunnel; else a tunneled request gets 404). HANDLER gets the request plist plus 'webhook and 'json, and answers a response plist, a body string, or anything else for ok. Without HANDLER each request becomes a webhook:NAME event")

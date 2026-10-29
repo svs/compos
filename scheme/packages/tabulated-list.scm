@@ -2675,6 +2675,10 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
     (let ((here (and (boundp 'group-here) (group-here))))
       (when (and here (not (buffer-group buf)) (boundp 'buffer-move-to-group!))
         (buffer-move-to-group! buf here)))
+    ;; every listing starts as an app, so app-dismiss puts it away and its
+    ;; pages join it; a package that claims its own keeps its id
+    (when (and (boundp 'app-claim!) (not (app-id buf)))
+      (app-claim! buf (string-append "list:" buf) 'list))
     ;; an explicit open asks for current rows; a wake does not. The init
     ;; below redraws cached entries when there are any, so fetch here in
     ;; that case — the one place the user chose to look.

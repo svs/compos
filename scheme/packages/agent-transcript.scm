@@ -37,8 +37,13 @@
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
 
 (define (agent-status slug)
+  ;; a runtime whose buffer was killed is dead too: a revive rebuilt the
+  ;; chat as a new buffer, and every reply the old runtime renders is
+  ;; dropped, so the chat looks like it ignores what you type
   (let ((info (agent-info slug)))
-    (if info (plist-get info 'status) 'dead)))
+    (if (and info (string? (plist-get info 'buffer)))
+        (plist-get info 'status)
+        'dead)))
 
 ;; A streamed block arrives as many deltas with one face. A range that
 ;; starts where the newest range ends, with the same face, extends that

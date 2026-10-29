@@ -29,7 +29,8 @@
         m0)))
 
 (define (agent-revive! slug)
-  (unless (member slug (agent-list))
+  (unless (and (member slug (agent-list))
+               (not (equal? (agent-status slug) 'dead)))
     (llm-session-close! slug))
   (chat-attach! (agent-buf slug)))
 

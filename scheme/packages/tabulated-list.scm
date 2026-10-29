@@ -2525,7 +2525,19 @@
 
 ;; `g` and every source change fetch again; a filter keystroke only
 ;; redraws, and a 'local-filter list then reuses its cached source.
-(define (list-refresh! buf) (list-render! buf #t))
+(define (list-mode-copies buf)
+  "BUF and the copies other groups keep of it, when BUF is the buffer a list mode names"
+  (let ((mode (buffer-local buf 'mode-name)))
+    (if (and mode (equal? buf (plist-get (or (list-mode-opts mode) '()) 'buffer)))
+        (cons buf (filter (lambda (b) (and (not (equal? b buf))
+                                           (equal? (buffer-local b 'mode-name) mode)))
+                          (buffer-list)))
+        (list buf))))
+
+;; a package redraws its list by the name it gave the mode; the copies
+;; other groups keep redraw with it
+(define (list-refresh! buf)
+  (for-each (lambda (b) (list-render! b #t)) (list-mode-copies buf)))
 (define (list-redraw! buf) (list-render! buf #f))
 
 ;; the `g` every list answers: a cached list fetches its source again,
@@ -2639,9 +2651,30 @@
   name)
 
 ;; open (or re-open) a list buffer in its mode
+(define (list-mode-group-buffer name)
+  "the buffer of list mode NAME that the group you are in keeps: the
+mode's own buffer when no other group holds it, else a copy BUF<n>"
+  (let* ((base (plist-get (list-mode-opts name) 'buffer))
+         (here (and (boundp 'group-here) (group-here)))
+         (mine? (lambda (b) (let ((g (buffer-group b))) (or (not g) (not here) (equal? g here))))))
+    (cond ((not (buffer-known? base)) base)
+          ((mine? base) base)
+          ((find (lambda (b) (and (equal? (buffer-local b 'mode-name) name)
+                                  (equal? (buffer-group b) here)))
+                 (buffer-list)))
+          (else
+           (let loop ((n 2))
+             (let ((b (string-append base "<" (number->string n) ">")))
+               (if (buffer-known? b) (loop (+ n 1)) b)))))))
+
+;; each group opens its own copy of a listing; a list never pulls the
+;; frame into the group another copy lives in
 (define (list-mode-show! name)
-  (let ((buf (plist-get (list-mode-opts name) 'buffer)))
+  (let ((buf (list-mode-group-buffer name)))
     (buffer-create buf)
+    (let ((here (and (boundp 'group-here) (group-here))))
+      (when (and here (not (buffer-group buf)) (boundp 'buffer-move-to-group!))
+        (buffer-move-to-group! buf here)))
     ;; an explicit open asks for current rows; a wake does not. The init
     ;; below redraws cached entries when there are any, so fetch here in
     ;; that case — the one place the user chose to look.

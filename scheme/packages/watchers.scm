@@ -134,26 +134,35 @@
 
 (define (watchers--detail-buffer row) (string-append "*watcher:" (plist-get row 'id) "*"))
 
+(define (watchers--list)
+  "the list at hand: this one, the one this page belongs to, else the first"
+  (if (equal? (buffer-local (current-buffer) 'mode-name) "watchers-mode")
+      (current-buffer)
+      (or (buffer-local (current-buffer) 'watchers-list) *watchers-buffer*)))
+
 (define (watchers-show-detail! row)
-  "show the page of the listener ROW beside the list"
+  "show the page of the listener ROW beside the list; each group's list keeps its own pages"
   (when row
-    (let ((buf (watchers--detail-buffer row)))
+    (let* ((list-buf (watchers--list))
+           (buf (string-append (watchers--detail-buffer row)
+                               (substring list-buf (string-length *watchers-buffer*) (string-length list-buf)))))
       (unless (buffer-known? buf)
         (buffer-create buf)
-        (let ((g (buffer-local *watchers-buffer* 'group)))
+        (let ((g (buffer-group list-buf)))
           (when g (buffer-move-to-group! buf g)))
         (with-current-buffer buf (lambda () (set-mode! "watchers-detail-mode"))))
       (buffer-set-local! buf 'watcher row)
+      (buffer-set-local! buf 'watchers-list list-buf)
       (buffer-set-text! buf (watchers--detail-text row) #t)
-      (display-buffer-detail! buf *watchers-buffer*))))
+      (display-buffer-detail! buf list-buf))))
 
 ;; the listener at hand: the page's own, else the list's row
 (define (watchers--at)
   (or (buffer-local (current-buffer) 'watcher)
-      (and (buffer-exists? *watchers-buffer*) (list-current *watchers-buffer*))))
+      (let ((l (watchers--list))) (and (buffer-exists? l) (list-current l)))))
 
 (define (watchers--redraw! _)
-  (when (buffer-exists? *watchers-buffer*) (list-refresh! *watchers-buffer*)))
+  (for-each (lambda (b) (list-render! b #t)) (mode-group-buffers "watchers-mode")))
 
 (define (watchers--saw e)
   (debounce! 'watchers-draw 500 watchers--redraw! #f))
@@ -191,9 +200,6 @@
 (define-command "watchers" "Open the agents' watchers: every listener, live or done, and its firings"
   (lambda ()
     (event-subscribe! "watchers" "agent-listen:*" 'watchers--saw)
-    (buffer-create *watchers-buffer*)
-    (unless (buffer-local *watchers-buffer* 'group)
-      (buffer-set-local! *watchers-buffer* 'group (frame-group)))
     (list-mode-show! "watchers-mode")))
 
 (define-command "watchers-show" "Show the watcher at point as its own page beside the list"
@@ -204,7 +210,7 @@
     (watchers--redraw! #f)
     (let ((row (buffer-local (current-buffer) 'watcher)))
       (when row
-        (let ((now (find (lambda (r) (equal? (plist-get r 'id) (plist-get row 'id))) (watchers--rows *watchers-buffer*))))
+        (let ((now (find (lambda (r) (equal? (plist-get r 'id) (plist-get row 'id))) (watchers--rows (watchers--list)))))
           (when now (watchers-show-detail! now)))))))
 
 (define-command "watchers-cancel" "Cancel the watcher at point; it wakes its chat no more"

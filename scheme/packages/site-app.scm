@@ -2661,6 +2661,10 @@
       (site-app-show-detail! buf (list-current buf)))))
 
 ;; the row's page and the chat of its own, as M-o on the page
+;; a row and its page are one thing with one chat: the row's key names it
+(mode-chat-key! "site-app-detail-mode"
+  (lambda (src) (let ((row (site-app-get src 'row))) (or (plist-get row 'key) (plist-get row 'href) src))))
+
 (define-command "site-app-agent" "Open the chat of this row's page, as M-o does on the page"
   (lambda ()
     (let* ((buf (current-buffer))

@@ -602,7 +602,8 @@
              (live (and (string? slug)
                         (find (lambda (b) (and (chat-buffer? b) (equal? (buffer-local b 'agent-slug) slug)))
                               (buffer-list))))
-             (c (or live (and header (visit-in-group path g)))))
+             ;; a chat written before headers has none, and is still the chat
+             (c (or live (and (file-exists? path) (visit-in-group path g)))))
         (and c
              (begin
                (buffer-set-local! c 'chat-for-key key)
@@ -646,7 +647,9 @@
   ;; no live chat: the archived chat the page had comes back, so a page keeps one chat
   (or (llm-mode--companion-existing buf)
       (let* ((g (or group (buffer-group buf)))
-             (c (and g (chat-for (chat-key buf) g))))
+             ;; a page kept before it had a key of its own was kept under its name
+             (c (and g (or (chat-for (chat-key buf) g)
+                           (and (not (equal? (chat-key buf) buf)) (chat-for buf g))))))
         ;; relinked by the page's key, not by a name the chat once had
         (when c (buffer-relate! c 'companion buf))
         c)))

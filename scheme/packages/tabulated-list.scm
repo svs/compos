@@ -634,10 +634,16 @@
 ;; every list gets the "match" kind; the mode's own 'filter fn reads the
 ;; kinds it invented. A list with neither keeps every row.
 (define (list-filter-match? buf e f &optional ctx)
-  (if (equal? (car f) "match")
-      (list-match? buf e (car (cdr f)) ctx)
-      (let ((m (if ctx (nth 8 ctx) (list-opt buf 'filter))))
-        (if m (m buf e f) #t))))
+  (cond
+   ((equal? (car f) "match")
+      (list-match? buf e (car (cdr f)) ctx))
+   ;; a column facet keeps the rows whose cell in that column reads the value
+   ((and (string? (car f)) (string-prefix? "column:" (car f)))
+    (equal? (list-column-text buf e (string->number (substring (car f) 7 (string-length (car f)))))
+            (car (cdr f))))
+   (else
+    (let ((m (if ctx (nth 8 ctx) (list-opt buf 'filter))))
+      (if m (m buf e f) #t)))))
 
 ;; the rows that survive the stack — the loop each list wrote by hand.
 ;; The filters and the row context are read once, not once per row.
@@ -1576,9 +1582,19 @@
                        (or (list-opt buf 'selection-trim) 0))))
           ;; the key is a change, and a change is a refresh: write it
           ;; only when the selection moved
-          (let ((key (list-key buf entry)))
-            (unless (equal? key (buffer-local buf 'list-selection-key))
-              (buffer-set-local! buf 'list-selection-key key)))
+          (let ((key (list-key buf entry))
+                (old (buffer-local buf 'list-selection-key)))
+            (unless (equal? key old)
+              (buffer-set-local! buf 'list-selection-key key)
+              ;; the highlight moved by any means (a click, a search, M-<),
+              ;; not only by the list's motion keys: preview the row it is on.
+              ;; A first draw is not a move, and a row already previewed is not
+              ;; previewed again.
+              (when (and old
+                         (list-opt buf 'preview)
+                         (not (equal? key (buffer-local buf 'list-preview-key)))
+                         (equal? (window-buffer (active-window)) buf))
+                (list-preview! buf))))
           (if face
               (overlay-set! buf 'list-selection
                 (list (list start end face)))
@@ -1654,6 +1670,9 @@
 (define (list-preview! buf)
   ;; A mode whose preview reads the network says 'debounce: its preview
   ;; waits for the highlight to rest, then shows whatever row is current then.
+  ;; The row it is for is noted, so the selection does not preview it again.
+  (let ((e (list-current buf)))
+    (buffer-set-local! buf 'list-preview-key (and e (list-key buf e))))
   (let ((f (list-opt buf 'preview))
         (delay (if (list-opt buf 'debounce) debounce-delay 0)))
     (if (and f (> delay 0))
@@ -1868,7 +1887,43 @@
 ;;; 'options (buf) gives its choices as (DISPLAY VALUE). Every tab leads
 ;;; with All, the value #f, which drops the facet. A facet that is not a
 ;;; filter brings 'get (buf) and 'set (buf value) of its own.
-(define (list-facets buf) (or (list-opt buf 'facets) '()))
+(define (list-facets buf) (or (list-opt buf 'facets) (list-column-facets buf)))
+
+;; A list that declares no facets still picks from tabs on /: each column
+;; whose rows hold a handful of values (a kind, a state, a source) is a tab,
+;; and its values are the choices. Free text still narrows the rows.
+(define list-facet-max-values 24)
+
+(define (list-column-text buf e i)
+  (let ((cells (list-row-cells buf e)))
+    (if (and (pair? cells) (< i (length (car cells))))
+        (string-trim (list-cell-text (nth i (car cells))))
+        "")))
+
+(define (list-column-facets buf)
+  (if (not (list-table? buf))
+      '()
+      (let* ((sep (list-opt buf 'separator?))
+             (rows (filter (lambda (e) (not (and sep (sep buf e)))) (list-entries buf))))
+        (let loop ((cols (list-columns buf)) (i 0) (out '()))
+          (if (null? cols)
+              (reverse out)
+              (let ((values (fold (lambda (acc e)
+                                    (let ((v (list-column-text buf e i)))
+                                      (if (or (equal? v "") (member v acc)) acc (cons v acc))))
+                                  '() rows))
+                    (kind (string-append "column:" (number->string i))))
+                (loop (cdr cols) (+ i 1)
+                      ;; a column that tells rows apart, or says the same of all, is no tab;
+                      ;; the one this list is narrowed by stays, to be widened again
+                      (if (or (assoc kind (list-filters buf))
+                              (and (> (length values) 1) (<= (length values) list-facet-max-values)
+                                   (< (length values) (length rows))))
+                          (cons (list 'label (car (car cols)) 'kind kind
+                                      'options (let ((vs (reverse values)))
+                                                 (lambda (buf) (map (lambda (v) (list v v)) vs))))
+                                out)
+                          out))))))))
 
 (define (list-facet buf kind)
   (let ((hit (filter (lambda (f) (equal? (plist-get f 'kind) kind)) (list-facets buf))))
@@ -2825,6 +2880,8 @@
   (list-tab-set! buf label)
   ;; a list that keeps its source redraws from it; another reads its rows
   (list-filter-forget! buf)
+  ;; a tab may have columns of its own
+  (list-columns-forget! buf)
   (list-render! buf (if (list-opt buf 'local-filter) #f #t))
   (list-goto-first-entry buf)
   label)

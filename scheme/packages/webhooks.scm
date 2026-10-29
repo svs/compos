@@ -329,8 +329,8 @@
 
 ;; M-x webhooks: the endpoints as a list, and the verbs on them
 
-(defface! 'webhooks-name 'fg "#26356b" 'weight "600")
-(defface! 'webhooks-path 'fg "#7a5a1a")
+(defface! 'webhooks-name 'fg "var(--default-fg)" 'weight "600")
+(defface! 'webhooks-path 'fg "var(--dim-fg)")
 
 (define *webhooks-buffer* "*webhooks*")
 
@@ -388,137 +388,76 @@
             (if (null? es) "  none yet\n" (apply string-append (map webhooks--request-line es)))
             "\n────\nend\n")))))
 
-(define (webhooks--tab buf) (or (buffer-local buf 'webhooks-tab) "history"))
+;; the page of one endpoint is a list: its requests under the history tab,
+;; its settings under the config tab. Moving onto a request shows its payload.
+(define (webhooks--request-row? r) (eq? (car r) 'request))
 
-;; the page's two tabs, as ui/tabs takes them, with the right hand's keys
-(define (webhooks--page-tabs buf n)
-  (let ((at (webhooks--tab buf)))
-    (tab-bars-keyed 'detail
-      (list (list "webhooks-tab-history" (string-append "history " (number->string n)) (equal? at "history"))
-            (list "webhooks-tab-config" "config" (equal? at "config"))))))
-
-;; the drawn page: a title, the path and URL, the tabs, then the tab
-(define (webhooks--page-blocks buf name)
-  (let ((hook (webhook-get name)))
+(define (webhooks--page-rows buf)
+  (let* ((name (buffer-local buf 'webhook-name))
+         (hook (and name (webhook-get name))))
     (if (not hook)
-        (list (component 'ui/empty (list 'text "This endpoint is gone")))
-        (let ((es (event-log-newest (string-append "webhook:" name) webhooks-history-shown))
-              (public? (plist-get hook 'public)))
-          (list
-            (component 'ui/page
-              (list 'body
-                (append
-                  (list (component 'ui/title (append (list 'text name 'badge (if public? "public" "local"))
-                                                     (if public? (list 'tone "info") '())))
-                        (component 'ui/meta (list 'segs (list (list "" (plist-get hook 'path))
-                                                              (list "c-sep" " · ")
-                                                              (list "" (or (webhook-url name) "the server is stopped")))))
-                        (component 'ui/tabs (list 'class "webhooks-tabs" 'tabs (webhooks--page-tabs buf (length es)))))
-                  (cond
-                    ((equal? (webhooks--tab buf) "config")
-                     (list (component 'ui/kv
-                             (list 'pairs
-                                   (list (list "methods" (string-join (plist-get hook 'methods) ", "))
-                                         (list "token" (if (plist-get hook 'token) "required" "none"))
-                                         (list "reach" (if public? "public, through the tunnel" "local only"))
-                                         (list "event data" (if (equal? (plist-get hook 'data) 'json) "the JSON body" "the whole request"))
-                                         (list "workflow" (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)))
-                                         (list "topic" (string-append "webhook:" name)))))))
-                    ((null? es) (list (component 'ui/empty (list 'text "No requests yet"))))
-                    (else (list (webhooks--history-table buf es))))))))))))
+        '()
+        (append
+          (map (lambda (e) (list 'request e))
+               (event-log-newest (string-append "webhook:" name) webhooks-history-shown))
+          (map (lambda (p) (list 'setting p))
+               (list (list "path" (plist-get hook 'path))
+                     (list "URL" (or (webhook-url name) "none, the server is stopped"))
+                     (list "methods" (string-join (plist-get hook 'methods) ", "))
+                     (list "token" (if (plist-get hook 'token) "required" "none"))
+                     (list "reach" (if (plist-get hook 'public) "public, through the tunnel" "local only"))
+                     (list "event data" (if (equal? (plist-get hook 'data) 'json) "the JSON body" "the whole request"))
+                     (list "workflow" (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)))
+                     (list "topic" (string-append "webhook:" name))))))))
 
-;; the history as a table whose rows take a click; the selected one is lit
-(define (webhooks--history-table buf es)
-  (let* ((tbl (component 'ui/table
-                (list 'columns '(("when") ("kind") ("source") ("summary"))
-                      'rows (map webhooks--request-parts es))))
-         (kids (plist-get tbl 'children))
-         (sel (buffer-local buf 'webhooks-sel)))
-    (plist-put tbl 'children
-      (cons (car kids)
-            (let loop ((rows (cdr kids)) (es es) (out '()))
-              (if (or (null? rows) (null? es)) (reverse out)
-                  (let* ((seq (plist-get (car es) 'seq))
-                         (row (plist-put (car rows) 'click (string-append "webhooks-req-" (number->string seq)))))
-                    (loop (cdr rows) (cdr es)
-                          (cons (if (equal? seq sel)
-                                    (plist-put row 'attrs (list (list "style" "background: var(--hl-line-bg)")))
-                                    row)
-                                out)))))))))
+(define (webhooks--page-columns buf)
+  (if (equal? (car (list-tab-current buf)) "config")
+      (list (list "setting" 12) (list "value" #f))
+      (list (list "when" 13) (list "kind" 20) (list "source" 10) (list "summary" #f))))
 
-(define (webhooks--page-events buf)
-  (let ((name (buffer-local buf 'webhook-name)))
-    (if name (event-log-newest (string-append "webhook:" name) webhooks-history-shown) '())))
+(define (webhooks--page-cells buf r)
+  (if (webhooks--request-row? r)
+      (let ((p (webhooks--request-parts (cadr r))))
+        (list (list (nth 0 p) "dim") (list (nth 1 p) "webhooks-name") (list (nth 2 p) "dim") (nth 3 p)))
+      (list (list (car (cadr r)) "dim") (cadr (cadr r)))))
+
+(define (webhooks--page-meta buf)
+  (let* ((name (buffer-local buf 'webhook-name))
+         (hook (and name (webhook-get name))))
+    (if (not hook)
+        "this endpoint is gone"
+        (string-append (if (plist-get hook 'public) "public" "local") " · " (plist-get hook 'path)
+                       " · " (or (webhook-url name) "the server is stopped")))))
 
 (define (webhooks--payload-buffer page)
   (string-append "*webhook-payload:" (substring page 9 (string-length page))))
 
-;; select request SEQ on PAGE and show its payload in the window beside it
-(define (webhooks--select-request! page seq)
-  (let* ((name (buffer-local page 'webhook-name))
-         (r (event-log-read (- seq 1) (string-append "webhook:" name) 1))
-         (e (and (pair? r) (equal? (plist-get (car r) 'seq) seq) (car r))))
-    (when e
-      (buffer-set-local! page 'webhooks-sel seq)
-      (buffer-set-local! page 'webhooks-tab "history")
-      (webhooks--draw-detail! page name)
-      (let ((buf (webhooks--payload-buffer page)))
-        (unless (buffer-known? buf)
-          (buffer-create buf)
-          (let ((g (buffer-group page)))
-            (when g (buffer-move-to-group! buf g))))
-        (buffer-set-read-only! buf #f)
-        (buffer-set-text! buf (json-encode (plist-get e 'data) #t) #t)
-        (with-current-buffer buf (lambda () (unless (equal? (buffer-local buf 'mode-name) "json-mode") (set-mode! "json-mode"))))
-        (buffer-set-local! buf 'webhooks-seq seq)
-        (buffer-set-read-only! buf #t)
-        (display-buffer-detail! buf page)))))
-
-;; the request STEP rows from the selected one, newest first; the first move lands on the newest
-(define (webhooks--step-request! page step)
-  (let* ((seqs (map (lambda (e) (plist-get e 'seq)) (webhooks--page-events page)))
-         (sel (buffer-local page 'webhooks-sel))
-         (i (let loop ((s seqs) (i 0)) (cond ((null? s) #f) ((equal? (car s) sel) i) (else (loop (cdr s) (+ i 1))))))
-         (j (if i (max 0 (min (- (length seqs) 1) (+ i step))) 0)))
-    (if (null? seqs)
-        (message "No requests yet")
-        (webhooks--select-request! page (list-ref seqs j)))))
-
-(add-hook! (list 'block-click 'webhooks-requests)
-  (lambda (buf id)
-    (and (string? id)
-         (string-prefix? "webhooks-req-" id)
-         (buffer-local buf 'webhook-name)
-         (let ((seq (string->number (substring id 13 (string-length id)))))
-           (and seq (begin (webhooks--select-request! buf seq) #t))))))
-
-(define-command "webhooks-next-request" "Select the next older request on this webhook's page and show its payload"
-  (lambda () (webhooks--step-request! (current-buffer) 1)))
-
-(define-command "webhooks-previous-request" "Select the next newer request on this webhook's page and show its payload"
-  (lambda () (webhooks--step-request! (current-buffer) -1)))
+;; show request E of PAGE as JSON in the window beside the page
+(define (webhooks--show-payload! page e)
+  (let ((buf (webhooks--payload-buffer page)))
+    (unless (buffer-known? buf)
+      (buffer-create buf)
+      (let ((g (buffer-group page)))
+        (when g (buffer-move-to-group! buf g))))
+    (buffer-set-read-only! buf #f)
+    (buffer-set-text! buf (json-encode (plist-get e 'data) #t) #t)
+    (with-current-buffer buf
+      (lambda () (unless (equal? (buffer-local buf 'mode-name) "json-mode") (set-mode! "json-mode"))))
+    (buffer-set-local! buf 'webhooks-seq (plist-get e 'seq))
+    (buffer-set-read-only! buf #t)
+    (display-buffer-detail! buf page)))
 
 (define (webhooks--draw-detail! buf name)
   (buffer-set-local! buf 'webhook-name name)
-  ;; the text is what agents and search read; the blocks are what you see
-  (buffer-set-text! buf (webhooks--detail-text name) #t)
-  (desktop-skip! buf 'render-blocks)
-  (desktop-skip! buf 'footer-line-blocks)
-  (buffer-set-local! buf 'render-mode "blocks")
-  (buffer-set-local! buf 'render-blocks (webhooks--page-blocks buf name))
-  (buffer-set-local! buf 'footer-line-blocks
-    (list (component 'ui/keys-bar
-            (list 'main '(("6" "history") ("7" "config") ("n/p" "payload") ("e" "edit") ("P" "public")
-                          ("y" "copy URL") ("h" "event log") ("g" "refresh") ("q" "quit")))))))
+  (list-render! buf #t))
 
-(add-hook! (list 'block-click 'webhooks-tabs)
-  (lambda (buf id)
-    (and (string? id)
-         (string-prefix? "webhooks-tab-" id)
-         (buffer-local buf 'webhook-name)
-         (begin (buffer-set-local! buf 'webhooks-tab (substring id 13 (string-length id)))
-                (webhooks--draw-detail! buf (buffer-local buf 'webhook-name))
-                #t))))
+(define-command "webhooks-show-payload" "Show the payload of the request at point beside this page"
+  (lambda ()
+    (let ((r (list-current (current-buffer))))
+      (if (and r (webhooks--request-row? r))
+          (webhooks--show-payload! (current-buffer) (cadr r))
+          (message "no request on this line")))))
+
 
 (define (webhooks--list)
   "the list at hand: this one, the one this page belongs to, else the first"
@@ -535,10 +474,13 @@
       (unless (buffer-known? buf)
         (buffer-create buf)
         (let ((g (buffer-group list-buf)))
-          (when g (buffer-move-to-group! buf g)))
-        (with-current-buffer buf (lambda () (set-mode! "webhooks-detail-mode"))))
+          (when g (buffer-move-to-group! buf g))))
       (buffer-set-local! buf 'webhooks-list list-buf)
-      (webhooks--draw-detail! buf name)
+      (buffer-set-local! buf 'webhook-name name)
+      ;; the page is a list; it enters the mode once, and redraws after
+      (if (equal? (list-mode-of buf) "webhooks-detail-mode")
+          (list-render! buf #t)
+          (with-current-buffer buf (lambda () (set-mode! "webhooks-detail-mode"))))
       (display-buffer-detail! buf list-buf))))
 
 (define (webhooks--saw e)
@@ -723,23 +665,40 @@
             ("s" "webhooks-toggle-server") ("g" "webhooks-refresh")
             ("q" "quit-window"))))
 
-(define-mode "webhooks-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "webhooks-detail-mode"
-            '(("e" "webhooks-edit") ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
-              ("k" "webhooks-remove") ("P" "webhooks-toggle-public") ("y" "webhooks-copy-url")
-              ("h" "webhooks-history") ("g" "webhooks-refresh")
-              ("n" "webhooks-next-request") ("p" "webhooks-previous-request")))
-(when (boundp 'tab-bars-declare!)
-  ;; the list has no tabs of its own; declaring it pairs it with the page
-  ;; beside it, so 6 and 7 take the page's tabs from either pane
-  (tab-bars-declare! "webhooks-mode" (lambda (buf) '()))
-  (tab-bars-declare! "webhooks-detail-mode"
-    (lambda (buf)
-      (let ((name (buffer-local buf 'webhook-name)))
-        (if name
-            (list (list "Page" (webhooks--page-tabs buf (length (event-log-newest (string-append "webhook:" name) webhooks-history-shown)))))
-            '())))))
-(mode-doc! "webhooks-detail-mode" "One webhook endpoint: its path, reach and URL over two tabs. History, the first, lists the requests it took, newest first, and follows new ones; config shows its methods, token, reach, event data and workflow. 6 and 7, the arrows or a click take a tab. n and p, or a click, select a request and show its JSON payload in the window beside the page. e edits it, w attaches a workflow, W stops it, k removes it, P makes it public or local, y copies its URL, h opens its requests in the event log, g reads it again.")
+(define-list-mode! "webhooks-detail-mode"
+  (list
+    'doc (string-append
+           "One webhook endpoint as a list, over two tabs. history, the first, holds the requests it took, "
+           "newest first, and follows new ones; moving onto one shows its JSON payload in the window beside "
+           "the page, and RET shows it too. config holds its path, URL, methods, token, reach, event data, "
+           "workflow and topic. <left> and <right> step the tabs. / narrows the rows and searches the payloads. "
+           "e edits the endpoint, w attaches a workflow, W stops it, k removes it, P makes it public or local, "
+           "y copies its URL, h opens its requests in the event log, g reads it again, q quits.")
+    'transient #f
+    'rows webhooks--page-rows
+    'key (lambda (buf r)
+           (if (webhooks--request-row? r)
+               (number->string (plist-get (cadr r) 'seq))
+               (string-append "setting:" (car (cadr r)))))
+    'tabs (list (list "history" (lambda (buf r) (webhooks--request-row? r)))
+                (list "config" (lambda (buf r) (not (webhooks--request-row? r)))))
+    'columns webhooks--page-columns
+    'cells webhooks--page-cells
+    'body (lambda (buf r) (if (webhooks--request-row? r) (json-encode (plist-get (cadr r) 'data)) (cadr (cadr r))))
+    'preview (lambda (buf r) (when (webhooks--request-row? r) (webhooks--show-payload! buf (cadr r))))
+    'title (lambda (buf) (string-append "Webhook " (or (buffer-local buf 'webhook-name) "")))
+    'meta webhooks--page-meta
+    'noun "request"
+    'no-marks #t
+    'local-filter #t
+    'footer (lambda (buf)
+              '(("RET" "payload") ("<left>/<right>" "tab") ("e" "edit") ("P" "public")
+                ("y" "copy URL") ("h" "event log") ("/" "filter") ("q" "quit")))
+    'keys '(("RET" "webhooks-show-payload") ("e" "webhooks-edit")
+            ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
+            ("k" "webhooks-remove") ("P" "webhooks-toggle-public") ("y" "webhooks-copy-url")
+            ("h" "webhooks-history") ("g" "webhooks-refresh") ("q" "quit-window"))))
+
 
 (define-command "webhooks-show" "Show the webhook at point as its own page beside the list: its config and its requests"
   (lambda () (webhooks--on-current webhooks-show-detail!)))

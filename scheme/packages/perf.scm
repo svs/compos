@@ -290,7 +290,7 @@
   (let* ((s (vm-sample))
          (procs (vm-processes perf-process-rows (perf--sort-name buf)
                               (or (buffer-local buf 'perf-filter) "")))
-         (events (telemetry-events 400))
+         (events (telemetry-events 1000))
          (since (or (buffer-local buf 'perf-heat-since) 0)))
     (buffer-set-locals! buf
       (list 'perf-sample s
@@ -301,6 +301,7 @@
             'perf-sparks (perf--advance-sparks (buffer-local buf 'perf-sparks)
                                                (perf--get procs 'rows '()))
             'perf-render-ms (perf--render-durations events)
+            'perf-lanes (perf--lanes events)
             'perf-tick (+ 1 (or (buffer-local buf 'perf-tick) 0))))))
 
 ;;; --- the text ----------------------------------------------------------------------
@@ -616,6 +617,64 @@
                   (reverse acc)
                   (loop (cdr rs) (+ line 1) (cons (perf--process-row (car rs) line sparks) acc)))))))))
 
+;; lane contention: every lane job the telemetry stamped in the last
+;; *perf-lane-window-ms*, one row per lane, the lane that waited longest first.
+;; wait is the time a job sat queued behind the lane's earlier jobs.
+(define *perf-lane-window-ms* 30000)
+
+(define (perf--lane-name owner)
+  (cond ((equal? owner ":ui") "ui")
+        ((string-prefix? "{:rpc" owner) "rpc")
+        (else (let ((parts (string-split owner "\"")))
+                (if (>= (length parts) 2) (cadr parts) owner)))))
+
+;; (NAME JOBS BUSY WAIT-MAX WAIT-SUM BACKLOG-MAX SLOWEST SLOWEST-LABEL) per lane
+(define (perf--lanes events)
+  (let* ((now (perf--newest-time events))
+         (fresh (filter (lambda (r) (and (equal? (plist-get r 'kind) "lane")
+                                         (> (plist-get r 'time-ms) (- now *perf-lane-window-ms*))))
+                        events))
+         (acc (fold (lambda (acc r)
+                      (let* ((name (perf--lane-name (plist-get r 'owner)))
+                             (old (or (alist-get acc name) '(0 0 0 0 0 0 "")))
+                             (ms (or (plist-get r 'duration-ms) 0))
+                             (q (or (plist-get r 'queue-ms) 0)))
+                        (alist-put acc name
+                          (list (+ 1 (list-ref old 0)) (+ ms (list-ref old 1))
+                                (max q (list-ref old 2)) (+ q (list-ref old 3))
+                                (max (or (plist-get r 'backlog) 0) (list-ref old 4))
+                                (max ms (list-ref old 5))
+                                (if (> ms (list-ref old 5)) (plist-get r 'label) (list-ref old 6))))))
+                    '() fresh)))
+    (map cdr (sort (map (lambda (e) (cons (list (- (list-ref (cadr e) 3)) (- (list-ref (cadr e) 1)))
+                                          (cons (car e) (cadr e))))
+                        acc)))))
+
+(define (perf--lane-row r)
+  (let ((busy (list-ref r 2)) (wait-max (list-ref r 3)))
+    (perf--div "perf-prow perf-lrow"
+      (perf--txt "perf-name" (list-ref r 0))
+      (perf--txt "perf-num" (number->string (list-ref r 1)))
+      (perf--txt "perf-num perf-strong" (number->string busy))
+      (perf--txt "perf-num" (number->string (quotient (* 100 busy) *perf-lane-window-ms*)))
+      (perf--txt (string-append "perf-num " (perf--heat-class wait-max)) (number->string wait-max))
+      (perf--txt (string-append "perf-num " (if (> (list-ref r 4) 0) "perf-warm" "perf-dim"))
+                 (number->string (list-ref r 4)))
+      (perf--txt "perf-num" (number->string (list-ref r 5)))
+      (perf--txt "perf-dim perf-current-fn"
+                 (string-append (number->string (list-ref r 6)) " ms · " (list-ref r 7))))))
+
+(define (perf--lanes-panel lanes)
+  (perf--panel 12 "Fig. 0" "Lanes · contention"
+    (list (perf--txt "" (string-append "ms · last " (number->string (quotient *perf-lane-window-ms* 1000)) " s")))
+    (perf--div "perf-prow perf-lrow perf-phead"
+      (perf--txt "" "lane") (perf--txt "perf-num" "jobs") (perf--txt "perf-num" "busy")
+      (perf--txt "perf-num" "busy %") (perf--txt "perf-num" "wait max") (perf--txt "perf-num" "wait sum")
+      (perf--txt "perf-num" "backlog") (perf--txt "" "slowest job"))
+    (if (null? lanes)
+        (list (component 'ui/empty '(text "no lane jobs in the window")))
+        (map perf--lane-row lanes))))
+
 (define (perf--disk-row d)
   (let ((pct (perf--get d 'pct 0)))
     (perf--div "perf-disk"
@@ -732,7 +791,8 @@
                            (perf--frame-panel sorted)
                            (perf--heat-panel (or (buffer-local buf 'perf-heat) '()))
                            (perf--storage-panel s))
-                     (list (perf--cpu-panel s ser)
+                     (list (perf--lanes-panel (or (buffer-local buf 'perf-lanes) '()))
+                           (perf--cpu-panel s ser)
                            (perf--memory-panel s)
                            (perf--io-panel s ser)
                            (perf--process-panel buf)))))
@@ -1151,6 +1211,7 @@ span.perf-idle { color: var(--dim-fg); }
 .perf-prow { display: grid; grid-template-columns: 88px minmax(0, 1.4fr) 72px 76px 40px 64px minmax(0, 1fr) 92px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; cursor: pointer; }
 .perf-prow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perf-prow.current { background: var(--hl-line-bg); }
+.perf-prow.perf-lrow { grid-template-columns: minmax(0, 1.2fr) 48px 64px 56px 72px 72px 64px minmax(0, 2fr); cursor: default; }
 .perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); cursor: default; }
 .perf-name { color: var(--default-fg); }
 .perf-num { text-align: right; }

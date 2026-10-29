@@ -706,6 +706,20 @@
            (panes-apply! (if pid (panes-set-focus (car popped) pid) (car popped)))
            #t))))
 
+(define (panes--kill-raise layout name)
+  "LAYOUT without NAME. When NAME was what its pane showed, the window of
+   that pane seen most recently comes to the front: closing a scratch
+   goes back to where you were, not to the next buffer of its window."
+  (let* ((k (find (lambda (k) (member name (panes-window-buffers layout k))) (panes-window-keys layout)))
+         (pid (and k (panes-pane-of layout k)))
+         (front (and pid (equal? k (car (panes-pane-keys layout pid)))
+                     (equal? name (panes-window-buffer layout k))))
+         (l (panes-drop-buffer layout name)))
+    (if (not front)
+        l
+        (let ((back (find (lambda (j) (member j (panes-pane-keys l pid))) (panes--recent l))))
+          (if back (panes-raise l back) l)))))
+
 (define (panes--kill-repair! name)
   "A buffer dies: it leaves every stack before the core looks for a
    stand-in. The keyed hook (buffer-kill-repair KEY) answers a thunk for
@@ -716,7 +730,7 @@
     (and layout (member name (panes-buffers layout))
          (begin
            (window-log-note! "panes kill" name)
-           (panes-apply! (panes-drop-buffer layout name))
+           (panes-apply! (panes--kill-raise layout name))
            (lambda () (window-state-changed!))))))
 
 
@@ -758,8 +772,13 @@
          (k (and l (panes-key-of-handle l win)))
          (pid (and l (not k) (panes--empty-pane-of win))))
     (cond ((not (and l (fill-candidate? buf))) #f)
-          (k (unless (equal? (panes-window-buffer l k) buf)
-               (panes-layout-set! (panes-show l k buf))))
+          ((and k (equal? (panes-window-buffer l k) buf)) #f)
+          ;; a buffer of another mode goes to its own mode's window in this
+          ;; pane, not onto this one: a chat in the morg window made the
+          ;; window list name morg for what was the chat
+          ((and k (not (equal? (panes-window-mode l k) (panes--buffer-mode buf))))
+           (panes--show-in-pane! (list l (panes-pane-of l k)) buf "panes follows"))
+          (k (panes-layout-set! (panes-show l k buf)))
           ((and pid (panes-pane l pid))
            ;; the blank window becomes the pane's window: it takes its id
            (let ((made (panes-add-window l pid buf (panes--buffer-mode buf))))

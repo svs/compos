@@ -868,21 +868,34 @@
                      (equal? (string-trim (chat-input-text b)) ""))))
             (map car *chats-activity*))))
 
+(defcustom 'chat-idle-reap-dry-run #t
+  "Only name the idle chats the reaper would ask, in the echo area; ask none of them."
+  'group 'chat 'type 'boolean)
+
 (define (chat-reap! &optional _event)
   "ask each idle chat to finish; answer the chats asked"
   (if (not (and (number? chat-idle-reap-minutes) (> chat-idle-reap-minutes 0)))
       '()
       (let ((bs (chat-reap--candidates)))
-        (for-each (lambda (b)
-                    (buffer-set-local! b 'chat-reap #t)
-                    (buffer-set-local! b 'chat-dismiss-pending #t)
-                    (buffer-set-local! b 'chat-finish-asked #t)
-                    (agent-send-msg! (agent-slug-of b)
-                                     (string-append "This chat has been idle for "
-                                                    (number->string chat-idle-reap-minutes)
-                                                    " minutes. " *chat-finish-ask*)))
-                  bs)
-        bs)))
+        (if chat-idle-reap-dry-run
+            (let ((new (filter (lambda (b) (not (buffer-local b 'chat-reap-noted))) bs)))
+              (for-each (lambda (b) (buffer-set-local! b 'chat-reap-noted #t)) new)
+              (when (pair? new)
+                (message (string-append "Reap (dry run) would ask "
+                                        (number->string (length new)) ": "
+                                        (string-join new ", "))))
+              bs)
+            (begin
+              (for-each (lambda (b)
+                          (buffer-set-local! b 'chat-reap #t)
+                          (buffer-set-local! b 'chat-dismiss-pending #t)
+                          (buffer-set-local! b 'chat-finish-asked #t)
+                          (agent-send-msg! (agent-slug-of b)
+                                           (string-append "This chat has been idle for "
+                                                          (number->string chat-idle-reap-minutes)
+                                                          " minutes. " *chat-finish-ask*)))
+                        bs)
+              bs)))))
 
 (public! 'chat-reap! "(chat-reap!) -- ask each idle chat to finish; answer the chats asked")
 (catalog-meta! 'function "chat-reap!" 'domain 'chat 'effects '(write spend))

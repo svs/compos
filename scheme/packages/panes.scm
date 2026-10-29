@@ -81,44 +81,13 @@
   "The id of buffer BUF; BUF itself when no buffer has that name."
   (car (panes--ids (list buf))))
 
-;; ((ID NAME) ...) and the buffer count it was read at. A miss reads it
-;; again only when buffers came or went; a rename clears it
-(define panes--names '())
-(define panes--names-count -1)
-(define panes--names-missed '())
-
-(define (panes--names-forget!)
-  "Forget the id-to-name map; the next panes--name reads it again."
-  (set! panes--names '())
-  (set! panes--names-count -1)
-  (set! panes--names-missed '()))
-
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has
-   that id."
-  (let ((e (assoc id panes--names)))
-    (if e
-        (cadr e)
-        ;; every buffer, dormant ones too: a model window holds a dormant
-        ;; buffer as well, and buffer-list names only the live ones
-        ;; the count alone (limit 0) is cheap; a dead id in the layout asks
-        ;; on every lookup, so the full listing is read only to refresh the map
-        (let ((count (car (buffer-rows '(hidden #t context-only #t limit 0 fields (name))))))
-          ;; a kill and a create keep the count, so a new id reads the map
-          ;; again too; an id that missed once waits for the count to change
-          (unless (and (= count panes--names-count) (member id panes--names-missed))
-            (unless (= count panes--names-count) (set! panes--names-missed '()))
-            (set! panes--names-count count)
-            (set! panes--names
-              (let ((all (map car (cadr (buffer-rows '(hidden #t context-only #t fields (name)))))))
-                (map (lambda (r) (list (cadr r) (car r)))
-                     (filter cadr (buffer-read-many all '(id) '()))))))
-          (let ((e (assoc id panes--names)))
-            (if e
-                (cadr e)
-                (begin (unless (member id panes--names-missed)
-                         (set! panes--names-missed (cons id panes--names-missed)))
-                       id)))))))
+   that id. meta.db holds every buffer, dormant ones too, by id: a
+   model window holds a dormant buffer as well, and a rename keeps the
+   id."
+  (let ((rows (cadr (buffer-rows (list 'ids (list id) 'hidden #t 'context-only #t 'limit 1)))))
+    (if (pair? rows) (caar rows) id)))
 
 (define (panes--with-ids layout)
   "LAYOUT with every stack entry an id: a name some buffer has becomes

@@ -1966,7 +1966,7 @@ defmodule Compos.Core.SchemeAPI do
         Buffer.get_local(buf, plain(k)) || false
       end,
       {"buffer-rows",
-       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, modes, agents (#t: every agent's buffer too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, path, mode, title, group (group-id), group-label, modified, read-only, used, agent, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
+       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, ids, modes, agents (#t: every agent's buffer too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, id, path, mode, title, group (group-id), group-label, modified, read-only, used, agent, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
         fn args ->
           spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
 

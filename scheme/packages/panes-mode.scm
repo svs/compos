@@ -719,10 +719,6 @@
            (panes-apply! (panes-drop-buffer layout name))
            (lambda () (window-state-changed!))))))
 
-(define (panes--rename! old new)
-  "A renamed buffer keeps its id, so no layout changes: the model holds
-   ids. The id-to-name map is read again on the next lookup."
-  (panes--names-forget!))
 
 (define (panes--enter-group!)
   "The frame enters a group: its layout comes back, or the frame is
@@ -1037,8 +1033,7 @@
    and window-set-buffer! and switch-to-buffer-here! show a buffer in a
    window; outside a draw each edits the model first (see the section
    above).
-   Hooks: buffer-kill-repair runs panes--kill-repair!,
-   buffer-renamed-hook runs panes--rename!, and group-joined-hook with
+   Hooks: buffer-kill-repair runs panes--kill-repair!, and group-joined-hook with
    post-command-hook give a buffer that joins a group a window
    (panes--place-joined!). No window hook writes the model."
   (advice-add! 'select-window! 'around 'panes
@@ -1056,8 +1051,9 @@
   (add-hook! 'group-joined-hook 'panes--joined!)
   (add-hook! 'post-command-hook 'panes--place-joined!)
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
-  (add-hook! 'buffer-renamed-hook 'panes--rename!)
-  ;; an install over an older one drops the hooks that read the frame back
+  ;; an install over an older one drops the hooks that read the frame back,
+  ;; and the rename hook: a model of ids needs nothing on a rename
+  (remove-hook! 'buffer-renamed-hook 'panes--rename!)
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
   (remove-hook! 'window-state-change-hook 'panes--note-focus!))
 

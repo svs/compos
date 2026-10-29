@@ -75,3 +75,15 @@
     (check-equal! (length (switch-tab-rows 'all t--tab-rows "g1" #f)) 4 "all")
     (check-equal! (switch-tab-rows 'window t--tab-rows "g1" #f) '() "no window, no history")
     (check-equal! (switch-tab-rows 'group t--tab-rows #f #f) '() "no group")))
+
+(deftest 'the-buffer-prompt-orders-by-recent-use
+  "C-x b leads with the buffer used last, not the window's own history"
+  (lambda ()
+    (for-each (lambda (n) (buffer-create n)) '("*zz-mru-a*" "*zz-mru-b*" "*zz-mru-c*"))
+    (for-each switch-to-buffer-here! '("*zz-mru-a*" "*zz-mru-b*" "*zz-mru-c*"))
+    (set-window-prev-buffers! (active-window) '("*zz-mru-a*"))
+    (let* ((mine (lambda (names) (filter (lambda (n) (string-prefix? "*zz-mru-" n)) names)))
+           (rows (mine (map car (switch-prompt-rows "*zz-mru-c*" (active-window)))))
+           (bufs (mine (switch-prompt-buffers "*zz-mru-c*" #f (active-window)))))
+      (check-equal! rows '("*zz-mru-b*" "*zz-mru-a*" "*zz-mru-c*") "rows: recent first, here last")
+      (check-equal! bufs '("*zz-mru-b*" "*zz-mru-a*" "*zz-mru-c*") "buffers: recent first, here last"))))

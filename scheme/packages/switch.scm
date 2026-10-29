@@ -757,9 +757,8 @@
            (loop (cdr rs) out))
           (else (loop (cdr rs) (cons (car rs) out))))))
 
-;; the buffers C-x b offers, in the order the pool keeps: the window's
-;; own history first, then the editor's recency, the buffer you are on
-;; last. Names only: the pool annotates
+;; the buffers C-x b offers, by the editor's recency alone, the buffer
+;; you are on last. The window's own history does not lead. Names only: the pool annotates
 ;; every buffer for the candidate panel, and that cost 800ms the table
 ;; never shows.
 (define (switch-prompt-buffers here my-group win)
@@ -768,11 +767,8 @@
                               (not (equal? b *switch-buffer*))
                               (not (buffer-context-only? b))))
                        (buffer-list-mru)))
-         (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
-         (led (filter (lambda (n) (and (member n bufs) (not (equal? n here)))) mine))
-         (rest (filter (lambda (b) (and (not (member b led)) (not (equal? b here)))) bufs)))
-    (append led rest
-            (if (member here bufs) (list here) '()))))
+         (rest (filter (lambda (b) (not (equal? b here))) bufs)))
+    (append rest (if (member here bufs) (list here) '()))))
 
 ;; the wall time of the last C-x b, key dispatch to a usable minibuffer:
 ;; (ibuffer-prompt-last-ms) reads it back for a measurement outside eval
@@ -1002,21 +998,17 @@ the next row down. STEP is kept for the callers."
                 (cons (list (car candidate) (string-join parts "  ")) out))))))
 
 (define (switch-prompt-rows here win)
-  ;; switch-prompt-buffers' order from one read of the buffer rows: the
-  ;; buffers WIN showed before, every other buffer by recent use, then
-  ;; HERE. A row is (NAME PATH MODIFIED MODE GROUP-ID
-  ;; GROUP); a file that is no buffer has #f for each.
+  ;; switch-prompt-buffers' order from one read of the buffer rows: every
+  ;; buffer by recent use, then HERE. WIN's own history does not lead, so
+  ;; the first row is the buffer you used last, wherever it was shown.
+  ;; WIN stays for the callers. A row is (NAME PATH MODIFIED MODE
+  ;; GROUP-ID GROUP); a file that is no buffer has #f for each.
   (let* ((all (cadr (buffer-rows (list 'sort 'recent 'exclude-names (list *switch-buffer*)
                                         'fields '(path modified mode group-id group)))))
          (row-of (lambda (r) (list-head r 6)))
-         (mine (if (and win (window-exists? win)) (window-prev-buffers win) '()))
-         (led (filter (lambda (r) r)
-                      (map (lambda (n) (and (not (equal? n here)) (assoc n all))) mine)))
-         (led-names (map car led))
-         (rest (filter (lambda (r) (not (or (equal? (car r) here) (member (car r) led-names)))) all))
-         (self (let ((r (assoc here all))) (if r (list r) '())))
-         (buffers (map row-of (append led rest self))))
-    buffers))
+         (rest (filter (lambda (r) (not (equal? (car r) here))) all))
+         (self (let ((r (assoc here all))) (if r (list r) '()))))
+    (map row-of (append rest self))))
 
 ;; C-x b has three tabs over one list: every buffer, the current group's,
 ;; and the ones this window showed. The side arrows move between them and

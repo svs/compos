@@ -59,7 +59,13 @@
                          ((and (equal? kind "cancelled") (not live)) (plist-put row 'state "cancelled"))
                          (else row)))))))
       (reverse (event-log-newest "agent-listen:*" watchers-history-limit)))
-    (let ((rows (map cdr table)))
+    ;; the task titles in one read: todo-get reads every todo file per call
+    (let* ((titles (let ((ts (if (boundp 'todo--all) (todo--all) '())))
+                     (map (lambda (t) (list (plist-get t 'id) (plist-get t 'title))) ts)))
+           (rows (map (lambda (p)
+                        (let* ((r (cdr p)) (hit (assoc (plist-get r 'task) titles)))
+                          (plist-put (plist-put r 'task-read #t) 'task-title (and hit (cadr hit)))))
+                      table)))
       (append (filter (lambda (r) (equal? (plist-get r 'state) "listening")) rows)
               ;; sort has no comparator: the newest first, keyed on minus its last activity
               (map cadr (sort (map (lambda (r) (list (- 0 (or (plist-get r 'last) 0)) r))
@@ -83,8 +89,10 @@
     (and id (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list)))))
 
 (define (watchers--task-title row)
-  (let* ((id (plist-get row 'task)) (t (and (not (watchers--blank? id)) (todo-get id))))
-    (and t (plist-get t 'title))))
+  (if (plist-get row 'task-read)
+      (plist-get row 'task-title)
+      (let* ((id (plist-get row 'task)) (t (and (not (watchers--blank? id)) (todo-get id))))
+        (and t (plist-get t 'title)))))
 
 ;;; `<` cycles what a section is, as in ibuffer; a heading is a row of kind sep
 (define *watchers-groupings* '("state" "chat" "group" "topic" "none"))
@@ -94,21 +102,30 @@
 
 (define (watchers--sep? row) (equal? (plist-get row 'kind) "sep"))
 
-(define (watchers--section-of buf row)
-  (let ((g (watchers--grouping buf))
-        (chat (watchers--chat-buffer row)))
-    (cond ((equal? g "chat") (or (and chat (buffer-short-label chat)) (plist-get row 'chat) "no chat"))
-          ((equal? g "group") (or (and chat (buffer-group chat) (group-name (buffer-group chat)))
-                                   (watchers--task-group row) "no group"))
+(define (watchers--section-of buf row &optional chats)
+  ;; CHATS maps a chat id to its buffer, read once per draw
+  (let* ((g (watchers--grouping buf))
+         (chat (lambda () (if chats
+                              (let ((hit (assoc (plist-get row 'chat) chats))) (and hit (cadr hit)))
+                              (watchers--chat-buffer row)))))
+    (cond ((equal? g "chat") (let ((c (chat))) (or (and c (buffer-short-label c)) (plist-get row 'chat) "no chat")))
+          ((equal? g "group") (let ((c (chat))) (or (and c (buffer-group c) (group-name (buffer-group c)))
+                                                      (watchers--task-group row) "no group")))
           ((equal? g "topic") (or (plist-get row 'topic) "no topic"))
           (else (watchers--state-label row)))))
 
 (define (watchers--sections buf rows)
-  ;; a state keeps its fixed order; any other section comes in the order of its first watcher
+  ;; a state keeps its fixed order; any other section comes in the order of its first watcher.
+  ;; Each row's section is worked out once.
   (if (equal? (watchers--grouping buf) "none")
       rows
-      (let* ((seen (fold (lambda (acc r) (let ((n (watchers--section-of buf r))) (if (member n acc) acc (append acc (list n)))))
-                         '() rows))
+      (let* ((chats (if (member (watchers--grouping buf) '("chat" "group"))
+                        (filter (lambda (p) p) (map (lambda (b) (let ((id (buffer-local b 'chat-id))) (and id (list id b))))
+                                                         (buffer-list)))
+                        '()))
+             (tagged (map (lambda (r) (cons (watchers--section-of buf r chats) r)) rows))
+             (seen (fold (lambda (acc p) (if (member (car p) acc) acc (cons (car p) acc))) '() tagged))
+             (seen (reverse seen))
              (names (if (equal? (watchers--grouping buf) "state")
                         (append (filter (lambda (s) (member s seen)) *watchers-state-order*)
                                 (filter (lambda (s) (not (member s *watchers-state-order*))) seen))
@@ -116,7 +133,7 @@
         (apply append
           (map (lambda (n)
                  (cons (list 'kind "sep" 'id (string-append "sep:" n) 'title n)
-                       (filter (lambda (r) (equal? (watchers--section-of buf r) n)) rows)))
+                       (map cdr (filter (lambda (p) (equal? (car p) n)) tagged))))
                names)))))
 
 (define (watchers--list-rows buf) (watchers--sections buf (watchers--rows buf)))

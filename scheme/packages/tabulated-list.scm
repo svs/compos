@@ -693,7 +693,9 @@
             (else (walk (cdr rest) heading (cons (car rest) rows) out))))))
 
 (define (list-keep buf entries)
-  (let ((filters (list-filters buf)))
+  (let ((filters (list-filters buf))
+        ;; the tab is a filter too: a switch keeps rows, it fetches nothing
+        (entries (if (pair? (list-tabs-of buf)) (list-tab-keep buf entries) entries)))
     (let ((ctx (list-row-ctx buf)))
       (if (list-opt buf 'separator?)
           (list-keep-sections buf entries filters ctx)
@@ -2733,7 +2735,9 @@
 
 (define (list-tab-keep buf rows)
   (let* ((tab (list-tab-current buf))
-         (sep? (lambda (e) (list-separator? buf e)))
+         ;; the option once, not once per row: list-opt reads the layout each time
+         (sep-fn (list-opt buf 'separator?))
+         (sep? (if sep-fn (lambda (e) (sep-fn buf e)) (lambda (e) #f)))
          (kept (filter (lambda (e) (or (sep? e) ((cadr tab) buf e))) rows)))
     ;; a heading with no row under it goes
     (let loop ((es kept) (out '()))
@@ -2742,8 +2746,8 @@
             (else (loop (cdr es) (cons (car es) out)))))))
 
 (define (list-tab-blocks buf)
-  (let ((rows (filter (lambda (e) (not (list-separator? buf e)))
-                      (or (buffer-local buf 'list-tab-source) '())))
+  (let ((rows (let ((sep-fn (list-opt buf 'separator?)) (all (or (buffer-local buf 'list-tab-source) '())))
+                (if sep-fn (filter (lambda (e) (not (sep-fn buf e))) all) all)))
         (here (car (list-tab-current buf))))
     (list (component 'ui/tabs
             (list 'class "list-tabs"
@@ -2756,7 +2760,9 @@
 
 (define (list-tab-go! buf label)
   (list-tab-set! buf label)
-  (list-refresh! buf)
+  ;; a list that keeps its source redraws from it; another reads its rows
+  (list-filter-forget! buf)
+  (list-render! buf (if (list-opt buf 'local-filter) #f #t))
   (list-goto-first-entry buf)
   label)
 
@@ -2788,7 +2794,7 @@
                      (lambda (buf)
                        (let ((all (rows buf)))
                          (buffer-set-local! buf 'list-tab-source all)
-                         (list-tab-keep buf all)))))
+                         all))))
              (opts (plist-put opts 'head-blocks
                      (lambda (buf) (append (list-tab-blocks buf) (or (and head (head buf)) '()))))))
         (plist-put opts 'keys (append '(("<right>" "list-tab-next") ("<left>" "list-tab-prev"))

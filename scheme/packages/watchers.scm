@@ -86,16 +86,61 @@
   (let* ((id (plist-get row 'task)) (t (and (not (watchers--blank? id)) (todo-get id))))
     (and t (plist-get t 'title))))
 
+;;; `<` cycles what a section is, as in ibuffer; a heading is a row of kind sep
+(define *watchers-groupings* '("state" "chat" "group" "topic" "none"))
+(define *watchers-state-order* '("listening" "queued" "fired" "cancelled" "gone"))
+
+(define (watchers--grouping buf) (or (buffer-local buf 'watchers-grouping) "state"))
+
+(define (watchers--sep? row) (equal? (plist-get row 'kind) "sep"))
+
+(define (watchers--section-of buf row)
+  (let ((g (watchers--grouping buf))
+        (chat (watchers--chat-buffer row)))
+    (cond ((equal? g "chat") (or (and chat (buffer-short-label chat)) (plist-get row 'chat) "no chat"))
+          ((equal? g "group") (or (and chat (buffer-group chat) (group-name (buffer-group chat)))
+                                   (watchers--task-group row) "no group"))
+          ((equal? g "topic") (or (plist-get row 'topic) "no topic"))
+          (else (watchers--state-label row)))))
+
+(define (watchers--sections buf rows)
+  ;; a state keeps its fixed order; any other section comes in the order of its first watcher
+  (if (equal? (watchers--grouping buf) "none")
+      rows
+      (let* ((seen (fold (lambda (acc r) (let ((n (watchers--section-of buf r))) (if (member n acc) acc (append acc (list n)))))
+                         '() rows))
+             (names (if (equal? (watchers--grouping buf) "state")
+                        (append (filter (lambda (s) (member s seen)) *watchers-state-order*)
+                                (filter (lambda (s) (not (member s *watchers-state-order*))) seen))
+                        seen)))
+        (apply append
+          (map (lambda (n)
+                 (cons (list 'kind "sep" 'id (string-append "sep:" n) 'title n)
+                       (filter (lambda (r) (equal? (watchers--section-of buf r) n)) rows)))
+               names)))))
+
+(define (watchers--list-rows buf) (watchers--sections buf (watchers--rows buf)))
+
 (define (watchers--cells buf row)
+  (if (watchers--sep? row)
+      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "")
   (list (watchers--state-label row)
         (number->string (length (plist-get row 'fired)))
         (watchers--age (plist-get row 'last))
         (watchers--due-label row)
         (or (plist-get row 'topic) "")
         (or (plist-get row 'match) "")
-        (or (watchers--task-title row) (plist-get row 'note) "")))
+        (or (watchers--task-title row) (plist-get row 'note) ""))))
 
 ;; one firing, as its page lists it: when, what, from whom, and the event's first line
+;; a pane narrower than the full table keeps what tells watchers apart:
+;; when it is due, what it listens to, and what it is for
+(define (watchers--narrow-cells buf row)
+  (if (watchers--sep? row)
+      (list (list (plist-get row 'title) "list-section-name") "" "" "")
+      (let ((c (watchers--cells buf row)))
+        (list (nth 0 c) (nth 3 c) (nth 4 c) (nth 6 c)))))
+
 (define (watchers--firing-text e)
   (let* ((d (plist-get e 'data))
          (seq (plist-get d 'event-seq)) (topic (plist-get d 'event-topic))
@@ -159,7 +204,22 @@
 ;; the listener at hand: the page's own, else the list's row
 (define (watchers--at)
   (or (buffer-local (current-buffer) 'watcher)
-      (let ((l (watchers--list))) (and (buffer-exists? l) (list-current l)))))
+      (let* ((l (watchers--list)) (row (and (buffer-exists? l) (list-current l))))
+        (and row (not (watchers--sep? row)) row))))
+
+(define (watchers--regroup! buf)
+  (let* ((g (watchers--grouping buf))
+         (i (length (member g (reverse *watchers-groupings*))))
+         (next (nth (modulo i (length *watchers-groupings*)) *watchers-groupings*)))
+    (buffer-set-local! buf 'watchers-grouping next)
+    (list-refresh! buf)
+    (message (string-append "Watchers grouped by " next))))
+
+;; x on the rows flagged with d: each live one stops listening
+(define (watchers--cancel-key! buf id)
+  (let ((row (find (lambda (r) (equal? (plist-get r 'id) id)) (watchers--rows buf))))
+    (and row (equal? (plist-get row 'state) "listening")
+         (begin (agent-listen-cancel! id) #t))))
 
 (define (watchers--redraw! _)
   (for-each (lambda (b) (list-render! b #t)) (mode-group-buffers "watchers-mode")))
@@ -170,25 +230,36 @@
 (define-list-mode! "watchers-mode"
   (list
     'doc (string-append
-           "The agents' watchers: every listener a chat set with agent-listen!, live first, then the ones "
-           "that fired or were cancelled. Moving the point shows the watcher's page beside the list: what it "
-           "waits for, its chat and task, and each time it fired. k cancels a live watcher, c shows its chat, "
-           "t its task, RET its page, / narrows the rows, g redraws, q quits.")
+           "The agents' watchers: every listener a chat set with agent-listen!, in sections as ibuffer has them. "
+           "< cycles the sections: state, chat, group, topic, none. Moving the point shows the watcher's page "
+           "beside the list: what it waits for, its chat and task, and each time it fired. d flags a live "
+           "watcher for cancel and x cancels the flagged ones; SPC marks, u unmarks, U drops every mark. "
+           "k cancels the watcher at point at once, c shows its chat, t its task, RET its page, / narrows "
+           "the rows, g redraws, q quits.")
     'buffer *watchers-buffer*
     'transient #f
-    'rows watchers--rows
+    'rows watchers--list-rows
     'key (lambda (buf row) (plist-get row 'id))
     'local-filter #t
-    'no-marks #t
+    'separator? (lambda (buf row) (watchers--sep? row))
+    'section? (lambda (buf row) (watchers--sep? row))
+    'regroup watchers--regroup!
+    'markable? (lambda (buf row) (equal? (plist-get row 'state) "listening"))
+    'flags (list (list "d" "D" "cancel" watchers--cancel-key! #f))
     'columns (lambda (buf)
                (list (list "state" 10) (list "fired" 6) (list "last" 6) (list "due" 9) (list "listens to" 26)
                      (list "match" 20) (list "for" #f)))
     'cells watchers--cells
-    'preview (lambda (buf row) (watchers-show-detail! row))
+    'layouts (list (list 'name 'narrow
+                         'max-cols (lambda (buf) 119)
+                         'columns (lambda (buf) (list (list "state" 10) (list "due" 9) (list "listens to" 24) (list "for" #f)))
+                         'cells watchers--narrow-cells)
+                   (list 'name 'wide 'default #t))
+    'preview (lambda (buf row) (unless (watchers--sep? row) (watchers-show-detail! row)))
     'title (lambda (buf) "Watchers")
-    'total (lambda (buf) (length (list-entries buf)))
+    'total (lambda (buf) (length (filter (lambda (r) (not (watchers--sep? r))) (list-entries buf))))
     'noun "watcher"
-    'footer (lambda (buf) '(("RET" "page") ("k" "cancel") ("c" "chat") ("t" "task") ("/" "filter") ("g" "redraw") ("q" "quit")))
+    'footer (lambda (buf) '(("RET" "page") ("d" "flag") ("x" "cancel flagged") ("k" "cancel") ("c" "chat") ("t" "task") ("<" "group") ("/" "filter") ("g" "redraw") ("q" "quit")))
     'keys '(("RET" "watchers-show") ("k" "watchers-cancel") ("c" "watchers-chat")
             ("t" "watchers-task") ("g" "watchers-refresh") ("q" "quit-window"))))
 

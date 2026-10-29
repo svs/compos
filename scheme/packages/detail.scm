@@ -140,6 +140,15 @@
 ;; show NAME in the window OWNER opens its rows into, keep that window for
 ;; the next row, and select nothing: point stays in the list. OWNER names
 ;; the list, and defaults to the buffer that is asking.
+;; a list that opens pages is an app, so app-dismiss and app-layout reach
+;; it: a list no app claimed becomes one, named after the list buffer, and
+;; its pages join it
+(define (detail--claim-app! owner name)
+  (when (and (boundp 'app-claim!) (buffer-known? owner))
+    (let ((id (or (app-id owner)
+                  (app-claim! owner (string-append "list:" owner) 'list))))
+      (unless (app-id name) (app-claim! name id 'detail)))))
+
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
          (me (active-window))
@@ -160,6 +169,7 @@
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name)
+      (detail--claim-app! o name)
       (when (boundp 'chat-follow!) (chat-follow! name)))
     win))
 

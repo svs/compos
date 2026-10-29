@@ -805,6 +805,9 @@
               (and (string? name)
                    (not (equal? name here))
                    (buffer-known? name)
+                   ;; a buffer that moved to another group stays in this
+                   ;; window's history; the walk stays in the group
+                   (window-history-member? win name)
                    (or (not mode-only)
                        (if mode
                            (buffer-derived-mode? name mode)

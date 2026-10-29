@@ -822,7 +822,8 @@
                  (begin
                    (buffer-set-local! buf 'chat-finish-asked #t)
                    (agent-send-msg! slug (chat-dismiss--ask)))
-                 (chat-finish--settle! buf slug ok? stop-reason)))))))
+                 (chat-finish--settle! buf slug ok? stop-reason)))
+            (else (chat-auto-close--turn-end! buf slug ok? stop-reason))))))
 
 (define (chat-finish! outcome summary &optional buf0)
   (let* ((buf (or buf0 (current-buffer)))
@@ -869,7 +870,7 @@
             (map car *chats-activity*))))
 
 (defcustom 'chat-idle-reap-dry-run #t
-  "Only name the idle chats the reaper would ask, in the echo area; ask none of them."
+  "Only name, in the echo area, the idle chats the reaper would ask and the chats auto-close would close; touch none."
   'group 'chat 'type 'boolean)
 
 (define (chat-reap! &optional _event)
@@ -899,6 +900,95 @@
 
 (public! 'chat-reap! "(chat-reap!) -- ask each idle chat to finish; answer the chats asked")
 (catalog-meta! 'function "chat-reap!" 'domain 'chat 'effects '(write spend))
+
+;; At every turn end JEV reads the last exchange and says whether the chat
+;; is done: finished, and waiting on nothing from svs. A done chat closes the
+;; way the reaper closes one, archived and killed. Listeners, a failed run, a
+;; waiting permission, unsaved edits and an open todo hold it before JEV is
+;; asked. A chat a window shows is the user's, and stays. In dry run
+;; (chat-idle-reap-dry-run) the echo area only names it.
+(defcustom 'chat-auto-close #t
+  "At each turn end, ask JEV whether the chat is done, and close it when it is."
+  'group 'chat 'type 'boolean)
+
+(defcustom 'chat-auto-close-threshold 0.6
+  "How sure JEV must be, from 0 to 1, that a chat is done before it closes."
+  'group 'chat 'type 'number)
+
+(define *chat-done-question*
+  (decide-noul "Is this chat done? It is done unless the agent now waits on svs for something specific before it can go on.
+NOT done: the reply asks svs a question he must answer, asks him to choose, approve or confirm, says a draft or message waits for his approval, or the agent says it will do more work in THIS chat.
+DONE: the reply answers what svs asked, reports finished work, hands the rest to another chat or todo, or only invites him to come back if something is still wrong (\"tell me if it is still stuck\")."))
+
+;; RECORD is newest first: the reply is the newest assistant text, the
+;; message the newest user text before it
+(define (chat-done--exchange record)
+  (let loop ((rs record) (reply #f))
+    (cond ((null? rs) (list "" (or reply "")))
+          ((equal? (plist-get (car rs) 'role) "user")
+           (let ((said (chat-turn-display (car rs))))
+             (if (equal? (string-trim said) "")
+                 (loop (cdr rs) reply)
+                 (list said (or reply "")))))
+          ((and (not reply) (equal? (plist-get (car rs) 'role) "assistant"))
+           (let ((said (chat-turn-display (car rs))))
+             (loop (cdr rs) (if (equal? (string-trim said) "") #f said))))
+          (else (loop (cdr rs) reply)))))
+
+(define (chat-done-exchange chat)
+  "the last exchange of CHAT, a live chat buffer or an archived .chat path: (MESSAGE REPLY)"
+  (chat-done--exchange
+   (if (buffer-exists? chat)
+       (chat-record chat)
+       (reverse (or (plist-get (chat-log-read chat) 'record) '())))))
+
+(define (chat-done--holds buf slug ok? stop-reason)
+  (if (buffer-exists? buf)
+      (append (if (pair? (agent-listeners buf)) (list "listeners wait") '())
+              (chat-finish--blockers buf slug ok? stop-reason))
+      '()))
+
+(define (chat-done-judge chat k)
+  "ask whether CHAT is done; K gets (done? P WHY). P is JEV's probability, #f when a hold answered first"
+  (let ((holds (chat-done--holds chat (agent-slug-of chat) #t #f)))
+    (if (pair? holds)
+        (k #f #f (string-join holds "; "))
+        (let ((ex (chat-done-exchange chat)))
+          (decide-async (string-append "Last message from svs:\n" (car ex)
+                                       "\n\nLast reply from the agent:\n" (cadr ex))
+                        (list 'done *chat-done-question*)
+                        (lambda (r)
+                          (let* ((row (assq 'done (or (plist-get r 'answers) '())))
+                                 (p (and row (plist-get (cadr row) 'noul))))
+                            (cond ((not (number? p)) (k #f #f "JEV gave no answer"))
+                                  ((>= p chat-auto-close-threshold) (k #t p "JEV says done"))
+                                  (else (k #f p "JEV says it waits on svs")))))
+                        'backend 'jev)))))
+
+(define (chat-auto-close--turn-end! buf slug ok? stop-reason)
+  (when (and chat-auto-close ok? (not (equal? stop-reason "cancelled"))
+             (not (window-showing buf)))
+    (chat-done-judge buf
+      (lambda (done? p why)
+        ;; a new turn, a window or a hold may have come while JEV read
+        (when (and done? (buffer-exists? buf)
+                   (equal? (agent-status slug) 'idle)
+                   (not (window-showing buf))
+                   (null? (chat-done--holds buf slug #t #f)))
+          (let ((title (chats-title buf))
+                (pct (number->string (round (* 100 p)))))
+            (if chat-idle-reap-dry-run
+                (message (string-append "Auto-close (dry run) would close: " title " (" pct "%)"))
+                (begin
+                  (ignore-errors (lambda () (chat-log-save! buf)))
+                  (agents-archive! buf)
+                  (notify! "chat" (string-append "Done: " title)
+                           (string-append "JEV judged it done (" pct "%)"))))))))))
+
+(public! 'chat-done-exchange "(chat-done-exchange CHAT) -- the last exchange of a live chat or an archived .chat path: (MESSAGE REPLY)")
+(catalog-meta! 'function "chat-done-exchange" 'domain 'chat 'effects '(read))
+(public! 'chat-done-judge "(chat-done-judge CHAT K) -- ask JEV whether CHAT is done; K gets (done? P WHY); closes nothing")
+(catalog-meta! 'function "chat-done-judge" 'domain 'chat 'effects '(read external execute))
 
 (when (boundp 'cron-define!)
   (cron-define! "chat-reap" "*/5 * * * *" 'call 'chat-reap! 'save #f))

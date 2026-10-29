@@ -66,6 +66,14 @@
   ;; was dropped on ESC: the chat kept its old backend and model.
   (set-frame-local! 'llm-config-selected (llm-config--source-name)))
 
+;; A picker edits the box, or STORE when it is given: (GET SET), so the
+;; presets app reuses the pickers on its own draft.
+(define (llm-config--get store key)
+  (if store ((car store) key) (llm-config--box-get key)))
+
+(define (llm-config--put! store key value)
+  (if store ((cadr store) key value) (llm-config--box-set! key value)))
+
 (define (llm-config--drop-draft! key)
   (set-frame-local! 'llm-config-drafts
     (filter (lambda (e) (not (equal? (car e) key))) (llm-config--drafts))))
@@ -286,10 +294,10 @@
                     (loop (cdr servers) n (+ pending 1))))))))))
 
 ;; the preset palette, with the glyphs following the box, not the chat
-(define (llm-config--preset-candidates)
+(define (llm-config--preset-candidates &optional store)
   ;; presets (servers bundled with their prompt) above the bare MCP servers,
   ;; each under its own separator
-  (let* ((loaded (llm-config--with-compos (llm-config--box-get 'presets)))
+  (let* ((loaded (llm-config--with-compos (llm-config--get store 'presets)))
          (names (map car *chat-presets*))
          (servers (filter (lambda (srv) (not (member (car srv) names))) *mcp-registry*)))
     (append
@@ -305,27 +313,27 @@
                    (string-append (if (member (car srv) loaded) "● " "○ ") "server")))
            servers))))
 
-(define (llm-config--toggle-preset! name)
-  (let ((loaded (llm-config--with-compos (llm-config--box-get 'presets))))
+(define (llm-config--toggle-preset! name &optional store)
+  (let ((loaded (llm-config--with-compos (llm-config--get store 'presets))))
     (cond ((equal? name 'compos)
            (message "The compos preset is the editor bridge — it stays on"))
           ((member name loaded)
-           (llm-config--box-set! 'presets (remove (lambda (p) (equal? p name)) loaded))
+           (llm-config--put! store 'presets (remove (lambda (p) (equal? p name)) loaded))
            (message (string-append "Preset " (symbol->string name) " off in the box")))
           (else
-           (llm-config--box-set! 'presets (cons name loaded))
+           (llm-config--put! store 'presets (cons name loaded))
            (message (string-append "Preset " (symbol->string name) " on in the box"))))))
 
-(define (llm-config--pick-preset-loop! preselect)
+(define (llm-config--pick-preset-loop! preselect &optional store)
   (minibuffer-read* "Preset: "
-    (llm-config--preset-candidates)
+    (llm-config--preset-candidates store)
     (append
       (list (list 'confirm
                   (lambda (name)
                     (unless (equal? name "")
-                      (llm-config--toggle-preset! (string->symbol name))
+                      (llm-config--toggle-preset! (string->symbol name) store)
                       (llm-config--refresh!)
-                      (llm-config--pick-preset-loop! name))))
+                      (llm-config--pick-preset-loop! name store))))
             (list 'cancel (lambda () #f))
             (list 'style "palette")
             (list 'legend '(("RET" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
@@ -433,8 +441,8 @@
 ;;; Each picker writes the box. THEN runs after a pick: the new-preset flow
 ;;; chains the three pickers through it.
 
-(define (llm-config--read-backend buf then)
-  (let ((current (llm-config--box-get 'connector)))
+(define (llm-config--read-backend buf then &optional store)
+  (let ((current (llm-config--get store 'connector)))
     (llm-config-read! "Backend: "
       (llm-config-current-first
         (map (lambda (c)
@@ -445,15 +453,15 @@
                                (if (= models 0) "asks the backend"
                                    (string-append (number->string models) " known")))
                          (list "model" (if (equal? c current)
-                                           (llm-config--box-get 'model)
+                                           (llm-config--get store 'model)
                                            "default"))))))
              (connector-names))
         current)
       (lambda (choice)
         (unless (equal? choice "")
-          (llm-config--box-set! 'connector choice)
-          (llm-config--box-set! 'model "default")
-          (llm-config--box-set! 'effort "default")
+          (llm-config--put! store 'connector choice)
+          (llm-config--put! store 'model "default")
+          (llm-config--put! store 'effort "default")
           (llm-config--refresh!)
           (then)))
       (lambda () #f)
@@ -474,9 +482,9 @@
         (if (equal? hint "") '() (list (list "name" hint)))
         (list (list "efforts" (if (null? efforts) "none listed" (string-join efforts " "))))))))
 
-(define (llm-config--read-model buf then)
-  (let ((connector (llm-config--box-get 'connector))
-        (current (llm-config--box-get 'model)))
+(define (llm-config--read-model buf then &optional store)
+  (let ((connector (llm-config--get store 'connector))
+        (current (llm-config--get store 'model)))
     ;; the direct lane offers every model a provider lists, so a day-old
     ;; catalog refreshes behind this list for the next time
     (when (and (equal? connector "api")
@@ -491,18 +499,18 @@
         current)
       (lambda (model)
         (unless (equal? model "")
-          (llm-config--box-set! 'model model)
-          (llm-config--box-set! 'effort "default")
+          (llm-config--put! store 'model model)
+          (llm-config--put! store 'effort "default")
           (llm-config--refresh!)
           (then)))
       (lambda () #f)
       (string-append "RET puts the model on " connector
                      " in the box and resets the effort to the model's default."))))
 
-(define (llm-config--read-effort buf then)
-  (let* ((connector (llm-config--box-get 'connector))
-         (model (llm-config--box-get 'model))
-         (current (llm-config--box-get 'effort))
+(define (llm-config--read-effort buf then &optional store)
+  (let* ((connector (llm-config--get store 'connector))
+         (model (llm-config--get store 'model))
+         (current (llm-config--get store 'effort))
          (info (chat-model-effort-info buf connector model))
          (efforts (car info))
          (default (cadr info)))
@@ -520,7 +528,7 @@
         current)
       (lambda (effort)
         (unless (equal? effort "")
-          (llm-config--box-set! 'effort effort)
+          (llm-config--put! store 'effort effort)
           (llm-config--refresh!)
           (then)))
       (lambda () #f)
@@ -854,6 +862,15 @@
             (let ((b (and (not (equal? name "")) (llm-bundle-named name))))
               (when b (llm-config--select-preset! (llm-bundle-name b)))))
           (lambda () #f)))))
+
+(define-command "llm-config-open-presets" "Close this menu and manage the presets in the LLM Presets app"
+  (lambda ()
+    (let ((name (llm-config--source-name)) (chat (transient-scope)))
+      (run-command "transient-quit-all")
+      (if (and chat (buffer-exists? chat))
+          (with-current-buffer chat (lambda () (run-command "llm-presets")))
+          (run-command "llm-presets"))
+      (when (string? name) (llm-presets-show-detail! name)))))
 
 (define-command "llm-config-forget-bundle" "Forget a saved preset"
   (lambda ()
@@ -1297,7 +1314,8 @@
         (list (list "s" "llm-config-save-into")
               (list "S" "llm-config-save-bundle")
               (list "u" "llm-config-revert")))
-    (list (list "M-u" "llm-config-save-into")
+    (list (list "M-o" "llm-config-open-presets")
+          (list "M-u" "llm-config-save-into")
           (list "M-s" "llm-config-save-bundle")
           (list "M-n" "llm-config-new-preset")
           (list "M-k" "llm-config-forget-bundle")
@@ -1347,6 +1365,7 @@
             (list (list "S" "save as…"))
             (if drift? (list (list "u" "undo changes")) '())
             default-key))
+      (list (list "M-o" "manage presets…"))
       (list (list "ESC C-g" (string-append "apply " (or sel "this chat")
                                            (if (llm-config--dirty? sel) "*" "")
                                            " + close"))))))

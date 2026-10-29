@@ -30,7 +30,9 @@
 
 (defcustom 'webhooks-saved '()
   "The webhooks M-x webhook-define made, as (NAME PATH TOKEN) rows; each one publishes webhook:NAME events."
-  'group 'webhooks 'type 'sexp)
+  'group 'webhooks 'type 'sexp
+  ;; custom.scm loads after this package, so the saved rows arrive here
+  'set (lambda (rows) (webhooks--define-saved!)))
 
 (defcustom 'webhooks-tunnel-host #f
   "The public hostname of the Cloudflare tunnel in front of the server, such as compos.example.com; #f when there is none."
@@ -42,7 +44,11 @@
 
 (defcustom 'webhooks-enabled #f
   "Start the webhook server when this package loads."
-  'group 'webhooks 'type 'boolean)
+  'group 'webhooks 'type 'boolean
+  ;; custom.scm loads after this package, so the saved value arrives here
+  'set (lambda (on)
+         (cond ((and on (not (webhooks-running?))) (ignore-errors (lambda () (webhooks-start!))))
+               ((and (not on) (webhooks-running?)) (webhooks-stop!)))))
 
 ;; the registry table webhook: NAME -> the endpoint plist: name path methods token peers handler
 ;; the server's detail plist while it runs, else #f
@@ -422,6 +428,14 @@
                            (webhooks--said name (string-append "workflow " (symbol->string sym))))))))
           'initial (let ((h (webhook-workflow name))) (if h (symbol->string h) "")))))))
 
+(define-command "webhooks-history" "Show the requests the webhook on this line took, newest first"
+  (lambda ()
+    (webhooks--on-current
+      (lambda (name)
+        (events-list-open!)
+        (events-list-set-topic! (string-append "webhook:" name))
+        (list-mode-show! "events-mode")))))
+
 (define-command "webhooks-detach-workflow" "Stop the workflow on the webhook on this line"
   (lambda ()
     (webhooks--on-current
@@ -476,7 +490,7 @@
            "The webhook endpoints: path, methods, whether a token guards it, the last request, "
            "and the workflow that handles its events. c defines one, e edits the path, "
            "methods and token, w attaches a workflow handler, W stops it, k removes the "
-           "endpoint, p makes it public through the tunnel or local again, y copies its URL, s starts or stops the server, g redraws, "
+           "endpoint, p makes it public through the tunnel or local again, y copies its URL, h or RET shows its request history, s starts or stops the server, g redraws, "
            "/ narrows, and q quits.")
     'buffer *webhooks-buffer*
     'transient #f
@@ -491,10 +505,11 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("c" "define") ("e" "edit") ("w" "workflow") ("k" "remove")
-                ("p" "public") ("s" "server") ("/" "filter") ("q" "quit")))
+                ("p" "public") ("h" "history") ("s" "server") ("/" "filter") ("q" "quit")))
     'keys '(("c" "webhook-define") ("e" "webhooks-edit")
             ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
             ("k" "webhooks-remove") ("p" "webhooks-toggle-public") ("y" "webhooks-copy-url")
+            ("h" "webhooks-history") ("RET" "webhooks-history")
             ("s" "webhooks-toggle-server") ("g" "webhooks-refresh")
             ("q" "quit-window"))))
 

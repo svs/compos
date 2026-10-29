@@ -232,3 +232,18 @@
                               (list (list "a" 4) (list "b" #f)))))
       (check-equal! (cadr laid) (list (list 6 1 "bold"))
                     "only the named face paints a span"))))
+
+(deftest 'list-narrow-window-hides-low-rank-columns
+  "a list too wide for its window hides its lowest-ranked columns, so a row never wraps"
+  (lambda ()
+    (let* ((cols (list (list "name" 10) (list "size" 6 'right 'middle 50) (list "kind" 8)
+                       (list "note" #f) (list "when" 12)))
+           (shown (lambda (w) (map car (filter (lambda (c) (not (list-col-hidden? c)))
+                                               (list-fit-columns cols w))))))
+      (check-equal! (shown 100) '("name" "size" "kind" "note" "when") "a wide window shows every column")
+      (check-equal! (shown 52) '("name" "kind" "note" "when") "the lowest rank goes first")
+      (check-equal! (shown 46) '("name" "kind" "note") "then the rightmost")
+      (check-equal! (shown 10) '("name" "note") "the first column and the rest column stay")
+      (check-equal! (car (list-lay-out (list "a" "1" "k" "n" "w")
+                                       (list-fit-columns cols 30)))
+                    "a           n" "a hidden column takes no room"))))

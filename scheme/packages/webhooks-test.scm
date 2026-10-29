@@ -70,12 +70,10 @@
     (webhook-remove! "zz-test-public")))
 
 (deftest 'webhooks-saved-endpoints-come-back
-  "an endpoint webhook-define kept is defined again from webhooks-saved"
+  "a saved endpoint is defined again when custom.scm sets webhooks-saved, after the package loaded"
   (lambda ()
-    (let ((saved webhooks-saved))
-      (set! webhooks-saved (list (list "zz-test-saved" "/hooks/zz-test-saved" "t0k")))
-      (webhooks--define-saved!)
-      (set! webhooks-saved saved))
+    (with-custom 'webhooks-saved (list (list "zz-test-saved" "/hooks/zz-test-saved" "t0k"))
+      (lambda () #t))
     (let ((hook (webhook-get "zz-test-saved")))
       (check-true! hook "the saved endpoint is defined")
       (check-true! (equal? "t0k" (plist-get hook 'token)) "it keeps its token"))

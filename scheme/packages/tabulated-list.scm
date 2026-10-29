@@ -830,10 +830,52 @@
   (or (and (not (buffer-exists? buf)) (buffer-local buf 'list-width))
       (max 40 (- (buffer-cols buf) 1))))
 
+;; A row never wraps for want of width: when the columns do not fit, the
+;; lowest-ranked one hides, then the next, until the rest fit. A column's
+;; rank is the fifth item of its spec, else its place, so the rightmost
+;; goes first. The first column and the one that takes the rest stay.
+(define list-flex-min 12)
+
+(define (list-col-hidden? c) (equal? (list-col-width c) 0))
+
+(define (list-col-rank c i)
+  (if (and (> (length c) 4) (number? (nth 4 c))) (nth 4 c) (- 100 i)))
+
+(define (list-columns-need cols)
+  (fold (lambda (acc c)
+          (cond ((list-col-hidden? c) acc)
+                ((list-col-width c) (+ acc 2 (list-col-width c)))
+                (else (+ acc 2 list-flex-min))))
+        2 cols))
+
+(define (list-drop-victim cols)
+  (let loop ((cs cols) (i 0) (best #f) (rank #f))
+    (if (null? cs) best
+        (let ((c (car cs)))
+          (if (and (> i 0) (list-col-width c) (not (list-col-hidden? c))
+                   (or (not rank) (< (list-col-rank c i) rank)))
+              (loop (cdr cs) (+ i 1) i (list-col-rank c i))
+              (loop (cdr cs) (+ i 1) best rank))))))
+
+(define (list-drop-columns cols w)
+  (if (<= (list-columns-need cols) w) cols
+      (let ((victim (list-drop-victim cols)))
+        (if (not victim) cols
+            (list-drop-columns
+             (let loop ((cs cols) (i 0) (out '()))
+               (if (null? cs) (reverse out)
+                   (loop (cdr cs) (+ i 1)
+                         (cons (if (= i victim)
+                                   (list (car (car cs)) 0 (list-col-align (car cs)) (list-col-trim (car cs)))
+                                   (car cs))
+                               out))))
+             w)))))
+
 ;; the column that declares no width takes whatever the others leave, so
 ;; the table fills the window instead of stopping short of it
 (define (list-fit-columns cols w)
-  (let* ((fixed (fold (lambda (acc c) (+ acc 2 (or (list-col-width c) 0))) 2 cols))
+  (let* ((cols (list-drop-columns cols w))
+         (fixed (fold (lambda (acc c) (if (list-col-hidden? c) acc (+ acc 2 (or (list-col-width c) 0)))) 2 cols))
          (rest (max 8 (- w fixed))))
     (map (lambda (c)
            (if (list-col-width c)
@@ -938,7 +980,7 @@
   (let* ((pieces (let zip ((cs cells) (ks cols) (out '()))
                    (if (or (null? cs) (null? ks)) (reverse out)
                        (zip (cdr cs) (cdr ks)
-                            (cons (if (and (equal? (list-col-trim (car ks)) 'wrap) (list-col-width (car ks)))
+                            (cons (if (and (equal? (list-col-trim (car ks)) 'wrap) (list-col-width (car ks)) (not (list-col-hidden? (car ks))))
                                       (cdr (list-wrap-chunks (list-cell-text (car cs)) (list-col-width (car ks))))
                                       '())
                                   out)))))
@@ -1004,17 +1046,24 @@
 ;; only place that counts absolute offsets.
 (define (list-lay-out cells cols &optional fields?)
   (let loop ((cs cells) (ks cols) (text "") (spans '()) (fields '()))
-    (if (or (null? cs) (null? ks))
-        (if fields? (list text (reverse spans) (reverse fields))
-                    (list text (reverse spans)))
+    (cond
+     ((or (null? cs) (null? ks))
+      (if fields? (list text (reverse spans) (reverse fields))
+                  (list text (reverse spans))))
+     ;; a hidden column takes no room; its field stays, empty, to keep the order
+     ((list-col-hidden? (car ks))
+      (loop (cdr cs) (cdr ks) text spans
+            (if fields? (cons (list (string-byte-length text) 0) fields) fields)))
+     (else
         (let* ((k (car ks))
+               (last? (not (any (lambda (c) (not (list-col-hidden? c))) (cdr ks))))
                (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)
                                  (list-col-trim k)))
                ;; the last column is not padded, so the line ends where
                ;; its text ends; a right-aligned last column pads on the
                ;; left, so its text ends at the column's edge
                (align (list-col-align k))
-               (padded (if (and (null? (cdr ks)) (not (equal? align 'right)))
+               (padded (if (and last? (not (equal? align 'right)))
                            fitted
                            (list-pad fitted (list-col-width k) align)))
                (face (list-cell-face (car cs)))
@@ -1025,7 +1074,7 @@
                              0))))
           (loop (cdr cs) (cdr ks)
                 (string-append text padded
-                               (if (null? (cdr ks)) "" *list-gap*))
+                               (if last? "" *list-gap*))
                 ;; a face is one name for the whole cell, or the cell's own
                 ;; spans, (OFFSET LENGTH FACE) in its text: several pills in
                 ;; one cell. A cell the width trimmed loses them.
@@ -1035,7 +1084,7 @@
                            (append (reverse (list-shift-spans face start)) spans)
                            spans))
                       (else (cons (list start (string-byte-length fitted) face) spans)))
-                (if fields? (cons (list start (string-byte-length fitted)) fields) fields))))))
+                (if fields? (cons (list start (string-byte-length fitted)) fields) fields)))))))
 
 (define (list-shift-spans spans n)
   (map (lambda (s) (list (+ (car s) n) (car (cdr s)) (nth 2 s))) spans))

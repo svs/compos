@@ -1785,6 +1785,22 @@ DONE: the reply answers what svs asked, reports finished work, hands the rest to
 
 (define *bulk-jobs* '())
 
+(define (page-chat! buf &optional text)
+  "BUF's own chat, the one M-o opens, made quietly when it has none and kept for
+BUF's key, so the page finds it after an archive; TEXT goes to it.
+An agent that calls it becomes the chat's parent: the chat's answers wake it."
+  (let ((chat (car (llm-companion-ensure! buf)))
+        (parent (subagent-spawner)))
+    (when parent
+      (buffer-set-local! chat 'subagent-notify #t)
+      (subagent-record! parent chat))
+    (when text (agent-continue! chat text))
+    chat))
+
+(public! 'page-chat!
+  "(page-chat! BUF [TEXT]) — BUF's own chat, the one M-o opens, made quietly and kept for BUF when it has none; TEXT is sent to it; a calling agent becomes its parent")
+(catalog-meta! 'function "page-chat!" 'domain 'chat 'effects '(write spend))
+
 ;; The orchestrator starts at once, with the job in its prompt, and hands the
 ;; cases over itself: it evals (bulk-handover! SLUG), which spawns the children.
 (define (bulk-agents! bufs opts)
@@ -1794,16 +1810,16 @@ DONE: the reply answers what svs asked, reports finished work, hands the rest to
          (q "\"")
          (ids (map (lambda (b) (or (ats-case-id b) b)) bufs))
          (n (number->string (length bufs))))
-    ;; the orchestrator spawns the subagents itself; its prompt carries the ids and the exact code
+    ;; the orchestrator hands each case to its page's own chat; its prompt carries the ids and the exact code
     (subagent-live-buffer
       (execute* (string-append
                   "You orchestrate " n " " noun ". You review none of them yourself. Their ids: " (string-join ids ", ") ".\n\n"
-                  "1. Now spawn one subagent per id with this single eval, then end your turn:\n"
-                  "(for-each (lambda (id) (execute* (string-append (chat-opening-prompt (ats-case-buffer id))"
+                  "1. Now hand each id to its page's own chat with this single eval, then end your turn:\n"
+                  "(for-each (lambda (id) (page-chat! (ats-case-buffer id) (string-append (chat-opening-prompt (ats-case-buffer id))"
                   (if (string? rules) (string-append " " q " " rules q) "")
-                  ") (list 'title (ats-case-buffer id) 'notify #t))) (list "
+                  "))) (list "
                   (string-join (map (lambda (id) (string-append q id q)) ids) " ") "))\n"
-                  "(execute* PROMPT OPTS) starts a subagent chat with PROMPT and returns its slug at once; 'notify #t wakes you each time one answers. "
+                  "(page-chat! BUF PROMPT) sends PROMPT to BUF's own chat, the one M-o on the page opens, which keeps the case after an archive; it returns at once, and each answer wakes you. "
                   "(ats-case-buffer ID) is the buffer holding that approval's page, and (chat-opening-prompt BUF) is its prompt, with the id and how to read the page.\n\n"
                   "2. Each answer wakes you. Until all " n " have answered, end your turn and say nothing.\n\n"
                   "3. When all have answered, mark every one that answered in one eval: (subagent-verdict! SLUG 'done ONE-LINE). "

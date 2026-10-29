@@ -344,19 +344,23 @@
 ;; the page of one endpoint shows this many of its newest requests
 (define webhooks-history-shown 50)
 
-;; one request as its page lists it: when, what kind, from where, and its summary
-(define (webhooks--request-line e)
+;; one request as (WHEN KIND SOURCE SUMMARY)
+(define (webhooks--request-parts e)
   (let* ((d (plist-get e 'data))
-         (get (lambda (k) (and (pair? d) (plist-get d k))))
-         (kind (get 'kind))
-         (source (get 'source))
-         (what (cond ((string? (get 'summary)) (first-line (get 'summary)))
-                     ((get 'path) (string-append (format "~a" (or (get 'method) "")) " " (format "~a" (get 'path))))
-                     (else (first-line (format "~a" d))))))
-    (string-append "  " (format-time (plist-get e 'at) "%d %b %H:%M") "  "
-                   (if (string? kind) kind "request")
-                   (if (string? source) (string-append " · " source) "")
-                   (if (equal? what "") "" (string-append "\n      " what))
+         (get (lambda (k) (and (pair? d) (plist-get d k)))))
+    (list (format-time (plist-get e 'at) "%d %b %H:%M")
+          (if (string? (get 'kind)) (get 'kind) "request")
+          (if (string? (get 'source)) (get 'source) "")
+          (cond ((string? (get 'summary)) (first-line (get 'summary)))
+                ((get 'path) (string-append (format "~a" (or (get 'method) "")) " " (format "~a" (get 'path))))
+                (else (first-line (format "~a" d)))))))
+
+;; one request as the page's text lists it: when, what kind, from where, and its summary
+(define (webhooks--request-line e)
+  (let ((p (webhooks--request-parts e)))
+    (string-append "  " (nth 0 p) "  " (nth 1 p)
+                   (if (equal? (nth 2 p) "") "" (string-append " · " (nth 2 p)))
+                   (if (equal? (nth 3 p) "") "" (string-append "\n      " (nth 3 p)))
                    "\n")))
 
 ;; the page of one endpoint: its config, then the requests it took, newest first
@@ -384,9 +388,69 @@
             (if (null? es) "  none yet\n" (apply string-append (map webhooks--request-line es)))
             "\n────\nend\n")))))
 
+(define (webhooks--tab buf) (or (buffer-local buf 'webhooks-tab) "history"))
+
+;; the page's two tabs, as ui/tabs takes them, with the right hand's keys
+(define (webhooks--page-tabs buf n)
+  (let ((at (webhooks--tab buf)))
+    (tab-bars-keyed 'detail
+      (list (list "webhooks-tab-history" (string-append "history " (number->string n)) (equal? at "history"))
+            (list "webhooks-tab-config" "config" (equal? at "config"))))))
+
+;; the drawn page: a title, the path and URL, the tabs, then the tab
+(define (webhooks--page-blocks buf name)
+  (let ((hook (webhook-get name)))
+    (if (not hook)
+        (list (component 'ui/empty (list 'text "This endpoint is gone")))
+        (let ((es (event-log-newest (string-append "webhook:" name) webhooks-history-shown))
+              (public? (plist-get hook 'public)))
+          (list
+            (component 'ui/page
+              (list 'body
+                (append
+                  (list (component 'ui/title (append (list 'text name 'badge (if public? "public" "local"))
+                                                     (if public? (list 'tone "info") '())))
+                        (component 'ui/meta (list 'segs (list (list "" (plist-get hook 'path))
+                                                              (list "c-sep" " · ")
+                                                              (list "" (or (webhook-url name) "the server is stopped")))))
+                        (component 'ui/tabs (list 'class "webhooks-tabs" 'tabs (webhooks--page-tabs buf (length es)))))
+                  (cond
+                    ((equal? (webhooks--tab buf) "config")
+                     (list (component 'ui/kv
+                             (list 'pairs
+                                   (list (list "methods" (string-join (plist-get hook 'methods) ", "))
+                                         (list "token" (if (plist-get hook 'token) "required" "none"))
+                                         (list "reach" (if public? "public, through the tunnel" "local only"))
+                                         (list "event data" (if (equal? (plist-get hook 'data) 'json) "the JSON body" "the whole request"))
+                                         (list "workflow" (if (plist-get hook 'handler) "Scheme handler" (webhooks--workflow-text name)))
+                                         (list "topic" (string-append "webhook:" name)))))))
+                    ((null? es) (list (component 'ui/empty (list 'text "No requests yet"))))
+                    (else
+                     (list (component 'ui/table
+                             (list 'columns '(("when") ("kind") ("source") ("summary"))
+                                   'rows (map webhooks--request-parts es))))))))))))))
+
 (define (webhooks--draw-detail! buf name)
   (buffer-set-local! buf 'webhook-name name)
-  (buffer-set-text! buf (webhooks--detail-text name) #t))
+  ;; the text is what agents and search read; the blocks are what you see
+  (buffer-set-text! buf (webhooks--detail-text name) #t)
+  (desktop-skip! buf 'render-blocks)
+  (desktop-skip! buf 'footer-line-blocks)
+  (buffer-set-local! buf 'render-mode "blocks")
+  (buffer-set-local! buf 'render-blocks (webhooks--page-blocks buf name))
+  (buffer-set-local! buf 'footer-line-blocks
+    (list (component 'ui/keys-bar
+            (list 'main '(("6" "history") ("7" "config") ("e" "edit") ("p" "public")
+                          ("y" "copy URL") ("h" "event log") ("g" "refresh") ("q" "quit")))))))
+
+(add-hook! (list 'block-click 'webhooks-tabs)
+  (lambda (buf id)
+    (and (string? id)
+         (string-prefix? "webhooks-tab-" id)
+         (buffer-local buf 'webhook-name)
+         (begin (buffer-set-local! buf 'webhooks-tab (substring id 13 (string-length id)))
+                (webhooks--draw-detail! buf (buffer-local buf 'webhook-name))
+                #t))))
 
 (define (webhooks--list)
   "the list at hand: this one, the one this page belongs to, else the first"
@@ -596,7 +660,17 @@
             '(("e" "webhooks-edit") ("w" "webhooks-attach-workflow") ("W" "webhooks-detach-workflow")
               ("k" "webhooks-remove") ("p" "webhooks-toggle-public") ("y" "webhooks-copy-url")
               ("h" "webhooks-history") ("g" "webhooks-refresh")))
-(mode-doc! "webhooks-detail-mode" "One webhook endpoint: its path, URL, methods, token, reach, event data and workflow, then the requests it took, newest first. It follows new requests. e edits it, w attaches a workflow, W stops it, k removes it, p makes it public or local, y copies its URL, h opens its requests in the event log, g reads it again.")
+(when (boundp 'tab-bars-declare!)
+  ;; the list has no tabs of its own; declaring it pairs it with the page
+  ;; beside it, so 6 and 7 take the page's tabs from either pane
+  (tab-bars-declare! "webhooks-mode" (lambda (buf) '()))
+  (tab-bars-declare! "webhooks-detail-mode"
+    (lambda (buf)
+      (let ((name (buffer-local buf 'webhook-name)))
+        (if name
+            (list (list "Page" (webhooks--page-tabs buf (length (event-log-newest (string-append "webhook:" name) webhooks-history-shown)))))
+            '())))))
+(mode-doc! "webhooks-detail-mode" "One webhook endpoint: its path, reach and URL over two tabs. History, the first, lists the requests it took, newest first, and follows new ones; config shows its methods, token, reach, event data and workflow. 6 and 7, the arrows or a click take a tab. e edits it, w attaches a workflow, W stops it, k removes it, p makes it public or local, y copies its URL, h opens its requests in the event log, g reads it again.")
 
 (define-command "webhooks-show" "Show the webhook at point as its own page beside the list: its config and its requests"
   (lambda () (webhooks--on-current webhooks-show-detail!)))

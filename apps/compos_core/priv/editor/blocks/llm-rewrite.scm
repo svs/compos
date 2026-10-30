@@ -115,6 +115,17 @@
 ;; iterations and choices, until the rewrite is cancelled.
 (defface! 'rewrite-selection 'bg "var(--region-bg)")
 
+;; Saved drafts are reference, not prose: smaller and dimmer than the text.
+(defface! 'rewrite-options 'size "0.8em" 'fg "var(--dim-fg)")
+
+(define (llm-rewrite--paint-options-face! buf)
+  (overlay-set! buf 'rewrite-options
+    (filter (lambda (x) x)
+      (map (lambda (s)
+             (let ((span (llm-rewrite--range buf s "block")))
+               (and span (list (car span) (cadr span) "rewrite-options"))))
+           (or (buffer-local buf 'rewrite-sessions) '())))))
+
 (define (llm-rewrite--paint-selection! buf)
   (let* ((s (llm-rewrite--session buf))
          (span (and s (llm-rewrite--range buf s "source"))))
@@ -221,7 +232,8 @@
                            (string-byte-length
                              (car (string-split (plist-get s 'rendered) "\n"))))
                         (cadr span)))
-            '())))))
+            '())))
+    (llm-rewrite--paint-options-face! buf)))
 
 (define (llm-rewrite--option-key-pairs)
   (map (lambda (k) (list (car k) (cadr k))) *llm-rewrite-option-keys*))
@@ -530,6 +542,7 @@
         (filter (lambda (o) (not (equal? (plist-get o 'id) (plist-get s 'id))))
                 (or (buffer-local buf 'rewrite-sessions) '()))))
     (buffer-set-local! buf 'rewrite-active #f)
+    (llm-rewrite--paint-options-face! buf)
     (when (null? (or (buffer-local buf 'rewrite-sessions) '()))
       (block-unbind-keys! buf (llm-rewrite--option-key-pairs)))
     (message "Rewrite cancelled; the text stays")))

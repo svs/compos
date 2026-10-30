@@ -579,16 +579,18 @@ and Help receive that exception. These cases do not certify the full window regi
 
 ## Explicit picker placement — current rule
 
-`C-x b` chooses the physical pane. Mode affinity moves the whole logical
-window there, preserving its stack. The displaced window takes the vacated
-pane. A hidden stack exchanges with the selected pane without a split.
+`C-x b` shows the choice in the invoking window. A buffer lives in one
+window at a time, so a buffer that another window holds, visible or hidden,
+moves: it leaves that window, which shows its own next buffer, and joins
+the invoking window. `C-x b` is how a buffer moves between windows; cycling
+stays inside one window's own stack. No window moves and no stack is copied.
 Foreign selections enter their owning group first; windows never cross groups.
 This supersedes older cases describing `C-x b` as following a mode window.
 
 | Case | Command | Expected result |
 | --- | --- | --- |
-| E01 — Visible mode window | `C-x b`, select another chat, `RET` | Move the chat window into the invoking pane and show the choice. Preserve its stack. |
-| E02 — Hidden stack | `C-x b`, select a hidden mode buffer, `RET` | Exchange its stack with the chosen pane's stack; preserve pane geometry. |
+| E01 — Buffer in another window | `C-x b`, select a chat another pane shows or holds, `RET` | The chat moves to the front of the invoking window. The other window keeps its place and shows its next buffer; a window left empty closes and its pane stays. |
+| E02 — Hidden stack | `C-x b`, select a buffer a hidden window holds, `RET` | The buffer moves to the invoking window; the rest of the hidden stack stays hidden. Pane geometry stays. |
 | E03 — No attraction | `C-x b`, select a mode with no window | Show the buffer in the invoking pane. |
 | E04 — Same pane | `C-x b`, choose another buffer of this mode | Keep the window in place. |
 | E05 — Foreign group | `C-x b`, choose a foreign buffer | Enter its group; only move windows belonging to that group. |

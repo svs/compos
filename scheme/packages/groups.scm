@@ -1735,24 +1735,25 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((g (group-context-group b)))
     (and (not (eq? g 'outside)) g)))
 
-;; An explicit pick goes to the pane that prefers its mode, else this one.
+;; An explicit pick shows the buffer in this window. A buffer held by
+;; another window moves here: it leaves that window, which shows its own
+;; next buffer, so a buffer lives in one window at a time (E01).
 ;; Nothing swaps: the panes stay where they are.
 (define (switch-to-buffer-in-chosen-pane! b)
   (let ((home (group-home-of b)))
     (when (and home (not (equal? home (frame-group))))
       (switch-to-group! home))
-    (begin
-      (let* ((pane (active-window))
-             (mode (buffer-local b 'mode-name))
-             (preferred (or (window-showing-mode mode) (window-showing b))))
-        (when (and preferred (not (equal? preferred pane)))
-          (select-window! preferred))
-        (switch-to-buffer-here! b)
-        (set-window-restore! (active-window) #f)
-        (active-window)))))
+    (let* ((l (panes--ensure-layout!))
+           (here (panes-key-of-handle l (active-window)))
+           (from (panes-find l b)))
+      (if (and here from (not (equal? from here)))
+          (panes-apply! (panes-focus-window (panes-move-buffer l b here) here))
+          (switch-to-buffer-here! b))
+      (set-window-restore! (active-window) #f)
+      (active-window))))
 
 (public! 'switch-to-buffer-in-chosen-pane!
-  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: show BUFFER in the pane that prefers its mode, else this one, within BUFFER's group; no pane moves")
+  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: show BUFFER in this window, within BUFFER's group; a buffer another window holds moves here")
 
 (define (switch-to-buffer-in-group! b)
   (let ((id (group-home-of b)))

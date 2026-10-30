@@ -207,7 +207,7 @@ defmodule Compos.Core.Candidates do
         kept =
           rows
           |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1), list.style))
-          |> Enum.sort_by(&rank(&1.label, list.query))
+          |> Enum.sort_by(&rank(&1.label, list.query, hint_of(list, &1)))
 
         case {separator, kept} do
           {_, []} -> []
@@ -385,6 +385,13 @@ defmodule Compos.Core.Candidates do
     Enum.any?(kinds, &String.starts_with?(&1, t))
   end
 
+  # the whole query is a kind's name, `chat` or `chat-mode`, not a prefix
+  # of one: `c` must still rank by the label
+  defp kind_named?(kinds, dq) do
+    t = String.trim(dq)
+    Enum.any?(kinds, &(&1 == t or &1 == t <> "-mode"))
+  end
+
   defp subsequence?(_label, ""), do: true
 
   defp subsequence?(label, <<c::utf8, rest::binary>>) do
@@ -394,12 +401,17 @@ defmodule Compos.Core.Candidates do
     end
   end
 
-  @doc "exact < prefix < substring < subsequence — so `paper` beats `paper-night`."
-  def rank(label, query) do
+  @doc """
+  exact < prefix < substring < subsequence — so `paper` beats `paper-night`.
+  A query that names a row's kind (`chat` for a chat) ranks that row first,
+  whatever its label says, so the kind's rows keep the prompt's own order.
+  """
+  def rank(label, query, kinds \\ []) do
     dl = String.downcase(label)
     dq = String.downcase(query)
 
     cond do
+      kind_named?(kinds, dq) -> 0
       dl == dq -> 0
       String.starts_with?(dl, dq) -> 1
       String.contains?(dl, dq) -> 2

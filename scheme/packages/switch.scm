@@ -1014,13 +1014,13 @@ the next row down. STEP is kept for the callers."
 ;; and the ones this window showed. The side arrows move between them and
 ;; typing filters the tab you are on. Each prompt opens on the same tab.
 (defcustom 'switch-buffer-initial-tab 'last
-  "The tab C-x b opens on: 'last, the tab it showed the last time; or 'all, 'group, 'window or 'pane. The left and right arrows move to the others while the prompt is open."
+  "The tab C-x b opens on: 'last, the tab it showed the last time; or 'all, 'group, 'window, 'pane or 'mode, every buffer in the mode of the one you are in. The left and right arrows move to the others while the prompt is open."
   'group 'buffers 'type 'choice)
 
 ;; the tab C-x b showed the last time, for 'last
 (defvar '*switch-last-tab* 'group)
 
-(define *switch-tabs* '((all "All") (group "Group") (window "Window") (pane "Pane")))
+(define *switch-tabs* '((all "All") (group "Group") (window "Window") (pane "Pane") (mode "Mode")))
 
 ;; every buffer of every window in WIN's pane, its front window first: the
 ;; pane is a stack of windows; without a layout, the windows the pane records
@@ -1135,6 +1135,12 @@ the next row down. STEP is kept for the callers."
         ((eq? tab 'pane)
          (let ((mine (if (and win (window-exists? win)) (switch-pane-tab-buffers win) '())))
            (filter (lambda (r) (member (car r) mine)) rows)))
+        ((eq? tab 'mode)
+         ;; every buffer in the mode of the one WIN shows, whatever its group
+         (let* ((b (and win (window-exists? win) (window-buffer win)))
+                (r (and b (assoc b rows)))
+                (m (and r (nth 3 r))))
+           (if m (filter (lambda (x) (equal? (nth 3 x) m)) rows) '())))
         ((eq? tab 'family) (switch-family-rows rows group))
         ((string? tab)
          (if group

@@ -356,6 +356,37 @@
     (set-mark! #f)
     (t--rw-done!)))
 
+(deftest 'promoting-takes-out-a-diff-whose-fence-labels-are-old
+  "A diff drawn with older key labels is not an edited diff: promoting an option still replaces the passage."
+  (lambda ()
+    (t--rw! "One.\n\nTwo.\n")
+    (buffer-set-local! t--rw-buf 'diff-block-verbs '(("C-c o" "llm-rewrite-keep-option" "keeps as option")))
+    (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
+    (t--rw-propose! t--rw-buf 6 10 "Two." "Deux." t--rw-what)
+    (llm-rewrite--keep-option! t--rw-buf)
+    (buffer-set-local! t--rw-buf 'diff-block-verbs *llm-rewrite-verbs*)
+    (llm-rewrite--choose-option! t--rw-buf 1)
+    (check-false! (diff-block-pending t--rw-buf) "the old-labelled diff went")
+    (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "the option replaced the passage")
+    (t--rw-done!)))
+
+(deftest 'the-options-block-takes-keys-not-typing
+  "Typing inside the options block is put back; the original is not listed, only the drafts."
+  (lambda ()
+    (t--rw-options!)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "block"))
+           (rendered (plist-get s 'rendered)))
+      (check-false! (string-index rendered "Original") "the original is not listed")
+      (check-true! (string-index rendered "Option 1: ") "the draft is")
+      (buffer-insert! t--rw-buf (+ (car span) 90) "typed")
+      (llm-rewrite--checkpoint! t--rw-buf)
+      (let ((span (llm-rewrite--range t--rw-buf (llm-rewrite--session t--rw-buf) "block")))
+        (check-equal! (block-text-at t--rw-buf (car span) (cadr span)) rendered "the typing was put back")
+        (check-false! (string-index (buffer-text t--rw-buf) "typed") "nowhere in the document")))
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "the passage stands")
+    (t--rw-done!)))
+
 (deftest 'an-empty-answer-decides-nothing
   "leaving the prompt is not a decision"
   (lambda ()

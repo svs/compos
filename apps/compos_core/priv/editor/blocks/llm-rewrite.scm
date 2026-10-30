@@ -202,15 +202,14 @@
 
 (define (llm-rewrite--option-row-text rows i)
   (let ((row (nth i rows)))
-    (string-append (if (= i 0) "Original"
-                       (string-append "Option " (number->string i) ": " (car row)))
-                   "\n\n" (cadr row))))
+    (string-append "Option " (number->string i) ": " (car row) "\n\n" (cadr row))))
 
 (define (llm-rewrite--options-text s)
   (let* ((rows (plist-get s 'options))
          (body (string-join
+                 ;; the original is not shown: C-c u puts it back
                  (map (lambda (i) (llm-rewrite--option-row-text rows i))
-                      (iota (length rows))) "\n\n"))
+                      (cdr (iota (length rows)))) "\n\n"))
          (fence (let loop ((f "```"))
                   (if (string-index body f) (loop (string-append f "`")) f))))
     (string-append fence (llm-rewrite--options-head s) "\n" body "\n" fence)))
@@ -221,7 +220,7 @@
          (rows (plist-get s 'options))
          (rendered (plist-get s 'rendered)))
     (and span rendered (<= (car span) pos) (<= pos (cadr span))
-         (let loop ((i 0)
+         (let loop ((i 1)
                     (at (+ (car span) 1 (string-byte-length
                                           (car (string-split rendered "\n"))))))
            (and (< i (length rows))
@@ -262,7 +261,9 @@
         (let ((bounds
                 (if span
                     (begin
+                      (buffer-set-local! buf 'rewrite-writing #t)
                       (diff-block-replace-span! buf (car span) (cadr span) text)
+                      (buffer-set-local! buf 'rewrite-writing #f)
                       (list (car span) (+ (car span) (string-byte-length text))))
                     (let* ((p (diff-block-pending buf))
                            (ds (and p (diff-block--spans buf)))
@@ -622,11 +623,29 @@
 
 ;; Rebuild presentation after mode setup or desktop restore. The watch keeps
 ;; checkpoint offsets current, including edits made above a saved passage.
+;; The options block takes its keys, not typing: an edit inside it is put
+;; back at once. Deleting the whole block lets it go.
+(define (llm-rewrite--guard-options! buf s)
+  (let ((span (llm-rewrite--range buf s "block"))
+        (rendered (plist-get s 'rendered)))
+    (when (and span rendered (not (buffer-local buf 'rewrite-writing))
+               (not (equal? (block-text-at buf (car span) (cadr span)) rendered)))
+      (buffer-set-local! buf 'rewrite-writing #t)
+      (diff-block-replace-span! buf (car span) (cadr span) rendered)
+      (buffer-set-local! buf 'rewrite-writing #f)
+      (llm-rewrite--track! buf s "block"
+        (list (car span) (+ (car span) (string-byte-length rendered))))
+      (message "Options take their keys: C-c p promote · C-c u original · C-c t fold"))))
+
 (define (llm-rewrite--checkpoint! buf)
   (when (buffer-exists? buf)
     (for-each
       (lambda (s)
-        (let ((saved (llm-rewrite--save-session! buf s)))
+        (llm-rewrite--guard-options! buf s)
+        (let ((saved (llm-rewrite--save-session! buf
+                       (or (find (lambda (o) (equal? (plist-get o 'id) (plist-get s 'id)))
+                                 (or (buffer-local buf 'rewrite-sessions) '()))
+                           s))))
           (llm-rewrite--paint-options! buf saved)))
       (or (buffer-local buf 'rewrite-sessions) '()))
     (llm-rewrite--paint-selection! buf)))
@@ -658,6 +677,8 @@
                           (llm-rewrite--checkpoint! buf)) 'eager))
       (let ((p (diff-block-pending buf)))
         (when p
+          ;; the verbs a block was proposed with may be older than these
+          (buffer-set-local! buf 'diff-block-verbs *llm-rewrite-verbs*)
           (diff-block--bind-keys! buf)
           (diff-block--paint! buf (diff-block--spans buf) (diff-block-state p)))))))
 

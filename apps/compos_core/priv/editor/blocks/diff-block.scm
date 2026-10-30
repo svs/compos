@@ -153,6 +153,17 @@
 (define (diff-block--rendered p buf)
   (diff-block--render p (diff-block-state p) buf))
 
+;; The fence line is the block's label and its keys, and those change with
+;; the labels and bindings; whether you edited the block is a question
+;; about the rest of it.
+(define (diff-block--untouched? p block buf)
+  (let ((drop-head (lambda (text)
+                     (let ((nl (string-index text "\n")))
+                       (if nl (substring-bytes text nl (string-byte-length text)) text)))))
+    (and block
+         (string-prefix? "```" block)
+         (equal? (drop-head block) (drop-head (diff-block--rendered p buf))))))
+
 ;;; --- paint -------------------------------------------------------------------
 
 ;; The all state wears the add and delete faces by line prefix, so the
@@ -306,7 +317,7 @@
          (block (and spans (block-text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not block) 'gone)
-      ((not (equal? block (diff-block--rendered p buf))) 'edited)
+      ((not (diff-block--untouched? p block buf)) 'edited)
       (else
         (let ((state (diff-block-state p)))
           (diff-block--put! buf p spans
@@ -330,7 +341,7 @@
       ((not block)
        (diff-block-release! buf)
        (message "The waiting block is gone"))
-      ((not (equal? block (diff-block--rendered p buf)))
+      ((not (diff-block--untouched? p block buf))
        (message "The block has been edited — it stays as it is"))
       (else
         (diff-block--put! buf p spans
@@ -392,7 +403,7 @@
       ((not block)
        (diff-block-release! buf)
        (message "The waiting block is gone"))
-      ((not (equal? block (diff-block--rendered p buf)))
+      ((not (diff-block--untouched? p block buf))
        (message "The block has been edited — it stays"))
       (else
         (let ((from (nth 1 spans))

@@ -149,6 +149,7 @@ nonstandard install out of the built-in connector catalog."
 ;; one package per connector: each declares its command, install steps,
 ;; sign-in and secrets
 (require 'connector-gemini "connectors/gemini.scm")
+(require 'connector-kimi "connectors/kimi.scm")
 
 ;;; --- the live model catalog ---------------------------------------------------
 ;;; LLMDB ships a snapshot of what each provider offers, and a snapshot

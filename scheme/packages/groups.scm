@@ -1735,11 +1735,10 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((g (group-context-group b)))
     (and (not (eq? g 'outside)) g)))
 
-;; An explicit pick shows the buffer in this pane. A buffer another pane
-;; holds moves here into a new window of its mode, alone: it leaves that
-;; window, which shows its own next buffer, so a buffer lives in one
-;; window at a time (E01). A buffer no window holds joins this pane's
-;; window of its mode, else a new one at the front.
+;; An explicit pick shows the buffer in this pane, in the pane's window of
+;; its mode, else a new one at the front. A buffer another pane holds moves
+;; here: it leaves that window, which shows its own next buffer, so a
+;; buffer lives in one window at a time (E01).
 ;; Nothing swaps: the panes stay where they are.
 (define (switch-to-buffer-in-chosen-pane! b)
   (let ((home (group-home-of b)))
@@ -1755,7 +1754,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (cond ((not pid) (switch-to-buffer-here! b))
             ((and from (equal? (panes-pane-of l from) pid))
              (panes-apply! (panes-focus-window (panes-show l from b) from)))
-            ((and same (not from))
+            (same
              (panes-apply! (panes-focus-window (panes-move-buffer l b same) same)))
             (else (let ((made (panes-add-window (panes-drop-buffer l b) pid b mode)))
                     (panes-apply! (panes-focus-window (car made) (cadr made))))))
@@ -1763,7 +1762,7 @@ is forgotten and that group falls back to creation order in the switcher."
       (active-window))))
 
 (public! 'switch-to-buffer-in-chosen-pane!
-  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: show BUFFER in this pane, within BUFFER's group; a buffer another pane holds moves into a new window of its mode, alone")
+  "(switch-to-buffer-in-chosen-pane! BUFFER) — explicit choice: show BUFFER in this pane's window of its mode, else a new one, within BUFFER's group; a buffer another pane holds moves here")
 
 (define (switch-to-buffer-in-group! b)
   (let ((id (group-home-of b)))

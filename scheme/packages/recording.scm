@@ -240,16 +240,34 @@
 
 (effects! '(write))
 
+(define (recording--strip-slash path)
+  (if (and (> (string-length path) 1) (string-suffix? "/" path))
+      (recording--strip-slash (substring path 0 (- (string-length path) 1)))
+      path))
+
+(define (recording--directory? path)
+  (or (string-suffix? "/" path) (file-directory? path)))
+
+;; PATH names the log file, or a directory to hold a timestamped one;
+;; without it the log goes under ~/.compos/recordings.
+;; PATH names the log file, or a directory to hold a timestamped one;
+;; without it the log goes under ~/.compos/recordings.
+(define (recording--log-path path)
+  (if (and path (not (recording--directory? path)))
+      (expand-path path)
+      (let ((dir (if path
+                     (recording--strip-slash (expand-path path))
+                     (string-append (compos-home) "/recordings"))))
+        (make-directory! dir)
+        (string-append dir "/" (number->string (current-time)) ".jsonl"))))
+
 (public! 'recording-start!
-  "(recording-start! [PATH]) — start the window recording and log the current arrangement")
+  "(recording-start! [PATH]) — start the window recording and log the current arrangement; PATH is the log file or the directory that holds the recording")
 (define (recording-start! &optional path)
   (if *recording-path*
       #f
       (begin
-        (set! *recording-path*
-          (or path
-              (string-append (compos-home) "/recordings/"
-                             (number->string (current-time)) ".jsonl")))
+        (set! *recording-path* (recording--log-path path))
         (set! *recording-lines* '())
         (set! *recording-last* #f)
         (set! *recording-t0* (monotonic-ms))
@@ -276,14 +294,20 @@
 
 ;;;###autoload
 (define-command "recording-start"
-  "Start the recording: log the visible windows on each change and capture the editor as frames"
-  (lambda ()
-    (let ((path (recording-start!)))
-      (if path
-          (message (string-append "Recording to " path
-                                  (if *recording-task* " with frames" "")))
-          (message (string-append "Recording already runs: "
-                                  *recording-path*))))))
+  "Start the recording: log the visible windows on each change and capture the editor as frames; with a prefix, ask for the output directory"
+  (interactive 'P)
+  (lambda (prefix)
+    (define (start dir)
+      (let ((path (recording-start! dir)))
+        (if path
+            (message (string-append "Recording to " path
+                                    (if *recording-task* " with frames" "")))
+            (message (string-append "Recording already runs: "
+                                    *recording-path*)))))
+    (if prefix
+        (read-file-name "Record into directory: "
+          (lambda (dir) (start (string-append dir "/"))))
+        (start #f))))
 
 (define-command "recording-end"
   "Stop the recording and name its log file; the video follows"

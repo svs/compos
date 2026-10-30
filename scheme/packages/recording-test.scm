@@ -72,6 +72,18 @@
       (check-equal! (recording-path) path "the first log file stays")
       (recording-end!))))))
 
+(deftest 'recording-start-into-a-directory
+  "a directory PATH holds a timestamped log, made when missing"
+  (lambda ()
+   (t--without-frames (lambda ()
+    (let* ((dir (string-append (compos-home) "/recordings/zz-rec-dir"))
+           (path (recording-start! (string-append dir "/"))))
+      (check-true! (file-directory? dir) "the directory is made")
+      (check-true! (string-prefix? (string-append dir "/") path)
+                   "the log lies in the directory")
+      (check-true! (string-suffix? ".jsonl" path) "the log is a jsonl file")
+      (check-equal! (recording-end!) path "end returns the same log"))))))
+
 (deftest 'recording-concat-holds-each-frame-until-the-next
   "the ffconcat list gives each frame the time until the next, and the last one twice"
   (lambda ()

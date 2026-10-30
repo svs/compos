@@ -107,8 +107,9 @@
 (define (agent-set-verbosity! level)
   (let ((buf (current-buffer)))
     (buffer-set-local! buf 'agent-verbosity level)
-    ;; the header line's switch says the level: redraw it
-    (dashboard--sync! buf)))
+    ;; the header line's switch says the level, and the transcript shows it
+    (dashboard--sync! buf)
+    (chat-view-sync! buf)))
 
 (define-command "agent-verbosity-info" "Show summaries and only the latest tool title in each burst"
   (lambda () (agent-set-verbosity! "info")))

@@ -201,7 +201,12 @@
   (overlay-set! buf 'diff-block-faces
     (diff-block--block-faces (nth 2 spans)
       (or (block-text-at buf (nth 2 spans) (nth 3 spans)) "")
-      state)))
+      state))
+  ;; a proposal sits beside the prose, a size below it
+  (overlay-set! buf 'diff-block-small
+    (list (list (nth 2 spans) (nth 3 spans) "diff-block-small"))))
+
+(defface! 'diff-block-small 'size "0.8em")
 
 ;;; --- hold and release --------------------------------------------------------
 
@@ -235,6 +240,7 @@
   (overlay-clear! buf 'diff-block)
   (overlay-clear! buf 'diff-block-source)
   (overlay-clear! buf 'diff-block-faces)
+  (overlay-clear! buf 'diff-block-small)
   (block-unbind-keys! buf (append diff-block--keys
                                   (map (lambda (v) (list (car v) (cadr v)))
                                        (diff-block--verbs buf)))))

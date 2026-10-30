@@ -584,15 +584,15 @@ window at a time, so a buffer that another window holds, visible or hidden,
 moves: it leaves that window, which shows its own next buffer, and comes
 to the front of the invoking pane in a new window of its mode that holds
 only it, even when the pane has a window of that mode already. A buffer
-no window holds joins the pane's window of its mode, else a new one. A
-chat never lands in a scheme window's stack. `C-x b` is how a buffer moves between windows; cycling
+no window holds joins the pane's window of its mode, else a new one. This
+holds for every mode: a buffer never lands in another mode's window stack. `C-x b` is how a buffer moves between windows; cycling
 stays inside one window's own stack. No window moves and no stack is copied.
 Foreign selections enter their owning group first; windows never cross groups.
 This supersedes older cases describing `C-x b` as following a mode window.
 
 | Case | Command | Expected result |
 | --- | --- | --- |
-| E01 — Buffer in another window | `C-x b`, select a chat another pane shows or holds, `RET` | The chat moves to a new chat window at the front of the invoking pane, holding only that chat. The other window keeps its place and shows its next buffer; a window left empty closes and its pane stays. |
+| E01 — Buffer in another window | `C-x b`, select a buffer another pane shows or holds, `RET` | The buffer moves to a new window of its mode at the front of the invoking pane, holding only that buffer. The other window keeps its place and shows its next buffer; a window left empty closes and its pane stays. |
 | E02 — Hidden stack | `C-x b`, select a buffer a hidden window holds, `RET` | The buffer moves to the invoking window; the rest of the hidden stack stays hidden. Pane geometry stays. |
 | E03 — No attraction | `C-x b`, select a mode with no window | Show the buffer in the invoking pane. |
 | E04 — Same pane | `C-x b`, choose another buffer of this mode | Keep the window in place. |

@@ -3026,16 +3026,24 @@
 (define (editor-context-snapshot?)
   (not (and (boundp 'editor-context-snapshot) (not editor-context-snapshot))))
 
+;; BUF's selected text as a fenced block under its line, or #f when nothing is selected
+(define (editor-context-selection buf)
+  (let ((text (or (ignore-errors (lambda () (with-current-buffer buf (lambda () (region-text))))) "")))
+    (and (not (equal? (string-trim text) ""))
+         (string-append "\n  selected:\n```\n" text "\n```"))))
+
 ;; BUF as one line: its name, its mode and the line POS is on, then what
-;; its mode's provider adds; with the snapshot off, the provider's text or #f
+;; its mode's provider adds, then its selection; with the snapshot off, the provider's text or #f
 (define (editor-context-line buf pos)
   (let ((ctx (buffer-context buf)))
     (if (not (editor-context-snapshot?))
         ctx
-        (let ((line (and pos (with-current-buffer buf (lambda () (line-number-at-pos pos))))))
+        (let ((line (and pos (with-current-buffer buf (lambda () (line-number-at-pos pos)))))
+              (sel (editor-context-selection buf)))
           (string-append "- " buf " (" (or (buffer-local buf 'mode-name) "fundamental-mode") ")"
                          (if line (string-append ", line " (number->string line)) "")
-                         (if ctx (string-append ": " ctx) ""))))))
+                         (if ctx (string-append ": " ctx) "")
+                         (or sel ""))))))
 
 ;; one line for every visible buffer except EXCLUDE (the chat itself) and
 ;; SKIP, deduped, the last focused first; "" when none has a line

@@ -1301,12 +1301,24 @@
           ((buffer-read-only? (current-buffer)) (llm-companion-open! (current-buffer)))
           (else (llm-send-at-point! (current-buffer) (point))))))
 
-(define-command "llm-companion-open" "Open this document's own chat, starting one when it has none"
+(define (llm-companion-selection-input buf text draft)
+  (string-append
+    "Use only this selection from \"" buf "\" as context; do not read the rest of the document.\n"
+    "```\n" text "\n```\n"
+    (if (equal? (string-trim draft) "") "" draft)))
+
+(define-command "llm-companion-open" "Open this document's own chat, starting one when it has none; with a region, the region is the chat's only context"
   (lambda ()
-    (let ((buf (current-buffer)))
+    (let ((buf (current-buffer))
+          (text (region-text)))
       (if (chat-buffer? buf)
           (message "Already in a chat")
-          (llm-companion-open! buf)))))
+          (let ((chat (llm-companion-open! buf)))
+            (unless (equal? text "")
+              (with-current-buffer chat
+                (lambda ()
+                  (chat-replace-input! chat
+                    (llm-companion-selection-input buf text (chat-input-text chat)))))))))))
 
 (global-set-key "C-RET" "llm-send-buffer")
 (global-set-key "M-o" "llm-companion-open")

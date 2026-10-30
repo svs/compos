@@ -81,7 +81,7 @@
     (let ((b (test-buffer! "zz-rw-keyed" "x")))
       (local-set-key* b "<f9>" "diff-block-accept")
       (check-equal! (diff-block-theirs-text "new" b)
-                    "```diff theirs · <f9> keeps it\nnew\n```"
+                    "```diff theirs · <f9> keep\nnew\n```"
                     "the bound verb stands on the fence with its key")
       (local-unset-key* b "<f9>")
       (buffer-kill! b))
@@ -264,6 +264,49 @@
       (check-equal! (length calls) 2 "both blank answers asked the model")
       (check-true! (number? (string-index (cadr calls) "is its own instruction"))
                    "the passage is the instruction"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-forget-a-block-that-went-away
+  "A recorded options span over other text is no block: keeping writes a new one and touches nothing else."
+  (lambda ()
+    (t--rw-proposed!)
+    (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
+    (llm-rewrite--save-session! t--rw-buf
+      (plist-put (llm-rewrite--session t--rw-buf) 'block (list 0 4)))
+    (llm-rewrite--keep-option! t--rw-buf)
+    (check-true! (string-prefix? "One." (buffer-text t--rw-buf)) "the text under the stale span stands")
+    (check-true! (string-index (buffer-text t--rw-buf) "```options") "a new options block landed")
+    (t--rw-done!)))
+
+(deftest 'rewriting-a-block-keeps-the-cursor-in-it
+  "Redrawing the diff keeps a cursor inside it where it was."
+  (lambda ()
+    (t--rw-proposed!)
+    (let* ((spans (diff-block--spans t--rw-buf))
+           (at (+ (nth 2 spans) 5)))
+      (buffer-goto! t--rw-buf at)
+      (llm-rewrite--refine! t--rw-buf "Zwei." "German")
+      (check-equal! (buffer-point t--rw-buf) at "the cursor did not move"))
+    (t--rw-done!)))
+
+(deftest 'notes-are-filled-in-place-and-nothing-else-changes
+  "Following the notes, the model names words; the passage around them is kept byte for byte."
+  (lambda ()
+    (let* ((p "code [word for beams], a <a word for vessel>. [[link]] [t](u) <br> <https://x>")
+           (notes (llm-rewrite--notes p)))
+      (check-equal! (map caddr notes) '("word for beams" "a word for vessel")
+                    "links, tags and urls are not notes")
+      (check-equal! (llm-rewrite--fill-notes p notes "1: girders\n2. vessel")
+                    "code girders, a vessel. [[link]] [t](u) <br> <https://x>" "filled in place")
+      (check-false! (llm-rewrite--fill-notes p notes "1: girders") "a missing note fills nothing"))
+    (t--rw! "it needs [word for beams] now.")
+    (llm-rewrite--new-session! t--rw-buf 0 29 "it needs [word for beams] now.")
+    (let ((landed #f))
+      (with-stub 'llm (lambda (prompt callback) (callback "It needs: rafters, and more\n1: girders"))
+        (lambda ()
+          (llm-rewrite--ask! t--rw-buf "it needs [word for beams] now." *llm-rewrite-self-directive*
+            (lambda (new) (set! landed new)))))
+      (check-equal! landed "it needs girders now." "only the note changed"))
     (t--rw-done!)))
 
 (deftest 'an-empty-answer-decides-nothing
@@ -484,14 +527,17 @@
            (span (llm-rewrite--range t--rw-buf s "block"))
            (text (plist-get s 'rendered))
            (head (car (string-split text "\n"))))
-      (check-true! (string-index head "C-c p promotes the one at point") "fence names promote")
-      (check-true! (string-index head "C-c u puts the original back") "fence names restore")
+      (check-true! (string-index head "C-c p promote") "fence names promote")
+      (check-true! (string-index head "C-c u original") "fence names restore")
       (check-false! (string-index text "Option 0") "the original is not a number")
       (check-false! (llm-rewrite--option-at t--rw-buf s (car span)) "the fence line is no option")
       (switch-to-buffer! t--rw-buf)
       (buffer-goto! t--rw-buf (+ (car span) (string-index text "Deux.")))
       (trace-key! '("C-c" "p"))
       (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "C-c p promoted the draft at point")
+      (let ((block (llm-rewrite--range t--rw-buf (llm-rewrite--session t--rw-buf) "block")))
+        (check-true! (and (<= (car block) (buffer-point t--rw-buf)) (<= (buffer-point t--rw-buf) (cadr block)))
+                     "the cursor stays in the options block"))
       (trace-key! '("C-c" "u"))
       (check-equal! (block-text-at t--rw-buf 6 10) "Two." "C-c u put the original back"))
     (t--rw-done!)))

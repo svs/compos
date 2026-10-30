@@ -79,9 +79,9 @@
          (parts (filter (lambda (x) x)
                         (append
                          (list (diff-block--state-name state)
-                              (verb "diff-block-accept" "keeps it")
-                              (verb "diff-block-reject" "puts it back")
-                              (verb "diff-block-cycle" "changes the view"))
+                              (verb "diff-block-accept" "keep")
+                              (verb "diff-block-reject" "back")
+                              (verb "diff-block-cycle" "view"))
                         (map (lambda (v) (verb (cadr v) (caddr v)))
                              (diff-block--verbs buf))))))
     (string-join parts " · ")))
@@ -252,9 +252,22 @@
 ;; Replacing what the block holds: one delete, one insert, and the record
 ;; follows the new length. Every verb that changes the block goes through
 ;; here.
+;; Replace FROM..TO with TEXT and leave the cursor where it was: inside the
+;; span it keeps its offset, after the span it moves with the text. A plain
+;; delete and insert would put a cursor inside the span past the new text,
+;; out of the block it was in.
+(define (diff-block-replace-span! buf from to text)
+  (let ((pt (buffer-point buf))
+        (len (string-byte-length text)))
+    (buffer-delete-range! buf from (- to from))
+    (buffer-insert! buf from text)
+    (buffer-goto! buf
+      (cond ((< pt from) pt)
+            ((<= pt to) (+ from (min (- pt from) len)))
+            (else (+ pt (- len (- to from))))))))
+
 (define (diff-block--put! buf p spans text theirs note state)
-  (buffer-delete-range! buf (nth 2 spans) (- (nth 3 spans) (nth 2 spans)))
-  (buffer-insert! buf (nth 2 spans) text)
+  (diff-block-replace-span! buf (nth 2 spans) (nth 3 spans) text)
   (diff-block--hold! buf
     (list (nth 0 spans) (nth 1 spans) (nth 2 spans)
           (+ (nth 2 spans) (string-byte-length text)))

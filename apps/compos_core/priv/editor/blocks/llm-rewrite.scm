@@ -97,9 +97,19 @@
 (define (llm-rewrite--face s part)
   (string-append "rewrite-" (plist-get s 'id) "-" part))
 
+;; An options span counts only while it still holds an options block: a span
+;; left over from text that went away must not stand for the block.
+(define (llm-rewrite--options-at? buf span)
+  (and (<= 0 (car span)) (< (car span) (cadr span)) (<= (cadr span) (buffer-size buf))
+       (let ((head (car (string-split (block-text-at buf (car span) (cadr span)) "\n"))))
+         (and (string-prefix? "```" head) (string-index head "options") #t))))
+
 (define (llm-rewrite--range buf s part)
-  (or (block-overlay-span buf (llm-rewrite--face s part))
-      (plist-get s (string->symbol part))))
+  (let ((span (or (block-overlay-span buf (llm-rewrite--face s part))
+                  (plist-get s (string->symbol part)))))
+    (if (and span (equal? part "block") (not (llm-rewrite--options-at? buf span)))
+        #f
+        span)))
 
 ;; The passage stays selected for the whole session, across prompts,
 ;; iterations and choices, until the rewrite is cancelled.
@@ -151,11 +161,11 @@
       (plist-put s 'history (string-append (plist-get s 'history) part)))))
 
 (define *llm-rewrite-option-keys*
-  '(("C-c p" "llm-rewrite-promote-option" "promotes the one at point")
-    ("C-c u" "llm-rewrite-restore-original" "puts the original back")
-    ("C-c t" "llm-rewrite-toggle-options" "shows or hides")
-    ("C-c h" "llm-rewrite-show-chat" "shows the chat")
-    ("C-c x" "llm-rewrite-cancel" "cancels")))
+  '(("C-c p" "llm-rewrite-promote-option" "promote")
+    ("C-c u" "llm-rewrite-restore-original" "original")
+    ("C-c t" "llm-rewrite-toggle-options" "fold")
+    ("C-c h" "llm-rewrite-show-chat" "chat")
+    ("C-c x" "llm-rewrite-cancel" "cancel")))
 
 ;; The block's fence line names its keys, the way a diff block's does.
 (define (llm-rewrite--options-head)
@@ -224,8 +234,7 @@
         (let ((bounds
                 (if span
                     (begin
-                      (buffer-delete-range! buf (car span) (- (cadr span) (car span)))
-                      (buffer-insert! buf (car span) text)
+                      (diff-block-replace-span! buf (car span) (cadr span) text)
                       (list (car span) (+ (car span) (string-byte-length text))))
                     (let* ((p (diff-block-pending buf))
                            (ds (and p (diff-block--spans buf)))
@@ -263,11 +272,16 @@
                 (message "Kept as an option; the passage is unchanged")))))))
 
 (define (llm-rewrite--toggle-options! buf)
-  (let ((s (llm-rewrite--session buf)))
-    (if (and s (llm-rewrite--range buf s "block"))
-        (begin
-          (llm-rewrite--save-session! buf (plist-put s 'hidden (not (plist-get s 'hidden))))
-          (llm-rewrite--paint-options! buf))
+  (let* ((s (llm-rewrite--session buf))
+         (span (and s (llm-rewrite--range buf s "block"))))
+    (if span
+        (let ((hide (not (plist-get s 'hidden)))
+              (pt (buffer-point buf)))
+          (llm-rewrite--save-session! buf (plist-put s 'hidden hide))
+          (llm-rewrite--paint-options! buf)
+          ;; folding keeps the cursor on the block's fence line, not past it
+          (when (and hide (<= (car span) pt) (<= pt (cadr span)))
+            (buffer-goto! buf (car span))))
         (message "No saved options for this passage"))))
 
 (define (llm-rewrite--choose-option! buf n)
@@ -284,8 +298,7 @@
        (unless (diff-block-pending buf) (llm-rewrite--choose-option! buf n)))
       (else
         (let ((text (cadr (nth n rows))))
-          (buffer-delete-range! buf (car source) (- (cadr source) (car source)))
-          (buffer-insert! buf (car source) text)
+          (diff-block-replace-span! buf (car source) (cadr source) text)
           (llm-rewrite--track! buf
             (plist-put s 'current text) "source"
             (list (car source) (+ (car source) (string-byte-length text))))
@@ -316,42 +329,134 @@
           (lambda (new)
             (llm-rewrite--propose! buf (car span) (cadr span) old new directive)))))))
 
+;; Notes are the author's instructions in place: [a word for X] or
+;; <make this punchier>. A [[link]], [text](url), <https://...> or an HTML
+;; tag is not one. Each note is (START END INNER), as bytes of TEXT.
+(define *llm-rewrite-html-tags*
+  '("a" "b" "i" "u" "s" "p" "br" "hr" "em" "strong" "div" "span" "img"
+    "ul" "ol" "li" "code" "pre" "sub" "sup" "small" "table" "tr" "td" "th"
+    "kbd" "mark" "details" "summary" "blockquote" "h1" "h2" "h3" "h4"))
+
+(define (llm-rewrite--angle-note? inner)
+  (let* ((t (string-trim inner))
+         (bare (string-trim (if (string-suffix? "/" t) (substring-bytes t 0 (- (string-byte-length t) 1)) t))))
+    (not (or (equal? t "")
+             (string-prefix? "http" t) (string-prefix? "mailto:" t)
+             (string-prefix? "/" t) (string-prefix? "!" t)
+             (string-index t "=")
+             (member (string-downcase bare) *llm-rewrite-html-tags*)))))
+
+(define (llm-rewrite--notes text)
+  (let ((n (string-byte-length text)))
+    (let loop ((i 0) (out '()))
+      (let* ((sq (string-index text "[" i))
+             (an (string-index text "<" i))
+             (at (cond ((and sq an) (min sq an)) (sq sq) (an an) (else #f))))
+        (if (not at)
+            (reverse out)
+            (if (equal? at sq)
+                (cond
+                  ((equal? (string-index text "[[" at) at)
+                   (let ((close (string-index text "]]" at)))
+                     (if close (loop (+ close 2) out) (reverse out))))
+                  (else
+                    (let ((close (string-index text "]" (+ at 1))))
+                      (cond ((not close) (reverse out))
+                            ((and (< (+ close 1) n) (equal? (string-index text "(" (+ close 1)) (+ close 1)))
+                             (loop (+ close 1) out))
+                            (else
+                              (loop (+ close 1)
+                                    (cons (list at (+ close 1) (substring-bytes text (+ at 1) close)) out)))))))
+                (let ((close (string-index text ">" (+ at 1))))
+                  (cond ((not close) (reverse out))
+                        ((llm-rewrite--angle-note? (substring-bytes text (+ at 1) close))
+                         (loop (+ close 1)
+                               (cons (list at (+ close 1) (substring-bytes text (+ at 1) close)) out)))
+                        (else (loop (+ close 1) out))))))))))
+
+(define (llm-rewrite--notes-prompt buf passage notes)
+  (string-append
+    "You fill the author's notes in one passage of a document open in a text editor"
+    (let ((mode (buffer-local buf 'mode-name)))
+      (if mode (string-append " (" mode ")") ""))
+    ". Each note, in [square] or <angle> brackets, asks for the words that go in its place."
+    "\n\nPassage:\n" passage
+    "\n\nNotes:\n"
+    (string-join (map (lambda (i) (string-append (number->string (+ i 1)) ". "
+                                                 (substring-bytes passage (car (nth i notes)) (cadr (nth i notes)))))
+                      (iota (length notes))) "\n")
+    "\n\nReply with one line per note, as N: WORDS, where WORDS replace the note "
+    "and its brackets and read naturally in the sentence. Write nothing else."))
+
+;; N: WORDS lines -> the passage with each note filled, or #f when one is missing.
+(define (llm-rewrite--fill-notes passage notes reply)
+  (let* ((lines (map string-trim (string-split reply "\n")))
+         (word-for
+           (lambda (k)
+             (let* ((tag (number->string k))
+                    (line (find (lambda (l)
+                                  (and (string-prefix? tag l)
+                                       (> (string-byte-length l) (string-byte-length tag))
+                                       (member (substring-bytes l (string-byte-length tag) (+ 1 (string-byte-length tag)))
+                                               '(":" "." ")"))))
+                                lines)))
+               (and line
+                    (let ((w (string-trim (substring-bytes line (+ 1 (string-byte-length tag)) (string-byte-length line)))))
+                      (if (equal? w "") #f w))))))
+         (words (map (lambda (k) (word-for (+ k 1))) (iota (length notes)))))
+    (and (not (member #f words))
+         (let loop ((i (- (length notes) 1)) (text passage))
+           (if (< i 0)
+               text
+               (let ((note (nth i notes)))
+                 (loop (- i 1)
+                       (string-append (substring-bytes text 0 (car note))
+                                      (nth i words)
+                                      (substring-bytes text (cadr note) (string-byte-length text))))))))))
+
 (define (llm-rewrite--ask! buf passage directive land)
   (let* ((s (or (llm-rewrite--session buf)
                 (llm-rewrite--new-session! buf 0 0 passage)))
          (id (plist-get s 'id))
-         (token (list (monotonic-ms) (string-byte-length (plist-get s 'history)))))
-    (llm-rewrite--record! buf "You" (llm-rewrite-prompt buf directive passage))
+         (token (list (monotonic-ms) (string-byte-length (plist-get s 'history))))
+         ;; following the notes, only the notes change: the model names the
+         ;; words and the passage around them is never in its hands
+         (notes (and (equal? directive *llm-rewrite-self-directive*) (llm-rewrite--notes passage)))
+         (notes (and (pair? notes) notes)))
+    (llm-rewrite--record! buf "You"
+      (if notes (llm-rewrite--notes-prompt buf passage notes)
+          (llm-rewrite-prompt buf directive passage)))
     (llm-rewrite--save-session! buf
       (plist-put (llm-rewrite--session buf) 'request token))
     (message "LLM rewriting...")
     (llm (string-append
            "Continue this rewrite conversation. Earlier instructions and replies are context.\n"
            (if (string-index (plist-get (llm-rewrite--session buf) 'history) "### Assistant")
-               "This is another try: your reply must differ from every earlier reply, "
-               "")
-           (if (string-index (plist-get (llm-rewrite--session buf) 'history) "### Assistant")
-               "in wording and, where a note asks for a word, in the word you choose.\n"
+               "This is another try: your reply must differ from every earlier reply.\n"
                "")
            (plist-get (llm-rewrite--session buf) 'history))
       (lambda (reply)
         (let* ((live (and (buffer-exists? buf) (llm-rewrite--session buf)))
-               (new (llm-rewrite-clean reply)))
+               (new (llm-rewrite-clean reply))
+               (filled (and notes (not (equal? new "")) (llm-rewrite--fill-notes passage notes new))))
           (cond
             ((not (and live (equal? (plist-get live 'id) id)
                        (equal? (plist-get live 'request) token)))
              (message "Discarded a superseded rewrite"))
             ((equal? new "") (message "The model returned nothing"))
+            ((and notes (not filled))
+             (llm-rewrite--record! buf "Assistant" new)
+             (message "The model did not fill every note; nothing changed"))
             (else
               (llm-rewrite--record! buf "Assistant" new)
-              (land new))))))))
+              (land (or filled new)))))))))
 
 ;; The rewrite's own verbs ride the diff block's fence line.
 (define *llm-rewrite-verbs*
-  '(("C-c o" "llm-rewrite-keep-option" "keeps as option")
-    ("C-c r" "llm-rewrite-iterate" "iterates")
-    ("C-c h" "llm-rewrite-show-chat" "shows the chat")
-    ("C-c x" "llm-rewrite-cancel" "cancels")))
+  '(("C-c o" "llm-rewrite-keep-option" "option")
+    ("C-c r" "llm-rewrite-iterate" "again")
+    ("C-c h" "llm-rewrite-show-chat" "chat")
+    ("C-c x" "llm-rewrite-cancel" "cancel")))
 
 (define (llm-rewrite--propose! buf start end original new directive)
   (unless (llm-rewrite--session buf)

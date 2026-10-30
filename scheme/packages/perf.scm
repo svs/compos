@@ -1,14 +1,13 @@
-;;; perf.scm --- the system monitor: the VM and the host, live, in one buffer.
+;;; perf.scm --- the system monitor: lane contention, live, in one buffer.
 ;;;
-;;; The *perf* buffer draws nine panels from two sources per tick: the VM
-;;; counters that vm-sample and vm-processes return, and the telemetry
-;;; stream. Elixir supplies the counters. This package decides the series,
-;;; the scale, the colours, the table, and the keys.
+;;; The *perf* buffer draws two panels. The first holds every lane the telemetry stamped a
+;;; job on in the last *perf-lane-window-ms*, the lane that waited longest
+;;; first. Wait is the time a job sat queued behind the lane's earlier
+;;; jobs, so a lane with wait is a lane with contention. The second is
+;;; the host memory in use and the apps that hold the most of it.
 ;;;
-;;; The buffer text is a plain table of the same numbers. A reader without
-;;; the blocks view still sees the state, and point rests on a process row:
-;;; the table rows carry the line they stand for, so the current row
-;;; follows point and RET, k act on the row at point.
+;;; The buffer text is a plain table of the same numbers, for a reader
+;;; without the blocks view.
 ;;;
 ;;; The tick is one debounce that re-arms itself. A hidden buffer ticks
 ;;; five times slower and samples nothing; a shown buffer samples every
@@ -25,23 +24,7 @@
   "Milliseconds between two samples of a shown *perf* buffer. Every sample is one patch to the browser."
   'group 'perf 'type 'number)
 
-(defcustom 'perf-history 60
-  "How many samples each chart keeps."
-  'group 'perf 'type 'number)
-
-;; How many process rows the table shows.
-(define perf-process-rows 20)
-
-(define *perf-sorts* '("reds" "memory" "queue" "name"))
-(define *perf-heat-layers* '("scheme" "live" "browser"))
-(define *perf-heat-width* 30)
-(define *perf-core-width* 24)
-(define *perf-spark-width* 16)
-(define *perf-log-rows* 8)
-
-;; the buffer text: line 1 is the summary, line 2 the filter, line 3 blank,
-;; line 4 the table head, and the rows start on line 5
-(define perf--first-row-line 5)
+(define *perf-lane-window-ms* 30000)
 
 ;;; --- small helpers ------------------------------------------------------------
 
@@ -53,105 +36,16 @@
           ((equal? (car xs) key) (cadr xs))
           (else (loop (cdr (cdr xs)))))))
 
-(define (perf--push xs v n)
-  (last-n (append xs (list v)) n))
-
-(define (perf--add a b)
-  (let loop ((a a) (b b) (acc '()))
-    (if (or (null? a) (null? b))
-        (reverse acc)
-        (loop (cdr a) (cdr b) (cons (+ (car a) (car b)) acc)))))
-
-(define (perf--max xs)
-  (fold (lambda (acc v) (max acc v)) 0 xs))
-
-(define (perf--last xs)
-  (if (null? xs) 0 (car (reverse xs))))
-
-(define (perf--clamp v)
-  (max 0 (min 100 v)))
-
-;; every value as a percent of the largest, so a chart fills its height
-(define (perf--scale xs)
-  (let ((top (max 1 (perf--max xs))))
-    (map (lambda (v) (percent-of v top)) xs)))
-
-;; N tenths as "12.3"
-(define (perf--tenths n)
-  (string-append (number->string (quotient n 10)) "." (number->string (modulo n 10))))
-
 ;; bytes in the binary units the VM counts in; a tenth only above a
 ;; gibibyte, where a whole unit is too coarse
 (define (perf--bytes b)
   (format-bytes b 'iec (if (>= b 1073741824) 1 0)))
-
-;; 1234567 -> "1.2M", 12345 -> "12.3k", 999 -> "999"
-(define (perf--count n)
-  (cond ((>= n 1000000) (string-append (perf--tenths (quotient n 100000)) "M"))
-        ((>= n 1000) (string-append (perf--tenths (quotient n 100)) "k"))
-        (else (number->string n))))
-
-(define (perf--uptime ms)
-  (let* ((s (quotient ms 1000))
-         (h (quotient s 3600))
-         (m (quotient (modulo s 3600) 60)))
-    (string-append (number->string h) "h " (if (< m 10) "0" "") (number->string m) "m")))
 
 (define (perf--clip s n)
   (if (> (string-length s) n) (substring s 0 n) s))
 
 (define (perf--line-count text)
   (length (string-split text "\n")))
-
-;;; --- SVG paths -------------------------------------------------------------------
-;;; Every chart is a viewBox 0 0 W 100 with one point per ten units of x and
-;;; y as a percent from the top. Integer arithmetic only.
-
-(define (perf--x i) (number->string (* i 10)))
-(define (perf--y v) (number->string (- 100 (perf--clamp v))))
-
-(define (perf--view-box n)
-  (string-append "0 0 " (number->string (* 10 (max 1 (- n 1)))) " 100"))
-
-(define (perf--path-line vs)
-  (let loop ((xs vs) (i 0) (acc '()))
-    (if (null? xs)
-        (string-join (reverse acc) " ")
-        (loop (cdr xs) (+ i 1)
-              (cons (string-append (if (= i 0) "M" "L") (perf--x i) "," (perf--y (car xs)))
-                    acc)))))
-
-;; the area between TOP and BOTTOM; BOTTOM #f is the floor
-(define (perf--path-area top bottom)
-  (let* ((n (length top))
-         (back (let loop ((i (- n 1)) (acc '()))
-                 (if (< i 0)
-                     (reverse acc)
-                     (loop (- i 1)
-                           (cons (string-append "L" (perf--x i) ","
-                                                (perf--y (if bottom (nth i bottom) 0)))
-                                 acc))))))
-    (if (= n 0)
-        ""
-        (string-append (perf--path-line top) " " (string-join back " ") " Z"))))
-
-;; a mirrored area: UP? draws above the midline, else below
-(define (perf--path-mirror vs up?)
-  (let* ((n (length vs))
-         (pts (let loop ((xs vs) (i 0) (acc '()))
-                (if (null? xs)
-                    (reverse acc)
-                    (loop (cdr xs) (+ i 1)
-                          (cons (string-append (if (= i 0) "M" "L") (perf--x i) ","
-                                               (number->string
-                                                 (if up?
-                                                     (- 50 (quotient (* (perf--clamp (car xs)) 48) 100))
-                                                     (+ 50 (quotient (* (perf--clamp (car xs)) 48) 100)))))
-                                acc))))))
-    (if (= n 0)
-        ""
-        (string-append (string-join pts " ")
-                       " L" (perf--x (- n 1)) ",50 L0,50 Z"))))
 
 ;;; --- blocks -----------------------------------------------------------------------
 
@@ -169,189 +63,130 @@
 (define (perf--txt class text)
   (list 'tag "span" 'class class 'text text))
 
-(define (perf--svg n class &rest children)
-  (list 'tag "svg" 'class (string-append "perf-svg " class)
-        'attrs (list (list "viewBox" (perf--view-box n))
-                     (list "preserveAspectRatio" "none"))
-        'children (perf--kids children)))
+;; the face a wait wears: red past a quarter second, amber past 50 ms
+(define (perf--wait-class ms)
+  (cond ((>= ms 250) "perf-hot")
+        ((>= ms 50) "perf-warm")
+        ((> ms 0) "perf-strong")
+        (else "perf-dim")))
 
-(define (perf--path d class)
-  (list 'tag "path" 'class class 'attrs (list (list "d" d))))
-
-(define (perf--hline y)
-  (list 'tag "line" 'class "perf-rule"
-        'attrs (list (list "x1" "0") (list "y1" (number->string y))
-                     (list "x2" "10000") (list "y2" (number->string y)))))
-
-(define (perf--panel span fig title right &rest body)
-  (list 'tag "div" 'class (string-append "perf-panel perf-c" (number->string span))
-        'children
-        (cons (perf--div "perf-head"
-                (perf--txt "perf-fig" fig)
-                (perf--txt "" title)
-                (perf--txt "perf-spacer" "")
-                (perf--div "perf-head-right" right))
-              (perf--kids body))))
-
-(define (perf--stat k v class)
-  (perf--div "perf-stat"
-    (perf--txt "perf-stat-k" k)
-    (perf--txt (string-append "perf-stat-v " class) v)))
-
-(define (perf--legend class label)
-  (perf--div "perf-legend" (perf--txt (string-append "perf-swatch " class) "") (perf--txt "" label)))
-
-;; the face a load wears: red past 70, amber past 40, indigo past 15
-(define (perf--load-class v)
-  (cond ((> v 70) "perf-hot")
-        ((> v 40) "perf-warm")
-        ((> v 15) "perf-cool")
-        (else "perf-idle")))
-
-(define (perf--heat-class ms)
-  (cond ((= ms 0) "perf-h0")
-        ((< ms 4) "perf-h1")
-        ((< ms 16) "perf-h2")
-        ((< ms 50) "perf-h3")
-        ((< ms 250) "perf-h4")
-        (else "perf-h5")))
-
-(define (perf--level-class level)
-  (cond ((equal? level "error") "perf-hot")
-        ((equal? level "warn") "perf-warm")
-        (else "perf-cool")))
-
-;;; --- the samples -----------------------------------------------------------------
-
-(define (perf--sort-name buf)
-  (or (buffer-local buf 'perf-sort) "reds"))
-
-(define (perf--advance-cores old now)
-  (let loop ((i 0) (now now) (acc '()))
-    (if (null? now)
-        (reverse acc)
-        (loop (+ i 1) (cdr now)
-              (cons (perf--push (if (< i (length old)) (nth i old) '())
-                                (car now) *perf-core-width*)
-                    acc)))))
-
-(define (perf--advance ser s)
-  (let ((os (perf--get s 'os '()))
-        (n perf-history))
-    (list 'sched (perf--push (perf--get ser 'sched '()) (perf--get s 'sched-util 0) n)
-          'dcpu (perf--push (perf--get ser 'dcpu '()) (perf--get s 'dirty-cpu-util 0) n)
-          'dio (perf--push (perf--get ser 'dio '()) (perf--get s 'dirty-io-util 0) n)
-          'host (perf--push (perf--get ser 'host '()) (perf--get os 'cpu-util 0) n)
-          'in (perf--push (perf--get ser 'in '()) (perf--get s 'io-in-rate 0) n)
-          'out (perf--push (perf--get ser 'out '()) (perf--get s 'io-out-rate 0) n)
-          'cores (perf--advance-cores (perf--get ser 'cores '())
-                                      (append (perf--get s 'schedulers '())
-                                              (perf--get s 'dirty-cpu '()))))))
-
-;; one heat cell per layer per tick: the slowest event that arrived since
-;; the previous tick
-(define (perf--advance-heat old since events)
-  (let ((fresh (filter (lambda (r) (> (plist-get r 'time-ms) since)) events)))
-    (let loop ((layers *perf-heat-layers*) (i 0) (acc '()))
-      (if (null? layers)
-          (reverse acc)
-          (let ((ms (fold (lambda (m r)
-                            (if (equal? (telemetry--layer r) (car layers))
-                                (max m (telemetry--ms r))
-                                m))
-                          0 fresh)))
-            (loop (cdr layers) (+ i 1)
-                  (cons (perf--push (if (< i (length old)) (nth i old) '()) ms *perf-heat-width*)
-                        acc)))))))
-
-;; the reductions history of every shown process; a process that leaves
-;; the table leaves the history
-(define (perf--advance-sparks old rows)
-  (map (lambda (r)
-         (let* ((pid (plist-get r 'pid))
-                (hit (assoc pid (or old '())))
-                (hist (if hit (cadr hit) '())))
-           (list pid (perf--push hist (plist-get r 'reds) *perf-spark-width*))))
-       rows))
-
-(define (perf--render-durations events)
-  (sort (map telemetry--ms
-             (filter (lambda (r)
-                       (and (equal? (telemetry--layer r) "live")
-                            (string-prefix? "render" (or (plist-get r 'label) ""))))
-                     events))))
+;;; --- the lanes --------------------------------------------------------------------
 
 (define (perf--newest-time events)
   (fold (lambda (m r) (max m (plist-get r 'time-ms))) 0 events))
 
-;; one change: every local a sample writes lands in one buffer-set-locals!,
-;; so the frame refreshes once for the sample, not once per local
+(define (perf--lane-name owner)
+  (cond ((equal? owner ":ui") "ui")
+        ((string-prefix? "{:rpc" owner) "rpc")
+        (else (let ((parts (string-split owner "\"")))
+                (if (>= (length parts) 2) (cadr parts) owner)))))
+
+;; (NAME JOBS BUSY WAIT-MAX WAIT-SUM BACKLOG-MAX SLOWEST SLOWEST-LABEL) per
+;; lane, the most wait first, then the most busy
+(define (perf--lanes events)
+  (let* ((now (perf--newest-time events))
+         (fresh (filter (lambda (r) (and (equal? (plist-get r 'kind) "lane")
+                                         (> (plist-get r 'time-ms) (- now *perf-lane-window-ms*))))
+                        events))
+         (acc (fold (lambda (acc r)
+                      (let* ((name (perf--lane-name (or (plist-get r 'owner) "")))
+                             (old (or (alist-get acc name) '(0 0 0 0 0 0 "")))
+                             (ms (or (plist-get r 'duration-ms) 0))
+                             (q (or (plist-get r 'queue-ms) 0)))
+                        (alist-put acc name
+                          (list (+ 1 (list-ref old 0)) (+ ms (list-ref old 1))
+                                (max q (list-ref old 2)) (+ q (list-ref old 3))
+                                (max (or (plist-get r 'backlog) 0) (list-ref old 4))
+                                (max ms (list-ref old 5))
+                                (if (> ms (list-ref old 5)) (or (plist-get r 'label) "") (list-ref old 6))))))
+                    '() fresh)))
+    (map cdr (sort (map (lambda (e) (cons (list (- (list-ref (cadr e) 3)) (- (list-ref (cadr e) 1)))
+                                          (cons (car e) (cadr e))))
+                        acc)))))
+
 (define (perf--sample! buf)
   (let* ((s (vm-sample))
-         (procs (vm-processes perf-process-rows (perf--sort-name buf)
-                              (or (buffer-local buf 'perf-filter) "")))
-         (events (telemetry-events 1000))
-         (since (or (buffer-local buf 'perf-heat-since) 0)))
+         (os (perf--get s 'os '())))
     (buffer-set-locals! buf
-      (list 'perf-sample s
-            'perf-procs procs
-            'perf-series (perf--advance (or (buffer-local buf 'perf-series) '()) s)
-            'perf-heat (perf--advance-heat (or (buffer-local buf 'perf-heat) '()) since events)
-            'perf-heat-since (max since (perf--newest-time events))
-            'perf-sparks (perf--advance-sparks (buffer-local buf 'perf-sparks)
-                                               (perf--get procs 'rows '()))
-            'perf-render-ms (perf--render-durations events)
-            'perf-lanes (perf--lanes events)
+      (list 'perf-lanes (perf--lanes (telemetry-events 1000))
+            'perf-mem (list (perf--get os 'mem-total 0) (perf--get os 'mem-free 0)
+                            (perf--get (perf--get s 'memory '()) 'total 0))
             'perf-tick (+ 1 (or (buffer-local buf 'perf-tick) 0))))))
+
+;;; --- the apps ----------------------------------------------------------------------
+;;; ps lists every host process with its resident memory; the processes of
+;;; one .app bundle, its helpers included, count as one app.
+
+(define *perf-app-rows* 12)
+
+(define (perf--app-name comm)
+  (let* ((outer (car (string-split comm ".app/")))
+         (parts (string-split outer "/")))
+    (car (reverse parts))))
+
+;; (NAME KIB PROCESSES) for the apps holding the most memory, most first
+(define (perf--apps ps-out)
+  (let ((acc (fold (lambda (acc line)
+                     (let* ((words (string-split (string-trim line) " "))
+                            (kib (and (pair? words) (string->number (car words)))))
+                       (if (and kib (pair? (cdr words)))
+                           (let* ((name (perf--app-name (string-join (cdr words) " ")))
+                                  (old (or (alist-get acc name) '(0 0))))
+                             (alist-put acc name (list (+ kib (car old)) (+ 1 (cadr old)))))
+                           acc)))
+                   '() (string-split ps-out "\n"))))
+    (let ((rows (map cdr (sort (map (lambda (e) (cons (- (car (cadr e))) (cons (car e) (cadr e)))) acc)))))
+      (if (> (length rows) *perf-app-rows*) (list-head rows *perf-app-rows*) rows))))
+
+;; ps runs off the lane; its answer lands in the buffer and redraws it.
+;; One run at a time: a tick that finds one in flight skips its own.
+(define (perf--sample-apps! buf)
+  (unless (buffer-local buf 'perf-ps-busy)
+    (buffer-set-local! buf 'perf-ps-busy #t)
+    (shell-command->string "ps -axo rss=,comm=" "/"
+      (lambda (out)
+        (when (buffer-exists? buf)
+          (buffer-set-locals! buf (list 'perf-apps (perf--apps out) 'perf-ps-busy #f))
+          (perf--render! buf))))))
 
 ;;; --- the text ----------------------------------------------------------------------
 
-(define (perf--row-text r)
+(define (perf--lane-text r)
   (string-append
-    (string-pad-right (plist-get r 'pid) 12)
-    (string-pad-right (perf--clip (plist-get r 'name) 38) 40)
-    (string-pad-left (perf--count (plist-get r 'reds)) 10)
-    (string-pad-left (perf--bytes (plist-get r 'memory)) 10)
-    (string-pad-left (number->string (plist-get r 'queue)) 6)
-    "  " (plist-get r 'status) "\n"))
+    (string-pad-right (perf--clip (list-ref r 0) 38) 40)
+    (string-pad-left (number->string (list-ref r 1)) 6)
+    (string-pad-left (number->string (list-ref r 2)) 8)
+    (string-pad-left (number->string (list-ref r 3)) 10)
+    (string-pad-left (number->string (list-ref r 4)) 10)
+    (string-pad-left (number->string (list-ref r 5)) 9)
+    "  " (number->string (list-ref r 6)) " ms " (list-ref r 7) "\n"))
 
 (define (perf--text buf)
-  (let* ((s (or (buffer-local buf 'perf-sample) '()))
-         (os (perf--get s 'os '()))
-         (mem (perf--get s 'memory '()))
-         (procs (or (buffer-local buf 'perf-procs) '()))
-         (rows (perf--get procs 'rows '())))
-    (string-append
-      "*perf*  " (perf--get s 'host "")
-      "  schedulers " (number->string (perf--get s 'sched-util 0)) "%"
-      "  host cpu " (number->string (perf--get os 'cpu-util 0)) "%"
-      "  memory " (perf--bytes (perf--get mem 'total 0))
-      "  processes " (number->string (perf--get s 'process-count 0))
-      "  run queue " (number->string (perf--get s 'run-queue 0))
-      "  tick " (number->string (or (buffer-local buf 'perf-tick) 0)) "\n"
-      "filter: " (or (buffer-local buf 'perf-filter) "")
-      "  sort: " (perf--sort-name buf)
-      "  " (number->string (perf--get procs 'matched 0)) "/" (number->string (perf--get procs 'count 0))
-      (if (buffer-local buf 'perf-paused) "  paused" "") "\n"
-      "\n"
-      (string-pad-right "PID" 12) (string-pad-right "NAME" 40)
-      (string-pad-left "REDS/S" 10) (string-pad-left "MEMORY" 10) (string-pad-left "MQ" 6)
-      "  STATUS\n"
-      (apply string-append (map perf--row-text rows)))))
+  (string-append
+    "*perf*  lanes, last " (number->string (quotient *perf-lane-window-ms* 1000)) " s"
+    "  tick " (number->string (or (buffer-local buf 'perf-tick) 0))
+    (if (buffer-local buf 'perf-paused) "  paused" "") "\n"
+    "\n"
+    (string-pad-right "LANE" 40) (string-pad-left "JOBS" 6) (string-pad-left "BUSY" 8)
+    (string-pad-left "WAIT MAX" 10) (string-pad-left "WAIT SUM" 10) (string-pad-left "BACKLOG" 9)
+    "  SLOWEST\n"
+    (apply string-append (map perf--lane-text (or (buffer-local buf 'perf-lanes) '())))
+    "\n" (perf--mem-summary buf) "\n\n"
+    (string-pad-right "APP" 40) (string-pad-left "PROCS" 6) (string-pad-left "MEMORY" 12) "\n"
+    (apply string-append
+           (map (lambda (r) (string-append (string-pad-right (perf--clip (car r) 38) 40)
+                                           (string-pad-left (number->string (caddr r)) 6)
+                                           (string-pad-left (perf--bytes (* 1024 (cadr r))) 12) "\n"))
+                (or (buffer-local buf 'perf-apps) '())))))
 
-;; (LINE PID NAME) for every table row
-(define (perf--rows buf)
-  (let loop ((rows (perf--get (or (buffer-local buf 'perf-procs) '()) 'rows '()))
-             (line perf--first-row-line)
-             (acc '()))
-    (if (null? rows)
-        (reverse acc)
-        (loop (cdr rows) (+ line 1)
-              (cons (list line (plist-get (car rows) 'pid) (plist-get (car rows) 'name)) acc)))))
-
-(define (perf--row-at-point buf)
-  (let ((line (car (buffer-line-at-point buf))))
-    (assoc line (or (buffer-local buf 'perf-rows) '()))))
+;; "used 20 GiB of 24 GiB · 84% · compos 697 MiB"
+(define (perf--mem-summary buf)
+  (let* ((m (or (buffer-local buf 'perf-mem) '(0 0 0)))
+         (total (car m))
+         (used (max 0 (- total (cadr m)))))
+    (string-append "memory used " (perf--bytes used) " of " (perf--bytes total)
+                   " · " (format-percent used (max 1 total))
+                   " · compos " (perf--bytes (caddr m)))))
 
 ;; rewrite the text in one change; point stays on its line. The write is
 ;; programmatic: buffer-replace-range! bypasses read-only, so the flag does
@@ -365,456 +200,95 @@
       (with-current-buffer buf
         (lambda () (goto-char! (line-start-position want)))))))
 
-;;; --- the panels ----------------------------------------------------------------------
-
-(define (perf--cpu-panel s ser)
-  (let* ((sched (perf--get ser 'sched '()))
-         (dcpu (perf--get ser 'dcpu '()))
-         (dio (perf--get ser 'dio '()))
-         (host (perf--get ser 'host '()))
-         (stack1 (perf--add sched dcpu))
-         (stack2 (perf--add stack1 dio))
-         (os (perf--get s 'os '()))
-         (now (perf--last sched))
-         (n (length sched)))
-    (perf--panel 5 "Fig. 1" "Schedulers · aggregate"
-      (list (perf--legend "perf-sw-user" "normal")
-            (perf--legend "perf-sw-sys" "dirty cpu")
-            (perf--legend "perf-sw-io" "dirty io")
-            (perf--legend "perf-sw-line" "host"))
-      (perf--div "perf-body-row"
-        (perf--div "perf-chart"
-          (perf--svg n ""
-            (perf--hline 20) (perf--hline 40) (perf--hline 60) (perf--hline 80)
-            (perf--path (perf--path-area stack2 stack1) "perf-io")
-            (perf--path (perf--path-area stack1 sched) "perf-sys")
-            (perf--path (perf--path-area sched #f) "perf-user")
-            (perf--path (perf--path-line host) "perf-line"))
-          (perf--txt "perf-corner perf-corner-tl" "100%")
-          (perf--txt "perf-corner perf-corner-bl" (string-append "−" (number->string n) " s")))
-        (perf--div "perf-side"
-          (perf--div "perf-big" (perf--txt "" (number->string now)) (perf--txt "perf-unit" "%"))
-          (perf--stat "normal" (string-append (number->string now) "%") "perf-cool")
-          (perf--stat "dirty cpu" (string-append (number->string (perf--last dcpu)) "%") "perf-warm")
-          (perf--stat "dirty io" (string-append (number->string (perf--last dio)) "%") "perf-hot")
-          (perf--stat "host cpu" (string-append (number->string (perf--get os 'cpu-util 0)) "%") "")
-          (perf--stat "run queue" (number->string (perf--get s 'run-queue 0)) "")
-          (perf--stat "reds/s" (perf--count (perf--get s 'reductions-rate 0)) "")
-          (perf--stat "ctx sw/s" (perf--count (perf--get s 'context-switch-rate 0)) "")
-          (perf--stat "gc/s" (perf--count (perf--get s 'gc-rate 0)) ""))))))
-
-(define (perf--ring label pct sub class)
-  (perf--div "perf-ring"
-    (perf--div "perf-ring-box"
-      (list 'tag "svg" 'class "perf-ring-svg"
-            'attrs (list (list "viewBox" "0 0 40 40"))
-            'children
-            (list (list 'tag "circle" 'class "perf-ring-track"
-                        'attrs (list (list "cx" "20") (list "cy" "20") (list "r" "16")))
-                  (list 'tag "circle" 'class (string-append "perf-ring-arc " class)
-                        'attrs (list (list "cx" "20") (list "cy" "20") (list "r" "16")
-                                     (list "stroke-dasharray"
-                                           (string-append (number->string pct) " 100.5"))))))
-      (perf--txt "perf-ring-pct" (string-append (number->string pct) "%")))
-    (perf--txt "perf-ring-label" label)
-    (perf--txt "perf-ring-sub" sub)))
-
-(define (perf--segment label bytes total class)
-  (list label bytes (percent-of bytes total) class))
-
-(define (perf--memory-panel s)
-  (let* ((mem (perf--get s 'memory '()))
-         (os (perf--get s 'os '()))
-         (total (max 1 (perf--get mem 'total 0)))
-         (procs (perf--get mem 'processes 0))
-         (bin (perf--get mem 'binary 0))
-         (ets (perf--get mem 'ets 0))
-         (code (perf--get mem 'code 0))
-         (atom (perf--get mem 'atom 0))
-         (other (max 0 (- total procs bin ets code atom)))
-         (host-total (perf--get os 'mem-total 0))
-         (host-used (max 0 (- host-total (perf--get os 'mem-free 0))))
-         (segs (list (perf--segment "processes" procs total "perf-sw-user")
-                     (perf--segment "binaries" bin total "perf-sw-soft")
-                     (perf--segment "ets" ets total "perf-sw-sand")
-                     (perf--segment "code" code total "perf-sw-sys")
-                     (perf--segment "atoms" atom total "perf-sw-io")
-                     (perf--segment "other" other total "perf-sw-dim"))))
-    (perf--panel 3 "Fig. 2" "Memory"
-      (list (perf--txt "" (perf--bytes total)))
-      (perf--div "perf-rings"
-        (perf--ring "processes" (percent-of procs total) (perf--bytes procs) "perf-user")
-        (perf--ring "binaries" (percent-of bin total) (perf--bytes bin) "perf-sys")
-        (perf--ring "host" (percent-of host-used (max 1 host-total)) (perf--bytes host-used)
-                    (if (> (percent-of host-used (max 1 host-total)) 90) "perf-io" "perf-ok")))
-      (perf--div "perf-segbar"
-        (map (lambda (seg)
-               (list 'tag "div" 'class (string-append "perf-seg " (nth 3 seg))
-                     'attrs (list (list "style" (string-append "width:" (number->string (nth 2 seg)) "%")))))
-             segs))
-      (perf--div "perf-seglist"
-        (map (lambda (seg)
-               (perf--div "perf-segrow"
-                 (perf--txt (string-append "perf-swatch " (nth 3 seg)) "")
-                 (perf--txt "perf-stat-k perf-spacer" (car seg))
-                 (perf--txt "" (perf--bytes (cadr seg)))))
-             segs)))))
-
-(define (perf--io-panel s ser)
-  (let* ((in (perf--get ser 'in '()))
-         (out (perf--get ser 'out '()))
-         (top (max 1 (perf--max in) (perf--max out)))
-         (n (length in)))
-    (perf--panel 4 "Fig. 3" "Port IO · bytes"
-      (list (perf--txt "perf-ok" (string-append "in " (perf--bytes (perf--last in)) "/s"))
-            (perf--txt "perf-cool" (string-append "out " (perf--bytes (perf--last out)) "/s")))
-      (perf--div "perf-chart"
-        (perf--svg n ""
-          (perf--hline 50)
-          (perf--path (perf--path-mirror (map (lambda (v) (percent-of v top)) in) #t) "perf-in")
-          (perf--path (perf--path-mirror (map (lambda (v) (percent-of v top)) out) #f) "perf-out"))
-        (perf--txt "perf-corner perf-corner-tr" (string-append "±" (perf--bytes top) "/s")))
-      (perf--div "perf-stats4"
-        (perf--stat "ports" (number->string (perf--get s 'port-count 0)) "")
-        (perf--stat "ets tables" (number->string (perf--get s 'ets-count 0)) "")
-        (perf--stat "gc words/s" (perf--count (perf--get s 'gc-words-rate 0)) "")
-        (perf--stat "atoms" (perf--count (perf--get s 'atom-count 0)) "")))))
-
-(define (perf--core-name i normal)
-  (if (< i normal)
-      (string-append "s" (string-pad-left (number->string (+ i 1)) 2))
-      (string-append "dc" (number->string (+ 1 (- i normal))))))
-
-(define (perf--cores-panel s ser)
-  (let* ((cores (perf--get ser 'cores '()))
-         (normal (length (perf--get s 'schedulers '())))
-         (hot (let loop ((cs cores) (i 0) (best 0) (bi 0))
-                (if (null? cs)
-                    (list bi best)
-                    (let ((v (perf--last (car cs))))
-                      (if (> v best) (loop (cdr cs) (+ i 1) v i) (loop (cdr cs) (+ i 1) best bi)))))))
-    (perf--panel 5 "Fig. 4"
-      (string-append "Per-scheduler utilisation · " (number->string normal) " normal")
-      (list (perf--txt "" (string-append "hottest " (perf--core-name (car hot) normal)
-                                         " · " (number->string (cadr hot)) "%")))
-      (perf--div "perf-cores"
-        (let loop ((cs cores) (i 0) (acc '()))
-          (if (null? cs)
-              (reverse acc)
-              (let* ((hist (car cs))
-                     (v (perf--last hist))
-                     (class (perf--load-class v)))
-                (loop (cdr cs) (+ i 1)
-                      (cons (perf--div "perf-core"
-                              (perf--svg (length hist) ""
-                                (perf--path (perf--path-area hist #f) (string-append "perf-fill " class))
-                                (perf--path (perf--path-line hist) (string-append "perf-stroke " class)))
-                              (perf--div "perf-core-label"
-                                (perf--txt "perf-stat-k" (perf--core-name i normal))
-                                (perf--txt (string-append "perf-strong " class) (number->string v))))
-                            acc)))))))))
-
-;; render durations in ten bins: up to 2, 4, 8, 12, 16, 24, 33, 50, 100 ms, and past
-(define *perf-bins* '(2 4 8 12 16 24 33 50 100))
-
-(define (perf--histogram sorted)
-  (let loop ((edges *perf-bins*) (xs sorted) (acc '()))
-    (if (null? edges)
-        (reverse (cons (length xs) acc))
-        (let ((in (filter (lambda (v) (< v (car edges))) xs)))
-          (loop (cdr edges)
-                (filter (lambda (v) (>= v (car edges))) xs)
-                (cons (length in) acc))))))
-
-(define (perf--frame-panel sorted)
-  (let* ((counts (perf--histogram sorted))
-         (heights (perf--scale counts))
-         (now (perf--last sorted))
-         (p50 (telemetry--percentile sorted 50))
-         (p95 (telemetry--percentile sorted 95))
-         (p99 (telemetry--percentile sorted 99)))
-    (perf--panel 3 "Fig. 5" "Render time"
-      (list (perf--txt (if (> now 16) "perf-hot" "perf-ok")
-                       (string-append (number->string now) " ms")))
-      (perf--div "perf-histo"
-        (let loop ((hs heights) (i 0) (acc '()))
-          (if (null? hs)
-              (reverse acc)
-              (loop (cdr hs) (+ i 1)
-                    (cons (list 'tag "div"
-                                'class (string-append "perf-hbar "
-                                                      (cond ((> i 7) "perf-fill perf-hot")
-                                                            ((> i 4) "perf-fill perf-warm")
-                                                            (else "perf-fill perf-cool")))
-                                'attrs (list (list "style" (string-append "height:" (number->string (max 2 (car hs))) "%"))))
-                          acc)))))
-      (perf--div "perf-axis"
-        (perf--txt "" "2 ms") (perf--txt "" "16") (perf--txt "" "33") (perf--txt "" "100+"))
-      (perf--div "perf-stats3"
-        (perf--stat "p50" (number->string p50) "")
-        (perf--stat "p95" (number->string p95) (if (> p95 16) "perf-hot" ""))
-        (perf--stat "p99" (number->string p99) (if (> p99 16) "perf-hot" ""))))))
-
-(define (perf--heat-panel heat)
-  (perf--panel 4 "Fig. 6" "Event latency · per layer"
-    (list (perf--txt "" (string-append "ms · " (number->string *perf-heat-width*) " ticks")))
-    (perf--div "perf-heat"
-      (let loop ((layers *perf-heat-layers*) (rows heat) (acc '()))
-        (if (or (null? layers) (null? rows))
-            (reverse acc)
-            (loop (cdr layers) (cdr rows)
-                  (cons (perf--div "perf-heat-row"
-                          (perf--txt "perf-heat-label" (car layers))
-                          (perf--div "perf-heat-cells"
-                            (map (lambda (ms) (perf--div (string-append "perf-cell " (perf--heat-class ms))))
-                                 (car rows)))
-                          (perf--txt "perf-heat-val" (number->string (perf--last (car rows)))))
-                        acc)))))))
-
-(define (perf--spark pid sparks)
-  (let* ((hit (assoc pid (or sparks '())))
-         (hist (perf--scale (if hit (cadr hit) '()))))
-    (perf--svg (length hist) "perf-spark-svg"
-      (perf--path (perf--path-line hist) "perf-spark"))))
-
-(define (perf--process-row r line sparks)
-  (let* ((reds (plist-get r 'reds))
-         (class (perf--load-class (min 100 (quotient reds 20000)))))
-    (list 'tag "div" 'class "perf-prow"
-          'lines (list line line) 'mark "current"
-          'click (string-append "perf:row:" (number->string line))
-          'children
-          (list (perf--txt "perf-dim" (plist-get r 'pid))
-                (perf--txt "perf-name" (plist-get r 'name))
-                (perf--txt (string-append "perf-num perf-strong " class) (perf--count reds))
-                (perf--txt "perf-num" (perf--bytes (plist-get r 'memory)))
-                (perf--txt (string-append "perf-num " (if (> (plist-get r 'queue) 0) "perf-warm" "perf-dim"))
-                           (number->string (plist-get r 'queue)))
-                (perf--txt "perf-dim" (plist-get r 'status))
-                (perf--txt "perf-dim perf-current-fn" (plist-get r 'current))
-                (perf--div (string-append "perf-spark-box " class) (perf--spark (plist-get r 'pid) sparks))))))
-
-(define (perf--process-panel buf)
-  (let* ((procs (or (buffer-local buf 'perf-procs) '()))
-         (rows (perf--get procs 'rows '()))
-         (sparks (buffer-local buf 'perf-sparks))
-         (filter-text (or (buffer-local buf 'perf-filter) "")))
-    (perf--panel 12 "Fig. 7"
-      (string-append "Processes · sorted by " (perf--sort-name buf))
-      (list (perf--txt "" (string-append (number->string (perf--get procs 'matched 0)) " of "
-                                         (number->string (perf--get procs 'count 0)) " processes"))
-            (perf--txt (if (equal? filter-text "") "perf-dim" "perf-strong")
-                       (if (equal? filter-text "") "no filter" (string-append "filter " filter-text))))
-      (perf--div "perf-prow perf-phead"
-        (perf--txt "" "pid") (perf--txt "" "name") (perf--txt "perf-num" "reds/s")
-        (perf--txt "perf-num" "mem") (perf--txt "perf-num" "mq") (perf--txt "" "status")
-        (perf--txt "" "current") (perf--txt "" "trend"))
-      (perf--div "perf-plist"
-        (if (null? rows)
-            (list (component 'ui/empty '(text "no process matches the filter")))
-            (let loop ((rs rows) (line perf--first-row-line) (acc '()))
-              (if (null? rs)
-                  (reverse acc)
-                  (loop (cdr rs) (+ line 1) (cons (perf--process-row (car rs) line sparks) acc)))))))))
-
-;; lane contention: every lane job the telemetry stamped in the last
-;; *perf-lane-window-ms*, one row per lane, the lane that waited longest first.
-;; wait is the time a job sat queued behind the lane's earlier jobs.
-(define *perf-lane-window-ms* 30000)
-
-(define (perf--lane-name owner)
-  (cond ((equal? owner ":ui") "ui")
-        ((string-prefix? "{:rpc" owner) "rpc")
-        (else (let ((parts (string-split owner "\"")))
-                (if (>= (length parts) 2) (cadr parts) owner)))))
-
-;; (NAME JOBS BUSY WAIT-MAX WAIT-SUM BACKLOG-MAX SLOWEST SLOWEST-LABEL) per lane
-(define (perf--lanes events)
-  (let* ((now (perf--newest-time events))
-         (fresh (filter (lambda (r) (and (equal? (plist-get r 'kind) "lane")
-                                         (> (plist-get r 'time-ms) (- now *perf-lane-window-ms*))))
-                        events))
-         (acc (fold (lambda (acc r)
-                      (let* ((name (perf--lane-name (plist-get r 'owner)))
-                             (old (or (alist-get acc name) '(0 0 0 0 0 0 "")))
-                             (ms (or (plist-get r 'duration-ms) 0))
-                             (q (or (plist-get r 'queue-ms) 0)))
-                        (alist-put acc name
-                          (list (+ 1 (list-ref old 0)) (+ ms (list-ref old 1))
-                                (max q (list-ref old 2)) (+ q (list-ref old 3))
-                                (max (or (plist-get r 'backlog) 0) (list-ref old 4))
-                                (max ms (list-ref old 5))
-                                (if (> ms (list-ref old 5)) (plist-get r 'label) (list-ref old 6))))))
-                    '() fresh)))
-    (map cdr (sort (map (lambda (e) (cons (list (- (list-ref (cadr e) 3)) (- (list-ref (cadr e) 1)))
-                                          (cons (car e) (cadr e))))
-                        acc)))))
+;;; --- the panel ---------------------------------------------------------------------
 
 (define (perf--lane-row r)
-  (let ((busy (list-ref r 2)) (wait-max (list-ref r 3)))
-    (perf--div "perf-prow perf-lrow"
+  (let ((busy (list-ref r 2)) (wait-max (list-ref r 3)) (wait-sum (list-ref r 4)))
+    (perf--div "perf-lrow"
       (perf--txt "perf-name" (list-ref r 0))
       (perf--txt "perf-num" (number->string (list-ref r 1)))
       (perf--txt "perf-num perf-strong" (number->string busy))
       (perf--txt "perf-num" (number->string (quotient (* 100 busy) *perf-lane-window-ms*)))
-      (perf--txt (string-append "perf-num " (perf--heat-class wait-max)) (number->string wait-max))
-      (perf--txt (string-append "perf-num " (if (> (list-ref r 4) 0) "perf-warm" "perf-dim"))
-                 (number->string (list-ref r 4)))
+      (perf--txt (string-append "perf-num " (perf--wait-class wait-max)) (number->string wait-max))
+      (perf--txt (string-append "perf-num " (perf--wait-class wait-sum)) (number->string wait-sum))
       (perf--txt "perf-num" (number->string (list-ref r 5)))
-      (perf--txt "perf-dim perf-current-fn"
-                 (string-append (number->string (list-ref r 6)) " ms · " (list-ref r 7))))))
+      (perf--txt "perf-dim" (string-append (number->string (list-ref r 6)) " ms · " (list-ref r 7))))))
 
 (define (perf--lanes-panel lanes)
-  (perf--panel 12 "Fig. 0" "Lanes · contention"
-    (list (perf--txt "" (string-append "ms · last " (number->string (quotient *perf-lane-window-ms* 1000)) " s")))
-    (perf--div "perf-prow perf-lrow perf-phead"
+  (perf--div "perf-panel"
+    (perf--div "perf-head"
+      (perf--txt "perf-strong" "Lanes · contention")
+      (perf--txt "perf-spacer" "")
+      (perf--txt "" (string-append "ms · last " (number->string (quotient *perf-lane-window-ms* 1000)) " s")))
+    (perf--div "perf-lrow perf-phead"
       (perf--txt "" "lane") (perf--txt "perf-num" "jobs") (perf--txt "perf-num" "busy")
       (perf--txt "perf-num" "busy %") (perf--txt "perf-num" "wait max") (perf--txt "perf-num" "wait sum")
       (perf--txt "perf-num" "backlog") (perf--txt "" "slowest job"))
-    (if (null? lanes)
-        (list (component 'ui/empty '(text "no lane jobs in the window")))
-        (map perf--lane-row lanes))))
+    (perf--div "perf-list"
+      (if (null? lanes)
+          (list (component 'ui/empty '(text "no lane jobs in the window")))
+          (map perf--lane-row lanes)))))
 
-(define (perf--disk-row d)
-  (let ((pct (perf--get d 'pct 0)))
-    (perf--div "perf-disk"
-      (perf--txt "" (perf--clip (perf--get d 'id "") 22))
-      (perf--div "perf-diskbar"
-        (list 'tag "div" 'class (string-append "perf-diskfill " (perf--load-class pct))
-              'attrs (list (list "style" (string-append "width:" (number->string pct) "%")))))
-      (perf--txt "perf-num" (perf--bytes (* 1024 (perf--get d 'kbytes 0))))
-      (perf--txt (string-append "perf-num " (perf--load-class pct)) (string-append (number->string pct) "%")))))
+(define (perf--pct part whole)
+  (if (> whole 0) (min 100 (quotient (* 100 part) whole)) 0))
 
-(define (perf--log-row row first?)
-  (let ((level (or (plist-get row 'level) "info")))
-    (perf--div (string-append "perf-log" (if first? " perf-log-new" ""))
-      (perf--txt "perf-dim" (format-time (quotient (plist-get row 'time-ms) 1000) "%H:%M:%S"))
-      (perf--txt (string-append "perf-lvl " (perf--level-class level)) level)
-      (perf--txt "perf-log-msg" (plist-get row 'text)))))
+(define (perf--meter pct class)
+  (perf--div "perf-meter"
+    (list 'tag "div" 'class (string-append "perf-meter-fill " class)
+          'attrs (list (list "style" (string-append "width:" (number->string pct) "%"))))))
 
-(define (perf--count-level rows level)
-  (length (filter (lambda (r) (equal? (plist-get r 'level) level)) rows)))
+(define (perf--app-row r total-kib)
+  (let ((pct (perf--pct (cadr r) total-kib)))
+    (perf--div "perf-arow"
+      (perf--txt "perf-name" (car r))
+      (perf--txt "perf-num perf-dim" (number->string (caddr r)))
+      (perf--txt "perf-num perf-strong" (perf--bytes (* 1024 (cadr r))))
+      (perf--meter pct (cond ((>= pct 20) "perf-hot") ((>= pct 8) "perf-warm") (else ""))))))
 
-(define (perf--storage-panel s)
-  (let* ((disks (perf--get (perf--get s 'os '()) 'disks '()))
-         (logs (last-n (messages-events) *perf-log-rows*))
-         (newest (reverse logs)))
-    (perf--panel 12 "Fig. 8" "Storage & messages"
-      (list (perf--txt "" (string-append (number->string (length disks)) " volumes")))
-      (perf--div "perf-disks"
-        (if (null? disks)
-            (list (component 'ui/empty '(text "os_mon reports no volumes")))
-            (map perf--disk-row disks)))
-      (perf--div "perf-head perf-head-inner"
-        (perf--txt "perf-fig" "Fig. 9") (perf--txt "" "Messages") (perf--txt "perf-spacer" "")
-        (perf--txt "perf-hot" (string-append (number->string (perf--count-level logs "error")) " err"))
-        (perf--txt "perf-warm" (string-append (number->string (perf--count-level logs "warn")) " warn")))
-      (perf--div "perf-logs"
-        (let loop ((ls newest) (first? #t) (acc '()))
-          (if (null? ls)
-              (reverse acc)
-              (loop (cdr ls) #f (cons (perf--log-row (car ls) first?) acc))))))))
+(define (perf--memory-panel buf)
+  (let* ((m (or (buffer-local buf 'perf-mem) '(0 0 0)))
+         (total (car m))
+         (pct (perf--pct (max 0 (- total (cadr m))) total))
+         (apps (or (buffer-local buf 'perf-apps) '())))
+    (perf--div "perf-panel"
+      (perf--div "perf-head"
+        (perf--txt "perf-strong" "Memory · apps")
+        (perf--txt "perf-spacer" "")
+        (perf--txt "" (perf--mem-summary buf)))
+      (perf--meter pct (cond ((>= pct 90) "perf-hot") ((>= pct 75) "perf-warm") (else "")))
+      (perf--div "perf-arow perf-phead"
+        (perf--txt "" "app") (perf--txt "perf-num" "procs") (perf--txt "perf-num" "memory")
+        (perf--txt "" "share of ram"))
+      (perf--div "perf-list"
+        (if (null? apps)
+            (list (component 'ui/empty '(text "reading ps")))
+            (map (lambda (r) (perf--app-row r (quotient total 1024))) apps))))))
 
-(define (perf--state-class util)
-  (cond ((> util 80) (list "degraded" "perf-hot"))
-        ((> util 50) (list "under load" "perf-warm"))
-        (else (list "nominal" "perf-ok"))))
-
-(define *perf-pages* '((1 "vitals") (2 "detail")))
-
-;; the monitor shows one page at a time: page 1 the vitals, page 2 the detail.
-;; a page is two rows of panels, so every panel is wide and nothing scrolls.
-(define (perf--page buf)
-  (if (equal? (buffer-local buf 'perf-page) 2) 2 1))
-
-(define (perf--page-name n)
-  (let ((hit (filter (lambda (p) (= (car p) n)) *perf-pages*)))
-    (if (null? hit) "" (cadr (car hit)))))
-
-(define (perf--goto-page! buf n)
-  (buffer-set-local! buf 'perf-page n)
-  (perf--refresh! buf)
-  (message (string-append "perf page " (number->string n) " " (perf--page-name n))))
-
-(define (perf--tab buf n label)
-  (list 'tag "div"
-        'class (string-append "perf-tab" (if (= n (perf--page buf)) " current" ""))
-        'click (string-append "perf:page:" (number->string n))
-        'children (list (perf--txt "" (string-append (number->string n) " " label)))))
-
-(define (perf--tabs buf)
-  (perf--div "perf-tabs"
-    (map (lambda (p) (perf--tab buf (car p) (cadr p))) *perf-pages*)))
-
-(define (perf--header buf s)
-  (let* ((os (perf--get s 'os '()))
-         (state (perf--state-class (perf--get s 'sched-util 0))))
-    (perf--div "perf-bar perf-top"
-      (perf--txt "perf-strong perf-brand" "Compos")
-      (perf--tabs buf)
-      (perf--txt "perf-dim"
-                 (string-append "host " (perf--get s 'host "") " · "
-                                (number->string (length (perf--get s 'schedulers '()))) " schedulers · "
-                                (number->string (perf--get s 'logical-processors 0)) " cpus · "
-                                (perf--bytes (perf--get (perf--get s 'memory '()) 'total 0)) " vm"))
-      (perf--txt "perf-spacer" "")
-      (perf--txt "" (string-append "up " (perf--uptime (perf--get s 'uptime-ms 0))))
-      (perf--div "" (perf--txt "" "load ")
-                    (perf--txt "perf-strong" (perf--get os 'load1 "0.00"))
-                    (perf--txt "" (string-append " " (perf--get os 'load5 "0.00") " " (perf--get os 'load15 "0.00"))))
-      (perf--txt (string-append "perf-state " (cadr state)) (car state))
-      (perf--txt "perf-dim" (format-time (current-time) "%H:%M:%S")))))
-
-(define (perf--count-blocks blocks)
-  (fold (lambda (acc b) (+ acc 1 (perf--count-blocks (perf--get b 'children '()))))
-        0 blocks))
-
-(define (perf--footer buf s render-ms cells)
-  (perf--div "perf-bar perf-bottom"
+(define (perf--footer buf)
+  (perf--div "perf-bar"
     (perf--txt "perf-strong" *perf-buffer*)
-    (perf--txt "" "g refresh") (perf--txt "" "/ filter") (perf--txt "" "s sort")
-    (perf--txt "" "RET info") (perf--txt "" "k kill") (perf--txt "" "SPC pause") (perf--txt "" "t text") (perf--txt "" "1 2 TAB page")
+    (perf--txt "" "g refresh") (perf--txt "" "SPC pause") (perf--txt "" "q quit")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local buf 'perf-paused) "perf-warm" "perf-dim")
-               (if (buffer-local buf 'perf-paused) "paused" (string-append "tick " (number->string (or (buffer-local buf 'perf-tick) 0)))))
-    (perf--txt "" (string-append "render " (number->string render-ms) " ms"))
-    (perf--txt "" (string-append (number->string cells) " live cells"))
-    (perf--txt "" (string-append "otp " (perf--get s 'otp "")))))
+               (if (buffer-local buf 'perf-paused) "paused" (string-append "tick " (number->string (or (buffer-local buf 'perf-tick) 0)))))))
 
 (define (perf--blocks buf)
-  (let* ((s (or (buffer-local buf 'perf-sample) '()))
-         (ser (or (buffer-local buf 'perf-series) '()))
-         (sorted (or (buffer-local buf 'perf-render-ms) '()))
-         (render-ms (if (null? sorted) 0 (car (reverse sorted))))
-         (panels (if (= (perf--page buf) 2)
-                     (list (perf--cores-panel s ser)
-                           (perf--frame-panel sorted)
-                           (perf--heat-panel (or (buffer-local buf 'perf-heat) '()))
-                           (perf--storage-panel s))
-                     (list (perf--lanes-panel (or (buffer-local buf 'perf-lanes) '()))
-                           (perf--cpu-panel s ser)
-                           (perf--memory-panel s)
-                           (perf--io-panel s ser)
-                           (perf--process-panel buf)))))
-    (list (perf--div "perf-root"
-            (perf--header buf s)
-            (perf--div "perf-grid" panels)
-            (perf--footer buf s render-ms (perf--count-blocks panels))))))
+  (list (perf--div "perf-root"
+          (perf--lanes-panel (or (buffer-local buf 'perf-lanes) '()))
+          (perf--memory-panel buf)
+          (perf--footer buf))))
 
 ;;; --- the tick ---------------------------------------------------------------------
 
-;; a render is two changes: the text, then the rows and the blocks together.
-;; The blocks carry only the current page (perf--blocks), so a tick ships
-;; one page, once.
+;; a render is two changes: the text, then the blocks
 (define (perf--render! buf)
   (perf--replace-text! buf (perf--text buf))
-  (buffer-set-locals! buf
-    (list 'perf-rows (perf--rows buf)
-          'render-blocks (perf--blocks buf))))
+  (buffer-set-locals! buf (list 'render-blocks (perf--blocks buf))))
 
 (define (perf--refresh! buf)
   (perf--sample! buf)
-  (perf--render! buf))
+  (perf--render! buf)
+  (perf--sample-apps! buf))
 
 (define (perf--arm! buf ms)
   (debounce! (string-append "perf-tick:" buf) ms perf--tick buf))
@@ -842,16 +316,12 @@
 
 ;;; --- the mode ------------------------------------------------------------------------
 
-(define *perf-runtime-locals*
-  '(render-blocks perf-sample perf-procs perf-series perf-heat perf-heat-since
-    perf-sparks perf-render-ms perf-tick perf-rows))
+(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-apps perf-ps-busy perf-tick))
 
 (define (perf--setup! buf)
   (buffer-set-read-only! buf #t)
   (buffer-set-local! buf 'render-mode "blocks")
   (for-each (lambda (k) (desktop-skip! buf k)) *perf-runtime-locals*)
-  (unless (buffer-local buf 'perf-sort)
-    (buffer-set-local! buf 'perf-sort "reds"))
   (perf--refresh! buf)
   (perf--arm! buf perf-tick-ms))
 
@@ -862,98 +332,31 @@
 
 (mode-keys! "perf-mode"
   '(("g" "perf-refresh")
-    ("/" "perf-filter")
-    ("s" "perf-sort")
-    ("RET" "perf-process-info")
-    ("k" "perf-process-kill")
     ("SPC" "perf-pause")
-    ("t" "perf-toggle-text")
-    ("TAB" "perf-page")
-    ("1" "perf-page-1")
-    ("2" "perf-page-2")
     ("n" "next-line")
     ("p" "previous-line")
     ("q" "quit-window")))
 
 (mode-doc! "perf-mode"
-  "The system monitor. Schedulers, memory, port IO, render time, event latency, the process table, volumes, and messages, sampled every perf-tick-ms. Page 1 holds the vitals and the process table, page 2 the per-core, render, latency and storage detail; TAB turns the page, `1` and `2` name one, and a tab click does too. `/` filters the table, `s` cycles the sort, RET shows a process, `k` kills it after confirmation, SPC pauses.")
-
-(add-hook! (list 'block-click 'perf)
-  (lambda (buf id)
-    (and (buffer-derived-mode? buf "perf-mode")
-         (cond ((string-prefix? "perf:row:" id)
-                (let ((line (string->number (substring id 9 (string-length id)))))
-                  (when (number? line)
-                    (with-current-buffer buf
-                      (lambda () (goto-char! (line-start-position line)))))
-                  #t))
-               ((string-prefix? "perf:page:" id)
-                (let ((n (string->number (substring id 10 (string-length id)))))
-                  (when (number? n) (perf--goto-page! buf n))
-                  #t))
-               (else #f)))))
+  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. g samples now, SPC pauses, q quits.")
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
     (string-append "The system monitor " buf
-                   " is open. Its text is a table of the busiest processes; "
+                   " is open. Its text is a table of lane contention over the last 30 s; "
                    "read the buffer for the numbers.")))
-
-;;; --- commands -------------------------------------------------------------------------
 
 (effects! '(read display))
 
-(define-command "perf" "Show the system monitor: schedulers, memory, IO, processes, telemetry"
+(define-command "perf" "Show lane contention: the wait and the work of every lane"
   (lambda ()
     (buffer-create *perf-buffer*)
     (switch-to-buffer! *perf-buffer*)
     (unless (buffer-derived-mode? *perf-buffer* "perf-mode")
       (set-mode! "perf-mode"))))
 
-(define-command "perf-refresh" "Sample the VM now"
+(define-command "perf-refresh" "Sample the lanes now"
   (lambda () (perf--refresh! (current-buffer))))
-
-(define-command "perf-filter" "Show only the processes whose name or pid contains a string"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (read-string "Filter processes: "
-        (lambda (text)
-          (buffer-set-local! buf 'perf-filter (string-trim text))
-          (perf--refresh! buf))))))
-
-(define (perf--sort-next current)
-  (let loop ((xs *perf-sorts*))
-    (cond ((null? xs) (car *perf-sorts*))
-          ((equal? (car xs) current)
-           (if (null? (cdr xs)) (car *perf-sorts*) (cadr xs)))
-          (else (loop (cdr xs))))))
-
-(define-command "perf-sort" "Cycle the process sort: reductions, memory, queue, name"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (next (perf--sort-next (perf--sort-name buf))))
-      (buffer-set-local! buf 'perf-sort next)
-      (perf--refresh! buf)
-      (message (string-append "sorted by " next)))))
-
-(define-command "perf-toggle-text" "Show the monitor as its plain text table, or as the panels again"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (text? (equal? (buffer-local buf 'render-mode) "text")))
-      (buffer-set-local! buf 'render-mode (if text? "blocks" "text"))
-      (message (if text? "perf panels" "perf text")))))
-
-(define-command "perf-page-1" "Show page one of the monitor: the vitals"
-  (lambda () (perf--goto-page! (current-buffer) 1)))
-
-(define-command "perf-page-2" "Show page two of the monitor: the detail"
-  (lambda () (perf--goto-page! (current-buffer) 2)))
-
-(define-command "perf-page" "Turn to the other page of the monitor: vitals or detail"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (next (if (= (perf--page buf) 1) 2 1)))
-      (perf--goto-page! buf next))))
 
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
@@ -964,82 +367,6 @@
           (perf--render! buf)
           (perf--arm! buf 0))
       (message (if paused "perf paused" "perf resumed")))))
-
-;;; --- one process ------------------------------------------------------------------------
-
-(define (perf--info-buffer pid)
-  (string-append "*perf: " pid "*"))
-
-(define (perf--info-text info)
-  (let ((row (lambda (k v) (string-append (string-pad-right k 16) v "\n"))))
-    (string-append
-      (row "pid" (perf--get info 'pid ""))
-      (row "name" (perf--get info 'name ""))
-      (row "registered" (perf--get info 'registered ""))
-      (row "initial call" (perf--get info 'initial-call ""))
-      (row "current" (perf--get info 'current ""))
-      (row "status" (perf--get info 'status ""))
-      (row "priority" (perf--get info 'priority ""))
-      (row "trap exit" (if (perf--get info 'trap-exit #f) "yes" "no"))
-      (row "reductions" (number->string (perf--get info 'reductions 0)))
-      (row "memory" (perf--bytes (perf--get info 'memory 0)))
-      (row "heap words" (number->string (perf--get info 'heap-words 0)))
-      (row "total heap" (number->string (perf--get info 'total-heap-words 0)))
-      (row "stack words" (number->string (perf--get info 'stack-words 0)))
-      (row "minor gcs" (number->string (perf--get info 'minor-gcs 0)))
-      (row "links" (number->string (perf--get info 'links 0)))
-      (row "monitors" (number->string (perf--get info 'monitors 0)))
-      (row "monitored by" (number->string (perf--get info 'monitored-by 0)))
-      (row "group leader" (perf--get info 'group-leader ""))
-      (row "ancestors" (string-join (perf--get info 'ancestors '()) " < "))
-      (row "queue" (number->string (perf--get info 'queue 0)))
-      "\nfirst messages\n"
-      (apply string-append
-             (map (lambda (m) (string-append "  " m "\n")) (perf--get info 'messages '()))))))
-
-(define (perf--show-info! pid)
-  (let ((info (vm-process-info pid))
-        (buf (perf--info-buffer pid)))
-    (if (not info)
-        (message (string-append "process " pid " is gone"))
-        (begin
-          (buffer-create buf)
-          (buffer-set-read-only! buf #f)
-          (buffer-delete-range! buf 0 (buffer-size buf))
-          (buffer-append! buf (perf--info-text info))
-          (buffer-set-read-only! buf #t)
-          (with-current-buffer buf (lambda () (set-mode! "perf-info-mode")))
-          (display-buffer-other-window! buf)))))
-
-(define-mode "perf-info-mode"
-  (lambda () (buffer-set-read-only! (current-buffer) #t)))
-
-(mode-keys! "perf-info-mode" '(("q" "quit-window")))
-
-(mode-doc! "perf-info-mode" "One process, every field Process.info reports.")
-
-(define-command "perf-process-info" "Show the process on this row"
-  (lambda ()
-    (let ((row (perf--row-at-point (current-buffer))))
-      (if row
-          (perf--show-info! (cadr row))
-          (message "no process on this line")))))
-
-(effects! '(destroy))
-
-(define-command "perf-process-kill" "Kill the process on this row after confirmation"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (row (perf--row-at-point buf)))
-      (if (not row)
-          (message "no process on this line")
-          (y-or-n? (string-append "Kill " (nth 2 row) " " (cadr row) "? ")
-            (lambda (yes?)
-              (when yes?
-                (if (vm-process-kill! (cadr row))
-                    (message (string-append "killed " (cadr row)))
-                    (message (string-append (cadr row) " was already gone")))
-                (perf--refresh! buf))))))))
 
 (effects! '(read))
 
@@ -1110,126 +437,27 @@
 
 (define-style! 'perf "
 .perf-root { font-family: var(--font-mono); font-size: 12.5px; color: var(--default-fg); -webkit-font-smoothing: antialiased; height: 100%; min-height: 0; display: flex; flex-direction: column; }
-.perf-bar { display: flex; align-items: center; gap: 16px; padding: 6px 12px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; overflow: hidden; }
-.perf-top { border-bottom: 1px solid var(--border-bg); }
-.perf-bottom { border-top: 1px solid var(--border-bg); }
-.perf-brand { letter-spacing: .2em; }
-.perf-tabs { display: flex; gap: 2px; }
-.perf-tab { padding: 3px 12px; border: 1px solid var(--border-bg); color: var(--dim-fg); cursor: pointer; letter-spacing: .14em; }
-.perf-tab.current { color: var(--default-fg); background: var(--hl-line-bg); font-weight: 600; }
+.perf-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border-bg); }
+.perf-head, .perf-bar { display: flex; align-items: baseline; gap: 16px; padding: 6px 12px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; overflow: hidden; }
+.perf-head { border-bottom: 1px solid var(--border-bg); }
 .perf-spacer { flex: 1; }
 .perf-strong { color: var(--default-fg); font-weight: 600; }
 .perf-dim { color: var(--dim-fg); }
-.perf-state { padding: 2px 8px; border: 1px solid var(--border-bg); font-weight: 600; }
-.perf-grid { display: grid; flex: 1; min-height: 0; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: minmax(220px, 1fr); gap: 1px; background: var(--border-bg); border: 1px solid var(--border-bg); }
-.perf-panel { background: var(--default-bg, transparent); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.perf-c3 { grid-column: span 3; } .perf-c4 { grid-column: span 4; } .perf-c5 { grid-column: span 5; } .perf-c7 { grid-column: span 7; } .perf-c12 { grid-column: span 12; }
-.perf-head { display: flex; align-items: baseline; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border-bg); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim-fg); white-space: nowrap; }
-.perf-head-inner { border-top: 1px solid var(--border-bg); }
-.perf-head-right { display: flex; gap: 10px; }
-.perf-fig { color: var(--default-fg); font-weight: 600; }
-.perf-legend { display: flex; align-items: center; gap: 4px; }
-.perf-swatch { width: 8px; height: 8px; display: inline-block; flex: none; }
-.perf-sw-user { background: var(--perf-indigo-fg, #3b5bb5); }
-.perf-sw-sys { background: var(--perf-amber-fg, #b07a2a); }
-.perf-sw-io { background: var(--perf-red-fg, #c24a3a); }
-.perf-sw-line { background: var(--default-fg); }
-.perf-sw-soft { background: color-mix(in srgb, var(--perf-indigo-fg, #3b5bb5) 55%, transparent); }
-.perf-sw-sand { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 40%, transparent); }
-.perf-sw-dim { background: var(--hl-line-bg); }
-.perf-body-row { flex: 1; display: flex; min-height: 0; }
-.perf-chart { flex: 1; position: relative; min-width: 0; min-height: 170px; }
-.perf-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.perf-rule { stroke: var(--border-bg); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.perf-user { fill: var(--perf-indigo-fg, #3b5bb5); fill-opacity: .85; }
-.perf-sys { fill: var(--perf-amber-fg, #b07a2a); fill-opacity: .85; }
-.perf-io { fill: var(--perf-red-fg, #c24a3a); fill-opacity: .85; }
-.perf-in { fill: var(--perf-green-fg, #3a8a58); fill-opacity: .7; }
-.perf-out { fill: var(--perf-indigo-fg, #3b5bb5); fill-opacity: .7; }
-.perf-line { fill: none; stroke: var(--default-fg); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.perf-fill.perf-hot { fill: var(--perf-red-fg, #c24a3a); fill-opacity: .5; }
-.perf-fill.perf-warm { fill: var(--perf-amber-fg, #b07a2a); fill-opacity: .5; }
-.perf-fill.perf-cool { fill: var(--perf-indigo-fg, #3b5bb5); fill-opacity: .5; }
-.perf-fill.perf-idle { fill: var(--dim-fg); fill-opacity: .35; }
-.perf-stroke { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.perf-stroke.perf-hot { stroke: var(--perf-red-fg, #c24a3a); }
-.perf-stroke.perf-warm { stroke: var(--perf-amber-fg, #b07a2a); }
-.perf-stroke.perf-cool { stroke: var(--perf-indigo-fg, #3b5bb5); }
-.perf-stroke.perf-idle { stroke: var(--dim-fg); }
 span.perf-hot { color: var(--perf-red-fg, #c24a3a); }
 span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
-span.perf-cool { color: var(--modeline-fg); }
-span.perf-ok { color: var(--modeline-fg); }
-span.perf-idle { color: var(--dim-fg); }
-.perf-corner { position: absolute; font-size: 10px; color: var(--dim-fg); }
-.perf-corner-tl { left: 6px; top: 4px; } .perf-corner-bl { left: 6px; bottom: 3px; } .perf-corner-tr { right: 6px; top: 3px; }
-.perf-side { flex: 0 0 180px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; border-left: 1px solid var(--border-bg); overflow: hidden; }
-.perf-big { font-family: var(--font-serif); font-size: 34px; line-height: .9; letter-spacing: -1.5px; font-weight: 300; margin-bottom: 4px; }
-.perf-unit { font-size: 18px; color: var(--dim-fg); }
-.perf-stat { display: flex; align-items: baseline; gap: 8px; font-size: 11px; border-bottom: 1px dotted var(--border-bg); padding-bottom: 3px; }
-.perf-stat-k { color: var(--dim-fg); flex: 1; letter-spacing: .08em; text-transform: uppercase; font-size: 10px; }
-.perf-stat-v { font-weight: 500; }
-.perf-stats3, .perf-stats4 { display: grid; border-top: 1px solid var(--border-bg); }
-.perf-stats3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .perf-stats4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.perf-stats3 .perf-stat, .perf-stats4 .perf-stat { flex-direction: column; gap: 0; padding: 6px 11px; border-bottom: 0; border-right: 1px solid var(--border-bg); }
-.perf-stats3 .perf-stat-v, .perf-stats4 .perf-stat-v { font-size: 15px; }
-.perf-rings { display: flex; justify-content: space-around; padding: 10px 12px 6px; }
-.perf-ring { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.perf-ring-box { position: relative; width: 76px; height: 76px; }
-.perf-ring-svg { width: 76px; height: 76px; display: block; transform: rotate(-90deg); }
-.perf-ring-track { fill: none; stroke: var(--hl-line-bg); stroke-width: 5; }
-.perf-ring-arc { fill: none; stroke-width: 5; }
-.perf-ring-arc.perf-user { stroke: var(--perf-indigo-fg, #3b5bb5); } .perf-ring-arc.perf-sys { stroke: var(--perf-amber-fg, #b07a2a); }
-.perf-ring-arc.perf-io { stroke: var(--perf-red-fg, #c24a3a); } .perf-ring-arc.perf-ok { stroke: var(--modeline-fg); }
-.perf-ring-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
-.perf-ring-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); }
-.perf-ring-sub { font-size: 10.5px; color: var(--dim-fg); }
-.perf-segbar { display: flex; height: 14px; margin: 3px 12px; border: 1px solid var(--border-bg); overflow: hidden; }
-.perf-seg { height: 100%; }
-.perf-seglist { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
-.perf-segrow { display: flex; align-items: center; gap: 7px; }
-.perf-cores { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: minmax(48px, 1fr); overflow: hidden; }
-.perf-core { position: relative; border-right: 1px solid var(--border-bg); border-bottom: 1px solid var(--border-bg); padding: 2px 4px; min-width: 0; overflow: hidden; }
-.perf-core-label { position: relative; display: flex; justify-content: space-between; font-size: 10px; }
-.perf-histo { flex: 1; min-height: 130px; display: flex; align-items: flex-end; gap: 1px; padding: 10px 12px 6px; }
-.perf-hbar { flex: 1; min-width: 0; }
-.perf-hbar.perf-fill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-hbar.perf-fill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-hbar.perf-fill.perf-cool { background: var(--dim-fg); }
-.perf-axis { display: flex; justify-content: space-between; padding: 0 12px 6px; font-size: 10px; color: var(--dim-fg); }
-.perf-heat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 12px; gap: 4px; }
-.perf-heat-row { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 22px; }
-.perf-heat-label { flex: 0 0 62px; font-size: 10px; color: var(--dim-fg); text-align: right; }
-.perf-heat-cells { flex: 1; display: flex; gap: 1px; height: 100%; min-width: 0; }
-.perf-cell { flex: 1; min-width: 0; }
-.perf-h0 { background: var(--hl-line-bg); }
-.perf-h1 { background: color-mix(in srgb, var(--default-fg) 12%, transparent); }
-.perf-h2 { background: color-mix(in srgb, var(--default-fg) 24%, transparent); }
-.perf-h3 { background: color-mix(in srgb, var(--default-fg) 38%, transparent); }
-.perf-h4 { background: color-mix(in srgb, var(--perf-amber-fg, #b07a2a) 70%, transparent); }
-.perf-h5 { background: var(--perf-red-fg, #c24a3a); }
-.perf-heat-val { flex: 0 0 38px; font-size: 10px; text-align: right; }
-.perf-plist { flex: 1; min-height: 0; overflow-y: auto; }
-.perf-prow { display: grid; grid-template-columns: 88px minmax(0, 1.4fr) 72px 76px 40px 64px minmax(0, 1fr) 92px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; cursor: pointer; }
-.perf-prow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.perf-prow.current { background: var(--hl-line-bg); }
-.perf-prow.perf-lrow { grid-template-columns: minmax(0, 1.2fr) 48px 64px 56px 72px 72px 64px minmax(0, 2fr); cursor: default; }
-.perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); cursor: default; }
+.perf-list { flex: 1; min-height: 0; overflow-y: auto; }
+.perf-lrow { display: grid; grid-template-columns: minmax(0, 1.2fr) 48px 64px 56px 72px 72px 64px minmax(0, 2fr); gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; }
+.perf-lrow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); }
 .perf-name { color: var(--default-fg); }
+.perf-arow { display: grid; grid-template-columns: minmax(0, 1.4fr) 56px 88px minmax(0, 2fr); gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; }
+.perf-arow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-meter { height: 8px; margin: 6px 12px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
+.perf-arow .perf-meter { margin: 0; }
+.perf-meter-fill { height: 100%; background: var(--dim-fg); }
+.perf-meter-fill.perf-warm { background: var(--perf-amber-fg, #b07a2a); }
+.perf-meter-fill.perf-hot { background: var(--perf-red-fg, #c24a3a); }
 .perf-num { text-align: right; }
-.perf-current-fn { font-size: 11px; }
-.perf-spark-box { height: 16px; }
-.perf-spark-svg { position: static; width: 100%; height: 16px; }
-.perf-spark { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; stroke: var(--dim-fg); }
-.perf-spark-box.perf-hot .perf-spark { stroke: var(--perf-red-fg, #c24a3a); } .perf-spark-box.perf-warm .perf-spark { stroke: var(--perf-amber-fg, #b07a2a); } .perf-spark-box.perf-cool .perf-spark { stroke: var(--perf-indigo-fg, #3b5bb5); }
-.perf-disks { flex: none; max-height: 200px; overflow-y: auto; }
-.perf-disk { display: grid; grid-template-columns: 170px 1fr 80px 50px; gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 11px; }
-.perf-diskbar { height: 9px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
-.perf-diskfill { height: 100%; }
-.perf-diskfill.perf-hot { background: var(--perf-red-fg, #c24a3a); } .perf-diskfill.perf-warm { background: var(--perf-amber-fg, #b07a2a); } .perf-diskfill.perf-cool { background: var(--dim-fg); } .perf-diskfill.perf-idle { background: var(--dim-fg); }
-.perf-logs { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 0; }
-.perf-log { display: flex; gap: 10px; padding: 3px 12px; font-size: 11.5px; }
-.perf-log-new { background: var(--hl-line-bg); }
-.perf-lvl { flex: none; width: 44px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
-.perf-log-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ")
 
 (define (perf-refresh! buf) (perf--refresh! buf))

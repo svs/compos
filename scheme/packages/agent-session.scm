@@ -204,12 +204,20 @@
         (let ((slug (or (agent-slug-of buf) (chat-ensure-runtime! buf))))
           (when (equal? (agent-status slug) 'dead)
             (agent-revive! slug))
-          (agent-send-msg! slug text)))))
+          (agent-send-msg! slug
+            ;; Programmatic continuations are never typed user input. Keep
+            ;; authorship in the text envelope so queues, both connectors,
+            ;; replay and .chat files retain it without side-channel state.
+            (if (or (string-prefix? "[agent] " text)
+                    (string-prefix? "[event] " text)
+                    (string-prefix? "[subagent " text))
+                text
+                (string-append "[agent] " text)))))))
 
 (category! 'chat)
 
 (public! 'agent-continue!
-  "(agent-continue! THREAD TEXT) — send to a durable chat buffer or live slug, reviving and replaying it after restart")
+  "(agent-continue! THREAD TEXT) — send an agent-authored continuation to a durable chat buffer or live slug, reviving and replaying it after restart; rendered as a collapsed agent notice")
 
 ;;; Scheme at the chat prompt.
 ;;

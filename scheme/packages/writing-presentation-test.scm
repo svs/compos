@@ -1,0 +1,46 @@
+;;; writing-presentation-test.scm — width without typography changes
+(domain! 'testing)
+(effects! '(write))
+
+(deftest 'writing-mode-enables-the-centered-prose-look
+  "width and line numbers change without taking over source typography or preview"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-look" "one two three\n")))
+      (face-remap-in! buf 'default '(family "JetBrains Mono" size "14px" line-height "1.4" fg "#123456"))
+      (buffer-set-local! buf 'line-numbers "on")
+      (with-current-buffer buf (lambda () (run-command "writing-mode")))
+      (check-false! (minor-mode-on? buf "preview-mode") "source stays source")
+      (check-equal! (buffer-local buf 'line-numbers) "off" "line numbers are hidden")
+      (check-equal! (buffer-local buf 'window-class) "writing" "the text is centered")
+      (check-equal! (cadr (assoc 'default (buffer-local buf 'face-remap)))
+                    '(family "JetBrains Mono" size "14px" line-height "1.4" fg "#123456")
+                    "font, size, spacing and colour are untouched")
+      (workspace-mode-apply! "writing-mode" buf)
+      (check-false! (minor-mode-on? buf "preview-mode") "refresh keeps preview off")
+      (with-current-buffer buf (lambda () (run-command "writing-mode")))
+      (check-equal! (buffer-local buf 'line-numbers) "on" "line numbers return")
+      (check-false! (assoc 'writing (buffer-local buf 'face-remap)) "the width override is removed")
+      (check-contains! (buffer-local buf 'style) "--default-family:JetBrains Mono" "source font survives teardown")
+      (buffer-kill! buf))))
+
+(deftest 'writing-mode-preserves-preview-and-cleans-legacy-source-typography
+  "preview remains independent and old writing fonts do not leak into source"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-preview.md" "# Title\n\nwords\n")))
+      (with-current-buffer buf (lambda () (set-mode! "morg-mode")))
+      (with-current-buffer buf (lambda () (run-command "preview-mode")))
+      (let ((look (buffer-local buf 'face-remap)))
+        (with-current-buffer buf (lambda () (run-command "writing-mode")))
+        (check-true! (minor-mode-on? buf "preview-mode") "an existing preview stays on")
+        (check-equal! (assoc 'default (buffer-local buf 'face-remap)) (assoc 'default look)
+                      "preview keeps its own typography")
+        (with-current-buffer buf (lambda () (run-command "preview-mode")))
+        (workspace-mode-apply! "writing-mode" buf)
+        (check-false! (minor-mode-on? buf "preview-mode") "writing refresh cannot enable preview")
+        (face-remap-in! buf 'default
+          (list 'family writing-font-family 'size writing-font-size 'line-height writing-line-height))
+        (workspace-mode-apply! "writing-mode" buf)
+        (check-false! (assoc 'default (buffer-local buf 'face-remap)) "the old writing font is removed")
+        (with-current-buffer buf (lambda () (run-command "writing-mode")))
+        (check-false! (assoc 'default (buffer-local buf 'face-remap)) "teardown cannot resurrect preview typography"))
+      (buffer-kill! buf))))

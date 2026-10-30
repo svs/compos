@@ -765,9 +765,22 @@
                           (list 'tag "c-message-body" 'class "ag-user-text"
                                 'text (string-join (cdr lines) "\n"))))))
 
-;; a listener's wake (agent-listen.scm) reaches the model as a prompt, but
-;; nobody typed it: it draws as the agent's own update, one line naming the
-;; event, folded over the whole brief
+;; Programmatic continuations carry their author before they enter the
+;; common prompt lane. The envelope survives queues and transcript replay.
+(define (chat-view--agent-notice? text)
+  (and (string? text) (string-prefix? "[agent] " text)))
+
+(define (chat-view--agent-notice text)
+  (let* ((body (substring-bytes text 8 (string-byte-length text)))
+         (head (car (string-split body "\n"))))
+    (list 'tag "details" 'class "ag-thought ag-event"
+          'attrs '(("author" "agent") ("kind" "event"))
+          'children
+          (list (list 'tag "summary" 'text
+                      (string-append "Agent · " (agent-clip head 120)))
+                (list 'tag "c-message-body" 'class "ag-user-text" 'text body)))))
+
+;; A listener wake has its own summary and remains an event on replay.
 (define (chat-view--event-notice? text)
   (and (string? text) (string-prefix? "[event] " text)))
 
@@ -876,8 +889,14 @@
        (let ((text (chat-view--user-text buf b)))
          (cond ((chat-view--subagent-notice? text) (chat-view--subagent-notice text))
                ((chat-view--event-notice? text) (chat-view--event-notice text))
+               ((chat-view--agent-notice? text) (chat-view--agent-notice text))
                (else (chat-view--user "user" "ag-user" text)))))
-      ((equal? kind "queued") (chat-view--user "queued" "ag-user ag-queued" (chat-view--user-text buf b)))
+      ((equal? kind "queued")
+       (let ((text (chat-view--user-text buf b)))
+         (cond ((chat-view--subagent-notice? text) (chat-view--subagent-notice text))
+               ((chat-view--event-notice? text) (chat-view--event-notice text))
+               ((chat-view--agent-notice? text) (chat-view--agent-notice text))
+               (else (chat-view--user "queued" "ag-user ag-queued" text)))))
       ((equal? kind "prose") (chat-view--prose buf s e))
       ((equal? kind "thought")
        (list 'tag "details" 'class "ag-thought"

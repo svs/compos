@@ -30,15 +30,15 @@
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-font-family "Spectral, Georgia, serif"
-  "Font family for writing-mode buffer text."
+  "Font family for reading views. writing-mode leaves the source font unchanged."
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-font-size ""
-  "Font size for writing-mode buffer text (any CSS size). Empty means the default face's size."
+  "Font size for reading views (any CSS size). writing-mode leaves the source size unchanged."
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-line-height "1.9"
-  "Line height for writing-mode buffer text."
+  "Line height for reading views. writing-mode leaves source line spacing unchanged."
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-wpm 220
@@ -256,57 +256,52 @@
 ;;; --- enable / disable -----------------------------------------------------------
 
 (define (writing--present! buf entering?)
-  (preview-heal! buf)
-  ;; writing-mode changes the current buffer's presentation only. It never
-  ;; creates a group, scratch, LLM session, or window layout.
-  ;; The preview is the writing surface. Markdown remains the buffer text,
-  ;; so every ordinary edit, save, undo, and future narrowing command keeps
-  ;; its normal editor semantics.
-  (buffer-set-local! buf 'preview-renderer "rows")
-  ;; The first entry chooses the writing surface. A reload only reapplies
-  ;; the modes the user left on, so source view remains source view.
-  (if entering?
-      (enable-minor-mode! buf "preview-mode")
-      (when (minor-mode-on? buf "preview-mode")
-        (preview-mode--apply! buf)))
-  ;; the mode, not only its local: the dashboard names it, and M-x
-  ;; visual-line-mode toggles what writing turned on
+  ;; Only the measure and line numbers belong to writing's presentation.
+  ;; Preview and the major mode keep ownership of typography and paint.
+  (let* ((baseline (or (workspace-mode-saved "writing-mode" buf 'writing-source-remap)
+                       (preview--source-remap
+                         (or (workspace-mode-saved "writing-mode" buf 'face-remap) '()))))
+         (remap (writing--source-remap (or (buffer-local buf 'face-remap) '()) baseline))
+         (preview (buffer-local buf 'preview-rows-saved)))
+    (buffer-set-local! buf 'face-remap remap)
+    (when preview
+      (buffer-set-local! buf 'preview-rows-saved
+        (list (writing--source-remap (car preview) baseline) (cadr preview)))))
   (enable-minor-mode! buf "visual-line-mode")
-  (face-remap-in! buf 'default
-    (list 'family writing-font-family
-          'size writing-font-size
-          'line-height writing-line-height))
-  ;; pseudo-face: emits --writing-measure on .buf; the stylesheet's
-  ;; .window.writing rules read it
   (face-remap-in! buf 'writing (list 'measure writing-measure))
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-local! buf 'window-class "writing")
-  ;; Platform-native prose movement. With visual-line-mode on, the line
-  ;; commands read the wrap map the client measured and stop at the
-  ;; visual row; without one they stop at the source line.
   (writing--ensure-hook! buf)
-  (writing--update-count! buf)
-  ;; last word: the rows agree with the mode list, and the drawn page keeps
-  ;; its own look over writing's typography
-  (preview-heal! buf)
-  (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
-    (preview--rows-look! buf)))
+  (writing--update-count! buf))
 
-;; What the definer does not give back itself: the look it derived, and
-;; the view the preview draws.
+(define (writing--source-remap remap baseline)
+  ;; Migrate only the default face older writing-mode versions installed.
+  (let ((owned? (lambda (entry)
+                  (and (equal? (car entry) 'default)
+                       (equal? (plist-get (cadr entry) 'family) writing-font-family)
+                       (equal? (plist-get (cadr entry) 'size) writing-font-size)
+                       (equal? (plist-get (cadr entry) 'line-height) writing-line-height)))))
+    (if (find owned? remap)
+        (append (filter (lambda (entry) (and (equal? (car entry) 'default)
+                                             (not (owned? entry)))) baseline)
+                (remove owned? remap))
+        remap)))
+
+;; Remove only writing's width override; keep later typography changes.
 (define (writing--restore-look! buf saved)
-  ;; the saved remap predates a scale set while writing; the local wins
+  (let* ((baseline (or (saved 'writing-source-remap)
+                       (preview--source-remap (or (saved 'face-remap) '()))))
+         (remap (writing--source-remap (or (buffer-local buf 'face-remap) '()) baseline))
+         (width (assoc 'writing baseline)))
+    (buffer-set-local! buf 'face-remap
+      (append (if width (list width) '())
+              (remove (lambda (entry) (equal? (car entry) 'writing)) remap)))
+    (buffer-set-local! buf 'style (face-remap--css (buffer-local buf 'face-remap))))
   (text-scale-sync! buf)
-  (buffer-set-local! buf 'window-class #f)
-  (buffer-set-local! buf 'modeline-info #f)
-  ;; a preview that stayed on redraws with the renderer it got back
-  (when (minor-mode-on? buf "preview-mode")
-    (preview-mode--apply! buf))
-  ;; Membership restores first because its setup and teardown derive this
-  ;; local. The saved presentation remains authoritative after they run.
-  ;; "rows" is a renderer name, never a render mode: a stale save of it is #f
-  (let ((render (saved 'render-mode)))
-    (buffer-set-local! buf 'render-mode (if (equal? render "rows") #f render))))
+  ;; Heal old desktops which had applied writing presentation to a chat.
+  (when (equal? (buffer-local buf 'mode-name) "chat-mode")
+    (buffer-set-local! buf 'render-mode (saved 'render-mode)))
+  (buffer-set-local! buf 'modeline-info #f))
 
 ;; The definer is the one funnel for enable, refresh, and desktop restore.
 ;; A chat renders its transcript, not a markdown preview (preview-mode has
@@ -315,9 +310,14 @@
 (define-workspace-mode! "writing-mode"
   'saved 'writing-saved
   'accepts? (lambda (buf) (not (equal? (buffer-local buf 'mode-name) "chat-mode")))
-  'locals '((face-remap ()) style line-numbers preview-renderer)
-  'modes '("preview-mode" "visual-line-mode")
-  'remember '(render-mode)
+  'locals '(line-numbers window-class)
+  'modes '("visual-line-mode")
+  'remember (list 'face-remap
+                  (list 'writing-source-remap
+                    (lambda (buf)
+                      (let ((preview (buffer-local buf 'preview-rows-saved)))
+                        (if preview (car preview)
+                            (or (buffer-local buf 'face-remap) '()))))))
   'setup writing--present!
   'teardown (lambda (buf saved) (writing--remove-hook! buf))
   'after writing--restore-look!)
@@ -386,7 +386,7 @@
             (message "Writing mode disabled")))))
 
 (mode-doc! "writing-mode"
-  "Layout-neutral prose presentation: typography, wrapping, margins, prose movement, and word count.")
+  "Centered text width and hidden line numbers, with visual-line movement and word count. Typography and preview remain independent.")
 
 (catalog-meta! 'mode "writing-mode" 'domain 'writing 'effects '(write))
 (mode-doc! "writing-layout"

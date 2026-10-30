@@ -314,25 +314,6 @@
                     "and the mode is gone")
       (t--wr-done! buf))))
 
-(deftest 'writing-mode-enables-the-centered-prose-look
-  "presentation only: the panes and the group belong to write"
-  (lambda ()
-    (let ((buf (test-buffer! "zz-writing-look" "one two three\n")))
-      (delete-other-windows!)
-      (switch-to-buffer! buf)
-      (run-command "writing-mode")
-      (check-true! (member "writing-mode" (buffer-local buf 'minor-modes))
-                   "the writing mode is on")
-      (check-true! (member "preview-mode" (buffer-local buf 'minor-modes))
-                   "the preview mode owns the writing surface")
-      (check-equal! (buffer-local buf 'line-numbers) "off" "no line numbers")
-      (check-equal! (buffer-local buf 'window-class) "writing" "the writing measure")
-      (check-false! (buffer-local buf 'render-mode) "drawn as rows, not in an iframe")
-      (check-equal! (buffer-local buf 'preview-renderer) "rows" "by the rows renderer")
-      (check-true! (buffer-local buf 'preview-rows) "and the rows are on")
-      (check-true! (buffer-local buf 'visual-line-mode) "with visual lines")
-      (check-false! (buffer-local buf 'group) "and no group: that is write's job")
-      (t--wr-done! buf))))
 
 (deftest 'the-writing-selection-commands-extend-the-region
   "point moves and the mark stays where the selection started"
@@ -432,3 +413,5 @@
       (check-contains! (buffer-text companion) (string-append "companion · " buf)
                        "and it says whose it is")
       (t--wr-done! buf companion))))
+
+

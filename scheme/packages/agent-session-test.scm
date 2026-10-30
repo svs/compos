@@ -115,3 +115,52 @@
       (chat-follow-again! buf)
       (check-equal! (buffer-local buf 'chat-view-reveal) #f "the reveals are gone")
       (buffer-kill! buf))))
+
+(deftest 'programmatic-continuations-retain-agent-authorship
+  "plain callback output is an agent notice on delivery, queueing and replay"
+  (lambda ()
+    (let ((buf (t--as-chat! '()))
+          (sent #f))
+      (buffer-set-local! buf 'agent-slug "zz-agent-origin")
+      (with-stubs
+        (list (list 'agent-status (lambda (slug) 'idle))
+              (list 'agent-send-msg! (lambda (slug text) (set! sent text))))
+        (lambda ()
+          (agent-continue! buf "Focused rewrite tests completed:\n6 tests, 0 failures")
+          (check-equal! sent "[agent] Focused rewrite tests completed:\n6 tests, 0 failures"
+                        "the source envelope enters before either connector")
+          (for-each
+            (lambda (kind)
+              (let ((view (chat-view-block buf (list 0 0 kind sent) '())))
+                (check-equal! (plist-get view 'tag) "details" "machine output starts collapsed")
+                (check-equal! (plist-get view 'attrs)
+                              '(("author" "agent") ("kind" "event"))
+                              "queued and delivered output never claims human authorship")))
+            '("user" "queued"))
+          (let* ((turns (chat-parse-transcript
+                         (string-append "\n### You\n\n" sent "\n\n### Assistant\n\nAcknowledged.\n")))
+                 (text (cadr (car turns))))
+            (check-true! (chat-view--agent-notice? text) "the saved transcript retains the envelope")
+            (check-equal! (plist-get (chat-view-block buf (list 0 0 "user" text) '()) 'tag)
+                          "details" "a restored turn remains collapsed"))
+          (for-each
+            (lambda (text)
+              (agent-continue! buf text)
+              (check-equal! sent text "existing source envelopes are not nested"))
+            '("[event] listener notice" "[subagent child] done" "[agent] callback notice"))))
+      (buffer-kill! buf))))
+
+(deftest 'typed-messages-stay-human-while-agent-notices-fold
+  "ordinary human input retains its label and an agent body remains expandable"
+  (lambda ()
+    (let ((buf (t--as-chat! '())))
+      (check-equal! (plist-get (chat-view-block buf (list 0 0 "user" "please rewrite this") '()) 'tag)
+                    "c-user" "typed input stays human")
+      (let* ((text "[agent] Tests completed\n6 tests, 0 failures")
+             (view (chat-view-block buf (list 0 0 "user" text) '()))
+             (children (plist-get view 'children)))
+        (check-equal! (plist-get (car children) 'text) "Agent · Tests completed"
+                      "the summary names the machine source")
+        (check-equal! (plist-get (cadr children) 'text) "Tests completed\n6 tests, 0 failures"
+                      "the complete output remains available on expansion"))
+      (buffer-kill! buf))))

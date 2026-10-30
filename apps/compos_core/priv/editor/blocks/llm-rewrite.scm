@@ -327,6 +327,12 @@
     (message "LLM rewriting...")
     (llm (string-append
            "Continue this rewrite conversation. Earlier instructions and replies are context.\n"
+           (if (string-index (plist-get (llm-rewrite--session buf) 'history) "### Assistant")
+               "This is another try: your reply must differ from every earlier reply, "
+               "")
+           (if (string-index (plist-get (llm-rewrite--session buf) 'history) "### Assistant")
+               "in wording and, where a note asks for a word, in the word you choose.\n"
+               "")
            (plist-get (llm-rewrite--session buf) 'history))
       (lambda (reply)
         (let* ((live (and (buffer-exists? buf) (llm-rewrite--session buf)))
@@ -371,7 +377,13 @@
 
 (define (llm-rewrite--directive buf input)
   (let ((typed (string-trim input)))
-    (if (equal? typed "") *llm-rewrite-self-directive* typed)))
+    (if (member typed (list "" *llm-rewrite-try-again*)) *llm-rewrite-self-directive* typed)))
+
+;; Iterating, the common ask leads the list: another go at the passage's notes.
+(define *llm-rewrite-try-again* "try again")
+
+(define (llm-rewrite--iterate-choices buf)
+  (cons *llm-rewrite-try-again* (llm-rewrite-directives buf)))
 
 ;; Iterate: another version through the same conversation. Blank asks the
 ;; passage's own notes again, from the passage as you wrote it.
@@ -379,13 +391,13 @@
   (let ((s (or (llm-rewrite--session buf) (llm-rewrite--locate! buf))))
     (if (not s)
         (message "No rewrite here")
-        (minibuffer-read "Iterate (blank: the selection is the instruction): " (llm-rewrite-directives buf)
+        (minibuffer-read "Iterate (blank: the selection is the instruction): " (llm-rewrite--iterate-choices buf)
           (lambda (input)
             (let* ((directive (llm-rewrite--directive buf input))
                    (s (llm-rewrite--session buf))
                    (p (diff-block-pending buf))
                    (old (plist-get s 'current))
-                   (passage (if (and p (not (equal? (string-trim input) ""))) (diff-block-theirs p) old)))
+                   (passage (if (and p (not (equal? directive *llm-rewrite-self-directive*))) (diff-block-theirs p) old)))
               (llm-rewrite--ask! buf passage directive
                 (lambda (new)
                   (if (diff-block-pending buf)
@@ -439,7 +451,7 @@
 ;; The prompt takes instructions only; every action is a key on the blocks.
 (define (llm-rewrite--review! buf p answer)
   (cond
-    ((equal? answer "")
+    ((member answer (list "" *llm-rewrite-try-again*))
      (let ((s (llm-rewrite--session buf)))
        (if (not s)
            (message "Rewrite still waiting")
@@ -453,7 +465,7 @@
   (if (not (diff-block--spans buf))
       (begin (diff-block-release! buf) (message "The waiting rewrite is gone"))
       (minibuffer-read "Rewrite instruction (blank: the selection is the instruction): "
-        (llm-rewrite-directives buf)
+        (llm-rewrite--iterate-choices buf)
         (lambda (input) (llm-rewrite--review! buf p (string-trim input))))))
 
 ;; Rebuild presentation after mode setup or desktop restore. The watch keeps

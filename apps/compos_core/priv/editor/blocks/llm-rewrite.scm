@@ -168,10 +168,14 @@
     ("C-c x" "llm-rewrite-cancel" "cancel")))
 
 ;; The block's fence line names its keys, the way a diff block's does.
-(define (llm-rewrite--options-head)
-  (string-append "options "
-    (string-join (map (lambda (k) (string-append (car k) " " (caddr k)))
-                      *llm-rewrite-option-keys*) " · ")))
+;; Folded, it says only how many drafts it holds: a quiet line in the prose.
+(define (llm-rewrite--options-head s)
+  (if (plist-get s 'hidden)
+      (let ((n (- (length (plist-get s 'options)) 1)))
+        (string-append "options · " (number->string n) (if (= n 1) " draft" " drafts")))
+      (string-append "options "
+        (string-join (map (lambda (k) (string-append (car k) " " (caddr k)))
+                          *llm-rewrite-option-keys*) " · "))))
 
 (define (llm-rewrite--option-row-text rows i)
   (let ((row (nth i rows)))
@@ -186,7 +190,7 @@
                       (iota (length rows))) "\n\n"))
          (fence (let loop ((f "```"))
                   (if (string-index body f) (loop (string-append f "`")) f))))
-    (string-append fence (llm-rewrite--options-head) "\n" body "\n" fence)))
+    (string-append fence (llm-rewrite--options-head s) "\n" body "\n" fence)))
 
 ;; Which saved row holds byte POS of the block, or #f on its fence lines.
 (define (llm-rewrite--option-at buf s pos)
@@ -278,7 +282,8 @@
         (let ((hide (not (plist-get s 'hidden)))
               (pt (buffer-point buf)))
           (llm-rewrite--save-session! buf (plist-put s 'hidden hide))
-          (llm-rewrite--paint-options! buf)
+          ;; the fence line changes with the fold, so the block is redrawn
+          (llm-rewrite--write-options! buf)
           ;; folding keeps the cursor on the block's fence line, not past it
           (when (and hide (<= (car span) pt) (<= pt (cadr span)))
             (buffer-goto! buf (car span))))

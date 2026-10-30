@@ -309,6 +309,19 @@
       (check-equal! landed "it needs girders now." "only the note changed"))
     (t--rw-done!)))
 
+(deftest 'a-folded-options-block-drops-its-keys
+  "Folded, the fence line only counts the drafts; unfolded, it names the keys again."
+  (lambda ()
+    (t--rw-options!)
+    (llm-rewrite--toggle-options! t--rw-buf)
+    (let ((head (car (string-split (plist-get (llm-rewrite--session t--rw-buf) 'rendered) "\n"))))
+      (check-equal! head "```options · 1 draft" "folded: a quiet count"))
+    (check-true! (string-index (buffer-text t--rw-buf) "```options · 1 draft") "the document holds it")
+    (llm-rewrite--toggle-options! t--rw-buf)
+    (check-true! (string-index (plist-get (llm-rewrite--session t--rw-buf) 'rendered) "C-c p promote")
+                 "unfolded: the keys are back")
+    (t--rw-done!)))
+
 (deftest 'an-empty-answer-decides-nothing
   "leaving the prompt is not a decision"
   (lambda ()

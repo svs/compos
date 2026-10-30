@@ -134,7 +134,7 @@
               (let ((view (chat-view-block buf (list 0 0 kind sent) '())))
                 (check-equal! (plist-get view 'tag) "details" "machine output starts collapsed")
                 (check-equal! (plist-get view 'attrs)
-                              '(("author" "agent") ("kind" "event"))
+                              '(("author" "agent") ("kind" "event") ("source" "agent"))
                               "queued and delivered output never claims human authorship")))
             '("user" "queued"))
           (let* ((turns (chat-parse-transcript
@@ -147,7 +147,12 @@
             (lambda (text)
               (agent-continue! buf text)
               (check-equal! sent text "existing source envelopes are not nested"))
-            '("[event] listener notice" "[subagent child] done" "[agent] callback notice"))))
+            '("[event] listener notice" "[subagent child] done" "[agent] callback notice"))
+          (agent-wake! buf 'hook "a file changed")
+          (check-equal! sent "[hook] a file changed" "a named source rides in the envelope")
+          (check-equal! (plist-get (chat-view-block buf (list 0 0 "user" sent) '()) 'tag)
+                        "details" "every source folds as a notice")
+          (check-false! (agent-wake-source "[note] typed by the user") "an unknown bracket is the user's text")))
       (buffer-kill! buf))))
 
 (deftest 'typed-messages-stay-human-while-agent-notices-fold

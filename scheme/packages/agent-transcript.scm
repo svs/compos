@@ -768,16 +768,19 @@
 ;; Programmatic continuations carry their author before they enter the
 ;; common prompt lane. The envelope survives queues and transcript replay.
 (define (chat-view--agent-notice? text)
-  (and (string? text) (string-prefix? "[agent] " text)))
+  (and (agent-wake-source text) #t))
 
 (define (chat-view--agent-notice text)
-  (let* ((body (substring-bytes text 8 (string-byte-length text)))
+  (let* ((source (agent-wake-source text))
+         (body (substring-bytes text (+ 3 (string-byte-length source)) (string-byte-length text)))
          (head (car (string-split body "\n"))))
     (list 'tag "details" 'class "ag-thought ag-event"
-          'attrs '(("author" "agent") ("kind" "event"))
+          'attrs (list (list "author" "agent") (list "kind" "event") (list "source" source))
           'children
           (list (list 'tag "summary" 'text
-                      (string-append "Agent · " (agent-clip head 120)))
+                      (string-append (string-upcase (substring source 0 1))
+                                     (substring source 1 (string-length source))
+                                     " · " (agent-clip head 120)))
                 (list 'tag "c-message-body" 'class "ag-user-text" 'text body)))))
 
 ;; A listener wake has its own summary and remains an event on replay.

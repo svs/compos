@@ -9,7 +9,7 @@ defmodule Compos.SubagentResultTest do
       :ui lane, and agent.scm fans it out on the agent-turn-end hook.
     * a child reports STRUCTURALLY: (subagent-result SLUG) reads the child's
       own last message and costs the parent no turn at all.
-    * 'notify #t is the opt-in exception, a free-text wake into the parent.
+    * a child wakes its parent by default; 'notify #f is the fire-and-forget exception.
     * subagent-wait answers a parent that fanned out to several children.
   """
 
@@ -165,7 +165,7 @@ defmodule Compos.SubagentResultTest do
     assert parent_text =~ "(subagent-log \"#{c}\")"
   end
 
-  test "without 'notify the parent is never woken" do
+  test "'notify #f leaves the parent asleep" do
     p = slug(eval!(~s[(execute* "" '(backend "stub" script (())))]))
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(p)) end)
 
@@ -174,7 +174,7 @@ defmodule Compos.SubagentResultTest do
         eval!("""
         (with-edit-author "agent:#{p}"
           (lambda ()
-            (execute* "go" '(backend "stub" script
+            (execute* "go" '(backend "stub" notify #f script
               (((type chunk text "child says hi.")))))))
         """)
       )

@@ -147,7 +147,7 @@
         (unless (null? new)
           (buffer-set-local! chat 'orchestrate-woke (append woke (map car new)))
           (unless quiet
-            (agent-continue! chat
+            (agent-wake! chat 'orchestrator
               (string-append "orchestrate-mode needs your judgment:\n"
                              (string-join (map (lambda (s) (string-append "- " s)) texts) "\n")
                              "\n\n" (orchestrate-status chat)))))

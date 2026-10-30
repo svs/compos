@@ -197,27 +197,50 @@
 (define (agent-dequeue! slug text)
   (llm-session-dequeue! slug text))
 
+;; A wake is a turn the system starts, not the user: an orchestrator, a
+;; listener's event, a hook, cron, a todo. It reaches the model as a normal
+;; turn and the transcript folds it as a notice. Its source rides in the text
+;; envelope, "[SOURCE] ", so queues, both connectors, replay and .chat files
+;; keep it without side-channel state. A subagent's wake is "[subagent SLUG ...]".
+(define agent-wake-sources
+  '("agent" "event" "orchestrator" "hook" "todo" "cron" "handover" "watcher"))
+
+(define (agent-wake-source text)
+  (and (string? text)
+       (if (string-prefix? "[subagent " text)
+           "subagent"
+           (let loop ((ss agent-wake-sources))
+             (cond ((null? ss) #f)
+                   ((string-prefix? (string-append "[" (car ss) "] ") text) (car ss))
+                   (else (loop (cdr ss))))))))
+
+(define (agent-wake! thread source text)
+  (let ((buf (if (buffer-exists? thread) thread (agent-buf thread)))
+        (source (if (symbol? source) (symbol->string source) source)))
+    (cond ((not (and buf (buffer-exists? buf)))
+           (error "agent-wake!: unknown chat" thread))
+          ((not (member source agent-wake-sources))
+           (error "agent-wake!: SOURCE is one of" agent-wake-sources))
+          (else
+           (let ((slug (or (agent-slug-of buf) (chat-ensure-runtime! buf))))
+             (when (equal? (agent-status slug) 'dead)
+               (agent-revive! slug))
+             (agent-send-msg! slug
+               (if (agent-wake-source text)
+                   text
+                   (string-append "[" source "] " text))))))))
+
 (define (agent-continue! thread text)
-  (let ((buf (if (buffer-exists? thread) thread (agent-buf thread))))
-    (if (not (and buf (buffer-exists? buf)))
-        (error "agent-continue!: unknown chat" thread)
-        (let ((slug (or (agent-slug-of buf) (chat-ensure-runtime! buf))))
-          (when (equal? (agent-status slug) 'dead)
-            (agent-revive! slug))
-          (agent-send-msg! slug
-            ;; Programmatic continuations are never typed user input. Keep
-            ;; authorship in the text envelope so queues, both connectors,
-            ;; replay and .chat files retain it without side-channel state.
-            (if (or (string-prefix? "[agent] " text)
-                    (string-prefix? "[event] " text)
-                    (string-prefix? "[subagent " text))
-                text
-                (string-append "[agent] " text)))))))
+  (agent-wake! thread "agent" text))
 
 (category! 'chat)
 
+(public! 'agent-wake!
+  "(agent-wake! CHAT SOURCE TEXT) — wake any chat buffer or live slug with a turn the system starts; SOURCE is one of agent-wake-sources (orchestrator, hook, event, todo, cron, handover, watcher, agent). Revives a dead chat; the transcript folds it as a notice under its source, and M-p history skips it")
+(public! 'agent-wake-source
+  "(agent-wake-source TEXT) — the source of a wake message as a string, or #f for text the user typed")
 (public! 'agent-continue!
-  "(agent-continue! THREAD TEXT) — send an agent-authored continuation to a durable chat buffer or live slug, reviving and replaying it after restart; rendered as a collapsed agent notice")
+  "(agent-continue! THREAD TEXT) — (agent-wake! THREAD 'agent TEXT)")
 
 ;;; Scheme at the chat prompt.
 ;;
@@ -582,7 +605,9 @@
     (chat-history-set! buf
       (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
         (cond ((null? ts) (reverse acc))
-              ((equal? (car (car ts)) "user")
+              ;; a wake is not something the user typed
+              ((and (equal? (car (car ts)) "user")
+                    (not (agent-wake-source (car (cdr (car ts))))))
                (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
               (else (loop (cdr ts) acc)))))))
 
@@ -1358,9 +1383,9 @@
 ;;; no context. A fan-out of ten children therefore costs ten turns, not
 ;;; twenty, and the parent reads the answers when it wants them.
 ;;;
-;;; A free-text wake is the exception, not the rule. 'notify #t on the spawn
-;;; asks for one: when a turn of that child ends, the parent is sent a
-;;; message with agent-continue!, which does cost the parent a turn.
+;;; A parent also hears from its children: by default, when a turn of a child
+;;; ends, the parent is woken with a subagent notice, which costs the parent
+;;; a turn. 'notify #f on the spawn is the fire-and-forget exception.
 ;;;
 ;;; The turn-end hook (agent.scm) is what makes any of this work. It fires
 ;;; on the :ui lane after the child's transcript has landed, so the last
@@ -1816,10 +1841,10 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
                 (buffer-set-local! chat 'subagent-turn-end #f)
                 (when (subagent-verdict-of (subagent-slug chat))
                   (subagent-log-append! (subagent-slug chat) 'verdict "again: handed over again"))
-                (agent-continue! chat (if (string? rules) (string-append ask "\n\n" rules) ask))))
+                (agent-wake! chat 'handover (if (string? rules) (string-append ask "\n\n" rules) ask))))
             work)
           (subagent-wait (map cadr work)
-            (lambda (results) (agent-continue! orch (bulk-agents--report results skipped opts))))
+            (lambda (results) (agent-wake! orch 'handover (bulk-agents--report results skipped opts))))
           (string-append "handed " (number->string (length work))
                          (if (null? skipped) "" (string-append ", " (number->string (length skipped)) " already working")))))))
 
@@ -1886,11 +1911,11 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
     ;; 'companion BUF: the chat works BUF, and BUF's chat-follow? finds it
     (let ((c (plist-get opts 'companion)))
       (when c (buffer-relate! buf 'companion c)))
-    ;; 'notify #t opts into a free-text wake: every turn this chat finishes
-    ;; sends a message to the chat that spawned it, which costs that parent
-    ;; a turn. The default is silence — the parent reads the child's result
-    ;; with (subagent-result SLUG) and spends nothing.
-    (when (plist-get opts 'notify)
+    ;; Every turn this chat finishes wakes the chat that spawned it: a
+    ;; parent keeps listening to its children. 'notify #f is the
+    ;; fire-and-forget exception; that parent reads the child's result with
+    ;; (subagent-result SLUG) when it wants it.
+    (unless (and (memq 'notify opts) (not (plist-get opts 'notify)))
       (buffer-set-local! buf 'subagent-notify #t))
     ;; the group's own defaults (its 'llm bundle: presets, permission,
     ;; connector, model) land first, as on any new chat in the group; an

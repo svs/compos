@@ -204,7 +204,7 @@
 
 (define (cron--agent! name target)
   (if cron-agent-jobs
-      (agent-continue! (car target) (cadr target))
+      (agent-wake! (car target) 'cron (cadr target))
       (message (string-append "cron: " name
                               " sends a prompt to an agent; turn on cron-agent-jobs to let it"))))
 

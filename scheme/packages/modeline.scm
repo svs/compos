@@ -1106,7 +1106,7 @@
 (define (buffer-modeline-name buf)
   (let* ((path (buffer-path buf))
          (root (buffer-project-root buf))
-         (name (cond ((not (string? path)) (buffer-modeline-chat-name buf))
+         (name (cond ((or (not (string? path)) (chat-buffer? buf)) (buffer-modeline-chat-name buf))
                      ((and (string? root) (not (equal? root ""))
                            (string-prefix? (string-append root "/") path))
                       (substring path (+ 1 (string-length root)) (string-length path)))

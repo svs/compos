@@ -201,11 +201,13 @@
 (define (preview-mode--apply! buf)
   (let ((renderer (preview-renderer-for buf)))
     (if renderer
-        (if (equal? renderer "rows")
-            (preview--rows-on! buf)
-            (begin
-              (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
-              (buffer-set-local! buf 'render-mode renderer)))
+        (begin
+          (if (equal? renderer "rows")
+              (preview--rows-on! buf)
+              (begin
+                (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
+                (buffer-set-local! buf 'render-mode renderer)))
+          (preview-tabs-sync! buf #t))
         ;; A renamed or restored buffer can lose its renderer. Remove the
         ;; stale mode entry instead of leaving an enabled mode that draws
         ;; nothing.
@@ -217,7 +219,8 @@
 
 (define (preview-mode--teardown! buf)
   (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
-  (buffer-set-local! buf 'render-mode #f))
+  (buffer-set-local! buf 'render-mode #f)
+  (preview-tabs-sync! buf #f))
 
 (register-minor-mode! "preview-mode" preview-mode--apply! preview-mode--teardown!)
 
@@ -245,6 +248,54 @@
 ;;; RET edits source text. One press inserts one newline. The renderer decides
 ;;; whether Markdown shows that byte as a soft break or a block gap. Lists keep
 ;;; their editor behavior: a non-empty item continues, and an empty item ends.
+
+;; A Morg page wears its two views as tabs in the window's header line:
+;; raw, the source, and preview, the rendered page, the one shown lit.
+;; C-c C-v toggles them. In the movement state the left and right arrows
+;; take the raw and the preview tab; editing, they move point as ever.
+(define (preview-tab-blocks on)
+  (list (component 'ui/tabs
+          (list 'class "preview-tabs"
+                'tabs (list (list "preview-tab-raw" "raw" (not on))
+                            (list "preview-tab-preview" "preview" on))))))
+
+(define (preview-tabs-sync! buf on)
+  (when (buffer-derived-mode? buf "morg-mode")
+    (desktop-skip! buf 'header-line-blocks)
+    (let ((blocks (preview-tab-blocks on)))
+      (unless (equal? blocks (buffer-local buf 'header-line-blocks))
+        (buffer-set-local! buf 'header-line-blocks blocks)
+        (dashboard--sync! buf)))))
+
+(define (preview-view! buf on)
+  (unless (equal? on (minor-mode-on? buf "preview-mode"))
+    (run-command "preview-mode")))
+
+(define (preview-tab-step! on motion)
+  (let ((buf (current-buffer)))
+    (if (editing-state? buf)
+        (run-command motion)
+        (begin (preview-view! buf on) (editing-quit!)))))
+
+(define-command "preview-tab-raw" "Show the page's source"
+  (lambda () (preview-view! (current-buffer) #f) (editing-quit!)))
+(define-command "preview-tab-preview" "Show the rendered page"
+  (lambda () (preview-view! (current-buffer) #t) (editing-quit!)))
+(define-command "preview-tab-left" "The raw tab in the movement state; editing, back a character"
+  (lambda () (preview-tab-step! #f "backward-char")))
+(define-command "preview-tab-right" "The preview tab in the movement state; editing, forward a character"
+  (lambda () (preview-tab-step! #t "forward-char")))
+(define-key "morg-mode-map" "<left>" "preview-tab-left")
+(define-key "morg-mode-map" "<right>" "preview-tab-right")
+
+(define (preview--morg-tabs!)
+  (let ((buf (current-buffer)))
+    (preview-tabs-sync! buf (minor-mode-on? buf "preview-mode"))))
+(add-hook! 'morg-mode-hook 'preview--morg-tabs!)
+(for-each (lambda (buf) (preview-tabs-sync! buf (minor-mode-on? buf "preview-mode")))
+          (buffer-list))
+
+(public! 'preview-tabs-sync! "(preview-tabs-sync! BUF ON) — a Morg BUF's raw and preview tabs in its header line, preview lit when ON")
 
 ;; A list item continues the list. An ordered item counts on; a bullet
 ;; repeats. The third value is the length of the marker, which says where

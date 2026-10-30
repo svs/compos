@@ -661,10 +661,27 @@
 ;; The point in a listing is the reader's: it moves only when the
 ;; reader moves it. A listing opened for the first time starts on its
 ;; first entry; a listing opened again keeps the row it was on.
+(define (dired-group-buffer dir group)
+  ;; every group keeps its own Dired of DIR: the one GROUP has, else DIR when
+  ;; no other group holds it, else a fresh DIR <N>
+  (let ((mine (find (lambda (b) (and (dired-buffer? b)
+                                     (equal? (dired-dir b) dir)
+                                     (equal? (buffer-group b) group)))
+                    (buffer-list))))
+    (cond (mine mine)
+          ((or (not group) (not (buffer-known? dir)) (not (buffer-group dir))) dir)
+          (else (let loop ((n 2))
+                  (let ((name (string-append dir " <" (number->string n) ">")))
+                    (if (buffer-known? name) (loop (+ n 1)) name)))))))
+
 (define (dired-open-directory dir)
-  (let* ((buf dir)
+  (let* ((group (or (frame-group) (buffer-group (current-buffer))))
+         (buf (dired-group-buffer dir group))
          (fresh (not (buffer-known? buf))))
     (buffer-create buf)
+    ;; a Dired opened in a group stays in that group
+    (when (and group (not (equal? (buffer-group buf) group)))
+      (buffer-move-to-group! buf group))
     ;; the dir local first: the mode setup's refresh reads it
     (buffer-set-local! buf 'dired-dir dir)
     (dired-skip-derived! buf)

@@ -57,3 +57,28 @@
       (check-equal! (buffer-local buf 'dired-scanned) 'sentinel
                     "the refresh leaves the buffer alone"))
     (t--dfile-remove!)))
+
+(deftest 'dired-keeps-a-listing-per-group
+  "a directory opened from two groups gets a Dired in each, and each stays in its group"
+  (lambda ()
+    (t--dfile-make!)
+    (with-fresh-group "zz-dired-a"
+      (lambda (a)
+        (with-fresh-group "zz-dired-b"
+          (lambda (b)
+            (buffer-create "zz-dired-from-a")
+            (buffer-create "zz-dired-from-b")
+            (buffer-move-to-group! "zz-dired-from-a" a)
+            (buffer-move-to-group! "zz-dired-from-b" b)
+            (let ((in-a (with-current-buffer "zz-dired-from-a" (lambda () (dired-open t--dfile-dir))))
+                  (in-b (with-current-buffer "zz-dired-from-b" (lambda () (dired-open t--dfile-dir))))
+                  (again (with-current-buffer "zz-dired-from-a" (lambda () (dired-open t--dfile-dir)))))
+              (check-true! (not (equal? in-a in-b)) "each group gets its own listing")
+              (check-equal! again in-a "opening it again reuses the group's listing")
+              (check-equal! (buffer-group in-a) a "the first listing stays in its group")
+              (check-equal! (buffer-group in-b) b "the second listing stays in its group")
+              (check-equal! (dired-dir in-b) t--dfile-dir "both list the same directory")
+              (buffer-kill! in-b))
+            (buffer-kill! "zz-dired-from-a")
+            (buffer-kill! "zz-dired-from-b")))))
+    (t--dfile-remove!)))

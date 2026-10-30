@@ -113,6 +113,8 @@
 (require 'panes-board)
 ;; every window of a pane as tiles in the pane: M-x pane-overview
 (require 'pane-overview)
+;; a window flashes what it shows as a pane cycles to it
+(require 'window-flash)
 ;; undo and redo over the pane arrangement alone: M-x layout-undo, layout-redo
 (require 'panes-history)
 ;; app identity: an app names the buffers of one instance, and a move

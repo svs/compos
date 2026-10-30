@@ -1863,6 +1863,14 @@ defmodule Compos.Ui.EditorLive do
       role={if @preview?, do: "note"}
       aria-label={if @preview?, do: "Preview"}
     >
+      <c-group :if={Map.get(@node, :flash)} id={"window-flash-#{@node.id}-#{@node.flash.nonce}"}
+        class="window-flash" aria-hidden="true">
+        <c-group class="window-flash-card">
+          <c-text class="window-flash-title">{@node.flash.title}</c-text>
+          <c-text :if={@node.flash.summary != ""} class="window-flash-summary">{@node.flash.summary}</c-text>
+          <c-text class={"window-flash-state #{@node.flash.state |> String.split(" ") |> hd()}"}>{String.replace(@node.flash.state, "-", " ")}</c-text>
+        </c-group>
+      </c-group>
       <%= if @preview? do %>
         <c-group class="preview-card-header">
           <c-text class="preview-card-label">Preview</c-text>

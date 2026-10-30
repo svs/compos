@@ -1222,7 +1222,8 @@
 (define (panes--cycle-pane-window! step)
   "The next window of the focused pane comes to its front; the one that
    was there goes to the back, so stepping on walks the whole pane.
-   STEP 1 is forward, -1 is back. The pane keeps the focus. A message
+   STEP 1 is forward, -1 is back. The pane keeps the focus, and the
+   new front window flashes its overlay text (window-flash.scm). A message
    and #f when the pane has fewer than two windows."
   (let* ((l (panes--ensure-layout!))
          (k (panes-key-of-handle l (active-window)))
@@ -1231,10 +1232,12 @@
     (if (< (length ks) 2)
         (begin (message "No other window in this pane") #f)
         (begin
-          (panes-apply!
-            (if (> step 0)
-                (panes-set-focus (panes-move-window l (car ks) pid (- (length ks) 1)) pid)
-                (panes-focus-window l (car (reverse ks)))))
+          (let ((front (if (> step 0) (cadr ks) (car (reverse ks)))))
+            (panes-apply!
+              (if (> step 0)
+                  (panes-set-focus (panes-move-window l (car ks) pid (- (length ks) 1)) pid)
+                  (panes-focus-window l front)))
+            (window-flash! (panes-handle l front) (panes-window-buffer l front)))
           #t))))
 
 (define-command "pane-next-window" "Bring the next window of this pane to the front"

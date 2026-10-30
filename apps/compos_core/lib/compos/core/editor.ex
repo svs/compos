@@ -3389,6 +3389,16 @@ defmodule Compos.Core.Editor do
       # extra CSS class on the window div (writing-mode centering etc.)
       highlighted: id in (Map.get(locals, "window-highlight-ids") || []),
       window_class: Map.get(locals, "window-class") || nil,
+      # the label the window flashes as it comes to the front of its pane
+      # (window-flash.scm): a chat's (WIN NONCE TITLE SUMMARY STATE), drawn
+      # only in WIN
+      flash:
+        (case Map.get(locals, "window-flash") do
+          [^id, nonce, title, summary, state] ->
+            %{nonce: nonce, title: title, summary: summary, state: state}
+
+          _ -> nil
+        end),
       # how many buffers the window holds: the one it shows and the ones
       # under it. The header line shows it beside the title.
       stack: 1 + (leaf |> Map.get(:history, []) |> Enum.uniq() |> Enum.count(&(&1 != buffer))),

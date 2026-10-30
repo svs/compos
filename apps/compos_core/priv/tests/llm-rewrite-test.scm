@@ -243,33 +243,27 @@
 (define (t--rw-review! answer)
   (llm-rewrite--review! t--rw-buf (diff-block-pending t--rw-buf) answer))
 
-(deftest 'the-review-prompt-keeps-a-rewrite
-  "the keep answer is the accept verb"
-  (lambda ()
-    (t--rw-proposed!)
-    (t--rw-review! *llm-rewrite-keep-answer*)
-    (check-equal! (buffer-text t--rw-buf) "One.\n\nDeux.\n" "kept")
-    (t--rw-done!)))
 
-(deftest 'the-review-prompt-puts-a-rewrite-back
-  "the back answer is the reject verb"
-  (lambda ()
-    (t--rw-proposed!)
-    (t--rw-review! *llm-rewrite-back-answer*)
-    (check-equal! (buffer-text t--rw-buf) "One.\n\nTwo.\n" "put back")
-    (t--rw-done!)))
 
-(deftest 'the-review-prompt-offers-the-views-you-are-not-in
-  "two answers, and each says which view it gives"
+
+
+
+
+(deftest 'a-blank-instruction-makes-the-selection-the-instruction
+  "A blank answer, at the waiting diff or the options prompt, sends the passage as its own instruction."
   (lambda ()
-    (t--rw-proposed!)
-    (check-equal! (diff-block-state-answers 'theirs)
-                  '("show all" "show ours")
-                  "a theirs block offers the diff and the passage")
-    (t--rw-review! "show all")
-    (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (diff-block-all-text "Two." "Deux." t--rw-buf))
-                  "and the answer is the view")
+    (t--rw-options!)
+    (let ((calls '()))
+      (with-stub 'llm (lambda (prompt callback) (set! calls (append calls (list prompt))))
+        (lambda ()
+          (t--rw-review! "")
+          (diff-block-reject! t--rw-buf)
+          (with-stub 'minibuffer-read
+            (lambda (prompt choices callback) (callback ""))
+            (lambda () (llm-rewrite--options-menu! t--rw-buf)))))
+      (check-equal! (length calls) 2 "both blank answers asked the model")
+      (check-true! (number? (string-index (cadr calls) "is its own instruction"))
+                   "the passage is the instruction"))
     (t--rw-done!)))
 
 (deftest 'an-empty-answer-decides-nothing
@@ -455,19 +449,22 @@
       (check-true! (pair? (diff-block-pending t--rw-buf)) "preview remains"))
     (t--rw-done!)))
 
-(deftest 'rewrite-options-prompts-choose-saved-drafts
-  "The review prompts put the original back by name, not by number."
+(deftest 'rewrite-prompts-take-instructions-and-the-blocks-hold-the-actions
+  "The prompts offer instructions only; the actions are keys on the fence lines and stay bound after the diff goes."
   (lambda ()
     (t--rw-options!)
-    (t--rw-review! "restore original")
-    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "review kept the original")
     (with-stub 'minibuffer-read
       (lambda (prompt choices callback)
-        (check-false! (find (lambda (c) (string-prefix? "choose option" c)) choices)
-                      "no numbered choices")
-        (callback "restore original"))
-      (lambda () (llm-rewrite--options-menu! t--rw-buf)))
-    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "options prompt restored the original")
+        (check-equal! choices (llm-rewrite-directives t--rw-buf) "only instructions are offered"))
+      (lambda ()
+        (llm-rewrite--again! t--rw-buf (diff-block-pending t--rw-buf))
+        (llm-rewrite--options-menu! t--rw-buf)))
+    (diff-block-reject! t--rw-buf)
+    (switch-to-buffer! t--rw-buf)
+    (check-equal! (key-binding-dispatch '("C-c" "x")) '("command" "llm-rewrite-cancel")
+                  "cancel stays bound for the options block")
+    (check-equal! (key-binding-dispatch '("C-c" "h")) '("command" "llm-rewrite-show-chat")
+                  "the chat key stays bound for the options block")
     (t--rw-done!)))
 
 (deftest 'rewrite-options-fence-names-keys-and-promotes-at-point

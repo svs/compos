@@ -694,6 +694,21 @@
                             "later rewrite messages stay out of the user's input")))))
     (t--rw-done!))))
 
+(deftest 'rewrite-options-preview-makes-the-draft-primary
+  "The draft keeps normal document typography; only its prompt is small and dim."
+  (lambda ()
+    (t--rw-options!)
+    (let ((prompt (car (buffer-overlays t--rw-buf 'rewrite-option-prompt)))
+          (draft (car (buffer-overlays t--rw-buf 'rewrite-option-draft))))
+      (check-equal! (block-text-at t--rw-buf (car prompt) (cadr prompt)) t--rw-what
+                    "the small face covers only the prompt")
+      (check-equal! (block-text-at t--rw-buf (car draft) (cadr draft)) "Deux."
+                    "the reading face covers only the draft")
+      (check-equal! (face-color 'rewrite-option-draft 'size) "var(--default-size)"
+                    "the draft uses the document's normal size")
+      (check-false! (face-color 'rewrite-options 'size) "the whole block is not shrunk"))
+    (t--rw-done!)))
+
 (deftest 'rewrite-options-blocks-do-not-run
   "An options block holds saved text, not executable code."
   (lambda ()

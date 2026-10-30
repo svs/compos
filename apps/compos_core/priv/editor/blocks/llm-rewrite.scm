@@ -116,15 +116,50 @@
 (defface! 'rewrite-selection 'bg "var(--region-bg)")
 
 ;; Saved drafts are reference, not prose: smaller and dimmer than the text.
-(defface! 'rewrite-options 'size "0.8em" 'fg "var(--dim-fg)")
+(defface! 'rewrite-options 'fg "var(--dim-fg)")
+(defface! 'rewrite-option-prompt 'fg "var(--dim-fg)" 'size "0.85em")
+(defface! 'rewrite-option-draft 'fg "var(--default-fg)" 'size "var(--default-size)")
+
+(define (llm-rewrite--option-face-ranges buf s)
+  (let* ((span (llm-rewrite--range buf s "block"))
+         (rows (plist-get s 'options))
+         (rendered (plist-get s 'rendered)))
+    (and span rendered
+         (let loop ((i 1)
+                    (at (+ (car span) 1 (string-byte-length (car (string-split rendered "\n")))))
+                    (prompts '())
+                    (drafts '()))
+           (if (= i (length rows))
+               (list (reverse prompts) (reverse drafts))
+               (let* ((row (nth i rows))
+                      (prompt-start (+ at (string-byte-length
+                                            (string-append "Option " (number->string i) ": "))))
+                      (prompt-end (+ prompt-start (string-byte-length (car row))))
+                      (draft-start (+ prompt-end 2))
+                      (draft-end (+ draft-start (string-byte-length (cadr row)))))
+                 (loop (+ i 1)
+                       (+ at (string-byte-length (llm-rewrite--option-row-text rows i)) 2)
+                       (cons (list prompt-start prompt-end "rewrite-option-prompt") prompts)
+                       (cons (list draft-start draft-end "rewrite-option-draft") drafts))))))))
 
 (define (llm-rewrite--paint-options-face! buf)
-  (overlay-set! buf 'rewrite-options
-    (filter (lambda (x) x)
-      (map (lambda (s)
-             (let ((span (llm-rewrite--range buf s "block")))
-               (and span (list (car span) (cadr span) "rewrite-options"))))
-           (or (buffer-local buf 'rewrite-sessions) '())))))
+  (let ((prompt-ranges '())
+        (draft-ranges '()))
+    (overlay-set! buf 'rewrite-options
+      (filter (lambda (x) x)
+        (map (lambda (s)
+               (let ((span (llm-rewrite--range buf s "block")))
+                 (and span (list (car span) (cadr span) "rewrite-options"))))
+             (or (buffer-local buf 'rewrite-sessions) '()))))
+    (for-each
+      (lambda (s)
+        (let ((ranges (llm-rewrite--option-face-ranges buf s)))
+          (when ranges
+            (set! prompt-ranges (append prompt-ranges (car ranges)))
+            (set! draft-ranges (append draft-ranges (cadr ranges))))))
+      (or (buffer-local buf 'rewrite-sessions) '()))
+    (overlay-set! buf 'rewrite-option-prompt prompt-ranges)
+    (overlay-set! buf 'rewrite-option-draft draft-ranges)))
 
 (define (llm-rewrite--paint-selection! buf)
   (let* ((s (llm-rewrite--session buf))

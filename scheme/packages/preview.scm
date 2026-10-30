@@ -234,12 +234,14 @@
           (if (minor-mode-on? buf "preview-mode")
               (begin
                 (disable-minor-mode! buf "preview-mode")
+                (preview-tabs-sync! buf #f)
                 (message "Preview off"))
               (let ((renderer (preview-renderer-for buf)))
                 (if renderer
                     (begin
                       (enable-minor-mode! buf "preview-mode")
                       (preview-heal! buf)
+                      (preview-tabs-sync! buf #t)
                       (message
                         (string-append "Preview on (" renderer ") — C-c C-v toggles")))
                     (message "No preview renderer for this buffer"))))))))
@@ -261,6 +263,7 @@
 
 (define (preview-tabs-sync! buf on)
   (when (buffer-derived-mode? buf "morg-mode")
+    (unless (buffer-local buf 'arrow-keys) (buffer-set-local! buf 'arrow-keys #t))
     (desktop-skip! buf 'header-line-blocks)
     (let ((blocks (preview-tab-blocks on)))
       (unless (equal? blocks (buffer-local buf 'header-line-blocks))
@@ -271,20 +274,18 @@
   (unless (equal? on (minor-mode-on? buf "preview-mode"))
     (run-command "preview-mode")))
 
-(define (preview-tab-step! on motion)
-  (let ((buf (current-buffer)))
-    (if (editing-state? buf)
-        (run-command motion)
-        (begin (preview-view! buf on) (editing-quit!)))))
+(define (preview-tab-step! on)
+  (preview-view! (current-buffer) on)
+  (editing-quit!))
 
 (define-command "preview-tab-raw" "Show the page's source"
   (lambda () (preview-view! (current-buffer) #f) (editing-quit!)))
 (define-command "preview-tab-preview" "Show the rendered page"
   (lambda () (preview-view! (current-buffer) #t) (editing-quit!)))
-(define-command "preview-tab-left" "The raw tab in the movement state; editing, back a character"
-  (lambda () (preview-tab-step! #f "backward-char")))
-(define-command "preview-tab-right" "The preview tab in the movement state; editing, forward a character"
-  (lambda () (preview-tab-step! #t "forward-char")))
+(define-command "preview-tab-left" "Show the raw tab; the client sends the arrow only in the movement state"
+  (lambda () (preview-tab-step! #f)))
+(define-command "preview-tab-right" "Show the preview tab; the client sends the arrow only in the movement state"
+  (lambda () (preview-tab-step! #t)))
 (define-key "morg-mode-map" "<left>" "preview-tab-left")
 (define-key "morg-mode-map" "<right>" "preview-tab-right")
 

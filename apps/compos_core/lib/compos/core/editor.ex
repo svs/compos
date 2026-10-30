@@ -3281,6 +3281,9 @@ defmodule Compos.Core.Editor do
       # the editing state: the caret map is armed and the caret shows. In
       # the movement state the client hides the caret and the window floats.
       editing: Map.get(locals, "editing-state") == true,
+      # the buffer takes the plain left and right arrows as keys in the
+      # movement state (a Morg page's raw and preview tabs)
+      arrow_keys: Map.get(locals, "arrow-keys") == true,
       dismissible: Map.get(locals, "dismissible") == true,
       cursor_visible:
         Map.get(locals, "dismissible") != true or

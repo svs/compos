@@ -2370,8 +2370,13 @@
           }
           const onSurface = document.activeElement && document.activeElement.closest &&
             document.activeElement.closest(".window.active .buf[contenteditable]");
-          if (onSurface) this._editing = editingAfterKey(e, this._editing);
-          const native = nativeTextKey(e, this._editing);
+          // A buffer that asks for them takes the plain left and right
+          // arrows as keys in the movement state, and stays in it.
+          const arrowKey = !this._editing && landedWin?.dataset.arrowKeys === "true" &&
+            !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
+            (e.key === "ArrowLeft" || e.key === "ArrowRight");
+          if (onSurface && !arrowKey) this._editing = editingAfterKey(e, this._editing);
+          const native = !arrowKey && nativeTextKey(e, this._editing);
           // Typing is not a selection gesture. Finish an intentional
           // caret move before its following key, then disarm reports
           // caused by the DOM patch for that key.

@@ -1858,6 +1858,7 @@ defmodule Compos.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
       data-editing={to_string(Map.get(@node, :editing, false))}
+      data-arrow-keys={to_string(Map.get(@node, :arrow_keys, false))}
       phx-hook={if @preview?, do: "PreviewCard"}
       role={if @preview?, do: "note"}
       aria-label={if @preview?, do: "Preview"}

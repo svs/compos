@@ -315,7 +315,48 @@
                     (and (equal? type "regular")
                          (if (string-index perms "x") #t #f)))
                    (else (equal? type "regular")))))
+          ((equal? kind "mode") (equal? (dired-entry-mode buf e) arg))
+          ((equal? kind "ext") (equal? (dired-entry-ext e) arg))
           (else #t))))
+
+;; the mode a row opens in, as RET would open it: a directory in Dired
+(define (dired-entry-mode buf e)
+  (let ((info (dired-info buf e)))
+    (if (and info (equal? (plist-get info 'type) "directory"))
+        "Dired"
+        (or (auto-mode-for e) "Fundamental"))))
+
+;; the text after a name's last dot, "" for none; a dotfile has none
+(define (dired-entry-ext e)
+  (let loop ((i (- (string-length e) 1)))
+    (cond ((<= i 0) "")
+          ((equal? (substring e i (+ i 1)) ".") (substring e (+ i 1) (string-length e)))
+          (else (loop (- i 1))))))
+
+;; `/` picks from tabs: the mode a file opens in, its extension, its type.
+;; Each tab offers what this listing holds, the most common first
+(define (dired-facet-options buf value label)
+  (let* ((rows (remove (lambda (e) (equal? e "..")) (list-entries buf)))
+         (counts (fold (lambda (acc e)
+                         (let* ((v (value buf e)) (hit (assoc v acc)))
+                           (if hit
+                               (map (lambda (c) (if (equal? (car c) v) (list v (+ 1 (cadr c))) c)) acc)
+                               (cons (list v 1) acc))))
+                       '() rows)))
+    (map (lambda (c) (list (string-append (label (car c)) "  " (number->string (cadr c))) (car c)))
+         ;; the most rows first, then by value
+         (map cdr (sort (map (lambda (c) (cons (- (cadr c)) c)) counts))))))
+
+(define dired-facets
+  (list (list 'label "Mode" 'kind "mode"
+              'options (lambda (buf) (dired-facet-options buf dired-entry-mode mode-label)))
+        (list 'label "Extension" 'kind "ext"
+              'options (lambda (buf)
+                         (dired-facet-options buf (lambda (buf e) (dired-entry-ext e))
+                                              (lambda (v) (if (equal? v "") "(none)" (string-append "." v))))))
+        (list 'label "Type" 'kind "type"
+              'options (lambda (buf)
+                         '(("directories" "dir") ("files" "file") ("links" "link") ("executables" "exec"))))))
 
 (define (dired-match? buf e input)
   (or (equal? e "..")
@@ -495,7 +536,8 @@
            "`q` leaves dired. "
            "`RET` on a directory opens it here. `^` goes up. `/` narrows as you type — it matches the "
            "perms, the size, the date, the name and the mode the file would "
-           "open in. The arrows move the rows while you type, and `RET` "
+           "open in — or picks from its tabs: the mode a file opens in, its "
+           "extension, its type. The arrows move the rows while you type, and `RET` "
            "keeps the narrowing and the row you chose. `\\` widens by one "
            "and `.` hides the dotfiles. `s` changes sorting, `S` reverses it, "
            "and `G` groups directories first. The filters and sorting persist. "
@@ -512,6 +554,7 @@
     'local-filter #t
     'filter (lambda (buf e q) (dired-filter-match? buf e q))
     'match (lambda (buf e q) (dired-match? buf e q))
+    'facets dired-facets
     'rows (lambda (buf)
             (let ((dir (dired-dir buf)))
               (if (not dir)

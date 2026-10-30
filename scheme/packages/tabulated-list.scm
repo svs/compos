@@ -1957,7 +1957,8 @@
     (if (pair? hit) (car (car hit)) value)))
 
 (define (list-facet-prompt! buf)
-  (let* ((facets (list-facets buf))
+  (let* ((before (list-query buf))
+         (facets (list-facets buf))
          (labels (map (lambda (f) (plist-get f 'label)) facets))
          (tab (mb-tab-recall (string-append "list-facet:" buf) labels 0))
          (facet (lambda () (nth tab facets)))
@@ -1970,12 +1971,25 @@
                                (loop (cdr fs) (+ i 1) (cons (list (plist-get (car fs) 'label) (= i tab)) out))))))
          (on-confirm (lambda (label)
                        (let ((hit (assoc label (list-facet-options buf (facet)))))
-                         (cond (hit (list-facet-set! buf (facet) (cadr hit)))
+                         ;; a picked value drops the text typed to find it
+                         (cond (hit (list-set-query! buf before) (list-facet-set! buf (facet) (cadr hit)))
                                ((not (equal? (string-trim label) ""))
                                 (list-set-query! buf (string-trim label))
                                 (list-goto-first-entry buf)))))))
     (minibuffer-read-preview *list-filter-prompt* (cands)
-      (lambda (label) #f) on-confirm (lambda () #f) #f "minibuffer")
+      (lambda (label) #f) on-confirm
+      ;; C-g gives back the rows the prompt opened on
+      (lambda () (list-set-query! buf before) (list-goto-first-entry buf))
+      #f "minibuffer")
+    ;; text narrows the rows as you type, as / does in a list with no tabs;
+    ;; the tabs stay there to pick from
+    (set! *mb-change-fn*
+      (lambda (input)
+        (with-buffer-display-update buf
+          (lambda ()
+            (unless (equal? (string-trim input) (list-query buf))
+              (list-set-query! buf (string-trim input))
+              (list-goto-first-entry buf))))))
     (minibuffer-tabs! (row))
     (set! *mb-tab-fn* (lambda (step)
                         (set! tab (modulo (+ tab step) (length facets)))

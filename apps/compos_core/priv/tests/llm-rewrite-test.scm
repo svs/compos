@@ -456,15 +456,39 @@
     (t--rw-done!)))
 
 (deftest 'rewrite-options-prompts-choose-saved-drafts
-  "Both review prompts parse the selected option."
+  "The review prompts put the original back by name, not by number."
   (lambda ()
     (t--rw-options!)
-    (t--rw-review! "choose option 1")
-    (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "review chose the saved draft")
+    (t--rw-review! "restore original")
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "review kept the original")
     (with-stub 'minibuffer-read
-      (lambda (prompt choices callback) (callback "choose option 0"))
+      (lambda (prompt choices callback)
+        (check-false! (find (lambda (c) (string-prefix? "choose option" c)) choices)
+                      "no numbered choices")
+        (callback "restore original"))
       (lambda () (llm-rewrite--options-menu! t--rw-buf)))
     (check-equal! (block-text-at t--rw-buf 6 10) "Two." "options prompt restored the original")
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-fence-names-keys-and-promotes-at-point
+  "The options block names its keys; C-c p promotes the draft under point, C-c u puts the original back."
+  (lambda ()
+    (t--rw-options!)
+    (diff-block-reject! t--rw-buf)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "block"))
+           (text (plist-get s 'rendered))
+           (head (car (string-split text "\n"))))
+      (check-true! (string-index head "C-c p promotes the one at point") "fence names promote")
+      (check-true! (string-index head "C-c u puts the original back") "fence names restore")
+      (check-false! (string-index text "Option 0") "the original is not a number")
+      (check-false! (llm-rewrite--option-at t--rw-buf s (car span)) "the fence line is no option")
+      (switch-to-buffer! t--rw-buf)
+      (buffer-goto! t--rw-buf (+ (car span) (string-index text "Deux.")))
+      (trace-key! '("C-c" "p"))
+      (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "C-c p promoted the draft at point")
+      (trace-key! '("C-c" "u"))
+      (check-equal! (block-text-at t--rw-buf 6 10) "Two." "C-c u put the original back"))
     (t--rw-done!)))
 
 (deftest 'rewrite-options-blocks-do-not-run

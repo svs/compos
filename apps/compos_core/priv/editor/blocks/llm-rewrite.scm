@@ -43,6 +43,9 @@
     (let ((mode (buffer-local buf 'mode-name)))
       (if mode (string-append " (" mode ")") ""))
     ".\n\nInstruction: " directive
+    "\n\nA note in single square brackets, such as [a word for X], is the author's "
+    "instruction: put what it asks for in its place and drop the brackets. "
+    "A [[link]] or [text](url) is a link, not a note."
     "\n\nPassage:\n" passage
     "\n\nReply with ONLY the rewritten passage. No commentary, no quotes and "
     "no code fences. Keep the indentation of every line, and add no heading, "
@@ -97,9 +100,22 @@
   (or (block-overlay-span buf (llm-rewrite--face s part))
       (plist-get s (string->symbol part))))
 
+;; The passage stays selected for the whole session, across prompts,
+;; iterations and choices, until the rewrite is cancelled.
+(defface! 'rewrite-selection 'bg "var(--region-bg)")
+
+(define (llm-rewrite--paint-selection! buf)
+  (let* ((s (llm-rewrite--session buf))
+         (span (and s (llm-rewrite--range buf s "source"))))
+    (overlay-set! buf 'rewrite-selection
+      (if span (list (list (car span) (cadr span) "rewrite-selection")) '()))))
+
 (define (llm-rewrite--track! buf s part span)
   (let ((face (llm-rewrite--face s part)))
     (overlay-set! buf face (list (append span (list face)))))
+  (when (equal? part "source")
+    (overlay-set! buf 'rewrite-selection
+      (list (list (car span) (cadr span) "rewrite-selection"))))
   (llm-rewrite--save-session! buf
     (plist-put s (string->symbol part) span)))
 
@@ -133,17 +149,45 @@
     (llm-rewrite--save-session! buf
       (plist-put s 'history (string-append (plist-get s 'history) part)))))
 
+(define *llm-rewrite-option-keys*
+  '(("C-c p" "llm-rewrite-promote-option" "promotes the one at point")
+    ("C-c u" "llm-rewrite-restore-original" "puts the original back")
+    ("C-c t" "llm-rewrite-toggle-options" "shows or hides")
+    ("C-c x" "llm-rewrite-cancel" "cancels")))
+
+;; The block's fence line names its keys, the way a diff block's does.
+(define (llm-rewrite--options-head)
+  (string-append "options "
+    (string-join (map (lambda (k) (string-append (car k) " " (caddr k)))
+                      *llm-rewrite-option-keys*) " · ")))
+
+(define (llm-rewrite--option-row-text rows i)
+  (let ((row (nth i rows)))
+    (string-append (if (= i 0) "Original"
+                       (string-append "Option " (number->string i) ": " (car row)))
+                   "\n\n" (cadr row))))
+
 (define (llm-rewrite--options-text s)
   (let* ((rows (plist-get s 'options))
          (body (string-join
-                 (map (lambda (i)
-                        (let ((row (nth i rows)))
-                          (string-append "Option " (number->string i) ": "
-                                         (car row) "\n\n" (cadr row))))
+                 (map (lambda (i) (llm-rewrite--option-row-text rows i))
                       (iota (length rows))) "\n\n"))
          (fence (let loop ((f "```"))
                   (if (string-index body f) (loop (string-append f "`")) f))))
-    (string-append fence "options\n" body "\n" fence)))
+    (string-append fence (llm-rewrite--options-head) "\n" body "\n" fence)))
+
+;; Which saved row holds byte POS of the block, or #f on its fence lines.
+(define (llm-rewrite--option-at buf s pos)
+  (let* ((span (llm-rewrite--range buf s "block"))
+         (rows (plist-get s 'options))
+         (rendered (plist-get s 'rendered)))
+    (and span rendered (<= (car span) pos) (<= pos (cadr span))
+         (let loop ((i 0)
+                    (at (+ (car span) 1 (string-byte-length
+                                          (car (string-split rendered "\n"))))))
+           (and (< i (length rows))
+                (let ((end (+ at (string-byte-length (llm-rewrite--option-row-text rows i)))))
+                  (if (< pos (+ end 2)) (and (<= at pos) i) (loop (+ i 1) (+ end 2)))))))))
 
 (define (llm-rewrite--options-valid? buf s)
   (let ((span (llm-rewrite--range buf s "block")))
@@ -162,6 +206,12 @@
                              (car (string-split (plist-get s 'rendered) "\n"))))
                         (cadr span)))
             '())))))
+
+(define (llm-rewrite--option-key-pairs)
+  (map (lambda (k) (list (car k) (cadr k))) *llm-rewrite-option-keys*))
+
+(define (llm-rewrite--bind-option-keys! buf)
+  (block-bind-keys! buf (llm-rewrite--option-key-pairs)))
 
 (define (llm-rewrite--write-options! buf)
   (let* ((s (llm-rewrite--session buf))
@@ -185,6 +235,7 @@
           (llm-rewrite--track! buf
             (plist-put (llm-rewrite--session buf) 'rendered text) "block" bounds)
           (llm-rewrite--paint-options! buf)
+          (llm-rewrite--bind-option-keys! buf)
           #t))))
 
 (define (llm-rewrite--keep-option! buf)
@@ -201,7 +252,11 @@
               (unless (find (lambda (r) (equal? (cadr r) text)) rows)
                 (llm-rewrite--save-session! buf
                   (plist-put s 'options
-                    (append rows (list (list (diff-block-note p) text))))))
+                    (append rows (list (list (let ((note (diff-block-note p)))
+                                               (if (member note (list "" *llm-rewrite-self-directive*))
+                                                   "following the passage's notes"
+                                                   note))
+                                             text))))))
               (when (llm-rewrite--write-options! buf)
                 (message "Kept as an option; the passage is unchanged")))))))
 
@@ -232,7 +287,8 @@
           (llm-rewrite--track! buf
             (plist-put s 'current text) "source"
             (list (car source) (+ (car source) (string-byte-length text))))
-          (message (string-append "Chose option " (number->string n))))))))
+          (message (if (= n 0) "Put the original back"
+                       (string-append "Promoted option " (number->string n)))))))))
 
 (define (llm-rewrite--locate! buf)
   (let ((pt (with-current-buffer buf (lambda () (point)))))
@@ -249,20 +305,18 @@
 (define (llm-rewrite--options-menu! buf)
   (let* ((s (llm-rewrite--session buf))
          (rows (plist-get s 'options))
-         (choices (map (lambda (i) (string-append "choose option " (number->string i)))
-                       (iota (length rows)))))
-    (minibuffer-read "Options (choose / show options / hide options / instruction): "
-      (append choices '("show options" "hide options" "show chat") (llm-rewrite-directives buf))
+         (choices '("restore original")))
+    (minibuffer-read "Options (restore original / show options / hide options / instruction): "
+      (append choices '("show options" "hide options" "show chat" "cancel rewrite") (llm-rewrite-directives buf))
       (lambda (input)
-        (let* ((answer (string-trim input))
-               (n (and (string-prefix? "choose option " answer)
-                       (string->number (substring-bytes answer 14 (string-byte-length answer))))))
+        (let ((answer (string-trim input)))
           (cond ((equal? answer "") #f)
-                (n (llm-rewrite--choose-option! buf n))
+                ((equal? answer "restore original") (llm-rewrite--choose-option! buf 0))
                 ((member answer '("show options" "hide options"))
                  (llm-rewrite--save-session! buf
                    (plist-put (llm-rewrite--session buf) 'hidden (equal? answer "hide options")))
                  (llm-rewrite--paint-options! buf))
+                ((equal? answer "cancel rewrite") (llm-rewrite--cancel! buf))
                 ((equal? answer "show chat")
                  (display-buffer-other-window! (llm-rewrite--chat! buf (llm-rewrite--session buf))))
                 (else
@@ -297,9 +351,16 @@
               (llm-rewrite--record! buf "Assistant" new)
               (land new))))))))
 
+;; The rewrite's own verbs ride the diff block's fence line.
+(define *llm-rewrite-verbs*
+  '(("C-c o" "llm-rewrite-keep-option" "keeps as option")
+    ("C-c r" "llm-rewrite-iterate" "iterates")
+    ("C-c x" "llm-rewrite-cancel" "cancels")))
+
 (define (llm-rewrite--propose! buf start end original new directive)
   (unless (llm-rewrite--session buf)
     (llm-rewrite--new-session! buf start end original))
+  (buffer-set-local! buf 'diff-block-verbs *llm-rewrite-verbs*)
   (if (equal? (diff-block-propose! buf start end original new directive) 'ok)
       (message "Rewrite waiting: C-c e to decide, keep as option, or iterate")
       (message "Rewrite dropped - that passage has changed")))
@@ -313,10 +374,53 @@
                                         (key-for-command "llm-rewrite")
                                         " decides"))))))
 
-;; An empty answer at the prompt takes the instruction the mode leads with.
+;; An empty answer makes the passage its own instruction: its notes say
+;; what to change.
+(define *llm-rewrite-self-directive*
+  "The passage is its own instruction. Carry out every note in square brackets, and leave every other word as the author wrote it.")
+
 (define (llm-rewrite--directive buf input)
   (let ((typed (string-trim input)))
-    (if (equal? typed "") (car (llm-rewrite-directives buf)) typed)))
+    (if (equal? typed "") *llm-rewrite-self-directive* typed)))
+
+;; Iterate: another version through the same conversation. Blank asks the
+;; passage's own notes again, from the passage as you wrote it.
+(define (llm-rewrite--iterate! buf)
+  (let ((s (or (llm-rewrite--session buf) (llm-rewrite--locate! buf))))
+    (if (not s)
+        (message "No rewrite here")
+        (minibuffer-read "Iterate (blank: follow the passage's notes): " (llm-rewrite-directives buf)
+          (lambda (input)
+            (let* ((directive (llm-rewrite--directive buf input))
+                   (s (llm-rewrite--session buf))
+                   (p (diff-block-pending buf))
+                   (old (plist-get s 'current))
+                   (passage (if (and p (not (equal? (string-trim input) ""))) (diff-block-theirs p) old)))
+              (llm-rewrite--ask! buf passage directive
+                (lambda (new)
+                  (if (diff-block-pending buf)
+                      (llm-rewrite--refine! buf new directive)
+                      (let ((span (llm-rewrite--range buf (llm-rewrite--session buf) "source")))
+                        (llm-rewrite--propose! buf (car span) (cadr span) old new directive)))))))))))
+
+;; Cancel ends the session: the waiting diff goes, the selection lets go,
+;; and the text, options block included, stays as it is.
+(define (llm-rewrite--cancel! buf)
+  (let ((s (or (llm-rewrite--session buf) (llm-rewrite--locate! buf))))
+    (when (diff-block-pending buf) (diff-block-reject! buf))
+    (when (diff-block-pending buf) (diff-block-release! buf))
+    (overlay-clear! buf 'rewrite-selection)
+    (when s
+      (overlay-clear! buf (llm-rewrite--face s "source"))
+      (overlay-clear! buf (llm-rewrite--face s "block"))
+      (fold-set! buf (llm-rewrite--face s "fold") '())
+      (buffer-set-local! buf 'rewrite-sessions
+        (filter (lambda (o) (not (equal? (plist-get o 'id) (plist-get s 'id))))
+                (or (buffer-local buf 'rewrite-sessions) '()))))
+    (buffer-set-local! buf 'rewrite-active #f)
+    (when (null? (or (buffer-local buf 'rewrite-sessions) '()))
+      (block-unbind-keys! buf (llm-rewrite--option-key-pairs)))
+    (message "Rewrite cancelled; the text stays")))
 
 (define (llm-rewrite--start! buf)
   (let* ((start (and (mark) (region-beginning)))
@@ -348,9 +452,9 @@
   (let ((state (diff-block-answer-state answer)))
     (cond
       ((equal? answer "") (message "Rewrite still waiting"))
-      ((string-prefix? "choose option " answer)
-       (llm-rewrite--choose-option! buf (string->number (substring-bytes answer 14 (string-byte-length answer)))))
+      ((equal? answer "restore original") (llm-rewrite--choose-option! buf 0))
       ((equal? answer "keep as option") (llm-rewrite--keep-option! buf))
+      ((equal? answer "cancel rewrite") (llm-rewrite--cancel! buf))
       ((member answer '("show options" "hide options"))
        (let ((s (llm-rewrite--session buf)))
          (when s
@@ -371,11 +475,9 @@
       (begin (diff-block-release! buf) (message "The waiting rewrite is gone"))
       (minibuffer-read
         "Rewrite (keep it / keep as option / put it back / show options / instruction): "
-        (append (let ((s (llm-rewrite--session buf)))
-                  (if s (map (lambda (i) (string-append "choose option " (number->string i)))
-                             (iota (length (plist-get s 'options)))) '()))
+        (append (if (llm-rewrite--session buf) '("restore original") '())
                 (list *llm-rewrite-keep-answer* "keep as option"
-                      *llm-rewrite-back-answer* "show options" "hide options" "show chat")
+                      *llm-rewrite-back-answer* "show options" "hide options" "show chat" "cancel rewrite")
                 (diff-block-state-answers (diff-block-state p))
                 (llm-rewrite-directives buf))
         (lambda (input) (llm-rewrite--review! buf p (string-trim input))))))
@@ -388,7 +490,8 @@
       (lambda (s)
         (let ((saved (llm-rewrite--save-session! buf s)))
           (llm-rewrite--paint-options! buf saved)))
-      (or (buffer-local buf 'rewrite-sessions) '()))))
+      (or (buffer-local buf 'rewrite-sessions) '()))
+    (llm-rewrite--paint-selection! buf)))
 
 (define (llm-rewrite--restore! &optional named)
   (let* ((buf (or named (current-buffer)))
@@ -406,8 +509,10 @@
                   (let ((face (llm-rewrite--face s part)))
                     (overlay-set! buf face (list (append span (list face))))))))
             '("source" "block"))
-          (llm-rewrite--paint-options! buf s))
+          (llm-rewrite--paint-options! buf s)
+          (when (plist-get s 'block) (llm-rewrite--bind-option-keys! buf)))
         sessions)
+      (llm-rewrite--paint-selection! buf)
       (let ((old (buffer-local buf 'rewrite-change-handler)))
         (when old (remove-on-change! old)))
       (buffer-set-local! buf 'rewrite-change-handler
@@ -444,15 +549,40 @@
     (let ((buf (current-buffer)))
       (llm-rewrite--locate! buf)
       (llm-rewrite--toggle-options! buf))))
+(define-command "llm-rewrite-promote-option"
+  "Put the saved option at point in the passage's place"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (s (llm-rewrite--locate! buf))
+           (n (and s (llm-rewrite--option-at buf s (point)))))
+      (cond ((not s) (message "No options for this passage"))
+            ((not n) (message "Put point on an option in the options block"))
+            (else (llm-rewrite--choose-option! buf n))))))
+
+(define-command "llm-rewrite-restore-original"
+  "Put the passage's original text back"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (llm-rewrite--locate! buf)
+          (llm-rewrite--choose-option! buf 0)
+          (message "No options for this passage")))))
+
 (define-command "llm-rewrite-choose-option"
-  "Choose a saved rewrite or restore the original"
+  "Restore the original, show or hide options, or iterate"
   (lambda ()
     (let ((buf (current-buffer)))
       (llm-rewrite--locate! buf)
       (if (llm-rewrite--session buf)
           (llm-rewrite--options-menu! buf)
           (message "No options for this passage")))))
+(define-command "llm-rewrite-cancel"
+  "End this passage's rewrite: drop the waiting diff and the selection, keep the text"
+  (lambda () (llm-rewrite--cancel! (current-buffer))))
 (effects! '(write external spend))
+
+(define-command "llm-rewrite-iterate"
+  "Ask for another version through the passage's conversation; blank follows its notes"
+  (lambda () (llm-rewrite--iterate! (current-buffer))))
 
 (define-command "llm-rewrite"
   "Rewrite the region; keep drafts as options and iterate with the passage's conversation"

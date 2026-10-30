@@ -77,10 +77,13 @@
                  (let ((k (key-for-command cmd buf)))
                    (if (equal? k "") #f (string-append k " " label)))))
          (parts (filter (lambda (x) x)
-                        (list (diff-block--state-name state)
+                        (append
+                         (list (diff-block--state-name state)
                               (verb "diff-block-accept" "keeps it")
                               (verb "diff-block-reject" "puts it back")
-                              (verb "diff-block-cycle" "changes the view")))))
+                              (verb "diff-block-cycle" "changes the view"))
+                        (map (lambda (v) (verb (cadr v) (caddr v)))
+                             (diff-block--verbs buf))))))
     (string-join parts " · ")))
 
 ;;; --- rendering the states ----------------------------------------------------
@@ -207,8 +210,16 @@
     ("C-c k" "diff-block-reject")
     ("C-c d" "diff-block-cycle")))
 
+;; A caller that proposes the block may add its own verbs, as (KEY COMMAND
+;; LABEL) in the buffer local diff-block-verbs: they bind with the block's
+;; keys and show on its fence line.
+(define (diff-block--verbs buf)
+  (or (buffer-local buf 'diff-block-verbs) '()))
+
 (define (diff-block--bind-keys! buf)
-  (block-bind-keys! buf diff-block--keys))
+  (block-bind-keys! buf (append diff-block--keys
+                                (map (lambda (v) (list (car v) (cadr v)))
+                                     (diff-block--verbs buf)))))
 
 
 (define (diff-block--hold! buf spans tail ours theirs note state)
@@ -224,7 +235,9 @@
   (overlay-clear! buf 'diff-block)
   (overlay-clear! buf 'diff-block-source)
   (overlay-clear! buf 'diff-block-faces)
-  (block-unbind-keys! buf diff-block--keys))
+  (block-unbind-keys! buf (append diff-block--keys
+                                  (map (lambda (v) (list (car v) (cadr v)))
+                                       (diff-block--verbs buf)))))
 
 ;; Both overlays follow the rope, so an edit above them moves both; the
 ;; record answers before they exist.

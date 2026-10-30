@@ -3334,6 +3334,7 @@ defmodule Compos.Core.Editor do
       # The frame group remains separate context for the bottom bar.
       group_color: Map.get(ml, "group-color"),
       ts_lang: Map.get(locals, "ts-lang"),
+      plain_source: Map.get(locals, "plain-source") == true,
       display_updating: display_updating or Events.display_updating?(buffer),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,

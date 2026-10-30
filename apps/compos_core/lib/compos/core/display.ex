@@ -34,10 +34,11 @@ defmodule Compos.Core.Display do
     want = want(leaf)
     client_scroll? = leaf.total_lines <= want
     whitespace = whitespace?(leaf)
+    plain_source = Map.get(leaf, :plain_source, false)
 
     raw_key =
       {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, leaf.top, want,
-       leaf.hidden_lines, leaf.narrow_lines, whitespace, opts[:embed_generation],
+       leaf.hidden_lines, leaf.narrow_lines, whitespace, plain_source, opts[:embed_generation],
        Map.get(leaf, :fontification, [])}
 
     {visible, row_cache} =
@@ -53,7 +54,7 @@ defmodule Compos.Core.Display do
             end
 
           source = viewport_lines(rope, leaf, want, client_scroll?)
-          build_static(leaf, source, previous, whitespace)
+          build_static(leaf, source, previous, whitespace and not plain_source, plain_source)
       end
 
     lines =
@@ -145,13 +146,17 @@ defmodule Compos.Core.Display do
 
   # Prepare only selected source lines. Faces arrive asynchronously and
   # must match this snapshot. Text rendering never calls the parser.
-  defp build_static(leaf, lines, previous, whitespace) do
+  defp build_static(leaf, lines, previous, whitespace, plain_source) do
     request_jit(leaf, lines)
 
     spans =
-      display_spans(leaf, lines)
-      |> Enum.with_index()
-      |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
+      if plain_source do
+        []
+      else
+        display_spans(leaf, lines)
+        |> Enum.with_index()
+        |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
+      end
 
     # A chrome attachment stands at one byte and holds zero bytes: text the
     # buffer does not hold, drawn beside the text it decorates. It rides the
@@ -163,7 +168,7 @@ defmodule Compos.Core.Display do
 
     chrome = Enum.flat_map(chrome_raw, &chrome_item/1)
 
-    ovs = Enum.map(plain_ov, fn {s, e, face} -> {s, e, "f-" <> face} end)
+    ovs = if plain_source, do: [], else: Enum.map(plain_ov, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
     # Whitespace decoration only scans the selected lines.
     ovs =

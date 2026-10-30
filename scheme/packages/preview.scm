@@ -115,6 +115,7 @@
       (list (or (buffer-local buf 'face-remap) '())
             (or (buffer-local buf 'style) #f))))
   (buffer-set-local! buf 'preview-rows #t)
+  (buffer-set-local! buf 'plain-source #f)
   (markdown-paint-on! buf)
   (preview--rows-look! buf))
 
@@ -140,6 +141,7 @@
 
 (define (preview--rows-off! buf)
   (buffer-set-local! buf 'preview-rows #f)
+  (buffer-set-local! buf 'plain-source #t)
   (markdown-paint-off! buf)
   ;; the plain faces come back: morg skipped its paint while the rows drew
   (when (buffer-derived-mode? buf "morg-mode")
@@ -186,6 +188,8 @@
   ;; "rows" is a renderer, never a render mode
   (when (equal? (buffer-local buf 'render-mode) "rows")
     (buffer-set-local! buf 'render-mode #f))
+  (when (buffer-derived-mode? buf "morg-mode")
+    (buffer-set-local! buf 'plain-source (not (minor-mode-on? buf "preview-mode"))))
   (let ((on (minor-mode-on? buf "preview-mode"))
         (rows (equal? (buffer-local buf 'preview-rows) #t)))
     (cond ((and rows (not on)) (preview--rows-off! buf))

@@ -302,6 +302,20 @@
                         "the page renders as html")))
       (buffer-kill! buf))))
 
+(deftest 'raw-is-plain-and-preview-restores-presentation
+  "Raw suppresses source faces; preview turns presentation back on."
+  (lambda ()
+    (let ((buf (test-buffer! "zz-plain-raw" "*plain*\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (set-mode! "morg-mode")
+          (check-true! (buffer-local buf 'plain-source) "raw starts plain")
+          (enable-minor-mode! buf "preview-mode")
+          (check-false! (buffer-local buf 'plain-source) "preview restores presentation")
+          (disable-minor-mode! buf "preview-mode")
+          (check-true! (buffer-local buf 'plain-source) "raw is plain again")))
+      (buffer-kill! buf))))
+
 (deftest 'a-morg-buffer-previews-by-its-mode-not-its-name
   "a scratch has no extension, and the mode is the truth"
   (lambda ()

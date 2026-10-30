@@ -46,6 +46,23 @@ defmodule Compos.DisplayTest do
     assert :erts_debug.same(visible, again)
   end
 
+  test "plain source suppresses syntax and overlay faces" do
+    name = "zz-plain-source"
+    Editor.set_window_buffer(name)
+    Buffer.append(name, "*plain*", source: :editor)
+    Buffer.goto(name, 0)
+    Buffer.set_overlays(name, "test", [{0, 6, "italic"}])
+    Buffer.set_local(name, "plain-source", true)
+
+    on_exit(fn -> Compos.Core.kill_buffer(name) end)
+
+    leaf = Editor.render_state().tree
+    {drawn, _} = Display.window(leaf, nil, caret_owner: leaf.id)
+    segments = Enum.flat_map(drawn.lines, & &1.segs)
+
+    assert segments == [{"*plain*", ""}]
+  end
+
   test "a preview card takes more rows, up to a bound" do
     leaf = %{Editor.render_state().tree | window_class: "listing-preview"}
     {drawn, _} = Display.window(leaf, nil)

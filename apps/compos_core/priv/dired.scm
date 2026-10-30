@@ -687,15 +687,17 @@
     (dired-skip-derived! buf)
     ;; re-opening a directory re-reads what git and the sizes say
     (dired-rescan! buf)
-    (switch-to-buffer-here! buf)
     ;; the mode goes on BUF, not on whatever is current: a group preview
-    ;; revives a directory while the prompt is current, and the switch
-    ;; above leaves the minibuffer current, so it became a Dired of /
+    ;; revives a directory while the prompt is current, so it became a
+    ;; Dired of /. And it goes on before the switch: the window model
+    ;; places a buffer by its mode, and a fresh one read as fundamental
+    ;; took a new window beside the Dired window
     (with-current-buffer buf
       (lambda ()
         (set-mode! "Dired")
-        (dired-arm-watch! buf)
-        (when fresh (dired-goto-first-entry))))
+        (dired-arm-watch! buf)))
+    (switch-to-buffer-here! buf)
+    (when fresh (with-current-buffer buf (lambda () (dired-goto-first-entry))))
     buf))
 
 ;; the entry on the current line: a name, the ".." token, or #f above them

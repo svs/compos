@@ -726,6 +726,27 @@
 ;;; of each. The model of a group names its layout in 'layout; panes keeps
 ;;; the rest (stacks, focus, history, where a buffer goes).
 
+(define (panes-fill-capacity layout)
+  "Columns short of the capacity are added at the end, and every empty
+   pane, new or old, takes the first hidden window of the pane that
+   hides the most, so the windows stacked behind come out beside. A pane
+   stays empty only when no window is hidden. A full layout with no
+   empty pane does not change."
+  (let* ((panes (apply append (panes-columns layout)))
+         (empty (filter (lambda (p) (null? (panes-keys p))) panes))
+         (deepest (let loop ((best (and (pair? panes) (car panes))) (rest (if (pair? panes) (cdr panes) '())))
+                    (cond ((null? rest) best)
+                          ((> (length (panes-keys (car rest))) (length (panes-keys best))) (loop (car rest) (cdr rest)))
+                          (else (loop best (cdr rest))))))
+         (hidden (if deepest (cdr (panes-keys deepest)) '())))
+    (cond ((and (pair? empty) (pair? hidden))
+           (panes-fill-capacity (panes-move-window layout (car hidden) (plist-get (car empty) 'id))))
+          ((panes-under-capacity? layout)
+           (let ((made (panes-add-pane layout)))
+             (panes-fill-capacity
+               (if (pair? hidden) (panes-move-window (car made) (car hidden) (cadr made)) (car made)))))
+          (else layout))))
+
 (define panes--layout-specs '())
 
 (define (define-layout! name &rest props)
@@ -757,12 +778,13 @@
 
 (define (panes-set-layout layout name)
   "LAYOUT in layout NAME: the capacity becomes NAME's, panes past it
-   fold into the last one, and every pane takes the default share, so
-   NAME's shares hold. An unknown NAME changes nothing."
+   fold into the last one, panes short of it are added and take the
+   hidden windows, and every pane takes the default share, so NAME's
+   shares hold. An unknown NAME changes nothing."
   (let ((cap (panes-layout-capacity name)))
     (if (not cap)
         layout
-        (panes-equalize (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap))))))
+        (panes-equalize (panes-fill-capacity (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap)))))))
 
 (define (panes-layout-shares layout &optional columns?)
   "The share of each pane, normalized to sum 1; with COLUMNS?, the width
@@ -1065,6 +1087,8 @@
 (catalog-meta! 'function "panes-pane-keys" 'effects '(pure))
 (public! 'panes-add-pane "(panes-add-pane LAYOUT [AT]) -> (LAYOUT ID): a new empty pane at index AT, the end when absent; pure")
 (catalog-meta! 'function "panes-add-pane" 'effects '(pure))
+(public! 'panes-fill-capacity "(panes-fill-capacity LAYOUT) -> LAYOUT: panes added up to the capacity, each taking a hidden window; pure")
+(catalog-meta! 'function "panes-fill-capacity" 'effects '(pure))
 (public! 'panes-remove-pane "(panes-remove-pane LAYOUT ID) -> LAYOUT: pane ID goes with its windows; the last pane stays; pure")
 (catalog-meta! 'function "panes-remove-pane" 'effects '(pure))
 (public! 'panes-move-pane "(panes-move-pane LAYOUT ID AT) -> LAYOUT: pane ID moves to index AT with its windows; pure")

@@ -597,19 +597,27 @@
 
 (define (panes--show-in-pane! to buf note)
   "TO is (LAYOUT PANE-ID). BUF takes the window of its mode in that pane,
-   else a new window at the front. The focus stays. NOTE goes to the
-   window log. Answers the window's handle."
+   else its mode's window in another pane, else a new window at the
+   front of that pane. The focus stays. NOTE goes to the window log.
+   Answers the window's handle."
   (let* ((mode (panes--buffer-mode buf))
          (l (car to)) (pid (cadr to))
-         (same (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid)))
+         (same (or (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid))
+                   ;; a mode keeps one window across the panes: a Dired opened
+                   ;; from the chat's pane goes to the Dired window beside it
+                   (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-windows-holding l buf))
+                   (panes-mode-window l mode)))
          (placed (if same
                      (list (if (member buf (panes-window-buffers l same))
                                (panes-show l same buf)
                                (panes-show (panes-drop-buffer l buf) same buf))
                            same)
                      (panes-add-window (panes-drop-buffer l buf) pid buf mode)))
-         ;; the window comes to the front of its pane; the focus stays
+         ;; the window comes to the front of its pane; the focus stays in
+         ;; the pane the frame has selected, not one the model last noted
+         (here (panes--selected-pane l))
          (l (panes-raise (car placed) (cadr placed)))
+         (l (if (and here (panes-pane l here)) (panes-set-focus l here) l))
          (drawn (panes-apply! l)))
     (window-log-note! note buf "->" (cadr placed))
     (panes-handle drawn (cadr placed))))
@@ -767,7 +775,9 @@
 (define (panes--show-follows! win buf)
   "window-set-buffer!: BUF comes to the front of the model window that
    WIN draws. In an empty pane's blank window, BUF fills that pane with
-   a new window on WIN. Another window changes nothing here."
+   a new window on WIN. Another window changes nothing here. Answers
+   the handle of the window BUF went to when that is not WIN, else #f:
+   the door then shows BUF there, not on WIN."
   (let* ((l (panes-layout))
          (k (and l (panes-key-of-handle l win)))
          (pid (and l (not k) (panes--empty-pane-of win))))
@@ -778,13 +788,15 @@
           ;; window list name morg for what was the chat
           ((and k (not (equal? (panes-window-mode l k) (panes--buffer-mode buf))))
            (panes--show-in-pane! (list l (panes-pane-of l k)) buf "panes follows"))
-          (k (panes-layout-set! (panes-show l k buf)))
+          (k (panes-layout-set! (panes-show l k buf)) #f)
           ((and pid (panes-pane l pid))
            ;; the blank window becomes the pane's window: it takes its id
            (let ((made (panes-add-window l pid buf (panes--buffer-mode buf))))
              (panes-layout-set!
                (panes--update-pane (panes-set-handle (car made) (cadr made) win) pid
-                 (lambda (p) (panes--put p 'blank #f)))))))))
+                 (lambda (p) (panes--put p 'blank #f))))
+             #f))
+          (else #f))))
 
 (define (panes--delete-window!)
   "C-x 0: the pane of the selected window goes, and its windows wait
@@ -1059,14 +1071,18 @@
     (lambda (next win &rest more)
       (when (panes--door?) (panes--focus-follows! win))
       (apply next (cons win more))))
+  ;; a buffer of another mode goes to its own window: the show lands
+  ;; there, never on the window asked, and a switch here also moves the
+  ;; focus to it, where the user meant to look
   (advice-add! 'window-set-buffer! 'around 'panes
     (lambda (next win buf &rest more)
-      (when (panes--door?) (panes--show-follows! win buf))
-      (apply next (cons win (cons buf more)))))
+      (let ((to (and (panes--door?) (panes--show-follows! win buf))))
+        (apply next (cons (or to win) (cons buf more))))))
   (advice-add! 'switch-to-buffer-here! 'around 'panes
     (lambda (next buf &rest more)
-      (when (panes--door?) (panes--show-follows! (active-window) buf))
-      (apply next (cons buf more))))
+      (let ((to (and (panes--door?) (panes--show-follows! (active-window) buf))))
+        (when (and to (not (equal? to (active-window)))) (select-window! to))
+        (apply next (cons buf more)))))
   (add-hook! 'group-joined-hook 'panes--joined!)
   (add-hook! 'post-command-hook 'panes--place-joined!)
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)

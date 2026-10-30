@@ -1376,11 +1376,13 @@
 
 ;; The prompt for one log entry. The log is read top to bottom as the
 ;; story of the chat, so each entry says what was done and what came of it.
-(define (chat-summary--turn-prompt passage)
+(define (chat-summary--turn-prompt passage &optional goal)
   (string-append
     "You write one entry of a work log for a chat between a person and a"
-    " coding agent. Below is the person's request and the agent's work on it.\n"
-    "Answer with exactly two lines and nothing else.\n"
+    " coding agent, and you judge where the chat stands against its goal."
+    " Below is the chat's goal, then the person's latest request and the"
+    " agent's work on it.\n"
+    "Answer with exactly three lines and nothing else.\n"
     "TITLE: three to six words naming the subject (files, features, people).\n"
     "DESC: what the agent did and what came of it, in past tense, as one or"
     " two short sentences: the action first, then the result. Name the"
@@ -1388,7 +1390,16 @@
     " give the answer. If it asks the person something or is waiting, say"
     " what for. Do not start with The agent, The assistant or The user;"
     " start with the verb, e.g. Added X to Y; the picker now shows Z.\n"
+    "STATUS: one word, a dash, and a reason of at most ten words. Judge the"
+    " goal, not only the latest request. The word is one of:\n"
+    "  working: the goal is not met and the agent goes on by itself.\n"
+    "  success: the goal is met; the agent finished it or answered it.\n"
+    "  blocked: the agent cannot go on: an error or a failure it cannot fix.\n"
+    "  needs-you: the agent waits on the person: a question, a choice, an"
+    " approval, a draft to review.\n"
+    "  idle: the chat has no goal yet, only talk.\n"
     "Plain text only: no markdown, no emoji. Write in the passage's language."
+    "\n\nGOAL:\n" (if (and (string? goal) (not (equal? goal ""))) goal "(unknown)")
     "\n\nPASSAGE:\n" passage))
 
 (define (chat-summary--first-ask buf)
@@ -1399,6 +1410,43 @@
                 (not (equal? (string-trim (chat-turn-display (car ts))) "")))
            (string-trim (chat-turn-display (car ts))))
           (else (loop (cdr ts))))))
+
+;; The goal a turn is judged against: the open todo this chat holds, else
+;; the ask that opened the chat. The latest ask alone cannot say whether
+;; the work is done -- "go on" is not a goal.
+(define (chat-summary--goal buf)
+  (let* ((who (buffer-local buf 'chat-id))
+         (held (and (string? who) (boundp 'todo-list)
+                    (ignore-errors (lambda () (todo-list (list 'assignee who))))))
+         (t (and (pair? held) (car held))))
+    (if t
+        (chat-summary--clip
+          (string-append (plist-get t 'title)
+            (let ((n (plist-get t 'notes)))
+              (if (and (string? n) (not (equal? (string-trim n) "")))
+                  (string-append "\n" n)
+                  "")))
+          1200)
+        (let ((ask (chat-summary--first-ask buf)))
+          (and ask (chat-summary--clip ask 600))))))
+
+(define chat-goal-statuses '(working success blocked needs-you idle))
+
+;; STATUS: WORD - REASON, from the card writer's answer. A word outside
+;; the five is no status: the turn keeps its line and judges nothing.
+(define (chat-summary--parse-status raw)
+  (let loop ((lines (string-split raw "\n")))
+    (if (null? lines)
+        #f
+        (let ((line (string-trim (car lines))))
+          (if (string-prefix? "STATUS:" (string-upcase line))
+              (let* ((rest (string-trim (substring line 7 (string-length line))))
+                     (m (re-match "^([A-Za-z-]+)[\\s]*[-:–—,]*[\\s]*(.*)$" rest))
+                     (word (and m (string-downcase (cadr m))))
+                     (sym (and word (string->symbol word))))
+                (and (memq sym chat-goal-statuses)
+                     (list sym (chat-summary--one-line (or (caddr m) "") 120))))
+              (loop (cdr lines)))))))
 
 ;; the newest turn of work: every turn back to the ask that started it,
 ;; put back in the order it happened
@@ -1516,9 +1564,11 @@
        (let ((passage (chat-summary--turn-passage buf)))
          (and (not (equal? passage ""))
               (begin
-                (llm-with-model (chat-summary--turn-prompt passage) chat-summary-model
+                (llm-with-model (chat-summary--turn-prompt passage (chat-summary--goal buf))
+                                chat-summary-model
                   (lambda (raw)
-                   (let ((card (and (string? raw) (not (equal? raw "")) (title--parse raw))))
+                   (let ((card (and (string? raw) (not (equal? raw "")) (title--parse raw)))
+                         (status (and (string? raw) (chat-summary--parse-status raw))))
                     (when (and (pair? card) (buffer-known? buf))
                       (let* ((desc (and (pair? (cdr card)) (car (cdr card))))
                              (text (if (and (string? desc)
@@ -1535,7 +1585,8 @@
                                             chat-title-max-bytes))))
                              (b (if (and name (chat-title buf name)) name buf)))
                         (chat-summary-land! b
-                          (chat-summary--one-line text chat-summary-turn-max-bytes)))))))
+                          (chat-summary--one-line text chat-summary-turn-max-bytes)
+                          (and status (car status)) (and status (cadr status))))))))
                 #t)))))
 
 (define (chat-summary-refresh! buf &optional force?)
@@ -1609,11 +1660,26 @@
 ;; doing adds itself here instead of polling the buffer-local.
 (public! 'chat-summary-hook
   "chat-summary-hook — runs (BUF KIND TEXT) when a chat's title or running summary lands; KIND is 'title or 'summary")
+(public! 'chat-status-hook
+  "chat-status-hook — runs (BUF STATUS WHY) when a turn's summary judges the chat's goal; STATUS is working, success, blocked, needs-you or idle")
+
+(effects! '(read))
+(public! 'chat-goal-status
+  "(chat-goal-status BUF) — the newest turn's judgement of BUF's goal: (STATUS WHY), or #f before the first")
+(define (chat-goal-status buf)
+  (let ((s (buffer-local buf 'chat-goal-status)))
+    (and (symbol? s) (list s (or (buffer-local buf 'chat-goal-why) "")))))
+(effects! '(write external spend))
 
 ;; a fresh paragraph: the bar shows it, the log keeps it, the archive
 ;; takes it
-(define (chat-summary-land! buf text)
+(define (chat-summary-land! buf text &optional status why)
   (buffer-set-local! buf 'chat-summary text)
+  ;; the goal status is the newest turn's judgement: the list shows it,
+  ;; the header keeps it, auto-close acts on it
+  (when status
+    (buffer-set-local! buf 'chat-goal-status status)
+    (buffer-set-local! buf 'chat-goal-why (or why "")))
   ;; the first label a chat writes is its title, and it is fixed from
   ;; here on. A chat whose log predates the title takes the oldest entry
   ;; the log holds, so the title is still the label it wore first.
@@ -1625,10 +1691,19 @@
   (run-hook-with-args 'chat-summary-hook buf 'summary text)
   (let ((log (or (buffer-local buf 'chat-summary-log) '())))
     (buffer-set-local! buf 'chat-summary-log
-      (take (cons (list (current-time) text) log) *chat-summary-log-max*)))
+      (take (cons (append (list (current-time) text)
+                          (if status (list status (or why "")) '()))
+                  log)
+            *chat-summary-log-max*)))
   ;; A summary is transcript status: ordered where it lands, durable in the
-  ;; record, but filtered from every model-facing conversation path.
+  ;; record, but filtered from every model-facing conversation path. The
+  ;; turn's goal status rides on it, so the .chat file keeps one per turn.
   (chat-record-push! buf "status" (list (list "text" text)) #f)
+  (when status
+    (let ((r (chat-record buf)))
+      (buffer-set-local! buf 'chat-wire-turns
+        (cons (append (car r) (list 'goal (symbol->string status) 'goal-why (or why "")))
+              (cdr r)))))
   (when (buffer-local buf 'agent-saved-mark)
     (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
     ;; the line wears its kind, as an ask wears >>> you:, so the chat's
@@ -1644,7 +1719,9 @@
   ;; between turns no save is coming -- the archive takes the fresh
   ;; paragraph now; mid-turn the turn-end save carries it
   (unless (buffer-local buf 'chat-turn-active)
-    (chat-log-save! buf)))
+    (chat-log-save! buf))
+  (when status
+    (run-hook-with-args 'chat-status-hook buf status (or why ""))))
 
 ;; The bar shows the latest line. The log shows every line, the chat's
 ;; summaries and the repo's open changes in one order of time.

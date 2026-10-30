@@ -1679,6 +1679,13 @@
       (if (and (string? c) (not (equal? c "")))
           (string-append " subject " (value->string c))
           ""))
+    ;; the newest turn's judgement of the goal, so a dormant or archived
+    ;; chat still says where it stands
+    (let ((g (buffer-local buf 'chat-goal-status)))
+      (if (symbol? g)
+          (string-append " goal " (symbol->string g)
+                         " goal-why " (value->string (or (buffer-local buf 'chat-goal-why) "")))
+          ""))
     ;; who this chat is: its spawn slug and the page it is the companion of,
     ;; so an archived chat comes back linked to its parent and its page
     (let ((sl (buffer-local buf 'agent-slug)))
@@ -1796,6 +1803,7 @@
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
           (title chat-title) (summary chat-summary) (subject chat-subject)
+          (goal chat-goal-status) (goal-why chat-goal-why)
           (directory chat-directory) (slug agent-slug)))
       (let ((doc (plist-get header 'companion-of)))
         (when doc (buffer-relate! buf 'companion (chat-header-string doc))))
@@ -1926,6 +1934,8 @@
     ;; the running summary and every paragraph before it: a reset starts
     ;; a new conversation with nothing to say yet
     chat-summary chat-summary-log
+    ;; and the goal status the newest summary judged
+    chat-goal-status chat-goal-why
     ;; this chat had a runtime and something took it away, so chats-start-all
     ;; knows what to open again. A conversation local, not a global: the flag
     ;; outlives a daemon restart the way chat-turn-active does, and a reset

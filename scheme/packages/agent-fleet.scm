@@ -208,6 +208,20 @@
         ((equal? status 'api) "idle")
         (else "stopped")))
 
+;; the goal status the newest turn summary judged, in the row's words
+(define (chats-goal-label b)
+  (let ((g (buffer-local b 'chat-goal-status)))
+    (and (symbol? g) (if (eq? g 'needs-you) "needs you" (symbol->string g)))))
+
+;; while the runtime works or asks, it says so; between turns the goal
+;; status says where the chat stands
+(define (chats-row-label b)
+  (let ((s (chat-row-status b))
+        (g (chats-goal-label b)))
+    (if (and g (not (memq s '(running starting needs_attention))))
+        g
+        (chats-state-label s))))
+
 ;; The colours a chat's state wears. They are this package's defaults,
 ;; so a theme can say otherwise, and they are the ones the design names:
 ;; a live chat teal, a stopped one coral, an idle one out of the way.
@@ -266,7 +280,7 @@
                  (or (chats-summary b) "") " "
                  (or (chat-subject b) "") " "
                  (chats-model b) " "
-                 (chats-state-label (chat-row-status b)) " "
+                 (chats-row-label b) " "
                  (or (buffer-local b 'agent-slug) "")))
 
 (define (chats-match-text b)
@@ -291,7 +305,7 @@
                  (let ((hit (chat-list-hit b)))
                    (if hit
                        (chat-prompt-clip hit)
-                       (chats-state-label (chat-row-status b)))))
+                       (chats-row-label b))))
         'last (lambda (b)
                 (let ((t (chats-activity-at b)))
                   (if t (chats-age-label t) (ibuffer-last-label b))))
@@ -882,6 +896,8 @@
   "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
 (public! 'chats-state-label
   "(chats-state-label STATUS) — the words a chat list row shows for a runtime status")
+(public! 'chats-row-label
+  "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
 
 
 ;;; ------------------------------------------------------------ the chat list

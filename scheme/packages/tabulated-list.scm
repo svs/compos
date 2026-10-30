@@ -1667,7 +1667,10 @@
   "How long the highlight rests on a row before a list whose preview reads the network fetches it, in milliseconds. A held arrow reaches the row you want before one read goes out. 0 fetches on every move."
   'group 'list 'type 'number)
 
+(define (list-detail-off? buf) (and (buffer-local buf 'list-detail-off) #t))
+
 (define (list-preview! buf)
+ (unless (list-detail-off? buf)
   ;; A mode whose preview reads the network says 'debounce: its preview
   ;; waits for the highlight to rest, then shows whatever row is current then.
   ;; The row it is for is noted, so the selection does not preview it again.
@@ -1689,7 +1692,7 @@
                         (f b e))))))
             buf))
         (let ((e (list-current buf)))
-          (when (and f e) (f buf e))))))
+          (when (and f e) (f buf e)))))))
 
 ;; the mover may not be in the list: the filter prompt is the current
 ;; buffer while its arrows move the rows of the list behind it
@@ -2851,6 +2854,23 @@
   (lambda () (list-cycle-view! (current-buffer))))
 
 (define-key "list-mode-map" "C-c C-v" "list-cycle-view")
+
+;; the detail follows the highlight until you turn it off; off, the
+;; details leave the screen and moving shows nothing until you turn it on
+(define-command "list-toggle-detail" "Turn this list's detail on or off"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (off (not (list-detail-off? buf))))
+      (buffer-set-local! buf 'list-detail-off off)
+      (if off
+          (let ((id (and (boundp 'app-id) (app-id buf))))
+            (when id (app-hide-detail-buffers! id)))
+          (list-preview! buf))
+      (message (if off "Detail off" "Detail on")))))
+
+(define-key "list-mode-map" "C-c v" "list-toggle-detail")
+
+(public! 'list-detail-off? "(list-detail-off? BUF) — #t when list BUF's detail does not follow the highlight")
 
 (public! 'list-cycle-view! "(list-cycle-view! BUF) — the next view of list BUF: rendered, bare, source; answers its name")
 (public! 'list-source-text "(list-source-text BUF) — the buffer under list BUF's view, as ComposML text")

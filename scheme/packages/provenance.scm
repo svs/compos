@@ -190,7 +190,11 @@
 
 ;;; --- the verbs ----------------------------------------------------------------
 
-(define *revision-buffer* "*revision*")
+;; one buffer per revision, named after the buffer and the row number, so
+;; C-` walks the revisions you looked at and M-RET keeps one
+(define (prov-revision-name id)
+  (string-append "*revision:" (file-name-nondirectory (or *buffer-log-target* "?"))
+                 " #" (number->string (prov-index id)) "*"))
 
 (define (prov-op-lines ops)
   (apply string-append
@@ -238,14 +242,16 @@
 ;; Moving in the log keeps focus in the list and updates the other window.
 ;; RET selects that same window, so preview and visit show one durable view.
 (define (prov-show-revision! rev select?)
-  (let ((buf *revision-buffer*))
-    (buffer-create buf)
+  (let ((buf (prov-revision-name (prov-get rev 'id)))
+        (group (buffer-group *buffer-log-buffer*)))
+    (unless (buffer-known? buf) (buffer-create buf))
     (buffer-set-local! buf 'revision rev)
     (buffer-set-local! buf 'mode-name "revision-mode")
     (prov-revision-setup! buf)
-    ;; one revision buffer, shown in another window
-    (display-buffer-other-window! buf)
-    (let ((win (window-showing buf)))
+    (when (and group (not (equal? (buffer-group buf) group)))
+      (buffer-move-to-group! buf group))
+    ;; the detail window beside the log, the same one for every revision
+    (let ((win (display-buffer-detail! buf *buffer-log-buffer*)))
       (when (and select? win (window-exists? win))
         (select-window! win)))))
 
@@ -256,10 +262,14 @@
 (mode-icon! "revision-mode" "")
 
 (define-mode "revision-mode" (lambda () (prov-revision-setup! (current-buffer))))
-(mode-keys! "revision-mode" '(("q" "quit-window")))
+(mode-keys! "revision-mode"
+  '(("q" "quit-window") ("n" "index-next-item") ("p" "index-previous-item")))
 
 (mode-doc! "revision-mode"
-  "One revision of one buffer: its actor, its group, and every operation it holds, with the text each one inserted and deleted.")
+  "One revision of one buffer: its actor, its group, and every operation it holds, with the text each one inserted and deleted. `n`/`p` step to the next and previous revision in this window, with or without the log on screen. ``C-` `` walks the revisions you opened, `M-RET` keeps this one, `^` goes to the log.")
+
+(detail-name! "revision-mode"
+  (lambda (buf) (string-append (substring buf 0 (- (string-length buf) 1)) " kept*")))
 
 (define-command "buffer-log-describe" "Visit this revision in full, with the text it moved"
   (lambda ()
@@ -268,6 +278,12 @@
       (if (not rev)
           (message "no revision on this line")
           (prov-show-revision! rev #t)))))
+
+(define-command "buffer-log-show" "Show this revision beside the log, keeping focus here"
+  (lambda ()
+    (let* ((id (list-current *buffer-log-buffer*))
+           (rev (and id (prov-plist id))))
+      (when rev (prov-show-revision! rev #f)))))
 
 (define-command "buffer-log-refresh" "Redraw the revision list"
   (lambda ()
@@ -284,8 +300,10 @@
            "Every accepted revision of one buffer, oldest first. The header "
            "names the recording state, the policy that set it, and the "
            "accepted head. The text column shows what the change inserted, or "
-           "what it deleted when it only deleted. Moving previews the pointed "
-           "revision. `RET` visits it, with every operation and its text.")
+           "what it deleted when it only deleted. Moving shows the pointed "
+           "revision beside the log, one buffer per revision. `RET` goes "
+           "to it; there `n`/`p` step through the history. `C-c v` turns "
+           "the detail on and off.")
     'buffer *buffer-log-buffer*
     'rows prov-ids
     'columns (lambda (buf)
@@ -300,11 +318,15 @@
     'local-filter #t
     'preview prov-preview-revision!
     'footer (lambda (buf)
-              '(("n/p" "preview") ("RET" "visit") ("/" "filter")
+              '(("n/p" "move") ("RET" "visit") ("C-c v" "detail") ("/" "filter")
                 ("g" "refresh") ("q" "quit")))
     'keys '(("RET" "buffer-log-describe")
             ("g" "buffer-log-refresh")
             ("q" "quit-window"))))
+
+;; the log is an index: a revision steps to its neighbours without the log
+(index-declare! "buffer-log-mode"
+  'next "list-next" 'prev "list-prev" 'open "buffer-log-show")
 
 (define-command "buffer-log" "Show the provenance of this buffer: every accepted revision"
   (lambda ()

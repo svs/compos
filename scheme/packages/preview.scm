@@ -278,6 +278,15 @@
   (preview-view! (current-buffer) on)
   (editing-quit!))
 
+;; a click on a tab reaches the page as a block click, not as a command
+(add-hook! (list 'block-click 'preview-tabs)
+  (lambda (buf id)
+    (and (member id '("preview-tab-raw" "preview-tab-preview"))
+         (buffer-exists? buf)
+         (begin (with-current-buffer buf
+                  (lambda () (preview-view! buf (equal? id "preview-tab-preview"))))
+                #t))))
+
 (define-command "preview-tab-raw" "Show the page's source"
   (lambda () (preview-view! (current-buffer) #f) (editing-quit!)))
 (define-command "preview-tab-preview" "Show the rendered page"

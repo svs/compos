@@ -322,6 +322,40 @@
                  "unfolded: the keys are back")
     (t--rw-done!)))
 
+(deftest 'a-selection-elsewhere-starts-its-own-rewrite
+  "With a diff waiting, a new selection parks that draft as an option and rewrites the new passage."
+  (lambda ()
+    (t--rw! "One.\n\nTwo.\n\nThree.\n")
+    (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
+    (t--rw-propose! t--rw-buf 6 10 "Two." "Deux." t--rw-what)
+    (let* ((spans (diff-block--spans t--rw-buf))
+           (at (string-index (buffer-text t--rw-buf) "Three.")))
+      (with-stub 'minibuffer-read (lambda (prompt choices callback) (callback "French"))
+        (lambda ()
+          (with-stub 'llm (lambda (prompt callback) (callback "Trois."))
+            (lambda () (llm-rewrite--start-elsewhere! t--rw-buf at (+ at 6) spans))))))
+    (let ((text (buffer-text t--rw-buf)) (p (diff-block-pending t--rw-buf)))
+      (check-true! (string-index text "Deux.") "the first draft is kept as an option")
+      (check-true! (string-prefix? "One.\n\nTwo.\n" text) "the first passage stands")
+      (check-equal! (and p (diff-block-ours p)) "Three." "the new diff is on the new passage")
+      (check-equal! (and p (diff-block-theirs p)) "Trois." "with the new rewrite"))
+    (t--rw-done!)))
+
+(deftest 'setting-the-mark-releases-the-lasting-selection
+  "A new mark clears the rewrite's highlight; the session and its keys stay."
+  (lambda ()
+    (t--rw-options!)
+    (check-true! (pair? (buffer-overlays t--rw-buf 'rewrite-selection)) "the passage is highlighted")
+    (switch-to-buffer! t--rw-buf)
+    (set-mark! 0)
+    (llm-rewrite--release-on-mark!)
+    (check-equal! (buffer-overlays t--rw-buf 'rewrite-selection) '() "the highlight let go")
+    (check-true! (llm-rewrite--session t--rw-buf) "the rewrite is still there")
+    (llm-rewrite--refine! t--rw-buf "Zwei." "German")
+    (check-equal! (buffer-overlays t--rw-buf 'rewrite-selection) '() "iterating does not bring it back")
+    (set-mark! #f)
+    (t--rw-done!)))
+
 (deftest 'an-empty-answer-decides-nothing
   "leaving the prompt is not a decision"
   (lambda ()

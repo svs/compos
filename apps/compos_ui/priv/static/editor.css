@@ -685,9 +685,22 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
   text-align: center; color: var(--dim-fg, #8a857a);
 }
 .line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
-/* a folded fenced block is a quiet line: smaller and dim, whatever it holds */
-.line.row-fence:has(.f-fold-marker) .line-content {
-  font-size: 0.8em; color: var(--dim-fg);
+/* A folded fenced block is a sliver: a thin rule where the block is, its
+   fence text (and any keys on it) out of sight. Point on the line opens
+   the sliver back to a small dim line, so you can read what is folded. */
+.line.row-fence:has(.f-fold-marker):not(.hl-line) {
+  height: 5px; min-height: 0; overflow: hidden;
+}
+.line.row-fence:has(.f-fold-marker):not(.hl-line) .line-content,
+.line.row-fence:has(.f-fold-marker):not(.hl-line) .linenum {
+  font-size: 0; line-height: 0;
+}
+.line.row-fence:has(.f-fold-marker):not(.hl-line) .line-content {
+  display: block; height: 0; margin-top: 2px;
+  border-top: 1px dashed color-mix(in srgb, var(--dim-fg) 60%, transparent);
+}
+.line.row-fence.hl-line:has(.f-fold-marker) .line-content {
+  font-size: 0.75em; color: var(--dim-fg);
 }
 
 .line.row-quote .line-content {

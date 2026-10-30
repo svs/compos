@@ -128,14 +128,26 @@
 
 (define (llm-rewrite--paint-selection! buf)
   (let* ((s (llm-rewrite--session buf))
-         (span (and s (llm-rewrite--range buf s "source"))))
+         (span (and s (not (plist-get s 'released)) (llm-rewrite--range buf s "source"))))
     (overlay-set! buf 'rewrite-selection
       (if span (list (list (car span) (cadr span) "rewrite-selection")) '()))))
+
+;; Setting the mark again lets the lasting selection go: the highlight
+;; clears, while the rewrite, its blocks and its keys stay.
+(define (llm-rewrite--release-on-mark!)
+  (let ((buf (current-buffer)))
+    (when (and (buffer-local buf 'rewrite-active) (mark))
+      (let ((s (llm-rewrite--session buf)))
+        (when (and s (not (plist-get s 'released)))
+          (llm-rewrite--save-session! buf (plist-put s 'released #t))
+          (overlay-clear! buf 'rewrite-selection))))))
+
+(add-hook! 'post-command-hook 'llm-rewrite--release-on-mark!)
 
 (define (llm-rewrite--track! buf s part span)
   (let ((face (llm-rewrite--face s part)))
     (overlay-set! buf face (list (append span (list face)))))
-  (when (equal? part "source")
+  (when (and (equal? part "source") (not (plist-get s 'released)))
     (overlay-set! buf 'rewrite-selection
       (list (list (car span) (cadr span) "rewrite-selection"))))
   (llm-rewrite--save-session! buf
@@ -547,6 +559,15 @@
       (block-unbind-keys! buf (llm-rewrite--option-key-pairs)))
     (message "Rewrite cancelled; the text stays")))
 
+(define (llm-rewrite--start-at! buf start end old)
+  (minibuffer-read "Rewrite region (blank: the selection is the instruction): " (llm-rewrite-directives buf)
+    (lambda (input)
+      (let ((directive (llm-rewrite--directive buf input)))
+        (llm-rewrite--new-session! buf start end old)
+        (llm-rewrite--ask! buf old directive
+          (lambda (new)
+            (llm-rewrite--propose! buf start end old new directive)))))))
+
 (define (llm-rewrite--start! buf)
   (let* ((start (and (mark) (region-beginning)))
          (end (and start (region-end)))
@@ -555,13 +576,21 @@
         (message "No region - set the mark first (C-SPC)")
         (begin
           (set-mark! #f)
-          (minibuffer-read "Rewrite region (blank: the selection is the instruction): " (llm-rewrite-directives buf)
-            (lambda (input)
-              (let ((directive (llm-rewrite--directive buf input)))
-                (llm-rewrite--new-session! buf start end old)
-                (llm-rewrite--ask! buf old directive
-                  (lambda (new)
-                    (llm-rewrite--propose! buf start end old new directive))))))))))
+          (llm-rewrite--start-at! buf start end old)))))
+
+;; A buffer holds one waiting diff. A new selection elsewhere parks the
+;; waiting draft in its options block and takes the diff back out, then
+;; starts its own rewrite; edits above the selection shift it by their size.
+(define (llm-rewrite--start-elsewhere! buf start end spans)
+  (let ((old (block-text-at buf start end))
+        (before (buffer-size buf)))
+    (set-mark! #f)
+    (when (llm-rewrite--session buf) (llm-rewrite--keep-option! buf))
+    (when (diff-block-pending buf) (diff-block-reject! buf))
+    (if (diff-block-pending buf)
+        (message "The waiting rewrite was edited; decide it first")
+        (let ((shift (if (>= start (nth 3 spans)) (- (buffer-size buf) before) 0)))
+          (llm-rewrite--start-at! buf (+ start shift) (+ end shift) old)))))
 
 ;;; --- the review loop ---------------------------------------------------------
 ;; One key decides. The block's own keys live only in the buffer that
@@ -697,8 +726,14 @@
 (define-command "llm-rewrite"
   "Rewrite the region; keep drafts as options and iterate with the passage's conversation"
   (lambda ()
-    (let* ((buf (current-buffer)) (p (diff-block-pending buf)))
-      (cond (p (llm-rewrite--again! buf p))
+    (let* ((buf (current-buffer))
+           (p (diff-block-pending buf))
+           (spans (and p (diff-block--spans buf)))
+           (here (and (mark) (list (region-beginning) (region-end))))
+           (elsewhere (and here spans (< (car here) (cadr here))
+                           (or (>= (car here) (nth 3 spans)) (<= (cadr here) (nth 0 spans))))))
+      (cond (elsewhere (llm-rewrite--start-elsewhere! buf (car here) (cadr here) spans))
+            (p (llm-rewrite--again! buf p))
             ((and (not (mark)) (llm-rewrite--locate! buf))
              (llm-rewrite--options-menu! buf))
             (else (llm-rewrite--start! buf))))))

@@ -163,7 +163,8 @@ defmodule Compos.Core.Events do
   def scheme(m) when is_map(m),
     do: Enum.flat_map(Enum.sort(Map.to_list(m)), fn {k, v} -> [scheme(k), scheme(v)] end)
 
-  def scheme([{k, _} | _] = kw) when is_atom(k),
+  # A Scheme symbol is {:sym, name}; a list that starts with one is a list.
+  def scheme([{k, _} | _] = kw) when is_atom(k) and k != :sym,
     do: Enum.flat_map(kw, fn {k, v} -> [scheme(k), scheme(v)] end)
 
   def scheme(l) when is_list(l), do: Enum.map(l, &scheme/1)

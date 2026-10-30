@@ -916,7 +916,7 @@
   "How sure JEV must be, from 0 to 1, that a chat is done before it closes."
   'group 'chat 'type 'number)
 
-(define *chat-done-question*
+(define (chat-done-question)
   (decide-noul "Is this chat done? It is done unless the agent now waits on svs for something specific before it can go on.
 NOT done: the reply asks svs a question he must answer, asks him to choose, approve or confirm, says a draft or message waits for his approval, or the agent says it will do more work in THIS chat.
 DONE: the reply answers what svs asked, reports finished work, hands the rest to another chat or todo, or only invites him to come back if something is still wrong (\"tell me if it is still stuck\")."))
@@ -957,7 +957,7 @@ DONE: the reply answers what svs asked, reports finished work, hands the rest to
         (let ((ex (chat-done-exchange chat)))
           (decide-async (string-append "Last message from svs:\n" (car ex)
                                        "\n\nLast reply from the agent:\n" (cadr ex))
-                        (list 'done *chat-done-question*)
+                        (list 'done (chat-done-question))
                         (lambda (r)
                           (let* ((row (assq 'done (or (plist-get r 'answers) '())))
                                  (p (and row (plist-get (cadr row) 'noul))))

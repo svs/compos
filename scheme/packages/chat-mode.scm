@@ -354,7 +354,7 @@
   (buffer-set-local! buf 'llm-session-dirty #f)
   #t)
 
-(define-command "llm-set-model" "Choose the model for C-RET in this buffer"
+(define-command "llm-set-model" "Choose the model for C-RET and this buffer's chat"
   (lambda ()
     (let ((buf (current-buffer)))
       (minibuffer-read
@@ -366,6 +366,10 @@
             ;; Codex fixes model identity in the thread instructions. Resume
             ;; the same thread through a fresh runtime with the new override.
             (llm-mode-reset-runtime! buf #t)
+            (let ((chat (llm-mode--companion-recall! buf)))
+              (when chat
+                (chat-switch! chat #f model)
+                (buffer-set-local! buf 'llm-session-id (buffer-local chat 'agent-slug))))
             (message (string-append "C-RET · " model))))))))
 
 ;; The live inline turn is data on the document's chat, not a registry of
@@ -655,11 +659,11 @@
         (when c (buffer-relate! c 'companion buf))
         c)))
 
-(define (llm-mode--companion! buf &optional model group)
+(define (llm-mode--companion! buf &optional model group name)
   ;; a new chat starts as its group's chats do: the group's bundle, unless the
   ;; document chose its own model or connector. GROUP, when given, is the chat's
   ;; group in place of the document's.
-  (let* ((name (or (llm-mode--companion-recall! buf group) (llm-mode--companion-name buf)))
+  (let* ((name (or name (llm-mode--companion-recall! buf group) (llm-mode--companion-name buf)))
          (g (or group (buffer-group buf)))
          (bundle (and g (boundp 'llm-group-bundle) (llm-group-bundle g)))
          (bundle-model (and bundle (let ((m (llm-bundle-model bundle))) (if (equal? m "default") #f m))))

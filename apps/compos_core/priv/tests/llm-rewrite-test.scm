@@ -254,7 +254,7 @@
   (lambda ()
     (t--rw-options!)
     (let ((calls '()))
-      (with-stub 'llm (lambda (prompt callback) (set! calls (append calls (list prompt))))
+      (with-stub 'llm-with-model (lambda (prompt model callback) (set! calls (append calls (list prompt))))
         (lambda ()
           (t--rw-review! "")
           (diff-block-reject! t--rw-buf)
@@ -302,7 +302,7 @@
     (t--rw! "it needs [word for beams] now.")
     (llm-rewrite--new-session! t--rw-buf 0 29 "it needs [word for beams] now.")
     (let ((landed #f))
-      (with-stub 'llm (lambda (prompt callback) (callback "It needs: rafters, and more\n1: girders"))
+      (with-stub 'llm-with-model (lambda (prompt model callback) (callback "It needs: rafters, and more\n1: girders"))
         (lambda ()
           (llm-rewrite--ask! t--rw-buf "it needs [word for beams] now." *llm-rewrite-self-directive*
             (lambda (new) (set! landed new)))))
@@ -332,7 +332,7 @@
            (at (string-index (buffer-text t--rw-buf) "Three.")))
       (with-stub 'minibuffer-read (lambda (prompt choices callback) (callback "French"))
         (lambda ()
-          (with-stub 'llm (lambda (prompt callback) (callback "Trois."))
+          (with-stub 'llm-with-model (lambda (prompt model callback) (callback "Trois."))
             (lambda () (llm-rewrite--start-elsewhere! t--rw-buf at (+ at 6) spans))))))
     (let ((text (buffer-text t--rw-buf)) (p (diff-block-pending t--rw-buf)))
       (check-true! (string-index text "Deux.") "the first draft is kept as an option")
@@ -371,7 +371,7 @@
     (t--rw-done!)))
 
 (deftest 'the-options-block-takes-keys-not-typing
-  "Typing inside the options block is put back; the original is not listed, only the drafts."
+  "Typing in a draft is put back; only its prompt is editable."
   (lambda ()
     (t--rw-options!)
     (let* ((s (llm-rewrite--session t--rw-buf))
@@ -379,7 +379,7 @@
            (rendered (plist-get s 'rendered)))
       (check-false! (string-index rendered "Original") "the original is not listed")
       (check-true! (string-index rendered "Option 1: ") "the draft is")
-      (buffer-insert! t--rw-buf (+ (car span) 90) "typed")
+      (buffer-insert! t--rw-buf (+ (car span) (string-index rendered "Deux.")) "typed")
       (llm-rewrite--checkpoint! t--rw-buf)
       (let ((span (llm-rewrite--range t--rw-buf (llm-rewrite--session t--rw-buf) "block")))
         (check-equal! (block-text-at t--rw-buf (car span) (cadr span)) rendered "the typing was put back")
@@ -508,7 +508,7 @@
     (t--rw! "Two.")
     (llm-rewrite--new-session! t--rw-buf 0 4 "Two.")
     (let ((calls '()) (landed '()))
-      (with-stub 'llm (lambda (prompt callback) (set! calls (append calls (list (list prompt callback)))))
+      (with-stub 'llm-with-model (lambda (prompt model callback) (set! calls (append calls (list (list prompt callback)))))
         (lambda ()
           (llm-rewrite--ask! t--rw-buf "Two." "French" (lambda (s) (set! landed (cons s landed))))
           ((cadr (car calls)) "Deux.")
@@ -584,7 +584,7 @@
         (check-equal! choices (llm-rewrite-directives t--rw-buf) "only instructions are offered"))
       (lambda () (llm-rewrite--options-menu! t--rw-buf)))
     (let ((calls '()))
-      (with-stub 'llm (lambda (prompt callback) (set! calls (cons prompt calls)))
+      (with-stub 'llm-with-model (lambda (prompt model callback) (set! calls (cons prompt calls)))
         (lambda () (t--rw-review! "try again")))
       (check-true! (number? (string-index (car calls) "is its own instruction"))
                    "try again goes back to the passage's notes"))
@@ -597,7 +597,7 @@
     (t--rw-done!)))
 
 (deftest 'rewrite-options-fence-names-keys-and-promotes-at-point
-  "The options block names its keys; C-c p promotes the draft under point, C-c u puts the original back."
+  "The options block names its keys; C-c p promotes the draft under point."
   (lambda ()
     (t--rw-options!)
     (diff-block-reject! t--rw-buf)
@@ -606,8 +606,8 @@
            (text (plist-get s 'rendered))
            (head (car (string-split text "\n"))))
       (check-true! (string-index head "C-c p promote") "fence names promote")
-      (check-true! (string-index head "C-c u original") "fence names restore")
-      (check-false! (string-index text "Option 0") "the original is not a number")
+      (check-true! (string-index head "C-c r again") "fence names rerun")
+      (check-false! (string-index text "Original") "the original is not listed as a draft")
       (check-false! (llm-rewrite--option-at t--rw-buf s (car span)) "the fence line is no option")
       (switch-to-buffer! t--rw-buf)
       (buffer-goto! t--rw-buf (+ (car span) (string-index text "Deux.")))
@@ -615,10 +615,84 @@
       (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "C-c p promoted the draft at point")
       (let ((block (llm-rewrite--range t--rw-buf (llm-rewrite--session t--rw-buf) "block")))
         (check-true! (and (<= (car block) (buffer-point t--rw-buf)) (<= (buffer-point t--rw-buf) (cadr block)))
-                     "the cursor stays in the options block"))
-      (trace-key! '("C-c" "u"))
-      (check-equal! (block-text-at t--rw-buf 6 10) "Two." "C-c u put the original back"))
+                     "the cursor stays in the options block")))
     (t--rw-done!)))
+
+(deftest 'rewrite-options-rerun-the-draft-at-point
+  "Editing an option's visible prompt is enough; C-c r reruns it directly from that draft."
+  (lambda ()
+    (t--rw-options!)
+    (diff-block-reject! t--rw-buf)
+    (switch-to-buffer! t--rw-buf)
+    (buffer-replace! t--rw-buf t--rw-what "shorter")
+    (llm-rewrite--checkpoint! t--rw-buf)
+    (check-equal! (car (nth 1 (plist-get (llm-rewrite--session t--rw-buf) 'options))) "shorter"
+                  "the visible prompt edit is kept")
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "block"))
+           (text (plist-get s 'rendered))
+           (calls '()))
+      (buffer-goto! t--rw-buf (+ (car span) (string-index text "Deux.")))
+      (with-stub 'minibuffer-read
+        (lambda (prompt choices callback) (error "an option rerun opened another prompt"))
+        (lambda ()
+          (with-stub 'llm-with-model
+            (lambda (prompt model callback) (set! calls (cons (list prompt callback) calls)))
+            (lambda () (trace-key! '("C-c" "r"))))))
+      (check-equal! (length calls) 1 "C-c r sent one rewrite request")
+      (check-true! (number? (string-index (car (car calls)) "Deux.")) "the saved draft is the rerun source")
+      (check-true! (number? (string-index (car (car calls)) "shorter")) "the edited instruction is sent")
+      ((cadr (car calls)) "D.")
+      (check-equal! (diff-block-theirs (diff-block-pending t--rw-buf)) "D." "the rerun lands as a fresh diff")
+      (check-equal! (block-text-at t--rw-buf 6 10) "Two." "the passage is unchanged")
+      (check-equal! (cadr (nth 1 (plist-get (llm-rewrite--session t--rw-buf) 'options))) "Deux."
+                    "the saved option is unchanged")
+      (check-true! (number? (string-index (plist-get (llm-rewrite--session t--rw-buf) 'history) "shorter"))
+                   "the rerun stays in the conversation"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-chat-follows-the-buffer-model-and-stays-user-usable
+  "The attached chat is a real companion, and C-c m changes its model and later rewrite requests."
+  (lambda ()
+    (t--rw! "Two.")
+    (buffer-set-local! t--rw-buf 'llm-model "first-model")
+    (let ((s (plist-put (llm-rewrite--new-session! t--rw-buf 0 4 "Two.")
+                        'history "\n### You\nold\n"))
+          (switches '()))
+      (with-stub 'chat-attach-agent!
+        (lambda (chat connector model opts)
+          (buffer-set-local! chat 'agent-slug "zz-rewrite-agent")
+          (buffer-set-local! chat 'agent-connector connector)
+          (buffer-set-local! chat 'agent-model model)
+          (buffer-set-local! chat 'agent-saved-mark (buffer-size chat)))
+        (lambda ()
+          (let ((chat (llm-rewrite--chat! t--rw-buf s)))
+            (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the attachment is a chat")
+            (check-false! (buffer-local chat 'context-only) "the user can use the chat")
+            (check-equal! (llm-mode--companion-recall! t--rw-buf) chat "it is the buffer's companion")
+            (check-equal! (buffer-local chat 'agent-model) "first-model" "it starts with the buffer model")
+            (check-equal! (buffer-local chat 'agent-saved-mark) (buffer-size chat)
+                          "existing rewrite history is transcript, not input")
+            (with-stub 'chat-switch!
+              (lambda (where connector model)
+                (set! switches (cons (list where connector model) switches))
+                (buffer-set-local! where 'agent-model model))
+              (lambda ()
+                (with-stub 'minibuffer-read
+                  (lambda (prompt choices callback) (callback "second-model"))
+                  (lambda ()
+                    (switch-to-buffer! t--rw-buf)
+                    (run-command "llm-set-model")))))
+            (check-equal! (buffer-local t--rw-buf 'llm-model) "second-model" "the buffer changed")
+            (check-equal! switches (list (list chat #f "second-model")) "the same chat changed")
+            (let ((models '()))
+              (with-stub 'llm-with-model
+                (lambda (prompt model callback) (set! models (cons model models)))
+                (lambda () (llm-rewrite--ask! t--rw-buf "Two." "shorter" (lambda (new) #t))))
+              (check-equal! models (list "second-model") "rewrite requests use the buffer model")
+              (check-equal! (buffer-local chat 'agent-saved-mark) (buffer-size chat)
+                            "later rewrite messages stay out of the user's input")))))
+    (t--rw-done!))))
 
 (deftest 'rewrite-options-blocks-do-not-run
   "An options block holds saved text, not executable code."

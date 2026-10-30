@@ -219,6 +219,10 @@
   "A legacy name for a hand-written waiting block. It does not run."
   'runnable #f 'ts-lang #f)
 
+(define-fence-kind! "options"
+  "Saved rewrite alternatives. Use llm-rewrite to show, hide, choose, or iterate."
+  'runnable #f 'ts-lang #f)
+
 ;; Info strings whose tree-sitter grammar wears another name and that
 ;; morg-babel gives no runner.
 (for-each

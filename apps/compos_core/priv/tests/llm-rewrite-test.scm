@@ -19,6 +19,10 @@
 
 (define (t--rw-done!)
   (when (buffer-known? t--rw-buf)
+    (for-each (lambda (s)
+                (let ((chat (plist-get s 'chat)))
+                  (when (and chat (buffer-known? chat)) (buffer-kill! chat))))
+              (or (buffer-local t--rw-buf 'rewrite-sessions) '()))
     (diff-block-release! t--rw-buf)
     (buffer-kill! t--rw-buf)))
 
@@ -291,3 +295,179 @@
         (check-false! (mark) "the mark is gone the moment the ask begins")
         (run-command "minibuffer-cancel")))
     (t--rw-done!)))
+
+(define (t--rw-options!)
+  (t--rw-proposed!)
+  (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
+  (llm-rewrite--keep-option! t--rw-buf))
+
+(deftest 'rewrite-options-keep-the-source-and-all-saved-drafts
+  "Keeping an option does not accept the diff."
+  (lambda ()
+    (t--rw-options!)
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "source stays")
+    (llm-rewrite--refine! t--rw-buf "Zwei." "German")
+    (llm-rewrite--keep-option! t--rw-buf)
+    (llm-rewrite--keep-option! t--rw-buf)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "block")))
+      (check-equal! (map cadr (plist-get s 'options)) '("Two." "Deux." "Zwei.")
+                    "original plus two drafts, no duplicate")
+      (check-equal! (block-text-at t--rw-buf (car span) (cadr span))
+                    (llm-rewrite--options-text s) "options are a real document block"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-survive-rejection-and-follow-edits-above
+  "The saved alternatives remain after the preview is dismissed."
+  (lambda ()
+    (t--rw-options!)
+    (diff-block-reject! t--rw-buf)
+    (buffer-insert! t--rw-buf 0 "Intro.\n")
+    (llm-rewrite--choose-option! t--rw-buf 1)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "source")))
+      (check-equal! (block-text-at t--rw-buf (car span) (cadr span)) "Deux."
+                    "the tracked source receives the option")
+      (check-true! (llm-rewrite--options-valid? t--rw-buf s) "options remain intact"))
+    (llm-rewrite--choose-option! t--rw-buf 0)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "source")))
+      (check-equal! (block-text-at t--rw-buf (car span) (cadr span)) "Two." "original is option zero"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-survive-direct-diff-acceptance
+  "Accept through the diff command, then choose the original."
+  (lambda ()
+    (t--rw-options!)
+    (with-current-buffer t--rw-buf (lambda () (run-command "diff-block-accept")))
+    (check-equal! (plist-get (llm-rewrite--session t--rw-buf) 'current) "Deux."
+                  "the diff decision updates the session")
+    (llm-rewrite--choose-option! t--rw-buf 0)
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "original restored")
+    (check-true! (llm-rewrite--options-valid? t--rw-buf (llm-rewrite--session t--rw-buf))
+                 "saved block remains")
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-choose-while-a-preview-is-waiting
+  "Choosing an option dismisses an unedited preview first."
+  (lambda ()
+    (t--rw-options!)
+    (llm-rewrite--choose-option! t--rw-buf 1)
+    (check-false! (diff-block-pending t--rw-buf) "preview is gone")
+    (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "saved option chosen")
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-hide-and-show-without-changing-text
+  "Folding changes presentation only."
+  (lambda ()
+    (t--rw-options!)
+    (let ((text (buffer-text t--rw-buf))
+          (tag (llm-rewrite--face (llm-rewrite--session t--rw-buf) "fold")))
+      (llm-rewrite--toggle-options! t--rw-buf)
+      (check-true! (pair? (fold-get t--rw-buf tag)) "options hidden")
+      (llm-rewrite--toggle-options! t--rw-buf)
+      (check-equal! (fold-get t--rw-buf tag) '() "options visible")
+      (check-equal! (buffer-text t--rw-buf) text "document unchanged"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-protect-edited-source-and-options
+  "Neither saved drafts nor the user's changed passage are overwritten."
+  (lambda ()
+    (t--rw-options!)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (span (llm-rewrite--range t--rw-buf s "block")))
+      (buffer-insert! t--rw-buf (+ (car span) 15) "manual")
+      (let ((text (buffer-text t--rw-buf)))
+        (llm-rewrite--keep-option! t--rw-buf)
+        (check-equal! (buffer-text t--rw-buf) text "edited options stay")))
+    (diff-block-reject! t--rw-buf)
+    (buffer-insert! t--rw-buf 7 "manual")
+    (let ((text (buffer-text t--rw-buf)))
+      (llm-rewrite--choose-option! t--rw-buf 1)
+      (check-equal! (buffer-text t--rw-buf) text "edited source stays"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-iteration-sends-the-conversation-and-ignores-stale-replies
+  "A later instruction sees earlier replies; superseded replies cannot land."
+  (lambda ()
+    (t--rw! "Two.")
+    (llm-rewrite--new-session! t--rw-buf 0 4 "Two.")
+    (let ((calls '()) (landed '()))
+      (with-stub 'llm (lambda (prompt callback) (set! calls (append calls (list (list prompt callback)))))
+        (lambda ()
+          (llm-rewrite--ask! t--rw-buf "Two." "French" (lambda (s) (set! landed (cons s landed))))
+          ((cadr (car calls)) "Deux.")
+          (llm-rewrite--ask! t--rw-buf "Deux." "shorter" (lambda (s) (set! landed (cons s landed))))
+          (llm-rewrite--ask! t--rw-buf "Deux." "German" (lambda (s) (set! landed (cons s landed))))
+          ((cadr (cadr calls)) "stale")
+          ((cadr (nth 2 calls)) "Zwei.")
+          (check-equal! landed '("Zwei." "Deux.") "stale response discarded")
+          (let* ((s (llm-rewrite--session t--rw-buf))
+                 (chat (plist-get s 'chat)))
+            (check-equal! (buffer-text chat) (plist-get s 'history) "chat holds the same history")
+            (check-true! (number? (string-index (car (cadr calls)) "Deux.")) "prior reply is sent")
+            (check-true! (number? (string-index (car (cadr calls)) "French")) "prior instruction is sent")))))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-rebuild-after-mode-setup
+  "Saved document locals rebuild tracking and folds without a live model."
+  (lambda ()
+    (t--rw-options!)
+    (diff-block-reject! t--rw-buf)
+    (buffer-insert! t--rw-buf 0 "Intro.\n")
+    (llm-rewrite--checkpoint! t--rw-buf)
+    (llm-rewrite--toggle-options! t--rw-buf)
+    (let* ((s (llm-rewrite--session t--rw-buf))
+           (id (plist-get s 'id)))
+      (for-each (lambda (part) (overlay-clear! t--rw-buf (llm-rewrite--face s part)))
+                '("source" "block"))
+      (fold-set! t--rw-buf (llm-rewrite--face s "fold") '())
+      (with-current-buffer t--rw-buf (lambda () (set-mode! "text-mode")))
+      (check-equal! (plist-get (llm-rewrite--session t--rw-buf) 'id) id "session identity survives")
+      (check-true! (pair? (fold-get t--rw-buf (llm-rewrite--face s "fold"))) "hidden options rebuilt")
+      (llm-rewrite--choose-option! t--rw-buf 1)
+      (let* ((s (llm-rewrite--session t--rw-buf))
+             (src (llm-rewrite--range t--rw-buf s "source")))
+        (check-equal! (block-text-at t--rw-buf (car src) (cadr src)) "Deux." "selection still works")))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-command-runs-through-key-dispatch
+  "A test-owned key saves the preview as an option."
+  (lambda ()
+    (t--rw-proposed!)
+    (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
+    (switch-to-buffer! t--rw-buf)
+    (local-set-key* t--rw-buf "<f9> r" "llm-rewrite-keep-option")
+    (trace-key! '("<f9>" "r"))
+    (check-equal! (length (plist-get (llm-rewrite--session t--rw-buf) 'options)) 2
+                  "the dispatched command saved an option")
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "source unchanged")
+    (t--rw-done!)))
+
+(deftest 'rewrite-diff-does-not-accept-over-an-edited-passage
+  "The preview cannot overwrite newer source edits."
+  (lambda ()
+    (t--rw-options!)
+    (buffer-insert! t--rw-buf 7 "manual")
+    (let ((text (buffer-text t--rw-buf)))
+      (diff-block-accept! t--rw-buf)
+      (check-equal! (buffer-text t--rw-buf) text "source edit is preserved")
+      (check-true! (pair? (diff-block-pending t--rw-buf)) "preview remains"))
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-prompts-choose-saved-drafts
+  "Both review prompts parse the selected option."
+  (lambda ()
+    (t--rw-options!)
+    (t--rw-review! "choose option 1")
+    (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "review chose the saved draft")
+    (with-stub 'minibuffer-read
+      (lambda (prompt choices callback) (callback "choose option 0"))
+      (lambda () (llm-rewrite--options-menu! t--rw-buf)))
+    (check-equal! (block-text-at t--rw-buf 6 10) "Two." "options prompt restored the original")
+    (t--rw-done!)))
+
+(deftest 'rewrite-options-blocks-do-not-run
+  "An options block holds saved text, not executable code."
+  (lambda ()
+    (check-false! (fence-kind-runnable? "options") "options are not executable")))

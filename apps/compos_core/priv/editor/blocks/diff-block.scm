@@ -333,6 +333,8 @@
       ((not block)
        (diff-block-release! buf)
        (message "The waiting block is gone"))
+      ((not (equal? (block-text-at buf (nth 0 spans) (nth 1 spans)) (diff-block-ours p)))
+       (message "The passage changed; the diff was not accepted"))
       (else
         (let ((from (nth 0 spans))
               (to (min (buffer-size buf)
@@ -344,6 +346,7 @@
           (diff-block-release! buf)
           ;; the decision ends the selection too: nothing lingers
           (with-current-buffer buf (lambda () (set-mark! #f)))
+          (run-hook-with-args 'diff-block-decision-hook buf 'accept from (diff-block-ours p) text)
           (message "Kept"))))))
 
 ;; Putting it back: only the block and its blank line go. A block you
@@ -367,6 +370,7 @@
           (buffer-delete-range! buf from (- to from))
           (diff-block-release! buf)
           (with-current-buffer buf (lambda () (set-mark! #f)))
+          (run-hook-with-args 'diff-block-decision-hook buf 'reject (nth 0 spans) (diff-block-ours p) (diff-block-ours p))
           (message "Put back"))))))
 
 (define-command "diff-block-accept" "Keep the waiting diff block: theirs stands where ours did"

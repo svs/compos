@@ -84,7 +84,8 @@
 ;; point has to show where point stands: in browse-mode RET follows the
 ;; link at point, and n, p and TAB walk the links. Those modes get caret
 ;; browsing when they become dismissible, once per mode, so a later
-;; M-x caret-browsing-mode is still the reader's answer.
+;; M-x caret-browsing-mode is still the reader's answer. A read-only
+;; file is browsed by point too, so it shows the caret in every mode.
 (define *dismiss-caret-modes* '("browse-mode" "help-mode"))
 
 (define (dismiss-keep-caret! mode)
@@ -96,7 +97,7 @@
     (unless (equal? (buffer-local buf 'dismiss-caret-default) mode)
       (desktop-skip! buf 'dismiss-caret-default)
       (buffer-set-local! buf 'dismiss-caret-default mode)
-      (when (and (member mode *dismiss-caret-modes*)
+      (when (and (or (member mode *dismiss-caret-modes*) (buffer-path buf))
                  (not (minor-mode-on? buf "caret-browsing-mode")))
         (enable-minor-mode! buf "caret-browsing-mode")))))
 

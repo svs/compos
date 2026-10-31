@@ -1488,17 +1488,30 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
                     (cons (car xs) out)
                     out))))))
 
+(defcustom 'notmuch-autotag-archive
+  '()
+  "Tags that archive a thread when autotag gives them, per mailbox, as
+(PROFILE TAG ...). A thread autotag tags so leaves the inbox.")
+
+(define (nm--autotag-archive-tags)
+  (let ((hit (assoc notmuch-profile notmuch-autotag-archive)))
+    (if hit (cdr hit) '())))
+
 (define (nm--autotag-apply! id want)
   ;; WANT is every tag this thread should end up carrying besides the system
   ;; ones. Everything else goes, so a second run corrects an old answer instead
   ;; of piling a new tag on top of it. Answers the ops it ran, already signed.
+  ;; A tag this mailbox archives on also takes the thread out of the inbox.
   (let* ((have (nm--thread-tags id))
          (add (filter (lambda (t) (not (member t have))) want))
          (drop (filter (lambda (t) (and (not (member t notmuch-autotag-exclude))
                                         (not (member t want))))
                        have))
+         (archive? (and (member "inbox" have)
+                        (pair? (filter (lambda (t) (member t (nm--autotag-archive-tags))) want))))
          (ops (append (map (lambda (t) (string-append "+" t)) add)
-                      (map (lambda (t) (string-append "-" t)) drop))))
+                      (map (lambda (t) (string-append "-" t)) drop)
+                      (if archive? '("-inbox") '()))))
     (unless (null? ops)
       (nm--run (string-append "tag "
                  (string-join (map sh-quote ops) " ")

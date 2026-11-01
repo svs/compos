@@ -47,32 +47,60 @@
   "L with BUF back in the windows HELD names. A window that closed when
    it lost BUF comes back at the back of its pane."
   (fold (lambda (l h)
-          (let ((k (car h)) (pid (cadr h)) (bufs (filter buffer-known? (caddr h))) (mode (cadddr h)))
+          (let ((k (car h)) (pid (cadr h)) (bufs (caddr h)) (mode (cadddr h)))
             (cond ((panes-window l k)
                    (let ((now (panes-window-buffers l k)))
                      (panes-set-buffers l k (append bufs (filter (lambda (b) (not (member b bufs))) now)))))
                   ((and (panes-pane l pid) (pair? bufs))
                    (let ((a (panes-add-window l pid buf mode #t)))
-                     (panes-set-buffers (car a) (cadr a) bufs)))
+                     (panes--update-window (panes-set-buffers (car a) (cadr a) bufs) (cadr a)
+                       (lambda (w) (panes--put w 'key k)))))
                   (else l))))
         l held))
 
-(define (peek--pane l owner here)
-  "Where a peek of OWNER's row goes: (LAYOUT PANE MADE?). The pane after
-   OWNER's, else a new pane after it while there is room, else the pane
-   before, else OWNER's own pane. An OWNER in no pane, as a prompt's
-   list, peeks over HERE. #f with no pane at all."
+(define (peek--pane l owner here mode)
+  "Where a peek of OWNER's row goes: (LAYOUT PANE MADE?). The pane of a
+   window of MODE, the row's mode, where a visit would put it; else the
+   pane after OWNER's, else a new pane after it while there is room, else
+   the pane before, else OWNER's own pane. An OWNER in no pane, as a
+   prompt's list, peeks over HERE. #f with no pane at all."
   (let* ((ok (panes-find l owner))
          (from (if ok (panes-pane-of l ok) here))
          (ids (panes-pane-ids l))
-         (i (and from (panes--index-of from ids))))
+         (i (and from (panes--index-of from ids)))
+         (home (and ok mode
+                    (find (lambda (k) (and (equal? (panes-window-mode l k) mode)
+                                           (not (equal? (panes-pane-of l k) from))))
+                          (panes-window-keys l)))))
     (cond ((not i) #f)
           ((not ok) (list l from #f))
+          (home (list l (panes-pane-of l home) #f))
           ((< (+ i 1) (length ids)) (list l (list-ref ids (+ i 1)) #f))
           ((panes-under-capacity? l)
            (let ((a (panes-add-pane l (+ i 1)))) (list (car a) (cadr a) #t)))
           ((> i 0) (list l (list-ref ids (- i 1)) #f))
           (else (list l from #f)))))
+
+(effects! '(read))
+
+(define (peek-place l owner target here)
+  "TARGET, the row of list OWNER, peeked in L: (LAYOUT KEY MADE HELD), or
+   #f with no pane. KEY is the peek window, marked 'peek, at the front of
+   its pane; MADE the pane made for it, or #f; HELD the other windows that
+   had TARGET. The focus stays in HERE, the pane the user is in."
+  (let* ((mode (panes--buffer-mode target))
+         (to (peek--pane l owner here mode)))
+    (and to
+         (let* ((l (car to)) (pid (cadr to))
+                (held (peek--holders l target #f))
+                (added (panes-add-window (panes-drop-buffer l target) pid target mode))
+                (key (cadr added))
+                (l (panes--update-window (car added) key
+                     (lambda (w) (panes--put (panes--put w 'peek #t) 'preferred #f))))
+                (l (if (and here (panes-pane l here)) (panes-set-focus l here) l)))
+           (list l key (and (caddr to) pid) held)))))
+
+(effects! '(pure))
 
 (define (peek--without l s)
   "L without the peek S: its window goes, its buffer goes back to the
@@ -89,15 +117,21 @@
 (effects! '(write display))
 
 (define (peek--arm! buf)
-  "BUF is a peek: peek-mode's keys are on, and an edit keeps it."
+  "BUF is a peek: peek-mode's keys are on, dismiss-mode's q dismisses it
+   (buffer-dismissible?), and an edit keeps it."
   (when (buffer-exists? buf)
     (enable-minor-mode! buf "peek-mode")
-    (buffer-watch-change! buf 'peek (lambda args (peek-keep!)))))
+    (dismiss--sync! buf)
+    ;; only a change made there: a chat that streams into the peek is not an edit
+    (buffer-watch-change! buf 'peek
+      (lambda (&rest args)
+        (when (equal? (window-buffer (active-window)) (peek-buffer)) (peek-keep!))))))
 
 (define (peek--disarm! buf)
   (when (buffer-exists? buf)
     (buffer-unwatch-change! buf 'peek)
-    (when (minor-mode-on? buf "peek-mode") (disable-minor-mode! buf "peek-mode"))))
+    (when (minor-mode-on? buf "peek-mode") (disable-minor-mode! buf "peek-mode"))
+    (dismiss--sync! buf)))
 
 (define (peek--left! buf asleep)
   "BUF is no longer the peek and not kept: it goes back to sleep when it
@@ -111,21 +145,14 @@
 
 (define (peek--show! owner target)
   (let* ((l (panes--ensure-layout!))
-         (here (panes--selected-pane l))
-         (to (and l (peek--pane l owner here))))
-    (and to
-         (let* ((l (car to)) (pid (cadr to))
-                (held (peek--holders l target #f))
+         (placed (and l (peek-place l owner target (panes--selected-pane l)))))
+    (and placed
+         (let* ((key (cadr placed))
                 (asleep (peek--asleep? target))
-                (added (panes-add-window (panes-drop-buffer l target) pid target (panes--buffer-mode target)))
-                (key (cadr added))
-                (l (panes--update-window (car added) key
-                     (lambda (w) (panes--put (panes--put w 'peek #t) 'preferred #f))))
-                (l (if (and here (panes-pane l here)) (panes-set-focus l here) l))
-                (drawn (panes-apply! l)))
+                (drawn (panes-apply! (car placed))))
            (set-frame-local! 'peek
-             (list 'owner owner 'buffer target 'key key 'made (and (caddr to) pid)
-                   'asleep asleep 'held held 'group (panes--group-key)))
+             (list 'owner owner 'buffer target 'key key 'made (caddr placed)
+                   'asleep asleep 'held (cadddr placed) 'group (panes--group-key)))
            (peek--arm! target)
            (window-log-note! "peek" target "->" key)
            (or (panes-handle drawn key) #t)))))
@@ -190,8 +217,16 @@
       (peek--disarm! (plist-get s 'buffer))
       (let* ((key (plist-get s 'key)) (l (panes-layout)))
         (when (and l (panes-window l key))
-          (let ((l (panes--update-window l key (lambda (w) (panes--put w 'peek #f)))))
-            (if go (panes-apply! (panes-focus-window l key)) (panes-layout-set! l))))))))
+          ;; a window of the buffer's mode in that pane takes it: the peek
+          ;; leaves no second window of one mode behind
+          (let* ((buf (plist-get s 'buffer)) (mode (panes-window-mode l key))
+                 (home (find (lambda (k) (and (not (equal? k key)) (equal? (panes-window-mode l k) mode)))
+                             (panes-pane-keys l (panes-pane-of l key))))
+                 (l (if home
+                        (panes-raise (panes-move-buffer l buf home) home)
+                        (panes--update-window l key (lambda (w) (panes--put w 'peek #f)))))
+                 (at (or home key)))
+            (if (or go home) (panes-apply! (if go (panes-focus-window l at) l)) (panes-layout-set! l))))))))
 
 (define (peek-track!)
   "After each command: the peek goes when its list is gone or the focus
@@ -236,11 +271,13 @@
 (define-command "peek-keep" "Keep the peek as a normal window" (lambda () (peek-keep! #t)))
 
 (minor-mode-keys! "peek-mode"
-  '(("q" "peek-quit") ("C-g" "peek-quit") ("n" "peek-next") ("p" "peek-previous") ("RET" "peek-keep")))
+  '(("C-g" "peek-quit") ("n" "peek-next") ("p" "peek-previous") ("RET" "peek-keep")))
 
 (public! 'listing-peek! "(listing-peek! OWNER TARGET) -> peek TARGET, the row of list OWNER, in a window of the panes model; #f when it cannot")
 (public! 'peek-dismiss! "(peek-dismiss! [TO-OWNER]) -> end this frame's peek; TO-OWNER puts the focus back on the list")
 (public! 'peek-keep! "(peek-keep! [GO]) -> this frame's peek stays as a normal window; GO focuses it")
+(public! 'peek-place "(peek-place LAYOUT OWNER TARGET HERE) -> (LAYOUT KEY MADE HELD): TARGET peeked beside list OWNER, or over it with no room; #f with no pane")
+(catalog-meta! 'function "peek-place" 'effects '(read))
 (public! 'peek-owner "(peek-owner) -> the list of this frame's peek, or #f")
 (catalog-meta! 'function "peek-owner" 'effects '(read))
 (public! 'peek-buffer "(peek-buffer) -> the buffer this frame's peek shows, or #f")

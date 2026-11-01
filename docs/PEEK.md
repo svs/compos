@@ -55,6 +55,12 @@ called from, where the answer goes. `C-g` dismisses it.
 If the row's buffer is already the front of a visible window, there is
 no peek. The current peek, if there is one, goes.
 
+A row of another group gets the float card: groups are sealed, so its
+buffer cannot enter this group's model.
+
+A row whose buffer waits in a hidden window: the peek takes it, and
+dismiss puts it back in that window, with the same key.
+
 ## Keys
 
 A minor mode, `peek-mode`, is on in the peek window while it is a peek:

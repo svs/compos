@@ -40,6 +40,11 @@
   (eq? (mode-inherited (buffer-local buf 'mode-name) 'dismissible) 'never))
 
 (define (buffer-dismissible? buf)
+  ;; a peek dismisses with q whatever the buffer is (peek.scm)
+  (or (and (boundp 'peek-buffer) (string? buf) (equal? buf (peek-buffer)))
+      (buffer--dismissible? buf)))
+
+(define (buffer--dismissible? buf)
   (and (buffer-known? buf) (buffer-read-only? buf)
        (not (minibuffer-buffer? buf))
        (not (dismiss--prompt-surface? buf))
@@ -186,6 +191,7 @@
   (lambda ()
     (let* ((buf (current-buffer)) (child (dismiss--child-target buf)))
       (cond ((equal? (listing-preview-owner) buf) (listing-preview-hide!))
+            ((and (boundp 'peek-buffer) (equal? (peek-buffer) buf)) (run-command "peek-quit"))
             (child (dismiss--close-child! child))
             ((and (buffer-parent buf) (buffer-dismissible? buf)) (dismiss--close-child! buf))
             (else

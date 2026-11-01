@@ -1953,7 +1953,7 @@
   (and (equal? view (peek-owner)) (equal? target (peek-buffer))
        (begin (peek-keep! #t) #t)))
 
-((define (listing-visit! view target)
+(define (listing-visit! view target)
   ;; Leave the listing on the invoking window's history for q.
   (unless (listing-preview--kept? view target)
     (listing-preview-dismiss! view)

@@ -2178,12 +2178,12 @@
                    (site-app-collect-detail! name buf tab url wait page gen))))))))
       buf)))
 
-(define (site-app-tab-key name page)
+(define (site-app-chosen-tab-key name page)
   (string-append "site-app-tab:" (symbol->string name) ":" (let ((id (plist-get page 'id))) (if (symbol? id) (symbol->string id) (or id "")))))
 
 (define (site-app-chosen-tab name page list-buf ids)
   (let* ((g (and list-buf (buffer-group list-buf)))
-         (chosen (and g (group-setting g (site-app-tab-key name page)))))
+         (chosen (and g (group-setting g (site-app-chosen-tab-key name page)))))
     (cond ((member chosen ids) chosen)
           ((pair? ids) (car ids))
           (else #f))))
@@ -2198,7 +2198,7 @@
   (let* ((list-buf (site-app-get buf 'list))
          (g (and list-buf (buffer-group list-buf))))
     (when g
-      (group-setting-set! g (site-app-tab-key (site-app-get buf 'name) (site-app-current-page list-buf)) id)))
+      (group-setting-set! g (site-app-chosen-tab-key (site-app-get buf 'name) (site-app-current-page list-buf)) id)))
   (site-app-draw! buf)
   ;; The background collection moved on to another item: fetch this one again.
   (let ((name (site-app-get buf 'name)))

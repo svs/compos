@@ -50,7 +50,7 @@
 (define (panes-board-key id)
   (let ((ps (panes-board--split id)))
     (and (> (length ps) 2)
-         (let ((s (caddr ps))) (if (member (car ps) '("p" "c")) s (or (string->number s) s))))))
+         (let ((s (caddr ps))) (if (member (car ps) '("p" "c" "h")) s (or (string->number s) s))))))
 (define (panes-board-buffer-of id) (let ((ps (panes-board--split id))) (and (> (length ps) 3) (cadddr ps))))
 
 (define (panes-board-here-group) (panes--group-key))
@@ -122,7 +122,9 @@
     (if (not l)
         '()
         (append (apply append (map (lambda (c) (panes-board--column-rows buf g l c #f)) (panes-columns l)))
-                (panes-board--float-rows g)))))
+                (panes-board--float-rows g)
+                ;; the hidden panes wait after the row, the last hidden first
+                (map (lambda (p) (panes-board--id "h" g (plist-get p 'id))) (panes-hidden l))))))
 
 ;; a column of stacked panes is a row of its own, its panes under it; a
 ;; column of one pane is that pane's row. Its key is its top pane's id
@@ -237,7 +239,7 @@
   ;; how deep a row sits in the whole tree; a stacked pane is one deeper
   (let* ((kind (panes-board-kind id))
          (s (if (and (member kind '("p" "w" "b")) (panes-board--column-row id)) 1 0)))
-    (cond ((equal? kind "g") 0) ((member kind '("c" "f")) 1) ((equal? kind "p") (+ 1 s)) ((equal? kind "w") (+ 2 s)) (else (+ 3 s)))))
+    (cond ((equal? kind "g") 0) ((member kind '("c" "f" "h")) 1) ((equal? kind "p") (+ 1 s)) ((equal? kind "w") (+ 2 s)) (else (+ 3 s)))))
 
 (define (panes-board--depth buf id)
   ;; how far in a row sits below the top of what is shown
@@ -286,6 +288,15 @@
                    (list (string-append pad "floating") (if (equal? w (active-window)) "accent" #f))
                    (list (if b (buffer-modeline-name b) "") "dim")
                    (list "preview" "faint"))))
+          ((equal? kind "h")
+           (let* ((p (find (lambda (p) (equal? (plist-get p 'id) (panes-board-key id))) (if l (panes-hidden l) '())))
+                  (ws (if p (plist-get p 'windows) '()))
+                  (front (and (pair? ws) (pair? (plist-get (car ws) 'buffers))
+                              (panes--name (car (plist-get (car ws) 'buffers))))))
+             (list (list "◌" "faint")
+                   (list (string-append pad "hidden pane" (if front (string-append " · " front) "")) "faint")
+                   (list "" #f)
+                   (list (string-append (number->string (length ws)) " windows") "dim"))))
           ((not l) (list (list "" #f) (list id "faint") (list "" #f) (list "" #f)))
           ((equal? kind "c")
            (let* ((col (panes-board--column-of l (panes-board-key id)))
@@ -374,6 +385,8 @@
             ((equal? (panes-board-kind id) "f")
              (let ((w (panes-board-key id)))
                (if (window-exists? w) (select-window! w) (message "The floating preview is gone"))))
+            ((equal? (panes-board-kind id) "h")
+             (panes-board-edit! (lambda (l id) (car (panes-restore-pane l (panes-board-key id))))))
             (else
               (let* ((l (panes-board-layout))
                      (kind (panes-board-kind id))
@@ -399,7 +412,7 @@
   (panes-board-edit!
     (lambda (l id)
       (let ((kind (panes-board-kind id)))
-        (cond ((equal? kind "g") l)
+        (cond ((member kind '("g" "h")) l)
               ((member kind '("p" "c")) (panes-move-column l (panes-board-key id) dir))
               (else
                 (let* ((key (panes-board-key id))
@@ -483,6 +496,9 @@
         (let ((kind (panes-board-kind id)))
           (cond ((member kind '("g" "c")) l)
                 ((equal? kind "p") (panes-remove-pane l (panes-board-key id)))
+                ;; a hidden pane is forgotten; its buffers stay open
+                ((equal? kind "h")
+                 (panes--put l 'hidden (filter (lambda (p) (not (equal? (plist-get p 'id) (panes-board-key id)))) (panes-hidden l))))
                 ((equal? kind "w") (panes-remove-window l (panes-board-key id)))
                 (else
                   (let* ((key (panes-board-key id)) (b (panes-board-buffer-of id))
@@ -592,7 +608,7 @@
   (list
     'doc (string-append
            "The windows as the model holds them, one section for every group, as ibuffer has: this group first, then the rest most recent first. `<left>`/`<right>` switch to Group, this group's panes alone, and back to All. `n`/`p` go from group to group. "
-           "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). "
+           "A pane holds windows (■ on screen, ● the one you are in, □ behind) and a window its buffers (· the one it shows). A hidden pane (◌) waits after the row with its windows: `RET` brings it back, `k` forgets it. "
            "`+` zooms one level towards the row: a pane, then a window; on a buffer row it zooms to its window. `-` zooms back out. "
            "`<left>`/`<right>` switch the view. `TAB` folds a row, `S-TAB` every window. `RET` goes there, `m` moves a window to a pane or a buffer to a window, `k` closes a window or takes a buffer out of one, `K` kills a buffer, `c` gives every mode one window, `a` adds an empty pane, `{`/`}` resize a pane, `=` equalizes.")
     'buffer *panes-board-buffer*

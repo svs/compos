@@ -113,6 +113,30 @@
       (check-equal! (panes-focus r) "p2" "the focus moved to the pane that took its place")
       (check-equal! (panes-pane-ids (panes-remove-pane r "p2")) '("p2") "the last pane stays"))))
 
+(deftest 'a-hidden-pane-keeps-its-windows-and-its-place
+  "pane-remove hides a pane with its windows; it comes back where it was; an empty pane goes outright; a kill empties a hidden pane away"
+  (lambda ()
+    (let* ((l (pt-row "a.scm" "b.scm" "*chat*"))
+           (h (panes-hide-pane l "p2"))
+           (r (panes-restore-pane h)))
+      (check-equal! (panes-pane-ids h) '("p1" "p3") "the pane leaves the row")
+      (check-false! (member "b.scm" (panes-buffers h)) "its window leaves the screen")
+      (check-equal! (panes-hidden-buffers h) '("b.scm") "and waits in the hidden pane")
+      (check-equal! (cadr r) "p2" "restore brings back the pane hidden last")
+      (check-equal! (panes-pane-ids (car r)) '("p1" "p2" "p3") "in its old place")
+      (check-equal! (panes-hidden (panes-drop-buffer h "b.scm")) '() "a hidden pane left with no window goes")
+      (check-equal! (panes-hidden (panes-hide-pane (car (panes-add-pane l)) "p4")) '() "an empty pane is not hidden"))))
+
+(deftest 'a-smaller-layout-hides-columns-and-a-bigger-one-brings-them-back
+  "capacity counts the columns on screen: past it they hide, nothing folds; room again shows them in order"
+  (lambda ()
+    (let* ((l (pt-row "a.scm" "b.scm" "*chat*"))
+           (small (panes-fit-capacity (panes-set-capacity l 1)))
+           (big (panes-fill-capacity (panes-set-capacity small 3))))
+      (check-equal! (panes-pane-ids small) '("p1") "one column on screen")
+      (check-equal! (panes-pane-keys small "p1") (panes-pane-keys l "p1") "nothing folded into it")
+      (check-equal! (panes-pane-ids big) '("p1" "p2" "p3") "the hidden columns come back in order"))))
+
 (deftest 'a-window-moves-between-panes-with-its-stack
   "a window moves whole, to the front of the other pane; the pane it leaves stays"
   (lambda ()

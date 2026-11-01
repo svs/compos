@@ -239,7 +239,8 @@
   ;; the short words a key wears in the empty pane; a command not here shows its doc
   '(("pane-take-window" "Move a window here")
     ("find-file" "Open a file")
-    ("pane-remove" "Remove this pane")))
+    ("pane-remove" "Remove this pane")
+    ("pane-restore" "Bring back a hidden pane")))
 
 (define (panes--empty-blocks)
   "The blank buffer as blocks: a dashed frame, a title, one line on what
@@ -321,12 +322,27 @@
                     (panes-apply! (panes-focus-window (panes-move-window l (cadr row) pid) (cadr row)))))))
             'require-match #t)))))
 
-(define-command "pane-remove" "Remove this empty pane"
-  (lambda () (run-command "delete-window")))
+(define-command "pane-remove" "Hide this pane with its windows; an empty pane goes. pane-restore brings it back"
+  (lambda ()
+    (let* ((l (panes--ensure-layout!))
+           (pid (panes--current-pane l))
+           (keys (if pid (panes-pane-keys l pid) '()))
+           (front (and (pair? keys) (panes-handle l (car keys)))))
+      (cond ((not pid) (message "Not in a pane"))
+            ((<= (panes-pane-count l) 1) (message "The last pane stays"))
+            (else
+             ;; the front window leaves the screen: its point stays in the model
+             (panes-apply! (panes-hide-pane (if (and front (window-exists? front)) (panes--park-points! l (list front)) l) pid))
+             (when (pair? keys) (message "Pane hidden; pane-restore brings it back")))))))
+
+(define-command "pane-restore" "Bring back the pane hidden last, with its windows; you stay where you are"
+  (lambda ()
+    (let ((r (panes-restore-pane (panes--ensure-layout!))))
+      (if (cadr r) (panes-apply! (car r)) (message "No hidden pane")))))
 
 (mode-keys! "pane-empty-mode"
   '(("b" "pane-take-window") ("RET" "pane-take-window")
-    ("f" "find-file") ("k" "pane-remove")))
+    ("f" "find-file") ("k" "pane-remove") ("r" "pane-restore")))
 
 (define (panes--empty-buffer!)
   "Makes the blank buffer in pane-empty-mode, unless it is there in that
@@ -735,7 +751,8 @@
    wins, so the group repair stands down. #f when the layout does not
    hold NAME. An emptied pane stays, empty."
   (let ((layout (panes-layout)))
-    (and layout (member name (panes-buffers layout))
+    (and layout (or (member name (panes-buffers layout))
+                    (and (pair? (panes-hidden layout)) (member name (panes-hidden-buffers layout))))
          (begin
            (window-log-note! "panes kill" name)
            (panes-apply! (panes--kill-raise layout name))
@@ -865,8 +882,7 @@
   "C-x l and every caller of panes-tile!: a layout is a capacity and
    an order. The capacity becomes that of ALGORITHM, and BUFFERS, up to
    it, front the panes from the left: a buffer of a window already used
-   leaves it for a new window. Panes past the buffers fold into the
-   last one, and the first pane takes the focus. Answers the front
+   leaves it for a new window. Panes past the buffers hide, and the first pane takes the focus. Answers the front
    buffers, or #f for an unknown layout or no buffer."
   (let* ((cap (panes-layout-capacity algorithm))
          (bufs (let cut ((bs (panes--uniq (filter (lambda (b) (and (string? b) (buffer-known? b))) buffers)))
@@ -1246,12 +1262,20 @@
 (define-command "pane-previous-window" "Bring the previous window of this pane to the front"
   (lambda () (panes--cycle-pane-window! -1)))
 
-(define-command "pane-add" "Add an empty pane to the right of this one; you stay where you are"
+(define (panes--split-sensibly l)
+  "How pane-add splits the selected window, as Emacs's
+   split-window-sensibly: h, a column beside it, when it is wider than
+   tall and a column fits; else v, a pane under it. A text row is about
+   twice as tall as a column is wide."
+  (if (and (panes-under-capacity? l) (>= (window-cols) (* 2 (window-rows)))) 'h 'v))
+
+(define-command "pane-add" "Add an empty pane beside this one, or under it when it is taller than wide or the row is full; you stay where you are"
   (lambda ()
     (let* ((l (panes--ensure-layout!))
-           (me (active-window)))
+           (pid (or (panes--current-pane l) (panes-focus l)))
+           (added (if (equal? (panes--split-sensibly l) 'v) (panes-split-below l pid) (panes-add-empty-pane l pid))))
       ;; the focus stays on this pane: the draw keeps you here
-      (panes-apply! (car (panes-add-empty-pane l (panes--current-pane l)))))))
+      (panes-apply! (panes-set-focus (car added) pid)))))
 
 (define (panes-split-off! bufs &optional from)
   "BUFS go to a second window of their mode, beside FROM; the new

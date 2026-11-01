@@ -375,6 +375,97 @@
                (at (+ 1 (panes--index-of id (panes-pane-ids layout)))))
           (list (tree-insert panes--shape (panes--normal layout) 'root new at) (car made))))))
 
+;; --- hidden panes --------------------------------------------------------
+;; A pane can leave the screen with its windows, as a window waits behind
+;; the front of its pane. A hidden pane is kept apart from the row, under
+;; 'hidden, the last hidden first, so nothing that draws or counts the row
+;; sees it. It keeps AT, its index in the row, and its column.
+
+(define (panes-hidden layout)
+  "The hidden panes of LAYOUT, the last hidden first. Each is a pane
+   with its windows and AT, the index it had in the row."
+  (or (plist-get layout 'hidden) '()))
+
+(define (panes-hidden-buffers layout)
+  "Every buffer the hidden panes of LAYOUT hold, once."
+  (panes--uniq (panes--names-of
+                 (apply append (map (lambda (w) (or (plist-get w 'buffers) '()))
+                                    (apply append (map panes--pane-windows (panes-hidden layout))))))))
+
+(define (panes--prune-hidden layout drop?)
+  "LAYOUT with every stack entry that DROP? accepts out of the hidden
+   panes. A window left with nothing goes, and a pane left with no
+   window goes."
+  (if (null? (panes-hidden layout))
+      layout
+      (panes--put layout 'hidden
+        (filter (lambda (p) (pair? (panes--pane-windows p)))
+                (map (lambda (p)
+                       (panes--put p 'windows
+                         (filter (lambda (w) (pair? (plist-get w 'buffers)))
+                                 (map (lambda (w)
+                                        (panes--put w 'buffers
+                                          (filter (lambda (e) (not (drop? e))) (or (plist-get w 'buffers) '()))))
+                                      (panes--pane-windows p)))))
+                     (panes-hidden layout))))))
+
+(define (panes-hide-pane layout id)
+  "Pane ID leaves the screen with its windows, in their order and with
+   the same front window. It keeps its place in the row and its column;
+   the panes left take its room, as for panes-remove-pane. An empty pane
+   goes outright. The last pane stays, and an unknown ID changes
+   nothing."
+  (let ((pane (panes-pane layout id)))
+    (cond ((or (not pane) (<= (panes-pane-count layout) 1)) layout)
+          ((null? (panes-keys pane)) (panes-remove-pane layout id))
+          (else
+           (let ((at (panes--index-of id (panes-pane-ids layout)))
+                 (gone (panes-remove-pane layout id)))
+             (panes--put gone 'hidden (cons (panes--put pane 'at at) (panes-hidden gone))))))))
+
+(define (panes-restore-pane layout &optional id)
+  "Hidden pane ID, the last hidden when ID is absent, comes back:
+   (LAYOUT ID), or (LAYOUT #f) when there is none. When its column still
+   stands it goes back into it near its old place, and halves the height
+   of the pane above it, else of the pane below. Else it comes back as a
+   column of its own at its old place, with the average width, and the
+   capacity grows to hold it."
+  (let* ((hidden (panes-hidden layout))
+         (entry (if id (find (lambda (p) (equal? (plist-get p 'id) id)) hidden) (and (pair? hidden) (car hidden)))))
+    (if (not entry)
+        (list layout #f)
+        (let* ((pid (plist-get entry 'id))
+               (layout (panes--put layout 'hidden (filter (lambda (p) (not (equal? (plist-get p 'id) pid))) hidden)))
+               (at (or (plist-get entry 'at) (panes-pane-count layout)))
+               (col-id (panes-column-of entry))
+               (ids (panes-pane-ids layout))
+               (col (find (lambda (c) (equal? (panes-column-of (car c)) col-id)) (panes-columns layout)))
+               (bare (panes--put (panes--put entry 'at #f) 'blank #f)))
+          (if col
+              ;; back into its column, between its first and last pane
+              (let* ((first (panes--index-of (plist-get (car col) 'id) ids))
+                     (i (max first (min at (+ first (length col)))))
+                     (above (if (> i first) (list-ref ids (- i 1)) (plist-get (car col) 'id)))
+                     (half (/ (panes--positive (plist-get (panes-pane layout above) 'vshare)) 2))
+                     (layout (panes--update-pane layout above
+                               (lambda (p) (panes--put (panes--put p 'column col-id) 'vshare half))))
+                     (pane (panes--put (panes--put (panes--put bare 'column col-id) 'vshare half)
+                                       'share (panes--positive (plist-get (car col) 'share)))))
+                (list (tree-insert panes--shape (panes--normal layout) 'root pane i) pid))
+              ;; a column of its own, at the first column edge from its old place
+              (let* ((edges (let loop ((cs (panes-columns layout)) (n 0) (acc '(0)))
+                              (if (null? cs) (reverse acc)
+                                  (let ((n (+ n (length (car cs))))) (loop (cdr cs) n (cons n acc))))))
+                     (i (or (find (lambda (e) (>= e at)) edges) (length ids)))
+                     (shares (map (lambda (c) (panes--positive (plist-get (car c) 'share))) (panes-columns layout)))
+                     (share (if (null? shares) 1 (/ (apply + shares) (length shares))))
+                     (pane (panes--put (panes--put (panes--put bare 'column #f) 'vshare 1) 'share share))
+                     (layout (tree-insert panes--shape (panes--normal layout) 'root pane i)))
+                (list (if (> (panes-column-count layout) (panes-capacity layout))
+                          (panes-set-capacity layout (panes-column-count layout))
+                          layout)
+                      pid)))))))
+
 (define (panes-move-pane layout id at)
   "Pane ID moves to index AT among the panes, with all its windows, as a
    column of its own. An AT inside another column goes to that column's
@@ -474,7 +565,8 @@
   "A buffer is in one window: the window that shows it on screen, else
    one that has it in front, else the first that holds it, the windows
    on screen first. Every other window lets it go, and a window left
-   with nothing closes. The pane of a closed window stays."
+   with nothing closes. The pane of a closed window stays. A hidden pane
+   lets go of every buffer the row holds."
   (let* ((keys (panes-window-keys layout))
          (tops (panes-top-windows layout))
          (order (append tops (filter (lambda (k) (not (member k tops))) keys)))
@@ -486,13 +578,17 @@
                         (fold (lambda (a b) (if (assoc b a) a (cons (list b k) a)))
                               acc (panes-window-buffers layout k)))
                       fronts order)))
-    (fold (lambda (l k)
-            (let* ((bufs (panes-window-buffers l k))
-                   (mine (filter (lambda (b) (equal? (cadr (assoc b owner)) k)) bufs)))
-              (cond ((= (length mine) (length bufs)) l)
-                    ((null? mine) (panes-remove-window l k))
-                    (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids mine))))))))
-          layout keys)))
+    (let ((kept (fold (lambda (l k)
+                        (let* ((bufs (panes-window-buffers l k))
+                               (mine (filter (lambda (b) (equal? (cadr (assoc b owner)) k)) bufs)))
+                          (cond ((= (length mine) (length bufs)) l)
+                                ((null? mine) (panes-remove-window l k))
+                                (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids mine))))))))
+                      layout keys)))
+      (if (null? (panes-hidden kept))
+          kept
+          (let ((held (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows kept)))))
+            (panes--prune-hidden kept (lambda (e) (member e held))))))))
 
 (define (panes-remove-window layout key)
   "Window KEY goes; its pane stays, empty when it held nothing else. An
@@ -534,10 +630,10 @@
 
 (define (panes-drop-buffer layout buf)
   "BUF leaves every window, as for a kill. Emptied windows close; their
-   panes stay."
+   panes stay. A hidden pane left with no window goes."
   (let loop ((keys (panes-window-keys layout)) (layout layout) (id (panes--id buf)))
     (if (null? keys)
-        layout
+        (panes--prune-hidden layout (lambda (e) (panes--entry-is? e buf id)))
         (let* ((w (panes-window layout (car keys)))
                (bufs (or (plist-get w 'buffers) '()))
                (left (filter (lambda (e) (not (panes--entry-is? e buf id))) bufs)))
@@ -700,19 +796,17 @@
   (< (panes-column-count layout) (panes-capacity layout)))
 
 (define (panes-fit-capacity layout)
-  "Columns past the capacity fold into the last pane that fits: their
-   windows go behind the windows of that pane, in order, so they are
-   hidden. Then the panes left share the frame equally. A layout within
+  "Columns past the capacity hide (panes-hide-pane), the last column
+   first and each column from its bottom pane, so they come back left to
+   right. Then the panes left share the frame equally. A layout within
    its capacity does not change, its shares included."
   (let ((cols (panes-columns layout)) (cap (panes-capacity layout)))
     (if (<= (length cols) cap)
         layout
-        (let* ((kept (apply append (list-head cols cap)))
-               (extra (apply append (list-tail cols cap)))
-               (moved (apply append (map (lambda (p) (or (plist-get p 'windows) '())) extra)))
-               (last (car (reverse kept)))
-               (last (panes--put last 'windows (append (or (plist-get last 'windows) '()) moved))))
-          (panes-equalize (panes--set-panes layout (append (list-head kept (- (length kept) 1)) (list last))))))))
+        (panes-equalize
+          (fold (lambda (l p) (panes-hide-pane l (plist-get p 'id)))
+                layout
+                (reverse (apply append (list-tail cols cap))))))))
 
 ;;; --- consolidation ------------------------------------------------------------
 ;;; Every mode has one window: the preferred window of a mode gathers every
@@ -727,11 +821,14 @@
 ;;; the rest (stacks, focus, history, where a buffer goes).
 
 (define (panes-fill-capacity layout)
-  "Columns short of the capacity are added at the end, and every empty
-   pane, new or old, takes the first hidden window of the pane that
-   hides the most, so the windows stacked behind come out beside. A pane
-   stays empty only when no window is hidden. A full layout with no
-   empty pane does not change."
+  "Hidden panes come back first, while a column fits. Then columns
+   short of the capacity are added at the end, and every empty pane, new
+   or old, takes the first hidden window of the pane that hides the
+   most, so the windows stacked behind come out beside. A pane stays
+   empty only when no window is hidden. A full layout with no empty pane
+   does not change."
+  (if (and (pair? (panes-hidden layout)) (panes-under-capacity? layout))
+      (panes-fill-capacity (car (panes-restore-pane layout)))
   (let* ((panes (apply append (panes-columns layout)))
          (empty (filter (lambda (p) (null? (panes-keys p))) panes))
          (deepest (let loop ((best (and (pair? panes) (car panes))) (rest (if (pair? panes) (cdr panes) '())))
@@ -745,7 +842,7 @@
            (let ((made (panes-add-pane layout)))
              (panes-fill-capacity
                (if (pair? hidden) (panes-move-window (car made) (car hidden) (cadr made)) (car made)))))
-          (else layout))))
+          (else layout)))))
 
 (define panes--layout-specs '())
 
@@ -952,7 +1049,8 @@
 (define (panes-validate layout live?)
   "Buffers that LIVE? rejects leave every stack; emptied windows close.
    Their panes stay."
-  (fold (lambda (l b) (if (live? b) l (panes-drop-buffer l b))) layout (panes-buffers layout)))
+  (fold (lambda (l b) (if (live? b) l (panes-drop-buffer l b)))
+        layout (panes--uniq (append (panes-buffers layout) (panes-hidden-buffers layout)))))
 
 (define (panes-handle layout key)
   "The frame window of window KEY: KEY itself, the key is the frame
@@ -1014,6 +1112,7 @@
          (pane? (lambda (p) (and (plist? p) (plist-get p 'id) (rows? (plist-get p 'windows) window?)))))
     (and (plist? x)
          (rows? (plist-get x 'panes) pane?)
+         (rows? (plist-get x 'hidden) pane?)
          (rows? (plist-get x 'windows) (lambda (w) (and (plist? w) (plist-get w 'key) #t)))
          #t)))
 
@@ -1087,10 +1186,18 @@
 (catalog-meta! 'function "panes-pane-keys" 'effects '(pure))
 (public! 'panes-add-pane "(panes-add-pane LAYOUT [AT]) -> (LAYOUT ID): a new empty pane at index AT, the end when absent; pure")
 (catalog-meta! 'function "panes-add-pane" 'effects '(pure))
-(public! 'panes-fill-capacity "(panes-fill-capacity LAYOUT) -> LAYOUT: panes added up to the capacity, each taking a hidden window; pure")
+(public! 'panes-fill-capacity "(panes-fill-capacity LAYOUT) -> LAYOUT: hidden panes come back, then panes are added up to the capacity, each taking a hidden window; pure")
 (catalog-meta! 'function "panes-fill-capacity" 'effects '(pure))
 (public! 'panes-remove-pane "(panes-remove-pane LAYOUT ID) -> LAYOUT: pane ID goes with its windows; the last pane stays; pure")
 (catalog-meta! 'function "panes-remove-pane" 'effects '(pure))
+(public! 'panes-hide-pane "(panes-hide-pane LAYOUT ID) -> LAYOUT: pane ID leaves the screen with its windows and keeps its place; an empty pane goes; the last pane stays")
+(catalog-meta! 'function "panes-hide-pane" 'effects '(pure))
+(public! 'panes-restore-pane "(panes-restore-pane LAYOUT [ID]) -> (LAYOUT ID): hidden pane ID, the last hidden when absent, comes back to its column or its old place; (LAYOUT #f) when none is hidden")
+(catalog-meta! 'function "panes-restore-pane" 'effects '(pure))
+(public! 'panes-hidden "(panes-hidden LAYOUT) -> (PANE ...): the hidden panes, the last hidden first; pure")
+(catalog-meta! 'function "panes-hidden" 'effects '(pure))
+(public! 'panes-hidden-buffers "(panes-hidden-buffers LAYOUT) -> (BUF ...): the buffers the hidden panes hold")
+(catalog-meta! 'function "panes-hidden-buffers" 'effects '(read))
 (public! 'panes-move-pane "(panes-move-pane LAYOUT ID AT) -> LAYOUT: pane ID moves to index AT with its windows; pure")
 (catalog-meta! 'function "panes-move-pane" 'effects '(pure))
 (public! 'panes-columns "(panes-columns LAYOUT) -> ((PANE ...) ...): the panes in columns, left to right, each top to bottom; pure")

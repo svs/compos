@@ -478,10 +478,14 @@
 ;;; the two spans. The text is compared before it is set, so the change hook
 ;;; that calls this on every window move does no work on an unchanged frame.
 (define (layout-modeline-text)
-  (let ((target (panes-current-layout)))
+  ;; the layout's name, and +N when N panes are hidden
+  (let* ((target (panes-current-layout))
+         (l (and (boundp 'panes-layout) (panes-layout)))
+         (n (if (and l (boundp 'panes-hidden)) (length (panes-hidden l)) 0)))
     (string-append ":" (cond ((not target) "free")
                              ((symbol? target) (symbol->string target))
-                             (else target)))))
+                             (else target))
+                   (if (> n 0) (string-append " +" (number->string n)) ""))))
 
 (define (layout-modeline-shown)
   (let ((entry (assq 'layout-value *global-mode-string*)))

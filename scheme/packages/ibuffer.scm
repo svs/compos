@@ -1778,17 +1778,26 @@
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
              (not (equal? (buffer-local owner 'listing-preview-dismissed-row) target)))
-    (listing-preview-copy! owner target)))
+    ;; listing-preview-style picks the form: a peek is the real buffer in a
+    ;; window of the layout (peek.scm); a row it cannot peek, as one of
+    ;; another group, gets the card
+    (or (and (equal? listing-preview-style 'peek) (listing-peek! owner target))
+        (listing-preview-copy! owner target))))
 
 ;; the card is the frame's look (preview-show ... 'float); the copy it
 ;; shows names the list and the row: these read them back
 (define (listing-preview-owner)
+  (or (peek-owner) (listing-preview--card-owner)))
+
+(define (listing-preview--card-owner)
   (let ((b (preview-buffer)))
     (and b (equal? (nth 1 (preview-slot)) 'float) (buffer-known? b)
          (buffer-local b 'listing-preview-owner))))
 
 (define (listing-preview-target)
-  (and (listing-preview-owner) (buffer-local (preview-buffer) 'listing-preview-source)))
+  (if (peek-owner)
+      (peek-buffer)
+      (and (listing-preview-owner) (buffer-local (preview-buffer) 'listing-preview-source))))
 
 (define (listing-preview-show! copy source)
   ;; The card floats. A floating window's split takes no room -- its
@@ -1870,7 +1879,8 @@
           (run-command "other-window")))))
 
 (define (listing-preview-track!)
-  (let ((owner (listing-preview-owner)))
+  ;; a peek tracks itself (peek-track!): the focus may go into it
+  (let ((owner (listing-preview--card-owner)))
     (when (and owner (not (equal? (window-buffer (active-window)) owner))
                (not (equal? (mb-list-target) owner)))
       (listing-preview-dismiss! owner))))
@@ -1924,7 +1934,9 @@
 (define (listing-preview-dismiss! owner)
   (set-frame-local! 'listing-preview-ticket (+ 1 (or (frame-local 'listing-preview-ticket) 0)))
   (debounce-cancel! (string-append "listing-preview:" (selected-frame)))
-  (when (and owner (equal? owner (listing-preview-owner)))
+  (when (and owner (equal? owner (peek-owner)))
+    (peek-dismiss! #t))
+  (when (and owner (equal? owner (listing-preview--card-owner)))
     (let ((copy (preview-buffer)) (focus (active-window)))
       (preview-end #f)
       (when (window-exists? focus) (select-window! focus))
@@ -1936,20 +1948,26 @@
     ;; The listing remains available for reuse. Ordinary history owns return.
     (begin (window-unwind-or-close! (active-window)))))
 
-(define (listing-visit! view target)
+(define (listing-preview--kept? view target)
+  ;; RET on the row the peek shows keeps the peek and goes there
+  (and (equal? view (peek-owner)) (equal? target (peek-buffer))
+       (begin (peek-keep! #t) #t)))
+
+((define (listing-visit! view target)
   ;; Leave the listing on the invoking window's history for q.
-  (listing-preview-dismiss! view)
-  (cond ((buffer-known? target)
-         (let ((group (buffer-group target)))
-           (when (and group (not (equal? group (frame-group)))) (switch-to-group! group)))
-         (switch-to-buffer-in-chosen-pane! target))
-        ((and (string? target) (file-exists? target)) (visit-in-group target (frame-group))))
-  (when (and (equal? (current-buffer) target)
-             (equal? (buffer-group view) (buffer-group target)))
-    (let ((win (active-window)))
-      (set-window-prev-buffers! win
-        (cons view (filter (lambda (b) (not (equal? b view))) (window-prev-buffers win))))
-      (set-window-restore! win #f))))
+  (unless (listing-preview--kept? view target)
+    (listing-preview-dismiss! view)
+    (cond ((buffer-known? target)
+           (let ((group (buffer-group target)))
+             (when (and group (not (equal? group (frame-group)))) (switch-to-group! group)))
+           (switch-to-buffer-in-chosen-pane! target))
+          ((and (string? target) (file-exists? target)) (visit-in-group target (frame-group))))
+    (when (and (equal? (current-buffer) target)
+               (equal? (buffer-group view) (buffer-group target)))
+      (let ((win (active-window)))
+        (set-window-prev-buffers! win
+          (cons view (filter (lambda (b) (not (equal? b view))) (window-prev-buffers win))))
+        (set-window-restore! win #f)))))
 
 (public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
 (public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a read-only card tied to the selected source row")
@@ -1962,12 +1980,13 @@
   ;; showing it, else another one, split off when the list stands alone.
   ;; RET forgets the arrangement the list took; q no longer gives it back.
   (transient-frame-abandon! 'ibuffer)
-  (listing-preview-dismiss! view)
-  (let ((shown (and (buffer-known? target) (window-showing target)))
-        (home (window-showing view)))
-    (cond (shown (select-window! shown))
-          (home (select-window! home) (select-window! (get-other-window)))))
-  (listing-visit! view target))
+  (unless (listing-preview--kept? view target)
+    (listing-preview-dismiss! view)
+    (let ((shown (and (buffer-known? target) (window-showing target)))
+          (home (window-showing view)))
+      (cond (shown (select-window! shown))
+            (home (select-window! home) (select-window! (get-other-window)))))
+    (listing-visit! view target)))
 
 (public! 'listing-visit-beside! "(listing-visit-beside! VIEW TARGET) — visit TARGET in another window and keep VIEW where it is")
 (public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")

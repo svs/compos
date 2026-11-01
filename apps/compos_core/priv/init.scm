@@ -127,6 +127,7 @@
 (require 'tutorial)
 (require 'http)
 (require 'ibuffer)
+(require 'peek)
 ;; the buffers of one major mode, as ibuffer lists them
 (require 'mode-list)
 ;; the chats table is the mode list of chat-mode: it loads after it

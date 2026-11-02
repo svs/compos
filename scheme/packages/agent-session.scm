@@ -940,11 +940,12 @@
 ;; Every turn's summary judges the chat against its goal (chat.scm,
 ;; chat-status-hook). A turn judged success closes the chat the way the
 ;; reaper closes one, archived and killed. Listeners, a failed run, a
-;; waiting permission, unsaved edits and an open todo hold it. A chat a
-;; window shows is the user's, and stays. The reaper's dry run does
-;; not hold it: chat-auto-close is the switch.
+;; waiting permission, unsaved edits and an open todo hold it. Only a
+;; chat another chat spawned closes: a chat the user started is the
+;; user's, and stays, as does a chat a window shows. The reaper's dry
+;; run does not hold it: chat-auto-close is the switch.
 (defcustom 'chat-auto-close #t
-  "Close a chat when its turn summary judges the goal a success."
+  "Close a chat another chat spawned when its turn summary judges the goal a success."
   'group 'chat 'type 'boolean)
 
 (define (chat-done--holds buf slug ok? stop-reason)
@@ -965,6 +966,7 @@
     (when (and chat-auto-close (eq? status 'success) slug
                (buffer-local buf 'chat-auto-close-armed)
                (equal? (agent-status slug) 'idle)
+               (subagent-parent slug)
                (not (window-showing buf))
                (null? (chat-done--holds buf slug #t #f)))
       (buffer-set-local! buf 'chat-auto-close-armed #f)

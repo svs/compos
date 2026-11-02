@@ -1559,8 +1559,9 @@
 (public! 'chat-summary-turn!
   "(chat-summary-turn! BUF) -- land a one-line summary of the turn that just finished")
 (define (chat-summary-turn! buf)
+  ;; the judge is the hosted model, so it does not wait on the on-device
+  ;; card writer
   (and (buffer-known? buf)
-       (chat-title--card-ready?)
        (let ((passage (chat-summary--turn-passage buf)))
          (and (not (equal? passage ""))
               (begin

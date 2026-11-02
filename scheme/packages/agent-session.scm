@@ -906,7 +906,7 @@
             (map car *chats-activity*))))
 
 (defcustom 'chat-idle-reap-dry-run #t
-  "Only name, in the echo area, the idle chats the reaper would ask and the chats auto-close would close; touch none."
+  "Only name, in the echo area, the idle chats the reaper would ask; ask none."
   'group 'chat 'type 'boolean)
 
 (define (chat-reap! &optional _event)
@@ -941,8 +941,8 @@
 ;; chat-status-hook). A turn judged success closes the chat the way the
 ;; reaper closes one, archived and killed. Listeners, a failed run, a
 ;; waiting permission, unsaved edits and an open todo hold it. A chat a
-;; window shows is the user's, and stays. In dry run
-;; (chat-idle-reap-dry-run) the echo area only names it.
+;; window shows is the user's, and stays. The reaper's dry run does
+;; not hold it: chat-auto-close is the switch.
 (defcustom 'chat-auto-close #t
   "Close a chat when its turn summary judges the goal a success."
   'group 'chat 'type 'boolean)
@@ -969,12 +969,9 @@
                (null? (chat-done--holds buf slug #t #f)))
       (buffer-set-local! buf 'chat-auto-close-armed #f)
       (let ((title (chats-title buf)))
-        (if chat-idle-reap-dry-run
-            (message (string-append "Auto-close (dry run) would close: " title " (" why ")"))
-            (begin
-              (ignore-errors (lambda () (chat-log-save! buf)))
-              (agents-archive! buf)
-              (notify! "chat" (string-append "Done: " title) why)))))))
+        (ignore-errors (lambda () (chat-log-save! buf)))
+        (agents-archive! buf)
+        (notify! "chat" (string-append "Done: " title) why)))))
 
 (add-hook! 'chat-status-hook 'chat-auto-close--status!)
 

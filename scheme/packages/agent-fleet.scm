@@ -862,9 +862,38 @@
       (global-mode-string-set! 'agents-attention
         (if text (list "ml-attention" text) #f)))))
 
-(define-command "agent-goto-attention" "Jump to the first thread needing attention"
+;; An idle chat whose newest turn was judged needs-you or blocked waits
+;; on the person too. The modeline keeps to permissions and questions; the
+;; jump takes these after them.
+(define (agents-goal-attention)
+  (let loop ((ts (agent-threads)) (acc '()))
+    (if (null? ts)
+        (reverse acc)
+        (let* ((slug (car (car ts)))
+               (b (agent-buf slug)))
+          (loop (cdr ts)
+                (if (and (not (member slug acc))
+                         (string? b) (buffer-exists? b)
+                         (equal? (agent-status slug) 'idle)
+                         (memq (buffer-local b 'chat-goal-status) '(needs-you blocked)))
+                    (cons slug acc)
+                    acc))))))
+
+;; A chat that comes to need the person says so once, unless a window
+;; shows it already.
+(define (agents-goal-notify! buf status why)
+  (unless (eq? status (buffer-local buf 'chat-goal-noted))
+    (buffer-set-local! buf 'chat-goal-noted status)
+    (when (and (memq status '(needs-you blocked)) (not (window-showing buf)))
+      (notify! "chat"
+               (string-append (if (eq? status 'blocked) "Blocked: " "Needs you: ")
+                              (chats-title buf))
+               why))))
+(add-hook! 'chat-status-hook 'agents-goal-notify!)
+
+(define-command "agent-goto-attention" "Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked"
   (lambda ()
-    (let ((att (agents-attention)))
+    (let ((att (append (agents-attention) (agents-goal-attention))))
       (if (null? att)
           (message "no agent needs attention")
           (begin (switch-to-buffer! (agent-buf (car att)))

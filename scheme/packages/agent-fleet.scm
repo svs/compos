@@ -383,6 +383,17 @@
                   (if (or moved? (buffer-local b 'chats-watch)) (list-refresh! b) (list-redraw! b))))
               (mode-list-views "chat-mode"))))
 
+;; A chat that closes leaves every chat list. The kill seam asks each
+;; repair in turn and the first answer wins, so this one answers #f and
+;; only schedules the read for after the kill; a global hook runs before
+;; the keyed ones (panes, groups), so a winner never stops it
+(define (agents-chat-killed! name)
+  (when (chat-list-buf? name)
+    (task-run! (lambda () #t) (lambda (ok? v) (agents-restate!))))
+  #f)
+
+(add-hook! 'buffer-kill-repair 'agents-chat-killed!)
+
 ;; A title renames a chat, and a list holds its rows by name: a redraw keeps
 ;; the old name and the state it had, so a chat that ended its turn still
 ;; says "streaming". A rename reads the chats again.

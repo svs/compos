@@ -505,7 +505,7 @@
 
 ;;; --- windows ----------------------------------------------------------------
 
-(define panes-key-source #f)
+(define panes-key-source (if (boundp 'panes-key-source) panes-key-source #f))
 
 (define (panes--new-key layout)
   "A key for a new window and LAYOUT: (KEY LAYOUT). The key is the
@@ -589,10 +589,32 @@
                                 ((null? mine) (panes-remove-window l k))
                                 (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids mine))))))))
                       layout keys)))
-      (if (null? (panes-hidden kept))
-          kept
-          (let ((held (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows kept)))))
-            (panes--prune-hidden kept (lambda (e) (member e held))))))))
+      (panes--unshare-shown
+        (if (null? (panes-hidden kept))
+            kept
+            (let ((held (apply append (map (lambda (w) (or (plist-get w 'buffers) '())) (panes-windows kept)))))
+              (panes--prune-hidden kept (lambda (e) (member e held)))))))))
+
+(define (panes--unshare-shown layout)
+  "A buffer is on screen in one window. Windows of one mode share their
+   buffers, so two on screen can front the same one: the window in the
+   focused pane keeps it, and the other shows the first of its buffers
+   that no window on screen shows. One with no such buffer stays."
+  (let* ((tops (panes-top-windows layout))
+         (focus (plist-get layout 'focus))
+         (order (append (filter (lambda (k) (equal? (panes-pane-of layout k) focus)) tops)
+                        (filter (lambda (k) (not (equal? (panes-pane-of layout k) focus))) tops))))
+    (let loop ((ks order) (l layout) (shown '()))
+      (if (null? ks)
+          l
+          (let* ((k (car ks)) (b (panes-window-buffer l k)))
+            (if (and b (member b shown))
+                (let ((next (find (lambda (x) (not (or (member x shown) (member x (map (lambda (t) (panes-window-buffer l t)) (cdr ks))))))
+                                  (panes-window-buffers l k))))
+                  (if next
+                      (loop (cdr ks) (panes-show l k next) (cons next shown))
+                      (loop (cdr ks) l shown)))
+                (loop (cdr ks) l (if b (cons b shown) shown))))))))
 
 (define (panes-remove-window layout key)
   "Window KEY goes; its pane stays, empty when it held nothing else. An

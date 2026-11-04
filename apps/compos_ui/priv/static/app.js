@@ -1751,7 +1751,14 @@
           this.stick = this.el.dataset.stick !== "false";
           this.anchor = this.el.dataset.scrollAnchor ? parseInt(this.el.dataset.scrollAnchor, 10) : null;
           this.offset = parseInt(this.el.dataset.scrollOffset || "0", 10);
-          this.place();
+          // another chat is a fresh view: the old chat's hand does not
+          // stop the settle, and one place lands before the new chat
+          // has its height, near its top, with nothing to correct it
+          this.reader = false;
+          this.handAt = 0;
+          this.pin = null;
+          if (this.raf) cancelAnimationFrame(this.raf);
+          this.settle();
           return;
         }
         // chat-to-bottom said, in so many words, follow again, and

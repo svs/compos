@@ -148,7 +148,9 @@
       (buffer-set-local! buf 'chat-images-in-flight (remove (lambda (e) (eq? e hit)) flight))
       (for-each (lambda (im) (chat-image-show! buf (cadr im) (car im))) (cdr hit)))))
 
-(add-paste-hook! "chat-mode" 'chat-image chat-image-paste!)
+;; by name, so a reload of this file reaches the hook
+(add-paste-hook! "chat-mode" 'chat-image
+  (lambda (kind data mime) (chat-image-paste! kind data mime)))
 
 ;; The editor context block rides only when it says something new: when it
 ;; differs from the block this chat sent last, when C-c RET named a source, or

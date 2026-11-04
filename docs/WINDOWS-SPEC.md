@@ -579,20 +579,20 @@ and Help receive that exception. These cases do not certify the full window regi
 
 ## Explicit picker placement — current rule
 
-`C-x b` shows the choice in the invoking window. A buffer lives in one
-window at a time, so a buffer that another window holds, visible or hidden,
-moves: it leaves that window, which shows its own next buffer, and joins
-the invoking pane's window of its mode, else a new window of its mode at
-the front of that pane. This
-holds for every mode: a buffer never lands in another mode's window stack. `C-x b` is how a buffer moves between windows; cycling
-stays inside one window's own stack. No window moves and no stack is copied.
+`C-x b` shows the choice in the invoking pane. A buffer that a window in
+another pane holds, visible or hidden, opens a copy of that window at the
+front of the invoking pane: a new window of the same mode with the same
+stack, the choice at the front. The source window stays as it is. After
+the copy, the two windows are independent; a buffer can be in both stacks.
+This holds for every mode: a buffer never lands in another mode's window
+stack. Cycling stays inside one window's own stack. No window moves.
 Foreign selections enter their owning group first; windows never cross groups.
 This supersedes older cases describing `C-x b` as following a mode window.
 
 | Case | Command | Expected result |
 | --- | --- | --- |
-| E01 — Buffer in another window | `C-x b`, select a buffer another pane shows or holds, `RET` | The buffer moves to the invoking pane's window of its mode, else a new window of its mode at the front of that pane. The other window keeps its place and shows its next buffer; a window left empty closes and its pane stays. |
-| E02 — Hidden stack | `C-x b`, select a buffer a hidden window holds, `RET` | The buffer moves to the invoking window; the rest of the hidden stack stays hidden. Pane geometry stays. |
+| E01 — Buffer in another window | `C-x b`, select a buffer another pane shows or holds, `RET` | A copy of that window opens at the front of the invoking pane: same mode, same stack, the choice at the front. The source window is unchanged. A buffer already in a window of the invoking pane brings that window to the front. |
+| E02 — Hidden stack | `C-x b`, select a buffer a hidden window holds, `RET` | As E01: the hidden window is copied into the invoking pane and stays hidden. Pane geometry stays. |
 | E03 — No attraction | `C-x b`, select a mode with no window | Show the buffer in the invoking pane. |
 | E04 — Same pane | `C-x b`, choose another buffer of this mode | Keep the window in place. |
 | E05 — Foreign group | `C-x b`, choose a foreign buffer | Enter its group; only move windows belonging to that group. |

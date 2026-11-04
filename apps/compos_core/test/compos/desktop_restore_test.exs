@@ -9,9 +9,6 @@ defmodule Compos.DesktopRestoreTest do
 
   alias Compos.Core.{Buffer, Desktop, Editor, KeyDispatch, Session}
 
-  defp leaves(%{type: :leaf} = leaf), do: [leaf]
-  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
-
   defp eventually(fun, tries \\ 50) do
     cond do
       fun.() ->
@@ -386,15 +383,14 @@ defmodule Compos.DesktopRestoreTest do
 
     active = Editor.snapshot().active
     Editor.scroll_window(active, 10)
-    assert %{manual: true, top: 10} = Editor.render_state().tree |> leaves() |> hd()
+    assert %{manual: true, top: 10} = rendered_window(active)
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
     evict(name)
     assert :ok = Desktop.restore_now()
 
-    leaf = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.buffer == name))
-    assert %{manual: true, top: 10} = leaf
+    assert %{manual: true, top: 10} = rendered_window(window_showing(name))
   end
 
   # S1: the offset IS the pin. A key clears `manual` in the window it
@@ -416,8 +412,7 @@ defmodule Compos.DesktopRestoreTest do
     Editor.set_window_buffer("*scratch*")
     assert :ok = Desktop.restore_now()
 
-    leaf = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.buffer == name))
-    assert %{manual: true, ctop: 8330} = leaf
+    assert %{manual: true, ctop: 8330} = rendered_window(window_showing(name))
   end
 
   # S9: point belongs to the reader. A restore arranges windows; it does
@@ -450,13 +445,12 @@ defmodule Compos.DesktopRestoreTest do
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("2")
     active = Editor.snapshot().active
-    other = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.id != active))
-    Editor.scroll_window(other.id, 10)
+    {other, _} = Enum.find(Editor.list_windows(), fn {id, _} -> id != active end)
+    Editor.scroll_window(other, 10)
 
     KeyDispatch.handle_key("C-f")
 
-    assert %{manual: true} =
-             Editor.render_state().tree |> leaves() |> Enum.find(&(&1.id == other.id))
+    assert %{manual: true} = rendered_window(other)
 
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("1")

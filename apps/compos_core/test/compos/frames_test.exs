@@ -5,6 +5,12 @@ defmodule Compos.FramesTest do
 
   alias Compos.Core.{Buffer, Desktop, Editor, KeyDispatch, Session}
 
+  # (window-point WIN): the selected window's is the buffer's, any other's its own
+  defp window_point(win) do
+    {:ok, point} = Editor.window_point(win)
+    point
+  end
+
   # every other test assumes the single default frame — leave none behind
   setup do
     on_exit(fn ->
@@ -338,7 +344,7 @@ defmodule Compos.FramesTest do
     assert Buffer.win_point(buf, w1) == 7
     assert Buffer.win_point(buf, w2) == 0
 
-    points = for %{type: :leaf} = l <- Editor.render_state(fid).tree.children, do: l.point
+    points = for {w, _} <- Editor.list_windows(fid), do: window_point(w)
     assert Enum.sort(points) == [0, 7]
   end
 
@@ -419,8 +425,7 @@ defmodule Compos.FramesTest do
     Compos.TestHelpers.one_window!(fid)
     assert :ok = Desktop.restore_now()
 
-    points =
-      for %{type: :leaf} = l <- Editor.render_state(fid).tree.children, do: {l.point, l.buffer}
+    points = for {w, b} <- Editor.list_windows(fid), do: {window_point(w), b}
 
     assert Enum.sort(points) == [{3, buf}, {17, buf}]
   end

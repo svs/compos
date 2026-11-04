@@ -287,13 +287,12 @@ defmodule Compos.HelpTest do
   # and nothing on screen changes. Every key that moves through a buffer
   # has to scroll the page instead, or a help page longer than the window
   # is unreadable from the keyboard.
-  defp ctop(buf), do: find_ctop(Editor.render_state().tree, buf)
-
-  defp find_ctop(%{type: :leaf, buffer: b} = leaf, b), do: Map.get(leaf, :ctop, 0)
-  defp find_ctop(%{type: :leaf}, _b), do: nil
-
-  defp find_ctop(%{type: :split, children: [a, b]}, buf),
-    do: find_ctop(a, buf) || find_ctop(b, buf)
+  defp ctop(buf) do
+    case Compos.TestHelpers.window_showing(buf) do
+      nil -> nil
+      win -> Map.get(Compos.TestHelpers.rendered_window(win), :ctop, 0)
+    end
+  end
 
   # A writable preview takes edits. A read-only HTML page remains a reader.
   test "the motion keys move point in the Help page, not the page itself" do

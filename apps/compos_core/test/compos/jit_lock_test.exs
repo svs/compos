@@ -178,7 +178,7 @@ defmodule Compos.JitLockTest do
     end
 
     test "a draw of a 400 KB buffer fontifies the drawn lines and no others", %{name: name} do
-      leaf = Editor.render_state().tree
+      leaf = Compos.TestHelpers.rendered_window()
       assert leaf.buffer == name
       {drawn, _} = Display.window(leaf, nil)
       bytes = drawn_bytes()

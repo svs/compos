@@ -90,14 +90,14 @@ defmodule Compos.SwitcherPerformanceTest do
     Editor.set_window_buffer("*zz-perf-hidden*")
     win = Editor.active_window()
     Editor.scroll_window(win, 50)
-    before = Editor.render_state().tree
+    before = rendered_window(win)
     eval!(~s{
       (begin
         (buffer-create "*zz-perf-chat*")
         (buffer-set-local! "*zz-perf-chat*" 'ibuffer-prompt-home-window #{win})
         (ibuffer-preview! "*zz-perf-chat*" "*zz-perf-hidden*"))
     })
-    after_preview = Editor.render_state().tree
+    after_preview = rendered_window(win)
     assert after_preview.top == before.top
     assert after_preview.manual == before.manual
   end

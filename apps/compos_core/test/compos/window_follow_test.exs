@@ -15,16 +15,7 @@ defmodule Compos.WindowFollowTest do
     :ok
   end
 
-  defp active_leaf do
-    state = Editor.render_state()
-    find_leaf(state.tree, state.active)
-  end
-
-  defp find_leaf(%{type: :leaf, id: id} = leaf, id), do: leaf
-  defp find_leaf(%{type: :leaf}, _), do: nil
-
-  defp find_leaf(%{type: :split, children: children}, id),
-    do: Enum.find_value(children, &find_leaf(&1, id))
+  defp active_leaf, do: Compos.TestHelpers.rendered_window()
 
   defp pin_active_window! do
     %{active: win} = Editor.snapshot()

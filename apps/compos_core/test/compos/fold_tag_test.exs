@@ -193,14 +193,5 @@ defmodule Compos.FoldTagTest do
     assert leaf.path == nil
   end
 
-  defp active_leaf do
-    payload = Editor.render_state()
-    find_leaf(payload.tree, payload.active)
-  end
-
-  defp find_leaf(%{type: :leaf, id: id} = leaf, id), do: leaf
-  defp find_leaf(%{type: :leaf}, _id), do: nil
-
-  defp find_leaf(%{type: :split, children: children}, id),
-    do: Enum.find_value(children, &find_leaf(&1, id))
+  defp active_leaf, do: Compos.TestHelpers.rendered_window()
 end

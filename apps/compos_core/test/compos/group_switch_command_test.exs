@@ -30,8 +30,10 @@ defmodule Compos.GroupSwitchCommandTest do
     |> Jason.decode!()
   end
 
-  defp leaves(%{type: :leaf} = leaf), do: [leaf]
-  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
+  # What the client draws for the window that shows BUFFER.
+  defp rendered(buffer) do
+    Compos.TestHelpers.rendered_window(Compos.TestHelpers.window_showing(buffer))
+  end
 
   setup do
     Editor.set_pending([])
@@ -125,7 +127,7 @@ defmodule Compos.GroupSwitchCommandTest do
       assert eval!(~s{(group-label (dashboard--group "#{buffer}"))}) =~ "headline-dest",
              "#{buffer} did not move"
 
-      unless Enum.any?(leaves(Editor.render_state().tree), &(&1.buffer == buffer)) do
+      unless buffer in Compos.TestHelpers.window_buffers() do
         assert eval!(~s{(buffer-dirty? "#{buffer}" 'group-display)}) == "#t"
         Editor.set_window_buffer(buffer)
         eval!("(windows-shown-catchup!)")
@@ -338,7 +340,7 @@ defmodule Compos.GroupSwitchCommandTest do
     """)
 
     rendered = Editor.render_state()
-    leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == second))
+    leaf = rendered(second)
 
     docs_color =
       eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{docs}")))])
@@ -383,15 +385,14 @@ defmodule Compos.GroupSwitchCommandTest do
     """)
 
     rendered = Editor.render_state()
-    by_buffer = rendered.tree |> leaves() |> Map.new(&{&1.buffer, &1})
 
     # a pane in another group wears that group's color; one in the frame's wears none
     other_color =
       eval!(~s[(group-color-hex (group-record-color (group-record-by-id "#{other}")))])
       |> Jason.decode!()
 
-    assert by_buffer[first].group_color == other_color
-    assert by_buffer[second].group_color == other_color
+    assert rendered(first).group_color == other_color
+    assert rendered(second).group_color == other_color
     assert rendered.frame_group == "modeline-here"
     assert rendered.frame_group_color =~ ~r/^#[0-9a-f]{6}$/i
 
@@ -407,7 +408,6 @@ defmodule Compos.GroupSwitchCommandTest do
 
     # No group is genuinely ungrouped even while the frame stays here.
     eval!(~s{(buffer-move-to-group! "#{third}" #f)})
-    by_buffer = Editor.render_state().tree |> leaves() |> Map.new(&{&1.buffer, &1})
-    refute by_buffer[third].group_color
+    refute rendered(third).group_color
   end
 end

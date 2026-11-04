@@ -270,15 +270,15 @@ defmodule Compos.DismissTest do
       f
     )
 
-    assert Editor.render_state(f).tree.dismissible
-    refute Editor.render_state(f).tree.cursor_visible
+    assert Compos.TestHelpers.rendered_window(:active, f).dismissible
+    refute Compos.TestHelpers.rendered_window(:active, f).cursor_visible
     eval!("(run-command \"caret-browsing-mode\")", f)
-    assert Editor.render_state(f).tree.cursor_visible
+    assert Compos.TestHelpers.rendered_window(:active, f).cursor_visible
     eval!("(restore-buffer-runtime! \"zz-dismiss-child\")", f)
     assert eval!("(buffer-parent \"zz-dismiss-child\")", f) == ~s("zz-dismiss-parent")
-    assert Editor.render_state(f).tree.cursor_visible
+    assert Compos.TestHelpers.rendered_window(:active, f).cursor_visible
     eval!("(run-command \"caret-browsing-mode\")", f)
-    refute Editor.render_state(f).tree.cursor_visible
+    refute Compos.TestHelpers.rendered_window(:active, f).cursor_visible
   end
 
   test "a dismissible mode that navigates by point keeps its cursor", %{frame: f} do
@@ -293,13 +293,13 @@ defmodule Compos.DismissTest do
       f
     )
 
-    assert Editor.render_state(f).tree.dismissible
-    assert Editor.render_state(f).tree.cursor_visible
+    assert Compos.TestHelpers.rendered_window(:active, f).dismissible
+    assert Compos.TestHelpers.rendered_window(:active, f).cursor_visible
 
     # the default is applied once, so the reader's toggle still answers
     eval!("(run-command \"caret-browsing-mode\")", f)
     eval!("(dismiss-sync-visible!)", f)
-    refute Editor.render_state(f).tree.cursor_visible
+    refute Compos.TestHelpers.rendered_window(:active, f).cursor_visible
   end
 
   test "browse-mode is one of the modes that keep their cursor", %{frame: f} do

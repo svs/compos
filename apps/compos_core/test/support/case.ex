@@ -6,7 +6,7 @@ defmodule Compos.TestHelpers do
 
   import ExUnit.Assertions, only: [flunk: 1]
 
-  alias Compos.Core.{KeyDispatch, Session}
+  alias Compos.Core.{Editor, KeyDispatch, Session}
 
   @doc "Evaluate Scheme in the session and return the printed value; a failure is the test's."
   def eval!(code, frame \\ nil, timeout \\ 30_000, lane \\ nil) do
@@ -16,6 +16,40 @@ defmodule Compos.TestHelpers do
 
   @doc "The frame shows its active window alone, through Scheme's test-one-window!: the reset a window test starts from."
   def one_window!(frame \\ nil), do: eval!("(test-one-window!)", frame)
+
+  @doc """
+  The frame's windows as (window-rects) answers: {BUFFER, [X, Y, W, H]} per
+  window, in frame order. Each fraction is rounded to a thousandth, so a
+  third compares as 0.333.
+  """
+  def window_layout(frame \\ nil) do
+    for [_id, buffer, x, y, w, h] <- Editor.window_rects(frame),
+        do: {buffer, Enum.map([x, y, w, h], &Float.round(&1 / 1, 3))}
+  end
+
+  @doc "The rectangles of the frame's windows alone, in frame order."
+  def rects(frame \\ nil), do: for({_, rect} <- window_layout(frame), do: rect)
+
+  @doc "The buffers the frame's windows show, in frame order, as (window-list) answers."
+  def window_buffers(frame \\ nil), do: for({_, buffer} <- Editor.list_windows(frame), do: buffer)
+
+  @doc "The first window that shows BUFFER, as (window-showing BUFFER) answers, or nil."
+  def window_showing(buffer, frame \\ nil),
+    do: Enum.find_value(Editor.list_windows(frame), fn {id, b} -> b == buffer && id end)
+
+  @doc """
+  What the client draws for window WIN, the active window by default, or
+  nil when WIN is nil: the viewport (top, rows, total_lines), the cursor
+  and the mode flags. The layout is not in it; read that with window_layout.
+  """
+  def rendered_window(win \\ :active, frame \\ nil) do
+    win = if win == :active, do: Editor.active_window(frame), else: win
+    win && find_window(Editor.render_state(frame).tree, win)
+  end
+
+  defp find_window(%{type: :leaf, id: id} = leaf, id), do: leaf
+  defp find_window(%{type: :leaf}, _id), do: nil
+  defp find_window(%{type: :split, children: c}, id), do: Enum.find_value(c, &find_window(&1, id))
 
   @doc "Press one key or a list of keys through KeyDispatch, the path the GUI takes."
   def press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)

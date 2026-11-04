@@ -89,11 +89,4 @@ defmodule Compos.WindowIdsTest do
       assert [{^pane, @a}, {_, @b}] = Editor.list_windows(frame)
     end)
   end
-
-  test "the desktop view names each window's id" do
-    with_frame(fn frame ->
-      [{pane, @a}] = Editor.list_windows(frame)
-      assert %{tree: %{type: :leaf, id: ^pane}} = Editor.desktop_view(frame)
-    end)
-  end
 end

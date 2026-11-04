@@ -56,7 +56,7 @@ defmodule Compos.MorgTest do
     assert Buffer.hidden(buf) == []
     assert Buffer.get_local(buf, "morg-narrow-anchor") == 9
 
-    %{tree: leaf} = Editor.render_state()
+    leaf = Compos.TestHelpers.rendered_window()
     assert leaf.narrow_lines == {2, 3}
 
     press(["C-x", "n", "w"])

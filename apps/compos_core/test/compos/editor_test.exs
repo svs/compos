@@ -313,24 +313,11 @@ defmodule Compos.EditorTest do
     press(["RET"])
     assert Editor.current_buffer() == path
 
-    leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
-    assert leaf.mode == "morg-mode"
+    assert Buffer.get_local(path, "mode-name") == "morg-mode"
 
     press(["C-x", "C-s"])
     assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "saved-hook-ran"
     File.rm!(path)
-  end
-
-  defp find_active_leaf(%{type: :leaf} = leaf, _id), do: leaf
-
-  defp find_active_leaf(%{type: :split, children: c}, id) do
-    Enum.find_value(c, fn child ->
-      case child do
-        %{type: :leaf, id: ^id} -> child
-        %{type: :split} -> find_active_leaf(child, id)
-        _ -> nil
-      end
-    end)
   end
 
   test "mark, kill-region, yank, copy, exchange", %{buf: buf} do
@@ -937,7 +924,7 @@ defmodule Compos.EditorTest do
       {:ok, _} = Compos.Core.Session.eval(~s{(buffer-set-local! "#{root}" 'render-mode "blocks")})
 
       # the core stops calling it blocks the moment there are no blocks
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.buffer == root
       assert leaf.render_mode == nil
 
@@ -1724,7 +1711,7 @@ defmodule Compos.EditorTest do
     assert Editor.render_state().minibuffer.sel == 1
     press(["RET"])
 
-    assert %{type: :split, dir: :h} = Editor.render_state().tree
+    assert rects() == [[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]]
     press(["C-x", "1"])
   end
 
@@ -1836,7 +1823,7 @@ defmodule Compos.EditorTest do
     assert Buffer.exists?(path)
     assert Buffer.point(path) == 3
     assert Buffer.get_local(path, "mode-name") == "elixir-mode"
-    assert %{type: :split, dir: :h} = Editor.render_state().tree
+    assert rects() == [[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]]
     assert Editor.render_state().faces["desk-test"] == %{"fg" => "#123456"}
     assert Editor.current_buffer() == path
 
@@ -2018,14 +2005,14 @@ defmodule Compos.EditorTest do
     end
 
     test "renders only the visible slice; auto-follows point", %{buf: buf} do
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.top == 0
       assert leaf.rows == 10
       assert leaf.total_lines == 101
 
       # point to the end: viewport follows
       press(["M->"])
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.top == 101 - 10
       assert Buffer.point(buf) > 0
     end
@@ -2040,19 +2027,19 @@ defmodule Compos.EditorTest do
 
       {:ok, _} = Compos.Core.Session.eval("(goto-char! 400)")
       press(["C-l"])
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       # byte 400 sits on 0-based line 51; centered top = 51 - rows/2
       assert leaf.top == 46
     end
 
     test "manual scroll holds until a key re-follows point" do
       Editor.scroll_active(50)
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.top == 50
 
       # a key breaks the override; point (line 0) pulls the view back
       press(["C-f"])
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.top == 0
     end
 
@@ -2060,13 +2047,13 @@ defmodule Compos.EditorTest do
       press(["M-x"])
       type("display-line-numbers-mode")
       press(["RET"])
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.line_numbers == false
 
       press(["M-x"])
       type("display-line-numbers-mode")
       press(["RET"])
-      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      leaf = rendered_window()
       assert leaf.line_numbers == true
     end
   end
@@ -2265,18 +2252,11 @@ defmodule Compos.EditorTest do
       {other_id, _} = Editor.list_windows() |> Enum.find(fn {id, _} -> id != active end)
 
       press(["C-M-v"])
-      other_leaf = find_leaf_by_id(Editor.render_state().tree, other_id)
-      assert other_leaf.top > 0
+      assert rendered_window(other_id).top > 0
 
       press(["C-x", "1"])
     end
   end
-
-  defp find_leaf_by_id(%{type: :leaf, id: id} = leaf, id), do: leaf
-  defp find_leaf_by_id(%{type: :leaf}, _id), do: nil
-
-  defp find_leaf_by_id(%{type: :split, children: c}, id),
-    do: Enum.find_value(c, &find_leaf_by_id(&1, id))
 
   test "chat opens the group companion; RET sends, reply appends", %{buf: buf} do
     companion = "*chat:#{buf}*"
@@ -3863,6 +3843,9 @@ defmodule Compos.EditorTest do
     assert echo() == "42"
   end
 
+  # three equal columns, as (window-rects) answers them
+  @thirds [[0.0, 0.0, 0.333, 1.0], [0.333, 0.0, 0.333, 1.0], [0.667, 0.0, 0.333, 1.0]]
+
   describe "tiling windows" do
     test "frame width is reconstructed from measured pane columns" do
       Editor.set_window_cols(%{})
@@ -3885,21 +3868,19 @@ defmodule Compos.EditorTest do
       press(["C-x", "2"])
       press(["C-x", "3"])
 
-      state = Editor.render_state()
-      assert %{type: :split, dir: :v, children: [%{type: :split, dir: :h}, _]} = state.tree
-
-      ids = collect_ids(state.tree)
-      assert length(ids) == 3
+      # C-x 2 stacks two halves; C-x 3 splits the upper one beside itself
+      assert window_layout() == [
+               {buf, [0.0, 0.0, 0.5, 0.5]},
+               {buf, [0.5, 0.0, 0.5, 0.5]},
+               {buf, [0.0, 0.5, 1.0, 0.5]}
+             ]
 
       active_before = Editor.snapshot().active
       press(["C-x", "o"])
       assert Editor.snapshot().active != active_before
 
-      # all windows show the same buffer initially
-      assert state.tree |> collect_buffers() |> Enum.uniq() == [buf]
-
       press(["C-x", "1"])
-      assert %{type: :leaf} = Editor.render_state().tree
+      assert rects() == [[0.0, 0.0, 1.0, 1.0]]
 
       press(["C-x", "0"])
       assert echo() =~ "sole window"
@@ -3917,8 +3898,7 @@ defmodule Compos.EditorTest do
       type(other)
       press(["RET"])
 
-      buffers = Editor.render_state().tree |> collect_buffers() |> Enum.sort()
-      assert buffers == Enum.sort([buf, other])
+      assert Enum.sort(window_buffers()) == Enum.sort([buf, other])
       press(["C-x", "1"])
     end
 
@@ -3947,55 +3927,37 @@ defmodule Compos.EditorTest do
       type("window-layout-columns")
       press(["RET"])
 
-      columns = Editor.render_state().tree
-
-      assert %{
-               type: :split,
-               dir: :h,
-               ratio: first,
-               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]
-             } = columns
-
-      assert_in_delta first, 1 / 3, 0.001
-      assert_in_delta second_ratio, 1 / 2, 0.001
+      columns = window_layout()
+      assert Enum.map(columns, &elem(&1, 1)) == @thirds
 
       press(["M-x"])
       type("window-layout-main-right")
       press(["RET"])
 
-      assert %{
-               type: :split,
-               dir: :h,
-               ratio: main,
-               children: [_, %{type: :split, dir: :v, ratio: stack}]
-             } = Editor.render_state().tree
-
-      assert_in_delta main, 2 / 3, 0.001
-      assert_in_delta stack, 1 / 2, 0.001
+      # the main pane takes two thirds; the other two stack on the right
+      assert rects() == [
+               [0.0, 0.0, 0.667, 1.0],
+               [0.667, 0.0, 0.333, 0.5],
+               [0.667, 0.5, 0.333, 0.5]
+             ]
 
       press(["M-x"])
       type("winner-undo")
       press(["RET"])
-      assert layout_shape(Editor.render_state().tree) == layout_shape(columns)
+      assert window_layout() == columns
 
       {:ok, _} =
         Compos.Core.Session.eval(
           ~s{(panes-tile! 'grid (list "#{buf}" "#{second}" "#{third}" "#{fourth}"))}
         )
 
-      assert %{
-               type: :split,
-               dir: :h,
-               ratio: grid,
-               children: [
-                 %{type: :split, dir: :v, ratio: upper},
-                 %{type: :split, dir: :v, ratio: lower}
-               ]
-             } = Editor.render_state().tree
-
-      assert_in_delta grid, 1 / 2, 0.001
-      assert_in_delta upper, 1 / 2, 0.001
-      assert_in_delta lower, 1 / 2, 0.001
+      # two columns of two
+      assert rects() == [
+               [0.0, 0.0, 0.5, 0.5],
+               [0.0, 0.5, 0.5, 0.5],
+               [0.5, 0.0, 0.5, 0.5],
+               [0.5, 0.5, 0.5, 0.5]
+             ]
 
       {:ok, _} = Compos.Core.Session.eval("(delete-other-windows!)")
 
@@ -4026,9 +3988,7 @@ defmodule Compos.EditorTest do
       type("two-pane")
       press(["RET"])
 
-      assert %{type: :split, dir: :h, ratio: ratio} = Editor.render_state().tree
-      assert_in_delta ratio, 2 / 3, 0.001
-      assert Editor.render_state().tree |> collect_buffers() == [buf, second]
+      assert window_layout() == [{buf, [0.0, 0.0, 0.667, 1.0]}, {second, [0.667, 0.0, 0.333, 1.0]}]
       assert Editor.current_buffer() == buf
 
       for name <- [second, third],
@@ -4048,9 +4008,7 @@ defmodule Compos.EditorTest do
 
       run("window-layout-two-pane")
 
-      assert %{type: :split, dir: :h, ratio: ratio} = Editor.render_state().tree
-      assert_in_delta ratio, 2 / 3, 0.001
-      assert Editor.render_state().tree |> collect_buffers() == [buf, companion]
+      assert window_layout() == [{buf, [0.0, 0.0, 0.667, 1.0]}, {companion, [0.667, 0.0, 0.333, 1.0]}]
 
       Compos.Core.Session.eval(~s{(buffer-kill! "#{companion}")})
     end
@@ -4143,18 +4101,13 @@ defmodule Compos.EditorTest do
                (switch-to-buffer! "#{third}"))
         """)
 
-      before = Editor.render_state().tree
+      before = window_layout()
       run("window-layout")
       type("columns")
 
-      preview = Editor.render_state().tree
-      assert %{type: :split, dir: :h, ratio: first,
-               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]} = preview
-      assert_in_delta first, 1 / 3, 0.001
-      assert_in_delta second_ratio, 1 / 2, 0.001
-      assert collect_buffers(preview) == [buf, second, third]
+      assert window_layout() == Enum.zip([buf, second, third], @thirds)
       press(["C-g"])
-      assert layout_shape(Editor.render_state().tree) == layout_shape(before)
+      assert window_layout() == before
 
       for name <- [second, third],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
@@ -4173,8 +4126,7 @@ defmodule Compos.EditorTest do
 
       run("window-layout-columns")
 
-      assert Editor.render_state().tree |> collect_buffers() |> Enum.sort() ==
-               Enum.sort([buf, second, third])
+      assert Enum.sort(window_buffers()) == Enum.sort([buf, second, third])
 
       for name <- [second, third],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
@@ -4210,29 +4162,19 @@ defmodule Compos.EditorTest do
       type("window-layout-adaptive")
       press(["RET"])
 
-      assert %{
-               type: :split,
-               dir: :v,
-               ratio: compact_main,
-               children: [_, %{type: :split, dir: :h}]
-             } = Editor.render_state().tree
-
-      assert_in_delta compact_main, 2 / 3, 0.001
+      # a narrow frame: the main pane on top at two thirds, the rest beside each other below
+      [main, below_left, below_right] = rects()
+      assert main == [0.0, 0.0, 1.0, 0.667]
+      assert [Enum.at(below_left, 0), Enum.at(below_left, 1)] == [0.0, 0.667]
+      assert Enum.at(below_right, 1) == 0.667
+      assert Enum.at(below_left, 0) < Enum.at(below_right, 0)
 
       measure_frame.(240)
       press(["M-x"])
       type("window-layout-adaptive")
       press(["RET"])
 
-      assert %{
-               type: :split,
-               dir: :h,
-               ratio: first,
-               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]
-             } = Editor.render_state().tree
-
-      assert_in_delta first, 1 / 3, 0.001
-      assert_in_delta second_ratio, 1 / 2, 0.001
+      assert rects() == @thirds
 
       Compos.TestHelpers.one_window!()
       Editor.set_window_cols(%{})
@@ -4259,7 +4201,7 @@ defmodule Compos.EditorTest do
           (select-window! (window-showing "#{buf}")))
         """)
 
-      before = Editor.render_state().tree |> collect_buffers() |> Enum.sort()
+      before = Enum.sort(window_buffers())
       assert before == Enum.sort([buf, second, second, shell])
 
       press(["M-x"])
@@ -4268,7 +4210,7 @@ defmodule Compos.EditorTest do
       type("adaptive")
       press(["RET"])
 
-      after_layout = Editor.render_state().tree |> collect_buffers() |> Enum.sort()
+      after_layout = Enum.sort(window_buffers())
       assert after_layout == before
       assert length(Editor.list_windows()) == 4
       assert {:ok, "#f"} = Compos.Core.Session.eval(~s{(buffer-local "#{shell}" 'window-class)})
@@ -4280,17 +4222,6 @@ defmodule Compos.EditorTest do
     end
   end
 
-  defp collect_ids(%{type: :leaf, id: id}), do: [id]
-  defp collect_ids(%{type: :split, children: c}), do: Enum.flat_map(c, &collect_ids/1)
-
-  defp collect_buffers(%{type: :leaf, buffer: b}), do: [b]
-  defp collect_buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &collect_buffers/1)
-
-  defp layout_shape(%{type: :leaf, buffer: buffer}), do: {:leaf, buffer}
-
-  defp layout_shape(%{type: :split, dir: dir, ratio: ratio, children: children}) do
-    {:split, dir, ratio, Enum.map(children, &layout_shape/1)}
-  end
 end
 
 defmodule Compos.MinibufferEditingTest do

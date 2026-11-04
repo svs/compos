@@ -116,14 +116,7 @@ defmodule Compos.GitDiffTest do
   defp pl(false), do: nil
   defp pl(v), do: v
 
-  defp leaf(buf) do
-    payload = Editor.render_state()
-    find_leaf(payload.tree, buf)
-  end
-
-  defp find_leaf(%{type: :leaf, buffer: b} = l, b), do: l
-  defp find_leaf(%{type: :leaf}, _), do: nil
-  defp find_leaf(%{type: :split, children: cs}, b), do: Enum.find_value(cs, &find_leaf(&1, b))
+  defp leaf(buf), do: Compos.TestHelpers.rendered_window(Compos.TestHelpers.window_showing(buf))
 
   defp line_of(buf, pos), do: Compos.Core.Text.line_index(Buffer.text(buf), pos) + 1
 

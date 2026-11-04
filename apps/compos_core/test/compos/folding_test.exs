@@ -11,16 +11,8 @@ defmodule Compos.FoldingTest do
     name
   end
 
-  defp leaf_for(buf) do
-    %{tree: tree} = Editor.render_state()
-    find_leaf(tree, buf)
-  end
-
-  defp find_leaf(%{type: :leaf, buffer: b} = leaf, b), do: leaf
-  defp find_leaf(%{type: :leaf}, _), do: nil
-
-  defp find_leaf(%{type: :split, children: c}, b),
-    do: Enum.find_value(c, &find_leaf(&1, b))
+  defp leaf_for(buf),
+    do: Compos.TestHelpers.rendered_window(Compos.TestHelpers.window_showing(buf))
 
   # "* a\nbody1\nbody2\n* b\ntail" — fold covers a's body (the newline
   # after "* a" through the end of body2's line)

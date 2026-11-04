@@ -112,7 +112,7 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .row .t { overflow: hidden; text-overflow: ellipsis; transition: color .4s; }
 .row .st { color: var(--ngreen); opacity: 0; transition: opacity .4s; }
 .at-3 .row.cur { background: var(--night-sel); }
-.at-4 .row.cur .t { color: var(--nmuted); text-decoration: line-through; transition-delay: 2.2s; }
+.at-4 .row.cur .t { color: var(--nink); transition-delay: 2.2s; }
 .at-4 .row.cur .st { opacity: 1; transition-delay: 2.2s; }
 .legend { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--nrule); color: var(--nmuted); font-size: 11px; }
 .legend b { color: var(--nblue); font-weight: 400; }

@@ -977,8 +977,23 @@
           // the mode's focus key, as the title shows it, gives the keyboard back
           const focusKey = this.el.closest(".window")
             ?.querySelector(".dash-state-mark[data-focus-key]")?.dataset.focusKey;
-          const editorEntry = spec === focusKey ||
-            ["C-x", "M-x", "C-g", "C-`", "M-`", "C-M-`", "s-p"].includes(spec);
+          // the Cmd chords are the editor's: the Cmd-arrows leave the
+          // terminal for the next window while it has the keyboard
+          const editorEntry = spec === focusKey || spec?.startsWith("s-") ||
+            ["C-x", "M-x", "C-g", "C-`", "M-`", "C-M-`"].includes(spec);
+          // Shift and the page keys walk the scrollback while typing, as
+          // in a terminal; typing again goes back to the prompt
+          const page = { "S-<prior>": -1, "S-<next>": 1 }[spec];
+          const edge = { "S-<home>": "top", "S-<end>": "bottom" }[spec];
+          if (!this.editorSequence && !editorOpen && (page || edge)) {
+            e.preventDefault();
+            if (e.type === "keydown") {
+              if (page) this.term.scrollPages(page);
+              else if (edge === "top") this.term.scrollToTop();
+              else this.term.scrollToBottom();
+            }
+            return false;
+          }
           if (spec && (this.editorSequence || editorOpen || editorEntry)) {
             e.preventDefault();
             this.editorSequence = true;
@@ -1007,6 +1022,19 @@
           this.fitFrame = requestAnimationFrame(this.fit);
         });
         this.observer.observe(this.el);
+
+        // The editor's scroll commands reach the terminal as the window's
+        // scroll request, a generation and the lines: C-v, M-v and M-<down>
+        // from the other window walk the scrollback the browser holds.
+        this.scrollWas = this.el.dataset.scroll;
+        this.scrollObserver = new MutationObserver(() => {
+          const req = this.el.dataset.scroll;
+          if (!req || req === this.scrollWas || !this.term) return;
+          this.scrollWas = req;
+          const lines = parseInt(req.split(":")[1], 10);
+          if (lines) this.term.scrollLines(lines);
+        });
+        this.scrollObserver.observe(this.el, { attributes: true, attributeFilter: ["data-scroll"] });
 
         // A theme change rewrites the face stylesheet. Nothing else writes
         // a <style> element, so this observer fires once per theme change,
@@ -1041,6 +1069,7 @@
       },
       destroyed() {
         if (this.observer) this.observer.disconnect();
+        if (this.scrollObserver) this.scrollObserver.disconnect();
         if (this.themeObserver) this.themeObserver.disconnect();
         cancelAnimationFrame(this.themeFrame);
         if (this.dataSub) this.dataSub.dispose();

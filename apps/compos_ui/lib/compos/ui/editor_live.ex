@@ -1920,6 +1920,7 @@ defmodule Compos.Ui.EditorLive do
           phx-update="ignore"
           data-buffer={@node.buffer}
           data-win={@node.id}
+          data-scroll={scroll_request(@node)}
         ></c-group>
       <% else %>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>

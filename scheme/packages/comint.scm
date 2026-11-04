@@ -61,11 +61,36 @@
 (mode-keys! "term-mode"
   (map (lambda (entry) (list (car entry) "term-send-key")) term--key-bytes))
 
+;; The browser holds the scrollback, so a scroll is the window's scroll
+;; request: the terminal moves its own view by that many lines.
+(define (term--scroll! lines)
+  (scroll-window! (active-window) lines))
+
+(define (term--page)
+  (max 1 (- (or (window-rows) 24) 2)))
+
+(define-command "term-scroll-up" "Show the older output, one screen back"
+  (lambda () (term--scroll! (- (term--page)))))
+
+(define-command "term-scroll-down" "Show the newer output, one screen on"
+  (lambda () (term--scroll! (term--page))))
+
+(define-command "term-scroll-to-top" "Show the oldest output the terminal keeps"
+  (lambda () (term--scroll! -100000)))
+
+(define-command "term-scroll-to-bottom" "Go back to the prompt"
+  (lambda () (term--scroll! 100000)))
+
+(mode-keys! "term-mode"
+  '(("M-v" "term-scroll-up") ("<prior>" "term-scroll-up")
+    ("C-v" "term-scroll-down") ("<next>" "term-scroll-down")
+    ("M-<" "term-scroll-to-top") ("M->" "term-scroll-to-bottom")))
+
 ;; ESC belongs to the programs in the terminal (vim, less, the line editor)
 (mode-focus-key! "term-mode" "C-g")
 
 (mode-doc! "term-mode"
-  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, `C-g`, the focus key the title shows, or a window command takes the keyboard back. `ESC` stays the terminal's.")
+  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, `C-g`, the focus key the title shows, or a window command takes the keyboard back. The Cmd-arrows move to the next window from either state. `ESC` stays the terminal's. The scrollback scrolls from the keyboard: in focus, `M-v` and `C-v` (or the page keys) go a screen back and on, `M-<` to the oldest output and `M->` to the prompt; while typing, Shift with the page keys, Home and End does the same. `M-<down>` and `M-<up>` from another window scroll it too.")
 
 (define (shell--fresh-name base)
   (let loop ((n 2))

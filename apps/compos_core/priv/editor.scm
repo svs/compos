@@ -448,6 +448,12 @@
       (buffer-set-local! buf 'change-watches
         (filter (lambda (row) (not (equal? (car row) key))) cur)))))
 
+(define (buffer-list-all)
+  ;; buffer-list holds only the awake; this adds the ones asleep
+  (let ((live (buffer-list)))
+    (append live (filter (lambda (n) (not (member n live)))
+                         (map car (cadr (buffer-rows (list 'hidden #t 'fields '(name)))))))))
+
 (define (cache-declare! buf fetch render ttl)
   (desktop-skip! buf 'cache-spec)
   (desktop-skip! buf 'cache-inflight)
@@ -5940,6 +5946,8 @@
 (catalog-meta! 'function "modeline-cache-with" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "modeline-cache-set!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-unwatch-change! "(buffer-unwatch-change! BUF KEY) — stop the change watch KEY on BUF")
+(public! 'buffer-list-all "(buffer-list-all) — every buffer name, awake and asleep")
+(catalog-meta! 'function "buffer-list-all" 'effects '(read))
 (catalog-meta! 'function "buffer-unwatch-change!" 'domain 'buffers 'effects '(write))
 (effects! '(read))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")

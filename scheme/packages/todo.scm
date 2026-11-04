@@ -687,7 +687,7 @@
 
 (define (todo--refresh-all!)
   (for-each (lambda (b)
-              (if (window-showing b) (list-refresh! b) (buffer-mark-dirty! b 'todo-list)))
+              (list-refresh! b))
             (todo--buffers)))
 
 ;; the list and its task page are one app, an instance per group, laid out

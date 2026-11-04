@@ -2524,6 +2524,23 @@
     prepared))
 
 (define (list-render! buf fetch)
+  ;; a hidden list is not drawn: the render waits for a window, and keeps
+  ;; the strongest fetch asked for meanwhile (#t, then 'cached, then #f)
+  (let ((was (buffer-local buf 'list-render-fetch)))
+    (when (buffer-exists? buf)
+      (desktop-skip! buf 'list-render-fetch)
+      (buffer-set-local! buf 'list-render-fetch
+        (cond ((or (eq? was #t) (eq? fetch #t)) #t)
+              ((or was fetch) 'cached)
+              (else #f))))
+    (buffer-when-shown! buf 'list
+      (lambda ()
+        (let ((f (buffer-local buf 'list-render-fetch)))
+          (buffer-set-local! buf 'list-render-fetch #f)
+          (list-render--now! buf f)))
+      (equal? (mb-list-target) buf))))
+
+(define (list-render--now! buf fetch)
   (let* ((before (list-current buf))
          (key (and before (list-key buf before))))
     (with-buffer-display-update buf (lambda () (list-render-content! buf fetch)))

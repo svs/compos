@@ -92,4 +92,12 @@ The one `dirty?` local holds the pending keys. When a window shows the buffer
 keys and runs `buffer-refresh-hook` one time with `(BUF KEYS)`. Each handler acts
 on its own key; a handler that must wait marks again. `(buffer-dirty? BUF [KEY])`
 asks, and `(buffer-clear-dirty! BUF KEY)` drops a key the package did another way.
-Keys today: `dashboard`, `group-display`, `todo-cards`, `diff`, `anon`.
+Keys today: `dashboard`, `group-display`, `todo-cards`, `diff`, `anon`, `list`.
+
+`(buffer-when-shown! BUF KEY THUNK [NOW?])` is the same rule as one call: it runs
+THUNK now when a window in any frame shows BUF (`(buffer-shown? BUF)`), when BUF
+is the current buffer, or when NOW? is true. Otherwise it keeps the newest THUNK
+for KEY and runs it once when a window shows BUF. Every list render goes
+through it under the key `list`, so a hidden list costs nothing until it is seen.
+A window takes its buffer on the editor's commit, after the command, so a
+command that makes a buffer and reads it at once works in that buffer.

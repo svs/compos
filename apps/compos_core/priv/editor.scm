@@ -559,6 +559,41 @@
 (define (buffer-refresh-visible!)
   (for-each (lambda (w) (buffer-refresh-pending! (cadr w))) (window-list-all)))
 
+;; A hidden buffer is not drawn. Work that only changes how a buffer looks
+;; runs when a window in some frame shows it: the newest THUNK for KEY waits,
+;; and the show runs it once. Work in the current buffer runs at once, and
+;; so does NOW?, for a buffer that is seen without a window (the
+;; minibuffer's list). A window shows a buffer on the editor's commit, after
+;; the command, so a command that makes a buffer and reads it works in it.
+(define (buffer-shown? buf)
+  (and (member buf (map cadr (window-list-all))) #t))
+
+(define (buffer-when-shown! buf key thunk &optional now?)
+  (cond ((not (buffer-exists? buf)) #f)
+        ;; code that works in BUF is about to use it
+        ((or now? (equal? (current-buffer) buf) (buffer-shown? buf))
+         (buffer-set-local! buf 'shown-thunks
+           (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local buf 'shown-thunks) '())))
+         (buffer-clear-dirty! buf key)
+         (thunk)
+         #t)
+        (else
+         (desktop-skip! buf 'shown-thunks)
+         (buffer-set-local! buf 'shown-thunks
+           (alist-put (or (buffer-local buf 'shown-thunks) '()) key thunk))
+         (buffer-mark-dirty! buf key)
+         #f)))
+
+(define (buffer-when-shown--run! buf keys)
+  (let ((waiting (or (buffer-local buf 'shown-thunks) '())))
+    (for-each (lambda (key)
+                (let ((thunk (alist-get waiting key)))
+                  (when thunk
+                    (buffer-set-local! buf 'shown-thunks
+                      (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local buf 'shown-thunks) '())))
+                    (thunk))))
+              keys)))
+
 (domain! 'unknown)
 (effects! '(unknown))
 
@@ -974,6 +1009,7 @@
 
 ;; refresh when shown (buffer-mark-dirty!): add-hook! is defined only here
 (add-hook! 'buffer-shown-hook 'buffer-refresh-pending!)
+(add-hook! 'buffer-refresh-hook 'buffer-when-shown--run!)
 (add-hook! 'window-configuration-change-hook 'buffer-refresh-visible!)
 (define (take-n lst n) (take lst n))
 
@@ -6204,6 +6240,8 @@
 (public! 'cache-refresh! "(cache-refresh! BUF) — fetch and re-render; one flight at a time; the buffer shows what it has until the data lands")
 (public! 'cache-wake! "(cache-wake! BUF) — refresh only when the cache is stale; the wake rule for restored and previewed buffers")
 (public! 'buffer-mark-dirty! "(buffer-mark-dirty! BUF KEY) — KEY's work on hidden BUF waits; buffer-refresh-hook runs (BUF KEYS) one time when a window shows it")
+(public! 'buffer-shown? "(buffer-shown? BUF) — #t when a window in any frame shows BUF")
+(public! 'buffer-when-shown! "(buffer-when-shown! BUF KEY THUNK [NOW?]) — run THUNK now when BUF is shown (or NOW?), else keep the newest THUNK for KEY and run it once when a window shows BUF")
 (public! 'buffer-dirty? "(buffer-dirty? BUF [KEY]) — #t when BUF has pending refresh work, KEY's or any")
 (public! 'buffer-clear-dirty! "(buffer-clear-dirty! BUF KEY) — drop KEY's pending work; the package did it another way")
 (public! 'buffer-refresh-pending! "(buffer-refresh-pending! BUF) — run buffer-refresh-hook for BUF's pending keys now and clear them")

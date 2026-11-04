@@ -231,3 +231,19 @@
   if (reduce) { playing = false; playBtn.textContent = 'play'; playBtn.setAttribute('aria-pressed', 'true'); render(3, true); }
   else render(1, true);
 })();
+
+/* theme switch: system by default, the button pins light or dark */
+(function () {
+  var root = document.documentElement, key = 'compos-theme';
+  var saved = localStorage.getItem(key);
+  if (saved) root.setAttribute('data-theme', saved);
+  var btn = document.getElementById('theme');
+  if (!btn) return;
+  function dark() { return root.getAttribute('data-theme') === 'dark' || (!root.hasAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches); }
+  function label() { btn.textContent = dark() ? 'light' : 'dark'; }
+  btn.addEventListener('click', function () {
+    var next = dark() ? 'light' : 'dark';
+    root.setAttribute('data-theme', next); localStorage.setItem(key, next); label();
+  });
+  label();
+})();

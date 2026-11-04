@@ -1102,7 +1102,7 @@
                "chats again, and q gives the frame back.")
         'category 'chat
         ;; the title says whether the rows follow the chats (w) or stand still
-        'title (lambda (buf) (if (buffer-local buf 'chats-watch) "Chats · watching" "Chats · still"))
+        'title (lambda (buf) (if (buffer-local buf 'chats-watch) "Chats ⚡ on" "Chats ⚡ off"))
         'noun "chat"
         'facets chats-facets
         'filter chats-filter

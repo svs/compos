@@ -849,7 +849,9 @@
                (if (pair? hidden) (panes-move-window (car made) (car hidden) (cadr made)) (car made)))))
           (else layout)))))
 
-(define panes--layout-specs '())
+;; defvar, not define: panes-mode fills the table once at load, and a
+;; reload of this file must not empty it under C-x l
+(defvar 'panes--layout-specs '())
 
 (define (define-layout! name &rest props)
   "NAME is a layout of PROPS, a plist: 'capacity, a count of panes or a

@@ -1765,6 +1765,8 @@
              (not (equal? owner target))
              (not (buffer-local owner 'ibuffer-prompt-home-window))
              (not (buffer-local owner 'listing-preview-disabled))
+             ;; a popup list never peeks: the peek lays the frame out, and the popup goes
+             (not (and (boundp 'popper-popup?) (popper-popup? owner)))
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
              (not (equal? (buffer-local owner 'listing-preview-dismissed-row) target)))
@@ -1873,14 +1875,21 @@
   ;; the list stays where it is: the pick goes to the window already
   ;; showing it, else another one, split off when the list stands alone.
   ;; RET forgets the arrangement the list took; q no longer gives it back.
+  ;; A list in the popup window is a utility: the pick goes to the window
+  ;; you called it from, and the popup goes away.
   (transient-frame-abandon! 'ibuffer)
   (unless (listing-preview--kept? view target)
     (listing-preview-dismiss! view)
-    (let ((shown (and (buffer-known? target) (window-showing target)))
-          (home (window-showing view)))
+    (let* ((shown (and (buffer-known? target) (window-showing target)))
+           (home (window-showing view))
+           (popup (and home (boundp 'popper-window) (popper-window)))
+           (popup (and popup (equal? popup home) popup)))
       (cond (shown (select-window! shown))
-            (home (select-window! home) (select-window! (get-other-window)))))
-    (listing-visit! view target)))
+            (popup (select-window! (or (popper-return-window)
+                                       (begin (select-window! home) (get-other-window)))))
+            (home (select-window! home) (select-window! (get-other-window))))
+      (listing-visit! view target)
+      (when popup (popper-dismiss! popup)))))
 
 (public! 'listing-visit-beside! "(listing-visit-beside! VIEW TARGET) — visit TARGET in another window and keep VIEW where it is")
 (public! 'listing-quit! "(listing-quit! BUFFER) — return through the invoking window's history and retain the listing")

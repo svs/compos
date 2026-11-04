@@ -94,7 +94,12 @@
 
 ;; the popups, most recent first: the buffer ring is the record of use
 (define (popper-buffers)
-  (filter popper-popup? (buffer-list-mru)))
+  ;; a group keeps its own popups: one with no group belongs to every group
+  (let ((g (frame-group)))
+    (filter (lambda (b)
+              (and (popper-popup? b)
+                   (let ((bg (buffer-group b))) (or (not bg) (equal? bg g)))))
+            (buffer-list-mru))))
 
 ;;; --- the display ---------------------------------------------------------------
 
@@ -147,6 +152,17 @@
           (else (message "The popup is the last window") #f))))
 
 ;; show BUF in the popup window, and select that window
+(define (popper-return-window)
+  ;; the window you were in when the popup opened, while it lives
+  (let ((back (frame-local 'popper-return)))
+    (and back (assoc back (window-list)) back)))
+
+(define (popper-dismiss! win)
+  ;; a pick from the popup sends it away: no popup under it comes back
+  (when (and win (assoc win (window-list)) (pair? (cdr (window-list))))
+    (delete-window-id! win)
+    (set-frame-local! 'popper-window #f)))
+
 (define (popper-show! buf)
   (let ((w (display-buffer buf)))
     (when w (select-window! w))

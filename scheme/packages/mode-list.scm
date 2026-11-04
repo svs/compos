@@ -237,6 +237,8 @@
                "buffers again, and q gives the frame back.")
         'title (lambda (buf) (mode-label mode))
         'rows (lambda (buf) (mode-list-rows buf))
+        ;; the cells are kept for one draw: a redraw asks the rows again
+        'before-draw (lambda (buf) (ibuffer-cells-clear!))
         'match (lambda (buf row input) (mode-list-match? buf row input))
         'order-filtered (lambda (buf rows) (mode-list-rank buf rows))
         ;; at rest the list holds the recent rows and a filter reads them

@@ -1164,6 +1164,9 @@
   (set! *ibuffer-fields-memo* '())
   (set! *ibuffer-cell-memo* '()))
 
+;; a redraw keeps the fitted columns and asks every cell again
+(define (ibuffer-cells-clear!) (set! *ibuffer-cell-memo* '()))
+
 (define (ibuffer-columns-for buf all)
   (let* ((key (list buf (length all)))
          (hit (assoc key *ibuffer-columns-memo*)))
@@ -2571,6 +2574,8 @@
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows buf))
+    ;; the cells are kept for one draw: a redraw asks the rows again
+    'before-draw (lambda (buf) (ibuffer-cells-clear!))
     'separator? (lambda (buf b) (ibuffer-separator? buf b))
     'section? (lambda (buf b) (ibuffer-heading? b))
     ;; a row sits under its listed parent; the name cell takes the indent

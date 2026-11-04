@@ -2552,6 +2552,8 @@
       (equal? (mb-list-target) buf))))
 
 (define (list-render--now! buf fetch)
+  ;; a mode that keeps answers for one draw forgets them here
+  (let ((f (list-opt buf 'before-draw))) (when f (f buf)))
   (let* ((before (list-current buf))
          (key (and before (list-key buf before))))
     (with-buffer-display-update buf (lambda () (list-render-content! buf fetch)))

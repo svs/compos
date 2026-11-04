@@ -126,6 +126,8 @@
   var ECHO = ['', 'Ready.', 'instagram search - 12 creators', 'outreach-mode is new - creator cards', 'Arjun Nair booked by agent - 2 changes recorded', 'outreach-mode kept - ready for the next launch'];
   var scene = 1, timers = [], playing = !reduce, visible = false;
   var msgs = film.querySelectorAll('.msg');
+  // keep each typed line's words before any render blanks it
+  msgs.forEach(function (m) { if (m.hasAttribute('data-type') && !m.dataset.full) m.dataset.full = m.textContent; });
   var echo = film.querySelector('.echo-msg');
   var cur = film.querySelector('.row.cur');
   var btnA = film.querySelector('.btn-a'), btnR = film.querySelector('.btn-r');

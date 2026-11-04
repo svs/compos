@@ -989,6 +989,33 @@
       (list-goto-first-entry buf)
       (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats")))))
 
+;; / on the chat list has a Status tab: working, needs you, streaming and
+;; the rest, the words the row shows. is:needs types the same filter.
+(define chats-status-order
+  '("your turn" "needs you" "blocked" "working" "streaming" "starting"
+    "success" "idle" "stopped"))
+
+(define (chats-row-status-label e)
+  ;; an archived row is a saved file and has no state
+  (and (string? e) (not (string-prefix? "/" e)) (chats-row-label e)))
+
+(define (chats-status-options buf)
+  (let ((seen (filter (lambda (s) s) (map chats-row-status-label (list-entries buf)))))
+    (map (lambda (s) (list s s))
+         (filter (lambda (s) (member s seen)) chats-status-order))))
+
+(define chats-facets
+  (list (list 'label "Status" 'kind "status" 'options chats-status-options)))
+
+(define (chats-filter buf e f)
+  (if (equal? (car f) "status")
+      (equal? (chats-row-status-label e) (cadr f))
+      (let ((m (plist-get *ibuffer-opts* 'filter)))
+        (if m (m buf e f) #t))))
+
+(list-define-filter! "chat-list-mode" "is:"
+  (lambda (buf e) (or (chats-row-status-label e) "")) "status")
+
 (mode-list-define! "chat-mode"
   (list
     ;; an agent is listed with the chats even where its buffer is no chat
@@ -1022,7 +1049,8 @@
         'doc (string-append
                "The chats, as ibuffer lists buffers: the recent ones at rest, the "
                "chat you used last at the top. f filters every chat, by title, "
-               "state, model, and by a word somebody said in it. < cycles the "
+               "state, model, and by a word somebody said in it; / has a Status tab "
+               "(working, needs you, ...), and is:needs types the same filter. < cycles the "
                "sections (group, subject, none: the most recent first), > the order, t "
                "turns the sections off and on. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
@@ -1034,6 +1062,8 @@
         'category 'chat
         'title (lambda (buf) "Chats")
         'noun "chat"
+        'facets chats-facets
+        'filter chats-filter
         'section-note (lambda (buf members) (chats-live-note members))
         ;; the list stands still: g draws it again when you ask
         'stamp #f

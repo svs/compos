@@ -830,6 +830,16 @@
       (let ((icons (dash--preset-icons buf)))
         (if icons
             (list (list "tools" (car icons) (cadr icons) 1))
+            '()))
+      ;; a chat that spawned chats counts them by state; the counts move
+      ;; as the children work, so they live here, not in the header line.
+      ;; M-S-<down> walks them
+      (let ((rows (if (boundp 'subagents-status) (dash--child-counts buf) '())))
+        (if (pair? rows)
+            (list (list "children"
+                        (string-join (map (lambda (r) (string-append (number->string (cadr r)) " " (car r))) rows) " · ")
+                        (if (assoc "your turn" rows) "warn" "")
+                        2))
             '())))))
 
 ;; What a buffer can say about itself, as rows for the switcher's narrow:
@@ -971,10 +981,7 @@
                                (mode-own-icon (buffer-local buf 'mode-name))
                                (cadr file))))
                      (if (and vcs (not (dash--summary buf)))
-                         (list (list 'wide (dash--wide-seg "jj" vcs))) '())
-                     ;; a chat that spawned chats counts them; M-S-<down> walks them
-                     (let ((kids (dash--children-seg buf)))
-                       (if kids (list (list 'wide kids)) '())))))
+                         (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
          (width (buffer-cols buf))
          (keep (dash--headline-keep buf width))
          ;; KEEP says which segments survive a narrow window; NARROW? says

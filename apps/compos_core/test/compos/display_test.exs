@@ -63,13 +63,6 @@ defmodule Compos.DisplayTest do
     assert segments == [{"*plain*", ""}]
   end
 
-  test "a preview card takes more rows, up to a bound" do
-    leaf = %{Editor.render_state().tree | window_class: "listing-preview"}
-    {drawn, _} = Display.window(leaf, nil)
-
-    assert length(drawn.lines) == 2_000
-  end
-
   # A wrapped line is many screen rows, so a server top by source line
   # cannot reach the end of the buffer. The browser scrolls it instead.
   test "a window under the bound ships every line, whatever its mode" do

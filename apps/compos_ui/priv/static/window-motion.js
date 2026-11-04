@@ -35,7 +35,6 @@
     [...root.querySelectorAll('c-window.window')].filter(
       (w) =>
         !w.closest('.strip-ghost, .motion-ghost') &&
-        !w.classList.contains('listing-preview') &&
         ![...w.classList].some((c) => c.startsWith('popup'))
     );
 
@@ -412,7 +411,6 @@
     const next = to.getAttribute('data-panes');
     if (!was || !next || was === next) return;
     if (fresh && !walk && !move) return;
-    if (from.querySelector('.listing-preview')) return;
     const ms = duration();
     const prev = parse(was);
     const after = parse(next);

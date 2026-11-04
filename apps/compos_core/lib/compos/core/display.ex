@@ -93,9 +93,6 @@ defmodule Compos.Core.Display do
 
   defp want(leaf) do
     cond do
-      String.contains?(leaf.window_class || "", "listing-preview") ->
-        leaf.total_lines |> min(@ship_all_max_lines) |> max(1)
-
       leaf.total_lines <= @ship_all_max_lines ->
         max(leaf.total_lines, 1)
 

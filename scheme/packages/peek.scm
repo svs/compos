@@ -11,10 +11,6 @@
 (domain! 'windows)
 (effects! '(write display))
 
-(defcustom 'listing-preview-style 'peek
-  "How a list previews the row at point: peek shows the real buffer in a window beside the list, or over it when there is no room; float shows a read-only card over the list."
-  'group 'windows)
-
 ;; --- state ---------------------------------------------------------------
 ;; the frame's peek: (owner LIST buffer BUF key KEY made PANE-ID|#f
 ;; asleep BOOL held ((KEY PANE BUFS MODE) ...) group G). held is every

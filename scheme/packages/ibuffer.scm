@@ -1752,25 +1752,10 @@
                       (ibuffer-view! name)
                       name))))))))
 
-;; A listing preview is an overlay: an isolated presentation copy in a floating card. The shell owns scrolling and dismissal.
-(defvar '*listing-preview-projectors* '())
-
-(define (listing-preview-projector! mode fn)
-  (set! *listing-preview-projectors* (alist-put *listing-preview-projectors* mode fn)))
-
-(public! 'listing-preview-projector!
-  "(listing-preview-projector! MODE FN) — FN(COPY SOURCE) restores preview presentation from saved data, without waking SOURCE or fetching")
-
-(define (listing-preview-text target)
-  ;; buffer-text reads the saved checkpoint too, without waking the buffer.
-  ;; File fallback loses generated views (details and directory listings).
-  (buffer-text target))
-
+;; A listing previews its row as a peek: the real buffer in a window of
+;; the layout (peek.scm). A row it cannot peek, as one of another group,
+;; shows nothing.
 (define (listing-preview! owner target)
-  ;; Every listing form previews the same way: a floating card over the
-  ;; list's own window. Not a highlight on a window that already shows the
-  ;; row, and not the invoking pane. Both of those reach for a window the
-  ;; user did not offer, and the highlight shows nothing new at all.
   (when (and (buffer-known? owner) (buffer-known? target)
              (not (equal? owner target))
              (not (buffer-local owner 'ibuffer-prompt-home-window))
@@ -1778,92 +1763,10 @@
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
              (not (equal? (buffer-local owner 'listing-preview-dismissed-row) target)))
-    ;; listing-preview-style picks the form: a peek is the real buffer in a
-    ;; window of the layout (peek.scm); a row it cannot peek, as one of
-    ;; another group, gets the card
-    (or (and (equal? listing-preview-style 'peek) (listing-peek! owner target))
-        (listing-preview-copy! owner target))))
+    (listing-peek! owner target)))
 
-;; the card is the frame's look (preview-show ... 'float); the copy it
-;; shows names the list and the row: these read them back
-(define (listing-preview-owner)
-  (or (peek-owner) (listing-preview--card-owner)))
-
-(define (listing-preview--card-owner)
-  (let ((b (preview-buffer)))
-    (and b (equal? (nth 1 (preview-slot)) 'float) (buffer-known? b)
-         (buffer-local b 'listing-preview-owner))))
-
-(define (listing-preview-target)
-  (if (peek-owner)
-      (peek-buffer)
-      (and (listing-preview-owner) (buffer-local (preview-buffer) 'listing-preview-source))))
-
-(define (listing-preview-show! copy source)
-  ;; The card floats. A floating window's split takes no room -- its
-  ;; sibling fills the space and the card is drawn over the frame -- so
-  ;; the float splits the list's own window for itself and nothing else
-  ;; on screen is touched. It was laid over a neighbouring window for a
-  ;; while instead, on the strength of window-rects showing the list
-  ;; squeezed into a third; those are tree numbers, not what is drawn,
-  ;; and the price was a card that took another buffer's window away.
-  ;;
-  ;; Re-showing is already right here: with a float open, float-show!
-  ;; fills the float's window rather than splitting again.
-  (preview-show copy 'float source))
-
-(define (listing-preview-copy! owner target)
-  (let ((source (if (equal? (window-buffer (active-window)) owner)
-                    (active-window) (window-showing owner))))
-    (when (and source
-               (not (buffer-local owner 'listing-preview-disabled)) (buffer-known? target) (not (equal? owner target))
-               (or (equal? (active-window) source) (equal? (mb-list-target) owner))
-               (not (equal? (buffer-local owner 'listing-preview-dismissed-row) target)))
-      (let* ((copy (string-append " *listing-preview:" (selected-frame) "*"))
-             (focus (active-window)))
-        (buffer-create copy)
-        (with-buffer-display-update copy (lambda ()
-          (buffer-replace-range! copy 0 (string-byte-length (buffer-text copy))
-                                (listing-preview-text target))
-          ;; Copy presentation, never run the target's setup on a buffer that
-          ;; has none of its source state. Setups can clear text or fetch data.
-          (for-each (lambda (key) (buffer-set-local! copy key #f))
-            '(agent-blocks agent-saved-mark render-records render-text-root
-              header-line-blocks footer-line-blocks))
-          (for-each (lambda (key)
-            (buffer-set-local! copy key (buffer-local target key)))
-            '(mode-name render-mode render-blocks render-root render-records render-text-root preview-renderer
-              preview-authored))
-          ;; Every list mode already defines its projection. Rebuild it from
-          ;; saved rows into the copy, without setup or a rows/source fetch.
-          (when (pair? (list-mode-opts (list-mode-of target)))
-            (let ((rows (list-entries target)))
-              (unless (pair? (buffer-local copy 'render-blocks))
-                (list-composml! target rows (list-head-lines target) copy))
-              (unless (pair? (buffer-local copy 'render-records))
-                (list-composml-text! target rows #f copy))))
-          (when (and (equal? (buffer-local target 'mode-name) "chat-mode")
-                     (boundp 'chat-preview-project!))
-            (chat-preview-project! copy target))
-          (let ((projector (assoc (buffer-local target 'mode-name) *listing-preview-projectors*)))
-            (when projector ((cadr projector) copy target)))
-          (buffer-set-read-only! copy #t)
-          (buffer-set-locals! copy
-            (list 'listing-preview-owner owner 'listing-preview-source target
-                  'header-line target 'window-classes "listing-preview"
-                  'line-numbers "off"))
-          (buffer-move-to-group! copy (buffer-group owner))
-          (begin (with-display-preview
-              (lambda () (listing-preview-show! copy source))))
-          ;; The floating helper owns its size. These two numeric properties
-          ;; anchor the card to a source window and byte position in the UI.
-          (buffer-set-local! copy 'window-style
-            (string-append (or (buffer-local copy 'window-style) "") ";--preview-source-window:"
-              (number->string source) ";--preview-source-point:"
-              (number->string (window-point source))))
-          ))
-        (when (window-exists? focus) (select-window! focus))
-        copy))))
+(define (listing-preview-owner) (peek-owner))
+(define (listing-preview-target) (peek-buffer))
 
 (define-command "listing-preview-open-other" "Open the selected preview in another work window"
   (lambda ()
@@ -1878,14 +1781,6 @@
             (show-in-other-work-window! target))
           (run-command "other-window")))))
 
-(define (listing-preview-track!)
-  ;; a peek tracks itself (peek-track!): the focus may go into it
-  (let ((owner (listing-preview--card-owner)))
-    (when (and owner (not (equal? (window-buffer (active-window)) owner))
-               (not (equal? (mb-list-target) owner)))
-      (listing-preview-dismiss! owner))))
-(add-hook! 'post-command-hook 'listing-preview-track!)
-
 (define (listing-preview-schedule! owner target)
   (let ((ticket (+ 1 (or (frame-local 'listing-preview-ticket) 0)))
         (key (string-append "listing-preview:" (selected-frame))))
@@ -1899,11 +1794,10 @@
                (string? target) (buffer-known? target))
       (unless (equal? target (buffer-local owner 'listing-preview-dismissed-row))
         (buffer-set-local! owner 'listing-preview-dismissed-row #f)
-        ;; The wait is for the first card of a list: opening one splits a
-        ;; window and lays the frame out, and that should not happen while
-        ;; the user is still travelling. Once the card is up for this same
-        ;; list, the next row only swaps its contents, so it follows the
-        ;; point almost at once instead of lagging a fifth of a second.
+        ;; The wait is for the first peek of a list: opening one lays the
+        ;; frame out, and that should not happen while the user is still
+        ;; travelling. Once the peek is up for this same list, the next row
+        ;; only swaps its buffer, so it follows the point almost at once.
         (let ((delay (if (equal? (listing-preview-owner) owner) 40 180)))
           (debounce! key delay (lambda (ignored)
             (when (and (= ticket (or (frame-local 'listing-preview-ticket) 0))
@@ -1927,7 +1821,7 @@
       (buffer-set-local! owner 'listing-preview-dismissed-row (listing-preview-target))
       (listing-preview-dismiss! owner))))
 
-(define-command "listing-preview-dismiss" "Dismiss the preview card or window highlight; keep focus in its source"
+(define-command "listing-preview-dismiss" "Dismiss the peek; keep focus in its list"
   listing-preview-hide!)
 
 
@@ -1935,12 +1829,7 @@
   (set-frame-local! 'listing-preview-ticket (+ 1 (or (frame-local 'listing-preview-ticket) 0)))
   (debounce-cancel! (string-append "listing-preview:" (selected-frame)))
   (when (and owner (equal? owner (peek-owner)))
-    (peek-dismiss! #t))
-  (when (and owner (equal? owner (listing-preview--card-owner)))
-    (let ((copy (preview-buffer)) (focus (active-window)))
-      (preview-end #f)
-      (when (window-exists? focus) (select-window! focus))
-      (when (and copy (buffer-known? copy)) (buffer-kill! copy)))))
+    (peek-dismiss! #t)))
 
 (define (listing-quit! buf)
   (listing-preview-dismiss! buf)
@@ -1970,9 +1859,9 @@
         (set-window-restore! win #f)))))
 
 (public! 'ibuffer-group-view! "(ibuffer-group-view! MODE BASE) — reuse a listing buffer owned by this group, or create one")
-(public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a read-only card tied to the selected source row")
-(public! 'listing-preview! "(listing-preview! OWNER TARGET) — show an inert floating card anchored to OWNER; focus stays in the list")
-(public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss only OWNER's current card preview")
+(public! 'listing-preview-schedule! "(listing-preview-schedule! OWNER TARGET) — debounce a peek of the selected row of OWNER")
+(public! 'listing-preview! "(listing-preview! OWNER TARGET) — peek TARGET, the row of list OWNER, beside it; focus stays in the list")
+(public! 'listing-preview-dismiss! "(listing-preview-dismiss! OWNER) — dismiss OWNER's peek")
 (public! 'listing-visit! "(listing-visit! VIEW TARGET) — leave VIEW and visit TARGET in its owning group")
 
 (define (listing-visit-beside! view target)
@@ -1993,6 +1882,16 @@
 
 ;; open (or re-open) a view on SCOPE: *ibuffer* in ibuffer-mode unless a
 ;; view and its mode are named
+(define (listing--come-here! buf)
+  ;; The window that holds BUF moves to the front of the pane the user is
+  ;; in, with its id and its history. Mode affinity would raise it in the
+  ;; pane it was left in, and the list opened away from the user.
+  (let* ((l (panes-layout))
+         (here (and l (panes--selected-pane l)))
+         (k (and here (let ((ks (panes-windows-holding l buf))) (and (pair? ks) (car ks))))))
+    (when (and k (not (equal? (panes-pane-of l k) here)))
+      (panes-apply! (panes-set-focus (panes-show (panes-move-window l k here) k buf) here)))))
+
 (define (ibuffer-open! scope &optional view mode picker? options)
   (let* ((from (active-window))
          (buf (or view (ibuffer-group-view! (or mode "ibuffer-mode") *ibuffer-buffer*)))
@@ -2013,6 +1912,8 @@
          ;; so it records nothing.
          (_t (unless (buffer-local buf 'window-shape)
                (transient-frame-rearm! 'ibuffer buf)))
+         ;; a list a command opens comes to the pane the user is in
+         (_m (unless (buffer-local buf 'window-shape) (listing--come-here! buf)))
          (_d (if (buffer-local buf 'window-shape)
                  (begin
                    (display-buffer buf)

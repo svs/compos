@@ -1831,162 +1831,6 @@
     // when it actually changed, or every unrelated re-render would
     // yank the view back.
 
-    PreviewCard: {
-      mounted() {
-        const ns = "http://www.w3.org/2000/svg";
-        this.wire = document.createElementNS(ns, "svg");
-        this.wire.classList.add("preview-connector");
-        this.wire.setAttribute("aria-hidden", "true");
-        this.path = document.createElementNS(ns, "path");
-        this.path.setAttribute("fill", "none");
-        this.path.setAttribute("stroke", "currentColor");
-        this.path.setAttribute("stroke-width", "1.5");
-        this.dot = document.createElementNS(ns, "circle");
-        this.dot.setAttribute("r", "3");
-        this.dot.setAttribute("fill", "currentColor");
-        this.wire.append(this.path, this.dot);
-        document.body.append(this.wire);
-        this.schedule = () => {
-          cancelAnimationFrame(this.raf);
-          this.raf = requestAnimationFrame(() => this.place());
-        };
-        this.block = e => { e.preventDefault(); e.stopPropagation(); };
-        this.click = e => {
-          this.block(e);
-          if (e.target.closest(".preview-card-dismiss")) {
-            const owner = this.el.style.getPropertyValue("--preview-source-window").trim();
-            this.pushEvent("ui_cmd", {win: owner, cmd: "listing-preview-dismiss"});
-          }
-        };
-        this.scrollPreview = e => {
-          const body = this.el.querySelector(".preview-card-body");
-          if (body) body.scrollTop += e.deltaY;
-          e.preventDefault(); e.stopPropagation();
-        };
-        this.el.addEventListener("wheel", this.scrollPreview, {passive: false});
-        this.el.addEventListener("pointerdown", this.block);
-        this.el.addEventListener("mousedown", this.block);
-        this.el.addEventListener("click", this.click);
-        ["contextmenu", "dragstart"].forEach(event =>
-          this.el.addEventListener(event, this.block, {passive: false}));
-        window.addEventListener("resize", this.schedule);
-        document.addEventListener("scroll", this.schedule, true);
-        this.resize = new ResizeObserver(this.schedule);
-        this.resize.observe(this.el.closest(".windows") || document.body);
-        this.mutations = new MutationObserver(this.schedule);
-        this.schedule();
-      },
-      beforeUpdate() {
-        this.savedScroll = this.el.querySelector(".preview-card-body")?.scrollTop;
-      },
-      updated() { this.place(); },
-      place() {
-        const ownerId = this.el.style.getPropertyValue("--preview-source-window").trim();
-        const point = Number(this.el.style.getPropertyValue("--preview-source-point"));
-        const owner = document.getElementById("win-" + ownerId);
-        if (this.owner !== owner) {
-          this.mutations.disconnect();
-          this.owner = owner;
-          if (owner) this.mutations.observe(owner, {subtree: true, childList: true,
-            attributes: true, attributeFilter: ["data-current", "data-s"]});
-        }
-        if (!owner) { this.el.style.visibility = "hidden"; this.wire.style.display = "none"; return; }
-        const area = (owner.closest(".windows") || document.body).getBoundingClientRect();
-        const o = owner.getBoundingClientRect();
-        let row = null;
-        for (const candidate of owner.querySelectorAll(".line[data-s]")) {
-          if (Number(candidate.dataset.s) <= point && candidate.getClientRects().length) row = candidate;
-        }
-        row ||= owner.querySelector("[data-current], .line.hl-line, .selected");
-        if (this.row !== row) {
-          this.row?.classList.remove("preview-source-row");
-          this.row = row;
-          row?.classList.add("preview-source-row");
-        }
-        const r = row ? row.getBoundingClientRect() : o;
-        const pad = 10;
-        // The card lands on the pane NEXT to the list, not at a frame edge:
-        // pinning it to the edge threw it clear across a wide frame. Take
-        // the neighbour away from the list, and if the list is alone in the
-        // frame, lay the card over the list's own right half.
-        const neighbours = Array.from((owner.closest(".windows") || document.body)
-            .querySelectorAll(".window"))
-          .filter(w => w !== owner && w !== this.el && !w.classList.contains("listing-preview"))
-          .map(w => w.getBoundingClientRect())
-          .filter(b => b.width > 80 && b.height > 60
-                    && b.top < o.bottom - 8 && b.bottom > o.top + 8);
-        const after = neighbours.filter(b => b.left >= o.right - 8)
-          .sort((a, b) => a.left - b.left)[0];
-        const before = neighbours.filter(b => b.right <= o.left + 8)
-          .sort((a, b) => b.right - a.right)[0];
-        const outward = o.left + o.width / 2 < area.left + area.width / 2;
-        const host = (outward ? (after || before) : (before || after));
-        const box = host
-          ? {left: host.left + pad, top: host.top + pad,
-             width: host.width - pad * 2, height: host.height - pad * 2}
-          : {left: o.left + o.width / 2, top: o.top + pad,
-             width: o.width / 2 - pad, height: o.height - pad * 2};
-        const width = Math.max(180, Math.min(box.width, area.width - pad * 2));
-        const height = Math.max(100, Math.min(box.height, area.height - pad * 2));
-        const left = Math.max(area.left + pad, Math.min(area.right - width - pad, box.left));
-        const top = Math.max(area.top + pad, Math.min(area.bottom - height - pad, box.top));
-        const right = left + width / 2 > o.left + o.width / 2;
-        const sy = Math.max(o.top + 12, Math.min(o.bottom - 12, r.top + r.height / 2));
-        // Compos zooms its editor root independently of the viewport.
-        // DOM rectangles and the connector use viewport pixels; fixed
-        // descendants still inherit CSS zoom, so convert the card back.
-        let zoom = 1;
-        for (let el = this.el; el; el = el.parentElement) {
-          zoom *= Number.parseFloat(getComputedStyle(el).zoom) || 1;
-        }
-        Object.assign(this.el.style, {left: (left / zoom) + "px", top: (top / zoom) + "px",
-          width: (width / zoom) + "px", height: (height / zoom) + "px", right: "auto", bottom: "auto",
-          visibility: "visible"});
-        const body = this.el.querySelector(".preview-card-body");
-        const doc = body?.querySelector(".preview-document");
-        if (doc && !doc.dataset.previewSized) {
-          doc.dataset.previewSized = "true";
-          const size = () => {
-            const root = doc.contentDocument?.documentElement;
-            if (root) doc.style.height = Math.max(300, root.scrollHeight) + "px";
-          };
-          doc.addEventListener("load", size);
-          size();
-        }
-        const content = doc?.getAttribute("srcdoc") || body?.textContent;
-        if (body && this.content !== content) {
-          body.scrollTop = body.scrollHeight;
-          this.content = content;
-        } else if (body && this.savedScroll !== undefined) {
-          body.scrollTop = this.savedScroll;
-        }
-        this.savedScroll = undefined;
-        const sx = right ? Math.min(r.right, o.right) - 8 : Math.max(r.left, o.left) + 8;
-        const tx = right ? left : left + width;
-        const ty = Math.max(top + 28, Math.min(top + height - 28, sy));
-        const bend = Math.max(24, Math.abs(tx - sx) * .45);
-        const dir = right ? 1 : -1;
-        this.path.setAttribute("d", "M " + sx + " " + sy + " C " +
-          (sx + dir * bend) + " " + sy + ", " + (tx - dir * bend) + " " + ty + ", " + tx + " " + ty);
-        this.dot.setAttribute("cx", sx);
-        this.dot.setAttribute("cy", sy);
-        this.wire.style.display = row && r.bottom > o.top && r.top < o.bottom ? "" : "none";
-      },
-      destroyed() {
-        cancelAnimationFrame(this.raf);
-        this.resize.disconnect(); this.mutations.disconnect();
-        this.row?.classList.remove("preview-source-row");
-        this.wire.remove();
-        window.removeEventListener("resize", this.schedule);
-        document.removeEventListener("scroll", this.schedule, true);
-        this.el.removeEventListener("wheel", this.scrollPreview);
-        this.el.removeEventListener("pointerdown", this.block);
-        this.el.removeEventListener("mousedown", this.block);
-        this.el.removeEventListener("click", this.click);
-        ["contextmenu", "dragstart"].forEach(event =>
-          this.el.removeEventListener(event, this.block));
-      }
-    },
     BlockScroll: {
       mounted() {
         this.scroller = this.el.querySelector(".blocks-scroll");
@@ -3036,7 +2880,6 @@
           return { line: parseInt(lineEl.dataset.line || numEl.textContent, 10), col };
         };
         this.mouseH = (e) => {
-          if (e.target.closest(".listing-preview")) return;
           if (e.button !== 0) return;
           if (e.target.closest("button, [phx-click]")) return;
           const winEl = e.target.closest(".window[data-win-id]");
@@ -3383,7 +3226,6 @@
           this.wheelPending.clear();
         };
         this.wheelH = (e) => {
-          if (e.target.closest?.(".listing-preview")) return;
           // followed block lists (a chat transcript), diff cards
           // (.diff-scroll) and buffers under the ship-all threshold
           // (.buf.client-scroll) own their scrolling natively — the

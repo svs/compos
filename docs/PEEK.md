@@ -1,21 +1,17 @@
 # Peek: a list row in a real window
 
 A peek shows the buffer of the list row at point in a real window of
-the panes model (docs/PANES.md). It replaces the floating card as the
-default preview. The card stays as a choice.
+the panes model (docs/PANES.md). It replaced the floating card, which
+is gone.
 
-## The setting
+## The entry
 
-`listing-preview-style` is `peek` (the default) or `float`.
-
-- `peek`: the real buffer in a window of the model, as this file says.
-- `float`: the floating card with its read-only copy, as before.
-
-One entry, `listing-preview!`, reads the setting and calls
-`listing-peek!` or the card. The debounce, the tracking, `q` and the
-dismiss go through the same entry, so a list does not know the style.
-The switch for each list (`ibuffer-toggle-preview`,
-`chat-list-preview`) turns off both styles.
+A list previews only by peek; the floating card is gone. One entry,
+`listing-preview!`, calls `listing-peek!`. The debounce, the tracking,
+`q` and the dismiss go through it, so a list does not know how a peek
+works. The switch for each list (`ibuffer-toggle-preview`,
+`chat-list-preview`) turns peeks off. A row of another group cannot
+enter this group's layout, so it shows nothing.
 
 ## The model
 
@@ -55,8 +51,8 @@ called from, where the answer goes. `C-g` dismisses it.
 If the row's buffer is already the front of a visible window, there is
 no peek. The current peek, if there is one, goes.
 
-A row of another group gets the float card: groups are sealed, so its
-buffer cannot enter this group's model.
+A row of another group shows nothing: groups are sealed, so its buffer
+cannot enter this group's model.
 
 A row whose buffer waits in a hidden window: the peek takes it, and
 dismiss puts it back in that window, with the same key.
@@ -115,5 +111,4 @@ What happens to the row's buffer depends on what it was before the peek:
 - `panes.scm`: the `peek` mark on a window and on a pane; pure.
 - `peek.scm`: `listing-peek!`, `peek-dismiss!`, `peek-keep!`,
   `peek-mode`, the pane rule and the buffer rule.
-- `ibuffer.scm`: `listing-preview!` and its dismiss read
-  `listing-preview-style`.
+- `ibuffer.scm`: `listing-preview!` and its dismiss call the peek.

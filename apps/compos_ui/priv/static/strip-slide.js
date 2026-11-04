@@ -22,11 +22,8 @@
     return v.endsWith("ms") ? n : n * 1000;
   }
 
-  // the panes in screen order; a preview card floats and does not scroll
-  const panes = (root) =>
-    [...root.querySelectorAll("c-window.window")].filter(
-      (w) => !w.classList.contains("listing-preview")
-    );
+  // the panes in screen order
+  const panes = (root) => [...root.querySelectorAll("c-window.window")];
 
   // The axis and the distance of one pane-step. Panes that share one left
   // edge are rows, and the strip moves vertically. One pane moves by the

@@ -1776,7 +1776,7 @@ defmodule Compos.Ui.EditorLive do
 
   defp motion_float?(%{type: :leaf} = node) do
     class = Map.get(node, :window_class) || ""
-    String.contains?(class, "popup") or String.contains?(class, "listing-preview")
+    String.contains?(class, "popup")
   end
 
   defp motion_float?(_), do: false
@@ -1815,13 +1815,7 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
-  # A card takes an id of its own. The popup is split first and shows the
-  # list's buffer for one render, then the card's copy: under one id the
-  # client patched the phx-hook onto that element, and LiveView mounts a
-  # hook only when its element is inserted, so the card never placed
-  # itself and stayed hidden. A new id makes the client insert the card.
-  def window_dom_id(id, true), do: "preview-#{id}"
-  def window_dom_id(id, _), do: "win-#{id}"
+  def window_dom_id(id), do: "win-#{id}"
 
   @doc """
   One window: its header, dashboard, body, and modeline.
@@ -1840,7 +1834,6 @@ defmodule Compos.Ui.EditorLive do
         path: assigns.node.path,
         read_only: assigns.node.read_only,
         dismissible?: Map.get(assigns.node, :dismissible, false),
-        preview?: String.contains?(assigns.node.window_class || "", "listing-preview"),
         # the state the mode line draws, normalised: (KEY VALUE TONE RANK)
         facts: ml_facts(assigns.node),
         active?: assigns.node.id == assigns.active
@@ -1848,7 +1841,7 @@ defmodule Compos.Ui.EditorLive do
 
     ~M"""
     <c-window
-      id={window_dom_id(@node.id, @preview?)}
+      id={window_dom_id(@node.id)}
       class={"window #{if Map.get(@node, :highlighted, false), do: "preview-highlight"} #{if @active?, do: "active", else: "inactive"} #{if @dismissible?, do: "dismissible"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       active={to_string(@active?)}
@@ -1859,9 +1852,6 @@ defmodule Compos.Ui.EditorLive do
       data-read-only={to_string(@read_only)}
       data-editing={to_string(Map.get(@node, :editing, false))}
       data-arrow-keys={to_string(Map.get(@node, :arrow_keys, false))}
-      phx-hook={if @preview?, do: "PreviewCard"}
-      role={if @preview?, do: "note"}
-      aria-label={if @preview?, do: "Preview"}
     >
       <c-group :if={Map.get(@node, :flash)} id={"window-flash-#{@node.id}-#{@node.flash.nonce}"}
         class="window-flash" aria-hidden="true">
@@ -1871,31 +1861,6 @@ defmodule Compos.Ui.EditorLive do
           <c-text class={"window-flash-state #{@node.flash.state |> String.split(" ") |> hd()}"}>{String.replace(@node.flash.state, "-", " ")}</c-text>
         </c-group>
       </c-group>
-      <%= if @preview? do %>
-        <c-group class="preview-card-header">
-          <c-text class="preview-card-label">Preview</c-text>
-          <c-text class="preview-card-title">{@node.header_line || @node.buffer}</c-text>
-          <button type="button" tabindex="-1" class="preview-card-dismiss" aria-label="Dismiss preview (q)"><kbd>q</kbd></button>
-        </c-group>
-        <c-group class="preview-card-body">
-          <c-group inert>
-            <%= cond do %>
-              <% @node.render_mode in ["html", "markdown"] and Map.has_key?(@node, :preview) -> %>
-                <iframe class="preview-document" srcdoc={@node.preview}
-                  sandbox="allow-same-origin" tabindex="-1" title={@node.header_line || @node.buffer}></iframe>
-              <% @node.render_mode == "blocks" and Map.has_key?(@node, :blk) -> %>
-                <.dynamic_tag tag_name={@node.blk_root.tag} {@node.blk_root.attrs}
-                  class={"blocks-view #{@node.blk_root.class}"} style={@node.style}>
-                  <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
-                </.dynamic_tag>
-              <% Map.get(@node, :semantic_records) not in [nil, false, []] -> %>
-                <.preview_text node={@node} />
-              <% true -> %>
-                <pre class="preview-plain">{@node.text}</pre>
-            <% end %>
-          </c-group>
-        </c-group>
-      <% else %>
       <%!-- Dismissal is one key and it costs no row. The q rides the top
              right corner of the window, on the empty end of whatever headline
              the buffer draws for itself. Nobody needs the word Back. --%>
@@ -2126,7 +2091,6 @@ defmodule Compos.Ui.EditorLive do
         <% "position" -> %><c-position class="ml-pos" line={@line} column={@col}><%= for {cls, txt} <- ml_position(args, @node) do %><%= if cls == "" do %>{txt}<% else %><c-text class={cls}>{txt}</c-text><% end %><% end %></c-position>
         <% _ -> %>
       <% end %><% end %></c-modeline>
-      <% end %>
     </c-window>
     """
   end
@@ -2617,24 +2581,6 @@ defmodule Compos.Ui.EditorLive do
       text: Enum.map_join(assigns.segs, &elem(&1, 0)))
     ~M"""
     <.dynamic_tag tag_name={@field.tag} {@field.attrs} data-col={@col} style={"--field-column: #{@col + 1}; --field-width: #{@width}"} class={Enum.join(Enum.reject([@field.class, if(@uniform, do: @face_class)], &(&1 in [nil, ""])), " ")}><%= if @uniform do %>{@text}<% else %><.seg :for={{{txt, cls}, sx} <- Enum.with_index(@segs)} id={"#{@id_prefix}-#{sx}"} txt={txt} cls={cls} base={@base} win={@win} /><% end %></.dynamic_tag>
-    """
-  end
-
-  # Wrap existing lines without introducing layout boxes or replacing text nodes.
-  defp preview_text(assigns) do
-    ~M"""
-    <.dynamic_tag tag_name={block_root(Map.get(@node, :text_root)).tag}
-      {block_root(Map.get(@node, :text_root)).attrs} class="preview-text">
-      <%= for group <- semantic_line_groups(@node.lines, @node.semantic_records) do %>
-        <.dynamic_tag tag_name={group.tag} {group.attrs} class="semantic-record">
-          <c-text :for={ln <- group.lines}
-            class={"line line-content #{if group.direct, do: "semantic-direct"}"}>
-            <.semantic_line id_prefix={"preview-#{@node.id}-#{ln.num}"} segs={ln.segs}
-              start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={group.direct} />
-          </c-text>
-        </.dynamic_tag>
-      <% end %>
-    </.dynamic_tag>
     """
   end
 

@@ -513,20 +513,6 @@
             issue
             (and (buffer-local buf 'sentry-raw-open?) #t))))))
 
-(define (sentry-preview-project! copy source)
-  ;; The durable text contains the same issue payload as the transient cards.
-  ;; Rebuild presentation only: no source wake, cache refresh, or HTTP request.
-  (let* ((text (buffer-text copy))
-         (parts (string-split text "\n\nRaw issue JSON\n"))
-         (issue (or (buffer-local source 'sentry-detail-issue)
-                    (and (> (length parts) 1) (json-parse (cadr parts))))))
-    (when (and (pair? issue) (plist-get issue 'id))
-      (buffer-set-locals! copy
-        (list 'render-mode "blocks"
-              'render-blocks (sentry--issue-blocks issue #f))))))
-
-(listing-preview-projector! "sentry-detail-mode" sentry-preview-project!)
-
 ;; the cache fetch: the issue lands off the UI lane. An error renders in
 ;; the buffer, and (k #f) leaves the cache unstamped so a wake retries.
 (define (sentry--fetch-detail buf k)

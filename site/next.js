@@ -123,7 +123,7 @@
   var playBtn = document.getElementById('film-play');
   var steps = ctl.querySelectorAll('.stepb');
   var DUR = [0, 5600, 5000, 9800, 5400, 5400];
-  var ECHO = ['', 'Ready.', 'instagram search - 12 creators', 'outreach-mode is new - creator cards', 'Arjun Nair booked by agent - 2 changes recorded', 'group slow-mornings closed - 5 buffers kept'];
+  var ECHO = ['', 'Ready.', 'instagram search - 12 creators', 'outreach-mode is new - creator cards', 'Arjun Nair booked by agent - 2 changes recorded', 'outreach-mode kept - ready for the next launch'];
   var scene = 1, timers = [], playing = !reduce, visible = false;
   var msgs = film.querySelectorAll('.msg');
   var echo = film.querySelector('.echo-msg');

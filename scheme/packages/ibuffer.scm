@@ -2215,14 +2215,21 @@
 
 (define-command "ibuffer-quit" "Dismiss the preview, else give the frame back"
   (lambda ()
-    (if (equal? (listing-preview-owner) (ibuffer-view))
-        (listing-preview-hide!)
-        (begin (listing-preview-dismiss! (ibuffer-view))
-               ;; a transient frame mode gives the arrangement back whole;
-               ;; with nothing recorded — the minibuffer form, or a table
-               ;; that stopped standing — the ordinary quit still answers
-               (unless (transient-frame-exit! 'ibuffer)
-                 (listing-quit! (ibuffer-view)))))))
+    (let ((popup (and (boundp 'popper-window) (popper-window))))
+      (cond ((equal? (listing-preview-owner) (ibuffer-view))
+             (listing-preview-hide!))
+            ;; a list in the popup is a utility: q sends the popup away,
+            ;; and an arrangement the list recorded before is no longer due
+            ((and popup (equal? popup (window-showing (ibuffer-view))))
+             (transient-frame-abandon! 'ibuffer)
+             (popper-close! popup))
+            (else
+             (listing-preview-dismiss! (ibuffer-view))
+             ;; a transient frame mode gives the arrangement back whole;
+             ;; with nothing recorded — the minibuffer form, or a table
+             ;; that stopped standing — the ordinary quit still answers
+             (unless (transient-frame-exit! 'ibuffer)
+               (listing-quit! (ibuffer-view))))))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
   (lambda () (ibuffer-refresh!)))

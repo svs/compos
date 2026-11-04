@@ -5277,6 +5277,10 @@
       ;; C-g and ESC close the dashboard panel first, before a reading
       ;; surface's q can take the buffer away under it
       ((dashboard-panel-close! (current-buffer)) (message "Quit"))
+      ;; C-g in a popup sends the popup away, whatever its q does
+      ((and (boundp 'popper-window) (popper-window)
+            (equal? (popper-window) (active-window)))
+       (popper-close! (active-window)))
       ;; A reading surface quits with q: a list, a preview, a help
       ;; buffer. C-g is the key every quit answers to, so it does the
       ;; same there. A writable buffer types q, so it keeps the plain quit.

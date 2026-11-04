@@ -1119,7 +1119,9 @@
 (define (ibuffer-field-live? buf tag)
   (let ((g (ibuffer-grouping buf)))
     (not (or (and (equal? tag 'mode) (equal? g 'mode))
-             (and (equal? tag 'group) (equal? g 'group))))))
+             (and (equal? tag 'group) (equal? g 'group))
+             ;; a view leaves out the fields that say nothing about its rows
+             (memq tag (or (list-opt buf 'hide-fields) '()))))))
 
 (define *ibuffer-fields-memo* '())
 

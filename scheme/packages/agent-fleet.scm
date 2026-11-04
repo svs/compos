@@ -1104,6 +1104,8 @@
         ;; the title says whether the rows follow the chats (w) or stand still
         'title (lambda (buf) (if (buffer-local buf 'chats-watch) "Chats ⚡ on" "Chats ⚡ off"))
         'noun "chat"
+        ;; a chat's transcript size is not what you pick a chat by
+        'hide-fields '(size)
         'facets chats-facets
         'filter chats-filter
         'section-note (lambda (buf members) (chats-live-note members))

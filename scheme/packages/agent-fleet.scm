@@ -905,6 +905,15 @@
                why))))
 (add-hook! 'chat-status-hook 'agents-goal-notify!)
 
+(define (agents-goal-restate! buf status why)
+  ;; a row's label is the goal a turn's summary judged (working, needs
+  ;; you); the summary lands after the status event that last drew the
+  ;; list, so the list draws again when it does
+  (set! *chat-row-status-memo* (list #f #f))
+  (agents-restate!))
+
+(add-hook! 'chat-status-hook 'agents-goal-restate!)
+
 (define-command "agent-goto-attention" "Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked"
   (lambda ()
     (let ((att (append (agents-attention) (agents-goal-attention))))

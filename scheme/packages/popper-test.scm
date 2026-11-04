@@ -29,10 +29,6 @@
       (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
                 (list t--pop-a t--pop-b t--pop-c t--pop-work)))))
 
-(define (t--pop-bottom? win)
-  (let ((r (assoc win (window-rects))))
-    ;; (WIN BUFFER X Y W H): the window spans the frame and ends at its bottom
-    (and r (< (nth 2 r) 0.01) (> (nth 4 r) 0.99) (> (+ (nth 3 r) (nth 5 r)) 0.99))))
 
 (deftest 'a-popup-is-named-by-the-list-or-by-its-own-status
   "a regexp or a mode in the list makes a popup; toggle-type's status wins"
@@ -49,8 +45,8 @@
         (buffer-set-local! t--pop-work 'popper-popup-status #f)
         (buffer-set-local! t--pop-work 'mode-name #f)))))
 
-(deftest 'a-popup-shows-in-an-ordinary-window-at-the-bottom
-  "display-buffer splits the frame's root; the focus stays, and nothing floats"
+(deftest 'a-popup-floats-above-the-panes
+  "display-buffer floats the popup; the focus stays, and the layout does not count it"
   (lambda ()
     (t--pop-with
       (lambda ()
@@ -60,9 +56,8 @@
           (check-false! (equal? w me) "not the work window")
           (check-equal! (window-buffer w) t--pop-a "it shows the popup")
           (check-equal! (active-window) me "a display from code moves no focus")
-          (check-true! (t--pop-bottom? w) "across the bottom of the frame")
-          (check-false! (float-open?) "nothing floats")
-          (check-false! (buffer-local t--pop-a 'window-class) "the buffer wears no float class")
+          (check-equal! (float-window) w "the popup window is the float")
+          (check-equal! (popper-window) w "popper knows it")
           (check-equal! (window-buffer me) t--pop-work "the work stays in its window")
           (check-equal! (panes-shown-buffers) (list t--pop-work) "the layout does not count it"))))))
 
@@ -83,8 +78,8 @@
           (check-equal! (window-buffer (popper-window)) t--pop-a "the latest popup comes back")
           (check-equal! (window-buffer me) t--pop-work "in its own window again"))))))
 
-(deftest 'closing-a-popup-over-a-popup-shows-the-one-under-it
-  "a popup shown over another covers it; the close shows it, and the next close deletes the window"
+(deftest 'a-second-popup-takes-the-float
+  "a popup shown over another takes the float; one close sends it away"
   (lambda ()
     (t--pop-with
       (lambda ()
@@ -92,10 +87,7 @@
           (check-equal! (display-buffer t--pop-b) w "the second popup takes the popup window")
           (check-equal! (length (window-list)) 2 "no third window")
           (run-command "popper-toggle")
-          (check-equal! (window-buffer w) t--pop-a "the popup under it comes back")
-          (check-equal! (length (window-list)) 2 "in the same window")
-          (run-command "popper-toggle")
-          (check-equal! (length (window-list)) 1 "the next close deletes the window")
+          (check-equal! (length (window-list)) 1 "the close deletes the window")
           (check-equal! (window-buffer (active-window)) t--pop-work "the work shows"))))))
 
 (deftest 'a-popup-in-a-work-window-stays-there
@@ -146,19 +138,19 @@
         (run-command "popper-cycle")
         (check-equal! (window-buffer (popper-window)) t--pop-a "the latest popup shows")))))
 
-(deftest 'toggle-type-makes-a-popup-ordinary-and-back
-  "toggle-type changes the status and moves no buffer"
+(deftest 'toggle-type-lowers-a-popup-and-raises-it-again
+  "toggle-type moves the buffer: a floating popup goes to the work window, and back to the float"
   (lambda ()
     (t--pop-with
       (lambda ()
-        (let* ((me (active-window))
-               (w (popper-show! t--pop-a)))
+        (let ((me (active-window)))
+          (popper-show! t--pop-a)
           (run-command "popper-toggle-type")
           (check-false! (popper-popup? t--pop-a) "the buffer is ordinary now")
           (check-false! (popper-window) "no popup window stays")
-          (check-equal! (window-buffer w) t--pop-a "the buffer stays where it is")
-          (check-true! (member t--pop-a (panes-shown-buffers)) "as a work window")
+          (check-equal! (active-window) me "the focus is back in the work window")
+          (check-equal! (window-buffer me) t--pop-a "the buffer shows there")
           (run-command "popper-toggle-type")
           (check-true! (popper-popup? t--pop-a) "a popup again")
-          (check-equal! (window-buffer w) t--pop-a "the buffer still stays where it is")
-          (check-equal! (window-buffer me) t--pop-work "the work window keeps the work"))))))
+          (check-equal! (window-buffer (popper-window)) t--pop-a "it floats")
+          (check-equal! (window-buffer me) t--pop-work "the work window has the work again"))))))

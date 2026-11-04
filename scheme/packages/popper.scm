@@ -1,14 +1,14 @@
 ;;; popper.scm --- popups: buffers you call up and send away, after popper.el.
 ;;;
-;;; A popup is an ordinary buffer in an ordinary window. The list
+;;; A popup is an ordinary buffer in the float: one window that floats
+;;; above the panes, outside the layout, along one edge. The list
 ;;; popper-reference-buffers names the buffers that are popups: a string
 ;;; is a regexp on the buffer name, a symbol is a major mode (a derived
 ;;; mode matches too), and a procedure takes the name and answers.
 ;;;
 ;;; A display of a popup goes through display-buffer. The rule here sends
-;;; it to the popup window: the one window along one edge of the frame
-;;; that popper made. popper-side names the edge, and a buffer moved with
-;;; C-M-<arrow> keeps its own edge. The frame local 'popper-window names that window.
+;;; it to the float, the popup window. popper-side names the edge, and a buffer moved with
+;;; C-M-<arrow> keeps its own edge.
 ;;; Popper changes no other window. A popup buffer that the reader shows
 ;;; in a work window stays there. A display from code does not move the
 ;;; focus. popper-toggle and popper-cycle select the popup window, and a
@@ -20,8 +20,8 @@
 ;;; popper-toggle-type makes the popup an ordinary buffer, or makes the
 ;;; current buffer a popup.
 ;;;
-;;; A close shows the popup that the closed popup covered in the popup
-;;; window. When no popup is under it, the close deletes the popup window.
+;;; A close sends the float away. A pick from a popup list (RET) goes to
+;;; the window you called the popup from, and the popup goes away.
 
 ;; the popup keys take the backtick family from groups
 (require 'groups)
@@ -51,14 +51,6 @@
 (define (popper--size buf)
   (or (buffer-local buf 'popper-size) popper-window-height))
 
-;; a new popup window for BUF along its edge
-(define (popper--split buf)
-  (let ((side (popper--side buf)) (size (popper--size buf)))
-    (cond ((equal? side 'left) (split-root! 'h size #t))
-          ((equal? side 'top) (split-root! 'v size #t))
-          ((equal? side 'right) (split-root! 'h (- 1 size)))
-          (else (split-root! 'v (- 1 size))))))
-
 ;; the list's answer for BUF
 (define (popper--reference? buf)
   (let ((mode (buffer-local buf 'mode-name)))
@@ -73,22 +65,22 @@
             (else (loop (cdr refs)))))))
 
 ;; A popup. The buffer's own status wins over the list: popper-toggle-type
-;; writes 'popper-popup-status, 'popup or 'raised. A hidden buffer and a
-;; float are never popups: each has its own window.
+;; writes 'popper-popup-status, 'popup or 'raised. A hidden buffer is never
+;; a popup, and a float is one only when popper floated it.
 (define (popper-popup? buf)
   (and (string? buf) (buffer-known? buf)
        (not (string-prefix? " " buf))
-       (not (float--class? buf))
+       (or (buffer-local buf 'popper-floating) (not (float--class? buf)))
        (let ((status (buffer-local buf 'popper-popup-status)))
          (cond ((equal? status 'popup) #t)
                ((equal? status 'raised) #f)
                (else (popper--reference? buf))))))
 
-;; the popup window: the window that popper made, while it lives and
-;; shows a popup, else #f
+;; the popup window: the float, while it shows a popup that popper
+;; floated, else #f
 (define (popper-window)
-  (let ((w (frame-local 'popper-window)))
-    (and w (assoc w (window-list))
+  (let ((w (float-window)))
+    (and w (buffer-local (window-buffer w) 'popper-floating)
          (popper-popup? (window-buffer w))
          w)))
 
@@ -109,20 +101,18 @@
        (not (plist-get alist 'category))
        (popper-popup? name)))
 
-;; popper-display-popup-at-bottom, on any edge: the popup window, else a
-;; new window along NAME's edge of the frame. A popup display of NAME
-;; covers the popup there, and the close shows that popup again.
+;; popper-display-popup-at-bottom, on any edge: NAME floats above the
+;; panes along its edge. A popup display of NAME takes the float from the
+;; popup there. The focus stays.
 (define-display-action! 'popper-bottom
   (lambda (name alist)
-    (let* ((own (popper-window))
-           (win (or own (popper--split name))))
-      (when win
-        (unless own
-          (set-frame-local! 'popper-window win)
+    (let ((own (popper-window)))
+      (if own
+          (let ((was (window-buffer own)))
+            (unless (equal? was name) (buffer-set-local! was 'popper-floating #f)))
           (set-frame-local! 'popper-return (active-window)))
-        (unless (equal? (window-buffer win) name)
-          (display-buffer-in-window! win name)))
-      win)))
+      (buffer-set-local! name 'popper-floating #t)
+      (float-show! name (popper--side name) (popper--size name)))))
 
 (add-display-rule! popper-display-control? 'popper-bottom)
 (set! *display-buffer-outside-layout*
@@ -132,37 +122,27 @@
 
 ;;; --- close, toggle, cycle ----------------------------------------------------------
 
-;; Close the popup window WIN. The window shows the popup that the closed
-;; popup covered. When no popup is under it, the window goes, and the
-;; focus goes back to the window that had it before the popup opened.
-(define (popper-close! win)
-  (let* ((rec (window-restore win))
-         (under (and rec (equal? (car rec) 'other) (cadr rec))))
-    (cond ((and under (buffer-known? under) (popper-popup? under))
-           (display-buffer-in-window! win under)
-           (set-window-restore! win '(window #f #f))
-           #t)
-          ((pair? (cdr (window-list)))
-           (let ((back (frame-local 'popper-return))
-                 (had-focus (equal? (active-window) win)))
-             (delete-window-id! win)
-             (set-frame-local! 'popper-window #f)
-             (when (and had-focus back (assoc back (window-list))) (select-window! back)))
-           #t)
-          (else (message "The popup is the last window") #f))))
-
-;; show BUF in the popup window, and select that window
+;; the window you were in when the popup opened, while it lives
 (define (popper-return-window)
-  ;; the window you were in when the popup opened, while it lives
   (let ((back (frame-local 'popper-return)))
     (and back (assoc back (window-list)) back)))
 
-(define (popper-dismiss! win)
-  ;; a pick from the popup sends it away: no popup under it comes back
-  (when (and win (assoc win (window-list)) (pair? (cdr (window-list))))
-    (delete-window-id! win)
-    (set-frame-local! 'popper-window #f)))
+;; Close the popup window WIN: the float goes, and the focus goes back to
+;; the window that had it before the popup opened.
+(define (popper-close! win)
+  (let ((back (popper-return-window))
+        (had-focus (equal? (active-window) win))
+        (buf (window-buffer win)))
+    (when buf (buffer-set-local! buf 'popper-floating #f))
+    (float-close!)
+    (when (and had-focus back) (select-window! back))
+    #t))
 
+;; a pick from the popup sends it away
+(define (popper-dismiss! win)
+  (when (and win (equal? win (popper-window))) (popper-close! win)))
+
+;; show BUF in the popup window, and select that window
 (define (popper-show! buf)
   (let ((w (display-buffer buf)))
     (when w (select-window! w))
@@ -194,21 +174,27 @@
             (w (popper-show! (car (reverse others))))
             (else (popper-show! (car others)))))))
 
-;; popper-toggle-type. A popup becomes an ordinary buffer where it stands:
-;; its popup window becomes a work window. Any other buffer becomes a
-;; popup, and its window keeps it. The next popup display of it goes to
-;; the popup window.
+;; popper-toggle-type, as popper.el lowers and raises. A floating popup
+;; becomes an ordinary buffer: the float goes and the buffer shows in the
+;; window you called it from. Any other buffer becomes a popup: its window
+;; goes back to the buffer before it, and the buffer floats.
 (define-command "popper-toggle-type" "Make this popup an ordinary buffer, or make this buffer a popup"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (popper-popup? buf)
-          (begin
-            (when (equal? (popper-window) (active-window))
-              (set-frame-local! 'popper-window #f))
+          (let ((w (popper-window)))
             (buffer-set-local! buf 'popper-popup-status 'raised)
+            (when (and w (equal? (window-buffer w) buf))
+              (let ((back (or (popper-return-window) (active-window))))
+                (popper-close! w)
+                (select-window! back)
+                (window-set-buffer! back buf)))
             (message (string-append buf " is an ordinary buffer now")))
           (begin
             (buffer-set-local! buf 'popper-popup-status 'popup)
+            (when (equal? (window-buffer (active-window)) buf)
+              (run-command "previous-buffer"))
+            (popper-show! buf)
             (message (string-append buf " is a popup now")))))))
 
 ;; popper's README keys, less C-`: C-` belongs to group-next-mode-buffer, so
@@ -216,9 +202,8 @@
 (global-set-key "M-`" "popper-cycle")
 (global-set-key "C-M-`" "popper-toggle-type")
 
-;; Move the popup on screen to another edge. The popup window closes and
-;; opens again on SIDE; the buffer keeps SIDE for its next display. The
-;; focus stays where it was. The old popup.scm used M-<arrow>, which
+;; Move the popup on screen to another edge; the buffer keeps SIDE for its
+;; next display. The focus stays where it was. The old popup.scm used M-<arrow>, which
 ;; browse and morg take for landmarks.
 (define (popper-move! side)
   (let ((w (popper-window)))
@@ -227,14 +212,7 @@
         (let ((buf (window-buffer w))
               (me (active-window)))
           (buffer-set-local! buf 'popper-side side)
-          (let ((back (frame-local 'popper-return)))
-            (delete-window-id! w)
-            (set-frame-local! 'popper-window #f)
-            (let ((stay (if (equal? me w) #f me)))
-              (when (and stay (assoc stay (window-list))) (select-window! stay))
-              (let ((nw (display-buffer buf)))
-                (when back (set-frame-local! 'popper-return back))
-                (when (and nw (not stay)) (select-window! nw)))))
+          (float-show! buf side (popper--size buf) (equal? me w))
           (message (string-append "Popup on the " (symbol->string side)))))))
 
 (define-command "popper-move-left" "Move the popup to the left edge of the frame"
@@ -265,4 +243,4 @@
   "(popper-buffers) — the popups, most recent first")
 (effects! '(write display))
 (public! 'popper-close!
-  "(popper-close! WIN) — close the popup in the popup window WIN: show the popup under it, or delete the window")
+  "(popper-close! WIN) — close the popup in the popup window WIN: the float goes and the focus goes back")

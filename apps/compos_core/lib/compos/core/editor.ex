@@ -2753,6 +2753,7 @@ defmodule Compos.Core.Editor do
       next = own || fallback
 
       %{leaf | buffer: next, history: List.delete(back, next), top: 0, manual: false}
+      |> Map.put(:ctop, 0)
       |> Map.delete(:restore)
     else
       %{leaf | history: history}
@@ -2786,7 +2787,10 @@ defmodule Compos.Core.Editor do
     # a visit ends a look, and a display's record goes with its buffer
     keep? = buffer == leaf.buffer and previous == leaf.buffer
     leaf = if keep?, do: leaf, else: Map.delete(leaf, :restore)
-    Map.merge(leaf, %{buffer: buffer, history: history, top: 0, manual: false})
+    # the client's scroll offset was the old buffer's: kept, it scrolls the
+    # new one to an arbitrary place
+    ctop = if buffer == leaf.buffer, do: Map.get(leaf, :ctop, 0), else: 0
+    Map.merge(leaf, %{buffer: buffer, history: history, top: 0, manual: false, ctop: ctop})
   end
 
   # The leaf's restore record, {kind, covered, point, shown, under}, while
@@ -2806,7 +2810,7 @@ defmodule Compos.Core.Editor do
   # record; a look back onto the covered buffer ends it and puts back the
   # record the look was made over.
   defp preview_leaf(leaf, buffer) do
-    shown = %{leaf | buffer: buffer, top: 0, manual: false}
+    shown = %{leaf | buffer: buffer, top: 0, manual: false} |> Map.put(:ctop, 0)
 
     case leaf_restore(leaf) do
       {:preview, ^buffer, _, _, under} ->

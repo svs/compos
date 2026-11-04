@@ -71,8 +71,9 @@ A minor mode, `peek-mode`, is on in the peek window while it is a peek:
 | `n`, `p` | Peek the next or the previous row of the list, in place. |
 | `RET` | Keep. |
 
-The keys work in every peek, over the list or beside it. While the
-peek is up, they hide the same keys of the buffer under them.
+The keys matter in a peek over the list, where the focus is. A peek
+beside the list is kept as soon as the focus goes into it, so its own
+keys work at once and a letter typed there is a letter.
 
 In the list, the list keys stay. `q` in the list dismisses the peek
 first. A second `q` quits the list.
@@ -82,11 +83,11 @@ first. A second `q` quits the list.
 | Event | Result |
 |---|---|
 | Next row | The same peek window shows the new row. The rule below applies to the row it leaves. |
-| `RET` in the peek, or an edit in it | Keep. |
+| `RET` in the peek, or an edit in a peek over the list | Keep. |
 | `q`, `C-g` | Dismiss. |
 | The list is killed, or leaves the front of its window | Dismiss. |
 | The focus goes to a window that is not the list and not the peek | Dismiss. |
-| The focus goes into the peek | Nothing. Moving focus does not keep. |
+| The focus goes into a peek beside the list | Keep. The window stays, so the cursor and point stay. |
 | A command acts on the peek as a window (move, display another buffer in its pane) | Keep. |
 | `C-x 1` from the list | Dismiss. |
 | `C-x 0` or `pane-remove` on the peek | Dismiss. |

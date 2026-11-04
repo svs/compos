@@ -116,16 +116,18 @@
 
 (effects! '(write display))
 
-(define (peek--arm! buf)
+(define (peek--arm! buf over)
   "BUF is a peek: peek-mode's keys are on, dismiss-mode's q dismisses it
-   (buffer-dismissible?), and an edit keeps it."
+   (buffer-dismissible?). OVER, a peek over its list, is where the focus
+   already is: there an edit keeps it."
   (when (buffer-exists? buf)
     (enable-minor-mode! buf "peek-mode")
     (dismiss--sync! buf)
-    ;; only a change made there: a chat that streams into the peek is not an edit
-    (buffer-watch-change! buf 'peek
-      (lambda (&rest args)
-        (when (equal? (window-buffer (active-window)) (peek-buffer)) (peek-keep!))))))
+    (when over
+      ;; only a change made there: a chat that streams into the peek is not an edit
+      (buffer-watch-change! buf 'peek
+        (lambda (&rest args)
+          (when (equal? (window-buffer (active-window)) (peek-buffer)) (peek-keep!)))))))
 
 (define (peek--disarm! buf)
   (when (buffer-exists? buf)
@@ -150,10 +152,13 @@
          (let* ((key (cadr placed))
                 (asleep (peek--asleep? target))
                 (drawn (panes-apply! (car placed))))
-           (set-frame-local! 'peek
-             (list 'owner owner 'buffer target 'key key 'made (caddr placed)
-                   'asleep asleep 'held (cadddr placed) 'group (panes--group-key)))
-           (peek--arm! target)
+           ;; over: the peek took the front of its list's own pane
+           (let* ((l (car placed)) (ok (panes-find l owner))
+                  (over (and ok (not (equal? ok key)) (equal? (panes-pane-of l ok) (panes-pane-of l key)))))
+             (set-frame-local! 'peek
+               (list 'owner owner 'buffer target 'key key 'made (caddr placed) 'over over
+                     'asleep asleep 'held (cadddr placed) 'group (panes--group-key)))
+             (peek--arm! target over))
            (window-log-note! "peek" target "->" key)
            (or (panes-handle drawn key) #t)))))
 
@@ -168,7 +173,7 @@
          (drawn (panes-apply! l)))
     (set-frame-local! 'peek (plist-put (plist-put (plist-put s 'buffer target) 'asleep asleep) 'held held))
     (peek--left! old (plist-get s 'asleep))
-    (peek--arm! target)
+    (peek--arm! target (plist-get s 'over))
     (or (panes-handle drawn key) #t)))
 
 (define (peek--live? s)
@@ -230,8 +235,9 @@
 
 (define (peek-track!)
   "After each command: the peek goes when its list is gone or the focus
-   is in a window that is neither the list nor the peek. A peek window
-   that shows another buffer now is kept; one that is gone is over."
+   is in a window that is neither the list nor the peek. A peek beside
+   the list that the focus went into is kept, as is a peek window that
+   shows another buffer now; one that is gone is over."
   (let ((s (peek-state)))
     (when s
       (let ((l (panes-layout)) (key (plist-get s 'key))
@@ -242,6 +248,8 @@
                (peek--left! (plist-get s 'buffer) (plist-get s 'asleep)))
               ((not (equal? (panes-window-buffer l key) (plist-get s 'buffer))) (peek-keep!))
               ((not (buffer-known? owner)) (peek-dismiss!))
+              ;; the focus went into a peek beside the list: it is the user's now
+              ((and (not (plist-get s 'over)) (equal? (active-window) key)) (peek-keep!))
               ((member buf (list owner (plist-get s 'buffer))) #f)
               ((and (boundp 'mb-list-target) (equal? (mb-list-target) owner)) #f)
               (else (peek-dismiss!)))))))

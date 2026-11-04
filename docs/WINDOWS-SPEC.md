@@ -588,7 +588,8 @@ them all. A buffer never lands in another mode's window.
 it is of the buffer's mode, else in the pane's window of that mode. When
 the pane has none, a copy of the mode's window opens at the front of the
 pane: the same buffers, the choice at the front. The other windows keep
-what they show. Cycling stays inside one window's own stack. No window
+what they show, even when that is the same buffer: two windows can show
+one buffer side by side, each with its own point and scroll. Cycling stays inside one window's own stack. No window
 moves.
 Foreign selections enter their owning group first; windows never cross groups.
 This supersedes older cases describing `C-x b` as following a mode window.

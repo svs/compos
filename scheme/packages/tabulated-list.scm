@@ -2099,6 +2099,17 @@
        (< (list-shown-count buf) (length (list-entries buf)))))
 
 ;; draw enough pages to show row WANT (an index); nothing when it shows
+;; before a draw: raise the page limit so ROWS shows the row of each KEY
+(define (list-page-cover! buf rows keys)
+  (let ((size (list-page-size buf))
+        (want (fold (lambda (acc k)
+                      (let ((i (and k (list-index-of buf rows k))))
+                        (if (and i (> i acc)) i acc)))
+                    -1 keys)))
+    (when (and size (>= want (or (list-page-limit buf) 0)))
+      (buffer-set-local! buf 'list-page-limit
+        (min (length rows) (* (+ 1 (quotient want size)) size))))))
+
 (define (list-ensure-shown! buf want)
   (let ((size (list-page-size buf)))
     (when (and size (list-more? buf) (>= want (list-shown-count buf)))
@@ -2589,6 +2600,10 @@
       ;; node on the second patch, and reported end-of-buffer as point.
       ;; a paged list draws the first page of its rows; the entries keep
       ;; every row, so the counts and the filters see them all
+      ;; a paged list draws as many pages as reach the selected row and
+      ;; each window's row: a regroup or a sort can move them past the
+      ;; first page, and a row not drawn is a row point cannot stay on
+      (list-page-cover! buf rows (cons selected-key (map cadr places)))
       (let* ((shown (list-page-rows buf rows)))
         ;; entries first: the header states the row count. The columns
         ;; lay out against the rows this draw writes: the cache clears

@@ -388,6 +388,9 @@
 ;; the fleet's surfaces after an event batch: the modeline answers every
 ;; batch, and the list answers the state changes inside it.
 (define (agents-note-event! &optional slug)
+  ;; the row-status memo holds one row's answer for one draw; an event
+  ;; may change it, so the next draw asks again
+  (set! *chat-row-status-memo* (list #f #f))
   (when slug (chats-note-activity! (agent-buf slug)))
   ;; a status that moved is news for more than this list: the event log
   ;; publishes it on the chat's topic

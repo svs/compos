@@ -1080,7 +1080,9 @@
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh") ("w" "chats-watch")
                 ("+" "agent-open")
-                ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")))))
+                ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
+                ;; / is the Status picker, not ibuffer's old / prefix
+                ("/" "list-filter")))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
 

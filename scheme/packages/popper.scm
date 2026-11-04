@@ -134,6 +134,8 @@
         (had-focus (equal? (active-window) win))
         (buf (window-buffer win)))
     (when buf (buffer-set-local! buf 'popper-floating #f))
+    ;; a popup list's peek goes with it
+    (when (and buf (boundp 'listing-preview-dismiss!)) (listing-preview-dismiss! buf))
     (float-close!)
     (when (and had-focus back) (select-window! back))
     #t))

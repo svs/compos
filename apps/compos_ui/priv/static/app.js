@@ -745,7 +745,7 @@
     // a traced push: the label is the key or the intent type, the
     // wait is the server round trip, the detail is the patch and
     // the reply size
-    push(hook, event, payload) {
+    push(hook, event, payload, onReply) {
       let tid = null;
       try {
         this.wrap();
@@ -764,11 +764,12 @@
             this.row("push", label, done - t0, recv - t0, tid,
               "patch " + Math.round(done - recv) + "ms " + o.bytes + "b", t0);
           } catch (err) {}
+          if (onReply) onReply();
         });
       } catch (err) {
         this.capture = null;
         if (tid) delete this.open[tid];
-        hook.pushEvent(event, payload);
+        hook.pushEvent(event, payload, () => onReply && onReply());
       }
     },
     observe() {
@@ -953,11 +954,25 @@
         // the movement state: keys go to the editor until it arms editing
         const ownWin = this.el.closest(".window");
         this.editorSequence = !(ownWin?.classList.contains("active") && ownWin.dataset.editing === "true");
-        this.keyboardOwnerH = (event) => {
-          const owner = event.detail && event.detail.terminal;
-          const owns = owner === this.el.id;
+        this.claim = (owns) => {
           this.editorSequence = !owns;
           if (owns && document.hasFocus()) this.term.focus();
+        };
+        // A key the terminal gave the editor holds the keyboard for the
+        // editor until the editor answers it. The redraw of C-x came before
+        // its answer and gave the keys back, so the b of C-x b reached the
+        // shell. A prefix the editor still waits on holds it too.
+        this.held = 0;
+        this.ownsKeys = () => {
+          const win = this.el.closest(".window");
+          return !document.querySelector(".mb-panel, .which-key, .transient-panel") &&
+            !document.querySelector(".windows")?.dataset.pending &&
+            !!win?.classList.contains("active") && win.dataset.editing === "true";
+        };
+        this.keyboardOwnerH = (event) => {
+          if (this.held > 0) return;
+          const owner = event.detail && event.detail.terminal;
+          this.claim(owner === this.el.id);
         };
         window.addEventListener("compos:keyboard-owner", this.keyboardOwnerH);
         this.term.attachCustomKeyEventHandler((e) => {
@@ -996,8 +1011,14 @@
           }
           if (spec && (this.editorSequence || editorOpen || editorEntry)) {
             e.preventDefault();
+            // xterm asks on keyup and keypress too: one key is one push
+            if (e.type !== "keydown") return false;
             this.editorSequence = true;
-            Telem.push(this, "key", { k: spec });
+            this.held++;
+            Telem.push(this, "key", { k: spec }, () => {
+              this.held = Math.max(0, this.held - 1);
+              if (this.held === 0) this.claim(this.ownsKeys());
+            });
             return false;
           }
           return true;
@@ -2124,7 +2145,8 @@
           const editorOpen = document.querySelector(
             ".mb-panel, .which-key, .transient-panel"
           );
-          const terminal = editorOpen
+          const prefixPending = !!document.querySelector(".windows")?.dataset.pending;
+          const terminal = (editorOpen || prefixPending)
             ? null
             // a terminal owns the keys in the editing state only, as an
             // editable buffer does; the movement state gives them to the editor

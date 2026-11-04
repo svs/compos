@@ -1151,7 +1151,7 @@ defmodule Compos.Ui.EditorLive do
       <.frame_notices state={@state} />
       <.frame_keycast state={@state} />
       <c-windows class="windows" role="main" data-slide={assigns[:slide]}
-        data-panes={motion_panes(@state)}>
+        data-panes={motion_panes(@state)} data-pending={Enum.join(@state.pending, " ")}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
       <c-which-key :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil}

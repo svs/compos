@@ -17,13 +17,18 @@
 ;;;   at "2026-10-27 10:00" / SECS     wake at this local time; no topic needed
 ;;;   chat CHAT                       a chat other than the one it runs in
 ;;;
-;;; Each listener is a subscriber of its own, agent-listen:ID, so it keeps
-;;; its place in the log: an event that came while the editor was down
-;;; arrives after the restart. An at listener publishes its own event on
-;; time:ID when the time comes; its timer is armed again at boot, and fires
-;; at once when the time passed while the editor was down. agent-listen-file keeps the listeners. An
-;;; event for a chat that is not open waits in its listener until the chat
-;;; opens.
+;;; One workflow, agent-listen, carries every listener (workflows.scm). It
+;;; listens to the listeners' topics and keeps its place in the log, so an
+;;; event that came while the editor was down arrives after the restart. A
+;;; listener takes only the events after it was made. A sleeping or killed
+;;; chat is woken for its event. A wake that fails fails the batch, and the
+;;; workflow runs it again with a backoff; after the last try the batch is
+;;; parked on workflow:agent-listen. An at listener publishes its own event
+;;; on time:ID when the time comes; its timer is armed again at boot, and
+;;; fires at once when the time passed while the editor was down.
+;;; agent-listen-file keeps the listeners.
+
+(require 'workflows)
 
 (domain! 'chat)
 (effects! '(pure))
@@ -34,7 +39,7 @@
 (defcustom 'agent-listen-default-days 3
   "How long a listener waits before it is due, when its SPEC names no due or days. M-x watchers-sweep looks again at the ones past due.")
 
-;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B pending SEQS created SECS due SECS)
+;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B since SEQ created SECS due SECS)
 (defvar '*agent-listeners* '())
 
 (define (agent-listen--name id) (string-append "agent-listen:" id))
@@ -67,11 +72,6 @@
          (or (agent-listen--blank? match)
              (string-contains? (string-downcase (format "~s" (plist-get e 'data)))
                                (string-downcase match))))))
-
-;; the event SEQ, read back from the log for a chat that was not open
-(define (agent-listen--event l seq)
-  (let ((r (event-log-read (- seq 1) (plist-get l 'topic) 1)))
-    (and (pair? r) (equal? (plist-get (car r) 'seq) seq) (car r))))
 
 (define (agent-listen--who e)
   (let ((d (plist-get e 'data)))
@@ -159,7 +159,7 @@
 ;; long wait sleeps in steps a timer can hold
 (define (agent-listen--arm! l)
   (let ((at (plist-get l 'at)))
-    (when (and at (null? (or (plist-get l 'pending) '())))
+    (when at
       (debounce! (string->symbol (string-append "agent-listen-at:" (plist-get l 'id)))
                  (* 1000 (min 86400 (max 0 (- at (current-time)))))
                  (lambda (id)
@@ -175,17 +175,6 @@
 ;; the brief goes before the listener closes: an agent that cannot start
 ;; (a spawn that fails, a dead backend) raises, and the event then waits in
 ;; the listener for a retry instead of being lost
-(define (agent-listen--deliver! l buf e)
-  (if (ignore-errors (lambda () (agent-continue! buf (agent-listen--brief l e)) #t))
-      (begin
-        (agent-listen--record! l 'fired e)
-        (unless (plist-get l 'keep) (agent-listen--drop! (plist-get l 'id))))
-      (let* ((cur (or (agent-listen--find (plist-get l 'id)) l))
-             (seqs (or (plist-get cur 'pending) '())))
-        (agent-listen--record! l 'undelivered e)
-        (unless (member (plist-get e 'seq) seqs)
-          (agent-listen--put! (plist-put cur 'pending (append seqs (list (plist-get e 'seq))))))
-        (debounce! 'agent-listen-retry 60000 agent-listen--flush! #f))))
 
 (define (agent-listen--archive-group path)
   ;; .../groups/grp-SECS-N/chats/X.chat names its group grp:SECS:N
@@ -204,35 +193,75 @@
                  (let ((path (todo--archived-chat chat)))
                    (and path (todo--open-chat chat (agent-listen--archive-group path))))))))))
 
-(define (agent-listen--heard id e)
-  (let ((l (agent-listen--find id)))
-    (when (and l (agent-listen--wants? l e))
-      (let ((buf (agent-listen--wake-chat l)))
-        (if buf
-            (agent-listen--deliver! l buf e)
-            (agent-listen--put! (plist-put l 'pending (append (or (plist-get l 'pending) '())
-                                                              (list (plist-get e 'seq))))))))))
+(define agent-listen--workflow "agent-listen")
 
-(define (agent-listen--subscribe! l)
-  (let ((id (plist-get l 'id)))
-    (event-subscribe! (agent-listen--name id) (plist-get l 'topic)
-                      (lambda (e) (agent-listen--heard id e)))))
+;; the listener id and event seq of each wake this session made: a batch
+;; that runs again must not wake a chat twice for one event
+(defvar '*agent-listen-sent* '())
 
-;; hand each open chat the events that came while it was not; with ONLY,
-;; a chat id, only that chat's
-(define (agent-listen--flush! only)
-  (for-each
-    (lambda (l)
-      (let ((buf (and (pair? (plist-get l 'pending))
-                      (or (not only) (equal? (plist-get l 'chat) only))
-                      (agent-listen--wake-chat l))))
-        (when buf
-          (let ((events (filter (lambda (x) x)
-                                (map (lambda (seq) (agent-listen--event l seq)) (plist-get l 'pending)))))
-            (agent-listen--put! (plist-put l 'pending '()))
-            (for-each (lambda (e) (agent-listen--deliver! l buf e))
-                      (if (or (plist-get l 'keep) (null? events)) events (list (car events))))))))
-    *agent-listeners*))
+(define (agent-listen--sent-key l e)
+  (string-append (plist-get l 'id) ":" (number->string (plist-get e 'seq))))
+
+;; one group a batch, so the events go to the chats in the order they came
+(define (agent-listen--batch-key e) 'all)
+
+;; #t when L takes E: its topic, after L was made, its kind and its match
+(define (agent-listen--takes? l e)
+  (and (event-topic-match? (plist-get l 'topic) (plist-get e 'topic))
+       (> (plist-get e 'seq) (or (plist-get l 'since) 0))
+       (agent-listen--wants? l e)
+       (not (member (agent-listen--sent-key l e) *agent-listen-sent*))))
+
+;; wake L's chat with E; #f when the chat is there and could not take it,
+;; so the batch runs again
+(define (agent-listen--sent! l e)
+  (set! *agent-listen-sent* (take (cons (agent-listen--sent-key l e) *agent-listen-sent*) 500)))
+
+(define (agent-listen--deliver! l e)
+  (let ((buf (agent-listen--wake-chat l)))
+    (cond ((not buf)
+           ;; no chat and no archive: a retry finds nothing either
+           (agent-listen--sent! l e)
+           (agent-listen--record! l 'undelivered e)
+           #t)
+          ((ignore-errors (lambda () (agent-wake! buf 'event (agent-listen--brief l e)) #t))
+           (agent-listen--sent! l e)
+           (agent-listen--record! l 'fired e)
+           (unless (plist-get l 'keep) (agent-listen--drop! (plist-get l 'id)))
+           #t)
+          (else #f))))
+
+;; the workflow's handler: every event of the batch to every listener that
+;; takes it. A wake that failed fails the batch, and the workflow runs it
+;; again after a backoff; the wakes that landed are not made again
+(define (agent-listen--handle key events)
+  (let ((failed 0))
+    (for-each
+      (lambda (e)
+        (for-each (lambda (l)
+                    ;; a listener that fired and closed earlier in the batch is gone
+                    (when (and (agent-listen--find (plist-get l 'id)) (agent-listen--takes? l e))
+                      (unless (agent-listen--deliver! l e) (set! failed (+ failed 1)))))
+                  *agent-listeners*))
+      events)
+    (when (> failed 0)
+      (error (string-append "agent-listen: " (number->string failed) " wake(s) failed; the batch runs again")))))
+
+;; every listener's topic, once each; none when no one listens
+(define (agent-listen--topics)
+  (let loop ((ls *agent-listeners*) (acc '()))
+    (cond ((null? ls) (reverse acc))
+          ((member (plist-get (car ls) 'topic) acc) (loop (cdr ls) acc))
+          (else (loop (cdr ls) (cons (plist-get (car ls) 'topic) acc))))))
+
+;; one workflow carries every listener; FROM is where a new one starts
+(define (agent-listen--define! &optional from)
+  (define-workflow! agent-listen--workflow
+    'listen (agent-listen--topics)
+    'handle 'agent-listen--handle
+    'group-by 'agent-listen--batch-key
+    'quiet 50 'max-wait 500 'max-attempts 8
+    'from from))
 
 (define (agent-listen! spec &optional note)
   "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event; answer the listener's id. SPEC is a plist: topic (required unless at; a trailing * matches a prefix), kind, match (text the event's data must hold), task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local, or unix seconds: wake then)"
@@ -248,12 +277,12 @@
            (l (list 'id id 'chat chat 'topic topic
                     'kind (and kind (format "~a" kind))
                     'match (plist-get spec 'match) 'note note 'task (plist-get spec 'task)
-                    'keep (and (not at) (plist-get spec 'keep) #t) 'pending '() 'created (current-time)
+                    'keep (and (not at) (plist-get spec 'keep) #t) 'since (event-log-seq) 'created (current-time)
                     'at at
                     'due (or at (plist-get spec 'due)
                              (+ (current-time) (* 86400 (or (plist-get spec 'days) agent-listen-default-days)))))))
       (agent-listen--put! l)
-      (agent-listen--subscribe! l)
+      (agent-listen--define!)
       (agent-listen--arm! l)
       (agent-listen--record! l 'created)
       id)))
@@ -283,10 +312,8 @@
   (set! *agent-listeners* (filter (lambda (l) (not (equal? (plist-get l 'id) id))) *agent-listeners*))
   (agent-listen--save!)
   (debounce-cancel! (string->symbol (string-append "agent-listen-at:" id)))
-  ;; a delivery sets the subscriber's position after its handler returns,
-  ;; so the subscriber goes once that is done
-  (debounce! (string->symbol (agent-listen--name id)) 0
-             (lambda (name) (event-unsubscribe! name)) (agent-listen--name id))
+  ;; the workflow stops listening to a topic no listener names
+  (agent-listen--define!)
   id)
 
 (effects! '(read))
@@ -309,21 +336,42 @@
 
 (effects! '(write))
 
-;; a chat opens after its event came: it gets the event now
-(define (agent-listen--chat-mode-hook!)
-  ;; only the chat that woke: a full flush looks up every pending
-  ;; listener's archive, and that stalled each chat wake for seconds
-  (let ((id (buffer-local (current-buffer) 'chat-id)))
-    (when (and id (find (lambda (l) (and (equal? (plist-get l 'chat) id) (pair? (plist-get l 'pending))))
-                        *agent-listeners*))
-      (debounce! (string-append "agent-listen-flush:" id) 0 agent-listen--flush! id))))
-(add-hook! 'chat-mode-hook 'agent-listen--chat-mode-hook!)
+;; listeners made before the workflow carried them were subscribers of
+;; their own, agent-listen:ID, with a list of pending seqs: each takes the
+;; events after the oldest of those, and its subscriber goes
+(define (agent-listen--migrate!)
+  (let ((old (filter (lambda (l) (not (plist-get l 'since))) *agent-listeners*)))
+    (for-each
+      (lambda (l)
+        (let* ((name (agent-listen--name (plist-get l 'id)))
+               (pending (or (plist-get l 'pending) '()))
+               (since (if (pair? pending)
+                          (- (apply min pending) 1)
+                          (or (event-position name) (event-log-seq)))))
+          (event-unsubscribe! name)
+          (set! *agent-listeners*
+                (map (lambda (x) (if (equal? (plist-get x 'id) (plist-get l 'id))
+                                     (plist-put (plist-put x 'since since) 'pending '())
+                                     x))
+                     *agent-listeners*))))
+      old)
+    (when (pair? old) (agent-listen--save!))))
 
-;; the subscribers start once the boot ends, as todo.scm's first scan does
+;; where a new workflow starts: before the oldest listener, so none misses
+;; what came while the editor was down
+(define (agent-listen--oldest-since)
+  (let ((seqs (filter number? (map (lambda (l) (plist-get l 'since)) *agent-listeners*))))
+    (and (pair? seqs) (apply min seqs))))
+
+;; the workflow starts once the boot ends, as todo.scm's first scan does
 (debounce! 'agent-listen-boot 0
            (lambda (_)
+             ;; each step on its own: a step that fails must not leave the
+             ;; listeners deaf, as a failed subscribe once did
              (agent-listen--load!)
-             (for-each agent-listen--subscribe! *agent-listeners*)
-             (for-each agent-listen--arm! *agent-listeners*)
-             (agent-listen--flush! #f))
+             (unless (ignore-errors (lambda () (agent-listen--migrate!) #t))
+               (message "agent-listen: the old listeners did not migrate"))
+             (agent-listen--define! (agent-listen--oldest-since))
+             (for-each (lambda (l) (ignore-errors (lambda () (agent-listen--arm! l))))
+                       *agent-listeners*))
            #f)

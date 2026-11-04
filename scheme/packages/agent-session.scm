@@ -215,13 +215,17 @@
                    (else (loop (cdr ss))))))))
 
 (define (agent-wake! thread source text)
-  (let ((buf (if (buffer-exists? thread) thread (agent-buf thread)))
+  (let ((buf (if (buffer-known? thread) thread (agent-buf thread)))
         (source (if (symbol? source) (symbol->string source) source)))
-    (cond ((not (and buf (buffer-exists? buf)))
+    (cond ((not (and buf (buffer-known? buf)))
            (error "agent-wake!: unknown chat" thread))
           ((not (member source agent-wake-sources))
            (error "agent-wake!: SOURCE is one of" agent-wake-sources))
           (else
+           ;; a sleeping chat is known but not live; a write through its
+           ;; process wakes it, and the core restores its mode
+           (unless (buffer-exists? buf)
+             (buffer-set-local! buf 'chat-woken-at (current-time)))
            (let ((slug (or (agent-slug-of buf) (chat-ensure-runtime! buf))))
              (when (equal? (agent-status slug) 'dead)
                (agent-revive! slug))
@@ -236,7 +240,7 @@
 (category! 'chat)
 
 (public! 'agent-wake!
-  "(agent-wake! CHAT SOURCE TEXT) — wake any chat buffer or live slug with a turn the system starts; SOURCE is one of agent-wake-sources (orchestrator, hook, event, todo, cron, handover, watcher, agent). Revives a dead chat; the transcript folds it as a notice under its source, and M-p history skips it")
+  "(agent-wake! CHAT SOURCE TEXT) — wake any chat buffer or live slug with a turn the system starts; SOURCE is one of agent-wake-sources (orchestrator, hook, event, todo, cron, handover, watcher, agent). Revives a dead chat and wakes a sleeping one; the transcript folds it as a notice under its source, and M-p history skips it")
 (public! 'agent-wake-source
   "(agent-wake-source TEXT) — the source of a wake message as a string, or #f for text the user typed")
 (public! 'agent-continue!

@@ -2433,7 +2433,12 @@
 
 (define (ibuffer-kill-targets! view targets killed kept)
   ;; Confirm serially: one minibuffer question at a time, and every target
-  ;; goes through the same high-level policy as C-x k.
+  ;; goes through the same high-level policy as C-x k. The layout is
+  ;; frozen, so the frame is repaired once for the batch; a question
+  ;; thaws it, and the answer freezes it again for the rest.
+  (with-layout-freeze (lambda () (ibuffer-kill-targets--step! view targets killed kept))))
+
+(define (ibuffer-kill-targets--step! view targets killed kept)
   (if (null? targets)
       (begin
         (when (buffer-known? view) (list-refresh! view))

@@ -744,19 +744,45 @@
         (let ((back (find (lambda (j) (member j (panes-pane-keys l pid))) (panes--recent l))))
           (if back (panes-raise l back) l)))))
 
+(define panes--frozen #f)
+(define panes--frozen-layout #f)
+
+(define (with-layout-freeze thunk)
+  "THUNK runs with the layout frozen: a buffer that dies leaves the model
+   held here and nothing is drawn or stored, then the layout is applied
+   once when THUNK returns. A batch kill repairs the frame one time, not
+   once for each buffer. Nested freezes join the outer one."
+  (if panes--frozen
+      (thunk)
+      (let ((start (panes-layout)))
+        (set! panes--frozen #t)
+        (set! panes--frozen-layout start)
+        (unwind-protect
+          thunk
+          (lambda ()
+            (let ((layout panes--frozen-layout))
+              (set! panes--frozen #f)
+              (set! panes--frozen-layout #f)
+              (unless (eq? layout start)
+                (panes-apply! layout))))))))
+
 (define (panes--kill-repair! name)
   "A buffer dies: it leaves every stack before the core looks for a
    stand-in. The keyed hook (buffer-kill-repair KEY) answers a thunk for
    after the kill, or #f when it has nothing to say; the first answer
    wins, so the group repair stands down. #f when the layout does not
-   hold NAME. An emptied pane stays, empty."
-  (let ((layout (panes-layout)))
+   hold NAME. An emptied pane stays, empty. Under with-layout-freeze the
+   held layout drops NAME and the draw waits for the thaw."
+  (let ((layout (if panes--frozen panes--frozen-layout (panes-layout))))
     (and layout (or (member name (panes-buffers layout))
                     (and (pair? (panes-hidden layout)) (member name (panes-hidden-buffers layout))))
          (begin
            (window-log-note! "panes kill" name)
-           (panes-apply! (panes--kill-raise layout name))
-           (lambda () (window-state-changed!))))))
+           (if panes--frozen
+               (begin (set! panes--frozen-layout (panes--kill-raise layout name))
+                      (lambda () #f))
+               (begin (panes-apply! (panes--kill-raise layout name))
+                      (lambda () (window-state-changed!))))))))
 
 
 (define (panes--enter-group!)

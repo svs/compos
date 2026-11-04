@@ -11,6 +11,7 @@ defmodule Compos.Ui.SelGuardTest do
 
   setup do
     Editor.minibuffer_close()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     {:ok, conn: build_conn()}
   end
 

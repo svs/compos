@@ -149,16 +149,14 @@
         (delete-frame! frame)))))
 
 (define (test-one-window!)
-  "the frame a window test starts from: the active window alone, with
-   no window waiting behind it. It goes through delete-other-windows!,
-   so the model and the frame agree."
-  (delete-other-windows!)
-  (let* ((l (panes-layout))
-         (me (and l (panes-key-of-handle l (active-window)))))
-    (when me
-      (panes-apply!
-       (fold (lambda (l k) (if (equal? k me) l (panes-remove-window l k)))
-             l (panes-pane-keys l (panes-pane-of l me))))))
+  "the frame a window test starts from: the active window alone, and no
+   panes model on this frame, so no window waits behind it and the next
+   door adopts the frame as the test has made it. It does not go through
+   delete-other-windows!: a frame that shows one buffer in several
+   windows, as Editor.split leaves it, has no model to collapse."
+  (window-arrange! (list 'h '(1.0) (list (active-window))))
+  (panes-layout-forget!)
+  (window-state-changed!)
   #t)
 
 (define (test-fail! text)

@@ -8,9 +8,13 @@ defmodule Compos.ListPromptFollowTest do
 
   alias Compos.Core.{Editor}
 
-  defp leaf(tree, name) do
-    Regex.run(~r/\{:leaf, "#{Regex.escape(name)}", \d+, (\d+), (true|false), (\d+)/, tree)
+  # the window's leaf in the frame's tree, as the desktop reads it
+  defp leaf(name) do
+    Editor.desktop_view().tree |> leaves() |> Enum.find(&(&1.buffer == name))
   end
+
+  defp leaves(%{type: :leaf} = leaf), do: [leaf]
+  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
 
   test "moving a list under its prompt sets the window's point and drops its scroll pin" do
     eval!(~s{(begin
@@ -24,12 +28,12 @@ defmodule Compos.ListPromptFollowTest do
 
     # the client's own follow scroll reports back: the window is pinned
     Editor.set_client_top(win, 300)
-    assert [_, _, "true", "300"] = leaf(eval!("(window-tree)"), " *buffers*")
+    assert %{manual: true, ctop: 300} = leaf(" *buffers*")
 
-    before = eval!(~s{(window-point #{win})})
+    before = leaf(" *buffers*").point
     eval!(~s{(run-command "minibuffer-next-candidate")})
 
-    assert [_, point, "false", "0"] = leaf(eval!("(window-tree)"), " *buffers*")
+    assert %{manual: false, ctop: 0, point: point} = leaf(" *buffers*")
     assert point != before
     assert eval!(~s{(window-point #{win})}) == eval!(~s{(buffer-point " *buffers*")})
 

@@ -3568,7 +3568,7 @@ defmodule Compos.EditorTest do
 
     assert {:ok, history} =
              Compos.Core.Session.eval(
-               "(let ((layout (window-tree))) (builtin-window-tree-set! layout) (window-prev-buffers))"
+               "(window-prev-buffers)"
              )
 
     assert history =~ ~r/\A\("#{last}" "#{first}"/

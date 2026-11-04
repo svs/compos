@@ -18,29 +18,9 @@
 (define (t--rf-drop! &rest ids)
   (for-each (lambda (id) (when (group-record-by-id id) (group-record-delete! id))) ids))
 
-;; A layout is an opaque value from window-tree, so a test cannot write one
-;; by hand. Take the frame's own layout and point one of its leaves at a
-;; test buffer instead. The frame itself never changes.
+;; A layout is a panes value: one pane showing NAME, in the buffer's mode.
 (define (t--rf-layout-naming name)
-  (let* ((live (window-tree))
-         (names (window-tree-buffers live)))
-    (and (pair? names) (window-tree-rename live (car names) name))))
-
-;;; --- the primitive ------------------------------------------------------------
-
-(deftest 'window-tree-rename-swaps-a-leaf-and-the-active-buffer
-  "the mechanism the sweep is built on"
-  (lambda ()
-    (let* ((live (window-tree))
-           (names (window-tree-buffers live))
-           (old (car names))
-           (renamed (window-tree-rename live old "*zz-rf-leaf*")))
-      (check-true! (member "*zz-rf-leaf*" (window-tree-buffers renamed))
-                   "the new name is in the copy")
-      (check-false! (member "*zz-rf-leaf*" (window-tree-buffers live))
-                    "and the original is untouched")
-      (check-equal! (length (window-tree-buffers renamed)) (length names)
-                    "the shape does not change"))))
+  (panes-default-layout (list name) panes--buffer-mode))
 
 ;;; --- a group's saved layout ---------------------------------------------------
 
@@ -50,12 +30,12 @@
     (let ((id (group-record-create! "zzrf-layout"))
           (buf (test-buffer! "*zz-rf-chat*" "")))
       (group-record-update! id 'layout (t--rf-layout-naming "*zz-rf-chat*"))
-      (check-true! (member "*zz-rf-chat*" (window-tree-buffers (group-layout id)))
+      (check-true! (member "*zz-rf-chat*" (panes-buffers (group-layout id)))
                    "the layout names the buffer")
 
       (rename-buffer! buf "*zz-rf-chat-named*")
 
-      (let ((saved (window-tree-buffers (group-layout id))))
+      (let ((saved (panes-buffers (group-layout id))))
         (check-true! (member "*zz-rf-chat-named*" saved)
                      "the saved layout names the buffer's new name")
         (check-false! (member "*zz-rf-chat*" saved)

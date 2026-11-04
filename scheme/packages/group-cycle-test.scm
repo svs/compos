@@ -253,9 +253,9 @@
           (check-false! (window-exists? (nth 2 windows)) "a window emptied by another app closes")
           (check-false! (window-exists? (nth 3 windows)) "the exhausted window closes")
           (check-true! (buffer-known? "*zz-cyc-work-b*") "the gathered buffer stays alive")
-          (let ((before (window-tree)))
+          (let ((before (list (window-list) (active-window))))
             (run-command "consolidate")
-            (check-equal! (window-tree) before "a second consolidation changes nothing")))))))
+            (check-equal! (list (window-list) (active-window)) before "a second consolidation changes nothing")))))))
 
 (deftest 'mode-consolidate-includes-hidden-mode-buffers
   "a buffer need not be displayed or in a window history to join the stack"

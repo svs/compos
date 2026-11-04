@@ -154,13 +154,13 @@
   "C-g out of the prompt and nothing happened"
   (lambda ()
     (t--sw-setup!)
-    (let ((before (window-tree)))
+    (let ((before (list (window-list) (active-window))))
       (run-command "group-new")
       (t--sw-key! "cancel")
       (check-equal! (group-ids) '() "no group was founded")
       (check-false! (frame-local 'current-group) "the frame stands in none")
       (check-equal! (buffer-group t--sw-first) #f "the buffer joined none")
-      (check-equal! (window-tree) before "and the windows did not move"))
+      (check-equal! (list (window-list) (active-window)) before "and the windows did not move"))
     (t--sw-done!)))
 
 (deftest 'the-active-groups-are-the-groups-of-the-open-buffers

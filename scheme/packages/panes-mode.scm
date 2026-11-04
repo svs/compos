@@ -1339,29 +1339,6 @@
 (public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen")
 (catalog-meta! 'function "panes-adopt" 'effects '(read))
 
-;; --- the default -------------------------------------------------------------
-;; A group record from before the model holds a window tree, per frame:
-;; (per-frame (FRAME TREE TARGET) ...). It becomes a model once: one pane
-;; per buffer the tree showed, in the layout the record named.
-(define (panes--migrate-group-trees!)
-  (for-each
-    (lambda (r)
-      (let* ((id (group-record-id r))
-             (saved (group-record-layout r))
-             (entry (and (pair? saved) (equal? (car saved) 'per-frame) (pair? (cdr saved)) (cadr saved)))
-             (tree (if entry (cadr entry) saved))
-             (target (and entry (> (length entry) 2) (caddr entry))))
-        (when (and (pair? saved) (not (group-layout id)))
-          (let ((bufs (filter buffer-known? (or (ignore-errors (lambda () (window-tree-buffers tree))) '()))))
-            (group-record-update! id 'layout
-              (if (pair? bufs)
-                  (let ((l (panes--default-layout (panes--uniq bufs))))
-                    (if (and (symbol? target) (panes-layout-spec target)) (panes-set-layout l target) l))
-                  #f))))))
-    *group-records*))
-
-(panes--migrate-group-trees!)
-
 ;; the model is the editor's window management; a reload installs the
 ;; doors again, so a changed door reaches it
 (panes-mode--install!)

@@ -2386,26 +2386,6 @@ defmodule Compos.Core.SchemeAPI do
        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
         Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
       end,
-      # the layout round-trips as one opaque value: Scheme stores it in a
-      # buffer-local and hands it back; only Elixir reads its insides.
-      # The tree travels as the same tuple spec the desktop file uses,
-      # which is what restore_tree accepts.
-      {"window-tree",
-       "(window-tree) — return the frame's window layout as an opaque value."} =>
-        fn [] ->
-          v = Editor.desktop_view()
-
-          %{
-            tree: tree_spec(v.tree),
-            active: v.active_buffer
-          }
-        end,
-      # A saved layout names buffers, and a name can outlive its buffer.
-      # Scheme decides what to do about that — visit the file, drop the
-      # window — so it must be able to read the names back out.
-      {"window-tree-buffers",
-       "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds."} =>
-        fn [%{tree: tree}] -> tree_buffers(tree) end,
       # Emacs quit-restore as leaf data: what quit-window undoes in a window
       {"window-restore",
        "(window-restore WIN) — (KIND BUFFER POINT) while WIN still shows what a display or a look put there, else #f. KIND window: the display made WIN; other: it covered BUFFER; preview: a look covers BUFFER."} =>
@@ -3569,24 +3549,6 @@ defmodule Compos.Core.SchemeAPI do
       {:error, :already_exists} -> Path.expand(path)
     end
   end
-
-  # the desktop's tuple spec for a window tree — what restore_tree accepts
-  defp tree_buffers({:leaf, b, _, _, _, _, _, _, _, _}), do: [b]
-  defp tree_buffers({:leaf, b, _, _, _, _, _, _, _}), do: [b]
-  defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]
-  defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
-  defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
-  defp tree_buffers(_), do: []
-
-
-  defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
-    {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, []), Map.get(leaf, :restore),
-     Map.get(leaf, :owner), Map.get(leaf, :id)}
-  end
-
-  defp tree_spec(%{type: :split, dir: dir, children: [a, b]} = s),
-    do: {:split, dir, Map.get(s, :ratio, 0.5), tree_spec(a), tree_spec(b)}
 
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))

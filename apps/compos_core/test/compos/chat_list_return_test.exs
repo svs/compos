@@ -33,7 +33,7 @@ defmodule Compos.ChatListReturnTest do
                        (select-window! (cadr ws))))
                    (panes-choose-layout! 'two-pane)
                    (set! *group-current-inhibit* #f)
-                   (define *return-test-tree* (window-tree))
+                   (define *return-test-tree* (list (window-list) (active-window)))
                    (define *return-test-points* (map (lambda (r) (window-point (car r))) (window-list)))
                    (global-set-key "<f9>" "chat-list")
                    """,
@@ -54,7 +54,7 @@ defmodule Compos.ChatListReturnTest do
 
         KeyDispatch.handle_key(frame, "<f10>")
         assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
-        assert {:ok, ^expected_tree} = Session.eval("(window-tree)", frame)
+        assert {:ok, ^expected_tree} = Session.eval("(list (window-list) (active-window))", frame)
 
         assert {:ok, "#t"} =
                  Session.eval(
@@ -76,7 +76,7 @@ defmodule Compos.ChatListReturnTest do
 
         assert {:ok, _} = Session.eval("(run-command \"ibuffer-quit\")", frame)
         assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
-        assert {:ok, ^expected_tree} = Session.eval("(window-tree)", frame)
+        assert {:ok, ^expected_tree} = Session.eval("(list (window-list) (active-window))", frame)
       after
         Session.eval(
           """
@@ -115,7 +115,7 @@ defmodule Compos.ChatListReturnTest do
                      frame
                    )
 
-          {:ok, tree} = Session.eval("(window-tree)", frame)
+          {:ok, tree} = Session.eval("(list (window-list) (active-window))", frame)
           KeyDispatch.handle_key(frame, "<f9>")
           {frame, tree}
         end
@@ -123,7 +123,7 @@ defmodule Compos.ChatListReturnTest do
       for {frame, tree} <- expected do
         assert {:ok, _} = Session.eval("(local-set-key \"<f10>\" \"ibuffer-quit\")", frame)
         KeyDispatch.handle_key(frame, "<f10>")
-        assert {:ok, ^tree} = Session.eval("(window-tree)", frame)
+        assert {:ok, ^tree} = Session.eval("(list (window-list) (active-window))", frame)
       end
     after
       for {frame, n} <- Enum.with_index(frames) do

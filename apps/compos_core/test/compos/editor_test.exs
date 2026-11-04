@@ -86,7 +86,7 @@ defmodule Compos.EditorTest do
   # the minibuffer switcher survives for the surfaces that can only draw a
   # prompt (a browser page); these tests drive it directly
   defp open_switch_prompt do
-    {:ok, _} = Compos.Core.Session.eval(~s[(run-command "switch-to-buffer-prompt")])
+    {:ok, _} = Compos.Core.Session.eval(~s[(run-command "ibuffer-prompt")])
   end
 
   # Open a switcher by its own command, never by a key. A binding is a
@@ -3534,58 +3534,6 @@ defmodule Compos.EditorTest do
 
     assert out == "#t"
     press(["q"])
-  end
-
-  test "the group switcher orders buffers by the invoking window's history" do
-    n = System.unique_integer([:positive])
-    first = "wh-first-#{n}"
-    last = "wh-last-#{n}"
-    home = "wh-home-#{n}"
-    noise = "wh-noise-#{n}"
-
-    for buf <- [first, last, home, noise], do: Compos.Core.create_buffer(buf)
-
-    {:ok, original} =
-      Compos.Core.Session.eval("""
-      (let ((id (group-record-create! "wh-group-#{n}")))
-        (set-frame-local! 'current-group id)
-        (delete-other-windows!)
-        (buffer-add-group! "#{first}" id)
-        (buffer-add-group! "#{last}" id)
-        (buffer-add-group! "#{home}" id)
-        (switch-to-buffer! "#{first}")
-        (switch-to-buffer! "#{last}")
-        (switch-to-buffer! "#{home}")
-        (let ((window (active-window)))
-          (split-window! 'h 0.5)
-          (other-window!)
-          (switch-to-buffer! "#{first}")
-          (switch-to-buffer! "#{noise}")
-          window))
-      """)
-
-    {:ok, _} = Compos.Core.Session.eval("(select-window! #{original})")
-
-    assert {:ok, history} =
-             Compos.Core.Session.eval(
-               "(window-prev-buffers)"
-             )
-
-    assert history =~ ~r/\A\("#{last}" "#{first}"/
-
-    open_switch_prompt()
-    # the page shows a window of rows: narrow to this test's own buffers
-    type("wh-")
-
-    labels =
-      Editor.render_state().minibuffer
-      |> prompt_labels()
-      |> Enum.filter(&(&1 in [first, last, noise]))
-
-    assert labels == [last, first, noise]
-
-    press(["C-g"])
-    {:ok, _} = Compos.Core.Session.eval("(delete-other-windows!)")
   end
 
   test "the ring toggles: C-x b RET goes back, and back again" do

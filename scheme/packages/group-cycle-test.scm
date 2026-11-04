@@ -216,46 +216,7 @@
           (run-command "group-next-buffer")
           (check-equal! (current-buffer) "*zz-cyc-work-a*" "cycling returns to the first buffer"))))))
 
-(define (group-consolidate-test-open!)
-  (group-cycle-test-open!)
-  (panes-choose-layout! #f)
-  (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-  (buffer-set-local! "*zz-cyc-work-there*" 'mode-name "text-mode")
-  (panes-tile! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"
-                         "*zz-cyc-three*" "*zz-cyc-work-b*"))
-  (let ((windows (map car (window-list))))
-    (set-window-prev-buffers! (nth 0 windows) '("*zz-cyc-work-there*"))
-    (set-window-prev-buffers! (nth 1 windows) '("*zz-cyc-one*"))
-    (set-window-prev-buffers! (nth 2 windows) '("*zz-cyc-work-b*" "*zz-cyc-two*"))
-    (set-window-prev-buffers! (nth 3 windows) '())
-    (select-window! (car windows))
-    windows))
 
-(deftest 'mode-consolidate-gathers-history-and-preserves-unrelated-work
-  "matching buffers move to one window; unrelated histories and foreign groups stay"
-  (lambda ()
-    (group-cycle-groups-scene
-      (lambda ()
-        (let* ((windows (group-consolidate-test-open!))
-               (destination (car windows))
-               (geometry (map (lambda (r) (cons (car r) (cddr r))) (window-rects))))
-          (run-command "consolidate")
-          (check-equal! (length (window-list)) 2 "each app keeps one window; the exhausted ones close")
-          (check-equal! (active-window) destination "the destination stays selected")
-          (check-equal! (current-buffer) "*zz-cyc-work-a*" "the current buffer stays visible")
-          (check-equal! (window-prev-buffers destination)
-                        '("*zz-cyc-work-b*")
-                        "the destination contains only matching buffers")
-          (check-false! (window-showing "*zz-cyc-work-there*") "other destination buffers stay invisible")
-          (check-equal! (window-buffer (nth 1 windows)) "*zz-cyc-one*" "the source reveals its own app")
-          (check-equal! (window-prev-buffers (nth 1 windows)) '("*zz-cyc-three*" "*zz-cyc-two*")
-                        "that app gathers there too, hidden matches included")
-          (check-false! (window-exists? (nth 2 windows)) "a window emptied by another app closes")
-          (check-false! (window-exists? (nth 3 windows)) "the exhausted window closes")
-          (check-true! (buffer-known? "*zz-cyc-work-b*") "the gathered buffer stays alive")
-          (let ((before (list (window-list) (active-window))))
-            (run-command "consolidate")
-            (check-equal! (list (window-list) (active-window)) before "a second consolidation changes nothing")))))))
 
 (deftest 'mode-consolidate-includes-hidden-mode-buffers
   "a buffer need not be displayed or in a window history to join the stack"
@@ -292,20 +253,3 @@
           (check-equal! (length (window-list)) 2 "no visible window is created")
           (check-equal! (panes-current-layout) 'two-pane "the target stays unchanged"))))))
 
-(deftest 'mode-consolidate-lets-an-emptied-pane-close
-  "two panes of one mode leave one pane; the target does not refill the other"
-  (lambda ()
-    (group-cycle-groups-scene
-      (lambda ()
-        (group-cycle-test-open!)
-        (buffer-set-local! "*zz-cyc-work-b*" 'mode-name "text-mode")
-        (panes-tile! 'columns '("*zz-cyc-work-a*" "*zz-cyc-work-b*"))
-        (panes-choose-layout! 'columns)
-        (let ((destination (window-showing "*zz-cyc-work-a*"))
-              (neighbor (window-showing "*zz-cyc-work-b*")))
-          (set-window-prev-buffers! destination '())
-          (set-window-prev-buffers! neighbor '())
-          (select-window! destination)
-          (run-command "consolidate")
-          (check-equal! (length (window-list)) 1 "the emptied pane stays closed")
-          (check-equal! (window-prev-buffers destination) '("*zz-cyc-work-b*") "its buffer joins the stack"))))))

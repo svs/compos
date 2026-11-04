@@ -296,7 +296,7 @@ defmodule Compos.ChromeTest do
       Browser.detach(self())
       refute Browser.connected?()
 
-      Session.eval(~s[(run-command "switch-to-buffer-prompt")])
+      Session.eval(~s[(run-command "ibuffer-prompt")])
       # a prompt opened rather than the command dying on the missing browser
       assert eval!(~s[(plist-get (minibuffer-state) 'prompt)]) =~ "Switch to"
       Session.eval("(minibuffer-cancel!)")

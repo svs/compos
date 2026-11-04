@@ -562,10 +562,11 @@
         layout missing))
 
 (define (panes-unique-buffers layout)
-  "A buffer is in one window: the window that shows it on screen, else
-   one that has it in front, else the first that holds it, the windows
-   on screen first. Every other window lets it go, and a window left
-   with nothing closes. The pane of a closed window stays. A hidden pane
+  "A buffer is in the windows of one mode: the mode of the window that
+   shows it on screen, else of one that has it in front, else of the
+   first that holds it, the windows on screen first. Windows of one mode
+   share their buffers. Every window of another mode lets it go, and a
+   window left with nothing closes. The pane of a closed window stays. A hidden pane
    lets go of every buffer the row holds."
   (let* ((keys (panes-window-keys layout))
          (tops (panes-top-windows layout))
@@ -580,7 +581,10 @@
                       fronts order)))
     (let ((kept (fold (lambda (l k)
                         (let* ((bufs (panes-window-buffers l k))
-                               (mine (filter (lambda (b) (equal? (cadr (assoc b owner)) k)) bufs)))
+                               (mode (panes-window-mode layout k))
+                               (mine (filter (lambda (b) (let ((o (cadr (assoc b owner))))
+                                                           (or (equal? o k) (equal? (panes-window-mode layout o) mode))))
+                                             bufs)))
                           (cond ((= (length mine) (length bufs)) l)
                                 ((null? mine) (panes-remove-window l k))
                                 (else (panes--update-window l k (lambda (w) (panes--put w 'buffers (panes--ids mine))))))))
@@ -1140,6 +1144,17 @@
 (domain! 'windows)
 (effects! '(pure))
 
+(define (panes-join-mode layout buf mode)
+  "BUF joins the back of every window of MODE that does not hold it:
+   windows of one mode share their buffers."
+  (let ((id (panes--id buf)))
+    (fold (lambda (l k)
+            (if (and (equal? (panes-window-mode l k) mode)
+                     (not (member k (panes-windows-holding l buf))))
+                (panes--update-window l k (lambda (w) (panes--put w 'buffers (append (or (plist-get w 'buffers) '()) (list id)))))
+                l))
+          layout (panes-window-keys layout))))
+
 (define (panes-show-buffer layout buf mode &optional pane)
   "BUF shows, new or known: (LAYOUT KEY). The window of MODE that holds
    BUF, else MODE's window, takes BUF to its front and comes to the
@@ -1150,7 +1165,7 @@
                        (panes-windows-holding layout buf))
                  (panes-mode-window layout mode)))
         (ids (panes-pane-ids layout)))
-    (cond (key (list (panes-show layout key buf) key))
+    (cond (key (list (panes-join-mode (panes-show layout key buf) buf mode) key))
           ((and pane (panes-pane layout pane)) (panes-add-window layout pane buf mode))
           ((pair? ids) (panes-add-window layout (car ids) buf mode))
           (else (let ((added (panes-add-pane layout)))

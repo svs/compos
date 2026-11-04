@@ -1736,9 +1736,9 @@ is forgotten and that group falls back to creation order in the switcher."
     (and (not (eq? g 'outside)) g)))
 
 ;; An explicit pick shows the buffer in this pane, in the pane's window of
-;; its mode, else a new one at the front. A window of the buffer's mode
-;; takes it itself. A buffer a window in another pane holds leaves it for a
-;; new window of its mode here, so a buffer lives in one window (E01).
+;; its mode. Windows of one mode share their buffers, so when this pane has
+;; none, a copy of the mode's window opens here with the buffer at the
+;; front (E01).
 ;; Nothing swaps: the panes stay where they are.
 (define (switch-to-buffer-in-chosen-pane! b)
   (let ((home (group-home-of b)))
@@ -1749,21 +1749,34 @@ is forgotten and that group falls back to creation order in the switcher."
            (pid (and here (panes-pane-of l here)))
            (mode (panes--buffer-mode b))
            (from (panes-find l b))
-           (same (and pid (find (lambda (k) (equal? (panes-window-mode l k) mode))
-                                (panes-pane-keys l pid)))))
+           (same (and pid (if (equal? (panes-window-mode l here) mode)
+                              here
+                              (find (lambda (k) (equal? (panes-window-mode l k) mode))
+                                    (panes-pane-keys l pid)))))
+           ;; the window of B's mode to copy: one that holds B, else the mode's
+           (src (or (find (lambda (k) (equal? (panes-window-mode l k) mode))
+                          (panes-windows-holding l b))
+                    (panes-mode-window l mode))))
       (cond ((not pid) (switch-to-buffer-here! b))
-            ;; this window is of B's mode: B comes into it
-            ((equal? (panes-window-mode l here) mode)
-             (panes-apply! (panes-focus-window (panes-move-buffer l b here) here)))
+            ;; this window, else this pane's window, of B's mode shows B;
+            ;; windows of one mode share their buffers
+            (same
+             (panes-apply! (panes-focus-window (panes-join-mode (panes-show l same b) b mode) same)))
             ((and from (equal? (panes-pane-of l from) pid))
              (panes-apply! (panes-focus-window (panes-show l from b) from)))
-            ;; held by a window in another pane: a new window of its mode
-            ;; opens here with B alone, and B leaves the other window
-            (from
-             (let ((made (panes-add-window (panes-drop-buffer l b) pid b mode)))
-               (panes-apply! (panes-focus-window (car made) (cadr made)))))
-            (same
-             (panes-apply! (panes-focus-window (panes-show l same b) same)))
+            ;; B's mode has a window in another pane: a copy of it opens
+            ;; here, the same buffers with B at the front
+            (src
+             (let* ((made (panes-add-window l pid b mode))
+                    (key (cadr made))
+                    (id (panes--id b))
+                    (bufs (or (plist-get (panes-window l src) 'buffers) '())))
+               (panes-apply! (panes-focus-window
+                               (panes-join-mode
+                                 (panes--update-window (car made) key
+                                   (lambda (w) (panes--put w 'buffers (cons id (panes--without id bufs)))))
+                                 b mode)
+                               key))))
             (else (let ((made (panes-add-window l pid b mode)))
                     (panes-apply! (panes-focus-window (car made) (cadr made))))))
       (set-window-restore! (active-window) #f)

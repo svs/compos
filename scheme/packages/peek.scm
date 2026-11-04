@@ -217,16 +217,16 @@
       (peek--disarm! (plist-get s 'buffer))
       (let* ((key (plist-get s 'key)) (l (panes-layout)))
         (when (and l (panes-window l key))
-          ;; a window of the buffer's mode in that pane takes it: the peek
-          ;; leaves no second window of one mode behind
+          ;; a window of the buffer's mode in that pane folds into the peek:
+          ;; its buffers go behind, and it goes. The peek window stays, so a
+          ;; user who is in it keeps the window, the point and the cursor
           (let* ((buf (plist-get s 'buffer)) (mode (panes-window-mode l key))
                  (home (find (lambda (k) (and (not (equal? k key)) (equal? (panes-window-mode l k) mode)))
                              (panes-pane-keys l (panes-pane-of l key))))
-                 (l (if home
-                        (panes-raise (panes-move-buffer l buf home) home)
-                        (panes--update-window l key (lambda (w) (panes--put w 'peek #f)))))
-                 (at (or home key)))
-            (if (or go home) (panes-apply! (if go (panes-focus-window l at) l)) (panes-layout-set! l))))))))
+                 (rest (if home (filter (lambda (x) (not (equal? x buf))) (panes-window-buffers l home)) '()))
+                 (l (if home (panes-set-buffers (panes-remove-window l home) key (cons buf rest)) l))
+                 (l (panes--update-window l key (lambda (w) (panes--put w 'peek #f)))))
+            (if (or go home) (panes-apply! (if go (panes-focus-window l key) l)) (panes-layout-set! l))))))))
 
 (define (peek-track!)
   "After each command: the peek goes when its list is gone or the focus

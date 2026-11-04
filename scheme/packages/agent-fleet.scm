@@ -371,20 +371,12 @@
          (begin (set! *agents-state-last* (alist-put *agents-state-last* slug now))
                 #t))))
 
-(define *agents-chats-last* '())
-
 (define (agents-restate!)
-  ;; a watched list reads the chats again, so a new chat gets its row and
-  ;; the order follows what moved; the write keeps only what changed. Any
-  ;; other list keeps its order, but a chat that came or went is read
-  ;; again too: a redraw keeps the rows it has, and a new chat had none
-  (let* ((chats (sort (chat-list-bufs)))
-         (moved? (not (equal? chats *agents-chats-last*))))
-    (set! *agents-chats-last* chats)
-    (for-each (lambda (b)
-                (when (buffer-known? b)
-                  (if (or moved? (buffer-local b 'chats-watch)) (list-refresh! b) (list-redraw! b))))
-              (mode-list-views "chat-mode"))))
+  ;; Reload each visible view once after a burst. Hidden views wait for show.
+  (for-each (lambda (b)
+              (buffer-request-refresh! b 'list
+                (lambda () (list-refresh! b))))
+            (mode-list-views "chat-mode")))
 
 ;; A chat that closes leaves every chat list. The kill seam asks each
 ;; repair in turn and the first answer wins, so this one answers #f and

@@ -584,6 +584,19 @@
          (buffer-mark-dirty! buf key)
          #f)))
 
+(define (buffer-request-refresh! buf key thunk)
+  ;; Sources request a reload; a 500 ms tick consumes the latest request.
+  ;; Hidden buffers retain their request until shown. No source data is copied.
+  (when (buffer-exists? buf)
+    (let ((pending (memq key (or (buffer-local buf 'dirty?) '()))))
+      (desktop-skip! buf 'shown-thunks)
+      (buffer-set-local! buf 'shown-thunks
+        (alist-put (or (buffer-local buf 'shown-thunks) '()) key thunk))
+      (buffer-mark-dirty! buf key)
+      (when (and (not pending) (buffer-shown? buf))
+        (debounce! "buffer-refresh-visible" 500
+          (lambda (_) (buffer-refresh-visible!)) #f)))))
+
 (define (buffer-when-shown--run! buf keys)
   (let ((waiting (or (buffer-local buf 'shown-thunks) '())))
     (for-each (lambda (key)
@@ -6241,6 +6254,8 @@
 (public! 'cache-wake! "(cache-wake! BUF) — refresh only when the cache is stale; the wake rule for restored and previewed buffers")
 (public! 'buffer-mark-dirty! "(buffer-mark-dirty! BUF KEY) — KEY's work on hidden BUF waits; buffer-refresh-hook runs (BUF KEYS) one time when a window shows it")
 (public! 'buffer-shown? "(buffer-shown? BUF) — #t when a window in any frame shows BUF")
+(public! 'buffer-request-refresh! "(buffer-request-refresh! BUF KEY THUNK) - coalesce reload requests by KEY; run the latest THUNK on the UI lane when BUF is visible")
+(catalog-meta! 'function "buffer-request-refresh!" 'domain 'buffers 'effects '(write execute))
 (public! 'buffer-when-shown! "(buffer-when-shown! BUF KEY THUNK [NOW?]) — run THUNK now when BUF is shown (or NOW?), else keep the newest THUNK for KEY and run it once when a window shows BUF")
 (public! 'buffer-dirty? "(buffer-dirty? BUF [KEY]) — #t when BUF has pending refresh work, KEY's or any")
 (public! 'buffer-clear-dirty! "(buffer-clear-dirty! BUF KEY) — drop KEY's pending work; the package did it another way")

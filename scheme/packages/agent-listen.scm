@@ -217,11 +217,14 @@
     (event-subscribe! (agent-listen--name id) (plist-get l 'topic)
                       (lambda (e) (agent-listen--heard id e)))))
 
-;; hand each open chat the events that came while it was not
-(define (agent-listen--flush! _)
+;; hand each open chat the events that came while it was not; with ONLY,
+;; a chat id, only that chat's
+(define (agent-listen--flush! only)
   (for-each
     (lambda (l)
-      (let ((buf (and (pair? (plist-get l 'pending)) (agent-listen--wake-chat l))))
+      (let ((buf (and (pair? (plist-get l 'pending))
+                      (or (not only) (equal? (plist-get l 'chat) only))
+                      (agent-listen--wake-chat l))))
         (when buf
           (let ((events (filter (lambda (x) x)
                                 (map (lambda (seq) (agent-listen--event l seq)) (plist-get l 'pending)))))
@@ -307,7 +310,12 @@
 
 ;; a chat opens after its event came: it gets the event now
 (define (agent-listen--chat-mode-hook!)
-  (debounce! 'agent-listen-flush 0 agent-listen--flush! #f))
+  ;; only the chat that woke: a full flush looks up every pending
+  ;; listener's archive, and that stalled each chat wake for seconds
+  (let ((id (buffer-local (current-buffer) 'chat-id)))
+    (when (and id (find (lambda (l) (and (equal? (plist-get l 'chat) id) (pair? (plist-get l 'pending))))
+                        *agent-listeners*))
+      (debounce! (string-append "agent-listen-flush:" id) 0 agent-listen--flush! id))))
 (add-hook! 'chat-mode-hook 'agent-listen--chat-mode-hook!)
 
 ;; the subscribers start once the boot ends, as todo.scm's first scan does

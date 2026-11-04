@@ -110,9 +110,16 @@
   new MutationObserver(initGallery).observe(document.body, { childList: true, subtree: true });
 
   // the film: five scenes, need -> ask -> work -> keep -> let go
+  // Reconnect when the editor replaces the film markup, as the gallery does.
+  var currentFilm = null, currentFirst = null, currentCtl = null, cleanupFilm = null;
+  function initFilm() {
   var film = document.getElementById('film');
-  if (!film) return;
+  var first = film && film.querySelector('.msg');
   var ctl = document.getElementById('film-ctl');
+  if (film === currentFilm && first === currentFirst && ctl === currentCtl) return;
+  if (cleanupFilm) { cleanupFilm(); cleanupFilm = null; }
+  currentFilm = film; currentFirst = first; currentCtl = ctl;
+  if (!film || !ctl) return;
   var playBtn = document.getElementById('film-play');
   var steps = ctl.querySelectorAll('.stepb');
   var DUR = [0, 5000, 5600, 8000, 5400, 5400];
@@ -213,23 +220,32 @@
     b.addEventListener('click', function () { render(+b.dataset.go, !playing); });
   });
 
-  new IntersectionObserver(function (es) {
+  var filmObserver = new IntersectionObserver(function (es) {
     var v = es[0].isIntersecting;
     if (v === visible) return;
     visible = v;
     if (playing) render(scene, !v);
   }, { threshold: 0.45 }).observe(film);
-  document.addEventListener('visibilitychange', function () {
+  function onVisibility() {
     if (document.hidden) { visible = false; render(scene, true); return; }
     var r = film.getBoundingClientRect();
     visible = r.top < innerHeight * .7 && r.bottom > innerHeight * .3;
     if (playing) render(scene, !visible);
-  });
+  }
+  document.addEventListener('visibilitychange', onVisibility);
+  cleanupFilm = function () {
+    clear();
+    filmObserver.disconnect();
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
 
   var pin = +new URLSearchParams(location.search).get('scene');
   if (pin >= 1 && pin <= 5) { playing = false; playBtn.textContent = 'play'; playBtn.setAttribute('aria-pressed', 'true'); render(pin, true); return; }
   if (reduce) { playing = false; playBtn.textContent = 'play'; playBtn.setAttribute('aria-pressed', 'true'); render(3, true); }
   else render(1, true);
+  }
+  initFilm();
+  new MutationObserver(initFilm).observe(document.body, { childList: true, subtree: true });
 })();
 
 /* theme switch: system by default, the button pins light or dark */

@@ -15,7 +15,7 @@ defmodule Compos.Ui.DaemonSwitchTest do
     File.rm(path)
     {:ok, _} = Session.eval("(daemon-register-current! #f)")
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*daemons*")

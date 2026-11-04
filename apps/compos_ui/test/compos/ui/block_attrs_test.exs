@@ -17,7 +17,7 @@ defmodule Compos.Ui.BlockAttrsTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     buf = "*block-attrs-#{System.unique_integer([:positive])}*"
     {:ok, _} = Compos.Core.create_buffer(buf)
     on_exit(fn -> if Compos.Core.Buffer.exists?(buf), do: Compos.Core.kill_buffer(buf) end)

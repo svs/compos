@@ -9,7 +9,7 @@ defmodule Compos.DisplayTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_total_rows(20)
     name = "zz-display-#{System.unique_integer([:positive])}"
     Editor.set_window_buffer(name)

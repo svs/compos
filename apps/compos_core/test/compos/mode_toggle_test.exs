@@ -16,7 +16,7 @@ defmodule Compos.ModeToggleTest do
     name = "mode-toggle-#{System.unique_integer([:positive])}"
     {:ok, _} = Compos.Core.create_buffer(name, text: text)
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     name
   end
@@ -49,7 +49,7 @@ defmodule Compos.ModeToggleTest do
     on_exit(fn -> File.rm(path) end)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     eval!(~s{(visit "#{path}")})
     assert eval!(~s{(buffer-local "#{path}" 'mode-name)}) == ~s("elixir-mode")
 

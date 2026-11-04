@@ -48,7 +48,7 @@ defmodule Compos.DesktopRestoreTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     :ok
   end
 

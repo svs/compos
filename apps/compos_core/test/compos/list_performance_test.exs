@@ -7,7 +7,7 @@ defmodule Compos.ListPerformanceTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*zz-list-performance*")

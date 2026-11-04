@@ -9,7 +9,7 @@ defmodule Compos.Ui.TextDisplayTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Editor.set_total_rows(20)
     name = "display-#{System.unique_integer([:positive])}"
     Editor.set_window_buffer(name)

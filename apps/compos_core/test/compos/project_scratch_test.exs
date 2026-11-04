@@ -47,7 +47,7 @@ defmodule Compos.ProjectScratchTest do
 
   defp open(path) do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     eval!(~s{(find-file "#{path}")})
     eval!(~s{(switch-to-buffer! "#{path}")})
     Editor.current_buffer()
@@ -134,7 +134,7 @@ defmodule Compos.ProjectScratchTest do
     {:ok, _} = Compos.Core.create_buffer(name, text: "loose\n")
     on_exit(fn -> if Buffer.exists?(name), do: Compos.Core.kill_buffer(name) end)
 
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     eval!(~s{(buffer-set-local! "#{name}" 'default-directory "/")})
 

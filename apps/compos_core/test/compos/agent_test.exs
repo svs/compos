@@ -30,7 +30,7 @@ defmodule Compos.AgentTest do
     Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)
@@ -42,7 +42,7 @@ defmodule Compos.AgentTest do
       end)
 
       # (execute) pops a window — don't leak it into later suites
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

@@ -47,7 +47,7 @@ defmodule Compos.LSPSchemeTest do
 
   defp visit!(sc) do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     eval!(~s{(begin (visit "#{sc.path}") (set-mode! "#{sc.mode}"))})
   end
 

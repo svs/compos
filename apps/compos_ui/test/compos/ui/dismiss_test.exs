@@ -8,7 +8,7 @@ defmodule Compos.Ui.DismissTest do
   setup do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     name = "zz-dismiss-ui-#{System.unique_integer([:positive])}"
     {:ok, _} = Compos.Core.create_buffer(name)
     Buffer.append(name, "A reading surface\n")

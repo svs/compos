@@ -22,7 +22,7 @@ defmodule Compos.ChatFileTest do
     Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     dir = Path.join(System.tmp_dir!(), "chatfile-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -41,7 +41,7 @@ defmodule Compos.ChatFileTest do
 
       File.rm_rf(dir)
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     {:ok, dir: dir}

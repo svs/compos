@@ -248,7 +248,7 @@ defmodule Compos.FramesTest do
     assert :ok = Desktop.save_now()
 
     # wreck the layout, then restore over it
-    Editor.delete_other_windows(fid)
+    Compos.TestHelpers.one_window!(fid)
     assert :ok = Desktop.restore_now()
 
     assert fid in Editor.frame_list()
@@ -416,7 +416,7 @@ defmodule Compos.FramesTest do
     # windows now at 3 (active) and 17 (stored)
 
     assert :ok = Desktop.save_now()
-    Editor.delete_other_windows(fid)
+    Compos.TestHelpers.one_window!(fid)
     assert :ok = Desktop.restore_now()
 
     points =

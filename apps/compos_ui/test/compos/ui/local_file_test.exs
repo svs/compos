@@ -11,7 +11,7 @@ defmodule Compos.Ui.LocalFileTest do
 
   setup do
     Compos.Core.Editor.minibuffer_close()
-    Compos.Core.Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     :ok
   end
 

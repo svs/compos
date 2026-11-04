@@ -8,7 +8,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
   test "ibuffer owns semantic records while retaining its text lines and navigation" do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
     {:ok, _} =
       Session.eval(~S|(begin (buffer-create "*zz-semantic-buffer*") (run-command "ibuffer-pretty"))|)
@@ -42,7 +42,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
   test "picker metadata exposes formatter CSS classes on the rendered elements" do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Editor.set_window_buffer("*scratch*")
     {:ok, view, _} = live(build_conn(), "/")
     {:ok, _} = Session.eval(~S|(begin
@@ -67,7 +67,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
   test "plain and pretty picker rows both use the direct DOM path" do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Editor.set_window_buffer("*scratch*")
     {:ok, view, _} = live(build_conn(), "/")
     {:ok, _} = Session.eval(~S|(begin
@@ -97,7 +97,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
     File.write!(Path.join(dir, "beta.txt"), "beta")
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     {:ok, _} = Session.eval("(dired-open #{inspect(dir)})")
 
     on_exit(fn ->
@@ -138,7 +138,7 @@ defmodule Compos.Ui.ComposMLTextListTest do
   test "Imenu renders symbols with source locations and kinds" do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     {:ok, _} = Session.eval(~S|(begin
       (define zz-original-imenu-rows imenu-rows)
       (set! imenu-rows (lambda (buf) '((1 "function" "alpha" "Example documentation"))))

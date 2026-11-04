@@ -55,7 +55,7 @@ defmodule Compos.WorktreesTest do
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*worktrees*")
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

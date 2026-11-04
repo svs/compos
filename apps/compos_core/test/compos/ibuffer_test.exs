@@ -9,7 +9,7 @@ defmodule Compos.IbufferTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_cols(%{})
 
     on_exit(fn ->
@@ -30,7 +30,7 @@ defmodule Compos.IbufferTest do
         (local-unset-key* (minibuffer-buffer) "<f9>")
         (local-unset-key* (minibuffer-buffer) "<f6>"))})
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_cols(%{})
     end)
 

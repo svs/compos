@@ -10,7 +10,7 @@ defmodule Compos.WindowHealTest do
   alias Compos.Core.{Buffer, Editor}
 
   test "killing a displayed buffer heals the window tree" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-victim")
     Buffer.append("heal-victim", "hello\n", source: :editor)
     Editor.set_window_buffer("heal-victim")
@@ -26,7 +26,7 @@ defmodule Compos.WindowHealTest do
   # Emacs: kill-buffer keeps the window and shows another buffer in it.
   # A split the person made is not undone by a kill.
   test "killing a buffer keeps its window and fills it from the window's history" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-survivor")
     {:ok, _} = Compos.Core.create_buffer("heal-before")
     {:ok, _} = Compos.Core.create_buffer("heal-layout-victim")
@@ -47,7 +47,7 @@ defmodule Compos.WindowHealTest do
   end
 
   test "a window with no history falls back to a buffer no window shows" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-survivor")
     {:ok, _} = Compos.Core.create_buffer("heal-elsewhere")
     {:ok, _} = Compos.Core.create_buffer("heal-fresh-victim")
@@ -64,7 +64,7 @@ defmodule Compos.WindowHealTest do
   end
 
   test "killing a buffer shown in every window keeps every window" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-duplicate-victim")
     Editor.set_window_buffer("heal-duplicate-victim")
     Editor.split(:h, 0.5)
@@ -77,7 +77,7 @@ defmodule Compos.WindowHealTest do
   end
 
   test "killing a hidden buffer leaves the layout unchanged" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-hidden-victim")
     before = Editor.list_windows()
 
@@ -87,7 +87,7 @@ defmodule Compos.WindowHealTest do
   end
 
   test "a click racing a buffer kill cannot crash the Editor" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, _} = Compos.Core.create_buffer("heal-race")
     Buffer.append("heal-race", "hello\n", source: :editor)
     Editor.set_window_buffer("heal-race")

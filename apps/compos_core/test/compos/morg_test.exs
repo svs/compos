@@ -19,7 +19,7 @@ defmodule Compos.MorgTest do
     name = "morg-#{System.unique_integer([:positive])}.md"
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, text, source: :editor)
     {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
@@ -96,7 +96,7 @@ defmodule Compos.MorgTest do
 
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(document)
     {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
     :ok = Buffer.goto(document, 35)

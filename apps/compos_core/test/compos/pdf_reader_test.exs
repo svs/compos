@@ -6,7 +6,7 @@ defmodule Compos.Core.PdfReaderTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     eval!(~S"""
     (begin
@@ -108,7 +108,7 @@ defmodule Compos.Core.PdfReaderTest do
           (buffer-list)))
       """)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

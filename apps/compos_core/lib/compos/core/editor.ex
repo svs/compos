@@ -485,11 +485,6 @@ defmodule Compos.Core.Editor do
   """
   def arrange(spec, fid \\ nil), do: GenServer.call(__MODULE__, {:arrange, spec, fid(fid)})
 
-  # the frame reset every ExUnit setup runs; the editor itself goes through
-  # the panes model (delete-other-windows! in window.scm)
-  def delete_other_windows(fid \\ nil),
-    do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
-
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
   @doc """
@@ -2043,17 +2038,6 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:active_window, fid}, _from, state),
     do: {:reply, frame(state, fid).active, state}
-
-  def handle_call({:delete_other_windows, fid}, _from, state) do
-    f = frame(state, fid)
-    leaf = find_leaf(f.tree, f.active)
-
-    for {win, buf} <- leaf_ids_buffers(f.tree), win != leaf.id, Buffer.exists?(buf) do
-      wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
-    end
-
-    changed(:ok, state |> put_frame(%{f | tree: leaf}) |> resync_swap(), f.id)
-  end
 
   def handle_call({:other_window, fid}, _from, state) do
     f = frame(state, fid)

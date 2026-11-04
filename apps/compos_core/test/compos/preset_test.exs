@@ -17,7 +17,7 @@ defmodule Compos.PresetTest do
     Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     # a server + preset to load (never actually connected — the ACP lane
     # only needs its spawn spec, which is what session/new carries)
@@ -38,7 +38,7 @@ defmodule Compos.PresetTest do
       end)
 
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

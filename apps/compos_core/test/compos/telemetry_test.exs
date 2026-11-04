@@ -10,7 +10,7 @@ defmodule Compos.Core.TelemetryTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     :ok = Telemetry.clear()
 
     on_exit(fn ->

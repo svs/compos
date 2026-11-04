@@ -148,6 +148,19 @@
         (select-frame! home)
         (delete-frame! frame)))))
 
+(define (test-one-window!)
+  "the frame a window test starts from: the active window alone, with
+   no window waiting behind it. It goes through delete-other-windows!,
+   so the model and the frame agree."
+  (delete-other-windows!)
+  (let* ((l (panes-layout))
+         (me (and l (panes-key-of-handle l (active-window)))))
+    (when me
+      (panes-apply!
+       (fold (lambda (l k) (if (equal? k me) l (panes-remove-window l k)))
+             l (panes-pane-keys l (panes-pane-of l me))))))
+  #t)
+
 (define (test-fail! text)
   (set! *test-failures* (append *test-failures* (list text))))
 
@@ -411,6 +424,8 @@
   "(with-fresh-group NAME FN) - make a group record NAME, stale copies deleted first, and call (FN ID); the record goes after, also on an error")
 (public! 'with-frame
   "(with-frame FN) - make and select a frame, call (FN ID), then come back to the old frame and delete the new one, also on an error")
+(public! 'test-one-window!
+  "(test-one-window!) - the frame shows the active window alone and nothing waits behind it: the reset a window test starts from")
 (public! 'load-tests-once! "(load-tests-once!) — load every test file the first time only; answers the test count")
 (public! 'reload-tests! "(reload-tests!) — forget the loaded kernel suite and read priv/tests again")
 (public! 'load-tests! "(load-tests!) — load the kernel's tests, every .scm under priv/tests; answers the test count")

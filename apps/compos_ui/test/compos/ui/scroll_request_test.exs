@@ -18,7 +18,7 @@ defmodule Compos.Ui.ScrollRequestTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     buf = "*scroll-request-#{System.unique_integer([:positive])}*"
     {:ok, _} = Compos.Core.create_buffer(buf)
     Compos.Core.Buffer.append(buf, String.duplicate("line\n", 80), source: :editor)

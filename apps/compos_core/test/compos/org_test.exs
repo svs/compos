@@ -9,7 +9,7 @@ defmodule Compos.OrgTest do
     name = "org-#{System.unique_integer([:positive])}.org"
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, text, source: :editor)
     {:ok, _} = Session.eval(~s{(set-mode! "org-mode")})

@@ -25,7 +25,7 @@ defmodule Compos.ChatRecordTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :llm_chat_fun)
@@ -37,7 +37,7 @@ defmodule Compos.ChatRecordTest do
            do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

@@ -9,7 +9,7 @@ defmodule Compos.OnChangeTest do
   # rules fire only for visible buffers, so a watched buffer goes into the
   # window first — the same state a reader's buffer is in
   defp show(buf) do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(buf)
   end
 

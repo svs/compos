@@ -4,7 +4,7 @@ defmodule Compos.FilterNavigationTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("*scratch*")
 
     for name <- ["*zz-nav-a*", "*zz-nav-b*", "*zz-excluded*"] do
@@ -15,7 +15,7 @@ defmodule Compos.FilterNavigationTest do
     on_exit(fn ->
       Editor.minibuffer_close()
       eval!("(chat-list-search-reset!) (advice-remove! 'ibuffer-row-match 'zz-metadata-count)")
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_buffer("*scratch*")
 
       for name <- ["*zz-nav-a*", "*zz-nav-b*", "*zz-excluded*", "*ibuffer*", "*chat-list*"],

@@ -15,7 +15,7 @@ defmodule Compos.EscMetaTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     # Session.eval prints its value: a bound command reads as "\"name\""
     esc_command =

@@ -126,7 +126,7 @@ defmodule Compos.ChatAgentTest do
 
     on_exit(fn ->
       Compos.Core.kill_buffer(buf)
-      Compos.Core.Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     # unpinned, the modeline follows the editor default

@@ -13,7 +13,7 @@ defmodule Compos.Ui.ComposMLListTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     buf = "*semantic-list-test*"
 
     eval!(~S"""

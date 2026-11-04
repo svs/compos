@@ -76,7 +76,7 @@ defmodule Compos.Ui.RopeSyncTest do
     setup do
       Editor.minibuffer_close()
       Editor.set_total_rows(40)
-      Editor.delete_other_windows()
+      {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
       {:ok, conn: build_conn()}
     end
 

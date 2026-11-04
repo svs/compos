@@ -25,7 +25,7 @@ defmodule Compos.OccurTsTest do
   setup do
     source = "occur-ts-source-#{System.unique_integer([:positive])}"
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(source)
     :ok = Buffer.append(source, @json, source: :editor)
     Buffer.set_local(source, "ts-lang", "json")

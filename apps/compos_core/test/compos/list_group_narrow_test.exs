@@ -8,7 +8,7 @@ defmodule Compos.ListGroupNarrowTest do
     @mode mode
     test "#{mode} narrows a group, preserves text filtering, and widens" do
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_buffer("*scratch*")
 
       for name <- ["zz-scope-a", "zz-scope-b", "zz-scope-c"] do

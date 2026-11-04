@@ -16,7 +16,7 @@ defmodule Compos.Ui.ModelineExtraTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Editor.set_window_buffer("ui-test-#{System.unique_integer([:positive])}")
     on_exit(fn -> Editor.set_modeline_extra("") end)
     {:ok, conn: build_conn()}

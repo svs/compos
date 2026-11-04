@@ -30,7 +30,7 @@ defmodule Compos.BackendStubTest do
     Application.put_env(:compos_core, :acp_transport, Compos.BackendStubTest.NoTransport)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :acp_transport)
@@ -41,7 +41,7 @@ defmodule Compos.BackendStubTest do
           do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

@@ -12,14 +12,14 @@ defmodule Compos.Ui.BlockKindsTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_total_rows(40)
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
     on_exit(fn ->
       Enum.each(Compos.Core.list_buffers(), fn name ->
         if String.starts_with?(name, "*block-kinds"), do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     end)
 
     {:ok, conn: build_conn()}

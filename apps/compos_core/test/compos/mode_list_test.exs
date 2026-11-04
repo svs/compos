@@ -25,7 +25,7 @@ defmodule Compos.ModeListTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("*scratch*")
 
     for name <- ["*zz-ml-a*", "*zz-ml-b*", "*zz-ml-c*"] do

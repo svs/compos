@@ -13,7 +13,7 @@ defmodule Compos.Ui.PreviewLinkTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_total_rows(40)
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
     root =
       Path.join(System.tmp_dir!(), "compos-preview-link-#{System.unique_integer([:positive])}")
@@ -28,7 +28,7 @@ defmodule Compos.Ui.PreviewLinkTest do
       Compos.Core.kill_buffer(source)
       Compos.Core.kill_buffer(target)
       File.rm_rf(root)
-      Editor.delete_other_windows()
+      {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     end)
 
     {:ok, ^source} = Compos.Core.open_file(source)

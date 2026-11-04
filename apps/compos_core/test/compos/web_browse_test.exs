@@ -62,7 +62,7 @@ defmodule Compos.WebBrowseTest do
     """)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       {:ok, _} =
@@ -75,7 +75,7 @@ defmodule Compos.WebBrowseTest do
           #t)})
 
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

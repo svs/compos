@@ -7,7 +7,7 @@ defmodule Compos.Ui.DisplayUpdateTest do
 
   test "a display update retains the old presentation until the final text and point are ready" do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     name = "zz-display-#{System.unique_integer([:positive])}"
     Compos.Core.create_buffer(name, text: "STABLE_PRESENTATION")
     Editor.set_window_buffer(name)

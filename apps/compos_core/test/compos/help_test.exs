@@ -9,11 +9,11 @@ defmodule Compos.HelpTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       for b <- ["*Help*", "*switch*", "*zz-help*"], do: Compos.Core.kill_buffer(b)
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

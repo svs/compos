@@ -20,7 +20,7 @@ defmodule Compos.SwitchTest do
     Application.put_env(:compos_core, :acp_transport, Compos.Test.FakeTransport)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     {:ok, _} =
       Session.eval("""
@@ -40,7 +40,7 @@ defmodule Compos.SwitchTest do
       end)
 
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

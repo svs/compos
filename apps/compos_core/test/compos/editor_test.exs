@@ -35,7 +35,7 @@ defmodule Compos.EditorTest do
     Editor.completion_dismiss()
     Editor.set_pending([])
     Editor.set_echo("")
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     name
   end
@@ -468,7 +468,7 @@ defmodule Compos.EditorTest do
     test "lists with the buffer annotation, narrows by mode, C-k kills, RET visits" do
       on_exit(fn ->
         for b <- ["*zz-ib-a*", "*zz-ib-b*", "*switch*"], do: Compos.Core.kill_buffer(b)
-        Editor.delete_other_windows()
+        Compos.TestHelpers.one_window!()
       end)
 
       {:ok, _} = Compos.Core.Session.eval(~s{(begin
@@ -518,7 +518,7 @@ defmodule Compos.EditorTest do
     test "the marked buffers add to a group as one act" do
       on_exit(fn ->
         for b <- ["*zz-gr-a*", "*zz-gr-b*", "*switch*"], do: Compos.Core.kill_buffer(b)
-        Editor.delete_other_windows()
+        Compos.TestHelpers.one_window!()
       end)
 
       # no group the frame stands in or just left: with a default, that
@@ -562,7 +562,7 @@ defmodule Compos.EditorTest do
     test "typing and the arrows preview the highlighted buffer in the home window" do
       on_exit(fn ->
         for b <- ["*zz-pv-a*", "*zz-pv-b*", "*switch*"], do: Compos.Core.kill_buffer(b)
-        Editor.delete_other_windows()
+        Compos.TestHelpers.one_window!()
       end)
 
       {:ok, _} = Compos.Core.Session.eval(~s{(begin
@@ -1710,7 +1710,7 @@ defmodule Compos.EditorTest do
   end
 
   test "minibuffer v2: fuzzy filter, C-n selection, RET runs selected" do
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     press(["M-x"])
     type("splitwindow")
 
@@ -3929,7 +3929,7 @@ defmodule Compos.EditorTest do
 
       Editor.set_window_cols(measurements)
       assert Editor.frame_cols() == 180
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_cols(%{})
     end
 
@@ -4286,7 +4286,7 @@ defmodule Compos.EditorTest do
       assert_in_delta first, 1 / 3, 0.001
       assert_in_delta second_ratio, 1 / 2, 0.001
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_cols(%{})
 
       for name <- [second, third],
@@ -4325,7 +4325,7 @@ defmodule Compos.EditorTest do
       assert length(Editor.list_windows()) == 4
       assert {:ok, "#f"} = Compos.Core.Session.eval(~s{(buffer-local "#{shell}" 'window-class)})
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
 
       for name <- [second, replaced, shell],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
@@ -4357,7 +4357,7 @@ defmodule Compos.MinibufferEditingTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("mb-edit-#{System.unique_integer([:positive])}")
     press(["M-x"])
     assert Editor.render_state().minibuffer

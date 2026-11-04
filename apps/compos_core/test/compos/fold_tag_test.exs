@@ -142,7 +142,7 @@ defmodule Compos.FoldTagTest do
   test "an org buffer's folds come back when the mode setup runs again" do
     name = "restore-#{System.unique_integer([:positive])}.org"
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, "* a\nbody\n** child\ncbody\n* b\ntail\n", source: :editor)
 
@@ -169,7 +169,7 @@ defmodule Compos.FoldTagTest do
     on_exit(fn -> File.rm_rf!(path) end)
 
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     {:ok, buf} = Compos.Core.open_file(path)
     Editor.set_window_buffer(buf)
 
@@ -185,7 +185,7 @@ defmodule Compos.FoldTagTest do
   test "a buffer with no file has no path" do
     b = new_buf("scratch\n")
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(b)
 
     leaf = active_leaf()

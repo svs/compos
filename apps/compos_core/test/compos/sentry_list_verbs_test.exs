@@ -28,7 +28,7 @@ defmodule Compos.SentryListVerbsTest do
 
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Editor.minibuffer_close()

@@ -9,7 +9,7 @@ defmodule Compos.GroupSwitchPreviewTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     eval!("(panes-choose-layout! #f)")
 
     suffix = System.unique_integer([:positive])
@@ -25,7 +25,7 @@ defmodule Compos.GroupSwitchPreviewTest do
       Editor.minibuffer_close()
       Compos.Core.kill_buffer(source)
       Compos.Core.kill_buffer(target)
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     {:ok, source: source, target: target}

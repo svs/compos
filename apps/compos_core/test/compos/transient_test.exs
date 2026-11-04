@@ -17,7 +17,7 @@ defmodule Compos.TransientTest do
     Session.run_command("transient-quit-all")
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("transient-source-#{System.unique_integer([:positive])}")
     Session.eval("(set-frame-local! 'llm-config-more #f)")
 

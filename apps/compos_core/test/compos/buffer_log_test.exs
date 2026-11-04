@@ -19,7 +19,7 @@ defmodule Compos.BufferLogTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     name = "*buffer-log-src-#{System.unique_integer([:positive])}*"
     {:ok, ^name} = Compos.Core.create_buffer(name, text: "base")
 

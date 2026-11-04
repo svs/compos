@@ -41,7 +41,7 @@ defmodule Compos.Ui.EditorLiveTest do
     Compos.Core.Editor.completion_dismiss()
     Compos.Core.Editor.set_pending([])
     Compos.Core.Editor.set_total_rows(40)
-    Compos.Core.Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Compos.Core.Editor.set_window_buffer("ui-test-#{System.unique_integer([:positive])}")
     {:ok, conn: build_conn()}
   end
@@ -673,7 +673,7 @@ defmodule Compos.Ui.EditorLiveTest do
     Compos.Core.create_buffer(popup)
 
     on_exit(fn ->
-      Compos.Core.Editor.delete_other_windows()
+      {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
       for name <- [other, popup] do
         if Compos.Core.Buffer.exists?(name), do: Compos.Core.kill_buffer(name)

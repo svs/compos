@@ -56,7 +56,7 @@ defmodule Compos.SteeringTest do
           do: Compos.Core.kill_buffer(name)
       end)
 
-      Compos.Core.Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

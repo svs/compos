@@ -57,7 +57,7 @@ defmodule Compos.Ui.FrameTabsTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Editor.set_window_buffer("frame-tabs-#{System.unique_integer([:positive])}")
     reset!(3)
 

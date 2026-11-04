@@ -14,7 +14,7 @@ defmodule Compos.ChatInputGuardTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Enum.each(Agent.list(), &Agent.kill/1)
@@ -24,7 +24,7 @@ defmodule Compos.ChatInputGuardTest do
           do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

@@ -20,7 +20,7 @@ defmodule Compos.ScratchTest do
 
   defp fresh_buffer(name, text) do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, text, source: :editor)
     name

@@ -63,7 +63,7 @@ defmodule Compos.ChatNameTest do
     test "a renamed scratch is still its owner's scratch, so C-c s keeps toggling" do
       owner = "zz-owner-#{System.unique_integer([:positive])}"
       {:ok, _} = Compos.Core.create_buffer(owner, text: "code\n")
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_buffer(owner)
 
       on_exit(fn ->

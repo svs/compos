@@ -14,7 +14,7 @@ defmodule Compos.PromptShapeTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Session.eval(~s{(begin (minibuffer-cancel!) (ibuffer-prompt-close! " *buffers*"))})

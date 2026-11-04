@@ -57,7 +57,7 @@ defmodule Compos.SwitchModalTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       for b <- ["*zz-ma*", "*zz-mb*", "*zz-mc*", "*zz-md*", @switch],
@@ -69,7 +69,7 @@ defmodule Compos.SwitchModalTest do
           (set-frame-local! 'current-group #f))})
 
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

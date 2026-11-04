@@ -5,7 +5,7 @@ defmodule Compos.FoldingTest do
 
   defp fresh_buffer(text) do
     name = "fold-#{System.unique_integer([:positive])}"
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, text, source: :editor)
     name

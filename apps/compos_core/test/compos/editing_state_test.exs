@@ -16,7 +16,7 @@ defmodule Compos.EditingStateTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     eval!("""
     (begin
@@ -72,7 +72,7 @@ defmodule Compos.EditingStateTest do
     assert editing?()
     press(["<f9>", "s"])
     refute editing?()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
   end
 
   test "a focus command after a landing keeps the movement state" do

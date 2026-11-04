@@ -15,7 +15,7 @@ defmodule Compos.SwitcherPerformanceTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("*scratch*")
 
     on_exit(fn ->
@@ -32,7 +32,7 @@ defmodule Compos.SwitcherPerformanceTest do
       """)
 
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_buffer("*scratch*")
 
       for name <- ["*zz-perf-chat*", "*zz-perf-hidden*", "*chat-list*", "*switch*"],

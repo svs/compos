@@ -17,7 +17,7 @@ defmodule Compos.CacheEconomicsTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     on_exit(fn ->
       Application.delete_env(:compos_core, :llm_chat_fun)
       Application.delete_env(:compos_core, :llm_req_opts)
@@ -31,7 +31,7 @@ defmodule Compos.CacheEconomicsTest do
            do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

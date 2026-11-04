@@ -16,7 +16,7 @@ defmodule Compos.ProjectSearchTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     root = Path.join(System.tmp_dir!(), "ps-proj-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "lib"))
@@ -33,7 +33,7 @@ defmodule Compos.ProjectSearchTest do
 
       Compos.Core.kill_buffer("*zz-ps*")
       Compos.Core.kill_buffer(root)
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       File.rm_rf!(root)
     end)
 

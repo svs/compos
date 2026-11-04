@@ -14,6 +14,9 @@ defmodule Compos.TestHelpers do
     printed
   end
 
+  @doc "The frame shows its active window alone, through Scheme's test-one-window!: the reset a window test starts from."
+  def one_window!(frame \\ nil), do: eval!("(test-one-window!)", frame)
+
   @doc "Press one key or a list of keys through KeyDispatch, the path the GUI takes."
   def press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 

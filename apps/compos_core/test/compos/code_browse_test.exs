@@ -12,7 +12,7 @@ defmodule Compos.CodeBrowseTest do
   defp fresh_buffer(text, lang) do
     name = "code-#{System.unique_integer([:positive])}"
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     :ok = Buffer.append(name, text, source: :editor)
     if lang, do: Buffer.set_local(name, "ts-lang", lang)

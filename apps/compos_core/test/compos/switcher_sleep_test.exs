@@ -53,7 +53,7 @@ defmodule Compos.SwitcherSleepTest do
     name = unique("stand")
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
     name
   end
@@ -64,7 +64,7 @@ defmodule Compos.SwitcherSleepTest do
     on_exit(fn ->
       Compos.Core.kill_buffer(@switch)
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     {:ok, stand: stand}

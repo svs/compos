@@ -31,12 +31,12 @@ defmodule Compos.CollectTest do
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Editor.minibuffer_close()
       for b <- ["*zz-src*", "*Collect*"], do: Compos.Core.kill_buffer(b)
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

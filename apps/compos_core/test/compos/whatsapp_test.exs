@@ -23,7 +23,7 @@ defmodule Compos.WhatsappTest do
     Compos.Core.kill_buffer(@chat_buffer)
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     prior_group_setting = eval!("whatsapp-group")
 

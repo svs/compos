@@ -19,7 +19,7 @@ defmodule Compos.SubagentResultTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       # the probe listener is keyed by name, so a no-op replaces it
@@ -31,7 +31,7 @@ defmodule Compos.SubagentResultTest do
           do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

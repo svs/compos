@@ -8,7 +8,7 @@ defmodule Compos.SpreadsheetModeTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     dir = Path.join(System.tmp_dir!(), "compos-sheet-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -20,7 +20,7 @@ defmodule Compos.SpreadsheetModeTest do
       end
 
       File.rm_rf!(dir)
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     %{path: path, dir: dir}

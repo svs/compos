@@ -21,7 +21,7 @@ defmodule Compos.PermissionTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :llm_chat_fun)
@@ -32,7 +32,7 @@ defmodule Compos.PermissionTest do
           do: Compos.Core.kill_buffer(name)
       end)
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok
@@ -214,7 +214,7 @@ defmodule Compos.PermissionTest do
       # nobody is looking at it BEFORE the request arrives — that is the
       # condition that arms the deadline, so the turn starts after the
       # window is gone rather than racing it
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       {:ok, _} = Session.eval(~s[(switch-to-buffer! "*scratch*")])
 
       {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "go")])

@@ -4,7 +4,7 @@ defmodule Compos.IbufferPickerTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     for name <- ["*picker-home*", "*picker-target*"], do: Compos.Core.create_buffer(name)
     Editor.set_window_buffer("*picker-home*")
 
@@ -20,7 +20,7 @@ defmodule Compos.IbufferPickerTest do
         ~S{(begin (when (minibuffer-state) (minibuffer-cancel!)) (advice-remove! 'ibuffer-table-load! 'picker-test) (advice-remove! 'ibuffer-format 'picker-plain-test))}
       )
 
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       Editor.set_window_buffer("*scratch*")
 
       for name <- ["*picker-home*", "*picker-target*", " *buffers*"],

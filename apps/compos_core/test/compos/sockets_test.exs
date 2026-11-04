@@ -74,7 +74,7 @@ defmodule Compos.SocketsTest do
   describe "the sockets buffer" do
     setup do
       Editor.minibuffer_close()
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
       on_exit(fn -> Compos.Core.kill_buffer("*sockets*") end)
       :ok
     end

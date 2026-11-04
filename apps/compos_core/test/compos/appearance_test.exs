@@ -16,12 +16,12 @@ defmodule Compos.AppearanceTest do
 
   setup do
     Editor.minibuffer_close()
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*zz-scale*")
       Session.eval("(ui-scale-apply! 0)")
-      Editor.delete_other_windows()
+      Compos.TestHelpers.one_window!()
     end)
 
     :ok

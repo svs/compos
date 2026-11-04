@@ -17,7 +17,7 @@ defmodule Compos.MarginaliaProjectTest do
   setup do
     Editor.minibuffer_close()
     Editor.set_pending([])
-    Editor.delete_other_windows()
+    Compos.TestHelpers.one_window!()
     Editor.set_window_buffer("mp-#{System.unique_integer([:positive])}")
     on_exit(fn -> Editor.minibuffer_close() end)
     :ok

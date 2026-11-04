@@ -376,6 +376,15 @@
                 (if (buffer-local b 'chats-watch) (list-refresh! b) (list-redraw! b))))
             (mode-list-views "chat-mode")))
 
+;; A title renames a chat, and a list holds its rows by name: a redraw keeps
+;; the old name and the state it had, so a chat that ended its turn still
+;; says "streaming". A rename reads the chats again.
+(add-hook! 'buffer-renamed-hook
+  (lambda (old new)
+    (when (chat-buffer? new)
+      (for-each (lambda (b) (when (buffer-known? b) (list-refresh! b)))
+                (mode-list-views "chat-mode")))))
+
 ;; the fleet's surfaces after an event batch: the modeline answers every
 ;; batch, and the list answers the state changes inside it.
 (define (agents-note-event! &optional slug)

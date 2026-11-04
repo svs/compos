@@ -1366,13 +1366,15 @@ defmodule Compos.Ui.EditorLive do
 
   defp extra_segments(extra), do: extra
 
-  # The echo area is the frame's own bar and holds only what passes: the
-  # message, a rule, then the keys that matter where you are standing. It
+  # The echo area is the frame's own bar: the message, what Scheme keeps
+  # there (echo-status), a rule, then the keys that matter where you are
+  # standing. It
   # sits under every window unless echo-area-position says top.
   defp frame_echo(assigns) do
     ~M"""
     <c-statusbar class="echo-area" role="status">
       <c-echo class="echo">{@state.echo}</c-echo>
+      <c-text :for={{c, t} <- echo_status(@state)} class={c}>{t}</c-text>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
         <c-text :for={{k, v} <- echo_hints(@state)} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
@@ -1473,6 +1475,12 @@ defmodule Compos.Ui.EditorLive do
   # appearance.scm): (KEY VERB) pairs. An empty verb draws the key alone.
   defp echo_hints(state) do
     for [k, v] <- chrome(state, "echo-hints"), is_binary(k), is_binary(v), do: {k, v}
+  end
+
+  # What Scheme keeps on the echo area while it is true, such as the chats
+  # that need you: (CLASS TEXT) pairs, between the message and the keys.
+  defp echo_status(state) do
+    for [c, t] <- chrome(state, "echo-status"), is_binary(c), is_binary(t), do: {c, t}
   end
 
   defp chrome(state, key, default \\ []),

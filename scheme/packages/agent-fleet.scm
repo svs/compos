@@ -869,10 +869,12 @@
          (text (if (null? att) #f (string-append "! " (string-join att " ")))))
     ;; unchanged is not news: the old refresh repainted the modeline of
     ;; every frame on every event batch to say the same thing
+    ;; it sits on the echo area at the bottom: the top bar is crowded, and
+    ;; a segment that comes and goes there makes it jump
     (unless (equal? text *agents-attention-last*)
       (set! *agents-attention-last* text)
-      (global-mode-string-set! 'agents-attention
-        (if text (list "ml-attention" text) #f)))))
+      (frame-chrome-set! "echo-status"
+        (if text (list (list "ml-attention" text)) '())))))
 
 ;; An idle chat whose newest turn was judged needs-you or blocked waits
 ;; on the person too. The modeline keeps to permissions and questions; the

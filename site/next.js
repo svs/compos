@@ -18,11 +18,11 @@
     if (cleanupGallery) { cleanupGallery(); cleanupGallery = null; }
     currentGallery = nextGallery;
     if (!nextGallery) return;
-  // Rotate the app screenshots while the gallery is being read.
+  // Change app screenshots only when the reader asks.
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.gal-tabs [role=tab]'));
   var gallery = nextGallery;
   var galleryTimer = null, galleryVisible = false;
-  var galleryPaused = reduce, galleryIndex = 0;
+  var galleryPaused = true, galleryIndex = 0;
 
   function scheduleGallery() {
     clearTimeout(galleryTimer);

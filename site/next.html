@@ -13,7 +13,7 @@
 <link rel='preconnect' href='https://fonts.googleapis.com'>
 <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
 <link href='https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Spectral:ital,wght@0,300;0,400;1,300;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap' rel='stylesheet'>
-<link rel='preload' as='image' href='images/compos-musical-waves-hero.png'>
+<link rel='preload' as='image' href='images/smartbrew-frame.webp'>
 <link rel='stylesheet' href='next.css'>
 <script>document.documentElement.classList.add('js')</script>
 </head>
@@ -38,13 +38,31 @@
 <main id='main'>
 
 <section class='hero' aria-labelledby='hero-h'>
-  <figure class='hero-art'>
-    <img src='images/compos-musical-waves-hero.png' width='1672' height='941' alt='Flowing musical staves carry a continuous melody with accompanying voices in broad waves.' fetchpriority='high'>
+  <div class='hero-art gal' id='apps' aria-label='Apps built in Compos'>
+  <div class='gal-tabs' role='tablist' aria-label='Apps built in Compos'>
+    <button role='tab' id='tab-work' aria-controls='pl-work' aria-selected='true'>for work</button>
+    <button role='tab' id='tab-fire' aria-controls='pl-fire' aria-selected='false' tabindex='-1'>forprod</button>
+    <button role='tab' id='tab-love' aria-controls='pl-love' aria-selected='false' tabindex='-1'>for doing what you love</button>
+  </div>
+  <div class='slides'>
+  <figure class='plate on' id='pl-work' role='tabpanel' aria-labelledby='tab-work'>
+    <img src='images/smartbrew-frame.webp' width='2560' height='1294' fetchpriority='high' alt='Compos with a sales pipeline list, one lead in detail, and an agent chat that fixes a user setting in production.'>
+    <figcaption><b>A CRM that fits one team.</b><span>The pipeline on the left, the lead in the middle, the agent on the right. The agent sees what you see, so 'why can't this user save?' is the whole question.</span></figcaption>
   </figure>
+  <figure class='plate' id='pl-fire' role='tabpanel' aria-labelledby='tab-fire'>
+    <img src='images/compos-sentry-three-panes.png' width='2560' height='1270' loading='lazy' alt='Compos Sentry layout with an issues list, selected issue details, and a third pane with event trends, top errors and errors by release.'>
+    <figcaption><b>When prod is on fire.</b><span>Issues on the left, details in the middle, and event trends, top errors and release charts on the right. One workspace for the investigation.</span></figcaption>
+  </figure>
+  <figure class='plate' id='pl-love' role='tabpanel' aria-labelledby='tab-love'>
+    <img src='images/compos-music.webp' width='2560' height='1294' loading='lazy' alt='Compos with Spotify, the album page and an agent chat that recommends similar records.'>
+    <figcaption><b>For doing what you love.</b><span>Your music, the story of the album, and an agent that knows Steve Reich and Fela Kuti have more in common than it seems.</span></figcaption>
+  </figure>
+  </div>
+  </div>
   <div class='hero-copy'>
     <div class='eyebrow'><i></i><span>the hackable harness for power users</span></div>
     <h1 id='hero-h' aria-label='Intelligent software done your way.'>Intelligent software<br>done <span class='headline-correction'><del aria-hidden='true'>the right</del><span class='scribble' aria-hidden='true'>your</span></span> way.</h1>
-    <p class='sub'>Compos is the hackable harness for power users to build the software you need - for work or for life.</p>
+    <p class='sub'>Compos is an agentic platform for power users, with a focus on aesthetics, extensibility, and control.</p>
     <p class='lede'>Your whole working day in one place that fits the way you think. Your agents already know what you are working on, so you explain less and get more done, on the AI subscriptions you already pay for.</p>
     <div class='actions'>
       <a href='mailto:hello@compos.in?subject=Compos%20access' class='btn btn-solid'>request access</a>
@@ -134,36 +152,6 @@
     <button class='stepb' data-go='4'>keep</button><span class='sep'>&rarr;</span>
     <button class='stepb' data-go='5'>let go</button>
     <button class='play' id='film-play' aria-pressed='false'>pause</button>
-  </div>
-</section>
-
-<section class='rule' id='apps'>
-  <span class='title'>&sect; apps</span><span class='line'></span><span>real screens &middot; real work</span>
-</section>
-
-<section class='sec gal' aria-labelledby='apps-h'>
-  <div class='film-head'>
-    <h2 class='h2' id='apps-h'>Build any app you need.</h2>
-    <p class='p'>Build your app as you work with your agent. Over time you get software that fits your head, not the other way around.</p>
-  </div>
-  <div class='gal-tabs' role='tablist' aria-label='Apps built in Compos'>
-    <button role='tab' id='tab-work' aria-controls='pl-work' aria-selected='true'>for work</button>
-    <button role='tab' id='tab-fire' aria-controls='pl-fire' aria-selected='false' tabindex='-1'>for the bad days</button>
-    <button role='tab' id='tab-love' aria-controls='pl-love' aria-selected='false' tabindex='-1'>for doing what you love</button>
-  </div>
-  <div class='slides'>
-  <figure class='plate on' id='pl-work' role='tabpanel' aria-labelledby='tab-work'>
-    <img src='images/smartbrew-frame.webp' width='2560' height='1294' loading='lazy' alt='Compos with a sales pipeline list, one lead in detail, and an agent chat that fixes a user setting in production.'>
-    <figcaption><b>A CRM that fits one team.</b><span>The pipeline on the left, the lead in the middle, the agent on the right. The agent sees what you see, so 'why can't this user save?' is the whole question.</span></figcaption>
-  </figure>
-  <figure class='plate' id='pl-fire' role='tabpanel' aria-labelledby='tab-fire'>
-    <img src='images/compos-sentry-three-panes.png' width='2560' height='1270' loading='lazy' alt='Compos Sentry layout with an issues list, selected issue details, and a third pane with event trends, top errors and errors by release.'>
-    <figcaption><b>When prod is on fire.</b><span>Issues on the left, details in the middle, and event trends, top errors and release charts on the right. One workspace for the investigation.</span></figcaption>
-  </figure>
-  <figure class='plate' id='pl-love' role='tabpanel' aria-labelledby='tab-love'>
-    <img src='images/compos-music.webp' width='2560' height='1294' loading='lazy' alt='Compos with Spotify, the album page and an agent chat that recommends similar records.'>
-    <figcaption><b>For doing what you love.</b><span>Your music, the story of the album, and an agent that knows Steve Reich and Fela Kuti have more in common than it seems.</span></figcaption>
-  </figure>
   </div>
 </section>
 

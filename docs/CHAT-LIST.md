@@ -193,8 +193,29 @@ by group drops the column rather than say it twice.
 
 - none (MRU) — the group in a column
 - group
+- subject
 - state
 - model
+
+## Subjects
+
+A subject is a short label on a chat, such as `goals` or `compos ui`. It
+is a way to sort the chats inside one group, because a group often holds
+more than one kind of work. The subject is saved with the chat, so it
+stays after a restart.
+
+- `M-x chat-set-subject` gives the current chat a subject.
+  `M-x chat-set-subject-at-point` does the same for the chat at point in
+  the chat list. Both offer the subjects you already use. The first
+  choice is a guess from the chat's title. A blank answer removes the
+  subject.
+- In `C-x b`, every subject of a chat in the current group becomes a
+  tab, after the usual tabs.
+- In the chat list, `<` can section the chats by subject. A subject goes
+  across groups. Chats without a subject go under "no subject".
+
+A chat that follows a mode, such as the ATS or a todo page, gets its
+subject from that mode the first time it shows.
 
 ## A switch is a switch of group
 

@@ -229,6 +229,9 @@
 (defface! 'chat-stopped 'fg "#e08d78")
 (defface! 'chat-idle 'fg "#4a4660")
 (defface! 'chat-archived 'fg "#3a3746")
+;; the bolt in the title: green while the list watches the chats, muted red while it stands still
+(defface! 'chat-watch-on 'fg "#5fbf77")
+(defface! 'chat-watch-off 'fg "#8a5a55")
 
 (define (chats-state-face status)
   (cond ((equal? status 'needs_attention) "alert")
@@ -1102,7 +1105,10 @@
                "chats again, and q gives the frame back.")
         'category 'chat
         ;; the title says whether the rows follow the chats (w) or stand still
-        'title (lambda (buf) (if (buffer-local buf 'chats-watch) "Chats ⚡ on" "Chats ⚡ off"))
+        'title (lambda (buf) "Chats ⚡")
+        'title-spans (lambda (buf)
+                       (list (list (string-byte-length "Chats ") (string-byte-length "⚡")
+                                   (if (buffer-local buf 'chats-watch) "chat-watch-on" "chat-watch-off"))))
         'noun "chat"
         ;; a chat's transcript size is not what you pick a chat by
         'hide-fields '(size)

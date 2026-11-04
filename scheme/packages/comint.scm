@@ -58,13 +58,15 @@
         (list "<next>" "\x1b;[6~") (list "S-TAB" "\x1b;[Z")))
 
 ;; the control byte of one key: C-a is 1, C-@ and C-SPC are 0, C-? is DEL
+(define term--controls "\x0;\x1;\x2;\x3;\x4;\x5;\x6;\x7;\x8;\x9;\xa;\xb;\xc;\xd;\xe;\xf;\x10;\x11;\x12;\x13;\x14;\x15;\x16;\x17;\x18;\x19;\x1a;\x1b;\x1c;\x1d;\x1e;\x1f;")
+
 (define (term--control text)
-  (cond ((equal? text "SPC") (string (integer->char 0)))
+  (cond ((equal? text "SPC") (substring term--controls 0 1))
         ((not (= (string-length text) 1)) #f)
         (else
-         (let ((c (char->integer (string-ref text 0))))
-           (cond ((and (>= c 97) (<= c 122)) (string (integer->char (- c 96))))
-                 ((and (>= c 64) (<= c 95)) (string (integer->char (- c 64))))
+         (let ((c (string-byte text 0)))
+           (cond ((and (>= c 97) (<= c 122)) (substring term--controls (- c 96) (- c 95)))
+                 ((and (>= c 64) (<= c 95)) (substring term--controls (- c 64) (- c 63)))
                  ((= c 63) "\x7f;")
                  (else #f))))))
 
@@ -83,7 +85,6 @@
              (and b (string-append "\x1b;" b))))
           ((string-prefix? "C-" key) (term--control (substring key 2 n)))
           (else #f))))
-
 
 (define-command "term-send-key" "Send these keys to the terminal, and give it the keyboard"
   (lambda ()

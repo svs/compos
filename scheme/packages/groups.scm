@@ -1736,9 +1736,9 @@ is forgotten and that group falls back to creation order in the switcher."
     (and (not (eq? g 'outside)) g)))
 
 ;; An explicit pick shows the buffer in this pane, in the pane's window of
-;; its mode, else a new one at the front. A buffer a window in another pane
-;; holds opens a copy of that window here, the same stack with the buffer
-;; at the front; the source window stays as it is (E01).
+;; its mode, else a new one at the front. A window of the buffer's mode
+;; takes it itself. A buffer a window in another pane holds leaves it for a
+;; new window of its mode here, so a buffer lives in one window (E01).
 ;; Nothing swaps: the panes stay where they are.
 (define (switch-to-buffer-in-chosen-pane! b)
   (let ((home (group-home-of b)))
@@ -1752,19 +1752,16 @@ is forgotten and that group falls back to creation order in the switcher."
            (same (and pid (find (lambda (k) (equal? (panes-window-mode l k) mode))
                                 (panes-pane-keys l pid)))))
       (cond ((not pid) (switch-to-buffer-here! b))
+            ;; this window is of B's mode: B comes into it
+            ((equal? (panes-window-mode l here) mode)
+             (panes-apply! (panes-focus-window (panes-move-buffer l b here) here)))
             ((and from (equal? (panes-pane-of l from) pid))
              (panes-apply! (panes-focus-window (panes-show l from b) from)))
-            ;; Held by a window in another pane: a copy of that window
-            ;; opens here, the same stack with B at the front.
+            ;; held by a window in another pane: a new window of its mode
+            ;; opens here with B alone, and B leaves the other window
             (from
-             (let* ((made (panes-add-window l pid b mode))
-                    (key (cadr made))
-                    (id (panes--id b))
-                    (src (or (plist-get (panes-window l from) 'buffers) '())))
-               (panes-apply! (panes-focus-window
-                               (panes--update-window (car made) key
-                                 (lambda (w) (panes--put w 'buffers (cons id (panes--without id src)))))
-                               key))))
+             (let ((made (panes-add-window (panes-drop-buffer l b) pid b mode)))
+               (panes-apply! (panes-focus-window (car made) (cadr made)))))
             (same
              (panes-apply! (panes-focus-window (panes-show l same b) same)))
             (else (let ((made (panes-add-window l pid b mode)))

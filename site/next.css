@@ -304,8 +304,9 @@ footer { border-top: 1px solid var(--rule); }
   .hero-copy { width: auto; margin: 0; padding: 56px 0 8px; }
   .film { aspect-ratio: auto; height: 600px; }
   .film .w-detail { display: none; }
-  .at-2 .f-wins, .at-3 .f-wins { grid-template-columns: 1fr 0fr 0fr; }
-  .film[data-scene='1'] .f-wins, .film[data-scene='3'] .f-wins, .film[data-scene='4'] .f-wins { grid-template-columns: 0fr 0fr 1fr; }
+  .film .f-wins { grid-template-columns: minmax(0, 1fr); grid-template-rows: 0fr 1fr; transition: grid-template-rows 1s cubic-bezier(.6, 0, .2, 1), opacity .9s, filter .9s, transform .9s; }
+  .film .f-win { min-height: 0; }
+  .film.at-2 .f-wins, .film.at-3 .f-wins { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1.1fr 1fr; }
   .plate figcaption { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .film-ctl .play { margin-left: 0; }
 }

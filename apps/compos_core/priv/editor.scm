@@ -1731,7 +1731,7 @@
 
 (effects! '(read))
 (public! 'key-binding-dispatch
-  "(key-binding-dispatch SEQ) — the dispatcher's one lookup: (\"command\" NAME), (\"prefix\") or (\"none\") for the key sequence SEQ in the frame's buffer, ESC read as Meta when nothing binds it")
+  "(key-binding-dispatch SEQ) — the dispatcher's one lookup: (\"command\" NAME), (\"prefix\") or (\"none\") for the key sequence SEQ in the frame's buffer, ESC read as Meta when nothing binds it; an unbound one runs the buffer's 'undefined-key-command when it has one")
 (define (key-binding-dispatch seq)
   (let* ((seq (keymap--seq seq))
          (answer (lambda (r)
@@ -1742,7 +1742,18 @@
     (cond ((not (equal? r 'none)) (answer r))
           ((and (pair? seq) (equal? (car (reverse seq)) "ESC")) (list "prefix"))
           ((keymap--esc-meta seq) (answer (keymap--lookup-here (keymap--esc-meta seq))))
-          (else (list "none")))))
+          (else (keymap--undefined)))))
+
+;; A buffer can take the keys no map binds: its 'undefined-key-command runs,
+;; and reads the sequence from last-keys. A terminal sends them to its
+;; program. A locked overriding map (Transient) keeps its keys undefined.
+(define (keymap--undefined)
+  (let* ((ctx (key-context))
+         (over (cadr ctx))
+         (cmd (and (not (and (pair? over) (pair? (cdr over)) (cadr over)))
+                   (car ctx)
+                   (buffer-local (car ctx) 'undefined-key-command))))
+    (if (string? cmd) (list "command" cmd) (list "none"))))
 
 (public! 'key-binding
   "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys or a string.")

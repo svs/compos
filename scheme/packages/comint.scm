@@ -28,6 +28,8 @@
   ;; a window command takes them back
   (buffer-set-local! buf 'takes-keyboard #t)
   (local-remap*! buf "self-insert-command" "term-send-key")
+  ;; a key no map binds goes to the program: C-c C-c, C-d and the rest
+  (buffer-set-local! buf 'undefined-key-command "term-send-key")
   (unless (process-running? buf)
     ;; A terminal app records its own launch command in the buffer.  That
     ;; local rides the desktop, so waking *opencode* starts OpenCode again
@@ -46,17 +48,50 @@
         (list "TAB" "\t")
         (list "DEL" "\x7f;")))
 
+;; the keys a terminal speaks as escape sequences, sent when no map binds them
+(define term--escape-bytes
+  (list (list "ESC" "\x1b;")
+        (list "<up>" "\x1b;[A") (list "<down>" "\x1b;[B")
+        (list "<right>" "\x1b;[C") (list "<left>" "\x1b;[D")
+        (list "<home>" "\x1b;[H") (list "<end>" "\x1b;[F")
+        (list "<delete>" "\x1b;[3~") (list "<prior>" "\x1b;[5~")
+        (list "<next>" "\x1b;[6~") (list "S-TAB" "\x1b;[Z")))
+
+;; the control byte of one key: C-a is 1, C-@ and C-SPC are 0, C-? is DEL
+(define (term--control text)
+  (cond ((equal? text "SPC") (string (integer->char 0)))
+        ((not (= (string-length text) 1)) #f)
+        (else
+         (let ((c (char->integer (string-ref text 0))))
+           (cond ((and (>= c 97) (<= c 122)) (string (integer->char (- c 96))))
+                 ((and (>= c 64) (<= c 95)) (string (integer->char (- c 64))))
+                 ((= c 63) "\x7f;")
+                 (else #f))))))
+
+;; the bytes a terminal sends for KEY, or #f: Meta is ESC first, and the
+;; Cmd chords are the editor's
 (define (term--key-text key)
-  (let ((named (assoc key term--key-bytes)))
+  (let ((named (or (assoc key term--key-bytes) (assoc key term--escape-bytes)))
+        (n (string-length key)))
     (cond (named (cadr named))
-          ((= (string-length key) 1) key)
+          ((= n 1) key)
+          ((string-prefix? "C-M-" key)
+           (let ((b (term--control (substring key 4 n))))
+             (and b (string-append "\x1b;" b))))
+          ((string-prefix? "M-" key)
+           (let ((b (term--key-text (substring key 2 n))))
+             (and b (string-append "\x1b;" b))))
+          ((string-prefix? "C-" key) (term--control (substring key 2 n)))
           (else #f))))
 
-(define-command "term-send-key" "Send this key to the terminal, and give it the keyboard"
+
+(define-command "term-send-key" "Send these keys to the terminal, and give it the keyboard"
   (lambda ()
     (let* ((keys (last-keys))
-           (text (and (pair? keys) (null? (cdr keys)) (term--key-text (car keys)))))
-      (when text (process-send! (current-buffer) text)))))
+           (texts (map term--key-text keys)))
+      (if (and (pair? texts) (= (length (filter string? texts)) (length texts)))
+          (process-send! (current-buffer) (apply string-append texts))
+          (message (string-append (string-join keys " ") " is undefined"))))))
 
 (mode-keys! "term-mode"
   (map (lambda (entry) (list (car entry) "term-send-key")) term--key-bytes))

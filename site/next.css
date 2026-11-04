@@ -184,7 +184,7 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .slide-nav button { all: unset; pointer-events: auto; cursor: pointer; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: rgba(253, 243, 220, .9); color: var(--ink); font-family: var(--mono); font-size: 22px; line-height: 1; box-shadow: 0 8px 24px -10px rgba(0, 0, 0, .6); transition: transform .2s; }
 .slide-nav button:hover { transform: scale(1.08); }
 .slide-nav button:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
-.js .slides .plate.before { transform: translateX(-100%); }
+.js .slides .plate.before:not(.on) { transform: translateX(-100%); }
 .gal .plate + .plate { margin-top: 56px; }
 .js .gal .plate + .plate { margin-top: 0; }
 

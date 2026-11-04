@@ -1101,7 +1101,8 @@
                "started for itself, and puts them away again, A shows the 100 newest archived chats alone and the live ones again, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
-        'title (lambda (buf) "Chats")
+        ;; the title says whether the rows follow the chats (w) or stand still
+        'title (lambda (buf) (if (buffer-local buf 'chats-watch) "Chats · watching" "Chats · still"))
         'noun "chat"
         'facets chats-facets
         'filter chats-filter

@@ -2372,8 +2372,6 @@ defmodule Compos.Core.SchemeAPI do
           [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
           [dir, ratio, first?] -> Editor.split_root(dir_atom(dir), ratio / 1, nil, first? == true)
         end,
-      {"delete-window!", "(delete-window!) — delete the active window; return #t on success."} =>
-        fn [] -> Editor.delete_window() == :ok end,
       {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
         fn [id] -> Editor.delete_window_by_id(id) == :ok end,
       {"window-id-new!",
@@ -2467,12 +2465,6 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                ] ->
         Editor.scroll_window(id, lines) == :ok
       end,
-      {"delete-other-windows!",
-       "(delete-other-windows!) — delete every window in the frame except the active one."} =>
-        fn [] ->
-          Editor.delete_other_windows()
-          :void
-        end,
       {"other-window!", "(other-window!) — select the next window in the frame."} => fn [] ->
         Editor.other_window()
         :void

@@ -464,7 +464,6 @@ defmodule Compos.Core.Editor do
   def split_root(dir, ratio \\ 0.5, fid \\ nil, first? \\ false) when dir in [:h, :v],
     do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid), first?})
 
-  def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
   def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})
   def window_rects(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rects, fid(fid)})
@@ -486,6 +485,8 @@ defmodule Compos.Core.Editor do
   """
   def arrange(spec, fid \\ nil), do: GenServer.call(__MODULE__, {:arrange, spec, fid(fid)})
 
+  # the frame reset every ExUnit setup runs; the editor itself goes through
+  # the panes model (delete-other-windows! in window.scm)
   def delete_other_windows(fid \\ nil),
     do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
 
@@ -2014,7 +2015,6 @@ defmodule Compos.Core.Editor do
 
       f =
         %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
-        |> Map.delete(:hidden)
 
       changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
     end
@@ -2043,26 +2043,6 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:active_window, fid}, _from, state),
     do: {:reply, frame(state, fid).active, state}
-
-  def handle_call({:delete_window, fid}, _from, state) do
-    f = frame(state, fid)
-    leaf = find_leaf(f.tree, f.active)
-
-    case remove_leaf(f.tree, f.active) do
-      nil ->
-        {:reply, {:error, :sole_window}, state}
-
-      tree ->
-        if Buffer.exists?(leaf.buffer),
-          do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, leaf.id) end)
-
-        changed(
-          :ok,
-          state |> put_frame(%{f | tree: tree, active: first_leaf(tree).id}) |> resync_swap(),
-          f.id
-        )
-    end
-  end
 
   def handle_call({:delete_other_windows, fid}, _from, state) do
     f = frame(state, fid)

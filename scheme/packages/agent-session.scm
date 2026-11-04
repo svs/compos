@@ -124,9 +124,29 @@
         (buffer-set-local! buf 'chat-pending-images
           (append (or (buffer-local buf 'chat-pending-images) '())
                   (list (list mime path))))
-        (chat-image-show! buf path mime)
+        ;; the input shows it now; the transcript takes it with the message
+        (chat-view-sync! buf)
         (message "image attached - it rides with your next message")
         #t)))
+
+;; the Nth pending image leaves before the send; its file goes too
+(define (chat-image-drop! buf n)
+  (let ((pending (or (buffer-local buf 'chat-pending-images) '())))
+    (when (and (integer? n) (< -1 n (length pending)))
+      (let ((im (list-ref pending n)))
+        (buffer-set-local! buf 'chat-pending-images
+          (append (list-head pending n) (list-tail pending (+ n 1))))
+        (when (file-exists? (cadr im)) (delete-file! (cadr im)))
+        (chat-view-sync! buf)))))
+
+;; the images a sent message carries wait here, by its text, for the
+;; user-msg that draws it; they land in the transcript under it
+(define (chat-image-land! buf text)
+  (let* ((flight (or (buffer-local buf 'chat-images-in-flight) '()))
+         (hit (assoc text flight)))
+    (when hit
+      (buffer-set-local! buf 'chat-images-in-flight (remove (lambda (e) (eq? e hit)) flight))
+      (for-each (lambda (im) (chat-image-show! buf (cadr im) (car im))) (cdr hit)))))
 
 (add-paste-hook! "chat-mode" 'chat-image chat-image-paste!)
 
@@ -166,6 +186,9 @@
     (buffer-set-local! buf 'chat-note-once #f)
     (buffer-set-local! buf 'chat-fast-runs '())
     (buffer-set-local! buf 'chat-pending-images '())
+    (unless (null? images)
+      (buffer-set-local! buf 'chat-images-in-flight
+        (append (or (buffer-local buf 'chat-images-in-flight) '()) (list (cons raw images)))))
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)

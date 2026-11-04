@@ -1,9 +1,10 @@
 defmodule Compos.ChatImageTest do
   @moduledoc """
   A pasted image is a file, a block, and a content block on the wire: the
-  bytes land in <compos-home>/attachments, the transcript names the file
-  above the input, and the next message carries both the path (in its text)
-  and the picture itself (as an ACP image block).
+  bytes land in <compos-home>/attachments, the input shows it until the
+  send, the next message carries both the path (in its text) and the
+  picture itself (as an ACP image block), and the transcript takes it as
+  its own block under that message.
   """
 
   use ExUnit.Case
@@ -51,7 +52,7 @@ defmodule Compos.ChatImageTest do
     :ok
   end
 
-  test "a pasted image becomes a file, a transcript block, and an image block on the wire" do
+  test "a pasted image becomes a file, an image block on the wire, and a transcript block" do
     eval!("(buffer-create " <> inspect(@buf) <> ")")
     slug = String.trim(eval!("(chat-attach-agent! " <> inspect(@buf) <> " \"claude-code\")"), "\"")
 
@@ -71,13 +72,8 @@ defmodule Compos.ChatImageTest do
     assert File.exists?(path)
     assert File.read!(path) == Base.decode64!(@png)
 
-    # the transcript names it, above the input, as its own block
-    assert Buffer.text(@buf) =~ "[image " <> Path.basename(path) <> "]"
-
-    assert Enum.any?(Buffer.get_local(@buf, "agent-blocks") || [], fn
-             [_, _, "image", p, m] -> p == path and m == "image/png"
-             _ -> false
-           end)
+    # it waits in the input; the transcript does not have it yet
+    refute Buffer.text(@buf) =~ "[image " <> Path.basename(path) <> "]"
 
     # ...and it rides with the next message
     eval!("(agent-send-msg! " <> inspect(slug) <> " \"what is this\")")
@@ -95,6 +91,16 @@ defmodule Compos.ChatImageTest do
 
     # the attachment is spent: it rides once and no further
     assert pending() == []
+
+    # the message's turn starts, and the image lands under it as its own block
+    wait_until(fn ->
+      Enum.any?(Buffer.get_local(@buf, "agent-blocks") || [], fn
+        [_, _, "image", p, m] -> p == path and m == "image/png"
+        _ -> false
+      end)
+    end)
+
+    assert Buffer.text(@buf) =~ "[image " <> Path.basename(path) <> "]"
 
     File.rm(path)
   end

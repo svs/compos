@@ -1246,6 +1246,24 @@
                     'children (list (chat-view--text "c-text" "ag-activity-text"
                                                      (string-append "⋯ " activity)))))
         '())
+    ;; the images pasted since the last send, above the input they ride
+    ;; with; each one's x drops it before the send
+    (let ((pending (or (buffer-local buf 'chat-pending-images) '())))
+      (if (null? pending)
+          '()
+          (list (list 'tag "c-group" 'class "ag-pending"
+                      'children
+                      (map (lambda (i)
+                             (let* ((im (list-ref pending i))
+                                    (name (file-name-nondirectory (cadr im))))
+                               (list 'tag "c-group" 'class "ag-pending-item"
+                                     'children
+                                     (list (list 'tag "img" 'class "ag-pending-img" 'file (cadr im)
+                                                 'attrs (list (list "alt" name) (list "title" name)))
+                                           (chat-view--button "ag-pending-drop"
+                                             (string-append "chat-image-drop:" (number->string i))
+                                             "×")))))
+                           (iota (length pending)))))))
     (list (list 'tag "c-prompt" 'class "ag-inputrow"
                 'children (list (chat-view--label "YOU")
                                 (list 'tag "c-input" 'class "ag-input" 'input #t
@@ -1290,6 +1308,7 @@
            (queued (or (buffer-local buf 'chat-queued) '()))
            (activity (chat-activity-live buf))
            (sig (list raw open verbosity queued activity
+                      (buffer-local buf 'chat-pending-images)
                       (buffer-local buf 'chat-view-reveal)
                       (buffer-local buf 'chat-view-nav)
                       chat-view-window-bytes))
@@ -1324,6 +1343,9 @@
       ((string-prefix? "chat-cmd:" id)
        (run-command (substring-bytes id 9 (string-byte-length id)))
        (chat-view-sync! buf)
+       #t)
+      ((string-prefix? "chat-image-drop:" id)
+       (chat-image-drop! buf (string->number (substring-bytes id 16 (string-byte-length id))))
        #t)
       ((string-prefix? "chat-answer:" id)
        (let* ((parts (string-split (substring-bytes id 12 (string-byte-length id)) ":"))

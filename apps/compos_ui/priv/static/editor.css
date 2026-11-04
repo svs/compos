@@ -1229,6 +1229,21 @@ body.unfocused .window.active .cursor {
   white-space: pre; overflow-x: auto;
 }
 .ag-meta { font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.8); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
+/* the images pasted for the next message, above the input */
+.ag-pending {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 14px 0;
+}
+.ag-pending-item { position: relative; display: block; }
+.ag-pending-img {
+  display: block; height: 64px; width: auto; max-width: 160px; object-fit: cover;
+  border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
+}
+.ag-pending-drop {
+  position: absolute; top: 2px; right: 2px;
+  border: 0; padding: 0 5px; cursor: pointer; line-height: 1.4;
+  background: var(--window-bg, rgba(255,255,255,0.85)); color: inherit;
+}
+
 .ag-inputrow {
   position: relative;
   display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;

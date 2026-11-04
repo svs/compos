@@ -47,33 +47,6 @@
                         (string-append body txt))))
             (filter (lambda (x) (not (equal? (car x) id))) pending)))))
 
-;; A model stream can stop after a tool call opens and before its input
-;; arrives. The CLI retries the request, so the call never runs. The ACP
-;; adapter fails that call and then fails the prompt with one error. The
-;; error is not true for the turn: when every call it names is an orphan,
-;; the chat shows no error.
-(define agent-orphan-tool-error-text
-  "ended the turn without returning results for tool calls: ")
-
-(define (agent-note-orphan-tool! buf e)
-  (let ((cur (assoc (plist-get e 'id)
-                    (or (buffer-local buf 'chat-tool-pending) '()))))
-    (when (and (equal? (plist-get e 'status) "failed")
-               (or (not cur) (equal? (nth 2 cur) "")))
-      (buffer-set-local! buf 'agent-orphan-tools
-        (cons (plist-get e 'id)
-              (or (buffer-local buf 'agent-orphan-tools) '()))))))
-
-(define (agent-orphan-tool-error? buf text)
-  (and (string? text)
-       (string-contains? text agent-orphan-tool-error-text)
-       (let ((ids (map string-trim
-                       (string-split (last (string-split text agent-orphan-tool-error-text))
-                                     ","))))
-         (every (lambda (id)
-                  (member id (or (buffer-local buf 'agent-orphan-tools) '())))
-                ids))))
-
 (define (agent-tool-record! buf id failed?)
   (let* ((pending (or (buffer-local buf 'chat-tool-pending) '()))
          (cur (assoc id pending)))
@@ -157,7 +130,9 @@
          (let ((start (agent-render! slug
                         (string-append "\n>>> you: " txt "\n\n")
                         "agent-you")))
-           (agent-block-push! buf start (agent-mark slug) "user" (list txt))))
+           (agent-block-push! buf start (agent-mark slug) "user" (list txt)))
+         ;; the images pasted for this message land under it
+         (chat-image-land! buf txt))
        (agent-thought-forget! slug)
        (agent-show-waiting! slug)
        (chat-activity! buf "waiting…")
@@ -231,7 +206,6 @@
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
                (agent-add-fold! buf (car (cdr entry)) (agent-mark slug))))
            (agent-card-set-open! buf (plist-get e 'id) #f)
-           (agent-note-orphan-tool! buf e)
            ;; the gathered call and its result reach the record together
            (agent-tool-record! buf (plist-get e 'id)
                                (equal? (plist-get e 'status) "failed")))))
@@ -374,7 +348,6 @@
        ;; a tool that never completed leaves its pieces behind; the turn
        ;; is over, so they name nothing now
        (buffer-set-local! buf 'chat-tool-pending '())
-       (buffer-set-local! buf 'agent-orphan-tools '())
        (agent-block-drop-kind! buf "permission")
        (agent-block-drop-kind! buf "question")
        ;; The record used to compact itself here. It does not any more: a
@@ -404,10 +377,6 @@
        ;; <compos-home>/chats (chat.scm loads after this file)
        (when (boundp (quote chat-log-save!))
          (chat-log-save! buf)))
-
-      ;; the turn-end that follows closes the turn; the error says nothing
-      ((and (equal? type 'error) (agent-orphan-tool-error? buf (plist-get e 'text)))
-       #f)
 
       ((equal? type 'error)
        (chat-activity! buf #f)

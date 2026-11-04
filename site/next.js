@@ -8,7 +8,17 @@
       if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
     });
   }, { threshold: 0.3 });
-  document.querySelectorAll('.rule, .map, .log, .ask').forEach(function (el) { io.observe(el); });
+  // the editor replaces the markup in place, so watch each new copy too
+  var watched = new WeakSet();
+  function watchReveals() {
+    document.querySelectorAll('.rule, .map, .log, .ask').forEach(function (el) {
+      if (watched.has(el)) return;
+      watched.add(el);
+      io.observe(el);
+    });
+  }
+  watchReveals();
+  new MutationObserver(watchReveals).observe(document.body, { childList: true, subtree: true });
 
   // Reconnect when the editor replaces the gallery markup.
   var currentGallery = null, cleanupGallery = null;
@@ -227,7 +237,8 @@
     if (v === visible) return;
     visible = v;
     if (playing) render(scene, !v);
-  }, { threshold: 0.45 }).observe(film);
+  }, { threshold: 0.45 });
+  filmObserver.observe(film);
   function onVisibility() {
     if (document.hidden) { visible = false; render(scene, true); return; }
     var r = film.getBoundingClientRect();

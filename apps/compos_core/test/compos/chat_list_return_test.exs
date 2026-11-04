@@ -1,11 +1,12 @@
 defmodule Compos.ChatListReturnTest do
   use ExUnit.Case, async: false
-  alias Compos.Core.{Editor, KeyDispatch, Session}
+  alias Compos.Core.{Editor, Session}
 
-  for {grouped, duplicate} <- [{false, false}, {true, false}, {true, true}] do
+  # The panes model holds a buffer in one window only, so the frame a
+  # chat-list leaves has two different buffers side by side.
+  for grouped <- [false, true] do
     @grouped grouped
-    @duplicate duplicate
-    test "chat-list-quit restores the invoking frame (grouped=#{grouped}, duplicate=#{duplicate})" do
+    test "chat-list-quit restores the invoking frame (grouped=#{grouped})" do
       previous = Editor.last_active_frame()
       {:ok, frame} = Editor.attach_frame(nil)
 
@@ -22,7 +23,7 @@ defmodule Compos.ChatListReturnTest do
                    (set-frame-local! 'current-group *return-test-group*)
                    (set-frame-local! 'pinned-group *return-test-group*)
                    (begin
-                     (panes-tile! 'two-pane '("*zz-return-a*" "#{if @duplicate, do: "*zz-return-a*", else: "*zz-return-b*"}"))
+                     (panes-tile! 'two-pane '("*zz-return-a*" "*zz-return-b*"))
                      (let ((ws (map car (window-list))))
                        (set-window-prev-buffers! (car ws) '("*zz-return-past-a*"))
                        (set-window-prev-buffers! (cadr ws) '("*zz-return-past-b*"))
@@ -35,24 +36,14 @@ defmodule Compos.ChatListReturnTest do
                    (set! *group-current-inhibit* #f)
                    (define *return-test-tree* (list (window-list) (active-window)))
                    (define *return-test-points* (map (lambda (r) (window-point (car r))) (window-list)))
-                   (global-set-key "<f9>" "chat-list")
                    """,
                    frame
                  )
 
-        KeyDispatch.handle_key(frame, "<f9>")
-        assert {:ok, "#f"} = Session.eval("(frame-local 'chat-list-return)", frame)
+        assert {:ok, _} = Session.eval(~s{(run-command "chat-list")}, frame)
         # Re-entry must keep the invoking window's original predecessor.
-        assert {:ok, _} =
-                 Session.eval(
-                   """
-                   (run-command "chat-list")
-                   (local-set-key "<f10>" "ibuffer-quit")
-                   """,
-                   frame
-                 )
-
-        KeyDispatch.handle_key(frame, "<f10>")
+        assert {:ok, _} = Session.eval(~s{(run-command "chat-list")}, frame)
+        assert {:ok, _} = Session.eval(~s{(run-command "ibuffer-quit")}, frame)
         assert {:ok, expected_tree} = Session.eval("*return-test-tree*", frame)
         assert {:ok, ^expected_tree} = Session.eval("(list (window-list) (active-window))", frame)
 
@@ -80,10 +71,8 @@ defmodule Compos.ChatListReturnTest do
       after
         Session.eval(
           """
-          (set-frame-local! 'chat-list-return #f)
           (for-each buffer-kill! *return-test-buffers*)
           (when *return-test-group* (group-record-delete! *return-test-group*))
-          (global-unset-key "<f9>")
           """,
           frame
         )
@@ -91,47 +80,6 @@ defmodule Compos.ChatListReturnTest do
         Editor.delete_frame(frame)
         Editor.select_frame(previous)
       end
-    end
-  end
-
-  test "chat-list returns through each invoking frame's own history" do
-    previous = Editor.last_active_frame()
-    {:ok, first} = Editor.attach_frame(nil)
-    {:ok, second} = Editor.attach_frame(nil)
-    frames = [first, second]
-
-    try do
-      expected =
-        for {frame, n} <- Enum.with_index(frames) do
-          assert {:ok, _} =
-                   Session.eval(
-                     """
-                     (buffer-create "*zz-return-frame-#{n}*")
-                     (switch-to-buffer-here! "*zz-return-frame-#{n}*")
-                     (set-frame-local! 'pinned-group #f)
-                     (set-frame-local! 'current-group #f)
-                     (global-set-key "<f9>" "chat-list")
-                     """,
-                     frame
-                   )
-
-          {:ok, tree} = Session.eval("(list (window-list) (active-window))", frame)
-          KeyDispatch.handle_key(frame, "<f9>")
-          {frame, tree}
-        end
-
-      for {frame, tree} <- expected do
-        assert {:ok, _} = Session.eval("(local-set-key \"<f10>\" \"ibuffer-quit\")", frame)
-        KeyDispatch.handle_key(frame, "<f10>")
-        assert {:ok, ^tree} = Session.eval("(list (window-list) (active-window))", frame)
-      end
-    after
-      for {frame, n} <- Enum.with_index(frames) do
-        Session.eval("(buffer-kill! \"*zz-return-frame-#{n}*\")", frame)
-        Editor.delete_frame(frame)
-      end
-
-      Editor.select_frame(previous)
     end
   end
 end

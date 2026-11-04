@@ -884,11 +884,15 @@
   "LAYOUT in layout NAME: the capacity becomes NAME's, panes past it
    fold into the last one, panes short of it are added and take the
    hidden windows, and every pane takes the default share, so NAME's
-   shares hold. An unknown NAME changes nothing."
+   shares hold. Free is a ceiling, not a target: it adds no pane and
+   keeps the shares. An unknown NAME changes nothing."
   (let ((cap (panes-layout-capacity name)))
     (if (not cap)
         layout
-        (panes-equalize (panes-fill-capacity (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap)))))))
+        (let ((fit (panes-fit-capacity (panes-set-capacity (panes--put layout 'layout name) cap))))
+          (if (equal? name 'free)
+              fit
+              (panes-equalize (panes-fill-capacity fit)))))))
 
 (define (panes-layout-shares layout &optional columns?)
   "The share of each pane, normalized to sum 1; with COLUMNS?, the width

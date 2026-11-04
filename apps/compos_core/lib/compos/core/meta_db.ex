@@ -43,6 +43,7 @@ defmodule Compos.Core.MetaDb do
     "read-only" => "b.read_only",
     "used" => "b.used",
     "agent" => "b.agent",
+    "chat-id" => "b.chat_id",
     "icon" => "b.icon",
     "project" => "b.project",
     "workspace" => "b.workspace"
@@ -50,7 +51,7 @@ defmodule Compos.Core.MetaDb do
 
   # the version `migrate/1` brings a file to; a running process behind it
   # (a hot reload keeps the old one) migrates on the next `ensure_started`
-  @schema 1
+  @schema 2
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -106,7 +107,7 @@ defmodule Compos.Core.MetaDb do
   @doc """
   `{TOTAL, ROWS}` for OPTS, a map with string keys:
 
-    * `names`, `ids`, `modes`, `groups` - only these
+    * `names`, `ids`, `modes`, `groups`, `chat-ids` - only these
     * `exclude-names` - leave these out
     * `match` - space-separated terms; each is a case-blind substring of
       the name, title, path, mode, group label, project or workspace
@@ -116,7 +117,8 @@ defmodule Compos.Core.MetaDb do
 
   The filter, the sort and the page are SQL, all of them.
     * `fields` - what each row carries after its name: path mode title
-      id group group-label modified read-only icon project workspace
+      id group group-label modified read-only agent chat-id icon project
+      workspace
   """
   def query(opts), do: GenServer.call(__MODULE__, {:query, opts})
 
@@ -134,7 +136,8 @@ defmodule Compos.Core.MetaDb do
         name TEXT PRIMARY KEY, id TEXT,
         path TEXT, mode TEXT, title TEXT, group_id TEXT,
         modified INTEGER, read_only INTEGER, context_only INTEGER,
-        icon TEXT, project TEXT, workspace TEXT, used INTEGER, agent TEXT);
+        icon TEXT, project TEXT, workspace TEXT, used INTEGER, agent TEXT,
+        chat_id TEXT);
       CREATE INDEX IF NOT EXISTS buffers_mode ON buffers (mode);
       CREATE INDEX IF NOT EXISTS buffers_group ON buffers (group_id);
       CREATE INDEX IF NOT EXISTS buffers_path ON buffers (path);
@@ -270,8 +273,11 @@ defmodule Compos.Core.MetaDb do
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN agent TEXT")
     # the buffer's id is its stable key: a layout names its buffers by id
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN id TEXT")
+    # a chat's id never changes; its name and its agent slug can
+    _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN chat_id TEXT")
     :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_used ON buffers (used)")
     :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_id ON buffers (id)")
+    :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_chat_id ON buffers (chat_id)")
     :persistent_term.put({__MODULE__, :schema}, @schema)
   end
 
@@ -321,12 +327,12 @@ defmodule Compos.Core.MetaDb do
     case facts(name) do
       {:ok, facts} ->
         run(state, """
-        INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only, agent, id)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only, agent, id, chat_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         ON CONFLICT (name) DO UPDATE SET id = excluded.id, path = excluded.path, mode = excluded.mode,
           title = excluded.title, group_id = excluded.group_id, modified = excluded.modified,
           read_only = excluded.read_only, context_only = excluded.context_only,
-          agent = excluded.agent
+          agent = excluded.agent, chat_id = excluded.chat_id
         """, facts)
 
       :error ->
@@ -335,13 +341,13 @@ defmodule Compos.Core.MetaDb do
   end
 
   defp facts(name) do
-    keys = ~w(mode-name group-id list-title chat-title context-only agent-slug)
+    keys = ~w(mode-name group-id list-title chat-title context-only agent-slug chat-id)
 
     case BufferView.project(name, [:path, :modified, :read_only, :id], keys) do
-      {:ok, [path, modified, ro, id, mode, gid, title, chat_title, ctx, agent]} ->
+      {:ok, [path, modified, ro, id, mode, gid, title, chat_title, ctx, agent, chat_id]} ->
         {:ok,
          [name, str(path), str(mode), title_of(name, title, chat_title), str(gid),
-          flag(modified), flag(ro), flag(ctx), str(agent), str(id)]}
+          flag(modified), flag(ro), flag(ctx), str(agent), str(id), str(chat_id)]}
 
       _ ->
         :error
@@ -462,6 +468,7 @@ defmodule Compos.Core.MetaDb do
         modes_clause(opts["modes"], opts["agents"] == true),
         in_clause("coalesce(b.mode, '')", opts["exclude-modes"], "NOT IN"),
         in_clause("b.group_id", opts["groups"]),
+        in_clause("b.chat_id", opts["chat-ids"]),
         in_clause("b.name", opts["exclude-names"], "NOT IN"),
         dirs_clause(opts["dirs"]),
         if(opts["hidden"] == true, do: nil, else: {"substr(b.name, 1, 1) <> ' '", []}),

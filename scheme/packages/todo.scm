@@ -1221,9 +1221,13 @@
           ix))))
 
 (define (todo--live-chat id)
+  ;; asleep counts: a sleeping chat wakes when it is used
   (and (string? id)
        (let ((hit (assoc id (todo--chat-index))))
-         (and hit (buffer-exists? (cadr hit)) (cadr hit)))))
+         (if hit
+             (cadr hit)
+             (let ((found (chat-list (list 'chat-ids (list id)))))
+               (and (pair? found) (car found)))))))
 
 (define (todo--chat-of t)
   ;; the assignee while it is live, else the last live chat the log names:

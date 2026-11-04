@@ -448,11 +448,18 @@
       (buffer-set-local! buf 'change-watches
         (filter (lambda (row) (not (equal? (car row) key))) cur)))))
 
-(define (buffer-list-all)
-  ;; buffer-list holds only the awake; this adds the ones asleep
-  (let ((live (buffer-list)))
-    (append live (filter (lambda (n) (not (member n live)))
-                         (map car (cadr (buffer-rows (list 'hidden #t 'fields '(name)))))))))
+(define (buffer-find &optional spec)
+  ;; every buffer SPEC selects, awake and asleep, from meta.db: SPEC is
+  ;; buffer-rows' plist, and 'awake #t keeps only the awake ones
+  (let* ((spec (or spec '()))
+         (rows (map car (cadr (buffer-rows (append (list 'hidden #t 'context-only #t) spec))))))
+    (if (plist-get spec 'awake)
+        (let ((live (buffer-list))) (filter (lambda (n) (member n live)) rows))
+        rows)))
+
+(define (chat-list &optional spec)
+  ;; every chat SPEC selects, awake and asleep; 'chat-ids finds chats by id
+  (buffer-find (append (or spec '()) (list 'modes '("chat-mode")))))
 
 (define (cache-declare! buf fetch render ttl)
   (desktop-skip! buf 'cache-spec)
@@ -5946,8 +5953,10 @@
 (catalog-meta! 'function "modeline-cache-with" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "modeline-cache-set!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-unwatch-change! "(buffer-unwatch-change! BUF KEY) — stop the change watch KEY on BUF")
-(public! 'buffer-list-all "(buffer-list-all) — every buffer name, awake and asleep")
-(catalog-meta! 'function "buffer-list-all" 'effects '(read))
+(public! 'buffer-find "(buffer-find [SPEC]) — the buffers SPEC selects, awake and asleep, from meta.db; SPEC is buffer-rows' plist (names, chat-ids, modes, groups, match, sort, ...), and 'awake #t keeps only the awake ones")
+(catalog-meta! 'function "buffer-find" 'effects '(read))
+(public! 'chat-list "(chat-list [SPEC]) — the chats SPEC selects, awake and asleep: buffer-find in chat-mode; (chat-list '(chat-ids (ID))) finds a chat by its id")
+(catalog-meta! 'function "chat-list" 'effects '(read))
 (catalog-meta! 'function "buffer-unwatch-change!" 'domain 'buffers 'effects '(write))
 (effects! '(read))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")

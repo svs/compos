@@ -47,9 +47,9 @@
 
 ;; the open chat whose stable id is ID, or #f
 (define (agent-listen--chat id)
-  ;; asleep ones too: buffer-list holds only the awake, and an event
-  ;; must wake its chat
-  (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list-all)))
+  ;; asleep ones too: an event must wake its chat
+  (let ((hit (chat-list (list 'chat-ids (list id)))))
+    (and (pair? hit) (car hit))))
 
 ;; a chat buffer, a chat id or an agent id, as the chat's stable id
 (define (agent-listen--chat-id who)

@@ -122,8 +122,8 @@
   if (!film || !ctl) return;
   var playBtn = document.getElementById('film-play');
   var steps = ctl.querySelectorAll('.stepb');
-  var DUR = [0, 5000, 5600, 8000, 5400, 5400];
-  var ECHO = ['', 'Ready.', 'outreach-mode is new - 3 views, 3 keys', 'RET - Arjun Nair', 'Arjun Nair booked by agent - 2 changes recorded', 'group outreach closed - 5 buffers kept'];
+  var DUR = [0, 5600, 5000, 9800, 5400, 5400];
+  var ECHO = ['', 'Ready.', 'instagram search - 12 creators', 'outreach-mode is new - creator cards', 'Arjun Nair booked by agent - 2 changes recorded', 'group slow-mornings closed - 5 buffers kept'];
   var scene = 1, timers = [], playing = !reduce, visible = false;
   var msgs = film.querySelectorAll('.msg');
   var echo = film.querySelector('.echo-msg');
@@ -177,7 +177,7 @@
     film.dataset.scene = s;
     echo.textContent = ECHO[s];
     note.textContent = s >= 4 ? '1 booked' : '';
-    status.textContent = s >= 4 ? 'booked' : 'replied';
+    status.textContent = s >= 4 ? 'booked' : 'shortlisted';
     btnA.classList.remove('press');
     btnR.classList.remove('press');
     msgs.forEach(function (m) {
@@ -192,8 +192,8 @@
       }
     });
     if (!instant && s === 3) {
-      later(1000, function () { btnA.classList.add('press'); echo.textContent = 'a - ask agent about Arjun Nair'; });
-      later(1700, function () { btnA.classList.remove('press'); });
+      later(4400, function () { btnA.classList.add('press'); echo.textContent = 'RET - Arjun Nair'; });
+      later(5100, function () { btnA.classList.remove('press'); });
     }
     if (!instant && s === 4) {
       later(1900, fly);

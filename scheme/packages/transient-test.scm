@@ -151,7 +151,7 @@
             (check-equal! (car (cadr groups)) "this chat · config"
                           "the right column says whose config it shows")
             (check-equal! (map (lambda (i) (plist-get i 'key)) (cdr (cadr groups)))
-                          '("b" "m" "e" "p" "+")
+                          '("M-b" "M-m" "M-e" "M-p" "+")
                           "the config holds backend, model, effort, tools, and more")
             (check-equal! (llm-config--columns buf)
                           '(("Presets") ("this chat · config" "More"))
@@ -179,7 +179,7 @@
                         "the chat keeps its model while the menu is open")
           (check-equal! (llm-config--field-value 'model) "m1 → m9"
                         "the row shows the saved value and the new one")
-          (check-equal! ((plist-get (llm-config-test--key "m" buf) 'flags-fn) buf) "drift"
+          (check-contains! ((plist-get (llm-config-test--key "M-m" buf) 'flags-fn) buf) "drift"
                         "and carries the drift flag")
           (check-contains! (llm-config--subtitle buf) "zz-base*"
                            "the status line says the selection has unsaved changes")

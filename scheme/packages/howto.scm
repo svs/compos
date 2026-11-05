@@ -613,7 +613,7 @@ A project is a directory under version control. {{project-switch-project}} goes 
 ;;; --- Agents and chat -------------------------------------------------------------
 
 (defhowto! "Agents and chat" "ask the agent about my work"
-  "Press {{chat}}. The chat of the current group opens. Type your question after the prompt and press {{chat-mode:agent-send}}.
+  "Press {{chat-companion}}. The chat of the current group opens. Type your question after the prompt and press {{chat-mode:agent-send}}.
 
 The agent can read the buffers of the group, so you do not paste them. {{chat-companion-ask}} asks the chat without leaving the buffer you are in.")
 

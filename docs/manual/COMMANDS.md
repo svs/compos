@@ -4,6 +4,16 @@
 
 Every command that has a docstring, by domain. `M-x NAME` runs a command. The key column shows the stock global key; a mode can add its own keys.
 
+## anon
+
+| Command | Key | What it does |
+|---|---|---|
+| `anon-add` |  | Redact a text you type wherever anon shows it |
+| `anon-forget` |  | Forget every cached name, common word and email handle |
+| `anon-local-mode` |  | Toggle proper-noun redaction in this buffer |
+| `anon-mode` |  | Turn proper-noun redaction on in every buffer a window shows, or off everywhere |
+| `anon-selected` |  | Redact the selected text wherever anon shows it; with no selection, ask for one |
+
 ## buffers
 
 | Command | Key | What it does |
@@ -14,38 +24,58 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `buffer-log` | `C-x v l` | Show the provenance of this buffer: every accepted revision |
 | `buffer-log-describe` |  | Visit this revision in full, with the text it moved |
 | `buffer-log-refresh` |  | Redraw the revision list |
+| `buffer-log-show` |  | Show this revision beside the log, keeping focus here |
 | `buffer-magic-group` |  | Classify the current buffer with JEV and move it when a group matches |
 | `bury-buffer` |  | Put this buffer at the end of the buffer list; its window shows the one before |
 | `chat-load-config` |  | Run this group's chat hooks on this chat again |
 | `copy-buffer-link` | `C-c l` | Copy an compos:// link to this buffer and line to the clipboard |
 | `find-file` | `C-x C-f` | Visit a file, prompting with filename completion |
+| `frame-isolate` |  | Toggle whether this frame shows only its own groups and wears its own theme |
+| `frame-rename` |  | Name this frame; an empty name gives it back its id |
 | `group-add` | `C-c g` | Put the selected buffers, else this buffer, in a group |
+| `group-config` |  | Open this group's group.scm |
 | `group-cwd` |  | Set this group's working directory, and move its buffers there |
 | `group-describe` | `C-c d` | Ask the LLM to write this group's description |
 | `group-dissolve` |  | Dissolve a group; its members merge into the parent group when one exists |
+| `group-from-visible` | `C-x C-g v` | Move the visible windows, chats included, to a group: pick one, or type a new name to found it from these windows |
 | `group-kill` |  | Kill every buffer in the current group; in the board, the marked groups |
 | `group-members` | `C-x C-g b` | Open the switcher on this group's members |
 | `group-move` | `C-x C-g m` | Move the selected buffers, else this buffer, to one group |
 | `group-new` | `C-x C-g n` | Create and enter an empty group, or seed it with the selection |
-| `group-from-visible` | `C-x C-g v` | Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows |
 | `group-pin` | `C-x C-g p` | Toggle a frame pin that keeps the current group through window changes |
-| `group-reload-config` |  | Re-read this group's config and directory into every buffer in it |
+| `group-reload-config` |  | Load this group's group.scm again into every buffer in it |
 | `group-rename` |  | Rename the current group; in the board, the group at point |
 | `group-revive` |  | Revive a killed group: its record, layout, and every member that still exists |
+| `group-send-to-frame` |  | Move this frame's group to another frame |
 | `group-switch-kill` |  | Kill the group under the highlight; outside the group prompt, kill the line |
 | `group-switch-move-buffer` |  | Move the buffer you came from into the group under the highlight |
-| `group-switch-new` |  | Create a group from the group switcher |
 | `group-tab-left` | `M-S-<left>` | Switch to the group shown immediately to the left in the top bar |
 | `group-tab-right` | `M-S-<right>` | Switch to the group shown immediately to the right in the top bar |
-| `groups` | `C-x C-g l` | The groups board: switch, describe, set noise |
+| `group-tab-walk-end` |  | End a walk of the group tabs: the top bar sorts most recent first again |
+| `group-take` |  | Move a group another frame keeps into this frame |
+| `groups` |  | Open the groups list: every buffer group as a board, to switch, describe, set noise |
 | `ibuffer` | `C-x C-b` | List buffers by group in a buffer |
 | `ibuffer-do-sort-by-alphabetic` |  | Order the rows of a section by name |
 | `ibuffer-do-sort-by-recency` |  | Order the rows of a section by last use |
+| `ibuffer-filter-by-content` |  | Keep the buffers whose text matches a regexp; a sleeping file is searched with ripgrep |
+| `ibuffer-filter-by-derived-mode` |  | Keep the buffers in a mode or a mode derived from it |
+| `ibuffer-filter-by-directory` |  | Keep the buffers whose directory matches a regexp |
+| `ibuffer-filter-by-file-extension` |  | Keep the buffers whose file has an extension |
+| `ibuffer-filter-by-filename` |  | Keep the buffers whose file name matches a regexp |
+| `ibuffer-filter-by-mode` |  | Keep the buffers in one major mode |
+| `ibuffer-filter-by-modified` |  | Keep the file buffers with unsaved changes |
+| `ibuffer-filter-by-name` |  | Keep the buffers whose name matches a regexp |
+| `ibuffer-filter-by-starred-name` |  | Keep the buffers whose name starts with \* |
+| `ibuffer-filter-by-visiting-file` |  | Keep the buffers that visit a file |
+| `ibuffer-filter-disable` |  | Drop every filter |
 | `ibuffer-group-kill` |  | Kill the group at point: every member, then the group itself |
-| `ibuffer-kill` |  | Kill the marked buffers, the row at point, or the group at point |
+| `ibuffer-kill` |  | Kill the marked buffers, the row at point, or the shown buffers of the heading at point |
 | `ibuffer-narrow-group` |  | Narrow this list to the group at point |
+| `ibuffer-negate-filter` |  | Turn the newest filter into its opposite |
 | `ibuffer-next` |  | Move down to the next buffer |
 | `ibuffer-next-group` |  | Move to the next group in this buffer list |
+| `ibuffer-or-filter` |  | Join the two newest filters: keep a buffer either one keeps |
+| `ibuffer-pop-filter` |  | Drop the newest filter |
 | `ibuffer-pretty` |  | List buffers with the pretty table presentation |
 | `ibuffer-prev` |  | Move up to the previous buffer |
 | `ibuffer-previous-group` |  | Move to the previous group in this buffer list |
@@ -53,28 +83,36 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `ibuffer-prompt-pretty` |  | Switch to a buffer with the pretty minibuffer list |
 | `ibuffer-quit` |  | Dismiss the preview, else give the frame back |
 | `ibuffer-refresh` |  | Refresh the buffer table |
-| `ibuffer-toggle-filter-group` |  | Fold or unfold the section at point |
+| `ibuffer-tab-next` |  | Show the next tab of the list: all, group |
+| `ibuffer-tab-prev` |  | Show the previous tab of the list: all, group |
+| `ibuffer-toggle-all-filter-groups` |  | Fold every section, or open them all when all are folded |
+| `ibuffer-toggle-filter-group` |  | Fold or unfold the rows under the row at point, else the section at point |
 | `ibuffer-toggle-grouping` |  | Cycle what a section is: group, mode, directory |
+| `ibuffer-toggle-hidden` |  | Show the hidden buffers in this list too, or put them away |
 | `ibuffer-toggle-info` |  | Toggle metadata in this buffer list |
 | `ibuffer-toggle-pretty` |  | Toggle this list's formatting and report redraw milliseconds |
 | `ibuffer-toggle-preview` |  | Toggle automatic previews in this listing |
 | `ibuffer-toggle-sorting-mode` |  | Cycle the order inside a section: name, recent, size |
 | `ibuffer-visit` |  | Enter the selected buffer's group and show it; on a heading, open the section |
 | `ibuffer-widen-group` |  | Show every group, keeping the text filter |
-| `listing-preview-dismiss` |  | Dismiss the preview card or window highlight; keep focus in its source |
+| `listing-preview-dismiss` |  | Dismiss the peek; keep focus in its list |
 | `listing-preview-open-other` |  | Open the selected preview in another work window |
+| `mode-list` |  | List every buffer of one major mode |
+| `mode-list-toggle-groups` |  | Turn the sections off and on; off is one list, most recent first |
+| `mode-list-visit` |  | Show the buffer at point in its group; on a heading, open the section |
 | `narrow-to-region` | `C-x n n` | Show only the text between point and mark |
-| `next-buffer` | `S-<right>` | Walk back toward the most recently used buffer |
-| `previous-buffer` | `S-<left>` | Switch to the previously used buffer (again = deeper) |
+| `next-buffer` | `C-x <right>` | Walk back toward the most recently used buffer |
+| `previous-buffer` | `C-x <left>` | Switch to the previously used buffer (again = deeper) |
 | `project-scratch` | `C-x p s` | Toggle between this buffer and its project's scratch buffer |
+| `pull-buffer-here` |  | Pull a buffer from wherever it is into this group, and show it here |
 | `remove-buffers-from-group` |  | Toggle buffers out of this group; C-g applies |
-| `remove-group-from-buffer` | `C-x C-g r` | Toggle this buffer out of the groups it belongs to; C-g applies |
+| `remove-group-from-buffer` | `C-x C-g r` | Take this buffer out of its group; y removes, n keeps |
 | `save-buffer-anyway` |  | Save over a file that changed on disk |
 | `scene` |  | Open a declared scene: its group, its arrangement |
 | `scratch-buffer` | `C-c s` | Toggle between this buffer and its plain scratch buffer |
+| `scratch-new` |  | Open a new Morg scratch buffer |
 | `switch-del` |  | Widen the narrowing by one character |
 | `switch-groups` | `C-x G` | Switch group or project, then pick a buffer or file in it |
-| `switch-window` | `C-x j` | Pick a window of this frame by name and go to it |
 | `switch-kill` |  | Kill the marked buffers, or the one at point |
 | `switch-lock` |  | Narrow to the selected group's buffers |
 | `switch-mark` |  | Mark the row at point, or unmark a marked one |
@@ -92,7 +130,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `agent-goto-attention` | `C-c a a` | Jump to the first thread needing attention |
+| `agent-goto-attention` | `C-c a a` | Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked |
 | `agent-interrupt-send` |  | Revive, cancel, or hard-reset the agent |
 | `agent-open` | `C-c a n` | Prompt for a task and spawn a new agent thread |
 | `agent-permission-allow` |  | Allow the pending permission request once |
@@ -102,38 +140,37 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `agent-set-mode` |  | Switch the agent session's mode (plan, acceptEdits, ...) |
 | `agent-switch` |  | Reattach this thread to a new connector and model |
 | `agent-toggle-fold` |  | Toggle the transcript fold at or around point |
-| `agent-verbosity-debug` |  | Show summaries and full tool-call details |
 | `agent-verbosity-info` |  | Show summaries and only the latest tool title in each burst |
 | `agent-verbosity-log` |  | Show summaries and every compact tool call |
+| `agent-verbosity-summary` |  | Show only the prompts and the summaries |
 | `agents-allow` |  | Allow the pending permission of the chat at point |
 | `agents-deny` |  | Deny the pending permission of the chat at point |
 | `agents-refresh` |  | Refresh the chat list |
 | `agents-steer` |  | Send a steering message to the chat at point |
 | `buffer-new` |  | Create a buffer in the current group |
 | `buffer-summary-log` |  | Show this buffer's summaries and jj changes, interleaved by time |
-| `chat` | `C-c c` | Open the group chat for this buffer |
 | `chat-abort` |  | Stop the reply in flight in this chat |
 | `chat-adopt` |  | Make this chat the companion of a chosen buffer |
 | `chat-compact` |  | Summarize this chat's older turns, keeping the recent ones |
 | `chat-companion` | `C-c w` | Toggle between a work buffer and its group chat |
-| `chat-companion-ask` | `C-c RET` | Ask the group chat without leaving this buffer |
+| `chat-companion-ask` | `C-c RET` | Ask a new group chat about this buffer without leaving it |
+| `chat-component-actions` |  | Choose an action of the component M-up/M-down stepped to, else of the newest one |
+| `chat-component-default` |  | Run the default action of the component M-up/M-down stepped to, else of the newest one |
 | `chat-cost` |  | Show what this chat has cost, and its cache hit rate |
 | `chat-cwd` |  | Set this chat's working directory, and move its agent there |
+| `chat-delete` |  | Delete this chat, or the chat at point: the runtime stops, the buffer goes, the .chat file stays as its archive |
 | `chat-delete-backward` |  | Delete backward, but never into the transcript |
 | `chat-delete-forward` |  | Delete forward, but never the input marker |
-| `chat-dismiss` |  | Hide this chat, optionally send a final instruction, and dismiss after the current run |
+| `chat-dismiss` |  | Hide this chat, optionally send a final instruction; it closes when the agent says it is done |
 | `chat-finder` |  | Find chats by a keyword in their content |
 | `chat-heal` |  | Repair this chat's record: drop tool calls and results that lost their other half |
 | `chat-history-next` |  | Recall the next thing you typed at a prompt |
 | `chat-history-previous` |  | Recall the previous thing you typed at a prompt |
 | `chat-list` | `C-x C-c` | Switch to a chat, by its name or by a word somebody said in it |
-| `chat-list-filter` |  | Narrow the chat list by a word in a title or in a chat |
-| `chat-list-quit` |  | Leave the chat list and change nothing |
-| `chat-list-regroup` |  | Cycle what a section of the chat list is: none, group, state, model |
-| `chat-list-resort` |  | Cycle the order inside a section: recent, name, size on disk |
-| `chat-list-toggle-groups` |  | Turn the chat list's sections on or off; off is the flat list, most recent first |
-| `chat-list-visit` |  | Enter the chat at point in its own group; on a heading, open the section |
-| `chat-new` | `C-c n` | Start a new chat buffer; with a prefix, choose or create its group |
+| `chat-new` | `C-c n` | Start a new chat buffer; with a prefix, hand a task to a new chat in a group and stay here |
+| `chat-next-block` |  | Show the next block of this chat at the top; past the newest, follow the bottom |
+| `chat-open-children` |  | Read the archived children of this chat back, under it |
+| `chat-previous-block` |  | Show the previous block of this chat at the top |
 | `chat-prompt` | `C-x c` | Switch to a chat with the plain minibuffer list |
 | `chat-refresh-prompt` |  | Replace this conversation's frozen prompt from current sources |
 | `chat-refresh-tools` |  | Adopt the editor's current tool list in this chat |
@@ -141,22 +178,31 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-restore` |  | Restore a locally archived conversation |
 | `chat-retitle` |  | Title this chat again; a blank title asks the model |
 | `chat-retitle-at-point` |  | Title the chat at point again; a blank title asks the model |
+| `chat-scroll-linked-down` |  | Scroll down the window that shows the buffer this chat opened last |
+| `chat-scroll-linked-up` |  | Scroll up the window that shows the buffer this chat opened last |
+| `chat-send-new` |  | Send the input to a new chat in this group; this chat keeps its conversation |
 | `chat-send-region` | `C-c r` | Add the region to the chat buffer as context |
 | `chat-set-backend` |  | Choose this chat's LLM backend, model, and effort |
 | `chat-set-model` |  | Choose this chat's model |
 | `chat-set-permission-mode` |  | Cycle this chat's permission mode |
+| `chat-set-subject` |  | Give this chat a subject; C-x b shows each subject as a tab |
+| `chat-set-subject-at-point` |  | Give the chat at point a subject |
 | `chat-show-prompt` |  | Show this chat's system prompt and its named composition |
+| `chat-show-skills` |  | Open Dired on the skills this chat can load |
 | `chat-switch-prompt` |  | Switch to a chat by its title; with a prefix, show it in another window |
 | `chat-title` |  | Set the current chat's title |
 | `chat-to-bottom` |  | Scroll this chat to the newest message |
+| `chat-to-top` |  | Scroll this chat to its first message |
 | `chat-toggle-view` |  | Toggle between rich and plain chat transcript |
 | `chat-unqueue` |  | Remove the previewed queued message (or the newest one) and return it to the input |
 | `chat-unstick` |  | Clear a turn this chat shows as running when no runtime runs one |
 | `chat-where` |  | Switch to the chat where this was said |
 | `chats-archive` |  | Archive the chat at point: the runtime stops, the buffer goes, the file stays |
 | `chats-kill-runtime` |  | Stop the runtime of the chat at point and keep its transcript |
+| `chats-show-archived` |  | Show only the archived chats in the chat list, or the live ones again |
 | `chats-start-all` |  | Start every chat whose runtime was stopped |
 | `chats-stop-all` |  | Stop every chat runtime and keep the transcripts |
+| `chats-watch` |  | Watch the chats: one list, the busiest first, kept up as they change |
 | `group-chat` |  | Show or create the current group's primary chat |
 | `group-home` |  | Open Dired at the current group's home directory |
 | `ichat` |  | Open the chat buffer listing here |
@@ -166,16 +212,28 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `llm-mode-abort` |  | Cancel the inline reply and restore the prompt face |
 | `llm-models-refresh` |  | Ask every provider for its own model list |
 | `llm-pipe-region` | `M-\|` | Pipe the region through the LLM into \*llm\* |
-| `llm-set-model` | `C-c m` | Choose the model for M-o in this buffer |
+| `llm-set-model` | `C-c m` | Choose the model for C-RET and this buffer's chat |
 | `llm-set-preset` |  | Enable a tool preset (MCP servers) for this LLM session |
 | `llm-unset-preset` |  | Disable a tool preset for this LLM session |
 | `mcp-status` |  | Show MCP server connections |
+| `orchestrate-mode` |  | Stop or resume running this chat's todo tree; (orchestrate! ROOT) starts one |
+| `site-app-bulk-agents` |  | Hand the top rows to their pages' own chats, with one orchestrator to report |
 | `subagents` |  | List every spawned chat: parent, child, status, and the child's last line |
 | `subagents-one-shape` |  | Say that this table has one shape |
 | `subagents-refresh` |  | Read the spawn edges again |
-| `subagents-visit` |  | Show the chat of the row at point in the other window |
+| `subagents-show-log` |  | Show the edge log of the spawned chat at point in its own buffer |
+| `subagents-visit` |  | Show the chat of the row at point in the chat window, else the other window |
+| `watchers` |  | Open the agents' watchers: every listener, live or done, and its firings |
+| `watchers-cancel` |  | Cancel the watcher at point; it wakes its chat no more |
+| `watchers-chat` |  | Show the chat the watcher at point wakes |
+| `watchers-refresh` |  | Read the watchers again |
+| `watchers-show` |  | Show the watcher at point as its own page beside the list |
+| `watchers-sweep` |  | Hand the watchers past due to an agent, which looks again and fixes broken pipes |
+| `watchers-task` |  | Show the task the watcher at point waits on |
 | `whatsapp` |  | Open the WhatsApp workspace |
 | `whatsapp-chat-refresh` |  | Refresh this WhatsApp conversation |
+| `whatsapp-feed-start` |  | Turn WhatsApp messages into events: the webhook and the sweep |
+| `whatsapp-feed-stop` |  | Stop turning WhatsApp messages into events |
 | `whatsapp-list` |  | Show the recent WhatsApp chat index |
 | `whatsapp-next-message` |  | Move to the next message |
 | `whatsapp-open` |  | Read the WhatsApp chat on this row |
@@ -200,7 +258,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `code-mode` |  | Toggle the agent coding workspace in this buffer |
 | `definition-go` |  | Go to the definition the other window shows |
 | `definition-show` |  | Show the definition of the name at point in the other window; run again to go there; a link there is followed |
-| `imenu` | `M-g i` | Jump to a definition in this buffer |
+| `drracket` |  | Open this file in DrRacket |
+| `imenu` | `s-i` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
 | `lsp-diag-refresh` |  | Refresh the diagnostics list |
 | `lsp-diag-visit` |  | Visit the diagnostic on this row |
 | `lsp-diagnostics-list` |  | Show diagnostics as a list |
@@ -213,6 +272,10 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `lsp-references` |  | List the references to the symbol at point |
 | `lsp-show-diagnostic` |  | Echo the diagnostic at point |
 | `lsp-status` |  | Echo every language-server connection |
+| `racket-repl` |  | Go to the Racket REPL, starting one when there is none |
+| `racket-run` |  | Run this Racket file in a fresh REPL, like DrRacket's Run |
+| `racket-send-definition` |  | Send the definition at point to the Racket REPL |
+| `racket-send-region` |  | Send the region to the Racket REPL |
 | `repl` |  | Open a new Scheme REPL buffer |
 | `scheme-doc` |  | Echo the doc of the scheme name at point |
 | `scheme-goto-definition` |  | Go to the definition of the scheme name at point, or follow the link there |
@@ -259,6 +322,23 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `keys-scope` |  | Filter all bindings by keymap |
 | `keys-unbind` |  | Take the key on this row away |
 
+## content-scale
+
+| Command | Key | What it does |
+|---|---|---|
+| `anchor-fold` |  | Fold the part at point, or open it again |
+| `anchor-scale-decrease` |  | Show less of the part at point; outside a part, of the page |
+| `anchor-scale-forget-level` |  | Forget a saved content level of this kind of page |
+| `anchor-scale-increase` |  | Show more of the part at point; outside a part, of the page |
+| `anchor-scale-save-level` |  | Save how this page's parts are zoomed as a named content level |
+| `content-scale-decrease` | `C-M--` | Show less of this buffer: one content level out |
+| `content-scale-increase` | `C-M-+` | Show more of this buffer: one content level in |
+| `content-scale-refresh` |  | Draw this content level again |
+| `content-scale-reset` | `C-M-0` | Show this buffer as it is: content level 0 |
+| `content-scale-set` |  | Choose a content level for this buffer by name |
+| `content-scale-visit` |  | Return to the text at the place this line came from |
+| `summarize-selection` |  | Summarize the selected text into \*Summary\* |
+
 ## desktop
 
 | Command | Key | What it does |
@@ -273,19 +353,12 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 |---|---|---|
 | `chat-perf` |  | Show every step of this chat's last turn, with a flame graph |
 | `display-memory-mode` |  | Toggle the VM memory in the frame modeline |
-| `perf` |  | Show the system monitor: schedulers, memory, IO, processes, telemetry |
-| `perf-filter` |  | Show only the processes whose name or pid contains a string |
-| `perf-page` |  | Turn to the other page of the monitor: vitals or detail |
-| `perf-page-1` |  | Show page one of the monitor: the vitals |
-| `perf-page-2` |  | Show page two of the monitor: the detail |
+| `perf` |  | Show lane contention: the wait and the work of every lane |
 | `perf-pause` |  | Pause or resume the samples |
-| `perf-process-info` |  | Show the process on this row |
-| `perf-process-kill` |  | Kill the process on this row after confirmation |
-| `perf-refresh` |  | Sample the VM now |
-| `perf-sort` |  | Cycle the process sort: reductions, memory, queue, name |
-| `perf-toggle-text` |  | Show the monitor as its plain text table, or as the panels again |
+| `perf-refresh` |  | Sample the lanes now |
 | `profile` |  | Profile the next command and show where its time went |
 | `profile-cancel` |  | Disarm the profiler and drop any running trace |
+| `profile-flamegraph` |  | Show the last profile's Scheme call stacks as a flamegraph |
 | `telemetry` |  | Show the duration of every layer's work: scheme, live, browser |
 | `telemetry-all` |  | Show the editor's own refresh and render rows too; again hides them |
 | `telemetry-clear` |  | Clear retained telemetry events |
@@ -418,20 +491,35 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `diff-toggle-all` |  | Fold all files, or unfold all files |
 | `diff-toggle-file` |  | Fold or unfold the file at point |
 | `dired` | `C-x C-d` | Prompt for a directory and open it in Dired |
+| `dired-change-marks` |  | Change one mark character to another |
 | `dired-chmod` |  | Set the octal mode of the file at point or marked files |
 | `dired-copy` |  | Copy the file at point, or all marked files |
 | `dired-dirs-first` |  | Toggle directory grouping before other entries |
+| `dired-do-rename-regexp` |  | Rename the marked files by a regexp replacement; \1 is a group |
+| `dired-do-shell-command` |  | Run a shell command on the marked files: \* is all of them, ? is each one |
 | `dired-filter-dotfiles` |  | Toggle hiding dotfiles |
+| `dired-flag-backup-files` |  | Flag backup and auto-save files for trash |
+| `dired-flag-files-regexp` |  | Flag every shown file whose name matches a regexp for trash |
+| `dired-mark-directories` |  | Mark every directory this listing shows |
+| `dired-mark-executables` |  | Mark every executable file this listing shows |
+| `dired-mark-extension` |  | Mark every file with an extension |
+| `dired-mark-files-regexp` |  | Mark every shown file whose name matches a regexp |
+| `dired-mark-subdir-files` |  | Mark every file this listing shows |
+| `dired-mark-symlinks` |  | Mark every symbolic link this listing shows |
 | `dired-mkdir` |  | Prompt for a name and create a directory here |
 | `dired-next` |  | Move down to the next line in the Dired buffer |
+| `dired-next-marked-file` |  | Move to the next marked file |
 | `dired-open` |  | Open the file on this line beside the listing and go there |
 | `dired-prev` |  | Move up to the previous line in the Dired buffer |
+| `dired-prev-marked-file` |  | Move to the previous marked file |
 | `dired-quit` |  | Return through this window's directory history |
 | `dired-rename` |  | Rename or move the file at point |
 | `dired-revert` |  | Re-read the directory and refresh the listing |
 | `dired-sort-cycle` |  | Sort by the next field: name, size, modified, type, or VC |
 | `dired-sort-reverse` |  | Reverse the current Dired sort |
 | `dired-symlink` |  | Create a symbolic link to the file at point |
+| `dired-toggle-marks` |  | Mark the unmarked files and unmark the marked ones |
+| `dired-toggle-read-only` |  | Edit the file names as text: C-c C-c renames, C-c C-k cancels |
 | `dired-touch` |  | Touch the file at point or marked files |
 | `dired-up` |  | Open the parent directory in Dired, where it was |
 | `dired-visit` |  | Open the file on this line in another window, the one of its own mode first. A directory opens here |
@@ -447,6 +535,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `save-buffer` | `C-x C-s` | Save the current buffer to its file |
 | `scroll-other-window` | `C-M-v` | Scroll the next window up nearly a full screen |
 | `scroll-other-window-down` | `M-<up>` | Scroll the next window down nearly a full screen |
+| `wdired-abort-changes` |  | Leave the name edit and rename nothing |
+| `wdired-finish-edit` |  | Rename the files whose names you changed |
 | `write-file` | `C-x C-w` | Write the buffer to a file; the buffer becomes that file's buffer |
 | `write-rules` |  | List the rules that decide which writes happen |
 
@@ -490,12 +580,12 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `buffer-goto-group` |  | Stand in a group that holds this buffer: its own, or a pseudo group |
+| `buffer-goto-group` | `C-x C-g g` | Stand in this buffer's own group and focus the buffer there |
 | `chat-derive-names` |  | Rename every chat to the name of the group it accompanies |
-| `group-next-buffer` | `s-<down>` | Walk every buffer in this group, most recently used first |
+| `group-next-buffer` |  | Walk every buffer in this group, most recently used first |
 | `group-next-mode-buffer` | `` C-` `` | Walk this buffer's mode in this group, most recently used first |
 | `group-noise-cycle` |  | Cycle the companion noise of the marked groups |
-| `group-previous-buffer` | `s-<up>` | Walk every buffer in this group, the other way |
+| `group-previous-buffer` |  | Walk every buffer in this group, the other way |
 | `group-previous-mode-buffer` |  | Walk this buffer's mode in this group, the other way |
 | `groups-refresh` |  | Refresh the groups board |
 | `window-mode-preference` |  | Set the mode this pane prefers to show |
@@ -518,19 +608,43 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `app-reload` | `C-c C-r` | Reload every running app |
 | `command-palette` | `s-p` | Find an action by intent across command docs and recipes |
 | `digit-argument` | `M-0` | Add a digit to the next command's prefix argument |
+| `do` | `s-k` | Say what you want; a local model picks the command and runs it |
+| `do-forget` |  | Forget every phrase the Do prompt remembers |
+| `global-predict-mode` |  | Toggle local echo of typed text in every file buffer |
 | `goto-address-at-point` |  | Follow the URL or file path at point, else find the definition of the name there |
 | `goto-thing-at-point` | `M-.` | Follow the address at point, else go to the definition |
 | `insert-file-link` |  | Choose a file and insert a link to it at point, relative to this buffer's directory, in the mode's link syntax |
 | `keyboard-quit` | `C-g` | Quit the current operation: cancel the prompt, close the dashboard, or clear the mark |
 | `list-cycle-grouping` |  | Cycle through the grouping mechanisms declared by this list |
 | `list-cycle-sorting` |  | Cycle through the sorting mechanisms declared by this list |
-| `list-filter` |  | Narrow this list to the rows that match what you type |
+| `list-filter` |  | Narrow this list: pick a facet from the tabs when the list has them, else the rows that match what you type |
 | `list-filter-pop` |  | Drop the most recent filter on this list |
 | `list-mark-all` |  | Mark every row this list shows; again unmarks them |
 | `list-next` |  | Move to the next row of this list |
 | `list-page-down` |  | Move a screen down this list; a paged list draws its next page |
 | `list-prev` |  | Move to the previous row of this list |
+| `minibuffer-cancel` |  | Cancel the minibuffer prompt |
+| `minibuffer-complete` |  | Fold the row or section at hand, else complete the input |
+| `minibuffer-confirm` |  | Accept the selected minibuffer candidate |
+| `minibuffer-confirm-context` |  | Accept the selected candidate as a context (group) switch |
+| `minibuffer-confirm-input` |  | Accept the minibuffer input exactly as typed |
+| `minibuffer-cycle-shape` |  | Show this prompt as the bottom bar, the panel, or the modal |
+| `minibuffer-delete-backward` |  | Delete the character before point, or the highlighted row of an empty prompt that allows it |
+| `minibuffer-delete-row` |  | Delete the highlighted row, in a prompt that allows it |
+| `minibuffer-next-candidate` |  | Select the next minibuffer candidate |
+| `minibuffer-next-section` |  | Move to the next section in the list behind the prompt, else the next history entry |
+| `minibuffer-previous-candidate` |  | Select the previous minibuffer candidate |
+| `minibuffer-previous-section` |  | Move to the previous section in the list behind the prompt, else the previous history entry |
+| `minibuffer-rail-enter` |  | Move the arrows into the list on the right of the palette, or to the next tab |
+| `minibuffer-rail-exit` |  | Leave the list on the right and go back to the candidates, or to the previous tab |
+| `minibuffer-regroup` |  | Cycle what a section is in the list behind the prompt |
 | `negative-argument` | `M--` | Negate the next command's prefix argument |
+| `next-history-element` |  | Put the next history item in the minibuffer |
+| `notifications` |  | Show the notices that passed, newest first |
+| `notifications-clear` |  | Take every notice off the screen |
+| `notifications-refresh` |  | Redraw the notices |
+| `predict-mode` |  | Toggle local echo of typed text in the current buffer |
+| `previous-history-element` |  | Put the previous history item in the minibuffer |
 | `self-insert-command` | `!` | Insert the character you typed |
 | `transient-cancel-one` |  | Exit this transient, and tell it to change nothing |
 | `transient-column-left` |  | Select the same row in the column to the left |
@@ -565,39 +679,51 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | Command | Key | What it does |
 |---|---|---|
 | `chat-tools` |  | This chat's tool surface |
+| `group-llm` |  | Choose the preset this group's new chats start with |
 | `laya-server` |  | Start the laya daemon, or say where it stands |
 | `laya-server-stop` |  | Stop the laya daemon and free the weights |
 | `llm-catalog-refresh` |  | Fetch the newest model catalog and load it now |
 | `llm-catalog-status` |  | Say what the loaded model catalog is and how old it is |
+| `llm-companion-open` | `M-o` | Open this document's own chat, starting one when it has none; with a region, the region is the chat's only context |
 | `llm-config-apply-prompt-sections` |  | Apply all selected prompt sections |
 | `llm-config-filter-back` |  | Take the last character off the preset filter |
 | `llm-config-forget-bundle` |  | Forget a saved preset |
 | `llm-config-new-preset` |  | Make a new preset: backend, model, effort, then a name |
+| `llm-config-open-presets` |  | Close this menu and manage the presets in the LLM Presets app |
 | `llm-config-permission-report` |  | Show everything this session's permission policy does |
 | `llm-config-pick-agent-mode` |  | Choose the agent session's own mode, in the box |
+| `llm-config-pick-asks` |  | Choose which always-ask verbs this group allows, in the box |
 | `llm-config-pick-backend` |  | Choose the LLM backend in the box |
 | `llm-config-pick-effort` |  | Choose the LLM reasoning effort in the box |
 | `llm-config-pick-filesystem` |  | Choose what the agent's own file tools may do |
 | `llm-config-pick-model` |  | Choose the LLM model in the box |
 | `llm-config-pick-permission` |  | Choose when this session stops to ask, in the box |
-| `llm-config-pick-preset` |  | Turn a tool preset on or off in the box |
+| `llm-config-pick-preset` |  | Turn tool presets on or off in the box |
+| `llm-config-pick-sandbox` |  | Choose whether this chat's shell commands run in the sandbox, in the box |
 | `llm-config-prompt-all` |  | Turn on every prompt section in this draft |
 | `llm-config-prompt-none` |  | Turn off every prompt section in this draft |
 | `llm-config-revert` |  | Undo the unsaved changes to this config |
 | `llm-config-save-bundle` |  | Save this config as a preset under a name |
-| `llm-config-save-default` |  | Make the box's preset the default for new chats |
+| `llm-config-save-default` |  | Make the box's config the default for new chats |
+| `llm-config-save-group-default` |  | Make the box's config the default for this group's new chats |
 | `llm-config-save-into` |  | Update the preset with this config |
 | `llm-config-use-bundle` |  | Move to a saved preset by name |
 | `llm-configure` | `C-c b` | LLM setup |
 | `llm-mode` |  | Toggle in-buffer LLM interaction and response formatting |
 | `llm-prompt-sections` |  | Select the prompt sections, then apply them together |
-| `llm-rewrite` | `C-c e` | Rewrite the region with the LLM into a diff block below it; with one waiting, decide it or ask again |
-| `llm-send-buffer` | `M-o` | Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes |
+| `llm-rewrite` | `C-c e` | Rewrite the region; keep drafts as options and iterate with the passage's conversation |
+| `llm-rewrite-cancel` |  | End this passage's rewrite: drop the waiting diff and the selection, keep the text |
+| `llm-rewrite-iterate` |  | Ask for another version through the passage's conversation; blank follows its notes |
+| `llm-rewrite-keep-option` |  | Save the waiting rewrite into the passage's options block |
+| `llm-rewrite-promote-option` |  | Put the saved option at point in the passage's place |
+| `llm-rewrite-show-chat` |  | Show the conversation behind this passage's rewrites |
+| `llm-rewrite-toggle-options` |  | Show or hide the saved options for this passage |
+| `llm-send-buffer` | `C-RET` | Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes |
 | `llm-send-chat` |  | Send this document; the reply shows in its chat in the other window |
 | `llm-send-here` |  | Send this document and stream the reply below the block at point |
 | `llm-send-new-document` |  | Send this document; a new document in the other window carries the reply |
 | `llm-send-to` |  | Choose where the LLM reply goes |
-| `models` |  | List the models every model host holds |
+| `local-models` |  | List the models every model host holds |
 | `models-add-host` |  | Add a model host to the list |
 | `models-forget-host` |  | Drop this line's host from the list |
 | `models-install` |  | Install another model on this line's host |
@@ -618,12 +744,15 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `mail` |  | Toggle the three-pane mail scene: index, message, chat |
+| `mail` |  | Toggle mail in the group you are in: index, thread, chat |
 | `mail-abort` |  | Abandon this compose buffer |
+| `mail-feed-start` |  | Turn new mail into events: the webhook and the sweep |
+| `mail-feed-stop` |  | Stop turning new mail into events |
 | `mail-send` |  | Send this buffer as an email |
 | `notmuch-add-tag` |  | Add a tag to marked threads, or the thread at point (completes) |
 | `notmuch-archive-marked` |  | Archive all marked threads |
-| `notmuch-autotag` |  | Classify the marked threads, or the thread at point, with this mailbox's own tags |
+| `notmuch-autotag` |  | Classify the marked threads, or the thread at point, with this mailbox's own tags; only untagged ones unless C-u |
+| `notmuch-autotag-new` |  | Classify each thread that came in since the last run, with this mailbox's own tags |
 | `notmuch-back` |  | Remove the last mail filter, or return to mailboxes |
 | `notmuch-delete-sender` |  | Trash every message in the mailbox from this thread's sender, with no unsubscribe attempt (works on a \*notmuch\* list row or an open notmuch-show buffer) |
 | `notmuch-filter-by-sender` |  | Narrow the search to this thread's sender |
@@ -633,12 +762,13 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `notmuch-mark-all` |  | Select the entire filtered inbox or search locally; again clears selection |
 | `notmuch-mark-toggle` |  | Toggle local selection of this thread, move down |
 | `notmuch-open-attachment` |  | Choose and open an attachment from the selected mail thread |
-| `notmuch-open-thread` |  | Open the thread at point in the mail pane |
+| `notmuch-open-thread` |  | Open the thread at point beside the index and go to it |
 | `notmuch-purge-sender` |  | Purge this thread's sender: unsubscribe, trash every message from them, and block that one address out of the inbox for good. The block is the address alone, never the domain, because one address at a shared or hijacked domain says nothing about the rest of it (works on a \*notmuch\* list row or an open notmuch-show buffer) |
 | `notmuch-remove-all-tags` |  | Remove every tag from the marked threads, or the thread at point |
 | `notmuch-remove-tag` |  | Remove a tag from marked threads, or the thread at point (completes) |
 | `notmuch-reply` |  | Reply to the newest message of the thread at point |
 | `notmuch-show-archive` |  | Archive this thread and go back |
+| `notmuch-show-quit` |  | Close this thread's pane; it stays closed until you move to another thread |
 | `notmuch-show-reply` |  | Reply to the message at point |
 | `notmuch-show-toggle-view` |  | Switch between the HTML and text views |
 | `notmuch-tag-marked` |  | Apply tag changes to all marked threads |
@@ -659,17 +789,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `jump-to-mode` | `C-x m` | Pick a major mode among this frame's windows and go to its window |
 | `load-mode` |  | Choose a mode by name and put this buffer in it |
 
 ## navigation
 
 | Command | Key | What it does |
 |---|---|---|
+| `anchor-down` |  | Move point to the next anchor, or down a line when there is none |
 | `anchor-jump` |  | Go to an anchor of this buffer by name |
+| `anchor-left` |  | Move to the same place in the column to the left, or a character left on a page without columns |
 | `anchor-mode` |  | Walk this buffer's anchors, each with its own keys |
 | `anchor-next` |  | Move point to the next anchor |
 | `anchor-previous` |  | Move point to the previous anchor |
+| `anchor-read-next` |  | Move to the next anchor, or one page down past the last |
+| `anchor-read-previous` |  | Move to the previous anchor, or one page up before the first |
+| `anchor-right` |  | Move to the same place in the column to the right, or a character right on a page without columns |
+| `anchor-up` |  | Move point to the previous anchor, or up a line when there is none |
 | `bookmark-annotation-abort` |  | Discard this bookmark annotation edit |
 | `bookmark-annotation-edit-current` |  | Edit the displayed bookmark annotation |
 | `bookmark-annotation-save` |  | Save this bookmark annotation |
@@ -726,6 +861,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | Command | Key | What it does |
 |---|---|---|
 | `apropos-components` |  | Search UI components by words |
+| `ats` |  | Open SVS recruiting as a live website app |
 | `backward-char` | `C-b` | Move point one character backward |
 | `beginning-of-line` | `C-a` | Move point to the beginning of the line |
 | `buffer-rename` |  | Rename the current buffer without changing its file |
@@ -773,13 +909,32 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `eval-region` |  | Evaluate the region as Scheme |
 | `evil-local-mode` |  | Toggle Vim emulation in this buffer |
 | `evil-mode` |  | Toggle Vim emulation everywhere (files + \*scratch\*) |
+| `fast-code` |  | Turn an intent into Scheme and run it |
+| `fast-eval` |  | Show the fast-code eval as a table |
+| `fast-palette-install` |  | Send unmatched palette input to fast-code |
+| `fast-recipes` |  | Show the functions fast-code learned |
+| `fast-toggle` |  | Toggle fast |
+| `fast-trace` |  | Show the last fast-code resolutions, stage by stage |
+| `focus-left` | `s-<left>` | Select the pane to the left, across the columns |
+| `focus-right` | `s-<right>` | Select the pane to the right, across the columns |
 | `forward-char` | `C-f` | Move point one character forward |
+| `graveyard-sweep` |  | Delete graveyard entries older than graveyard-keep-days; the burial log stays |
+| `herdr` |  | Show the agents in this group's shells and what each is doing |
+| `history-sweep-redundant` |  | Delete history logs of dormant buffers whose checkpoint carries the text |
 | `hl-line-mode` |  | Toggle the highlight of the current line in this buffer |
+| `html-edit` |  | Edit this HTML file on its rendered page in the other window |
+| `insta` |  | Open the Instagram feed app |
 | `kill-line` | `C-k` | Kill text from point to end of line |
+| `list-cycle-view` |  | Cycle this list's view: rendered, bare text, and the source under it |
 | `list-execute` |  | Run the flags in this list |
 | `list-keys-toggle` |  | Grow this list's keys card into the whole keymap, or fold it back |
 | `list-mark` |  | Mark the entry at point |
 | `list-revert` |  | Fetch this list's rows again and redraw |
+| `list-tab-next` |  | Show the next tab of this list |
+| `list-tab-prev` |  | Show the previous tab of this list |
+| `list-toggle-all-children` |  | Fold every row that has rows under it, or unfold them all |
+| `list-toggle-children` |  | Fold or unfold the rows under this row, or under its parent |
+| `list-toggle-detail` |  | Turn this list's detail on or off |
 | `list-toggle-mark` |  | Mark the entry at point, or unmark a marked one |
 | `list-unmark` |  | Unmark the entry at point |
 | `list-unmark-all` |  | Drop every mark and flag in this list |
@@ -798,57 +953,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `mcp-hub-start-all` |  | Start every registered MCP server |
 | `mcp-hub-stop` |  | Stop the MCP server on this line |
 | `mcp-hub-stop-all` |  | Stop every running MCP server |
-| `minibuffer-cancel` |  | Cancel the minibuffer prompt |
-| `minibuffer-complete` |  | Fold the section at hand in the list behind the prompt, else complete the input |
-| `minibuffer-confirm` |  | Accept the selected minibuffer candidate |
-| `minibuffer-confirm-context` |  | Accept the selected candidate as a context (group) switch |
-| `minibuffer-confirm-input` |  | Accept the minibuffer input exactly as typed |
-| `minibuffer-cycle-shape` |  | Show this prompt as the bottom bar, the panel, or the modal |
-| `minibuffer-delete-backward` |  | Delete the character before point |
-| `minibuffer-next-candidate` |  | Select the next minibuffer candidate |
-| `minibuffer-next-section` |  | Move to the next section in the list behind the prompt, else the next history entry |
-| `minibuffer-previous-candidate` |  | Select the previous minibuffer candidate |
-| `minibuffer-previous-section` |  | Move to the previous section in the list behind the prompt, else the previous history entry |
-| `minibuffer-rail-enter` |  | Move the arrows into the list on the right of the palette |
-| `minibuffer-rail-exit` |  | Leave the list on the right and go back to the candidates |
-| `minibuffer-regroup` |  | Cycle what a section is in the list behind the prompt |
-| `minibuffer-shortcut-1` |  | Choose minibuffer shortcut M-1 |
-| `minibuffer-shortcut-2` |  | Choose minibuffer shortcut M-2 |
-| `minibuffer-shortcut-3` |  | Choose minibuffer shortcut M-3 |
-| `minibuffer-shortcut-4` |  | Choose minibuffer shortcut M-4 |
-| `minibuffer-shortcut-5` |  | Choose minibuffer shortcut M-5 |
-| `minibuffer-shortcut-6` |  | Choose minibuffer shortcut M-6 |
-| `minibuffer-shortcut-7` |  | Choose minibuffer shortcut M-7 |
-| `minibuffer-shortcut-8` |  | Choose minibuffer shortcut M-8 |
-| `minibuffer-shortcut-9` |  | Choose minibuffer shortcut M-9 |
-| `minibuffer-shortcut-a` |  | Choose minibuffer shortcut M-a |
-| `minibuffer-shortcut-b` |  | Choose minibuffer shortcut M-b |
-| `minibuffer-shortcut-c` |  | Choose minibuffer shortcut M-c |
-| `minibuffer-shortcut-d` |  | Choose minibuffer shortcut M-d |
-| `minibuffer-shortcut-e` |  | Choose minibuffer shortcut M-e |
-| `minibuffer-shortcut-f` |  | Choose minibuffer shortcut M-f |
-| `minibuffer-shortcut-g` |  | Choose minibuffer shortcut M-g |
-| `minibuffer-shortcut-h` |  | Choose minibuffer shortcut M-h |
-| `minibuffer-shortcut-i` |  | Choose minibuffer shortcut M-i |
-| `minibuffer-shortcut-j` |  | Choose minibuffer shortcut M-j |
-| `minibuffer-shortcut-k` |  | Choose minibuffer shortcut M-k |
-| `minibuffer-shortcut-l` |  | Choose minibuffer shortcut M-l |
-| `minibuffer-shortcut-m` |  | Choose minibuffer shortcut M-m |
-| `minibuffer-shortcut-n` |  | Choose minibuffer shortcut M-n |
-| `minibuffer-shortcut-o` |  | Choose minibuffer shortcut M-o |
-| `minibuffer-shortcut-p` |  | Choose minibuffer shortcut M-p |
-| `minibuffer-shortcut-q` |  | Choose minibuffer shortcut M-q |
-| `minibuffer-shortcut-r` |  | Choose minibuffer shortcut M-r |
-| `minibuffer-shortcut-s` |  | Choose minibuffer shortcut M-s |
-| `minibuffer-shortcut-t` |  | Choose minibuffer shortcut M-t |
-| `minibuffer-shortcut-u` |  | Choose minibuffer shortcut M-u |
-| `minibuffer-shortcut-v` |  | Choose minibuffer shortcut M-v |
-| `minibuffer-shortcut-w` |  | Choose minibuffer shortcut M-w |
-| `minibuffer-shortcut-x` |  | Choose minibuffer shortcut M-x |
-| `minibuffer-shortcut-y` |  | Choose minibuffer shortcut M-y |
-| `minibuffer-shortcut-z` |  | Choose minibuffer shortcut M-z |
 | `newline` | `S-RET` | Insert a newline at point |
-| `next-history-element` |  | Put the next history item in the minibuffer |
 | `next-line` | `C-n` | Move point down one line |
 | `normal-mode` |  | Set the major mode the buffer's file name asks for |
 | `notmuch` |  | Open the mailboxes (saved searches) |
@@ -867,10 +972,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `notmuch-quit` |  | Close mail: kill the view buffers, back to work |
 | `notmuch-refresh` |  | Re-run the search and refresh the listing |
 | `notmuch-search` |  | Prompt for a notmuch query and show it |
-| `notmuch-show-current` |  | Make the mail pane, showing the index's current thread if there is one |
+| `notmuch-show-current` |  | Open the page of the index's current thread, if there is one |
 | `notmuch-smart-untag` |  | Remove the searched-for tag from this thread |
 | `notmuch-switch-host` |  | Read mail from another mailbox |
 | `notmuch-toggle-unread` |  | Toggle the unread tag on the thread at point |
+| `onboarding` |  | Learn compos with a guide: a chat, and a stage window beside it |
 | `org-ctrl-c-ctrl-c` |  | Toggle the checkbox at point and update cookies |
 | `org-cycle` |  | Toggle folding of the headline at point, else indent |
 | `org-demote` |  | Demote the headline at point, or indent the line |
@@ -887,9 +993,25 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `org-todo` |  | Cycle the TODO state of the headline at point |
 | `package-install` |  | Fetch a package (.scm) from github/url and load it |
 | `package-list` |  | Echo the installed user packages |
-| `previous-history-element` |  | Put the previous history item in the minibuffer |
 | `previous-line` | `C-p` | Move point up one line |
+| `site-chat-tab` |  | Go back to the browser tab this site chat was opened from |
+| `slides-deck-mode` |  | Link or unlink this deck and its slides |
+| `slides-demo` |  | Present the slides demo: every feature of a deck, each on its own slide |
+| `slides-edit` |  | Show the deck at the slide the presenter shows |
+| `slides-new` |  | Start a deck from the starter deck and present it |
+| `slides-present` |  | Present this Markdown buffer as slides in the other window |
 | `switch-to-tab` |  | Pick a browser tab and bring it to the front |
+| `tabs-key-1` |  | Take the tab of the row at point keyed 1 |
+| `tabs-key-2` |  | Take the tab of the row at point keyed 2 |
+| `tabs-key-3` |  | Take the tab of the row at point keyed 3 |
+| `tabs-key-4` |  | Take the tab of the row at point keyed 4 |
+| `tabs-key-5` |  | Take the tab of the row at point keyed 5 |
+| `tabs-key-6` |  | Take the tab of the row at point keyed 6 |
+| `tabs-key-7` |  | Take the tab of the row at point keyed 7 |
+| `tabs-key-8` |  | Take the tab of the row at point keyed 8 |
+| `tabs-key-9` |  | Take the tab of the row at point keyed 9 |
+| `tabs-next` |  | Take the next tab of the row at point |
+| `tabs-prev` |  | Take the previous tab of the row at point |
 | `text-scale-decrease` | `C-_` | Make this buffer's text smaller |
 | `text-scale-increase` | `C-+` | Make this buffer's text larger |
 | `text-scale-reset` | `s-)` | Give this buffer the normal text size |
@@ -900,6 +1022,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `ui-scale-increase` | `s-=` | Make the whole application's text larger |
 | `ui-scale-reset` | `s-0` | Give the whole application the normal text size |
 | `undo` | `C-/` | Undo the last change |
+| `window-pane-above` | `S-<up>` | Move this window to the front of the pane above with its complete buffer stack |
+| `window-pane-below` | `S-<down>` | Move this window to the front of the pane below with its complete buffer stack |
 
 ## packages
 
@@ -912,12 +1036,17 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `comint-shell` |  | Open a text-buffer shell in \*comint-shell\* |
+| `comint-shell` |  | Open this group's text-buffer shell; with C-u, a new one |
 | `execute-extended-command` | `M-x` | Run a command by name, with its keybinding and doc alongside |
 | `newline-or-send` |  | Send input to the process, or insert a newline |
 | `opencode` |  | Open OpenCode for this group; with C-u, choose a group |
-| `shell` |  | Open a raw PTY shell in the \*shell\* buffer |
+| `shell` |  | Open this group's raw PTY shell; with C-u, a new one |
 | `tail-file` |  | Follow a file as it grows (local or /ssh: remote) |
+| `term-scroll-down` |  | Show the newer output, one screen on |
+| `term-scroll-to-bottom` |  | Go back to the prompt |
+| `term-scroll-to-top` |  | Show the oldest output the terminal keeps |
+| `term-scroll-up` |  | Show the older output, one screen back |
+| `term-send-key` |  | Send these keys to the terminal, and give it the keyboard |
 
 ## project
 
@@ -984,7 +1113,35 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `compos-home` |  | Open the Compos home page: setup until it is done, then the welcome page |
+| `cron-list` |  | List the cron jobs |
+| `cron-refresh` |  | Redraw the job list |
+| `cron-remove` |  | Stop the job on this line and forget it |
+| `cron-run-now` |  | Run the job on this line now |
+| `events` |  | Open the event log: the newest events of every topic |
+| `events-all-topics` |  | Show every topic of the event log again |
+| `events-demo` |  | Open the event bus scene: a producer, three workflows and a local model, all observed |
+| `events-demo-back` |  | Step the flow one event back |
+| `events-demo-back-ten` |  | Step the flow ten events back |
+| `events-demo-burst` |  | Send three messages from one person at once |
+| `events-demo-faster` |  | Make the producer tick twice as often |
+| `events-demo-flow` |  | Show the event bus scene as a picture beside the list |
+| `events-demo-forward` |  | Step the flow one event forward |
+| `events-demo-forward-ten` |  | Step the flow ten events forward |
+| `events-demo-live` |  | Follow the head of the log again |
+| `events-demo-next-model` |  | Switch triage to the next local model |
+| `events-demo-play` |  | Play the log forward from the cursor, or pause |
+| `events-demo-producer` |  | Start or stop the scene's producer |
+| `events-demo-refresh` |  | Redraw the scene |
+| `events-demo-replay` |  | Rewind the todos workflow 30 events and take them again |
+| `events-demo-slower` |  | Make the producer tick half as often |
+| `events-demo-toggle-failure` |  | Make the todos workflow fail, or heal it |
+| `events-demo-trace-at-point` |  | Show the whole trace of the event at point beside the scene |
+| `events-refresh` |  | Redraw the event log |
+| `events-show` |  | Show the whole event at point beside the list |
+| `events-topic` |  | Show only one topic family of the event log |
 | `find-file-other-window` | `C-x 4 f` | Find a file and display it only in another window |
+| `group-sandbox` |  | Choose the sandbox for this group's chats: on, off, or as every chat |
 | `messages-clear` |  | Clear the \*Messages\* log |
 | `messages-filter-group` |  | Filter \*Messages\* by source group |
 | `messages-filter-level` |  | Filter \*Messages\* by log level |
@@ -992,15 +1149,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `messages-refresh` |  | Refresh the structured \*Messages\* list |
 | `messages-watch-list` |  | Say which message watches are in force |
 | `restart-daemon` |  | Save the desktop and restart the daemon |
+| `setup` |  | Set up Compos: choose a model, then learn with the guide |
 | `setup-ai-guide` |  | Read the first-run AI setup guide |
 | `setup-bootstrap-gemini` |  | Set Gemini Nano as the default local connector |
 | `setup-bot` |  | Walk through first-run setup one question at a time |
-| `setup-inference` |  | Check this machine for models and pick a default |
+| `setup-inference` |  | Choose the model that new chats use |
+| `setup-install-connector` |  | Install the agent program of a connector in a terminal buffer |
+| `setup-learning-space` |  | Open the guide: a chat that teaches Compos, and a stage to try each step |
 | `setup-report` |  | Open the secret-free setup status report |
+| `setup-reset` |  | Start setup over: forget the chosen model and show the setup wizard |
 | `setup-secrets` |  | Probe the secret providers and set one up |
 | `setup-teach-code` |  | Teach the code-agent workflow |
 | `setup-teach-keys` |  | Teach M-x and the compos philosophy |
 | `setup-welcome` |  | Open the welcome page |
+| `setup-wizard-back` |  | Go to the previous setup step |
+| `setup-wizard-next` |  | Go to the next setup step |
+| `setup-wizard-rescan` |  | Scan this machine for models again |
 | `sockets` | `C-c a s` | List every socket the daemon holds. To open a client connection to another program, use endpoint-register! |
 | `sockets-refresh` |  | Redraw the socket list |
 | `sockets-restart` |  | Restart the socket on this line |
@@ -1057,6 +1221,28 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `preview-font-toggle` |  | Switch rendered preview pages between serif and monospace |
 | `preview-mode` | `C-c C-v` | Toggle rendered preview of the current buffer |
 | `preview-newline` | `RET` | Insert one newline in a rendered page |
+| `preview-tab-left` |  | Show the raw tab; the client sends the arrow only in the movement state |
+| `preview-tab-preview` |  | Show the rendered page |
+| `preview-tab-raw` |  | Show the page's source |
+| `preview-tab-right` |  | Show the preview tab; the client sends the arrow only in the movement state |
+| `screenshot-clear` |  | Remove every screenshot highlight |
+| `screenshot-frame` |  | Save a PNG of the whole editor, highlights included |
+| `screenshot-highlight` |  | Box a buffer's window, a component, or a CSS selector for the next shot |
+| `screenshot-path` |  | Show the path of the last screenshot |
+| `screenshot-pick` |  | Point at a component or window, then click to save a PNG of it |
+| `screenshot-target` |  | Save a PNG of a buffer's window, a component, or a CSS selector |
+| `screenshot-window` |  | Save a PNG of the selected window |
+| `tab-bars-detail-1` |  | Show tab 1 of the page's tab bar |
+| `tab-bars-detail-2` |  | Show tab 2 of the page's tab bar |
+| `tab-bars-detail-3` |  | Show tab 3 of the page's tab bar |
+| `tab-bars-detail-4` |  | Show tab 4 of the page's tab bar |
+| `tab-bars-detail-5` |  | Show tab 5 of the page's tab bar |
+| `tab-bars-index-1` |  | Show tab 1 of the list's tab bar |
+| `tab-bars-index-2` |  | Show tab 2 of the list's tab bar |
+| `tab-bars-index-3` |  | Show tab 3 of the list's tab bar |
+| `tab-bars-index-4` |  | Show tab 4 of the list's tab bar |
+| `tab-bars-index-5` |  | Show tab 5 of the list's tab bar |
+| `tab-bars-pick` |  | Show any tab of the list or the page beside it by name: the minibuffer's tabs are the tab bars, and typing filters across all of them |
 
 ## web
 
@@ -1067,9 +1253,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `browse-copy-url` |  | Copy the link at point, else the page URL |
 | `browse-cycle-view` |  | Cycle browse between monospace, serif, and Markdown source |
 | `browse-download` |  | Save the link at point, else the page, to the download directory |
-| `browse-follow` |  | Follow the link at point |
+| `browse-follow` |  | Follow the link at point; on a folded run of site furniture, open or close it |
 | `browse-follow-new-tab` |  | Open the link at point in a new tab |
-| `browse-follow-other-window` |  | Open the link at point in another window; point stays here |
+| `browse-follow-other-window` |  | Open the link at point beside this page, as its child; point stays here |
 | `browse-forward` |  | Go forward to the page you came back from |
 | `browse-hard-refresh` |  | Refetch the current page while bypassing cached responses |
 | `browse-history` |  | List every page you read, newest first |
@@ -1079,19 +1265,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `browse-history-open-external` |  | Open the page on this row in the real browser |
 | `browse-history-open-other-window` |  | Open the page on this row in another window |
 | `browse-history-refresh` |  | Read the history file again |
+| `browse-index-toggle` |  | Treat this page as an index of links that open beside it, or as a page |
 | `browse-learn-parser` |  | Learn this page's site parser again, replacing the one on disk |
 | `browse-list-tabs` |  | List the buffers of the page's group in the switcher |
 | `browse-next-link` |  | Move point to the next link |
 | `browse-next-tab` |  | Switch to the next browse tab |
 | `browse-open-external` |  | Open this page in the real browser |
 | `browse-other-window` |  | Open a web page as readable text in another window |
+| `browse-page` |  | Show the page itself, live, in this window |
 | `browse-prev-link` |  | Move point to the previous link |
 | `browse-prev-tab` |  | Switch to the previous browse tab |
 | `browse-refresh` |  | Fetch a page: this one again, or another |
-| `browse-toggle-reading` |  | Switch between the calm and the full reading |
+| `browse-toggle-reading` |  | Cycle the calm reading, the full reading and the page itself |
 | `browse-top` |  | Go to the root of this page's site |
 | `browse-up` |  | Go to the parent of this page's path |
 | `browse-view-source` |  | Show this page's html in a buffer |
+| `calm-mode` |  | Toggle the calm reading of this page |
 | `feeds` |  | Read your RSS and Atom feeds |
 | `feeds-open` |  | Read the item on this row beside the list |
 | `feeds-open-external` |  | Open the item on this row in the real browser |
@@ -1099,46 +1288,216 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `feeds-subscribe` |  | Subscribe to a feed — a feed URL, or a page with one |
 | `feeds-unsubscribe` |  | Unsubscribe a feed |
 | `http` |  | Fetch a URL and show the answer in a buffer |
+| `reading-mode` |  | Toggle client-side reading motion on this page |
+| `site-app-agent` |  | Open the chat of this row's page, as M-o does on the page |
+| `site-app-detail` |  | Open the item on this website app row |
+| `site-app-detail-anchor-next` |  | Go to the next part of the page beside the list |
+| `site-app-detail-anchor-prev` |  | Go to the previous part of the page beside the list |
+| `site-app-detail-fold` |  | Fold or unfold the card at point |
+| `site-app-detail-follow` |  | Open the link at point: an item compos draws opens beside the list, anything else on the site |
+| `site-app-detail-key-a` |  | Press this page's button on a |
+| `site-app-detail-key-b` |  | Press this page's button on b |
+| `site-app-detail-key-c` |  | Press this page's button on c |
+| `site-app-detail-key-d` |  | Press this page's button on d |
+| `site-app-detail-key-e` |  | Press this page's button on e |
+| `site-app-detail-key-f` |  | Press this page's button on f |
+| `site-app-detail-key-h` |  | Press this page's button on h |
+| `site-app-detail-key-i` |  | Press this page's button on i |
+| `site-app-detail-key-j` |  | Press this page's button on j |
+| `site-app-detail-key-k` |  | Press this page's button on k |
+| `site-app-detail-key-l` |  | Press this page's button on l |
+| `site-app-detail-key-m` |  | Press this page's button on m |
+| `site-app-detail-key-n` |  | Press this page's button on n |
+| `site-app-detail-key-p` |  | Press this page's button on p |
+| `site-app-detail-key-r` |  | Press this page's button on r |
+| `site-app-detail-key-u` |  | Press this page's button on u |
+| `site-app-detail-key-v` |  | Press this page's button on v |
+| `site-app-detail-key-w` |  | Press this page's button on w |
+| `site-app-detail-key-x` |  | Press this page's button on x |
+| `site-app-detail-key-y` |  | Press this page's button on y |
+| `site-app-detail-key-z` |  | Press this page's button on z |
+| `site-app-detail-next` |  | Go to the next piece of this page |
+| `site-app-detail-next-tab` |  | Show this page's next tab |
+| `site-app-detail-open` |  | Open this page on the site |
+| `site-app-detail-prev` |  | Go to the previous piece of this page |
+| `site-app-detail-prev-tab` |  | Show this page's previous tab |
+| `site-app-detail-reload` |  | Read this page again from the site |
+| `site-app-detail-stage` |  | Ask for one of this tab's stages and show it |
+| `site-app-detail-stage-next` |  | Show this tab's next stage |
+| `site-app-detail-stage-prev` |  | Show this tab's previous stage |
+| `site-app-detail-tab-0` |  | Show this page's composed tab |
+| `site-app-detail-tab-1` |  | Show this page's first tab |
+| `site-app-detail-tab-2` |  | Show this page's second tab |
+| `site-app-detail-tab-3` |  | Show this page's third tab |
+| `site-app-detail-tab-4` |  | Show this page's fourth tab |
+| `site-app-detail-tab-5` |  | Show this page's fifth tab |
+| `site-app-detail-tab-next-beside` |  | Show the next tab of the page beside the list |
+| `site-app-detail-tab-prev-beside` |  | Show the previous tab of the page beside the list |
+| `site-app-filter-choose` |  | Ask for a status tab of this section and show it |
+| `site-app-filter-next` |  | Show the next status tab of this section |
+| `site-app-filter-prev` |  | Show the previous status tab of this section |
+| `site-app-refresh` |  | Read this website app tab again |
+| `site-app-sections` |  | Pick a section of this website app |
+| `site-app-tab-1` |  | Open section 1 of this website app |
+| `site-app-tab-2` |  | Open section 2 of this website app |
+| `site-app-tab-3` |  | Open section 3 of this website app |
+| `site-app-tab-4` |  | Open section 4 of this website app |
+| `site-app-tab-5` |  | Open section 5 of this website app |
+| `site-app-tab-6` |  | Open section 6 of this website app |
+| `site-app-tab-7` |  | Open section 7 of this website app |
+| `site-app-tab-8` |  | Open section 8 of this website app |
+| `site-app-tab-9` |  | Open section 9 of this website app |
+| `site-app-tabs` |  | Pick one of this buffer's tabs |
+
+## web-servers
+
+| Command | Key | What it does |
+|---|---|---|
+| `webhook-define` |  | Define a webhook endpoint that turns each request into an event, and keep it |
+| `webhook-delete` |  | Remove a webhook endpoint and forget it |
+| `webhooks` |  | List the webhook endpoints: define, edit, attach workflows |
+| `webhooks-attach-workflow` |  | Run a Scheme handler, as a workflow, on every request to the webhook on this line |
+| `webhooks-copy-url` |  | Copy the URL of the webhook on this line |
+| `webhooks-detach-workflow` |  | Stop the workflow on the webhook on this line |
+| `webhooks-edit` |  | Change the path, methods and token of the webhook on this line |
+| `webhooks-history` |  | Show the requests the webhook on this line took, newest first |
+| `webhooks-list` |  | Say every webhook endpoint and where it listens |
+| `webhooks-refresh` |  | Redraw the webhook list |
+| `webhooks-remove` |  | Remove the webhook on this line and forget it |
+| `webhooks-show` |  | Show the webhook at point as its own page beside the list: its config and its requests |
+| `webhooks-show-payload` |  | Show the payload of the request at point beside this page |
+| `webhooks-start` |  | Start the webhook server |
+| `webhooks-stop` |  | Stop the webhook server |
+| `webhooks-toggle-public` |  | Let the webhook on this line answer through the tunnel, or keep it local |
+| `webhooks-toggle-server` |  | Start the webhook server, or stop it |
 
 ## windows
 
 | Command | Key | What it does |
 |---|---|---|
-| `buffer-left` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
-| `buffer-right` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
+| `app-dismiss` |  | Put this app away: its windows leave the screen, its buffers keep running |
+| `app-hide-detail-buffers` |  | Hide this app's pages: each of their windows goes back to what it showed before, or closes |
+| `app-layout` |  | Lay this app out: its lists in one window, its pages in another, the rest in a third |
+| `app-pull` |  | Pull this app into this group: every one of its buffers comes along |
+| `app-push` |  | Push this app to another group: every one of its buffers goes there |
+| `app-swap-windows` |  | Swap this app's listing and page windows between their panes |
+| `buffer-next-pane` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
+| `buffer-pop` |  | Move this buffer to a second window of its mode, beside this one; ibuffer's split action moves the marked buffers |
+| `buffer-previous-pane` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `caret-browsing-mode` |  | Toggle the text cursor while reading a dismissible buffer |
+| `consolidate` | `C-x C` | Give every major mode of this group one window: behind its pane, or on the layout ring |
+| `debug-last-window-movement` |  | Show the last change of this frame's windows: before, the action, after |
+| `debug-window-movements` |  | Show the last ten changes of this frame's windows, newest first |
 | `delete-other-windows` | `C-x 1` | Make the selected window the only one |
 | `delete-window` | `C-x 0` | Delete the selected window |
 | `detail-keep` |  | Keep this detail: it takes a name of its own, and the next row opens a new one |
 | `detail-next` |  | Walk the details opened from this list, most recently used first |
 | `detail-previous` |  | Walk the details opened from this list, the other way |
 | `dismiss-buffer` |  | Dismiss a child first, otherwise run this buffer's normal q action |
-| `focus-down` |  | Select the window below |
-| `focus-left` | `s-<left>` | Select the window to the left |
-| `focus-right` | `s-<right>` | Select the window to the right |
-| `focus-up` |  | Select the window above |
+| `focus-down` | `s-<down>` | Select the window below |
+| `focus-up` | `s-<up>` | Select the window above |
 | `group-switch` | `C-x g` | Switch to a group and restore its layout |
 | `group-switch-last` | `C-x C-g C-g` | Switch back to the group this frame just left |
-| `layout-backward` |  | Move the layout one window backward through the frame's window ring |
-| `layout-forward` |  | Move the layout one window forward through the frame's window ring |
-| `mode-consolidate` |  | Gather this group's preferred-mode buffers into the selected window |
+| `index-hide-item` |  | Hide this item from the list it came from, and open the next one here |
+| `index-next-item` |  | Open the next item of the list this page came from, here |
+| `index-previous-item` |  | Open the previous item of the list this page came from, here |
+| `index-up` |  | Go to the list this page came from |
+| `jump-to-mode` | `C-x m` | Pick a major mode among this frame's windows and go to its window |
+| `layout-backward` |  | Bring the previous window of this pane to the front |
+| `layout-forward` |  | Bring the next window of this pane to the front |
+| `layout-redo` |  | Go forward again to the pane arrangement layout-undo left |
+| `layout-undo` |  | Put back the previous pane arrangement; the windows keep the buffers they show now |
+| `mode-consolidate` |  | Gather every buffer of this pane's major mode into this pane |
+| `next-pane` |  | Select the next pane |
 | `other-window` | `C-x o` | Select another window in cyclic order |
+| `pane-add` |  | Add an empty pane beside this one, or under it when it is taller than wide or the row is full; you stay where you are |
+| `pane-move-down` | `s-S-<down>` | Swap this pane's windows with the pane below |
+| `pane-move-left` | `s-S-<left>` | Swap this pane's windows with the pane to the left |
+| `pane-move-right` | `s-S-<right>` | Swap this pane's windows with the pane to the right |
+| `pane-move-up` | `s-S-<up>` | Swap this pane's windows with the pane above |
+| `pane-next-window` | `s-M-]` | Bring the next window of this pane to the front |
+| `pane-overview` |  | Show every window of this pane as a tile in the pane; pick one to bring it to the front |
+| `pane-overview-down` |  | Select the tile below |
+| `pane-overview-next` |  | Select the next tile |
+| `pane-overview-pick` |  | Bring the window of the selected tile to the front |
+| `pane-overview-pick-1` |  | Bring the window of tile 1 to the front |
+| `pane-overview-pick-2` |  | Bring the window of tile 2 to the front |
+| `pane-overview-pick-3` |  | Bring the window of tile 3 to the front |
+| `pane-overview-pick-4` |  | Bring the window of tile 4 to the front |
+| `pane-overview-pick-5` |  | Bring the window of tile 5 to the front |
+| `pane-overview-pick-6` |  | Bring the window of tile 6 to the front |
+| `pane-overview-pick-7` |  | Bring the window of tile 7 to the front |
+| `pane-overview-pick-8` |  | Bring the window of tile 8 to the front |
+| `pane-overview-pick-9` |  | Bring the window of tile 9 to the front |
+| `pane-overview-previous` |  | Select the previous tile |
+| `pane-overview-quit` |  | Leave the overview; the pane shows what it showed before |
+| `pane-overview-up` |  | Select the tile above |
+| `pane-previous-window` | `s-M-[` | Bring the previous window of this pane to the front |
+| `pane-remove` |  | Hide this pane with its windows; an empty pane goes. pane-restore brings it back |
+| `pane-restore` |  | Bring back the pane hidden last, with its windows; you stay where you are |
+| `pane-take-window` |  | Move a window of this group into this pane |
+| `panes-adopt` |  | Read this frame as it stands into the window model, and lay it out from the model |
+| `panes-board-add-pane` |  | Add an empty pane after the pane on this row |
+| `panes-board-close` |  | Close this window (its buffers stay open), take this buffer out of its window, or remove this pane |
+| `panes-board-consolidate` |  | Give every mode one window |
+| `panes-board-equalize` |  | Every pane an equal share |
+| `panes-board-fold` |  | Fold or unfold the group, pane or window on this row |
+| `panes-board-fold-all` |  | Fold every row below the top level of the zoom, or unfold them all when some are folded |
+| `panes-board-kill` |  | Kill the buffer on this row |
+| `panes-board-left` |  | Move this window to the pane on its left; a pane row moves the pane |
+| `panes-board-move` |  | Move this window to a pane, or this buffer to a window |
+| `panes-board-narrower` |  | Give this pane less of the width |
+| `panes-board-next-group` |  | Go to the next group's heading |
+| `panes-board-previous-group` |  | Go to the previous group's heading |
+| `panes-board-refresh` |  | Redraw the board |
+| `panes-board-right` |  | Move this window to the pane on its right; a pane row moves the pane |
+| `panes-board-view-next` |  | Switch between the views: All, Group |
+| `panes-board-visit` |  | Show this window, or this buffer in its window, and go there |
+| `panes-board-wider` |  | Give this pane more of the width |
+| `panes-board-zoom-in` |  | Zoom one level towards this row: a pane, a window |
+| `panes-board-zoom-out` |  | Zoom back out one level |
+| `peek-keep` |  | Keep the peek as a normal window |
+| `peek-next` |  | Peek the next row of the list |
+| `peek-previous` |  | Peek the previous row of the list |
+| `peek-quit` |  | Dismiss the peek and go back to its list |
 | `popper-cycle` | `` M-` `` | Show the next popup in the popup window |
+| `popper-move-down` | `C-M-<down>` | Move the popup to the bottom edge of the frame |
+| `popper-move-left` | `C-M-<left>` | Move the popup to the left edge of the frame |
+| `popper-move-right` | `C-M-<right>` | Move the popup to the right edge of the frame |
+| `popper-move-up` | `C-M-<up>` | Move the popup to the top edge of the frame |
 | `popper-toggle` |  | Close the popup on screen, or show the latest popup again |
 | `popper-toggle-type` | `` C-M-` `` | Make this popup an ordinary buffer, or make this buffer a popup |
+| `previous-pane` |  | Select the previous pane |
 | `reset-layout` |  | Arrange the frame the way this buffer's mode asks |
 | `split-window-below` | `C-x 2` | Split the window in two, one above the other |
 | `split-window-right` | `C-x 3` | Split the window in two, side by side |
+| `switch-window` | `C-x j` | Pick a window of this frame by name and go to it |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
-| `window-layout` | `C-x l` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
+| `window-kill-buffers` | `C-x K` | Kill every buffer in this window: the one it shows and its whole history |
+| `window-layout` | `C-x l` | Choose this group's layout; each one shows as you move to it |
+| `window-layout-columns` |  | Equal columns |
+| `window-layout-free` |  | As many panes as you open |
+| `window-layout-halves` |  | Two equal panes |
+| `window-layout-single` |  | One window |
+| `window-layout-two-chat` |  | Two equal panes and a narrow chat |
+| `window-layout-two-pane` |  | Two panes, the first two thirds |
+| `window-next-buffer` |  | Show the next buffer down this window's stack; hold Shift to keep walking |
+| `window-next-child-chat` |  | Show the next of this chat's parent and child chats; hold Alt to keep walking. Without any, show the next block |
+| `window-next-mode-buffer` | `s-]` | Show the next buffer of this mode down this window's stack; hold Cmd to keep walking |
+| `window-next-pane` | `S-<right>` | Move this window to the front of the next pane with its complete buffer stack |
+| `window-previous-buffer` |  | Show the next buffer up this window's stack; hold Shift to keep walking |
+| `window-previous-child-chat` |  | Show the previous of this chat's parent and child chats; hold Alt to keep walking. Without any, show the previous block |
+| `window-previous-mode-buffer` | `s-[` | Show the next buffer of this mode up this window's stack; hold Cmd to keep walking |
+| `window-previous-pane` | `S-<left>` | Move this window to the front of the previous pane with its complete buffer stack |
 | `window-rename` |  | Give this window a name; an empty name goes back to the default |
-| `window-layout-columns` |  | Show three equal columns |
-| `window-layout-free` |  | Drop the frame's target layout: a display may split a window again |
-| `window-layout-halves` |  | Show two equal panes side by side |
-| `window-layout-single` |  | Show one window |
-| `window-layout-two-pane` |  | Show two panes side by side; the first pane takes two thirds |
-| `window-left` | `s-S-<left>` | Move this window leftward with its complete buffer stack |
-| `window-right` | `s-S-<right>` | Move this window rightward with its complete buffer stack |
+| `window-walk-end` |  | End a walk of the window's stack: the next walk starts on top again |
+| `windows-list` | `C-x w` | List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group |
+| `windows-list-close` |  | Close the window on this line |
+| `windows-list-consolidate` |  | Give every major mode one window, from the window on this line; visible panes keep their modes |
+| `windows-list-refresh` |  | Redraw the window list |
+| `windows-list-rename` |  | Name the window on this line |
+| `windows-list-ring` |  | List the windows of this frame's ring in one flat list, on screen and waiting |
+| `windows-list-visit` |  | Show the window on this line in the list's pane |
 | `winner-next` | `C-c <right>` | Switch to the next window and buffer arrangement |
 | `winner-previous` | `C-c <left>` | Switch to the previous window and buffer arrangement |
 | `winner-redo` |  | Walk forward to a later window and buffer arrangement |
@@ -1158,7 +1517,14 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `agenda-visit` |  | Open the entry's file at its heading |
 | `agenda-week-next` |  | Show the next week |
 | `agenda-week-prev` |  | Show the previous week |
+| `chat-todo` |  | Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes |
+| `copilot-mode` |  | Toggle copilot-mode: rewrites come as ghost text when you close a [note] |
 | `count-words` |  | Display the number of words in the buffer |
+| `ghost-rewrite` |  | Rewrite the region, or the paragraph at point, as ghost text; [notes] in it say what to do. Again asks for more |
+| `ghost-rewrite-accept` |  | Take the rewrite shown |
+| `ghost-rewrite-next` |  | Show the next rewrite |
+| `ghost-rewrite-previous` |  | Show the previous rewrite |
+| `ghost-rewrite-quit` |  | Let the rewrites go |
 | `morg-agenda` | `C-c A` | Show the agenda: dated entries from your morg files |
 | `morg-babel` |  | Run the Morg code block at point and replace its result block |
 | `morg-backward-same-level` |  | Move to the previous heading at this level |
@@ -1180,5 +1546,35 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `morg-tangle` |  | Write all Morg blocks with :tangle PATH headers |
 | `morg-todo` |  | Cycle the TODO state of the heading or checkbox at point |
 | `morg-widen` |  | Show the complete Morg document |
+| `todo` |  | Show the todo list of the group you are in |
+| `todo-accept` |  | Mark the task todo: triage it, or approve it from review |
+| `todo-add-note` |  | Add a note to the task |
+| `todo-assign` |  | Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane, the chat it already has when it has one; C-u asks for the group |
+| `todo-attach-chat` |  | Attach another open chat to the task at point, beside the one it is assigned to |
+| `todo-attach-this-chat` |  | Attach the chat you are in to an open task |
+| `todo-capture` |  | File a new task |
+| `todo-cycle-priority` |  | Cycle the task's priority: A, B, C, none |
+| `todo-detail-agent` |  | Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live |
+| `todo-detail-attach-chat` |  | Attach another open chat to this task, beside the one it is assigned to |
+| `todo-detail-goto-chat` |  | Go to the chat working this task; with several, ask which |
+| `todo-detail-refresh` |  | Read the task again |
+| `todo-detail-task-chat` |  | Open this task's chat, or start one titled with the task; the chat is also attached to the task's parent |
+| `todo-detail-visit` |  | Open the task's file at its heading |
+| `todo-filter-project` |  | Show one project's tasks: pick it from the list; all shows every project |
+| `todo-goto-chat` |  | Go to the chat the task is assigned to; with several, ask which |
+| `todo-mark-cancelled` |  | Cancel the task |
+| `todo-mark-doing` |  | Mark the task in progress |
+| `todo-mark-done` |  | Mark the task done |
+| `todo-mark-waiting` |  | Park the task as waiting |
+| `todo-next-sort` |  | Cycle the order: status, urgency, deadline, created |
+| `todo-next-view` |  | Show the next status tab: open, inbox, review, doing, waiting, mine, overdue, closed, all |
+| `todo-prev-view` |  | Show the previous status tab |
+| `todo-refresh` |  | Re-read the todo files, and look again for new ones |
+| `todo-set-deadline` |  | Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w |
+| `todo-set-project` |  | Move the task, or the marked tasks, to another project; a new name makes a new project |
+| `todo-show` |  | Show the task as its own page beside the list |
+| `todo-task-chat` |  | Open the task's chat, or start one titled with the task; the chat is also attached to the task's parent |
+| `todo-toggle-urgent` |  | Mark the task time-sensitive, or not |
+| `todo-visit` |  | Open the task's file at its heading |
 | `write` |  | Enter the writing workspace |
 | `writing-mode` |  | Toggle writing mode in the current buffer |

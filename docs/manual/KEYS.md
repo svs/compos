@@ -20,6 +20,14 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-/` | `undo` | Undo the last change |
 | `C-<left>` | `backward-word` | Move point backward one word |
 | `C-<right>` | `forward-word` | Move point forward one word |
+| `C-M-+` | `content-scale-increase` | Show more of this buffer: one content level in |
+| `C-M--` | `content-scale-decrease` | Show less of this buffer: one content level out |
+| `C-M-0` | `content-scale-reset` | Show this buffer as it is: content level 0 |
+| `C-M-<down>` | `popper-move-down` | Move the popup to the bottom edge of the frame |
+| `C-M-<left>` | `popper-move-left` | Move the popup to the left edge of the frame |
+| `C-M-<right>` | `popper-move-right` | Move the popup to the right edge of the frame |
+| `C-M-<up>` | `popper-move-up` | Move the popup to the top edge of the frame |
+| `C-M-=` | `content-scale-increase` | Show more of this buffer: one content level in |
 | `` C-M-` `` | `popper-toggle-type` | Make this popup an ordinary buffer, or make this buffer a popup |
 | `C-M-b` | `backward-sexp` | Move backward across one balanced expression |
 | `C-M-d` | `down-list` | Move forward down one level of parentheses |
@@ -27,6 +35,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-M-i` | `completion-at-point` | Perform completion on the text around point |
 | `C-M-u` | `backward-up-list` | Move backward out of one level of parentheses |
 | `C-M-v` | `scroll-other-window` | Scroll the next window up nearly a full screen |
+| `C-RET` | `llm-send-buffer` | Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes |
 | `C-SPC` | `set-mark-command` | Set the mark where point is; with a prefix, go back to the previous mark |
 | `C-_` | `text-scale-decrease` | Make this buffer's text smaller |
 | `` C-` `` | `group-next-mode-buffer` | Walk this buffer's mode in this group, most recently used first |
@@ -39,20 +48,19 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-c C-a` | `app-preview` | Run the current buffer as an HTML app |
 | `C-c C-r` | `app-reload` | Reload every running app |
 | `C-c C-v` | `preview-mode` | Toggle rendered preview of the current buffer |
-| `C-c RET` | `chat-companion-ask` | Ask the group chat without leaving this buffer |
-| `C-c a a` | `agent-goto-attention` | Jump to the first thread needing attention |
+| `C-c RET` | `chat-companion-ask` | Ask a new group chat about this buffer without leaving it |
+| `C-c a a` | `agent-goto-attention` | Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked |
 | `C-c a d` | `doppler` | List and manage Doppler secret names |
 | `C-c a m` | `mcp-hub` | List every MCP server: status, tools, presets |
 | `C-c a n` | `agent-open` | Prompt for a task and spawn a new agent thread |
 | `C-c a s` | `sockets` | List every socket the daemon holds. To open a client connection to another program, use endpoint-register! |
 | `C-c b` | `llm-configure` | LLM setup |
-| `C-c c` | `chat` | Open the group chat for this buffer |
 | `C-c d` | `group-describe` | Ask the LLM to write this group's description |
-| `C-c e` | `llm-rewrite` | Rewrite the region with the LLM into a diff block below it; with one waiting, decide it or ask again |
+| `C-c e` | `llm-rewrite` | Rewrite the region; keep drafts as options and iterate with the passage's conversation |
 | `C-c g` | `group-add` | Put the selected buffers, else this buffer, in a group |
 | `C-c l` | `copy-buffer-link` | Copy an compos:// link to this buffer and line to the clipboard |
-| `C-c m` | `llm-set-model` | Choose the model for M-o in this buffer |
-| `C-c n` | `chat-new` | Start a new chat buffer; with a prefix, choose or create its group |
+| `C-c m` | `llm-set-model` | Choose the model for C-RET and this buffer's chat |
+| `C-c n` | `chat-new` | Start a new chat buffer; with a prefix, hand a task to a new chat in a group and stay here |
 | `C-c q` | `llm-ask` | Ask the LLM from anywhere via the minibuffer |
 | `C-c r` | `chat-send-region` | Add the region to the chat buffer as context |
 | `C-c s` | `scratch-buffer` | Toggle between this buffer and its plain scratch buffer |
@@ -89,37 +97,38 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x <left>` | `previous-buffer` | Switch to the previously used buffer (again = deeper) |
 | `C-x <right>` | `next-buffer` | Walk back toward the most recently used buffer |
 | `C-x ?` | `modeline-expand` | Toggle this buffer's expanded modeline panel |
+| `C-x C` | `consolidate` | Give every major mode of this group one window: behind its pane, or on the layout ring |
 | `C-x C-SPC` | `pop-global-mark` | Go back to the last mark set in any buffer |
 | `C-x C-b` | `ibuffer` | List buffers by group in a buffer |
 | `C-x C-c` | `chat-list` | Switch to a chat, by its name or by a word somebody said in it |
 | `C-x C-d` | `dired` | Prompt for a directory and open it in Dired |
 | `C-x C-e` | `eval-last-sexp` | Evaluate the region, else the sexp before point, and echo the value |
 | `C-x C-f` | `find-file` | Visit a file, prompting with filename completion |
+| `C-x C-g C-g` | `group-switch-last` | Switch back to the group this frame just left |
 | `C-x C-g a` | `group-add` | Put the selected buffers, else this buffer, in a group |
+| `C-x C-g b` | `group-members` | Open the switcher on this group's members |
+| `C-x C-g g` | `buffer-goto-group` | Stand in this buffer's own group and focus the buffer there |
 | `C-x C-g m` | `group-move` | Move the selected buffers, else this buffer, to one group |
 | `C-x C-g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
-| `C-x C-g r` | `remove-group-from-buffer` | Toggle this buffer out of the groups it belongs to; C-g applies |
-| `C-x C-g v` | `group-from-visible` | Put every visible work buffer in a group: pick one to move them there, or type a new name to found it from these windows |
+| `C-x C-g p` | `group-pin` | Toggle a frame pin that keeps the current group through window changes |
+| `C-x C-g r` | `remove-group-from-buffer` | Take this buffer out of its group; y removes, n keeps |
+| `C-x C-g v` | `group-from-visible` | Move the visible windows, chats included, to a group: pick one, or type a new name to found it from these windows |
 | `C-x C-q` | `read-only-mode` | Toggle whether this buffer refuses edits |
 | `C-x C-s` | `save-buffer` | Save the current buffer to its file |
 | `C-x C-t` | `switch-window-buffer` | Choose another buffer from this window's title |
 | `C-x C-w` | `write-file` | Write the buffer to a file; the buffer becomes that file's buffer |
 | `C-x C-x` | `exchange-point-and-mark` | Exchange positions of point and mark |
 | `C-x G` | `switch-groups` | Switch group or project, then pick a buffer or file in it |
+| `C-x K` | `window-kill-buffers` | Kill every buffer in this window: the one it shows and its whole history |
 | `C-x b` | `ibuffer-prompt` | Switch to a buffer with the plain minibuffer list |
 | `C-x c` | `chat-prompt` | Switch to a chat with the plain minibuffer list |
 | `C-x d` | `daemons` | List daemons and switch this browser tab |
 | `C-x e` | `window-eat` | Eat the neighboring pane and take its space |
-| `C-x C-g C-g` | `group-switch-last` | Switch back to the group this frame just left |
-| `C-x C-g b` | `group-members` | Open the switcher on this group's members |
 | `C-x g` | `group-switch` | Switch to a group and restore its layout |
-| `C-x C-g l` | `groups` | The groups board: switch, describe, set noise |
-| `C-x C-g n` | `group-new` | Create and enter an empty group, or seed it with the selection |
-| `C-x C-g p` | `group-pin` | Toggle a frame pin that keeps the current group through window changes |
-| `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
-| `C-x l` | `window-layout` | Choose a tiling layout for visible buffers; the choice is the frame's target layout |
-| `C-x m` | `jump-to-mode` | Pick a major mode among this frame's windows and go to its window |
 | `C-x j` | `switch-window` | Pick a window of this frame by name and go to it |
+| `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
+| `C-x l` | `window-layout` | Choose this group's layout; each one shows as you move to it |
+| `C-x m` | `jump-to-mode` | Pick a major mode among this frame's windows and go to its window |
 | `C-x n N` | `narrow-context-also` | Narrow the view and the LLM context to the same region or Morg section |
 | `C-x n n` | `narrow-to-region` | Show only the text between point and mark |
 | `C-x n w` | `widen` | Show the complete current buffer |
@@ -145,7 +154,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x r x` | `copy-to-register` | Save the region's text in a register |
 | `C-x u` | `undo` | Undo the last change |
 | `C-x v l` | `buffer-log` | Show the provenance of this buffer: every accepted revision |
-| `C-x w` | `list-windows` | List the windows of this frame's ring, on screen and waiting |
+| `C-x w` | `windows-list` | List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group |
 | `C-y` | `yank` | Reinsert the last killed text at point |
 | `DEL` | `delete-backward-char` | Delete the character before point |
 | `ESC` | `keyboard-quit` | Quit the current operation: cancel the prompt, close the dashboard, or clear the mark |
@@ -182,9 +191,9 @@ Every key in the global map, except the keys that insert their own character. A 
 | `M-f` | `forward-word` | Move point forward one word |
 | `M-g M-g` | `goto-line` | Go to a line number read from the minibuffer |
 | `M-g g` | `goto-line` | Go to a line number read from the minibuffer |
-| `M-g i` | `imenu` | Jump to a definition in this buffer |
+| `M-g i` | `imenu` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
 | `M-m` | `back-to-indentation` | Move point to the first non-space on this line |
-| `M-o` | `llm-send-buffer` | Send this document to the LLM and stream its reply below the block at point; with C-u, choose where the reply goes |
+| `M-o` | `llm-companion-open` | Open this document's own chat, starting one when it has none; with a region, the region is the chat's only context |
 | `M-s t` | `occur-ts` | Show tree-sitter query captures for this buffer |
 | `M-v` | `scroll-down-command` | Scroll text downward nearly a full screen |
 | `M-w` | `copy-region-as-kill` | Save the region as if killed, but don't kill it |
@@ -192,20 +201,30 @@ Every key in the global map, except the keys that insert their own character. A 
 | `M-y` | `yank-pop` | Replace just-yanked text with an earlier kill |
 | `M-\|` | `llm-pipe-region` | Pipe the region through the LLM into \*llm\* |
 | `RET` | `preview-newline` | Insert one newline in a rendered page |
-| `S-<left>` | `previous-buffer` | Switch to the previously used buffer (again = deeper) |
-| `S-<right>` | `next-buffer` | Walk back toward the most recently used buffer |
+| `S-<down>` | `window-pane-below` | Move this window to the front of the pane below with its complete buffer stack |
+| `S-<left>` | `window-previous-pane` | Move this window to the front of the previous pane with its complete buffer stack |
+| `S-<right>` | `window-next-pane` | Move this window to the front of the next pane with its complete buffer stack |
+| `S-<up>` | `window-pane-above` | Move this window to the front of the pane above with its complete buffer stack |
 | `S-RET` | `newline` | Insert a newline at point |
 | `TAB` | `indent-for-tab` | Indent by inserting two spaces |
 | `s-)` | `text-scale-reset` | Give this buffer the normal text size |
 | `s-+` | `text-scale-increase` | Make this buffer's text larger |
 | `s--` | `ui-scale-decrease` | Make the whole application's text smaller |
 | `s-0` | `ui-scale-reset` | Give the whole application the normal text size |
-| `s-<down>` | `group-next-buffer` | Walk every buffer in this group, most recently used first |
-| `s-<left>` | `focus-left` | Select the window to the left |
-| `s-<right>` | `focus-right` | Select the window to the right |
-| `s-<up>` | `group-previous-buffer` | Walk every buffer in this group, the other way |
+| `s-<down>` | `focus-down` | Select the window below |
+| `s-<left>` | `focus-left` | Select the pane to the left, across the columns |
+| `s-<right>` | `focus-right` | Select the pane to the right, across the columns |
+| `s-<up>` | `focus-up` | Select the window above |
 | `s-=` | `ui-scale-increase` | Make the whole application's text larger |
-| `s-S-<left>` | `window-left` | Move this window leftward with its complete buffer stack |
-| `s-S-<right>` | `window-right` | Move this window rightward with its complete buffer stack |
+| `s-M-[` | `pane-previous-window` | Bring the previous window of this pane to the front |
+| `s-M-]` | `pane-next-window` | Bring the next window of this pane to the front |
+| `s-S-<down>` | `pane-move-down` | Swap this pane's windows with the pane below |
+| `s-S-<left>` | `pane-move-left` | Swap this pane's windows with the pane to the left |
+| `s-S-<right>` | `pane-move-right` | Swap this pane's windows with the pane to the right |
+| `s-S-<up>` | `pane-move-up` | Swap this pane's windows with the pane above |
+| `s-[` | `window-previous-mode-buffer` | Show the next buffer of this mode up this window's stack; hold Cmd to keep walking |
+| `s-]` | `window-next-mode-buffer` | Show the next buffer of this mode down this window's stack; hold Cmd to keep walking |
 | `s-_` | `text-scale-decrease` | Make this buffer's text smaller |
+| `s-i` | `imenu` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
+| `s-k` | `do` | Say what you want; a local model picks the command and runs it |
 | `s-p` | `command-palette` | Find an action by intent across command docs and recipes |

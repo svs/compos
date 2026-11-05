@@ -67,7 +67,7 @@ Press `C-x C-d` (`dired`) and choose a directory. Dired lists its files.
 - `R` (`dired-rename`) renames or moves a file.
 - `C` (`dired-copy`) copies a file.
 - `+` (`dired-mkdir`) makes a directory.
-- `m` (`list-mark`) marks a file. A command then acts on every marked file.
+- `* m` (`list-mark`) marks a file. A command then acts on every marked file.
 
 ### How do I find a file in my project?
 
@@ -111,7 +111,7 @@ Press `M-%` (`query-replace`). Type the text to find, then the new text. At each
 
 Press `M-g g` (`goto-line`) and type the line number.
 
-`M-<` (`beginning-of-buffer`) goes to the start, and `M->` (`end-of-buffer`) goes to the end. `M-g i` (`imenu`) goes to a definition in this buffer by its name.
+`M-<` (`beginning-of-buffer`) goes to the start, and `M->` (`end-of-buffer`) goes to the end. `s-i` (`imenu`) goes to a definition in this buffer by its name.
 
 ### How do I make the text larger or smaller?
 
@@ -123,7 +123,7 @@ Press `C-+` (`text-scale-increase`) or `C-_` (`text-scale-decrease`). The change
 
 Press `C-x b` (`ibuffer-prompt`) and type a part of the buffer name. Press `RET` to show it.
 
-`S-<left>` (`previous-buffer`) goes back to the buffer you used before. `C-x C-b` (`ibuffer`) lists every buffer by group.
+`C-x <left>` (`previous-buffer`) goes back to the buffer you used before. `C-x C-b` (`ibuffer`) lists every buffer by group.
 
 ### How do I close a buffer?
 
@@ -168,7 +168,7 @@ Press `M-x group-rename` to give the current group a new name. `M-x group-kill` 
 
 ### How do I ask the agent about my work?
 
-Press `C-c c` (`chat`). The chat of the current group opens. Type your question after the prompt and press `RET` (`agent-send`).
+Press `C-c w` (`chat-companion`). The chat of the current group opens. Type your question after the prompt and press `RET` (`agent-send`).
 
 The agent can read the buffers of the group, so you do not paste them. `C-c RET` (`chat-companion-ask`) asks the chat without leaving the buffer you are in.
 
@@ -209,7 +209,7 @@ When the agent wants to use a tool, the chat asks you.
 Press `M-x browse` and type a URL or some search words. The page opens as readable text in a buffer.
 
 - `RET` (`browse-follow`) follows the link at point.
-- `n` (`browse-next-link`) moves to the next link.
+- `TAB` (`browse-next-link`) moves to the next link.
 - `l` (`browse-back`) goes back.
 - `o` (`browse-open-external`) opens the page in your real browser.
 

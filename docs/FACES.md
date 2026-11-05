@@ -22,6 +22,8 @@ becomes CSS.
 Any other attribute becomes a CSS variable `--NAME-ATTR` and nothing
 else. `chrome` uses `gap`, `radius`, `border`, `shadow` this way.
 
+The face `spinner` has no attributes. `editor.css` turns its glyph at the speed of `--chrome-anim`, so `ui-animation` stops it. Put it on a span together with a colour face: the herdr list marks a working agent this way.
+
 A face writes only the attributes it sets. An unset attribute means
 "leave it alone", as in Emacs. A span that carries two faces keeps the
 syntax colour of one under the background of the other.

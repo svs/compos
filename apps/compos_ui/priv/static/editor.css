@@ -625,6 +625,15 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
 @media (prefers-reduced-motion: reduce) {
   .llm-thinking-spinner::before { animation: none; }
 }
+/* the spinner face turns its glyph: a list row says "working" with it.
+   A second face on the same span gives the colour. */
+.f-spinner {
+  display: inline-block; transform-origin: 50% 55%;
+  animation: llm-thinking-spin calc(var(--chrome-anim, 0s) * 7) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .f-spinner { animation: none; }
+}
 
 /* the block shapes of a drawn page: the marker stepped back, the
    row takes the shape */

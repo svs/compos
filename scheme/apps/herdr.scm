@@ -94,6 +94,13 @@
         ((equal? state "done") "+") ((equal? state "error") "x")
         ((equal? state "idle") "-") (else "?")))
 
+;; a working agent's glyph turns: the spinner face over the state's colour
+(define (herdr--glyph-cell row face)
+  (let ((state (plist-get row 'state)))
+    (if (equal? state "working")
+        (list (herdr--glyph state) (list (list 0 1 face) (list 0 1 "spinner")))
+        (list (herdr--glyph state) face))))
+
 (define (herdr--state-label row)
   (let ((s (plist-get row 'state)) (k (plist-get row 'kind)))
     (cond ((and (equal? s "blocked") (not (equal? k ""))) (string-append "needs " k))
@@ -102,7 +109,7 @@
 
 (define (herdr--cells buf row)
   (let ((face (herdr--face (plist-get row 'state))))
-    (list (list (herdr--glyph (plist-get row 'state)) face)
+    (list (herdr--glyph-cell row face)
           (list (plist-get row 'agent) "default")
           (list (plist-get row 'model) "chat-idle")
           (list (herdr--state-label row) face)
@@ -111,7 +118,7 @@
 
 (define (herdr--narrow-cells buf row)
   (let ((face (herdr--face (plist-get row 'state))))
-    (list (list (herdr--glyph (plist-get row 'state)) face)
+    (list (herdr--glyph-cell row face)
           (list (plist-get row 'agent) "default")
           (list (plist-get row 'model) "chat-idle")
           (list (herdr--state-label row) face)
@@ -124,6 +131,11 @@
     (string-append (number->string (length rows)) (if (= (length rows) 1) " agent" " agents")
                    (if (> need 0) (string-append ", " (number->string need) " need you") "")
                    (if (> (count "working") 0) (string-append ", " (number->string (count "working")) " working") ""))))
+
+;; the state column outranks the model: a narrow window hides the model first
+(define (herdr--narrow-columns buf)
+  (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16 'left 'end 99)
+        (list "session" #f)))
 
 (define-list-mode! "herdr-mode"
   (list
@@ -138,11 +150,11 @@
            "/ narrows, and q quits.")
     'transient #f
     'rows herdr-rows
-    'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16)
+    'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16 'left 'end 99)
                                  (list "session" 28) (list "says" #f)))
     'cells herdr--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 72)
-                         'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16) (list "session" #f)))
+                         'columns herdr--narrow-columns
                          'cells herdr--narrow-cells)
                    (list 'name 'wide 'default #t))
     'title (lambda (buf) (string-append "Agents: " (group-name (herdr--group buf))))
@@ -217,3 +229,5 @@
 (public! 'herdr-rows "(herdr-rows BUF) — the agent rows of a herdr listing: (shell S agent A model MO state ST kind K msg M), the ones that need you first")
 (effects! '(write display))
 (public! 'herdr "(herdr) — show the agents in this group's shells and what each is doing")
+
+(provide 'herdr)

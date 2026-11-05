@@ -19,7 +19,9 @@
 (define herdr-agent-programs
   '("claude" "codex" "opencode" "pi" "gemini" "cursor-agent" "copilot" "amp"
     "aider" "goose" "crush" "droid" "kimi" "kilo" "qwen" "grok" "devin"
-    "hermes" "omp" "cline" "kiro-cli" "letta" "qodercli"))
+    "hermes" "omp" "cline" "kiro-cli" "letta" "qodercli"
+    ;; DeepSeek: the harness, its TUI and the TUI's short name, and Reasonix
+    "dsh" "dsh-tui" "dst" "reasonix"))
 
 ;; the worse first: what needs you, then what finished, then what runs
 (define herdr--order '("blocked" "error" "done" "working" "idle" "unknown"))

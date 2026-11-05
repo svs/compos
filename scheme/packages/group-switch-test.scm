@@ -32,7 +32,7 @@
       (buffer-set-local! b 'special #f))
     (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
-  (set! *group-mru* '())
+  (set! group--saved-mru '())
   (set! *group-next-id* 0)
   ;; these tests read a free frame; the default target has its own
   (panes-choose-layout! #f)
@@ -749,26 +749,23 @@
       (check-equal! (t--sw-at "zzsw-here") 2 "current group stays last"))
     (t--sw-done!)))
 
-(deftest 'group-mru-outranks-the-shared-history-ring
-  "groups keep their own recency cache, so buffer churn cannot evict them"
+(deftest 'group-recency-is-the-history-ring
+  "group order is the ring's group marks, then the last session's order"
   (lambda ()
     (t--sw-setup!)
     (let ((older (group-record-create! "zzsw-cache-older"))
-          (recent (group-record-create! "zzsw-cache-recent")))
+          (recent (group-record-create! "zzsw-cache-recent"))
+          (saved (group-record-create! "zzsw-cache-saved")))
+      (set! group--saved-mru (list saved older))
       (group-mru-note! older)
       (group-mru-note! recent)
-      (check-equal! (take (group-mru-ids) 2) (list recent older)
-                    "the cache holds group ids alone, newest first")
-      ;; the shared ring still reads (recent older). Only the cache says
-      ;; otherwise, and the cache is what the switcher must follow.
-      (set! *group-mru* (list older recent))
-      (check-equal! (filter (lambda (id) (member id (list older recent)))
+      (check-equal! (filter (lambda (id) (member id (list older recent saved)))
                             (group-ids-mru-all))
-                    (list older recent)
-                    "group-ids-mru-all follows the cache, not the ring")
+                    (list recent older saved)
+                    "this session's switches lead, the saved order trails")
       (group-record-delete! older)
-      (check-false! (and (member older (group-mru-ids)) #t)
-                    "a deleted group leaves the cache"))
+      (check-false! (and (member older (group-ids-mru-all)) #t)
+                    "a deleted group leaves the order"))
     (t--sw-done!)))
 
 (deftest 'group-switch-preserves-mru-in-a-mixed-frame

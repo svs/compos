@@ -22,12 +22,12 @@
 
 (defvar '*group-records* '())
 
-;; Groups are first class, so they keep their own recency cache. The shared
-;; mru-list is one ring for buffers and groups together: the buffer visits
-;; between two group switches push every older group off the end, and the
-;; ring is rebuilt each boot from the buffer history, which carries no group
-;; marks at all. This list holds group ids only, and it persists.
-(defvar '*group-mru* '())
+;; Group recency has one owner, the editor's history ring (mru-groups):
+;; a group switch is an entry there, and a group mark that buffer visits
+;; push out of the ring waits behind it. The ring is rebuilt each boot from
+;; the buffer history, which carries no group marks, so the order the last
+;; session ended with persists here and trails the marks this one made.
+(defvar 'group--saved-mru '())
 
 (defcustom 'group-mru-limit 50
   "How many groups the recency cache remembers. Past the limit the oldest
@@ -555,7 +555,6 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (group-resolve-id value)))
     (when id
       (group-frame-context-remove-id! id)
-      (set! *group-mru* (remove (lambda (x) (equal? x id)) *group-mru*))
       (with-group-records-lock (lambda ()
         (set! *group-records*
           (remove (lambda (record) (equal? (group-record-id record) id))
@@ -725,12 +724,24 @@ is forgotten and that group falls back to creation order in the switcher."
             entry))
       *frame-locals*)))
 
+;; the groups this session went to, newest first, then the ones the last
+;; session ended with; a deleted group drops out
+(define (group-ids-mru-recent)
+  (let loop ((ids (append (mru-groups) group--saved-mru)) (found '()))
+    (if (null? ids)
+        (reverse found)
+        (let ((id (group-resolve-id (car ids))))
+          (loop (cdr ids)
+                (if (and id (group-record-by-id id) (not (member id found)))
+                    (cons id found)
+                    found))))))
+
 ;; Registered before groups-v2, so it restores after it: the records are
 ;; already in place when the cache lands.
 (persist-global! 'group-mru
-  (lambda () *group-mru*)
+  (lambda () (take (group-ids-mru-recent) group-mru-limit))
   (lambda (saved)
-    (when (pair? saved) (set! *group-mru* (take saved group-mru-limit)))))
+    (when (pair? saved) (set! group--saved-mru (take saved group-mru-limit)))))
 
 (persist-global! 'group-frame-contexts
   group-frame-context-state
@@ -2079,36 +2090,12 @@ is forgotten and that group falls back to creation order in the switcher."
   (let ((id (group-resolve-id value)))
     ;; a walk of the tabs looks at groups; only where it lands counts
     (when (and id (not (frame-local 'tab-walk)))
-      (set! *group-mru*
-            (take (cons id (remove (lambda (x) (equal? x id)) *group-mru*))
-                    group-mru-limit))
       (desktop-dirty!)
       (mru-note-group! id))
     id))
 
-;; the cached order, minus the groups that have since been deleted
-(define (group-mru-ids)
-  (filter (lambda (id) (and (group-record-by-id id) #t)) *group-mru*))
-
-;; the group marks left in the shared buffer/group ring. A group switched
-;; to before this cache existed is only found here.
-(define (group-mru-history-ids)
-  (let loop ((rows (mru-list)) (found '()))
-    (if (null? rows)
-        (reverse found)
-        (let* ((row (car rows))
-               (id (and (equal? (car row) "group")
-                        (group-resolve-id (car (cdr row))))))
-          (loop (cdr rows)
-                (if (and id (not (member id found)))
-                    (cons id found)
-                    found))))))
-
 (define (group-ids-mru-all)
-  (let* ((cached (group-mru-ids))
-         (stream (filter (lambda (id) (not (member id cached)))
-                         (group-mru-history-ids)))
-         (recent (append cached stream)))
+  (let ((recent (group-ids-mru-recent)))
     (append recent
             (filter (lambda (id) (not (member id recent))) (group-ids)))))
 

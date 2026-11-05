@@ -357,6 +357,9 @@ defmodule Compos.Core.Editor do
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
+  @doc "Group names by recency, newest first, also those buffer visits pushed out of the ring."
+  def mru_groups, do: GenServer.call(__MODULE__, :mru_groups)
+
   # Emacs last-command (yank-pop and friends dispatch on it), per frame
   def set_last_command(name, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_last_command, name, fid(fid)})
@@ -1629,7 +1632,9 @@ defmodule Compos.Core.Editor do
     live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
     rest = Enum.sort(Compos.Core.buffer_names() -- live)
     Compos.Core.MetaDb.bury(buffer)
-    {:reply, :ok, %{state | mru: List.delete(live ++ rest, buffer) ++ [buffer]}}
+    marks = Enum.filter(state.mru, &match?({:group, _}, &1))
+    state = %{state | mru: List.delete(live ++ rest, buffer) ++ [buffer]}
+    {:reply, :ok, keep_group_tail(state, marks, Map.get(state, :group_tail, []))}
   end
 
   def handle_call(:buffer_mru, _from, state) do
@@ -1677,6 +1682,13 @@ defmodule Compos.Core.Editor do
       end)
 
     {:reply, rows, state}
+  end
+
+  # the groups by recency, newest first: the marks of the ring, then the
+  # ones it pushed out. Group recency has this one owner.
+  def handle_call(:mru_groups, _from, state) do
+    marks = for {:group, g} <- state.mru ++ Map.get(state, :group_tail, []), do: g
+    {:reply, Enum.uniq(marks), state}
   end
 
   def handle_call({:mru_note_group, g}, _from, state),
@@ -2256,8 +2268,19 @@ defmodule Compos.Core.Editor do
 
   defp bump_mru(state, _other), do: state
 
-  defp push_mru(state, entry),
-    do: %{state | mru: Enum.take([entry | List.delete(state.mru, entry)], 500)}
+  # the ring holds 500 entries. A group mark it pushes out, or a bury
+  # drops, waits in group_tail, 50 at most: buffer visits never make the
+  # editor forget which group came last (mru_groups, group-ids-mru-all)
+  defp push_mru(state, entry) do
+    {window, out} = Enum.split([entry | List.delete(state.mru, entry)], 500)
+    tail = List.delete(Map.get(state, :group_tail, []), entry)
+    keep_group_tail(%{state | mru: window}, out, tail)
+  end
+
+  defp keep_group_tail(state, dropped, tail) do
+    marks = Enum.filter(dropped, &match?({:group, _}, &1))
+    Map.put(state, :group_tail, Enum.take(Enum.uniq(marks ++ tail), 50))
+  end
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}

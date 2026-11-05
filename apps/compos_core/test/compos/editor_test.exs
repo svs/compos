@@ -1514,6 +1514,21 @@ defmodule Compos.EditorTest do
     assert Process.whereis(Editor) == pid
   end
 
+  test "a group mark outlives buffer visits and a bury", %{buf: buf} do
+    pid = Process.whereis(Editor)
+    names = for i <- 1..499, do: "zz-ring-\#{i}"
+    :sys.replace_state(pid, fn state -> Map.put(%{state | mru: names ++ [{:group, "g"}]}, :group_tail, []) end)
+
+    # the 500th entry pushes the mark out of the ring the switcher reads
+    Editor.set_window_buffer(buf)
+    refute ["group", "g"] in Editor.mru_all()
+    assert Editor.mru_groups() == ["g"]
+
+    Editor.mru_note_group("h")
+    Editor.mru_bury(buf)
+    assert Editor.mru_groups() == ["h", "g"]
+  end
+
   test "find-file TAB filename completion completes and descends directories" do
     root = Path.join(System.tmp_dir!(), "compos-fc-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "subdir"))

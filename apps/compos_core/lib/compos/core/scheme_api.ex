@@ -676,6 +676,9 @@ defmodule Compos.Core.SchemeAPI do
       {"mru-list",
        "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order."} =>
         fn [] -> Editor.mru_all() end,
+      {"mru-groups",
+       "(mru-groups) — return the groups in recency order, newest first: every group mark of the history, also the ones buffer visits pushed out."} =>
+        fn [] -> Editor.mru_groups() end,
       {"mru-note-group!", "(mru-note-group! NAME) — record a group switch as a history entry."} =>
         fn [g] ->
           Editor.mru_note_group(g)

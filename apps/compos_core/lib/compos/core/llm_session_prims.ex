@@ -76,6 +76,14 @@ defmodule Compos.Core.LLMSession.Prims do
             {:error, _} -> false
           end
         end,
+      {"llm-session-promote!",
+       "(llm-session-promote! ID TEXT) — move one queued prompt to the front of the queue; #f when it already left the queue."} =>
+        fn [id, text] ->
+          case Compos.Core.LLMSession.promote(s(id), s(text)) do
+            :ok -> true
+            {:error, _} -> false
+          end
+        end,
       {"llm-session-close!", "(llm-session-close! ID) — close an LLM session."} => fn [id] ->
         Compos.Core.LLMSession.close(s(id))
         :void

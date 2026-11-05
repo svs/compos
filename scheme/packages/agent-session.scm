@@ -780,6 +780,28 @@
                (llm-session-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
 
+(define (agent-promote! slug text)
+  (llm-session-promote! slug text))
+
+;; C-RET with text sends it like RET, and a message that queues goes to the
+;; front: it runs next, ahead of what waited. With no text C-RET interrupts.
+(define-command "chat-send-next" "Send the input as the next message, ahead of the queue"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf))
+           (before (length (or (buffer-local buf 'chat-queued) '()))))
+      (if (equal? (string-trim (chat-input-text buf)) "")
+          (run-command "agent-interrupt-send")
+          (begin
+            (run-command "agent-send")
+            (let ((q (or (buffer-local buf 'chat-queued) '())))
+              (when (and slug (> (length q) before) (> (length q) 1))
+                (let ((text (list-ref q (- (length q) 1))))
+                  (when (agent-promote! slug text)
+                    (buffer-set-local! buf 'chat-queued
+                      (cons text (list-head q (- (length q) 1))))
+                    (message "queued first — runs when this turn ends"))))))))))
+
 (define-command "chat-abort" "Stop the reply in flight in this chat"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -1220,7 +1242,7 @@
     ("DEL" "chat-delete-backward")
     ("C-d" "chat-delete-forward")
     ("RET" "agent-send")
-    ("C-RET" "agent-interrupt-send")
+    ("C-RET" "chat-send-next")
     ("s-RET" "chat-send-new")
     ("C-g" "chat-abort")
     ("TAB" "agent-toggle-fold")

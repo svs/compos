@@ -34,6 +34,7 @@ defmodule Compos.Core.LLMSession do
     do: Agent.prompt(id, text, display, images)
   def steer_next(id), do: Agent.steer_next(id)
   def dequeue(id, text), do: Agent.dequeue(id, text)
+  def promote(id, text), do: Agent.promote(id, text)
   def cancel(id), do: Agent.cancel(id)
   def set_model(id, model), do: Agent.set_model(id, model)
   def set_effort(id, effort), do: Agent.set_effort(id, effort)

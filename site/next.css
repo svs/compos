@@ -188,8 +188,8 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .plate img { display: block; width: 100%; height: auto; background: var(--night); border: 1px solid #2b2720; }
 .plate img.for-dark { display: none; }
 .plate figcaption { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 10px; margin-top: 22px; font-family: var(--mono); text-align: center; }
-.plate figcaption b { font-weight: 300; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: -.02em; }
-.plate figcaption span { font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 56ch; }
+.plate figcaption b { font-weight: 300; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.1; letter-spacing: -.02em; }
+.plate figcaption span { font-size: 13px; line-height: 1.55; color: var(--ink-2); max-width: 56ch; }
 .slides { display: grid; }
 .js .slides { position: relative; overflow-x: clip; touch-action: pan-y; }
 .js .slides img { -webkit-user-drag: none; user-select: none; }

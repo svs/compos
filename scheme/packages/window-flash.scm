@@ -1,7 +1,8 @@
 ;;; window-flash.scm --- a chat says where it stands as it comes to the
 ;;; front. Cycling a pane (pane-next-window, pane-previous-window) to a chat
 ;;; flashes a card over its window for a moment: the chat's title, its last
-;;; summary and its state. Other buffers flash nothing.
+;;; summary and its state. The card goes once you stay on the chat. Other
+;;; buffers flash nothing.
 
 (require 'panes-mode)
 
@@ -45,6 +46,21 @@
            (debounce! 'window-flash window-flash-ms
              (lambda (b) (window-flash--clear! b) (set! window-flash--buf #f)) buf)
            #t))))
+
+;; The card says where a chat stands while you cycle to it. Once you stay,
+;; the first other command takes it away: a key typed in the chat, C-g, or
+;; the end of a walk. Only another step of the cycle keeps it.
+(define window-flash--cycle-commands
+  '("pane-next-window" "pane-previous-window"
+    "window-next-mode-buffer" "window-previous-mode-buffer"
+    "window-next-buffer" "window-previous-buffer"))
+
+(define (window-flash--settled!)
+  (when (and window-flash--buf (not (member (this-command) window-flash--cycle-commands)))
+    (window-flash--clear! window-flash--buf)
+    (set! window-flash--buf #f)))
+
+(add-hook! 'post-command-hook 'window-flash--settled!)
 
 (public! 'window-flash-card "(window-flash-card BUF) -> (TITLE SUMMARY STATE) a window flashes for the chat BUF, or #f")
 (catalog-meta! 'function "window-flash-card" 'effects '(read))

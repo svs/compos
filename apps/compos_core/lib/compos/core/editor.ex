@@ -23,7 +23,7 @@ defmodule Compos.Core.Editor do
 
   use GenServer
 
-  alias Compos.Core.{Buffer, Candidates, Events, Frame, Session}
+  alias Compos.Core.{Buffer, Candidates, Events, Frame, Recent, Session}
 
   # Emacs window-configuration-change-hook, by its Scheme name
   @config_hook "window-configuration-changed!"
@@ -348,18 +348,6 @@ defmodule Compos.Core.Editor do
   def set_frame_faces(ops, skin, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_frame_faces, ops, skin, fid(fid)})
 
-  @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
-  def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
-
-  @doc "Move BUFFER to the end of the buffer list (Emacs bury-buffer)."
-  def mru_bury(buffer), do: GenServer.call(__MODULE__, {:mru_bury, buffer})
-
-  def mru_all, do: GenServer.call(__MODULE__, :mru_all)
-  def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
-
-  @doc "Group names by recency, newest first, also those buffer visits pushed out of the ring."
-  def mru_groups, do: GenServer.call(__MODULE__, :mru_groups)
-
   # Emacs last-command (yank-pop and friends dispatch on it), per frame
   def set_last_command(name, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_last_command, name, fid(fid)})
@@ -484,7 +472,7 @@ defmodule Compos.Core.Editor do
   """
   def visible_buffers, do: GenServer.call(__MODULE__, :visible_buffers)
 
-  @doc "Carry windows and MRU state across a buffer rename; Scheme carries the keymaps."
+  @doc "Carry windows and the recent order across a buffer rename; Scheme carries the keymaps."
   def rename_buffer(old, new), do: GenServer.call(__MODULE__, {:rename_buffer, old, new})
 
   # A dormant buffer named here wakes inside the handler, through the one
@@ -631,7 +619,6 @@ defmodule Compos.Core.Editor do
        faces: %{},
        styles: %{},
        undo_exempt: MapSet.new(["undo"]),
-       mru: Enum.uniq([@scratch | Compos.Core.BufferStore.history()]),
        # frame id => text a command wants on that client's OS clipboard
        clips: %{},
        # frame id => URL for same-tab navigation on the next client render
@@ -656,7 +643,7 @@ defmodule Compos.Core.Editor do
 
       nil ->
         id = if valid_frame_id?(id), do: id, else: gen_frame_id()
-        buffer = List.first(Enum.filter(state.mru, &Buffer.exists?/1)) || live_scratch()
+        buffer = Recent.find_buffer(&Buffer.exists?/1) || live_scratch()
 
         frame = %{
           id: id,
@@ -1197,10 +1184,10 @@ defmodule Compos.Core.Editor do
     visible = Enum.flat_map(state.frames, fn {_id, f} -> visible_buffers(f.tree) end)
 
     fallback =
-      Enum.find(state.mru, fn b ->
+      Recent.find_buffer(fn b ->
         b != buffer and b not in visible and Buffer.exists?(b)
       end) ||
-        Enum.find(state.mru, fn b ->
+        Recent.find_buffer(fn b ->
           b != buffer and Buffer.exists?(b)
         end) ||
         # the recent list can lack every live buffer; a refill must never
@@ -1238,7 +1225,8 @@ defmodule Compos.Core.Editor do
         end
       end)
 
-    changed(:ok, %{state | frames: frames, mru: List.delete(state.mru, buffer)})
+    Recent.forget(buffer)
+    changed(:ok, %{state | frames: frames})
   end
 
   def handle_call({:rename_buffer, old, new}, _from, state) do
@@ -1247,9 +1235,8 @@ defmodule Compos.Core.Editor do
         {id, %{f | tree: swap_buffer(f.tree, old, new)}}
       end)
 
-    mru = state.mru |> Enum.map(&if(&1 == old, do: new, else: &1)) |> Enum.uniq()
-
-    changed(:ok, %{state | frames: frames, mru: mru})
+    Recent.rename(old, new)
+    changed(:ok, %{state | frames: frames})
   end
 
   def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
@@ -1625,28 +1612,7 @@ defmodule Compos.Core.Editor do
     changed(reply, put_frame(state, %{f | minibuffer: nil}), f.id)
   end
 
-  # The whole known list goes into the MRU in its shown order, then BUFFER
-  # moves to its end: a buffer never used would otherwise sort after it.
-  def handle_call({:mru_bury, buffer}, _from, state) do
-    known = MapSet.new(Compos.Core.buffer_names())
-    live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
-    rest = Enum.sort(Compos.Core.buffer_names() -- live)
-    Compos.Core.MetaDb.bury(buffer)
-    marks = Enum.filter(state.mru, &match?({:group, _}, &1))
-    state = %{state | mru: List.delete(live ++ rest, buffer) ++ [buffer]}
-    {:reply, :ok, keep_group_tail(state, marks, Map.get(state, :group_tail, []))}
-  end
-
-  def handle_call(:buffer_mru, _from, state) do
-    known = MapSet.new(Compos.Core.buffer_names())
-    live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
-    rest = Compos.Core.buffer_names() -- live
-
-    # space-prefixed buffers are internal (the minibuf), hidden like Emacs
-    {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
-  end
-
-  # a window's stack count, for its header line: Scheme keeps the
+      # a window's stack count, for its header line: Scheme keeps the
   # history (window.scm) and hands the number over, keyed by window id
   # so a layout restore keeps it
   def handle_call({:set_window_stack, win, n}, _from, state) do
@@ -1665,36 +1631,9 @@ defmodule Compos.Core.Editor do
 
   # the WHOLE history, group marks included: a group switch is an entry
   # like any buffer visit, so one stream ranks every place you went
-  def handle_call(:mru_all, _from, state) do
-    # one read of the names, not one per entry: each read walks the registry
-    # and the store, and the history holds dozens of entries
-    known = MapSet.new(Compos.Core.buffer_names())
-
-    rows =
-      Enum.flat_map(state.mru, fn
-        {:group, g} -> [["group", g]]
-        b when is_binary(b) -> if MapSet.member?(known, b), do: [["buffer", b]], else: []
-        # anything else is not a place the user went. Drop it, never raise
-        # on it: this runs inside Editor.handle_call, and a raise here kills
-        # the Editor and takes every buffer's local keymap with it. A chat
-        # that loses its keymap stops sending on RET.
-        _ -> []
-      end)
-
-    {:reply, rows, state}
-  end
-
-  # the groups by recency, newest first: the marks of the ring, then the
+    # the groups by recency, newest first: the marks of the ring, then the
   # ones it pushed out. Group recency has this one owner.
-  def handle_call(:mru_groups, _from, state) do
-    marks = for {:group, g} <- state.mru ++ Map.get(state, :group_tail, []), do: g
-    {:reply, Enum.uniq(marks), state}
-  end
-
-  def handle_call({:mru_note_group, g}, _from, state),
-    do: changed(:ok, bump_mru(state, {:group, g}))
-
-  def handle_call({:set_last_command, name, fid}, _from, state),
+      def handle_call({:set_last_command, name, fid}, _from, state),
     do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :last_command, name))}
 
   def handle_call({:last_command, fid}, _from, state),
@@ -2255,32 +2194,18 @@ defmodule Compos.Core.Editor do
     %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, nil)]}
   end
 
-  # the history holds buffer names and group marks. A window with no buffer
-  # offers `false` here; it names no place, so it never enters the history.
+  # A window with no buffer offers `false` here; it names no place, so it
+  # never enters the recent order (Compos.Core.Recent).
   defp bump_mru(state, buffer) when is_binary(buffer) do
     Compos.Core.BufferStore.touch(buffer)
     Compos.Core.BufferView.note_used(buffer, System.system_time(:millisecond))
     if Buffer.exists?(buffer), do: Buffer.touch(buffer)
-    push_mru(state, buffer)
+    # an insert into the order's own table, in this process: no call
+    Recent.bump(buffer)
+    state
   end
-
-  defp bump_mru(state, {:group, _} = mark), do: push_mru(state, mark)
 
   defp bump_mru(state, _other), do: state
-
-  # the ring holds 500 entries. A group mark it pushes out, or a bury
-  # drops, waits in group_tail, 50 at most: buffer visits never make the
-  # editor forget which group came last (mru_groups, group-ids-mru-all)
-  defp push_mru(state, entry) do
-    {window, out} = Enum.split([entry | List.delete(state.mru, entry)], 500)
-    tail = List.delete(Map.get(state, :group_tail, []), entry)
-    keep_group_tail(%{state | mru: window}, out, tail)
-  end
-
-  defp keep_group_tail(state, dropped, tail) do
-    marks = Enum.filter(dropped, &match?({:group, _}, &1))
-    Map.put(state, :group_tail, Enum.take(Enum.uniq(marks ++ tail), 50))
-  end
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}

@@ -171,7 +171,7 @@ defmodule Compos.BufferLifecycleTest do
     assert Buffer.path(destination) == destination
     assert Buffer.eviction_info(destination).id == id
     assert Editor.current_buffer() == destination
-    assert destination in Editor.buffer_mru()
+    assert destination in Compos.Core.Recent.buffers()
 
     Editor.set_window_buffer("*scratch*")
     Compos.Core.kill_buffer(destination)
@@ -192,7 +192,7 @@ defmodule Compos.BufferLifecycleTest do
     Buffer.touch(name)
 
     assert eventually(fn -> not Buffer.exists?(name) end)
-    assert name in Editor.buffer_mru()
+    assert name in Compos.Core.Recent.buffers()
     refute Buffer.exists?(name)
 
     Editor.set_window_buffer(name)
@@ -212,7 +212,7 @@ defmodule Compos.BufferLifecycleTest do
 
     :ok = Compos.Core.kill_buffer(name)
     refute BufferStore.known?(name)
-    refute name in Editor.buffer_mru()
+    refute name in Compos.Core.Recent.buffers()
   end
 
   test "renaming a dormant file updates its catalog without retaining a process" do

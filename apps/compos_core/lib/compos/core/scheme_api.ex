@@ -666,22 +666,22 @@ defmodule Compos.Core.SchemeAPI do
       end,
       {"buffer-list-mru",
        "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers."} =>
-        fn [] -> Editor.buffer_mru() end,
+        fn [] -> Compos.Core.Recent.buffers() end,
       {"buffer-bury!", "(buffer-bury! BUF) — move BUF to the end of the buffer list."} => fn [buf] ->
-        Editor.mru_bury(Compos.Core.Prims.s(buf))
+        Compos.Core.Recent.bury(Compos.Core.Prims.s(buf))
         :void
       end,
       # the whole history: ("buffer" NAME) and ("group" NAME) rows in
       # recency order — a group switch is an entry like a buffer visit
       {"mru-list",
        "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order."} =>
-        fn [] -> Editor.mru_all() end,
+        fn [] -> Compos.Core.Recent.all() end,
       {"mru-groups",
        "(mru-groups) — return the groups in recency order, newest first: every group mark of the history, also the ones buffer visits pushed out."} =>
-        fn [] -> Editor.mru_groups() end,
+        fn [] -> Compos.Core.Recent.groups() end,
       {"mru-note-group!", "(mru-note-group! NAME) — record a group switch as a history entry."} =>
         fn [g] ->
-          Editor.mru_note_group(g)
+          Compos.Core.Recent.bump({:group, g})
           :void
         end,
       {"buffer-exists?", "(buffer-exists? NAME) — return #t if the buffer NAME exists."} => fn [

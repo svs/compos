@@ -75,6 +75,9 @@ defmodule Compos.Core.Application do
       # init, so the table must already exist when the first one starts
       Compos.Core.BufferView,
       Compos.Core.BufferStore,
+      # the recent order, seeded from the store's history; before the
+      # Editor, which bumps it, and MetaDb, which reads it
+      Compos.Core.Recent,
       # every buffer's metadata changes, batched, to the Scheme handler
       Compos.Core.BufferMeta,
       # the buffer metadata as SQLite rows, meta.db

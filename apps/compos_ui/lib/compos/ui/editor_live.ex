@@ -1492,7 +1492,7 @@ defmodule Compos.Ui.EditorLive do
   # ones and how many, and this asks again only when the frame's group,
   # the buffer order or a walk of the tabs moved: nothing per keystroke.
   defp frame_tabs(socket, state) do
-    key = {state.frame_group, Compos.Core.Editor.buffer_mru(), chrome(state, "tabs-walk", "")}
+    key = {state.frame_group, Compos.Core.Recent.buffers(), chrome(state, "tabs-walk", "")}
 
     if key == socket.assigns[:tabs_key] do
       {socket.assigns[:tabs] || @no_tabs, key}

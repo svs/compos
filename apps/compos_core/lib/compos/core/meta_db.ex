@@ -386,11 +386,11 @@ defmodule Compos.Core.MetaDb do
   # from it: newest just below now, so every use from here on ranks above.
   # A buffer it does not name has no use, and sorts by name below them all.
   defp seed_used(state) do
-    # the editor's own list when it runs; at boot it has not started, and
-    # the history is what it will start from
+    # the recent order when it runs; at boot it has not started, and the
+    # history is what it will start from
     history =
-      if Process.whereis(Compos.Core.Editor),
-        do: Compos.Core.Editor.buffer_mru(),
+      if Process.whereis(Compos.Core.Recent),
+        do: Compos.Core.Recent.buffers(),
         else: Compos.Core.BufferStore.history()
 
     now = System.system_time(:millisecond)

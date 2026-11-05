@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # next.html is the homepage; the site root serves it.
+      - run: cp site/next.html site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

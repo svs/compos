@@ -185,9 +185,9 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .gal-tabs button[aria-selected='true'] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .gal-tabs button:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
 .plate { margin: 0; }
-.plate img { display: block; width: 100%; height: auto; background: var(--night); border: 1px solid #2b2720; box-shadow: 0 40px 90px -40px rgba(60, 40, 10, .6); }
+.plate img { display: block; width: 100%; height: auto; background: var(--night); border: 1px solid #2b2720; }
 .plate img.for-dark { display: none; }
-.plate figcaption { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 32px; margin-top: 22px; }
+.plate figcaption { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 10px; margin-top: 22px; font-family: var(--mono); text-align: center; }
 .plate figcaption b { font-weight: 300; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: -.02em; }
 .plate figcaption span { font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 56ch; }
 .slides { display: grid; }
@@ -386,6 +386,7 @@ footer { border-top: 1px solid var(--rule); }
 :root[data-theme=dark] ::selection { background: #3a4570; color: #efe9dc; }
 :root[data-theme=dark] .plate img.for-light { display: none; }
 :root[data-theme=dark] .plate img.for-dark { display: block; }
-:root[data-theme=dark] .film, :root[data-theme=dark] .plate img, :root[data-theme=dark] .ask { border-color: #302b23; box-shadow: 0 40px 90px -40px rgba(0, 0, 0, .8); }
+:root[data-theme=dark] .film, :root[data-theme=dark] .ask { border-color: #302b23; box-shadow: 0 40px 90px -40px rgba(0, 0, 0, .8); }
+:root[data-theme=dark] .plate img { border-color: #302b23; }
 .theme { all: unset; cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
 .theme:hover { color: var(--ink); }

@@ -28,7 +28,7 @@
     if (cleanupGallery) { cleanupGallery(); cleanupGallery = null; }
     currentGallery = nextGallery;
     if (!nextGallery) return;
-  // The app screenshots turn every 6 s; a pointer on them holds the turn.
+  // The app screenshots turn every 6 s, whatever the pointer does.
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.gal-tabs [role=tab]'));
   var gallery = nextGallery;
   var galleryTimer = null, galleryVisible = false;
@@ -102,8 +102,6 @@
       if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
     });
     slides.addEventListener('pointercancel', function () { downX = null; });
-    slides.addEventListener('mouseenter', function () { galleryPaused = true; scheduleGallery(); });
-    slides.addEventListener('mouseleave', function () { galleryPaused = false; scheduleGallery(); });
     document.addEventListener('visibilitychange', scheduleGallery);
     var galleryObserver = new IntersectionObserver(function (es) {
       galleryVisible = es[0].isIntersecting;

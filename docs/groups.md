@@ -368,7 +368,7 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `switch` | `group-switch` | `C-x g`; `RET` in the board |
 | `switch-last` | `group-switch-last` | `C-x C-g C-g` |
 | `switch-to-buffer-group` | `buffer-context-switch!` | `C-RET` in the switcher |
-| `new` | `group-new` | `C-x C-g n`; `C-c C-n` in the group switcher |
+| `new` | `group-new` | `C-x C-g n`; `M-RET` in the group switcher |
 | `dissolve` | `group-dissolve` | `x` in the board |
 | `kill` | `group-kill` | `K` in the board |
 | `rename` | `group-rename` | `r` in the board |
@@ -515,11 +515,7 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 `C-x g` lists this frame's groups in MRU order, and the current group
 comes last. In a mixed frame the groups of the selected buffer come first.
 Groups with no MRU entry trail in creation order. The non-empty pseudo groups
-follow, then other frames' groups in a marked section. The new-group action is
-`C-c C-n` in the switcher, not a row. Its label says whether it starts empty,
-moves the selected buffer, or starts with it. The text you typed to filter
-the list names the new group, so a search that finds nothing becomes the
-group. With no text, `C-c C-n` asks for a name.
+follow, then other frames' groups in a marked section. When the typed text is not the name of a group, the last row is that text under the heading `new group - M-RET`. The row has its own section, so it stays under every group that the text matches, and the highlight starts on the first match. `RET` on the row, or `M-RET` anywhere, founds the group that the text names. The row's annotation says whether the new group starts empty, moves the current buffer, or starts with it.
 
 ### Candidate preview
 

@@ -1,6 +1,37 @@
-![compos](apps/compos_ui/priv/static/images/compos-study-symbolic-composition-v1.png)
+![compos](site/images/compos-logo-clear.png)
 
 # compos
+
+## Install and run
+
+To install with an AI agent, point the agent at [INSTALL.md](INSTALL.md).
+
+```sh
+mix deps.get && mix test
+mix run --no-halt
+open -na "Google Chrome" --args --app=http://localhost:4004
+```
+
+The daemon watches `apps/*/lib`, `apps/compos_core/priv`, `scheme/`, and the
+config home. When you save a file, the daemon reloads it without a restart.
+Browser clients reload themselves through a boot-id check.
+
+Each daemon records its name and URL in `~/.compos/daemons.json`. Run another
+daemon with a different home and port, then use `C-x d` to switch the current
+browser tab. Set `COMPOS_DAEMON_REGISTRY` when the daemons must share another
+registry path.
+
+```sh
+COMPOS_HOME=~/.compos-feature COMPOS_PORT=4014 COMPOS_APP_PORT=4015 \
+  COMPOS_NAME=feature COMPOS_ACCENT="#3f7cac" mix run --no-halt
+```
+
+`COMPOS_ACCENT` adds a persistent colored frame and instance label. Use a
+six-digit CSS hex color so each daemon has a stable visual identity.
+
+In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
+`C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,
+`C-/` undoes, `M-x` runs a command, and `M-:` evaluates Scheme.
 
 ## on the plight of the modern worker, and some solutions
 
@@ -106,37 +137,6 @@ apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 
 Your config loads from `~/.compos/ai-config.scm`, then `~/.compos/init.scm`,
 then the saved `~/.compos/custom.scm`. All three are optional.
-
-## Run it
-
-To install with an AI agent, point the agent at [INSTALL.md](INSTALL.md).
-
-```sh
-mix deps.get && mix test
-mix run --no-halt
-open -na "Google Chrome" --args --app=http://localhost:4004
-```
-
-The daemon watches `apps/*/lib`, `apps/compos_core/priv`, `scheme/`, and the
-config home. When you save a file, the daemon reloads it without a restart.
-Browser clients reload themselves through a boot-id check.
-
-Each daemon records its name and URL in `~/.compos/daemons.json`. Run another
-daemon with a different home and port, then use `C-x d` to switch the current
-browser tab. Set `COMPOS_DAEMON_REGISTRY` when the daemons must share another
-registry path.
-
-```sh
-COMPOS_HOME=~/.compos-feature COMPOS_PORT=4014 COMPOS_APP_PORT=4015 \
-  COMPOS_NAME=feature COMPOS_ACCENT="#3f7cac" mix run --no-halt
-```
-
-`COMPOS_ACCENT` adds a persistent colored frame and instance label. Use a
-six-digit CSS hex color so each daemon has a stable visual identity.
-
-In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
-`C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,
-`C-/` undoes, `M-x` runs a command, and `M-:` evaluates Scheme.
 
 ## Say what you want
 

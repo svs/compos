@@ -915,7 +915,8 @@
       (notify! "chat"
                (string-append (if (eq? status 'blocked) "Blocked: " "Needs you: ")
                               (chats-title buf))
-               why))))
+               why
+               (list 'buffer buf)))))
 (add-hook! 'chat-status-hook 'agents-goal-notify!)
 
 (define (agents-goal-restate! buf status why)

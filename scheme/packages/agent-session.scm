@@ -855,7 +855,7 @@
         (begin
           (ignore-errors (lambda () (chat-log-save! buf)))
           (agents-archive! buf)
-          (notify! "chat" (string-append "Done: " title) summary)
+          (notify! "chat" (string-append "Done: " title) summary (list 'buffer buf))
           'closed)
         (let ((why (string-join
                     (append (cond ((not outcome) '("the agent did not say it is done"))
@@ -868,7 +868,7 @@
               (begin
                 (buffer-set-local! buf 'chat-reaped #t)
                 (message (string-append "Kept: " title ": " why)))
-              (notify! "chat" (string-append "Kept: " title) why))
+              (notify! "chat" (string-append "Kept: " title) why (list 'buffer buf)))
           'kept))))
 
 (define (chat-finish-turn-end! slug stop-reason ok?)
@@ -1002,7 +1002,7 @@
       (let ((title (chats-title buf)))
         (ignore-errors (lambda () (chat-log-save! buf)))
         (agents-archive! buf)
-        (notify! "chat" (string-append "Done: " title) why)))))
+        (notify! "chat" (string-append "Done: " title) why (list 'buffer buf))))))
 
 (add-hook! 'chat-status-hook 'chat-auto-close--status!)
 

@@ -21,7 +21,8 @@
 
 (define *notifications-buffer* "*notifications*")
 
-;; the notices on screen, newest first, as (SEQ SOURCE TITLE BODY); survives a reload
+;; the notices on screen, newest first, as (SEQ SOURCE TITLE BODY BUFFER),
+;; BUFFER the one the notice is about or #f; survives a reload
 (define *notifications-shown* (if (boundp '*notifications-shown*) *notifications-shown* '()))
 
 (effects! '(pure))
@@ -53,7 +54,8 @@
     (set! *notifications-shown*
           (take (cons (list seq (notifications--source e)
                             (or (notifications--data e 'title) "")
-                            (or (notifications--data e 'body) ""))
+                            (or (notifications--data e 'body) "")
+                            (or (notifications--data e 'buffer) #f))
                       *notifications-shown*)
                 (min notifications-max-shown (+ 1 (length *notifications-shown*)))))
     (notifications--publish!)
@@ -61,6 +63,18 @@
                (* 1000 notifications-seconds)
                (lambda (s) (notifications-dismiss! s))
                seq)))
+
+;; a notice about a buffer has done its job once you are in that buffer:
+;; its 'buffer prop names it
+(define (notifications--dismiss-here!)
+  (when (pair? *notifications-shown*)
+    (let ((here (window-buffer (active-window))))
+      (for-each (lambda (n)
+                  (when (and (> (length n) 4) here (equal? (nth 4 n) here))
+                    (notifications-dismiss! (car n))))
+                *notifications-shown*))))
+
+(add-hook! 'post-command-hook 'notifications--dismiss-here!)
 
 (define (notifications--saw e)
   "a notice reached the log: show it, unless it is old, as when a restart replays the log"
@@ -70,7 +84,7 @@
 (effects! '(write))
 
 (define (notify! source title &optional body props)
-  "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it for a short time. PROPS is a plist kept with it, such as (topic \"whatsapp:9198...\"). Return its seq"
+  "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it for a short time. PROPS is a plist kept with it, such as (topic \"whatsapp:9198...\"); (buffer BUF) takes the notice off the screen when you go to BUF. Return its seq"
   (event-publish! (string-append "notify:" source) 'notice
                   (append (list 'title title 'body (or body "")) (or props '()))))
 

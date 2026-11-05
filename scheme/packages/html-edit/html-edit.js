@@ -18,7 +18,8 @@
   let queue = Promise.resolve();
   let pending = false;
 
-  const post = (m) => fetch(API, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(m) })
+  // a small edit outlives the page: a reload or a close still sends it
+  const post = (m, body = JSON.stringify(m)) => fetch(API, { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: body.length < 60000 })
     .then((r) => r.json()).catch(() => null);
   // The file changes under the page (the source window, an undo, an
   // agent). The page never reloads, which would lose the text being typed:
@@ -300,7 +301,21 @@
     before = host.innerHTML;
     host.addEventListener("blur", () => { if (editing === host) finishEdit(); }, { once: true });
   }
+  // the open text goes to the file as it is: after a pause in typing, when
+  // the editor takes the focus, and when the page goes away
+  let saveTimer = null;
+  function saveOpen() {
+    clearTimeout(saveTimer);
+    const host = editing;
+    if (!host || !host.isConnected || !src || host.innerHTML === before) return;
+    commitText(host);
+    before = host.innerHTML;
+  }
+  addEventListener("input", () => { if (editing) { clearTimeout(saveTimer); saveTimer = setTimeout(saveOpen, 800); } }, true);
+  addEventListener("blur", (ev) => { if (ev.target === window) saveOpen(); });
+  addEventListener("pagehide", saveOpen);
   function finishEdit() {
+    clearTimeout(saveTimer);
     const host = editing;
     if (!host) return;
     editing = null;

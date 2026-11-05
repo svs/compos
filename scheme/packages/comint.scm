@@ -187,15 +187,31 @@
     (and (not (member (string-downcase t) term--generic-titles))
          (if (> (string-length t) chat-title-max-bytes) (substring t 0 chat-title-max-bytes) t))))
 
+;; the shell's name follows a rename, and the hook tells the listings
+(define (term--renamed! old new)
+  (set! *term-status*
+        (map (lambda (e) (if (equal? (car e) old) (list new (cadr e)) e)) *term-status*))
+  (run-hook-with-args 'terminal-retitle-hook new old))
+
+;; A session names the shell, and the shell keeps the name it had before
+;; (term-home-name). When the agent shows its bare name again, its session
+;; ended, as /clear ends it: the shell takes its own name back, and the
+;; next session names it anew.
 (define (term--title-changed! buf title)
-  (let ((name (and term-session-titles (term-status buf) (term--session-title title))))
-    (when (and name (not (equal? name buf)) (not (equal? (buffer-local buf 'chat-title) name)))
-      ;; chat-title answers the name it took, TITLE<2> when TITLE is taken
-      (let ((new (chat-title buf name)))
-        (when new
-          (set! *term-status*
-                (map (lambda (e) (if (equal? (car e) buf) (list new (cadr e)) e)) *term-status*))
-          (run-hook-with-args 'terminal-retitle-hook new buf))))))
+  (when (and term-session-titles (term-status buf))
+    (let ((name (term--session-title title))
+          (home (buffer-local buf 'term-home-name)))
+      (cond
+        ((and name (not (equal? name buf)) (not (equal? (buffer-local buf 'chat-title) name)))
+         ;; chat-title answers the name it took, TITLE<2> when TITLE is taken
+         (let ((new (chat-title buf name)))
+           (when new
+             (buffer-set-local! new 'term-home-name (or home buf))
+             (term--renamed! buf new))))
+        ((and (not name) home)
+         (buffer-set-locals! buf (list 'term-home-name #f 'chat-title #f))
+         (when (and (not (buffer-known? home)) (rename-buffer! buf home))
+           (term--renamed! buf home)))))))
 
 (on-event! 'terminal-title (lambda (buf title) (term--title-changed! buf title)))
 

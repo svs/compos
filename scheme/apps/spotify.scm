@@ -484,7 +484,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 .sp-name { font-weight: 600; color: var(--default-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-by { color: var(--dim-fg); font-size: .9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 8px; align-items: baseline; }
 .sp-album { flex: 0 1 30%; min-width: 0; color: var(--dim-fg); font-size: .9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-date { flex: none; width: 11ch; text-align: right; color: var(--dim-fg); font-size: .85em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sp-date { flex: none; width: 11ch; text-align: right; color: var(--dim-fg); font-size: .85em; font-variant-numeric: tabular-nums; white-space: nowrap; } .sp-date:empty { display: none; }
 .sp-dur { flex: none; color: var(--dim-fg); font-size: .85em; font-variant-numeric: tabular-nums; }
 .sp-chip { flex: none; font-size: .78em; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-fg); }
 .sp-sub { overflow: hidden; text-overflow: ellipsis; }
@@ -2471,6 +2471,8 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
                             'detail-composed (list *spotify-ambient-tab* *spotify-artist-tab* *spotify-album-tab*) 'detail-default "ambient"
                             ;; a track row holds what the artist and album tabs need; an album row
                             ;; holds only its name, so its page is read for its tracks and artist
+                            ;; opened again, it follows the music and puts the page of what plays beside it
+                            'after-open (lambda (buf) (spotify--playing-section! #f))
                             'detail-lazy (lambda (row) (string-prefix? "/track/" (or (site-app-field row 'href) "")))
                             'detail-count-from-one #t)
                       (spotify--section 'playing "Now Playing" "0"

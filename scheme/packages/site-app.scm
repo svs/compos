@@ -662,8 +662,10 @@
     (when (plist-get spec 'own-group) (frame-tab! (app-group (or (plist-get spec 'title) (symbol->string name)))))
     ;; a page of the app opens in the window you are in, as every app's does
     (if (boundp 'app-open!) (app-open! buf) (switch-to-buffer! buf))
-    (when (null? (site-app-rows buf))
-      (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page))))
+    (if (null? (site-app-rows buf))
+        (site-app-find-tab! name (lambda (tab) (site-app-read-page! name page)))
+        ;; a section already read may bring its page beside it, as its fill does
+        (let ((f (plist-get page 'after-open))) (when f (f buf))))
     buf))
 
 

@@ -53,14 +53,17 @@
     (string-append (expand-path image-gen-directory) "/"
                    (format-time (current-time) "%Y%m%d-%H%M%S") "-" slug ".png")))
 
-(define (image-gen--opts headers)
-  (list 'headers headers 'timeout image-gen-timeout-ms 'max-bytes 64000000))
+;; http-request, not http-post: http-post never answered a slow image reply.
+(define (image-gen--post url headers body k)
+  (http-request url (list 'method "POST" 'headers headers 'json body
+                          'timeout image-gen-timeout-ms 'max-bytes 64000000)
+                k))
 
 ;; Each provider answers the base64 of the PNG, or (error TEXT).
 (define (image-gen--openai model prompt k)
-  (http-post "https://api.openai.com/v1/images/generations"
+  (image-gen--post "https://api.openai.com/v1/images/generations"
+    (list 'authorization (string-append "Bearer " (or (llm-key "openai") "")))
     (list 'model model 'prompt prompt 'n 1 'size image-gen-size 'quality image-gen-quality)
-    (image-gen--opts (list (list "Authorization" (string-append "Bearer " (or (llm-key "openai") "")))))
     (lambda (r)
       (let* ((j (http-json r))
              (data (and j (plist-get j 'data)))
@@ -68,11 +71,10 @@
         (k (or b64 (list 'error (image-gen--why r j))))))))
 
 (define (image-gen--gemini model prompt k)
-  (http-post (string-append "https://generativelanguage.googleapis.com/v1beta/models/" model
-                            ":generateContent?key=" (or (llm-key "gemini") ""))
+  (image-gen--post (string-append "https://generativelanguage.googleapis.com/v1beta/models/" model ":generateContent")
+    (list 'x-goog-api-key (or (llm-key "gemini") ""))
     (list 'contents (list (list 'parts (list (list 'text prompt))))
           'generationConfig (list 'responseModalities (list "IMAGE")))
-    (image-gen--opts '())
     (lambda (r)
       (let* ((j (http-json r))
              (cands (and j (plist-get j 'candidates)))

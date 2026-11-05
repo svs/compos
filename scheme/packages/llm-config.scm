@@ -916,7 +916,7 @@
 ;;; a feature and one table moves every job at once.
 
 (defcustom 'llm-model-presets
-  '((default . "") (fast . "") (summarize . "") (coding . ""))
+  '((default . "") (fast . "") (summarize . "") (coding . "") (image . ""))
   "((ROLE . MODEL-ID) ...) - the model each named job uses. Empty means the session model."
   'group 'llm)
 

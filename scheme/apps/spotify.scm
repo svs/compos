@@ -2986,6 +2986,18 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
 (define-command "spotify-now-context" "Go to Now Playing: the list that plays, on the track that plays"
   (lambda () (spotify--playing-section! #t)))
 
+(define-command "spotify-back-to-playing" "Put the Now Playing list back on the track that plays, its page beside"
+  (lambda ()
+    (let ((buf (current-buffer))
+          (href (spotify--now-field 'trackHref)))
+      (cond ((not (equal? buf (site-app-page-buffer 'spotify 'playing))) (run-command "keyboard-quit"))
+            ((spotify--show-playing-row! buf))
+            ;; the list does not hold it: its page beside all the same
+            ((and (string? href) (not (equal? href "")))
+             (with-frame-windows
+               (lambda () (site-app-show-detail! buf (list 'href href 'kind "track" 'name (spotify--now-field 'title))))))
+            (else (message "Nothing is playing"))))))
+
 (define-command "spotify-detail-follow" "Follow the link on this line: a review or a story reads beside the page"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -3048,7 +3060,10 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   ;; a page is not a list: its arrows step from part to part
   (define-key (mode-keymap "spotify-detail-mode") "<down>" "site-app-detail-next")
   (define-key (mode-keymap "spotify-detail-mode") "<up>" "site-app-detail-prev")
-  (define-key (mode-keymap "spotify-detail-mode") "RET" "spotify-detail-follow"))
+  (define-key (mode-keymap "spotify-detail-mode") "RET" "spotify-detail-follow")
+  ;; the page beside follows the row; C-g and ESC give it back to what plays
+  (define-key (mode-keymap "spotify-mode") "C-g" "spotify-back-to-playing")
+  (define-key (mode-keymap "spotify-mode") "<escape>" "spotify-back-to-playing"))
 
 (define (spotify--own-nav!)
   ;; detail-mode's N and P walk the list beside the page, and its map is

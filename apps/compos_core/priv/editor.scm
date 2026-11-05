@@ -3795,14 +3795,8 @@
 ;; file can never carry a write to another.
 (defvar '*write-permit* #f)
 
-;; The raw primitives, kept under their own names before the shadows below
-;; take the plain ones. The boundp guard matters: a hot reload of this file
-;; re-evaluates these two forms, and without it the raw name would capture
-;; the shadow and the door would call itself.
-(define raw-write-file!
-  (if (boundp 'raw-write-file!) raw-write-file! write-file!))
-(define raw-buffer-save!
-  (if (boundp 'raw-buffer-save!) raw-buffer-save! buffer-save!))
+;; raw-write-file! and raw-buffer-save! are the primitives under the doors
+;; below; Compos.Core.SchemeRawNames registers them.
 
 ;; CONFIRMABLE? says whether a human answering a question can set this rule
 ;; aside. A rule about clobbering is confirmable, because overwriting a file
@@ -4984,8 +4978,7 @@
 ;; Packages can repair windows after the core releases a killed buffer.
 ;; The callback returns a thunk because its policy must inspect the old buffer
 ;; before the core removes it, then repair the surviving windows afterwards.
-(define buffer-kill-raw!
-  (if (boundp 'buffer-kill-raw!) buffer-kill-raw! buffer-kill!))
+;; buffer-kill-raw! is the primitive; Compos.Core.SchemeRawNames registers it.
 ;; the repair a kill runs after the buffer is gone: the keyed hook
 ;; (buffer-kill-repair KEY) answers with a thunk, none means nothing to do
 (define (buffer-kill-repair name)

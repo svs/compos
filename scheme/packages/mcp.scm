@@ -71,9 +71,8 @@
     (if i (string-append (substring-bytes u 0 i) "?…") u)))
 
 ;; connect a registered server unless it already is — safe to call every send
-;; the builtin, kept once: a reload must not capture the wrapper below.
+;; mcp--connect is the builtin; Compos.Core.SchemeRawNames registers it.
 ;; mcp-ensure! connects only registered servers, so it calls the builtin.
-(define mcp--connect (if (boundp 'mcp--connect) mcp--connect mcp-connect!))
 
 (define (mcp-connect! name spec)
   (mcp-refuse-agent! 'mcp-connect!)

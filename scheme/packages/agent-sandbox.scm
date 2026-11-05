@@ -34,9 +34,8 @@
 
 (define agent-sandbox-exec "/usr/bin/sandbox-exec")
 
-;; the shell builtin, kept once: a reload must not wrap the wrapper
-(define %shell-command->string-builtin
-  (if (boundp '%shell-command->string-builtin) %shell-command->string-builtin shell-command->string))
+;; %shell-command->string-builtin is the shell builtin; Compos.Core.SchemeRawNames
+;; registers it.
 
 ;; what the sandbox makes safe to run without asking: the shell gate's
 ;; kinds, and the deny patterns that only a shell command can act on

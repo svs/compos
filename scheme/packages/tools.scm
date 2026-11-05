@@ -1402,10 +1402,8 @@
         (loop (cdr lines) (+ n 1)
               (cons (string-append (number->string n) "\t" (car lines)) out)))))
 
-;; Keep the core file reader under a private name. Hot reload must not capture
-;; this wrapper when this form runs again.
-(unless (boundp 'read-file-source)
-  (define read-file-source read-file))
+;; read-file-source is the core file reader; Compos.Core.SchemeRawNames
+;; registers it.
 
 (define (read-file path &optional line-numbers)
   (let ((source (read-file-source path)))
@@ -1635,9 +1633,7 @@
          (cmd (if (boundp (quote agent-sandbox-wrap))
                   (agent-sandbox-wrap (car parts) chat)
                   (car parts)))
-         (run (if (boundp (quote %shell-command->string-builtin))
-                  %shell-command->string-builtin
-                  shell-command->string)))
+         (run %shell-command->string-builtin))
     (let ((dir (or (cadr parts)
                    (and chat (with-current-buffer chat default-directory)))))
       (if dir

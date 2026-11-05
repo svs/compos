@@ -309,7 +309,9 @@
     ev.preventDefault();
     if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     window.focus();
-    select(picking(ev) ? marked(ev.target) : content(ev.target));
+    const picked = picking(ev) ? marked(ev.target) : content(ev.target);
+    select(picked);
+    if (picked && picking(ev)) note(tagOf(picked) + (picked.id ? "#" + picked.id : picked.classList[0] ? "." + picked.classList[0] : "") + " selected: arrows move, Delete removes");
   }, true);
 
   addEventListener("keydown", (ev) => {

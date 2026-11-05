@@ -493,7 +493,7 @@ defmodule Compos.Core.Editor do
   def set_window_buffer(buffer, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
 
-  @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
+  @doc "Replace a frame's window tree from a `Compos.Core.WindowSpec` spec."
   def restore_tree(spec, active_buffer, fid \\ nil),
     do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
 
@@ -2662,48 +2662,25 @@ defmodule Compos.Core.Editor do
   defp first_leaf(%{type: :leaf} = leaf), do: leaf
   defp first_leaf(%{type: :split, children: [a | _]}), do: first_leaf(a)
 
-  defp build_tree({:leaf, buffer}, n), do: build_tree({:leaf, buffer, 0}, n)
+  # A spec (Compos.Core.WindowSpec) becomes a live tree. A leaf's id is a
+  # wish, not a claim: reuse_window_ids keeps it when no other window holds
+  # it, else the leaf takes an id the way a leaf without one does. Carrying
+  # the id is what keeps every record keyed by window id true across a
+  # layout restore.
+  defp build_tree(%{type: :leaf} = spec, n) do
+    leaf = %{
+      type: :leaf,
+      id: n,
+      buffer: spec.buffer,
+      top: spec.top,
+      manual: spec.manual,
+      ctop: spec.ctop
+    }
 
-  defp build_tree({:leaf, buffer, top}, n),
-    do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
-
-  # 4-tuple carries a saved window point (desktop v2). Older layouts and
-  # desktop files still hold one; it is read and discarded, because a
-  # restore never writes point into a buffer.
-  defp build_tree({:leaf, buffer, top, _point}, n), do: build_tree({:leaf, buffer, top}, n)
-
-  # 6-tuple adds the scroll override and the client-scroll offset (S1):
-  # a manually scrolled window restores pinned where the reader left it.
-  # A saved offset is itself the pin. `manual` is cleared by the key that
-  # reaches the active window (S9), and the key that starts a group
-  # switch is such a key — so the flag alone loses the reader's place.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop}, n) do
-    {leaf, n} = build_tree({:leaf, buffer, top, point}, n)
-    ctop = ctop || 0
-    {%{leaf | manual: manual == true or ctop > 0} |> Map.put(:ctop, ctop), n}
+    {put_want(leaf, spec.id), n + 1}
   end
 
-  # 7-tuple adds a history slot, 9-tuple a restore and an owner slot.
-  # Scheme keeps all three now (window records, window.scm), so the slots
-  # are read and dropped; older desktop files still hold them.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, _history}, n),
-    do: build_tree({:leaf, buffer, top, point, manual, ctop}, n)
-
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, _restore, _owner}, n),
-    do: build_tree({:leaf, buffer, top, point, manual, ctop, history}, n)
-
-  # 10-tuple names the window id the leaf had. It is a wish, not a claim:
-  # a restore keeps it when no other window holds it, else the leaf takes
-  # an id the way a leaf without one does. Carrying the id is what keeps
-  # every record keyed by window id true across a layout restore.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, owner, want}, n) do
-    {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, owner}, n)
-    {put_want(leaf, want), n}
-  end
-
-  defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
-
-  defp build_tree({:split, dir, ratio, a, b}, n) do
+  defp build_tree(%{type: :split, dir: dir, ratio: ratio, children: [a, b]}, n) do
     {ta, n} = build_tree(a, n)
     {tb, n} = build_tree(b, n)
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}

@@ -9,7 +9,7 @@ defmodule Compos.Core.Desktop do
 
   require Logger
 
-  alias Compos.Core.{Editor, Events, Session}
+  alias Compos.Core.{Editor, Events, Session, WindowSpec}
 
   @debounce 1_500
 
@@ -269,18 +269,10 @@ defmodule Compos.Core.Desktop do
       :ok
   end
 
-  # the leaf carries the per-window point and scroll state — saved so
-  # each window reopens at its own spot, pinned if the reader pinned it
-  # the 10-tuple leaf spec: no restore record and no owner, which are
-  # session state, and the window id, so a restart gives every window
-  # back under the id the layouts and groups knew it by
-  defp serialize(%{type: :leaf, buffer: b} = leaf) do
-    {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, []), nil, nil, Map.get(leaf, :id)}
-  end
-
-  defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
-    do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}
+  # the leaf carries the scroll state, so each window reopens pinned if
+  # the reader pinned it, and the window id, so a restart gives every
+  # window back under the id the layouts and groups knew it by
+  defp serialize(tree), do: WindowSpec.from_tree(tree)
 
   defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
     do: false
@@ -486,35 +478,20 @@ defmodule Compos.Core.Desktop do
     |> Enum.uniq()
   end
 
-  # Every buffer the saved trees name. A leaf is `{:leaf, name, ...}`; a
-  # split ends in its two children, whatever rides between.
+  # Every buffer the saved trees name.
   defp tree_buffers(%{frames: frames}) when is_list(frames),
-    do:
-      frames
-      |> Enum.flat_map(fn f ->
-        leaf_names(Map.get(f, :tree))
-      end)
-      |> Enum.uniq()
+    do: frames |> Enum.flat_map(&WindowSpec.buffers(&1.tree)) |> Enum.uniq()
 
-  defp tree_buffers(%{tree: tree}), do: tree |> leaf_names() |> Enum.uniq()
+  defp tree_buffers(%{tree: tree}), do: tree |> WindowSpec.buffers() |> Enum.uniq()
   defp tree_buffers(_), do: []
 
-  defp leaf_names(tuple) when is_tuple(tuple) and tuple_size(tuple) >= 2 do
-    case elem(tuple, 0) do
-      :leaf ->
-        name = elem(tuple, 1)
-        if is_binary(name), do: [name], else: []
+  # An older file holds its trees as positional tuples. Read every tree
+  # once, here, so the rest of the restore sees specs only.
+  defp read_trees(%{frames: frames} = desktop) when is_list(frames),
+    do: %{desktop | frames: Enum.map(frames, &%{&1 | tree: WindowSpec.read(&1.tree)})}
 
-      :split when tuple_size(tuple) >= 4 ->
-        n = tuple_size(tuple)
-        leaf_names(elem(tuple, n - 2)) ++ leaf_names(elem(tuple, n - 1))
-
-      _ ->
-        []
-    end
-  end
-
-  defp leaf_names(_), do: []
+  defp read_trees(%{tree: tree} = desktop), do: %{desktop | tree: WindowSpec.read(tree)}
+  defp read_trees(desktop), do: desktop
 
   # A Session restart is not a boot: every buffer is already awake, and its
   # mode setup, minor modes and derived state went with the old interpreter.
@@ -554,6 +531,8 @@ defmodule Compos.Core.Desktop do
   defp do_restore(state) do
     with {:ok, bin} <- File.read(path()),
          %{} = desktop <- :erlang.binary_to_term(bin) do
+      desktop = read_trees(desktop)
+
       # Hold the file's globals before anything else can fail. A save that
       # runs next writes what this process holds, so the values must be
       # here even when the install below never happens.

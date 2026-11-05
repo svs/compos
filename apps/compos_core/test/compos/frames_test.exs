@@ -283,6 +283,34 @@ defmodule Compos.FramesTest do
     assert Enum.all?(windows, fn {_id, b} -> b == buf end)
   end
 
+  test "a desktop of positional leaves restores the same windows, ids and pins" do
+    buf = "frames-old-#{System.unique_integer([:positive])}"
+    Compos.Core.create_buffer(buf)
+    fid = "f-oldleaf"
+    id = Editor.new_window_id() + 1000
+
+    old = %{
+      version: 3,
+      frames: [
+        %{
+          id: fid,
+          active_buffer: buf,
+          tree:
+            {:split, :h, 0.5, {:leaf, buf, 0, 0, false, 40, [], nil, nil, id},
+             {:leaf, buf, 0, 0, false, 0, []}}
+        }
+      ]
+    }
+
+    File.write!(Desktop.path(), :erlang.term_to_binary(old))
+    assert :ok = Desktop.restore_now()
+
+    assert [{^id, ^buf}, {_, ^buf}] = Editor.list_windows(fid)
+    %{children: [a, b]} = Editor.desktop_view(fid).tree
+    assert %{manual: true, ctop: 40} = a
+    assert %{manual: false, ctop: 0} = b
+  end
+
   test "two frames prompt at once; keys and C-g stay in their own prompt" do
     {:ok, fa} = Editor.attach_frame(nil)
     {:ok, fb} = Editor.attach_frame(nil)

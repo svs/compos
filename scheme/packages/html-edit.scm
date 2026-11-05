@@ -215,7 +215,7 @@
       (when (and source (buffer-exists? source)) (html-edit--watch! source)))))
 
 (mode-doc! "html-edit-mode"
-  "An HTML file drawn as itself for copy editing. Hover marks the text, pictures and embeds, never the layout. A click puts the caret in the text, and the text goes back to the file when it loses focus; Escape leaves it. A click on a picture or an embed selects it and Delete removes it. A paste puts an image, an X post or a YouTube video after the text or the picture. C-g gives the keyboard back.")
+  "An HTML file drawn as itself for copy editing. Hover marks the text, pictures and embeds, never the layout. A click puts the caret in the text, and the text goes back to the file when it loses focus; Escape leaves it. A click on a picture or an embed selects it and Delete removes it. A paste puts an image, an X post or a YouTube video after the text or the picture. Cmd-+ and Cmd-- size the text of the block you are in or have selected, and Cmd-0 gives it the page's own size; the size goes into the file as the element's font-size. C-g gives the keyboard back.")
 
 ;;;###autoload
 (define-command "html-edit" "Edit this HTML file on its rendered page in the other window"

@@ -292,8 +292,9 @@
     s.addRange(r);
   }
 
-  // Option marks any element, the layout too
-  addEventListener("mousemove", (ev) => { hover = ev.altKey ? marked(ev.target) : content(ev.target); }, true);
+  // Option or Cmd (M in the editor) marks any element, the layout too
+  const picking = (ev) => ev.altKey || ev.metaKey;
+  addEventListener("mousemove", (ev) => { hover = picking(ev) ? marked(ev.target) : content(ev.target); }, true);
   addEventListener("mouseleave", () => { hover = null; });
   addEventListener("dragstart", (ev) => ev.preventDefault(), true);
   // a link is text to edit here, not a way out of the page
@@ -302,13 +303,13 @@
     parent.postMessage({ compos: "request-focus" }, "*");
     if (editing && editing.contains(ev.target)) return;
     finishEdit();
-    const host = !ev.altKey && textHost(ev.target);
+    const host = !picking(ev) && textHost(ev.target);
     if (host) { startEdit(host); return; }
     // the page takes the keyboard, so Delete reaches it, not the editor
     ev.preventDefault();
     if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     window.focus();
-    select(ev.altKey ? marked(ev.target) : content(ev.target));
+    select(picking(ev) ? marked(ev.target) : content(ev.target));
   }, true);
 
   addEventListener("keydown", (ev) => {

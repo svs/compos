@@ -9,6 +9,20 @@
 /* quiet marks: a copy editor reads the page, so nothing frames it */
 #he-hover { border-radius: 4px; background: color-mix(in srgb, var(--amber, #e0a33a) 9%, transparent); }
 #he-sel { border-radius: 4px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber, #e0a33a) 70%, transparent); }
+/* the grips on a selected element: drag the right edge, the bottom, or the corner */
+.he-grip {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  pointer-events: auto;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1.5px var(--amber, #e0a33a);
+}
+.he-grip[data-grip="e"] { cursor: ew-resize; }
+.he-grip[data-grip="s"] { cursor: ns-resize; }
+.he-grip[data-grip="se"] { cursor: nwse-resize; }
+html.he-dragging, html.he-dragging * { user-select: none !important; }
 #he-note {
   left: 50% !important;
   bottom: 24px;

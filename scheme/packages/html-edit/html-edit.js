@@ -194,6 +194,22 @@
     apply(s, is, startTag(el), ancestors(el), []);
   }
 
+  // the box size of EL, dragged by a grip: a width that never passes the
+  // page width, so the phone keeps the layout, and a height that is only a
+  // minimum, so the text never spills. Only EL's start tag changes.
+  function boxSize(el, w, h) {
+    if (w === null) { el.style.removeProperty("width"); el.style.removeProperty("max-width"); }
+    else if (w !== undefined) { el.style.width = w + "px"; el.style.maxWidth = "100%"; }
+    if (h === null) el.style.removeProperty("min-height");
+    else if (h !== undefined) el.style.minHeight = h + "px";
+    if (tagOf(el) === "img" && w !== undefined) el.style.height = "auto";
+    if (el.getAttribute("style") === "") el.removeAttribute("style");
+  }
+  function commitTag(el) {
+    const { s } = range(el), { is } = inner(el);
+    apply(s, is, startTag(el), ancestors(el), []);
+  }
+
   // put EL after X, on a line of its own at X's indent
   function insertAfter(x, el) {
     const { s, e } = range(x);
@@ -254,9 +270,19 @@
       width: r.width + 2 * pad + "px", height: r.height + 2 * pad + "px" });
     return r;
   }
+  // a picture keeps its shape, so it only takes the width grips
+  const grips = ["e", "s", "se"].map((k) => { const g = ui("he-grip-" + k); g.className = "he-grip"; g.dataset.grip = k; return g; });
+  let drag = null;
   function frame() {
     place(hoverBox, hover && hover !== sel && hover !== editing ? hover : null);
-    place(selBox, editing ? null : sel);
+    const r = place(selBox, editing ? null : sel);
+    const img = sel && tagOf(sel) === "img";
+    for (const g of grips) {
+      const k = g.dataset.grip;
+      if (!r || (img && k === "s")) { g.style.display = "none"; continue; }
+      const x = k === "s" ? r.left + r.width / 2 : r.right + 4, y = k === "e" ? r.top + r.height / 2 : r.bottom + 4;
+      Object.assign(g.style, { display: "block", left: x + "px", top: y + "px" });
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -299,6 +325,38 @@
   addEventListener("dragstart", (ev) => ev.preventDefault(), true);
   // a link is text to edit here, not a way out of the page
   addEventListener("click", (ev) => { if (ev.target.closest && ev.target.closest("a")) ev.preventDefault(); }, true);
+  // drag a grip to size the selected element; a double-click on it lets go
+  // of the size
+  addEventListener("mousedown", (ev) => {
+    const k = ev.target.dataset && ev.target.dataset.grip;
+    if (!k || !sel || !src) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const cs = getComputedStyle(sel);
+    drag = { el: sel, k, x: ev.clientX, y: ev.clientY, w: parseFloat(cs.width), h: parseFloat(cs.height), moved: false };
+    document.documentElement.classList.add("he-dragging");
+  }, true);
+  addEventListener("mousemove", (ev) => {
+    if (!drag) return;
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    drag.moved = true;
+    boxSize(drag.el, drag.k === "s" ? undefined : Math.max(16, Math.round(drag.w + dx)),
+      drag.k === "e" || tagOf(drag.el) === "img" ? undefined : Math.max(16, Math.round(drag.h + dy)));
+  }, true);
+  addEventListener("mouseup", () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    document.documentElement.classList.remove("he-dragging");
+    if (d.moved && d.el.isConnected) commitTag(d.el);
+  }, true);
+  addEventListener("dblclick", (ev) => {
+    const k = ev.target.dataset && ev.target.dataset.grip;
+    if (!k || !sel || !src) return;
+    ev.preventDefault();
+    boxSize(sel, k === "s" ? undefined : null, k === "e" ? undefined : null);
+    commitTag(sel);
+  }, true);
   addEventListener("mousedown", (ev) => {
     parent.postMessage({ compos: "request-focus" }, "*");
     if (editing && editing.contains(ev.target)) return;

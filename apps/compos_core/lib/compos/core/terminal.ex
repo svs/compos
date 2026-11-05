@@ -18,7 +18,7 @@ defmodule Compos.Core.Terminal do
 
   use GenServer, restart: :temporary
 
-  alias Compos.Core.Buffer
+  alias Compos.Core.{Buffer, Roots, Session}
   alias Compos.Core.Terminal.Transcript
 
   @registry Compos.Core.TerminalRegistry
@@ -27,6 +27,7 @@ defmodule Compos.Core.Terminal do
   @history_limit 512 * 1024
   @transcript_limit 512 * 1024
   @tty_prefix "COMPOS_TTY="
+  @status_states ~w(idle working done blocked error)
 
   @doc "Start COMMAND in a PTY attached to BUFFER. `raw: false` makes a comint process."
   def start(buffer, command, opts \\ []) do
@@ -93,6 +94,42 @@ defmodule Compos.Core.Terminal do
   leaves blank rows above the prompt.
   """
   def size(buffer), do: call(buffer, :size)
+
+  @doc """
+  What the program in the terminal says it is doing (OSC 7501), as
+  `%{state, app, kind, msg}`, and `:tty`, the PTY device; `nil` before it
+  says anything.
+  """
+  def status(buffer) do
+    case call(buffer, :status) do
+      {:error, :no_terminal} -> nil
+      status -> status
+    end
+  end
+
+  @doc "The PTY device of BUFFER's terminal, such as /dev/ttys012, or nil."
+  def tty(buffer) do
+    case call(buffer, :tty) do
+      tty when is_binary(tty) -> tty
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The programs in the foreground of BUFFER's terminal, as their command
+  lines, the shell first: what owns the keyboard now.
+  """
+  def foreground(buffer) do
+    with tty when is_binary(tty) <- tty(buffer),
+         {out, 0} <- System.cmd("/bin/ps", ["-o", "stat=,args=", "-t", Path.basename(tty)]) do
+      for line <- String.split(out, "\n", trim: true),
+          [stat, comm] <- [String.split(String.trim(line), ~r/\s+/, parts: 2)],
+          String.contains?(stat, "+"),
+          do: comm
+    else
+      _ -> []
+    end
+  end
 
   def subscribe(buffer, subscriber \\ self()),
     do: call(buffer, {:subscribe, subscriber})
@@ -172,7 +209,10 @@ defmodule Compos.Core.Terminal do
        history_bytes: 0,
        transcript: Transcript.new(),
        transcript_pending: "",
-       transcript_timer: nil
+       transcript_timer: nil,
+       osc_carry: "",
+       status: nil,
+       notice: nil
      }}
   end
 
@@ -189,6 +229,14 @@ defmodule Compos.Core.Terminal do
   def handle_call(:size, _from, state), do: {:reply, {state.cols, state.rows}, state}
 
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
+
+  def handle_call(:tty, _from, state), do: {:reply, state.tty, state}
+
+  def handle_call(:status, _from, state) do
+    tty = if is_binary(state.tty), do: state.tty
+    status = Map.get(state, :status)
+    {:reply, status && Map.put(status, :tty, tty), state}
+  end
 
   def handle_call({:subscribe, subscriber}, _from, state) do
     state = monitor_subscriber(state, subscriber)
@@ -207,6 +255,7 @@ defmodule Compos.Core.Terminal do
 
         state.raw ->
           state
+          |> scan_status(data)
           |> Map.update!(:raw_pending, &[data | &1])
           |> schedule_raw_flush()
 
@@ -248,6 +297,9 @@ defmodule Compos.Core.Terminal do
     Enum.each(Map.keys(state.subscribers), fn subscriber ->
       send(subscriber, {:terminal_exit, state.buffer, status})
     end)
+
+    # a working or blocked record ends with its program
+    state = if Map.get(state, :status), do: put_status(state, nil), else: state
 
     {:stop, :normal, state}
   end
@@ -294,6 +346,140 @@ defmodule Compos.Core.Terminal do
   end
 
   defp consume_tty_handshake(data, state), do: {data, state}
+
+  # OSC 7501, the Program Status Protocol: the program in the terminal says
+  # whether it is idle, working, blocked, done or failed. The terminal answers
+  # the probe, because Claude Code and Pi report only to a terminal that
+  # does, and keeps the root record; records with an id are a program's
+  # background work. OSC 9 (not 9;4, a progress bar) is a notification:
+  # Codex sends no done, and a notification followed by idle is its
+  # finished turn.
+  defp scan_status(state, data) do
+    # a shell started before this code has no status keys: Map.get and
+    # Map.put, not state.key, so a reload does not crash it
+    bytes = Map.get(state, :osc_carry, "") <> data
+
+    if :binary.match(bytes, "\e") == :nomatch do
+      Map.put(state, :osc_carry, "")
+    else
+      ~r/\e\](7501|9);([^\a\e]*)(?:\a|\e\\)/
+      |> Regex.scan(bytes, capture: :all_but_first)
+      |> Enum.reduce(Map.put(state, :osc_carry, osc_tail(bytes)), fn [code, body], st ->
+        status_seq(st, code, body)
+      end)
+    end
+  end
+
+  # an unfinished OSC at the end of a chunk waits for the next one; the
+  # protocol caps a report at 4096 bytes
+  defp osc_tail(bytes) do
+    case List.last(:binary.matches(bytes, "\e")) do
+      nil ->
+        ""
+
+      {at, _} ->
+        tail = binary_part(bytes, at, byte_size(bytes) - at)
+
+        cond do
+          byte_size(tail) > 4096 -> ""
+          tail == "\e" -> tail
+          String.starts_with?(tail, "\e]") and not String.contains?(tail, ["\a", "\e\\"]) -> tail
+          true -> ""
+        end
+    end
+  end
+
+  defp status_seq(state, "7501", "?") do
+    Port.command(state.port, "\e]7501;?\e\\")
+    state
+  end
+
+  defp status_seq(state, "7501", body) do
+    fields =
+      for pair <- String.split(body, ":"),
+          [k, v] <- [String.split(pair, "=", parts: 2)],
+          into: %{},
+          do: {k, v}
+
+    cond do
+      Map.get(fields, "id", "") != "" -> state
+      fields["state"] == "clear" -> put_status(Map.put(state, :notice, nil), nil)
+      fields["state"] in @status_states ->
+        put_status(Map.put(state, :notice, nil), record(fields, Map.get(state, :notice)))
+      true -> state
+    end
+  end
+
+  defp status_seq(state, "9", "4;" <> _), do: state
+  defp status_seq(state, "9", body), do: Map.put(state, :notice, body)
+
+  defp record(fields, notice) do
+    status =
+      case {fields["state"], notice} do
+        {"idle", n} when is_binary(n) -> "done"
+        {s, _} -> s
+      end
+
+    %{state: status, app: fields["app"], kind: fields["kind"], msg: decode64(fields["msg"]) || notice}
+    |> Map.reject(fn {_, v} -> is_nil(v) end)
+  end
+
+  # The changes reach Scheme one at a time and in order, through one relay
+  # per terminal: a task each let a turn's end overtake its start. The relay
+  # is started on the first change, and again if a reload killed it.
+  defp ensure_relay(state) do
+    case Map.get(state, :status_relay) do
+      pid when is_pid(pid) ->
+        if Process.alive?(pid), do: state, else: Map.put(state, :status_relay, spawn_relay())
+
+      _ ->
+        Map.put(state, :status_relay, spawn_relay())
+    end
+  end
+
+  defp spawn_relay, do: spawn_link(fn -> relay_loop() end)
+
+  @doc false
+  def relay_loop do
+    receive do
+      {:status, buffer, record, was} ->
+        with handler when handler != nil <- Roots.get({:on_event, "terminal"}) do
+          Session.apply_callback(handler, [buffer, scheme_record(record), scheme_record(was)], nil, {:terminal, buffer})
+        end
+
+        __MODULE__.relay_loop()
+    end
+  end
+
+  defp scheme_record(nil), do: false
+  defp scheme_record(record), do: Compos.Core.Events.scheme(record)
+
+  defp decode64(nil), do: nil
+
+  defp decode64(text) do
+    case Base.decode64(text, padding: false) do
+      {:ok, msg} -> if String.valid?(msg), do: msg
+      :error -> nil
+    end
+  end
+
+  # one Scheme handler hears every change (on-event! 'terminal), and the
+  # event log keeps each change of state for an agent that listens
+  defp put_status(state, record) do
+    if Map.get(state, :status) == record, do: state, else: put_new_status(state, record)
+  end
+
+  defp put_new_status(state, record) do
+    was = Map.get(state, :status)
+    state = ensure_relay(state)
+    send(state.status_relay, {:status, state.buffer, record, was})
+
+    if (record && record.state) != (was && was.state) do
+      Compos.Core.Events.publish("terminal:" <> state.buffer, :status, record || %{state: "gone"})
+    end
+
+    Map.put(state, :status, record)
+  end
 
   defp schedule_raw_flush(%{raw_timer: nil} = state) do
     %{state | raw_timer: Process.send_after(self(), :flush_raw, @raw_flush_ms)}

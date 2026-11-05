@@ -1444,6 +1444,20 @@ defmodule Compos.Core.SchemeAPI do
         Compos.Core.Terminal.kill(buffer)
         :void
       end,
+      {"terminal-status",
+       "(terminal-status BUF) — what the program in BUF's terminal says it is doing (OSC 7501): a plist of state (idle working done blocked error), app, kind, msg and tty; #f before it says anything."} =>
+        fn [buffer] ->
+          case Compos.Core.Terminal.status(buffer) do
+            nil -> false
+            status -> Compos.Core.Events.scheme(Map.reject(status, fn {_, v} -> is_nil(v) end))
+          end
+        end,
+      {"terminal-foreground",
+       "(terminal-foreground BUF) — the command lines of the programs in the foreground of BUF's terminal, the shell first; () when it has none."} =>
+        fn [buffer] -> Compos.Core.Terminal.foreground(buffer) end,
+      {"terminal-tty",
+       "(terminal-tty BUF) — the PTY device of BUF's terminal, such as /dev/ttys012, or #f."} =>
+        fn [buffer] -> Compos.Core.Terminal.tty(buffer) || false end,
       {"process-list",
        "(process-list) — return ((BUF CMD) ...) for every running process buffer."} => fn [] ->
         for {name, cmd} <- Compos.Core.Terminal.list(), do: [name, cmd]

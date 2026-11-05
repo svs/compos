@@ -69,7 +69,7 @@ defmodule Compos.LoadTest do
     # harvest at the end of init.scm installs.
     opt_in =
       ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training
-         ats chart decide fast-code fast-code-eval housekeeping onboarding recruiting site-app slides)
+         ats chart decide fast-code fast-code-eval herdr housekeeping onboarding recruiting site-app slides)
       |> Enum.map(&(&1 <> ".scm"))
 
     # an app nobody loads must still be reachable: a command means a cookie.

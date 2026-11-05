@@ -128,6 +128,45 @@
 (mode-doc! "term-mode"
   "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text. It has the two states of an editable buffer: you land in focus, where the keys are the editor's; the first key you type goes to the terminal and gives it the keyboard, `C-g`, the focus key the title shows, or a window command takes the keyboard back. The Cmd-arrows move to the next window from either state. `ESC` stays the terminal's. The scrollback scrolls from the keyboard: in focus, `M-v` and `C-v` (or the page keys) go a screen back and on, `M-<` to the oldest output and `M->` to the prompt; while typing, Shift with the page keys, Home and End does the same. `M-<down>` and `M-<up>` from another window scroll it too.")
 
+;;; --- program status ---------------------------------------------------------
+;;; A program in a terminal says what it is doing with OSC 7501: idle,
+;;; working, blocked, done or error, with its app, a kind and a message.
+;;; The terminal keeps the newest record and calls here on each change, in
+;;; order, with the record before it; here it becomes hooks. A turn starts when the program goes to working,
+;;; and ends when it leaves working and blocked: done is a success, error a
+;;; failure, idle a turn you stopped, and an exit a program that went away.
+
+(define *term-status* '())             ; (BUF STATUS) rows
+
+(define (term-status buf)
+  (let ((e (assoc buf *term-status*)))
+    (if e (cadr e) (and (process-running? buf) (terminal-status buf)))))
+
+(define (term--state status) (and status (plist-get status 'state)))
+(define (term--in-turn? state) (and (member state '("working" "blocked")) #t))
+
+(define (term--outcome state)
+  (cond ((equal? state "done") 'done)
+        ((equal? state "error") 'error)
+        ((equal? state "idle") 'stopped)
+        (else 'exited)))
+
+(define (term--status-changed! buf status was)
+  (let* ((from (term--state was))
+         (to (term--state status))
+         (app (or (and status (plist-get status 'app)) (and was (plist-get was 'app)))))
+    (set! *term-status*
+          (cons (list buf status) (filter (lambda (e) (not (equal? (car e) buf))) *term-status*)))
+    (run-hook-with-args 'terminal-status-hook buf status was)
+    (cond ((and (equal? to "working") (not (term--in-turn? from)))
+           (run-hook-with-args 'terminal-turn-start-hook buf app))
+          ((and (term--in-turn? from) (not (term--in-turn? to)))
+           (run-hook-with-args 'terminal-turn-end-hook buf app (term--outcome to)
+                               (and status (plist-get status 'msg)))))))
+
+;; through the name, so a reload of the handler takes effect
+(on-event! 'terminal (lambda (buf status was) (term--status-changed! buf status was)))
+
 (define (shell--fresh-name base)
   (let loop ((n 2))
     (let ((name (string-append base "<" (number->string n) ">")))
@@ -308,6 +347,7 @@
 (domain! 'unknown)
 (effects! '(unknown))
 (category! 'buffers)
+(public! 'term-status "(term-status BUF) — what the program in BUF's terminal last said it is doing (OSC 7501): a plist of state, app, kind, msg; #f before it says anything. terminal-status-hook runs (BUF STATUS WAS) on every change, terminal-turn-start-hook (BUF APP) when it starts working, and terminal-turn-end-hook (BUF APP OUTCOME MSG) when the turn ends, OUTCOME done, error, stopped or exited")
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 

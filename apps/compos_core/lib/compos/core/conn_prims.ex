@@ -14,7 +14,7 @@ defmodule Compos.Core.Conn.Prims do
   @hidden [:log, :caps]
 
   # the kinds whose mechanism sends events to one Scheme handler
-  @event_kinds ["mcp", "lsp", "endpoint"]
+  @event_kinds ["mcp", "lsp", "endpoint", "terminal"]
 
   @doc "Every primitive under its {name, doc} key."
   def entries do
@@ -35,7 +35,7 @@ defmodule Compos.Core.Conn.Prims do
           for e <- log(s(kind), s(name)), do: [clock(e.at), to_string(e.dir), e.text]
         end,
       {"on-event!",
-       "(on-event! KIND HANDLER) — set the ONE handler for events of KIND: mcp (NAME STATUS), lsp (ID METHOD PARAMS), endpoint (NAME KIND TEXT)."} =>
+       "(on-event! KIND HANDLER) — set the ONE handler for events of KIND: mcp (NAME STATUS), lsp (ID METHOD PARAMS), endpoint (NAME KIND TEXT), terminal (BUF STATUS WAS), each the plist terminal-status answers or #f."} =>
         fn [kind, handler] ->
           kind = s(kind)
           unless kind in @event_kinds, do: raise_scheme("on-event!: unknown kind #{kind}")

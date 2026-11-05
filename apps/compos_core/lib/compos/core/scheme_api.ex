@@ -2425,12 +2425,6 @@ defmodule Compos.Core.SchemeAPI do
                if(is_binary(covered), do: covered), if(is_integer(point), do: point)}
             )
         end,
-      {"window-owner",
-       "(window-owner WIN) — the window that asked for WIN (a preview's or a display's owner), or #f."} =>
-        fn [id] -> Editor.window_owner(id) || false end,
-      {"set-window-owner!",
-       "(set-window-owner! WIN OWNER) — record the window OWNER as the one that asked for WIN; #f clears it."} =>
-        fn [id, owner] -> Editor.set_window_owner(id, owner) end,
       {"window-rects",
        "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles."} =>
         fn [] -> Editor.window_rects() end,

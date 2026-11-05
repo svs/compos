@@ -362,13 +362,6 @@ defmodule Compos.Core.Editor do
   def set_window_restore(win, restore, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_restore, win, restore, fid(fid)})
 
-  @doc "The window that asked for WIN (4.2 owner), or nil."
-  def window_owner(win, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:window_owner, win, fid(fid)})
-
-  def set_window_owner(win, owner, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_window_owner, win, owner, fid(fid)})
-
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
@@ -1726,15 +1719,6 @@ defmodule Compos.Core.Editor do
     end)
   end
 
-  def handle_call({:window_owner, win, fid}, _from, state) do
-    f = (win && find_window_frame(state, win)) || frame(state, fid)
-    owner = (leaf = find_leaf(f.tree, win || f.active)) && Map.get(leaf, :owner)
-    {:reply, owner && find_leaf(f.tree, owner) && owner, state}
-  end
-
-  def handle_call({:set_window_owner, win, owner, fid}, _from, state),
-    do: update_leaf(state, win, fid, &put_owner(&1, owner))
-
   # the WHOLE history, group marks included: a group switch is an entry
   # like any buffer visit, so one stream ranks every place you went
   def handle_call(:mru_all, _from, state) do
@@ -2495,8 +2479,7 @@ defmodule Compos.Core.Editor do
       point: safe_win_point(b, id),
       manual: Map.get(leaf, :manual, false),
       ctop: Map.get(leaf, :ctop, 0),
-      restore: Map.get(leaf, :restore),
-      owner: Map.get(leaf, :owner)
+      restore: Map.get(leaf, :restore)
     }
   end
 
@@ -2792,17 +2775,8 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  # an owner names a window of this tree, or the link is dropped
-  defp prune_owners(%{type: :leaf} = leaf, ids),
-    do: if(Map.get(leaf, :owner) in (ids -- [leaf.id]), do: leaf, else: Map.delete(leaf, :owner))
-
-  defp prune_owners(%{type: :split} = split, ids),
-    do: %{split | children: Enum.map(split.children, &prune_owners(&1, ids))}
-
   defp put_restore(leaf, nil), do: Map.delete(leaf, :restore)
   defp put_restore(leaf, record), do: Map.put(leaf, :restore, record)
-  defp put_owner(leaf, owner) when is_integer(owner), do: Map.put(leaf, :owner, owner)
-  defp put_owner(leaf, _), do: Map.delete(leaf, :owner)
 
   defp restore_rename({kind, covered, point, shown, under}, old, new) do
     swap = fn b -> if b == old, do: new, else: b end
@@ -2879,11 +2853,12 @@ defmodule Compos.Core.Editor do
     {%{leaf | history: Enum.filter(history, &is_binary/1)}, n}
   end
 
-  # 9-tuple adds the restore record and the owner (Phase 2). Older layouts
-  # and every desktop file read with neither.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, owner}, n) do
+  # 9-tuple adds the restore record and an owner slot (Phase 2). Older
+  # layouts and every desktop file read with neither. The owner is
+  # Scheme's now (window-owner, window.scm): the slot is read and dropped.
+  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, _owner}, n) do
     {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop, history}, n)
-    {leaf |> put_restore(restore) |> put_owner(owner), n}
+    {put_restore(leaf, restore), n}
   end
 
   # 10-tuple names the window id the leaf had. It is a wish, not a claim:
@@ -2926,7 +2901,6 @@ defmodule Compos.Core.Editor do
     old_panes = leaf_ids_buffers(f.tree)
     {tree, _minted} = build_tree(spec, state.next_win)
     {tree, next_win} = reuse_window_ids(tree, old_panes, taken, state.next_win)
-    tree = prune_owners(tree, leaf_ids(tree))
 
     # A buffer that cannot start leaves its pane to *scratch*: a window
     # must show a live buffer, and the dormant one keeps its files.

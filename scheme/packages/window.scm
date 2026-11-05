@@ -359,6 +359,48 @@
       (window-state-changed!))
     (and e #t)))
 
+;;; --- window records ------------------------------------------------------------
+;;; What Scheme keeps about one window: a plist keyed by the window id, in
+;;; its frame's frame-local window-records. A layout restore keeps a
+;;; window's id, so a record follows its window through one. A write drops
+;;; the records of windows the frame no longer has.
+;;;   owner   the window that asked for this one (a display, a look)
+
+(domain! 'windows)
+(effects! '(read))
+(define (window--records frame)
+  (or (and frame (frame-local-in frame 'window-records)) '()))
+
+(define (window-record win key)
+  "(window-record WIN KEY) -> the value of KEY in WIN's record, or #f"
+  (let ((e (and win (assoc win (window--records (frame-of-window win))))))
+    (and e (plist-get (cadr e) key))))
+
+(define (window-owner win)
+  "(window-owner WIN) -> the window that asked for WIN (a preview's or a display's owner), or #f"
+  (let ((owner (window-record win 'owner)))
+    (and owner (equal? (frame-of-window owner) (frame-of-window win)) owner)))
+
+(effects! '(write))
+(define (window-record-set! win key val)
+  "(window-record-set! WIN KEY VAL) -> #t: KEY of WIN's record is VAL; #f when WIN is no window"
+  (let ((frame (and win (frame-of-window win))))
+    (and frame
+         (let* ((ids (map car (filter (lambda (r) (equal? (caddr r) frame)) (window-list-all))))
+                (all (window--records frame))
+                (e (assoc win all))
+                (rest (filter (lambda (e) (and (member (car e) ids) (not (equal? (car e) win)))) all)))
+           (set-frame-local-in! frame 'window-records
+             (cons (list win (plist-put (if e (cadr e) '()) key val)) rest))
+           #t))))
+
+(define (set-window-owner! win owner)
+  "(set-window-owner! WIN OWNER) -> #t: record the window OWNER as the one that asked for WIN; #f clears it"
+  (window-record-set! win 'owner (and (integer? owner) owner)))
+
+(domain! 'files)
+(effects! '(read))
+
 ;;; --- the preview verb ----------------------------------------------------------
 ;;; A look shows a buffer for a while without keeping it. It never bumps
 ;;; the MRU and never moves focus. A frame

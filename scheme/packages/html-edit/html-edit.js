@@ -70,6 +70,8 @@
     return el && el.closest ? el.closest("[data-hs]") : null;
   };
   const up = (el) => marked(el && el.parentElement);
+  const kids = (el) => Array.from(el.children).filter((c) => c.hasAttribute("data-hs"));
+  const sibling = (el, d) => { const ks = el.parentElement ? kids(el.parentElement) : []; return ks[ks.indexOf(el) + d] || null; };
   const ancestors = (el) => {
     const out = new Set();
     for (let p = el; p; p = p.parentElement) if (p.hasAttribute && p.hasAttribute("data-hs")) out.add(p);
@@ -290,7 +292,8 @@
     s.addRange(r);
   }
 
-  addEventListener("mousemove", (ev) => { hover = content(ev.target); }, true);
+  // Option marks any element, the layout too
+  addEventListener("mousemove", (ev) => { hover = ev.altKey ? marked(ev.target) : content(ev.target); }, true);
   addEventListener("mouseleave", () => { hover = null; });
   addEventListener("dragstart", (ev) => ev.preventDefault(), true);
   // a link is text to edit here, not a way out of the page
@@ -299,13 +302,13 @@
     parent.postMessage({ compos: "request-focus" }, "*");
     if (editing && editing.contains(ev.target)) return;
     finishEdit();
-    const host = textHost(ev.target);
+    const host = !ev.altKey && textHost(ev.target);
     if (host) { startEdit(host); return; }
     // the page takes the keyboard, so Delete reaches it, not the editor
     ev.preventDefault();
     if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     window.focus();
-    select(content(ev.target));
+    select(ev.altKey ? marked(ev.target) : content(ev.target));
   }, true);
 
   addEventListener("keydown", (ev) => {
@@ -342,6 +345,14 @@
     switch (ev.key) {
       case "Backspace": case "Delete": ev.preventDefault(); if (src) remove(sel); break;
       case "Escape": ev.preventDefault(); select(null); break;
+      // the arrows walk the elements: out, in, and along
+      case "ArrowUp": case "ArrowDown": case "ArrowLeft": case "ArrowRight": {
+        const to = ev.key === "ArrowUp" ? up(sel) : ev.key === "ArrowDown" ? kids(sel)[0] : sibling(sel, ev.key === "ArrowRight" ? 1 : -1);
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        if (to) select(to);
+        break;
+      }
       case "Enter": {
         const host = hasText(sel) ? sel : null;
         if (host) { ev.preventDefault(); startEdit(host); caretAtEnd(host); }

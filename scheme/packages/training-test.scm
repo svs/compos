@@ -41,6 +41,20 @@
     (check-false! (minibuffer-state) "no resume or revert question")
     (t--training-clean!)))
 
+(deftest 'training-reopens-the-live-copy-in-its-format
+  "C-h t gives a live copy that lost its mode the morg rendering back"
+  (lambda ()
+    (t--training-clean!)
+    (training--load-tutorial! "* lesson\n" 0)
+    (with-current-buffer "TUTORIAL" (lambda () (set-mode! "fundamental-mode")))
+    (disable-minor-mode! "TUTORIAL" "preview-mode")
+    (training--open-tutorial!)
+    (check-equal! (buffer-local "TUTORIAL" 'mode-name) "morg-mode"
+                  "the morg mode is back")
+    (check-true! (minor-mode-on? "TUTORIAL" "preview-mode")
+                 "the tutorial is drawn again")
+    (t--training-clean!)))
+
 (deftest 'training-resumes-saved-progress-without-a-question
   "C-h t restores saved text and point directly when no live copy exists"
   (lambda ()

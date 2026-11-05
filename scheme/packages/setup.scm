@@ -607,7 +607,7 @@
       '(("**[Set up Compos →](compos:setup/wizard)**"
          "Choose a model. Then a guide teaches you in a chat, starting with windows.")
         ("**[Start the tutorial →](compos:training/tutorial)**"
-         "Learn by editing real text. `C-h t` resumes it at any time.")
+         "Learn by editing real text. `C-h t` resumes it at any time: hold Control and type `h`, release Control, then type `t`.")
         ("**[Read the AI guide →](compos:setup/ai)**"
          "Models, chats, agents, logins, and how to test a first reply.")))
     "\n## Three keys to remember\n\n"

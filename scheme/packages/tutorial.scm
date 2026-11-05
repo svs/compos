@@ -45,17 +45,23 @@
                (training-encode-state (buffer-point buf) (buffer-text buf)))
   #t)
 
+(define (training--format! buf)
+  ;; Rendered, and still editable: morg draws it in place. A live copy that
+  ;; lost its mode gets it back, so C-h t always shows the tutorial as made.
+  (unless (equal? (buffer-local buf 'mode-name) "morg-mode")
+    (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
+  (unless (minor-mode-on? buf "preview-mode")
+    (enable-minor-mode! buf "preview-mode"))
+  (preview-heal! buf)
+  buf)
+
 (define (training--load-tutorial! text point)
   (let ((buf *training-tutorial-buffer*))
     (buffer-create buf)
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))
     (buffer-insert! buf 0 text)
-    (with-current-buffer buf (lambda () (set-mode! "morg-mode")))
-    ;; Rendered, and still editable: morg draws it in place.
-    (unless (minor-mode-on? buf "preview-mode")
-      (enable-minor-mode! buf "preview-mode"))
-    (preview-heal! buf)
+    (training--format! buf)
     (let ((point (max 0 (min point (buffer-size buf)))))
       (buffer-goto! buf point)
       (buffer-set-local! buf 'training-starting-point point))
@@ -78,7 +84,7 @@
 
 (define (training--prepare-document!)
   (if (buffer-known? *training-tutorial-buffer*)
-      (buffer-create *training-tutorial-buffer*)
+      (training--format! (buffer-create *training-tutorial-buffer*))
       (let ((state (training-read-state)))
         (if state
             (training-resume-tutorial! state)
@@ -87,11 +93,18 @@
 (define (training--open-tutorial!)
   (training--show! (training--prepare-document!)))
 
+;; With the onboarding app, the tutorial opens as the first run made it:
+;; the guide chat and the tutorial stage side by side in their group.
 (define-command "help-with-tutorial"
-  "Select the Compos learn-by-doing tutorial, resuming saved progress"
-  (lambda () (training--open-tutorial!)))
+  "Open the Compos learn-by-doing tutorial beside its guide, resuming saved progress"
+  (lambda ()
+    (if (member "onboarding" (command-names))
+        (run-command "onboarding")
+        (training--open-tutorial!))))
 
+;; A new reader often keeps Control held for the second key.
 (define-key "help-map" "t" "help-with-tutorial")
+(define-key "help-map" "C-t" "help-with-tutorial")
 
 ;; The welcome page links compos:training/tutorial. The companion app
 ;; answers the other training links when the user init loads it.

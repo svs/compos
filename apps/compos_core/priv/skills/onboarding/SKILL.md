@@ -103,6 +103,7 @@ short. Then offer to go back to the step you were on.
 11. **Settings.** `M-x customize` and `M-x load-theme`. Run neither for
     the user; tell them where to look.
 12. **Done.** Say what they learnt in three lines. Tell them `C-h t`
-    opens the tutorial again, and `M-x onboarding` brings this guide back.
+    opens the tutorial again (hold Control and type `h`, release Control,
+    then type `t`), and `M-x onboarding` brings this guide back.
 
 Start with step 1 at once. Do not ask the user if they are ready.

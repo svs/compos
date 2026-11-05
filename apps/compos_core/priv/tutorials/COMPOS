@@ -15,6 +15,7 @@ Compos commands use the CONTROL key (often labelled CTRL or CTL) or the META key
 | `C-<chr>` | Hold the CONTROL key while you type the character `<chr>`. |
 | `M-<chr>` | Hold the META or ALT key while you type `<chr>`. |
 | `C-M-<chr>` | Hold both CONTROL and META while you type `<chr>`. |
+| `C-h t` | A space separates keys that you type one after the other. Hold CONTROL and type `h`. Release CONTROL. Then type `t`. |
 
 You do not need to learn everything at once. Three commands make a wrong guess easy to repair:
 

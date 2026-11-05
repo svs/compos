@@ -188,7 +188,7 @@
   (let ((chat (plist-get l 'chat)))
     (or (agent-listen--chat chat)
         (and (boundp 'todo--archived-chat)
-             (ignore-errors
+             (report-errors "agent-listen: reopen the archived chat"
                (lambda ()
                  (let ((path (todo--archived-chat chat)))
                    (and path (todo--open-chat chat (agent-listen--archive-group path))))))))))
@@ -224,7 +224,7 @@
            (agent-listen--sent! l e)
            (agent-listen--record! l 'undelivered e)
            #t)
-          ((ignore-errors (lambda () (agent-wake! buf 'event (agent-listen--brief l e)) #t))
+          ((report-errors "agent-listen: wake the chat" (lambda () (agent-wake! buf 'event (agent-listen--brief l e)) #t))
            (agent-listen--sent! l e)
            (agent-listen--record! l 'fired e)
            (unless (plist-get l 'keep) (agent-listen--drop! (plist-get l 'id)))
@@ -369,9 +369,9 @@
              ;; each step on its own: a step that fails must not leave the
              ;; listeners deaf, as a failed subscribe once did
              (agent-listen--load!)
-             (unless (ignore-errors (lambda () (agent-listen--migrate!) #t))
-               (message "agent-listen: the old listeners did not migrate"))
+             (report-errors "agent-listen: the old listeners did not migrate"
+               (lambda () (agent-listen--migrate!)))
              (agent-listen--define! (agent-listen--oldest-since))
-             (for-each (lambda (l) (ignore-errors (lambda () (agent-listen--arm! l))))
+             (for-each (lambda (l) (report-errors "agent-listen: arm a listener" (lambda () (agent-listen--arm! l))))
                        *agent-listeners*))
            #f)

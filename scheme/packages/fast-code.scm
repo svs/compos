@@ -225,7 +225,7 @@
 
 ;; precise first (every word), then wide (most words), one list per step
 (define (fast-step-entries step)
-  (let loop ((es (append (or (ignore-errors (lambda () (apropos-quick step 6))) '())
+  (let loop ((es (append (or (report-errors "fast-code: apropos" (lambda () (apropos-quick step 6))) '())
                          (apropos-recall step fast-code-step-entries)))
              (seen (fast-learned-names))
              (acc '()))
@@ -459,6 +459,7 @@
     ((equal? (car form) 'quote) '())
     ((and (equal? (car form) 'run-command) (pair? (cdr form)) (string? (car (cdr form)))
           (command-fn (car (cdr form))))
+     ;; ignore-errors: a builtin has no source to read
      (let ((src (or (ignore-errors (lambda () (describe-function (string->symbol (car (cdr form)))))) "")))
        (if (pair? (filter (lambda (r) (string-contains? src r)) fast-reader-calls))
            (list (car (cdr form)))
@@ -466,6 +467,7 @@
     (else (fold (lambda (acc x) (append acc (fast-asking-commands x))) '() form))))
 
 (define (fast-command-source cmd)
+  ;; ignore-errors: a builtin has no source to read
   (let ((src (or (ignore-errors (lambda () (describe-function (string->symbol cmd)))) "")))
     (string-append "Its source is "
                    (if (> (string-length src) 400) (substring src 0 400) src))))
@@ -588,7 +590,7 @@
   (let* ((words (string-join (filter (lambda (w) (not (equal? w "")))
                                      (string-split (string-join (string-split name "!") "") "-"))
                              " "))
-         (hits (ignore-errors (lambda () (apropos words 'lexical #t))))
+         (hits (report-errors "fast-code: apropos near a name" (lambda () (apropos words 'lexical #t))))
          (names (if (pair? hits) (map (lambda (e) (plist-get e 'name)) (take-n hits 5)) '())))
     (if (null? names) "" (string-append " (real names near it: " (string-join names ", ") ")"))))
 
@@ -629,7 +631,7 @@
 ;; the file holds the oldest first; a restart reads it back, so the next
 ;; record adds to the history instead of writing over it
 (define (fast-trace-load)
-  (ignore-errors
+  (report-errors "fast-code: load the trace"
     (lambda ()
       (if (file-exists? (fast-trace-path))
           (reverse (filter (lambda (r) r)
@@ -643,7 +645,7 @@
 
 (define (fast-trace-add! rec)
   (set! *fast-trace* (take-n (cons rec *fast-trace*) 100))
-  (ignore-errors
+  (report-errors "fast-code: write the trace"
     (lambda ()
       (write-file! (fast-trace-path)
         (fold (lambda (acc r) (string-append (json-encode r #f) "\n" acc)) "" *fast-trace*)))))
@@ -1002,7 +1004,7 @@
 (define (fast-forget-answer! intent)
   (let ((words (string-trim intent)))
     (set! *fast-trace* (remove (lambda (r) (equal? (plist-get r 'intent) words)) *fast-trace*))
-    (ignore-errors
+    (report-errors "fast-code: write the trace"
       (lambda ()
         (write-file! (fast-trace-path)
           (fold (lambda (acc r) (string-append (json-encode r #f) "\n" acc)) "" *fast-trace*))))

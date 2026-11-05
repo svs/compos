@@ -166,11 +166,11 @@ loads once, before its first test"
                  (name (string->symbol (plist-get t 'name))))
             (unless (member rel loaded)
               (set! loaded (cons rel loaded))
-              (ignore-errors (lambda () (load-test-files! (list (plist-get t 'path))))))
+              (report-errors "test-browser: load a test file" (lambda () (load-test-files! (list (plist-get t 'path))))))
             (let* ((t0 (monotonic-ms))
                    (fs (if (and (test-needs-disposable? name) (not (editor-is-disposable?)))
                            'skip
-                           (ignore-errors (lambda () (run-test name)))))
+                           (report-errors "test-browser: run a test" (lambda () (run-test name)))))
                    (ms (- (monotonic-ms) t0)))
               (set! times (cons (list id ms) times))
               (cond
@@ -315,7 +315,7 @@ loads once, before its first test"
                    (apply append
                      (map (lambda (rel)
                             (map (lambda (r) (plist-put r 'backend name))
-                                 (or (ignore-errors (lambda () ((plist-get be 'discover) root rel))) '())))
+                                 (or (report-errors "test-browser: discover tests" (lambda () ((plist-get be 'discover) root rel))) '())))
                           ((plist-get be 'files) root)))))
                names)))
       (lambda (ok? rows)

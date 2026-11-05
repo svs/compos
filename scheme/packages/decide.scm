@@ -180,6 +180,7 @@
 ;; and in decide-default, which is how a session configured for a different
 ;; fast model still paid for a model nobody had chosen.
 (define (decide--fast-model)
+  ;; ignore-errors: a session can have no fast model
   (or (ignore-errors (lambda () (llm-model-for 'fast)))
       "claude-3-5-haiku-latest"))
 
@@ -480,6 +481,7 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
   ;; jj.scm owns jj, so the gate need not weigh what else runs beside it
   (if (re-match? decide--jj-command code)
       'jj
+      ;; ignore-errors: the model is an outside service; no answer is no kind
       (let* ((reply (ignore-errors (lambda () (decide code (decide--shell-questions) 'purpose 'fast))))
              (row (and reply (assoc 'kind (plist-get reply 'answers)))))
         (and row (decide--choice-symbol (plist-get (cadr row) 'choice))))))

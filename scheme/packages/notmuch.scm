@@ -1747,7 +1747,7 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
 
 (define (nm--autotag-new-tick _)
   (when notmuch-autotag-new-enabled
-    (ignore-errors (lambda () (nm--autotag-new!)))
+    (report-errors "notmuch: autotag new mail" (lambda () (nm--autotag-new!)))
     (debounce! 'notmuch-autotag-new (* 1000 notmuch-autotag-new-seconds)
                (lambda (x) (nm--autotag-new-tick x)) #f)))
 
@@ -3198,7 +3198,7 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
   (for-each mail-feed--sweep-one! mail-feed-profiles))
 
 (define (mail-feed--tick _)
-  (ignore-errors (lambda () (mail-feed-sweep!)))
+  (report-errors "mail-feed: sweep" (lambda () (mail-feed-sweep!)))
   (debounce! 'mail-feed-sweep (* 1000 mail-feed-sweep-seconds)
              (lambda (x) (mail-feed--tick x)) #f))
 

@@ -119,7 +119,11 @@ defmodule Compos.Core.JitLock do
           try do
             Session.call_named(@runner, [name, s, e, version], nil, 30_000, lane)
           catch
-            _, _ -> :ok
+            # the buffer or the Session may be gone; a range that did not
+            # fontify is said, and the next edit asks again
+            kind, reason ->
+              require Logger
+              Logger.warning("jit-lock: #{name} #{s}..#{e}: #{kind} #{inspect(reason)}")
           end
         end
       end

@@ -102,14 +102,14 @@
     (when (> seq (or (event-position name) 0))
       ;; one bad subscriber must not stall itself or the ones behind it:
       ;; its position moves on, and the failure is said
-      (unless (ignore-errors (lambda () ((events--fn (caddr sub)) e) #t))
-        (message (string-append "event subscriber " (events--name name)
-                                " failed on " (plist-get e 'topic))))
+      (report-errors (string-append "event subscriber " (events--name name)
+                                    " failed on " (plist-get e 'topic))
+        (lambda () ((events--fn (caddr sub)) e)))
       (event-log-position-set! name seq))))
 
 (define (events--step-view! v e)
   (when (event-topic-match? (cadr v) (plist-get e 'topic))
-    (let ((next (ignore-errors
+    (let ((next (report-errors "event view: step"
                   (lambda () (list ((events--fn (caddr v)) (event-view (car v)) e))))))
       (when next
         (set! *event-view-states* (alist-put *event-view-states* (car v) (car next)))))))
@@ -120,7 +120,7 @@
 (define (events--pump!)
   (unless *events-pumping*
     (set! *events-pumping* #t)
-    (ignore-errors
+    (report-errors "events: pump"
       (lambda ()
         (let loop ()
           (let ((batch (event-log-read *events-pumped* #f 500)))
@@ -178,7 +178,7 @@
         (when (pair? saved)
           (event-log-import! (reverse (or (plist-get saved 'events) '())) '()))))))
 
-(ignore-errors events--import!)
+(report-errors "events: import the saved log" events--import!)
 (unless *events-pumped* (set! *events-pumped* (event-log-seq)))
 
 ;;; The agents report here. agent-fleet runs agent-status-hook when a

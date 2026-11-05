@@ -494,11 +494,11 @@
       ;; and the record unwritten. Isolate each event, and say what broke.
       (for-each
         (lambda (e)
-          (unless (ignore-errors (lambda () (agent-handle-event slug e) #t))
-            (message (string-append "agent " slug ": event "
-                       (let ((t (plist-get e 'type)))
-                         (if t (symbol->string t) "?"))
-                       " failed — transcript may be missing a piece"))))
+          (report-errors (string-append "agent " slug ": event "
+                           (let ((t (plist-get e 'type)))
+                             (if t (symbol->string t) "?"))
+                           " failed, the transcript may miss a piece")
+            (lambda () (agent-handle-event slug e))))
         events)
       ;; the rich view follows the batch: one tree per batch, not per event
       (chat-view-sync! (agent-buf slug))
@@ -526,13 +526,11 @@
       (buffer-set-local! buf 'chat-connector-suspect #f)
       ;; a reconnect that fails must not take the batch with it: the turn
       ;; is already closed and the transcript already says why
-      (unless (ignore-errors
-                (lambda ()
-                  (agent-reconnect! slug
-                    (or (buffer-local buf 'agent-connector) *default-connector*)
-                    (or (buffer-local buf 'agent-model) ""))
-                  #t))
-        (message (string-append "agent " slug ": could not reconnect the session"))))))
+      (report-errors (string-append "agent " slug ": could not reconnect the session")
+        (lambda ()
+          (agent-reconnect! slug
+            (or (buffer-local buf 'agent-connector) *default-connector*)
+            (or (buffer-local buf 'agent-model) "")))))))
 
 ;; one batch of a runtime's events, in order, then one view sync
 (llm-session-on-event! agent-handle-events)
@@ -559,13 +557,11 @@
       ;; reason one bad event must not eat its batch
       (for-each
         (lambda (key)
-          (unless (ignore-errors
-                    (lambda ()
-                      (run-hook-with-args (list 'agent-turn-end key) slug stop-reason ok?)
-                      #t))
-            (message (string-append "turn-end listener "
-                                    (if (symbol? key) (symbol->string key) key)
-                                    " failed on " slug))))
+          (report-errors (string-append "turn-end listener "
+                                        (if (symbol? key) (symbol->string key) key)
+                                        " failed on " slug)
+            (lambda ()
+              (run-hook-with-args (list 'agent-turn-end key) slug stop-reason ok?))))
         (hook-keys 'agent-turn-end)))))
 
 (category! 'chat)

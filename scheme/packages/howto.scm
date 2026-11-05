@@ -300,6 +300,7 @@
      (message (string-append "No command named " command)))
     (else
       (let ((w (buffer-local *help-buffer* 'help-from-window)))
+        ;; ignore-errors: the window may be gone
         (when w (ignore-errors (lambda () (select-window! w)))))
       (run-command command))))
 

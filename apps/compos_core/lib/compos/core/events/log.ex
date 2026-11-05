@@ -270,7 +270,10 @@ defmodule Compos.Core.Events.Log do
         try do
           Session.call_named(@notify_fn, [], nil, 30_000)
         catch
-          _, _ -> :ok
+          # the Session may be gone or busy; the next burst notifies again
+          kind, reason ->
+            require Logger
+            Logger.warning("events: the notify failed: #{kind} #{inspect(reason)}")
         end
       end)
     end

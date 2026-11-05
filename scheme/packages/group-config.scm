@@ -213,7 +213,7 @@
 ;; Run G's group-on-chat hooks on the chat BUF. #t when every one ran.
 (define (group-config-run! buf id)
   (let ((failed (filter (lambda (fn)
-                          (not (ignore-errors
+                          (not (report-errors "group-config: a group-on-chat hook"
                                  (lambda () (with-current-buffer buf (lambda () (fn buf))) #t))))
                         (group-config-hooks id))))
     (buffer-set-local! buf 'group-config-loaded id)

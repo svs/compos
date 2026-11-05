@@ -1417,7 +1417,7 @@
 (define (chat-summary--goal buf)
   (let* ((who (buffer-local buf 'chat-id))
          (held (and (string? who) (boundp 'todo-list)
-                    (ignore-errors (lambda () (todo-list (list 'assignee who))))))
+                    (report-errors "chat summary: read the assigned todos" (lambda () (todo-list (list 'assignee who))))))
          (t (and (pair? held) (car held))))
     (if t
         (chat-summary--clip

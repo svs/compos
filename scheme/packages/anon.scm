@@ -345,7 +345,7 @@
 (define (anon--write-view! buf plist)
   "set PLIST past anon's own advice"
   (set! *anon-writing* #t)
-  (ignore-errors (lambda () (buffer-set-locals! buf plist)))
+  (report-errors "anon: write the view" (lambda () (buffer-set-locals! buf plist)))
   (set! *anon-writing* #f))
 
 ;; A mode writes its whole view again for each change: a chat for each
@@ -436,6 +436,7 @@ from the buffer, so the redaction must reach that text through the tree"
 
 (define (anon--title-redraw! buf)
   "rebuild BUF's mode line; its title passes through anon on the way"
+  ;; ignore-errors: the buffer may be gone, killed while its title changed
   (ignore-errors (lambda () (dashboard--render! buf))))
 
 (define (anon--view-catchup! buf)
@@ -780,7 +781,7 @@ from the buffer, so the redaction must reach that text through the tree"
   "(anon-off!) - turn redaction off in every buffer and put back what it hid"
   (set! *anon-global* #f)
   (for-each (lambda (b)
-              (ignore-errors
+              (report-errors "anon-off: put back a buffer"
                 (lambda ()
                   (if (buffer-exists? b)
                       (disable-minor-mode! b "anon-local-mode")

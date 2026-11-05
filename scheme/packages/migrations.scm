@@ -46,9 +46,8 @@
 
 ;; one migration that throws does not stop the restore or the others
 (define (migration--run! m buf)
-  (unless (ignore-errors (lambda () ((car (cdr (cdr m))) buf) #t))
-    (message (string-append "migration " (symbol->string (car m))
-                            " failed on " buf))))
+  (report-errors (string-append "migration " (symbol->string (car m)) " failed on " buf)
+    (lambda () ((car (cdr (cdr m))) buf))))
 
 (public! 'migrate-buffer!
   "(migrate-buffer! BUF) - run every registered migration BUF has not seen, and stamp it; return the names that ran")
@@ -89,8 +88,8 @@
         '())))
 
 (define (home-migration--run! m)
-  (unless (ignore-errors (lambda () ((car (cdr (cdr m)))) #t))
-    (message (string-append "migration " (symbol->string (car m)) " failed"))))
+  (report-errors (string-append "migration " (symbol->string (car m)) " failed")
+    (lambda () ((car (cdr (cdr m)))))))
 
 (public! 'migrate-home!
   "(migrate-home!) - run every registered home migration this home has not seen, and stamp it; return the names that ran")
@@ -346,7 +345,7 @@
                        (<= 0 (car range)) (< (car range) (cadr range))
                        (<= (cadr range) size)
                        (not (llm-mode--range-overlaps-any? range turns)))
-              (ignore-errors
+              (report-errors "migration: make an llm-response block"
                 (lambda ()
                   (block-close-end! buf
                     (block-create! buf 'llm-response (car range) (cadr range)
@@ -426,7 +425,7 @@
       (when (file-exists? dir)
         (for-each
           (lambda (name)
-            (ignore-errors
+            (report-errors "migration: move an annotation file"
               (lambda ()
                 (when (string-suffix? ".scm" name)
                   (let* ((source (string-append dir "/" name))

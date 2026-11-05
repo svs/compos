@@ -197,6 +197,7 @@
 
 (define-command "summarize-selection" "Summarize the selected text into *Summary*"
   (lambda ()
+    ;; ignore-errors: with no region there is no text
     (let ((text (or (ignore-errors (lambda () (region-text))) "")))
       (if (equal? (string-trim text) "")
           (message "summarize-selection: select some text first")

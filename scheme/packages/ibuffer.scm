@@ -285,6 +285,7 @@
     (if p (ibuffer-split-path (abbreviate-file-name p)) (list "" b))))
 
 (define (ibuffer-file-age b)
+  ;; ignore-errors: a buffer without a file, or a file that went, has no age
   (let ((t (ignore-errors (lambda () (file-mtime b)))))
     (format-age (and (number? t) (- (current-time) t)))))
 
@@ -294,6 +295,7 @@
 (define (ibuffer-buffer-state b)
   (cond ((not (buffer-known? b)) #f)
         ((and (buffer-path b) (buffer-modified? b)) 'unsaved)
+        ;; ignore-errors: the process may be gone
         ((ignore-errors (lambda () (process-running? b))) 'live)
         (else #f)))
 

@@ -655,8 +655,8 @@
 (define (setup-show-welcome-once!)
   (when (setup-welcome-needed?)
     (run-command "setup-welcome")
-    (unless (ignore-errors (lambda () (setup-mark-welcome-seen!)))
-      (message "Could not record that the Welcome page was shown"))))
+    (report-errors "Could not record that the Welcome page was shown"
+      (lambda () (setup-mark-welcome-seen!)))))
 
 (define (setup--table header rows)
   "A Markdown pipe table. HEADER and each row are lists of cell strings."

@@ -138,7 +138,7 @@
     (when (orchestrate-on? chat)
       (let* ((root (orchestrate-root chat))
              (started (filter (lambda (c) c)
-                              (map (lambda (t) (ignore-errors (lambda () (orchestrate--start! chat t))))
+                              (map (lambda (t) (report-errors "orchestrate: start a child" (lambda () (orchestrate--start! chat t))))
                                    (filter orchestrate--startable? (orchestrate-children root)))))
              (woke (or (buffer-local chat 'orchestrate-woke) '()))
              (new (remove (lambda (j) (member (car j) woke))

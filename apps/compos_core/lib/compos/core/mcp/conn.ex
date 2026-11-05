@@ -57,7 +57,7 @@ defmodule Compos.Core.MCP.Conn do
   def call_tool(pid, tool, args) do
     GenServer.call(pid, {:call_tool, tool, args}, @call_timeout)
   catch
-    :exit, _ -> {:error, "mcp call timed out or connection died"}
+    :exit, reason -> {:error, "mcp call timed out or connection died: #{inspect(reason)}"}
   end
 
   @doc "Status plus the counts the hub lists: %{status, type, resources, prompts}."

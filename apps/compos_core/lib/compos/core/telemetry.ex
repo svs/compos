@@ -215,7 +215,10 @@ defmodule Compos.Core.Telemetry do
         try do
           Session.call_named(@notify_fn, [], nil, 5_000)
         catch
-          _, _ -> :ok
+          # the Session may be gone or busy; the next burst notifies again
+          kind, reason ->
+            require Logger
+            Logger.warning("telemetry: the notify failed: #{kind} #{inspect(reason)}")
         end
       end)
     end

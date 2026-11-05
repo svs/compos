@@ -1042,7 +1042,7 @@
   (let* ((at (nth 1 part)) (name (nth 3 part)) (body (nth 4 part))
          (props (chat-component--props body))
          (problems (chat-component--problems name props))
-         (drawn (and (null? problems) (ignore-errors (lambda () (component name props))))))
+         (drawn (and (null? problems) (report-errors "chat component: draw" (lambda () (component name props))))))
     (if (and (pair? drawn) (not (equal? (car drawn) 'error)))
         (list 'tag "c-group" 'class "ag-component"
               'attrs (list (list "kind" "component") (list "component" name))

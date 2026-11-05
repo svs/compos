@@ -146,6 +146,7 @@
 (define *chats-archived-summaries* '())
 
 (define (chats-archived-summary--read path)
+  ;; ignore-errors: the file may go between the listing and the read
   (let ((text (ignore-errors (lambda () (read-file path)))))
     (and (string? text)
          (let* ((nl (string-index text "\n"))
@@ -642,7 +643,7 @@
 
 (define (agents-delete! b)
   ;; a chat is never trashed: delete archives it, its .chat file stays
-  (ignore-errors (lambda () (chat-log-save! b)))
+  (report-errors "chat-delete: save the .chat file" (lambda () (chat-log-save! b)))
   (agents-archive! b))
 
 (define-command "chat-delete"
@@ -987,6 +988,7 @@
                    (and (string? id)
                         (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
                           (and (file-exists? path)
+                               ;; ignore-errors: the file may go between the check and the read
                                (let ((text (ignore-errors (lambda () (read-file path)))))
                                  (and (string? text)
                                       ;; the header holds the title and the last summary

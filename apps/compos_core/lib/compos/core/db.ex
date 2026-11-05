@@ -242,7 +242,7 @@ defmodule Compos.Core.DB do
         end
     end
   catch
-    :exit, _ -> {:error, "db: connection is not available"}
+    :exit, reason -> {:error, "db: connection is not available: #{inspect(reason)}"}
   end
 
   defp in_transaction(name, conn, fun) do
@@ -287,7 +287,7 @@ defmodule Compos.Core.DB do
         {:error, inspect(e)}
     end
   catch
-    :exit, _ -> {:error, "db: connection is not available"}
+    :exit, reason -> {:error, "db: connection is not available: #{inspect(reason)}"}
   end
 
   defp adapter_query(Postgrex, conn, sql, params) do

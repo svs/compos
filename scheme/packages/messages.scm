@@ -131,6 +131,7 @@
       (lambda (w)
         (let ((caps (messages-watch-captures row (nth 1 w))))
           (when caps
+            ;; ignore-errors: a report from here would be a message inside the watch
             (ignore-errors (lambda () ((nth 2 w) row caps) #t)))))
       *messages-watches*)
     (set! *messages-watching* #f)))

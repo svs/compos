@@ -107,6 +107,7 @@
 (effects! '(read))
 
 (define (agent-sandbox--real path)
+  ;; ignore-errors: a path that does not exist has no real path
   (let ((p (ignore-errors (lambda () (file-realpath path)))))
     (and (string? p)
          (if (and (> (string-length p) 1) (string-suffix? "/" p))

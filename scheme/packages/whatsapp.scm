@@ -679,7 +679,7 @@
            (when (= (length rows) 500) (whatsapp-feed-sweep!))))))))
 
 (define (whatsapp-feed--tick _)
-  (ignore-errors (lambda () (whatsapp-feed-sweep!)))
+  (report-errors "whatsapp-feed: sweep" (lambda () (whatsapp-feed-sweep!)))
   (debounce! 'whatsapp-feed-sweep (* 1000 whatsapp-feed-sweep-seconds)
              (lambda (x) (whatsapp-feed--tick x)) #f))
 

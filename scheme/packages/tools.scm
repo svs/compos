@@ -1224,7 +1224,7 @@
 (define (apropos-warm!)
   (unless (and *apropos--warming* (task-alive? *apropos--warming*))
     (set! *apropos--warming*
-          (task-spawn (lambda () (ignore-errors (lambda () (apropos--rows-cached))))))))
+          (task-spawn (lambda () (report-errors "apropos-warm" (lambda () (apropos--rows-cached))))))))
 
 (define (apropos--rows-stale-ok)
   (cond ((and *apropos--rows-cache* (equal? (catalog-generation) *apropos--rows-gen*))

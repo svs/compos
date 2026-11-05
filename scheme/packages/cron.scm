@@ -138,7 +138,7 @@
   "(cron-next-run NAME) — the next time the job NAME is due, in unix seconds; #f when no scheduler runs"
   (let ((job (alist-get *cron-jobs* name)))
     (and job (cron-running?)
-         (ignore-errors (lambda () (cron-next (plist-get job 'cron) (cron--zone job)))))))
+         (report-errors "cron-next-run" (lambda () (cron-next (plist-get job 'cron) (cron--zone job)))))))
 
 (define (cron-jobs)
   "(cron-jobs) — every job as a plist: name spec cron zone action next last"

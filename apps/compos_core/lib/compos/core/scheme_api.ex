@@ -2637,6 +2637,23 @@ defmodule Compos.Core.SchemeAPI do
           _, _ -> {false, store}
         end
       end,
+      # the ignore-errors for a failure that is a bug: the lane goes on, and
+      # *Messages* and the daemon log say what broke and where
+      {"report-errors",
+       "(report-errors WHERE THUNK) — THUNK's value; when it raises, #f, and the error goes to *Messages* and the log under WHERE."} =>
+        fn [where, thunk], store ->
+          try do
+            Compos.Scheme.Eval.apply_fn(thunk, [], store)
+          rescue
+            e ->
+              report_error(where, Exception.message(e))
+              {false, store}
+          catch
+            kind, reason ->
+              report_error(where, "#{kind}: #{inspect(reason)}")
+              {false, store}
+          end
+        end,
       # (load) restores its stamps with this, so a file that raises leaves
       # the loader clean. CLEANUP runs on the store THUNK returns, and its
       # store is the result: during the boot load the global frame lives in
@@ -3559,6 +3576,13 @@ defmodule Compos.Core.SchemeAPI do
   # stops there; without the command text, a slow shell is invisible. Name
   # it here, at the same threshold the lane uses.
   @slow_shell_ms 250
+
+  defp report_error(where, text) do
+    require Logger
+    where = where |> plain() |> to_string()
+    Logger.warning("report-errors: #{where}: #{text}")
+    Compos.Core.Session.message("#{where}: #{text}", "error")
+  end
 
   defp report_slow_shell(cmd, dir, ms) when ms > @slow_shell_ms do
     require Logger

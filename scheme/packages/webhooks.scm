@@ -47,7 +47,7 @@
   'group 'webhooks 'type 'boolean
   ;; custom.scm loads after this package, so the saved value arrives here
   'set (lambda (on)
-         (cond ((and on (not (webhooks-running?))) (ignore-errors (lambda () (webhooks-start!))))
+         (cond ((and on (not (webhooks-running?))) (report-errors "webhooks: start the server" (lambda () (webhooks-start!))))
                ((and (not on) (webhooks-running?)) (webhooks-stop!)))))
 
 ;; the registry table webhook: NAME -> the endpoint plist: name path methods token peers handler
@@ -198,6 +198,7 @@
 (define (webhook-detach-workflow! name)
   "(webhook-detach-workflow! NAME) — stop the workflow on webhook NAME; its position stays"
   (when (webhook-workflow name)
+    ;; ignore-errors: the workflow may not run
     (ignore-errors (lambda () (workflow-stop! (webhooks--workflow-name name))))
     (set! *webhook-workflows* (filter (lambda (e) (not (equal? (car e) name))) *webhook-workflows*)))
   name)
@@ -223,6 +224,7 @@
 (define (webhooks--tunnel-start!)
   (let ((token (secret-value 'webhooks-tunnel-token)))
     (when (and webhooks-tunnel-host token)
+      ;; ignore-errors: the tunnel may not run
       (ignore-errors (lambda () (endpoint-stop! "webhooks-tunnel")))
       ;; from a task, like the server: the caller's lane may be gone after its turn
       (task-await
@@ -237,6 +239,7 @@
 (define (webhooks-stop!)
   "(webhooks-stop!) — stop the webhook server; the endpoints stay defined"
   (web-server-stop! "webhooks")
+  ;; ignore-errors: the tunnel may not run
   (ignore-errors (lambda () (endpoint-stop! "webhooks-tunnel")))
   (set! *webhooks-server* #f)
   #t)
@@ -267,7 +270,7 @@
 (define (webhooks--define-saved!)
   "(webhooks--define-saved!) — define every endpoint webhooks-saved holds, with its workflow"
   (for-each (lambda (row)
-              (ignore-errors
+              (report-errors "webhooks: define a saved endpoint"
                (lambda ()
                  (let ((opts (if (> (length row) 3) (list-ref row 3) '())))
                    (define-webhook! (car row) (list 'path (cadr row) 'token (caddr row)
@@ -765,4 +768,4 @@
 (webhooks--define-saved!)
 
 (when webhooks-enabled
-  (ignore-errors (lambda () (webhooks-start!))))
+  (report-errors "webhooks: start the server" (lambda () (webhooks-start!))))

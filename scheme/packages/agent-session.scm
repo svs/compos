@@ -847,12 +847,12 @@
   (let ((id (buffer-local buf 'chat-id)))
     (if (string? id)
         (filter (lambda (t) (member id (todo-chats t)))
-                (or (ignore-errors (lambda () (todo-list))) '()))
+                (or (report-errors "chat-finish: read the open todos" (lambda () (todo-list))) '()))
         '())))
 
 (define (chat-finish--blockers buf slug ok? stop-reason)
   (let ((info (and slug (agent-info slug)))
-        (work (ignore-errors (lambda () (chat-work-state buf)))))
+        (work (report-errors "chat-finish: read the work state" (lambda () (chat-work-state buf)))))
     (append
      (if (and ok? (not (equal? stop-reason "cancelled")))
          '()
@@ -875,7 +875,7 @@
     (buffer-set-local! buf 'chat-reap #f)
     (if (and (eq? outcome 'done) (null? blockers))
         (begin
-          (ignore-errors (lambda () (chat-log-save! buf)))
+          (report-errors "chat-finish: save the .chat file" (lambda () (chat-log-save! buf)))
           (agents-archive! buf)
           (notify! "chat" (string-append "Done: " title) summary (list 'buffer buf))
           'closed)
@@ -1022,7 +1022,7 @@
                (null? (chat-done--holds buf slug #t #f)))
       (buffer-set-local! buf 'chat-auto-close-armed #f)
       (let ((title (chats-title buf)))
-        (ignore-errors (lambda () (chat-log-save! buf)))
+        (report-errors "chat-auto-close: save the .chat file" (lambda () (chat-log-save! buf)))
         (agents-archive! buf)
         (notify! "chat" (string-append "Done: " title) why (list 'buffer buf))))))
 
@@ -1567,8 +1567,8 @@
 (define (subagent-archive! slug)
   (let ((buf (subagent-live-buffer slug)))
     (when buf
-      (when (boundp 'chat-log-save!) (ignore-errors (lambda () (chat-log-save! buf))))
-      (let ((path (ignore-errors (lambda () (chat-log-path buf)))))
+      (when (boundp 'chat-log-save!) (report-errors "subagent-archive: save the .chat file" (lambda () (chat-log-save! buf))))
+      (let ((path (report-errors "subagent-archive: find the .chat file" (lambda () (chat-log-path buf)))))
         (when (string? path) (subagent-log-append! slug 'archived path)))
       (agents-archive! buf))))
 
@@ -1710,9 +1710,8 @@
           (set! *subagent-waiters* (reverse keep))
           (for-each
             (lambda (w)
-              (unless (ignore-errors
-                        (lambda () ((nth 2 w) (subagent-collect (nth 1 w))) #t))
-                (message "a subagent-wait callback failed")))
+              (report-errors "a subagent-wait callback failed"
+                (lambda () ((nth 2 w) (subagent-collect (nth 1 w))))))
             (reverse fire)))
         (let* ((w (car ws))
                (pending (remove (lambda (s) (equal? s slug)) (nth 0 w))))

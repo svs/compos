@@ -601,6 +601,7 @@
   ;; read back in G and named after its title, as chat-restore names it
   (or (chat-for--live path)
       (let* ((header (and (file-exists? path)
+                          ;; ignore-errors: a .chat file on disk may be damaged; then it is not this chat
                           (ignore-errors (lambda () (cadr (memq 'header (chat-log-read path)))))))
              (slug (and header (plist-get header 'slug)))
              (live (and (string? slug)
@@ -2041,7 +2042,7 @@
             ;; a reset never throws a conversation away: write it to its
             ;; .chat file, then forget the id so the next turn starts a new
             ;; file and cannot overwrite this one
-            (ignore-errors (lambda () (chat-log-save! buf)))
+            (report-errors "chat reset: save the .chat file" (lambda () (chat-log-save! buf)))
             (buffer-set-local! buf 'chat-log-id #f)
             (overlay-clear! buf "all")
             ;; every tag: a reset empties the buffer, so no owner's ranges
@@ -2549,7 +2550,7 @@
                   ((member type '(dead error)) (finish! #f)))))
         events))
     (when (member id (agent-list)) (llm-session-close! id))
-    (if (ignore-errors
+    (if (report-errors "llm-models-probe: open the session"
           (lambda ()
             (llm-session-open! id
               (agent-resolve-config (list 'connector connector 'cwd (getenv "HOME")))

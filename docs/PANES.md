@@ -58,6 +58,29 @@ Every way to change the windows is a model edit:
 - `select-window!` and `window-set-buffer!` outside a draw write the model
   first.
 
+## The files
+
+Each file owns one decision. A name that is not in this list is not a
+window package.
+
+| File | Owns |
+| --- | --- |
+| `panes.scm` | the model: a pure value and its edits, the layouts (`define-layout!`) |
+| `panes-mode.scm` | the model on the frame: the store per group, the applier (`panes-apply!`), the placement policy, the layout commands (`C-x l`), mode layouts (`apply-layout!`) |
+| `window.scm` | the public doors over the model: `display-buffer` and its rules, the float, previews, the frame return stack and transient frames, window records, the fill pool and rule (`window-fill-*`), `define-mode-layout!`, `quit-window`, winner, the tiling and motion commands |
+| `window-settings.scm` | the settings: `window-layout-*`, `preview-max-file-size`, `next-screen-context-lines`, `large-file-warning-threshold` |
+| `panes-history.scm` | undo and redo over the pane arrangement alone (`layout-undo`, `layout-redo`) |
+| `panes-board.scm` | the window lists: the board (`windows-list`, `C-x w`) and the ring (`windows-list-ring`) |
+| `pane-overview.scm` | the windows of one pane as tiles in that pane (`pane-overview`) |
+| `window-names.scm` | window names (`window-rename`, `C-x j` switch-window) |
+| `window-flash.scm` | the card a chat flashes as a pane cycles to it |
+| `window-log.scm` | the record of every window change (`debug-last-window-movement`) |
+
+The tests sit beside them. `window-config-test.scm` (the frame's group
+follows its windows) and `window-fill-test.scm` (the fill pool and rule)
+test sections of `window.scm`; `layouts-test.scm` tests the layouts and
+transient frames.
+
 ## Where the model is kept
 
 - Per frame and group: frame-local `panes-layouts`. The desktop saves it.

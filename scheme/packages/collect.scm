@@ -243,7 +243,7 @@
 ;; A page always overlaps and never gaps: the rows it keeps are the reader's
 ;; thread back to where they were, and a row scrolled past unseen is gone.
 ;; Every rounding on this path leans the same way. (Emacs
-;; next-screen-context-lines; defcustom in layouts.scm, a plain define here
+;; next-screen-context-lines; defcustom in window-settings.scm, a plain define here
 ;; because editor.scm loads before custom.scm.)
 (define next-screen-context-lines 2)
 

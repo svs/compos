@@ -1,8 +1,13 @@
-;;; panes-board.scm --- the window model as a list: groups, their panes, the
+;;; panes-board.scm --- the window lists: the model as a board, and the ring.
+;;;
+;;; The board: groups, their panes, the
 ;;; panes' windows, the windows' buffers. C-x w lists them. Two views: All,
 ;;; a section for every group as ibuffer has, and Group, this group's model. + zooms one
 ;;; level towards the row at point, - zooms back out; the verbs edit the model
 ;;; and the frame follows.
+;;;
+;;; The ring (M-x windows-list-ring, at the end): every window of the
+;;; frame in one flat list, on screen and waiting.
 
 (require 'panes-mode)
 
@@ -683,3 +688,157 @@
           (set! panes-board--drawn key)
           (list-refresh! board))))))
 (add-hook! 'window-state-change-hook 'panes-board-follow!)
+
+;;; The flat window list. M-x windows-list-ring opens *windows*: the windows of the
+;;; selected frame in ring order, the ones on screen filled, the ones
+;;; waiting off it hollow. RET goes to one, k closes it, c consolidates
+;;; from it, r names it.
+
+(domain! 'windows)
+(effects! '(write display))
+
+(define *windows-list-buffer* "*windows*")
+
+(defface! 'win-on 'fg "#2e6b45" 'weight "600")
+(defface! 'win-off 'fg "#8a857a")
+(defface! 'win-name 'fg "#26356b" 'weight "600")
+
+(define (windows-list-ids buf)
+  ;; the windows on screen first, left to right; then the waiting ones
+  (map number->string (append (layout-pane-windows) (layout-hidden-windows))))
+
+(define (windows-list-window id)
+  (let ((win (string->number id)))
+    (and win (or (window-exists? win) (assoc win (panes-waiting-windows))) win)))
+
+(define (windows-list-pane win)
+  (let* ((l (panes-layout))
+         (k (and l win (panes-key-of-handle l win))))
+    (or (and k (panes-pane-of l k)) "")))
+
+(define (windows-list-narrow-cells buf id)
+  (let ((cells (windows-list-cells buf id)))
+    (list (nth 0 cells) (nth 1 cells) (nth 4 cells) (nth 5 cells))))
+
+(define (windows-list-cells buf id)
+  ;; ● the window you are in, ■ on screen, □ waiting behind its pane
+  (let* ((win (windows-list-window id))
+         (on (and win (member win (layout-pane-windows)) #t))
+         (here (and win (equal? win (active-window))))
+         (top (if win (or (window-buffer-any win) "") ""))
+         (l (panes-layout))
+         (more (cond ((not win) 0)
+                     ((and l (panes-window l win)) (max 0 (- (length (panes-window-buffers l win)) 1)))
+                     (else (length (window-prev-buffers win))))))
+    (list (list (cond (here "●") (on "■") (else "□")) (if on "ok" "faint"))
+          (list (if win (window-name win) "") #f)
+          (list (windows-list-pane win) "faint")
+          (list (if (equal? top "") "" (buffer-modeline-name top)) "faint")
+          (list (let ((m (or (and win (mode-consolidate-window-mode win)) "")))
+                  (if (string-suffix? "-mode" m) (substring m 0 (- (string-length m) 5)) m))
+                "dim")
+          (list (if win (number->string (+ 1 more)) "") "faint"))))
+
+(define (windows-list-on-current fn)
+  (let* ((id (list-current *windows-list-buffer*))
+         (win (and id (windows-list-window id))))
+    (if win (fn win) (message "no window on this line — g refreshes"))))
+
+(define (windows-list-take! win)
+  ;; the chosen window comes to the front of its pane and takes the focus
+  (panes-raise-window! win))
+
+(define-command "windows-list-visit" "Show the window on this line in the list's pane"
+  (lambda () (windows-list-on-current windows-list-take!)))
+
+(define-command "windows-list-close" "Close the window on this line"
+  (lambda ()
+    (windows-list-on-current
+      (lambda (win)
+        (let* ((l (panes--ensure-layout!)) (k (panes-key-of-handle l win)))
+          (when k (panes-apply! (panes-remove-window l k))))
+        (list-refresh! *windows-list-buffer*)))))
+
+(define-command "windows-list-consolidate"
+  "Give every major mode one window, from the window on this line; visible panes keep their modes"
+  (lambda ()
+    (windows-list-on-current
+      (lambda (win)
+        (let ((list-win (active-window)))
+          (begin
+              ;; the panes model consolidates every window it holds, shown or not
+              (when (member win (map car (window-list))) (select-window! win))
+              (consolidate!))
+          (when (window-exists? list-win) (select-window! list-win))
+          (list-refresh! *windows-list-buffer*))))))
+
+(define-command "windows-list-refresh" "Redraw the window list"
+  (lambda () (list-refresh! *windows-list-buffer*)))
+
+(define-command "windows-list-rename" "Name the window on this line"
+  (lambda ()
+    (windows-list-on-current
+      (lambda (win)
+        (window-rename-prompt! win (lambda () (list-refresh! *windows-list-buffer*)))))))
+
+(define-list-mode! "windows-mode"
+  (list
+    'doc (string-append
+           "The windows of this frame, pane by pane, or in ring order without panes. ● is the window you are in, "
+           "■ one on screen, □ one waiting behind its pane; the last column counts its buffers. `RET` shows the "
+           "window in the list's pane, `k` closes it, `c` gives every major mode one window from the window on the line, `r` names the window.")
+    'buffer *windows-list-buffer*
+    'rows windows-list-ids
+    ;; a narrow window keeps the mark, the name and the count; the pane and
+    ;; the buffer it shows come back past 80 columns
+    'layouts (list (list 'name 'wide
+                         'min-cols 80
+                         'columns (lambda (buf)
+                                    (list (list "" 1) (list "window" 20) (list "pane" 7)
+                                          (list "showing" 40) (list "mode" 18) (list "bufs" #f)))
+                         'cells windows-list-cells)
+                   (list 'name 'narrow
+                         'default #t
+                         'columns (lambda (buf) (list (list "" 1) (list "window" #f) (list "mode" 18) (list "bufs" 4)))
+                         'cells windows-list-narrow-cells))
+    'cells windows-list-cells
+    'title (lambda (buf) "Windows")
+    'meta (lambda (buf)
+            (string-append (number->string (length (list-entries buf))) " windows"))
+    'total (lambda (buf) (length (list-source-entries buf)))
+    'no-marks #t
+    'local-filter #t
+    'footer (lambda (buf)
+              '(("RET" "go") ("k" "close") ("c" "consolidate") ("r" "rename") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
+    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate") ("r" "windows-list-rename")
+            ("g" "windows-list-refresh") ("q" "quit-window"))))
+
+(define-command "windows-list-ring"
+  "List the windows of this frame's ring in one flat list, on screen and waiting"
+  (lambda ()
+    ;; a list that waits behind a pane comes to this one: popping to it
+    ;; would leave it hidden in its own window
+    (let ((waiting (find (lambda (w) (equal? (window-buffer-any w) *windows-list-buffer*))
+                         (map car (panes-waiting-windows)))))
+      (if waiting
+          (begin (windows-list-take! waiting) (list-refresh! *windows-list-buffer*))
+          ;; else it opens in this pane: popping lets display send it to another group's window
+          (let ((buf *windows-list-buffer*))
+            (buffer-create buf)
+            (with-current-buffer buf (lambda () (set-mode! "windows-mode")))
+            (window-set-buffer! (active-window) buf)
+            (list-refresh! buf))))))
+
+;; C-x w opens the board (windows-list above)
+(define-key "ctl-x-map" "w" "windows-list")
+
+;; The list follows the ring while it is on screen.
+(define (windows-list-follow!)
+  ;; only a list on screen follows: a window waiting behind a pane with
+  ;; the list does not count as showing it
+  (when (and (buffer-known? *windows-list-buffer*)
+             (find (lambda (w) (equal? (cadr w) *windows-list-buffer*)) (window-list)))
+    (list-refresh! *windows-list-buffer*)))
+
+(add-hook! 'window-state-change-hook 'windows-list-follow!)

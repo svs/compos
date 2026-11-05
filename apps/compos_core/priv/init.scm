@@ -35,8 +35,8 @@
 (require 'migrations)
 (require 'transient)
 (require 'tabulated-list)
-; windows: display-buffer, the float, previews, layouts, tiling;
-; it precedes dired
+; windows: the public doors (display-buffer, the float, previews,
+; quit-window, the tiling commands) over the window model; it precedes dired
 (require 'window)
 (require 'tramp)
 (require 'dired)
@@ -57,6 +57,8 @@
 (require 'herdr-claude)
 (require 'advice)
 (require 'custom)
+;; the settings of the windows: bound before any package reads one
+(require 'window-settings)
 (require 'tools)
 (require 'recipes)
 (require 'components)
@@ -154,7 +156,6 @@
 (require 'jj)
 (require 'keys)
 (require 'keymaps)
-(require 'layouts)
 ;; the on-device decision model: it registers its daemon in the endpoint
 ;; registry, which models.scm reads to show and start it
 (require 'laya)

@@ -1,8 +1,12 @@
-;;; window.scm --- windows: display-buffer, the float, previews, layouts, tiling.
+;;; window.scm --- the public window doors over the window model.
 ;;;
-;;; Emacs's window.el, in one file: the display-buffer chain and its actions,
-;;; the float and the preview, the mode layouts, quit-window, winner,
-;;; and the tiling commands. init.scm loads it second, before dired.
+;;; Emacs's window.el: the names a package or a person calls. The
+;;; display-buffer chain and its actions, the float and the preview, the
+;;; frame return stack and transient frames, window records, the fill
+;;; pool and rule (window-fill-*), mode layout declarations, quit-window,
+;;; winner and the tiling and motion commands. Where a window goes and
+;;; what the frame draws is the model's decision (panes.scm, panes-mode.scm);
+;;; a door here asks it. docs/PANES.md maps the files.
 
 (domain! 'files)
 (effects! '(read))
@@ -32,18 +36,6 @@
 ;;; rule with a procedure PATTERN sends it to the bottom of the frame.
 
 (define *window-third* (/ 1 3))
-
-;; The two-pane layout reads this. It is a plain define here, because
-;; editor.scm loads before custom.scm; layouts.scm makes it a custom.
-;; It is the first pane's share of the frame.
-(define window-layout-main-ratio (- 1 *window-third*))
-;; The columns layout shows this many panes and keeps no others; layouts.scm makes
-;; it a setting.
-(define window-layout-columns 3)
-
-;; The layout a frame keeps as its target until the person frees it; a
-;; plain define here too, a custom in layouts.scm.
-(define window-layout-default 'columns)
 
 (define *display-buffer-defaults* (list 'side 'right 'size *window-third*))
 
@@ -362,6 +354,60 @@
       (window-state-changed!))
     (and e #t)))
 
+(domain! 'windows)
+(effects! '(write))
+
+;;; --- transient frames -------------------------------------------------------
+;;; A transient frame mode borrows the frame and gives it back. It records
+;;; the arrangement it found on the way in, and leaving puts that
+;;; arrangement back EXACTLY: the same panes, the same buffers in them,
+;;; and the group the frame stood in.
+;;;
+;;; This is not window history and it is not quit-restore. Those answer
+;;; "what did this one window show before", one window at a time, and a
+;;; mode that split, covered or retiled the frame cannot be undone one
+;;; window at a time — the window it was invoked in came back holding
+;;; whatever the history had, and the pane beside it was simply lost.
+;;;
+;;; A mode enters by NAME, so two can stand at once without reading each
+;;; other's record. Entering twice does not re-record: what a mode gives
+;;; back is the arrangement from before it took the frame, never one it
+;;; made itself. A mode that stopped standing by some other road — its
+;;; buffer was replaced, a layout was applied — abandons its record
+;;; instead of restoring a tree of windows that no longer exist.
+
+;; A record is an entry on the frame return stack, pushed for NAME.
+(define (transient-frame-standing? name) (and (arrangement-for name) #t))
+
+(define (transient-frame-enter! name)
+  (and (not (transient-frame-standing? name)) (arrangement-push! name) #t))
+
+(define (transient-frame-abandon! name)
+  (arrangement-drop! (arrangement-for name))
+  #f)
+
+;; the mode is standing only while the buffer it took the frame for is on
+;; screen. Arriving with a stale record re-arms: the arrangement to give
+;; back is the one in front of you now.
+(define (transient-frame-rearm! name buf)
+  (when (and (transient-frame-standing? name)
+             (not (and (string? buf) (buffer-known? buf) (window-showing buf))))
+    (transient-frame-abandon! name))
+  (transient-frame-enter! name))
+
+(define (transient-frame-exit! name) (arrangement-pop! (arrangement-for name)))
+
+(public! 'transient-frame-enter!
+  "(transient-frame-enter! NAME) — record the frame's arrangement so NAME can give it back; #f when NAME already stands")
+(public! 'transient-frame-exit!
+  "(transient-frame-exit! NAME) — put back exactly the arrangement and group NAME found; #f when NAME never entered")
+(public! 'transient-frame-standing?
+  "(transient-frame-standing? NAME) — #t while NAME holds an arrangement to give back")
+(public! 'transient-frame-rearm!
+  "(transient-frame-rearm! NAME BUF) — enter, re-recording when NAME's record is stale because BUF is not on screen")
+(public! 'transient-frame-abandon!
+  "(transient-frame-abandon! NAME) — drop NAME's record without restoring anything")
+
 ;;; --- window records ------------------------------------------------------------
 ;;; What Scheme keeps about one window: a plist keyed by the window id, in
 ;;; its frame's frame-local window-records. A layout restore keeps a
@@ -631,7 +677,6 @@
 
 (define (preview-slot) (frame-local 'preview))
 (define (preview-buffer) (let ((s (preview-slot))) (and s (car s))))
-(define (preview-data) (let ((s (preview-slot))) (and s (nth 4 s))))
 
 (define (preview--owned-window owner)
   (let loop ((rows (window-list)))
@@ -900,12 +945,6 @@
 
 ;; The selected window comes first, so a command that opens one thing still
 ;; opens it where you are: you are already in the window of its mode.
-;; the major mode NAME has, or the one it is about to open in: a file a
-;; listing just read has no mode yet, and it still belongs beside its kin
-(define (display-buffer-mode name)
-  (or (buffer-local name 'mode-name)
-      (and (buffer-known? name) (auto-mode-for-buffer name))))
-
 (define (window-showing-mode mode &optional except)
   (and (string? mode)
        (let ((me (active-window))
@@ -1031,9 +1070,7 @@
 ;;; reader asked for that one. A buffer that is open already is shown as
 ;;; before, because the work is paid.
 ;;;
-;;; layouts.scm makes the variable customizable.
-
-(define preview-max-file-size 1048576)
+;;; The cap is preview-max-file-size (window-settings.scm).
 
 ;; #t when a preview of PATH would open a file too big to preview. A path
 ;; with a buffer already, a directory, and a remote path all answer #f:
@@ -1153,39 +1190,6 @@
         (let ((spec (mode-layout (car names))))
           (if spec spec (loop (cdr names)))))))
 
-;; A pane that may not exist yet: (ensure "NAME" "COMMAND") runs COMMAND
-;; when NAME is absent, then uses NAME. This is what lets a declared
-;; layout be the whole truth — kill a pane's buffer, ask for the layout
-;; again, and the command builds it back. A plain "NAME" pane still
-;; drops when it is missing, because a document with no scratch yet must
-;; fill the frame alone.
-(define (layout--ensure name maker)
-  (unless (buffer-known? name)
-    (when (string? maker) (run-command maker)))
-  (and (buffer-known? name) name))
-
-(define (layout--pane anchor pane)
-  (cond ((equal? pane 'self) anchor)
-        ((string? pane) (and (buffer-known? pane) pane))
-        ((and (pair? pane) (equal? (car pane) 'ensure))
-         (layout--ensure (car (cdr pane))
-                         (and (pair? (cdr (cdr pane))) (car (cdr (cdr pane))))))
-        ((symbol? pane)
-         (let ((v (buffer-local anchor pane)))
-           (and (string? v) (buffer-known? v) v)))
-        (else #f)))
-
-;; the buffers the spec names, in order, without repeats
-(define (layout--panes anchor spec)
-  (let loop ((rest (if (pair? spec) (cdr (cdr spec)) (list spec))) (acc '()))
-    (if (null? rest)
-        (reverse acc)
-        (let ((b (layout--pane anchor (car rest))))
-          (loop (cdr rest) (if (and b (not (member b acc))) (cons b acc) acc))))))
-
-(define (layout--dir spec) (if (pair? spec) (car spec) 'h))
-(define (layout--ratio spec) (if (pair? spec) (cadr spec) 0.5))
-
 (domain! 'files)
 (effects! '(read))
 
@@ -1199,7 +1203,6 @@
 ;;; empties, the buffer q falls to. A layout that read the ring pulled
 ;;; buffers in from other groups.
 
-;; a buffer a window may be filled with: known, not hidden, not floating
 (domain! 'files)
 (effects! '(read))
 
@@ -1211,7 +1214,6 @@
        (not (float--class? b))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))
-(define window-fill-primary? (lambda (buffer) #t))
 (define window-fill-member? (lambda (buffer) #t))
 
 ;; History permits utility covers, but never another group's content.
@@ -1462,17 +1464,6 @@
 (define (delete-other-windows!) (panes--delete-other-windows!))
 
 (define (split-window! dir &optional ratio) (panes--split-window! dir))
-
-(define (window-arrange-line! dir ratio items)
-  "Lay the frame out as one line of the window ITEMS: window-arrange!
-   with a single line. A repeated window counts once."
-  (let ((id (lambda (i) (if (pair? i) (car i) i))))
-    (window-arrange!
-      (list dir ratio
-            (let loop ((is items) (seen '()) (acc '()))
-              (cond ((null? is) (reverse acc))
-                    ((member (id (car is)) seen) (loop (cdr is) seen acc))
-                    (else (loop (cdr is) (cons (id (car is)) seen) (cons (car is) acc)))))))))
 
 (define (delete-window!) (panes--delete-window!))
 
@@ -1740,161 +1731,6 @@ the focus; #f for a window or a buffer."
 (effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
-;;; The flat window list. M-x windows-list-ring opens *windows*: the windows of the
-;;; selected frame in ring order, the ones on screen filled, the ones
-;;; waiting off it hollow. RET goes to one, k closes it, c consolidates
-;;; from it, r names it.
-
-(domain! 'windows)
-(effects! '(write display))
-
-(define *windows-list-buffer* "*windows*")
-
-(defface! 'win-on 'fg "#2e6b45" 'weight "600")
-(defface! 'win-off 'fg "#8a857a")
-(defface! 'win-name 'fg "#26356b" 'weight "600")
-
-(define (windows-list-ids buf)
-  ;; the windows on screen first, left to right; then the waiting ones
-  (map number->string (append (layout-pane-windows) (layout-hidden-windows))))
-
-(define (windows-list-window id)
-  (let ((win (string->number id)))
-    (and win (or (window-exists? win) (assoc win (panes-waiting-windows))) win)))
-
-(define (windows-list-pane win)
-  (let* ((l (panes-layout))
-         (k (and l win (panes-key-of-handle l win))))
-    (or (and k (panes-pane-of l k)) "")))
-
-(define (windows-list-narrow-cells buf id)
-  (let ((cells (windows-list-cells buf id)))
-    (list (nth 0 cells) (nth 1 cells) (nth 4 cells) (nth 5 cells))))
-
-(define (windows-list-cells buf id)
-  ;; ● the window you are in, ■ on screen, □ waiting behind its pane
-  (let* ((win (windows-list-window id))
-         (on (and win (member win (layout-pane-windows)) #t))
-         (here (and win (equal? win (active-window))))
-         (top (if win (or (window-buffer-any win) "") ""))
-         (l (panes-layout))
-         (more (cond ((not win) 0)
-                     ((and l (panes-window l win)) (max 0 (- (length (panes-window-buffers l win)) 1)))
-                     (else (length (window-prev-buffers win))))))
-    (list (list (cond (here "●") (on "■") (else "□")) (if on "ok" "faint"))
-          (list (if win (window-name win) "") #f)
-          (list (windows-list-pane win) "faint")
-          (list (if (equal? top "") "" (buffer-modeline-name top)) "faint")
-          (list (let ((m (or (and win (mode-consolidate-window-mode win)) "")))
-                  (if (string-suffix? "-mode" m) (substring m 0 (- (string-length m) 5)) m))
-                "dim")
-          (list (if win (number->string (+ 1 more)) "") "faint"))))
-
-(define (windows-list-on-current fn)
-  (let* ((id (list-current *windows-list-buffer*))
-         (win (and id (windows-list-window id))))
-    (if win (fn win) (message "no window on this line — g refreshes"))))
-
-(define (windows-list-take! win)
-  ;; the chosen window comes to the front of its pane and takes the focus
-  (panes-raise-window! win))
-
-(define-command "windows-list-visit" "Show the window on this line in the list's pane"
-  (lambda () (windows-list-on-current windows-list-take!)))
-
-(define-command "windows-list-close" "Close the window on this line"
-  (lambda ()
-    (windows-list-on-current
-      (lambda (win)
-        (let* ((l (panes--ensure-layout!)) (k (panes-key-of-handle l win)))
-          (when k (panes-apply! (panes-remove-window l k))))
-        (list-refresh! *windows-list-buffer*)))))
-
-(define-command "windows-list-consolidate"
-  "Give every major mode one window, from the window on this line; visible panes keep their modes"
-  (lambda ()
-    (windows-list-on-current
-      (lambda (win)
-        (let ((list-win (active-window)))
-          (begin
-              ;; the panes model consolidates every window it holds, shown or not
-              (when (member win (map car (window-list))) (select-window! win))
-              (consolidate!))
-          (when (window-exists? list-win) (select-window! list-win))
-          (list-refresh! *windows-list-buffer*))))))
-
-(define-command "windows-list-refresh" "Redraw the window list"
-  (lambda () (list-refresh! *windows-list-buffer*)))
-
-(define-command "windows-list-rename" "Name the window on this line"
-  (lambda ()
-    (windows-list-on-current
-      (lambda (win)
-        (window-rename-prompt! win (lambda () (list-refresh! *windows-list-buffer*)))))))
-
-(define-list-mode! "windows-mode"
-  (list
-    'doc (string-append
-           "The windows of this frame, pane by pane, or in ring order without panes. ● is the window you are in, "
-           "■ one on screen, □ one waiting behind its pane; the last column counts its buffers. `RET` shows the "
-           "window in the list's pane, `k` closes it, `c` gives every major mode one window from the window on the line, `r` names the window.")
-    'buffer *windows-list-buffer*
-    'rows windows-list-ids
-    ;; a narrow window keeps the mark, the name and the count; the pane and
-    ;; the buffer it shows come back past 80 columns
-    'layouts (list (list 'name 'wide
-                         'min-cols 80
-                         'columns (lambda (buf)
-                                    (list (list "" 1) (list "window" 20) (list "pane" 7)
-                                          (list "showing" 40) (list "mode" 18) (list "bufs" #f)))
-                         'cells windows-list-cells)
-                   (list 'name 'narrow
-                         'default #t
-                         'columns (lambda (buf) (list (list "" 1) (list "window" #f) (list "mode" 18) (list "bufs" 4)))
-                         'cells windows-list-narrow-cells))
-    'cells windows-list-cells
-    'title (lambda (buf) "Windows")
-    'meta (lambda (buf)
-            (string-append (number->string (length (list-entries buf))) " windows"))
-    'total (lambda (buf) (length (list-source-entries buf)))
-    'no-marks #t
-    'local-filter #t
-    'footer (lambda (buf)
-              '(("RET" "go") ("k" "close") ("c" "consolidate") ("r" "rename") ("/" "filter")
-                ("g" "refresh") ("q" "quit")))
-    'keys '(("RET" "windows-list-visit") ("k" "windows-list-close") ("c" "windows-list-consolidate") ("r" "windows-list-rename")
-            ("g" "windows-list-refresh") ("q" "quit-window"))))
-
-(define-command "windows-list-ring"
-  "List the windows of this frame's ring in one flat list, on screen and waiting"
-  (lambda ()
-    ;; a list that waits behind a pane comes to this one: popping to it
-    ;; would leave it hidden in its own window
-    (let ((waiting (find (lambda (w) (equal? (window-buffer-any w) *windows-list-buffer*))
-                         (map car (panes-waiting-windows)))))
-      (if waiting
-          (begin (windows-list-take! waiting) (list-refresh! *windows-list-buffer*))
-          ;; else it opens in this pane: popping lets display send it to another group's window
-          (let ((buf *windows-list-buffer*))
-            (buffer-create buf)
-            (with-current-buffer buf (lambda () (set-mode! "windows-mode")))
-            (window-set-buffer! (active-window) buf)
-            (list-refresh! buf))))))
-
-
-
-(define-key "ctl-x-map" "w" "windows-list")
-
-;; The list follows the ring while it is on screen.
-(define (windows-list-follow!)
-  ;; only a list on screen follows: a window waiting behind a pane with
-  ;; the list does not count as showing it
-  (when (and (buffer-known? *windows-list-buffer*)
-             (find (lambda (w) (equal? (cadr w) *windows-list-buffer*)) (window-list)))
-    (list-refresh! *windows-list-buffer*)))
-
-(add-hook! 'window-state-change-hook 'windows-list-follow!)
-
 (domain! 'unknown)
 (effects! '(unknown))
 (category! 'interaction)

@@ -1023,6 +1023,39 @@
 (catalog-meta! 'function "panes-apart-panes" 'effects '(read))
 (public! 'panes-display-in-pane! "(panes-display-in-pane! BUF PANE) -> show BUF at the front of PANE; the focus stays")
 
+;; The panes of a mode layout (window.scm define-mode-layout!).
+;; A pane that may not exist yet: (ensure "NAME" "COMMAND") runs COMMAND
+;; when NAME is absent, then uses NAME. This is what lets a declared
+;; layout be the whole truth — kill a pane's buffer, ask for the layout
+;; again, and the command builds it back. A plain "NAME" pane still
+;; drops when it is missing, because a document with no scratch yet must
+;; fill the frame alone.
+(define (layout--ensure name maker)
+  (unless (buffer-known? name)
+    (when (string? maker) (run-command maker)))
+  (and (buffer-known? name) name))
+
+(define (layout--pane anchor pane)
+  (cond ((equal? pane 'self) anchor)
+        ((string? pane) (and (buffer-known? pane) pane))
+        ((and (pair? pane) (equal? (car pane) 'ensure))
+         (layout--ensure (car (cdr pane))
+                         (and (pair? (cdr (cdr pane))) (car (cdr (cdr pane))))))
+        ((symbol? pane)
+         (let ((v (buffer-local anchor pane)))
+           (and (string? v) (buffer-known? v) v)))
+        (else #f)))
+
+;; the buffers the spec names, in order, without repeats
+(define (layout--panes anchor spec)
+  (let loop ((rest (if (pair? spec) (cdr (cdr spec)) (list spec))) (acc '()))
+    (if (null? rest)
+        (reverse acc)
+        (let ((b (layout--pane anchor (car rest))))
+          (loop (cdr rest) (if (and b (not (member b acc))) (cons b acc) acc))))))
+
+(define (layout--ratio spec) (if (pair? spec) (cadr spec) 0.5))
+
 (define (apply-layout! anchor spec)
   "The frame as SPEC says (define-mode-layout!): its buffers front the
    panes, left to right, the first at SPEC's ratio and the rest equal;

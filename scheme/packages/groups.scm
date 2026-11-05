@@ -3650,7 +3650,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define *group-dying* #f)
 
-;; The pool (editor.scm window-fill-buffers): in a group, the group's
+;; The pool (window.scm window-fill-buffers): in a group, the group's
 ;; members; out of one, the ring. The switcher's members section and the
 ;; windows' fill read the same list.
 (define (group-primary-fill? b)
@@ -3667,11 +3667,6 @@ is forgotten and that group falls back to creation order in the switcher."
       (if g (group-fill-buffers g)
           (filter (lambda (b) (not (buffer-context-only? b))) (buffer-list-mru))))))
 
-
-
-
-(set! window-fill-primary?
-  (lambda (b) (or (not (frame-group)) (group-primary-fill? b))))
 (set! window-fill-member?
   (lambda (b) (or (not (frame-group)) (buffer-in-group? b (frame-group)))))
 

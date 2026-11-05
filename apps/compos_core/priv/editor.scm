@@ -4985,9 +4985,13 @@
   (or (run-hook-with-args-until-success 'buffer-kill-repair name) (lambda () #f)))
 
 (define (buffer-kill! name)
-  (let ((repair (buffer-kill-repair name)))
+  (let* ((repair (buffer-kill-repair name))
+         ;; after the model's repair, each window still on NAME goes back to
+         ;; its own past (window.scm); the core fills what is left
+         (release (and (boundp 'window-records-release!) (window-records-release! name))))
     (buffer-kill-raw! name)
     (keymap--forget-buffer! name)
+    (when release (release))
     (when repair (repair))))
 
 (define (kill-buffer-confirm! target done)

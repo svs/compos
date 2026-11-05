@@ -142,7 +142,12 @@
     ((or (remote-path? source) (remote-path? destination))
      (message "Copy between local and remote paths first")
      #f)
-    (else (local-rename-file! source destination))))
+    (else
+      (let ((done (local-rename-file! source destination)))
+        ;; the buffer moved with its file: window histories follow it
+        (when (and done (boundp 'window-records-renamed!))
+          (window-records-renamed! (expand-path source) (expand-path destination)))
+        done))))
 
 (define (copy-file! source destination)
   (cond

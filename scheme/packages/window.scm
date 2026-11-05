@@ -238,9 +238,12 @@
             (window-float-class! was #f)))
         ;; the float is a frame window outside the panes model: the raw
         ;; split, not split-window!, which adds a pane to the model
-        (let ((before (map car (window-list))))
+        (let ((before (map car (window-list)))
+              (past (window-prev-buffers (active-window))))
           (builtin-split-window! (if (member side '(top bottom)) 'v 'h) (- 1 size))
           (set! w (find (lambda (x) (not (member x before))) (map car (window-list))))
+          ;; the float starts with the past of the window it split from
+          (set-window-prev-buffers! w past)
           (window-show-buffer! w name)
           ;; the split made this window: the end of a look deletes it
           (set-window-restore! w '(window #f #f))))
@@ -364,7 +367,16 @@
 ;;; its frame's frame-local window-records. A layout restore keeps a
 ;;; window's id, so a record follows its window through one. A write drops
 ;;; the records of windows the frame no longer has.
-;;;   owner   the window that asked for this one (a display, a look)
+;;;   owner    the window that asked for this one (a display, a look)
+;;;   history  the buffers it showed before, most recent first
+;;;   restore  what quit-window undoes (Emacs quit-restore), as
+;;;            (KIND COVERED POINT SHOWN UNDER). It holds while the window
+;;;            shows SHOWN. KIND window: a display made the window; other:
+;;;            the display covered COVERED; preview: a look covers COVERED,
+;;;            and UNDER is the record the look covers.
+;;; The doors below keep them: window-set-buffer!, window-switch-buffer!
+;;; and window-preview-buffer! show a buffer through the raw primitives and
+;;; write the record; a kill gives each window its own past first.
 
 (domain! 'windows)
 (effects! '(read))
@@ -381,9 +393,46 @@
   (let ((owner (window-record win 'owner)))
     (and owner (equal? (frame-of-window owner) (frame-of-window win)) owner)))
 
+;; the buffer WIN shows, in any frame
+(define (window--buffer-of win)
+  (let ((row (assoc win (window-list-all)))) (and row (cadr row))))
+
+(define (window--without x lst) (remove (lambda (y) (equal? x y)) lst))
+
+(define (window--uniq lst)
+  (let loop ((l lst) (acc '()))
+    (cond ((null? l) (reverse acc))
+          ((member (car l) acc) (loop (cdr l) acc))
+          (else (loop (cdr l) (cons (car l) acc))))))
+
+;; histories a restart handed back (persist-global! below), by window id:
+;; a window reads its own until its record has one
+(defvar 'window--saved-histories '())
+
+(define (window--history win)
+  (let ((h (window-record win 'history)))
+    (if (list? h)
+        h
+        (let ((e (assoc win window--saved-histories))) (if e (cadr e) '())))))
+
+;; the restore record while it holds: WIN still shows what it put there
+(define (window--restore-record win)
+  (let ((r (window-record win 'restore)))
+    (and (pair? r) (equal? (list-ref r 3) (window--buffer-of win)) r)))
+
+(define (window-prev-buffers &optional win)
+  "(window-prev-buffers [WIN]) -> the buffers WIN showed before, most recent first; live, not internal"
+  (filter (lambda (b) (and (string? b) (buffer-known? b) (not (string-prefix? " " b))))
+          (window--history (or win (active-window)))))
+
+(define (window-restore win)
+  "(window-restore WIN) -> (KIND BUFFER POINT) while WIN still shows what a display or a look put there, else #f. KIND window: the display made WIN; other: it covered BUFFER; preview: a look covers BUFFER"
+  (let ((r (window--restore-record win)))
+    (and r (list (car r) (cadr r) (caddr r)))))
+
 (effects! '(write))
-(define (window-record-set! win key val)
-  "(window-record-set! WIN KEY VAL) -> #t: KEY of WIN's record is VAL; #f when WIN is no window"
+(define (window-record-set! win key val &rest more)
+  "(window-record-set! WIN KEY VAL [KEY VAL ...]) -> #t: each KEY of WIN's record is its VAL; #f when WIN is no window"
   (let ((frame (and win (frame-of-window win))))
     (and frame
          (let* ((ids (map car (filter (lambda (r) (equal? (caddr r) frame)) (window-list-all))))
@@ -391,12 +440,170 @@
                 (e (assoc win all))
                 (rest (filter (lambda (e) (and (member (car e) ids) (not (equal? (car e) win)))) all)))
            (set-frame-local-in! frame 'window-records
-             (cons (list win (plist-put (if e (cadr e) '()) key val)) rest))
+             (cons (list win (let loop ((p (if e (cadr e) '())) (kv (cons key (cons val more))))
+                               (if (null? kv) p (loop (plist-put p (car kv) (cadr kv)) (cddr kv)))))
+                   rest))
            #t))))
 
 (define (set-window-owner! win owner)
   "(set-window-owner! WIN OWNER) -> #t: record the window OWNER as the one that asked for WIN; #f clears it"
   (window-record-set! win 'owner (and (integer? owner) owner)))
+
+;; the header line counts the buffers a window holds: the one it shows and
+;; the ones under it. The renderer reads the number; Scheme sets it.
+(define (window--history-set! win history &rest more)
+  (let* ((shown (window--buffer-of win))
+         (history (take (window--without shown (window--uniq (filter string? history))) 500)))
+    (set! window--saved-histories (remove (lambda (e) (equal? (car e) win)) window--saved-histories))
+    (apply window-record-set! (cons win (cons 'history (cons history more))))
+    (window--set-stack! win (+ 1 (length history)))))
+
+(define (set-window-prev-buffers! win prev)
+  "(set-window-prev-buffers! WIN PREV) -> #t: WIN's previous buffers are PREV, most recent first; #f when WIN is no window"
+  (and (list? prev) (window--buffer-of win) (window--history-set! win prev)))
+
+(define (set-window-restore! win rec)
+  "(set-window-restore! WIN RECORD) -> #t: WIN's restore record is RECORD, (KIND BUFFER POINT) as window-restore answers, or #f to clear it"
+  (cond ((not rec) (window-record-set! win 'restore #f))
+        ((and (pair? rec) (member (car rec) '(window other preview)))
+         (window-record-set! win 'restore
+           (list (car rec)
+                 (and (string? (cadr rec)) (cadr rec))
+                 (and (integer? (caddr rec)) (caddr rec))
+                 (window--buffer-of win)
+                 #f)))
+        (else #f)))
+
+;; what a visit reads before the window changes
+(define (window--before win)
+  (list (window--buffer-of win) (window--restore-record win) (window--history win)))
+
+;; a visit of BUF in WIN: what it showed leads its history (what a look
+;; covered, during a look), and the record goes unless BUF is what it
+;; already showed
+(define (window--visited! win before buf)
+  (let* ((shown (car before)) (rec (cadr before)) (history (caddr before))
+         (previous (if (and rec (equal? (car rec) 'preview)) (cadr rec) shown))
+         (history (if (equal? previous buf)
+                      (window--without buf history)
+                      (cons previous (window--without previous (window--without buf history)))))
+         (keep (and (equal? buf shown) (equal? previous shown))))
+    (window--history-set! win history 'restore (and keep (window-record win 'restore)))))
+
+(define (window-set-buffer! win buf)
+  "(window-set-buffer! WIN BUF) -> #t: WIN shows BUF without being selected; the buffer list and WIN's history record it"
+  (let* ((before (window--before win))
+         (ok (raw-window-set-buffer! win buf #t)))
+    (when ok (window--visited! win before buf))
+    ok))
+
+(define (window-switch-buffer! buf)
+  "(window-switch-buffer! BUF) -> BUF: raw switch of the selected window that restores a dormant BUF inline"
+  (if (buffer-context?)
+      (raw-window-switch-buffer! buf)
+      (let* ((win (active-window))
+             (before (window--before win))
+             (r (raw-window-switch-buffer! buf)))
+        (window--visited! win before buf)
+        r)))
+
+;; a look: BUF shows in WIN with no history and no MRU bump, and the record
+;; says what it covers, so the end of the look puts that back
+(define (window-preview-buffer! buf &optional win)
+  "(window-preview-buffer! BUF [WIN]) -> #t: show BUF in WIN (default: the selected window) without MRU or history changes"
+  (let* ((win (or win (active-window)))
+         (shown (window--buffer-of win))
+         (raw (window-record win 'restore))
+         (rec (window--restore-record win))
+         (point (and shown (window-point win)))
+         (ok (and shown (buffer-known? buf) (raw-window-set-buffer! win buf #f))))
+    (when ok
+      (window-record-set! win 'restore
+        (cond ((and rec (equal? (car rec) 'preview) (equal? (cadr rec) buf)) (list-ref rec 4))
+              ((and rec (equal? (car rec) 'preview))
+               (list 'preview (cadr rec) (caddr rec) buf (list-ref rec 4)))
+              ((equal? buf shown) raw)
+              (else (list 'preview shown point buf rec)))))
+    (and ok #t)))
+
+;; a buffer that dies: each window that shows it goes back to its own
+;; past, what a display covered first, when that buffer lives and no other
+;; window of the frame shows it. Runs before the core kill, after the
+;; model's repair; answers the thunk for after it, which writes every
+;; record the death touched. A float that shows it closes in the core.
+(define (window-records-release! name)
+  (let* ((rows (window-list-all))
+         (class (buffer-local name 'window-class))
+         (float? (and (string? class) (string-prefix? "popup" class)))
+         (victims
+           (filter (lambda (r)
+                     (and (equal? (cadr r) name)
+                          (not (and float?
+                                    (find (lambda (o) (and (equal? (caddr o) (caddr r))
+                                                           (not (equal? (cadr o) name))))
+                                          rows)))))
+                   rows))
+         (backs
+           (map (lambda (r)
+                  (let* ((win (car r))
+                         (rec (window--restore-record win))
+                         (history (window--without name (window--history win)))
+                         (covered (and rec (cadr rec))))
+                    (list win
+                          (if (string? covered)
+                              (window--without name (cons covered (window--without covered history)))
+                              history))))
+                victims)))
+    (for-each
+      (lambda (wb)
+        (let* ((win (car wb)) (back (cadr wb))
+               (frame (frame-of-window win))
+               (shown (map cadr (filter (lambda (o) (and (equal? (caddr o) frame)
+                                                         (not (equal? (cadr o) name))))
+                                        rows)))
+               (own (find (lambda (b) (and (not (member b shown)) (buffer-exists? b))) back)))
+          (when own (raw-window-set-buffer! win own #f))))
+      backs)
+    (lambda ()
+      (for-each
+        (lambda (r)
+          (let ((wb (assoc (car r) backs)))
+            (cond (wb (when (window--buffer-of (car wb))
+                        (window--history-set! (car wb) (cadr wb) 'restore #f)))
+                  ((member name (window--history (car r)))
+                   (window--history-set! (car r) (window--without name (window--history (car r))))))))
+        (window-list-all)))))
+
+;; a renamed buffer keeps its place in every history and record
+(define (window-records-renamed! old new)
+  (for-each
+    (lambda (r)
+      (let* ((win (car r))
+             (history (window--history win))
+             (raw (window-record win 'restore))
+             (swap (lambda (b) (if (equal? b old) new b))))
+        (when (or (member old history) (pair? raw))
+          (window--history-set! win (map swap history)
+            'restore (and (pair? raw)
+                          (list (car raw) (swap (cadr raw)) (caddr raw) (swap (list-ref raw 3))
+                                (let ((u (list-ref raw 4)))
+                                  (and (pair? u) (list (car u) (swap (cadr u)) (caddr u)
+                                                       (swap (list-ref u 3)) (list-ref u 4))))))))))
+    (window-list-all)))
+(add-hook! 'buffer-renamed-hook 'window-records-renamed!)
+
+;; histories outlive a restart, keyed by window id: a restored window has
+;; its id back (the desktop's 10-tuple)
+(persist-global! 'window-histories
+  (lambda ()
+    (append
+      (apply append
+        (map (lambda (fr)
+               (map (lambda (e) (list (car e) (or (plist-get (cadr e) 'history) '())))
+                    (window--records fr)))
+             (window--uniq (map caddr (window-list-all)))))
+      window--saved-histories))
+  (lambda (v) (set! window--saved-histories (if (list? v) v '()))))
 
 (domain! 'files)
 (effects! '(read))

@@ -116,9 +116,17 @@ defmodule Compos.Core.Editor do
   @doc "All windows across all frames, frame-MRU order: [{win_id, buffer, frame_id}]."
   def list_windows_all, do: GenServer.call(__MODULE__, :list_windows_all)
 
-  @doc "Set any window's buffer, any frame, without selecting it."
-  def window_set_buffer(win_id, buffer),
-    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
+  @doc """
+  Set any window's buffer, any frame, without selecting it. BUMP? false
+  leaves the buffer list as it was (a look); Scheme keeps the window's
+  history and quit record (window.scm).
+  """
+  def window_set_buffer(win_id, buffer, bump? \\ true),
+    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer, bump?})
+
+  @doc "How many buffers WIN holds, for its header line; Scheme counts them."
+  def set_window_stack(win_id, n),
+    do: GenServer.call(__MODULE__, {:set_window_stack, win_id, n})
 
   @doc """
   The frame's overriding map, or nil to clear it. LOCK? makes an unbound
@@ -346,22 +354,6 @@ defmodule Compos.Core.Editor do
   @doc "Move BUFFER to the end of the buffer list (Emacs bury-buffer)."
   def mru_bury(buffer), do: GenServer.call(__MODULE__, {:mru_bury, buffer})
 
-  @doc "Previous buffers for one window, most recently displayed first."
-  def window_buffer_history(win \\ nil, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:window_buffer_history, win, fid(fid)})
-
-  @doc "Replace one window's previous buffers. A tiler gives each new pane the history of the pane it stands for."
-  def set_window_history(win, history, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_window_history, win, history, fid(fid)})
-
-  @doc "What quit-window undoes in WIN (Emacs quit-restore): `{kind, buffer, point}`, or nil."
-  def window_restore(win, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:window_restore, win, fid(fid)})
-
-  @doc "Set WIN's restore record to `{kind, buffer, point}`, or nil to clear it."
-  def set_window_restore(win, restore, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_window_restore, win, restore, fid(fid)})
-
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
@@ -480,14 +472,6 @@ defmodule Compos.Core.Editor do
 
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
-  @doc """
-  Show BUFFER in the active window WITHOUT touching the MRU ring — candidate
-  preview must not reorder the buffer history. WIN previews into that window
-  instead (the modal switcher previews into its home window, not its own).
-  """
-  def preview_buffer(buffer, fid \\ nil, win \\ nil),
-    do: GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid), win})
-
   @doc "A buffer is dying: swap every window showing it (any frame) onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
 
@@ -599,7 +583,7 @@ defmodule Compos.Core.Editor do
 
     frame = %{
       id: @main_frame,
-      tree: %{type: :leaf, id: 1, buffer: @scratch, history: [], top: 0, manual: false},
+      tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
       active: 1,
       pending: [],
       prefix_arg: nil,
@@ -677,7 +661,6 @@ defmodule Compos.Core.Editor do
             type: :leaf,
             id: state.next_win,
             buffer: buffer,
-            history: [],
             top: 0,
             manual: false
           },
@@ -808,7 +791,7 @@ defmodule Compos.Core.Editor do
     {:reply, reply, state}
   end
 
-  def handle_call({:window_set_buffer, win_id, buffer}, _from, state) do
+  def handle_call({:window_set_buffer, win_id, buffer, bump?}, _from, state) do
     case {find_window_frame(state, win_id), Compos.Core.ensure_buffer(buffer)} do
       {nil, _} ->
         {:reply, {:error, :no_window}, state}
@@ -817,6 +800,13 @@ defmodule Compos.Core.Editor do
       # window keeps what it showed
       {_f, {:error, reason}} ->
         {:reply, {:error, reason}, state}
+
+      # a look shows the buffer from its top and leaves the ring as it was
+      {f, _started} when not bump? ->
+        Buffer.touch(buffer)
+        leaf = find_leaf(f.tree, win_id)
+        shown = %{leaf | buffer: buffer, top: 0, manual: false} |> Map.put(:ctop, 0)
+        changed(:ok, put_frame(state, %{f | tree: replace_leaf(f.tree, win_id, shown)}), f.id)
 
       {f, _started} ->
         leaf = find_leaf(f.tree, win_id)
@@ -927,7 +917,7 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:render_state, fid}, _from, state) do
     f = frame(state, fid)
-    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label))
+    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label), Map.get(f, :win_stacks, %{}))
     state = put_frame(state, %{f | tree: tree})
 
     {:reply,
@@ -1192,9 +1182,10 @@ defmodule Compos.Core.Editor do
   end
 
   # Killing a buffer never deletes a work window: the window stays and
-  # shows another buffer, as kill-buffer does in Emacs. Each window that
-  # showed the victim falls back to its own history first, then to the
-  # most recent buffer no window shows, then to any live buffer. Only a
+  # shows another buffer, as kill-buffer does in Emacs. Scheme gives each
+  # window that showed the victim its own history first (buffer-kill!);
+  # a window left on it here shows the most recent buffer no window
+  # shows, then any live buffer. Only a
   # float that showed the victim closes: nobody split for a float, and
   # one with nothing to show is not a window. Scheme policy refines the
   # choice after the kill (buffer-kill-repair): a group window fills
@@ -1240,10 +1231,7 @@ defmodule Compos.Core.Editor do
               wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
             end)
 
-            # what this frame's other windows show: a refill never
-            # duplicates one of them (Emacs other-buffer)
-            shown = f.tree |> visible_buffers() |> Enum.reject(&(&1 == buffer))
-            {id, %{f | tree: release_buffer_from_tree(f.tree, buffer, fallback, shown)}}
+            {id, %{f | tree: release_buffer_from_tree(f.tree, buffer, fallback)}}
         end
       end)
 
@@ -1653,70 +1641,21 @@ defmodule Compos.Core.Editor do
     {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
   end
 
-  def handle_call({:window_buffer_history, win, fid}, _from, state) do
-    f = frame(state, fid)
-    leaf = find_leaf(f.tree, win || f.active)
-    known = MapSet.new(Compos.Core.buffer_names())
-
-    history =
-      if leaf do
-        leaf
-        |> Map.get(:history, [])
-        |> Enum.filter(&(is_binary(&1) and MapSet.member?(known, &1)))
-        |> Enum.reject(&String.starts_with?(&1, " "))
-      else
-        []
-      end
-
-    {:reply, history, state}
-  end
-
-  # The tiler rebuilds windows from one survivor, and a split copies the
-  # survivor's history into the new leaf; Scheme hands each new pane the
-  # history of the pane it replaces. The leaf's own buffer never leads
-  # its history.
-  def handle_call({:set_window_history, win, history, fid}, _from, state) do
-    f = frame(state, fid)
-
-    case find_leaf(f.tree, win || f.active) do
+  # a window's stack count, for its header line: Scheme keeps the
+  # history (window.scm) and hands the number over, keyed by window id
+  # so a layout restore keeps it
+  def handle_call({:set_window_stack, win, n}, _from, state) do
+    case find_window_frame(state, win) do
       nil ->
         {:reply, false, state}
 
-      leaf ->
-        history =
-          history
-          |> Enum.filter(&is_binary/1)
-          |> Enum.reject(&(&1 == leaf.buffer))
-          |> Enum.uniq()
-          |> Enum.take(500)
+      f ->
+        stacks = Map.get(f, :win_stacks, %{})
 
-        tree = replace_leaf(f.tree, leaf.id, %{leaf | history: history})
-        {:reply, true, put_frame(state, %{f | tree: tree})}
+        if Map.get(stacks, win) == n,
+          do: {:reply, true, state},
+          else: changed(true, put_frame(state, Map.put(f, :win_stacks, Map.put(stacks, win, n))), f.id)
     end
-  end
-
-  def handle_call({:window_restore, win, fid}, _from, state) do
-    f = (win && find_window_frame(state, win)) || frame(state, fid)
-
-    reply =
-      case leaf_restore(find_leaf(f.tree, win || f.active)) do
-        {kind, covered, point, _shown, _under} -> {kind, covered, point}
-        nil -> nil
-      end
-
-    {:reply, reply, state}
-  end
-
-  def handle_call({:set_window_restore, win, restore, fid}, _from, state) do
-    update_leaf(state, win, fid, fn leaf ->
-      case restore do
-        {kind, covered, point} ->
-          Map.put(leaf, :restore, {kind, covered, point, leaf.buffer, nil})
-
-        nil ->
-          Map.delete(leaf, :restore)
-      end
-    end)
   end
 
   # the WHOLE history, group marks included: a group switch is an entry
@@ -1895,7 +1834,6 @@ defmodule Compos.Core.Editor do
       type: :leaf,
       id: state.next_win,
       buffer: old.buffer,
-      history: Map.get(old, :history, []),
       top: old.top,
       manual: false
     }
@@ -1922,7 +1860,6 @@ defmodule Compos.Core.Editor do
       type: :leaf,
       id: state.next_win,
       buffer: seed.buffer,
-      history: Map.get(seed, :history, []),
       top: 0,
       manual: false
     }
@@ -2047,30 +1984,6 @@ defmodule Compos.Core.Editor do
         leaf = find_leaf(f.tree, f.active)
         tree = replace_leaf(f.tree, f.active, visit_buffer(leaf, buffer))
         changed(:ok, resync_swap(put_frame(bump_mru(state, buffer), %{f | tree: tree})), f.id)
-    end
-  end
-
-  def handle_call({:preview_buffer, buffer, fid, win}, _from, state) do
-    if Compos.Core.Buffer.exists?(buffer) or Compos.Core.BufferStore.known?(buffer) do
-      # a named window says which frame: a look driven from one frame can
-      # name a window of another, as window_set_buffer already allows
-      f = (win && find_window_frame(state, win)) || frame(state, fid)
-      target = win || f.active
-
-      case {find_leaf(f.tree, target), Compos.Core.ensure_buffer(buffer)} do
-        {nil, _} ->
-          {:reply, {:error, :no_window}, state}
-
-        {_leaf, {:error, reason}} ->
-          {:reply, {:error, reason}, state}
-
-        {leaf, _started} ->
-          Buffer.touch(buffer)
-          tree = replace_leaf(f.tree, target, preview_leaf(leaf, buffer))
-          changed(:ok, put_frame(state, %{f | tree: tree}))
-      end
-    else
-      {:reply, {:error, :no_buffer}, state}
     end
   end
 
@@ -2297,7 +2210,7 @@ defmodule Compos.Core.Editor do
       leaf = Enum.find(pool, &(&1.id == id)) -> leaf
       id in held -> nil
       match?({:error, _}, Compos.Core.ensure_buffer(buffer)) -> nil
-      true -> %{type: :leaf, id: id, buffer: buffer, history: [], top: 0, manual: false}
+      true -> %{type: :leaf, id: id, buffer: buffer, top: 0, manual: false}
     end
   end
 
@@ -2474,12 +2387,10 @@ defmodule Compos.Core.Editor do
       type: :leaf,
       id: id,
       buffer: b,
-      history: Map.get(leaf, :history, []),
       top: Map.get(leaf, :top, 0),
       point: safe_win_point(b, id),
       manual: Map.get(leaf, :manual, false),
-      ctop: Map.get(leaf, :ctop, 0),
-      restore: Map.get(leaf, :restore)
+      ctop: Map.get(leaf, :ctop, 0)
     }
   end
 
@@ -2656,14 +2567,7 @@ defmodule Compos.Core.Editor do
 
   defp swap_buffer(%{type: :leaf} = leaf, from, to),
     do:
-      leaf
-      |> Map.update(:history, [], &Enum.map(&1, fn b -> if b == from, do: to, else: b end))
-      |> put_restore(restore_rename(Map.get(leaf, :restore), from, to))
-      |> then(fn renamed ->
-        if renamed.buffer == from,
-          do: %{renamed | buffer: to, top: 0, manual: false},
-          else: renamed
-      end)
+      if(leaf.buffer == from, do: %{leaf | buffer: to, top: 0, manual: false}, else: leaf)
 
   defp swap_buffer(%{type: :split} = split, from, to),
     do: %{split | children: Enum.map(split.children, &swap_buffer(&1, from, to))}
@@ -2678,39 +2582,19 @@ defmodule Compos.Core.Editor do
   defp unpin_buffer_leaves(%{type: :split} = split, buffer),
     do: %{split | children: Enum.map(split.children, &unpin_buffer_leaves(&1, buffer))}
 
-  # a leaf that showed the victim shows what it showed before, when that
-  # buffer still lives and no other window of the frame shows it (SHOWN);
-  # FALLBACK otherwise
-  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback, shown) do
-    history = leaf |> Map.get(:history, []) |> List.delete(buffer)
-
-    if leaf.buffer == buffer do
-      # the buffer the display or the look covered leads what this window
-      # showed before (a preview writes no history)
-      back =
-        case leaf_restore(leaf) do
-          {_kind, covered, _, _, _} when is_binary(covered) ->
-            List.delete([covered | List.delete(history, covered)], buffer)
-
-          _ ->
-            history
-        end
-
-      own = Enum.find(back, &(&1 not in shown and Buffer.exists?(&1)))
-      next = own || fallback
-
-      %{leaf | buffer: next, history: List.delete(back, next), top: 0, manual: false}
-      |> Map.put(:ctop, 0)
-      |> Map.delete(:restore)
-    else
-      %{leaf | history: history}
-    end
+  # a leaf that still shows the victim shows FALLBACK. Scheme gave each
+  # window its own past before the kill (window-records-release!); what is
+  # left here is the window with none.
+  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
+    if leaf.buffer == buffer,
+      do: %{leaf | buffer: fallback, top: 0, manual: false} |> Map.put(:ctop, 0),
+      else: leaf
   end
 
-  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback, shown),
+  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback),
     do: %{
       split
-      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback, shown))
+      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback))
     }
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),
@@ -2719,82 +2603,12 @@ defmodule Compos.Core.Editor do
   defp replace_leaf(%{type: :split} = split, id, new),
     do: %{split | children: Enum.map(split.children, &replace_leaf(&1, id, new))}
 
+  # the window's history and quit record are Scheme's (window.scm)
   defp visit_buffer(leaf, buffer) do
-    record = leaf_restore(leaf)
-    previous = if match?({:preview, _, _, _, _}, record), do: elem(record, 1), else: leaf.buffer
-    history = Map.get(leaf, :history, [])
-
-    history =
-      if previous == buffer do
-        List.delete(history, buffer)
-      else
-        Enum.take([previous | List.delete(List.delete(history, previous), buffer)], 500)
-      end
-
-    # a visit ends a look, and a display's record goes with its buffer
-    keep? = buffer == leaf.buffer and previous == leaf.buffer
-    leaf = if keep?, do: leaf, else: Map.delete(leaf, :restore)
     # the client's scroll offset was the old buffer's: kept, it scrolls the
     # new one to an arbitrary place
     ctop = if buffer == leaf.buffer, do: Map.get(leaf, :ctop, 0), else: 0
-    Map.merge(leaf, %{buffer: buffer, history: history, top: 0, manual: false, ctop: ctop})
-  end
-
-  # The leaf's restore record, {kind, covered, point, shown, under}, while
-  # the leaf still shows SHOWN, the buffer it was made for (Emacs checks
-  # quit-restore the same way). UNDER is the record a preview covers.
-  defp leaf_restore(%{type: :leaf, buffer: b} = leaf) do
-    case Map.get(leaf, :restore) do
-      {_kind, _covered, _point, ^b, _under} = record -> record
-      _ -> nil
-    end
-  end
-
-  defp leaf_restore(_), do: nil
-
-  # A preview covers what the window showed and writes no history. The
-  # first look records the covered buffer; the next look keeps that
-  # record; a look back onto the covered buffer ends it and puts back the
-  # record the look was made over.
-  defp preview_leaf(leaf, buffer) do
-    shown = %{leaf | buffer: buffer, top: 0, manual: false} |> Map.put(:ctop, 0)
-
-    case leaf_restore(leaf) do
-      {:preview, ^buffer, _, _, under} ->
-        put_restore(shown, under)
-
-      {:preview, covered, point, _, under} ->
-        Map.put(shown, :restore, {:preview, covered, point, buffer, under})
-
-      _ when buffer == leaf.buffer ->
-        shown
-
-      under ->
-        point = safe_win_point(leaf.buffer, leaf.id)
-        Map.put(shown, :restore, {:preview, leaf.buffer, point, buffer, under})
-    end
-  end
-
-  defp put_restore(leaf, nil), do: Map.delete(leaf, :restore)
-  defp put_restore(leaf, record), do: Map.put(leaf, :restore, record)
-
-  defp restore_rename({kind, covered, point, shown, under}, old, new) do
-    swap = fn b -> if b == old, do: new, else: b end
-    {kind, swap.(covered), point, swap.(shown), restore_rename(under, old, new)}
-  end
-
-  defp restore_rename(other, _old, _new), do: other
-
-  defp update_leaf(state, win, fid, fun) do
-    f = (win && find_window_frame(state, win)) || frame(state, fid)
-
-    case find_leaf(f.tree, win || f.active) do
-      nil ->
-        {:reply, false, state}
-
-      leaf ->
-        {:reply, true, put_frame(state, %{f | tree: replace_leaf(f.tree, leaf.id, fun.(leaf))})}
-    end
+    Map.merge(leaf, %{buffer: buffer, top: 0, manual: false, ctop: ctop})
   end
 
   # returns the tree with the leaf removed, or nil if the tree IS that leaf
@@ -2828,7 +2642,7 @@ defmodule Compos.Core.Editor do
   defp build_tree({:leaf, buffer}, n), do: build_tree({:leaf, buffer, 0}, n)
 
   defp build_tree({:leaf, buffer, top}, n),
-    do: {%{type: :leaf, id: n, buffer: buffer, history: [], top: top, manual: false}, n + 1}
+    do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
 
   # 4-tuple carries a saved window point (desktop v2). Older layouts and
   # desktop files still hold one; it is read and discarded, because a
@@ -2846,20 +2660,14 @@ defmodule Compos.Core.Editor do
     {%{leaf | manual: manual == true or ctop > 0} |> Map.put(:ctop, ctop), n}
   end
 
-  # 7-tuple keeps the window-local buffer history across layout and desktop
-  # restore. Older layouts start with an empty history.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, history}, n) do
-    {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop}, n)
-    {%{leaf | history: Enum.filter(history, &is_binary/1)}, n}
-  end
+  # 7-tuple adds a history slot, 9-tuple a restore and an owner slot.
+  # Scheme keeps all three now (window records, window.scm), so the slots
+  # are read and dropped; older desktop files still hold them.
+  defp build_tree({:leaf, buffer, top, point, manual, ctop, _history}, n),
+    do: build_tree({:leaf, buffer, top, point, manual, ctop}, n)
 
-  # 9-tuple adds the restore record and an owner slot (Phase 2). Older
-  # layouts and every desktop file read with neither. The owner is
-  # Scheme's now (window-owner, window.scm): the slot is read and dropped.
-  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, restore, _owner}, n) do
-    {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop, history}, n)
-    {put_restore(leaf, restore), n}
-  end
+  defp build_tree({:leaf, buffer, top, point, manual, ctop, history, _restore, _owner}, n),
+    do: build_tree({:leaf, buffer, top, point, manual, ctop, history}, n)
 
   # 10-tuple names the window id the leaf had. It is a wish, not a claim:
   # a restore keeps it when no other window holds it, else the leaf takes
@@ -3129,12 +2937,13 @@ defmodule Compos.Core.Editor do
          %{type: :split, dir: dir, children: [a, b]} = split,
          rows,
          win_rows,
-         frame_group
+         frame_group,
+         win_stacks
        ) do
     ratio = Map.get(split, :ratio, 0.5)
     {rows_a, rows_b} = split_rows(dir, rows, ratio)
-    {a2, ra} = render_walk(a, rows_a, win_rows, frame_group)
-    {b2, rb} = render_walk(b, rows_b, win_rows, frame_group)
+    {a2, ra} = render_walk(a, rows_a, win_rows, frame_group, win_stacks)
+    {b2, rb} = render_walk(b, rows_b, win_rows, frame_group, win_stacks)
 
     {%{split | children: [a2, b2]}, %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
   end
@@ -3143,7 +2952,8 @@ defmodule Compos.Core.Editor do
          %{type: :leaf, id: id, buffer: buffer} = leaf,
          rows,
          win_rows,
-         frame_group
+         frame_group,
+         win_stacks
        ) do
     # the client's measured row count for this window wins over split math:
     # line height varies per buffer, so only the client knows what fits
@@ -3344,7 +3154,7 @@ defmodule Compos.Core.Editor do
         end),
       # how many buffers the window holds: the one it shows and the ones
       # under it. The header line shows it beside the title.
-      stack: 1 + (leaf |> Map.get(:history, []) |> Enum.uniq() |> Enum.count(&(&1 != buffer))),
+      stack: Map.get(win_stacks, id, 1),
       # inline style on the window itself. A float hands its share of the
       # frame over this way: the stylesheet cannot read a number out of a
       # display rule, but it can read a custom property.

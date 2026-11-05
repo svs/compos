@@ -165,8 +165,11 @@
 (define (window-dock? win buf) (and buf (equal? (window-docked buf) win)))
 
 (define (window-dock! buf size)
-  (let ((win (split-root! 'v (- 1 size))))
+  (let* ((past (window-prev-buffers (active-window)))
+         (win (split-root! 'v (- 1 size))))
     (when win
+      ;; the dock starts with the past of the window it split from
+      (set-window-prev-buffers! win past)
       (window-float-class! buf #f)
       (buffer-set-local! buf 'window-dock win)
       (display-buffer-in-window! win buf)

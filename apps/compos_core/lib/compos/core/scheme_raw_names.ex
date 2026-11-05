@@ -60,7 +60,9 @@ defmodule Compos.Core.SchemeRawNames do
     "local-touch-file!" => "touch-file!",
     "local-make-symlink!" => "make-symlink!",
     "builtin-split-window!" => "split-window!",
-    "builtin-delete-window-id!" => "delete-window-id!"
+    "builtin-delete-window-id!" => "delete-window-id!",
+    "raw-window-set-buffer!" => "window-set-buffer!",
+    "raw-window-switch-buffer!" => "window-switch-buffer!"
   }
 
   @doc "RAW NAME => wrapped primitive name, for every name the editor wraps."

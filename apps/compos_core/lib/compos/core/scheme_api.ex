@@ -671,17 +671,6 @@ defmodule Compos.Core.SchemeAPI do
         Editor.mru_bury(Compos.Core.Prims.s(buf))
         :void
       end,
-      {"window-prev-buffers",
-       "(window-prev-buffers [ID]) — return the window's previous buffers, most recent first."} =>
-        fn
-          [] -> Editor.window_buffer_history()
-          [id] -> Editor.window_buffer_history(id)
-        end,
-      {"set-window-prev-buffers!",
-       "(set-window-prev-buffers! ID PREV) — replace the window's previous buffers with PREV, most recent first."} =>
-        fn [id, history] when is_list(history) ->
-          Editor.set_window_history(id, history)
-        end,
       # the whole history: ("buffer" NAME) and ("group" NAME) rows in
       # recency order — a group switch is an entry like a buffer visit
       {"mru-list",
@@ -2400,31 +2389,6 @@ defmodule Compos.Core.SchemeAPI do
        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows."} => fn [] ->
         Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end)
       end,
-      # Emacs quit-restore as leaf data: what quit-window undoes in a window
-      {"window-restore",
-       "(window-restore WIN) — (KIND BUFFER POINT) while WIN still shows what a display or a look put there, else #f. KIND window: the display made WIN; other: it covered BUFFER; preview: a look covers BUFFER."} =>
-        fn [id] ->
-          case Editor.window_restore(id) do
-            {kind, covered, point} ->
-              [{:sym, Atom.to_string(kind)}, covered || false, point || false]
-
-            nil ->
-              false
-          end
-        end,
-      {"set-window-restore!",
-       "(set-window-restore! WIN RECORD) — set WIN's restore record, (KIND BUFFER POINT) as window-restore answers, or #f to clear it."} =>
-        fn
-          [id, false] ->
-            Editor.set_window_restore(id, nil)
-
-          [id, [{:sym, kind}, covered, point]] when kind in ["window", "other", "preview"] ->
-            Editor.set_window_restore(
-              id,
-              {%{"window" => :window, "other" => :other, "preview" => :preview}[kind],
-               if(is_binary(covered), do: covered), if(is_integer(point), do: point)}
-            )
-        end,
       {"window-rects",
        "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles."} =>
         fn [] -> Editor.window_rects() end,
@@ -2531,12 +2495,18 @@ defmodule Compos.Core.SchemeAPI do
         fn [] ->
           Enum.map(Editor.list_windows_all(), fn {id, b, fid} -> [id, b, fid] end)
         end,
-      # set any window's buffer without selecting it (no frame/focus change)
+      # set any window's buffer without selecting it (no frame/focus change).
+      # window.scm wraps it (raw-window-set-buffer!) and keeps the window's
+      # history and quit record; BUMP #f is a look, the buffer list stays
       {"window-set-buffer!",
-       "(window-set-buffer! WIN BUF) — show BUF in window WIN without selection; return #t."} =>
-        fn [id, name] ->
-          Editor.window_set_buffer(id, name) == :ok
+       "(window-set-buffer! WIN BUF [BUMP]) — show BUF in window WIN without selection; BUMP #f leaves the buffer list alone; return #t."} =>
+        fn
+          [id, name] -> Editor.window_set_buffer(id, name) == :ok
+          [id, name, bump] -> Editor.window_set_buffer(id, name, bump != false) == :ok
         end,
+      {"window--set-stack!",
+       "(window--set-stack! WIN N) — the count WIN's header line shows: the buffer it shows and the ones under it."} =>
+        fn [id, n] when is_integer(n) -> Editor.set_window_stack(id, n) end,
       {"frame-of-window", "(frame-of-window WIN) — return the id of the window's frame, or #f."} =>
         fn [id] -> Editor.frame_of_window(id) || false end,
 
@@ -2879,15 +2849,6 @@ defmodule Compos.Core.SchemeAPI do
         fn [bool] ->
           Editor.set_mb_redirect(bool)
           :void
-        end,
-      # show a buffer in a window without MRU bookkeeping — candidate
-      # preview must not reorder the buffer ring. The optional WIN is the
-      # modal switcher's home window; default is the active window.
-      {"window-preview-buffer!",
-       "(window-preview-buffer! BUF [WIN]) — show BUF in WIN (default: the active window) without MRU changes."} =>
-        fn
-          [name] -> Editor.preview_buffer(name) == :ok
-          [name, win] -> Editor.preview_buffer(name, nil, win) == :ok
         end,
       # the way back to dormancy: preview wakes candidates, the prompt's
       # close puts the ones nobody picked back to sleep

@@ -67,7 +67,7 @@ defmodule Compos.Ui.MouseClipboardTest do
     view |> element("#editor") |> render_hook("paste", %{"text" => "från \"clipboard\"\nline2"})
 
     assert Buffer.text(buf) == "från \"clipboard\"\nline2"
-    assert Editor.kill_top() == "från \"clipboard\"\nline2"
+    assert Compos.Core.KillRing.top() == "från \"clipboard\"\nline2"
   end
 
   test "paste replaces the active selection and dismisses selection mode", %{conn: conn} do
@@ -81,7 +81,7 @@ defmodule Compos.Ui.MouseClipboardTest do
     assert Buffer.text(buf) == "hello there"
     assert Buffer.point(buf) == 11
     assert Buffer.mark(buf) == nil
-    assert Editor.kill_top() == "there"
+    assert Compos.Core.KillRing.top() == "there"
   end
 
   # a prompt is an ordinary buffer, so the text lands there; the prompt only
@@ -153,7 +153,7 @@ defmodule Compos.Ui.MouseClipboardTest do
     view |> element("#editor") |> render_hook("copy", %{})
 
     assert_push_event(view, "clipboard", %{text: "hello"})
-    assert Editor.kill_top() == "hello"
+    assert Compos.Core.KillRing.top() == "hello"
   end
 
   test "selecting a chat window snaps point into the input region", %{conn: conn} do

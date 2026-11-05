@@ -48,7 +48,7 @@ defmodule Compos.Ui.BufferLinkTest do
     want = "#{base()}/b/#{URI.encode(buf, &URI.char_unreserved?/1)}?line=2"
     assert_push_event(view, "clipboard", %{text: ^want})
     # C-y pastes the same link in a client that cannot write the clipboard
-    assert Editor.kill_top() == want
+    assert Compos.Core.KillRing.top() == want
   end
 
   test "a file buffer keeps its path in one encoded segment" do

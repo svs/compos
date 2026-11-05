@@ -392,13 +392,6 @@ defmodule Compos.Core.Editor do
   def completion_dismiss(fid \\ nil),
     do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
 
-  # kill ring
-  def kill_push(text), do: GenServer.call(__MODULE__, {:kill_push, text})
-  def kill_append(text, before?), do: GenServer.call(__MODULE__, {:kill_append, text, before?})
-  def kill_top, do: GenServer.call(__MODULE__, :kill_top)
-  def kill_nth(i), do: GenServer.call(__MODULE__, {:kill_nth, i})
-  def kill_size, do: GenServer.call(__MODULE__, :kill_size)
-
   # faces: name -> attrs map, merged; frontends map them to CSS vars
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
   @doc "Forget every attribute of a face. load-theme clears before it applies."
@@ -613,7 +606,6 @@ defmodule Compos.Core.Editor do
        # window of the last-active frame): {frame_id, win_id, buffer}
        swapped: nil,
        next_win: 2,
-       kill_ring: [],
        modeline_extra: "",
        chrome: %{},
        faces: %{},
@@ -1723,21 +1715,6 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
   end
 
-  def handle_call({:kill_push, text}, _from, state),
-    do: changed(:ok, %{state | kill_ring: Enum.take([text | state.kill_ring], 60)})
-
-  # Emacs kill-append: a kill that follows a kill grows the newest entry
-  # instead of adding one, so C-k C-k C-k yanks back as one piece
-  def handle_call({:kill_append, text, before?}, _from, state) do
-    ring =
-      case state.kill_ring do
-        [] -> [text]
-        [top | rest] -> [if(before?, do: text <> top, else: top <> text) | rest]
-      end
-
-    changed(:ok, %{state | kill_ring: ring})
-  end
-
   def handle_call({:set_face, name, attrs}, _from, state) do
     faces = Map.update(state.faces, name, attrs, &Map.merge(&1, attrs))
     changed(:ok, %{state | faces: faces})
@@ -1768,14 +1745,6 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:style_css, name}, _from, state),
     do: {:reply, Map.get(state.styles, name, ""), state}
-
-  def handle_call(:kill_top, _from, state),
-    do: {:reply, List.first(state.kill_ring, ""), state}
-
-  def handle_call({:kill_nth, i}, _from, state),
-    do: {:reply, Enum.at(state.kill_ring, i, ""), state}
-
-  def handle_call(:kill_size, _from, state), do: {:reply, length(state.kill_ring), state}
 
   def handle_call({:split, dir, ratio, fid}, _from, state) do
     f = frame(state, fid)

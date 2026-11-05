@@ -1864,21 +1864,21 @@ defmodule Compos.Core.SchemeAPI do
 
       # kill ring
       {"kill-push!", "(kill-push! TEXT) — push TEXT onto the kill ring."} => fn [text] ->
-        Editor.kill_push(text)
+        Compos.Core.KillRing.push(text)
         :void
       end,
       {"kill-append!",
        "(kill-append! TEXT BEFORE?) — grow the newest kill-ring entry with TEXT, in front when BEFORE? is true."} =>
         fn [text, before?] ->
-          Editor.kill_append(text, before? == true)
+          Compos.Core.KillRing.append(text, before? == true)
           :void
         end,
       {"kill-top", "(kill-top) — return the newest kill-ring entry, or \"\" when empty."} =>
-        fn [] -> Editor.kill_top() end,
+        fn [] -> Compos.Core.KillRing.top() end,
       {"kill-nth", "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent."} =>
-        fn [i] -> Editor.kill_nth(i) end,
+        fn [i] -> Compos.Core.KillRing.nth(i) end,
       {"kill-ring-size", "(kill-ring-size) — return the number of kill-ring entries."} => fn [] ->
-        Editor.kill_size()
+        Compos.Core.KillRing.size()
       end,
       {"client-select!",
        "(client-select! ALTER DIR GRANULARITY [COUNT]) — ask this frame's editable surface to move (\"move\") or extend (\"extend\") its selection \"forward\" or \"backward\" by \"character\", \"word\", \"line\", \"lineboundary\", \"paragraph\" or \"documentboundary\"; COUNT (default 1) applies the move that many times in one request, which is how a page moves; the client answers with point and mark."} =>

@@ -279,7 +279,7 @@ defmodule Compos.EditorTest do
 
     # the ring is global (other tests' kills included): a full rotation
     # comes back around to the most recent kill
-    n = Compos.Core.Editor.kill_size()
+    n = Compos.Core.KillRing.size()
     press(List.duplicate("M-y", n - 1))
     assert Buffer.text(buf) == "second"
   end

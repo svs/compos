@@ -91,11 +91,14 @@
 (define (panes-layout-set! layout)
   "LAYOUT becomes the model of this frame's group. First each buffer
    goes to one window (panes-unique-buffers); then the layout is stored
-   sealed (panes--layout-store!) and checked (panes--check-model!). It
-   does not draw the frame: panes-apply! does that."
-  (let ((layout (panes-unique-buffers layout)))
-    (panes--layout-store! (panes--group-key) layout)
-    (panes--check-model! layout)))
+   sealed (panes--layout-store!) and checked (panes--check-model!), and
+   the layout history records it (panes-history-note!). It does not draw
+   the frame: panes-apply! does that."
+  (let* ((unique (panes-unique-buffers layout))
+         (r (begin (panes--layout-store! (panes--group-key) unique)
+                   (panes--check-model! unique))))
+    (when (boundp 'panes-history-note!) (panes-history-note! layout))
+    r))
 
 (define (panes-model-faults model)
   "What MODEL breaks of its own rules, as a list of text; () is none.
@@ -841,6 +844,15 @@
              #f))
           (else #f))))
 
+(define (panes--show-here! buf)
+  "switch-to-buffer-here! calls this first: outside a draw BUF comes to
+   the model window the active window draws (panes--show-follows!). When
+   BUF goes to another window, the focus moves there, where the user
+   meant to look; the switch then shows BUF in it."
+  (when (panes--door?)
+    (let ((to (panes--show-follows! (active-window) buf)))
+      (when (and to (not (equal? to (active-window)))) (select-window! to)))))
+
 (define (panes--delete-window!)
   "C-x 0: the pane of the selected window goes, and its windows wait
    behind the windows of the pane that takes the focus, so no buffer
@@ -1101,35 +1113,23 @@
         joined))))
 
 (define (panes-mode--install!)
-  "The doors, installed. It draws nothing. The doors:
-   The frame primitives the draw uses: select-window! moves the focus,
-   and window-set-buffer! and switch-to-buffer-here! show a buffer in a
-   window; outside a draw each edits the model first (see the section
-   above).
+  "The hooks, installed. It draws nothing. The doors are no part of it:
+   select-window! and window-set-buffer! (window.scm) and
+   switch-to-buffer-here! (editor.scm) call the model themselves, through
+   panes--focus-follows!, panes--show-follows! and panes--show-here!.
    Hooks: buffer-kill-repair runs panes--kill-repair!, and group-joined-hook with
    post-command-hook give a buffer that joins a group a window
    (panes--place-joined!). No window hook writes the model."
-  (advice-add! 'select-window! 'around 'panes
-    (lambda (next win &rest more)
-      (when (panes--door?) (panes--focus-follows! win))
-      (apply next (cons win more))))
-  ;; a buffer of another mode goes to its own window: the show lands
-  ;; there, never on the window asked, and a switch here also moves the
-  ;; focus to it, where the user meant to look
-  (advice-add! 'window-set-buffer! 'around 'panes
-    (lambda (next win buf &rest more)
-      (let ((to (and (panes--door?) (panes--show-follows! win buf))))
-        (apply next (cons (or to win) (cons buf more))))))
-  (advice-add! 'switch-to-buffer-here! 'around 'panes
-    (lambda (next buf &rest more)
-      (let ((to (and (panes--door?) (panes--show-follows! (active-window) buf))))
-        (when (and to (not (equal? to (active-window)))) (select-window! to))
-        (apply next (cons buf more)))))
   (add-hook! 'group-joined-hook 'panes--joined!)
   (add-hook! 'post-command-hook 'panes--place-joined!)
   (add-hook! '(buffer-kill-repair panes) 'panes--kill-repair!)
   ;; an install over an older one drops the hooks that read the frame back,
-  ;; and the rename hook: a model of ids needs nothing on a rename
+  ;; and the rename hook: a model of ids needs nothing on a rename; and the
+  ;; advice that once made the doors and the layout history
+  (advice-remove! 'select-window! 'panes)
+  (advice-remove! 'window-set-buffer! 'panes)
+  (advice-remove! 'switch-to-buffer-here! 'panes)
+  (advice-remove! 'panes-layout-set! 'panes-history)
   (remove-hook! 'buffer-renamed-hook 'panes--rename!)
   (remove-hook! 'window-configuration-change-hook 'panes--reconcile!)
   (remove-hook! 'window-state-change-hook 'panes--note-focus!))

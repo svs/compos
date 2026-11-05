@@ -490,9 +490,18 @@
          (keep (and (equal? buf shown) (equal? previous shown))))
     (window--history-set! win history 'restore (and keep (window-record win 'restore)))))
 
+(define (select-window! win &rest more)
+  "(select-window! WIN) -> #t: WIN and its frame become active; outside a draw the panes model takes the focus first (panes--focus-follows!)"
+  (when (and (boundp 'panes--door?) (panes--door?)) (panes--focus-follows! win))
+  (apply raw-select-window! (cons win more)))
+
 (define (window-set-buffer! win buf)
   "(window-set-buffer! WIN BUF) -> #t: WIN shows BUF without being selected; the buffer list and WIN's history record it"
-  (let* ((before (window--before win))
+  ;; outside a draw the panes model places BUF first: a buffer of another
+  ;; mode goes to its own window, and the show lands there, not on WIN
+  (let* ((win (or (and (boundp 'panes--door?) (panes--door?) (panes--show-follows! win buf))
+                  win))
+         (before (window--before win))
          (ok (raw-window-set-buffer! win buf #t)))
     (when ok (window--visited! win before buf))
     ok))

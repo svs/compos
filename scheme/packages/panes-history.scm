@@ -80,14 +80,12 @@
   (set-frame-local! 'panes-histories (alist-put (panes-history--store) (panes--group-key) h))
   h)
 
-;; every layout the model keeps passes through panes-layout-set!; a
-;; restore passes too, and must not record itself as a new state
-(advice-add! 'panes-layout-set! 'around 'panes-history
-  (lambda (next layout)
-    (let ((r (next layout)))
-      (unless panes-history--restoring
-        (panes-history-set! (panes-history-record (panes-history) layout)))
-      r)))
+;; every layout the model keeps passes through panes-layout-set!, which
+;; calls this; a restore passes too, and must not record itself as a new
+;; state
+(define (panes-history-note! layout)
+  (unless panes-history--restoring
+    (panes-history-set! (panes-history-record (panes-history) layout))))
 
 (define (panes-history--step! step what)
   (cond ((not (panes-layout)) (message "No layout yet") #f)

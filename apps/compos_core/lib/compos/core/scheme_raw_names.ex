@@ -61,6 +61,7 @@ defmodule Compos.Core.SchemeRawNames do
     "local-make-symlink!" => "make-symlink!",
     "builtin-split-window!" => "split-window!",
     "builtin-delete-window-id!" => "delete-window-id!",
+    "raw-select-window!" => "select-window!",
     "raw-window-set-buffer!" => "window-set-buffer!",
     "raw-window-switch-buffer!" => "window-switch-buffer!"
   }

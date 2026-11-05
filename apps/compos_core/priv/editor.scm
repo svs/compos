@@ -2913,6 +2913,8 @@
 
 ;; the switch itself: the selected window shows BUF, whatever its group
 (define (switch-to-buffer-here! buf)
+  ;; the window model places BUF first (panes-mode.scm)
+  (when (boundp 'panes--show-here!) (panes--show-here! buf))
   (let ((restoring (not (buffer-exists? buf)))
         (float (float-window)))
     (window-switch-buffer! buf)

@@ -273,6 +273,32 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .ask.in .mail .cur .now { opacity: 1; }
 .ask.in .mail .cur .was { opacity: 0; }
 
+/* a chat and its sub-chats, as the chat list shows them */
+.team .ask-chat { min-height: 0; }
+.team .ask-chat > * { transition-delay: 2.2s; }
+.kids { padding: 8px 6px; border-bottom: 1px solid var(--nrule); }
+.kids > div { display: grid; grid-template-columns: 8px minmax(0, 1fr) 9ch 8ch; gap: 12px; align-items: center; padding: 5px 8px; white-space: nowrap; opacity: 0; transform: translateY(5px); transition: opacity .5s, transform .5s; }
+.ask.in .kids > div { opacity: 1; transform: none; }
+.ask.in .kids > :nth-child(2) { transition-delay: .4s; }
+.ask.in .kids > :nth-child(3) { transition-delay: .8s; }
+.ask.in .kids > :nth-child(4) { transition-delay: 1.2s; }
+.ask.in .kids > :nth-child(5) { transition-delay: 1.6s; }
+.kids .nm { overflow: hidden; text-overflow: ellipsis; color: var(--nink-2); }
+.kids .lead .nm { color: var(--nink); }
+.kids .nm b { font-weight: 400; color: var(--nmuted); margin-right: 8px; }
+.kids .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.kids .st, .kids .c { text-align: right; }
+.kids .c { color: var(--nmuted); }
+.kids .work { color: var(--namber); }
+.kids .ok { color: var(--nblue); }
+.kids .you { color: var(--verm); }
+.kids .wait { color: var(--nmuted); }
+.kids .cur { background: var(--night-sel); }
+@media (max-width: 520px) {
+  .kids > div { grid-template-columns: 8px minmax(0, 1fr) auto; }
+  .kids .c { display: none; }
+}
+
 /* features */
 .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: auto auto 1fr; border-top: 1px solid var(--edge); }
 .feature { padding: 30px 28px 38px; border-right: 1px solid var(--rule); display: grid; grid-row: span 3; grid-template-rows: subgrid; align-content: start; }

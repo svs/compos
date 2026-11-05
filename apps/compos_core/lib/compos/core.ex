@@ -502,6 +502,9 @@ defmodule Compos.Core do
           if Process.whereis(Compos.Core.Editor),
             do: Compos.Core.Editor.rename_buffer(old, new)
 
+          # a terminal is registered under its buffer's name
+          Compos.Core.Terminal.rename(old, new)
+
           # a dormant buffer woke for the rename; its runtime comes back
           # under the name it now has
           unless was_live, do: restore_runtime_later(new)

@@ -47,6 +47,10 @@ defmodule Compos.Ui.TerminalChannel do
     {:noreply, socket}
   end
 
+  def handle_info({:terminal_renamed, buffer, new}, %{assigns: %{buffer: buffer}} = socket) do
+    {:noreply, assign(socket, :buffer, new)}
+  end
+
   def handle_info({:terminal_exit, buffer, status}, %{assigns: %{buffer: buffer}} = socket) do
     push(socket, "exit", %{status: status})
     {:noreply, socket}

@@ -839,18 +839,18 @@
           (cond
             ;; a chat that already wears this name is titled all the same:
             ;; the local is what says so, and the auto-titler reads it
-            ((equal? name buf) (buffer-set-local! name 'chat-title name) #t)
+            ((equal? name buf) (buffer-set-local! name 'chat-title name) name)
             ((rename-buffer! buf name)
              ;; a title, once set, is the chat's own: the auto-titler names
              ;; a chat that has none, and never renames one that has
              (buffer-set-local! name 'chat-title name)
-             #t)
+             name)
             ((and (buffer-known? name) (< n 100))
              (loop (+ n 1) (string-append base "<" (number->string n) ">")))
             (else #f))))))
 
 (public! 'chat-title
-  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer; #f when BUF has inhibit-retitle")
+  "(chat-title BUF TITLE) — set a chat's title by renaming its buffer; the name it took (TITLE, or TITLE<N> when another buffer wears it), or #f when BUF has inhibit-retitle")
 
 (define (chat-title--first-summary buf)
   ;; the label the chat wore first: chat-summary-log is newest-first, so

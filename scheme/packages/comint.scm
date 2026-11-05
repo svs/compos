@@ -167,6 +167,37 @@
 ;; through the name, so a reload of the handler takes effect
 (on-event! 'terminal (lambda (buf status was) (term--status-changed! buf status was)))
 
+;;; --- session titles ---------------------------------------------------------
+;;; An agent titles its session in the terminal title (OSC 0/2): Claude Code
+;;; names the topic, Codex the thread. While an agent reports its status,
+;;; the shell takes that title as its name, the way a chat takes the label
+;;; of its summary (chat-title). The shell's own titles, such as zsh's
+;;; user@host: dir, name nothing: no agent reports then.
+
+(defcustom 'term-session-titles #t
+  "Name a shell after the session of the agent that runs in it, as a chat is named.")
+
+;; the titles that name the agent, not its session
+(define term--generic-titles
+  '("claude code" "claude" "codex" "openai codex" "pi" "opencode" "dsh" "dsh-tui" ""))
+
+;; the title without the activity glyph an agent puts before it (✳, ⠂)
+(define (term--session-title title)
+  (let ((t (string-trim (re-replace "^[^A-Za-z0-9]+" title ""))))
+    (and (not (member (string-downcase t) term--generic-titles))
+         (if (> (string-length t) chat-title-max-bytes) (substring t 0 chat-title-max-bytes) t))))
+
+(define (term--title-changed! buf title)
+  (let ((name (and term-session-titles (term-status buf) (term--session-title title))))
+    (when (and name (not (equal? name buf)) (not (equal? (buffer-local buf 'chat-title) name)))
+      ;; chat-title answers the name it took, TITLE<2> when TITLE is taken
+      (let ((new (chat-title buf name)))
+        (when new
+          (set! *term-status*
+                (map (lambda (e) (if (equal? (car e) buf) (list new (cadr e)) e)) *term-status*)))))))
+
+(on-event! 'terminal-title (lambda (buf title) (term--title-changed! buf title)))
+
 (define (shell--fresh-name base)
   (let loop ((n 2))
     (let ((name (string-append base "<" (number->string n) ">")))

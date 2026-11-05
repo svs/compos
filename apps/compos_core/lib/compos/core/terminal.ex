@@ -131,6 +131,17 @@ defmodule Compos.Core.Terminal do
     end
   end
 
+  @doc """
+  BUFFER was renamed NEW: the terminal registers under the new name, writes
+  its transcript there, and tells its clients.
+  """
+  def rename(buffer, new) do
+    case call(buffer, {:rename, new}) do
+      {:error, :no_terminal} -> :ok
+      reply -> reply
+    end
+  end
+
   def subscribe(buffer, subscriber \\ self()),
     do: call(buffer, {:subscribe, subscriber})
 
@@ -231,6 +242,20 @@ defmodule Compos.Core.Terminal do
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
 
   def handle_call(:tty, _from, state), do: {:reply, state.tty, state}
+
+  def handle_call({:rename, new}, _from, state) do
+    [{_, value}] = Registry.lookup(@registry, state.buffer)
+
+    case Registry.register(@registry, new, value) do
+      {:ok, _} ->
+        Registry.unregister(@registry, state.buffer)
+        Enum.each(Map.keys(state.subscribers), &send(&1, {:terminal_renamed, state.buffer, new}))
+        {:reply, :ok, %{state | buffer: new}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
 
   def handle_call(:status, _from, state) do
     tty = if is_binary(state.tty), do: state.tty
@@ -362,7 +387,7 @@ defmodule Compos.Core.Terminal do
     if :binary.match(bytes, "\e") == :nomatch do
       Map.put(state, :osc_carry, "")
     else
-      ~r/\e\](7501|9);([^\a\e]*)(?:\a|\e\\)/
+      ~r/\e\](7501|9|0|2);([^\a\e]*)(?:\a|\e\\)/
       |> Regex.scan(bytes, capture: :all_but_first)
       |> Enum.reduce(Map.put(state, :osc_carry, osc_tail(bytes)), fn [code, body], st ->
         status_seq(st, code, body)
@@ -410,6 +435,19 @@ defmodule Compos.Core.Terminal do
     end
   end
 
+  # OSC 0 and 2 set the window title. An agent titles its session there:
+  # Claude Code names the topic, Codex the thread. Scheme decides which
+  # titles name a session (on-event! 'terminal-title).
+  defp status_seq(state, code, title) when code in ["0", "2"] do
+    if title == Map.get(state, :title) or not String.valid?(title) do
+      state
+    else
+      state = state |> Map.put(:title, title) |> ensure_relay()
+      send(state.status_relay, {:title, state.buffer, title})
+      state
+    end
+  end
+
   defp status_seq(state, "9", "4;" <> _), do: state
   defp status_seq(state, "9", body), do: Map.put(state, :notice, body)
 
@@ -445,6 +483,13 @@ defmodule Compos.Core.Terminal do
       {:status, buffer, record, was} ->
         with handler when handler != nil <- Roots.get({:on_event, "terminal"}) do
           Session.apply_callback(handler, [buffer, scheme_record(record), scheme_record(was)], nil, {:terminal, buffer})
+        end
+
+        __MODULE__.relay_loop()
+
+      {:title, buffer, title} ->
+        with handler when handler != nil <- Roots.get({:on_event, "terminal-title"}) do
+          Session.apply_callback(handler, [buffer, title], nil, {:terminal, buffer})
         end
 
         __MODULE__.relay_loop()

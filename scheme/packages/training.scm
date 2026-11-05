@@ -82,15 +82,14 @@
       (run-command "agent-send"))))
 
 (define (training--show-chat-beside! document chat)
-  ;; The document already occupies the other window. Use it as the reference
-  ;; window, then show and select its companion in the remaining pane.
-  (let ((doc-window (window-showing document)))
-    (when doc-window
-      (select-window! doc-window)
-      (display-buffer-other-window! chat)
-      (let ((chat-window (window-showing chat)))
-        (when chat-window
-          (select-window! chat-window))))))
+  ;; The curriculum and its companion are columns, as onboarding tiles its
+  ;; guide and stage: the model places both, so neither covers the other.
+  ;; Then select the companion.
+  (when (window-showing document)
+    (panes-tile! 'columns (list document chat))
+    (let ((chat-window (window-showing chat)))
+      (when chat-window
+        (select-window! chat-window)))))
 
 (define (training-start-tour!)
   "Open TUTORIAL, start its companion chat, and send the first tour turn."

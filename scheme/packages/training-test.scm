@@ -94,9 +94,13 @@
   (lambda ()
     (let ((document (test-buffer! "*zz-training-document*" "lesson"))
           (chat (test-buffer! "*zz-training-chat*" "hello")))
+      ;; as TUTORIAL is: a mode of its own, so the panes model gives the
+      ;; companion a window of its own mode, not the curriculum's
+      (with-current-buffer document (lambda () (set-mode! "morg-mode")))
       (delete-other-windows!)
       (switch-to-buffer! "*scratch*")
       (display-buffer-other-window! document)
+      (check-true! (window-showing document) "setup: the curriculum is shown")
       (training--show-chat-beside! document chat)
       (check-true! (window-showing document) "the curriculum stays visible")
       (check-true! (window-showing chat) "the companion is visible")

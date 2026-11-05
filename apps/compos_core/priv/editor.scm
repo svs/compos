@@ -1810,12 +1810,27 @@
                         mods)
                    " + ")))
 
+(define which-key--off-modes '())
+(public! 'which-key-off-in-mode!
+  "(which-key-off-in-mode! MODE) — the buffers of MODE, and of the modes derived from it, never show the which-key panel")
+(define (which-key-off-in-mode! mode)
+  (unless (member mode which-key--off-modes)
+    (set! which-key--off-modes (cons mode which-key--off-modes)))
+  mode)
+(public! 'which-key-off?
+  "(which-key-off? BUF) — #t when BUF shows no which-key panel: its buffer-local which-key-off, or a mode given to which-key-off-in-mode!")
+(define (which-key-off? buf)
+  (and buf
+       (or (and (buffer-local buf 'which-key-off) #t)
+           (let loop ((ms which-key--off-modes))
+             (and (pair? ms) (or (buffer-derived-mode? buf (car ms)) (loop (cdr ms))))))))
+
 (public! 'which-key-rows
-  "(which-key-rows PENDING) — the keys the pending prefix PENDING can still complete to, as (KEY COMMAND MODIFIERS MODIFIER-LABEL) rows, unmodified keys first")
+  "(which-key-rows PENDING) — the keys the pending prefix PENDING can still complete to, as (KEY COMMAND MODIFIERS MODIFIER-LABEL) rows, unmodified keys first; none when which-key-off? is true of the buffer")
 (define (which-key-rows pending)
   (let* ((pending (keymap--seq pending))
          (buf (keymap--frame-buffer))
-         (rows (car (keymap--flat buf)))
+         (rows (if (which-key-off? buf) '() (car (keymap--flat buf))))
          (under (filter (lambda (r) (keymap--proper-prefix? pending (car r))) rows))
          (items (map (lambda (r)
                        (let* ((keys (list-tail (car r) (length pending)))

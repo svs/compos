@@ -605,7 +605,9 @@ defmodule Compos.Ui.EditorLive do
       # rows come from Scheme now, not with every key: a fast chord never
       # pays for them (which-key-rows walks the buffer's whole ladder)
       socket.assigns[:wk_shown] ->
-        {%{state | which_key: which_key_rows(pending, socket.assigns[:frame])}, socket}
+        rows = which_key_rows(pending, socket.assigns[:frame])
+        # no rows (a buffer with which-key off) draws no panel
+        {%{state | which_key: if(rows == [], do: nil, else: rows)}, socket}
 
       # the delay is idle time, not time since the chord began: while the
       # panel is still held back, every further prefix key restarts it. A

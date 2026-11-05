@@ -213,6 +213,8 @@
   (lambda ()
     (let ((source (buffer-local (current-buffer) 'html-edit-source)))
       (when (and source (buffer-exists? source)) (html-edit--watch! source)))))
+;; the page keeps the keyboard: a which-key panel over it would only refuse it focus
+(which-key-off-in-mode! "html-edit-mode")
 
 (mode-doc! "html-edit-mode"
   "An HTML file drawn as itself for copy editing. Hover marks the text, pictures and embeds, never the layout. A click puts the caret in the text, and the text goes back to the file when it loses focus; Escape leaves it. A click on a picture or an embed selects it, and M-click (Option or Cmd) selects any element, the layout too. With an element selected, the arrows select the element around it, the first one in it, and the ones beside it; Delete removes it, and Escape in text selects that text's block. A paste puts an image, an X post or a YouTube video after the text or the picture. Cmd-+ and Cmd-- size the text of the block you are in or have selected, and Cmd-0 gives it the page's own size; the size goes into the file as the element's font-size. C-g gives the keyboard back.")

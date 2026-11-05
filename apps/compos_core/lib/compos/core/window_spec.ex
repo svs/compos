@@ -50,7 +50,12 @@ defmodule Compos.Core.WindowSpec do
   end
 
   def read(%{type: :split, dir: dir, children: [a, b]} = spec),
-    do: %{type: :split, dir: dir, ratio: Map.get(spec, :ratio) || 0.5, children: [read(a), read(b)]}
+    do: %{
+      type: :split,
+      dir: dir,
+      ratio: Map.get(spec, :ratio) || 0.5,
+      children: [read(a), read(b)]
+    }
 
   # The tuples of older desktop files, read by position:
   #   {:leaf, buffer, top, point, manual, ctop, history, restore, owner, id}

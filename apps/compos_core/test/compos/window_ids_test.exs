@@ -13,7 +13,8 @@ defmodule Compos.WindowIdsTest do
   @b "*zz-wid-b*"
   @c "*zz-wid-c*"
 
-  defp leaf(buffer, id), do: %{type: :leaf, buffer: buffer, top: 0, manual: false, ctop: 0, id: id}
+  defp leaf(buffer, id),
+    do: %{type: :leaf, buffer: buffer, top: 0, manual: false, ctop: 0, id: id}
 
   defp with_frame(fun) do
     previous = Editor.last_active_frame()
@@ -50,7 +51,8 @@ defmodule Compos.WindowIdsTest do
   test "a layout comes back with the window ids it was saved with" do
     with_frame(fn frame ->
       [{pane, @a}] = Editor.list_windows(frame)
-      tree = %{type: :split, dir: :h, ratio: 0.5, children: [leaf(@a, pane), leaf(@b, pane + 1000)]}
+      children = [leaf(@a, pane), leaf(@b, pane + 1000)]
+      tree = %{type: :split, dir: :h, ratio: 0.5, children: children}
 
       assert :ok = Editor.restore_tree(tree, @a, frame)
       assert [{^pane, @a}, {second, @b}] = Editor.list_windows(frame)

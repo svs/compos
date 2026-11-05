@@ -13,7 +13,8 @@ defmodule Compos.WindowSpecTest do
     assert WindowSpec.read({:leaf, "b", 3, 9}) == @plain
     assert WindowSpec.read({:leaf, "b", 3, 9, true, nil}) == %{@plain | manual: true}
     # a saved offset is itself the pin
-    assert WindowSpec.read({:leaf, "b", 3, 9, false, 40, []}) == %{@plain | manual: true, ctop: 40}
+    pinned = %{@plain | manual: true, ctop: 40}
+    assert WindowSpec.read({:leaf, "b", 3, 9, false, 40, []}) == pinned
     assert WindowSpec.read({:leaf, "b", 3, 9, false, 0, [], :r, :o}) == @plain
     assert WindowSpec.read({:leaf, "b", 3, 9, false, 0, [], nil, nil, 7}) == %{@plain | id: 7}
   end
@@ -21,8 +22,8 @@ defmodule Compos.WindowSpecTest do
   test "splits read with their ratio, and a spec reads to itself" do
     spec = %{type: :split, dir: :v, ratio: 0.5, children: [@plain, %{@plain | id: 7}]}
 
-    assert WindowSpec.read({:split, :v, {:leaf, "b", 3}, {:leaf, "b", 3, 0, false, 0, [], nil, nil, 7}}) ==
-             spec
+    old = {:split, :v, {:leaf, "b", 3}, {:leaf, "b", 3, 0, false, 0, [], nil, nil, 7}}
+    assert WindowSpec.read(old) == spec
 
     assert WindowSpec.read(spec) == spec
     assert WindowSpec.buffers(spec) == ["b", "b"]

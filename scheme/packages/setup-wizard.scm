@@ -214,6 +214,12 @@
 (effects! '(write display))
 
 (define (setup-wizard-go! buf step)
+  ;; Next keeps the model in use when the user chose none: the card that
+  ;; was picked for them shows no Use button, and the choice must last
+  (when (and (equal? step "learn")
+             (equal? setup-default-connector "")
+             (member *default-connector* (setup-inference-available)))
+    (setup-wizard-use! buf *default-connector*))
   (buffer-set-local! buf 'setup-wizard-step step)
   (setup-wizard-redraw! buf))
 

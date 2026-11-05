@@ -1674,7 +1674,7 @@
 
 (define (chat-header-line buf)
   (string-append *chat-file-header* " (connector "
-    (value->string (chat-header-string (or (buffer-local buf 'agent-connector) "api")))
+    (value->string (chat-header-string (or (buffer-local buf 'agent-connector) *default-connector*)))
     (let ((m (buffer-local buf 'agent-model)))
       (if m (string-append " model " (value->string (chat-header-string m))) ""))
     (let ((effort (buffer-local buf 'agent-effort)))
@@ -2102,7 +2102,7 @@
 ;; one reset 'agent-queued and rescued a legacy mark, the other decided
 ;; seeding from a different test.
 (define (chat-attach! buf)
-  (let* ((cname (or (buffer-local buf 'agent-connector) "api"))
+  (let* ((cname (or (buffer-local buf 'agent-connector) *default-connector*))
          (mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)

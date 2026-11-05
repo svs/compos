@@ -133,7 +133,7 @@
 ;; does this chat's backend hold the conversation, or do we?
 (define (chat-stateless? buf)
   (and (boundp (quote connector-can?))
-       (connector-can? (or (buffer-local buf 'agent-connector) "api") 'stateless)))
+       (connector-can? (or (buffer-local buf 'agent-connector) *default-connector*) 'stateless)))
 
 ;;; --- compaction ------------------------------------------------------------------
 ;;; A conversation that never ends grows without bound, and every turn
@@ -638,7 +638,7 @@
     (list
       'chat chat
       'agent (or (buffer-local chat 'agent-slug) #f)
-      'connector (or (buffer-local chat 'agent-connector) "api")
+      'connector (or (buffer-local chat 'agent-connector) *default-connector*)
       'model (or (buffer-local chat 'agent-model) (llm-model))
       'group (or group #f)
       'group-name (if group (group-display-name group) #f)
@@ -785,7 +785,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (buffer-local buf 'agent-slug))
-           (cname (or (buffer-local buf 'agent-connector) "api")))
+           (cname (or (buffer-local buf 'agent-connector) *default-connector*)))
       (if (not (or slug (buffer-local buf 'agent-saved-mark)))
           (message "not a chat buffer")
           (minibuffer-read

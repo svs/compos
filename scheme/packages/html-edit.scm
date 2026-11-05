@@ -90,6 +90,9 @@
     (if (not (buffer-exists? app))
         (html-edit--unwatch! source)
         (let ((hash (content-hash (buffer-text source))))
+          ;; the page buffer follows its file, so a reload draws the file
+          ;; as it is now; the open page takes the change in place
+          (html-edit--render! app source)
           (unless (equal? (buffer-local app 'html-edit-expect) hash)
             (app-post! app (list 'changed hash)))))))
 

@@ -1269,7 +1269,7 @@
     (list (list 'tag "c-prompt" 'class "ag-inputrow"
                 'children (list (chat-view--label "YOU")
                                 (list 'tag "c-input" 'class "ag-input" 'input #t
-                                      'hint "RET sends · C-RET sends next, or interrupts when empty"))))))
+                                      'hint "RET sends · C-RET sends next · C-g cancels"))))))
 
 (effects! '(write))
 

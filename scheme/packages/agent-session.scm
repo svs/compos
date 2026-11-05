@@ -784,14 +784,14 @@
   (llm-session-promote! slug text))
 
 ;; C-RET with text sends it like RET, and a message that queues goes to the
-;; front: it runs next, ahead of what waited. With no text C-RET interrupts.
+;; front: it runs next, ahead of what waited. C-g cancels, not C-RET.
 (define-command "chat-send-next" "Send the input as the next message, ahead of the queue"
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
            (before (length (or (buffer-local buf 'chat-queued) '()))))
       (if (equal? (string-trim (chat-input-text buf)) "")
-          (run-command "agent-interrupt-send")
+          (message "nothing to send")
           (begin
             (run-command "agent-send")
             (let ((q (or (buffer-local buf 'chat-queued) '())))

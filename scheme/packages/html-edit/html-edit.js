@@ -12,6 +12,7 @@
   const RAW = new Set(["script", "style"]);
   const INLINE = new Set("a abbr b bdi bdo cite code data dfn em i kbd mark q s samp small span strong sub sup time u var".split(" "));
   const OURS = new Set(["data-hs", "contenteditable"]);
+  const SIZE_KEYS = { "=": 1, "+": 1, "-": -1, "_": -1, "0": 0 };
   let src = null;
   let sel = null, hover = null, editing = null, before = null;
   let queue = Promise.resolve();
@@ -99,6 +100,14 @@
   // it will hold once the text is in the source
   const escText = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\u00a0/g, "&nbsp;");
   const escAttr = (t) => t.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const startTag = (el) => {
+    let open = "<" + tagOf(el);
+    for (const a of el.attributes) {
+      if (OURS.has(a.name)) continue;
+      open += a.value === "" ? " " + a.name : " " + a.name + '="' + escAttr(a.value) + '"';
+    }
+    return open + ">";
+  };
   function serialize(nodes, base, raw) {
     let out = "", n = 0;
     const marks = [];
@@ -108,12 +117,7 @@
       if (nd.nodeType === 8) return put("<!--" + nd.data + "-->");
       if (nd.nodeType !== 1) return;
       const tag = tagOf(nd), s = base + n;
-      let open = "<" + tag;
-      for (const a of nd.attributes) {
-        if (OURS.has(a.name)) continue;
-        open += a.value === "" ? " " + a.name : " " + a.name + '="' + escAttr(a.value) + '"';
-      }
-      put(open + ">");
+      put(startTag(nd));
       if (!VOID.has(tag)) {
         for (const c of nd.childNodes) walk(c, RAW.has(tag));
         put("</" + tag + ">");
@@ -173,6 +177,19 @@
     el.remove();
     apply(s, e, "", anc, []);
     select(null);
+  }
+
+  // the text size of EL: STEP 1 a size up, -1 a size down, 0 the page's own.
+  // Only EL's start tag changes in the source.
+  function resize(el, step) {
+    const { s } = range(el), { is } = inner(el);
+    if (step === 0) el.style.removeProperty("font-size");
+    else {
+      const px = parseFloat(getComputedStyle(el).fontSize);
+      el.style.fontSize = Math.max(6, Math.round(px * (step > 0 ? 1.1 : 1 / 1.1))) + "px";
+    }
+    if (el.getAttribute("style") === "") el.removeAttribute("style");
+    apply(s, is, startTag(el), ancestors(el), []);
   }
 
   // put EL after X, on a line of its own at X's indent
@@ -296,6 +313,15 @@
     // in text, Cmd-arrows move the caret; the app bridge, which listens
     // after this, would hand them to the editor as window motion
     if (editing && ev.metaKey && /^Arrow/.test(ev.key)) { ev.stopImmediatePropagation(); return; }
+    // Cmd-+ and Cmd-- size the block's text, in it or selected; Cmd-0 undoes it
+    const step = mod ? SIZE_KEYS[ev.key] : undefined;
+    const block = editing || sel;
+    if (step !== undefined && block && src && !VOID.has(tagOf(block))) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      resize(block, step);
+      return;
+    }
     if (editing) {
       // only Escape leaves the text: Enter is a new line in it
       if (ev.key === "Escape") {

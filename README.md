@@ -109,6 +109,8 @@ then the saved `~/.compos/custom.scm`. All three are optional.
 
 ## Run it
 
+To install with an AI agent, point the agent at [INSTALL.md](INSTALL.md).
+
 ```sh
 mix deps.get && mix test
 mix run --no-halt

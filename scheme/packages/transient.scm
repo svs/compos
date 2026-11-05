@@ -49,8 +49,8 @@
 (define (transient--item-wrapper prefix item)
   (let ((key (plist-get item 'key)))
     (if (equal? key "")
-        (string-append "transient:" prefix ":row:" (plist-get item 'description))
-        (string-append "transient:" prefix ":" key))))
+        (string-append "transient--" prefix ":row:" (plist-get item 'description))
+        (string-append "transient--" prefix ":" key))))
 
 (define (transient--install-item prefix item)
   (let ((name (transient--item-wrapper prefix item))

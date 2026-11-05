@@ -546,7 +546,7 @@
   (if (pair? cand) (car cand) cand))
 
 (define (mb-shortcut-command key)
-  (let ((name (string-append "minibuffer-shortcut-" key)))
+  (let ((name (string-append "minibuffer--shortcut-" key)))
     (define-command name (string-append "Choose minibuffer shortcut M-" key)
       (lambda ()
         (let ((hit (assoc key *mb-shortcuts*)))

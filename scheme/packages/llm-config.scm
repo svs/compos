@@ -1199,7 +1199,7 @@
         (loop (substring cs 1 (string-length cs)) (cons (substring cs 0 1) out)))))
 
 (define (llm-config--filter-command ch)
-  (string-append "llm-config-filter-" (if (equal? ch " ") "space" ch)))
+  (string-append "llm-config--filter-" (if (equal? ch " ") "space" ch)))
 
 (for-each
   (lambda (ch)

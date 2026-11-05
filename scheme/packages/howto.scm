@@ -336,8 +336,7 @@
 ;; a command worth a row: it says what it does, and a person can run it
 (define (manual--listed-command? name)
   (and (not (equal? (command-doc name) ""))
-       (not (string-contains? name "--"))
-       (not (string-prefix? "transient:" name))))
+       (not (command-internal? name))))
 
 ;; The packages the manual leaves out. The suite loads the opt-in apps,
 ;; and bin/docs names them here, so the manual describes the stock boot.

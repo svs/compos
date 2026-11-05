@@ -5048,6 +5048,26 @@
 
 (marginalia! 'command command-annotation)
 
+(domain! 'commands)
+(effects! '(pure))
+
+;; a command whose name holds -- is a package's own helper, such as the
+;; one a keymap makes for each key: keys run it, M-x does not list it
+(define (command-internal? name)
+  (string-contains? name "--"))
+
+(effects! '(read))
+
+;; the names M-x offers, as vertico sorts them: the shortest first, then
+;; A-Z; history-order puts the recent ones before them all
+(define (command-candidates)
+  (map cadr
+       (sort (map (lambda (n) (list (string-length n) n))
+                  (filter (lambda (n) (not (command-internal? n))) (command-names))))))
+
+(domain! 'processes)
+(effects! '(write execute))
+
 (define-command "execute-extended-command"
   "Run a command by name, with its keybinding and doc alongside"
   (lambda ()
@@ -5058,7 +5078,8 @@
       (set! *mb-history-key* 'M-x)
       (set! *mb-history-pos* -1)
       (minibuffer-read* "M-x "
-        (annotate 'command (history-order 'M-x (command-names)))
+        (annotate 'command
+                  (history-order 'M-x (command-candidates)))
         (list (list 'confirm
                 (lambda (cmd)
                   (set! *mb-history-key* #f)

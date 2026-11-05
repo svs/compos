@@ -287,7 +287,7 @@
                             "DEL takes the character back")
               (run-command "transient-column-right")
               (check-equal! (transient-dispatch-key "m")
-                            (list "command" "transient:llm-configure:m")
+                            (list "command" "transient--llm-configure:m")
                             "in the config column the letters are the fields")
               (run-command "transient-cancel-one")))
           (buffer-kill! buf))))))

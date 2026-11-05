@@ -601,10 +601,8 @@
                  'metadata-source "unknown")))))
 
 (define (apropos--primitives words index)
-  (if (boundp 'primitive-docs)
-      (apropos--compact
-        (map (lambda (p) (apropos--primitive p words index)) (primitive-docs)))
-      '()))
+  (apropos--compact
+    (map (lambda (p) (apropos--primitive p words index)) (primitive-docs))))
 
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
 

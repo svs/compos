@@ -341,7 +341,7 @@
               (hit
                 (definition--show! name hit)
                 (message (string-append "Definition of " name " in the other window; press again to go there")))
-              ((and (boundp 'primitive-doc) (primitive-doc name))
+              ((primitive-doc name)
                (message (string-append name " is a primitive: " (primitive-doc name))))
               (else (message (string-append "No definition of " name)))))))))
 

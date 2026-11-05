@@ -53,6 +53,8 @@
 (require 'predict)
 (require 'collect)
 (require 'comint)
+(require 'herdr-agent)
+(require 'herdr-claude)
 (require 'advice)
 (require 'custom)
 (require 'tools)

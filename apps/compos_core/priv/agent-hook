@@ -1,0 +1,26 @@
+#!/bin/sh
+# The hook of an agent harness in a compos terminal.
+#
+#   sh agent-hook HARNESS EVENT      (the harness's hook JSON on stdin)
+#
+# The terminal's shell exports COMPOS_AGENT and COMPOS_SOCK. The daemon
+# answers with the hook output (herdr-agent-hook, herdr-agent.scm), and
+# the mode of the harness decides its shape. Outside a compos terminal, or
+# when the daemon does not answer, the hook prints nothing and the harness
+# goes on as usual.
+
+[ -n "$COMPOS_AGENT" ] || exit 0
+sock="${COMPOS_SOCK:-$HOME/.compos/sock}"
+[ -S "$sock" ] || exit 0
+
+harness=$(printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-')
+event=$(printf '%s' "$2" | tr -cd 'A-Za-z0-9_.-')
+slug=$(printf '%s' "$COMPOS_AGENT" | tr -cd 'A-Za-z0-9_.-')
+# only the tool name goes to the daemon: a Write carries the whole file
+tool=$(sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_.-]*\)".*/\1/p' | head -n 1)
+
+req='{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(herdr-agent-hook \"'"$harness"'\" \"'"$event"'\" \"'"$slug"'\" \"'"$tool"'\")"}}'
+out=$(printf '%s\n' "$req" | nc -U "$sock" 2>/dev/null |
+      sed -n 's/.*"result":"\(\\"\)\{0,1\}\([A-Za-z0-9+/=]*\).*/\2/p')
+[ -n "$out" ] && printf '%s' "$out" | base64 --decode
+exit 0

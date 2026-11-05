@@ -32,6 +32,8 @@
       (let loop ((bs (buffer-list)))
         (cond ((null? bs) (agent-buffer slug))
               ((equal? (buffer-local (car bs) 'agent-slug) slug) (car bs))
+              ;; an agent in a terminal: the terminal stands where its chat would
+              ((equal? (buffer-local (car bs) 'herdr-agent-slug) slug) (car bs))
               (else (loop (cdr bs)))))))
 
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))

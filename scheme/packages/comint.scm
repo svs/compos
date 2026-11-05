@@ -16,6 +16,27 @@
 ;; The login flag works for zsh, bash, and fish. Override this in init.scm.
 (define *terminal-command* "exec \"${SHELL:-/bin/zsh}\" -l")
 
+;;; --- the environment of a terminal's shell ----------------------------------
+;;; Each function in term-environment-functions takes the terminal buffer
+;;; and answers ((NAME VALUE) ...). The shell exports them before it starts,
+;;; so every program in the terminal reads them. This is the terminal's
+;;; process-environment; a package adds a function with a keyed add-hook!.
+
+(define (term-environment buf)
+  (apply append
+         (map (lambda (f) (let ((p (hook--fn f))) (or (and p (p buf)) '())))
+              (hook-functions 'term-environment-functions))))
+
+(define (term--export-prefix buf)
+  (let ((env (term-environment buf)))
+    (if (null? env)
+        ""
+        (string-append "export "
+                       (string-join (map (lambda (e) (string-append (car e) "=" (sh-quote (cadr e))))
+                                         env)
+                                    " ")
+                       "; "))))
+
 (define (terminal-mode-init! buf)
   (buffer-set-local! buf 'render-mode "terminal")
   (buffer-set-local! buf 'line-numbers "off")
@@ -35,7 +56,8 @@
     ;; local rides the desktop, so waking *opencode* starts OpenCode again
     ;; instead of silently turning the buffer into a login shell.
     (start-terminal! buf
-      (or (buffer-local buf 'terminal-command) *terminal-command*))))
+      (string-append (term--export-prefix buf)
+                     (or (buffer-local buf 'terminal-command) *terminal-command*)))))
 
 (define-mode "term-mode"
   (lambda () (terminal-mode-init! (current-buffer))))

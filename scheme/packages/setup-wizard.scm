@@ -449,8 +449,13 @@
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((string-prefix? "wizard:use:" id)
      (setup-wizard-use! buf (substring-bytes id 11 (string-byte-length id))) #t)
+    ;; the model the user installs is the one they chose: it goes in the
+    ;; llm default at once, so the next chat after the install uses it
     ((string-prefix? "wizard:install:" id)
-     (setup-install-agent! (substring-bytes id 15 (string-byte-length id))) #t)
+     (let ((name (substring-bytes id 15 (string-byte-length id))))
+       (setup-wizard-use! buf name)
+       (setup-install-agent! name))
+     #t)
     (else #f)))
 
 (add-hook! (list 'block-click 'setup-wizard)

@@ -64,14 +64,15 @@
   (filter (lambda (b) (and (equal? (buffer-local b 'render-mode) "terminal") (process-running? b)))
           (group-buffers group)))
 
-;; a row: (shell S agent A state ST kind K msg M), one per shell with an agent
+;; a row: (shell S agent A model MO state ST kind K msg M), one per shell with
+;; an agent; the model is the variable a hook of the agent set (term-var)
 (define (herdr--row shell)
   (let* ((status (term-status shell))
          (live (and status (member (plist-get status 'state) '("working" "blocked" "done" "idle" "error"))))
          (fg (herdr--foreground-agent shell))
          (agent (or fg (and live (plist-get status 'app)))))
     (and agent
-         (list 'shell shell 'agent agent
+         (list 'shell shell 'agent agent 'model (or (term-var shell "model") "")
                'state (if live (plist-get status 'state) "unknown")
                'kind (or (and live (plist-get status 'kind)) "")
                'msg (or (and live (plist-get status 'msg)) "")))))
@@ -103,16 +104,18 @@
   (let ((face (herdr--face (plist-get row 'state))))
     (list (list (herdr--glyph (plist-get row 'state)) face)
           (list (plist-get row 'agent) "default")
+          (list (plist-get row 'model) "chat-idle")
           (list (herdr--state-label row) face)
-          (list (plist-get row 'shell) "chat-idle")
+          (list (plist-get row 'shell) "default")
           (list (plist-get row 'msg) "chat-idle"))))
 
 (define (herdr--narrow-cells buf row)
   (let ((face (herdr--face (plist-get row 'state))))
     (list (list (herdr--glyph (plist-get row 'state)) face)
           (list (plist-get row 'agent) "default")
+          (list (plist-get row 'model) "chat-idle")
           (list (herdr--state-label row) face)
-          (list (plist-get row 'msg) "chat-idle"))))
+          (list (plist-get row 'shell) "default"))))
 
 (define (herdr--meta buf)
   (let* ((rows (herdr-rows buf))
@@ -128,16 +131,18 @@
            "The agents in this group's shells, one row each: Claude Code, Codex, Pi and the rest. "
            "The state is what the agent says itself (OSC 7501): working, needs you (blocked, "
            "with what for), done, idle or error. An agent that says nothing shows as unknown. "
+           "The session is the shell, named after the agent's session title; the model is "
+           "the variable model a hook of the agent sets (OSC 1337 SetUserVar). "
            "The rows that need you come first, and the list follows the agents by itself. "
            "RET shows the agent's shell, i interrupts the agent (ESC), g reads the shells again, "
            "/ narrows, and q quits.")
     'transient #f
     'rows herdr-rows
-    'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "state" 16)
-                                 (list "shell" 20) (list "says" #f)))
+    'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16)
+                                 (list "session" 28) (list "says" #f)))
     'cells herdr--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 72)
-                         'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "state" 16) (list "says" #f)))
+                         'columns (lambda (buf) (list (list "" 1) (list "agent" 10) (list "model" 12) (list "state" 16) (list "session" #f)))
                          'cells herdr--narrow-cells)
                    (list 'name 'wide 'default #t))
     'title (lambda (buf) (string-append "Agents: " (group-name (herdr--group buf))))
@@ -156,9 +161,13 @@
                 (list-refresh! b)))
             (filter (lambda (b) (buffer-local b 'herdr-group)) (buffer-list))))
 
-;; a status change redraws the listing of the shell's group
+;; a status, a variable or a session title redraws the listing of the shell's group
 (add-hook! 'terminal-status-hook
   (lambda (shell status was) (herdr-refresh! (buffer-group shell))))
+(add-hook! 'terminal-var-hook
+  (lambda (shell name value) (herdr-refresh! (buffer-group shell))))
+(add-hook! 'terminal-retitle-hook
+  (lambda (shell was) (herdr-refresh! (buffer-group shell))))
 
 (define-command "herdr-refresh" "Read this group's shells again"
   (lambda () (herdr-refresh! (herdr--group (current-buffer)))))
@@ -205,6 +214,6 @@
 
 (domain! 'processes)
 (effects! '(read))
-(public! 'herdr-rows "(herdr-rows BUF) — the agent rows of a herdr listing: (shell S agent A state ST kind K msg M), the ones that need you first")
+(public! 'herdr-rows "(herdr-rows BUF) — the agent rows of a herdr listing: (shell S agent A model MO state ST kind K msg M), the ones that need you first")
 (effects! '(write display))
 (public! 'herdr "(herdr) — show the agents in this group's shells and what each is doing")

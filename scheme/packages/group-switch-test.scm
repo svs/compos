@@ -875,23 +875,41 @@
     (t--sw-done!)))
 
 (deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
-  "the explicit action puts the buffer in the new group"
+  "the new-group row founds the typed name, also when the name matches a group"
   (lambda ()
     (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source")))
+    (let ((source (group-record-create! "zzsw-moved-source")))
       (buffer-add-group! t--sw-first source)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group source)
       (run-command "group-switch")
-      (run-command "group-switch-new")
+      ;; "zzsw-moved" matches "zzsw-moved-source" too
       (t--sw-type! "zzsw-moved")
-      (t--sw-key! "confirm")
+      (let ((labels (t--sw-labels)))
+        (check-equal! (car (reverse labels)) "zzsw-moved" "the typed name is the last row")
+        (check-true! (and (member "zzsw-moved-source" labels) #t) "and the match stays")
+        (check-equal! (cadr (reverse labels)) "new group - M-RET" "its heading names the key"))
+      (check-equal! (t--sw-selected) "zzsw-moved-source" "the highlight starts on the match")
+      (t--sw-key! "confirm-input")
 
       (let ((moved (group-resolve-id "zzsw-moved")))
+        (check-true! (and moved (not (equal? moved source))) "a new group was founded")
         (check-true! (buffer-in-group? t--sw-first moved) "the destination was added")
         (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
-        (check-equal! (buffer-group t--sw-first) moved "and it is the only group")
         (check-equal! (frame-group) moved "the new group was entered")))
+    (t--sw-done!)))
+
+(deftest 'switch-to-group-offers-no-new-row-for-a-taken-name
+  "a name that a group has switches to it; the prompt offers no row to found it"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((taken (group-record-create! "zzsw-taken")))
+      (run-command "group-switch")
+      (t--sw-type! "zzsw-taken")
+      (check-equal! (filter (lambda (l) (string-prefix? "new group" l)) (t--sw-labels)) '()
+                    "no new-group heading")
+      (t--sw-key! "confirm")
+      (check-equal! (frame-group) taken "RET switches to the group"))
     (t--sw-done!)))
 
 (deftest 'a-freed-frame-stays-free-in-a-new-group

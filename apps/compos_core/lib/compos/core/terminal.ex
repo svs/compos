@@ -387,7 +387,7 @@ defmodule Compos.Core.Terminal do
     if :binary.match(bytes, "\e") == :nomatch do
       Map.put(state, :osc_carry, "")
     else
-      ~r/\e\](7501|9|0|2);([^\a\e]*)(?:\a|\e\\)/
+      ~r/\e\](7501|1337|9|0|2);([^\a\e]*)(?:\a|\e\\)/
       |> Regex.scan(bytes, capture: :all_but_first)
       |> Enum.reduce(Map.put(state, :osc_carry, osc_tail(bytes)), fn [code, body], st ->
         status_seq(st, code, body)
@@ -448,6 +448,26 @@ defmodule Compos.Core.Terminal do
     end
   end
 
+  # OSC 1337 SetUserVar, the user variables of iTerm2 and WezTerm: a
+  # program sets NAME to a base64 VALUE. Scheme keeps each as a local of
+  # the buffer (on-event! 'terminal-var); a value that did not change
+  # sends nothing.
+  defp status_seq(state, "1337", "SetUserVar=" <> var) do
+    vars = Map.get(state, :vars, %{})
+
+    with [name, b64] <- String.split(var, "=", parts: 2),
+         true <- Regex.match?(~r/^[A-Za-z0-9_-]{1,64}$/, name),
+         value when is_binary(value) <- if(b64 == "", do: "", else: decode64(b64)),
+         true <- Map.get(vars, name) != value do
+      state = state |> Map.put(:vars, Map.put(vars, name, value)) |> ensure_relay()
+      send(state.status_relay, {:var, state.buffer, name, value})
+      state
+    else
+      _ -> state
+    end
+  end
+
+  defp status_seq(state, "1337", _), do: state
   defp status_seq(state, "9", "4;" <> _), do: state
   defp status_seq(state, "9", body), do: Map.put(state, :notice, body)
 
@@ -490,6 +510,13 @@ defmodule Compos.Core.Terminal do
       {:title, buffer, title} ->
         with handler when handler != nil <- Roots.get({:on_event, "terminal-title"}) do
           Session.apply_callback(handler, [buffer, title], nil, {:terminal, buffer})
+        end
+
+        __MODULE__.relay_loop()
+
+      {:var, buffer, name, value} ->
+        with handler when handler != nil <- Roots.get({:on_event, "terminal-var"}) do
+          Session.apply_callback(handler, [buffer, name, value], nil, {:terminal, buffer})
         end
 
         __MODULE__.relay_loop()

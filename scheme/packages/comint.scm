@@ -194,9 +194,30 @@
       (let ((new (chat-title buf name)))
         (when new
           (set! *term-status*
-                (map (lambda (e) (if (equal? (car e) buf) (list new (cadr e)) e)) *term-status*)))))))
+                (map (lambda (e) (if (equal? (car e) buf) (list new (cadr e)) e)) *term-status*))
+          (run-hook-with-args 'terminal-retitle-hook new buf))))))
 
 (on-event! 'terminal-title (lambda (buf title) (term--title-changed! buf title)))
+
+;;; --- user variables ---------------------------------------------------------
+;;; A program in a terminal sets a variable with OSC 1337 SetUserVar, as in
+;;; iTerm2 and WezTerm: a shell integration its git branch, an agent's hook
+;;; its model. The shell keeps NAME as its local term-NAME, a string. A
+;;; program sets only these, never the buffer's own locals, and nothing runs.
+
+(defcustom 'term-user-vars #t
+  "Keep the variables a program in a terminal sets (OSC 1337 SetUserVar) as the shell's term- locals.")
+
+(define (term-var-local name) (string->symbol (string-append "term-" name)))
+
+(define (term-var buf name) (buffer-local buf (term-var-local name)))
+
+(define (term--var-changed! buf name value)
+  (when term-user-vars
+    (buffer-set-locals! buf (list (term-var-local name) value))
+    (run-hook-with-args 'terminal-var-hook buf name value)))
+
+(on-event! 'terminal-var (lambda (buf name value) (term--var-changed! buf name value)))
 
 (define (shell--fresh-name base)
   (let loop ((n 2))
@@ -379,6 +400,7 @@
 (effects! '(unknown))
 (category! 'buffers)
 (public! 'term-status "(term-status BUF) — what the program in BUF's terminal last said it is doing (OSC 7501): a plist of state, app, kind, msg; #f before it says anything. terminal-status-hook runs (BUF STATUS WAS) on every change, terminal-turn-start-hook (BUF APP) when it starts working, and terminal-turn-end-hook (BUF APP OUTCOME MSG) when the turn ends, OUTCOME done, error, stopped or exited")
+(public! 'term-var "(term-var BUF NAME) — the variable NAME a program in BUF's terminal set with OSC 1337 SetUserVar, kept as the local term-NAME; #f when unset. terminal-var-hook runs (BUF NAME VALUE) on each change, terminal-retitle-hook (NEW OLD) when an agent's session title renames the shell")
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 

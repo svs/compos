@@ -2646,6 +2646,10 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; bound in the minibuffer's own map knows it is somewhere else.
 (define *group-switch-rows* '())
 
+;; the open group prompt's cards, without the new-group row: the row
+;; follows the input, and C-k takes a card away
+(define *group-switch-cands* '())
+
 ;; the arrangement you came from, put back. A verb that destroys what the look
 ;; is showing calls this first, so no window is left naming a dead buffer.
 (define *group-switch-restore* #f)
@@ -2697,21 +2701,30 @@ is forgotten and that group falls back to creation order in the switcher."
               ;; the killed row leaves the list without closing the prompt
               (let ((rows (group-switch-prompt-rows)))
                 (set! *group-switch-rows* (cdr rows))
-                (minibuffer-set-candidates! (car rows)))))))))
+                (set! *group-switch-cands* (car rows))
+                (minibuffer-set-candidates!
+                  (group-switch-with-new-row (car rows) (minibuffer-input)
+                                             (group-switch-new-action))))))))))
 
 (local-set-key* (minibuffer-buffer) "M-m" "group-switch-move-buffer")
 (local-set-key* (minibuffer-buffer) "C-k" "group-switch-kill")
 
-(define-command "group-switch-new" "Create a group from the group switcher, named by what you typed"
-  (lambda ()
-    (let ((action (frame-local 'group-switch-new-action))
-          (state (minibuffer-state)))
-      (when (and state action)
-        ;; the filter you typed to look for the group names the new one
-        (let ((typed (string-trim (or (plist-get state 'input) ""))))
-          ;; Cancel restores the invoking arrangement before the name prompt.
-          (minibuffer-cancel!)
-          (group-switch-run-new-action! action typed))))))
+(define (group-switch-new-rows typed action)
+  ;; the row that founds the group you typed. It has its own heading, so the
+  ;; ranker keeps it under every group the text matches, and RET on a
+  ;; match still switches. A name that a group has offers no row
+  (if (or (equal? typed "")
+          (group-switch-row typed)
+          (group-record-by-name typed))
+      '()
+      ;; the row sits under every match, so the heading names the key that
+      ;; reaches it from anywhere in the list
+      (list (list "new group - M-RET" "" "separator")
+            (list typed (car action)))))
+
+(define (group-switch-with-new-row cands input action)
+  (append (mb-preview-shortcut-hint cands (mb-preview-shortcut-rows cands #f))
+          (group-switch-new-rows (string-trim (or input "")) action)))
 
 
 (define-command "group-switch" "Switch to a group and restore its layout"
@@ -2752,11 +2765,8 @@ is forgotten and that group falls back to creation order in the switcher."
                (close!
                  (lambda ()
                    (set! open #f)
-                   (set-frame-local! 'group-switch-new-action #f)
-                   (buffer-minor-maps! (minibuffer-buffer)
-                     (remove (lambda (m) (equal? m "group-switch-modal-map"))
-                             (buffer-minor-maps (minibuffer-buffer))))
                    (set! *group-switch-rows* '())
+                   (set! *group-switch-cands* '())
                    (set! *group-switch-restore* #f)
                    (group-preview-forget!)))
                (preview-now!
@@ -2817,11 +2827,14 @@ is forgotten and that group falls back to creation order in the switcher."
               ;; switcher, whose close! empties these, and RET on
               ;; "compos" then found no row and tried to create it
               (set! *group-switch-rows* (cdr prompt-rows))
+              (set! *group-switch-cands* candidates)
               (set! *group-switch-restore* restore!)
-              (set-frame-local! 'group-switch-new-action action)
-              (buffer-minor-maps! (minibuffer-buffer)
-                (cons "group-switch-modal-map"
-                      (buffer-minor-maps (minibuffer-buffer)))))))))
+              ;; the text you type can name a new group: the prompt offers
+              ;; it as the last row, also while it matches a group
+              (set! *mb-change-fn*
+                (lambda (input)
+                  (minibuffer-set-candidates!
+                    (group-switch-with-new-row *group-switch-cands* input action)))))))))
 
 (defcustom 'group-switch-preview-ms 120
   "How long the highlight rests on a group before the switcher previews it, in milliseconds. 0 turns the look off and leaves the frame still."

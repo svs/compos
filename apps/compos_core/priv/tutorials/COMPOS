@@ -326,7 +326,7 @@ The tutorial is a group too: its practice page, slide and lesson stay together i
 
 > **Try it.** Type `C-x g` to look at the group switcher. The group you are in is marked. Press `ESC` to stay here.
 
-> **Try it.** Type `C-x C-g b` to list the buffers of this group. The practice page, the slide and the lesson are in it. Press `q` to close the list.
+> **Try it.** Type `C-x C-g b` to list the buffers of this group. The practice page, the slide and the lesson are in it. Typing narrows this list, so press `ESC` to close it.
 
 To start a new task in a group of its own, type `M-x group-new`. Do not do it now: the tutorial stays in this group, and a new group opens without it. If you leave, `C-x C-g C-g` brings you back.
 

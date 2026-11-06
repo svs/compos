@@ -930,12 +930,16 @@
 
 ;; run what fast-resolve gave for INTENT: a clean run keeps the function it
 ;; wrote and is remembered, so the same words come back without a model
-(define (fast-run-resolved! intent r &optional where)
+(define (fast-run-resolved! intent r &optional where buf)
   (let ((code (plist-get r 'code)) (where (or where "palette")))
     (if (not code)
         (begin (fast-trace-done! where intent r #f)
                (message (fast-failure intent r)))
-        (let ((res (with-frame-windows (lambda () (eval-string-safe code)))))
+        ;; BUF is the buffer the request came from; without it, the frame's
+        (let ((res (with-frame-windows
+                     (lambda () (if buf
+                                    (with-current-buffer buf (lambda () (eval-string-safe code)))
+                                    (eval-string-safe code))))))
           (if (equal? (car res) 'ok)
               (begin (fast-keep-pending! intent)
                      (fast-learn-recipe! intent code (plist-get r 'defined)))
@@ -1179,7 +1183,7 @@
 (category! 'fast-code)
 (public! 'fast-resolve "(fast-resolve INTENT K) -- K gets (code CODE [defined NAME] source SOURCE ms MS), or code #f with a reason; the model writes a function when a job needs one")
 (public! 'fast-run! "(fast-run! INTENT) -- resolve INTENT and run it against the frame")
-(public! 'fast-run-resolved! "(fast-run-resolved! INTENT R [WHERE]) -- run R, what fast-resolve gave for INTENT, and remember it when it runs clean")
+(public! 'fast-run-resolved! "(fast-run-resolved! INTENT R [WHERE BUF]) -- run R, what fast-resolve gave for INTENT, and remember it when it runs clean")
 (public! 'fast-this-buffer "(fast-this-buffer) -- the buffer 'it' and 'this' mean: the first one on screen that is not a chat")
 (public! 'fast-show-learned "(fast-show-learned) -- show the functions fast-code learned, a Scheme file, in the other window")
 (public! 'fast-trace-text "(fast-trace-text N) -- the last N fast-code resolutions, stage by stage; M-x fast-trace shows them")

@@ -246,13 +246,24 @@
 ;; or recipe that does them; when none does, it writes a command. Either
 ;; way it saves a recipe, so the same words run at once next time.
 (define (command-palette--pick! text)
-  (set! *command-palette--request* text)
-  (message (string-append "Finding the command for: " text))
-  (command-palette-resolve text (current-buffer)
-    (lambda (r)
-      (if r
-          (command-palette--apply! text r)
-          (command-palette--ask-to-write! text)))))
+  ;; the answer comes seconds later, when the frame's current buffer can be
+  ;; the prompt's own: it runs in the buffer you were in when you asked
+  (let ((origin (command-palette--origin)))
+    (set! *command-palette--request* text)
+    (message (string-append "Finding the command for: " text))
+    (command-palette-resolve text origin
+      (lambda (r)
+        (if r
+            (with-frame-windows
+              (lambda () (with-current-buffer origin (lambda () (command-palette--apply! text r)))))
+            (command-palette--ask-to-write! text))))))
+
+;; the buffer you were in: the current one, unless that is a prompt's input
+(define (command-palette--origin)
+  (let ((b (current-buffer)))
+    (if (minibuffer-buffer? b)
+        (or (find (lambda (v) (not (minibuffer-buffer? v))) (get-visible-buffers)) b)
+        b)))
 
 ;; The recipes the palette offers: the ones in your recipes file, written to
 ;; be run from words. The bundled ones are written for agents: they answer data.
@@ -403,7 +414,7 @@
   (let ((kind (car r)) (name (cadr r)) (bindings (caddr r)))
     (set! *command-palette--request* #f)
     (cond
-      ((equal? kind "code") (fast-run-resolved! text (list-ref r 4) "palette"))
+      ((equal? kind "code") (fast-run-resolved! text (list-ref r 4) "palette" (current-buffer)))
       (else
         (command-palette--learn! text name bindings kind)
         (message (string-append text ": " name))

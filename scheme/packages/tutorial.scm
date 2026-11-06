@@ -812,14 +812,15 @@
 /* a key is a keycap: the editor's key element in a box, one cap a key. The
    cap keeps the main text colour: --accent steps down in an inactive window,
    and the tutorial's panes are inactive while you practise */
-.tutorial-say c-action-key.tutorial-key { display: inline-block; font-size: .78em; line-height: 1.45;
+.tutorial-say c-action-key.tutorial-key { display: inline-block; text-indent: 0; font-size: .78em; line-height: 1.45;
   padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; color: var(--default-fg);
   border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
   border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); }
 .tutorial-say .tutorial-code { font-family: var(--font-mono); font-size: .85em; }
-/* morg draws `KEY`{:.key} with the face key: the same keycap */
-c-text.f-key, code.key { display: inline-block; font-family: var(--font-mono); font-weight: var(--fw-semi);
+/* morg draws `KEY`{:.key} with the face key: the same keycap. text-indent:
+   0, or a list item's hanging indent pushes the key out of its own box */
+c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var(--font-mono); font-weight: var(--fw-semi);
   color: var(--default-fg); font-size: .82em; line-height: 1.45; padding: 0 .42em; margin: 0 .1em;
   border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
   border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);

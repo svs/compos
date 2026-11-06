@@ -640,8 +640,13 @@
   (let* ((steps (tutorial--steps l))
          (rs (plist-get l 'readings))
          (i *tutorial-shown*))
-    (cond ((< i (length steps)) (caddr (list-ref steps i)))
-          (else (- (length rs) 1)))))
+    ;; a box right after a box has no reading of its own: the one before
+    ;; it still stands
+    (let back ((k (cond ((< i (length steps)) (caddr (list-ref steps i)))
+                        (else (- (length rs) 1)))))
+      (if (and (> k 0) (equal? (string-trim (list-ref rs k)) ""))
+          (back (- k 1))
+          k))))
 
 (define (tutorial--draw-lesson! l)
   ;; the lesson is for reading: rendered, not for typing in, and only the

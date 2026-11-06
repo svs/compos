@@ -593,19 +593,26 @@
           (tutorial-step-done! (car w) (cadr w)))))))
 
 (define (tutorial-step-done! slug i)
-  "Mark step I of lesson SLUG done. The slide stays, and says that n goes on:
-   you choose when to move, after you have seen what the step did."
+  "Mark step I of lesson SLUG done. On the slide, the slide stays and says
+   that n goes on: you choose when to move. Anywhere else n is not at hand,
+   so the slide goes on to the next step by itself."
   (let ((l (tutorial-lesson slug)))
     (when (and l (not (tutorial-step-done? slug i)))
       (tutorial--mark! slug i)
-      ;; a step done ahead of the slide brings the slide to it
-      (when (and (equal? slug *tutorial-current*) (> i *tutorial-shown*))
-        (set! *tutorial-shown* i))
-      (set! *tutorial-help* #f)
-      (tutorial--changed!)
-      (message (cond ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")
-                     ((tutorial--nth (+ (plist-get l 'n) 1)) "Lesson done. Press n for the next lesson")
-                     (else "You finished the tutorial"))))))
+      (let* ((here? (equal? slug *tutorial-current*))
+             (auto? (and here?
+                         (not (equal? (window-buffer (active-window)) *tutorial-detail-buffer*))
+                         (< (+ i 1) (tutorial--step-count l)))))
+        ;; a step done ahead of the slide brings the slide to it
+        (when (and here? (> i *tutorial-shown*))
+          (set! *tutorial-shown* i))
+        (when auto? (set! *tutorial-shown* (+ i 1)))
+        (set! *tutorial-help* #f)
+        (tutorial--changed!)
+        (message (cond (auto? "Done")
+                       ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")
+                       ((tutorial--nth (+ (plist-get l 'n) 1)) "Lesson done. Press n for the next lesson")
+                       (else "You finished the tutorial")))))))
 
 ;;; keys as people know them
 

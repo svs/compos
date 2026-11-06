@@ -76,12 +76,22 @@
   (list 'kind "command" 'name name 'doc (command-doc name)
         'key (let ((k (key-for-command name))) (if (equal? k "") #f k))))
 
+;; A mode's commands are for its buffers (command-applicable?): the palette
+;; leaves out the ones whose modes are not on in BUF, the buffer you are in.
+(define (command-palette--for-user hits buf)
+  (let ((out (commands-out-of-scope buf)))
+    (filter (lambda (h) (not (and (equal? (plist-get h 'kind) "command")
+                                  (member (plist-get h 'name) out))))
+            hits)))
+
 ;; The palette draws the commands and recipes apropos finds, in its order,
 ;; with the ones whose name holds every word first. Its semantic pass can
 ;; take a second, so the refresh runs it in a task after a pause in typing.
 (define (command-palette--search query)
   (let* ((words (apropos-query-words query))
-         (found (append (apropos query 'kind "command") (apropos query 'kind "recipe")))
+         (found (command-palette--for-user
+                  (append (apropos query 'kind "command") (apropos query 'kind "recipe"))
+                  (current-buffer)))
          (hits (filter (lambda (h) h)
                  (map (lambda (h)
                         (let ((kind (plist-get h 'kind)))
@@ -112,7 +122,7 @@
       (let* ((hist (history-items 'M-x))
              (asks (take (filter (lambda (h) (not (command-fn h))) hist)
                          *command-palette-past-max*))
-             (rows (annotate 'command (history-order 'M-x (command-names))))
+             (rows (annotate 'command (history-order 'M-x (command-candidates))))
              (recent (filter (lambda (h) (or (command-fn h) (member h asks))) hist))
              (top (filter (lambda (r) r)
                           (map (lambda (h)
@@ -245,9 +255,10 @@
   ;; sentence matches docs that hold its words, and the pass finds the
   ;; commands that do it. The recipes are read by their patterns before
   ;; this, and most of the rest are written for agents: they answer data.
-  (task-run!
+  (let ((here (current-buffer)))
+   (task-run!
     (lambda ()
-      (let ((hits (apropos text 'semantic #t 'kind "command")))
+      (let ((hits (command-palette--for-user (apropos text 'semantic #t 'kind "command") here)))
         (take hits (min 8 (length hits)))))
     (lambda (ok? hits)
       (if (or (not ok?) (null? hits))
@@ -262,7 +273,7 @@
                                               hits))
                                   (list 'none "None of these does what they ask."))))
             (lambda (r) (command-palette--decided! text hits r))
-            'backend command-palette-decide-backend)))))
+            'backend command-palette-decide-backend))))))
 
 ;; run the hit decide picked and remember it for the words, else ask the
 ;; *recipes* chat to write the command
@@ -333,6 +344,10 @@
 
 (defcustom 'command-palette-learned '()
   "What you typed in the palette and what ran for it: ((WORDS NAME BINDINGS KIND) ...), KIND \"command\" or \"recipe\". RET on the same words runs it at once, and apropos finds NAME by the words."
+  'group 'interaction)
+
+(defcustom 'command-mode-scoping #t
+  "M-x and the palette offer a mode's commands only in its buffers, as Emacs does with (interactive nil MODE). A command's modes are the ones command-modes! names, else the modes whose -mode-map binds it when no global map does."
   'group 'interaction)
 
 (defcustom 'command-palette-decide-backend 'laya

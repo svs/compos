@@ -5062,12 +5062,68 @@
 
 (effects! '(read))
 
+;; Mode scoping, as Emacs's (interactive nil MODES): a mode's commands are
+;; offered in its buffers alone. A command names its modes with
+;; command-modes!; else its modes are the ones whose -mode-map binds it when
+;; no global map does. M-x and the palette ask command-applicable?, and
+;; command-mode-scoping #f turns it off.
+(define *command-modes* '())
+
+(define (command--map-commands m)
+  (filter string? (map cadr (or (ignore-errors (lambda () (keymap-bindings m))) '()))))
+
+;; is MODE, a mode name, on in BUF: its major mode or one it derives from,
+;; or a keymap BUF uses
+(define (command--mode-on? mode buf maps)
+  (let ((m (if (symbol? mode) (symbol->string mode) mode)))
+    (or (buffer-derived-mode? buf m)
+        (member (string-append m "-map") maps))))
+
+;; the commands that do not apply in BUF
+(define (commands-out-of-scope buf)
+  (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
+      '()
+      (let* ((maps (or (ignore-errors (lambda () (buffer-keymaps buf))) '()))
+             (open (apply append (map command--map-commands
+                                      (append (list "global") (global-minor-maps) maps))))
+             (derived (remove (lambda (c) (or (member c open) (assoc c *command-modes*)))
+                              (apply append
+                                     (map command--map-commands
+                                          (filter (lambda (n) (string-suffix? "-mode-map" n))
+                                                  (keymap-names))))))
+             (named (map car (remove (lambda (row)
+                                       (any (lambda (m) (command--mode-on? m buf maps)) (cadr row)))
+                                     *command-modes*))))
+        (append named derived))))
+
+(define (command-applicable? name &optional buf)
+  (not (member name (commands-out-of-scope (or buf (current-buffer))))))
+
 ;; the names M-x offers, as vertico sorts them: the shortest first, then
-;; A-Z; history-order puts the recent ones before them all
+;; A-Z; history-order puts the recent ones before them all. A command of a
+;; mode this buffer is not in is left out.
 (define (command-candidates)
-  (map cadr
-       (sort (map (lambda (n) (list (string-length n) n))
-                  (filter (lambda (n) (not (command-internal? n))) (command-names))))))
+  (let ((out (commands-out-of-scope (current-buffer))))
+    (map cadr
+         (sort (map (lambda (n) (list (string-length n) n))
+                    (filter (lambda (n) (not (or (command-internal? n) (member n out))))
+                            (command-names)))))))
+
+(effects! '(write))
+
+(define (command-modes! name modes)
+  (set! *command-modes*
+        (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*)))
+  name)
+
+(public! 'command-modes!
+  "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as Emacs's (interactive nil MODE ...)")
+(public! 'command-applicable?
+  "(command-applicable? NAME [BUF]) -- #t when command NAME is for BUF: no modes, or one of its modes is on there")
+(public! 'commands-out-of-scope
+  "(commands-out-of-scope BUF) -- the commands whose modes are not on in BUF")
+
+(effects! '(read))
 
 (domain! 'processes)
 (effects! '(write execute))

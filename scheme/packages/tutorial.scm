@@ -705,21 +705,54 @@
           (back (- k 1))
           k))))
 
+(define *tutorial-doc* #f)   ;; (LESSONS TEXT STARTS): the whole tutorial to read
+
+(define (tutorial--doc)
+  ;; every lesson, one after the other, so the lesson pane always has more to
+  ;; read ahead. STARTS is ((SLUG K) BYTE): where reading K of a lesson begins.
+  (let ((ls (tutorial-lessons)))
+    (unless (and *tutorial-doc* (eq? (car *tutorial-doc*) ls))
+      (let loop ((ls2 ls) (text "") (starts '()))
+        (if (null? ls2)
+            (set! *tutorial-doc* (list ls text (reverse starts)))
+            (let* ((l (car ls2))
+                   (head (string-append (if (equal? text "") "" "\n\n")
+                                        "# " (number->string (plist-get l 'n)) ". " (plist-get l 'title) "\n\n"))
+                   (top (string-byte-length text)))
+              (let rloop ((rs (map tutorial--symbolize (plist-get l 'readings))) (k 0)
+                          (acc (string-append text head)) (st starts))
+                (if (null? rs)
+                    (loop (cdr ls2) acc st)
+                    (rloop (cdr rs) (+ k 1)
+                           (string-append acc (if (= k 0) "" "\n\n") (car rs))
+                           (cons (list (list (plist-get l 'slug) k)
+                                       (if (= k 0) top (+ (string-byte-length acc) 2)))
+                                 st))))))))
+    *tutorial-doc*))
+
 (define (tutorial--draw-lesson! l)
-  ;; the lesson is for reading: rendered, not for typing in, and only the
-  ;; part that the step on the slide belongs to
+  ;; the lesson pane is for reading: rendered, not for typing in. It holds the
+  ;; whole tutorial, and each step turns it to the part the step belongs to.
   (let* ((buf *tutorial-lesson-buffer*)
+         (doc (tutorial--doc))
          (k (tutorial--reading-index l))
          (key (list (plist-get l 'slug) k)))
-    (unless (equal? (buffer-local buf 'tutorial-reading) key)
-      (tutorial--fill! buf (string-append "# " (number->string (plist-get l 'n)) ". "
-                                          (plist-get l 'title) "\n\n"
-                                          (tutorial--symbolize (list-ref (plist-get l 'readings) k)) "\n")
-                       "morg-mode")
+    (unless (equal? (buffer-local buf 'tutorial-lesson) "all")
+      (tutorial--fill! buf (string-append (cadr doc) "\n") "morg-mode")
       (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
       (preview-heal! buf)
       (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'tutorial-reading key))))
+      (buffer-set-local! buf 'tutorial-lesson "all")
+      (buffer-set-local! buf 'tutorial-reading #f))
+    (unless (equal? (buffer-local buf 'tutorial-reading) key)
+      (buffer-set-local! buf 'tutorial-reading key)
+      ;; the lesson's window turns to the step's part; a reader who stands
+      ;; in the lesson keeps their own place
+      (let ((w (window-showing buf))
+            (hit (assoc key (caddr doc))))
+        (when (and w hit (not (equal? w (active-window))))
+          (window-set-point! w (cadr hit))
+          (buffer-windows-follow-point! buf))))))
 
 (define (tutorial--practice-text l)
   ;; the lesson's prose, to move in and change; tables, Try it boxes and
@@ -866,7 +899,7 @@
       (for-each (lambda (b) (when (buffer-known? b) (buffer-set-local! b 'tutorial-lesson #f)))
                 (list *tutorial-buffer*))
       (when (buffer-known? *tutorial-lesson-buffer*)
-        (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-reading #f))
+        (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-lesson #f))
       (tutorial--go! (car (tutorial-lessons)))
       (message "Tutorial progress reset"))
     (lambda () (message "Kept your progress"))))

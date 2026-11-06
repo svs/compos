@@ -815,7 +815,7 @@
 .tutorial-say c-action-key.tutorial-key { display: inline-block; text-indent: 0; font-size: .78em; line-height: 1.45;
   padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; color: var(--default-fg);
   border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
-  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);
+  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 30%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); }
 .tutorial-say .tutorial-code { font-family: var(--font-mono); font-size: .85em; }
 /* morg draws `KEY`{:.key} with the face key: the same keycap. text-indent:
@@ -823,7 +823,7 @@
 c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var(--font-mono); font-weight: var(--fw-semi);
   color: var(--default-fg); font-size: .82em; line-height: 1.45; padding: 0 .42em; margin: 0 .1em;
   border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
-  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);
+  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 30%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
 .tutorial-busy::before { content: \"\"; display: inline-block; width: 10px; height: 10px; margin-right: 9px;

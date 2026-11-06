@@ -81,6 +81,7 @@
 ;; take a second, so the refresh runs it in a task after a pause in typing.
 (define (command-palette--search query)
   (let* ((words (apropos-query-words query))
+         (found (append (apropos query 'kind "command") (apropos query 'kind "recipe")))
          (hits (filter (lambda (h) h)
                  (map (lambda (h)
                         (let ((kind (plist-get h 'kind)))
@@ -91,7 +92,7 @@
                                       (assoc (plist-get h 'name) *recipes*))
                                  (command-palette--recipe-hit (assoc (plist-get h 'name) *recipes*)))
                                 (else #f))))
-                      (apropos query))))
+                      found)))
          (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words))))
     (append
       (let ((bind (command-palette--bind-hit query)))
@@ -228,8 +229,7 @@
        (command-palette--run-recipe (assoc choice *recipes*)))
       ((equal? (string-trim choice) "") #f)
       ((command-palette--learned choice)
-       (let ((row (command-palette--learned choice)))
-         (command-palette--run-recipe (assoc (cadr row) *recipes*) (caddr row))))
+       (command-palette--run-learned (command-palette--learned choice)))
       ((command-palette--reading choice)
        (let ((m (command-palette--reading choice)))
          (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
@@ -240,9 +240,52 @@
 ;; way it saves a recipe, so the same words run at once next time.
 (define (command-palette--pick! text)
   (set! *command-palette--request* text)
+  (message (string-append "Finding the command for: " text))
+  ;; apropos over the commands alone, with its semantic pass, in a task: a
+  ;; sentence matches docs that hold its words, and the pass finds the
+  ;; commands that do it. The recipes are read by their patterns before
+  ;; this, and most of the rest are written for agents: they answer data.
+  (task-run!
+    (lambda ()
+      (let ((hits (apropos text 'semantic #t 'kind "command")))
+        (take hits (min 8 (length hits)))))
+    (lambda (ok? hits)
+      (if (or (not ok?) (null? hits))
+          (command-palette--ask-to-write! text)
+          (decide-async (list 'request text)
+            (list 'pick (decide-choice
+                          "Someone typed this request into the command palette of an editor. Which command does what they ask?"
+                          (append (apply append
+                                         (map (lambda (h)
+                                                (list (string->symbol (plist-get h 'name))
+                                                      (or (plist-get h 'doc) (plist-get h 'name))))
+                                              hits))
+                                  (list 'none "None of these does what they ask."))))
+            (lambda (r) (command-palette--decided! text hits r))
+            'backend command-palette-decide-backend)))))
+
+;; run the hit decide picked and remember it for the words, else ask the
+;; *recipes* chat to write the command
+(define (command-palette--decided! text hits r)
+  (let* ((a (assq 'pick (or (plist-get r 'answers) '())))
+         (choice (and a (plist-get (cadr a) 'choice)))
+         (hit (and (string? choice)
+                   (find (lambda (h) (equal? (plist-get h 'name) choice)) hits))))
+    (if (not hit)
+        (command-palette--ask-to-write! text)
+        (let ((kind (plist-get hit 'kind)))
+          (set! *command-palette--request* #f)
+          (command-palette--learn! text choice '() kind)
+          (message (string-append text ": " choice))
+          (if (equal? kind "command")
+              (begin (history-push! 'M-x choice) (run-command choice))
+              (command-palette--run-recipe (assoc choice *recipes*)))))))
+
+(define (command-palette--ask-to-write! text)
   (command-palette-ask-recipes!
-    (string-append "do \"" text "\": run the command or recipe that does it, "
-                   "else write one with command-learn!, then save a recipe for these words")))
+    (string-append "No command the palette found does \"" text "\". Find one with apropos and run it; "
+                   "when none does, write one with (command-learn! NAME DOC \"(lambda () ...)\" \"" text "\") "
+                   "and run it with (run-command NAME).")))
 
 ;; What you typed is always the top row, so RET runs your words; a hit is
 ;; picked only when you move down to it.
@@ -268,9 +311,11 @@
                                                         (if (string? (cadr b)) (cadr b) (value->string (cadr b)))))
                              bindings))))))
     (list q (cond ((and (boundp '*recipes*) (assoc q *recipes*)) (say q '()))
+                  ((and learned (equal? (command-palette--row-kind learned) "command"))
+                   (string-append "command  " (cadr learned)))
                   (learned (say (cadr learned) (caddr learned)))
                   (m (say (car m) (cadr m)))
-                  (else "ask  *recipes* finds or writes the command for this")))))
+                  (else "find  the command for this, or write one")))))
 
 
 ;;; Words no recipe reads go to the *recipes* chat: an ordinary chat that
@@ -287,7 +332,11 @@
   'group 'interaction)
 
 (defcustom 'command-palette-learned '()
-  "What you typed in the palette and the recipe the *recipes* chat ran for it: ((WORDS TITLE BINDINGS) ...). RET on the same words runs that recipe at once."
+  "What you typed in the palette and what ran for it: ((WORDS NAME BINDINGS KIND) ...), KIND \"command\" or \"recipe\". RET on the same words runs it at once, and apropos finds NAME by the words."
+  'group 'interaction)
+
+(defcustom 'command-palette-decide-backend 'laya
+  "The decide backend that picks, from what apropos finds, the command for words you type: laya is local and quick."
   'group 'interaction)
 
 ;; the words of the request the *recipes* chat is on, or #f
@@ -296,13 +345,42 @@
 ;; the learned row for TEXT, while its recipe is still there, else #f
 (define (command-palette--learned text)
   (let ((row (assoc (string-downcase (string-trim text)) command-palette-learned)))
-    (and row (boundp '*recipes*) (assoc (cadr row) *recipes*) row)))
+    (and row
+         (if (equal? (command-palette--row-kind row) "command")
+             (command-fn (cadr row))
+             (and (boundp '*recipes*) (assoc (cadr row) *recipes*)))
+         row)))
 
-(define (command-palette--learn! text title bindings)
-  (let ((key (string-downcase (string-trim text))))
+(define (command-palette--row-kind row)
+  (if (> (length row) 3) (list-ref row 3) "recipe"))
+
+(define (command-palette--run-learned row)
+  (if (equal? (command-palette--row-kind row) "command")
+      (begin (history-push! 'M-x (cadr row))
+             (run-command (cadr row)))
+      (command-palette--run-recipe (assoc (cadr row) *recipes*) (caddr row))))
+
+;; the words join NAME's aliases, so apropos finds it by them
+(define (command-palette--alias! name kind words)
+  (let* ((k (if (equal? kind "command") 'command 'recipe))
+         (entry (catalog-entry k name))
+         (old (or (and entry (catalog--get entry 'aliases)) "")))
+    (when (and entry (not (string-contains? old words)))
+      (catalog-meta! k name 'aliases (string-trim (string-append old " " words))))))
+
+(define (command-palette--learn! text name bindings &optional kind)
+  (let ((key (string-downcase (string-trim text)))
+        (kind (or kind "recipe")))
+    (command-palette--alias! name kind key)
     (customize-save! 'command-palette-learned
-      (cons (list key title bindings)
+      (cons (list key name bindings kind)
             (filter (lambda (r) (not (equal? (car r) key))) command-palette-learned)))))
+
+;; the aliases are not saved with the catalog: put the learned words back
+(for-each (lambda (row)
+            (ignore-errors
+              (lambda () (command-palette--alias! (cadr row) (command-palette--row-kind row) (car row)))))
+          command-palette-learned)
 
 (define command-palette-recipes-chat "*recipes*")
 

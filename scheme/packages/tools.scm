@@ -1161,7 +1161,7 @@
 ;; Both are instructions to the search, not catalog fields. Remove them
 ;; before the filters reach the match test, which reads the catalog
 ;; fields only.
-(define *apropos--search-flags* '(lexical wait))
+(define *apropos--search-flags* '(lexical wait semantic))
 
 ;; KEY's value, or DEFAULT when the filters do not name it. plist-get
 ;; cannot tell an absent key from one whose value is #f, and the whole
@@ -1182,6 +1182,10 @@
 (define (apropos--search query filters0 index rows)
   (let* ((lexical? (plist-get filters0 'lexical))
          (wait? (apropos--flag filters0 'wait #t))
+         ;; 'semantic #t asks for the semantic pass even when the words
+         ;; found something: a sentence such as "change the layout" matches
+         ;; docs that hold the words, not the commands that do it
+         (semantic? (apropos--flag filters0 'semantic #f))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
          (scan (apropos--longest-first words))
@@ -1195,7 +1199,7 @@
          ;; queued for seconds. It is worth that only when the words found
          ;; nothing. A query the catalog already answered is answered.
          (semantic-hits
-           (if (or lexical? (pair? literal-hits))
+           (if (or lexical? (and (pair? literal-hits) (not semantic?)))
                '()
                (filter (lambda (hit)
                          (and (not (apropos--has-hit? literal-hits hit))

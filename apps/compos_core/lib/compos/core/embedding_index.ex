@@ -1,6 +1,7 @@
 defmodule Compos.Core.EmbeddingIndex do
   @moduledoc """
-  OpenAI embeddings for small local discovery indexes.
+  OpenAI-shaped embeddings for small local discovery indexes. The endpoint
+  and model are options, so OpenRouter serves the same model.
 
   Catalog vectors persist by content hash. Query vectors stay in bounded
   memory. Catalog synchronization is separate from query search, so a

@@ -100,7 +100,7 @@
 (define *setup-wizard-buffer* "*Setup*")
 
 (define *setup-wizard-steps*
-  '(("model" "Choose a model") ("learn" "Start learning")))
+  '(("model" "Choose a model") ("search" "Search by meaning") ("learn" "Start learning")))
 
 (define (setup-wizard-step buf)
   (or (buffer-local buf 'setup-wizard-step) "model"))
@@ -160,7 +160,52 @@
     (list (list 'tag "div" 'class "wizard-grid"
                 'children (map setup-wizard--card (setup-inference-scan))))
     (list (component 'wizard/nav
-            (list 'next (list "wizard:next" "Next: start learning →"))))))
+            (list 'next (list "wizard:next" "Next: search by meaning →"))))))
+
+;; The search step: one card for each backend of apropos-embedding-backends.
+;; The backend in use is the first one that has a key.
+(define (setup-wizard--embed-card b)
+  (let* ((spec (assq b *apropos-embedding-backend-specs*))
+         (name (symbol->string b))
+         (key (llm-key (list-ref spec 2)))
+         (ready? (and key (not (equal? key ""))))
+         (active (apropos-embedding-backend))
+         (chosen? (and active (eq? (car active) b))))
+    (component 'wizard/choice
+      (list 'title (list-ref spec 1)
+            'detail (string-append (list-ref spec 4) " · " (if ready? "key found" "no key"))
+            'badge (cond (chosen? "in use") (ready? "ready") (else "needs a key"))
+            'tone (cond (chosen? "accent") (ready? "good") (else "plain"))
+            'selected? chosen?
+            'actions (append
+                       (if (and ready? (not chosen?))
+                           (list (list (string-append "wizard:embed-use:" name) "Use this"))
+                           '())
+                       (list (list (string-append "wizard:embed-key:" name)
+                                   (if ready? "Change the key" "Add a key"))))))))
+
+(define (setup-wizard--search-blocks)
+  (list (list 'tag "div" 'class "wizard-title" 'text "Search by meaning")
+        (list 'tag "div" 'class "wizard-lede"
+              'text (string-append
+                      "Compos finds commands and functions for you and for its agents. "
+                      "An embedding model lets it find them by their meaning, not only by their words. "
+                      "Choose the service that makes the embeddings. The first index costs less than one cent."))
+        (list 'tag "div" 'class "wizard-grid"
+              'children (map setup-wizard--embed-card apropos-embedding-backends))
+        (component 'wizard/nav
+          (list 'back (list "wizard:back" "← Back")
+                'next (list "wizard:next" "Next: start learning →")))))
+
+;; The step DELTA places from BUF's step, held to the first and the last.
+(define (setup-wizard--step-after buf delta)
+  (let* ((names (map car *setup-wizard-steps*))
+         (here (let loop ((ns names) (i 0))
+                 (cond ((null? ns) 0)
+                       ((equal? (car ns) (setup-wizard-step buf)) i)
+                       (else (loop (cdr ns) (+ i 1))))))
+         (there (max 0 (min (- (length names) 1) (+ here delta)))))
+    (list-ref names there)))
 
 (define (setup-wizard--learn-blocks)
   (list (list 'tag "div" 'class "wizard-title" 'text "Start learning")
@@ -189,9 +234,9 @@
                 (append
                   (list (component 'wizard/steps
                           (list 'steps *setup-wizard-steps* 'current step)))
-                  (if (equal? step "learn")
-                      (setup-wizard--learn-blocks)
-                      (setup-wizard--model-blocks)))))))
+                  (cond ((equal? step "learn") (setup-wizard--learn-blocks))
+                        ((equal? step "search") (setup-wizard--search-blocks))
+                        (else (setup-wizard--model-blocks))))))))
 
 (define (setup-wizard-redraw! buf)
   (desktop-skip! buf 'render-blocks)
@@ -207,17 +252,33 @@
       (setup-wizard-redraw! buf))))
 
 (mode-doc! "setup-wizard-mode"
-  "First-run setup in two steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two starts the guide: a chat that teaches Compos beside a stage window.")
+  "First-run setup in three steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three starts the guide: a chat that teaches Compos beside a stage window.")
 
 ;;; --- actions -------------------------------------------------------------------
 
 (domain! 'system)
 (effects! '(write display))
 
+;; Put backend B first, so apropos embeds with it, and index the catalog now.
+(define (setup-wizard-embed-use! buf b)
+  (customize-save! 'apropos-embedding-backends
+                   (cons b (filter (lambda (x) (not (eq? x b))) apropos-embedding-backends)))
+  (apropos-sync-embeddings!)
+  (message (string-append "Setup: search by meaning uses "
+                          (list-ref (assq b *apropos-embedding-backend-specs*) 1)))
+  (when (buffer-exists? buf) (setup-wizard-redraw! buf)))
+
+;; A key added here chooses its backend.
+(define (setup-wizard-embed-key! buf b)
+  (setup-ask-secret!
+    (secret-for-provider (list-ref (assq b *apropos-embedding-backend-specs*) 2)) #f
+    (lambda ()
+      (when (apropos-embedding-backend) (setup-wizard-embed-use! buf b)))))
+
 (define (setup-wizard-go! buf step)
   ;; Next keeps the model in use when the user chose none: the card that
   ;; was picked for them shows no Use button, and the choice must last
-  (when (and (equal? step "learn")
+  (when (and (not (equal? step "model"))
              (equal? setup-default-connector "")
              (member *default-connector* (setup-inference-available)))
     (setup-wizard-use! buf *default-connector*))
@@ -444,8 +505,12 @@
 
 (define (setup-wizard-click buf id)
   (cond
-    ((equal? id "wizard:next") (setup-wizard-go! buf "learn") #t)
-    ((equal? id "wizard:back") (setup-wizard-go! buf "model") #t)
+    ((equal? id "wizard:next") (setup-wizard-go! buf (setup-wizard--step-after buf 1)) #t)
+    ((equal? id "wizard:back") (setup-wizard-go! buf (setup-wizard--step-after buf -1)) #t)
+    ((string-prefix? "wizard:embed-use:" id)
+     (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
+    ((string-prefix? "wizard:embed-key:" id)
+     (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((equal? id "wizard:rescan") (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
     ((string-prefix? "wizard:key:" id)
      (setup-wizard-add-key! buf (substring-bytes id 11 (string-byte-length id))) #t)
@@ -537,7 +602,7 @@
 (define-command "compos-home" "Open the Compos home page: setup until it is done, then the welcome page"
   (lambda () (compos-home!)))
 
-(define-command "setup" "Set up Compos: choose a model, then learn with the guide"
+(define-command "setup" "Set up Compos: choose a model and a search model, then learn with the guide"
   (lambda () (setup-wizard! "model")))
 
 ;; The inference step is the wizard's first page: the scan as cards with
@@ -549,10 +614,10 @@
   (lambda () (setup-open-learning-space!)))
 
 (define-command "setup-wizard-next" "Go to the next setup step"
-  (lambda () (setup-wizard-go! (current-buffer) "learn")))
+  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) 1))))
 
 (define-command "setup-wizard-back" "Go to the previous setup step"
-  (lambda () (setup-wizard-go! (current-buffer) "model")))
+  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) -1))))
 
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
   (lambda () (setup-wizard-redraw! (current-buffer))))

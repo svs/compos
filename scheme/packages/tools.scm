@@ -512,8 +512,19 @@
 (effects! '(read))
 
 (defcustom 'apropos-semantic-search #t
-  "Use OpenAI embeddings to add semantic apropos results when an OpenAI key exists."
+  "Use embeddings to add semantic apropos results when a backend in apropos-embedding-backends has a key."
   'group 'discovery)
+
+(defcustom 'apropos-embedding-backends '(openrouter openai)
+  "Backends semantic apropos tries in priority order: the first one with a key embeds. Setup sets it."
+  'group 'discovery)
+
+;; (BACKEND TITLE PROVIDER ENDPOINT MODEL). PROVIDER names the key for llm-key.
+(define *apropos-embedding-backend-specs*
+  '((openrouter "OpenRouter" "openrouter"
+                "https://openrouter.ai/api/v1/embeddings" "openai/text-embedding-3-small")
+    (openai "OpenAI" "openai"
+            "https://api.openai.com/v1/embeddings" "text-embedding-3-small")))
 
 (defcustom 'apropos-semantic-limit 24
   "The maximum semantic results that apropos reads from the embedding index."
@@ -766,10 +777,23 @@
 (define *apropos--embedding-sync-pending* #f)
 (define *apropos--embedding-synced-gen* -1)
 
+;; The first backend of apropos-embedding-backends that has a key, as
+;; (BACKEND KEY ENDPOINT MODEL); #f when none has one.
+(define (apropos-embedding-backend)
+  (and (boundp (quote llm-key))
+       (let loop ((bs apropos-embedding-backends))
+         (if (null? bs)
+             #f
+             (let* ((spec (assq (car bs) *apropos-embedding-backend-specs*))
+                    (key (and spec (llm-key (list-ref spec 2)))))
+               (if (and key (not (equal? key "")))
+                   (list (car spec) key (list-ref spec 3) (list-ref spec 4))
+                   (loop (cdr bs))))))))
+
+;; What the embedding primitives take as KEY: (KEY ENDPOINT MODEL).
 (define (apropos--embedding-key)
-  (and apropos-semantic-search
-       (boundp (quote llm-key))
-       (llm-key "openai")))
+  (let ((backend (and apropos-semantic-search (apropos-embedding-backend))))
+    (and backend (cdr backend))))
 
 (define (apropos--sources-cached rows)
   (let ((gen (catalog-generation)))
@@ -903,7 +927,7 @@
   (let ((path (embedding-cache-clear!))
         (key (apropos--embedding-key)))
     (if (or (not key) (equal? key ""))
-        (string-append "Cleared " path "; no OpenAI key is configured.")
+        (string-append "Cleared " path "; no backend in apropos-embedding-backends has a key.")
         (let* ((both (apropos--sources-cached (apropos--rows-cached)))
                (texts (nth 1 both))
                (count (*apropos--embedding-sync* texts key)))
@@ -1324,8 +1348,13 @@
 (public! 'apropos-recall
   "(apropos-recall QUERY N) — the N entries holding the most of QUERY's words, for a chooser that wants recall")
 (effects! '(read external spend))
+(public! 'apropos-embedding-backend
+  "(apropos-embedding-backend) — the backend semantic apropos embeds with, as (BACKEND KEY ENDPOINT MODEL): the first of apropos-embedding-backends with a key, else #f")
+(catalog-meta! 'function "apropos-embedding-backend"
+  'domain 'discovery 'effects '(read))
+
 (public! 'apropos-rebuild-embeddings!
-  "(apropos-rebuild-embeddings!) — clear and rebuild the OpenAI embedding cache for the current catalog")
+  "(apropos-rebuild-embeddings!) — clear and rebuild the embedding cache for the current catalog")
 (catalog-meta! 'function "apropos-rebuild-embeddings!"
   'domain 'discovery 'effects '(write external spend))
 (public! 'apropos-category

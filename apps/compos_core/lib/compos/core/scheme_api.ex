@@ -1512,9 +1512,11 @@ defmodule Compos.Core.SchemeAPI do
           path
         end,
       {"embedding-sync!",
-       "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS with OpenAI and persist their vectors by content hash."} =>
+       "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS and persist their vectors by content hash. KEY is an OpenAI key, or (KEY ENDPOINT MODEL)."} =>
         fn [texts, key] ->
-          case Compos.Core.EmbeddingIndex.sync(texts, to_string(key)) do
+          {key, access} = embedding_access(key)
+
+          case Compos.Core.EmbeddingIndex.sync(texts, key, access) do
             {:ok, count} -> count
             {:error, _reason} -> false
           end
@@ -1526,9 +1528,10 @@ defmodule Compos.Core.SchemeAPI do
       {"embedding-search",
        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE GEN CACHED-ONLY) — eligible cosine scores for QUERY against the vectors of catalog generation GEN. CACHED-ONLY answers #f rather than embedding a query over the network."} =>
         fn [query, texts, key, limit, eligible, gen, cached_only] ->
-          opts = [gen: gen, cached_only: cached_only == true]
+          {key, access} = embedding_access(key)
+          opts = [gen: gen, cached_only: cached_only == true] ++ access
 
-          case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key), opts) do
+          case Compos.Core.EmbeddingIndex.search(to_string(query), texts, key, opts) do
             {:ok, scores} ->
               # ELIGIBLE is #t when no filter narrows the answer. Building that
               # mask and handing it over was most of what a query cost, and
@@ -1567,16 +1570,23 @@ defmodule Compos.Core.SchemeAPI do
        "(embedding-warm! QUERY TEXTS KEY GEN) — embed QUERY off the caller's lane so the next ask scores without waiting."} =>
         fn [query, texts, key, gen] ->
           q = to_string(query)
-          k = to_string(key)
+          {k, access} = embedding_access(key)
 
           Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-            Compos.Core.EmbeddingIndex.search(q, texts, k, gen: gen)
+            Compos.Core.EmbeddingIndex.search(q, texts, k, [gen: gen] ++ access)
           end)
 
           :void
         end
     }
   end
+
+  # The KEY of an embedding primitive: an OpenAI key, or the backend that
+  # apropos chose as (KEY ENDPOINT MODEL).
+  defp embedding_access([key, endpoint, model]),
+    do: {to_string(key), [endpoint: to_string(endpoint), model: to_string(model)]}
+
+  defp embedding_access(key), do: {to_string(key), []}
 
   defp editor_primitives do
     %{

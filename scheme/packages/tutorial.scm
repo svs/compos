@@ -396,7 +396,13 @@
 (define (tutorial--after-command)
   ;; after a restart or a reload the first command arms the watch again
   (unless *tutorial-armed* (tutorial--load!) (tutorial--arm!))
-  (tutorial--saw! (tutorial--ran))
+  (let ((cmd (tutorial--ran)))
+    (tutorial--saw! cmd)
+    ;; a quit that ends a key sequence cancelled a prefix: C-x ESC
+    (when (equal? cmd "keyboard-quit")
+      (let ((keys (ignore-errors (lambda () (last-keys)))))
+        (when (and (pair? keys) (pair? (cdr keys)))
+          (tutorial--saw! "prefix-cancelled")))))
   (when (equal? (current-buffer) *tutorial-buffer*)
     (set! *tutorial-practice-at* (tutorial--where *tutorial-buffer*))))
 
@@ -700,7 +706,7 @@
                (step (and (< i n) (list-ref steps i)))
                (done? (and step (tutorial-step-done? slug i))))
           (list
-            (tutorial--div "wizard tutorial-slide"
+            (tutorial--div (string-append "wizard tutorial-slide " *tutorial-motion*)
               'children
               (append
                 (list (tutorial--div "tutorial-kicker"
@@ -727,15 +733,16 @@
                                    (tutorial--div "tutorial-state tutorial-failed"
                                      'text "That did not work. Press t to try again."))
                                   (p (tutorial--div "tutorial-state"
-                                       'text (if done? "Done. Press n for the next step." "Press t to run the check.")))
+                                       'children (tutorial--say (if done? "Done. Press `n` for the next step." "Press `t` to run the check."))))
                                   (else
-                          (tutorial--div "tutorial-state"
-                            'text (cond (done? "Done. Press n for the next step.")
+                          (tutorial--div (if (or done? (not (or (pair? (cadr step)) (tutorial--await-of slug (car step)) (tutorial--cards-of slug (car step)))))
+                                             "tutorial-state tutorial-press" "tutorial-state")
+                            'children (tutorial--say (cond (done? "Done. Press `n` for the next step.")
                                         ((tutorial--cards-of slug (car step))
                                          "Choose one below. The slide moves on when you do.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
                                          "Do it in the practice pane. The slide moves on when you do.")
-                                        (else "When you have done it, press n here, or ⌃C ⌃N in the practice page.")))))))
+                                        (else "When you have done it, press `n` here, or `C-c C-n` in the practice page."))))))))
                     (list (tutorial--div "tutorial-say"
                             'children (tutorial--say
                                     (if (= n 0)
@@ -759,7 +766,25 @@
                 '()))
           '(("r" "restart lesson") ("R" "reset") ("⌥O" "chat"))))
 
+;; A new step slides in: from the right going on, from the left going back.
+;; The page is patched, not rebuilt, so the slide flips between two
+;; animations of the same motion, and a changed animation plays again.
+(define *tutorial-drawn* #f)    ;; (LESSON-N STEP) last drawn
+(define *tutorial-motion* "") ;; the slide's motion class
+
+(define (tutorial--note-motion!)
+  (let* ((l (tutorial--lesson-now))
+         (here (and l (list (plist-get l 'n) *tutorial-shown*)))
+         (was *tutorial-drawn*))
+    (when (and here (not (equal? here was)))
+      (let* ((back? (and was (or (< (car here) (car was))
+                                 (and (= (car here) (car was)) (< (cadr here) (cadr was))))))
+             (flip (if (string-suffix? "-a" *tutorial-motion*) "-b" "-a")))
+        (set! *tutorial-motion* (string-append (if back? "tutorial-from-left" "tutorial-from-right") flip))
+        (set! *tutorial-drawn* here)))))
+
 (define (tutorial--draw-detail!)
+  (tutorial--note-motion!)
   (let ((buf *tutorial-detail-buffer*))
     (when (buffer-known? buf)
       (desktop-skip! buf 'render-blocks)
@@ -822,7 +847,7 @@
 /* a key is a keycap: the editor's key element in a box, one cap a key. The
    cap keeps the main text colour: --accent steps down in an inactive window,
    and the tutorial's panes are inactive while you practise */
-.tutorial-say c-action-key.tutorial-key { display: inline-block; text-indent: 0; font-size: .78em; line-height: 1.45;
+.tutorial-slide c-action-key.tutorial-key { display: inline-block; text-indent: 0; font-size: .78em; line-height: 1.45;
   padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; color: var(--default-fg);
   border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
   border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 30%, transparent);
@@ -836,6 +861,19 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 30%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
+/* a step that waits for n says so plainly */
+.tutorial-press { font-size: 17px; color: var(--default-fg); padding: 10px 14px; margin-top: 6px;
+  border-left: 3px solid var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 8%, transparent); }
+/* a new step slides in; two names for each way, so a patched page plays it again */
+.tutorial-from-right-a { animation: tutorial-in-right-a .28s ease-out; }
+.tutorial-from-right-b { animation: tutorial-in-right-b .28s ease-out; }
+.tutorial-from-left-a { animation: tutorial-in-left-a .28s ease-out; }
+.tutorial-from-left-b { animation: tutorial-in-left-b .28s ease-out; }
+@keyframes tutorial-in-right-a { from { transform: translateX(56px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tutorial-in-right-b { from { transform: translateX(56px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tutorial-in-left-a { from { transform: translateX(-56px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tutorial-in-left-b { from { transform: translateX(-56px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .tutorial-slide { animation: none !important; } }
 .tutorial-busy::before { content: \"\"; display: inline-block; width: 10px; height: 10px; margin-right: 9px;
   vertical-align: -1px; border: 2px solid var(--dim-fg); border-top-color: transparent; border-radius: 50%;
   animation: tutorial-spin .8s linear infinite; }
@@ -1225,6 +1263,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (lambda () (and (boundp 'browser-connected?) (browser-connected?))))
 
 (add-hook! 'browser-attached-hook 'tutorial-recheck!)
+
+;; the prefix step finishes when the prefix is cancelled
+(tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
 
 ;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!
 (tutorial-step-event! "selecting-copying-and-pasting" "Copy them with Cmd-C" "clipboard-copy")

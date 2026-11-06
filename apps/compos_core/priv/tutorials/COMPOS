@@ -182,7 +182,7 @@ The system keys copy and paste: Cmd-C and Cmd-V on a Mac, Ctrl-C and Ctrl-V on o
 
 To search forward, type `C-s`. To search backward, type `C-r`. Each character you type makes the match more specific at once. Search is a movement command; it does not make you fill a form before you see a result.
 
-> **Try it.** Type `C-s`, then type "window", and watch point move as the match becomes specific. Type `C-s` again for the next match, or `C-g` to stop.
+> **Try it.** Type `C-s`, then type "search", and watch point move as the match becomes specific. Type `C-s` again for the next match, or `C-g` to stop.
 
 While you search, `RET` accepts the match. `C-g` quits and returns to where the search started, where that makes sense.
 

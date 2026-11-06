@@ -1237,6 +1237,13 @@
   
   )
 
+;; C-g and ESC stop the reply in flight; with none, the plain quit
+(mode-quit! "chat-mode"
+  (lambda (buf)
+    (let ((slug (agent-slug-of buf)))
+      (and slug (member (agent-status slug) '(running starting needs_attention))
+           (begin (run-command "chat-abort") #t)))))
+
 (mode-keys! "chat-mode"
   '(
     ("DEL" "chat-delete-backward")
@@ -1244,7 +1251,6 @@
     ("RET" "agent-send")
     ("C-RET" "chat-send-next")
     ("s-RET" "chat-send-new")
-    ("C-g" "chat-abort")
     ("TAB" "agent-toggle-fold")
     ("<up>" "chat-history-previous")
     ("<down>" "chat-history-next")

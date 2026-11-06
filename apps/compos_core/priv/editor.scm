@@ -5314,6 +5314,31 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
+;; A mode does not bind C-g or ESC to leave what it is doing. It says what
+;; quitting means for its buffers, and keyboard-quit, on either key, asks
+;; it: (mode-quit! MODE FN), FN (BUF) does the quit and answers true, or
+;; answers #f when there is nothing of its own to quit. MODE is a major
+;; mode, matched with the modes it derives from, or a minor mode that is
+;; on. A keymap that binds C-g or ESC itself still wins. quit-hook takes
+;; the same (BUF) for what no mode owns.
+(define *mode-quits* (if (boundp '*mode-quits*) *mode-quits* '()))   ; ((MODE FN) ...)
+
+(define (mode-quit! mode fn)
+  (set! *mode-quits* (alist-put *mode-quits* mode fn))
+  mode)
+
+(define (mode-quit-run! buf)
+  (and buf (buffer-exists? buf)
+       (or (let loop ((qs *mode-quits*))
+             (and (pair? qs)
+                  (let ((mode (car (car qs))))
+                    (or (and (or (minor-mode-on? buf mode) (buffer-derived-mode? buf mode))
+                             ((cadr (car qs)) buf))
+                        (loop (cdr qs))))))
+           (run-hook-with-args-until-success 'quit-hook buf))))
+
+(public! 'mode-quit! "(mode-quit! MODE FN) — what C-g and ESC do in MODE's buffers: FN (BUF) quits and answers true, or #f to leave it to the next")
+
 (define-command "keyboard-quit" "Quit the current operation: cancel the prompt, close the dashboard, or clear the mark"
   (lambda ()
     (editing-quit!)
@@ -5325,6 +5350,8 @@
       ;; stay put: only C-g reached minibuffer-cancel. Quit the prompt
       ;; first, and both keys say the same thing.
       ((minibuffer-active?) (minibuffer-cancel!))
+      ;; then what the buffer's modes say quitting means
+      ((mode-quit-run! (current-buffer)) #t)
       ;; C-g and ESC close the dashboard panel first, before a reading
       ;; surface's q can take the buffer away under it
       ((dashboard-panel-close! (current-buffer)) (message "Quit"))

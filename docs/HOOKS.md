@@ -52,6 +52,7 @@ twice. registry-test.scm checks it.
 | `pre-command-hook` | | before every command and every self-insert |
 | `post-command-hook` | | after every command and every self-insert |
 | `point-motion-hook` | BUF | the client's caret moved point in the editing state, with no command (editor_live.ex `sel`) |
+| `quit-hook` | BUF | C-g or ESC ran keyboard-quit and no prompt and no mode took it; a function that quits answers true and stops the rest. A mode says what quitting means with `(mode-quit! MODE FN)` instead of binding C-g or ESC |
 | `find-file-hook` | | after the visit command opened a file |
 | `before-save-hook`, `after-save-hook` | | around a save |
 | `MODE-hook` | | after `set-mode!` ran the mode's setup |

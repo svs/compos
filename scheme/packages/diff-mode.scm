@@ -1392,6 +1392,13 @@
         (watch-path! (buffer-local buf 'diff-root) 'deep))
       (diff-refresh buf))))
 
+;; C-g and ESC clear a selection; with none, the plain quit (q)
+(mode-quit! "diff-mode"
+  (lambda (buf)
+    (let ((s (buffer-local buf 'diff-selection)))
+      (and s (not (equal? s 'none))
+           (begin (run-command "diff-clear-selection") #t)))))
+
 (mode-keys! "diff-mode"
   '(
     ("n" "diff-next-hunk")
@@ -1404,7 +1411,6 @@
     ("1" "diff-show-changes")
     ("2" "diff-show-history")
     ("?" "diff-explain")
-    ("ESC" "diff-clear-selection")
     ("s" "diff-stage")
     ("RET" "diff-visit")
     ("g" "diff-revert")

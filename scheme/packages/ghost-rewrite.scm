@@ -201,10 +201,11 @@
 (minor-mode-keys! "ghost-rewrite-mode"
   '(("TAB" "ghost-rewrite-accept")
     ("M-n" "ghost-rewrite-next")
-    ("M-p" "ghost-rewrite-previous")
-    ("C-g" "ghost-rewrite-quit")))
+    ("M-p" "ghost-rewrite-previous")))
+;; C-g and ESC let the rewrites go
+(mode-quit! "ghost-rewrite-mode" (lambda (buf) (run-command "ghost-rewrite-quit") #t))
 (mode-doc! "ghost-rewrite-mode"
-  "Rewrites of the lit passage wait as ghost text. `TAB` takes the one shown, `M-n` and `M-p` walk them, `C-c i` asks for more, and `C-g` or any edit lets them go.")
+  "Rewrites of the lit passage wait as ghost text. `TAB` takes the one shown, `M-n` and `M-p` walk them, `C-c i` asks for more, and `C-g`, `ESC` or any edit lets them go.")
 
 (catalog-meta! 'command "ghost-rewrite" 'domain 'writing 'effects '(write external spend))
 

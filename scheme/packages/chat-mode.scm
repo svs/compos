@@ -257,8 +257,15 @@
         (llm-mode-reset-runtime! new #t)))))
 
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
+;; C-g and ESC cancel the inline reply while it streams; else the plain quit
+(mode-quit! "llm-mode"
+  (lambda (buf)
+    (let* ((rid (buffer-local buf 'llm-active-response))
+           (r (and rid (block-resolve-id buf rid))))
+      (and r (member (plist-get r 'state) '(pending streaming))
+           (begin (run-command "llm-mode-abort") #t)))))
 (minor-mode-keys! "llm-mode"
-  '(("C-RET" "llm-send-buffer") ("C-g" "llm-mode-abort")
+  '(("C-RET" "llm-send-buffer")
     ("C-c m" "llm-set-model") ("C-c b" "llm-configure")))
 
 (define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"

@@ -274,8 +274,11 @@
 (define-command "peek-previous" "Peek the previous row of the list" (lambda () (peek-step! -1)))
 (define-command "peek-keep" "Keep the peek as a normal window" (lambda () (peek-keep! #t)))
 
+;; C-g and ESC dismiss the peek
+(mode-quit! "peek-mode" (lambda (buf) (run-command "peek-quit") #t))
+
 (minor-mode-keys! "peek-mode"
-  '(("C-g" "peek-quit") ("n" "peek-next") ("p" "peek-previous") ("RET" "peek-keep")))
+  '(("n" "peek-next") ("p" "peek-previous") ("RET" "peek-keep")))
 
 (public! 'listing-peek! "(listing-peek! OWNER TARGET) -> peek TARGET, the row of list OWNER, in a window of the panes model; #f when it cannot")
 (public! 'peek-dismiss! "(peek-dismiss! [TO-OWNER]) -> end this frame's peek; TO-OWNER puts the focus back on the list")

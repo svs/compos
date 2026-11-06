@@ -200,9 +200,12 @@
       (lambda () (pane-overview--pick! (- n 1)))))
   '(1 2 3 4 5 6 7 8 9))
 
+;; C-g and ESC leave the overview, as q does
+(mode-quit! "pane-overview-mode" (lambda (buf) (run-command "pane-overview-quit") #t))
+
 (mode-keys! "pane-overview-mode"
-  (append '(("RET" "pane-overview-pick") ("q" "pane-overview-quit") ("ESC" "pane-overview-quit")
-            ("C-g" "pane-overview-quit") ("g" "pane-overview")
+  (append '(("RET" "pane-overview-pick") ("q" "pane-overview-quit")
+            ("g" "pane-overview")
             ("<right>" "pane-overview-next") ("<left>" "pane-overview-previous")
             ("<down>" "pane-overview-down") ("<up>" "pane-overview-up")
             ("n" "pane-overview-next") ("p" "pane-overview-previous")

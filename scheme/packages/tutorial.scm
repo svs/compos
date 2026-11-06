@@ -316,7 +316,8 @@
 (define (tutorial--save!)
   (cache-put! 'tutorial "progress"
     (string-join
-      (cons (string-append "current " (or *tutorial-current* ""))
+      (append (list (string-append "current " (or *tutorial-current* ""))
+                    (string-append "shown " (number->string *tutorial-shown*)))
             (map (lambda (e) (string-join (cons (car e) (map number->string (cadr e))) " "))
                  *tutorial-done*))
       "\n")))
@@ -332,16 +333,21 @@
               (cond ((null? ws) #f)
                     ((equal? (car ws) "current")
                      (when (pair? (cdr ws)) (set! *tutorial-current* (cadr ws))))
+                    ((equal? (car ws) "shown")
+                     (when (pair? (cdr ws)) (set! *tutorial-shown* (or (string->number (cadr ws)) 0))))
                     (else (set! *tutorial-done*
                                 (alist-put *tutorial-done* (car ws)
                                            (map string->number (cdr ws))))))))
-          (string-split raw "\n"))))
-    (let ((l (tutorial--lesson-now)))
-      (when l (set! *tutorial-shown* (or (tutorial--next-step l) 0))))))
+          (string-split raw "\n")))
+      ;; an old save has no shown line: the first step not done
+      (let ((l (tutorial--lesson-now)))
+        (when (and l (not (and (string? raw) (string-contains? raw "\nshown "))))
+          (set! *tutorial-shown* (or (tutorial--next-step l) 0)))))))
 
 ;;; watching the reader
 
 (define (tutorial--arm!)
+  (set! *tutorial-armed* #t)
   (let* ((l (tutorial--lesson-now))
          (steps (if l (tutorial--steps l) '()))
          (i *tutorial-shown*))
@@ -365,16 +371,70 @@
           ((and (string? cmd) (string-contains? cmd "quit")) (set! *tutorial-mx* #f) cmd)
           (else cmd))))
 
+(define *tutorial-armed* #f)   ;; the watch was set since this editor started
+
 (define (tutorial--after-command)
+  ;; after a restart or a reload the first command arms the watch again
+  (unless *tutorial-armed* (tutorial--load!) (tutorial--arm!))
+  (tutorial--saw! (tutorial--ran))
+  (when (equal? (current-buffer) *tutorial-buffer*)
+    (set! *tutorial-practice-at* (tutorial--where *tutorial-buffer*))))
+
+;; In the editing state the browser moves the caret itself: no command runs,
+;; and point-motion-hook says where point went. The motion reads as the
+;; command a key would have run: a line down is next-line, the end of the
+;; line is end-of-line.
+(define *tutorial-practice-at* #f)   ;; (LINE COL POS EOL? END?) after the last move
+
+(define (tutorial--where buf)
+  (let* ((t (buffer-text buf))
+         (n (string-byte-length t))
+         (p (min (buffer-point buf) n))
+         (lines (string-split (substring-bytes t 0 p) "\n"))
+         (rest (substring-bytes t p n)))
+    (list (length lines) (string-byte-length (last lines)) p
+          (or (equal? rest "") (string-prefix? "\n" rest)) (= p n))))
+
+(define (tutorial--motions a b)
+  (let ((dl (- (car b) (car a)))
+        (dc (- (cadr b) (cadr a))))
+    (append
+      (cond ((>= dl 5) '("scroll-up-command" "next-line"))
+            ((> dl 0) '("next-line"))
+            ((<= dl -5) '("scroll-down-command" "previous-line"))
+            ((< dl 0) '("previous-line"))
+            ((and (= (cadr b) 0) (> (cadr a) 0)) '("beginning-of-line"))
+            ((and (list-ref b 3) (not (list-ref a 3))) '("end-of-line"))
+            ((= dc 1) '("forward-char"))
+            ((= dc -1) '("backward-char"))
+            ((> dc 1) '("forward-word"))
+            ((< dc -1) '("backward-word"))
+            (else '()))
+      (cond ((= (caddr b) 0) '("beginning-of-buffer"))
+            ((list-ref b 4) '("end-of-buffer"))
+            (else '())))))
+
+(define (tutorial--point-moved buf)
+  (when (equal? buf *tutorial-buffer*)
+    (unless *tutorial-armed* (tutorial--load!) (tutorial--arm!))
+    (let ((now (tutorial--where buf))
+          (was *tutorial-practice-at*))
+      (set! *tutorial-practice-at* now)
+      (when was
+        (for-each tutorial--saw! (tutorial--motions was now))))))
+
+(add-hook! 'point-motion-hook 'tutorial--point-moved)
+
+(define (tutorial--saw! cmd)
+  ;; CMD ran, or a caret motion reads as it: the step on the slide hears it
   (let ((w *tutorial-watch*))
     (when w
-      (let ((cmd (tutorial--ran)))
         (when (and (string? cmd) (member cmd (caddr w)))
           (let ((left (filter (lambda (c) (not (equal? c cmd))) (caddr w))))
             (set! *tutorial-watch* (list (car w) (cadr w) left))
             (if (null? left)
                 (tutorial--prove! (car w) (cadr w))
-                (message (string-append "Good. Still to do: " (string-join left ", "))))))))))
+                (message (string-append "Good. Still to do: " (string-join left ", ")))))))))
 
 (add-hook! 'post-command-hook 'tutorial--after-command)
 

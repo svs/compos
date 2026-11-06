@@ -116,10 +116,7 @@
                                  (if (command-fn h) (assoc h rows) (list h "past  ask")))
                                recent))))
         (append top (filter (lambda (r) (not (member (car r) recent))) rows)))
-      (let* ((hit (command-palette--pattern-row query))
-             (lead (append (if hit (list hit) '())
-                           (filter (lambda (r) (not (and hit (equal? (car r) (car hit)))))
-                                   (command-palette--past query)))))
+      (let ((lead (command-palette--past query)))
         (command-palette--with-ask query
           (append lead
                   (filter (lambda (candidate)
@@ -227,33 +224,70 @@
        (keys-bind-intent (car bind) (cadr bind)))
       ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
        (command-palette--run-recipe (assoc choice *recipes*)))
-      ((command-palette--pattern choice)
-       (let ((m (command-palette--pattern choice)))
-         (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
       ((equal? (string-trim choice) "") #f)
-      (else (command-palette-ask-recipes! choice)))))
+      (else (command-palette--pick! choice)))))
 
-;; The recipe a pattern reads in QUERY, and its arguments: (TITLE BINDINGS)
-(define (command-palette--pattern query)
-  (and (boundp 'recipe-match) (recipe-match query)))
+;; Words no row is named for go to the fast model. It picks the recipe that
+;; does them and reads the recipe's inputs out of the words; an input it
+;; cannot read is asked for. When no recipe fits, *recipes* writes one.
+(define (command-palette--recipe-menu)
+  (string-join
+    (map (lambda (r)
+           (string-append "- " (car r)
+             (if (null? (caddr r))
+                 ""
+                 (string-append "  inputs: "
+                   (string-join (map (lambda (i)
+                                       (string-append (symbol->string (car i))
+                                                      " (" (string-trim (cadr i)) ")"))
+                                     (caddr r))
+                                ", ")))))
+         *recipes*)
+    "\n"))
 
-;; What you typed, as the row of the recipe it runs: RET reads it again.
-(define (command-palette--pattern-row query)
-  (let ((m (command-palette--pattern query)))
-    (and m
-         (list (string-trim query)
-               (string-append "recipe  " (car m) "  "
-                              (string-join (map (lambda (b) (string-append (symbol->string (car b)) "=" (cadr b)))
-                                                (cadr m))
-                                           "  "))))))
+(define (command-palette--pick-prompt text)
+  (string-append
+    "Someone typed a request into the command palette of an editor. Pick the recipe below "
+    "that does it, and read the recipe's inputs from the request. Answer with JSON only:\n"
+    "{\"recipe\": \"TITLE\", \"inputs\": {\"NAME\": \"VALUE\"}} - leave out an input the request does not give\n"
+    "{\"recipe\": null} - no recipe does it\n\n"
+    "Recipes:\n" (command-palette--recipe-menu) "\n\nRequest: " text))
 
-;; Words no row is named for are a row too, so RET asks the *recipes* chat.
+;; the recipe and its bindings in a model's reply, else #f
+(define (command-palette--picked reply)
+  (let* ((from (string-index reply "{"))
+         (to (string-rindex reply "}"))
+         (json (and from to (< from to)
+                    (ignore-errors (lambda () (json-parse (substring reply from (+ to 1)))))))
+         (recipe (and (pair? json) (string? (plist-get json 'recipe))
+                      (assoc (plist-get json 'recipe) *recipes*))))
+    (and recipe
+         (list recipe
+               (filter (lambda (b) b)
+                       (map (lambda (input)
+                              (let ((v (plist-get (or (plist-get json 'inputs) '()) (car input))))
+                                (cond ((string? v) (list (car input) v))
+                                      ((number? v) (list (car input) (number->string v)))
+                                      (else #f))))
+                            (caddr recipe)))))))
+
+(define (command-palette--pick! text)
+  (message (string-append "Finding a recipe for: " text))
+  (llm-with-model (command-palette--pick-prompt text) (llm-model-for command-palette-recipes-role)
+    (lambda (reply)
+      (let ((picked (command-palette--picked reply)))
+        (if picked
+            (command-palette--run-recipe (car picked) (cadr picked))
+            (command-palette-ask-recipes! text))))
+    (lambda (_) (command-palette-ask-recipes! text))))
+
+;; Words no row is named for are a row too, so RET finds the recipe for them.
 ;; A sentence (three words or more) leads; a word or two follows the hits.
 (define (command-palette--with-ask query rows)
   (let ((q (string-trim query)))
     (if (or (equal? q "") (assoc q rows))
         rows
-        (let ((ask (list q "ask  *recipes* writes a recipe for this")))
+        (let ((ask (list q "ask  finds the recipe for this and runs it")))
           (if (>= (length (string-split q " ")) 3)
               (cons ask rows)
               (append rows (list ask)))))))

@@ -329,7 +329,10 @@
         (doc (or (plist-get h 'doc) "")))
     (cond
       ((equal? kind "recipe")
-       (list "Recipes" (plist-get h 'task) (plist-get h 'run) ""))
+       ;; a recipe names its task and the call that does it; the catalog
+       ;; now writes them as name and use
+       (list "Recipes" (or (plist-get h 'task) (plist-get h 'name) "")
+             (or (plist-get h 'run) (plist-get h 'use) "") ""))
       ((equal? kind "howto")
        (list "How do I" (plist-get h 'name) "" ""))
       ((equal? kind "command")

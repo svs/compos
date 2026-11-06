@@ -249,9 +249,9 @@ Compos documents itself while it runs. All the help commands start with `C-h`.
 | `M-?` | Explain the current context, or the name at point |
 | `C-h t` | Open or resume this tutorial |
 
-> **Try it.** Type `C-h k C-M-v` and read about `scroll-other-window`. Type `q` to dismiss the help page.
+> **Try it.** Type `C-h k C-M-v` and read about **scroll-other-window**. Type `q` to dismiss the help page.
 
-> **Try it.** Type `C-h m` in TUTORIAL. Notice the mode, the maps in force, and the commands they add. Type `q` when you finish.
+> **Try it.** Type `C-h m` in the practice page. Notice the mode, the maps in force, and the commands they add. Type `q` when you finish.
 
 `M-x apropos` searches everything that is defined. A public definition carries a domain, its effects, a signature and documentation, so people and agents can both find it.
 

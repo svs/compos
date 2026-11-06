@@ -279,11 +279,17 @@
 ;; A literal word of a pattern matches its plural too: "{{count}} column
 ;; layout" reads "3 columns layout".
 (define (recipe--same-word? a b)
+  ;; a plural, a short form ("col" for "column") or a typo is the same word:
+  ;; one in a short word, two from six letters up
   (let ((a (string-downcase a)) (b (string-downcase b))
         (stem (lambda (w) (if (and (> (string-length w) 3) (string-suffix? "s" w))
                               (substring w 0 (- (string-length w) 1))
                               w))))
-    (or (equal? a b) (equal? (stem a) (stem b)))))
+    (or (equal? a b) (equal? (stem a) (stem b))
+        (and (>= (string-length b) 3) (string-prefix? b a))
+        (let ((n (min (string-length a) (string-length b))))
+          (and (>= n 4)
+               (<= (string-edit-distance (stem a) (stem b)) (if (>= n 6) 2 1)))))))
 
 ;; A pattern that opens with a slot reads the end of the words, with the
 ;; shortest argument that fits: in "switch to 2 column layout" the words

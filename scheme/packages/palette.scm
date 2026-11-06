@@ -355,7 +355,9 @@
 ;; words you ran before, as the eval does.
 (define (command-palette-resolve text buf k &optional fresh?)
   (let ((learned (and (not fresh?) (command-palette--learned text)))
-        (answer (recipe-answer text))
+        ;; your own recipes answer by pattern; the bundled ones are for agents
+        (answer (let ((a (recipe-answer text)))
+                  (and a (member (plist-get a 'name) (map car (command-palette--own-recipes))) a)))
         (written (and (not fresh?) (boundp 'fast-remembered) (fast-remembered text)))
         ;; a command takes no value, so words that carry a number ("3 col
         ;; layout") are not done by one: fast-code writes the call with it

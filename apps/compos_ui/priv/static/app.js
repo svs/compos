@@ -63,7 +63,8 @@
       if (e.code === "Space") return "SPC";
       // Option-Shift-O is M-O, as in Emacs, not M-o
       if (e.code.startsWith("Key")) return e.shiftKey ? e.code.slice(3).toUpperCase() : e.code.slice(3).toLowerCase();
-      if (e.code.startsWith("Digit")) return e.code.slice(5);
+      // Option-Shift-5 is M-%, as in Emacs, not M-5
+      if (e.code.startsWith("Digit")) return e.shiftKey ? SHIFTED_DIGITS[Number(e.code.slice(5))] : e.code.slice(5);
       if (CODE_CHARS[e.code]) return CODE_CHARS[e.code][e.shiftKey ? 1 : 0];
     }
     // macOS reports a Cmd chord with the unshifted character:

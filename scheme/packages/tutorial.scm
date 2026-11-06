@@ -774,7 +774,7 @@
                      (tutorial--probe-of *tutorial-current* (car (list-ref steps *tutorial-shown*))))
                 '(("t" "try again"))
                 '()))
-          '(("r" "restart lesson") ("R" "reset") ("⌥O" "chat"))))
+          '(("r" "restart lesson") ("R" "reset") ("⌥O" "chat") ("q" "close"))))
 
 ;; A new step slides in: from the right going on, from the left going back.
 ;; The page is patched, not rebuilt, so the slide flips between two
@@ -823,7 +823,7 @@
   '(("n" "tutorial-next") ("RET" "tutorial-next") ("p" "tutorial-back")
     ("N" "tutorial-next-lesson") ("P" "tutorial-previous-lesson")
     ("i" "tutorial-index") ("h" "tutorial-help")
-    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("t" "tutorial-retry") ("q" "quit-window")))
+    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("t" "tutorial-retry") ("q" "tutorial-close")))
 
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
@@ -1062,8 +1062,70 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (tutorial--load!)
   (let ((panes (tutorial--panes!)))
     (tutorial--go! (or (tutorial--lesson-now) (tutorial--first-open)))
-    (apply-layout! *tutorial-buffer* (mode-layout "tutorial-practice-mode"))
+    (set! *tutorial-open* #t)
+    (set! *tutorial-frame* (selected-frame))
+    (tutorial--arrange! *tutorial-buffer*)
     *tutorial-buffer*))
+
+;;; the layout: the tutorial keeps its panes
+;; While the tutorial is open, its group shows the slide and the lesson
+;; beside whatever the reader works in. A command that takes one of them
+;; off the screen, C-x 1 or a kill, gets it back after the command; leaving
+;; the group leaves them alone. q on the slide closes the tutorial and ends
+;; this.
+(define *tutorial-open* #f)
+(define *tutorial-arranging* #f)
+(define *tutorial-frame* #f)   ;; the frame C-h t opened it in; no other frame is touched
+
+(define (tutorial--work-buffer)
+  ;; what the reader works in: the selected window's buffer when it is not
+  ;; the slide or the lesson, else the practice page
+  (let ((b (window-buffer (active-window))))
+    (if (and (string? b) (buffer-exists? b)
+             (not (member b (list *tutorial-detail-buffer* *tutorial-lesson-buffer*)))
+             (not (minibuffer-buffer? b)))
+        b
+        *tutorial-buffer*)))
+
+(define (tutorial--arrange! work)
+  ;; WORK takes the practice pane of the mode layout, the slide and the
+  ;; lesson the other two
+  (set! *tutorial-arranging* #t)
+  (unwind-protect
+    (lambda () (apply-layout! work (mode-layout "tutorial-practice-mode")))
+    (lambda () (set! *tutorial-arranging* #f))))
+
+(define (tutorial--keep-layout!)
+  (when (and *tutorial-open* (not *tutorial-arranging*) (not (minibuffer-active?))
+             (equal? (selected-frame) *tutorial-frame*)
+             (equal? (frame-group) (buffer-group *tutorial-detail-buffer*)))
+    (unless (and (buffer-exists? *tutorial-detail-buffer*) (buffer-exists? *tutorial-lesson-buffer*)
+                 (buffer-exists? *tutorial-buffer*))
+      ;; a pane was killed: make it again, drawn as it was
+      (tutorial--panes!)
+      (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-lesson #f)
+      (tutorial--changed!))
+    (unless (and (window-showing *tutorial-detail-buffer*) (window-showing *tutorial-lesson-buffer*))
+      (tutorial--arrange! (tutorial--work-buffer)))))
+
+;; checked a moment after the command, in its frame: inside the command the
+;; frame it changed is not drawn yet, and a layout applied there is lost
+(define (tutorial--keep-layout-soon!)
+  (when (and *tutorial-open* (not *tutorial-arranging*) (equal? (selected-frame) *tutorial-frame*))
+    (debounce! 'tutorial-layout 60
+      (lambda (frame) (with-selected-frame frame tutorial--keep-layout!))
+      (selected-frame))))
+
+(add-hook! 'post-command-hook 'tutorial--keep-layout-soon!)
+
+(define (tutorial-close!)
+  "Close the tutorial: the slide and the lesson leave the screen, and the layout is the reader's again."
+  (set! *tutorial-open* #f)
+  (with-selected-frame (or *tutorial-frame* (selected-frame))
+    (lambda ()
+      (for-each (lambda (b) (let ((w (window-showing b))) (when w (select-window! w) (delete-window!))))
+                (list *tutorial-lesson-buffer* *tutorial-detail-buffer*))))
+  (message "Tutorial closed. C-h t opens it where you were"))
 
 (define (tutorial--manual? l i)
   ;; a step done by hand: it watches no command, waits for nothing, and runs
@@ -1174,8 +1236,10 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (let* ((buf (tutorial--ensure! *tutorial-index-buffer* "tutorial-index-mode" 'list))
          (w (or (window-showing *tutorial-buffer*) (active-window)))
          (l (tutorial--lesson-now)))
+    ;; the index has its own mode, so the pane may show it in a new window:
+    ;; the focus goes where it is
     (window-set-buffer! w buf)
-    (select-window! w)
+    (select-window! (or (window-showing buf) w))
     (list-refresh! buf)
     (when l (list-goto-index! buf (- (plist-get l 'n) 1)))
     buf))
@@ -1183,7 +1247,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (define (tutorial-index-quit!)
   (let ((w (or (window-showing *tutorial-index-buffer*) (active-window))))
     (window-set-buffer! w (tutorial--ensure! *tutorial-buffer* "tutorial-practice-mode" 'home))
-    (select-window! w)))
+    (select-window! (or (window-showing *tutorial-buffer*) w))))
 
 (define (tutorial-toggle-done!)
   (let ((l (list-current *tutorial-index-buffer*)))
@@ -1206,6 +1270,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (define-command "help-with-tutorial" "Open the Compos tutorial at the step you are on"
   (lambda () (tutorial-open!)))
 (define-key "help-map" "t" "help-with-tutorial")
+
+(define-command "tutorial-close" "Close the tutorial; C-h t opens it again where you were"
+  (lambda () (tutorial-close!)))
 
 (define-command "tutorial-next" "Go to the next step of the tutorial"
   (lambda () (tutorial-next!)))

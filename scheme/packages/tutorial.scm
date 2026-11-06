@@ -435,6 +435,21 @@
                       *tutorial-probes*)))
   slug)
 
+;; A step that shows cards on the slide: the step of lesson SLUG whose text
+;; has TEXT draws the blocks FN answers, under the step, until it is done.
+(define *tutorial-cards* '())   ;; ((SLUG TEXT FN) ...)
+
+(define (tutorial-cards! slug text fn)
+  (set! *tutorial-cards*
+        (cons (list slug text fn)
+              (filter (lambda (c) (not (and (equal? (car c) slug) (equal? (cadr c) text))))
+                      *tutorial-cards*)))
+  slug)
+
+(define (tutorial--cards-of slug text)
+  (and text (find (lambda (c) (and (equal? (car c) slug) (string-contains? text (cadr c))))
+                  *tutorial-cards*)))
+
 (define (tutorial--probe-of slug text)
   (and text (find (lambda (p) (and (equal? (car p) slug) (string-contains? text (cadr p))))
                   *tutorial-probes*)))
@@ -600,6 +615,8 @@
                                   (else
                           (tutorial--div "tutorial-state"
                             'text (cond (done? "Done. Press n for the next step.")
+                                        ((tutorial--cards-of slug (car step))
+                                         "Choose one below. The slide moves on when you do.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
                                          "Do it in the practice pane. The slide moves on when you do.")
                                         (else "When you have done it, press n here, or ⌃C ⌃N in the practice page.")))))))
@@ -608,6 +625,8 @@
                                     (if (= n 0)
                                         "Read this lesson in the lesson pane. Press n when you are ready to go on."
                                         "Every step of this lesson is done. Press n for the next lesson.")))))
+                (let ((c (and step (not done?) (tutorial--cards-of slug (car step)))))
+                  (if c (or (ignore-errors (caddr c)) '()) '()))
                 (if *tutorial-help* (list (tutorial--div "tutorial-help" 'text *tutorial-help*)) '())
                 ;; the slide's keymap, d                ;; the keys are the window's keys bar, as every page has them
                 '())))))))
@@ -648,13 +667,22 @@
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
     (and (equal? buf *tutorial-detail-buffer*)
+         (cond
+           ((string-prefix? "wizard:use:" id) (tutorial--use-model! (substring id 11 (string-length id))) #t)
+           ((string-prefix? "wizard:key:" id) (tutorial--add-key! (substring id 11 (string-length id))) #t)
+           ((string-prefix? "wizard:install:" id)
+            (let ((name (substring id 15 (string-length id))))
+              (tutorial--use-model! name)
+              (setup-install-agent! name))
+            #t)
+           (else
          (let ((hit (assoc id '(("tutorial:next" "tutorial-next") ("tutorial:back" "tutorial-back")
                                 ("tutorial:next-lesson" "tutorial-next-lesson")
                                 ("tutorial:previous-lesson" "tutorial-previous-lesson")
                                 ("tutorial:index" "tutorial-index") ("tutorial:help" "tutorial-help")
                                 ("tutorial:restart" "tutorial-restart-lesson")
                                 ("tutorial:reset" "tutorial-reset")))))
-           (and hit (begin (run-command (cadr hit)) #t))))))
+           (and hit (begin (run-command (cadr hit)) #t))))))))
 
 (define-style! 'tutorial "
 .tutorial-slide { max-width: 36em; }
@@ -1100,9 +1128,31 @@
           (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x setup to choose another model."))
           (tutorial--draw-detail!))))))
 
-;; the model step: the setup wizard chose one already, or the reader does
+;; the model step: the setup wizard chose one already, or the reader does,
+;; on the slide, from the same cards *Setup* shows; the step finishes when a
+;; model is in use
 (tutorial-await! "set-up" "choose the model that new chats use"
   (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
+
+(tutorial-cards! "set-up" "choose the model that new chats use"
+  (lambda ()
+    (if (boundp 'setup-inference-scan)
+        (list (tutorial--div "wizard-grid" 'children (map setup-wizard--card (setup-inference-scan))))
+        '())))
+
+(define (tutorial--use-model! name)
+  "New chats use the connector NAME; the model step finishes."
+  (customize-save! 'setup-default-connector name)
+  (set! *default-connector* name)
+  (setup--save-default! name)
+  (message (string-append "New chats use " name))
+  (tutorial-recheck!)
+  (tutorial--draw-detail!))
+
+(define (tutorial--add-key! name)
+  ;; the card's key, asked as *Setup* asks it; the slide redraws when it is in
+  (setup-wizard-add-key! *tutorial-detail-buffer* name
+    (lambda () (tutorial-recheck!) (tutorial--draw-detail!))))
 
 ;; the reply step sends its own test, through the setup chat
 (tutorial-probe! "set-up" "test message to the model"

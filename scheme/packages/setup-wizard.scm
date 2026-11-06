@@ -422,14 +422,15 @@
 
 ;; The key button of a card asks for the connector's own secrets: one is
 ;; asked at once, more offer a choice.
-(define (setup-wizard-add-key! buf connector)
+(define (setup-wizard-add-key! buf connector &optional on-done)
   (let* ((reqs (filter (lambda (r) (memq (plist-get r 'kind) '(secret one-secret)))
                        (setup-connector-requirements connector)))
          (ss (apply append (map (lambda (r) (if (plist-get r 'secret)
                                                 (list (plist-get r 'secret))
                                                 (plist-get r 'secrets)))
                                 reqs)))
-         (done (lambda () (when (buffer-exists? buf) (setup-wizard-redraw! buf)))))
+         ;; ON-DONE runs when the key is in; the wizard's own page redraws
+         (done (or on-done (lambda () (when (buffer-exists? buf) (setup-wizard-redraw! buf))))))
     (cond
       ((null? ss) (message (string-append "Setup: " connector " declares no key")))
       ((null? (cdr ss)) (setup-ask-secret! (car ss) connector done))

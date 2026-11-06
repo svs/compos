@@ -79,7 +79,7 @@ This lesson sets up the models and the browser extension. Compos uses three kind
 
 ### A chat model
 
-> **Try it.** Type `M-x setup-inference` and choose the model that new chats use.
+> **Try it.** On the slide, choose the model that new chats use: click **Use** on a model that is ready.
 
 > **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
 

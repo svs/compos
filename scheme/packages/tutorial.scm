@@ -1201,6 +1201,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (define-command "help-with-tutorial" "Open the Compos tutorial at the step you are on"
   (lambda () (tutorial-open!)))
+(define-key "help-map" "t" "help-with-tutorial")
 
 (define-command "tutorial-next" "Go to the next step of the tutorial"
   (lambda () (tutorial-next!)))

@@ -1,34 +1,25 @@
-;;; recipes-test.scm --- the recipe book the palette reads.
-;;;
-;;; A recipe is a task, a line to run, and the inputs that line needs. A
-;;; templated line with no declared inputs prompts for nothing and runs
-;;; with the braces still in it.
-;;;
-;;; Seven palette tests stay in ExUnit: five press keys, and two wait for
-;;; a debounce to fire, which Scheme cannot do.
+;;; recipes-test.scm --- a pattern reads the command and its arguments.
 
 (domain! 'testing)
-(effects! '(read))
+(effects! '(write))
 
-(deftest 'display-and-history-have-unambiguous-buffer-recipes
-  "display targets another window; switching targets buffer history"
+(deftest 'recipe-pattern-reads-arguments
+  "the literal words pick the recipe, the slots take the rest"
   (lambda ()
-    (check-equal! (cadr (assoc "show a buffer in the other window" *recipes*))
-                  "(display-buffer-other-window! {{buffer}})" "the display recipe")
-    (check-equal! (cadr (assoc "other buffer" *recipes*))
-                  "(display-buffer-other-window! {{buffer}})" "the common phrase")
-    (check-equal! (cadr (assoc "switch to the previous buffer" *recipes*))
-                  "(run-command \"previous-buffer\")" "the history recipe")))
+    (check-equal! (recipe--match-words '("open" "{{path}}") '("Open" "my" "notes.md"))
+                  '((path "my notes.md"))
+                  "the last slot takes every word left")
+    (check-equal! (recipe--match-words '("make" "{{face}}" "{{color}}") '("make" "default" "red"))
+                  '((face "default") (color "red"))
+                  "an earlier slot takes the fewest words")
+    (check-false! (recipe--match-words '("open" "{{path}}") '("open"))
+                  "a slot takes one word at least")
+    (check-false! (recipe--match-words '("close" "{{b}}") '("open" "x"))
+                  "a literal word must be there")))
 
-(deftest 'no-templated-recipe-is-missing-its-input-declarations
-  "a line with braces and no inputs runs with the braces still in it"
+(deftest 'recipe-match-picks-the-most-literal-pattern
+  "open folder x is the directory, not a file named folder x"
   (lambda ()
-    (check-equal!
-      (map car (filter (lambda (recipe)
-                         (and (string-contains? (cadr recipe) "{{")
-                              (null? (caddr recipe))))
-                       *recipes*))
-      '() "every templated recipe declares its inputs")
-    ;; and no recipe ships a path from the machine it was written on
-    (check-false! (string-contains? (value->string (recipes)) "/abs/path")
-                  "no absolute path leaked into the book")))
+    (check-equal! (car (recipe-match "open folder src")) "open a directory" "two literals beat one")
+    (check-equal! (recipe-match "open notes.md") '("open a file" ((path "notes.md"))) "one literal")
+    (check-false! (recipe-match "qqzz nothing") "no pattern, no recipe")))

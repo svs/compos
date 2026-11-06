@@ -229,3 +229,141 @@
 
 (recipe-aliases! "kill a buffer"
   "kill close delete remove discard buffer")
+
+;;; Patterns: the words that ask for a recipe, with its arguments in them.
+;;; "open {{path}}" reads "open notes.md" as the recipe "open a file" with
+;;; path "notes.md": the literal words are the command, and each {{slot}}
+;;; takes the words between them. The palette reads what you type this way,
+;;; so a recipe runs with its arguments and asks for none.
+
+(domain! 'discovery)
+(effects! '(write))
+
+;; ((TITLE (PATTERN ...)) ...)
+(define *recipe-patterns* '())
+
+(define (recipe-patterns! title patterns)
+  (set! *recipe-patterns* (alist-put *recipe-patterns* title patterns))
+  title)
+
+(effects! '(read))
+
+(define (recipe--words s)
+  (remove (lambda (w) (equal? w "")) (string-split (string-trim s) " ")))
+
+;; "{{path}}" -> path; a literal word -> #f
+(define (recipe--slot word)
+  (and (> (string-length word) 4)
+       (string-prefix? "{{" word)
+       (string-suffix? "}}" word)
+       (string->symbol (substring word 2 (- (string-length word) 2)))))
+
+;; ((SLOT VALUE) ...) when WORDS read as PATTERN, else #f. A slot takes the
+;; fewest words that let the rest match, so the last one takes what is left.
+(define (recipe--match-words pattern words)
+  (cond
+    ((null? pattern) (and (null? words) '()))
+    ((recipe--slot (car pattern))
+     (let ((slot (recipe--slot (car pattern))))
+       (let loop ((n 1))
+         (and (<= n (length words))
+              (let ((rest (recipe--match-words (cdr pattern) (list-tail words n))))
+                (if rest
+                    (cons (list slot (string-join (take words n) " ")) rest)
+                    (loop (+ n 1))))))))
+    ((and (pair? words)
+          (equal? (string-downcase (car pattern)) (string-downcase (car words))))
+     (recipe--match-words (cdr pattern) (cdr words)))
+    (else #f)))
+
+;; (TITLE BINDINGS) for the pattern that reads TEXT, else #f. The pattern
+;; with the most literal words wins; a pattern of slots alone reads nothing.
+(define (recipe-match text)
+  (let ((words (recipe--words text)))
+    (cadr
+      (fold (lambda (best row)
+              (fold (lambda (best p)
+                      (let* ((pw (recipe--words p))
+                             (n (length (remove recipe--slot pw)))
+                             (b (and (> n (car best))
+                                     (assoc (car row) *recipes*)
+                                     (recipe--match-words pw words))))
+                        (if b (list n (list (car row) b)) best)))
+                    best
+                    (cadr row)))
+            (list 0 #f)
+            *recipe-patterns*))))
+
+;;; The recipes you asked for: the *recipes* chat writes them into
+;;; <compos-home>/recipes.scm, a Scheme file you can read and edit. Each
+;;; recipe is one block under its marker line, so learning one again leaves
+;;; the others, and your edits to them, as they are.
+
+(define (recipes-user-path) (string-append (compos-home) "/recipes.scm"))
+
+(define recipes--marker "\n;;; recipe: ")
+
+(define recipes--header
+  ";;; recipes.scm --- the recipes the *recipes* chat learned for you.\n;;; Each block is a defrecipe! and its recipe-patterns!. Edit them freely.\n")
+
+(define (recipe--block title expr inputs patterns)
+  (string-append
+    title "\n"
+    "(defrecipe! " (value->string title) "\n  " (value->string expr)
+    (if (null? inputs) "" (string-append "\n  '" (value->string inputs)))
+    ")\n"
+    (if (null? patterns)
+        ""
+        (string-append "(recipe-patterns! " (value->string title)
+                       "\n  '" (value->string patterns) ")\n"))))
+
+(effects! '(write))
+
+(define (recipe-learn! title expr &optional inputs patterns)
+  (let* ((inputs (or inputs '()))
+         (patterns (or patterns '()))
+         (path (recipes-user-path))
+         (old (if (file-exists? path) (read-file path) recipes--header))
+         (parts (string-split old recipes--marker))
+         (kept (remove (lambda (b) (string-prefix? (string-append title "\n") b))
+                       (cdr parts)))
+         (entry (catalog-entry 'recipe title))
+         (aliases (or (and entry (catalog--get entry 'aliases)) "")))
+    (defrecipe! title expr inputs)
+    (recipe-patterns! title patterns)
+    ;; the words of the patterns find the recipe in a search, too
+    (recipe-aliases! title
+      (string-join (cons aliases (map (lambda (p) (string-join (remove recipe--slot (recipe--words p)) " "))
+                                      patterns))
+                   " "))
+    (write-file! path
+      (string-append (car parts)
+                     (string-join (map (lambda (b) (string-append recipes--marker b))
+                                       (append kept (list (recipe--block title expr inputs patterns))))
+                                  "")))
+    title))
+
+(define (recipes-load-user!)
+  (let ((path (recipes-user-path)))
+    (when (file-exists? path)
+      (ignore-errors (lambda () (load path))))))
+
+(public! 'recipe-patterns!
+  "(recipe-patterns! \"task\" '(\"open {{path}}\" ...)) -- the words that ask for a recipe; literal words are the command, each {{slot}} an argument")
+(public! 'recipe-match
+  "(recipe-match \"open notes.md\") -- (TITLE ((SLOT VALUE) ...)) for the pattern that reads the words, else #f")
+(public! 'recipe-learn!
+  "(recipe-learn! TITLE EXPR [INPUTS PATTERNS]) -- define a recipe and save it to <compos-home>/recipes.scm")
+(public! 'recipes-user-path "(recipes-user-path) -- the file of the recipes you learned")
+
+(recipe-patterns! "open a file"
+  '("open {{path}}" "open file {{path}}" "visit {{path}}"))
+(recipe-patterns! "open a directory"
+  '("dired {{path}}" "open directory {{path}}" "open folder {{path}}"))
+(recipe-patterns! "kill a buffer"
+  '("kill {{buffer}}" "kill buffer {{buffer}}" "close {{buffer}}"))
+(recipe-patterns! "show a buffer in the other window"
+  '("show {{buffer}}" "show {{buffer}} in the other window"))
+
+;; the recipes you learned come last, so one of yours replaces a recipe here
+(recipes-load-user!)

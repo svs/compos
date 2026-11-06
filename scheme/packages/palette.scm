@@ -3,9 +3,11 @@
 ;;; The palette answers "how do I do this?" where M-x answers "what is
 ;;; the command called?". It searches command docs and recipes by the
 ;;; words typed, and puts first the past picks and asks that match them,
-;;; from the history it shares with M-x. fast-code wraps
-;;; command-palette-candidates and command-palette--run, so input that
-;;; matches nothing becomes Scheme.
+;;; from the history it shares with M-x. Words a recipe's pattern reads
+;;; run that recipe with the arguments in them: "open notes.md" opens the
+;;; file. Words nothing reads go to the *recipes* chat, which writes the
+;;; recipe into <compos-home>/recipes.scm and runs it, so the next time
+;;; the palette knows them.
 
 (domain! 'interaction)
 (effects! '(write execute))
@@ -138,11 +140,15 @@
                                  (if (command-fn h) (assoc h rows) (list h "past  ask")))
                                recent))))
         (append top (filter (lambda (r) (not (member (car r) recent))) rows)))
-      (let ((past (command-palette--past query)))
-        (append past
-                (filter (lambda (candidate)
-                          (and candidate (not (assoc (car candidate) past))))
-                        (map command-palette--candidate (command-palette--search query)))))))
+      (let* ((hit (command-palette--pattern-row query))
+             (lead (append (if hit (list hit) '())
+                           (filter (lambda (r) (not (and hit (equal? (car r) (car hit)))))
+                                   (command-palette--past query)))))
+        (command-palette--with-ask query
+          (append lead
+                  (filter (lambda (candidate)
+                            (and candidate (not (assoc (car candidate) lead))))
+                          (map command-palette--candidate (command-palette--search query))))))))
 
 ;; What you picked or asked here before, newest first: the entries of the
 ;; shared M-x history that hold every word typed.
@@ -186,13 +192,25 @@
                                     (value->string (cadr binding)))))
         (command-palette--render-recipe rendered (cdr bindings)))))
 
+;; An input whose row ends in number takes a number: "0.3" is 0.3.
+(define (command-palette--typed recipe bindings)
+  (map (lambda (b)
+         (let ((input (assoc (car b) (caddr recipe))))
+           (if (and input (memq 'number (cddr input)) (string? (cadr b)) (string->number (cadr b)))
+               (list (car b) (string->number (cadr b)))
+               b)))
+       bindings))
+
+;; the result, as eval-string-safe gives it, and in the echo area
 (define (command-palette--eval-recipe recipe bindings)
   (let ((result
           (eval-string-safe
-            (command-palette--render-recipe (cadr recipe) bindings))))
+            (command-palette--render-recipe
+              (cadr recipe) (command-palette--typed recipe bindings)))))
     (if (equal? (car result) 'ok)
         (message (value->string (cadr result)))
-        (message (string-append "Recipe error: " (cadr result))))))
+        (message (string-append "Recipe error: " (value->string (cadr result)))))
+    result))
 
 (define (command-palette--collect-recipe recipe inputs bindings)
   (if (null? inputs)
@@ -203,8 +221,11 @@
             (command-palette--collect-recipe
               recipe (cdr inputs) (append bindings (list (list (car input) value)))))))))
 
-(define (command-palette--run-recipe recipe)
-  (command-palette--collect-recipe recipe (caddr recipe) '()))
+(define (command-palette--run-recipe recipe &optional bindings)
+  (command-palette--collect-recipe
+    recipe
+    (filter (lambda (input) (not (assoc (car input) (or bindings '())))) (caddr recipe))
+    (or bindings '())))
 
 (define (command-palette--run choice)
   (let ((bind (command-palette--bind-parse choice)))
@@ -216,7 +237,90 @@
        (keys-bind-intent (car bind) (cadr bind)))
       ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
        (command-palette--run-recipe (assoc choice *recipes*)))
-      (else (message (string-append "No command or recipe named " choice))))))
+      ((command-palette--pattern choice)
+       (let ((m (command-palette--pattern choice)))
+         (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
+      ((equal? (string-trim choice) "") #f)
+      (else (command-palette-ask-recipes! choice)))))
+
+;; The recipe a pattern reads in QUERY, and its arguments: (TITLE BINDINGS)
+(define (command-palette--pattern query)
+  (and (boundp 'recipe-match) (recipe-match query)))
+
+;; What you typed, as the row of the recipe it runs: RET reads it again.
+(define (command-palette--pattern-row query)
+  (let ((m (command-palette--pattern query)))
+    (and m
+         (list (string-trim query)
+               (string-append "recipe  " (car m) "  "
+                              (string-join (map (lambda (b) (string-append (symbol->string (car b)) "=" (cadr b)))
+                                                (cadr m))
+                                           "  "))))))
+
+;; Words no row is named for are a row too, so RET asks the *recipes* chat.
+;; A sentence (three words or more) leads; a word or two follows the hits.
+(define (command-palette--with-ask query rows)
+  (let ((q (string-trim query)))
+    (if (or (equal? q "") (assoc q rows))
+        rows
+        (let ((ask (list q "ask  *recipes* writes a recipe for this")))
+          (if (>= (length (string-split q " ")) 3)
+              (cons ask rows)
+              (append rows (list ask)))))))
+
+;;; The *recipes* chat: one chat, kept across restarts, that turns the words
+;;; the palette did not know into a recipe and runs it. It works quietly; its
+;;; one-line answer is in the chat, and the recipe shows its result.
+
+(domain! 'interaction)
+(effects! '(write execute spend))
+
+(define command-palette-recipes-chat "*recipes*")
+
+;; the live chat, else the one kept for 'recipes read back, else #f
+(define (command-palette--recipes-chat)
+  (let ((name command-palette-recipes-chat))
+    (cond
+      ((and (buffer-known? name) (chat-buffer? name)) name)
+      (else (ignore-errors (lambda () (chat-for "recipes")))))))
+
+(define (command-palette--recipes-brief text)
+  (string-append
+    "The command palette got words it has no recipe for: " (value->string text) "\n\n"
+    "Make the recipe and run it:\n"
+    "1. Find the calls with (apropos \"...\") and (recipes). When a recipe already does the job, learn it again under its own title with a pattern for these words.\n"
+    "2. (recipe-learn! TITLE EXPR INPUTS PATTERNS) saves it to " (recipes-user-path) ". "
+    "TITLE is the task in general words, as \"open a file\". EXPR is the Scheme, with {{slot}} where each argument goes. "
+    "INPUTS is ((slot \"Prompt: \") ...); end a row with number when the argument is a number. "
+    "PATTERNS are the ways to say it, as (\"open {{path}}\" \"visit {{path}}\"): the literal words are the command, and each {{slot}} takes the words of one argument. "
+    "Every file, buffer, name, number or text in the words is an argument, never part of EXPR.\n"
+    "3. (recipe-match " (value->string text) ") must answer your TITLE and the right arguments.\n"
+    "4. (recipe-run! TITLE '((slot \"value\") ...)) runs it on the user's frame.\n"
+    "Reply in one line: the recipe, and what it did."))
+
+(define (command-palette-ask-recipes! text)
+  (let ((brief (command-palette--recipes-brief text))
+        (chat (command-palette--recipes-chat)))
+    (if chat
+        (agent-continue! chat brief)
+        (let ((made (agent-buf (execute* brief (list 'title command-palette-recipes-chat 'notify #f)))))
+          ;; kept under 'recipes, so a restart reads the same chat back
+          (ignore-errors (lambda () (chat-for! "recipes" made)))))
+    (message (string-append "Asked *recipes*: " text))))
+
+;; Run recipe TITLE with BINDINGS, ((SLOT VALUE) ...), on the frame you
+;; look at; answers what the recipe gave, or its error.
+(define (recipe-run! title &optional bindings)
+  (let ((recipe (and (boundp '*recipes*) (assoc title *recipes*))))
+    (if (not recipe)
+        (list 'error (string-append "no recipe named " title))
+        (with-frame-windows
+          (lambda () (command-palette--eval-recipe recipe (or bindings '())))))))
+
+(public! 'recipe-run!
+  "(recipe-run! TITLE '((slot \"value\") ...)) -- run a recipe with its arguments on the user's frame; answers (ok VALUE) or (error TEXT)")
+(public! 'command-palette-ask-recipes!
+  "(command-palette-ask-recipes! TEXT) -- the *recipes* chat writes a recipe for TEXT and runs it")
 
 (domain! 'interaction)
 (effects! '(write execute))

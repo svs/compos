@@ -1,6 +1,7 @@
 ;;; fast-code.scm --- prose -> one Scheme expression, and functions learned.
-;;; Entry points: the command palette, for input it cannot resolve to a
-;;; command, bind or recipe, and a ! at the chat prompt.
+;;; Entry point: a ! at the chat prompt. M-x fast-palette-install also
+;;; gives it the palette input that resolves to no command, bind or recipe;
+;;; by default the *recipes* chat takes that input.
 ;;;
 ;;; A fast model on the API lane writes the expression, from the functions
 ;;; learned before, the catalog entries the intent's words recall, and the
@@ -1129,7 +1130,6 @@
 (public! 'fast-palette-install! "(fast-palette-install!) -- palette input falls through to fast-code")
 (public! 'fast-palette-remove! "(fast-palette-remove!) -- restore the plain palette")
 
-;; learned functions come back first; both are safe to re-run after a reload
+;; learned functions come back first; safe to re-run after a reload
 (fast-learned-load!)
-(fast-palette-install!)
 (set! *command-palette-row-delete* (lambda (name) (fast-forget-answer! name)))

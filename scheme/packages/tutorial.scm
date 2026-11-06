@@ -871,17 +871,52 @@
                               (not (string-prefix? "|" p)) (not (string-prefix? ">" p))
                               (not (string-prefix? "#" p)) (not (string-prefix? "```" p))))
                        (string-split (plist-get l 'body) "\n"))))
-    (string-append "Practise here. This page is yours: move, type, kill and undo as you like.\n\n"
-                   (tutorial--symbolize (string-join paras "\n\n")) "\n")))
+    (string-append (tutorial--symbolize (string-join paras "\n\n")) "\n")))
+
+(define *tutorial-practice-doc* #f)   ;; (LESSONS TEXT STARTS): every lesson's prose
+
+(define (tutorial--practice-doc)
+  ;; the prose of every lesson under its title, so a step that searches for
+  ;; a word, or goes to the end, finds the text it names. STARTS is
+  ;; ((SLUG BYTE) ...): where each lesson begins.
+  (let ((ls (tutorial-lessons)))
+    (unless (and *tutorial-practice-doc* (eq? (car *tutorial-practice-doc*) ls))
+      (let loop ((ls2 ls)
+                 (text "Practise here. This page is yours: move, type, kill and undo as you like. It keeps what you do, from lesson to lesson.\n")
+                 (starts '()))
+        (if (null? ls2)
+            (set! *tutorial-practice-doc* (list ls text (reverse starts)))
+            (let* ((l (car ls2))
+                   (at (+ (string-byte-length text) 1)))
+              (loop (cdr ls2)
+                    (string-append text "\n" (number->string (plist-get l 'n)) ". " (plist-get l 'title) "\n\n"
+                                   (tutorial--practice-text l))
+                    (cons (list (plist-get l 'slug) at) starts))))))
+    *tutorial-practice-doc*))
 
 (define (tutorial--fill-practice! l)
-  (let ((buf *tutorial-buffer*))
-    (unless (equal? (buffer-local buf 'tutorial-lesson) (plist-get l 'slug))
-      (tutorial--fill! buf (tutorial--practice-text l) "tutorial-practice-mode")
+  ;; one practice page for the whole tutorial: it is filled once, and each
+  ;; lesson turns it to that lesson's prose; a reader typing in it keeps
+  ;; their place
+  (let ((buf *tutorial-buffer*)
+        (doc (tutorial--practice-doc)))
+    (unless (equal? (buffer-local buf 'tutorial-lesson) "all")
+      (tutorial--fill! buf (cadr doc) "tutorial-practice-mode")
       (buffer-set-local! buf 'footer-line-blocks
         (list (component 'ui/keys-bar
                 (list 'main '(("⌃C ⌃N" "next") ("⌃C ⌃P" "back") ("⌃C ⌃L" "lessons"))))))
-      (buffer-set-local! buf 'tutorial-lesson (plist-get l 'slug)))))
+      (buffer-set-local! buf 'tutorial-lesson "all")
+      (buffer-set-local! buf 'tutorial-practice-lesson #f))
+    (unless (equal? (buffer-local buf 'tutorial-practice-lesson) (plist-get l 'slug))
+      (buffer-set-local! buf 'tutorial-practice-lesson (plist-get l 'slug))
+      (let ((hit (assoc (plist-get l 'slug) (caddr doc)))
+            (w (window-showing buf)))
+        (when hit
+          (if (and w (equal? w (active-window)))
+              #t
+              (begin
+                (buffer-goto! buf (cadr hit))
+                (when w (window-set-point! w (cadr hit)) (buffer-windows-follow-point! buf)))))))))
 
 (define-derived-mode "tutorial-practice-mode" "text-mode" (lambda () #t))
 

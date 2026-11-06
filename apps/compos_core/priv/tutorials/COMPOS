@@ -27,7 +27,7 @@ You do not need to learn everything at once. Three commands make a wrong guess e
 
 The boxes marked **Try it** are directions for you to do now. For example:
 
-> **Try it.** Type `M-x` to open the command prompt. Then type `C-g` to close it and return here.
+> **Try it.** Type `M-x` to open the command prompt. Then type `ESC` or `C-g` to close it and return here.
 
 ---
 
@@ -35,7 +35,7 @@ The boxes marked **Try it** are directions for you to do now. For example:
 
 The sections, in order.
 
-To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `C-g` to cancel the search and return to where you started.
+To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `ESC` or `C-g` to cancel the search and return to where you started.
 
 1. Set up
 2. Windows and focus
@@ -133,14 +133,14 @@ A window with an editable buffer in it remains in `focus` mode until you type in
 
 | Key | What it does |
 | --- | --- |
-| `C-g` | Stop editing, or cancel a command |
+| `ESC` or `C-g` | Stop editing, or cancel a command |
 | `ESC` | The same |
 
 When you stop editing, the arrow keys move the focus again.
 
 > **Try it.** Move the focus to the practice page and type a word.
 
-> **Try it.** Type `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
+> **Try it.** Type `ESC` or `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
 
 ## Selecting, copying and pasting
 
@@ -158,9 +158,9 @@ The system keys copy and paste: Cmd-C and Cmd-V on a Mac, Ctrl-C and Ctrl-V on o
 
 To search forward, type `C-s`. To search backward, type `C-r`. Each character you type makes the match more specific at once. Search is a movement command; it does not make you fill a form before you see a result.
 
-> **Try it.** Type `C-s`, then type "search", and watch point move as the match becomes specific. Type `C-s` again for the next match, or `C-g` to stop.
+> **Try it.** Type `C-s`, then type "search", and watch point move as the match becomes specific. Type `C-s` again for the next match. Type `ESC` or `C-g` to stop.
 
-While you search, `RET` accepts the match. `C-g` quits and returns to where the search started, where that makes sense.
+While you search, `RET` accepts the match. `ESC` or `C-g` quits and returns to where the search started, where that makes sense.
 
 `M-%` runs `query-replace`. It asks for the old text and the new text, then visits each match, so you choose which ones to change.
 
@@ -369,7 +369,7 @@ The agent wrote the definition with the same Scheme evaluator the editor itself 
 
 `M-x customize` lists every setting: fonts, colours, keys and behaviour. A setting that you change stays after a restart. `M-x load-theme` changes the colours of the whole editor.
 
-> **Try it.** Type `M-x load-theme` and look at the themes. Type `C-g` to keep the theme you have.
+> **Try it.** Type `M-x load-theme` and look at the themes. Type `ESC` or `C-g` to keep the theme you have.
 
 > **Try it.** Type `M-x customize` and look at the groups of settings. Type `q` to close it.
 
@@ -556,7 +556,7 @@ You have practised the main ideas:
 - The live Scheme environment lets the editor grow around your work.
 - OTP supplies durable, concurrent mechanisms below that policy.
 
-You do not need to remember every key. Keep using `M-x` to find commands, `C-h` to look at the current world, and `C-g` to leave anything unfinished.
+You do not need to remember every key. Keep using `M-x` to find commands, `C-h` to look at the current world, and `ESC` or `C-g` to leave anything unfinished.
 
 To leave the tutorial, type `C-x k`. If you moved or edited it, Compos asks whether to save this copy and your position. Type `C-h t` whenever you want to come back. If you decline a saved copy, the next `C-h t` loads the installed master.
 

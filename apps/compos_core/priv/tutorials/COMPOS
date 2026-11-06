@@ -82,7 +82,7 @@ If the chat gives no reply, type `M-x setup-ai-guide`. The guide explains connec
 
 ### JEV
 
-JEV needs a TypeSafe API key. Compos reads the key from the `JEV_API_KEY` or `TYPESAFE_API_KEY` environment variable. When neither is set, Compos asks Doppler, in the project and config that the settings `jev-doppler-project` and `jev-doppler-config` name.
+JEV needs a TypeSafe API key. Compos reads the key from the `TYPESAFE_API_KEY` environment variable. `JEV_API_KEY` also works. When neither is set, Compos asks Doppler, in the project and config that the settings `jev-doppler-project` and `jev-doppler-config` name.
 
 > **Try it.** Type `M-x jev`. JEV classifies a sample support message, and the echo area shows its answers. If the echo area says "no answer", the key is not set.
 

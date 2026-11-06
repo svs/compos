@@ -668,7 +668,7 @@
       (lambda (ok? key)
         (if (and ok? key)
             (pass)
-            (fail "JEV has no API key. Set JEV_API_KEY, then type M-x jev again."))))))
+            (fail "JEV has no API key. Set TYPESAFE_API_KEY, then type M-x jev again."))))))
 
 (tutorial-proof! "laya-server"
   (lambda (pass fail)

@@ -766,7 +766,8 @@
                                     (if (= n 0)
                                         "Read this lesson in the lesson pane. Press n when you are ready to go on."
                                         "Every step of this lesson is done. Press n for the next lesson.")))))
-                (let ((c (and step (not done?) (tutorial--cards-of slug (car step)))))
+                ;; the cards stay after the step is done: the text still points at them
+                (let ((c (and step (tutorial--cards-of slug (car step)))))
                   (if c (or (ignore-errors (caddr c)) '()) '()))
                 (if *tutorial-help* (list (tutorial--div "tutorial-help" 'text *tutorial-help*)) '())
                 ;; the slide's keymap, d                ;; the keys are the window's keys bar, as every page has them

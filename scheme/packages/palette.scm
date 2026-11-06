@@ -404,6 +404,15 @@
             (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f)))
             (list 'change
               (lambda (input)
+                ;; RET must never pick a row the input has left behind: the
+                ;; typed words lead at once, and the search fills in after
+                (minibuffer-set-candidates!
+                  (if (equal? (string-trim input) "")
+                      (command-palette-candidates "")
+                      (let ((q (string-trim input)))
+                        (cons (list q "ask  *recipes* finds the recipe for this and runs it")
+                              (filter (lambda (r) (not (equal? (car r) q)))
+                                      (command-palette--past input))))))
                 (debounce!
                   (string-append "command-palette:" (selected-frame))
                   *command-palette-debounce-ms*

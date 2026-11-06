@@ -20,8 +20,15 @@
 ;;; match — the prompt stays open, the way Emacs repeats a search.
 
 ;; (search-find q backward from) -> (start end) or #f
+(define (search-fold? q)
+  ;; case does not count, unless the search text has a capital (Emacs
+  ;; search-upper-case)
+  (equal? q (string-downcase q)))
+
 (define (search-find q backward from)
-  (if backward (buffer-search-backward q from) (buffer-search q from)))
+  (if backward
+      (buffer-search-backward q from (search-fold? q))
+      (buffer-search q from (search-fold? q))))
 
 ;; miss -> one retry from the far end, and the echo area says so
 (define (search-find-wrap q backward from)
@@ -124,7 +131,7 @@
   (if (equal? q "")
       '()
       (let loop ((from 0) (acc '()) (n 0))
-        (let ((m (and (< n isearch-lazy-highlight-max) (buffer-search q from))))
+        (let ((m (and (< n isearch-lazy-highlight-max) (buffer-search q from (search-fold? q)))))
           (if (or (not m) (<= (cadr m) (car m)))
               (reverse acc)
               (loop (cadr m) (cons m acc) (+ n 1)))))))

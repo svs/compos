@@ -681,6 +681,14 @@
                 (fail (string-append "laya does not answer: " (or (plist-get reply 'error) "no answer")
                                      ". Read ~/.compos/laya-daemon.log, then type M-x laya-server again."))))))))
 
+;; the extension step is done when an extension is attached, whatever the
+;; tab list says
+(tutorial-proof! "list-tabs"
+  (lambda (pass fail)
+    (if (browser-connected?)
+        (pass)
+        (fail "No browser extension is connected. Load the extension folder at chrome://extensions, then type M-x list-tabs again."))))
+
 ;; the steps are watched from the start, not only once C-h t is open
 (ignore-errors (lambda () (tutorial--load!) (tutorial--arm!)))
 

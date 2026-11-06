@@ -37,7 +37,7 @@ The sections, in order.
 
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `C-g` to cancel the search and return to where you started.
 
-1. Set up inference
+1. Set up
 2. Key notation
 3. Named commands
 4. Files and buffers
@@ -62,9 +62,9 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 
 ---
 
-## Set up inference
+## Set up
 
-Compos uses three kinds of model. Set them up first, and the later lessons can use them. A lesson that needs no model works without this setup, so you can also come back here later.
+This lesson sets up the models and the browser extension. Compos uses three kinds of model. Set them up first, and the later lessons can use them. A lesson that needs no model works without this setup, so you can also come back here later.
 
 | Model | What it does | Where it runs |
 | --- | --- | --- |
@@ -97,6 +97,18 @@ laya is a 421M decision model. It runs on this machine with MLX, so it needs App
 > **Try it.** Type `M-x local-models`. The laya daemon shows as the host `endpoint:laya`. Type `q` to close the list.
 
 laya does not write text. Compos asks it for a decision when the decision must be fast, free, and stay on this machine.
+
+### The browser extension
+
+The extension connects Compos to your Chrome tabs. With it, `M-x` and `C-x` work in any page, and Compos can read a tab, type into it, and open pages in your own browser with your logins. The extension is in the `extension` folder of the Compos checkout.
+
+1. Open `chrome://extensions` in Chrome.
+2. Turn on **Developer mode**, at the top right.
+3. Click **Load unpacked**, and choose the `extension` folder.
+
+The extension finds the daemon on port 4004 by itself. Its **Options** page shows what it is connected to.
+
+> **Try it.** Type `M-x list-tabs`. Compos lists your open Chrome tabs. If the extension is not connected, the step stays open, and the echo area tells you.
 
 ## Key notation
 

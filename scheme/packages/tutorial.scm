@@ -574,26 +574,24 @@
                                         "Read this lesson in the lesson pane. Press n when you are ready to go on."
                                         "Every step of this lesson is done. Press n for the next lesson.")))))
                 (if *tutorial-help* (list (tutorial--div "tutorial-help" 'text *tutorial-help*)) '())
-                ;; the slide's keymap, drawn: every key is a button with its
-                ;; key on it, and every button is a key
-                (list (component 'ui/actions
-                        (list 'class "tutorial-actions"
-                              'actions (append
-                                         (list (list "tutorial:back" "Back" "p")
-                                               (list "tutorial:next" "Next" "n" "good")
-                                               (list "tutorial:previous-lesson" "Previous lesson" "⇧P")
-                                               (list "tutorial:next-lesson" "Next lesson" "⇧N")
-                                               (list "tutorial:index" "All lessons" "i"))
-                                         (if (equal? slug "set-up") (list (list "tutorial:help" "Help" "h")) '())
-                                         (list (list "tutorial:restart" "Restart lesson" "r")
-                                               (list "tutorial:reset" "Reset tutorial" "⇧R" "bad")))))))))))))
+                ;; the slide's keymap, d                ;; the keys are the window's keys bar, as every page has them
+                '())))))))
+
+(define (tutorial--slide-keys)
+  (append '(("n" "next") ("p" "back") ("N" "next lesson") ("P" "previous lesson")
+            ("i" "lessons"))
+          (if (equal? *tutorial-current* "set-up") '(("h" "help")) '())
+          '(("r" "restart lesson") ("R" "reset"))))
 
 (define (tutorial--draw-detail!)
   (let ((buf *tutorial-detail-buffer*))
     (when (buffer-known? buf)
       (desktop-skip! buf 'render-blocks)
       (buffer-set-local! buf 'render-mode "blocks")
-      (buffer-set-local! buf 'render-blocks (tutorial--detail-blocks)))))
+      (buffer-set-local! buf 'render-blocks (tutorial--detail-blocks))
+      ;; the slide's keys, in the keys bar every page carries
+      (buffer-set-local! buf 'footer-line-blocks
+        (list (component 'ui/keys-bar (list 'main (tutorial--slide-keys))))))))
 
 (define-mode "tutorial-detail-mode"
   (lambda ()
@@ -631,7 +629,6 @@
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
 .tutorial-help { margin-top: 18px; padding: 12px 14px; font-size: 15px; border-left: 3px solid var(--warn-fg);
   background: color-mix(in srgb, var(--warn-fg) 10%, transparent); }
-.tutorial-actions { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border-bg); }
 ")
 
 ;;; the lesson and the practice page
@@ -690,6 +687,9 @@
   (let ((buf *tutorial-buffer*))
     (unless (equal? (buffer-local buf 'tutorial-lesson) (plist-get l 'slug))
       (tutorial--fill! buf (tutorial--practice-text l) "tutorial-practice-mode")
+      (buffer-set-local! buf 'footer-line-blocks
+        (list (component 'ui/keys-bar
+                (list 'main '(("⌃C ⌃N" "next") ("⌃C ⌃P" "back") ("⌃C ⌃L" "lessons"))))))
       (buffer-set-local! buf 'tutorial-lesson (plist-get l 'slug)))))
 
 (define-derived-mode "tutorial-practice-mode" "text-mode" (lambda () #t))

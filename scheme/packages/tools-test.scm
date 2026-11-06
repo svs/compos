@@ -77,3 +77,18 @@
                             (lambda () (selected-frame)))
                           home "a chat that no frame shows keeps the current frame"))))
       (kill-buffer-confirm! "*t-agent-chat*" #f))))
+
+;; The caller is per call: a person's eval has no agent, an agent's eval
+;; finds its chat, and a slug with no chat is no agent at all.
+(deftest 'llm-tool-buffer-follows-the-edit-author
+  "the agent chat of a call comes from the edit author of that call"
+  (lambda ()
+    (buffer-create "*t-ltb-chat*")
+    (buffer-set-local! "*t-ltb-chat*" 'agent-slug "zz-ltb")
+    (check-false! (llm-tool-buffer) "a person's call has no agent chat")
+    (check-equal! (with-edit-author "agent:zz-ltb" (lambda () (llm-tool-buffer)))
+                  "*t-ltb-chat*" "an agent's call finds its chat")
+    (check-false! (with-edit-author "agent:zz-ltb-none" (lambda () (llm-tool-buffer)))
+                  "a slug with no chat is no agent chat")
+    (check-false! (llm-tool-buffer) "nothing stays set after the call")
+    (kill-buffer-confirm! "*t-ltb-chat*" #f)))

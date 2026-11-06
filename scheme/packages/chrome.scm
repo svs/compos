@@ -415,7 +415,7 @@
 (define *browser-tool-policy* (lambda (buf) 'allow))
 
 (define (chrome--tool-buffer)
-  (and (boundp (quote *llm-tool-buffer*)) *llm-tool-buffer*))
+  (and (boundp (quote llm-tool-buffer)) (llm-tool-buffer)))
 
 (define (chrome--tool-allowed?)
   (let ((buf (chrome--tool-buffer)))

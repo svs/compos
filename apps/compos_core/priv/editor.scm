@@ -5910,7 +5910,7 @@
 
 (define-command "restart-daemon" "Save the desktop and restart the daemon"
   (lambda ()
-    (let ((tool-buf (and (boundp (quote *llm-tool-buffer*)) *llm-tool-buffer*)))
+    (let ((tool-buf (and (boundp (quote llm-tool-buffer)) (llm-tool-buffer))))
       (if tool-buf
           (let ((verdict
                   (permit? tool-buf "restart-daemon" "command" "")))

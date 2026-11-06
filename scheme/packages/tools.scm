@@ -13,9 +13,17 @@
 
 (define *llm-tools* '())
 
-;; Non-#f only while an LLM tool evaluates Scheme. Browser policy uses this
-;; dynamic seam to restrict agents without breaking the user's browser-aware
-;; editor commands.
+;; The chat whose agent makes the call that runs now, or #f for a person.
+;; It reads the edit author, which the caller's process holds. A global set
+;; around the tool call was shared by every lane: two parallel calls left it
+;; set, and then the user's own M-x restart-daemon read as an agent's call.
+(define (llm-tool-buffer)
+  (let ((a (current-edit-author)))
+    (and (string? a) (string-prefix? "agent:" a)
+         (let ((buf (agent-buf (substring a 6 (string-length a)))))
+           (and buf (buffer-exists? buf) buf)))))
+
+;; retired: a package outside the repo may still read it
 (define *llm-tool-buffer* #f)
 
 ;; EFFECTS is the tool's side-effect declaration for the permission
@@ -182,17 +190,11 @@
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (plist-get args 'code))
-           (previous-tool-buffer *llm-tool-buffer*)
            ;; A tool has a logical current buffer, never a claim on the
            ;; user's selected window. Inside this binding switch-to-buffer!
            ;; retargets subsequent point-relative operations without display.
-           (r (begin
-                (set! *llm-tool-buffer* (current-buffer))
-                (let ((result
-                        (with-current-buffer (current-buffer)
-                          (lambda () (eval-string-safe code)))))
-                  (set! *llm-tool-buffer* previous-tool-buffer)
-                  result))))
+           (r (with-current-buffer (current-buffer)
+                (lambda () (eval-string-safe code)))))
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
           (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))
@@ -354,6 +356,8 @@
          (string-append "M-x command:\n" (function-source (command-fn name))))
         (else (string-append "no function or command named "
                              (symbol->string name)))))
+(public! 'llm-tool-buffer "(llm-tool-buffer) — the chat whose agent makes the current call, by the edit author; #f for a person")
+(catalog-meta! 'function "llm-tool-buffer" 'domain 'chat 'effects '(read))
 (public! 'describe-function "(describe-function 'NAME) — the Scheme source of a function or M-x command; a builtin gives its one-line doc")
 (catalog-meta! 'function "describe-function" 'domain 'discovery 'effects '(read))
 ;; reads the catalog's stamps; ON-UNSTAMPED is the caller's own effect

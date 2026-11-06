@@ -61,9 +61,7 @@
 
 (define (agent-sandbox--author-chat)
   "the chat whose agent is evaluating now, by the edit author, or #f"
-  (let ((author (current-edit-author)))
-    (and (string? author) (string-prefix? "agent:" author)
-         (agent-buf (substring author 6 (string-length author))))))
+  (llm-tool-buffer))
 
 (define (agent-sandbox-current-chat)
   "(agent-sandbox-current-chat) — the agent's chat this call runs for: the edit author, else an agent chat that is the current buffer; #f for a person"

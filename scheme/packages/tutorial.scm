@@ -581,23 +581,16 @@
           (tutorial-step-done! (car w) (cadr w)))))))
 
 (define (tutorial-step-done! slug i)
-  "Mark step I of lesson SLUG done: the slide moves on, and so does a finished lesson."
+  "Mark step I of lesson SLUG done. The slide stays, and says that n goes on:
+   you choose when to move, after you have seen what the step did."
   (let ((l (tutorial-lesson slug)))
     (when (and l (not (tutorial-step-done? slug i)))
       (tutorial--mark! slug i)
       (set! *tutorial-help* #f)
-      (if (tutorial-lesson-done? l)
-          (let ((to (tutorial--nth (+ (plist-get l 'n) 1))))
-            (if to
-                (begin (tutorial--go! to)
-                       (message (string-append "Lesson done. Next: " (plist-get to 'title))))
-                (begin (tutorial--changed!)
-                       (message "You finished the tutorial"))))
-          (begin
-            (when (equal? slug *tutorial-current*)
-              (set! *tutorial-shown* (or (tutorial--next-step l) i)))
-            (tutorial--changed!)
-            (message "Done. Next step."))))))
+      (tutorial--changed!)
+      (message (cond ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")
+                     ((tutorial--nth (+ (plist-get l 'n) 1)) "Lesson done. Press n for the next lesson")
+                     (else "You finished the tutorial"))))))
 
 ;;; keys as people know them
 
@@ -705,6 +698,11 @@
 (define (tutorial--div class &rest more)
   (append (list 'tag "div" 'class class) more))
 
+(define (tutorial--done-text l i)
+  (if (< (+ i 1) (tutorial--step-count l))
+      "Done. Press `n` for the next step."
+      "Lesson done. Press `n` for the next lesson."))
+
 (define (tutorial--detail-blocks)
   (let ((l (tutorial--lesson-now)))
     (if (not l)
@@ -742,12 +740,14 @@
                                   ((and p (not done?) (equal? *tutorial-probe-failed* here))
                                    (tutorial--div "tutorial-state tutorial-failed"
                                      'text "That did not work. Press t to try again."))
-                                  (p (tutorial--div "tutorial-state"
-                                       'children (tutorial--say (if done? "Done. Press `n` for the next step." "Press `t` to run the check."))))
+                                  (p (tutorial--div (if done? "tutorial-state tutorial-press tutorial-done" "tutorial-state")
+                                       'children (tutorial--say (if done? (tutorial--done-text l i) "Press `t` to run the check."))))
                                   (else
-                          (tutorial--div (if (or done? (not (or (pair? (cadr step)) (tutorial--await-of slug (car step)) (tutorial--cards-of slug (car step)))))
-                                             "tutorial-state tutorial-press" "tutorial-state")
-                            'children (tutorial--say (cond (done? "Done. Press `n` for the next step.")
+                          (tutorial--div (cond (done? "tutorial-state tutorial-press tutorial-done")
+                                               ((not (or (pair? (cadr step)) (tutorial--await-of slug (car step)) (tutorial--cards-of slug (car step))))
+                                                "tutorial-state tutorial-press")
+                                               (else "tutorial-state"))
+                            'children (tutorial--say (cond (done? (tutorial--done-text l i))
                                         ((tutorial--cards-of slug (car step))
                                          "Choose one below. The slide moves on when you do.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
@@ -875,11 +875,13 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 /* a step that waits for n says so plainly */
 .tutorial-press { font-size: 17px; color: var(--default-fg); padding: 10px 14px; margin-top: 6px;
   border-left: 3px solid var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 8%, transparent); }
+/* a step that is done: green, and n goes on */
+.tutorial-done { border-left-color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 12%, transparent); }
 /* a new step slides in; two names for each way, so a patched page plays it again */
-.tutorial-from-right-a { animation: tutorial-in-right-a .28s ease-out; }
-.tutorial-from-right-b { animation: tutorial-in-right-b .28s ease-out; }
-.tutorial-from-left-a { animation: tutorial-in-left-a .28s ease-out; }
-.tutorial-from-left-b { animation: tutorial-in-left-b .28s ease-out; }
+.tutorial-from-right-a { animation: tutorial-in-right-a .5s ease-out; }
+.tutorial-from-right-b { animation: tutorial-in-right-b .5s ease-out; }
+.tutorial-from-left-a { animation: tutorial-in-left-a .5s ease-out; }
+.tutorial-from-left-b { animation: tutorial-in-left-b .5s ease-out; }
 @keyframes tutorial-in-right-a { from { transform: translateX(56px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes tutorial-in-right-b { from { transform: translateX(56px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes tutorial-in-left-a { from { transform: translateX(-56px); opacity: 0; } to { transform: none; opacity: 1; } }

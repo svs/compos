@@ -278,6 +278,17 @@
 
 ;; (TITLE BINDINGS) for the pattern that reads TEXT, else #f. The pattern
 ;; with the most literal words wins; a pattern of slots alone reads nothing.
+;; A pattern that opens with a slot reads the end of the words, with the
+;; shortest argument that fits: in "switch to 2 column layout" the words
+;; before "2" are the asking, not the argument.
+(define (recipe--match-tail pattern words)
+  (if (and (pair? pattern) (recipe--slot (car pattern)))
+      (let loop ((k (- (length words) 1)))
+        (and (>= k 0)
+             (or (recipe--match-words pattern (list-tail words k))
+                 (loop (- k 1)))))
+      (recipe--match-words pattern words)))
+
 (define (recipe-match text)
   (let ((words (recipe--words text)))
     (cadr
@@ -287,7 +298,7 @@
                              (n (length (remove recipe--slot pw)))
                              (b (and (> n (car best))
                                      (assoc (car row) *recipes*)
-                                     (recipe--match-words pw words))))
+                                     (recipe--match-tail pw words))))
                         (if b (list n (list (car row) b)) best)))
                     best
                     (cadr row)))
@@ -343,6 +354,26 @@
                                   "")))
     title))
 
+(effects! '(destroy))
+;; Drop a recipe: from the book, its patterns, apropos and your file.
+(define (recipe-forget! title)
+  (let ((path (recipes-user-path)))
+    (set! *recipes* (remove (lambda (r) (equal? (car r) title)) *recipes*))
+    (set! *recipe-patterns* (remove (lambda (r) (equal? (car r) title)) *recipe-patterns*))
+    (set! *catalog* (remove-plists *catalog* 'kind "recipe" 'name title))
+    (set! *catalog-keys* (remove (lambda (k) (equal? k (string-append "recipe:" title))) *catalog-keys*))
+    (catalog--touch!)
+    (when (file-exists? path)
+      (let ((parts (string-split (read-file path) recipes--marker)))
+        (write-file! path
+          (string-append (car parts)
+            (string-join (map (lambda (b) (string-append recipes--marker b))
+                              (remove (lambda (b) (string-prefix? (string-append title "\n") b))
+                                      (cdr parts)))
+                         "")))))
+    title))
+
+(effects! '(write))
 (define (recipes-load-user!)
   (let ((path (recipes-user-path)))
     (when (file-exists? path)
@@ -354,6 +385,8 @@
   "(recipe-match \"open notes.md\") -- (TITLE ((SLOT VALUE) ...)) for the pattern that reads the words, else #f")
 (public! 'recipe-learn!
   "(recipe-learn! TITLE EXPR [INPUTS PATTERNS]) -- define a recipe and save it to <compos-home>/recipes.scm")
+(public! 'recipe-forget!
+  "(recipe-forget! TITLE) -- drop a recipe from the book, apropos and <compos-home>/recipes.scm")
 (public! 'recipes-user-path "(recipes-user-path) -- the file of the recipes you learned")
 
 (recipe-patterns! "open a file"

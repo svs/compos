@@ -85,6 +85,8 @@
                  (map (lambda (h)
                         (let ((kind (plist-get h 'kind)))
                           (cond ((equal? kind "command") h)
+                                ;; a recipe read with its arguments is the typed row
+                                ((plist-get h 'bindings) #f)
                                 ((and (equal? kind "recipe") (boundp (quote *recipes*))
                                       (assoc (plist-get h 'name) *recipes*))
                                  (command-palette--recipe-hit (assoc (plist-get h 'name) *recipes*)))
@@ -228,6 +230,9 @@
       ((command-palette--learned choice)
        (let ((row (command-palette--learned choice)))
          (command-palette--run-recipe (assoc (cadr row) *recipes*) (caddr row))))
+      ((command-palette--reading choice)
+       (let ((m (command-palette--reading choice)))
+         (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
       (else (command-palette--pick! choice)))))
 
 ;; Words no row is named for go to the *recipes* chat. It finds the recipe
@@ -244,8 +249,27 @@
   (let ((q (string-trim query)))
     (if (equal? q "")
         rows
-        (cons (or (assoc q rows) (list q "ask  *recipes* finds the recipe for this and runs it"))
+        (cons (or (and (command-fn q) (assoc q rows)) (command-palette--typed-row q))
               (filter (lambda (r) (not (equal? (car r) q))) rows)))))
+
+;; the recipe a pattern reads in TEXT, with its arguments: (TITLE BINDINGS)
+(define (command-palette--reading text)
+  (and (boundp 'recipe-match) (recipe-match text)))
+
+;; the typed row says what RET will do with the words
+(define (command-palette--typed-row q)
+  (let ((learned (command-palette--learned q))
+        (m (command-palette--reading q))
+        (say (lambda (title bindings)
+               (string-append "recipe  " title
+                 (apply string-append
+                        (map (lambda (b) (string-append "  " (symbol->string (car b)) "="
+                                                        (if (string? (cadr b)) (cadr b) (value->string (cadr b)))))
+                             bindings))))))
+    (list q (cond ((and (boundp '*recipes*) (assoc q *recipes*)) (say q '()))
+                  (learned (say (cadr learned) (caddr learned)))
+                  (m (say (car m) (cadr m)))
+                  (else "ask  *recipes* finds the recipe for this and runs it")))))
 
 
 ;;; Words no recipe reads go to the *recipes* chat: an ordinary chat that
@@ -288,9 +312,13 @@
     "find the recipe for \"WORDS\". Look for a recipe that does it with (apropos WORDS 'recipe) or (recipes); "
     "split the words into its arguments (each file, buffer, name, number or text) and run it with (recipe-run! TITLE BINDINGS), "
     "BINDINGS ((slot \"value\") ...). When no recipe does it, find the calls with apropos and "
-    "save one with (recipe-learn! TITLE EXPR INPUTS PATTERNS), EXPR with {{slot}} where each argument goes, "
-    "INPUTS ((slot \"Prompt: \" [number]) ...), PATTERNS the command words with {{slot}} for each argument, as (\"open {{path}}\"); "
-    "then run it with recipe-run!. "
+    "save one with (recipe-learn! TITLE EXPR INPUTS PATTERNS). Write it for every value, not for this one: "
+    "\"use a dark theme\" is the command \"use a ... theme\" with the argument dark, so TITLE is \"use a {{theme}} theme\" "
+    "and EXPR handles any theme. TITLE and PATTERNS keep the command words and put a {{slot}} where each argument goes; "
+    "EXPR has {{slot}} where each argument goes; INPUTS ((slot \"Prompt: \" [number]) ...); "
+    "PATTERNS the ways to say it, as (\"use a {{theme}} theme\" \"{{theme}} theme\"). "
+    "When a recipe you find does one value of a command, make it general and drop the old one with (recipe-forget! TITLE). "
+    "Check (recipe-match WORDS), then run it with recipe-run!. "
     "The recipes go to " (recipes-user-path) ". Reply in one line.\n\n"))
 
 ;; the live chat, else the one kept for 'recipes read back, else #f

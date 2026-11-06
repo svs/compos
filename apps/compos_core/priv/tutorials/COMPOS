@@ -223,13 +223,15 @@ You started a prefix command and cancelled it.
 
 Every action in Compos is a named command. A key binding, a menu, a Scheme program, an agent, a test, or an outside client can all run the same command. The key is only one way to ask for the action.
 
-`M-x` asks for a command by name. The list gets shorter as you type, and it shows each command's key beside the name. So using names teaches you the keys.
+`M-x` asks for a command by name. The list gets shorter as you type. Beside each name, the margin shows two things: the key that runs the command, and one line on what it does. So using names teaches you the keys.
 
-> **Try it.** Type `M-x`, then type `recenter`, then choose `recenter-top-bottom` and press `RET`. The line at point moves on the screen, but point stays on the same text.
+> **Try it.** In the practice page, type `M-x`, then type `previous`. Read the margin beside `previous-buffer`: its key, `C-x <left>`, and "Switch to the previously used buffer". Press `RET` to run it. The page shows the buffer you used before.
+
+> **Try it.** Type `C-x <right>` to come back to the practice page. You did not need `M-x` this time: the margin told you the key.
 
 You never need to know a command before you use it. Type the words you would use to describe what you want.
 
-> **Try it.** Type `M-x`, then type `tutorial`, and notice `help-with-tutorial` with `C-h t` beside it. Type `C-g` to leave the command picker.
+> **Try it.** Type `M-x`, then type `new chat`. Read the margin beside **chat-new**: it starts a new chat buffer, and the margin shows its key. Press `ESC` to leave the command picker. A later lesson starts a chat.
 
 Agents use this same list. An agent does not guess which rectangle is a button. It finds and runs the named commands you use.
 

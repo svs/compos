@@ -669,6 +669,16 @@
 
 ;;; the slide
 
+(define (tutorial--prose text)
+  ;; plain words, and **a name** in bold
+  (let loop ((ps (string-split text "**")) (bold? #f) (out '()))
+    (if (null? ps)
+        (reverse out)
+        (loop (cdr ps) (not bold?)
+              (if (equal? (car ps) "")
+                  out
+                  (cons (list 'tag "span" 'class (if bold? "tutorial-strong" "tutorial-text") 'text (car ps)) out))))))
+
 (define (tutorial--say text)
   ;; the slide's words: each key a keycap, the editor's c-action-key with a
   ;; box around it, one cap per key of a sequence; a name beside a key, such
@@ -678,7 +688,7 @@
         (reverse out)
         (loop (cdr parts) (not code?)
               (cond ((equal? (car parts) "") out)
-                    ((not code?) (cons (list 'tag "span" 'class "tutorial-text" 'text (car parts)) out))
+                    ((not code?) (append (reverse (tutorial--prose (car parts))) out))
                     (else
                       (let ((tokens (string-split (car parts) " ")))
                         (if (tutorial--key-label (car tokens))
@@ -861,6 +871,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 30%, transparent);
   border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
+.tutorial-strong { font-weight: 600; }
 /* a step that waits for n says so plainly */
 .tutorial-press { font-size: 17px; color: var(--default-fg); padding: 10px 14px; margin-top: 6px;
   border-left: 3px solid var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 8%, transparent); }

@@ -324,6 +324,7 @@
     "The user typed: " (value->string text) "\n\n"
     "The calls that may do it:\n" (string-join (map command-palette--hit-line hits) "\n") "\n\n"
     "Split the words. The command is what to do. Each argument is a value in the words: a file, buffer, name, number or text.\n"
+    "The expression does the thing now, on the screen; saving a setting alone does not.\n"
     "Answer one Scheme list and nothing else:\n"
     "(recipe TITLE EXPR INPUTS PATTERNS)\n"
     "TITLE: the task in general words, with no argument values.\n"
@@ -375,7 +376,16 @@
                (bindings (and read (recipe--match-words (recipe--words read) words))))
           (if (not read)
               (list 'no (string-append "no pattern reads " (value->string text)))
-              (command-palette--check-code recipe bindings)))))))
+              (let ((fixed (command-palette--fixed-number words bindings)))
+                (if fixed
+                    (list 'no (string-append "the word " (value->string fixed)
+                                             " is a value, so it is an argument: give it a {{slot}}"))
+                    (command-palette--check-code recipe bindings)))))))))
+
+;; a number in the words that no slot took: the pattern made it a command word
+(define (command-palette--fixed-number words bindings)
+  (let ((taken (apply append (map (lambda (b) (recipe--words (cadr b))) bindings))))
+    (find (lambda (w) (and (command-palette--number w) (not (member w taken)))) words)))
 
 ;; a number slot must read as a number; then the expression must name real calls
 (define (command-palette--check-code recipe bindings)

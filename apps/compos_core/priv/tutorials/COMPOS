@@ -336,7 +336,7 @@ A buffer can belong to several useful contexts without being trapped in one appl
 
 ## Agents
 
-> **Before you start.** Type `M-x setup-ai-guide`. Choose a connector, complete its login or key setup, and test one reply in a chat. Return here with `C-h t`. A connector in a list may still need authentication.
+The Set up lesson chose the model that new chats use, and tested that it answers.
 
 In most programs, a chat sidebar and an application share a screen but stay separate systems. The assistant sees summaries and a few narrow actions, while the application keeps the real state somewhere else.
 
@@ -367,9 +367,13 @@ A **connector** is how Compos reaches an agent or model. The connector picker sh
 
 ACP is the Agent Client Protocol. It lets Compos start an external coding agent as a process and exchange structured messages, tools and permissions with it. Codex now uses its app-server protocol instead. The older `codex-acp` connector is deprecated and is not shown in the picker.
 
-> **Try it.** Type `M-x chat-new`. In the new chat, type `C-c b`. The left column lists saved presets, and the right column shows this chat's setup. Press `<right>` to move to the setup. Press `b` and choose `codex-app-server`. Press `m` and choose a model, or choose `default` for the connector default. Press `ESC` to give the setup to the chat. Type a message and press `RET` to send it.
+> **Try it.** Type `M-x chat-new` to start a chat.
 
-If you chose Codex, sign in with `codex login` in a terminal first. The AI starter guide explains how to check the login when a chat returns 401.
+> **Try it.** In the chat, type `C-c b`. A menu opens over the screen with this chat's connector, model and tools. Look at it, then press `ESC` to close it.
+
+> **Try it.** Type a message in the chat and press `RET` to send it.
+
+To give one chat another model, open that menu again: `b` chooses the connector and `m` the model, and `ESC` gives the setup to the chat. If a chat answers 401, the connector needs its login: `M-x setup-ai-guide` explains how.
 
 > **Try it.** From the practice page, type `M-x chat-companion-ask` and ask: "What is the main idea of the lesson on windows?" The companion reads the tutorial's live buffers, so you do not paste them into another program.
 

@@ -1278,6 +1278,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (add-hook! 'browser-attached-hook 'tutorial-recheck!)
 
+;; a chat sends with RET, which runs agent-send
+(tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
+
 ;; the prefix step finishes when the prefix is cancelled
 (tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
 

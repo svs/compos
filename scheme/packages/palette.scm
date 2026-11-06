@@ -76,54 +76,30 @@
   (list 'kind "command" 'name name 'doc (command-doc name)
         'key (let ((k (key-for-command name))) (if (equal? k "") #f k))))
 
-;; The palette draws commands and recipes, so it searches those two alone.
-;; The whole catalog costs an index rebuild after every package load, and
-;; the semantic pass costs a network call. The palette searches again on
-;; every keystroke burst and can pay neither.
+;; The palette draws the commands and recipes apropos finds, in its order,
+;; with the ones whose name holds every word first. Its semantic pass can
+;; take a second, so the refresh runs it in a task after a pause in typing.
 (define (command-palette--search query)
   (let* ((words (apropos-query-words query))
-         ;; (SCORE LENGTH NAME KIND): a name that holds every word ranks
-         ;; above one matched only by its doc or aliases, then shorter first
-         (key (lambda (name kind)
-                (list (if (apropos-text-hit? name words) 0 1)
-                      (string-length name) name kind)))
-         (commands (map (lambda (name) (key name "command"))
-                        (filter (lambda (name)
-                                  (apropos-text-hit?
-                                    (string-append name " " (command-doc name)) words))
-                                (command-names))))
-         (recipes (map (lambda (row) (key (car (car row)) "recipe"))
-                       (filter (lambda (row) (apropos-text-hit? (cadr row) words))
-                               (command-palette--recipe-texts)))))
+         (hits (filter (lambda (h) h)
+                 (map (lambda (h)
+                        (let ((kind (plist-get h 'kind)))
+                          (cond ((equal? kind "command") h)
+                                ((and (equal? kind "recipe") (boundp (quote *recipes*))
+                                      (assoc (plist-get h 'name) *recipes*))
+                                 (command-palette--recipe-hit (assoc (plist-get h 'name) *recipes*)))
+                                (else #f))))
+                      (apropos query))))
+         (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words))))
     (append
       (let ((bind (command-palette--bind-hit query)))
         (if bind (list bind) '()))
-      (map (lambda (k)
-             (if (equal? (nth 3 k) "command")
-                 (command-palette--command-hit (nth 2 k))
-                 (command-palette--recipe-hit (assoc (nth 2 k) *recipes*))))
-           (sort (append commands recipes))))))
+      (filter named? hits)
+      (filter (lambda (h) (not (named? h))) hits))))
 
 ;; A recipe the palette can draw, in apropos hit shape.
 (define (command-palette--recipe-hit recipe)
   (list 'kind "recipe" 'name (car recipe) 'inputs (caddr recipe)))
-
-;; Each recipe with its text, made once for each *recipes* list: a catalog
-;; lookup costs about 10 ms, and a keystroke used to make sixty of them.
-(define *command-palette--recipe-cache* (list #f '()))
-
-(define (command-palette--recipe-texts)
-  (let ((recipes (if (boundp (quote *recipes*)) *recipes* '())))
-    (unless (eq? (car *command-palette--recipe-cache*) recipes)
-      (set! *command-palette--recipe-cache*
-            (list recipes (map (lambda (r) (list r (command-palette--recipe-text r))) recipes))))
-    (cadr *command-palette--recipe-cache*)))
-
-;; A recipe matches on its task words and the aliases people use for it.
-(define (command-palette--recipe-text recipe)
-  (let ((entry (catalog-entry 'recipe (car recipe))))
-    (string-append (car recipe) " "
-                   (or (and entry (catalog--get entry 'aliases)) ""))))
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
@@ -168,17 +144,23 @@
                (list h "past  ask")))
          (take hits *command-palette-past-max*))))
 
-(define *command-palette-debounce-ms* 80)
+(define *command-palette-debounce-ms* 250)
 
 (define (command-palette--refresh input)
   ;; A timer can outlive the prompt that scheduled it. Never put Cmd-p's
   ;; results into a later prompt, and never let an old query replace a newer
-  ;; one after the user has kept typing.
-  (let ((state (minibuffer-state)))
-    (when (and state
-               (equal? (plist-get state 'prompt) "Command: ")
-               (equal? (plist-get state 'input) input))
-      (minibuffer-set-candidates! (command-palette-candidates input)))))
+  ;; one after the user has kept typing. Apropos takes hundreds of ms, so it
+  ;; runs in a task and the prompt is checked again when it answers.
+  (let ((current? (lambda ()
+                    (let ((state (minibuffer-state)))
+                      (and state
+                           (equal? (plist-get state 'prompt) "Command: ")
+                           (equal? (plist-get state 'input) input))))))
+    (when (current?)
+      (task-run! (lambda () (command-palette-candidates input))
+                 (lambda (ok? rows)
+                   (when (and ok? (current?))
+                     (minibuffer-set-candidates! rows)))))))
 
 (define (command-palette--render-recipe expr bindings)
   ;; Every input becomes a printed Scheme string, not source. Quotes,
@@ -370,13 +352,14 @@
             (list 'filter #f)
             (list 'style "palette")))))
 
-;; the end of a turn may write nothing new; its summary still lands. With
-;; no watch up, the summary comes to the echo area.
+;; the end of a turn may write nothing new; its summary still lands. The
+;; turn is over, so the watch closes and the summary comes to the echo area.
 (define (command-palette--recipes-answered buf kind text)
   (when (and (equal? buf command-palette-recipes-chat) (equal? kind 'summary) (string? text))
-    (if *command-palette--watch*
-        (command-palette--watch-refresh #t)
-        (message (string-append "*recipes*: " text)))))
+    (let ((w *command-palette--watch*) (state (minibuffer-state)))
+      (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
+        (minibuffer-cancel!))
+      (message (string-append "*recipes*: " text)))))
 
 (add-hook! 'chat-summary-hook 'command-palette--recipes-answered)
 

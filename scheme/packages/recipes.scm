@@ -41,8 +41,7 @@
 ;;; --- windows ------------------------------------------------------------------
 
 (defrecipe! "open a file"
-  "(visit {{path}} (buffer-group (current-buffer)))"
-  (list (list 'path "File: ")))
+  "(run-command \"find-file\")")
 (catalog-meta! 'recipe "open a file" 'domain 'files 'effects '(write display))
 (defrecipe! "open a file in a split"
   "(let ((group (buffer-group (current-buffer)))) (split-window! 'h) (other-window!) (visit {{path}} group))"
@@ -231,8 +230,8 @@
   "kill close delete remove discard buffer")
 
 ;;; Patterns: the words that ask for a recipe, with its arguments in them.
-;;; "open {{path}}" reads "open notes.md" as the recipe "open a file" with
-;;; path "notes.md": the literal words are the command, and each {{slot}}
+;;; "dired {{path}}" reads "dired src" as the recipe "open a directory" with
+;;; path "src": the literal words are the command, and each {{slot}}
 ;;; takes the words between them. The palette reads what you type this way,
 ;;; so a recipe runs with its arguments and asks for none.
 
@@ -389,8 +388,6 @@
   "(recipe-forget! TITLE) -- drop a recipe from the book, apropos and <compos-home>/recipes.scm")
 (public! 'recipes-user-path "(recipes-user-path) -- the file of the recipes you learned")
 
-(recipe-patterns! "open a file"
-  '("open {{path}}" "open file {{path}}" "visit {{path}}"))
 (recipe-patterns! "open a directory"
   '("dired {{path}}" "open directory {{path}}" "open folder {{path}}"))
 (recipe-patterns! "kill a buffer"

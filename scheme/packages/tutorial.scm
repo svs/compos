@@ -122,11 +122,36 @@
 
 ;;; the master
 
+(define (tutorial--readings lines)
+  ;; the lesson cut at its Try it boxes: reading K is what leads up to Try it
+  ;; K, and the last one keeps the text after the last box. The boxes
+  ;; themselves are the slide's.
+  (let loop ((ls lines) (acc '()) (out '()))
+    (cond ((null? ls)
+           (let ((tail (string-trim (string-join (reverse acc) "\n"))))
+             (reverse (cond ((null? out) (list tail))
+                            ((equal? tail "") out)
+                            (else (cons (string-append (car out) "\n\n" tail) (cdr out)))))))
+          ((string-prefix? *tutorial-try* (car ls))
+           ;; text above a ### heading follows the box before it, so it
+           ;; stays with that box's reading
+           (let* ((chunk (reverse acc))
+                  (head (let find ((xs chunk) (i 0))
+                          (cond ((null? xs) #f)
+                                ((string-prefix? "### " (car xs)) i)
+                                (else (find (cdr xs) (+ i 1))))))
+                  (before (if (and head (pair? out)) (string-trim (string-join (list-head chunk head) "\n")) ""))
+                  (rest (if (and head (pair? out)) (list-tail chunk head) chunk))
+                  (out (if (equal? before "") out (cons (string-trim (string-append (car out) "\n\n" before)) (cdr out)))))
+             (loop (cdr ls) '() (cons (string-trim (string-join rest "\n")) out))))
+          (else (loop (cdr ls) (cons (car ls) acc) out)))))
+
 (define (tutorial--lesson title lines n)
   (let ((lines (filter (lambda (l) (not (equal? l "---"))) (reverse lines))))
     (list 'slug (string-downcase (re-replace-all "[^A-Za-z0-9]+" title "-"))
           'n n 'title title
           'body (string-trim (string-join lines "\n"))
+          'readings (tutorial--readings lines)
           'tries (map (lambda (l)
                         (string-trim (substring-bytes l (string-byte-length *tutorial-try*)
                                                       (string-byte-length l))))
@@ -249,8 +274,14 @@
         (let* ((maps (if (buffer-known? *tutorial-buffer*)
                          (buffer-keymaps *tutorial-buffer*)
                          (list "global")))
-               (steps (apply append (map (lambda (t) (tutorial--bites t maps))
-                                         (plist-get l 'tries)))))
+               ;; a step is (TEXT COMMANDS READING): READING is the part of
+               ;; the lesson its Try it belongs to
+               (steps (let loop ((ts (plist-get l 'tries)) (k 0) (out '()))
+                        (if (null? ts)
+                            out
+                            (loop (cdr ts) (+ k 1)
+                                  (append out (map (lambda (b) (append b (list k)))
+                                                   (tutorial--bites (car ts) maps))))))))
           (set! *tutorial-steps* (alist-put *tutorial-steps* slug steps))
           steps))))
 
@@ -557,17 +588,29 @@
   (let ((w (window-showing buf))) (when w (window-set-point! w 0)))
   (buffer-mark-saved! buf))
 
+(define (tutorial--reading-index l)
+  ;; the reading of the step on the slide; past the last step, the last one
+  (let* ((steps (tutorial--steps l))
+         (rs (plist-get l 'readings))
+         (i *tutorial-shown*))
+    (cond ((< i (length steps)) (caddr (list-ref steps i)))
+          (else (- (length rs) 1)))))
+
 (define (tutorial--draw-lesson! l)
-  ;; the lesson is for reading: rendered, and not for typing in
-  (let ((buf *tutorial-lesson-buffer*))
-    (unless (equal? (buffer-local buf 'tutorial-lesson) (plist-get l 'slug))
+  ;; the lesson is for reading: rendered, not for typing in, and only the
+  ;; part that the step on the slide belongs to
+  (let* ((buf *tutorial-lesson-buffer*)
+         (k (tutorial--reading-index l))
+         (key (list (plist-get l 'slug) k)))
+    (unless (equal? (buffer-local buf 'tutorial-reading) key)
       (tutorial--fill! buf (string-append "# " (number->string (plist-get l 'n)) ". "
-                                          (plist-get l 'title) "\n\n" (plist-get l 'body) "\n")
+                                          (plist-get l 'title) "\n\n"
+                                          (list-ref (plist-get l 'readings) k) "\n")
                        "morg-mode")
       (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
       (preview-heal! buf)
       (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'tutorial-lesson (plist-get l 'slug)))))
+      (buffer-set-local! buf 'tutorial-reading key))))
 
 (define (tutorial--practice-text l)
   ;; the lesson's prose, to move in and change; tables, Try it boxes and
@@ -617,6 +660,8 @@
   (tutorial--save!)
   (tutorial--arm!)
   (tutorial--draw-detail!)
+  (let ((l (tutorial--lesson-now)))
+    (when (and l (buffer-known? *tutorial-lesson-buffer*)) (tutorial--draw-lesson! l)))
   (when (buffer-known? *tutorial-index-buffer*) (list-refresh! *tutorial-index-buffer*)))
 
 (define (tutorial--go! l)
@@ -624,7 +669,6 @@
   (set! *tutorial-shown* (or (tutorial--next-step l) 0))
   (set! *tutorial-help* #f)
   (when (= (tutorial--step-count l) 0) (tutorial--mark! (plist-get l 'slug) 0))
-  (when (buffer-known? *tutorial-lesson-buffer*) (tutorial--draw-lesson! l))
   (when (buffer-known? *tutorial-buffer*) (tutorial--fill-practice! l))
   (tutorial--changed!)
   l)
@@ -687,7 +731,9 @@
       (set! *tutorial-done* '())
       (set! *tutorial-current* #f)
       (for-each (lambda (b) (when (buffer-known? b) (buffer-set-local! b 'tutorial-lesson #f)))
-                (list *tutorial-buffer* *tutorial-lesson-buffer*))
+                (list *tutorial-buffer*))
+      (when (buffer-known? *tutorial-lesson-buffer*)
+        (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-reading #f))
       (tutorial--go! (car (tutorial-lessons)))
       (message "Tutorial progress reset"))
     (lambda () (message "Kept your progress"))))

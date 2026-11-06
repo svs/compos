@@ -227,59 +227,12 @@
       ((equal? (string-trim choice) "") #f)
       (else (command-palette--pick! choice)))))
 
-;; Words no row is named for go to the fast model. It picks the recipe that
-;; does them and reads the recipe's inputs out of the words; an input it
-;; cannot read is asked for. When no recipe fits, *recipes* writes one.
-(define (command-palette--recipe-menu)
-  (string-join
-    (map (lambda (r)
-           (string-append "- " (car r)
-             (if (null? (caddr r))
-                 ""
-                 (string-append "  inputs: "
-                   (string-join (map (lambda (i)
-                                       (string-append (symbol->string (car i))
-                                                      " (" (string-trim (cadr i)) ")"))
-                                     (caddr r))
-                                ", ")))))
-         *recipes*)
-    "\n"))
-
-(define (command-palette--pick-prompt text)
-  (string-append
-    "Someone typed a request into the command palette of an editor. Pick the recipe below "
-    "that does it, and read the recipe's inputs from the request. Answer with JSON only:\n"
-    "{\"recipe\": \"TITLE\", \"inputs\": {\"NAME\": \"VALUE\"}} - leave out an input the request does not give\n"
-    "{\"recipe\": null} - no recipe does it\n\n"
-    "Recipes:\n" (command-palette--recipe-menu) "\n\nRequest: " text))
-
-;; the recipe and its bindings in a model's reply, else #f
-(define (command-palette--picked reply)
-  (let* ((from (string-index reply "{"))
-         (to (string-rindex reply "}"))
-         (json (and from to (< from to)
-                    (ignore-errors (lambda () (json-parse (substring reply from (+ to 1)))))))
-         (recipe (and (pair? json) (string? (plist-get json 'recipe))
-                      (assoc (plist-get json 'recipe) *recipes*))))
-    (and recipe
-         (list recipe
-               (filter (lambda (b) b)
-                       (map (lambda (input)
-                              (let ((v (plist-get (or (plist-get json 'inputs) '()) (car input))))
-                                (cond ((string? v) (list (car input) v))
-                                      ((number? v) (list (car input) (number->string v)))
-                                      (else #f))))
-                            (caddr recipe)))))))
-
+;; Words no row is named for go to the *recipes* chat. It finds the recipe
+;; that does them, reads its arguments out of the words and runs it; when
+;; no recipe fits, it writes one.
 (define (command-palette--pick! text)
-  (message (string-append "Finding a recipe for: " text))
-  (llm-with-model (command-palette--pick-prompt text) (llm-model-for command-palette-recipes-role)
-    (lambda (reply)
-      (let ((picked (command-palette--picked reply)))
-        (if picked
-            (command-palette--run-recipe (car picked) (cadr picked))
-            (command-palette-ask-recipes! text))))
-    (lambda (_) (command-palette-ask-recipes! text))))
+  (command-palette-ask-recipes!
+    (string-append "find the recipe for \"" text "\" and run it with recipe-run!")))
 
 ;; Words no row is named for are a row too, so RET finds the recipe for them.
 ;; A sentence (three words or more) leads; a word or two follows the hits.
@@ -287,7 +240,7 @@
   (let ((q (string-trim query)))
     (if (or (equal? q "") (assoc q rows))
         rows
-        (let ((ask (list q "ask  finds the recipe for this and runs it")))
+        (let ((ask (list q "ask  *recipes* finds the recipe for this and runs it")))
           (if (>= (length (string-split q " ")) 3)
               (cons ask rows)
               (append rows (list ask)))))))
@@ -311,11 +264,13 @@
 ;; what a new *recipes* chat is for; after that it learns from its own turns
 (define (command-palette--recipes-intro)
   (string-append
-    "You turn what the user types in the command palette into recipes. For each request: "
-    "find the calls with apropos; split the words into the command and its arguments (each file, buffer, name, number or text); "
-    "save it with (recipe-learn! TITLE EXPR INPUTS PATTERNS), EXPR with {{slot}} where each argument goes, "
+    "You turn what the user types in the command palette into recipes. Each request reads "
+    "find the recipe for \"WORDS\". Look for a recipe that does it with (apropos WORDS 'recipe) or (recipes); "
+    "split the words into its arguments (each file, buffer, name, number or text) and run it with (recipe-run! TITLE BINDINGS), "
+    "BINDINGS ((slot \"value\") ...). When no recipe does it, find the calls with apropos and "
+    "save one with (recipe-learn! TITLE EXPR INPUTS PATTERNS), EXPR with {{slot}} where each argument goes, "
     "INPUTS ((slot \"Prompt: \" [number]) ...), PATTERNS the command words with {{slot}} for each argument, as (\"open {{path}}\"); "
-    "check (recipe-match WORDS), then run it with (recipe-run! TITLE BINDINGS). "
+    "then run it with recipe-run!. "
     "The recipes go to " (recipes-user-path) ". Reply in one line.\n\n"))
 
 ;; the live chat, else the one kept for 'recipes read back, else #f

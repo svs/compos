@@ -1005,7 +1005,9 @@
                                             (format "~a" (caddr usage)) " in "
                                             (number->string (cadddr usage)) " ms")))
                   (fail (string-append "No decision model answered. Set TYPESAFE_API_KEY for JEV, "
-                                       "or set up laya and type M-x laya-server."))))))))
+                                       "or set up laya and type M-x laya-server.")))))
+          ;; an answer comes in well under a second; five seconds is a hang
+          'timeout 5)))
   (lambda ()
     (string-append "Asking "
                    (if (and (boundp 'decide--first-live) (ignore-errors decide--first-live))

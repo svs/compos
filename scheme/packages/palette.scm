@@ -268,130 +268,237 @@
               (cons ask rows)
               (append rows (list ask)))))))
 
-;;; The *recipes* chat: one chat, kept across restarts, that turns the words
-;;; the palette did not know into a recipe and runs it. It works quietly; its
-;;; one-line answer is in the chat, and the recipe shows its result.
+
+;;; Words no recipe reads become one. apropos finds the calls for the
+;;; words; the fast model sees those calls alone and answers the recipe as
+;;; data: which words are the command, which are the arguments, and the
+;;; expression. The palette checks it, runs it, and saves it. One search and
+;;; one short model call; a wrong answer gets one more, with the reason.
+;;; While it works the palette stays up and shows each step, the newest
+;;; first, and RET or C-g puts it away. An answer that does not hold leaves
+;;; a row that hands the words, and what was found, to the *recipes* chat.
 
 (domain! 'interaction)
-(effects! '(write execute spend))
+(effects! '(write execute external spend))
+
+(defcustom 'command-palette-recipes-role 'fast
+  "The model role that writes a recipe for the palette: llm-model-presets names its model. fast is the quickest."
+  'group 'interaction)
+
+(define (command-palette--recipes-model) (llm-model-for command-palette-recipes-role))
+
+;; how many hits the model reads: enough to hold the call, few enough that
+;; a fast model reads every one
+(define *command-palette-recipe-hits* 15)
+
+(define (command-palette--recipe-hits text)
+  (let ((hits (filter (lambda (e) (member (plist-get e 'kind) '("function" "command" "recipe" "variable")))
+                      (apropos text))))
+    (take hits (min *command-palette-recipe-hits* (length hits)))))
+
+;; one line a hit: the call as written, then its doc
+(define (command-palette--hit-line e)
+  (let ((kind (plist-get e 'kind)) (name (plist-get e 'name)))
+    (string-append "  "
+      (cond ((equal? kind "command") (string-append "(run-command " (value->string name) ")"))
+            ((equal? kind "recipe") (string-append (or (plist-get e 'use) "") "  ; " name))
+            ((equal? kind "variable") name)
+            (else (or (plist-get e 'sig) name)))
+      "  -- " (command-palette--clip (or (plist-get e 'doc) "") 120))))
+
+(define (command-palette--clip line &optional n)
+  (let ((n (or n 160)))
+    (if (> (string-length line) n) (string-append (substring line 0 (- n 3)) "...") line)))
+
+(define (command-palette--recipe-prompt text hits reason)
+  (string-append
+    "Write one recipe for the compos editor. Its language is compos Scheme, not Emacs Lisp.\n"
+    "The user typed: " (value->string text) "\n\n"
+    "The calls that may do it:\n" (string-join (map command-palette--hit-line hits) "\n") "\n\n"
+    "Split the words. The command is what to do. Each argument is a value in the words: a file, buffer, name, number or text.\n"
+    "Answer one Scheme list and nothing else:\n"
+    "(recipe TITLE EXPR INPUTS PATTERNS)\n"
+    "TITLE: the task in general words, with no argument values.\n"
+    "EXPR: a string, one expression made of the calls above, with {{slot}} where each argument goes. {{slot}} becomes a quoted string, so never quote it.\n"
+    "INPUTS: ((slot \"Prompt: \") ...), one row per slot; end a row with number when the value is a number; () when there are no arguments.\n"
+    "PATTERNS: 2 to 4 ways to say it, the command words with {{slot}} for each argument. One must read the typed words.\n"
+    "Example, for open notes.md:\n"
+    "(recipe \"open a file\" \"(visit {{path}} (buffer-group (current-buffer)))\" ((path \"File: \")) (\"open {{path}}\" \"visit {{path}}\"))\n"
+    (if reason (string-append "\nYour last answer failed: " reason "\nAnswer again.\n") "")))
+
+(define (command-palette--unfence s)
+  (string-trim (string-join (filter (lambda (l) (not (string-prefix? "```" (string-trim l))))
+                                    (string-split (string-trim s) "\n"))
+                            "\n")))
+
+;; A fast model quotes a slot, "\"{{name}}\"", though the slot is a quoted
+;; string already; the quotes go, so the value is not quoted twice.
+(define (command-palette--unquote-slots recipe)
+  (let* ((slots (append (map car (caddr recipe))
+                        (apply append (map (lambda (p) (filter (lambda (s) s) (map recipe--slot (recipe--words p))))
+                                           (cadddr recipe)))))
+         (expr (fold (lambda (e s)
+                       (let ((token (string-append "{{" (symbol->string s) "}}")))
+                         (string-join (string-split e (string-append "\"" token "\"")) token)))
+                     (cadr recipe) slots)))
+    (list (car recipe) expr (caddr recipe) (cadddr recipe))))
+
+;; (ok RECIPE BINDINGS CODE) or (no REASON). RECIPE is (TITLE EXPR INPUTS
+;; PATTERNS); BINDINGS are what the pattern reads in TEXT, as the palette
+;; will read them the next time; CODE is the expression they make.
+(define (command-palette--recipe-check text reply)
+  (let* ((forms (ignore-errors (lambda () (scheme-read (command-palette--unfence reply)))))
+         (form (and (pair? forms) (car forms))))
+    (if (not (and (pair? form) (eq? (car form) 'recipe) (= (length form) 5)
+                  (string? (list-ref form 1)) (string? (list-ref form 2))
+                  (list? (list-ref form 3)) (list? (list-ref form 4))
+                  (pair? (list-ref form 4)) (null? (filter (lambda (p) (not (string? p))) (list-ref form 4)))))
+        (list 'no "answer exactly one list: (recipe TITLE EXPR INPUTS PATTERNS), strings where the example has strings")
+        (let* ((recipe (command-palette--unquote-slots (cdr form)))
+               (words (recipe--words text))
+               (read (find (lambda (p) (recipe--match-words (recipe--words p) words)) (cadddr recipe)))
+               (bindings (and read (recipe--match-words (recipe--words read) words))))
+          (if (not read)
+              (list 'no (string-append "no pattern reads " (value->string text)))
+              (let* ((code (command-palette--render-recipe
+                             (cadr recipe) (command-palette--typed recipe bindings)))
+                     (accepted (if (boundp 'fast-accept) (fast-accept code) (list 'ok code))))
+                (if (equal? (car accepted) 'ok)
+                    (list 'ok recipe bindings code)
+                    (list 'no (let ((why (cadr accepted))) (if (string? why) why (value->string why)))))))))))
+
+;; the ask that is up: (TEXT STEPS DONE? REASON); STEPS are rows, newest first
+(define *command-palette--ask* #f)
+
+(define command-palette--chat-row "ask the *recipes* chat")
+
+(define (command-palette--ask-prompt text) (string-append "recipe: " text "  "))
+
+(define (command-palette--ask-rows)
+  (let ((a *command-palette--ask*))
+    (append
+      (list (if (caddr a)
+                (list "done" "RET or C-g puts this away")
+                (list "working ..." "C-g puts this away")))
+      (if (and (caddr a) (cadddr a))
+          (list (list command-palette--chat-row "RET hands it the words and what was found"))
+          '())
+      (cadr a))))
+
+(define (command-palette--ask-refresh!)
+  (let ((a *command-palette--ask*) (state (minibuffer-state)))
+    (when (and a state (equal? (plist-get state 'prompt) (command-palette--ask-prompt (car a))))
+      (minibuffer-set-candidates! (command-palette--ask-rows)))))
+
+(define (command-palette--step! label &optional hint)
+  (let ((a *command-palette--ask*))
+    (when a
+      (set! *command-palette--ask*
+            (list (car a) (cons (list (command-palette--clip label) (or hint "")) (cadr a)) (caddr a) (cadddr a)))
+      (command-palette--ask-refresh!))))
+
+(define (command-palette--ask-done! &optional reason)
+  (let ((a *command-palette--ask*))
+    (when a
+      (set! *command-palette--ask* (list (car a) (cadr a) #t reason))
+      (command-palette--ask-refresh!))))
+
+(define (command-palette--ms t0) (string-append (number->string (- (monotonic-ms) t0)) " ms"))
+
+(define (command-palette-ask-recipes! text)
+  (set! *command-palette--ask* (list text '() #f #f))
+  (minibuffer-read* (command-palette--ask-prompt text) (command-palette--ask-rows)
+    (list (list 'confirm
+            (lambda (choice)
+              (let ((a *command-palette--ask*))
+                (set! *command-palette--ask* #f)
+                (when (and a (equal? choice command-palette--chat-row))
+                  (command-palette--ask-chat! (car a) (cadddr a))))))
+          (list 'cancel (lambda () (set! *command-palette--ask* #f)))
+          (list 'filter #f)
+          (list 'style "palette")))
+  ;; the search costs most of a second: off the lane, with the prompt up
+  (let ((t0 (monotonic-ms)))
+    (task-run! (lambda () (command-palette--recipe-hits text))
+      (lambda (ok? hits)
+        (if (not ok?)
+            (begin (command-palette--step! (string-append "apropos failed: " (value->string hits)))
+                   (command-palette--ask-done! "apropos failed"))
+            (begin
+              (command-palette--step! (string-append "apropos  " (number->string (length hits)) " calls")
+                                      (command-palette--ms t0))
+              (command-palette--recipe-ask! text hits #f 1)))))))
+
+(define (command-palette--recipe-ask! text hits reason tries)
+  (let ((t0 (monotonic-ms)) (model (command-palette--recipes-model)))
+    (command-palette--step! (string-append "asking " model))
+    (llm-with-model (command-palette--recipe-prompt text hits reason) model
+      (lambda (reply)
+        (let ((r (command-palette--recipe-check text reply)))
+          (if (equal? (car r) 'ok)
+              (command-palette--recipe-run! text hits r t0 tries)
+              (command-palette--recipe-retry! text hits (cadr r) t0 tries))))
+      (lambda (err)
+        (command-palette--step! (string-append "model error: " (value->string err)) (command-palette--ms t0))
+        (command-palette--ask-done! (value->string err))))))
+
+(define (command-palette--recipe-retry! text hits reason t0 tries)
+  (command-palette--step! (string-append "wrong: " reason) (command-palette--ms t0))
+  (if (< tries 2)
+      (command-palette--recipe-ask! text hits reason (+ tries 1))
+      (command-palette--ask-done! reason)))
+
+;; run it first: a recipe is saved only when it ran clean
+(define (command-palette--recipe-run! text hits r t0 tries)
+  (let* ((recipe (cadr r)) (bindings (caddr r)) (code (cadddr r)))
+    (command-palette--step! (string-append "recipe  " (car recipe)) (command-palette--ms t0))
+    (command-palette--step! (string-append "  " code))
+    (let ((res (with-frame-windows (lambda () (eval-string-safe code)))))
+      (if (equal? (car res) 'ok)
+          (begin
+            (apply recipe-learn! recipe)
+            (command-palette--step! (string-append "ran  " (value->string (cadr res))) "saved to recipes.scm")
+            (command-palette--ask-done!))
+          (command-palette--recipe-retry! text hits
+            (string-append "running " code " gave: " (value->string (cadr res))) t0 tries)))))
+
+;;; The *recipes* chat takes what the fast model could not: the words, the
+;;; calls apropos found, and why the answer failed.
 
 (define command-palette-recipes-chat "*recipes*")
 
 ;; the live chat, else the one kept for 'recipes read back, else #f
 (define (command-palette--recipes-chat)
   (let ((name command-palette-recipes-chat))
-    (cond
-      ((and (buffer-known? name) (chat-buffer? name)) name)
-      (else (ignore-errors (lambda () (chat-for "recipes")))))))
+    (if (and (buffer-known? name) (chat-buffer? name))
+        name
+        (ignore-errors (lambda () (chat-for "recipes"))))))
 
-(define (command-palette--recipes-brief text)
+(define (command-palette--recipes-brief text reason)
   (string-append
-    "The command palette got words it has no recipe for: " (value->string text) "\n\n"
-    "Make the recipe and run it:\n"
-    "1. Find the calls with (apropos \"...\") and (recipes). When a recipe already does the job, learn it again under its own title with a pattern for these words.\n"
-    "2. (recipe-learn! TITLE EXPR INPUTS PATTERNS) saves it to " (recipes-user-path) ". "
-    "TITLE is the task in general words, as \"open a file\". EXPR is the Scheme, with {{slot}} where each argument goes. "
-    "INPUTS is ((slot \"Prompt: \") ...); end a row with number when the argument is a number. "
-    "PATTERNS are the ways to say it, as (\"open {{path}}\" \"visit {{path}}\"): the literal words are the command, and each {{slot}} takes the words of one argument. "
-    "Every file, buffer, name, number or text in the words is an argument, never part of EXPR.\n"
-    "3. (recipe-match " (value->string text) ") must answer your TITLE and the right arguments.\n"
-    "4. (recipe-run! TITLE '((slot \"value\") ...)) runs it on the user's frame.\n"
-    "Work fast, the user waits on the palette: one apropos, short reads, no exploring.\n"
-    "Reply in one line: the recipe, and what it did."))
+    "The palette could not make a recipe for " (value->string text)
+    (if reason (string-append "; the fast model's last try failed: " reason) "") ".\n"
+    "Write it with (recipe-learn! TITLE EXPR INPUTS PATTERNS), saved to " (recipes-user-path) ". "
+    "EXPR has {{slot}} where each argument goes; INPUTS is ((slot \"Prompt: \") ...); "
+    "PATTERNS are the command words with {{slot}} for each argument, as (\"open {{path}}\"). "
+    "Check (recipe-match " (value->string text) "), then run it with (recipe-run! TITLE BINDINGS). "
+    "Reply in one line."))
 
-(defcustom 'command-palette-recipes-role 'fast
-  "The model role the *recipes* chat runs on: llm-model-presets names its model. fast is the quickest."
-  'group 'interaction)
-
-;; the model the role names, and the connector that runs it
-(define (command-palette--recipes-llm)
-  (let ((model (llm-model-for command-palette-recipes-role)))
-    (list (llm-connector-for-model model) model)))
-
-;; the chat on the role's model: a chat made on another, or since moved,
-;; moves back, and its conversation carries over
-(define (command-palette--recipes-on-model! chat)
-  (let ((llm (command-palette--recipes-llm)))
-    (unless (equal? (buffer-llm-model chat) (cadr llm))
-      (chat-switch! chat (car llm) (cadr llm) "default"))))
-
-(define (command-palette-ask-recipes! text)
-  (let ((brief (command-palette--recipes-brief text))
-        (chat (command-palette--recipes-chat))
-        (llm (command-palette--recipes-llm)))
+(define (command-palette--ask-chat! text reason)
+  (let ((brief (command-palette--recipes-brief text reason))
+        (chat (command-palette--recipes-chat)))
     (if chat
-        (begin
-          (command-palette--recipes-on-model! chat)
-          (command-palette--watch! chat text)
-          (agent-continue! chat brief))
+        (agent-continue! chat brief)
         (let ((made (agent-buf (execute* brief (list 'title command-palette-recipes-chat 'notify #f
-                                                     'connector (car llm) 'model (cadr llm)
-                                                     ;; the editor's tools alone: a short prompt is a fast first token
                                                      'presets '(compos))))))
           ;; kept under 'recipes, so a restart reads the same chat back
-          (ignore-errors (lambda () (chat-for! "recipes" made)))
-          (command-palette--watch! made text)))))
+          (ignore-errors (lambda () (chat-for! "recipes" made)))))
+    (message (string-append "*recipes* has it; C-x b *recipes* shows it"))))
 
-;;; While *recipes* works, the palette stays up and shows the chat from the
-;;; ask on, the newest line first, and follows it as it writes. RET or C-g
-;;; puts it away; the chat goes on without it.
-
-;; (CHAT START TEXT CHANGE-ID) of the watch that is up, or #f
-(define *command-palette--watch* #f)
-
-(define (command-palette--watch-prompt text) (string-append "*recipes*: " text "  "))
-
-(define (command-palette--clip line)
-  (if (> (string-length line) 160) (string-append (substring line 0 157) "...") line))
-
-(define (command-palette--watch-rows chat start text)
-  (let* ((all (buffer-text chat))
-         (tail (if (< start (string-length all)) (substring all start (string-length all)) ""))
-         (brief (command-palette--recipes-brief text))
-         ;; the ask itself is in the transcript too; its lines are not news
-         (lines (filter (lambda (l) (and (not (equal? (string-trim l) ""))
-                                         (not (string-contains? brief (string-trim l)))))
-                        (string-split tail "\n")))
-         (slug (agent-slug-of chat))
-         (busy (and slug (equal? (agent-status slug) 'running))))
-    (cons (if busy
-              (list "working ..." "the chat writes the recipe; C-g puts this away")
-              (list "done" "RET or C-g puts this away"))
-          (map (lambda (l) (list (command-palette--clip (string-trim-right l)) ""))
-               (reverse lines)))))
-
-(define (command-palette--watch-refresh _)
-  (let ((w *command-palette--watch*) (state (minibuffer-state)))
-    (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
-      (minibuffer-set-candidates! (command-palette--watch-rows (car w) (cadr w) (caddr w))))))
-
-(define (command-palette--unwatch!)
-  (let ((w *command-palette--watch*))
-    (when w
-      (remove-on-change! (cadddr w))
-      (set! *command-palette--watch* #f))))
-
-(define (command-palette--watch! chat text)
-  (command-palette--unwatch!)
-  (let* ((start (string-length (buffer-text chat)))
-         (id (on-change! chat
-               (lambda (pos inserted deleted source)
-                 (debounce! "command-palette:recipes" 120 command-palette--watch-refresh #t))
-               'eager)))
-    (set! *command-palette--watch* (list chat start text id))
-    (minibuffer-read* (command-palette--watch-prompt text) (command-palette--watch-rows chat start text)
-      (list (list 'confirm (lambda (_) (command-palette--unwatch!)))
-            (list 'cancel (lambda () (command-palette--unwatch!)))
-            (list 'filter #f)
-            (list 'style "palette")))))
-
-;; The chat works out of sight, so its answer comes to the echo area when
-;; its turn ends: the line the turn's summary lands.
+;; the chat works out of sight; its answer comes to the echo area
 (define (command-palette--recipes-answered buf kind text)
   (when (and (equal? buf command-palette-recipes-chat) (equal? kind 'summary) (string? text))
-    (if *command-palette--watch*
-        (command-palette--watch-refresh #t)
-        (message (string-append "*recipes*: " text)))))
+    (message (string-append "*recipes*: " text))))
 
 (add-hook! 'chat-summary-hook 'command-palette--recipes-answered)
 

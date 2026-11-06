@@ -160,15 +160,16 @@
 
 (define (tutorial--parse text)
   ;; one lesson per ## section of the master; Contents is the master's own
-  ;; map, and the welcome above it opens the first lesson
+  ;; map, and the welcome above it is a lesson of its own, number 0, so the
+  ;; numbers stay those of Contents
   (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (pre '()) (out '()))
     (let ((flush (lambda ()
                    (if (and title (not (equal? title "Contents")))
-                       (cons (tutorial--lesson title (if (null? out) (append acc (list "") pre) acc)
-                                               (+ 1 (length out)))
-                             out)
+                       (cons (tutorial--lesson title acc (+ 1 (length out))) out)
                        out))))
-      (cond ((null? lines) (reverse (flush)))
+      (cond ((null? lines)
+             (let ((ls (reverse (flush))))
+               (if (null? pre) ls (cons (tutorial--lesson "Welcome" pre 0) ls))))
             ((string-prefix? "## " (car lines))
              (loop (cdr lines)
                    (string-trim (substring-bytes (car lines) 3 (string-byte-length (car lines))))
@@ -1207,6 +1208,10 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
     (lambda ()
       (set! *tutorial-done* '())
       (set! *tutorial-current* #f)
+      (set! *tutorial-shown* 0)
+      (set! *tutorial-probing* #f)
+      (set! *tutorial-probe-failed* #f)
+      (set! *tutorial-help* #f)
       (for-each (lambda (b) (when (buffer-known? b) (buffer-set-local! b 'tutorial-lesson #f)))
                 (list *tutorial-buffer*))
       (when (buffer-known? *tutorial-lesson-buffer*)
@@ -1444,28 +1449,63 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
         '())))
 
 (define (tutorial--use-model! name)
-  "New chats use the connector NAME; the model step finishes."
+  "New chats use the connector NAME; the model step finishes, and the test
+   step runs again for NAME."
   (customize-save! 'setup-default-connector name)
   (set! *default-connector* name)
   (setup--save-default! name)
   (message (string-append "New chats use " name))
+  (tutorial--retest-model!)
   (tutorial-recheck!)
   (tutorial--draw-detail!))
+
+(define (tutorial--retest-model!)
+  ;; a passed test proved the old model: it is not done for the new one
+  (let* ((l (tutorial-lesson "set-up"))
+         (i (and l (let find ((ss (tutorial--steps l)) (i 0))
+                      (cond ((null? ss) #f)
+                            ((string-contains? (car (car ss)) "test message") i)
+                            (else (find (cdr ss) (+ i 1))))))))
+    (when i
+      (set! *tutorial-done*
+            (alist-put *tutorial-done* "set-up"
+                       (filter (lambda (j) (not (= j i))) (tutorial--done-steps "set-up"))))
+      (set! *tutorial-probing* #f)
+      (set! *tutorial-probe-failed* #f)
+      (when (equal? *tutorial-current* "set-up") (set! *tutorial-shown* i))
+      (tutorial--changed!))))
 
 (define (tutorial--add-key! name)
   ;; the card's key, asked as *Setup* asks it; the slide redraws when it is in
   (setup-wizard-add-key! *tutorial-detail-buffer* name
     (lambda () (tutorial-recheck!) (tutorial--draw-detail!))))
 
-;; the reply step sends its own test, through the setup chat
+(define (tutorial--test-model! connector k)
+  ;; a fresh chat on CONNECTOR, not the setup chat: that one keeps the
+  ;; connector it was made with, so it would answer for any choice. K gets
+  ;; the reply, or #f when the turn ends without one
+  (let ((slug (ignore-errors
+                (lambda ()
+                  (execute* "This is a test that the model answers. Reply with the one word: ready."
+                            (list 'connector connector 'title "Model test" 'notify #f))))))
+    (if (not slug)
+        (k #f)
+        (subagent-wait (list slug)
+          (lambda (results)
+            (let* ((r (and (pair? results) (car results)))
+                   (s (and r (plist-get r 'text))))
+              (when (and r (buffer-known? (plist-get r 'buffer)))
+                (buffer-kill! (plist-get r 'buffer)))
+              (k (and (string? s) (not (equal? (string-trim s) "")) s))))))))
+
+;; the reply step sends its own test, to the connector the reader chose
 (tutorial-probe! "set-up" "test message to the model"
   (lambda (pass fail)
-    (tutorial--setup-ask!
-      (tutorial--setup-brief "This is a test that the model answers. Reply with the one word: ready.")
+    (tutorial--test-model! *default-connector*
       (lambda (said)
         (if said
             (pass)
-            (fail "The model gave no reply. Type M-x setup to choose another model, or M-x setup-ai-guide to check its login.")))))
+            (fail (string-append *default-connector* " gave no reply. Choose another model, or type M-x setup-ai-guide to check its login."))))))
   (lambda () (string-append "Waiting for a reply from " *default-connector*)))
 
 (add-hook! 'tutorial-trouble-hook

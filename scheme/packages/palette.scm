@@ -192,12 +192,20 @@
                                     (value->string (cadr binding)))))
         (command-palette--render-recipe rendered (cdr bindings)))))
 
+;; "0.3" -> 0.3, "three" -> 3, else #f: string->number answers :error
+(define (command-palette--number s)
+  (let ((n (string->number s))
+        (word (assoc (string-downcase s)
+                     '(("one" 1) ("two" 2) ("three" 3) ("four" 4) ("five" 5) ("six" 6)
+                       ("seven" 7) ("eight" 8) ("nine" 9) ("ten" 10) ("eleven" 11) ("twelve" 12)))))
+    (cond ((number? n) n) (word (cadr word)) (else #f))))
+
 ;; An input whose row ends in number takes a number: "0.3" is 0.3.
 (define (command-palette--typed recipe bindings)
   (map (lambda (b)
          (let ((input (assoc (car b) (caddr recipe))))
-           (if (and input (memq 'number (cddr input)) (string? (cadr b)) (string->number (cadr b)))
-               (list (car b) (string->number (cadr b)))
+           (if (and input (memq 'number (cddr input)) (string? (cadr b)) (command-palette--number (cadr b)))
+               (list (car b) (command-palette--number (cadr b)))
                b)))
        bindings))
 
@@ -310,7 +318,7 @@
   (let ((n (or n 160)))
     (if (> (string-length line) n) (string-append (substring line 0 (- n 3)) "...") line)))
 
-(define (command-palette--recipe-prompt text hits reason)
+(define (command-palette--recipe-prompt text hits reason &optional searched)
   (string-append
     "Write one recipe for the compos editor. Its language is compos Scheme, not Emacs Lisp.\n"
     "The user typed: " (value->string text) "\n\n"
@@ -322,6 +330,9 @@
     "EXPR: a string, one expression made of the calls above, with {{slot}} where each argument goes. {{slot}} becomes a quoted string, so never quote it.\n"
     "INPUTS: ((slot \"Prompt: \") ...), one row per slot; end a row with number when the value is a number; () when there are no arguments.\n"
     "PATTERNS: 2 to 4 ways to say it, the command words with {{slot}} for each argument. One must read the typed words.\n"
+    (if searched
+        "Build it from the closest calls above; a setting is changed with (customize-save! 'NAME VALUE). Never invent a call.\n"
+        "When no call above does it, answer (search \"WORDS\") instead: the words the editor's names would use, abbreviations spelled out, as \"three cols\" -> \"three columns layout\". Never invent a call.\n")
     "Example, for open notes.md:\n"
     "(recipe \"open a file\" \"(visit {{path}} (buffer-group (current-buffer)))\" ((path \"File: \")) (\"open {{path}}\" \"visit {{path}}\"))\n"
     (if reason (string-append "\nYour last answer failed: " reason "\nAnswer again.\n") "")))
@@ -349,23 +360,38 @@
 (define (command-palette--recipe-check text reply)
   (let* ((forms (ignore-errors (lambda () (scheme-read (command-palette--unfence reply)))))
          (form (and (pair? forms) (car forms))))
-    (if (not (and (pair? form) (eq? (car form) 'recipe) (= (length form) 5)
+    (cond
+      ((and (pair? form) (eq? (car form) 'search) (pair? (cdr form)) (string? (cadr form)))
+       (list 'search (cadr form)))
+      ((not (and (pair? form) (eq? (car form) 'recipe) (= (length form) 5)
                   (string? (list-ref form 1)) (string? (list-ref form 2))
                   (list? (list-ref form 3)) (list? (list-ref form 4))
                   (pair? (list-ref form 4)) (null? (filter (lambda (p) (not (string? p))) (list-ref form 4)))))
-        (list 'no "answer exactly one list: (recipe TITLE EXPR INPUTS PATTERNS), strings where the example has strings")
+       (list 'no "answer exactly one list: (recipe TITLE EXPR INPUTS PATTERNS) or (search WORDS), strings where the example has strings"))
+      (else
         (let* ((recipe (command-palette--unquote-slots (cdr form)))
                (words (recipe--words text))
                (read (find (lambda (p) (recipe--match-words (recipe--words p) words)) (cadddr recipe)))
                (bindings (and read (recipe--match-words (recipe--words read) words))))
           (if (not read)
               (list 'no (string-append "no pattern reads " (value->string text)))
-              (let* ((code (command-palette--render-recipe
+              (command-palette--check-code recipe bindings)))))))
+
+;; a number slot must read as a number; then the expression must name real calls
+(define (command-palette--check-code recipe bindings)
+  (let ((bad (find (lambda (b)
+                     (let ((input (assoc (car b) (caddr recipe))))
+                       (and input (memq 'number (cddr input)) (not (command-palette--number (cadr b))))))
+                   bindings)))
+    (if bad
+        (list 'no (string-append "the slot " (symbol->string (car bad)) " wants a number, and the words give "
+                                 (value->string (cadr bad))))
+        (let* ((code (command-palette--render-recipe
                              (cadr recipe) (command-palette--typed recipe bindings)))
                      (accepted (if (boundp 'fast-accept) (fast-accept code) (list 'ok code))))
                 (if (equal? (car accepted) 'ok)
                     (list 'ok recipe bindings code)
-                    (list 'no (let ((why (cadr accepted))) (if (string? why) why (value->string why)))))))))))
+                    (list 'no (let ((why (cadr accepted))) (if (string? why) why (value->string why)))))))))
 
 ;; the ask that is up: (TEXT STEPS DONE? REASON); STEPS are rows, newest first
 (define *command-palette--ask* #f)
@@ -429,23 +455,42 @@
                                       (command-palette--ms t0))
               (command-palette--recipe-ask! text hits #f 1)))))))
 
-(define (command-palette--recipe-ask! text hits reason tries)
+(define (command-palette--recipe-ask! text hits reason tries &optional searched)
   (let ((t0 (monotonic-ms)) (model (command-palette--recipes-model)))
     (command-palette--step! (string-append "asking " model))
-    (llm-with-model (command-palette--recipe-prompt text hits reason) model
+    (llm-with-model (command-palette--recipe-prompt text hits reason searched) model
       (lambda (reply)
         (let ((r (command-palette--recipe-check text reply)))
-          (if (equal? (car r) 'ok)
-              (command-palette--recipe-run! text hits r t0 tries)
-              (command-palette--recipe-retry! text hits (cadr r) t0 tries))))
+          (cond
+            ((equal? (car r) 'ok) (command-palette--recipe-run! text hits r t0 tries))
+            ;; one search with the model's words; a second asks for a recipe
+            ((and (equal? (car r) 'search) (not searched))
+             (command-palette--step! (string-append "search  " (cadr r)) (command-palette--ms t0))
+             (command-palette--recipe-search! text hits (cadr r) tries))
+            ((equal? (car r) 'search)
+             (command-palette--recipe-retry! text hits
+               "you searched once already; answer the recipe from the calls above" t0 tries))
+            (else (command-palette--recipe-retry! text hits (cadr r) t0 tries)))))
       (lambda (err)
         (command-palette--step! (string-append "model error: " (value->string err)) (command-palette--ms t0))
         (command-palette--ask-done! (value->string err))))))
 
+;; apropos again on WORDS, its hits first and the old ones after, then ask
+(define (command-palette--recipe-search! text hits words tries)
+  (let ((t0 (monotonic-ms)))
+    (task-run! (lambda () (command-palette--recipe-hits words))
+      (lambda (ok? found)
+        (let* ((found (if ok? found '()))
+               (names (map (lambda (e) (plist-get e 'name)) found))
+               (merged (append found (filter (lambda (e) (not (member (plist-get e 'name) names))) hits))))
+          (command-palette--step! (string-append "apropos  " (number->string (length found)) " calls")
+                                  (command-palette--ms t0))
+          (command-palette--recipe-ask! text (take merged (min 20 (length merged))) #f tries #t))))))
+
 (define (command-palette--recipe-retry! text hits reason t0 tries)
   (command-palette--step! (string-append "wrong: " reason) (command-palette--ms t0))
   (if (< tries 2)
-      (command-palette--recipe-ask! text hits reason (+ tries 1))
+      (command-palette--recipe-ask! text hits reason (+ tries 1) #t)
       (command-palette--ask-done! reason)))
 
 ;; run it first: a recipe is saved only when it ran clean

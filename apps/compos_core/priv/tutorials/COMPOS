@@ -108,7 +108,9 @@ The extension connects Compos to your Chrome tabs. With it, `M-x` and `C-x` work
 
 The extension finds the daemon on port 4004 by itself. Its **Options** page shows what it is connected to.
 
-> **Try it.** Type `M-x list-tabs`. Compos lists your open Chrome tabs. If the extension is not connected, the step stays open, and the echo area tells you.
+> **Try it.** Load the extension with the steps above. This box fills by itself when the extension connects to Compos.
+
+Then type `M-x list-tabs` to see your open Chrome tabs in Compos.
 
 ## Key notation
 

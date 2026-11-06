@@ -267,7 +267,31 @@
   (let* ((l (and *tutorial-current* (tutorial-lesson *tutorial-current*)))
          (i (and l (tutorial--next-step l))))
     (set! *tutorial-watch*
-          (and i (list (plist-get l 'slug) i (list-ref (tutorial--watches l) i))))))
+          (and i (list (plist-get l 'slug) i (list-ref (tutorial--watches l) i))))
+    (tutorial-recheck!)))
+
+;; A step that waits for the world, not for a command: the step of lesson
+;; SLUG whose text has TEXT is done when READY? answers true. It is asked
+;; when the step comes up, and again when a hook calls tutorial-recheck!.
+(define *tutorial-awaits* '())   ;; ((SLUG TEXT READY?) ...)
+
+(define (tutorial-await! slug text ready?)
+  (set! *tutorial-awaits*
+        (cons (list slug text ready?)
+              (filter (lambda (a) (not (and (equal? (car a) slug) (equal? (cadr a) text))))
+                      *tutorial-awaits*)))
+  slug)
+
+(define (tutorial-recheck!)
+  "Finish the step that is up when the thing it waits for is there."
+  (let* ((w *tutorial-watch*)
+         (l (and w (tutorial-lesson (car w)))))
+    (when l
+      (let* ((step (list-ref (plist-get l 'steps) (cadr w)))
+             (a (find (lambda (a) (and (equal? (car a) (car w)) (string-contains? step (cadr a))))
+                      *tutorial-awaits*)))
+        (when (and a (ignore-errors (caddr a)))
+          (tutorial-step-done! (car w) (cadr w)))))))
 
 (define *tutorial-mx* #f)
 
@@ -681,13 +705,12 @@
                 (fail (string-append "laya does not answer: " (or (plist-get reply 'error) "no answer")
                                      ". Read ~/.compos/laya-daemon.log, then type M-x laya-server again."))))))))
 
-;; the extension step is done when an extension is attached, whatever the
-;; tab list says
-(tutorial-proof! "list-tabs"
-  (lambda (pass fail)
-    (if (browser-connected?)
-        (pass)
-        (fail "No browser extension is connected. Load the extension folder at chrome://extensions, then type M-x list-tabs again."))))
+;; the extension step finishes itself: at once when the extension is
+;; already there, else when it attaches
+(tutorial-await! "set-up" "extension connects"
+  (lambda () (and (boundp 'browser-connected?) (browser-connected?))))
+
+(add-hook! 'browser-attached-hook 'tutorial-recheck!)
 
 ;; the steps are watched from the start, not only once C-h t is open
 (ignore-errors (lambda () (tutorial--load!) (tutorial--arm!)))

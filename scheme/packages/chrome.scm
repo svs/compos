@@ -372,7 +372,11 @@
   ;; both pointless and slow.
   (when (or (equal? op "chord") (equal? op "run"))
     (chrome--refresh-tabs))
-  (cond ((equal? op "attached") (chrome--refresh-tabs) (list 'ok #t))
+  (cond ((equal? op "attached")
+         (chrome--refresh-tabs)
+         ;; anything that waits for the extension hears it here
+         (run-hook-with-args 'browser-attached-hook)
+         (list 'ok #t))
         ;; the editor's own page, naming the browser window it sits in. The
         ;; prologue above stores it; this frame now knows where its tabs go.
         ((equal? op "register") (list 'ok #t))

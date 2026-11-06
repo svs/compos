@@ -423,28 +423,52 @@
 
 ;; A step that starts its own work when it comes up: the step of lesson
 ;; SLUG whose text has TEXT runs PROBE, which calls PASS or FAIL.
-(define *tutorial-probes* '())   ;; ((SLUG TEXT PROBE) ...)
+(define *tutorial-probes* '())   ;; ((SLUG TEXT PROBE LABEL) ...)
 (define *tutorial-probing* #f)   ;; (SLUG STEP) while a probe runs
+(define *tutorial-probe-failed* #f)   ;; (SLUG STEP) after a probe failed
 
-(define (tutorial-probe! slug text probe)
+;; LABEL, a string or a thunk, says on the slide what the probe waits for
+(define (tutorial-probe! slug text probe &optional label)
   (set! *tutorial-probes*
-        (cons (list slug text probe)
+        (cons (list slug text probe (or label "Checking"))
               (filter (lambda (p) (not (and (equal? (car p) slug) (equal? (cadr p) text))))
                       *tutorial-probes*)))
   slug)
 
+(define (tutorial--probe-of slug text)
+  (and text (find (lambda (p) (and (equal? (car p) slug) (string-contains? text (cadr p))))
+                  *tutorial-probes*)))
+
+(define (tutorial--probe-label p)
+  (let ((label (cadddr p))) (if (procedure? label) (label) label)))
+
 (define (tutorial--probe!)
+  ;; a failed probe waits for t: it does not run again on every redraw
   (let* ((w *tutorial-watch*)
          (l (and w (tutorial-lesson (car w))))
          (text (and l (car (list-ref (tutorial--steps l) (cadr w)))))
-         (p (and text (find (lambda (p) (and (equal? (car p) (car w)) (string-contains? text (cadr p))))
-                            *tutorial-probes*))))
-    (when (and p (not (equal? *tutorial-probing* (list (car w) (cadr w)))))
+         (p (and w (tutorial--probe-of (car w) text)))
+         (here (and w (list (car w) (cadr w)))))
+    (when (and p (not (equal? *tutorial-probing* here)) (not (equal? *tutorial-probe-failed* here)))
       (let ((slug (car w)) (i (cadr w)))
-        (set! *tutorial-probing* (list slug i))
+        (set! *tutorial-probing* here)
+        (tutorial--draw-detail!)
         ((caddr p)
-         (lambda () (set! *tutorial-probing* #f) (tutorial-step-done! slug i))
-         (lambda (why) (set! *tutorial-probing* #f) (tutorial--trouble! why)))))))
+         (lambda ()
+           (set! *tutorial-probing* #f)
+           (set! *tutorial-probe-failed* #f)
+           (tutorial-step-done! slug i))
+         (lambda (why)
+           (set! *tutorial-probing* #f)
+           (set! *tutorial-probe-failed* here)
+           (tutorial--trouble! why)))))))
+
+(define (tutorial-retry!)
+  "Run the check of the step on the slide again."
+  (set! *tutorial-probe-failed* #f)
+  (set! *tutorial-help* #f)
+  (tutorial--arm!)
+  (unless *tutorial-probing* (tutorial--draw-detail!)))
 
 (define (tutorial-recheck!)
   "Finish the step on the slide when the thing it waits for is there."
@@ -563,11 +587,22 @@
                              (iota n))))
                 (if step
                     (list (tutorial--div "tutorial-say" 'segs (tutorial--say (car step)))
+                          (let* ((here (list slug i))
+                                 (p (tutorial--probe-of slug (car step))))
+                            (cond ((and p (not done?) (equal? *tutorial-probing* here))
+                                   (tutorial--div "tutorial-state tutorial-busy"
+                                     'text (string-append (tutorial--probe-label p) "...")))
+                                  ((and p (not done?) (equal? *tutorial-probe-failed* here))
+                                   (tutorial--div "tutorial-state tutorial-failed"
+                                     'text "That did not work. Press t to try again."))
+                                  (p (tutorial--div "tutorial-state"
+                                       'text (if done? "Done. Press n for the next step." "Press t to run the check.")))
+                                  (else
                           (tutorial--div "tutorial-state"
                             'text (cond (done? "Done. Press n for the next step.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
                                          "Do it in the practice pane. The slide moves on when you do.")
-                                        (else "When you have done it, press n here, or ⌃C ⌃N in the practice page."))))
+                                        (else "When you have done it, press n here, or ⌃C ⌃N in the practice page.")))))))
                     (list (tutorial--div "tutorial-say"
                             'segs (tutorial--say
                                     (if (= n 0)
@@ -581,6 +616,12 @@
   (append '(("n" "next") ("p" "back") ("N" "next lesson") ("P" "previous lesson")
             ("i" "lessons"))
           (if (equal? *tutorial-current* "set-up") '(("h" "help")) '())
+          (let* ((l (tutorial--lesson-now))
+                 (steps (if l (tutorial--steps l) '())))
+            (if (and l (< *tutorial-shown* (length steps))
+                     (tutorial--probe-of *tutorial-current* (car (list-ref steps *tutorial-shown*))))
+                '(("t" "try again"))
+                '()))
           '(("r" "restart lesson") ("R" "reset"))))
 
 (define (tutorial--draw-detail!)
@@ -602,7 +643,7 @@
   '(("n" "tutorial-next") ("RET" "tutorial-next") ("p" "tutorial-back")
     ("N" "tutorial-next-lesson") ("P" "tutorial-previous-lesson")
     ("i" "tutorial-index") ("h" "tutorial-help")
-    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("q" "quit-window")))
+    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("t" "tutorial-retry") ("q" "quit-window")))
 
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
@@ -627,6 +668,11 @@
 .tutorial-key { font-family: var(--font-mono); font-size: .82em; padding: 1px 7px; border: 1px solid var(--border-bg);
   border-radius: 4px; white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
+.tutorial-busy::before { content: \"\"; display: inline-block; width: 10px; height: 10px; margin-right: 9px;
+  vertical-align: -1px; border: 2px solid var(--dim-fg); border-top-color: transparent; border-radius: 50%;
+  animation: tutorial-spin .8s linear infinite; }
+@keyframes tutorial-spin { to { transform: rotate(360deg); } }
+.tutorial-failed { color: var(--warn-fg); }
 /* the tutorial's panes are narrow by design, and their keys are the lesson:
    the keys bar stays, and wraps, where other windows hide it */
 @container (max-width: 520px) { .window.tutorial-pane .buffer-footer:has(.c-keys-bar) { display: flex; } }
@@ -761,8 +807,12 @@
     *tutorial-buffer*))
 
 (define (tutorial--manual? l i)
+  ;; a step done by hand: it watches no command, waits for nothing, and runs
+  ;; no check
   (let ((step (list-ref (tutorial--steps l) i)))
-    (and (null? (cadr step)) (not (tutorial--await-of (plist-get l 'slug) (car step))))))
+    (and (null? (cadr step))
+         (not (tutorial--await-of (plist-get l 'slug) (car step)))
+         (not (tutorial--probe-of (plist-get l 'slug) (car step))))))
 
 (define (tutorial--move! dir)
   (let* ((l (tutorial--lesson-now))
@@ -927,6 +977,9 @@
 (define-command "tutorial-toggle-done" "Mark the lesson on this row done, or not done"
   (lambda () (tutorial-toggle-done!)))
 
+(define-command "tutorial-retry" "Run the check of the step on the slide again"
+  (lambda () (tutorial-retry!)))
+
 (define-command "tutorial-restart-lesson" "Start the lesson on the slide again"
   (lambda () (tutorial-restart-lesson!)))
 
@@ -952,7 +1005,13 @@
                                             (format "~a" (caddr usage)) " in "
                                             (number->string (cadddr usage)) " ms")))
                   (fail (string-append "No decision model answered. Set TYPESAFE_API_KEY for JEV, "
-                                       "or set up laya and type M-x laya-server.")))))))))
+                                       "or set up laya and type M-x laya-server."))))))))
+  (lambda ()
+    (string-append "Asking "
+                   (if (and (boundp 'decide--first-live) (ignore-errors decide--first-live))
+                       (format "~a" (decide--first-live))
+                       "decide")
+                   " a test question")))
 
 ;; the extension step finishes itself: at once when the extension is
 ;; already there, else when it attaches
@@ -1020,7 +1079,8 @@
       (lambda (said)
         (if said
             (pass)
-            (fail "The model gave no reply. Type M-x setup to choose another model, or M-x setup-ai-guide to check its login."))))))
+            (fail "The model gave no reply. Type M-x setup to choose another model, or M-x setup-ai-guide to check its login.")))))
+  (lambda () (string-append "Waiting for a reply from " *default-connector*)))
 
 (add-hook! 'tutorial-trouble-hook
   (lambda (slug why) (tutorial--setup-help! slug (string-append "This step failed: " why))))

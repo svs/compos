@@ -110,6 +110,7 @@
 (define *tutorial-index-buffer* "*tutorial-index*")
 (define *tutorial-app-id* "tutorial")
 (define *tutorial-lessons* #f)
+(define *tutorial-lessons-mtime* #f)
 (define *tutorial-done* '())       ;; ((SLUG (N ...)) ...): the steps the reader finished
 (define *tutorial-current* #f)     ;; the lesson on the slide
 (define *tutorial-shown* 0)        ;; the step on the slide
@@ -178,11 +179,18 @@
 
 (define (tutorial-lessons)
   "The lessons of the bundled master, in order: plists of slug, n, title, body and tries."
-  (or *tutorial-lessons*
+  ;; an edit of the master shows at once: a new mtime parses it again, and
+  ;; the steps and the lesson pane follow
+  (let ((mtime (file-mtime (training-document-path))))
+    (unless (and *tutorial-lessons* (equal? mtime *tutorial-lessons-mtime*))
       (let ((text (read-file (training-document-path))))
         (unless text (error "The bundled Compos tutorial is missing"))
         (set! *tutorial-lessons* (tutorial--parse text))
-        *tutorial-lessons*)))
+        (set! *tutorial-lessons-mtime* mtime)
+        (set! *tutorial-steps* '())
+        (when (buffer-known? *tutorial-lesson-buffer*)
+          (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-lesson #f))))
+    *tutorial-lessons*))
 
 (define (tutorial-lesson slug)
   (find (lambda (l) (equal? (plist-get l 'slug) slug)) (tutorial-lessons)))

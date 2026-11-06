@@ -92,14 +92,38 @@
               (list (cadr url) (caddr url) "img-embed")
               (list (caddr url) e "md-marker")))))
 
+;; A kramdown inline attribute list right after a code span gives it
+;; classes: `C-x`{:.key} draws the code with the face key as well, and the
+;; list itself steps back as markup. AT is the byte in LINE after the span;
+;; the answer is (LENGTH CLASSES), or #f.
+(define (md--ial line at)
+  (let ((len (string-byte-length line)))
+    (and (< (+ at 3) len)
+         (equal? (substring-bytes line at (+ at 2)) "{:")
+         (let loop ((i (+ at 2)))
+           (cond ((>= i len) #f)
+                 ((equal? (substring-bytes line i (+ i 1)) "}")
+                  (let ((names (filter (lambda (w) (not (equal? w "")))
+                                       (string-split (substring-bytes line (+ at 2) i) " "))))
+                    (and (pair? names)
+                         (null? (filter (lambda (w) (not (and (string-prefix? "." w) (> (string-length w) 1)))) names))
+                         (list (- (+ i 1) at) (map (lambda (w) (substring w 1 (string-length w))) names)))))
+                 (else (loop (+ i 1))))))))
+
 (define (md--inline-spans start line caps)
   (apply append
     (map (lambda (c)
            (let ((kind (car c)) (s (cadr c)) (e (caddr c)))
              (cond
                ((equal? kind "code")
-                (let ((n (md--ticks line (- s start) 0)))
-                  (md--wrapped s e n n "morg-code")))
+                (let* ((n (md--ticks line (- s start) 0))
+                       (spans (md--wrapped s e n n "morg-code"))
+                       (ial (md--ial line (- e start))))
+                  (if ial
+                      (append spans
+                              (map (lambda (c) (list (+ s n) (- e n) c)) (cadr ial))
+                              (list (list e (+ e (car ial)) "md-marker")))
+                      spans)))
                ((equal? kind "strong") (md--wrapped s e 2 2 "morg-bold"))
                ((equal? kind "emphasis") (md--wrapped s e 1 1 "morg-italic"))
                ((equal? kind "link") (md--link start line caps s e))

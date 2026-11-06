@@ -107,12 +107,31 @@ defmodule Compos.Core.Markdown.Html do
   # CommonMark: a backslash before ASCII punctuation escapes it
   @backslash_escape ~r/\\[!-\/:-@\[-`{-~]/
 
+  # A kramdown inline attribute list right after a code span gives it classes:
+  # `C-x`{:.key} draws <code class="key">. The list is markup, so it draws
+  # nothing; a caret in it still draws.
+  @ial ~r/\A\{:\s*((?:\.[A-Za-z][\w-]*\s*)+)\}/
+
+  defp ial(text, at) when at < byte_size(text) do
+    case Regex.run(@ial, binary_part(text, at, byte_size(text) - at)) do
+      [whole, classes] ->
+        {byte_size(whole),
+         classes |> String.split(~r/\s+/, trim: true) |> Enum.map(&String.trim_leading(&1, "."))}
+
+      _ ->
+        {0, []}
+    end
+  end
+
+  defp ial(_text, _at), do: {0, []}
+
   defp nodes(nodes, text, from, marks, parent \\ :root) do
     content? = parent not in @containers
 
     {parts, {_at, _after_marker, marks}} =
       Enum.map_reduce(nodes, {from, false, marks}, fn node, {at, after_marker, marks} ->
         {skipped, at, marks} = skip_separator(text, at, node.start, after_marker, marks)
+        {skipped_ial, at, marks} = skip_ial(text, at, node.start, marks)
 
         {gap, marks} =
           cond do
@@ -128,7 +147,7 @@ defmodule Compos.Core.Markdown.Html do
           end
 
         {body, marks} = node(node, text, marks)
-        {[skipped, gap, body], {node.stop, node.kind in @silent, marks}}
+        {[skipped, skipped_ial, gap, body], {node.stop, node.kind in @silent, marks}}
       end)
 
     {parts, marks}
@@ -926,13 +945,31 @@ defmodule Compos.Core.Markdown.Html do
 
   defp children(node, text, marks) do
     {inner, marks} = nodes(node.children, text, node.start, marks, node.kind)
+    {skipped_ial, from, marks} = skip_ial(text, last_stop(node), node.stop, marks)
 
     {tail, marks} =
       if node.kind in @containers,
-        do: gap_marks(last_stop(node), node.stop, marks),
-        else: block_tail(text, last_stop(node), node.stop, marks)
+        do: gap_marks(from, node.stop, marks),
+        else: block_tail(text, from, node.stop, marks)
 
-    {[inner, tail], marks}
+    {[inner, skipped_ial, tail], marks}
+  end
+
+  # The attribute list after a code span at AT draws only its marks; the
+  # text resumes after it. Only a code span ends where a list can start.
+  defp skip_ial(text, at, stop, marks) do
+    case ial(text, at) do
+      {len, [_ | _]} when at > 0 and at + len <= stop ->
+        if binary_part(text, at - 1, 1) == "`" do
+          {drawn, marks} = gap_marks(at, at + len, marks)
+          {drawn, at + len, marks}
+        else
+          {[], at, marks}
+        end
+
+      _ ->
+        {[], at, marks}
+    end
   end
 
   # The newline that ends a block is the end of the block, not a line inside
@@ -989,7 +1026,15 @@ defmodule Compos.Core.Markdown.Html do
   defp tag(%{kind: :strong} = node, _), do: box("strong", node)
   defp tag(%{kind: :emphasis} = node, _), do: box("em", node)
   defp tag(%{kind: :strike} = node, _), do: box("del", node)
-  defp tag(%{kind: :code_span} = node, _), do: box("code", node)
+  defp tag(%{kind: :code_span} = node, text) do
+    case ial(text, node.stop) do
+      {_, [_ | _] = classes} ->
+        {~s(<code class="#{Enum.join(classes, " ")}" data-src="#{node.start}-#{node.stop}">), "</code>"}
+
+      _ ->
+        box("code", node)
+    end
+  end
   defp tag(%{kind: :list} = node, _), do: box(list_tag(node), node)
   defp tag(_node, _text), do: nil
 

@@ -631,6 +631,28 @@
         (string-join (map (lambda (t) (or (tutorial--key-label t) t)) tokens) " ")
         span)))
 
+(define (tutorial--keycaps text)
+  "TEXT for the lesson pane: each key a `KEY`{:.key} span, which morg draws
+   as a keycap; a name beside a key stays plain code."
+  (let loop ((parts (string-split text "`")) (code? #f) (out '()))
+    (if (null? parts)
+        (string-join (reverse out) "")
+        (loop (cdr parts) (not code?)
+              (cons (if (not code?)
+                        (car parts)
+                        (let ((tokens (string-split (car parts) " ")))
+                          (if (tutorial--key-label (car tokens))
+                              (string-join
+                                (map (lambda (t)
+                                       (let ((cap (tutorial--key-label t)))
+                                         (if cap
+                                             (string-append "`" cap "`{:.key}")
+                                             (string-append "`" t "`"))))
+                                     tokens)
+                                " ")
+                              (string-append "`" (car parts) "`"))))
+                    out)))))
+
 (define (tutorial--symbolize text)
   "TEXT with every `key` in it written as the keyboard's symbols."
   (let loop ((parts (string-split text "`")) (code? #f) (out '()))
@@ -787,11 +809,21 @@
 .tutorial-dot-done { background: var(--dim-fg); border-color: var(--dim-fg); }
 .tutorial-dot-here { background: var(--accent-fg); border-color: var(--accent-fg); }
 .tutorial-say { font-size: 26px; line-height: 1.45; margin-bottom: 18px; }
-/* a key is a keycap: the editor's key element in a box, one cap a key */
+/* a key is a keycap: the editor's key element in a box, one cap a key. The
+   cap keeps the main text colour: --accent steps down in an inactive window,
+   and the tutorial's panes are inactive while you practise */
 .tutorial-say c-action-key.tutorial-key { display: inline-block; font-size: .78em; line-height: 1.45;
-  padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; border: 1px solid var(--border-bg);
-  border-bottom-width: 3px; border-radius: 6px; background: var(--hl-line-bg); }
+  padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; color: var(--default-fg);
+  border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
+  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);
+  border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); }
 .tutorial-say .tutorial-code { font-family: var(--font-mono); font-size: .85em; }
+/* morg draws `KEY`{:.key} with the face key: the same keycap */
+c-text.f-key, code.key { display: inline-block; font-family: var(--font-mono); font-weight: var(--fw-semi);
+  color: var(--default-fg); font-size: .82em; line-height: 1.45; padding: 0 .42em; margin: 0 .1em;
+  border: 1px solid color-mix(in srgb, var(--default-fg) 40%, transparent);
+  border-bottom: 3px solid color-mix(in srgb, var(--default-fg) 60%, transparent);
+  border-radius: 6px; background: color-mix(in srgb, var(--default-fg) 7%, var(--default-bg)); white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
 .tutorial-busy::before { content: \"\"; display: inline-block; width: 10px; height: 10px; margin-right: 9px;
   vertical-align: -1px; border: 2px solid var(--dim-fg); border-top-color: transparent; border-radius: 50%;
@@ -844,7 +876,7 @@
                    (head (string-append (if (equal? text "") "" "\n\n")
                                         "# " (number->string (plist-get l 'n)) ". " (plist-get l 'title) "\n\n"))
                    (top (string-byte-length text)))
-              (let rloop ((rs (map tutorial--symbolize (plist-get l 'readings))) (k 0)
+              (let rloop ((rs (map tutorial--keycaps (plist-get l 'readings))) (k 0)
                           (acc (string-append text head)) (st starts))
                 (if (null? rs)
                     (loop (cdr ls2) acc st)

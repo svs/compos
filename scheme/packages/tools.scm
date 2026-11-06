@@ -722,18 +722,24 @@
     (if value (value->string value) "")))
 
 (define (apropos--embedding-text hit)
-  (string-append
-    "Editor API candidate. Kind: " (apropos--embedding-field hit 'kind)
-    ". Name: " (or (plist-get hit 'qualified-name)
-                    (plist-get hit 'name) (plist-get hit 'task) "")
-    ". Description: " (apropos--embedding-field hit 'doc)
-    ". Signature: " (apropos--embedding-field hit 'sig)
-    ". Domain: " (apropos--embedding-field hit 'domain)
-    ". Effects: " (apropos--embedding-field hit 'effects)
-    ". Usage: " (or (plist-get hit 'use) (plist-get hit 'run) "")
-    ;; The words people say for this task, which are rarely the words the
-    ;; identifier uses. "beside" has to reach the other-window operation.
-    ". Also called: " (apropos--embedding-field hit 'aliases)))
+  ;; What it does, in words, and nothing every row shares: a template around
+  ;; each row made every vector alike, and "close this window" scored the
+  ;; template, not "Delete the selected window". The name reads as words
+  ;; (delete-window -> delete window); the aliases are the words people say
+  ;; for it, which are rarely the words the identifier uses.
+  (let* ((name (or (plist-get hit 'name) (plist-get hit 'task) ""))
+         (words (string-trim
+                  (fold (lambda (s sep) (string-join (string-split s sep) " "))
+                        name '("-" "/" "_" "!" "?" "*"))))
+         (text (lambda (key) (let ((v (plist-get hit key)))
+                               (cond ((string? v) v) (v (value->string v)) (else "")))))
+         (doc (text 'doc))
+         (aliases (text 'aliases))
+         ;; a key runs a command: "/" alone is no text to embed
+         (runs (text 'runs)))
+    (string-join (filter (lambda (s) (not (equal? (string-trim s) "")))
+                         (list (if (equal? words "") name words) doc aliases runs))
+                 ". ")))
 
 ;; The sources and their embedding texts change only when the catalog does.
 ;; Rebuilding 1800 strings on every query cost more than a second, and the
@@ -1183,17 +1189,30 @@
          ;; caller waits behind it, so a keystroke that needs the Session
          ;; queued for seconds. It is worth that only when the words found
          ;; nothing. A query the catalog already answered is answered.
-         (semantic-hits
+         (semantic-all
            (if (or lexical? (and (pair? literal-hits) (not semantic?)))
                '()
-               (filter (lambda (hit)
-                         (and (not (apropos--has-hit? literal-hits hit))
-                              (not (apropos--has-hit? suggestions hit))))
-                       (apropos--semantic-hits query rows filters wait?))))
-         (hits (append literal-hits suggestions semantic-hits))
+               (apropos--semantic-hits query rows filters wait?)))
+         (semantic-hits
+           (filter (lambda (hit)
+                     (and (not (apropos--has-hit? literal-hits hit))
+                          (not (apropos--has-hit? suggestions hit))))
+                   semantic-all))
+         ;; asked for meaning: a word hit keeps the semantic score it got, so
+         ;; "start a group" ranks group-new (create a group) over a command
+         ;; whose doc only holds both words
+         (scored (if (and semantic? (not lexical?))
+                     (map (lambda (h)
+                            (let ((s (find (lambda (x) (apropos--same-hit? x h)) semantic-all)))
+                              (if s (append (list 'semantic-score (plist-get s 'semantic-score)) h) h)))
+                          literal-hits)
+                     literal-hits))
+         (hits (append scored suggestions semantic-hits))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
     (if (or (pair? filtered) (null? words) (pair? filters))
-        (apropos--rank filtered query)
+        (if (and semantic? (not lexical?) (pair? semantic-all))
+            (apropos--rank-semantic filtered query)
+            (apropos--rank filtered query))
         ;; No embedding key exists and nothing matched. Try any name shape.
         (map (lambda (e)
                (apropos--enrich

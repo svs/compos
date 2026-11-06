@@ -151,14 +151,12 @@
 ;; RET there keeps the group as it stands, or opens dired on a project
 ;; root. The open buffers follow, then the project's files, so the
 ;; second step of C-x G reaches a file the group never opened.
+;; Only a project group has files to list: its name is its root. A group of
+;; another kind once took the root of any buffer in it, and listed a whole
+;; checkout's files under a group that is not about them, a thousand rows
+;; that made C-x C-g b slow.
 (define (switch-locked-root g)
-  (if (file-directory? g)
-      g
-      (let loop ((bs (group-user-buffers-mru g)))
-        (cond ((null? bs) #f)
-              ((let ((r (buffer-project-root (car bs))))
-                 (and (string? r) (not (equal? r "")) r)))
-              (else (loop (cdr bs)))))))
+  (and (file-directory? g) g))
 
 (define (switch-locked-card g)
   (list (group-container-label g)

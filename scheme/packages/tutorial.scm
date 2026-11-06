@@ -378,10 +378,14 @@
   (set! *tutorial-armed* #t)
   (let* ((l (tutorial--lesson-now))
          (steps (if l (tutorial--steps l) '()))
-         (i *tutorial-shown*))
+         ;; a done step on the slide still hears the next one: a reader who
+         ;; goes on before pressing n is not ignored
+         (i (let next ((i *tutorial-shown*))
+              (if (and l (< i (length steps)) (tutorial-step-done? (plist-get l 'slug) i))
+                  (next (+ i 1))
+                  i))))
     (set! *tutorial-watch*
           (and l (< i (length steps))
-               (not (tutorial-step-done? (plist-get l 'slug) i))
                (list (plist-get l 'slug) i (cadr (list-ref steps i)))))
     (tutorial-recheck!)
     (tutorial--probe!)))
@@ -594,6 +598,9 @@
   (let ((l (tutorial-lesson slug)))
     (when (and l (not (tutorial-step-done? slug i)))
       (tutorial--mark! slug i)
+      ;; a step done ahead of the slide brings the slide to it
+      (when (and (equal? slug *tutorial-current*) (> i *tutorial-shown*))
+        (set! *tutorial-shown* i))
       (set! *tutorial-help* #f)
       (tutorial--changed!)
       (message (cond ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")

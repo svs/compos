@@ -1052,15 +1052,17 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (or (find (lambda (l) (not (tutorial-lesson-done? l))) (tutorial-lessons))
       (car (tutorial-lessons))))
 
+;; the tutorial owns its frame: three equal columns, practice, slide and
+;; lesson, whatever the columns layout holds; reset-layout puts them back
+(define-mode-layout! "tutorial-practice-mode"
+  (list 'h (/ 1 3) 'self *tutorial-detail-buffer* *tutorial-lesson-buffer*))
+
 (define (tutorial-open!)
   "Open the tutorial: practice, slide and lesson, at the step the reader is on."
   (tutorial--load!)
   (let ((panes (tutorial--panes!)))
     (tutorial--go! (or (tutorial--lesson-now) (tutorial--first-open)))
-    ;; columns may hold fewer than the three panes; then they go free
-    (panes-tile! (if (>= (panes-layout-capacity 'columns) (length panes)) 'columns 'free)
-                 panes)
-    (let ((w (window-showing *tutorial-buffer*))) (when w (select-window! w)))
+    (apply-layout! *tutorial-buffer* (mode-layout "tutorial-practice-mode"))
     *tutorial-buffer*))
 
 (define (tutorial--manual? l i)

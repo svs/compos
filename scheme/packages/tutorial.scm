@@ -474,11 +474,56 @@
             (tutorial--changed!)
             (message "Done. Next step."))))))
 
+;;; keys as people know them
+
+;; The master writes keys the Emacs way, and the watch reads them so. The
+;; reader sees the keyboard's own symbols: C-x o is ⌃X O, s-<right> is ⌘→.
+(define *tutorial-modifiers* '(("C-" "⌃") ("M-" "⌥") ("S-" "⇧") ("s-" "⌘")))
+
+(define *tutorial-key-names*
+  '(("RET" "⏎") ("<return>" "⏎") ("SPC" "Space") ("TAB" "⇥") ("<tab>" "⇥")
+    ("DEL" "⌫") ("<backspace>" "⌫") ("<delete>" "⌦") ("ESC" "esc")
+    ("<left>" "←") ("<right>" "→") ("<up>" "↑") ("<down>" "↓")
+    ("<home>" "Home") ("<end>" "End") ("<prior>" "PageUp") ("<next>" "PageDown")))
+
+(define (tutorial--key-label token)
+  ;; one key as symbols, or #f when TOKEN is not a key
+  (let loop ((t token) (mods '()))
+    (let ((m (find (lambda (p) (and (string-prefix? (car p) t) (> (string-length t) 1))) *tutorial-modifiers*)))
+      (if m
+          (loop (substring t 2 (string-length t)) (cons (car m) mods))
+          (let* ((sym (apply string-append
+                             (map cadr (filter (lambda (p) (member (car p) mods)) *tutorial-modifiers*))))
+                 (named (assoc t *tutorial-key-names*))
+                 (base (cond ((equal? t "") (and (pair? mods) ""))
+                             (named (cadr named))
+                             ;; a chord names its letter as the keycap does; a
+                             ;; lone letter stays as typed, since N is Shift-n
+                             ((= (string-length t) 1) (if (pair? mods) (string-upcase t) t))
+                             (else #f))))
+            (and base (or (pair? mods) named (= (string-length t) 1))
+                 (string-append sym base)))))))
+
+(define (tutorial--keys-label span)
+  ;; a span that starts with a key: each key as symbols, the rest as it is
+  (let ((tokens (string-split span " ")))
+    (if (tutorial--key-label (car tokens))
+        (string-join (map (lambda (t) (or (tutorial--key-label t) t)) tokens) " ")
+        span)))
+
+(define (tutorial--symbolize text)
+  "TEXT with every `key` in it written as the keyboard's symbols."
+  (let loop ((parts (string-split text "`")) (code? #f) (out '()))
+    (if (null? parts)
+        (string-join (reverse out) "`")
+        (loop (cdr parts) (not code?)
+              (cons (if code? (tutorial--keys-label (car parts)) (car parts)) out)))))
+
 ;;; the slide
 
 (define (tutorial--say text)
   ;; `keys` stand out on the slide; the rest is plain
-  (let loop ((parts (string-split text "`")) (code? #f) (out '()))
+  (let loop ((parts (string-split (tutorial--symbolize text) "`")) (code? #f) (out '()))
     (if (null? parts)
         (reverse out)
         (loop (cdr parts) (not code?)
@@ -522,7 +567,7 @@
                             'text (cond (done? "Done. Press n for the next step.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
                                          "Do it in the practice pane. The slide moves on when you do.")
-                                        (else "When you have done it, press n here, or C-c C-n in the practice page."))))
+                                        (else "When you have done it, press n here, or ⌃C ⌃N in the practice page."))))
                     (list (tutorial--div "tutorial-say"
                             'segs (tutorial--say
                                     (if (= n 0)
@@ -607,7 +652,7 @@
     (unless (equal? (buffer-local buf 'tutorial-reading) key)
       (tutorial--fill! buf (string-append "# " (number->string (plist-get l 'n)) ". "
                                           (plist-get l 'title) "\n\n"
-                                          (list-ref (plist-get l 'readings) k) "\n")
+                                          (tutorial--symbolize (list-ref (plist-get l 'readings) k)) "\n")
                        "morg-mode")
       (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
       (preview-heal! buf)
@@ -623,7 +668,7 @@
                               (not (string-prefix? "#" p)) (not (string-prefix? "```" p))))
                        (string-split (plist-get l 'body) "\n"))))
     (string-append "Practise here. This page is yours: move, type, kill and undo as you like.\n\n"
-                   (string-join paras "\n\n") "\n")))
+                   (tutorial--symbolize (string-join paras "\n\n")) "\n")))
 
 (define (tutorial--fill-practice! l)
   (let ((buf *tutorial-buffer*))

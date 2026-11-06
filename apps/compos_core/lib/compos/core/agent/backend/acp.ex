@@ -68,15 +68,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
       tool_started: %{},
       # an adapter with no system-prompt channel takes our sections on the
       # session's first turn, and only that one
-      system_sent: false,
-      # the session this thread held before its adapter was closed (an idle
-      # park, a daemon restart): initialize asks for it back with
-      # session/load when the agent advertises loadSession
-      resume: Map.get(config, "resume-session"),
-      # session/load replays the whole conversation as session/update
-      # notifications before it answers; the transcript already shows that
-      # text, so every update is dropped until the reply lands
-      loading: false
+      system_sent: false
     }
 
     {:ok,
@@ -271,6 +263,17 @@ defmodule Compos.Core.Agent.Backend.ACP do
     Map.put(state, :tool_started, started)
   end
 
+  # an adapter puts the cause of an "Internal error" in data, not in message
+  defp rpc_error_text(%{"message" => message} = err) when is_binary(message) do
+    case Map.get(err, "data") do
+      nil -> message
+      data when is_binary(data) -> "#{message} (#{data})"
+      data -> "#{message} (#{json_text(data)})"
+    end
+  end
+
+  defp rpc_error_text(err), do: Backend.error_text(err)
+
   # responses to our requests
   defp handle_frame(state, %{"id" => id} = frame)
        when not is_map_key(frame, "method") do
@@ -304,49 +307,40 @@ defmodule Compos.Core.Agent.Backend.ACP do
             meta -> Map.put(params, "_meta", meta_json(meta))
           end
 
-        state = Map.put(state, :session_params, params)
-        can_load? = get_in(result, ["agentCapabilities", "loadSession"]) == true
-
-        cond do
-          is_binary(state.resume) and can_load? ->
-            %{state | loading: true}
-            |> request("session/load", Map.put(params, "sessionId", state.resume))
-
-          is_binary(state.resume) ->
-            # the thread asked for its old session back and this agent cannot
-            # give it: say so where the reader will see it, then start fresh
-            state
-            |> emit(type: :error, text: "the agent cannot resume a session; this is a fresh one")
-            |> Map.put(:resume, nil)
-            |> request("session/new", params)
-
-          true ->
-            request(state, "session/new", params)
-        end
-
-      # the old session is back: the same id, the conversation still in the
-      # agent. Nothing replayed here reaches the transcript (see :loading).
-      {"session/load", %{"result" => result}} ->
-        sid = state.resume
-
-        %{state | session_id: sid, loading: false}
-        |> emit(type: :session, id: sid, resumed: true)
-        |> session_ready(result || %{})
-
-      {"session/load", %{"error" => err}} ->
-        state
-        |> emit(
-          type: :error,
-          text:
-            "the agent could not resume the session (#{Map.get(err, "message") || Backend.error_text(err)}); this is a fresh one"
-        )
-        |> Map.merge(%{loading: false, resume: nil})
-        |> request("session/new", state.session_params)
+        request(state, "session/new", params)
 
       {"session/new", %{"result" => %{"sessionId" => sid} = result}} ->
-        %{state | session_id: sid}
-        |> emit(type: :session, id: sid, resumed: false)
-        |> session_ready(result)
+        state = %{state | session_id: sid}
+
+        # the adapter reports which model the session ACTUALLY runs (and
+        # the pickable list) — the truth the modeline shows
+        state =
+          case result do
+            %{"models" => %{"currentModelId" => cur} = ms} ->
+              emit(state,
+                type: :"model-state",
+                current: cur,
+                available:
+                  for m <- Map.get(ms, "availableModels", []) do
+                    [Map.get(m, "modelId"), Map.get(m, "name", "")]
+                  end
+              )
+
+            _ ->
+              state
+          end
+
+        # ...and which permission modes it offers, in the SAME payload. We
+        # used to drop this: it is how `auto` stops the agent asking at all.
+        state = emit_mode_state(state, Map.get(result, "modes"))
+
+        # a config-options agent (opencode) reports model and mode as
+        # session config options instead of the two keys above
+        state = ingest_config_options(state, Map.get(result, "configOptions"))
+        state = push_pinned_model(state)
+        state = push_pinned_effort(state)
+
+        emit(state, type: :ready)
 
       {"session/set_model", %{"result" => _}} ->
         state
@@ -356,8 +350,14 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
       # the response carries the COMPLETE option list — setting one option
       # may change another (opencode grows an effort option per model)
-      {"session/set_config_option", %{"result" => result}} ->
+      {{:config, _id, _value}, %{"result" => result}} ->
         ingest_config_options(state, Map.get(result, "configOptions"))
+
+      {{:config, id, value}, %{"error" => err}} ->
+        emit(state,
+          type: :error,
+          text: "session/set_config_option #{id}=#{inspect(value)}: #{rpc_error_text(err)}"
+        )
 
       {"session/prompt", %{"result" => result}} ->
         state
@@ -380,7 +380,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
         state =
           emit(state,
             type: :error,
-            text: "#{method}: #{Map.get(err, "message") || Backend.error_text(err)}"
+            text: "#{method}: #{rpc_error_text(err)}"
           )
 
         # a failed prompt still ends the turn — a thread must never wedge
@@ -402,10 +402,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
     params = Map.get(frame, "params", %{})
 
     case method do
-      # a loading session replays its history; the transcript has it already
-      "session/update" when state.loading ->
-        state
-
       "session/update" ->
         handle_update(state, Map.get(params, "update", %{}))
 
@@ -446,42 +442,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp handle_frame(state, _frame), do: state
-
-  # what a session answers with, new or loaded: the model it runs, the
-  # modes and config options it offers, then the thread goes idle
-  defp session_ready(state, result) do
-        # the adapter reports which model the session ACTUALLY runs (and
-        # the pickable list) — the truth the modeline shows
-        state =
-          case result do
-            %{"models" => %{"currentModelId" => cur} = ms} ->
-              emit(state,
-                type: :"model-state",
-                current: cur,
-                available:
-                  for m <- Map.get(ms, "availableModels", []) do
-                    [Map.get(m, "modelId"), Map.get(m, "name", "")]
-                  end
-              )
-
-            _ ->
-              state
-          end
-
-        # ...and which permission modes it offers, in the SAME payload. We
-        # used to drop this: it is how `auto` stops the agent asking at all.
-        state = emit_mode_state(state, Map.get(result, "modes"))
-
-        # a config-options agent (opencode) reports model and mode as
-        # session config options instead of the two keys above
-        state = ingest_config_options(state, Map.get(result, "configOptions"))
-        state = push_pinned_model(state)
-        state = push_pinned_effort(state)
-        state = push_pinned_mode(state)
-
-        emit(state, type: :ready)
-
-  end
 
   # a tool call as one searchable string; an adapter may put anything in
   # there, so an unencodable payload degrades to inspect rather than
@@ -770,27 +730,17 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp set_config_option(state, id, value), do: write_config_option(state, id, value)
 
   defp write_config_option(state, id, value) do
-    request(state, "session/set_config_option", %{
-      "sessionId" => state.session_id,
-      "configId" => id,
-      "value" => value
-    })
+    request(
+      state,
+      "session/set_config_option",
+      %{"sessionId" => state.session_id, "configId" => id, "value" => value},
+      {:config, id, value}
+    )
   end
 
   # a pinned model ('model in the resolved config) has no spawn-time route
   # on this lane — the session starts on the agent's default, then we set
   # the option before ready
-  # a permission mode chosen while the thread was parked (no adapter) rides
-  # in the config; the new session takes it here
-  defp push_pinned_mode(%{config: %{"mode" => mode}} = state) when is_binary(mode) do
-    if "mode" in state.config_option_ids,
-      do: set_config_option(state, "mode", mode),
-      else:
-        request(state, "session/set_mode", %{"sessionId" => state.session_id, "modeId" => mode})
-  end
-
-  defp push_pinned_mode(state), do: state
-
   defp push_pinned_model(state) do
     model = Map.get(state.config, "model")
 

@@ -349,8 +349,8 @@ The commands in this section are optional. Your provider may charge for requests
 | `M-x chat-new` | Start a new chat buffer |
 | `C-c b` | Choose the chat's connector, model, effort, tools and permissions |
 | `M-x agent-switch` | Move a running chat to another connector and model |
-| `C-c w` | Switch between a work buffer and its chat |
-| `M-x chat-companion-ask` | Ask the companion a question without leaving the work buffer |
+| `M-o` | Open the chat of the buffer you are in |
+| `C-c w` | Switch between a work buffer and its group's chat |
 
 `M-|` sends the active region through an LLM.
 
@@ -375,15 +375,17 @@ ACP is the Agent Client Protocol. It lets Compos start an external coding agent 
 
 To give one chat another model, open that menu again: `b` chooses the connector and `m` the model, and `ESC` gives the setup to the chat. If a chat answers 401, the connector needs its login: `M-x setup-ai-guide` explains how.
 
-> **Try it.** From the practice page, type `M-x chat-companion-ask` and ask: "What is the main idea of the lesson on windows?" The companion reads the tutorial's live buffers, so you do not paste them into another program.
+Most buffers have a chat of their own. `M-o` opens it beside the buffer, and starts one when there is none. The chat reads the buffer it belongs to, so you never paste the text into it.
 
-> **Try it.** Open the practice file from the Files and buffers section with `C-x C-f /tmp/compos-practice.txt`. Type `M-x chat-companion-ask` there and ask: "Summarize this file." The companion reads the file buffer. You did not copy any of it into the chat.
+> **Try it.** In the practice page, type `M-o`. Ask the chat: "What is this page about?"
 
-> **Try it.** Type `M-x training-companion-summarize-mode` to ask the companion to teach the current major mode.
+A group has a chat too, which sees every buffer in the group. `C-c w` goes to it from any buffer, and back again.
+
+> **Try it.** Type `C-c w` to go to the group's chat. Type `C-c w` again to come back.
 
 Agents also write extensions. Ask for one and watch it appear as a command:
 
-> **Try it.** Type `M-x chat-companion-ask` and ask: "Define a Scheme command named tutorial-agent-hello that prints a greeting." Then type `M-x tutorial-agent-hello`.
+> **Try it.** Type `M-o` and ask: "Define a Scheme command named tutorial-agent-hello that prints a greeting." When it answers, type `M-x tutorial-agent-hello`.
 
 The agent wrote the definition with the same Scheme evaluator the editor itself runs. The context is concrete: it is there in the buffer.
 

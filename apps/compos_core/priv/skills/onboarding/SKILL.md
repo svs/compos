@@ -73,36 +73,31 @@ short. Then offer to go back to the step you were on.
    `ESC`) stops editing, and then the arrow keys move the focus again.
    Ask the user to go to the stage, type a word in the tutorial, press
    `C-g`, and come back with `s-<left>`.
-3. **Moving and editing.** On the tutorial. The keys they know already work:
-   the arrows move, `Home` and `End` go to the start and end of the line,
-   `PageUp` and `PageDown` scroll. Typing inserts, `Backspace` deletes,
-   and `C-/` undoes. Teach only those. The tutorial itself teaches
-   `C-f C-n` and the rest; skip that part of it unless the user asks.
-4. **Selecting, copying, pasting.** On the same copy: Shift with an arrow
+3. **Selecting, copying, pasting.** On the same copy: Shift with an arrow
    selects (`S-<right>`, `S-<down>`), `s-a` selects everything. The
    system copy and paste keys copy the selection and paste it (Cmd-C and
    Cmd-V on a Mac). Name `C-w` and `C-y` only if the user asks.
-5. **Searching.** `C-s` on the stage. Ask the user to find a word.
-6. **Help and commands.** Every key runs a named command. Ask the user to
+4. **Searching.** `C-s` on the stage. Ask the user to find a word.
+5. **Help and commands.** Every key runs a named command. Ask the user to
    press `C-h k C-s` on the stage: a help page opens on the stage and
    names the command. Teach `q`: it closes the help page and gives back
    the tutorial. Then: `M-x` runs a command by name, and `C-g` stops a
    command that waits. `C-h m` tells about the mode, and `C-h a` finds a
    command by words.
-7. **Files and buffers.** `C-x C-f` to open a file, `C-x C-s` to save it.
+6. **Files and buffers.** `C-x C-f` to open a file, `C-x C-s` to save it.
    Then run `ibuffer` on the stage (`C-x C-b`) and show what a buffer is.
-8. **Windows.** `C-x 3` splits, `C-x o` moves, `C-x 1` keeps one window.
+7. **Windows.** `C-x 3` splits, `C-x o` moves, `C-x 1` keeps one window.
    Ask the user to split the stage, then come back to one stage with
    `C-x 0` there. Warn that `C-x 1` in the chat closes the stage.
-9. **Groups.** A group keeps the buffers and the windows of one task.
+8. **Groups.** A group keeps the buffers and the windows of one task.
    This app is a group. `C-x C-g n` makes a new one. Explain, but do not
    make the user leave this group.
-10. **Agents.** Every group has a chat like this one, and it can see and
+9. **Agents.** Every group has a chat like this one, and it can see and
    change the editor. `C-c RET` asks the chat from any buffer. Ask the
    user to ask you something about the stage buffer with it.
-11. **Settings.** `M-x customize` and `M-x load-theme`. Run neither for
+10. **Settings.** `M-x customize` and `M-x load-theme`. Run neither for
     the user; tell them where to look.
-12. **Done.** Say what they learnt in three lines. Tell them `C-h t`
+11. **Done.** Say what they learnt in three lines. Tell them `C-h t`
     opens the tutorial again (hold Control and type `h`, release Control,
     then type `t`), and `M-x onboarding` brings this guide back.
 

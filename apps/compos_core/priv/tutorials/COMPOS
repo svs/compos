@@ -40,30 +40,27 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 1. Set up
 2. Windows and focus
 3. Typing and the focus
-4. Moving and editing
-5. Selecting, copying and pasting
-6. Searching and replacing
-7. Key notation
-8. Named commands
-9. Help
-10. Files and buffers
-11. Windows
-12. Groups
-13. Agents
-14. Settings
-15. Moving by screens
-16. Moving point
-17. Editing and undo
-18. Prefix arguments
-19. Killing and yanking
-20. Modes and keymaps
-21. Lists and previews
-22. Browsing the web
-23. Why Compos
-24. Persistence
-25. The editor is malleable
-26. Scheme and the BEAM
-27. Where to go next
+4. Selecting, copying and pasting
+5. Searching and replacing
+6. Key notation
+7. Named commands
+8. Help
+9. Files and buffers
+10. Windows
+11. Groups
+12. Agents
+13. Settings
+14. Editing and undo
+15. Prefix arguments
+16. Killing and yanking
+17. Modes and keymaps
+18. Lists and previews
+19. Browsing the web
+20. Why Compos
+21. Persistence
+22. The editor is malleable
+23. Scheme and the BEAM
+24. Where to go next
 
 ---
 
@@ -145,26 +142,6 @@ When you stop editing, the arrow keys move the focus again.
 > **Try it.** Move the focus to the practice page and type a word.
 
 > **Try it.** Type `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
-
-## Moving and editing
-
-The keys that you know from other programs work here. If you know Emacs, its keys work too.
-
-| Key | What it does |
-| --- | --- |
-| The arrow keys | Move one character, or one line |
-| Home and End (`<home>`, `<end>`) | Move to the start or the end of the line |
-| PageUp and PageDown (`<prior>`, `<next>`) | Scroll one screen |
-| Backspace | Delete the character before the cursor |
-| `C-/` | Undo |
-
-> **Try it.** In the practice page, type `<down>` a few times. Then type `<end>` to go to the end of the line.
-
-> **Try it.** Type `<home>` to go to the start of the line.
-
-> **Try it.** Type `<next>` to scroll down one screen. Then type `<prior>` to scroll back.
-
-> **Try it.** Type a few words and delete some of them with Backspace. Then type `C-/` until the text is as it was.
 
 ## Selecting, copying and pasting
 
@@ -396,47 +373,6 @@ The agent wrote the definition with the same Scheme evaluator the editor itself 
 > **Try it.** Type `M-x load-theme` and look at the themes. Type `C-g` to keep the theme you have.
 
 > **Try it.** Type `M-x customize` and look at the groups of settings. Type `q` to close it.
-
-## Moving by screens
-
-A buffer often holds more text than one window can show. The window shows one screenful; the rest continues above and below. Scrolling moves the view over the text. It never changes the text.
-
-> **Try it.** Type `C-v` once to move forward almost one screen. Then type `M-v` once to move backward and return here.
-
-| Key | What it does |
-| --- | --- |
-| `C-v` | Move forward almost one screen |
-| `M-v` | Move backward almost one screen |
-| `C-l` | Put the line at point in the middle of the screen (lowercase L) |
-
-> **Try it.** Type `C-l` and watch this line move to the middle. The text does not change.
-
-When you scroll a whole screen, the lines at the edge stay, so you can keep reading without losing your place.
-
-The modeline at the bottom of the window shows the buffer name, the size and point, and whether you are near the top, middle or bottom of the buffer.
-
-## Moving point
-
-| Key | What it does |
-| --- | --- |
-| `C-f` | Move forward one character |
-| `C-b` | Move backward one character |
-| `C-n` | Move to the next line |
-| `C-p` | Move to the previous line |
-| `C-a` | Move to the start of the line |
-| `C-e` | Move to the end of the line |
-| `M-f` | Move forward one word |
-| `M-b` | Move backward one word |
-| `M-<` | Move to the start of the buffer |
-| `M->` | Move to the end of the buffer |
-
-The letters are easy to remember: **P** for previous, **N** for next, **B** for backward and **F** for forward. You will use these commands all the time.
-
-> **Try it.** Move through this paragraph with `C-f`, `C-b`, `C-n` and `C-p` only. Then use `M-f` and `M-b` to travel by words. Finish with `C-a` and `C-e`.
-
-The command names are literal: `forward-char`, `backward-char`, `next-line`, `previous-line`, `forward-word`. A key is a short name for a command, not a second interface you must learn.
-
-> **Try it.** Type `M->` to visit the end of the tutorial and read the last line. Type `M-<` to come back.
 
 ## Editing and undo
 

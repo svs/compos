@@ -225,8 +225,38 @@
                       (number->string n)
                       (if (= n 1) " occurrence" " occurrences"))))))))))))
 
+;; The match at hand wears isearch, the matches still ahead lazy-highlight,
+;; as Emacs draws them.
+(define (replace--show! buf old m)
+  (overlay-set! buf 'query-replace
+    (cons (list (car m) (cadr m) "isearch")
+          (map (lambda (r) (list (car r) (cadr r) "lazy-highlight"))
+               (replace--matches buf old (cadr m) '())))))
+
+(define (replace--goto! buf pos)
+  (buffer-goto! buf pos)
+  (let ((w (window-showing buf)))
+    (when w (window-set-point! w pos))))
+
+;; The answers Emacs gives a match: y replaces it, n skips it, ! replaces it
+;; and every one after, and q, RET or C-g stops.
+(define (replace--ask prompt yes no all quit)
+  (let ((answer (lambda (k) (lambda () (minibuffer-detach!) (k)))))
+    (minibuffer-read* (string-append prompt "(y, n, ! all, q stop) ") '()
+      (list (list 'change (lambda (input)
+                            (cond ((string-suffix? "y" input) ((answer yes)))
+                                  ((string-suffix? "n" input) ((answer no)))
+                                  ((string-suffix? "!" input) ((answer all)))
+                                  ((string-suffix? "q" input) ((answer quit)))
+                                  (else (minibuffer-input! "")))))
+            (list 'confirm (lambda (v) (quit)))
+            (list 'cancel quit)
+            (list 'style "question")))))
+
 (define-command "query-replace" "Replace literal text with confirmation"
   (lambda ()
+    ;; every search, move and replace is in BUF, the buffer the command
+    ;; started in: the minibuffer's invoking buffer can be another one
     (let ((buf (current-buffer)) (origin (point)))
       (replace--prompt "Query replace: "
         (lambda (old)
@@ -234,25 +264,27 @@
               (message "Query replace cannot search for an empty string")
               (replace--read-new buf old "Query replace with: "
                 (lambda (new)
-                  (let loop ((from origin) (n 0))
-                    (let ((m #f))
-                      (with-invoking-buffer
-                        (lambda () (set! m (buffer-search old from))))
-                      (if (not m)
-                          (message (string-append "Replaced "
-                            (number->string n)
-                            (if (= n 1) " occurrence" " occurrences")))
-                          (begin
-                            (with-invoking-buffer
-                              (lambda () (goto-char! (car m))))
-                            (y-or-n
-                              (string-append "Replace " old " with " new "? ")
-                              (lambda ()
-                                (buffer-replace-range! buf (car m)
-                                  (- (cadr m) (car m)) new)
-                                (loop (+ (car m) (string-byte-length new))
-                                      (+ n 1)))
-                              (lambda () (loop (cadr m) n)))))))))))))))
+                  (let* ((done (lambda (n)
+                                 (overlay-clear! buf 'query-replace)
+                                 (message (string-append "Replaced " (number->string n)
+                                                         (if (= n 1) " occurrence" " occurrences"))))))
+                    (let loop ((from origin) (n 0))
+                      (let ((m (with-current-buffer buf (lambda () (buffer-search old from)))))
+                        (if (not m)
+                            (done n)
+                            (begin
+                              (replace--show! buf old m)
+                              (replace--goto! buf (car m))
+                              (replace--ask
+                                (string-append "Replace " old " with " new "? ")
+                                (lambda ()
+                                  (buffer-replace-range! buf (car m) (- (cadr m) (car m)) new)
+                                  (loop (+ (car m) (string-byte-length new)) (+ n 1)))
+                                (lambda () (loop (cadr m) n))
+                                (lambda ()
+                                  (buffer-replace-range! buf (car m) (- (cadr m) (car m)) new)
+                                  (done (+ n 1 (replace--all! buf old new (+ (car m) (string-byte-length new))))))
+                                (lambda () (done n))))))))))))))))
 
 (catalog-meta! 'command "replace-string" 'domain 'editing 'effects '(write))
 (catalog-meta! 'command "query-replace" 'domain 'editing 'effects '(write))

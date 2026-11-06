@@ -235,13 +235,14 @@
          (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
       (else (command-palette--pick! choice)))))
 
-;; Words no row is named for go to the *recipes* chat. It finds the recipe
-;; that does them, reads its arguments out of the words and runs it; when
-;; no recipe fits, it writes one.
+;; Words no row is named for go to the *recipes* chat. It runs the command
+;; or recipe that does them; when none does, it writes a command. Either
+;; way it saves a recipe, so the same words run at once next time.
 (define (command-palette--pick! text)
   (set! *command-palette--request* text)
   (command-palette-ask-recipes!
-    (string-append "find the recipe for \"" text "\" and run it with recipe-run!")))
+    (string-append "do \"" text "\": run the command or recipe that does it, "
+                   "else write one with command-learn!, then save a recipe for these words")))
 
 ;; What you typed is always the top row, so RET runs your words; a hit is
 ;; picked only when you move down to it.
@@ -269,7 +270,7 @@
     (list q (cond ((and (boundp '*recipes*) (assoc q *recipes*)) (say q '()))
                   (learned (say (cadr learned) (caddr learned)))
                   (m (say (car m) (cadr m)))
-                  (else "ask  *recipes* finds the recipe for this and runs it")))))
+                  (else "ask  *recipes* finds or writes the command for this")))))
 
 
 ;;; Words no recipe reads go to the *recipes* chat: an ordinary chat that
@@ -308,18 +309,20 @@
 ;; what a new *recipes* chat is for; after that it learns from its own turns
 (define (command-palette--recipes-intro)
   (string-append
-    "You turn what the user types in the command palette into recipes. Each request reads "
-    "find the recipe for \"WORDS\". Look for a recipe that does it with (apropos WORDS 'recipe) or (recipes); "
-    "split the words into its arguments (each file, buffer, name, number or text) and run it with (recipe-run! TITLE BINDINGS), "
-    "BINDINGS ((slot \"value\") ...). When no recipe does it, find the calls with apropos and "
-    "save one with (recipe-learn! TITLE EXPR INPUTS PATTERNS). Write it for every value, not for this one: "
-    "\"use a dark theme\" is the command \"use a ... theme\" with the argument dark, so TITLE is \"use a {{theme}} theme\" "
-    "and EXPR handles any theme. TITLE and PATTERNS keep the command words and put a {{slot}} where each argument goes; "
-    "EXPR has {{slot}} where each argument goes; INPUTS ((slot \"Prompt: \" [number]) ...); "
-    "PATTERNS the ways to say it, as (\"use a {{theme}} theme\" \"{{theme}} theme\"). "
+    "You do what the user types in the command palette, and make it instant the next time. Each request reads "
+    "do \"WORDS\". In this order:\n"
+    "1. A command does it: find it with (apropos WORDS) and run it with (run-command NAME).\n"
+    "2. A recipe does it: find it in (recipes) and run it with (recipe-run! TITLE BINDINGS), BINDINGS ((slot \"value\") ...).\n"
+    "3. Neither: write a command with (command-learn! NAME DOC \"(lambda () ...)\"), from the calls apropos finds, "
+    "and run it with (run-command NAME). It is saved in " (recipes-commands-path) ".\n"
+    "After 1 or 3, save a recipe that runs the command, so the palette runs these words at once next time: "
+    "(recipe-learn! TITLE EXPR INPUTS PATTERNS). Write it for every value, not for this one: "
+    "\"use a dark theme\" is the command words \"use a ... theme\" with the argument dark, so TITLE is \"use a {{theme}} theme\". "
+    "TITLE and PATTERNS keep the command words and put a {{slot}} where each argument goes; EXPR has {{slot}} "
+    "where each argument goes; INPUTS ((slot \"Prompt: \" [number]) ...); PATTERNS the ways to say it, "
+    "as (\"use a {{theme}} theme\" \"{{theme}} theme\"). A recipe with no arguments is (run-command \"NAME\"). "
     "When a recipe you find does one value of a command, make it general and drop the old one with (recipe-forget! TITLE). "
-    "Check (recipe-match WORDS), then run it with recipe-run!. "
-    "The recipes go to " (recipes-user-path) ". Reply in one line.\n\n"))
+    "Check (recipe-match WORDS). The recipes go to " (recipes-user-path) ". Reply in one line.\n\n"))
 
 ;; the live chat, else the one kept for 'recipes read back, else #f
 (define (command-palette--recipes-chat)

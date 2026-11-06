@@ -353,6 +353,35 @@
                                   "")))
     title))
 
+(effects! '(write execute))
+(define (recipes-commands-path) (string-append (compos-home) "/commands.scm"))
+
+(define recipes--command-marker "\n;;; command: ")
+
+(define recipes--commands-header
+  ";;; commands.scm --- the commands the *recipes* chat wrote for you.\n;;; Each block is one define-command. Edit them freely.\n(effects! '(unknown))\n")
+
+;; Define the M-x command NAME, which runs the procedure SOURCE (Scheme text,
+;; as "(lambda () ...)"), and keep it in <compos-home>/commands.scm: a
+;; request no command does gets a command, and a recipe runs it after.
+(define (command-learn! name doc source)
+  (let* ((path (recipes-commands-path))
+         (old (if (file-exists? path) (read-file path) recipes--commands-header))
+         (parts (string-split old recipes--command-marker))
+         (kept (remove (lambda (b) (string-prefix? (string-append name "\n") b)) (cdr parts)))
+         (form (string-append "(define-command " (value->string name) " " (value->string doc)
+                              "\n  " source ")\n"))
+         (result (eval-string-safe form)))
+    (if (not (equal? (car result) 'ok))
+        (list 'error (value->string (cadr result)))
+        (begin
+          (write-file! path
+            (string-append (car parts)
+              (string-join (map (lambda (b) (string-append recipes--command-marker b))
+                                (append kept (list (string-append name "\n" form))))
+                           "")))
+          name))))
+
 (effects! '(destroy))
 ;; Drop a recipe: from the book, its patterns, apropos and your file.
 (define (recipe-forget! title)
@@ -374,9 +403,11 @@
 
 (effects! '(write))
 (define (recipes-load-user!)
-  (let ((path (recipes-user-path)))
-    (when (file-exists? path)
-      (ignore-errors (lambda () (load path))))))
+  ;; the commands first: a recipe may run one
+  (for-each (lambda (path)
+              (when (file-exists? path)
+                (ignore-errors (lambda () (load path)))))
+            (list (recipes-commands-path) (recipes-user-path))))
 
 (public! 'recipe-patterns!
   "(recipe-patterns! \"task\" '(\"open {{path}}\" ...)) -- the words that ask for a recipe; literal words are the command, each {{slot}} an argument")
@@ -386,6 +417,8 @@
   "(recipe-learn! TITLE EXPR [INPUTS PATTERNS]) -- define a recipe and save it to <compos-home>/recipes.scm")
 (public! 'recipe-forget!
   "(recipe-forget! TITLE) -- drop a recipe from the book, apropos and <compos-home>/recipes.scm")
+(public! 'command-learn!
+  "(command-learn! NAME DOC \"(lambda () ...)\") -- define an M-x command and keep it in <compos-home>/commands.scm")
 (public! 'recipes-user-path "(recipes-user-path) -- the file of the recipes you learned")
 
 (recipe-patterns! "open a directory"

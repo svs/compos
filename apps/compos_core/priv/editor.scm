@@ -1731,7 +1731,7 @@
 
 (effects! '(read))
 (public! 'key-binding-dispatch
-  "(key-binding-dispatch SEQ) — the dispatcher's one lookup: (\"command\" NAME), (\"prefix\") or (\"none\") for the key sequence SEQ in the frame's buffer, ESC read as Meta when nothing binds it; an unbound one runs the buffer's 'undefined-key-command when it has one")
+  "(key-binding-dispatch SEQ) — the dispatcher's one lookup: (\"command\" NAME), (\"prefix\") or (\"none\") for the key sequence SEQ in the frame's buffer; an unbound ESC cancels the prefix before it; an unbound one runs the buffer's 'undefined-key-command when it has one")
 (define (key-binding-dispatch seq)
   (let* ((seq (keymap--seq seq))
          (answer (lambda (r)
@@ -1740,7 +1740,12 @@
                          (else (list "none")))))
          (r (keymap--lookup-here seq)))
     (cond ((not (equal? r 'none)) (answer r))
-          ((and (pair? seq) (equal? (car (reverse seq)) "ESC")) (list "prefix"))
+          ;; ESC after a prefix cancels it, as C-g would: Meta is the Option
+          ;; key here, so ESC need not start a key (ESC-as-Meta is for a
+          ;; terminal, which has none)
+          ((and (pair? seq) (pair? (cdr seq)) (equal? (car (reverse seq)) "ESC")) (list "command" "keyboard-quit"))
+          ;; a lone unbound ESC still pends as Meta, for a map that wants it
+          ((and (pair? seq) (equal? (car seq) "ESC")) (list "prefix"))
           ((keymap--esc-meta seq) (answer (keymap--lookup-here (keymap--esc-meta seq))))
           (else (keymap--undefined)))))
 

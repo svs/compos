@@ -19,7 +19,7 @@ You do not need to learn everything at once. Three commands make a wrong guess e
 
 | Key | What it does |
 | --- | --- |
-| `C-g` | Cancel the command or prompt you are in. |
+| `ESC` | Cancel the command, prefix or prompt you are in. |
 | `M-x` | Run a command by name. |
 | `C-h t` | Open or resume this tutorial. |
 
@@ -213,9 +213,9 @@ Some keys are written by name:
 
 Angle brackets name a key on the keyboard: `<down>`, `<up>`, `<left>` and `<right>` are the arrow keys. `s-` means hold the Super key, which is Command on macOS.
 
-If a prefix, a prompt or a search waits for input you do not want to give, type `C-g`. A lone Escape also quits, but `C-g` is the habit to keep.
+If a prefix, a prompt or a search waits for input you do not want to give, press `ESC`. It cancels whatever waits. `C-g` does the same, except after `C-x`, where `C-x C-g` starts the group commands.
 
-> **Try it.** Hold CONTROL and press `h`, then release both keys. Compos is now waiting for the next key, and shows the keys that can follow. Type `C-g` to cancel.
+> **Try it.** Hold CONTROL and press `x`, then release both keys. Compos is now waiting for the next key, and shows the keys that can follow. Press `ESC` to cancel.
 
 You started a prefix command and cancelled it.
 

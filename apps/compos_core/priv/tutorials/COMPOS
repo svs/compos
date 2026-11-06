@@ -131,7 +131,9 @@ You can read a window and not go to it. `M-<down>` scrolls the other window, and
 
 ## Typing and the focus
 
-A window that you move to does not take your typing until you type in it. The first key that you type starts editing there.
+Windows can be in one of two modes - ```focus``` or ```editing```. `focus` mode is the mode where you manipulate your window, like moving it around and so on. Most windows aren't editable so this is the default. 
+
+A window with an editable buffer in it remains in `focus` mode until you type in it. To return to `focus` mode after typing, press ^-g / ESC 
 
 | Key | What it does |
 | --- | --- |

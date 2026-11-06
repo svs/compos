@@ -215,7 +215,7 @@ Angle brackets name a key on the keyboard: `<down>`, `<up>`, `<left>` and `<righ
 
 If a prefix, a prompt or a search waits for input you do not want to give, type `C-g`. A lone Escape also quits, but `C-g` is the habit to keep.
 
-> **Try it.** Hold CONTROL and press `x`, then release both keys. Compos is now waiting for the next key. Type `C-g` to cancel.
+> **Try it.** Hold CONTROL and press `h`, then release both keys. Compos is now waiting for the next key, and shows the keys that can follow. Type `C-g` to cancel.
 
 You started a prefix command and cancelled it.
 

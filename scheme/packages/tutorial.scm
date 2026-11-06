@@ -523,7 +523,8 @@
   '(("RET" "⏎") ("<return>" "⏎") ("SPC" "Space") ("TAB" "⇥") ("<tab>" "⇥")
     ("DEL" "⌫") ("<backspace>" "⌫") ("<delete>" "⌦") ("ESC" "esc")
     ("<left>" "←") ("<right>" "→") ("<up>" "↑") ("<down>" "↓")
-    ("<home>" "Home") ("<end>" "End") ("<prior>" "PageUp") ("<next>" "PageDown")))
+    ;; a laptop keyboard has no Home, End, PageUp or PageDown: fn and an arrow
+    ("<home>" "fn ←") ("<end>" "fn →") ("<prior>" "fn ↑") ("<next>" "fn ↓")))
 
 (define (tutorial--key-label token)
   ;; one key as symbols, or #f when TOKEN is not a key

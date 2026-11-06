@@ -376,14 +376,18 @@
       "- **" (help--code (nth 1 r)) "**"
       (if (equal? call "") "" (string-append " " (help--code call)))
       (if (equal? doc "") "" (string-append " — " (help--cell doc)))
-      (help--apropos-meta h))))
+      ;; who owns a name and what it may do matters to Scheme and agents
+      (if (member (car r) '("Functions" "Recipes" "Internal primitives" "Components"))
+          (help--apropos-meta h)
+          ""))))
 
 ;; one line under a heading says how to call the kind, once, instead of a
 ;; call column that repeats "M-x" down the page
 (define (help--apropos-hint section)
   (cond ((equal? section "Commands")
          "`M-x` runs a command by name. The key after a name also runs it.\n\n")
-        ((equal? section "Functions") "Call a function from Scheme.\n\n")
+        ((equal? section "Functions") "For Scheme and agents: call a function from Scheme.\n\n")
+        ((equal? section "Recipes") "For Scheme and agents: a task, and the Scheme that does it.\n\n")
         ((equal? section "How do I")
          "`C-h h` opens a task by its title.\n\n")
         ((equal? section "Modes")
@@ -392,11 +396,23 @@
 
 ;; ((SECTION HIT ...) ...) in the order each section first appears, so
 ;; the section with the best-ranked hit stays on top
+;; The page is read by a person first: what to do and the keys come first,
+;; and what Scheme and agents call comes last. A section keeps the rank
+;; order of its own hits.
+(define *help--apropos-order*
+  '("How do I" "Commands" "Keys" "Settings" "Modes" "Components"
+    "Functions" "Recipes" "Internal primitives" "Closest names"))
+
+(define (help--apropos-rank section)
+  (let loop ((xs *help--apropos-order*) (i 0))
+    (cond ((null? xs) i) ((equal? (car xs) section) i) (else (loop (cdr xs) (+ i 1))))))
+
 (define (help--apropos-groups hits)
   (let loop ((hs hits) (order '()) (by '()))
     (if (null? hs)
         (map (lambda (s) (cons s (reverse (cdr (assoc s by)))))
-             (reverse order))
+             ;; sort takes no comparator: (RANK NAME) pairs sort by rank
+             (map cadr (sort (map (lambda (s) (list (help--apropos-rank s) s)) (reverse order)))))
         (let* ((h (car hs))
                (s (car (help--apropos-row h)))
                (g (assoc s by)))
@@ -423,17 +439,47 @@
       "\n")))
 
 (define (apropos-page query &optional filters)
-  (let ((hits (apply apropos (cons query (or filters '())))))
+  (let* ((hits (apply apropos (cons query (or filters '()))))
+         (kind (plist-get (or filters '()) 'kind))
+         (shown (let ((k (find (lambda (p) (equal? (cadr p) kind)) *apropos-kinds*)))
+                  (if (and kind k) (string-append " · " (car k) " only") ""))))
     (help-doc! (string-append "apropos " query)
       (string-append
         "# apropos `" query "`\n\n"
         (if (null? hits)
             "Nothing matched, and no name is close.\n"
-            (string-append (number->string (length hits)) " hits.\n\n"
+            (string-append (number->string (length hits)) " hits" shown ". `/` shows one kind.\n\n"
                            (help--apropos-list hits)))
         "\n---\n\n"
-        "`C-h b` lists every binding · `M-x` runs a command by name "
-        "· `q` closes this page\n"))))
+        "`/` shows one kind · `C-h b` lists every binding · `M-x` runs a command by name "
+        "· `q` closes this page\n"))
+    ;; the page remembers what it asked, so / can ask again for one kind
+    (when (buffer-known? *help-buffer*)
+      (buffer-set-local! *help-buffer* 'apropos-query query)
+      (buffer-set-local! *help-buffer* 'apropos-filters (or filters '())))
+    *help-buffer*))
+
+;; / on an apropos page shows one kind: the page asks again with the kind
+;; filter apropos already takes, so nothing is searched twice by hand
+(define *apropos-kinds*
+  '(("All" #f) ("How do I" "howto") ("Commands" "command") ("Keys" "key")
+    ("Settings" "variable") ("Modes" "mode") ("Components" "component")
+    ("Functions" "function") ("Recipes" "recipe")))
+
+(define (apropos-filter!)
+  "Show one kind of the apropos page's hits, or all of them again."
+  (let ((q (buffer-local (current-buffer) 'apropos-query)))
+    (if (not q)
+        (message "This page is not an apropos page")
+        (minibuffer-read "Show: " (map car *apropos-kinds*)
+          (lambda (choice)
+            (let ((hit (assoc choice *apropos-kinds*)))
+              (apropos-page q (if (and hit (cadr hit)) (list 'kind (cadr hit)) '()))))))))
+
+(define-command "apropos-filter" "On an apropos page, show one kind of hits: commands, keys, functions, recipes"
+  (lambda () (apropos-filter!)))
+
+(define-key "help-mode-map" "/" "apropos-filter")
 
 (define-command "apropos"
   "Search the whole editor by words or intent; literal hits rank before cached semantic hits"

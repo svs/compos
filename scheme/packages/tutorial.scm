@@ -1057,7 +1057,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (tutorial--load!)
   (let ((panes (tutorial--panes!)))
     (tutorial--go! (or (tutorial--lesson-now) (tutorial--first-open)))
-    (panes-tile! 'columns panes)
+    ;; columns may hold fewer than the three panes; then they go free
+    (panes-tile! (if (>= (panes-layout-capacity 'columns) (length panes)) 'columns 'free)
+                 panes)
     (let ((w (window-showing *tutorial-buffer*))) (when w (select-window! w)))
     *tutorial-buffer*))
 

@@ -233,6 +233,14 @@
           (map (lambda (r) (list (car r) (cadr r) "lazy-highlight"))
                (replace--matches buf old (cadr m) '())))))
 
+;; While the search text is typed, its matches from point on light up, so
+;; they are in view before the replacement is asked for.
+(define (replace--preview! buf old from)
+  (let ((ms (if (equal? old "") '() (replace--matches buf old from '()))))
+    (if (null? ms)
+        (overlay-clear! buf 'query-replace)
+        (replace--show! buf old (car ms)))))
+
 (define (replace--goto! buf pos)
   (buffer-goto! buf pos)
   (let ((w (window-showing buf)))
@@ -257,12 +265,21 @@
   (lambda ()
     ;; every search, move and replace is in BUF, the buffer the command
     ;; started in: the minibuffer's invoking buffer can be another one
-    (let ((buf (current-buffer)) (origin (point)))
-      (replace--prompt "Query replace: "
+    (let* ((buf (current-buffer)) (origin (point))
+           (quit (lambda () (overlay-clear! buf 'query-replace) (message "Quit"))))
+      (minibuffer-read* "Query replace: " '()
+        (list
+          (list 'change (lambda (input) (replace--preview! buf input origin)))
+          (list 'cancel quit)
+          (list 'confirm
         (lambda (old)
           (if (equal? old "")
-              (message "Query replace cannot search for an empty string")
-              (replace--read-new buf old "Query replace with: "
+              (begin (overlay-clear! buf 'query-replace)
+                     (message "Query replace cannot search for an empty string"))
+              (minibuffer-read* "Query replace with: " '()
+                (list
+                  (list 'cancel quit)
+                  (list 'confirm
                 (lambda (new)
                   (let* ((done (lambda (n)
                                  (overlay-clear! buf 'query-replace)
@@ -284,7 +301,7 @@
                                 (lambda ()
                                   (buffer-replace-range! buf (car m) (- (cadr m) (car m)) new)
                                   (done (+ n 1 (replace--all! buf old new (+ (car m) (string-byte-length new))))))
-                                (lambda () (done n))))))))))))))))
+                                (lambda () (done n))))))))))))))))))))
 
 (catalog-meta! 'command "replace-string" 'domain 'editing 'effects '(write))
 (catalog-meta! 'command "query-replace" 'domain 'editing 'effects '(write))

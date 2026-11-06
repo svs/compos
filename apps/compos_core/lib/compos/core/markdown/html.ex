@@ -312,9 +312,6 @@ defmodule Compos.Core.Markdown.Html do
      marks}
   end
 
-  defp bare(children, target),
-    do: Enum.map(children, fn c -> if c == target, do: %{c | kind: :bare}, else: c end)
-
   # A table row's pipes are anonymous to the grammar, like a link's
   # brackets, so they never become nodes and would fall through as text.
   # In a row, everything that is not a cell is markup.
@@ -379,43 +376,6 @@ defmodule Compos.Core.Markdown.Html do
      ], marks}
   end
 
-  # An attribute holds a value, never markup: a break drawn into one would
-  # be read as part of the value.
-  defp attr(text), do: without_breaks(fn -> escape(text) end)
-
-  defp image_src(src) do
-    case Process.get(:compos_md_image_src) do
-      fun when is_function(fun, 1) -> fun.(src)
-      _ -> src
-    end
-  end
-
-  # The label's own text, with every mark that fell anywhere in the link
-  # still drawn: point may be standing in the destination, and it has to
-  # show somewhere.
-  defp label(node, text, marks) do
-    case Enum.find(node.children, &(&1.kind == :link_text)) do
-      nil ->
-        {marks_only(node, marks), drop_marks(node, marks)}
-
-      link_text ->
-        {before, marks} =
-          {marks_before(node, link_text, marks), drop_before(node, link_text, marks)}
-
-        {inner, marks} = children(link_text, text, marks)
-        {[before, inner, marks_only(node, marks)], drop_marks(node, marks)}
-    end
-  end
-
-  defp marks_before(node, child, marks),
-    do:
-      marks
-      |> Enum.filter(fn {off, _} -> off >= node.start and off < child.start end)
-      |> Enum.map(&elem(&1, 1))
-
-  defp drop_before(node, child, marks),
-    do: Enum.reject(marks, fn {off, _} -> off >= node.start and off < child.start end)
-
   defp node(%{kind: :code} = node, text, marks) do
     # The fence names the language, and a Morg fence adds arguments after
     # it. Only the first word is the language: the whole info string as a
@@ -475,6 +435,51 @@ defmodule Compos.Core.Markdown.Html do
         generic_node(node, text, marks)
     end
   end
+
+  defp node(%{kind: :code_span} = node, text, marks),
+    do: verbatim(fn -> generic_node(node, text, marks) end)
+
+  defp node(node, text, marks), do: generic_node(node, text, marks)
+
+  defp bare(children, target),
+    do: Enum.map(children, fn c -> if c == target, do: %{c | kind: :bare}, else: c end)
+
+  # An attribute holds a value, never markup: a break drawn into one would
+  # be read as part of the value.
+  defp attr(text), do: without_breaks(fn -> escape(text) end)
+
+  defp image_src(src) do
+    case Process.get(:compos_md_image_src) do
+      fun when is_function(fun, 1) -> fun.(src)
+      _ -> src
+    end
+  end
+
+  # The label's own text, with every mark that fell anywhere in the link
+  # still drawn: point may be standing in the destination, and it has to
+  # show somewhere.
+  defp label(node, text, marks) do
+    case Enum.find(node.children, &(&1.kind == :link_text)) do
+      nil ->
+        {marks_only(node, marks), drop_marks(node, marks)}
+
+      link_text ->
+        {before, marks} =
+          {marks_before(node, link_text, marks), drop_before(node, link_text, marks)}
+
+        {inner, marks} = children(link_text, text, marks)
+        {[before, inner, marks_only(node, marks)], drop_marks(node, marks)}
+    end
+  end
+
+  defp marks_before(node, child, marks),
+    do:
+      marks
+      |> Enum.filter(fn {off, _} -> off >= node.start and off < child.start end)
+      |> Enum.map(&elem(&1, 1))
+
+  defp drop_before(node, child, marks),
+    do: Enum.reject(marks, fn {off, _} -> off >= node.start and off < child.start end)
 
   # A paragraph that is one URL and nothing else: the author pasted it to
   # show the thing it names. A picture draws as the picture and an X post as
@@ -907,11 +912,6 @@ defmodule Compos.Core.Markdown.Html do
       _ -> nil
     end
   end
-
-  defp node(%{kind: :code_span} = node, text, marks),
-    do: verbatim(fn -> generic_node(node, text, marks) end)
-
-  defp node(node, text, marks), do: generic_node(node, text, marks)
 
   defp generic_node(node, text, marks) do
     case tag(node, text) do

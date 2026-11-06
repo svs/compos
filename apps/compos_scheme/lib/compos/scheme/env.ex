@@ -216,7 +216,7 @@ defmodule Compos.Scheme.Env do
         # all define needs to know. A full lookup copied every global into
         # the heap on each define or set!, so a load that grew *tests* one
         # deftest at a time copied the whole list each time and passed the
-        # 1024 MB heap limit (2026-10-15).
+        # 1024 MB heap limit.
         case :ets.select_count(tid, [{{{:var, ref, name}, {:interposed, :_, :_}}, [], [true]}]) do
           0 ->
             nil
@@ -462,8 +462,8 @@ defmodule Compos.Scheme.Env do
 
   # Walk a list cell by cell, not with Enum.reduce: a term the host keeps
   # can be an improper list ([a | b] with a non-list tail, iodata among
-  # them), and Enum.reduce raises on one. A GC sweep that raised took the
-  # Session down (2026-09-19). The tail is itself a term and walks the same.
+  # them), and Enum.reduce raises on one. A GC sweep that raises takes the
+  # Session down. The tail is itself a term and walks the same.
   def closure_refs([head | tail], acc), do: closure_refs(tail, closure_refs(head, acc))
   def closure_refs([], acc), do: acc
 

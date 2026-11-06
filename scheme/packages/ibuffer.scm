@@ -2703,7 +2703,7 @@
             ("C-x o" "listing-preview-open-other") ("s-RET" "listing-preview-open-other")
             ("RET" "ibuffer-visit")
             ("C-c v" "ibuffer-toggle-preview")
-            ;; the owner's ruling (2026-09-19): p turns the row preview off
+            ;; p turns the row preview off
             ;; and on; C-p and <up> still move to the row above
             ("p" "ibuffer-toggle-preview")
             ("k" "ibuffer-kill") ("K" "ibuffer-group-kill")

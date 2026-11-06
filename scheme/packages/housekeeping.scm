@@ -3,7 +3,7 @@
 ;;
 ;; A kill never erases: the checkpoint and the history log move to the
 ;; graveyard (buffers/dead, docs/dead) and a burial line keeps id -> name.
-;; Nothing emptied the graveyard, and it held 1.6 GB on 2026-10-08. The
+;; Nothing emptied the graveyard, and it once held 1.6 GB. The
 ;; sweep deletes the bytes of entries older than `graveyard-keep-days`;
 ;; the burial line stays, so the record of what was killed survives.
 ;;

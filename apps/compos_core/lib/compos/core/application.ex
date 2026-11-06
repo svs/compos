@@ -11,7 +11,7 @@ defmodule Compos.Core.Application do
     # to remove the live socket and bind its own (Compos.Rpc.Server.init), so
     # two daemons served one home. Both then saved the desktop, and the one
     # that never installed the restored globals wrote its empty set over the
-    # good file: on 2026-09-09 that lost every group, every graveyard entry
+    # good file: that once lost every group, every graveyard entry
     # and every LLM bundle. The probe runs before the supervision tree, so a
     # second daemon dies before it can restore or save anything.
     case live_daemon(daemon_socket_path()) do

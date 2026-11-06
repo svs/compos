@@ -69,13 +69,13 @@ defmodule Compos.Core.EmbeddingIndex do
     end
   end
 
+  def search(_, _, _, _), do: {:error, :invalid_arguments}
+
   defp score(query_vector, available) do
     available
     |> Enum.map(fn {index, vector} -> {index, cosine(query_vector, vector)} end)
     |> Enum.sort_by(fn {_index, score} -> -score end)
   end
-
-  def search(_, _, _, _), do: {:error, :invalid_arguments}
 
   @doc "Embed catalog texts missing from the durable content-addressed index."
   @spec sync([String.t()], String.t(), keyword()) ::

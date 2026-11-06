@@ -347,7 +347,7 @@ defmodule Compos.Core.Display do
   def whitespace?(leaf),
     do: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true
 
-  defp line_segs(part, start, line_ts, line_ov, chrome \\ []) do
+  defp line_segs(part, start, line_ts, line_ov, chrome) do
     segs =
       if byte_size(part) > @max_styled_line or
            length(line_ts) + length(line_ov) > @max_line_ranges do

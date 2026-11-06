@@ -294,7 +294,7 @@ defmodule Compos.Core.Desktop do
   # The read happens only against the interpreter this process seeded. A
   # Session that died and came back answers every one of these with its
   # defvar default, and a save that believes that answer writes the empty
-  # set over the good file: on 2026-09-11 that lost 35 groups, the group
+  # set over the good file: that once lost 35 groups, the group
   # graveyard, both connector catalogs and every history in one autosave.
   # Until the replacement takes the globals back, a save writes the set
   # this process already holds.

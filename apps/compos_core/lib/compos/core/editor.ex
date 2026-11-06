@@ -429,9 +429,9 @@ defmodule Compos.Core.Editor do
   from the frame rather than covering them.
 
   Deleting the new window puts the tree back: one half of a root split
-  left alone becomes the root again.
+  left alone becomes the root again. FIRST? puts the new window before the
+  old tree: left of it, or above it.
   """
-  @doc "FIRST? puts the new window before the old tree: left of it, or above it."
   def split_root(dir, ratio \\ 0.5, fid \\ nil, first? \\ false) when dir in [:h, :v],
     do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid), first?})
 
@@ -497,8 +497,8 @@ defmodule Compos.Core.Editor do
   # A dormant buffer named to a window wakes HERE, in the caller, through
   # the one door (Compos.Core.ensure_buffer): never inside the Editor,
   # whose handlers only ask whether a buffer is live (live/1). A wake
-  # reads the store and starts a process; on 2026-11-04 a store call from
-  # a handler stalled the Editor and took the UI down. The runtime rebuild
+  # reads the store and starts a process; a store call from a handler
+  # stalls the Editor and takes the UI down. The runtime rebuild
   # of a woken buffer is queued on the buffer's own lane, as it was when
   # the Editor woke it, so nothing waits for it.
   defp wake(buffer) do
@@ -1158,15 +1158,6 @@ defmodule Compos.Core.Editor do
           end
 
         changed(:ok, put_frame(state, %{f | tree: replace_leaf(f.tree, id, leaf)}), f.id)
-    end
-  end
-
-  # the render modes the client draws in an iframe
-  defp preview?(buffer) do
-    try do
-      Buffer.get_local(buffer, "render-mode") in ["html", "markdown", "app", "file", "web"]
-    catch
-      :exit, _ -> false
     end
   end
 
@@ -1952,6 +1943,15 @@ defmodule Compos.Core.Editor do
     taken = other_frames_window_ids(state, f.id)
     {state, f} = restore_frame_tree(state, f, spec, active_buffer, bump_mru?, taken)
     changed(:ok, state, f.id)
+  end
+
+  # the render modes the client draws in an iframe
+  defp preview?(buffer) do
+    try do
+      Buffer.get_local(buffer, "render-mode") in ["html", "markdown", "app", "file", "web"]
+    catch
+      :exit, _ -> false
+    end
   end
 
   # --- frame clients ----------------------------------------------------------

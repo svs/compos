@@ -109,7 +109,7 @@ defmodule Compos.Core.Reactor do
   # transient: a hot reload purges the module a handler came from, the retry
   # runs the new one. The retry itself is what needed a bound. A handler that
   # cannot finish this text will not finish it on the tenth attempt either,
-  # and it retries with the batch still growing. On 2026-09-09 a rule over a
+  # and it retries with the batch still growing. Once a rule over a
   # 3.8 MB chat buffer passed the 1024 MB Scheme heap limit every twelve
   # seconds. It held the :ui lane, so every desktop save timed out, and no
   # Scheme registry still held its id, so nothing in the editor could remove
@@ -213,27 +213,6 @@ defmodule Compos.Core.Reactor do
     end
   end
 
-  defp fire_rule(state, id, rule) do
-    changes = Enum.reverse(rule.pending)
-    handler = rule.handler
-    reactor = self()
-
-    case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-           result = run_handler(handler, changes)
-           send(reactor, {:handler_done, id, changes, result})
-         end) do
-      {:ok, pid} ->
-        monitor = Process.monitor(pid)
-        in_flight = %{monitor: monitor, changes: changes}
-        rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
-        {:noreply, put_in(state.rules[id], rule)}
-
-      {:error, reason} ->
-        Logger.error("reactor rule #{id} could not start: #{inspect(reason)}")
-        {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
-    end
-  end
-
   def handle_info({:handler_done, id, changes, result}, state) do
     case state.rules[id] do
       nil ->
@@ -293,6 +272,27 @@ defmodule Compos.Core.Reactor do
           end)
 
         {:noreply, %{state | rules: rules}}
+    end
+  end
+
+  defp fire_rule(state, id, rule) do
+    changes = Enum.reverse(rule.pending)
+    handler = rule.handler
+    reactor = self()
+
+    case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+           result = run_handler(handler, changes)
+           send(reactor, {:handler_done, id, changes, result})
+         end) do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+        in_flight = %{monitor: monitor, changes: changes}
+        rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
+        {:noreply, put_in(state.rules[id], rule)}
+
+      {:error, reason} ->
+        Logger.error("reactor rule #{id} could not start: #{inspect(reason)}")
+        {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
     end
   end
 

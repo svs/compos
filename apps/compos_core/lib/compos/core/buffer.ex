@@ -1946,12 +1946,6 @@ defmodule Compos.Core.Buffer do
     end
   end
 
-  # The authorship fold wants one actor for the bytes that arrived. The change
-  # itself carries the actor who really wrote it, so the fold says "elsewhere"
-  # and the history says who.
-  defp merge_actor(_state),
-    do: local_actor("system:remote", "system", "remote", :merge)
-
   defp on_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
     actor = resolve_actor(author, src)
@@ -2263,6 +2257,12 @@ defmodule Compos.Core.Buffer do
     end
   end
 
+  # The authorship fold wants one actor for the bytes that arrived. The change
+  # itself carries the actor who really wrote it, so the fold says "elsewhere"
+  # and the history says who.
+  defp merge_actor(_state),
+    do: local_actor("system:remote", "system", "remote", :merge)
+
   # The recording policy, which the checkpoint restores and this seeds. It is
   # four fields about whether to record, not a record of anything: the history
   # itself lives in the weave and its log.
@@ -2445,7 +2445,7 @@ defmodule Compos.Core.Buffer do
   end
 
   # Undo swaps the whole rope, so the document takes the result and works out
-  # the operations. Phase 3 moves undo into the document and retires this.
+  # the operations.
   defp mirror_update(state, text) do
     if mirroring?(state),
       do: history_result(state, History.update(state.history, text), "update"),
@@ -2499,8 +2499,8 @@ defmodule Compos.Core.Buffer do
     %{state | history_actor: nil, history_group: nil}
   end
 
-  # The origin is the live label the undo managers filter on in Phase 3. The
-  # actor id already reads `user:local`, `agent:codex`, `system:undo`, so a
+  # The origin is the live label the undo managers filter on. The actor id
+  # already reads `user:local`, `agent:codex`, `system:undo`, so a
   # prefix match on it separates the actors.
   defp history_origin(actor), do: Map.get(actor, :id, "unknown")
 
@@ -2516,9 +2516,8 @@ defmodule Compos.Core.Buffer do
   # every checkpoint boundary, which is also where the buffer already compares
   # content hashes.
   #
-  # In this phase the rope is authoritative, so a mismatch resynchronizes the
-  # document from the rope. That direction reverses in Phase 5, once the
-  # document owns the history the rope cannot rebuild.
+  # The rope is authoritative, so a mismatch resynchronizes the document
+  # from the rope.
   defp verify_history(%{history: nil} = state), do: state
 
   # Recording can be off while the document stays attached. Then the rope is
@@ -3742,8 +3741,6 @@ defmodule Compos.Core.Buffer do
 
   defp back_up(text, pos, n), do: Text.back_graphemes(text, pos, n)
 
-  defp apply_motion(motion, text, pos, goal_col \\ nil)
-
   defp apply_motion(:forward, text, pos, _), do: pos + chars_len(text, pos, 1)
   defp apply_motion(:backward, text, pos, _), do: back_up(text, pos, 1)
   defp apply_motion(:bob, _text, _pos, _), do: 0
@@ -3775,17 +3772,6 @@ defmodule Compos.Core.Buffer do
     end
   end
 
-  # the byte where grapheme column COL of the line BOL..EOL begins, or the
-  # end of the line when the line is shorter
-  defp column_pos(text, bol, eol, col) do
-    line = binary_part(text, bol, eol - bol)
-
-    line
-    |> String.graphemes()
-    |> Enum.take(col)
-    |> Enum.reduce(bol, fn g, acc -> acc + Kernel.byte_size(g) end)
-  end
-
   # words: [A-Za-z0-9_] runs, Emacs-style — skip separators, then the word
   defp apply_motion(:forward_word, text, pos, _) do
     len = Kernel.byte_size(text)
@@ -3796,6 +3782,17 @@ defmodule Compos.Core.Buffer do
   defp apply_motion(:backward_word, text, pos, _) do
     pos = skip_back_while(text, pos, &(!word_byte?(&1)))
     skip_back_while(text, pos, &word_byte?/1)
+  end
+
+  # the byte where grapheme column COL of the line BOL..EOL begins, or the
+  # end of the line when the line is shorter
+  defp column_pos(text, bol, eol, col) do
+    line = binary_part(text, bol, eol - bol)
+
+    line
+    |> String.graphemes()
+    |> Enum.take(col)
+    |> Enum.reduce(bol, fn g, acc -> acc + Kernel.byte_size(g) end)
   end
 
   defp snap_atomic_overlay(point, motion, state) do

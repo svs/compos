@@ -373,6 +373,9 @@ defmodule Compos.Core.Endpoint.Conn do
 
   defp framing_name(:raw), do: "raw"
   defp framing_name({:length, _}), do: "length"
+  defp framing_name(:content_length), do: "content-length"
+  defp framing_name({:delimiter, "\n"}), do: "line"
+  defp framing_name({:delimiter, _}), do: "delimiter"
 
   defp length_opts(spec) do
     %{
@@ -390,9 +393,6 @@ defmodule Compos.Core.Endpoint.Conn do
 
   defp int_opt(n, _default) when is_integer(n) and n >= 0, do: n
   defp int_opt(_, default), do: default
-  defp framing_name(:content_length), do: "content-length"
-  defp framing_name({:delimiter, "\n"}), do: "line"
-  defp framing_name({:delimiter, _}), do: "delimiter"
 
   # --- routing --------------------------------------------------------------
 

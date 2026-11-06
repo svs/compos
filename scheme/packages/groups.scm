@@ -3751,9 +3751,9 @@ is forgotten and that group falls back to creation order in the switcher."
       (let ((chat (group-chat group)))
         (and chat (not (equal? chat name)) chat))))
 
-;; The window of a killed buffer stays in its group (user ruling,
-;; 2026-09-03): it shows the member it showed before, most recent first
-;; from its own history (user ruling, 2026-09-03: a window refills MRU),
+;; The window of a killed buffer stays in its group: it shows the member
+;; it showed before, most recent first from its own history (a window
+;; refills MRU),
 ;; else hidden ordinary group work, then an existing chat or scratch; it closes
 ;; only when the group has none of these — a group that is dying. A
 ;; buffer from another group never comes in, and a member another window
@@ -4067,7 +4067,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; name is the group's name. Renaming the buffer must move both, or the
 ;; group keeps a label for a buffer nobody can find and the chat beside it
 ;; still reads as the old work. The chat then re-derives, which renames it
-;; too, which the layout sweep above follows in turn.
+;; too, which the window records follow in turn (window.scm).
 (add-hook! 'buffer-renamed-hook
   (lambda (old new)
     (unless (chat-buffer? new)

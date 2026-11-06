@@ -762,8 +762,8 @@ defmodule Compos.Scheme.Builtins do
 
   # Walk the arguments in place. chunk_every built the whole list of
   # overlapping pairs first, so a comparison over a long list allocated a
-  # second copy of it before Enum.all? could reject the first pair. On
-  # 2026-09-09 one such call reached 368 MB of heap and passed the 1024 MB
+  # second copy of it before Enum.all? could reject the first pair. One
+  # such call reached 368 MB of heap and passed the 1024 MB
   # limit, which killed the reactor rule that made it. This allocates
   # nothing and stops at the first pair that fails.
   defp cmp(op) do

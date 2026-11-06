@@ -627,6 +627,9 @@
 .tutorial-key { font-family: var(--font-mono); font-size: .82em; padding: 1px 7px; border: 1px solid var(--border-bg);
   border-radius: 4px; white-space: nowrap; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
+/* the tutorial's panes are narrow by design, and their keys are the lesson:
+   the keys bar stays, and wraps, where other windows hide it */
+@container (max-width: 520px) { .window.tutorial-pane .buffer-footer:has(.c-keys-bar) { display: flex; } }
 .tutorial-help { margin-top: 18px; padding: 12px 14px; font-size: 15px; border-left: 3px solid var(--warn-fg);
   background: color-mix(in srgb, var(--warn-fg) 10%, transparent); }
 ")
@@ -714,9 +717,17 @@
     (with-current-buffer name (lambda () (set-mode! mode))))
   (tutorial--join! name role))
 
+(define (tutorial--mark-pane! buf)
+  ;; tutorial-pane keeps the keys bar in a narrow window
+  (let ((cs (string-split (or (buffer-local buf 'window-class) "") " ")))
+    (unless (member "tutorial-pane" cs)
+      (buffer-set-local! buf 'window-class
+        (string-join (filter (lambda (c) (not (equal? c ""))) (append cs (list "tutorial-pane"))) " "))))
+  buf)
+
 (define (tutorial--panes!)
-  (list (tutorial--ensure! *tutorial-buffer* "tutorial-practice-mode" 'home)
-        (tutorial--ensure! *tutorial-detail-buffer* "tutorial-detail-mode" 'detail)
+  (list (tutorial--mark-pane! (tutorial--ensure! *tutorial-buffer* "tutorial-practice-mode" 'home))
+        (tutorial--mark-pane! (tutorial--ensure! *tutorial-detail-buffer* "tutorial-detail-mode" 'detail))
         (tutorial--ensure! *tutorial-lesson-buffer* "morg-mode" 'detail)))
 
 (define (tutorial--changed!)

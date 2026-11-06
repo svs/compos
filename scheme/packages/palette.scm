@@ -225,12 +225,16 @@
       ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
        (command-palette--run-recipe (assoc choice *recipes*)))
       ((equal? (string-trim choice) "") #f)
+      ((command-palette--learned choice)
+       (let ((row (command-palette--learned choice)))
+         (command-palette--run-recipe (assoc (cadr row) *recipes*) (caddr row))))
       (else (command-palette--pick! choice)))))
 
 ;; Words no row is named for go to the *recipes* chat. It finds the recipe
 ;; that does them, reads its arguments out of the words and runs it; when
 ;; no recipe fits, it writes one.
 (define (command-palette--pick! text)
+  (set! *command-palette--request* text)
   (command-palette-ask-recipes!
     (string-append "find the recipe for \"" text "\" and run it with recipe-run!")))
 
@@ -256,6 +260,24 @@
 (defcustom 'command-palette-recipes-role 'fast
   "The model role the *recipes* chat starts on: llm-model-presets names its model. fast is the quickest."
   'group 'interaction)
+
+(defcustom 'command-palette-learned '()
+  "What you typed in the palette and the recipe the *recipes* chat ran for it: ((WORDS TITLE BINDINGS) ...). RET on the same words runs that recipe at once."
+  'group 'interaction)
+
+;; the words of the request the *recipes* chat is on, or #f
+(define *command-palette--request* #f)
+
+;; the learned row for TEXT, while its recipe is still there, else #f
+(define (command-palette--learned text)
+  (let ((row (assoc (string-downcase (string-trim text)) command-palette-learned)))
+    (and row (boundp '*recipes*) (assoc (cadr row) *recipes*) row)))
+
+(define (command-palette--learn! text title bindings)
+  (let ((key (string-downcase (string-trim text))))
+    (customize-save! 'command-palette-learned
+      (cons (list key title bindings)
+            (filter (lambda (r) (not (equal? (car r) key))) command-palette-learned)))))
 
 (define command-palette-recipes-chat "*recipes*")
 
@@ -346,6 +368,7 @@
     (let ((w *command-palette--watch*) (state (minibuffer-state)))
       (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
         (minibuffer-cancel!))
+      (set! *command-palette--request* #f)
       (message (string-append "*recipes*: " text)))))
 
 (add-hook! 'chat-summary-hook 'command-palette--recipes-answered)
@@ -356,8 +379,12 @@
   (let ((recipe (and (boundp '*recipes*) (assoc title *recipes*))))
     (if (not recipe)
         (list 'error (string-append "no recipe named " title))
-        (with-frame-windows
-          (lambda () (command-palette--eval-recipe recipe (or bindings '())))))))
+        (let ((result (with-frame-windows
+                        (lambda () (command-palette--eval-recipe recipe (or bindings '()))))))
+          ;; the chat ran this for a palette request: the same words run it next time
+          (when (and *command-palette--request* (equal? (car result) 'ok))
+            (command-palette--learn! *command-palette--request* title (or bindings '())))
+          result))))
 
 (public! 'recipe-run!
   "(recipe-run! TITLE '((slot \"value\") ...)) -- run a recipe with its arguments on the user's frame; answers (ok VALUE) or (error TEXT)")

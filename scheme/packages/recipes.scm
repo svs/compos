@@ -270,13 +270,21 @@
                 (if rest
                     (cons (list slot (string-join (take words n) " ")) rest)
                     (loop (+ n 1))))))))
-    ((and (pair? words)
-          (equal? (string-downcase (car pattern)) (string-downcase (car words))))
+    ((and (pair? words) (recipe--same-word? (car pattern) (car words)))
      (recipe--match-words (cdr pattern) (cdr words)))
     (else #f)))
 
 ;; (TITLE BINDINGS) for the pattern that reads TEXT, else #f. The pattern
 ;; with the most literal words wins; a pattern of slots alone reads nothing.
+;; A literal word of a pattern matches its plural too: "{{count}} column
+;; layout" reads "3 columns layout".
+(define (recipe--same-word? a b)
+  (let ((a (string-downcase a)) (b (string-downcase b))
+        (stem (lambda (w) (if (and (> (string-length w) 3) (string-suffix? "s" w))
+                              (substring w 0 (- (string-length w) 1))
+                              w))))
+    (or (equal? a b) (equal? (stem a) (stem b)))))
+
 ;; A pattern that opens with a slot reads the end of the words, with the
 ;; shortest argument that fits: in "switch to 2 column layout" the words
 ;; before "2" are the asking, not the argument.

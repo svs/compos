@@ -400,7 +400,7 @@ Every command is one undo step. Typing joins into groups, and commands such as n
 
 Most Compos commands accept a count. To give one, type `C-u` and then the digits, before you type the command. With a META key there is a shorter way: hold META and type the digits.
 
-> **Try it.** Type `C-u 5 C-n`. Point moves down five lines. Type `M-3 C-p` to move back three lines.
+> **Try it.** Type `C-u 5 <down>`. Point moves down five lines. Type `M-3 <up>` to move back three lines.
 
 A command uses the count in different ways. Movement, deletion, killing, scrolling and undo repeat. A command that takes no count may read `C-u` as a request for another version of itself.
 
@@ -433,9 +433,9 @@ Compos applications share one list interface:
 | `SPC` | Mark items, when the list supports selection |
 | `g` | Refresh, when the list supports refreshing |
 
-A list mode adds its own actions, such as `RET` to visit a row and `q` to quit. A list mode can also give a shared key a different action. `C-n` and `C-p` always move by rows.
+A list mode adds its own actions, such as `RET` to visit a row and `q` to quit. A list mode can also give a shared key a different action. The up and down arrows always move by rows.
 
-> **Try it.** Type `M-x ibuffer`. This list manages buffers. Move through the rows with `C-n` and `C-p`. In ibuffer, `p` turns the row preview on and off. Type `f` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
+> **Try it.** Type `M-x ibuffer`. This list manages buffers. Move through the rows with the up and down arrows. In ibuffer, `p` turns the row preview on and off. Type `f` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
 
 Every buffer opens normally, in a window, as your own. A list such as dired opens the file at point in another window with `RET`, while your selection stays in the list. A list of buffers shows the row at point as a **preview**: a card that floats over the frame and follows the highlight. `q` dismisses the card. `M-<down>` and `M-<up>` scroll the other window without taking your focus.
 

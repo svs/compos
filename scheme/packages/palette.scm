@@ -91,7 +91,7 @@
   (let* ((words (apropos-query-words query))
          (found (command-palette--for-user
                   (append (apropos query 'kind "command") (apropos query 'kind "recipe"))
-                  (current-buffer)))
+                  (command-palette--origin)))
          (hits (filter (lambda (h) h)
                  (map (lambda (h)
                         (let ((kind (plist-get h 'kind)))
@@ -258,9 +258,15 @@
               (lambda () (with-current-buffer origin (lambda () (command-palette--apply! text r)))))
             (command-palette--ask-to-write! text))))))
 
+;; the buffer the palette was opened from: its rows are that buffer's
+;; commands, and what you pick runs there
+(define *command-palette--from* #f)
+
 ;; the buffer you were in: the current one, unless that is a prompt's input
 (define (command-palette--origin)
-  (let ((b (current-buffer)))
+  (let ((b (if (and *command-palette--from* (buffer-known? *command-palette--from*))
+               *command-palette--from*
+               (current-buffer))))
     (if (minibuffer-buffer? b)
         (or (find (lambda (v) (not (minibuffer-buffer? v))) (get-visible-buffers)) b)
         b)))
@@ -698,6 +704,7 @@
 (define-command "command-palette"
   "Find an action by intent across command docs and recipes"
   (lambda ()
+    (set! *command-palette--from* (current-buffer))
     (set! *mb-row-delete-fn* command-palette--delete-row!)
     ;; every pick and every ask goes on 'M-x, the one history the palette
     ;; and M-x share, so M-p in either walks them back

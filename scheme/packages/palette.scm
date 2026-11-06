@@ -234,16 +234,14 @@
   (command-palette-ask-recipes!
     (string-append "find the recipe for \"" text "\" and run it with recipe-run!")))
 
-;; Words no row is named for are a row too, so RET finds the recipe for them.
-;; A sentence (three words or more) leads; a word or two follows the hits.
+;; What you typed is always the top row, so RET runs your words; a hit is
+;; picked only when you move down to it.
 (define (command-palette--with-ask query rows)
   (let ((q (string-trim query)))
-    (if (or (equal? q "") (assoc q rows))
+    (if (equal? q "")
         rows
-        (let ((ask (list q "ask  *recipes* finds the recipe for this and runs it")))
-          (if (>= (length (string-split q " ")) 3)
-              (cons ask rows)
-              (append rows (list ask)))))))
+        (cons (or (assoc q rows) (list q "ask  *recipes* finds the recipe for this and runs it"))
+              (filter (lambda (r) (not (equal? (car r) q))) rows)))))
 
 
 ;;; Words no recipe reads go to the *recipes* chat: an ordinary chat that
@@ -409,10 +407,7 @@
                 (minibuffer-set-candidates!
                   (if (equal? (string-trim input) "")
                       (command-palette-candidates "")
-                      (let ((q (string-trim input)))
-                        (cons (list q "ask  *recipes* finds the recipe for this and runs it")
-                              (filter (lambda (r) (not (equal? (car r) q)))
-                                      (command-palette--past input))))))
+                      (command-palette--with-ask input (command-palette--past input))))
                 (debounce!
                   (string-append "command-palette:" (selected-frame))
                   *command-palette-debounce-ms*

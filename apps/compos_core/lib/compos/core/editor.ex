@@ -121,8 +121,10 @@ defmodule Compos.Core.Editor do
   leaves the buffer list as it was (a look); Scheme keeps the window's
   history and quit record (window.scm).
   """
-  def window_set_buffer(win_id, buffer, bump? \\ true),
-    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer, bump?})
+  def window_set_buffer(win_id, buffer, bump? \\ true) do
+    with {:ok, _} <- wake(buffer),
+         do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer, bump?})
+  end
 
   @doc "How many buffers WIN holds, for its header line; Scheme counts them."
   def set_window_stack(win_id, n),
@@ -452,7 +454,20 @@ defmodule Compos.Core.Editor do
   divides the rest evenly. A window not in ITEMS is deleted: the panes
   model keeps what it needs of a window off the screen.
   """
-  def arrange(spec, fid \\ nil), do: GenServer.call(__MODULE__, {:arrange, spec, fid(fid)})
+  def arrange(spec, fid \\ nil) do
+    fid = fid(fid)
+
+    # the Editor names the buffers its new windows need; they wake here
+    # and the line is asked for again, once
+    case GenServer.call(__MODULE__, {:arrange, spec, fid, true}) do
+      {:wake, buffers} ->
+        Enum.each(buffers, &wake/1)
+        GenServer.call(__MODULE__, {:arrange, spec, fid, false})
+
+      reply ->
+        reply
+    end
+  end
 
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
@@ -468,15 +483,48 @@ defmodule Compos.Core.Editor do
   @doc "Carry windows and the recent order across a buffer rename; Scheme carries the keymaps."
   def rename_buffer(old, new), do: GenServer.call(__MODULE__, {:rename_buffer, old, new})
 
-  # A dormant buffer named here wakes inside the handler, through the one
-  # door (Compos.Core.ensure_buffer), which queues its runtime rebuild on
-  # the buffer's own lane. Nothing waits for it.
-  def set_window_buffer(buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
+  def set_window_buffer(buffer, fid \\ nil) do
+    with {:ok, _} <- wake(buffer),
+         do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
+  end
 
   @doc "Replace a frame's window tree from a `Compos.Core.WindowSpec` spec."
-  def restore_tree(spec, active_buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
+  def restore_tree(spec, active_buffer, fid \\ nil) do
+    spec |> spec_buffers() |> Enum.uniq() |> Enum.each(&wake/1)
+    GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
+  end
+
+  # A dormant buffer named to a window wakes HERE, in the caller, through
+  # the one door (Compos.Core.ensure_buffer): never inside the Editor,
+  # whose handlers only ask whether a buffer is live (live/1). A wake
+  # reads the store and starts a process; on 2026-11-04 a store call from
+  # a handler stalled the Editor and took the UI down. The runtime rebuild
+  # of a woken buffer is queued on the buffer's own lane, as it was when
+  # the Editor woke it, so nothing waits for it.
+  defp wake(buffer) do
+    if Buffer.exists?(buffer) do
+      {:ok, buffer}
+    else
+      dormant? = Compos.Core.BufferStore.known?(buffer)
+
+      case Compos.Core.ensure_buffer(buffer, restore: false) do
+        {:ok, _} = ok ->
+          if dormant?, do: Compos.Core.restore_runtime_later(buffer)
+          ok
+
+        other ->
+          other
+      end
+    end
+  end
+
+  defp spec_buffers(%{type: :leaf, buffer: buffer}) when is_binary(buffer), do: [buffer]
+  defp spec_buffers(%{type: :split, children: children}), do: Enum.flat_map(children, &spec_buffers/1)
+  defp spec_buffers(_), do: []
+
+  # Only a live buffer enters a window. A registry read, no message.
+  defp live(buffer),
+    do: if(Buffer.exists?(buffer), do: {:ok, buffer}, else: {:error, :not_live})
 
   # viewport: each client reports how many text rows fit its frame; wheel
   # scrolls server-side; any key re-enables point auto-follow
@@ -774,7 +822,7 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:window_set_buffer, win_id, buffer, bump?}, _from, state) do
-    case {find_window_frame(state, win_id), Compos.Core.ensure_buffer(buffer)} do
+    case {find_window_frame(state, win_id), live(buffer)} do
       {nil, _} ->
         {:reply, {:error, :no_window}, state}
 
@@ -1832,27 +1880,19 @@ defmodule Compos.Core.Editor do
   def handle_call(:new_window_id, _from, state),
     do: {:reply, state.next_win, %{state | next_win: state.next_win + 1}}
 
-  def handle_call({:arrange, spec, fid}, _from, state) do
+  def handle_call({:arrange, spec, fid, ask_wake?}, _from, state) do
     f = frame(state, fid)
     visible = leaves(f.tree)
     held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
     items = arrange_items(spec)
     chosen = Enum.map(items, &line_leaf(&1, visible, held))
     ids = Enum.map(items, &line_item_id/1)
+    asleep = Enum.flat_map(items, &List.wrap(asleep_buffer(&1, visible, held)))
 
-    if chosen == [] or Enum.any?(chosen, &is_nil/1) or Enum.uniq(ids) != ids do
-      {:reply, {:error, :no_window}, state}
+    if ask_wake? and asleep != [] do
+      {:reply, {:wake, Enum.uniq(asleep)}, state}
     else
-      used = MapSet.new(chosen, & &1.id)
-      # a window that leaves the line goes, its point with it
-      visible |> Enum.reject(&MapSet.member?(used, &1.id)) |> Enum.each(&drop_point/1)
-      active = if MapSet.member?(used, f.active), do: f.active, else: hd(chosen).id
-      next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
-
-      f =
-        %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
-
-      changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
+      arrange_line(state, f, spec, visible, chosen, ids)
     end
   end
 
@@ -1895,7 +1935,7 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
-    case Compos.Core.ensure_buffer(buffer) do
+    case live(buffer) do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
 
@@ -2129,12 +2169,36 @@ defmodule Compos.Core.Editor do
     cond do
       leaf = Enum.find(pool, &(&1.id == id)) -> leaf
       id in held -> nil
-      match?({:error, _}, Compos.Core.ensure_buffer(buffer)) -> nil
+      match?({:error, _}, live(buffer)) -> nil
       true -> %{type: :leaf, id: id, buffer: buffer, top: 0, manual: false}
     end
   end
 
   defp line_leaf(id, pool, _held), do: Enum.find(pool, &(&1.id == id))
+
+  defp arrange_line(state, f, spec, visible, chosen, ids) do
+    if chosen == [] or Enum.any?(chosen, &is_nil/1) or Enum.uniq(ids) != ids do
+      {:reply, {:error, :no_window}, state}
+    else
+      used = MapSet.new(chosen, & &1.id)
+      # a window that leaves the line goes, its point with it
+      visible |> Enum.reject(&MapSet.member?(used, &1.id)) |> Enum.each(&drop_point/1)
+      active = if MapSet.member?(used, f.active), do: f.active, else: hd(chosen).id
+      next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
+
+      f =
+        %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
+
+      changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
+    end
+  end
+
+  # the buffer an item needs started: a new window on a buffer not live
+  defp asleep_buffer([id, buffer], pool, held) when is_integer(id) and id > 0 and is_binary(buffer) do
+    if Enum.any?(pool, &(&1.id == id)) or id in held or Buffer.exists?(buffer), do: nil, else: buffer
+  end
+
+  defp asleep_buffer(_item, _pool, _held), do: nil
 
   # One line of LEAVES, nested to the right: the first takes RATIO, and
   # each later split gives its first pane 1/COUNT of what is left. This is
@@ -2608,7 +2672,7 @@ defmodule Compos.Core.Editor do
     # must show a live buffer, and the dormant one keeps its files.
     tree =
       Enum.reduce(leaf_ids_buffers(tree), tree, fn {id, buffer}, tree ->
-        case Compos.Core.ensure_buffer(buffer) do
+        case live(buffer) do
           {:error, _reason} ->
             replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: live_scratch()})
 

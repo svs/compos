@@ -288,9 +288,31 @@
       (let ((cmd (tutorial--ran)))
         (when (and (string? cmd) (member cmd (caddr w)))
           (let ((left (filter (lambda (c) (not (equal? c cmd))) (caddr w))))
+            (set! *tutorial-watch* (list (car w) (cadr w) left))
             (if (null? left)
-                (tutorial-step-done! (car w) (cadr w))
-                (set! *tutorial-watch* (list (car w) (cadr w) left)))))))))
+                (tutorial--prove! (car w) (cadr w))
+                (message (string-append "Good. Still to do in this step: "
+                                        (string-join left ", "))))))))))
+
+;; A command that only starts the work (a key check, a daemon start) proves
+;; the step when the work answers: PROOF takes PASS and FAIL, and calls one.
+(define *tutorial-proofs* '())   ;; ((COMMAND PROOF) ...)
+
+(define (tutorial-proof! command proof)
+  (set! *tutorial-proofs* (alist-put *tutorial-proofs* command proof))
+  command)
+
+(define (tutorial--prove! slug i)
+  (let* ((l (tutorial-lesson slug))
+         (ran (if l (list-ref (tutorial--watches l) i) '()))
+         (hit (find (lambda (c) (assoc c *tutorial-proofs*)) ran)))
+    (if (not hit)
+        (tutorial-step-done! slug i)
+        (begin
+          (message "Checking that it works...")
+          ((cadr (assoc hit *tutorial-proofs*))
+           (lambda () (tutorial-step-done! slug i))
+           (lambda (why) (tutorial--arm!) (message why)))))))
 
 (add-hook! 'post-command-hook 'tutorial--after-command)
 
@@ -400,9 +422,38 @@
       (set! *tutorial-done*
             (alist-put *tutorial-done* slug (append (tutorial--done-steps slug) (list i))))
       (tutorial--changed! l)
-      (message (if (tutorial-lesson-done? l)
-                   (string-append "Lesson done: " (plist-get l 'title) ". C-c C-n goes to the next one")
-                   (string-append "Step " (number->string (+ i 1)) " done. On to the next Try it"))))))
+      (if (tutorial-lesson-done? l)
+          (tutorial--advance! l)
+          (tutorial--show-step! l)))))
+
+(define (tutorial--show-step! l)
+  ;; the page beside you turns to the next step; a page you type in keeps
+  ;; your point, and the echo area names the step instead
+  (let* ((i (tutorial--next-step l))
+         (buf (tutorial-lesson-buffer l))
+         (w (and (buffer-known? buf) (window-showing buf))))
+    (when i
+      (when (and w (not (equal? w (active-window))))
+        (let ((pos (string-index (buffer-text buf) "- [ ] **Try it.**")))
+          (when pos (window-set-point! w pos))))
+      (message (string-append "Done. Next: " (list-ref (plist-get l 'steps) i))))))
+
+(define (tutorial--advance! l)
+  ;; a finished lesson gives its window to the next one
+  (let ((to (tutorial--nth (+ (plist-get l 'n) 1))))
+    (if (not to)
+        (message "You finished the last lesson of the tutorial")
+        (let* ((buf (tutorial--page! to))
+               (from (tutorial-lesson-buffer l))
+               (w (and (buffer-known? from) (window-showing from))))
+          (tutorial--enter! to)
+          (when (buffer-known? *tutorial-buffer*)
+            (list-goto-index! *tutorial-buffer* (- (plist-get to 'n) 1)))
+          (when w
+            (window-set-buffer! w buf)
+            (display-buffer-detail! buf *tutorial-buffer*))
+          (message (string-append "Lesson done: " (plist-get l 'title) ". Next: "
+                                  (number->string (plist-get to 'n)) ". " (plist-get to 'title)))))))
 
 ;;; the listing
 
@@ -609,6 +660,29 @@
         (else #f)))
 
 (add-hook! (list 'preview-link "tutorial") tutorial--link)
+
+;; JEV and laya steps are done when they answer, not when they are asked
+(tutorial-proof! "jev"
+  (lambda (pass fail)
+    (task-run! (lambda () (and (boundp 'jev-api-key) (jev-api-key)))
+      (lambda (ok? key)
+        (if (and ok? key)
+            (pass)
+            (fail "JEV has no API key. Set JEV_API_KEY, then type M-x jev again."))))))
+
+(tutorial-proof! "laya-server"
+  (lambda (pass fail)
+    (if (not (boundp 'laya-ask))
+        (fail "laya is not loaded in this editor")
+        (laya-ask '(op "models")
+          (lambda (reply)
+            (if (plist-get reply 'ok)
+                (pass)
+                (fail (string-append "laya does not answer: " (or (plist-get reply 'error) "no answer")
+                                     ". Read ~/.compos/laya-daemon.log, then type M-x laya-server again."))))))))
+
+;; the steps are watched from the start, not only once C-h t is open
+(ignore-errors (lambda () (tutorial--load!) (tutorial--arm!)))
 
 ;; A new reader often keeps Control held for the second key.
 (define-key "help-map" "t" "help-with-tutorial")

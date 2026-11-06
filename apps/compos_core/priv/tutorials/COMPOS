@@ -4,8 +4,6 @@ Welcome. This tutorial teaches Compos by doing: you read it, and you edit it as 
 
 This is your personal copy of the tutorial. Later we tell you to change it. Do not worry if you change it before we say so. That is called "editing", and editing is what Compos is for.
 
-> **Want to use AI?** Hold the META key (usually ALT or Option) and type `x`. Then type `setup-ai-guide` and press Return. We write this as `M-x setup-ai-guide`. The guide explains models, chats, agents, logins and a first reply. You can do the editor lessons without a model. Return to the guide before the Agents exercises.
-
 You are reading one buffer. A **buffer** is a named place where Compos holds text: a file, a chat, a help page, or this tutorial. This buffer is named TUTORIAL. The cursor in the text is called **point**. Commands move point.
 
 Compos commands use the CONTROL key (often labelled CTRL or CTL) or the META key (usually labelled ALT or Option). We use these abbreviations:
@@ -39,45 +37,66 @@ The sections, in order.
 
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `C-g` to cancel the search and return to where you started.
 
-1. Why Compos
+1. Set up inference
 2. Key notation
 3. Named commands
-4. Moving by screens
-5. Moving point
-6. Windows
-7. Editing and undo
-8. Prefix arguments
-9. Killing and yanking
-10. Searching and replacing
-11. Files and buffers
+4. Files and buffers
+5. Windows
+6. Moving by screens
+7. Moving point
+8. Editing and undo
+9. Prefix arguments
+10. Killing and yanking
+11. Searching and replacing
 12. Help
 13. Modes and keymaps
 14. Lists and previews
 15. Browsing the web
 16. Groups
-17. Agents
-18. Persistence
-19. The editor is malleable
-20. Scheme and the BEAM
-21. Where to go next
+17. Why Compos
+18. Agents
+19. Persistence
+20. The editor is malleable
+21. Scheme and the BEAM
+22. Where to go next
 
 ---
 
-## Why Compos
+## Set up inference
 
-Most programs make you leave your work to find the next piece of information. You switch to a browser, then to a chat window, then to a terminal, and you rebuild the task in your head each time.
+Compos uses three kinds of model. Set them up first, and the later lessons can use them. A lesson that needs no model works without this setup, so you can also come back here later.
 
-**Compos does it differently. The information comes to you**, in another window, without your leaving what you are doing.
+| Model | What it does | Where it runs |
+| --- | --- | --- |
+| A chat model | Writes replies in chats, and does work as an agent. | A connector, such as Claude Code, Codex or a direct API. |
+| JEV | Classifies text fast and at a low cost: urgency, a team, the group of a buffer. | The TypeSafe System One API. |
+| laya | Answers typed questions about a passage: a choice, a score, or a yes or no, with a confidence. | This machine, in a local daemon. |
 
-Emacs, the editor Compos is modelled on, was built this way long before agents existed. A programmer could keep code in one window and documentation in another, and read the documentation without leaving the code. Mail, help, shells, directories and source all lived in the same program, and the same movement and editing commands worked in all of them.
+### A chat model
 
-Compos keeps that idea and adds a graphical display, work that runs at the same time, saved state, and agents. An **agent** is a model that works on the same buffers you do. A web page, a file, a chat, a mail thread, a search result and a running process are all buffers in one system.
+> **Try it.** Type `M-x setup-inference` and choose the model that new chats use.
 
-Every one of them has a name, named commands, a place on the screen, and state that you and an agent can both change.
+> **Try it.** Type `M-x chat-new`, type a short message, and press `RET`. A reply tells you that the connector works. Type `C-h t` to come back to the tutorial.
 
-Every window, list and page uses the same movement and editing keys. So the next sections teach those keys, on the text in front of you. When they are familiar, the sections on Windows, Lists and previews, Groups and Agents show the idea above in action.
+If the chat gives no reply, type `M-x setup-ai-guide`. The guide explains connectors, logins and keys.
 
-The tutorial is a buffer too. You are learning Compos from inside Compos.
+### JEV
+
+JEV needs a TypeSafe API key. Compos reads the key from the `JEV_API_KEY` or `TYPESAFE_API_KEY` environment variable. When neither is set, Compos asks Doppler, in the project and config that the settings `jev-doppler-project` and `jev-doppler-config` name.
+
+> **Try it.** Type `M-x jev`. JEV classifies a sample support message, and the echo area shows its answers. If the echo area says "no answer", the key is not set.
+
+Compos uses JEV to tag mail, to move a buffer to its group (`M-x buffer-magic-group`), and to find the command for a request (`M-x jev-apropos`).
+
+### laya
+
+laya is a 421M decision model. It runs on this machine with MLX, so it needs Apple silicon and a Python that has the `laya-mlx` package. The setting `laya-python` names that Python. The checkpoint comes from the Hugging Face cache, or from the folders in the setting `laya-model-roots`.
+
+> **Try it.** Type `M-x laya-server`. Compos starts the laya daemon, or tells you its state. The first question after a start waits while the daemon loads the weights.
+
+> **Try it.** Type `M-x local-models`. The laya daemon shows as the host `endpoint:laya`. Type `q` to close the list.
+
+laya does not write text. Compos asks it for a decision when the decision must be fast, free, and stay on this machine.
 
 ## Key notation
 
@@ -120,6 +139,56 @@ You never need to know a command before you use it. Type the words you would use
 
 Agents use this same list. An agent does not guess which rectangle is a button. It finds and runs the named commands you use.
 
+## Files and buffers
+
+Compos checkpoints buffers, including unsaved ones, so their text can survive a restart. Put text in a file when it should also exist outside Compos and have a path that other programs can open.
+
+A **file** is data on disk. A **buffer** is a named place where the editor holds text. A file buffer visits the file it came from: editing the buffer changes the buffer, and `C-x C-s` writes the buffer back to the file.
+
+| Key | What it does |
+| --- | --- |
+| `C-x C-f` | Find or create a file |
+| `C-x C-s` | Save the current file buffer |
+| `C-x b` | Switch buffers |
+| `C-x k` | Kill a buffer |
+
+This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
+
+> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose TUTORIAL and press `RET` to return.
+
+Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
+
+Because of that, they share the same window commands, links, search, modes, saved state, groups and agent context.
+
+## Windows
+
+Compos can show more than one window at a time. A window shows a buffer. Splitting a window does not copy the buffer, and closing a window does not kill the buffer.
+
+| Key | What it does |
+| --- | --- |
+| `C-x 2` | Split the window below |
+| `C-x 3` | Split the window to the right |
+| `C-x o` | Move to the other window |
+| `C-x b` | Show another buffer in this window |
+| `C-x 0` | Close the selected window |
+| `C-x 1` | Close every other window |
+
+> **Try it.** Type `C-x 2` to split the screen into two windows. Compos may show another buffer in the new window. Type `C-x o`, then `C-x b`, choose TUTORIAL and press `RET`. Both windows now show TUTORIAL. Move point in the second window. Each window remembers its own point, even though both show the same text.
+
+One small command shows the whole idea:
+
+| Key | What it does |
+| --- | --- |
+| `C-M-v` | Scroll the other window while you stay in this one |
+| `M-<down>` | The same |
+| `M-<up>` | Scroll the other window backward |
+
+> **Try it.** Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
+
+You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a file beside the work, the messages buffer or any other useful neighbour.
+
+> **Try it.** Type `C-x 1` to return to one window.
+
 ## Moving by screens
 
 A buffer often holds more text than one window can show. The window shows one screenful; the rest continues above and below. Scrolling moves the view over the text. It never changes the text.
@@ -160,35 +229,6 @@ The letters are easy to remember: **P** for previous, **N** for next, **B** for 
 The command names are literal: `forward-char`, `backward-char`, `next-line`, `previous-line`, `forward-word`. A key is a short name for a command, not a second interface you must learn.
 
 > **Try it.** Type `M->` to visit the end of the tutorial and read the last line. Type `M-<` to come back.
-
-## Windows
-
-Compos can show more than one window at a time. A window shows a buffer. Splitting a window does not copy the buffer, and closing a window does not kill the buffer.
-
-| Key | What it does |
-| --- | --- |
-| `C-x 2` | Split the window below |
-| `C-x 3` | Split the window to the right |
-| `C-x o` | Move to the other window |
-| `C-x b` | Show another buffer in this window |
-| `C-x 0` | Close the selected window |
-| `C-x 1` | Close every other window |
-
-> **Try it.** Type `C-x 2` to split the screen into two windows. Compos may show another buffer in the new window. Type `C-x o`, then `C-x b`, choose TUTORIAL and press `RET`. Both windows now show TUTORIAL. Move point in the second window. Each window remembers its own point, even though both show the same text.
-
-One small command shows the whole idea:
-
-| Key | What it does |
-| --- | --- |
-| `C-M-v` | Scroll the other window while you stay in this one |
-| `M-<down>` | The same |
-| `M-<up>` | Scroll the other window backward |
-
-> **Try it.** Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
-
-You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a file beside the work, the messages buffer or any other useful neighbour.
-
-> **Try it.** Type `C-x 1` to return to one window.
 
 ## Editing and undo
 
@@ -262,27 +302,6 @@ While you search, `RET` accepts the match. `C-g` quits and returns to where the 
 > **Try it.** Put point at the start of the practice line below. Type `M-%`, replace "colour" with "color", and answer `y` for the match. Type `C-/` afterward if you want the original text back.
 
 This practice line uses the word colour once.
-
-## Files and buffers
-
-Compos checkpoints buffers, including unsaved ones, so their text can survive a restart. Put text in a file when it should also exist outside Compos and have a path that other programs can open.
-
-A **file** is data on disk. A **buffer** is a named place where the editor holds text. A file buffer visits the file it came from: editing the buffer changes the buffer, and `C-x C-s` writes the buffer back to the file.
-
-| Key | What it does |
-| --- | --- |
-| `C-x C-f` | Find or create a file |
-| `C-x C-s` | Save the current file buffer |
-| `C-x b` | Switch buffers |
-| `C-x k` | Kill a buffer |
-
-This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
-
-> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose TUTORIAL and press `RET` to return.
-
-Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
-
-Because of that, they share the same window commands, links, search, modes, saved state, groups and agent context.
 
 ## Help
 
@@ -381,6 +400,22 @@ A **group** remembers a task: its buffers, its companion chat, and the window ar
 A task should not be a pile of tabs that you rebuild from memory. Its sources, notes, pages, process output and conversation should come back together.
 
 A buffer can belong to several useful contexts without being trapped in one application.
+
+## Why Compos
+
+Most programs make you leave your work to find the next piece of information. You switch to a browser, then to a chat window, then to a terminal, and you rebuild the task in your head each time.
+
+**Compos does it differently. The information comes to you**, in another window, without your leaving what you are doing.
+
+Emacs, the editor Compos is modelled on, was built this way long before agents existed. A programmer could keep code in one window and documentation in another, and read the documentation without leaving the code. Mail, help, shells, directories and source all lived in the same program, and the same movement and editing commands worked in all of them.
+
+Compos keeps that idea and adds a graphical display, work that runs at the same time, saved state, and agents. An **agent** is a model that works on the same buffers you do. A web page, a file, a chat, a mail thread, a search result and a running process are all buffers in one system.
+
+Every one of them has a name, named commands, a place on the screen, and state that you and an agent can both change.
+
+Every window, list and page uses the same movement and editing keys. So the next sections teach those keys, on the text in front of you. When they are familiar, the sections on Windows, Lists and previews, Groups and Agents show the idea above in action.
+
+The tutorial is a buffer too. You are learning Compos from inside Compos.
 
 ## Agents
 

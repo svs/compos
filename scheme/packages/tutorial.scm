@@ -125,18 +125,23 @@
                       (filter (lambda (l) (string-prefix? *tutorial-try* l)) lines)))))
 
 (define (tutorial--parse text)
-  ;; one lesson per ## section of the master; Contents is the master's own map
-  (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (out '()))
+  ;; one lesson per ## section of the master; Contents is the master's own
+  ;; map, and the welcome above it opens the first lesson
+  (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (pre '()) (out '()))
     (let ((flush (lambda ()
                    (if (and title (not (equal? title "Contents")))
-                       (cons (tutorial--lesson title acc (+ 1 (length out))) out)
+                       (cons (tutorial--lesson title (if (null? out) (append acc (list "") pre) acc)
+                                               (+ 1 (length out)))
+                             out)
                        out))))
       (cond ((null? lines) (reverse (flush)))
             ((string-prefix? "## " (car lines))
              (loop (cdr lines)
                    (string-trim (substring-bytes (car lines) 3 (string-byte-length (car lines))))
-                   '() (flush)))
-            (else (loop (cdr lines) title (cons (car lines) acc) out))))))
+                   '() (if title pre acc) (flush)))
+            ((and (not title) (string-prefix? "# " (car lines)))
+             (loop (cdr lines) title acc pre out))
+            (else (loop (cdr lines) title (cons (car lines) acc) pre out))))))
 
 (define (tutorial-lessons)
   "The lessons of the bundled master, in order: plists of slug, n, title, body and steps."
@@ -299,7 +304,7 @@
         (done (length (tutorial--done-steps (plist-get l 'slug))))
         (of (string-append "Lesson " (number->string (plist-get l 'n)) " of "
                            (number->string (length (tutorial-lessons))))))
-    (string-append "*" of " · "
+    (string-append "*" of " - "
                    (cond ((= n 0) "read it, then go on with C-c C-n")
                          ((>= done n) "every step is done. C-c C-n goes on")
                          (else (string-append (number->string done) " of " (number->string n)
@@ -312,7 +317,7 @@
                  "**Try it.** " (list-ref (plist-get l 'steps) i)))
 
 (define *tutorial-nav*
-  "[← Previous](compos:tutorial/previous) · [All lessons](compos:tutorial/lessons) · [Next →](compos:tutorial/next)")
+  "[<- Previous](compos:tutorial/previous) | [All lessons](compos:tutorial/lessons) | [Next ->](compos:tutorial/next)")
 
 (define (tutorial--page-text l)
   (let loop ((lines (string-split (plist-get l 'body) "\n")) (i 0) (out '()))
@@ -404,8 +409,8 @@
 (define (tutorial--cells buf l)
   (let ((n (length (plist-get l 'steps)))
         (done (length (tutorial--done-steps (plist-get l 'slug)))))
-    (list (list (cond ((tutorial-lesson-done? l) "✓")
-                      ((equal? (plist-get l 'slug) *tutorial-current*) "▸")
+    (list (list (cond ((tutorial-lesson-done? l) "x")
+                      ((equal? (plist-get l 'slug) *tutorial-current*) ">")
                       (else ""))
                 "default")
           (list (number->string (plist-get l 'n)) "dim")
@@ -415,7 +420,7 @@
 
 (define (tutorial--title buf)
   (let ((ls (tutorial-lessons)))
-    (string-append "Compos tutorial · " (number->string (length (filter tutorial-lesson-done? ls)))
+    (string-append "Compos tutorial - " (number->string (length (filter tutorial-lesson-done? ls)))
                    " of " (number->string (length ls)) " lessons done")))
 
 (define-list-mode! "tutorial-mode"

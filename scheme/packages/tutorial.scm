@@ -622,7 +622,7 @@
                      (tutorial--probe-of *tutorial-current* (car (list-ref steps *tutorial-shown*))))
                 '(("t" "try again"))
                 '()))
-          '(("r" "restart lesson") ("R" "reset"))))
+          '(("r" "restart lesson") ("R" "reset") ("⌥O" "chat"))))
 
 (define (tutorial--draw-detail!)
   (let ((buf *tutorial-detail-buffer*))
@@ -1029,11 +1029,12 @@
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 
-;; Behind the Set up lesson, a chat troubleshoots. A step that fails, or h
-;; on the slide, goes to it; its answer comes to the slide. The chat is
-;; never shown: C-x b *setup-chat* reads it. *setup* is the welcome page.
-(define *tutorial-setup-chat* "*setup-chat*")
-(define *tutorial-setup-slug* #f)
+;; Behind the Set up lesson, a chat troubleshoots. It is the slide's own
+;; chat, attached as every page's chat is: M-o on the slide opens it. A step
+;; that fails, or h on the slide, goes to it; its answer comes to the slide.
+(define *tutorial-setup-chat* #f)
+
+(mode-chat-title! "tutorial-detail-mode" "Tutorial setup")
 
 (define (tutorial--setup-brief what)
   (string-append
@@ -1044,20 +1045,17 @@
     "did, and what the reader must do now. Do not ask questions."))
 
 (define (tutorial--setup-ask! text k)
-  ;; TEXT to the setup chat, started without showing it; K gets the reply,
-  ;; or #f when none comes
-  (let ((sent (ignore-errors
-                (lambda ()
-                  (if (and *tutorial-setup-slug* (buffer-known? *tutorial-setup-chat*))
-                      (agent-prompt! *tutorial-setup-slug* text)
-                      (set! *tutorial-setup-slug*
-                            (execute* text (list 'title *tutorial-setup-chat* 'notify #f))))
-                  (subagent-wait (list *tutorial-setup-slug*)
-                    (lambda (results)
-                      (let ((s (and (pair? results) (plist-get (car results) 'text))))
-                        (k (and (string? s) (not (equal? (string-trim s) "")) s)))))
-                  #t))))
-    (unless sent (k #f))))
+  ;; TEXT to the slide's own chat, made quietly when it has none; K gets the
+  ;; reply, or #f when none comes
+  (let ((chat (ignore-errors (lambda () (page-chat! *tutorial-detail-buffer* text)))))
+    (if (not chat)
+        (k #f)
+        (begin
+          (set! *tutorial-setup-chat* chat)
+          (subagent-wait (list chat)
+            (lambda (results)
+              (let ((s (and (pair? results) (plist-get (car results) 'text))))
+                (k (and (string? s) (not (equal? (string-trim s) "")) s)))))))))
 
 (define (tutorial--setup-help! slug what)
   (when (equal? slug "set-up")

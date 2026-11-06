@@ -231,7 +231,9 @@
   (cond ((string-prefix? "M-x " span)
          (tutorial--command
            (car (string-split (substring-bytes span 4 (string-byte-length span)) " "))))
-        ((re-match "^(C-|M-|s-)" span) (tutorial--key-command span maps))
+        ;; a key: a chord, or a named key such as <home>; Shift and an arrow
+        ;; selects text but is bound to pane moves, so it is not watched
+        ((re-match "^(C-|M-|s-|<)" span) (tutorial--key-command span maps))
         (else (tutorial--command span))))
 
 (define (tutorial--step-watch text maps)
@@ -850,25 +852,23 @@
 (define-command "tutorial-refresh" "Redraw the list of lessons"
   (lambda () (list-refresh! *tutorial-index-buffer*)))
 
-;; JEV is optional: without its key, laya decides
-(tutorial-proof! "jev"
+;; decide answers the test question with JEV when its key is set, else laya
+(tutorial-probe! "set-up" "asks **decide** a test question"
   (lambda (pass fail)
-    (task-run! (lambda () (and (boundp 'decide-jev-ready?) (decide-jev-ready?)))
-      (lambda (ok? ready?)
-        (pass)
-        (unless (and ok? ready?)
-          (message "No JEV key, so Compos uses laya for decisions. The next step sets up laya."))))))
-
-(tutorial-proof! "laya-server"
-  (lambda (pass fail)
-    (if (not (boundp 'laya-ask))
-        (fail "laya is not loaded in this editor")
-        (laya-ask '(op "models")
-          (lambda (reply)
-            (if (plist-get reply 'ok)
-                (pass)
-                (fail (string-append "laya does not answer: " (or (plist-get reply 'error) "no answer")
-                                     ". Read ~/.compos/laya-daemon.log, then type M-x laya-server again."))))))))
+    (if (not (boundp 'decide-async))
+        (fail "decide is not loaded in this editor")
+        (decide-async "The payment server is down and customers cannot pay."
+          (list 'urgent (decide-noul "Is this message urgent?"))
+          (lambda (r)
+            (let ((usage (plist-get r 'usage)))
+              (if (pair? (plist-get r 'answers))
+                  (begin
+                    (pass)
+                    (message (string-append "decide answered with "
+                                            (format "~a" (caddr usage)) " in "
+                                            (number->string (cadddr usage)) " ms")))
+                  (fail (string-append "No decision model answered. Set TYPESAFE_API_KEY for JEV, "
+                                       "or set up laya and type M-x laya-server.")))))))))
 
 ;; the extension step finishes itself: at once when the extension is
 ;; already there, else when it attaches

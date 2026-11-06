@@ -574,13 +574,19 @@
                                         "Read this lesson in the lesson pane. Press n when you are ready to go on."
                                         "Every step of this lesson is done. Press n for the next lesson.")))))
                 (if *tutorial-help* (list (tutorial--div "tutorial-help" 'text *tutorial-help*)) '())
-                (list (component 'wizard/nav
-                        (list 'back (list "tutorial:back" "<- Back")
-                              'next (list "tutorial:next" "Next ->")))
-                      (tutorial--div "tutorial-keys"
-                        'text (if (equal? slug "set-up")
-                                "n next   p back   N next lesson   P previous lesson   i all lessons   h help"
-                                "n next   p back   N next lesson   P previous lesson   i all lessons"))))))))))
+                ;; the slide's keymap, drawn: every key is a button with its
+                ;; key on it, and every button is a key
+                (list (component 'ui/actions
+                        (list 'class "tutorial-actions"
+                              'actions (append
+                                         (list (list "tutorial:back" "Back" "p")
+                                               (list "tutorial:next" "Next" "n" "good")
+                                               (list "tutorial:previous-lesson" "Previous lesson" "⇧P")
+                                               (list "tutorial:next-lesson" "Next lesson" "⇧N")
+                                               (list "tutorial:index" "All lessons" "i"))
+                                         (if (equal? slug "set-up") (list (list "tutorial:help" "Help" "h")) '())
+                                         (list (list "tutorial:restart" "Restart lesson" "r")
+                                               (list "tutorial:reset" "Reset tutorial" "⇧R" "bad")))))))))))))
 
 (define (tutorial--draw-detail!)
   (let ((buf *tutorial-detail-buffer*))
@@ -597,14 +603,19 @@
 (mode-keys! "tutorial-detail-mode"
   '(("n" "tutorial-next") ("RET" "tutorial-next") ("p" "tutorial-back")
     ("N" "tutorial-next-lesson") ("P" "tutorial-previous-lesson")
-    ("i" "tutorial-index") ("h" "tutorial-help") ("q" "quit-window")))
+    ("i" "tutorial-index") ("h" "tutorial-help")
+    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("q" "quit-window")))
 
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
     (and (equal? buf *tutorial-detail-buffer*)
-         (cond ((equal? id "tutorial:next") (tutorial-next!) #t)
-               ((equal? id "tutorial:back") (tutorial-back!) #t)
-               (else #f)))))
+         (let ((hit (assoc id '(("tutorial:next" "tutorial-next") ("tutorial:back" "tutorial-back")
+                                ("tutorial:next-lesson" "tutorial-next-lesson")
+                                ("tutorial:previous-lesson" "tutorial-previous-lesson")
+                                ("tutorial:index" "tutorial-index") ("tutorial:help" "tutorial-help")
+                                ("tutorial:restart" "tutorial-restart-lesson")
+                                ("tutorial:reset" "tutorial-reset")))))
+           (and hit (begin (run-command (cadr hit)) #t))))))
 
 (define-style! 'tutorial "
 .tutorial-slide { max-width: 36em; }
@@ -620,7 +631,7 @@
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
 .tutorial-help { margin-top: 18px; padding: 12px 14px; font-size: 15px; border-left: 3px solid var(--warn-fg);
   background: color-mix(in srgb, var(--warn-fg) 10%, transparent); }
-.tutorial-keys { margin-top: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg); }
+.tutorial-actions { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border-bg); }
 ")
 
 ;;; the lesson and the practice page
@@ -777,6 +788,15 @@
         (tutorial-step-done! (plist-get l 'slug) *tutorial-shown*)
         (message "No step to tick"))))
 
+(define (tutorial-restart-lesson!)
+  "Start the lesson on the slide again: no step done, a fresh practice page."
+  (let ((l (tutorial--lesson-now)))
+    (when l
+      (set! *tutorial-done* (alist-put *tutorial-done* (plist-get l 'slug) '()))
+      (when (buffer-known? *tutorial-buffer*) (buffer-set-local! *tutorial-buffer* 'tutorial-lesson #f))
+      (tutorial--go! l)
+      (message (string-append "Started again: " (plist-get l 'title))))))
+
 (define (tutorial-reset!)
   (y-or-n "Forget all tutorial progress and start again?"
     (lambda ()
@@ -895,6 +915,9 @@
 
 (define-command "tutorial-toggle-done" "Mark the lesson on this row done, or not done"
   (lambda () (tutorial-toggle-done!)))
+
+(define-command "tutorial-restart-lesson" "Start the lesson on the slide again"
+  (lambda () (tutorial-restart-lesson!)))
 
 (define-command "tutorial-reset" "Forget all tutorial progress"
   (lambda () (tutorial-reset!)))

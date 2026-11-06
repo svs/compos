@@ -267,6 +267,23 @@
                 ((null? (cadr cur)) (loop (cdr ss) (list (string-append (car cur) " " s) w) out))
                 (else (loop (cdr ss) (list s w) (cons cur out))))))))
 
+;; A step can listen for something that is not a command: the browser's copy
+;; and paste call Scheme straight, with no command. The step of lesson SLUG
+;; whose text has TEXT hears EVENT as if a command of that name ran.
+(define *tutorial-step-events* '())   ;; ((SLUG TEXT EVENT) ...)
+
+(define (tutorial-step-event! slug text event)
+  (set! *tutorial-step-events*
+        (cons (list slug text event)
+              (filter (lambda (e) (not (and (equal? (car e) slug) (equal? (cadr e) text))))
+                      *tutorial-step-events*)))
+  (set! *tutorial-steps* '())
+  slug)
+
+(define (tutorial--step-events slug text)
+  (map caddr (filter (lambda (e) (and (equal? (car e) slug) (string-contains? text (cadr e))))
+                     *tutorial-step-events*)))
+
 (define (tutorial--steps l)
   ;; keys resolve as they do in the practice pane, where the reader types them
   (let* ((slug (plist-get l 'slug))
@@ -282,7 +299,10 @@
                         (if (null? ts)
                             out
                             (loop (cdr ts) (+ k 1)
-                                  (append out (map (lambda (b) (append b (list k)))
+                                  (append out (map (lambda (b)
+                                                     (list (car b)
+                                                           (append (cadr b) (tutorial--step-events slug (car b)))
+                                                           k))
                                                    (tutorial--bites (car ts) maps))))))))
           (set! *tutorial-steps* (alist-put *tutorial-steps* slug steps))
           steps))))
@@ -1143,6 +1163,14 @@
   (lambda () (and (boundp 'browser-connected?) (browser-connected?))))
 
 (add-hook! 'browser-attached-hook 'tutorial-recheck!)
+
+;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!
+(tutorial-step-event! "selecting-copying-and-pasting" "Copy them with Cmd-C" "clipboard-copy")
+(tutorial-step-event! "selecting-copying-and-pasting" "paste with Cmd-V" "clipboard-paste")
+(advice-add! 'clipboard-copy 'after 'tutorial-hears-copy
+  (lambda (&rest args) (tutorial--saw! "clipboard-copy")))
+(advice-add! 'clipboard-paste! 'after 'tutorial-hears-paste
+  (lambda (&rest args) (tutorial--saw! "clipboard-paste")))
 
 ;; typing a word puts the practice page in the editing state: that is the
 ;; step, and the reader is in the practice page, where n types an n

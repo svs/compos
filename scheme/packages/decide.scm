@@ -91,13 +91,22 @@
         (task-run! (lambda () (apply decide (append (list state questions) opts)))
           (lambda (ok? v) (k (if ok? v (list 'answers '() 'usage (list 0 0 effective 0))))))))))
 
+(define (decide-jev-ready?)
+  "#t when the JEV package is loaded and a real key answers."
+  ;; doppler answers a miss as the text "no such secret: NAME", which is
+  ;; not a key
+  (and (boundp 'jev-systemone) (boundp 'jev-api-key)
+       (let ((key (jev-api-key)))
+         (and (string? key) (not (equal? key ""))
+              (not (string-prefix? "no such secret" key))))))
+
 (define (decide--first-live)
   (let loop ((bs decide-backends))
     (cond ((null? bs) 'jev)
-          ;; jev lives in a user package, so the adapter is only reachable
-          ;; when that package is loaded; unloaded, it would raise here.
+          ;; jev lives in a user package, and needs its key; without
+          ;; either, the next backend (laya) decides
           ((equal? (car bs) 'jev)
-           (if (boundp 'jev-systemone) 'jev (loop (cdr bs))))
+           (if (decide-jev-ready?) 'jev (loop (cdr bs))))
           ((equal? (car bs) 'laya)
            (if (laya-available?) 'laya (loop (cdr bs))))
           ((equal? (car bs) 'haiku)
@@ -298,6 +307,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
 
 (public! 'decide
   "(decide STATE QUESTIONS [OPTS ...]) — typed decisions over JEV, Laya, or LLM. Returns (answers ((KEY VALUE) ...) usage (INPUT OUTPUT BACKEND ELAPSED-MS)).")
+(public! 'decide-jev-ready?
+  "(decide-jev-ready?) — #t when JEV is loaded and has a real API key")
 (public! 'decide-async
   "(decide-async STATE QUESTIONS K &rest OPTS) — decide, answering K the moment the backend does; never waits on the lane")
 (public! 'decide-config!

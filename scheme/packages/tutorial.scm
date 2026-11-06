@@ -664,11 +664,11 @@
 ;; JEV and laya steps are done when they answer, not when they are asked
 (tutorial-proof! "jev"
   (lambda (pass fail)
-    (task-run! (lambda () (and (boundp 'jev-api-key) (jev-api-key)))
-      (lambda (ok? key)
-        (if (and ok? key)
-            (pass)
-            (fail "JEV has no API key. Set TYPESAFE_API_KEY, then type M-x jev again."))))))
+    (task-run! (lambda () (and (boundp 'decide-jev-ready?) (decide-jev-ready?)))
+      (lambda (ok? ready?)
+        (pass)
+        (unless (and ok? ready?)
+          (message "No JEV key, so Compos uses laya for decisions. The next step sets up laya."))))))
 
 (tutorial-proof! "laya-server"
   (lambda (pass fail)

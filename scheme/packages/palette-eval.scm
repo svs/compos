@@ -120,12 +120,23 @@
     ;; nothing should run
     ("order a pizza" #f)
     ("what is the capital of france" #f)
-    ("asdf qwer" #f)))
+    ("asdf qwer" #f)
+    ;; no command does these: fast-code writes the code
+    ("close every dired buffer" (code "buffer-kill!"))
+    ("kill all the dierd buffers" (code "buffer-kill!"))
+    ("how many buffers are open" (code "buffer-list"))
+    ("insert todays date" (code "insert"))
+    ("open my downloads folder showing only pdfs" (code "pdf"))
+    ("open my documents folder showing only the md files" (code "md"))
+    ("copy this buffer's file path" (code "kill-new"))))
 
 (define (palette-eval--ok? expected got)
   (let ((want (car expected)) (bindings (if (pair? (cdr expected)) (cadr expected) #f)))
     (cond ((not want) (not got))
           ((not got) #f)
+          ;; (code TEXT): fast-code wrote code that holds TEXT
+          ((and (pair? want) (equal? (car want) 'code))
+           (and (equal? (car got) "code") (string-contains? (cadr got) (cadr want)) #t))
           (else (and (if (pair? want) (member (cadr got) want) (equal? (cadr got) want))
                      (or (not bindings)
                          (every (lambda (b) (equal? (assoc (car b) (caddr got)) b)) bindings))

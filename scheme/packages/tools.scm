@@ -1075,7 +1075,10 @@
          (hits (apropos--search query filters (apropos--index-cached) rows))
          (skills (filter (lambda (h) (apropos--filter-match? h filters))
                          (apropos--skill-hits query))))
-    (map apropos--public-hit (apropos--focus (append hits skills) query))))
+    ;; a recipe pattern that reads the query is the answer, filled in
+    (let ((answer (and (boundp 'recipe-answer) (recipe-answer query))))
+      (append (if (and answer (apropos--filter-match? answer filters)) (list answer) '())
+              (map apropos--public-hit (apropos--focus (append hits skills) query))))))
 
 ;; The skills the calling chat can load, as hits: its group's own and the
 ;; global ones. They are found by their name and description

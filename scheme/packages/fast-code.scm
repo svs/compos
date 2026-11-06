@@ -225,14 +225,19 @@
           (else (loop (cdr xs) (cons (car xs) acc))))))
 
 ;; precise first (every word), then wide (most words), one list per step
-(define (fast-step-entries step)
-  (let loop ((es (append (or (report-errors "fast-code: apropos" (lambda () (apropos-quick step 6))) '())
-                         (apropos-recall step fast-code-step-entries)))
-             (seen (fast-learned-names))
-             (acc '()))
-    (cond ((or (null? es) (>= (length acc) fast-code-step-entries)) (reverse acc))
-          ((member (plist-get (car es) 'name) seen) (loop (cdr es) seen acc))
-          (else (loop (cdr es) (cons (plist-get (car es) 'name) seen) (cons (car es) acc))))))
+(define (fast-step-entries step0)
+  ;; a number is a value, not a name: "3 col layout" searches "col layout".
+  ;; A command and a setting can share a name, so both are kept.
+  (let* ((words (filter (lambda (w) (not (number? (string->number w)))) (fast-words step0)))
+         (step (if (null? words) step0 (string-join words " ")))
+         (key (lambda (e) (list (plist-get e 'name) (plist-get e 'kind)))))
+    (let loop ((es (append (or (report-errors "fast-code: apropos" (lambda () (apropos-quick step 6))) '())
+                           (apropos-recall step fast-code-step-entries)))
+               (seen (map (lambda (n) (list n "function")) (fast-learned-names)))
+               (acc '()))
+      (cond ((or (null? es) (>= (length acc) fast-code-step-entries)) (reverse acc))
+            ((member (key (car es)) seen) (loop (cdr es) seen acc))
+            (else (loop (cdr es) (cons (key (car es)) seen) (cons (car es) acc)))))))
 
 ;; The functions learned come first, all of them: they are few, and they are
 ;; the operations this user has asked for before. Then each step with what
@@ -271,7 +276,8 @@
 ;; call, and the model called (*themes*).
 (define (fast-variable? e)
   (let ((sym (string->symbol (plist-get e 'name))))
-    (and (boundp sym) (not (procedure? (symbol-value sym))))))
+    (and (not (equal? (plist-get e 'kind) "command"))
+         (boundp sym) (not (procedure? (symbol-value sym))))))
 
 (define (fast-entry-line e)
   (string-append "  "
@@ -869,22 +875,72 @@
 (define (fast-run! intent)
   (unless (or (fast-recipe intent) (fast-remembered intent) (fast-template intent))
     (message (string-append "fast: asking " fast-code-model "...")))
-  (fast-resolve intent
-    (lambda (r)
-      (let ((code (plist-get r 'code)))
-        (if (not code)
-            (begin (fast-trace-done! "palette" intent r #f)
-                   (message (fast-failure intent r)))
-            (let ((res (with-frame-windows (lambda () (eval-string-safe code)))))
-              (if (equal? (car res) 'ok)
-                  (fast-keep-pending! intent)
-                  (set! *fast-pending* #f))
-              (fast-trace-done! "palette" intent r
-                                (if (equal? (car res) 'ok)
-                                    (value->string (car (cdr res)))
-                                    (string-append "error: " (value->string (car (cdr res))))))
-              (message (format "~a  ~a ms ~a -- ~a" code (plist-get r 'ms) (plist-get r 'source)
-                               (if (equal? (car res) 'ok) "ok" (car (cdr res)))))))))))
+  (fast-resolve intent (lambda (r) (fast-run-resolved! intent r "palette"))))
+
+;; A clean call whose values are words of the request is kept as a recipe:
+;; "3 col layout" that ran (columns-layout! 3) becomes "{{n}} col layout" ->
+;; (columns-layout! {{n}}), so apropos answers "4 col layout" with no model.
+;; A slot is named after the function's parameter when fast-code wrote it.
+(define (fast-learn-recipe! intent code &optional defined)
+  (let* ((forms (ignore-errors (lambda () (scheme-read code))))
+         (call (and (pair? forms) (null? (cdr forms)) (pair? (car forms))
+                    (symbol? (car (car forms))) (car forms)))
+         (row (and defined (assoc defined *fast-learned*)))
+         (def (and row (ignore-errors (lambda () (car (scheme-read (car (cdr row))))))))
+         (params (if (and (pair? def) (pair? (cdr def)) (pair? (car (cdr def))))
+                     (cdr (car (cdr def)))
+                     '()))
+         (words (fast-words intent))
+         (word-of (lambda (a) (and (or (number? a) (string? a))
+                                   (find (lambda (w) (equal? (string-downcase w)
+                                                             (string-downcase (format "~a" a))))
+                                         words)))))
+    (and call
+         (let loop ((args (cdr call)) (i 0) (out '()) (slots '()))
+           (if (pair? args)
+               (let* ((a (car args)) (w (word-of a))
+                      (slot (and w (if (< i (length params))
+                                       (symbol->string (list-ref params i))
+                                       (string-append "p" (number->string (+ i 1)))))))
+                 (if slot
+                     (loop (cdr args) (+ i 1) (cons (string-append "{{" slot "}}") out)
+                           (cons (list slot w (number? a)) slots))
+                     (loop (cdr args) (+ i 1) (cons (format "~s" a) out) slots)))
+               (and (pair? slots)
+                    (let ((title (string-join
+                                   (map (lambda (w)
+                                          (let ((s (find (lambda (s) (equal? (cadr s) w)) slots)))
+                                            (if s (string-append "{{" (car s) "}}") w)))
+                                        words)
+                                   " ")))
+                      (recipe-learn! title
+                        (string-append "(" (symbol->string (car call))
+                                       (apply string-append (map (lambda (x) (string-append " " x)) (reverse out)))
+                                       ")")
+                        (map (lambda (s) (if (car (cdr (cdr s)))
+                                             (list (string->symbol (car s)) (string-append (car s) ": ") 'number)
+                                             (list (string->symbol (car s)) (string-append (car s) ": "))))
+                             (reverse slots))
+                        (list title)))))))))
+
+;; run what fast-resolve gave for INTENT: a clean run keeps the function it
+;; wrote and is remembered, so the same words come back without a model
+(define (fast-run-resolved! intent r &optional where)
+  (let ((code (plist-get r 'code)) (where (or where "palette")))
+    (if (not code)
+        (begin (fast-trace-done! where intent r #f)
+               (message (fast-failure intent r)))
+        (let ((res (with-frame-windows (lambda () (eval-string-safe code)))))
+          (if (equal? (car res) 'ok)
+              (begin (fast-keep-pending! intent)
+                     (fast-learn-recipe! intent code (plist-get r 'defined)))
+              (set! *fast-pending* #f))
+          (fast-trace-done! where intent r
+                            (if (equal? (car res) 'ok)
+                                (value->string (car (cdr res)))
+                                (string-append "error: " (value->string (car (cdr res))))))
+          (message (format "~a  ~a ms ~a -- ~a" code (plist-get r 'ms) (plist-get r 'source)
+                           (if (equal? (car res) 'ok) "ok" (car (cdr res)))))))))
 
 ;;; --- The chat prompt ---------------------------------------------------
 ;;; A chat input that opens with ! is prose for fast-code. It resolves here
@@ -1118,6 +1174,7 @@
 (category! 'fast-code)
 (public! 'fast-resolve "(fast-resolve INTENT K) -- K gets (code CODE [defined NAME] source SOURCE ms MS), or code #f with a reason; the model writes a function when a job needs one")
 (public! 'fast-run! "(fast-run! INTENT) -- resolve INTENT and run it against the frame")
+(public! 'fast-run-resolved! "(fast-run-resolved! INTENT R [WHERE]) -- run R, what fast-resolve gave for INTENT, and remember it when it runs clean")
 (public! 'fast-this-buffer "(fast-this-buffer) -- the buffer 'it' and 'this' mean: the first one on screen that is not a chat")
 (public! 'fast-show-learned "(fast-show-learned) -- show the functions fast-code learned, a Scheme file, in the other window")
 (public! 'fast-trace-text "(fast-trace-text N) -- the last N fast-code resolutions, stage by stage; M-x fast-trace shows them")

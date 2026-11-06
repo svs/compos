@@ -316,23 +316,57 @@
                                       (else #f))))
                             (plist-get c 'inputs)))))))
 
+;; The answer to TEXT when a recipe pattern reads it: "3 col layout" against
+;; "{{count}} col layout" gives the recipe's expression with 3 in it. apropos
+;; puts it first, so a request a recipe knows is answered without a model.
+(define (recipe-answer text)
+  (let* ((m (recipe-match text))
+         (recipe (and m (assoc (car m) *recipes*))))
+    (and recipe
+         (list 'kind "recipe" 'name (car m) 'doc (car m) 'bindings (cadr m) 'answer #t
+               'use (command-palette--render-recipe
+                      (cadr recipe) (command-palette--typed recipe (cadr m)))))))
+
+;; words that carry a number: "3 col layout", "show four columns"
+(define (command-palette--has-number? text)
+  (any command-palette--number (string-split text " ")))
+
 ;; What TEXT runs in BUF. K gets (KIND NAME BINDINGS STAGE), KIND "command"
 ;; or "recipe", or #f when nothing does it. An exact name and words you
 ;; ran before answer at once; the rest go to a model that picks among the
 ;; candidates and reads the arguments, typos and all. FRESH? skips the
 ;; words you ran before, as the eval does.
 (define (command-palette-resolve text buf k &optional fresh?)
-  (let ((learned (and (not fresh?) (command-palette--learned text))))
+  (let ((learned (and (not fresh?) (command-palette--learned text)))
+        (answer (recipe-answer text))
+        (written (and (not fresh?) (boundp 'fast-remembered) (fast-remembered text)))
+        ;; a command takes no value, so words that carry a number ("3 col
+        ;; layout") are not done by one: fast-code writes the call with it
+        (write (lambda (r) (if (and r (not (and (equal? (car r) "command")
+                                                 (command-palette--has-number? text))))
+                               (k r)
+                               (command-palette--write text k)))))
     (cond
       ((command-fn text) (k (list "command" text '() 'exact)))
       ((and (boundp '*recipes*) (assoc text *recipes*)) (k (list "recipe" text '() 'exact)))
       (learned (k (list (command-palette--row-kind learned) (cadr learned) (caddr learned) 'learned)))
+      (answer (k (list "recipe" (plist-get answer 'name) (plist-get answer 'bindings) 'pattern)))
+      (written (k (list "code" written '() 'remembered (list 'code written 'source 'remembered))))
       (else
         (task-run! (lambda () (command-palette--candidates-for text buf))
           (lambda (ok? cands)
             (if (or (not ok?) (null? cands))
-                (k #f)
-                (command-palette--model-pick text cands k))))))))
+                (write #f)
+                (command-palette--model-pick text cands write))))))))
+
+;; No command fits TEXT: fast-code writes the code, one model call that
+;; composes what apropos finds and names a function when the job takes one.
+;; K gets ("code" CODE () written R), R being what fast-resolve gave, or #f.
+(define (command-palette--write text k)
+  (if (boundp 'fast-resolve)
+      (fast-resolve text
+        (lambda (r) (k (and (plist-get r 'code) (list "code" (plist-get r 'code) '() 'written r)))))
+      (k #f)))
 
 (define (command-palette--model-pick text cands k)
   (if (and (equal? command-palette-decide-backend 'jev) (boundp 'jev-systemone))
@@ -368,11 +402,14 @@
 (define (command-palette--apply! text r)
   (let ((kind (car r)) (name (cadr r)) (bindings (caddr r)))
     (set! *command-palette--request* #f)
-    (command-palette--learn! text name bindings kind)
-    (message (string-append text ": " name))
-    (if (equal? kind "command")
-        (begin (history-push! 'M-x name) (run-command name))
-        (command-palette--run-recipe (assoc name *recipes*) bindings))))
+    (cond
+      ((equal? kind "code") (fast-run-resolved! text (list-ref r 4) "palette"))
+      (else
+        (command-palette--learn! text name bindings kind)
+        (message (string-append text ": " name))
+        (if (equal? kind "command")
+            (begin (history-push! 'M-x name) (run-command name))
+            (command-palette--run-recipe (assoc name *recipes*) bindings))))))
 
 (define (command-palette--ask-to-write! text)
   (command-palette-ask-recipes!

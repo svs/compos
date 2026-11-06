@@ -296,17 +296,104 @@
     "Every file, buffer, name, number or text in the words is an argument, never part of EXPR.\n"
     "3. (recipe-match " (value->string text) ") must answer your TITLE and the right arguments.\n"
     "4. (recipe-run! TITLE '((slot \"value\") ...)) runs it on the user's frame.\n"
+    "Work fast, the user waits on the palette: one apropos, short reads, no exploring.\n"
     "Reply in one line: the recipe, and what it did."))
+
+(defcustom 'command-palette-recipes-role 'fast
+  "The model role the *recipes* chat runs on: llm-model-presets names its model. fast is the quickest."
+  'group 'interaction)
+
+;; the model the role names, and the connector that runs it
+(define (command-palette--recipes-llm)
+  (let ((model (llm-model-for command-palette-recipes-role)))
+    (list (llm-connector-for-model model) model)))
+
+;; the chat on the role's model: a chat made on another, or since moved,
+;; moves back, and its conversation carries over
+(define (command-palette--recipes-on-model! chat)
+  (let ((llm (command-palette--recipes-llm)))
+    (unless (equal? (buffer-llm-model chat) (cadr llm))
+      (chat-switch! chat (car llm) (cadr llm) "default"))))
 
 (define (command-palette-ask-recipes! text)
   (let ((brief (command-palette--recipes-brief text))
-        (chat (command-palette--recipes-chat)))
+        (chat (command-palette--recipes-chat))
+        (llm (command-palette--recipes-llm)))
     (if chat
-        (agent-continue! chat brief)
-        (let ((made (agent-buf (execute* brief (list 'title command-palette-recipes-chat 'notify #f)))))
+        (begin
+          (command-palette--recipes-on-model! chat)
+          (command-palette--watch! chat text)
+          (agent-continue! chat brief))
+        (let ((made (agent-buf (execute* brief (list 'title command-palette-recipes-chat 'notify #f
+                                                     'connector (car llm) 'model (cadr llm)
+                                                     ;; the editor's tools alone: a short prompt is a fast first token
+                                                     'presets '(compos))))))
           ;; kept under 'recipes, so a restart reads the same chat back
-          (ignore-errors (lambda () (chat-for! "recipes" made)))))
-    (message (string-append "Asked *recipes*: " text))))
+          (ignore-errors (lambda () (chat-for! "recipes" made)))
+          (command-palette--watch! made text)))))
+
+;;; While *recipes* works, the palette stays up and shows the chat from the
+;;; ask on, the newest line first, and follows it as it writes. RET or C-g
+;;; puts it away; the chat goes on without it.
+
+;; (CHAT START TEXT CHANGE-ID) of the watch that is up, or #f
+(define *command-palette--watch* #f)
+
+(define (command-palette--watch-prompt text) (string-append "*recipes*: " text "  "))
+
+(define (command-palette--clip line)
+  (if (> (string-length line) 160) (string-append (substring line 0 157) "...") line))
+
+(define (command-palette--watch-rows chat start text)
+  (let* ((all (buffer-text chat))
+         (tail (if (< start (string-length all)) (substring all start (string-length all)) ""))
+         (brief (command-palette--recipes-brief text))
+         ;; the ask itself is in the transcript too; its lines are not news
+         (lines (filter (lambda (l) (and (not (equal? (string-trim l) ""))
+                                         (not (string-contains? brief (string-trim l)))))
+                        (string-split tail "\n")))
+         (slug (agent-slug-of chat))
+         (busy (and slug (equal? (agent-status slug) 'running))))
+    (cons (if busy
+              (list "working ..." "the chat writes the recipe; C-g puts this away")
+              (list "done" "RET or C-g puts this away"))
+          (map (lambda (l) (list (command-palette--clip (string-trim-right l)) ""))
+               (reverse lines)))))
+
+(define (command-palette--watch-refresh _)
+  (let ((w *command-palette--watch*) (state (minibuffer-state)))
+    (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
+      (minibuffer-set-candidates! (command-palette--watch-rows (car w) (cadr w) (caddr w))))))
+
+(define (command-palette--unwatch!)
+  (let ((w *command-palette--watch*))
+    (when w
+      (remove-on-change! (cadddr w))
+      (set! *command-palette--watch* #f))))
+
+(define (command-palette--watch! chat text)
+  (command-palette--unwatch!)
+  (let* ((start (string-length (buffer-text chat)))
+         (id (on-change! chat
+               (lambda (pos inserted deleted source)
+                 (debounce! "command-palette:recipes" 120 command-palette--watch-refresh #t))
+               'eager)))
+    (set! *command-palette--watch* (list chat start text id))
+    (minibuffer-read* (command-palette--watch-prompt text) (command-palette--watch-rows chat start text)
+      (list (list 'confirm (lambda (_) (command-palette--unwatch!)))
+            (list 'cancel (lambda () (command-palette--unwatch!)))
+            (list 'filter #f)
+            (list 'style "palette")))))
+
+;; The chat works out of sight, so its answer comes to the echo area when
+;; its turn ends: the line the turn's summary lands.
+(define (command-palette--recipes-answered buf kind text)
+  (when (and (equal? buf command-palette-recipes-chat) (equal? kind 'summary) (string? text))
+    (if *command-palette--watch*
+        (command-palette--watch-refresh #t)
+        (message (string-append "*recipes*: " text)))))
+
+(add-hook! 'chat-summary-hook 'command-palette--recipes-answered)
 
 ;; Run recipe TITLE with BINDINGS, ((SLOT VALUE) ...), on the frame you
 ;; look at; answers what the recipe gave, or its error.

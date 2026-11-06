@@ -642,14 +642,27 @@
 ;;; the slide
 
 (define (tutorial--say text)
-  ;; `keys` stand out on the slide; the rest is plain
-  (let loop ((parts (string-split (tutorial--symbolize text) "`")) (code? #f) (out '()))
+  ;; the slide's words: each key a keycap, the editor's c-action-key with a
+  ;; box around it, one cap per key of a sequence; a name beside a key, such
+  ;; as the command after M-x, is plain code
+  (let loop ((parts (string-split text "`")) (code? #f) (out '()))
     (if (null? parts)
         (reverse out)
         (loop (cdr parts) (not code?)
-              (if (equal? (car parts) "")
-                  out
-                  (cons (list (if code? "tutorial-key" "tutorial-text") (car parts)) out))))))
+              (cond ((equal? (car parts) "") out)
+                    ((not code?) (cons (list 'tag "span" 'class "tutorial-text" 'text (car parts)) out))
+                    (else
+                      (let ((tokens (string-split (car parts) " ")))
+                        (if (tutorial--key-label (car tokens))
+                            (append (reverse
+                                      (map (lambda (t)
+                                             (let ((cap (tutorial--key-label t)))
+                                               (if cap
+                                                   (list 'tag "c-action-key" 'class "tutorial-key" 'text cap)
+                                                   (list 'tag "span" 'class "tutorial-code" 'text t))))
+                                           tokens))
+                                    out)
+                            (cons (list 'tag "span" 'class "tutorial-code" 'text (car parts)) out)))))))))
 
 (define (tutorial--div class &rest more)
   (append (list 'tag "div" 'class class) more))
@@ -682,7 +695,7 @@
                                                                  (else "")))))
                              (iota n))))
                 (if step
-                    (list (tutorial--div "tutorial-say" 'segs (tutorial--say (car step)))
+                    (list (tutorial--div "tutorial-say" 'children (tutorial--say (car step)))
                           (let* ((here (list slug i))
                                  (p (tutorial--probe-of slug (car step))))
                             (cond ((and p (not done?) (equal? *tutorial-probing* here))
@@ -702,7 +715,7 @@
                                          "Do it in the practice pane. The slide moves on when you do.")
                                         (else "When you have done it, press n here, or ⌃C ⌃N in the practice page.")))))))
                     (list (tutorial--div "tutorial-say"
-                            'segs (tutorial--say
+                            'children (tutorial--say
                                     (if (= n 0)
                                         "Read this lesson in the lesson pane. Press n when you are ready to go on."
                                         "Every step of this lesson is done. Press n for the next lesson.")))))
@@ -774,8 +787,11 @@
 .tutorial-dot-done { background: var(--dim-fg); border-color: var(--dim-fg); }
 .tutorial-dot-here { background: var(--accent-fg); border-color: var(--accent-fg); }
 .tutorial-say { font-size: 26px; line-height: 1.45; margin-bottom: 18px; }
-.tutorial-key { font-family: var(--font-mono); font-size: .82em; padding: 1px 7px; border: 1px solid var(--border-bg);
-  border-radius: 4px; white-space: nowrap; }
+/* a key is a keycap: the editor's key element in a box, one cap a key */
+.tutorial-say c-action-key.tutorial-key { display: inline-block; font-size: .78em; line-height: 1.45;
+  padding: 0 .42em; margin: 0 .12em; vertical-align: .08em; border: 1px solid var(--border-bg);
+  border-bottom-width: 3px; border-radius: 6px; background: var(--hl-line-bg); }
+.tutorial-say .tutorial-code { font-family: var(--font-mono); font-size: .85em; }
 .tutorial-state { font-size: 15px; color: var(--dim-fg); }
 .tutorial-busy::before { content: \"\"; display: inline-block; width: 10px; height: 10px; margin-right: 9px;
   vertical-align: -1px; border: 2px solid var(--dim-fg); border-top-color: transparent; border-radius: 50%;

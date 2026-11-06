@@ -313,13 +313,18 @@ A **group** remembers a task: its buffers, its companion chat, and the window ar
 
 | Key | What it does |
 | --- | --- |
-| `M-x group-new` | Create and enter a group |
 | `C-x g` | Switch groups |
 | `C-x C-g C-g` | Return to the previous group |
 | `C-x C-g b` | List the buffers in the current group |
-| `C-x C-g s` | Tile the group |
+| `M-x group-new` | Create and enter a group |
 
-> **Try it.** Type `M-x group-new` and call the group `tutorial-practice`. With nothing marked, the new group starts empty and opens its scratch buffer. Type `C-x g` to look at the group switcher, then `C-g` if you do not want to switch. Type `C-x b`, choose TUTORIAL and press `RET` to return here.
+The tutorial is a group too: its practice page, slide and lesson stay together in it.
+
+> **Try it.** Type `C-x g` to look at the group switcher. The group you are in is marked. Press `ESC` to stay here.
+
+> **Try it.** Type `C-x C-g b` to list the buffers of this group. The practice page, the slide and the lesson are in it. Press `q` to close the list.
+
+To start a new task in a group of its own, type `M-x group-new`. Do not do it now: the tutorial stays in this group, and a new group opens without it. If you leave, `C-x C-g C-g` brings you back.
 
 A task should not be a pile of tabs that you rebuild from memory. Its sources, notes, pages, process output and conversation should come back together.
 

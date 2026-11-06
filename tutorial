@@ -1,0 +1,12 @@
+The quick brown fox.
+Practise here. This page is yours: move, type, kill and undo as you like.
+
+Compos checkpoints buffers, including unsaved ones, so their text can survive a restart. Put text in a file when it should also exist outside Compos and have a path that other programs can open.
+
+A **file** is data on disk. A **buffer** is a named place where the editor holds text. A file buffer visits the file it came from: editing the buffer changes the buffer, and `⌃X ⌃S` writes the buffer back to the file.
+
+This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
+
+Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
+
+Because of that, they share the same window commands, links, search, modes, saved state, groups and agent context.

@@ -3,6 +3,12 @@
   "name": "compos",
   "version": "0.7.0",
   "description": "compos's keys and commands in every tab, and a wire so the editor can drive any of them.",
+  "icons": {
+    "16": "icons/compos-16.png",
+    "32": "icons/compos-32.png",
+    "48": "icons/compos-48.png",
+    "128": "icons/compos-128.png"
+  },
   "permissions": [
     "tabs",
     "scripting",
@@ -33,6 +39,7 @@
   "sidebar_action": {
     "default_title": "compos",
     "default_panel": "sidepanel.html",
+    "default_icon": "icons/compos-32.png",
     "open_at_install": false
   },
   "options_ui": {
@@ -40,7 +47,11 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "compos \u2014 chat about this tab"
+    "default_title": "compos \u2014 chat about this tab",
+    "default_icon": {
+      "16": "icons/compos-16.png",
+      "32": "icons/compos-32.png"
+    }
   },
   "content_scripts": [
     {

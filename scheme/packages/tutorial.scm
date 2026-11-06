@@ -774,6 +774,16 @@
     (buffer-set-read-only! (current-buffer) #t)
     (tutorial--draw-detail!)))
 
+;; ESC and C-g on the slide leave nothing: the slide is where the lesson
+;; is. A quit clears a help note and stays. Without this, keyboard-quit ran
+;; the slide's q, and the slide's window closed.
+(mode-quit! "tutorial-detail-mode"
+  (lambda (buf)
+    (set! *tutorial-help* #f)
+    (tutorial--draw-detail!)
+    (message "Quit")
+    #t))
+
 (mode-keys! "tutorial-detail-mode"
   '(("n" "tutorial-next") ("RET" "tutorial-next") ("p" "tutorial-back")
     ("N" "tutorial-next-lesson") ("P" "tutorial-previous-lesson")

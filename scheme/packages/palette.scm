@@ -256,6 +256,15 @@
   ;; commands that do it. The recipes are read by their patterns before
   ;; this, and most of the rest are written for agents: they answer data.
   (let ((here (current-buffer)))
+   (if (and (equal? command-palette-decide-backend 'jev) (boundp 'jev-apropos))
+    ;; jev-apropos does the whole of it: the commands for HERE, apropos with
+    ;; its semantic pass, and JEV's pick or none
+    (task-run! (lambda () (jev-apropos text here))
+      (lambda (ok? hit)
+        (if (and ok? hit)
+            (command-palette--decided! text (list hit)
+              (list 'answers (list (list 'pick (list 'choice (plist-get hit 'name))))))
+            (command-palette--ask-to-write! text))))
    (task-run!
     (lambda ()
       (let ((hits (command-palette--for-user (apropos text 'semantic #t 'kind "command") here)))
@@ -273,7 +282,7 @@
                                               hits))
                                   (list 'none "None of these does what they ask."))))
             (lambda (r) (command-palette--decided! text hits r))
-            'backend command-palette-decide-backend))))))
+            'backend command-palette-decide-backend)))))))
 
 ;; run the hit decide picked and remember it for the words, else ask the
 ;; *recipes* chat to write the command
@@ -350,8 +359,8 @@
   "M-x and the palette offer a mode's commands only in its buffers, as Emacs does with (interactive nil MODE). A command's modes are the ones command-modes! names, else the modes whose -mode-map binds it when no global map does."
   'group 'interaction)
 
-(defcustom 'command-palette-decide-backend 'laya
-  "The decide backend that picks, from what apropos finds, the command for words you type: laya is local and quick."
+(defcustom 'command-palette-decide-backend 'jev
+  "What picks the command for words you type in the palette: jev runs jev-apropos; laya or haiku ask decide to pick among what apropos finds."
   'group 'interaction)
 
 ;; the words of the request the *recipes* chat is on, or #f

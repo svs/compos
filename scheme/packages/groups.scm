@@ -1184,7 +1184,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (frame-group-label-refresh!)
           (message "Frame isolated: only its own groups")))))
 
-(define (group-frame-raise! frame)
+(define (group-frame-raise! frame &optional animate?)
   ;; a frame that lives in a browser tab comes to the front by its tab. No
   ;; other client can be raised from here yet, so say so and move nothing.
   (if (not (browser-connected?))
@@ -1196,7 +1196,9 @@ is forgotten and that group falls back to creation order in the switcher."
               (cond ((null? rest)
                      (message "That group is open in another window"))
                     ((equal? (plist-get (car rest) 'frame) frame)
-                     (tab-activate (plist-get (car rest) 'tab)))
+                     (let ((tab (plist-get (car rest) 'tab)))
+                       (tab-activate tab)
+                       (when animate? (tab-eval tab "document.body.classList.remove('frame-arrive'); void document.body.offsetWidth; document.body.classList.add('frame-arrive');" chrome-ignore))))
                     (else (loop (cdr rest)))))))
         #t)))
 

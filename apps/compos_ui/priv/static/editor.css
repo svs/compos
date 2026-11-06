@@ -2216,3 +2216,6 @@ c-action-key {
 
 /* predict.js hides the daemon's rows while it shows its painted copies */
 .buf > c-line[hidden], .semantic-record > c-line[hidden] { display: none !important; }
+
+@keyframes frame-arrive { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+body.frame-arrive .window { animation: frame-arrive calc(var(--chrome-anim, 0ms) * 3) linear; }

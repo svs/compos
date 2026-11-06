@@ -1240,6 +1240,19 @@ the next row down. STEP is kept for the callers."
 (define (ibuffer-prompt-last-ms) *ibuffer-prompt-last-ms*)
 
 (global-set-key "C-x b" "ibuffer-prompt")
+
+;; C-x f: the frame list, most recently used first; RET selects
+(domain! 'buffers)
+(effects! '(write display))
+(define (frame-switch-prompt!)
+  (let ((frames (map (lambda (f) (list (frame-label f) f)) (filter (lambda (f) (not (equal? f (selected-frame)))) (frame-list)))))
+    (minibuffer-read "Switch to frame: " (map car frames)
+      (lambda (label)
+        (let ((entry (assoc label frames)))
+          (when entry (select-frame! (cadr entry)) (group-frame-raise! (cadr entry) #t)))))))
+(define-command "frame-switch" "Switch to another frame: type to narrow, RET selects"
+  (lambda () (frame-switch-prompt!)))
+(global-set-key "C-x f" "frame-switch")
 (global-set-key "C-x C-t" "switch-window-buffer")
 
 (category! 'buffers)

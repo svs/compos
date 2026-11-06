@@ -522,7 +522,7 @@
                             'text (cond (done? "Done. Press n for the next step.")
                                         ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
                                          "Do it in the practice pane. The slide moves on when you do.")
-                                        (else "When you have done it, press n."))))
+                                        (else "When you have done it, press n here, or C-c C-n in the practice page."))))
                     (list (tutorial--div "tutorial-say"
                             'segs (tutorial--say
                                     (if (= n 0)
@@ -876,6 +876,13 @@
   (lambda () (and (boundp 'browser-connected?) (browser-connected?))))
 
 (add-hook! 'browser-attached-hook 'tutorial-recheck!)
+
+;; typing a word puts the practice page in the editing state: that is the
+;; step, and the reader is in the practice page, where n types an n
+(tutorial-await! "typing-and-the-focus" "type a word"
+  (lambda () (and (buffer-known? *tutorial-buffer*) (editing-state? *tutorial-buffer*))))
+
+(add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 
 ;; Behind the Set up lesson, a chat troubleshoots. A step that fails, or h
 ;; on the slide, goes to it; its answer comes to the slide. The chat is

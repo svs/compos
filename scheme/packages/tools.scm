@@ -1074,26 +1074,8 @@
   (let* ((rows (apropos--rows-cached))
          (hits (apropos--search query filters (apropos--index-cached) rows))
          (skills (filter (lambda (h) (apropos--filter-match? h filters))
-                         (apropos--skill-hits query)))
-         (read (filter (lambda (h) (apropos--filter-match? h filters))
-                       (apropos--recipe-reading query)))
-         (title (and (pair? read) (plist-get (car read) 'name))))
-    (append (map apropos--public-hit read)
-            (filter (lambda (h) (not (and title (equal? (plist-get h 'kind) "recipe")
-                                          (equal? (plist-get h 'name) title))))
-                    (map apropos--public-hit (apropos--focus (append hits skills) query))))))
-
-;; The recipe whose pattern reads QUERY as its command and arguments, as a
-;; hit that carries them: "use a dark theme" is "use a {{theme}} theme"
-;; with theme dark. It leads, because the words asked for it exactly.
-(define (apropos--recipe-reading query)
-  (let ((m (and (boundp 'recipe-match) (recipe-match query))))
-    (if (not m)
-        '()
-        (let ((r (assoc (car m) *recipes*)))
-          (list (list 'kind "recipe" 'name (car m) 'doc (car m)
-                      'use (and r (cadr r)) 'props (if r (caddr r) '())
-                      'bindings (cadr m) 'note "reads your words"))))))
+                         (apropos--skill-hits query))))
+    (map apropos--public-hit (apropos--focus (append hits skills) query))))
 
 ;; The skills the calling chat can load, as hits: its group's own and the
 ;; global ones. They are found by their name and description

@@ -240,9 +240,6 @@
       ((equal? (string-trim choice) "") #f)
       ((command-palette--learned choice)
        (command-palette--run-learned (command-palette--learned choice)))
-      ((command-palette--reading choice)
-       (let ((m (command-palette--reading choice)))
-         (command-palette--run-recipe (assoc (car m) *recipes*) (cadr m))))
       (else (command-palette--pick! choice)))))
 
 ;; Words no row is named for go to the *recipes* chat. It runs the command
@@ -251,55 +248,131 @@
 (define (command-palette--pick! text)
   (set! *command-palette--request* text)
   (message (string-append "Finding the command for: " text))
-  ;; apropos over the commands alone, with its semantic pass, in a task: a
-  ;; sentence matches docs that hold its words, and the pass finds the
-  ;; commands that do it. The recipes are read by their patterns before
-  ;; this, and most of the rest are written for agents: they answer data.
-  (let ((here (current-buffer)))
-   (if (and (equal? command-palette-decide-backend 'jev) (boundp 'jev-apropos))
-    ;; jev-apropos does the whole of it: the commands for HERE, apropos with
-    ;; its semantic pass, and JEV's pick or none
-    (task-run! (lambda () (jev-apropos text here))
-      (lambda (ok? hit)
-        (if (and ok? hit)
-            (command-palette--decided! text (list hit)
-              (list 'answers (list (list 'pick (list 'choice (plist-get hit 'name))))))
-            (command-palette--ask-to-write! text))))
-   (task-run!
-    (lambda ()
-      (let ((hits (command-palette--for-user (apropos text 'semantic #t 'kind "command") here)))
-        (take hits (min 8 (length hits)))))
-    (lambda (ok? hits)
-      (if (or (not ok?) (null? hits))
-          (command-palette--ask-to-write! text)
-          (decide-async (list 'request text)
-            (list 'pick (decide-choice
-                          "Someone typed this request into the command palette of an editor. Which command does what they ask?"
-                          (append (apply append
-                                         (map (lambda (h)
-                                                (list (string->symbol (plist-get h 'name))
-                                                      (or (plist-get h 'doc) (plist-get h 'name))))
-                                              hits))
-                                  (list 'none "None of these does what they ask."))))
-            (lambda (r) (command-palette--decided! text hits r))
-            'backend command-palette-decide-backend)))))))
+  (command-palette-resolve text (current-buffer)
+    (lambda (r)
+      (if r
+          (command-palette--apply! text r)
+          (command-palette--ask-to-write! text)))))
 
-;; run the hit decide picked and remember it for the words, else ask the
-;; *recipes* chat to write the command
-(define (command-palette--decided! text hits r)
-  (let* ((a (assq 'pick (or (plist-get r 'answers) '())))
-         (choice (and a (plist-get (cadr a) 'choice)))
-         (hit (and (string? choice)
-                   (find (lambda (h) (equal? (plist-get h 'name) choice)) hits))))
-    (if (not hit)
-        (command-palette--ask-to-write! text)
-        (let ((kind (plist-get hit 'kind)))
-          (set! *command-palette--request* #f)
-          (command-palette--learn! text choice '() kind)
-          (message (string-append text ": " choice))
-          (if (equal? kind "command")
-              (begin (history-push! 'M-x choice) (run-command choice))
-              (command-palette--run-recipe (assoc choice *recipes*)))))))
+;; The recipes the palette offers: the ones in your recipes file, written to
+;; be run from words. The bundled ones are written for agents: they answer data.
+(define (command-palette--own-recipes)
+  (let ((path (recipes-user-path)))
+    (if (not (file-exists? path))
+        '()
+        (filter (lambda (r) r)
+                (map (lambda (b) (assoc (car (string-split b "\n")) *recipes*))
+                     (cdr (string-split (read-file path) recipes--marker)))))))
+
+;; What could do TEXT in BUF: the commands for BUF that apropos finds with its
+;; semantic pass, then your own recipes. Slow: run it in a task.
+(define (command-palette--candidates-for text buf)
+  (let* ((out (commands-out-of-scope buf))
+         (cmds (filter (lambda (h) (and (not (string-contains? (plist-get h 'name) "--"))
+                                        (not (member (plist-get h 'name) out))))
+                       (apropos text 'semantic #t 'kind "command"))))
+    (append (map (lambda (h) (list 'kind "command" 'name (plist-get h 'name)
+                                   'doc (or (plist-get h 'doc) "") 'inputs '()))
+                 (take cmds (min command-palette-candidate-count (length cmds))))
+            (map (lambda (r) (list 'kind "recipe" 'name (car r) 'doc (car r) 'inputs (caddr r)))
+                 (command-palette--own-recipes)))))
+
+(define (command-palette--candidate-line c)
+  (string-append "- " (plist-get c 'name)
+    (if (equal? (plist-get c 'doc) (plist-get c 'name)) "" (string-append ": " (plist-get c 'doc)))
+    (if (null? (plist-get c 'inputs))
+        ""
+        (string-append "  [inputs: "
+          (string-join (map (lambda (i) (string-append (symbol->string (car i)) " (" (string-trim (cadr i)) ")"))
+                            (plist-get c 'inputs))
+                       ", ")
+          "]"))))
+
+(define (command-palette--pick-prompt text cands)
+  (string-append
+    "Someone typed a request into the command palette of an editor. It may have typos. "
+    "Pick the command or recipe below that does it, and read the recipe's inputs from the request. "
+    "Answer with JSON only:\n"
+    "{\"name\": \"NAME\", \"inputs\": {\"INPUT\": \"VALUE\"}} - leave out an input the request does not give\n"
+    "{\"name\": null} - none of them does it\n\n"
+    (string-join (map command-palette--candidate-line cands) "\n")
+    "\n\nRequest: " text))
+
+;; (KIND NAME BINDINGS) from a model's JSON reply, when NAME is a candidate
+(define (command-palette--parse-pick reply cands)
+  (let* ((from (string-index reply "{"))
+         (to (string-rindex reply "}"))
+         (json (and from to (< from to)
+                    (ignore-errors (lambda () (json-parse (substring reply from (+ to 1)))))))
+         (name (and (pair? json) (plist-get json 'name)))
+         (c (and (string? name) (find (lambda (c) (equal? (plist-get c 'name) name)) cands))))
+    (and c
+         (list (plist-get c 'kind) name
+               (filter (lambda (b) b)
+                       (map (lambda (i)
+                              (let ((v (plist-get (or (plist-get json 'inputs) '()) (car i))))
+                                (cond ((string? v) (list (car i) v))
+                                      ((number? v) (list (car i) (number->string v)))
+                                      (else #f))))
+                            (plist-get c 'inputs)))))))
+
+;; What TEXT runs in BUF. K gets (KIND NAME BINDINGS STAGE), KIND "command"
+;; or "recipe", or #f when nothing does it. An exact name and words you
+;; ran before answer at once; the rest go to a model that picks among the
+;; candidates and reads the arguments, typos and all. FRESH? skips the
+;; words you ran before, as the eval does.
+(define (command-palette-resolve text buf k &optional fresh?)
+  (let ((learned (and (not fresh?) (command-palette--learned text))))
+    (cond
+      ((command-fn text) (k (list "command" text '() 'exact)))
+      ((and (boundp '*recipes*) (assoc text *recipes*)) (k (list "recipe" text '() 'exact)))
+      (learned (k (list (command-palette--row-kind learned) (cadr learned) (caddr learned) 'learned)))
+      (else
+        (task-run! (lambda () (command-palette--candidates-for text buf))
+          (lambda (ok? cands)
+            (if (or (not ok?) (null? cands))
+                (k #f)
+                (command-palette--model-pick text cands k))))))))
+
+(define (command-palette--model-pick text cands k)
+  (if (and (equal? command-palette-decide-backend 'jev) (boundp 'jev-systemone))
+      ;; JEV picks among them; it reads no arguments, so a recipe asks for them
+      (task-run!
+        (lambda ()
+          (jev-systemone text
+            (list 'which (jev-choice "Which of these is the right command for this request?"
+                           (append (apply append (map (lambda (c) (list (string->symbol (plist-get c 'name))
+                                                                       (command-palette--candidate-line c)))
+                                                      cands))
+                                   (list 'none "None of these does what the request asks."))))))
+        (lambda (ok? reply)
+          (let* ((name (and ok? reply (jev-answer-choice reply 'which)))
+                 (c (and name (find (lambda (c) (equal? (plist-get c 'name) name)) cands))))
+            (cond ((not c) (k #f))
+                  ((null? (plist-get c 'inputs)) (k (list (plist-get c 'kind) name '() 'jev)))
+                  ;; JEV reads no arguments: the model reads them for the one it picked
+                  (else (llm-with-model (command-palette--pick-prompt text (list c))
+                                        (llm-model-for command-palette-pick-role)
+                          (lambda (reply)
+                            (let ((r (command-palette--parse-pick reply (list c))))
+                              (k (list (plist-get c 'kind) name (if r (caddr r) '()) 'jev+model))))
+                          (lambda (_) (k (list (plist-get c 'kind) name '() 'jev)))))))))
+      (llm-with-model (command-palette--pick-prompt text cands)
+                      (llm-model-for command-palette-pick-role)
+        (lambda (reply)
+          (let ((r (command-palette--parse-pick reply cands)))
+            (k (and r (append r (list 'model))))))
+        (lambda (_) (k #f)))))
+
+;; run what resolve found, and remember it for the words
+(define (command-palette--apply! text r)
+  (let ((kind (car r)) (name (cadr r)) (bindings (caddr r)))
+    (set! *command-palette--request* #f)
+    (command-palette--learn! text name bindings kind)
+    (message (string-append text ": " name))
+    (if (equal? kind "command")
+        (begin (history-push! 'M-x name) (run-command name))
+        (command-palette--run-recipe (assoc name *recipes*) bindings))))
 
 (define (command-palette--ask-to-write! text)
   (command-palette-ask-recipes!
@@ -316,14 +389,9 @@
         (cons (or (and (command-fn q) (assoc q rows)) (command-palette--typed-row q))
               (filter (lambda (r) (not (equal? (car r) q))) rows)))))
 
-;; the recipe a pattern reads in TEXT, with its arguments: (TITLE BINDINGS)
-(define (command-palette--reading text)
-  (and (boundp 'recipe-match) (recipe-match text)))
-
 ;; the typed row says what RET will do with the words
 (define (command-palette--typed-row q)
   (let ((learned (command-palette--learned q))
-        (m (command-palette--reading q))
         (say (lambda (title bindings)
                (string-append "recipe  " title
                  (apply string-append
@@ -334,7 +402,6 @@
                   ((and learned (equal? (command-palette--row-kind learned) "command"))
                    (string-append "command  " (cadr learned)))
                   (learned (say (cadr learned) (caddr learned)))
-                  (m (say (car m) (cadr m)))
                   (else "find  the command for this, or write one")))))
 
 
@@ -360,7 +427,15 @@
   'group 'interaction)
 
 (defcustom 'command-palette-decide-backend 'jev
-  "What picks the command for words you type in the palette: jev runs jev-apropos; laya or haiku ask decide to pick among what apropos finds."
+  "What picks the command for words you type in the palette: jev asks JEV, and the command-palette-pick-role model reads the arguments of a recipe it picks; model asks that model to pick and read them in one call."
+  'group 'interaction)
+
+(defcustom 'command-palette-pick-role 'fast
+  "The model role that picks the command for words you type in the palette: llm-model-presets names its model."
+  'group 'interaction)
+
+(defcustom 'command-palette-candidate-count 12
+  "How many commands apropos hands the picker, besides your own recipes."
   'group 'interaction)
 
 ;; the words of the request the *recipes* chat is on, or #f
@@ -433,12 +508,24 @@
         name
         (ignore-errors (lambda () (chat-for "recipes"))))))
 
+;; The Claude Code adapter names its models by family (sonnet, opus,
+;; haiku), not by id: claude-sonnet-5-5 is refused, and the chat would stay
+;; on its old model.
+(define (command-palette--chat-model model)
+  (cond ((not (and (string? model) (string-prefix? "claude-" model)
+                   (equal? (llm-connector-for-model model) "claude-code")))
+         model)
+        ((string-contains? model "sonnet") "sonnet")
+        ((string-contains? model "opus") "opus")
+        ((string-contains? model "haiku") "haiku")
+        (else model)))
+
 (define (command-palette-ask-recipes! text)
   (let ((chat (command-palette--recipes-chat)))
     (if chat
         (begin (command-palette--watch! chat text)
                (agent-continue! chat text))
-        (let* ((model (llm-model-for command-palette-recipes-role))
+        (let* ((model (command-palette--chat-model (llm-model-for command-palette-recipes-role)))
                (made (agent-buf (execute* (string-append (command-palette--recipes-intro) text)
                                           (list 'title command-palette-recipes-chat 'notify #f
                                                 'connector (llm-connector-for-model model) 'model model)))))
@@ -594,3 +681,5 @@
             (list 'filter #f)
             (list 'style "palette")))))
 
+;; the eval that scores what RET runs for the words you type
+(load "palette-eval.scm")

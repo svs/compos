@@ -437,7 +437,22 @@
   (let ((a *command-palette--ask*))
     (when a
       (set! *command-palette--ask* (list (car a) (cadr a) #t reason))
-      (command-palette--ask-refresh!))))
+      (command-palette--ask-refresh!)
+      (ignore-errors (lambda () (command-palette--log! (car a) (cadr a) reason))))))
+
+;; The *recipes* chat is the log: each ask lands there as a block of its
+;; steps, oldest first, so a wrong recipe shows what the model was given
+;; and what it answered.
+(define (command-palette--log! text steps reason)
+  (let* ((chat (command-palette--recipes-chat!))
+         (slug (or (agent-slug-of chat) (chat-ensure-runtime! chat))))
+    (agent-append! slug
+      (string-append
+        "\n### palette: " text "\n"
+        (string-join (map (lambda (s) (string-append "- " (car s) (if (equal? (cadr s) "") "" (string-append "  (" (cadr s) ")"))))
+                          (reverse steps))
+                     "\n")
+        "\n" (if reason (string-append "- failed: " reason) "- done") "\n"))))
 
 (define (command-palette--ms t0) (string-append (number->string (- (monotonic-ms) t0)) " ms"))
 
@@ -539,16 +554,17 @@
     "Check (recipe-match " (value->string text) "), then run it with (recipe-run! TITLE BINDINGS). "
     "Reply in one line."))
 
+(define (command-palette--recipes-chat!)
+  (or (command-palette--recipes-chat)
+      (let ((made (agent-buf (execute* "" (list 'title command-palette-recipes-chat 'notify #f
+                                                 'presets '(compos))))))
+        ;; kept under 'recipes, so a restart reads the same chat back
+        (ignore-errors (lambda () (chat-for! "recipes" made)))
+        made)))
+
 (define (command-palette--ask-chat! text reason)
-  (let ((brief (command-palette--recipes-brief text reason))
-        (chat (command-palette--recipes-chat)))
-    (if chat
-        (agent-continue! chat brief)
-        (let ((made (agent-buf (execute* brief (list 'title command-palette-recipes-chat 'notify #f
-                                                     'presets '(compos))))))
-          ;; kept under 'recipes, so a restart reads the same chat back
-          (ignore-errors (lambda () (chat-for! "recipes" made)))))
-    (message (string-append "*recipes* has it; C-x b *recipes* shows it"))))
+  (agent-continue! (command-palette--recipes-chat!) (command-palette--recipes-brief text reason))
+  (message "*recipes* has it; C-x b *recipes* shows it"))
 
 ;; the chat works out of sight; its answer comes to the echo area
 (define (command-palette--recipes-answered buf kind text)

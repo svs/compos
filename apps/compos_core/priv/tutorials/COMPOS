@@ -52,15 +52,14 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 13. Settings
 14. Editing and undo
 15. Prefix arguments
-16. Killing and yanking
-17. Modes and keymaps
-18. Lists and previews
-19. Browsing the web
-20. Why Compos
-21. Persistence
-22. The editor is malleable
-23. Scheme and the BEAM
-24. Where to go next
+16. Modes and keymaps
+17. Lists and previews
+18. Browsing the web
+19. Why Compos
+20. Persistence
+21. The editor is malleable
+22. Scheme and the BEAM
+23. Where to go next
 
 ---
 
@@ -153,7 +152,7 @@ The system keys copy and paste: Cmd-C and Cmd-V on a Mac, Ctrl-C and Ctrl-V on o
 
 > **Try it.** Move to the end of a line and paste with Cmd-V.
 
-`C-w` and `C-y` do the same in the Emacs way. The lesson Killing and yanking teaches them.
+`C-w` and `C-y` do the same in the Emacs way.
 
 ## Searching and replacing
 
@@ -408,30 +407,6 @@ A command uses the count in different ways. Movement, deletion, killing, scrolli
 > **Try it.** Type `C-u 5 C-v` to scroll five lines. Then type `C-u 5 M-v` to scroll back.
 
 You do not need prefix arguments often. The point is that **commands compose**: a small set of movements and edits expresses large actions.
-
-## Killing and yanking
-
-To set the mark, type `C-SPC`. If macOS uses `C-SPC` to switch input sources, type `M-SPC` instead. Move point after you set the mark, and the text between the mark and point becomes the active **region**.
-
-When you edit a file, the usual keys from other editors work: Shift with an arrow key selects, `s-a` (Cmd-A) selects everything, and Cmd-C, Cmd-X and Cmd-V copy, cut and paste. You can keep using them; the keys below are there when you want them.
-
-| Key | What it does |
-| --- | --- |
-| `C-w` | Kill the region |
-| `M-w` | Copy the region and leave it in place |
-| `C-y` | Yank the most recent killed text |
-| `M-y` | Replace that yank with an older kill |
-| `C-x C-x` | Exchange point and mark |
-
-> **Try it.** Put point at the start of the practice sentence below, type `C-SPC`, move to the end with `C-e`, and type `C-w`. Then type `C-y` to bring the sentence back.
-
-This practice sentence is here for you to kill and yank.
-
-Killing is more useful than deleting, because killed text goes into a shared **kill ring**. Do several kills in a row and they join into one entry. So `C-k C-k C-k` removes several lines, and one `C-y` restores them together.
-
-The mark also remembers places. `C-u C-SPC` returns to earlier marks in this buffer. `C-x C-SPC` walks the global mark ring across buffers.
-
-> **Try it.** Set the mark here, move somewhere else in the tutorial, then type `C-u C-SPC` to return. Type `C-g` if you wanted the jump only, without an active region.
 
 ## Modes and keymaps
 

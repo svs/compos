@@ -1939,6 +1939,12 @@
                     (web--page-hide! buf)
                     (when denied (denied))))))))))
 
+;; preview-mode sets the markdown renderer whenever the mode comes up
+;; again; a tab that shows the page itself keeps showing it.
+(define (web--page-keep! buf)
+  (when (web--page? buf)
+    (web--page-on! buf (buffer-local buf 'browse-url))))
+
 (define (web--page-hide! buf)
   (when (web--page? buf)
     (buffer-set-local! buf 'browse-page #f)
@@ -2154,6 +2160,7 @@ whole document. R cycles calm, full and the page itself.")
             (unless (minor-mode-on? buf "preview-mode")
               (enable-minor-mode! buf "preview-mode"))
             (preview-heal! buf)))))
+  (web--page-keep! buf)
   (web--update-modeline! buf)
   (message (string-append "browse: " (web--view-label view))))
 
@@ -2239,6 +2246,7 @@ whole document. R cycles calm, full and the page itself.")
             (if (minor-mode-on? buf "preview-mode")
                 (preview-heal! buf)
                 (enable-minor-mode! buf "preview-mode"))))
+      (web--page-keep! buf)
       (web--install-keys! buf)
       (buffer-set-local! buf 'imenu-index-function 'web--imenu-rows)
       (desktop-skip! buf 'footer-line-blocks)

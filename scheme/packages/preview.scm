@@ -210,7 +210,9 @@
               (preview--rows-on! buf)
               (begin
                 (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
-                (buffer-set-local! buf 'render-mode renderer)))
+                ;; a browse tab showing the page itself keeps the page
+                (unless (equal? (buffer-local buf 'render-mode) "web")
+                  (buffer-set-local! buf 'render-mode renderer))))
           (preview-tabs-sync! buf #t))
         ;; A renamed or restored buffer can lose its renderer. Remove the
         ;; stale mode entry instead of leaving an enabled mode that draws

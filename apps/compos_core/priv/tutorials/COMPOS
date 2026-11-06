@@ -272,7 +272,7 @@ A **file** is data on disk. A **buffer** is a named place where the editor holds
 
 This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
 
-> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose TUTORIAL and press `RET` to return.
+> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
 
 Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
 
@@ -291,7 +291,11 @@ Compos can show more than one window at a time. A window shows a buffer. Splitti
 | `C-x 0` | Close the selected window |
 | `C-x 1` | Close every other window |
 
-> **Try it.** Type `C-x 2` to split the screen into two windows. Compos may show another buffer in the new window. Type `C-x o`, then `C-x b`, choose TUTORIAL and press `RET`. Both windows now show TUTORIAL. Move point in the second window. Each window remembers its own point, even though both show the same text.
+> **Try it.** In the practice page, type `C-x 3` to split it into two windows side by side. Both show the practice page.
+
+> **Try it.** Type `C-x o` to move to the other window. Move point in it with the arrow keys. Each window keeps its own point, even though both show the same text.
+
+> **Try it.** Type `C-x 0` to close the window you are in. The practice page is one window again, and the slide and the lesson stay.
 
 One small command shows the whole idea:
 
@@ -305,7 +309,7 @@ One small command shows the whole idea:
 
 You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a file beside the work, the messages buffer or any other useful neighbour.
 
-> **Try it.** Type `C-x 1` to return to one window.
+`C-x 1` keeps only the window you are in and closes every other one. Do not try it now: it closes the slide and the lesson too. If it happens, `C-h t` brings the tutorial back.
 
 ## Groups
 
@@ -367,7 +371,7 @@ ACP is the Agent Client Protocol. It lets Compos start an external coding agent 
 
 If you chose Codex, sign in with `codex login` in a terminal first. The AI starter guide explains how to check the login when a chat returns 401.
 
-> **Try it.** From TUTORIAL, type `M-x chat-companion-ask` and ask: "What is the main idea of the section named Windows?" The companion reads the live tutorial buffer, so you do not paste it into another program.
+> **Try it.** From the practice page, type `M-x chat-companion-ask` and ask: "What is the main idea of the lesson on windows?" The companion reads the tutorial's live buffers, so you do not paste them into another program.
 
 > **Try it.** Open the practice file from the Files and buffers section with `C-x C-f /tmp/compos-practice.txt`. Type `M-x chat-companion-ask` there and ask: "Summarize this file." The companion reads the file buffer. You did not copy any of it into the chat.
 
@@ -520,7 +524,7 @@ Every buffer opens normally, in a window, as your own. A list such as dired open
 
 This is `scroll-other-window` made into a pattern: look at nearby context without losing the work that led you there.
 
-> **Try it.** Type `C-x b TUTORIAL RET` when you are ready to return.
+> **Try it.** Type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
 
 ## Browsing the web
 

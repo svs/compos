@@ -15,6 +15,11 @@ defmodule Compos.Core.Daemon do
   name, never by a compile-time call.
   """
 
+  # Every agent adapter holds a few pipes. With the macOS default of 256
+  # descriptors, about 35 open chats use them all, and then no port opens:
+  # no shell, no git, no file watcher. Raise the soft limit before launch.
+  @raise_fd_limit "ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null; "
+
   # listener name => {supervisor name, child id}. Every child is
   # restartable in place: terminate_child then restart_child.
   @listeners [
@@ -191,7 +196,8 @@ defmodule Compos.Core.Daemon do
         log = Path.join(home, "daemon.log")
 
         command =
-          "nohup env COMPOS_HOME=#{shq(home)} MIX_DEPS_PATH=#{shq(deps)} " <>
+          @raise_fd_limit <>
+            "nohup env COMPOS_HOME=#{shq(home)} MIX_DEPS_PATH=#{shq(deps)} " <>
             "MIX_BUILD_PATH=#{shq(build)} mix run --no-halt >> #{shq(log)} 2>&1 </dev/null &"
 
         case System.cmd("/bin/sh", ["-c", command], cd: workspace, stderr_to_stdout: true) do
@@ -275,6 +281,7 @@ defmodule Compos.Core.Daemon do
     relaunch =
       "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>
         "cd #{shq(root)}; " <>
+        @raise_fd_limit <>
         "exec env COMPOS_HOME=#{shq(home)} mix run --no-halt >> #{shq(log)} 2>&1"
 
     "nohup /bin/sh -c #{shq(relaunch)} </dev/null >/dev/null 2>&1 &"

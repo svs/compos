@@ -3571,7 +3571,13 @@ defmodule Compos.Core.SchemeAPI do
     report_slow_shell(cmd, dir, System.monotonic_time(:millisecond) - t0)
     out
   rescue
-    _ -> ""
+    # A shell that cannot start (emfile: the daemon has no free file
+    # descriptor; enoent: DIR is gone) must say so. An empty string reads
+    # as a command that printed nothing.
+    e ->
+      text = "cannot run the shell in #{dir}: #{Exception.message(e)}"
+      report_error("shell-command->string", text)
+      text
   end
 
   # The inline form holds its lane for as long as the command runs, so a

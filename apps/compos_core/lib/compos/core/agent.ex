@@ -270,12 +270,20 @@ defmodule Compos.Core.Agent do
        next_steer_id: 1,
        steering: steering,
        pending_permission: nil,
+       waiting_permissions: [],
        pending_question: nil,
        # which turn a context fetch belongs to (see send_prompt)
        epoch: 0,
        # ids for the requests WE raise; an adapter's own requests arrive
        # carrying theirs
-       next_rpc_id: 1
+       next_rpc_id: 1,
+       # the backend's session id (the :session event), which an idle park
+       # and a daemon restart hand back to the next adapter as
+       # "resume-session"; nil until the backend names one
+       resume: nil,
+       # the idle clock: a thread idle this long closes its adapter
+       idle_timer: nil,
+       idle_ms: idle_ms(config)
      }}
   end
 
@@ -290,6 +298,19 @@ defmodule Compos.Core.Agent do
         prompt_call(text, display, images, state)
     end
   end
+
+  # parked (no adapter): a choice made now rides in the config the next
+  # adapter starts with, so nothing is lost and nothing is woken for it
+  def handle_call({:set_model, model_id}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "model", model_id)}}
+
+  def handle_call({:set_effort, effort}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "effort", effort)}}
+
+  def handle_call({:set_mode, mode_id}, _from, %{handle: nil} = state),
+    do: {:reply, :ok, %{state | config: Map.put(state.config, "mode", mode_id)}}
+
+  def handle_call(:cancel, _from, %{handle: nil} = state), do: {:reply, :ok, state}
 
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
@@ -468,7 +489,8 @@ defmodule Compos.Core.Agent do
     if ms = req[:timeout_ms], do: Process.send_after(self(), {:permission_timeout, id}, ms)
 
     state =
-      %{state | next_rpc_id: id + 1, pending_permission: pending}
+      %{state | next_rpc_id: id + 1}
+      |> add_permission(pending)
       |> set_status(:needs_attention)
       |> enqueue(
         Backend.plist(
@@ -490,10 +512,7 @@ defmodule Compos.Core.Agent do
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
     # CAS on rpc_id: only the request still pending resolves, and a stale
     # answer is a silent no-op
-    case state.pending_permission do
-      %{rpc_id: ^rpc_id} -> {:reply, :ok, resolve_permission(state, option_id)}
-      _ -> {:reply, :ok, state}
-    end
+    {:reply, :ok, resolve_permission(state, rpc_id, option_id)}
   end
 
   # A question is a tool call, not a permission request. It has its own
@@ -583,6 +602,9 @@ defmodule Compos.Core.Agent do
        buffer: Buffer.name(state.buffer_ref),
        buffer_id: Buffer.id(state.buffer_ref),
        status: state.status,
+       # idle with its adapter closed: the next prompt reopens the session
+       parked: is_nil(state.handle),
+       session: Map.get(state, :resume),
        queued:
          length(state.prompt_queue) + length(state.steering_queue) +
            map_size(state.pending_steers) + length(state.steering_fallbacks),
@@ -614,6 +636,11 @@ defmodule Compos.Core.Agent do
          end
      }, state}
   end
+
+  # parked: the adapter was closed while the thread sat idle. Open a new
+  # one on the old session; the prompt waits in the queue until `ready`.
+  defp prompt_call(text, display, images, %{handle: nil, status: :idle} = state),
+    do: {:reply, :queued, state |> revive_backend() |> queue_prompt(text, display, images)}
 
   defp prompt_call(text, display, images, state) do
     case state.status do
@@ -687,12 +714,12 @@ defmodule Compos.Core.Agent do
   # nobody is looking at this chat and nobody answered — deny and say so,
   # rather than leaving the turn wedged forever
   def handle_info({:permission_timeout, id}, state) do
-    case state.pending_permission do
-      %{rpc_id: ^id, title: title} ->
+    case Enum.find(permissions(state), &(&1.rpc_id == id)) do
+      %{title: title} ->
         state =
           state
           |> enqueue(Backend.plist(type: :"permission-timeout", title: title))
-          |> resolve_permission(nil)
+          |> resolve_permission(id, nil)
 
         {:noreply, state}
 
@@ -779,6 +806,13 @@ defmodule Compos.Core.Agent do
     {:noreply, state}
   end
 
+  def handle_info({:idle_park, ref}, %{idle_timer: ref} = state) do
+    state = %{state | idle_timer: nil}
+    if parkable?(state), do: {:noreply, park(state)}, else: {:noreply, state}
+  end
+
+  def handle_info({:idle_park, _stale}, state), do: {:noreply, state}
+
   def handle_info({:silent_turn, _stale}, state),
     do: {:noreply, Map.put(state, :silent_timer, nil)}
 
@@ -794,10 +828,10 @@ defmodule Compos.Core.Agent do
   def terminate(_reason, state) do
     # a killed thread must never leave anyone blocked on an answer: not an
     # adapter waiting on the wire, and not a turn task waiting on us
-    if state.pending_permission, do: resolve_permission(state, nil)
+    resolve_all_permissions(state)
     if state.pending_question, do: resolve_question(state, state.pending_question.id, nil)
 
-    state.backend.close(state.handle)
+    if state.handle, do: state.backend.close(state.handle)
     :ok
   end
 
@@ -805,18 +839,73 @@ defmodule Compos.Core.Agent do
   # to the turn task that is blocked on us, or answer the adapter that
   # asked. Then clear the slot and go back to running.
   defp resolve_permission(state, option_id) do
+    answer_permission(state, state.pending_permission, option_id)
+
+    state
+    |> next_permission()
+    |> attention_resolved_status()
+  end
+
+  # An answer names its request. The request that waits behind the first
+  # one resolves alone and leaves the first one pending.
+  defp resolve_permission(state, rpc_id, option_id) do
     case state.pending_permission do
-      %{from: from} = pending when not is_nil(from) ->
+      %{rpc_id: ^rpc_id} ->
+        resolve_permission(state, option_id)
+
+      _ ->
+        case Enum.split_with(waiting_permissions(state), &(&1.rpc_id == rpc_id)) do
+          {[pending | _], rest} ->
+            answer_permission(state, pending, option_id)
+            Map.put(state, :waiting_permissions, rest)
+
+          {[], _} ->
+            state
+        end
+    end
+  end
+
+  defp resolve_all_permissions(state) do
+    if state.pending_permission,
+      do: state |> resolve_permission(nil) |> resolve_all_permissions(),
+      else: state
+  end
+
+  defp answer_permission(state, pending, option_id) do
+    case pending do
+      %{from: from} when not is_nil(from) ->
         GenServer.reply(from, verdict_of(pending, option_id))
 
       pending ->
         state.backend.respond_permission(state.handle, pending.rpc_id, option_id)
     end
-
-    state
-    |> Map.put(:pending_permission, nil)
-    |> attention_resolved_status()
   end
+
+  # An adapter asks about parallel tool calls at the same time. The second
+  # request waits behind the first. It never replaces the first: a replaced
+  # request gets no answer, and its tool call waits forever.
+  defp add_permission(state, pending) do
+    if state.pending_permission,
+      do: Map.put(state, :waiting_permissions, waiting_permissions(state) ++ [pending]),
+      else: Map.put(state, :pending_permission, pending)
+  end
+
+  defp next_permission(state) do
+    case waiting_permissions(state) do
+      [next | rest] ->
+        state |> Map.put(:pending_permission, next) |> Map.put(:waiting_permissions, rest)
+
+      [] ->
+        Map.put(state, :pending_permission, nil)
+    end
+  end
+
+  # read with Map.get: a running agent holds the state shape from before
+  # this field existed
+  defp waiting_permissions(state), do: Map.get(state, :waiting_permissions, [])
+
+  defp permissions(state),
+    do: List.wrap(state.pending_permission) ++ waiting_permissions(state)
 
   defp resolve_question(%{pending_question: %{id: id} = pending} = state, id, answer) do
     answer = if is_nil(answer), do: nil, else: to_string(answer)
@@ -955,7 +1044,8 @@ defmodule Compos.Core.Agent do
           options: options
         }
 
-        %{state | pending_permission: pending}
+        state
+        |> add_permission(pending)
         |> set_status(:needs_attention)
         |> enqueue(event)
 
@@ -971,10 +1061,19 @@ defmodule Compos.Core.Agent do
         |> set_status(:needs_attention)
         |> enqueue(event)
 
+      # the backend named its session: kept for the next adapter (an idle
+      # park, a revive) and forwarded, so the chat can keep it across a
+      # daemon restart
+      "session" ->
+        state
+        |> Map.put(:resume, Backend.plist_get(event, "id"))
+        |> enqueue(event)
+
       "dead" ->
         # deliver what's queued; the thread stays registered so the
         # transcript keeps working (revive reattaches a fresh backend)
         state
+        |> cancel_idle_timer()
         |> Map.put(:status, :dead)
         |> enqueue(event)
 
@@ -1066,7 +1165,7 @@ defmodule Compos.Core.Agent do
     |> cancel_steering_settle_timer()
     |> restore_boundary_steering()
     |> restore_push_fallbacks()
-    |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
+    |> resolve_all_permissions()
     |> then(fn s ->
       if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
     end)
@@ -1197,6 +1296,7 @@ defmodule Compos.Core.Agent do
       |> cancel_settle_timer()
       |> cancel_silent_timer()
       |> Map.put(:steered_turn, false)
+      |> cancel_idle_timer()
       |> Map.put(:status, :running)
       |> emit_status(:running)
 
@@ -1245,7 +1345,67 @@ defmodule Compos.Core.Agent do
   defp set_status(%{status: s} = state, s), do: state
 
   defp set_status(state, status),
-    do: state |> Map.put(:status, status) |> emit_status(status)
+    do: state |> Map.put(:status, status) |> emit_status(status) |> idle_clock(status)
+
+  # --- idle park ----------------------------------------------------------------
+  #
+  # An idle adapter is two OS processes and up to a few hundred MB for a
+  # conversation nobody is having. A thread idle for `idle_ms` closes its
+  # adapter and keeps the session id; the next prompt opens a new adapter
+  # on the same session (ACP session/load), so the agent keeps its memory.
+  # A thread with no session to come back to is never parked: no :session
+  # event yet, or a stateless lane that has no process to close.
+
+  @idle_default_ms 600_000
+
+  defp idle_ms(config) do
+    case Map.get(config, "idle-seconds") do
+      s when is_integer(s) and s >= 0 -> s * 1000
+      _ -> Application.get_env(:compos_core, :agent_idle_ms, @idle_default_ms)
+    end
+  end
+
+  defp idle_clock(state, :idle), do: arm_idle_timer(state)
+  defp idle_clock(state, _status), do: cancel_idle_timer(state)
+
+  defp arm_idle_timer(state) do
+    state = cancel_idle_timer(state)
+    ms = Map.get(state, :idle_ms, 0)
+
+    if is_integer(ms) and ms > 0 and parkable?(state) do
+      ref = make_ref()
+      Process.send_after(self(), {:idle_park, ref}, ms)
+      Map.put(state, :idle_timer, ref)
+    else
+      state
+    end
+  end
+
+  defp cancel_idle_timer(state), do: Map.put(state, :idle_timer, nil)
+
+  defp parkable?(state) do
+    state.status == :idle and is_binary(Map.get(state, :resume)) and not is_nil(state.handle) and
+      state.prompt_queue == [] and state.steering_queue == [] and
+      is_nil(state.pending_permission) and is_nil(state.pending_question) and
+      not state.context_pending and :stateless not in state.backend.capabilities()
+  end
+
+  defp park(state) do
+    handle = state.handle
+    # drop the handle first: the EXIT the close raises must not read as a
+    # dead backend (that clause matches the current handle only)
+    state = %{state | handle: nil}
+    state.backend.close(handle)
+    state
+  end
+
+  defp revive_backend(%{handle: nil} = state) do
+    config = Map.put(state.config, "resume-session", Map.get(state, :resume))
+    {:ok, handle} = state.backend.start(Map.put(config, "slug", state.slug), self())
+    %{state | handle: handle, config: config} |> set_status(:starting)
+  end
+
+  defp revive_backend(state), do: state
 
   defp emit_status(state, status),
     do: enqueue(state, Backend.plist(type: :status, status: status))

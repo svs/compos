@@ -316,7 +316,8 @@
           (and l (< i (length steps))
                (not (tutorial-step-done? (plist-get l 'slug) i))
                (list (plist-get l 'slug) i (cadr (list-ref steps i)))))
-    (tutorial-recheck!)))
+    (tutorial-recheck!)
+    (tutorial--probe!)))
 
 (define *tutorial-mx* #f)
 
@@ -386,6 +387,31 @@
 (define (tutorial--await-of slug text)
   (find (lambda (a) (and (equal? (car a) slug) (string-contains? text (cadr a))))
         *tutorial-awaits*))
+
+;; A step that starts its own work when it comes up: the step of lesson
+;; SLUG whose text has TEXT runs PROBE, which calls PASS or FAIL.
+(define *tutorial-probes* '())   ;; ((SLUG TEXT PROBE) ...)
+(define *tutorial-probing* #f)   ;; (SLUG STEP) while a probe runs
+
+(define (tutorial-probe! slug text probe)
+  (set! *tutorial-probes*
+        (cons (list slug text probe)
+              (filter (lambda (p) (not (and (equal? (car p) slug) (equal? (cadr p) text))))
+                      *tutorial-probes*)))
+  slug)
+
+(define (tutorial--probe!)
+  (let* ((w *tutorial-watch*)
+         (l (and w (tutorial-lesson (car w))))
+         (text (and l (car (list-ref (tutorial--steps l) (cadr w)))))
+         (p (and text (find (lambda (p) (and (equal? (car p) (car w)) (string-contains? text (cadr p))))
+                            *tutorial-probes*))))
+    (when (and p (not (equal? *tutorial-probing* (list (car w) (cadr w)))))
+      (let ((slug (car w)) (i (cadr w)))
+        (set! *tutorial-probing* (list slug i))
+        ((caddr p)
+         (lambda () (set! *tutorial-probing* #f) (tutorial-step-done! slug i))
+         (lambda (why) (set! *tutorial-probing* #f) (tutorial--trouble! why)))))))
 
 (define (tutorial-recheck!)
   "Finish the step on the slide when the thing it waits for is there."
@@ -819,23 +845,45 @@
     "paths. Then reply in at most three short sentences for the reader: what was wrong, what you "
     "did, and what the reader must do now. Do not ask questions."))
 
+(define (tutorial--setup-ask! text k)
+  ;; TEXT to the setup chat, started without showing it; K gets the reply,
+  ;; or #f when none comes
+  (let ((sent (ignore-errors
+                (lambda ()
+                  (if (and *tutorial-setup-slug* (buffer-known? *tutorial-setup-chat*))
+                      (agent-prompt! *tutorial-setup-slug* text)
+                      (set! *tutorial-setup-slug*
+                            (execute* text (list 'title *tutorial-setup-chat* 'notify #f))))
+                  (subagent-wait (list *tutorial-setup-slug*)
+                    (lambda (results)
+                      (let ((s (and (pair? results) (plist-get (car results) 'text))))
+                        (k (and (string? s) (not (equal? (string-trim s) "")) s)))))
+                  #t))))
+    (unless sent (k #f))))
+
 (define (tutorial--setup-help! slug what)
   (when (equal? slug "set-up")
-    (ignore-errors
-      (lambda ()
-        (let ((text (tutorial--setup-brief what)))
-          (if (and *tutorial-setup-slug* (buffer-known? *tutorial-setup-chat*))
-              (agent-prompt! *tutorial-setup-slug* text)
-              (set! *tutorial-setup-slug*
-                    (execute* text (list 'title *tutorial-setup-chat* 'notify #f)))))
-        (set! *tutorial-help* "The setup chat is looking into it...")
-        (tutorial--draw-detail!)
-        (subagent-wait (list *tutorial-setup-slug*)
-          (lambda (results)
-            (let ((said (and (pair? results) (plist-get (car results) 'text))))
-              (when (and (string? said) (equal? *tutorial-current* "set-up"))
-                (set! *tutorial-help* said)
-                (tutorial--draw-detail!)))))))))
+    (set! *tutorial-help* "The setup chat is looking into it...")
+    (tutorial--draw-detail!)
+    (tutorial--setup-ask! (tutorial--setup-brief what)
+      (lambda (said)
+        (when (equal? *tutorial-current* "set-up")
+          (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x setup to choose another model."))
+          (tutorial--draw-detail!))))))
+
+;; the model step: the setup wizard chose one already, or the reader does
+(tutorial-await! "set-up" "choose the model that new chats use"
+  (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
+
+;; the reply step sends its own test, through the setup chat
+(tutorial-probe! "set-up" "test message to the model"
+  (lambda (pass fail)
+    (tutorial--setup-ask!
+      (tutorial--setup-brief "This is a test that the model answers. Reply with the one word: ready.")
+      (lambda (said)
+        (if said
+            (pass)
+            (fail "The model gave no reply. Type M-x setup to choose another model, or M-x setup-ai-guide to check its login."))))))
 
 (add-hook! 'tutorial-trouble-hook
   (lambda (slug why) (tutorial--setup-help! slug (string-append "This step failed: " why))))

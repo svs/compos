@@ -166,20 +166,21 @@
   (list (list 'tag "div" 'class "wizard-title" 'text "Start learning")
         (list 'tag "div" 'class "wizard-lede"
               'text (string-append
-                      "A guide teaches you Compos in a chat, one step at a time, with "
-                      *default-connector* ". It sees your screen and starts with "
-                      "windows: how to move the focus and get around. Ask it anything as you go."))
-        (list 'tag "div" 'class "wizard-columns wizard-columns-2"
+                      "The tutorial teaches you Compos one small step at a time. A slide "
+                      "says what to do, you do it, and the slide goes on by itself. "
+                      "It starts with the rest of the setup, then buffers, windows and editing."))
+        (list 'tag "div" 'class "wizard-columns"
               'children
               (map (lambda (c)
                      (list 'tag "div" 'class "wizard-column"
                            'segs (list (list "wizard-column-name" (car c))
                                        (list "wizard-column-what" (cadr c)))))
-                   '(("Guide" "a chat that teaches, and answers your questions")
-                     ("Stage" "the window where you try each step"))))
+                   '(("Practice" "the page where you try each step")
+                     ("Slide" "one small step at a time, with its keys")
+                     ("Lesson" "the lesson, to read"))))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:learn" "Start the guide →")))))
+                'next (list "wizard:learn" "Start the tutorial ->")))))
 
 (define (setup-wizard-blocks buf)
   (let ((step (setup-wizard-step buf)))
@@ -232,7 +233,8 @@
 
 ;; The learning space is the onboarding app: the guide chat and its stage.
 (define (setup-open-learning-space!)
-  (run-command "onboarding"))
+  ;; the teaching is the tutorial's slides, not a chat
+  (run-command "tutorial"))
 
 ;; A secret, all in the editor. The secrets are settings of type secret
 ;; (keys.scm), so the question comes from the declaration: its doc, its
@@ -542,7 +544,7 @@
 (define-command "setup-inference" "Choose the model that new chats use"
   (lambda () (setup-wizard! "model")))
 
-(define-command "setup-learning-space" "Open the guide: a chat that teaches Compos, and a stage to try each step"
+(define-command "setup-learning-space" "Open the tutorial: practice, a slide that teaches, and the lesson"
   (lambda () (setup-open-learning-space!)))
 
 (define-command "setup-wizard-next" "Go to the next setup step"

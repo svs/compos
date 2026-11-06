@@ -76,9 +76,9 @@ This lesson sets up the models and the browser extension. Compos uses three kind
 
 > **Try it.** Type `M-x setup-inference` and choose the model that new chats use.
 
-> **Try it.** Type `M-x chat-new`, type a short message, and press `RET`. A reply tells you that the connector works. Type `C-h t` to come back to the tutorial.
+> **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
 
-If the chat gives no reply, type `M-x setup-ai-guide`. The guide explains connectors, logins and keys.
+If no reply comes, the slide tells you what is wrong. `M-x setup` chooses another model, and `M-x setup-ai-guide` explains connectors, logins and keys.
 
 ### JEV
 

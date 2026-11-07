@@ -328,6 +328,17 @@ defmodule Compos.Core.Editor do
   @doc "Currently selected candidate label (after fuzzy filter), or nil."
   def minibuffer_selected(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_selected, fid(fid)})
 
+  @doc "Open the frame's prompt snapshot: PROMPT, CANDIDATES and the VIEW map Scheme composes."
+  def minibuffer_show(prompt, candidates, view, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_show, prompt, candidates, view, fid(fid)})
+
+  @doc "Move the selection by DELTA rows, with no policy."
+  def minibuffer_move(delta, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_move, delta, fid(fid)})
+
+  @doc "The rows that survive the input, [label, hint] each, or nil."
+  def minibuffer_filtered(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_filtered, fid(fid)})
+
   def minibuffer_close(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_close, fid(fid)})
 
   @doc "Re-read input from the minibuf buffer. :unchanged | {:changed, input}."
@@ -1508,27 +1519,33 @@ defmodule Compos.Core.Editor do
       }
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
+      |> mb_view_of_handlers()
 
-    reset_minibuf_buffer(minibuf_of(f), mb.input)
+    open_minibuffer(state, f, mb, candidates)
+  end
+
+  # Scheme owns the prompt: its handlers, its policy and its history. The
+  # frame keeps what the render walk draws, and VIEW is that: input, style,
+  # note, legend, whether the prompt completes a path, what the list
+  # matches on (QUERY :input, :segment after the last "/", or :none), and
+  # how it matches (match_hint, completion_style, preselect, selected).
+  def handle_call({:mb_show, prompt, candidates, view, fid}, _from, state) do
+    f = frame(state, fid)
 
     mb =
-      Map.put(
-        mb,
-        :list,
-        Candidates.new(candidates,
-          query: mb_query(mb),
-          match_hint: mb.match_hint,
-          style: mb.completion_style
-        )
-      )
+      %{
+        input: "",
+        completing: false,
+        query: :input,
+        match_hint: false,
+        style: nil,
+        completion_style: :flex,
+        preselect: :first
+      }
+      |> Map.merge(view)
+      |> Map.put(:prompt, prompt)
 
-    mb =
-      case mb[:selected] do
-        label when is_binary(label) -> %{mb | list: Candidates.select_label(mb.list, label)}
-        _ -> mb
-      end
-
-    changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
+    open_minibuffer(state, f, mb, candidates)
   end
 
   def handle_call({:mb_input, input, fid}, _from, state) do
@@ -1622,6 +1639,34 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  # the selection moves by DELTA rows and nothing else: what a move means
+  # in a prompt that holds the selection itself is the prompt's policy
+  def handle_call({:mb_move, delta, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        changed(
+          :ok,
+          put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}),
+          f.id
+        )
+
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
+
+  # the rows that survive the input, [label, hint] each: what a collected
+  # prompt hands on
+  def handle_call({:mb_filtered, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} ->
+        {:reply, Enum.map(Candidates.filtered(mb.list), fn c -> [c.label, c.hint || ""] end), state}
+
+      _ ->
+        {:reply, nil, state}
+    end
+  end
+
   def handle_call({:mb_selected, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} -> {:reply, Candidates.selected(mb.list), state}
@@ -1639,6 +1684,7 @@ defmodule Compos.Core.Editor do
         |> Map.put(:selected, Candidates.selected(f.minibuffer.list))
         |> Map.put(:total, Candidates.total(f.minibuffer.list))
         |> Map.put(:sel_touched, f.minibuffer.list.touched)
+        |> Map.put(:prompt_sel, prompt_preselected?(f.minibuffer))
 
     changed(reply, put_frame(state, %{f | minibuffer: nil}), f.id)
   end
@@ -2313,12 +2359,49 @@ defmodule Compos.Core.Editor do
   # A dynamic provider can return an already-ranked result set whose labels
   # need not contain the query (the command palette finds commands by docs and
   # recipes). Ordinary prompts keep the shared candidate matcher.
-  defp mb_query(%{filter: false}), do: ""
+  defp mb_query(%{query: :none}), do: ""
 
-  defp mb_query(%{on_complete: oc, input: input}) when oc not in [nil, false],
+  defp mb_query(%{query: :segment, input: input}),
     do: input |> String.split("/") |> List.last()
 
   defp mb_query(%{input: input}), do: input
+
+  # the old handler form names the view fields by the handlers it carries
+  defp mb_view_of_handlers(mb) do
+    completing = mb.on_complete not in [nil, false]
+
+    query =
+      cond do
+        mb.filter == false -> :none
+        completing -> :segment
+        true -> :input
+      end
+
+    Map.merge(mb, %{completing: completing, query: query})
+  end
+
+  defp open_minibuffer(state, f, mb, candidates) do
+    reset_minibuf_buffer(minibuf_of(f), mb.input)
+
+    mb =
+      Map.put(
+        mb,
+        :list,
+        Candidates.new(candidates,
+          query: mb_query(mb),
+          match_hint: mb.match_hint,
+          style: mb.completion_style
+        )
+      )
+
+    mb =
+      case mb[:selected] do
+        label when is_binary(label) -> %{mb | list: Candidates.select_label(mb.list, label)}
+        _ -> mb
+      end
+
+    changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
+  end
 
   @doc """
   True when the prompt line itself is the selection, not a candidate row
@@ -2335,7 +2418,7 @@ defmodule Compos.Core.Editor do
   def prompt_preselected?(mb) do
     touched = Map.get(mb, :sel_touched) || (mb[:list] && mb.list.touched) || false
 
-    mb[:on_complete] not in [nil, false] and not touched and
+    mb[:completing] == true and not touched and
       (mb[:preselect] == :prompt or String.ends_with?(mb.input, "/"))
   end
 
@@ -2422,7 +2505,7 @@ defmodule Compos.Core.Editor do
       label_width: Candidates.label_width(mb.list),
       sel: mb.list.sel,
       total: Candidates.total(mb.list),
-      completing: mb.on_complete not in [nil, false],
+      completing: mb[:completing] == true,
       # the prompt's own flavour word, which picks the label row: nil,
       # "palette", "modal", "popup", "question", "filter"
       style: Map.get(mb, :style),

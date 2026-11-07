@@ -60,8 +60,8 @@
 ;; the settings of the windows: bound before any package reads one
 (require 'window-settings)
 (require 'tools)
-;; the model wire's retry and read-only rules: Elixir asks them by name
-(require 'llm-loop)
+;; the catalog's pure rules: reasoning controls, live effort rows, staleness
+(require 'model-rules)
 (require 'recipes)
 (require 'components)
 ;; the hand keys and / over an index's and a detail's tab bars

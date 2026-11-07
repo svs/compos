@@ -68,7 +68,7 @@
         (check-equal! (panes-window-buffer filled (panes-find filled "b.scm")) "b.scm" "and shows in the new pane")
         (check-equal! (length (filter (lambda (kk) (member "b.scm" (panes-window-buffers filled kk)))
                                       (panes-window-keys filled)))
-                      1 "one buffer, one window"))))
+                      1 "one buffer, one window")))))
 
 (deftest 'a-buffer-opens-in-the-window-of-its-mode
   "another buffer of a mode goes to that mode's window, wherever you are, and that window comes to the front of its pane"

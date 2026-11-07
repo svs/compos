@@ -101,7 +101,7 @@
             (set-frame-local! 'current-group id)
             (panes-layout-forget!)
             (delete-other-windows!)
-            (group-layout-enter! id)
+            (group-layout-enter! id #f)
             (let ((l (panes-layout)))
               (check-equal! (panes-pane-count l) 1 "one pane")
               (check-equal! (length (panes-visible l)) 0 "blank, no buffer")))

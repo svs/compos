@@ -1,19 +1,25 @@
 defmodule Compos.Core.WindowSpec do
   @moduledoc """
-  The saved shape of a window tree: what the desktop writes and what
-  `Editor.restore_tree/3` lays back.
+  The saved shape of a frame's windows: what the desktop writes and what
+  `Editor.restore_tree/3` lays back. One window is its leaf; more are a
+  row, left to right.
 
-      %{type: :leaf, buffer: name, top: line, manual: bool, ctop: px, id: id | nil}
-      %{type: :split, dir: :h | :v, ratio: float, children: [spec, spec]}
+      %{type: :leaf, buffer: name, top: line, manual: bool, ctop: px, id: id | nil, share: n, dock: bool}
+      %{type: :row, children: [leaf, ...]}
 
   `id` is the window id the leaf had. It is a wish, not a claim: a restore
-  keeps it when no other window holds it.
+  keeps it when no other window holds it. `share` is the leaf's part of the
+  row's width; a `dock` spans the frame under the row, and its share is its
+  part of the height.
 
-  `read/1` is the one reader. It takes a spec, or any tuple shape an older
-  desktop file holds, and answers a spec.
+  `read/1` is the one reader. It takes a spec, or any shape an older
+  desktop file holds, and answers a spec. An older file's split tree reads
+  as its leaves, at equal shares.
   """
 
-  @doc "The spec of a live window tree."
+  @doc "The spec of a frame's windows: a leaf, or a row."
+  def from_tree(%{children: c}), do: %{type: :row, children: Enum.flat_map(c, &leaves(from_tree(&1)))}
+
   def from_tree(%{type: :leaf, buffer: b} = leaf) do
     %{
       type: :leaf,
@@ -21,16 +27,9 @@ defmodule Compos.Core.WindowSpec do
       top: Map.get(leaf, :top, 0),
       manual: Map.get(leaf, :manual, false),
       ctop: Map.get(leaf, :ctop, 0),
-      id: Map.get(leaf, :id)
-    }
-  end
-
-  def from_tree(%{type: :split, dir: dir, children: [a, b]} = split) do
-    %{
-      type: :split,
-      dir: dir,
-      ratio: Map.get(split, :ratio, 0.5),
-      children: [from_tree(a), from_tree(b)]
+      id: Map.get(leaf, :id),
+      share: Map.get(leaf, :share, 1),
+      dock: Map.get(leaf, :dock, false)
     }
   end
 
@@ -45,26 +44,20 @@ defmodule Compos.Core.WindowSpec do
       # a saved offset is itself the pin (S1)
       manual: Map.get(spec, :manual) == true or ctop > 0,
       ctop: ctop,
-      id: want(Map.get(spec, :id))
+      id: want(Map.get(spec, :id)),
+      share: Map.get(spec, :share) || 1,
+      dock: Map.get(spec, :dock) == true
     }
   end
 
-  def read(%{type: :split, dir: dir, children: [a, b]} = spec),
-    do: %{
-      type: :split,
-      dir: dir,
-      ratio: Map.get(spec, :ratio) || 0.5,
-      children: [read(a), read(b)]
-    }
+  def read(%{children: c}), do: %{type: :row, children: Enum.flat_map(c, &leaves/1)}
 
   # The tuples of older desktop files, read by position:
   #   {:leaf, buffer, top, point, manual, ctop, history, restore, owner, id}
   # each shape a prefix of the next. Point, history, restore and owner are
   # dropped: a restore never writes point, and Scheme keeps the rest.
-  def read({:split, dir, a, b}), do: read({:split, dir, 0.5, a, b})
-
-  def read({:split, dir, ratio, a, b}),
-    do: read(%{type: :split, dir: dir, ratio: ratio, children: [a, b]})
+  def read({:split, _dir, a, b}), do: read(%{children: [a, b]})
+  def read({:split, _dir, _ratio, a, b}), do: read(%{children: [a, b]})
 
   def read(leaf) when is_tuple(leaf) and tuple_size(leaf) >= 2 and elem(leaf, 0) == :leaf do
     at = fn i -> if tuple_size(leaf) > i, do: elem(leaf, i) end
@@ -79,9 +72,17 @@ defmodule Compos.Core.WindowSpec do
     })
   end
 
+  @doc "The leaves of a spec, left to right."
+  def leaves(spec) do
+    case read(spec) do
+      %{type: :row, children: c} -> c
+      leaf -> [leaf]
+    end
+  end
+
   @doc "Every buffer a spec names, in leaf order."
   def buffers(%{type: :leaf, buffer: b}) when is_binary(b), do: [b]
-  def buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &buffers/1)
+  def buffers(%{children: c}), do: Enum.flat_map(c, &buffers/1)
   def buffers(_), do: []
 
   defp want(id) when is_integer(id), do: id

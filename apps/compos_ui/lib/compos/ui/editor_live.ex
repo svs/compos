@@ -844,11 +844,11 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp leaves(%{type: :leaf} = leaf), do: [leaf]
-  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
+  defp leaves(%{children: children}), do: Enum.flat_map(children, &leaves/1)
   defp leaves(_), do: []
 
   # A window draws its buffer's mode-line format, else the frame default.
-  defp with_mode_line(%{type: :split, children: children} = split, default),
+  defp with_mode_line(%{children: children} = split, default),
     do: %{split | children: Enum.map(children, &with_mode_line(&1, default))}
 
   defp with_mode_line(%{type: :leaf} = leaf, default),
@@ -864,7 +864,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
-  defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
+  defp leaf_ids(%{children: children}), do: Enum.flat_map(children, &leaf_ids/1)
   defp leaf_ids(_), do: []
 
   defp frame_file_path(%{tree: tree, active: active}), do: active_file_path(tree, active)
@@ -873,7 +873,7 @@ defmodule Compos.Ui.EditorLive do
        when is_binary(path) and path != "",
        do: path
 
-  defp active_file_path(%{type: :split, children: children}, id),
+  defp active_file_path(%{children: children}, id),
     do: Enum.find_value(children, &active_file_path(&1, id))
 
   defp active_file_path(_, _), do: nil
@@ -883,7 +883,7 @@ defmodule Compos.Ui.EditorLive do
   defp event_buffers(%{type: :leaf, render_mode: "terminal"}), do: []
   defp event_buffers(%{type: :leaf, buffer: buffer}), do: [buffer]
 
-  defp event_buffers(%{type: :split, children: children}),
+  defp event_buffers(%{children: children}),
     do: Enum.flat_map(children, &event_buffers/1)
 
   defp event_buffers(_), do: []
@@ -900,13 +900,13 @@ defmodule Compos.Ui.EditorLive do
   # hl-line) is recomputed per render but only for lines it actually touches
   defp previous_leaves(%{type: :leaf, id: id} = leaf), do: %{id => leaf}
 
-  defp previous_leaves(%{type: :split, children: children}) do
+  defp previous_leaves(%{children: children}) do
     Enum.reduce(children, %{}, fn child, leaves -> Map.merge(leaves, previous_leaves(child)) end)
   end
 
   defp previous_leaves(_), do: %{}
 
-  defp decorate_display(%{type: :split} = split, previous, cache, faces, active) do
+  defp decorate_display(%{children: _} = split, previous, cache, faces, active) do
     {children, cache} =
       Enum.map_reduce(split.children, cache, &decorate_display(&1, previous, &2, faces, active))
 
@@ -924,7 +924,7 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
-  defp decorate(%{type: :split} = split, cache, faces, active) do
+  defp decorate(%{children: _} = split, cache, faces, active) do
     {children, cache} =
       Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces, active))
 
@@ -1770,25 +1770,15 @@ defmodule Compos.Ui.EditorLive do
 
   defp motion_panes(_), do: nil
 
-  defp motion_shape(%{type: :split, children: [a, b]} = node) do
-    cond do
-      motion_float?(a) ->
-        motion_shape(b)
-
-      motion_float?(b) ->
-        motion_shape(a)
-
-      true ->
-        {sa, pa} = motion_shape(a)
-        {sb, pb} = motion_shape(b)
-        ratio = round((Map.get(node, :ratio) || 0.5) * 1000)
-        {"#{node.dir}#{ratio}(#{sa},#{sb})", pa ++ pb}
-    end
+  # the row's signature: each window that does not float, with its share
+  defp motion_shape(%{children: children}) do
+    {shapes, panes} = children |> Enum.reject(&motion_float?/1) |> Enum.map(&motion_shape/1) |> Enum.unzip()
+    {Enum.join(shapes, ","), Enum.concat(panes)}
   end
 
   defp motion_shape(%{type: :leaf} = node) do
     buffer = if Map.get(node, :highlighted, false), do: "", else: node.buffer
-    {to_string(node.id), [[to_string(node.id), buffer]]}
+    {"#{node.id}:#{round(Map.get(node, :share, 1) * 1000)}", [[to_string(node.id), buffer]]}
   end
 
   defp motion_shape(_), do: {"", []}
@@ -1799,6 +1789,28 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp motion_float?(_), do: false
+
+  # the frame's row of windows, by share of the width; a dock spans the
+  # frame under the row, by share of the height
+  defp tree(%{node: %{type: :row}} = assigns) do
+    {docks, cols} = Enum.split_with(assigns.node.children, &Map.get(&1, :dock))
+    assigns = assign(assigns, cols: cols, docks: docks, low: Enum.sum(Enum.map(docks, & &1.share)))
+
+    ~M"""
+    <c-split class="split v">
+      <c-group class="split-child" style={"flex: #{1 - @low} 1 0%"}>
+        <c-split class="split h">
+          <c-group :for={c <- @cols} class="split-child" style={"flex: #{Map.get(c, :share, 1)} 1 0%"}>
+            <.tree node={c} active={@active} completion={@completion} />
+          </c-group>
+        </c-split>
+      </c-group>
+      <c-group :for={d <- @docks} class="split-child" style={"flex: #{d.share} 1 0%"}>
+        <.tree node={d} active={@active} completion={@completion} />
+      </c-group>
+    </c-split>
+    """
+  end
 
   defp tree(%{node: %{type: :split}} = assigns) do
     assigns = assign(assigns, ratio: Map.get(assigns.node, :ratio, 0.5))

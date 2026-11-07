@@ -1,11 +1,11 @@
 defmodule Compos.WindowSpecTest do
-  @moduledoc "Every tree shape an older desktop file holds reads to the same spec."
+  @moduledoc "Every window shape an older desktop file holds reads to the same spec."
 
   use ExUnit.Case, async: true
 
   alias Compos.Core.WindowSpec
 
-  @plain %{type: :leaf, buffer: "b", top: 3, manual: false, ctop: 0, id: nil}
+  @plain %{type: :leaf, buffer: "b", top: 3, manual: false, ctop: 0, id: nil, share: 1, dock: false}
 
   test "each positional leaf reads by position, with defaults for what it lacks" do
     assert WindowSpec.read({:leaf, "b"}) == %{@plain | top: 0}
@@ -19,11 +19,12 @@ defmodule Compos.WindowSpecTest do
     assert WindowSpec.read({:leaf, "b", 3, 9, false, 0, [], nil, nil, 7}) == %{@plain | id: 7}
   end
 
-  test "splits read with their ratio, and a spec reads to itself" do
-    spec = %{type: :split, dir: :v, ratio: 0.5, children: [@plain, %{@plain | id: 7}]}
+  test "an older split tree reads as a row of its leaves, and a spec reads to itself" do
+    spec = %{type: :row, children: [@plain, %{@plain | id: 7}]}
 
     old = {:split, :v, {:leaf, "b", 3}, {:leaf, "b", 3, 0, false, 0, [], nil, nil, 7}}
     assert WindowSpec.read(old) == spec
+    assert WindowSpec.read(%{type: :split, dir: :h, ratio: 0.3, children: [@plain, %{@plain | id: 7}]}) == spec
 
     assert WindowSpec.read(spec) == spec
     assert WindowSpec.buffers(spec) == ["b", "b"]

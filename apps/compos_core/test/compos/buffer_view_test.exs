@@ -271,7 +271,7 @@ defmodule Compos.BufferViewTest do
     end
   end
 
-  defp render_text(%{type: :split, children: children}, name),
+  defp render_text(%{children: children}, name),
     do: Enum.find_value(children, &render_text(&1, name))
 
   defp render_text(%{type: :leaf, buffer: buffer, text: text}, name),

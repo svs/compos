@@ -52,7 +52,7 @@ defmodule Compos.WindowIdsTest do
     with_frame(fn frame ->
       [{pane, @a}] = Editor.list_windows(frame)
       children = [leaf(@a, pane), leaf(@b, pane + 1000)]
-      tree = %{type: :split, dir: :h, ratio: 0.5, children: children}
+      tree = %{type: :row, children: children}
 
       assert :ok = Editor.restore_tree(tree, @a, frame)
       assert [{^pane, @a}, {second, @b}] = Editor.list_windows(frame)

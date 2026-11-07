@@ -13,8 +13,10 @@ defmodule Compos.Core.Editor do
   ids are short stable strings; window ids are integers, globally unique
   across all frames, so a bare window id always names one window.
 
-  Window tree: `%{type: :leaf, id, buffer, top, manual}` | `%{type: :split,
-  dir: :h | :v, ratio, children: [tree, tree]}`. `:h` = side-by-side.
+  Windows: a frame is one row of leaves, `%{type: :leaf, id, buffer, top,
+  manual, share, dock}`, left to right. `share` is a leaf's part of the
+  row's width; a `dock` leaf spans the frame under the row, and its share
+  is its part of the height.
   TODO: per-window points, window resizing.
 
   Calls that take a frame accept nil, resolved server-side to the
@@ -392,24 +394,17 @@ defmodule Compos.Core.Editor do
   def style(name), do: GenServer.call(__MODULE__, {:style, name})
 
   # windows
+  @doc "A window right of the selected one, on its buffer, with 1 - RATIO of the selected one's share. A frame is a row: DIR does not stack."
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:split, dir, ratio, fid(fid)})
+    do: GenServer.call(__MODULE__, {:split, ratio, fid(fid)})
 
   @doc """
-  Split the frame's ROOT and answer the new window's id.
-
-  `split/3` splits the selected window, so the pane it makes is as wide as
-  whatever window happened to be selected. This splits the whole tree: the
-  new pane spans the frame, and every existing window keeps its share of
-  what is left. It is what a bottom dock needs — a surface that takes rows
-  from the frame rather than covering them.
-
-  Deleting the new window puts the tree back: one half of a root split
-  left alone becomes the root again. FIRST? puts the new window before the
-  old tree: left of it, or above it.
+  A dock under the frame's row, and its window id. It spans the frame and
+  takes 1 - RATIO of the height, so it takes rows from the row rather than
+  covering them. Deleting the window gives them back.
   """
-  def split_root(dir, ratio \\ 0.5, fid \\ nil, first? \\ false) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:split_root, dir, ratio, fid(fid), first?})
+  def split_root(dir, ratio \\ 0.5, fid \\ nil, _first? \\ false) when dir in [:h, :v],
+    do: GenServer.call(__MODULE__, {:dock, ratio, fid(fid)})
 
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
   def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})
@@ -466,7 +461,7 @@ defmodule Compos.Core.Editor do
 
   @doc "Replace a frame's window tree from a `Compos.Core.WindowSpec` spec."
   def restore_tree(spec, active_buffer, fid \\ nil) do
-    spec |> spec_buffers() |> Enum.uniq() |> Enum.each(&wake/1)
+    spec |> Compos.Core.WindowSpec.buffers() |> Enum.uniq() |> Enum.each(&wake/1)
     GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid), true})
   end
 
@@ -493,10 +488,6 @@ defmodule Compos.Core.Editor do
       end
     end
   end
-
-  defp spec_buffers(%{type: :leaf, buffer: buffer}) when is_binary(buffer), do: [buffer]
-  defp spec_buffers(%{type: :split, children: children}), do: Enum.flat_map(children, &spec_buffers/1)
-  defp spec_buffers(_), do: []
 
   # Only a live buffer enters a window. A registry read, no message.
   defp live(buffer),
@@ -590,7 +581,7 @@ defmodule Compos.Core.Editor do
     # *scratch* is named, not made: editor.scm makes it at boot
     frame = %{
       id: @main_frame,
-      tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
+      tree: [%{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false}],
       active: 1,
       pending: [],
       prefix_arg: nil,
@@ -662,13 +653,7 @@ defmodule Compos.Core.Editor do
 
         frame = %{
           id: id,
-          tree: %{
-            type: :leaf,
-            id: state.next_win,
-            buffer: buffer,
-            top: 0,
-            manual: false
-          },
+          tree: [%{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false}],
           active: state.next_win,
           pending: [],
           prefix_arg: nil,
@@ -922,7 +907,7 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:render_state, fid}, _from, state) do
     f = frame(state, fid)
-    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label), Map.get(f, :win_stacks, %{}))
+    {tree, rendered} = render_row(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label), Map.get(f, :win_stacks, %{}))
     state = put_frame(state, %{f | tree: tree})
 
     {:reply,
@@ -1028,7 +1013,7 @@ defmodule Compos.Core.Editor do
         {:reply, false, state}
 
       true ->
-        live = for [id | _] <- leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0}), do: id
+        live = for [id | _] <- leaf_rects(f.tree), do: id
         cols = old |> Map.take(live) |> Map.merge(map)
         {:reply, true, put_frame(state, Map.put(f, :win_cols, cols))}
     end
@@ -1080,7 +1065,7 @@ defmodule Compos.Core.Editor do
     measured = Map.get(f, :win_cols, %{})
 
     estimates =
-      for [id, _buffer, _x, _y, width, _height] <- leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0}),
+      for [id, _buffer, _x, _y, width, _height] <- leaf_rects(f.tree),
           cols when is_number(cols) <- [Map.get(measured, id)],
           width > 0,
           do: cols / width
@@ -1732,20 +1717,14 @@ defmodule Compos.Core.Editor do
   def handle_call(:styles, _from, state), do: {:reply, state.styles, state}
   def handle_call({:style, name}, _from, state), do: {:reply, Map.get(state.styles, name), state}
 
-  def handle_call({:split, dir, ratio, fid}, _from, state) do
+  # the selected window keeps its share, so a float split off it (a card,
+  # a shaped prompt), which takes no width on screen, narrows nothing
+  def handle_call({:split, ratio, fid}, _from, state) do
     f = frame(state, fid)
     old = find_leaf(f.tree, f.active)
-
-    new_leaf = %{
-      type: :leaf,
-      id: state.next_win,
-      buffer: old.buffer,
-      top: old.top,
-      manual: false
-    }
-
-    split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
-    tree = replace_leaf(f.tree, f.active, split)
+    share = share(old) * (1 - ratio)
+    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false, share: share}
+    tree = Enum.flat_map(row(f.tree), &if(&1.id == f.active, do: [&1, new_leaf], else: [&1]))
 
     # the new window starts at the old one's point and diverges from here
     # (Emacs split-window)
@@ -1758,26 +1737,12 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
-  def handle_call({:split_root, dir, ratio, fid, first?}, _from, state) do
+  def handle_call({:dock, ratio, fid}, _from, state) do
     f = frame(state, fid)
     seed = find_leaf(f.tree, f.active) || first_leaf(f.tree)
-
-    new_leaf = %{
-      type: :leaf,
-      id: state.next_win,
-      buffer: seed.buffer,
-      top: 0,
-      manual: false
-    }
-
-    children = if first?, do: [new_leaf, f.tree], else: [f.tree, new_leaf]
-    tree = %{type: :split, dir: dir, ratio: ratio, children: children}
-
-    changed(
-      new_leaf.id,
-      put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}),
-      f.id
-    )
+    dock = %{type: :leaf, id: state.next_win, buffer: seed.buffer, top: 0, manual: false, share: 1 - ratio, dock: true}
+    f = %{f | tree: row(f.tree) ++ [dock]}
+    changed(dock.id, put_frame(%{state | next_win: state.next_win + 1}, f), f.id)
   end
 
   def handle_call({:delete_window_by_id, id}, _from, state) do
@@ -1811,7 +1776,7 @@ defmodule Compos.Core.Editor do
     do: {:reply, leaf_ids_buffers(frame(state, fid).tree), state}
 
   def handle_call({:window_rects, fid}, _from, state),
-    do: {:reply, leaf_rects(frame(state, fid).tree, {0.0, 0.0, 1.0, 1.0}), state}
+    do: {:reply, leaf_rects(frame(state, fid).tree), state}
 
   # --- the line of windows ----------------------------------------------------
 
@@ -1820,7 +1785,7 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:arrange, spec, fid, ask_wake?}, _from, state) do
     f = frame(state, fid)
-    visible = leaves(f.tree)
+    visible = row(f.tree)
     held = Enum.flat_map(Map.values(state.frames), &frame_window_ids/1)
     items = arrange_items(spec)
     chosen = Enum.map(items, &line_leaf(&1, visible, held))
@@ -2102,8 +2067,18 @@ defmodule Compos.Core.Editor do
     if moved?, do: out, else: :same
   end
 
-  defp leaves(%{type: :leaf} = leaf), do: [leaf]
-  defp leaves(%{type: :split, children: c}), do: Enum.flat_map(c, &leaves/1)
+  # A frame's windows: its row of leaves. A map is the tree a frame held
+  # before the row, in a daemon that hot-loaded it: it reads as its
+  # leaves, left to right and top to bottom, at equal shares.
+  defp row(leaves) when is_list(leaves), do: leaves
+  defp row(%{type: :leaf} = leaf), do: [leaf]
+  defp row(%{children: c}), do: Enum.flat_map(c, &row/1)
+
+  defp share(leaf), do: Map.get(leaf, :share, 1)
+
+  # one window is its leaf, more are a row
+  defp payload([leaf]), do: leaf
+  defp payload(leaves), do: %{type: :row, children: leaves}
 
   defp drop_point(%{buffer: b, id: id}) do
     if Buffer.exists?(b), do: wp_safely(fn -> Buffer.drop_win_point(b, id) end)
@@ -2136,7 +2111,7 @@ defmodule Compos.Core.Editor do
       next_win = Enum.reduce(chosen, state.next_win, &max(&2, &1.id + 1))
 
       f =
-        %{f | tree: arrange_tree(spec, Map.new(chosen, &{&1.id, &1})), active: active}
+        %{f | tree: arrange_row(spec, chosen), active: active}
 
       changed(:ok, %{state | next_win: next_win} |> put_frame(f) |> resync_swap(), f.id)
     end
@@ -2149,32 +2124,17 @@ defmodule Compos.Core.Editor do
 
   defp asleep_buffer(_item, _pool, _held), do: nil
 
-  # One line of LEAVES, nested to the right: the first takes RATIO, and
-  # each later split gives its first pane 1/COUNT of what is left. This is
-  # the tree layout--fill-line! makes with split-window!.
-  # a spec is a line item, or {dir, shares, children}: the children in a line
+  # a spec is a line item, or {dir, shares, children}: the row's items, left
+  # to right, each with its share of the width; other shares are equal
   defp arrange_items({_dir, _shares, children}), do: Enum.flat_map(children, &arrange_items/1)
   defp arrange_items(item), do: [item]
 
-  defp arrange_tree({dir, shares, children}, by_id),
-    do: line_tree(Enum.map(children, &arrange_tree(&1, by_id)), dir, shares)
-
-  defp arrange_tree(item, by_id), do: Map.fetch!(by_id, line_item_id(item))
-
-  defp line_tree([leaf], _dir, _ratio), do: leaf
-
-  # RATIO may be a list of shares, one for each pane: each split takes its
-  # first pane's share of what is left
-  defp line_tree([first | rest], dir, [share | more]) do
-    total = share + Enum.sum(more)
-    ratio = if share > 0 and share < total, do: share / total, else: 1 / (length(rest) + 1)
-    %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, more)]}
+  defp arrange_row({_dir, shares, _children}, leaves) when length(shares) == length(leaves) do
+    total = Enum.sum(shares)
+    Enum.zip_with(leaves, shares, &Map.put(&1, :share, &2 / total))
   end
 
-  defp line_tree([first | rest], dir, ratio) do
-    ratio = if is_number(ratio) and ratio > 0 and ratio < 1, do: ratio, else: 1 / (length(rest) + 1)
-    %{type: :split, dir: dir, ratio: ratio, children: [first, line_tree(rest, dir, nil)]}
-  end
+  defp arrange_row(_spec, leaves), do: Enum.map(leaves, &Map.put(&1, :share, 1 / length(leaves)))
 
   # A window with no buffer offers `false` here; it names no place, so it
   # never enters the recent order (Compos.Core.Recent).
@@ -2335,20 +2295,23 @@ defmodule Compos.Core.Editor do
   # An exact hit anywhere wins over a prefix anywhere. Emacs's
   # minor-mode-map-alist, local map and global map, in that order.
 
-  defp dtree(%{type: :leaf, id: id, buffer: b} = leaf) do
-    %{
-      type: :leaf,
-      id: id,
-      buffer: b,
-      top: Map.get(leaf, :top, 0),
-      point: safe_win_point(b, id),
-      manual: Map.get(leaf, :manual, false),
-      ctop: Map.get(leaf, :ctop, 0)
-    }
+  defp dtree(tree) do
+    payload(
+      for %{id: id, buffer: b} = leaf <- row(tree) do
+        %{
+          type: :leaf,
+          id: id,
+          buffer: b,
+          top: Map.get(leaf, :top, 0),
+          point: safe_win_point(b, id),
+          manual: Map.get(leaf, :manual, false),
+          ctop: Map.get(leaf, :ctop, 0),
+          share: share(leaf),
+          dock: Map.get(leaf, :dock, false)
+        }
+      end
+    )
   end
-
-  defp dtree(%{type: :split, dir: dir, children: [a, b]} = s),
-    do: %{type: :split, dir: dir, ratio: Map.get(s, :ratio, 0.5), children: [dtree(a), dtree(b)]}
 
   defp safe_win_point(buffer, win_id) do
     if Buffer.exists?(buffer), do: Buffer.win_point(buffer, win_id), else: 0
@@ -2478,7 +2441,7 @@ defmodule Compos.Core.Editor do
 
   defp estimated_cols(f, [win | _]) do
     measured = Map.get(f, :win_cols, %{})
-    rects = leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0})
+    rects = leaf_rects(f.tree)
 
     per_frame =
       for [id, _buffer, _x, _y, width, _height] <- rects,
@@ -2495,58 +2458,29 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  defp wins_showing(%{type: :leaf, id: id, buffer: b}, buf), do: if(b == buf, do: [id], else: [])
+  defp wins_showing(tree, buf), do: for(%{id: id, buffer: ^buf} <- row(tree), do: id)
 
-  defp wins_showing(%{type: :split, children: cs}, buf),
-    do: Enum.flat_map(cs, &wins_showing(&1, buf))
+  defp find_leaf(tree, id), do: Enum.find(row(tree), &(&1.id == id))
 
-  defp find_leaf(%{type: :leaf} = leaf, id), do: if(leaf.id == id, do: leaf, else: nil)
+  defp visible_buffers(tree), do: Enum.map(row(tree), & &1.buffer)
 
-  defp find_leaf(%{type: :split, children: children}, id),
-    do: Enum.find_value(children, &find_leaf(&1, id))
-
-  defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
-
-  defp visible_buffers(%{type: :split, children: children}),
-    do: Enum.flat_map(children, &visible_buffers/1)
-
-  defp swap_buffer(%{type: :leaf} = leaf, from, to),
-    do:
-      if(leaf.buffer == from, do: %{leaf | buffer: to, top: 0, manual: false}, else: leaf)
-
-  defp swap_buffer(%{type: :split} = split, from, to),
-    do: %{split | children: Enum.map(split.children, &swap_buffer(&1, from, to))}
+  defp swap_buffer(tree, from, to),
+    do: map_leaves(tree, from, &%{&1 | buffer: to, top: 0, manual: false})
 
   # a leaf on BUFFER follows point again: no pin, top and pixel offset at 0
-  defp unpin_buffer_leaves(%{type: :leaf} = leaf, buffer) do
-    if leaf.buffer == buffer,
-      do: %{leaf | top: 0, manual: false} |> Map.put(:ctop, 0),
-      else: leaf
-  end
-
-  defp unpin_buffer_leaves(%{type: :split} = split, buffer),
-    do: %{split | children: Enum.map(split.children, &unpin_buffer_leaves(&1, buffer))}
+  defp unpin_buffer_leaves(tree, buffer),
+    do: map_leaves(tree, buffer, &(%{&1 | top: 0, manual: false} |> Map.put(:ctop, 0)))
 
   # a leaf that still shows the victim shows FALLBACK. Scheme gave each
   # window its own past before the kill (window-records-release!); what is
   # left here is the window with none.
-  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
-    if leaf.buffer == buffer,
-      do: %{leaf | buffer: fallback, top: 0, manual: false} |> Map.put(:ctop, 0),
-      else: leaf
-  end
+  defp release_buffer_from_tree(tree, buffer, fallback),
+    do: map_leaves(tree, buffer, &(%{&1 | buffer: fallback, top: 0, manual: false} |> Map.put(:ctop, 0)))
 
-  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback),
-    do: %{
-      split
-      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback))
-    }
+  # FUN on each leaf that shows BUFFER
+  defp map_leaves(tree, buffer, fun), do: Enum.map(row(tree), &if(&1.buffer == buffer, do: fun.(&1), else: &1))
 
-  defp replace_leaf(%{type: :leaf} = leaf, id, new),
-    do: if(leaf.id == id, do: new, else: leaf)
-
-  defp replace_leaf(%{type: :split} = split, id, new),
-    do: %{split | children: Enum.map(split.children, &replace_leaf(&1, id, new))}
+  defp replace_leaf(tree, id, new), do: Enum.map(row(tree), &if(&1.id == id, do: new, else: &1))
 
   # the window's history and quit record are Scheme's (window.scm)
   defp visit_buffer(leaf, buffer) do
@@ -2556,7 +2490,6 @@ defmodule Compos.Core.Editor do
     Map.merge(leaf, %{buffer: buffer, top: 0, manual: false, ctop: ctop})
   end
 
-  # returns the tree with the leaf removed, or nil if the tree IS that leaf
   # a floating buffer (a card, a shaped prompt) wears the class Scheme
   # gave it; the class string keeps the stylesheet's name, popup-SIDE
   defp float_buffer?(b) when is_binary(b) do
@@ -2570,42 +2503,26 @@ defmodule Compos.Core.Editor do
 
   defp float_buffer?(_), do: false
 
-  defp remove_leaf(%{type: :leaf, id: id}, id), do: nil
-  defp remove_leaf(%{type: :leaf} = leaf, _id), do: leaf
-
-  defp remove_leaf(%{type: :split, children: [a, b]} = split, id) do
-    case {remove_leaf(a, id), remove_leaf(b, id)} do
-      {nil, b2} -> b2
-      {a2, nil} -> a2
-      {a2, b2} -> %{split | children: [a2, b2]}
+  # the row without the leaf, or nil when it was the last
+  defp remove_leaf(tree, id) do
+    case Enum.reject(row(tree), &(&1.id == id)) do
+      [] -> nil
+      rest -> rest
     end
   end
 
-  defp first_leaf(%{type: :leaf} = leaf), do: leaf
-  defp first_leaf(%{type: :split, children: [a | _]}), do: first_leaf(a)
+  defp first_leaf(tree), do: hd(row(tree))
 
-  # A spec (Compos.Core.WindowSpec) becomes a live tree. A leaf's id is a
+  # A spec (Compos.Core.WindowSpec) becomes a live row. A leaf's id is a
   # wish, not a claim: reuse_window_ids keeps it when no other window holds
   # it, else the leaf takes an id the way a leaf without one does. Carrying
   # the id is what keeps every record keyed by window id true across a
   # layout restore.
-  defp build_tree(%{type: :leaf} = spec, n) do
-    leaf = %{
-      type: :leaf,
-      id: n,
-      buffer: spec.buffer,
-      top: spec.top,
-      manual: spec.manual,
-      ctop: spec.ctop
-    }
-
-    {put_want(leaf, spec.id), n + 1}
-  end
-
-  defp build_tree(%{type: :split, dir: dir, ratio: ratio, children: [a, b]}, n) do
-    {ta, n} = build_tree(a, n)
-    {tb, n} = build_tree(b, n)
-    {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
+  defp build_row(spec) do
+    for s <- Compos.Core.WindowSpec.leaves(spec) do
+      leaf = Map.take(s, [:buffer, :top, :manual, :ctop, :share, :dock])
+      put_want(Map.merge(leaf, %{type: :leaf, id: nil}), s.id)
+    end
   end
 
   defp put_want(leaf, want) when is_integer(want), do: Map.put(leaf, :want, want)
@@ -2629,7 +2546,7 @@ defmodule Compos.Core.Editor do
     # the size of every visible buffer. Keep the ids the frame already had,
     # and the ids the leaves name when they are free.
     old_panes = leaf_ids_buffers(f.tree)
-    {tree, _minted} = build_tree(spec, state.next_win)
+    tree = build_row(spec)
     {tree, next_win} = reuse_window_ids(tree, old_panes, taken, state.next_win)
 
     # A buffer that cannot start leaves its pane to *scratch*, and the
@@ -2677,13 +2594,11 @@ defmodule Compos.Core.Editor do
 
   defp reuse_window_ids(tree, old_panes, taken, next_win) do
     {ids, next_win} = window_ids_for(leaf_wants(tree), old_panes, taken, next_win)
-    {tree, _left, _n} = relabel_leaves(tree, ids, next_win)
-    {tree, next_win}
+    {Enum.zip_with(tree, ids, &take_id/2), next_win}
   end
 
   # the leaves in order, each as {buffer, the id it asks for or nil}
-  defp leaf_wants(%{type: :leaf, buffer: b} = leaf), do: [{b, Map.get(leaf, :want)}]
-  defp leaf_wants(%{type: :split, children: c}), do: Enum.flat_map(c, &leaf_wants/1)
+  defp leaf_wants(tree), do: Enum.map(row(tree), &{&1.buffer, Map.get(&1, :want)})
 
   # every window id a frame holds
   defp frame_window_ids(f), do: leaf_ids(f.tree)
@@ -2739,35 +2654,23 @@ defmodule Compos.Core.Editor do
     {Enum.reverse(ids), next_win}
   end
 
-  defp relabel_leaves(%{type: :split, children: [a, b]} = node, ids, n) do
-    {a, ids, n} = relabel_leaves(a, ids, n)
-    {b, ids, n} = relabel_leaves(b, ids, n)
-    {%{node | children: [a, b]}, ids, n}
-  end
-
-  defp relabel_leaves(%{type: :leaf} = leaf, [id | rest], n), do: {take_id(leaf, id), rest, n}
-
-  defp relabel_leaves(%{type: :leaf} = leaf, [], n), do: {take_id(leaf, n), [], n + 1}
-
   defp take_id(leaf, id), do: leaf |> Map.put(:id, id) |> Map.delete(:want)
 
-  defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
+  defp leaf_ids_buffers(tree), do: Enum.map(row(tree), &{&1.id, &1.buffer})
 
-  defp leaf_ids_buffers(%{type: :split, children: c}),
-    do: Enum.flat_map(c, &leaf_ids_buffers/1)
+  # normalized frame geometry per leaf: the arrow commands' map of the
+  # screen. The row parts the width by share; a dock spans the width under
+  # it, with its share of the height.
+  defp leaf_rects(tree) do
+    {docks, cols} = Enum.split_with(row(tree), &Map.get(&1, :dock))
+    low = docks |> Enum.map(&share/1) |> Enum.sum()
+    total = cols |> Enum.map(&share/1) |> Enum.sum()
+    {top, _} = Enum.map_reduce(cols, 0.0, &{[&1.id, &1.buffer, &2, 0.0, share(&1) / total, 1.0 - low], &2 + share(&1) / total})
+    {under, _} = Enum.map_reduce(docks, 1.0 - low, &{[&1.id, &1.buffer, 0.0, &2, 1.0, share(&1)], &2 + share(&1)})
+    top ++ under
+  end
 
-  # normalized frame geometry per leaf: the arrow commands' map of the screen
-  defp leaf_rects(%{type: :leaf, id: id, buffer: b}, {x, y, w, h}),
-    do: [[id, b, x, y, w, h]]
-
-  defp leaf_rects(%{type: :split, dir: :h, ratio: r, children: [a, b]}, {x, y, w, h}),
-    do: leaf_rects(a, {x, y, w * r, h}) ++ leaf_rects(b, {x + w * r, y, w * (1 - r), h})
-
-  defp leaf_rects(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
-    do: leaf_rects(a, {x, y, w, h * r}) ++ leaf_rects(b, {x, y + h * r, w, h * (1 - r)})
-
-  defp leaf_ids(%{type: :leaf, id: id}), do: [id]
-  defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
+  defp leaf_ids(tree), do: Enum.map(row(tree), & &1.id)
 
   @empty_snapshot %{
     text: "",
@@ -2787,13 +2690,6 @@ defmodule Compos.Core.Editor do
     line: 1,
     col: 0
   }
-
-  defp split_rows(:h, rows, _ratio), do: {rows, rows}
-
-  defp split_rows(:v, rows, ratio) do
-    a = max(round(rows * ratio), 3)
-    {a, max(rows - a, 3)}
-  end
 
   # the modeline's derived state: one plist local, KEY VALUE ... (editor.scm
   # modeline-cache). A missing key reads nil, as a missing local did, and the
@@ -2853,22 +2749,13 @@ defmodule Compos.Core.Editor do
     :exit, _ -> @empty_snapshot
   end
 
-  # render walk: computes per-window rows (v-splits divide), clamps and
-  # auto-follows the viewport top (unless manually scrolled), and returns
-  # both the updated tree (tops persist) and the render payload
-  defp render_walk(
-         %{type: :split, dir: dir, children: [a, b]} = split,
-         rows,
-         win_rows,
-         frame_group,
-         win_stacks
-       ) do
-    ratio = Map.get(split, :ratio, 0.5)
-    {rows_a, rows_b} = split_rows(dir, rows, ratio)
-    {a2, ra} = render_walk(a, rows_a, win_rows, frame_group, win_stacks)
-    {b2, rb} = render_walk(b, rows_b, win_rows, frame_group, win_stacks)
-
-    {%{split | children: [a2, b2]}, %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
+  # render walk: gives each window its rows (a dock its share of them),
+  # clamps and auto-follows the viewport top (unless manually scrolled), and
+  # returns both the updated row (tops persist) and the render payload
+  defp render_row(tree, rows, win_rows, frame_group, win_stacks) do
+    leaves = row(tree)
+    walked = Enum.map(leaves, &render_walk(&1, rows_for(leaves, &1.id, rows), win_rows, frame_group, win_stacks))
+    {Enum.map(walked, &elem(&1, 0)), payload(Enum.map(walked, &elem(&1, 1)))}
   end
 
   defp render_walk(
@@ -2949,6 +2836,9 @@ defmodule Compos.Core.Editor do
       type: :leaf,
       id: id,
       buffer: buffer,
+      # its part of the row's width; a dock's, of the frame's height
+      share: share(leaf),
+      dock: Map.get(leaf, :dock, false),
       # the file this buffer visits, nil for the rest. /raw URLs and the
       # modeline read these two; the client renders no UI for them yet.
       path: snap.path,
@@ -3203,12 +3093,16 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows
-  defp rows_for(%{type: :leaf}, _id, _rows), do: nil
+  # a dock has its share of the frame's rows; the row has what is left
+  defp rows_for(tree, id, rows) do
+    leaves = row(tree)
+    docks = for %{dock: true} = d <- leaves, into: %{}, do: {d.id, max(round(rows * share(d)), 3)}
 
-  defp rows_for(%{type: :split, dir: dir, children: [a, b]} = split, id, rows) do
-    ratio = Map.get(split, :ratio, 0.5)
-    {rows_a, rows_b} = split_rows(dir, rows, ratio)
-    rows_for(a, id, rows_a) || rows_for(b, id, rows_b)
+    cond do
+      Map.has_key?(docks, id) -> docks[id]
+      not Enum.any?(leaves, &(&1.id == id)) -> nil
+      docks == %{} -> rows
+      true -> max(rows - Enum.sum(Map.values(docks)), 3)
+    end
   end
 end

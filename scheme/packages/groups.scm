@@ -5087,6 +5087,8 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-home-dir
   "(group-home-dir G) -> ~/.compos/groups/<id>, the directory G saves its chats, config and skills under"
   'buffers)
+(public! 'group-buffers-mru
+  "(group-buffers-mru G) -> members in MRU order; buffers never visited this session trail")
 (public! 'buffer-color-group
   "(buffer-color-group NAME) -> the buffer-owned group that supplies its color, or #f"
   'buffers)

@@ -1263,18 +1263,22 @@
         (let* ((p (hook--fn (car fs))) (v (and p (p category name))))
           (or v (loop (cdr fs)))))))
 
-;; the faces of commands, ((NAME FACE) ...) for each that has one: found
-;; once per command table and face hooks, not once per prompt
+;; the faces of commands, ((NAME FACE-OR-#F) ...): each asked once per
+;; command table and face hooks, not once per prompt
 (define *command-faces* #f)
-(define (command-faces fns)
-  (if (and *command-faces*
-           (equal? (car *command-faces*) *command-generation*)
-           (equal? (cadr *command-faces*) fns))
-      (caddr *command-faces*)
-      (let ((faces (filter cadr (map (lambda (n) (list n (candidate-face-for 'command n fns)))
-                                     (command-names)))))
-        (set! *command-faces* (list *command-generation* fns faces))
-        faces)))
+(define (command-faces fns names)
+  (let* ((known (if (and *command-faces*
+                         (equal? (car *command-faces*) *command-generation*)
+                         (equal? (cadr *command-faces*) fns))
+                    (caddr *command-faces*)
+                    '()))
+         (new (filter (lambda (n) (not (assoc n known))) names)))
+    (if (null? new)
+        known
+        (let ((faces (append (map (lambda (n) (list n (candidate-face-for 'command n fns))) new)
+                             known)))
+          (set! *command-faces* (list *command-generation* fns faces))
+          faces))))
 
 ;; the annotator of CATEGORY is the registry table marginalia: one per
 ;; category, and the same category replaces
@@ -1367,7 +1371,7 @@
                      (ws (marginalia-widths rows))
                      (face-fns (hook-functions 'candidate-face))
                      (cmd-faces (if (and (eq? category 'command) (pair? face-fns))
-                                    (command-faces face-fns)
+                                    (command-faces face-fns names)
                                     '())))
                 (let loop ((ns names) (rs rows) (out '()))
                   (if (null? ns)

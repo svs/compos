@@ -403,8 +403,7 @@ defmodule Compos.Core.Editor do
   takes 1 - RATIO of the height, so it takes rows from the row rather than
   covering them. Deleting the window gives them back.
   """
-  def split_root(dir, ratio \\ 0.5, fid \\ nil, _first? \\ false) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:dock, ratio, fid(fid)})
+  def dock(ratio \\ 0.5, fid \\ nil), do: GenServer.call(__MODULE__, {:dock, ratio, fid(fid)})
 
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
   def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})

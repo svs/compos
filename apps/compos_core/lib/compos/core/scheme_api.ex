@@ -2399,14 +2399,12 @@ defmodule Compos.Core.SchemeAPI do
             Editor.split(dir_atom(dir), ratio / 1)
             :void
         end,
-      # a dock is a pane of the FRAME, not of a window: it spans the frame
-      # and the windows above it shrink by its share
+      # a dock spans the frame under its row of windows, which gives it rows
       {"split-root!",
-       "(split-root! DIR [RATIO FIRST?]) — split the FRAME 'h or 'v at RATIO, the first pane's share; the new window spans the frame and every other window shrinks. FIRST? puts the new window first: on the left, or on top. Returns the new window."} =>
+       "(split-root! DIR [RATIO]) — a dock window under the frame's row of windows, across the frame, with 1 - RATIO of its height; DIR is 'v. Returns the new window."} =>
         fn
-          [dir] -> Editor.split_root(dir_atom(dir))
-          [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
-          [dir, ratio, first?] -> Editor.split_root(dir_atom(dir), ratio / 1, nil, first? == true)
+          [_dir] -> Editor.dock()
+          [_dir, ratio | _] -> Editor.dock(ratio / 1)
         end,
       {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
         fn [id] -> Editor.delete_window_by_id(id) == :ok end,

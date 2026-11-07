@@ -1812,21 +1812,6 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
-  defp tree(%{node: %{type: :split}} = assigns) do
-    assigns = assign(assigns, ratio: Map.get(assigns.node, :ratio, 0.5))
-
-    ~M"""
-    <c-split class={"split #{@node.dir}"}>
-      <c-group class="split-child" style={"flex: #{@ratio} 1 0%"}>
-        <.tree node={Enum.at(@node.children, 0)} active={@active} completion={@completion} />
-      </c-group>
-      <c-group class="split-child" style={"flex: #{1.0 - @ratio} 1 0%"}>
-        <.tree node={Enum.at(@node.children, 1)} active={@active} completion={@completion} />
-      </c-group>
-    </c-split>
-    """
-  end
-
   # A window is a stateful component so that a window nobody touched
   # costs nothing: the component's assign skips a value equal to the one
   # it holds, and a component with no changed assign renders nothing and

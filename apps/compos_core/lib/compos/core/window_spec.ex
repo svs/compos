@@ -17,23 +17,7 @@ defmodule Compos.Core.WindowSpec do
   as its leaves, at equal shares.
   """
 
-  @doc "The spec of a frame's windows: a leaf, or a row."
-  def from_tree(%{children: c}), do: %{type: :row, children: Enum.flat_map(c, &leaves(from_tree(&1)))}
-
-  def from_tree(%{type: :leaf, buffer: b} = leaf) do
-    %{
-      type: :leaf,
-      buffer: b,
-      top: Map.get(leaf, :top, 0),
-      manual: Map.get(leaf, :manual, false),
-      ctop: Map.get(leaf, :ctop, 0),
-      id: Map.get(leaf, :id),
-      share: Map.get(leaf, :share, 1),
-      dock: Map.get(leaf, :dock, false)
-    }
-  end
-
-  @doc "A spec from a spec or from any older saved shape; missing keys take their defaults."
+  @doc "A spec from a frame's live windows, a spec, or any older saved shape; missing keys take their defaults."
   def read(%{type: :leaf, buffer: b} = spec) do
     ctop = Map.get(spec, :ctop) || 0
 

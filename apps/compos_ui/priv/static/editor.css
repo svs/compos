@@ -231,16 +231,12 @@ body {
   display: flex; min-width: 0; min-height: 0;
 }
 .split-child > * { flex: 1; min-width: 0; min-height: 0; }
-/* A float (the card, a shaped prompt) stays in the window tree, so
-   editor commands can reach it. Its split leaves the visual flow. The
-   sibling then fills that split. The float measures itself against
+/* A float (the card, a shaped prompt) stays in the row of windows, so
+   editor commands can reach it. It takes no width: the other windows
+   share the row by their shares. The float measures itself against
    .windows, which is the frame. The class keeps the name popup-SIDE. */
 .split-child:has(> .window.popup) {
   flex: 0 0 0 !important; overflow: visible; transition: none;
-}
-.split:has(> .split-child > .window.popup)
-  > .split-child:not(:has(> .window.popup)) {
-  flex-grow: 1 !important;
 }
 .window.popup-right,
 .window.popup-left,

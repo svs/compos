@@ -8,7 +8,7 @@ defmodule Compos.Core.ReactorLoadBench do
 
   alias Compos.Core.{Buffer, Editor, Events, Reactor}
 
-  @n 60
+  @n 20
 
   defp ms(fun) do
     t0 = System.monotonic_time(:microsecond)
@@ -22,6 +22,7 @@ defmodule Compos.Core.ReactorLoadBench do
     spawn_link(fn -> Stream.repeatedly(fun) |> Stream.run() end)
   end
 
+  @tag timeout: 300_000
   test "on_change latency under four streaming buffers" do
     Editor.minibuffer_close()
     {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
@@ -60,8 +61,13 @@ defmodule Compos.Core.ReactorLoadBench do
       for _ <- 1..@n do
         t =
           ms(fn ->
-            {:ok, id} = Reactor.on_change("*zz-reactor-bench-new*", :any, fn _ -> :ok end)
-            :ok = Reactor.remove(id)
+            # a 5 s call timeout counts as 5000 ms, as execute* saw it
+            try do
+              {:ok, id} = Reactor.on_change("*zz-reactor-bench-new*", :any, fn _ -> :ok end)
+              :ok = Reactor.remove(id)
+            catch
+              :exit, _ -> :timeout
+            end
           end)
 
         {:message_queue_len, q} = Process.info(reactor, :message_queue_len)

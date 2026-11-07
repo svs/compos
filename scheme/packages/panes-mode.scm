@@ -470,9 +470,11 @@
    is one row. A pane takes its column's width; a column of several
    panes, from a layout saved before the row, gives each its part of
    that width by height."
-  (apply append
-    (map (lambda (col w) (map (lambda (v) (* w v)) (panes-vshares col)))
-         (panes-columns layout) (panes-layout-shares layout #t))))
+  (let loop ((cols (panes-columns layout)) (ws (panes-layout-shares layout #t)) (acc '()))
+    (if (or (null? cols) (null? ws))
+        (apply append (reverse acc))
+        (loop (cdr cols) (cdr ws)
+              (cons (let ((w (car ws))) (map (lambda (v) (* w v)) (panes-vshares (car cols)))) acc)))))
 
 (define (panes--draw! layout)
   "The frame drawn as LAYOUT: every top window on screen with its

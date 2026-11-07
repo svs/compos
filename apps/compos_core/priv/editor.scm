@@ -6494,6 +6494,7 @@
 (effects! '(pure))
 (public! 'plist-get "(plist-get PLIST KEY) — the value after KEY in the flat PLIST; #f when KEY is absent")
 (public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
+(public! 'boundp "(boundp 'NAME) — return #t when the symbol has a global binding.")
 (effects! '(write))
 (public! 'report-errors "(report-errors WHERE THUNK) — THUNK's value; when it raises, #f, and the error goes to *Messages* and the log under WHERE")
 (effects! '(pure))

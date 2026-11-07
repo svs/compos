@@ -6730,6 +6730,8 @@
 (public! 'locate-library "(locate-library NAME) — the file (load NAME) reads, or #f")
 (public! 'autoload-file "(autoload-file NAME) — the file the autoload stub under NAME would load, or #f when NAME is defined")
 (public! 'priv-path "(priv-path REL) — the absolute path of REL in the compos_core priv directory, symlinks resolved")
+(public! 'compos-priv-dir "(compos-priv-dir) — the bundled Scheme directory, the compos_core priv dir" 'files)
+(catalog-meta! 'function "compos-priv-dir" 'domain 'files 'effects '(pure))
 (public! 'file-exists? "(file-exists? PATH) — return #t if PATH exists." 'files)
 (effects! '(write))
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")

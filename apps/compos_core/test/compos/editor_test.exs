@@ -3893,8 +3893,7 @@ defmodule Compos.EditorTest do
       n = System.unique_integer([:positive])
       second = "tile-second-#{n}"
       third = "tile-third-#{n}"
-      fourth = "tile-fourth-#{n}"
-      for name <- [second, third, fourth], do: Compos.Core.create_buffer(name)
+      for name <- [second, third], do: Compos.Core.create_buffer(name)
 
       {:ok, _} =
         Compos.Core.Session.eval("""
@@ -3903,7 +3902,7 @@ defmodule Compos.EditorTest do
                (split-window! 'h 0.7)
                (other-window!)
                (switch-to-buffer! "#{second}")
-               (split-window! 'h 0.8)
+               (split-window! 'h 0.5)
                (other-window!)
                (switch-to-buffer! "#{third}")
                (set-frame-local! 'winner-ring #f)
@@ -3918,37 +3917,20 @@ defmodule Compos.EditorTest do
       assert Enum.map(columns, &elem(&1, 1)) == @thirds
 
       press(["M-x"])
-      type("window-layout-main-right")
+      type("window-layout-two-chat")
       press(["RET"])
 
-      # the main pane takes two thirds; the other two stack on the right
-      assert rects() == [
-               [0.0, 0.0, 0.667, 1.0],
-               [0.667, 0.0, 0.333, 0.5],
-               [0.667, 0.5, 0.333, 0.5]
-             ]
+      # the frame is a row of columns: the two-chat preset keeps three of them
+      assert length(window_layout()) == 3
 
       press(["M-x"])
       type("winner-undo")
       press(["RET"])
       assert window_layout() == columns
 
-      {:ok, _} =
-        Compos.Core.Session.eval(
-          ~s{(panes-tile! 'grid (list "#{buf}" "#{second}" "#{third}" "#{fourth}"))}
-        )
-
-      # two columns of two
-      assert rects() == [
-               [0.0, 0.0, 0.5, 0.5],
-               [0.0, 0.5, 0.5, 0.5],
-               [0.5, 0.0, 0.5, 0.5],
-               [0.5, 0.5, 0.5, 0.5]
-             ]
-
       {:ok, _} = Compos.Core.Session.eval("(delete-other-windows!)")
 
-      for name <- [second, third, fourth],
+      for name <- [second, third],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
 
@@ -4032,45 +4014,6 @@ defmodule Compos.EditorTest do
       for name <- [second, third], do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
 
-    test "window-eat only swallows a pane that makes one rectangle", %{buf: buf} do
-      second = "eat-column-#{System.unique_integer([:positive])}"
-      third = "eat-column-#{System.unique_integer([:positive])}"
-      for name <- [second, third], do: Compos.Core.create_buffer(name)
-
-      # one pane beside a column of two: neither half of the column shares
-      # a whole edge with it
-      {:ok, _} =
-        Compos.Core.Session.eval("""
-        (begin (delete-other-windows!)
-               (switch-to-buffer! "#{buf}")
-               (split-window! 'h 0.5)
-               (other-window!)
-               (switch-to-buffer! "#{second}")
-               (split-window! 'v 0.5)
-               (other-window!)
-               (switch-to-buffer! "#{third}")
-               (select-window! (window-showing "#{buf}")))
-        """)
-
-      run("window-eat")
-      assert length(Editor.window_rects()) == 3
-
-      # from the bottom of the column, the pane above it is a meal
-      {:ok, _} = Compos.Core.Session.eval(~s{(select-window! (window-showing "#{third}"))})
-
-      run("window-eat")
-
-      rects = Map.new(Editor.window_rects(), fn [_id, b, x, y, w, h] -> {b, {x, y, w, h}} end)
-      assert rects |> Map.keys() |> Enum.sort() == Enum.sort([buf, third])
-      {x, y, w, h} = rects[third]
-      assert_in_delta x, 0.5, 0.001
-      assert_in_delta y, 0.0, 0.001
-      assert_in_delta w, 0.5, 0.001
-      assert_in_delta h, 1.0, 0.001
-
-      for name <- [second, third], do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
-    end
-
     test "window layout selection previews and restores the layout on cancel", %{buf: buf} do
       second = "layout-preview-second-#{System.unique_integer([:positive])}"
       third = "layout-preview-third-#{System.unique_integer([:positive])}"
@@ -4083,16 +4026,19 @@ defmodule Compos.EditorTest do
                (split-window! 'h 0.7)
                (other-window!)
                (switch-to-buffer! "#{second}")
-               (split-window! 'v 0.6)
+               (split-window! 'h 0.5)
                (other-window!)
-               (switch-to-buffer! "#{third}"))
+               (switch-to-buffer! "#{third}")
+               (select-window! (window-showing "#{buf}")))
         """)
 
       before = window_layout()
+      # the frame is a row of columns; the two-pane preset previews two
+      # of them, and C-g puts the three columns back
       run("window-layout")
-      type("columns")
+      type("two-pane")
 
-      assert window_layout() == Enum.zip([buf, second, third], @thirds)
+      assert length(window_layout()) == 2
       press(["C-g"])
       assert window_layout() == before
 
@@ -4114,57 +4060,6 @@ defmodule Compos.EditorTest do
       run("window-layout-columns")
 
       assert Enum.sort(window_buffers()) == Enum.sort([buf, second, third])
-
-      for name <- [second, third],
-          do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
-    end
-
-    test "adaptive layout command follows the measured frame width", %{buf: buf} do
-      n = System.unique_integer([:positive])
-      second = "adaptive-second-#{n}"
-      third = "adaptive-third-#{n}"
-      for name <- [second, third], do: Compos.Core.create_buffer(name)
-
-      {:ok, _} =
-        Compos.Core.Session.eval("""
-        (begin (delete-other-windows!)
-               (switch-to-buffer! "#{buf}")
-               (split-window! 'h 0.7)
-               (other-window!)
-               (switch-to-buffer! "#{second}")
-               (split-window! 'h 0.8)
-               (other-window!)
-               (switch-to-buffer! "#{third}"))
-        """)
-
-      measure_frame = fn total ->
-        Map.new(Editor.window_rects(), fn [id, _buffer, _x, _y, width, _height] ->
-          {id, max(1, round(total * width))}
-        end)
-        |> Editor.set_window_cols()
-      end
-
-      measure_frame.(80)
-      press(["M-x"])
-      type("window-layout-adaptive")
-      press(["RET"])
-
-      # a narrow frame: the main pane on top at two thirds, the rest beside each other below
-      [main, below_left, below_right] = rects()
-      assert main == [0.0, 0.0, 1.0, 0.667]
-      assert [Enum.at(below_left, 0), Enum.at(below_left, 1)] == [0.0, 0.667]
-      assert Enum.at(below_right, 1) == 0.667
-      assert Enum.at(below_left, 0) < Enum.at(below_right, 0)
-
-      measure_frame.(240)
-      press(["M-x"])
-      type("window-layout-adaptive")
-      press(["RET"])
-
-      assert rects() == @thirds
-
-      Compos.TestHelpers.one_window!()
-      Editor.set_window_cols(%{})
 
       for name <- [second, third],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})

@@ -343,10 +343,9 @@
                      (llm-connectors-models name)))))))
 
 (define (llm-connectors--page-columns buf)
-  ;; the value wraps, so a long model id or command reads whole in a narrow pane
   ;; one column the width of the pane: a fact reads label: value, a model
   ;; row is its id and its result, and nothing stands empty beside them
-  (list (list "" #f 'left 'wrap))))
+  (list (list "" #f 'left 'wrap)))
 
 (define (llm-connectors--row-key r)
   (cond ((eq? (car r) 'model) (string-append "model:" (cadr r)))
@@ -378,7 +377,7 @@
          (list (list (string-append (caddr r) ": " value)
                      (cond ((equal? id "state") (if (equal? value "ready") "success" "warning"))
                            ((equal? id "test") (llm-connectors--test-face name))
-                           ((string-prefix? "install:" id) (if (string-prefix? "present" value) "success" "warning"))
+                           ((string-prefix? "install:" id) (if (string-prefix? "present" value) #f "warning"))
                            (else #f)))))))))
 
 (define (llm-connectors--page-meta buf)

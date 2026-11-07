@@ -70,4 +70,22 @@ defmodule Compos.PromptShapeTest do
     # a shape change moves the surface and nothing else
     assert eval!(~s{(list-query " *buffers*")}) == query
   end
+
+  test "a section heading paints the line, so its band reaches both edges" do
+    eval!(~s{(run-command "ibuffer-prompt-pretty")})
+
+    rows = ~s{(list-page-rows " *buffers*" (list-entries " *buffers*"))}
+    bands = eval!(~s{(length (filter (lambda (o) (equal? (nth 2 o) "row-list-section"))
+                                     (list-row-overlays " *buffers*" #{rows})))})
+
+    # a row-* face on a line's first byte names the whole line in the
+    # renderer (editor_live row_class); a plain face would stop where the
+    # heading's own text stops
+    assert String.to_integer(bands) > 0
+
+    first = eval!(~s{(car (filter (lambda (o) (equal? (nth 2 o) "row-list-section"))
+                                  (list-row-overlays " *buffers*" #{rows})))})
+    [start | _] = Regex.run(~r/\d+/, first)
+    assert start in String.split(eval!(~s{(list-offsets " *buffers*")}), ~r/[( )]/)
+  end
 end

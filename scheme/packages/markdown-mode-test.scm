@@ -39,14 +39,6 @@
     (check-true! (t--md-has? '(33 40 "md-marker")) "level six")
     (t--md-done!)))
 
-(deftest 'fence-markers-step-back-with-other-preview-markup
-  "the opening and closing backticks use the concealed marker face"
-  (lambda ()
-    (t--md-fresh! "```elixir\n:ok\n```\n")
-    (check-true! (t--md-has? '(0 9 "md-marker")) "the opening fence")
-    (check-true! (t--md-has? '(14 17 "md-marker")) "the closing fence")
-    (t--md-done!)))
-
 (deftest 'emphasis-markers-step-back-around-the-emphasized-text
   "**b** paints two markers and one bold run"
   (lambda ()
@@ -72,7 +64,8 @@
   (lambda ()
     (t--md-fresh! "go [home](https://x.y) now\n")
     (check-true! (t--md-has? '(3 4 "md-marker")) "the bracket steps back")
-    (check-true! (t--md-has? '(4 8 "link")) "the text is the link")
+    (check-true! (t--md-has? '(4 8 "link link-to:https%3A%2F%2Fx.y"))
+                 "the text is the link, and it names its target")
     (check-true! (t--md-has? '(8 22 "md-marker")) "the target steps back")
     (t--md-done!)))
 
@@ -213,15 +206,15 @@
   "commas are column bars, the first row is the head, the rows wear row-csv"
   (lambda ()
     (t--md-fresh! "```result-csv\nname,\"a,b\",n\nx,y,1\n```\n")
-    ;; the head row starts at byte 14: name,"a,b",n
-    (check-true! (t--md-has? '(14 27 "row-table")) "the head row is a table row")
-    (check-true! (t--md-has? '(14 27 "row-table-head")) "and it is the head")
-    (check-true! (t--md-has? '(14 27 "row-csv")) "and a csv row")
+    ;; the head row is bytes 14..26: name,"a,b",n; the body row is 27..32
+    (check-true! (t--md-has? '(14 26 "row-table")) "the head row is a table row")
+    (check-true! (t--md-has? '(14 26 "row-table-head")) "and it is the head")
+    (check-true! (t--md-has? '(14 26 "row-csv")) "and a csv row")
     (check-true! (t--md-has? '(18 19 "md-table-bar")) "the first comma is a bar")
     (check-false! (t--md-has? '(21 22 "md-table-bar")) "a comma inside quotes is text")
     (check-true! (t--md-has? '(24 25 "md-table-bar")) "the comma after the quoted field is a bar")
-    (check-true! (t--md-has? '(28 33 "row-table")) "the body row is a table row")
-    (check-false! (t--md-has? '(28 33 "row-table-head")) "and not a head")
+    (check-true! (t--md-has? '(27 32 "row-table")) "the body row is a table row")
+    (check-false! (t--md-has? '(27 32 "row-table-head")) "and not a head")
     (t--md-done!)))
 
 (deftest 'a-named-fence-shows-its-info

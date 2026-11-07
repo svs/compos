@@ -2561,42 +2561,16 @@ defmodule Compos.Core.SchemeAPI do
        "(minibuffer--hide!) — close the frame's prompt snapshot; answer (input I selected S prompt-sel B total N), or #f."} =>
         fn [] ->
           case Editor.minibuffer_close() do
-            nil ->
-              false
-
-            mb ->
-              [
-                {:sym, "prompt"},
-                mb.prompt,
-                {:sym, "input"},
-                mb.input,
-                {:sym, "selected"},
-                mb.selected || false,
-                {:sym, "prompt-sel"},
-                mb.prompt_sel,
-                {:sym, "total"},
-                mb.total
-              ]
+            nil -> false
+            mb -> plist(prompt: mb.prompt, input: mb.input, selected: mb.selected, "prompt-sel": mb.prompt_sel, total: mb.total)
           end
         end,
       {"minibuffer--facts",
        "(minibuffer--facts) — the open prompt's (input I selected S touched B prompt-sel B), or #f; no candidate list travels."} =>
         fn [] ->
           case Editor.minibuffer_facts() do
-            nil ->
-              false
-
-            f ->
-              [
-                {:sym, "input"},
-                f.input,
-                {:sym, "selected"},
-                f.selected || false,
-                {:sym, "touched"},
-                f.touched,
-                {:sym, "prompt-sel"},
-                f.prompt_sel
-              ]
+            nil -> false
+            f -> plist(input: f.input, selected: f.selected, touched: f.touched, "prompt-sel": f.prompt_sel)
           end
         end,
       {"completion-query!", "(completion-query! TEXT) — narrow the open popup to TEXT; no row left closes it."} =>
@@ -2770,20 +2744,14 @@ defmodule Compos.Core.SchemeAPI do
         fn [] ->
           s = Editor.snapshot()
 
-          [
-            {:sym, "capture"},
-            Map.get(s, :key_capture) || false,
-            {:sym, "minibuffer"},
-            s.minibuffer != nil,
-            {:sym, "completion"},
-            s.completion != nil,
-            {:sym, "transient"},
-            Map.get(s, :transient) != nil,
-            {:sym, "pending"},
-            Map.get(s, :pending) || [],
-            {:sym, "prefix-arg"},
-            Map.get(s, :prefix_arg) || false
-          ]
+          plist(
+            capture: Map.get(s, :key_capture),
+            minibuffer: s.minibuffer != nil,
+            completion: s.completion != nil,
+            transient: Map.get(s, :transient) != nil,
+            pending: Map.get(s, :pending) || [],
+            "prefix-arg": Map.get(s, :prefix_arg)
+          )
         end,
       {"key-run-command",
        "(key-run-command NAME) — run NAME the way a key runs it, in the current store; answer (ok) or (error MSG)."} =>
@@ -3582,6 +3550,9 @@ defmodule Compos.Core.SchemeAPI do
                   ~w(echo pending prefix-arg key-capture last-command this-command last-keys),
                   &{&1, String.to_atom(String.replace(&1, "-", "_"))}
                 )
+  # a keyword list as a Scheme plist; nil is #f
+  defp plist(kw), do: Enum.flat_map(kw, fn {k, v} -> [{:sym, Atom.to_string(k)}, if(v == nil, do: false, else: v)] end)
+
   defp frame_field(field), do: Map.fetch!(@frame_fields, Opts.plain(field))
 
   defp mb_query_rule("segment"), do: :segment

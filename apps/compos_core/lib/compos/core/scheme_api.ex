@@ -2705,15 +2705,6 @@ defmodule Compos.Core.SchemeAPI do
           Editor.set_key_capture(command)
           :void
         end,
-      # the mechanism under (trace-key): KeyDispatch records a row per phase
-      {"trace-key!",
-       "(trace-key! KEYS) — dispatch the key list in this process; return one state row per phase."} =>
-        fn [specs] ->
-          specs
-          |> List.wrap()
-          |> Enum.flat_map(&String.split(Opts.plain(&1), " ", trim: true))
-          |> Compos.Core.KeyDispatch.trace_keys()
-        end,
       # a mode's own stylesheet, rendered into the page beside the face
       # variables. Modes are trusted code — they can eval anything — so the
       # CSS ships raw.
@@ -2860,6 +2851,19 @@ defmodule Compos.Core.SchemeAPI do
             _ ->
               :void
           end
+        end,
+      {"key-trace-start!",
+       "(key-trace-start!) — begin collecting key-trace rows in this process."} =>
+        fn [] ->
+          Process.put(:key_trace, [])
+          :void
+        end,
+      {"key-trace-take!",
+       "(key-trace-take!) — return the key-trace rows collected in this process, oldest first, and stop collecting."} =>
+        fn [] ->
+          rows = Process.get(:key_trace) || []
+          Process.delete(:key_trace)
+          Enum.reverse(rows)
         end,
       {"key-trace-note!",
        "(key-trace-note! PHASE NAME) — record one key-trace row while (trace-key) collects."} =>

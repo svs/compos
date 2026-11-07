@@ -1950,6 +1950,14 @@
            (key-loop--echo "")
            (key-loop--run command)))))
 
+(define (trace-keys! keys)
+  (key-trace-start!)
+  (for-each (lambda (k) (key-dispatch! k))
+            (cond ((string? keys) (list keys))
+                  ((pair? keys) keys)
+                  (else (list keys))))
+  (key-trace-take!))
+
 (define (key-dispatch! key)
   (key-loop--note "key" key)
   (let* ((state (key-routing))

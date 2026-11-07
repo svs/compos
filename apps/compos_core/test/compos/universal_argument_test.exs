@@ -57,7 +57,7 @@ defmodule Compos.UniversalArgumentTest do
     assert eval!("*zz-prefix-seen*") == "-2"
   end
 
-  test "self insertion uses the numeric prefix and clears it", %{name: name} do
+      test "self insertion uses the numeric prefix and clears it", %{name: name} do
     press(["<f9>", "u", "x"])
 
     assert Buffer.text(name) == "xxxx"

@@ -700,7 +700,7 @@
            (if (and (number? mark) (number? mb))
                (append row (list 'input-start (+ mark mb)))
                row)))
-       (trace-key! (if (string? keys) (list keys) keys))))
+       (trace-keys! keys)))
 
 (public! 'trace-key
   "(trace-key KEYS) — dispatch KEYS; return a state row per phase: point, size, mark, input-start")

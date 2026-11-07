@@ -619,6 +619,8 @@
 
 ;; list-ref by its Emacs name; list-ref is a builtin
 (define (nth n l) (list-ref l n))
+(public! 'nth "(nth N L) — the element of L at 0-based index N; an error past the end")
+(catalog-meta! 'function "nth" 'domain 'system 'effects '(pure))
 
 ;;; --- editing commands ------------------------------------------------------
 

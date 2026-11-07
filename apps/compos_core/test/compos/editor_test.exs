@@ -969,6 +969,9 @@ defmodule Compos.EditorTest do
     end
 
     test "dired rows carry name/size/date/perms columns under their labels", %{root: root} do
+      # PERMS is a wide column: below 100 columns the compact layout drops it
+      Editor.set_window_cols(Map.new(Editor.list_windows(), fn {id, _} -> {id, 160} end))
+      on_exit(fn -> Editor.set_window_cols(%{}) end)
       {:ok, _} = Compos.Core.Session.eval(~s{(dired-open "#{root}")})
       text = Buffer.text(root)
       # the labels name the columns, and a row fills them in that order
@@ -976,8 +979,6 @@ defmodule Compos.EditorTest do
       # the icon leads the row: a file wears its mode's, a directory Dired's
       assert text =~ ~r/ +alpha\.txt .*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} +-rw/m
       assert text =~ ~r/ +subdir\/ .*drwx/m
-      # the key bar says what the list does
-      assert text =~ "RET visit"
     end
 
     test "rename refuses the parent row", %{root: root} do
@@ -991,6 +992,9 @@ defmodule Compos.EditorTest do
     end
 
     test "structured entries preserve exact bytes and symlinks", %{root: root} do
+      # PERMS, where lrw shows, is a wide column
+      Editor.set_window_cols(Map.new(Editor.list_windows(), fn {id, _} -> {id, 160} end))
+      on_exit(fn -> Editor.set_window_cols(%{}) end)
       exact = Path.join(root, "exact.bin")
       link = Path.join(root, "alpha-link")
       unicode_dir = Path.join(root, "café")

@@ -1999,6 +1999,9 @@
 
 (define (list-facet-prompt! buf)
   (let* ((before (list-query buf))
+         ;; the text typed so far: while it is not empty it IS the query,
+         ;; and the tabs step aside
+         (typed before)
          (facets (list-facets buf))
          (labels (map (lambda (f) (plist-get f 'label)) facets))
          (tab (mb-tab-recall (string-append "list-facet:" buf) labels 0))
@@ -2007,37 +2010,53 @@
                   (let ((now (list-facet-value buf (facet))))
                     (map (lambda (o) (list (car o) (if (equal? (cadr o) now) "current" "")))
                          (list-facet-options buf (facet))))))
+         ;; You type, and then you select: with text in the input the prompt
+         ;; offers no values, so its arrows move the rows behind it. An empty
+         ;; input offers the values of the tab to pick from.
+         (shown (lambda () (if (equal? typed "") (cands) '())))
+         (rows-follow! (lambda ()
+                         (set! *mb-list-buffer* (if (equal? typed "") #f buf))
+                         (set! *mb-list-prompt* #f)
+                         (set! *mb-list-flush* #f)))
          (row (lambda () (let loop ((fs facets) (i 0) (out '()))
                            (if (null? fs) (reverse out)
                                (loop (cdr fs) (+ i 1) (cons (list (plist-get (car fs) 'label) (= i tab)) out))))))
          (on-confirm (lambda (label)
-                       (let ((hit (assoc label (list-facet-options buf (facet)))))
-                         ;; a picked value drops the text typed to find it
-                         (cond (hit (list-set-query! buf before) (list-facet-set! buf (facet) (cadr hit)))
-                               ((not (equal? (string-trim label) ""))
-                                (list-set-query! buf (string-trim label))
-                                (list-goto-first-entry buf)))))))
-    (minibuffer-read-preview *list-filter-prompt* (cands)
+                       (set! *mb-list-buffer* #f)
+                       (let ((hit (and (equal? typed "") (assoc label (list-facet-options buf (facet))))))
+                         ;; a picked value sets its facet; typed text stays the
+                         ;; query, on the row the arrows chose
+                         (if hit
+                             (list-facet-set! buf (facet) (cadr hit))
+                             (list-set-query! buf typed))))))
+    (minibuffer-read-preview *list-filter-prompt* (shown)
       (lambda (label) #f) on-confirm
       ;; C-g gives back the rows the prompt opened on
-      (lambda () (list-set-query! buf before) (list-goto-first-entry buf))
+      (lambda () (set! *mb-list-buffer* #f) (list-set-query! buf before) (list-goto-first-entry buf))
       #f "minibuffer")
-    ;; text narrows the rows as you type, as / does in a list with no tabs;
-    ;; the tabs stay there to pick from
+    ;; text narrows the rows as you type, as / does in a list with no tabs
     (set! *mb-change-fn*
       (lambda (input)
-        (with-buffer-display-update buf
-          (lambda ()
-            (unless (equal? (string-trim input) (list-query buf))
-              (list-set-query! buf (string-trim input))
-              (list-goto-first-entry buf))))))
+        (let ((was typed))
+          (set! typed (string-trim input))
+          (with-buffer-display-update buf
+            (lambda ()
+              (unless (equal? typed (list-query buf))
+                (list-set-query! buf typed)
+                (list-goto-first-entry buf))))
+          (unless (eq? (equal? was "") (equal? typed ""))
+            (rows-follow!)
+            (minibuffer-preview-candidates! (shown) on-confirm)))))
     (minibuffer-tabs! (row))
     (set! *mb-tab-fn* (lambda (step)
                         (set! tab (modulo (+ tab step) (length facets)))
                         (mb-tab-remember! (string-append "list-facet:" buf) (nth tab labels))
                         (minibuffer-tabs! (row))
-                        (minibuffer-preview-candidates! (cands) on-confirm)
-                        #t))))
+                        (minibuffer-preview-candidates! (shown) on-confirm)
+                        #t))
+    (rows-follow!)
+    ;; the prompt opens holding the query the list already has
+    (unless (equal? before "") (minibuffer-input! before))))
 
 (define-command "list-filter"
   "Narrow this list: pick a facet from the tabs when the list has them, else the rows that match what you type"

@@ -6942,6 +6942,8 @@
 (catalog-meta! 'function "list?" 'domain 'system 'effects '(pure))
 (public! 'format-time "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT.")
 (public! 'apply "(apply F ARGS) — call F with the elements of the list ARGS as arguments.")
+(effects! '(write execute))
+(public! 'eval "(eval FORM) — evaluate the datum FORM at the top level; return its value. FORM can do anything.")
 (effects! '(write))
 (public! 'report-errors "(report-errors WHERE THUNK) — THUNK's value; when it raises, #f, and the error goes to *Messages* and the log under WHERE")
 (effects! '(pure))

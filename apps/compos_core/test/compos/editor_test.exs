@@ -3890,14 +3890,19 @@ defmodule Compos.EditorTest do
     end
 
     test "split below/right builds a tree, C-x o cycles, C-x 1/0 collapse", %{buf: buf} do
-      press(["C-x", "2"])
-      press(["C-x", "3"])
+      other = "split-other-#{System.unique_integer([:positive])}"
+      Compos.Core.create_buffer(other)
+      _id = tile_group!("zz-tile-split-#{System.unique_integer([:positive])}", [buf, other])
 
-      # C-x 2 stacks two halves; C-x 3 splits the upper one beside itself
+      # ruling B: a new pane takes the group's most recent buffer no pane
+      # shows, never the same buffer twice; with none left it stays blank
+      press(["C-x", "3"])
+      press(["C-x", "2"])
+
       assert window_layout() == [
                {buf, [0.0, 0.0, 0.5, 0.5]},
-               {buf, [0.5, 0.0, 0.5, 0.5]},
-               {buf, [0.0, 0.5, 1.0, 0.5]}
+               {" *pane*", [0.0, 0.5, 0.5, 0.5]},
+               {other, [0.5, 0.0, 0.5, 1.0]}
              ]
 
       active_before = Editor.snapshot().active
@@ -4111,24 +4116,23 @@ defmodule Compos.EditorTest do
 
     test "adaptive layout preserves every ordinary visible window", %{buf: buf} do
       n = System.unique_integer([:positive])
-      second = "adaptive-duplicate-#{n}"
-      replaced = "adaptive-replaced-#{n}"
+      second = "adaptive-second-#{n}"
+      third = "adaptive-third-#{n}"
       shell = "*shell* ordinary #{n}"
-      for name <- [second, replaced, shell], do: Compos.Core.create_buffer(name)
+      for name <- [second, third, shell], do: Compos.Core.create_buffer(name)
+      _id = tile_group!("zz-adaptive-#{n}", [buf, second, third, shell])
 
+      # ruling B: no buffer shows twice, so four panes show four buffers
       {:ok, _} =
         Compos.Core.Session.eval("""
         (begin
           (buffer-set-local! "#{shell}" 'window-class #f)
           (panes-tile! 'grid
-            (list "#{buf}" "#{second}" "#{replaced}" "#{shell}"))
-          (select-window! (window-showing "#{replaced}"))
-          (switch-to-buffer! "#{second}")
-          (select-window! (window-showing "#{buf}")))
+            (list "#{buf}" "#{second}" "#{third}" "#{shell}")))
         """)
 
       before = Enum.sort(window_buffers())
-      assert before == Enum.sort([buf, second, second, shell])
+      assert before == Enum.sort([buf, second, third, shell])
 
       press(["M-x"])
       type("window-layout")
@@ -4143,7 +4147,7 @@ defmodule Compos.EditorTest do
 
       Compos.TestHelpers.one_window!()
 
-      for name <- [second, replaced, shell],
+      for name <- [second, third, shell],
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
   end

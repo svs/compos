@@ -2460,9 +2460,17 @@
 
 ;; one section: (ROWS DEPTHS), DEPTHS as (KEY DEPTH) for the rows deeper than 0
 (define (list-nest-run buf rows parent-of flat? folded)
+  ;; member is native and a lambda per pair is not: the keys and the parent
+  ;; keys are lists once, and only a row some row names as parent scans for
+  ;; its children. A search per row over every pair cost 250 ms at 150 rows.
   (let* ((pairs (map (lambda (r) (list r (list-key buf r) (parent-of buf r))) rows))
-         (listed? (lambda (p) (and p (find (lambda (pr) (equal? (cadr pr) p)) pairs) #t)))
-         (kids (lambda (pr) (filter (lambda (c) (equal? (nth 2 c) (cadr pr))) pairs)))
+         (keys (map cadr pairs))
+         (parent-keys (filter (lambda (p) p) (map (lambda (pr) (nth 2 pr)) pairs)))
+         (listed? (lambda (p) (and p (member p keys) #t)))
+         (kids (lambda (pr)
+                 (if (member (cadr pr) parent-keys)
+                     (filter (lambda (c) (equal? (nth 2 c) (cadr pr))) pairs)
+                     '())))
          (folded? (lambda (pr) (and (member (cadr pr) folded) #t))))
     (cond ((not (find (lambda (pr) (listed? (nth 2 pr))) pairs)) (list rows '() '()))
           (flat?

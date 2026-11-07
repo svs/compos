@@ -43,12 +43,13 @@
         (check-equal! (panes-history-future after-new) '() "a new state ends the redo")))))
 
 (deftest 'layout-undo-keeps-the-buffers-the-windows-show-now
-  "the arrangement comes back; a window both states hold keeps its present stack; a gone buffer leaves"
+  "the arrangement comes back; a window both states hold keeps its present stack; a gone buffer leaves, its pane stays blank"
   (lambda ()
     (let* ((made (pht-layout)) (l (car made)) (wa (cadr made)) (pb (caddr made))
            (recorded l)
            (now (panes-show (panes-remove-window l (car (panes-pane-keys l pb))) wa "y"))
            (merged (panes-history-merge now recorded (lambda (b) (not (equal? b "z"))))))
-      (check-equal! (length (panes-panes merged)) 1 "the pane whose only buffer is gone does not come back")
+      (check-equal! (length (panes-panes merged)) 2 "the pane whose only buffer is gone comes back")
+      (check-equal! (panes-pane-keys merged pb) '() "blank: its window closed with the buffer")
       (check-equal! (panes-window-buffer merged wa) "y" "the surviving window shows what it shows now")
       (check-equal! (panes-window-buffers merged wa) '("y" "x") "with its present stack"))))

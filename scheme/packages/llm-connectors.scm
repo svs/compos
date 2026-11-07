@@ -87,6 +87,14 @@
           ((eq? status 'ok) (string-append "replied in " (llm-connectors--secs (plist-get r 'ms))))
           (else (string-append "failed: " (or (plist-get r 'error) "no reply"))))))
 
+;; the result as a short word, for a column: ok and its time, or failed
+(define (llm-connectors--result-short r)
+  (let ((status (and r (plist-get r 'status))))
+    (cond ((not r) "not tested")
+          ((eq? status 'testing) "testing...")
+          ((eq? status 'ok) (string-append "ok " (llm-connectors--secs (plist-get r 'ms))))
+          (else "failed"))))
+
 (define (llm-connectors--test-text name &optional model)
   (llm-connectors--result-text (llm-connectors-test-result name model)))
 
@@ -182,7 +190,7 @@
                       '())
                   (map (lambda (s)
                          (fact (string-append "key:" (symbol->string s)) "key"
-                               (string-append (setup-secret-label s) ": "
+                               (string-append (let ((l (setup-secret-label s))) (if (string-suffix? "." l) (substring l 0 (- (string-length l) 1)) l)) ": "
                                               (if (secret-set? s) "set; k changes it" "missing; k adds it"))))
                        ss))))
           (append
@@ -214,8 +222,13 @@
        (let* ((id (cadr r))
               (default? (equal? id (llm-connectors--default-model name))))
          ;; the result first, as a checklist reads: it fits a narrow pane
-         (list (list (llm-connectors--test-text name id) (llm-connectors--test-face name id))
+         (list (list (llm-connectors--result-short (llm-connectors-test-result name id))
+                     (llm-connectors--test-face name id))
                (list (string-append id
+                                    (let ((t (llm-connectors-test-result name id)))
+                                      (if (and t (eq? (plist-get t 'status) 'failed))
+                                          (string-append " · " (or (plist-get t 'error) "no reply"))
+                                          ""))
                                     ;; a short id is an alias, and its name says which model it is
                                     (if (or (equal? (caddr r) "") (> (string-length id) 12)) ""
                                         (string-append " · " (caddr r)))
@@ -245,7 +258,8 @@
 (define (llm-connectors-refresh!)
   "(llm-connectors-refresh!) -- redraw the connector list and every connector page"
   (when (buffer-exists? *llm-connectors-buffer*) (list-refresh! *llm-connectors-buffer*))
-  (for-each (lambda (b) (when (buffer-local b 'llm-connector) (list-render! b #t)))
+  ;; list-refresh! reads the rows again; list-render! would draw the old ones
+  (for-each (lambda (b) (when (buffer-local b 'llm-connector) (list-refresh! b)))
             (mode-group-buffers "llm-connectors-detail-mode")))
 
 (define (llm-connectors--list)
@@ -346,6 +360,17 @@
       (message (string-append key ": " (llm-connectors--result-text result)))
       (when k (k result)))))
 
+;; the error a test chat shows, as (SUMMARY FULL), or #f. The chat writes
+;; it as [error: ...]; the summary is its first sentence.
+(define (llm-connectors--chat-error text)
+  (let ((parts (string-split text "[error: ")))
+    (and (pair? (cdr parts))
+         (let* ((full (string-trim (car (string-split (car (reverse parts)) "]\n"))))
+                (line (car (string-split full "\n")))
+                (line (if (string-prefix? "session/prompt: " line) (substring line 16 (string-length line)) line))
+                (summary (car (string-split line ". "))))
+           (list summary full)))))
+
 (define (llm-connectors-test! name &optional k model)
   "(llm-connectors-test! NAME [K] [MODEL]) -- a fresh chat on connector NAME, on MODEL when it is given, asks for one word; the reply and its time go on the row, and K gets the result plist"
   (let* ((t0 (monotonic-ms))
@@ -368,8 +393,13 @@
             (debounce! (string->symbol (string-append "llm-connectors-deadline:" key))
                        (* 1000 llm-connectors-test-seconds)
                        (lambda (_)
-                         (llm-connectors--finish! key token
-                           (fail (string-append "no reply in " (number->string llm-connectors-test-seconds) " s")) k))
+                         ;; the chat may already show an error; read it, then close the chat
+                         (let* ((buf (ignore-errors (lambda () (plist-get (subagent-result slug) 'buffer))))
+                                (err (and buf (buffer-known? buf) (llm-connectors--chat-error (buffer-text buf))))
+                                (late (fail (string-append "no reply in " (number->string llm-connectors-test-seconds) " s"))))
+                           (when (and buf (buffer-known? buf)) (buffer-kill! buf))
+                           (llm-connectors--finish! key token
+                             (if err (append (fail (car err)) (list 'detail (cadr err))) late) k)))
                        #f)
             (subagent-wait (list slug)
               (lambda (results)
@@ -377,13 +407,17 @@
                        (text (and r (plist-get r 'text)))
                        (said (and (string? text) (not (equal? (string-trim text) "")) (string-trim text)))
                        (reason (and r (plist-get r 'stop-reason))))
-                  (when (and r (buffer-known? (plist-get r 'buffer)))
-                    (buffer-kill! (plist-get r 'buffer)))
-                  (llm-connectors--finish! key token
-                    (if said
-                        (list 'status 'ok 'reply said 'ms (elapsed) 'at (current-time))
-                        (fail (if reason (format "~a" reason) "no reply")))
-                    k)))))))))
+                  ;; the chat says what went wrong; read it before it goes
+                  (let ((err (and r (buffer-known? (plist-get r 'buffer))
+                                  (llm-connectors--chat-error (buffer-text (plist-get r 'buffer))))))
+                    (when (and r (buffer-known? (plist-get r 'buffer)))
+                      (buffer-kill! (plist-get r 'buffer)))
+                    (llm-connectors--finish! key token
+                      (cond ((and said (not err))
+                             (list 'status 'ok 'reply said 'ms (elapsed) 'at (current-time)))
+                            (err (append (fail (car err)) (list 'detail (cadr err))))
+                            (else (fail (if reason (format "~a" reason) "no reply"))))
+                      k))))))))))
 
 (define (llm-connectors-test-all!)
   "(llm-connectors-test-all!) -- test every connector that is ready, at once"
@@ -391,9 +425,42 @@
     (for-each (lambda (n) (llm-connectors-test! n)) ready)
     (message (string-append "testing " (number->string (length ready)) " connectors"))))
 
+(effects! '(write display))
+
+;; the whole result of one test, in its own buffer beside the page
+(define (llm-connectors-show-test! name &optional model)
+  "(llm-connectors-show-test! NAME [MODEL]) -- show the whole last test of connector NAME, or of its MODEL, in the other window"
+  (let* ((key (llm-connectors--test-key name model))
+         (r (llm-connectors--result key))
+         (buf (string-append "*llm-connector-test:" key "*")))
+    (if (not r)
+        (message (string-append key " is not tested yet; t tests it"))
+        (begin
+          (unless (buffer-known? buf) (buffer-create buf))
+          (llm-connectors--join! buf)
+          (buffer-set-read-only! buf #f)
+          (buffer-set-text! buf
+            (string-append "Test of " key "\n\n"
+                           "result  " (llm-connectors--result-text r) "\n"
+                           (if (plist-get r 'at) (string-append "at      " (format-time (plist-get r 'at) "%d %b %H:%M:%S") "\n") "")
+                           (if (plist-get r 'ms) (string-append "time    " (llm-connectors--secs (plist-get r 'ms)) "\n") "")
+                           (if (plist-get r 'reply) (string-append "\nReply\n\n" (plist-get r 'reply) "\n") "")
+                           (if (plist-get r 'detail) (string-append "\nError\n\n" (plist-get r 'detail) "\n") "")
+                           "\nt on the row tests it again.\n")
+            #t)
+          (buffer-set-read-only! buf #t)
+          (with-current-buffer buf (lambda () (unless (equal? (buffer-local buf 'mode-name) "help-mode") (set-mode! "help-mode"))))
+          (display-buffer-other-window! buf)
+          buf))))
+
 ;;; --- commands ------------------------------------------------------------------
 
 (effects! '(write))
+
+(define-command "llm-connectors-show-test" "Show the whole last test of the model on this line, or else the connector"
+  (lambda ()
+    (let ((model (llm-connectors--model-at-point)))
+      (llm-connectors--on-current (lambda (name) (llm-connectors-show-test! name model))))))
 
 (define-command "llm-connectors-show" "Show the page of the connector on this line beside the list"
   (lambda () (llm-connectors--on-current llm-connectors-show-detail!)))
@@ -481,7 +548,7 @@
            "One model connector: what it needs (its command, the install steps, the sign-in and "
            "the keys), its last test, and under Models every model it offers, each with its own "
            "last test. On a model, t tests that model and d makes it the model new chats use; "
-           "elsewhere they act on the connector. i installs, l signs in, k adds the key, "
+           "elsewhere they act on the connector. RET shows the whole last test, with the error a failed test gave, in the other window. i installs, l signs in, k adds the key, "
            "/ narrows, g checks again, q quits.")
     'transient #f
     'rows (lambda (buf) (llm-connectors--page-rows buf))
@@ -496,9 +563,9 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("t" "test") ("d" "default") ("i" "install") ("l" "sign in") ("k" "key")
+              '(("RET" "result") ("t" "test") ("d" "default") ("i" "install") ("l" "sign in") ("k" "key")
                 ("/" "filter") ("g" "check") ("q" "quit")))
-    'keys *llm-connectors-keys*))
+    'keys (cons '("RET" "llm-connectors-show-test") *llm-connectors-keys*)))
 
 (add-hook! 'setup-connector-chosen-hook 'llm-connectors-refresh!)
 

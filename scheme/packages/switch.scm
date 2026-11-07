@@ -1031,9 +1031,18 @@ the next row down. STEP is kept for the callers."
                                         (panes-pane-keys l pane))))
         (switch-pane-buffers win))))
 
-;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...)
-(define (switch-tab-row tab &optional tabs)
-  (map (lambda (t) (list (cadr t) (equal? (car t) tab))) (or tabs *switch-tabs*)))
+;; the tabs as the prompt shows them, ((LABEL CURRENT?) ...). A LOCKED
+;; prompt shows its one tab: the others are out of reach until TAB unlocks.
+(define (switch-tab-row tab &optional tabs locked)
+  (let ((row (map (lambda (t) (list (cadr t) (equal? (car t) tab))) (or tabs *switch-tabs*))))
+    (if locked (filter cadr row) row)))
+
+;; where a side arrow takes the prompt: the next tab, or the same tab when
+;; TAB locked it. The lock is the switcher's TAB lock, on a tab: TAB in the
+;; modal switcher keeps one group's rows; TAB in the plain prompt keeps one
+;; tab's rows, and its completion, until TAB again or the prompt closes.
+(define (switch-tab-move tab step tabs locked)
+  (if locked tab (switch-tab-step tab step tabs)))
 
 ;; the slug of the chat that spawned chat NAME, and NAME's own slug
 (define (switch-chat-parent name)
@@ -1205,6 +1214,7 @@ the next row down. STEP is kept for the callers."
            (choices (append candidates (map car family)))
            ;; DISPLAY and CANDIDATES come in the same order, so one walk
            ;; keeps the rows of a tab
+           (locked #f)
            (tab-display (lambda (tab)
                           (if (eq? tab 'family)
                               (map cadr family)
@@ -1237,11 +1247,21 @@ the next row down. STEP is kept for the callers."
         (if ibuffer-info 3 #t) "minibuffer")
       (minibuffer-tabs! (switch-tab-row tab tabs))
       (set! *mb-tab-fn* (lambda (step)
-                          (set! tab (switch-tab-step tab step tabs))
-                          (set! *switch-last-tab* tab)
-                          (minibuffer-tabs! (switch-tab-row tab tabs))
-                          (minibuffer-preview-candidates! (tab-display tab) on-confirm)
-                          #t)))
+                          (and (not locked)
+                               (begin
+                                 (set! tab (switch-tab-move tab step tabs locked))
+                                 (set! *switch-last-tab* tab)
+                                 (minibuffer-tabs! (switch-tab-row tab tabs))
+                                 (minibuffer-preview-candidates! (tab-display tab) on-confirm)
+                                 #t))))
+      ;; TAB locks the list to the tab it shows; TAB again unlocks
+      (set! *mb-fold-fn* (lambda (sel)
+                           (set! locked (not locked))
+                           (minibuffer-tabs! (switch-tab-row tab tabs locked))
+                           (message (if locked
+                                        (string-append "in " (cadr (assoc tab tabs)) " -- TAB unlocks")
+                                        "all tabs -- the side arrows move"))
+                           #t)))
     (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))
 
 (define-command "ibuffer-prompt" "Switch to a buffer with the plain minibuffer list"

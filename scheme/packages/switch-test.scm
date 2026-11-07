@@ -76,6 +76,28 @@
     (check-equal! (switch-tab-rows 'window t--tab-rows "g1" #f) '() "no window, no history")
     (check-equal! (switch-tab-rows 'group t--tab-rows #f #f) '() "no group")))
 
+(deftest 'tab-locks-the-plain-prompt-to-its-tab
+  "in C-x b's plain list, TAB keeps the rows on the chosen tab; TAB again unlocks"
+  (lambda ()
+    (for-each buffer-create '("*zz-lock-a*" "*zz-lock-b*"))
+    (switch-to-buffer-here! "*zz-lock-a*")
+    (switch-to-buffer-here! "*zz-lock-b*")
+    (run-command "ibuffer-prompt")
+    (let* ((tabs (lambda () (plist-get (minibuffer-state) 'tabs)))
+           (current (lambda () (car (find cadr (tabs)))))
+           (here (current))
+           (rows (plist-get (minibuffer-state) 'candidates)))
+      (run-command "minibuffer-complete")
+      (check-equal! (map car (tabs)) (list here) "locked: the chosen tab alone")
+      (run-command "minibuffer-rail-enter")
+      (check-equal! (current) here "an arrow does not leave a locked tab")
+      (check-equal! (plist-get (minibuffer-state) 'candidates) rows "the rows stay the tab's")
+      (run-command "minibuffer-complete")
+      (check-true! (> (length (tabs)) 1) "TAB again unlocks: every tab is back")
+      (run-command "minibuffer-rail-enter")
+      (check-false! (equal? (current) here) "unlocked, the arrow moves to the next tab"))
+    (minibuffer-cancel!)))
+
 (deftest 'the-buffer-prompt-orders-by-recent-use
   "C-x b leads with the buffer used last, not the window's own history"
   (lambda ()

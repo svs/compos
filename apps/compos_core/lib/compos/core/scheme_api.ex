@@ -589,6 +589,12 @@ defmodule Compos.Core.SchemeAPI do
       {"vm-sample",
        "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks."} =>
         fn [] -> SysMon.sample() end,
+      {"vm-ports",
+       "(vm-ports [LIMIT]) — the open ports grouped by name, most first: a list of (NAME COUNT). A port is an external program, a socket, or a driver; each holds descriptors."} =>
+        fn
+          [] -> Enum.map(SysMon.ports(20), fn {name, n} -> [name, n] end)
+          [limit] -> Enum.map(SysMon.ports(trunc(limit)), fn {name, n} -> [name, n] end)
+        end,
       {"vm-processes",
        "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\"."} =>
         fn

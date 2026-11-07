@@ -6252,6 +6252,8 @@
   '("point" "buffer-point" "editor-context" "line-start-position" "region-text"
     "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"))
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
+(public! 're-find "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.")
+(catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
 (catalog-meta! 'function "register-context-provider!" 'domain 'chat 'effects '(write))
 
 (category! 'windows)

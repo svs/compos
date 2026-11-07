@@ -68,6 +68,8 @@ defmodule Compos.Core.SysMon do
       run_queue: :erlang.statistics(:total_run_queue_lengths),
       process_count: :erlang.system_info(:process_count),
       port_count: :erlang.system_info(:port_count),
+      fds: fd_count(),
+      fd_limit: fd_limit(),
       atom_count: :erlang.system_info(:atom_count),
       ets_count: length(:ets.all()),
       reductions_rate: rate(reds, last && last.reds, dt),
@@ -136,6 +138,46 @@ defmodule Compos.Core.SysMon do
   # in a test or a release without it. A missing value reads as 0. The
   # calls go through apply: os_mon belongs to compos_ui, so this app
   # cannot name its modules at compile time.
+  # The descriptors this OS process holds: macOS lists them in /dev/fd,
+  # Linux in /proc/self/fd. The listing opens one descriptor of its own.
+  defp fd_count do
+    dir = if File.dir?("/proc/self/fd"), do: "/proc/self/fd", else: "/dev/fd"
+
+    case File.ls(dir) do
+      {:ok, names} -> max(length(names) - 1, 0)
+      _ -> 0
+    end
+  end
+
+  # The most descriptors the VM can hold: the soft limit it started with
+  defp fd_limit do
+    :erlang.system_info(:check_io)
+    |> List.wrap()
+    |> Enum.find_value(0, fn info -> is_list(info) && Keyword.get(info, :max_fds) end)
+  rescue
+    _ -> 0
+  end
+
+  @doc """
+  The open ports, grouped by name, most first: a list of `{name, count}`.
+
+  A port is an external program, a socket, or a driver. Each one holds
+  descriptors, so a group that grows is the one that leaks them. The name
+  of an external program is its command line, cut to 120 characters.
+  """
+  def ports(limit \\ 20) do
+    Port.list()
+    |> Enum.map(fn port ->
+      case Port.info(port, :name) do
+        {:name, name} -> name |> to_string() |> String.slice(0, 120)
+        _ -> "closed"
+      end
+    end)
+    |> Enum.frequencies()
+    |> Enum.sort_by(fn {name, n} -> {-n, name} end)
+    |> Enum.take(limit)
+  end
+
   defp os_sample do
     %{
       cpu_util: guard(fn -> os(:cpu_sup, :util) |> round() |> clamp() end, 0),

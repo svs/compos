@@ -122,20 +122,10 @@ defmodule Compos.Core.SchemeAPI do
   defp http_primitives do
     %{
       {"http-request",
-       "(http-request URL [OPTS] [CALLBACK]) — make one HTTP request and return (ok BOOL status N headers PLIST body STRING [json VALUE] [error TEXT]). OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes. Without CALLBACK it holds the lane for up to 15 seconds; with CALLBACK it runs in a Task and CALLBACK gets the answer."} =>
+       "(http-request URL [OPTS] [CALLBACK]) — make one HTTP request and return (ok BOOL status N headers PLIST body STRING [json VALUE] [error TEXT]). OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes; http.scm fills in the method, the waits and redirect. Without CALLBACK it holds the lane; with CALLBACK it runs in a Task and CALLBACK gets the answer."} =>
         fn
-          [url] ->
-            http_call(url, [], http_inline_limit())
-
-          [url, opts] ->
-            if is_list(opts) or opts == false do
-              http_call(url, opts, http_inline_limit())
-            else
-              async_dispatch(opts, fn -> http_call(url, [], http_async_limit()) end)
-            end
-
-          [url, opts, callback] ->
-            async_dispatch(callback, fn -> http_call(url, opts, http_async_limit()) end)
+          [url, opts] -> http_call(url, opts)
+          [url, opts, callback] -> async_dispatch(callback, fn -> http_call(url, opts) end)
         end
     }
   end
@@ -150,13 +140,9 @@ defmodule Compos.Core.SchemeAPI do
     "options" => :options
   }
 
-  defp http_call(url, opts, limit) do
-    o = http_opts(opts)
-
-    with {:ok, url} <- http_url(url),
-         {:ok, method} <- http_method(o) do
-      http_send(method, url, o, http_json_body(opts), limit)
-    else
+  defp http_call(url, opts) do
+    case http_url(url) do
+      {:ok, url} -> http_send(url, http_opts(opts), http_json_body(opts))
       {:error, message} -> http_failure(message)
     end
   end
@@ -198,29 +184,16 @@ defmodule Compos.Core.SchemeAPI do
 
   defp http_url(_), do: {:error, "The URL must be a string."}
 
-  defp http_method(o) do
-    name =
-      case Map.get(o, "method") do
-        value when value in [nil, false, ""] -> "get"
-        value -> value |> to_string() |> String.downcase()
-      end
-
-    case Map.fetch(@http_methods, name) do
-      {:ok, verb} -> {:ok, verb}
-      :error -> {:error, "Unsupported HTTP method: " <> name}
-    end
-  end
-
-  defp http_send(method, url, o, json, limit) do
+  defp http_send(url, o, json) do
     req =
       [
-        method: method,
+        method: Map.fetch!(@http_methods, o["method"]),
         url: url,
         decode_body: false,
         retry: false,
-        redirect: Map.get(o, "redirect", true) != false,
-        receive_timeout: http_limit(Map.get(o, "timeout"), limit),
-        connect_options: [timeout: http_limit(Map.get(o, "connect-timeout"), 10_000)]
+        redirect: o["redirect"] != false,
+        receive_timeout: o["timeout"],
+        connect_options: [timeout: o["connect-timeout"]]
       ]
       |> http_option(:headers, Opts.pairs(Map.get(o, "headers")))
       |> http_option(:params, Opts.pairs(Map.get(o, "params")))
@@ -331,13 +304,6 @@ defmodule Compos.Core.SchemeAPI do
   defp http_reason(reason) when is_atom(reason), do: "the request failed: " <> to_string(reason)
   defp http_reason(reason), do: "the request failed: " <> inspect(reason)
 
-  defp http_limit(value, _default) when is_integer(value) and value > 0, do: value
-  defp http_limit(_value, default), do: default
-
-  defp http_inline_limit, do: Application.get_env(:compos_core, :http_timeout_ms, 15_000)
-
-  defp http_async_limit, do: Application.get_env(:compos_core, :http_async_timeout_ms, 120_000)
-
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
   def docs, do: Prim.docs(entries())
 
@@ -403,24 +369,13 @@ defmodule Compos.Core.SchemeAPI do
       {"workflow-define!",
        "(workflow-define! NAME SPEC) — start or reconfigure the workflow NAME. SPEC is a plist: listen (patterns), quiet-ms, max-wait-ms, batch, max-attempts, backoff-ms, max-backoff-ms, timeout-ms, from."} =>
         fn [name, spec] ->
-          m = Opts.map(spec, & &1)
-
+          # workflows.scm picks the fields and makes them whole numbers
           opts =
-            for {key, field} <- [
-                  {"quiet-ms", :quiet_ms},
-                  {"max-wait-ms", :max_wait_ms},
-                  {"batch", :batch},
-                  {"max-attempts", :max_attempts},
-                  {"backoff-ms", :backoff_ms},
-                  {"max-backoff-ms", :max_backoff_ms},
-                  {"timeout-ms", :timeout_ms},
-                  {"from", :from}
-                ],
-                is_number(m[key]),
-                into: %{},
-                do: {field, trunc(m[key])}
+            Map.new(Opts.map(spec, & &1), fn {key, value} ->
+              {key |> String.replace("-", "_") |> String.to_existing_atom(), value}
+            end)
 
-          case Workflows.define(Map.merge(opts, %{name: name, listen: m["listen"] || []})) do
+          case Workflows.define(Map.merge(opts, %{name: name, listen: opts[:listen] || []})) do
             :ok -> true
             {:error, reason} -> raise "workflow-define!: " <> to_string(reason)
           end
@@ -497,10 +452,7 @@ defmodule Compos.Core.SchemeAPI do
     }
   end
 
-  defp event_plist(e) do
-    [{:sym, "seq"}, e.seq, {:sym, "topic"}, e.topic, {:sym, "kind"}, e.kind, {:sym, "data"},
-     e.data, {:sym, "at"}, e.at]
-  end
+  defp event_plist(e), do: Opts.plist(e, [:seq, :topic, :kind, :data, :at])
 
   defp telemetry_primitives do
     %{
@@ -3291,15 +3243,8 @@ defmodule Compos.Core.SchemeAPI do
     :void
   end
 
-  # a plist Scheme reads: nil becomes #f, which every caller already handles
-  defp catalog_plist(info) when is_map(info) do
-    for key <- [:snapshot_id, :captured_at, :models, :providers, :stale_days, :path],
-        reduce: [] do
-      acc ->
-        name = key |> Atom.to_string() |> String.replace("_", "-")
-        acc ++ [{:sym, name}, Map.get(info, key) || false]
-    end
-  end
+  defp catalog_plist(info) when is_map(info),
+    do: Opts.plist(info, [:snapshot_id, :captured_at, :models, :providers, :stale_days, :path])
 
   defp git_value({:ok, value}, shape), do: shape.(value)
   defp git_value({:error, msg}, _shape), do: [{:sym, "error"}, msg]
@@ -3309,96 +3254,34 @@ defmodule Compos.Core.SchemeAPI do
   defp callback?({:interposed, _, _}), do: true
   defp callback?(_), do: false
 
-  defp status_plist(e) do
-    [
-      {:sym, "path"},
-      e.path,
-      {:sym, "orig-path"},
-      e.orig_path || false,
-      {:sym, "index"},
-      e.index,
-      {:sym, "worktree"},
-      e.worktree
-    ]
-  end
+  defp status_plist(e), do: Opts.plist(e, [:path, :orig_path, :index, :worktree])
 
   defp diff_plist(files) do
     for f <- files do
-      [
-        {:sym, "file-a"},
-        f.file_a || false,
-        {:sym, "file-b"},
-        f.file_b || false,
-        {:sym, "binary?"},
-        f.binary?,
-        {:sym, "patch-head"},
-        Map.get(f, :patch_head, ""),
-        {:sym, "start-byte"},
-        Map.get(f, :start_byte, 0),
-        {:sym, "end-byte"},
-        Map.get(f, :end_byte, 0),
-        {:sym, "hunks"},
-        Enum.map(f.hunks, &hunk_plist/1)
-      ]
+      Opts.plist(
+        %{f | hunks: Enum.map(f.hunks, &hunk_plist/1)},
+        ~w(file_a file_b binary? patch_head start_byte end_byte hunks)a
+      )
     end
   end
 
   defp hunk_plist(h) do
-    [
-      {:sym, "header"},
-      h.header,
-      {:sym, "old-start"},
-      h.old_start,
-      {:sym, "old-count"},
-      h.old_count,
-      {:sym, "new-start"},
-      h.new_start,
-      {:sym, "new-count"},
-      h.new_count,
-      {:sym, "patch"},
-      Map.get(h, :patch, ""),
-      {:sym, "start-byte"},
-      Map.get(h, :start_byte, 0),
-      {:sym, "end-byte"},
-      Map.get(h, :end_byte, 0),
-      {:sym, "lines"},
-      for({tag, text} <- h.lines, do: [{:sym, Atom.to_string(tag)}, text])
-    ]
+    lines = for {tag, text} <- h.lines, do: [{:sym, Atom.to_string(tag)}, text]
+
+    Opts.plist(
+      %{h | lines: lines},
+      ~w(header old_start old_count new_start new_count patch start_byte end_byte lines)a
+    )
   end
 
-  defp log_plist(c) do
-    [
-      {:sym, "sha"},
-      c.sha,
-      {:sym, "short-sha"},
-      c.short_sha,
-      {:sym, "author"},
-      c.author,
-      {:sym, "date"},
-      c.date,
-      {:sym, "subject"},
-      c.subject
-    ]
+  defp log_plist(c), do: Opts.plist(c, [:sha, :short_sha, :author, :date, :subject])
+
+  # (base "HEAD" path "lib/x.ex" staged #t): Git.diff's own names; a #f
+  # base drops the ref and diffs the work tree against the index
+  defp diff_opts(plist) do
+    m = Opts.map(plist, &Opts.string/1)
+    [base: Map.get(m, "base", "HEAD"), path: m["path"], staged: m["staged"] == true]
   end
-
-  # (base "HEAD" path "lib/x.ex" staged #t) — a #f base drops the ref and
-  # diffs the work tree against the index
-  defp diff_opts(plist) when is_list(plist), do: diff_opts(plist, [])
-  defp diff_opts(_), do: []
-
-  defp diff_opts([key, value | rest], acc) do
-    acc =
-      case Opts.plain(key) do
-        "base" -> Keyword.put(acc, :base, Opts.string(value))
-        "path" -> Keyword.put(acc, :path, Opts.string(value))
-        "staged" -> Keyword.put(acc, :staged, value == true)
-        _ -> acc
-      end
-
-    diff_opts(rest, acc)
-  end
-
-  defp diff_opts(_, acc), do: acc
 
   # ((FACE PLIST-or-#f) ...) as [{name, attrs | nil}]
   defp face_changes(changes) do

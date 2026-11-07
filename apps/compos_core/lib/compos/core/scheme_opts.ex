@@ -43,6 +43,16 @@ defmodule Compos.Core.SchemeOpts do
   def seq([seq]), do: seq
   def seq(seq), do: seq
 
+  @doc """
+  The KEYS of MAP as the plist Scheme reads back: `:short_sha` is the
+  symbol `short-sha`, and `nil` is `#f`.
+  """
+  def plist(map, keys) do
+    Enum.flat_map(keys, fn key ->
+      [{:sym, key |> Atom.to_string() |> String.replace("_", "-")}, Map.get(map, key) || false]
+    end)
+  end
+
   @doc "A header or parameter set as `{name, value}` pairs, names as strings."
   def pairs(map) when is_map(map) do
     for {key, value} <- map, do: {to_string(key), scalar(value)}

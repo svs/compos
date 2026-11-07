@@ -62,7 +62,8 @@
   "(event-topic E) — E's topic: the key a workflow groups by when it names none"
   (plist-get e 'topic))
 
-;; the options define-workflow! passes on, as the core names them
+;; the options define-workflow! passes on, as the core names them; a
+;; number is whole milliseconds or a count, so a fraction goes here
 (define workflow--options
   '((quiet quiet-ms) (max-wait max-wait-ms) (batch batch) (max-attempts max-attempts)
     (backoff backoff-ms) (max-backoff max-backoff-ms) (timeout timeout-ms) (from from)))
@@ -71,7 +72,7 @@
   (append (list 'listen (plist-get opts 'listen))
           (apply append (map (lambda (o)
                                (let ((v (plist-get opts (car o))))
-                                 (if (number? v) (list (cadr o) v) '())))
+                                 (if (number? v) (list (cadr o) (truncate v)) '())))
                              workflow--options))))
 
 (effects! '(write))

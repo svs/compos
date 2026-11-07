@@ -91,6 +91,34 @@
 
 (define (http--opts opts) (if (pair? opts) opts '()))
 
+;; The policy of one request lives here: the verb, redirects and the
+;; waits. raw-http-request sends what it is given and decides nothing.
+;; A wait the caller wrote that is not a positive whole number of
+;; milliseconds falls back to the default, as it did in the core.
+(define http--methods '("get" "post" "put" "patch" "delete" "head" "options"))
+
+(define (http--wait v default) (if (and (integer? v) (> v 0)) v default))
+
+(define (http--method o)
+  (let ((m (plist-get o 'method)))
+    (if (or (not m) (equal? m "")) "get" (string-downcase (http--text m)))))
+
+(define (http-request url &optional opts k)
+  (let* ((o (http--opts opts))
+         (k (if (procedure? opts) opts k))
+         (method (http--method o))
+         (full (append (list 'method method
+                             'timeout (http--wait (plist-get o 'timeout) (if k 120000 15000))
+                             'connect-timeout (http--wait (plist-get o 'connect-timeout) 10000))
+                       o
+                       (list 'redirect #t))))
+    (cond ((not (member method http--methods))
+           (let ((r (list 'ok #f 'status #f 'headers '() 'body ""
+                          'error (string-append "Unsupported HTTP method: " method))))
+             (if k (k r) r)))
+          (k (raw-http-request url full k))
+          (else (raw-http-request url full)))))
+
 ;; A server that refuses an unnamed client is common enough that the
 ;; editor names itself. A caller that sets its own user-agent keeps it,
 ;; because a plist answers with the first pair it meets. A header set

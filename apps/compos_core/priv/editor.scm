@@ -6190,6 +6190,8 @@
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
 (effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
+(effects! '(read external))
+(public! 'find-file "(find-file PATH [PERSISTENT?] [READ?]) -- open PATH in a buffer and return its name; PERSISTENT? #f opens it for this session only, READ? #f binds the buffer to the path without reading it")
 (effects! '(write display))
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window; a buffer of another group switches the frame to that group first; an ungrouped buffer takes the window and the frame leaves its group")
 (public! 'switch-to-buffer-here! "(switch-to-buffer-here! NAME) — show in the active window whatever the group: the mechanism a layout, a swap, or a restore uses")

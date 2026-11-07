@@ -98,10 +98,13 @@
              (rows (if (null? missing)
                        '()
                        (cadr (buffer-rows (list 'ids missing 'hidden #t 'context-only #t 'fields '(id)))))))
-        (map (lambda (id name)
-               (or name
-                   (let ((r (find (lambda (r) (equal? (cadr r) id)) rows))) (if r (car r) id))))
-             ids live))))
+        (let loop ((i ids) (n live) (acc '()))
+          (if (null? i)
+              (reverse acc)
+              (loop (cdr i) (cdr n)
+                    (cons (or (car n)
+                              (let ((r (find (lambda (r) (equal? (cadr r) (car i))) rows))) (if r (car r) (car i))))
+                          acc)))))))
 
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has

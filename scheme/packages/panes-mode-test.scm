@@ -137,3 +137,20 @@
                   (switch-to-group! ga)
                   (check-false! (window-showing b1) "back in A, B's buffer is not on screen"))
                 (lambda () (pmt-done! (list a1 a2 b1)))))))))))
+
+(deftest 'a-saved-layout-shows-a-renamed-buffer
+  "a layout holds buffer ids, and a rename keeps the id: the saved layout reads back the new name, even for a buffer made a moment ago"
+  (lambda ()
+    (let ((a (pmt-buffer! "zz-pr-a" "zz-a-mode"))
+          (c (pmt-buffer! "zz-pr-c" "zz-c-mode")))
+      (unwind-protect
+        (lambda ()
+          (let* ((saved (panes--with-ids (panes--default-layout (list a c))))
+                 (stored (apply append (map (lambda (k) (plist-get (panes-window saved k) 'buffers))
+                                            (panes-window-keys saved)))))
+            (check-equal! (member a stored) #f "the layout stores ids, not names")
+            (buffer-rename! a "zz-pr-a2")
+            (check-equal! (map (lambda (k) (car (panes-window-buffers saved k))) (panes-window-keys saved))
+                          (list "zz-pr-a2" c)
+                          "the renamed buffer reads back under its new name")))
+        (lambda () (pmt-done! (list "zz-pr-a2" a c)))))))

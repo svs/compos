@@ -34,6 +34,16 @@
       (check-equal! (panes-pane-count l) 1 "one pane")
       (check-equal! (map caddr (panes-visible l)) '("a.scm") "showing the buffer"))))
 
+(deftest 'an-empty-model-adopts-the-frames-windows
+  "an empty model plus the frame's rows is one pane per window, left to right: each pane keeps its window, its width and its buffer"
+  (lambda ()
+    (let* ((rows '((7 "a.scm" 0.6) (9 "*chat*" 0.4)))
+           (l (panes-layout-from-rows rows pt-mode (lambda (win buf) (list buf)))))
+      (check-equal! (panes-pane-count l) 2 "one pane per window")
+      (check-equal! (map caddr (panes-visible l)) '("a.scm" "*chat*") "left to right")
+      (check-equal! (panes-shares l) '(0.6 0.4) "the frame's widths")
+      (check-equal! (map (lambda (k) (panes-handle l k)) (panes-top-windows l)) '(7 9) "each pane keeps its window"))))
+
 (deftest 'a-buffer-opens-in-the-window-of-its-mode
   "another buffer of a mode goes to that mode's window, wherever you are, and that window comes to the front of its pane"
   (lambda ()

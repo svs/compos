@@ -1189,6 +1189,22 @@
         (panes-empty)
         bufs))
 
+(define (panes-layout-from-rows rows mode-of stack-of)
+  "LAYOUT: one pane per row of ROWS (WIN BUF WIDTH), left to right, the
+   row's window as the pane's handle, the row's width as its share, and
+   BUF in front of the stack STACK-OF answers for its window. An empty
+   model adopts the frame's windows this way. Pure: ROWS and the two
+   readers say it all."
+  (fold (lambda (l row)
+          (let* ((win (car row)) (buf (cadr row)) (width (caddr row))
+                 (added (panes-add-pane l))
+                 (l (panes-set-share (car added) (cadr added) width))
+                 (made (panes-add-window l (cadr added) buf (mode-of buf)))
+                 (l (panes-set-buffers (car made) (cadr made) (stack-of win buf))))
+            (panes-set-handle l (cadr made) win)))
+        (panes-empty)
+        rows))
+
 (define (panes-remove-buffer layout buf)
   "BUF leaves its window, and the next buffer of that window shows. A
    window it leaves empty closes, and the next window of its pane comes
@@ -1198,6 +1214,8 @@
 (public! 'panes-show-buffer "(panes-show-buffer LAYOUT BUF MODE [PANE]) -> (LAYOUT KEY): BUF to the front of its mode's window, that window to the front of its pane; a mode with no window gets a new one in PANE")
 (catalog-meta! 'function "panes-show-buffer" 'effects '(read))
 (public! 'panes-default-layout "(panes-default-layout BUFS MODE-OF) -> LAYOUT: one pane per buffer, left to right, equal shares, each a window of the buffer's mode; pure")
+(public! 'panes-layout-from-rows "(panes-layout-from-rows ROWS MODE-OF STACK-OF) -> LAYOUT: one pane per row (WIN BUF WIDTH) of the frame, left to right, each keeping its window and width; pure")
+(catalog-meta! 'function "panes-layout-from-rows" 'effects '(pure))
 (public! 'panes-remove-buffer "(panes-remove-buffer LAYOUT BUF) -> LAYOUT: BUF leaves its window; the next buffer shows, an emptied window closes and the next window of its pane shows; pure")
 (catalog-meta! 'function "panes-remove-buffer" 'effects '(pure))
 (public! 'panes-split-off "(panes-split-off LAYOUT BUFS FROM) -> (LAYOUT KEY) | #f: BUFS move to a new window of FROM's mode beside FROM; pure")

@@ -114,12 +114,12 @@
    goes to one window (panes-unique-buffers); then the layout is stored
    sealed (panes--layout-store!) and checked (panes--check-model!), and
    the layout history records it (panes-history-note!). It does not draw
-   the frame: panes-apply! does that."
+   the frame: panes-apply! does that. Answers the stored layout."
   (let* ((unique (panes-unique-buffers layout))
-         (r (begin (panes--layout-store! (panes--group-key) unique)
-                   (panes--check-model! unique))))
+         (stored (panes--layout-store! (panes--group-key) unique)))
+    (panes--check-model! unique)
     (when (boundp 'panes-history-note!) (panes-history-note! layout))
-    r))
+    stored))
 
 (define (panes-model-faults model)
   "What MODEL breaks of its own rules, as a list of text; () is none.
@@ -222,15 +222,7 @@
   "The frame as it stands: one pane per window on screen, left to right,
    each holding that window, with the window's width as its share. It
    reads the frame and stores nothing: panes-adopt! stores."
-  (let loop ((rows (panes--frame-row)) (layout (panes-empty)))
-    (if (null? rows)
-        layout
-        (let* ((win (car (car rows))) (buf (cadr (car rows))) (width (caddr (car rows)))
-               (added (panes-add-pane layout))
-               (l (panes-set-share (car added) (cadr added) width))
-               (made (panes-add-window l (cadr added) buf (panes--buffer-mode buf)))
-               (l (panes-set-buffers (car made) (cadr made) (panes--window-stack win buf))))
-          (loop (cdr rows) (panes-set-handle l (cadr made) win))))))
+  (panes-layout-from-rows (panes--frame-row) panes--buffer-mode panes--window-stack))
 
 (define (panes-adopt!)
   "The frame as it stands (panes-adopt), folded to the capacity, becomes
@@ -617,9 +609,14 @@
         (panes--empty-pane-of (active-window)))))
 
 (define (panes--ensure-layout!)
-  "The layout of this frame's group. When it has none: the group's seed
-   (panes--seed!), else the frame as it stands (panes-adopt!)."
-  (or (panes-layout) (panes--seed! (frame-group)) (panes-adopt!)))
+  "The layout of this frame's group. When it has none, or it has no pane
+   while the frame shows a window: the group's seed (panes--seed!), else
+   the frame as it stands (panes-adopt!). An empty model over a live
+   frame adopts the frame."
+  (let ((l (or (panes-layout) (panes--seed! (frame-group)))))
+    (if (and l (pair? (panes-panes l)))
+        l
+        (panes-adopt!))))
 
 (define (panes-place! buf kind)
   "BUF shows where panes-show-buffer says: its mode's window, else a

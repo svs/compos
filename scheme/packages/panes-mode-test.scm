@@ -75,6 +75,22 @@
               (check-false! (member 'panes--note-focus! (hook-functions 'window-state-change-hook)) "no focus hook"))
             (lambda () (pmt-done! (list a c)))))))))
 
+(deftest 'an-empty-model-over-a-live-frame-adopts-the-frame
+  "the frame has one window and the group's model has no pane: the model takes the frame's window"
+  (lambda ()
+    (with-fresh-group "zz-panes-adopt-frame"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-af-a" "zz-a-mode")))
+          (unwind-protect
+            (lambda ()
+              (switch-to-buffer-here! a)
+              (delete-other-windows!)
+              (panes-layout-set! (panes-empty))
+              (let ((l (panes--ensure-layout!)))
+                (check-equal! (panes-pane-count l) 1 "the empty model took the frame's window")
+                (check-equal! (panes-window-buffer l (car (panes-top-windows l))) a "showing that window's buffer")))
+            (lambda () (pmt-done! (list a)))))))))
+
 (deftest 'coming-back-to-a-group-never-shows-another-groups-buffer
   "a window of A that comes to show B's buffer leaves A's model without it, so coming back to A never shows B's buffer"
   (lambda ()

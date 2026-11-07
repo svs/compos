@@ -5,6 +5,10 @@ defmodule Compos.Core.McpShim do
 
   Compiling this module builds the crate with cargo, as Rustler builds a
   NIF, and puts the binary in `priv/native`. mcp.scm names that path.
+
+  The same shim serves the servers the editor serves besides compos, such
+  as fetch: COMPOS_MCP_SURFACE names the server on the connection's first
+  line.
   """
 
   @crate Path.expand("../../../native/compos_mcp_shim", __DIR__)

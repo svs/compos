@@ -99,9 +99,6 @@
           'prompt-disabled (or (llm-bundle-prompt-disabled nb)
                                (llm-bundle-prompt-disabled live)
                                '())
-          'tools-disabled (or (llm-bundle-tools-disabled nb)
-                              (llm-bundle-tools-disabled live)
-                              '())
           'sandbox (or (llm-bundle-get nb 'sandbox #f) (llm-bundle-get live 'sandbox #f) "group"))))
 
 ;; BUF's live setup as one whole bundle, with no name

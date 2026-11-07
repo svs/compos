@@ -2,7 +2,9 @@
 //!
 //! An ACP adapter starts each MCP server as a stdio subprocess. This one
 //! does no MCP work. It sends the agent's slug (COMPOS_AGENT) as the first
-//! line, then copies stdin to the socket and the socket to stdout. The
+//! line, then copies stdin to the socket and the socket to stdout. When
+//! COMPOS_MCP_SURFACE names a server the editor serves besides compos (such
+//! as fetch), the line is SLUG, a tab, and that name. The
 //! daemon (Compos.Rpc.McpServer) serves the tools. On stdin EOF the shim
 //! closes its write side; the daemon answers the calls in flight and
 //! closes, and the shim exits.
@@ -30,7 +32,19 @@ fn main() {
         .filter(|c| *c != '\n' && *c != '\r')
         .collect();
 
-    if sock.write_all(format!("{slug}\n").as_bytes()).is_err() {
+    let surface: String = env::var("COMPOS_MCP_SURFACE")
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !matches!(*c, '\n' | '\r' | '\t'))
+        .collect();
+
+    let line = if surface.is_empty() {
+        format!("{slug}\n")
+    } else {
+        format!("{slug}\t{surface}\n")
+    };
+
+    if sock.write_all(line.as_bytes()).is_err() {
         process::exit(1);
     }
 

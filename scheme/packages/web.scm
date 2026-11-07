@@ -2676,3 +2676,7 @@ the tabs. C-s searches to any link.")
             (else (web-fetch--page text (or (plist-get args 'start_index) 0)
                                    (or (plist-get args 'max_length) 20000))))))
   '(read external))
+
+;; fetch is its own MCP server in the hub, not part of compos: a chat holds it
+;; through a preset (web), so a group can leave it out
+(tool-server! 'fetch 'fetch)

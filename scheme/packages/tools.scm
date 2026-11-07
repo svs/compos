@@ -38,13 +38,36 @@
       (catalog-register! 'tool name description))
   name)
 
-(define (llm-tool-specs)
-  (map (lambda (t)
-         (list (symbol->string (car t))
-               (plist-get (cadr t) 'description)
-               (plist-get (cadr t) 'params)
-               (plist-get (cadr t) 'effects)))
-       (reverse *llm-tools*)))
+;; A tool can belong to an MCP server of its own instead of compos. The
+;; editor still serves it, but the hub lists that server apart, and a chat
+;; holds it only through a preset, as it holds any other server.
+(define *tool-servers* '())
+
+(define (tool-server! tool server)
+  (set! *tool-servers* (alist-put *tool-servers* tool server))
+  server)
+
+(define (tool-server tool)
+  (let ((e (assq tool *tool-servers*)))
+    (if e (cadr e) 'compos)))
+
+;; the servers the editor serves besides compos
+(define (tool-servers)
+  (fold (lambda (acc e) (if (member (cadr e) acc) acc (append acc (list (cadr e)))))
+        '() *tool-servers*))
+
+;; the tools SERVER serves; compos when SERVER is #f
+(define (llm-tool-specs &optional server)
+  (let ((server (cond ((not server) 'compos)
+                      ((string? server) (string->symbol server))
+                      (else server))))
+    (map (lambda (t)
+           (list (symbol->string (car t))
+                 (plist-get (cadr t) 'description)
+                 (plist-get (cadr t) 'params)
+                 (plist-get (cadr t) 'effects)))
+         (filter (lambda (t) (eq? (tool-server (car t)) server))
+                 (reverse *llm-tools*)))))
 
 ;; tool-call-hook is the one seam that can still say no. Each function on
 ;; it gets (NAME ARGS) and answers #f to stay out of the way; the first
@@ -1634,22 +1657,10 @@
 ;;; these two. Payloads are base64 both ways — RPC eval returns printed
 ;;; values, and printed-string escaping is not JSON-safe for every byte.
 
-;; SLUG names the agent's chat; its tool list leaves out the tools that
-;; chat turned off. No slug, or a chat that is gone, gets the whole registry.
-(define (mcp-proxy--chat slug)
-  (and (string? slug) (not (equal? slug "")) (agent-info slug) (agent-buf slug)))
-
-(define (mcp-proxy-tools-json &optional slug)
-  (let ((chat (mcp-proxy--chat slug)))
-    (base64-encode
-      (tool-specs-json
-        (if (and chat (boundp (quote chat-compos-tool-specs)))
-            (chat-compos-tool-specs chat)
-            (llm-tool-specs))))))
-
-(define (mcp-proxy--tool-off? slug name)
-  (let ((chat (mcp-proxy--chat slug)))
-    (and chat (boundp (quote chat-tool-on?)) (not (chat-tool-on? chat name)))))
+;; SERVER names the surface the connection serves: compos, or a server a
+;; tool belongs to, such as fetch. Each is its own entry in the hub.
+(define (mcp-proxy-tools-json &optional server)
+  (base64-encode (tool-specs-json (llm-tool-specs server))))
 
 ;; The third chokepoint. In auto mode the agent stops asking us ANYTHING,
 ;; and every deny-listed verb reaches the world through one of our three
@@ -1912,15 +1923,6 @@
                      (decide-refusal kind)))))))
 
 (define (mcp-proxy-call name args-b64 &optional author)
-  ;; a tool the agent's chat turned off is not there: the tool list left it
-  ;; out, and a call that names it anyway gets this answer
-  (if (mcp-proxy--tool-off? (and author (string-prefix? "agent:" author)
-                                 (substring author 6 (string-length author)))
-                            name)
-      (base64-encode (string-append "error: the tool " name " is turned off in this chat"))
-      (mcp-proxy--call name args-b64 author)))
-
-(define (mcp-proxy--call name args-b64 author)
   (let* ((args-json (base64-decode args-b64))
          (raw (mcp-proxy--call-text name args-json))
          ;; the author names the thread when one is attributed; otherwise
@@ -2033,6 +2035,10 @@
 
 (category! 'chat)
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
+(public! 'tool-server! "(tool-server! 'TOOL 'SERVER) — serve TOOL as an MCP server of its own, not as part of compos")
+(public! 'tool-server "(tool-server 'TOOL) — the server that serves TOOL; compos unless tool-server! named one")
+(public! 'tool-servers "(tool-servers) — the servers the editor serves besides compos")
+(public! 'llm-tool-specs "(llm-tool-specs [SERVER]) — the tool specs SERVER serves; compos by default")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")
 
 ;; chat integration: chat-send routes through llm-with-tools when this is on

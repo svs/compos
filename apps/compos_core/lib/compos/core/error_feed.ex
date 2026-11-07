@@ -17,10 +17,72 @@ defmodule Compos.Core.ErrorFeed do
   @id :compos_error_feed
   @max_text 4_000
 
+  # One fault can log thousands of times a second: a descriptor storm
+  # logged `emfile` 74,000 times in two minutes, and every one became an
+  # event. Each signature publishes at most once a window; the repeats in
+  # the window go to daemon.log only.
+  @window_ms 10_000
+  @table :compos_error_feed_windows
+  @holder :compos_error_feed_holder
+
   @doc "Add the handler; again replaces it. The application calls this at boot."
   def install do
+    ensure_table()
     :logger.remove_handler(@id)
     :logger.add_handler(@id, __MODULE__, %{level: :error})
+  end
+
+  # The table outlives the caller: a small holder process owns it
+  defp ensure_table do
+    if Process.whereis(@holder) == nil do
+      parent = self()
+
+      pid =
+        spawn(fn ->
+          if :ets.whereis(@table) == :undefined,
+            do: :ets.new(@table, [:named_table, :public, :set, write_concurrency: true])
+
+          send(parent, {@holder, :ready})
+          Process.sleep(:infinity)
+        end)
+
+      try do
+        Process.register(pid, @holder)
+      rescue
+        _ -> Process.exit(pid, :kill)
+      end
+
+      receive do
+        {@holder, :ready} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  True for the first occurrence of SIGNATURE in the current window, false
+  for a repeat. Without the table every occurrence is the first.
+  """
+  def first_in_window?(signature, now_ms \\ System.monotonic_time(:millisecond)) do
+    if :ets.whereis(@table) == :undefined do
+      true
+    else
+      window = div(now_ms, @window_ms)
+      key = {signature, window}
+
+      case :ets.update_counter(@table, key, 1, {key, 0}) do
+        1 ->
+          # a new window for this signature: drop the windows before it
+          :ets.select_delete(@table, [{{{:_, :"$1"}, :_}, [{:<, :"$1", window}], [true]}])
+          true
+
+        _ ->
+          false
+      end
+    end
   end
 
   @doc false
@@ -35,12 +97,17 @@ defmodule Compos.Core.ErrorFeed do
   defp publish(msg, meta) do
     Logger.metadata([{@id, true}])
     text = msg |> text(meta) |> String.slice(0, @max_text)
+    sig = signature(text, meta)
+    # a hot reload does not run install again: the first error makes the table
+    if :ets.whereis(@table) == :undefined, do: ensure_table()
 
-    Compos.Core.Events.publish("compos:error", :logged, %{
-      text: text,
-      signature: signature(text, meta),
-      source: source(meta)
-    })
+    if first_in_window?(sig) do
+      Compos.Core.Events.publish("compos:error", :logged, %{
+        text: text,
+        signature: sig,
+        source: source(meta)
+      })
+    end
   rescue
     _ -> :ok
   catch

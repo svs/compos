@@ -1,52 +1,40 @@
 defmodule Compos.Core.Agent do
   @moduledoc """
-  One agent thread: a GenServer owning backend-agnostic thread machinery —
-  status machine (`:starting → :idle → :running → :needs_attention → :dead`),
-  prompt queue, ordered event pipeline, output mark, permission bookkeeping.
-  Turn execution lives behind `Compos.Core.Agent.Backend` (ACP subprocess,
-  in-process LLM, test stub). Everything visible (transcript rendering,
-  keybindings, presets, the *agents* list) is Scheme in
-  `scheme/packages/agent.scm`.
+  One agent thread: a GenServer that owns the backend adapter, the timers,
+  the context fetch and the ordered event pipe to Scheme. What the thread
+  does with each message is Scheme's: `agent-step` in
+  `scheme/packages/agent-machine.scm` keeps the status machine
+  (`starting -> idle -> running -> needs_attention -> dead`), the prompt
+  queue, steering and its settlement, the idle park and the revive, and
+  the permission and question slots. This process calls it in place (the
+  step is pure, so it needs no lane) and runs the effects it answers.
+  Turn execution lives behind `Compos.Core.Agent.Backend`; everything
+  visible is Scheme in `scheme/packages/agent.scm`.
 
-  Events are delivered to Scheme in ordered batches through the owning
-  `LLMSession` callback (or the default registered by chat), via
-  `Session.apply_callback` from a Task — never synchronously from this process,
-  so Session -> Agent calls can't deadlock.
-  Adjacent text chunks coalesce in a short frame-sized batch. A batch in flight
-  buffers the next, and a batch is bounded in size as well as in time: a
-  burst of events applies in slices of `@batch_max_events`, so an eval queued
-  on the same lane waits behind one slice, never behind the whole burst.
-  This keeps token streaming from monopolizing Scheme input.
+  Events reach Scheme in ordered batches through the owning `LLMSession`
+  callback (or the default registered by chat), via `Session.apply_callback`
+  from a Task, never synchronously from this process, so Session -> Agent
+  calls cannot deadlock. A batch in flight buffers the next, and a batch is
+  bounded in size as well as in time (`@batch_max_events`), so an eval
+  queued on the same lane waits behind one slice, never a whole burst.
 
-  The output mark: agent text inserts at `mark`, always before the steering
-  prompt marker at buffer end. `append_at_mark/2` is called by Scheme (the
-  renderer); the mark chases user edits above it via buffer change events.
+  The output mark: agent text inserts at the buffer-local
+  'agent-saved-mark, always before the input at buffer end.
   """
 
   use GenServer, restart: :temporary
 
+  require Logger
+
   alias Compos.Core.{Buffer, Session}
   alias Compos.Core.Agent.Backend
+  alias Compos.Scheme
 
   @registry Compos.Core.AgentRegistry
   alias Compos.Core.Roots
   @chunk_batch_ms 25
   @batch_max_events 200
-
-  # How long a steered turn waits, after the cycle result the adapter
-  # settles on, for the reply to session/prompt. The healthy reply follows
-  # the result within milliseconds, so this only expires when the adapter
-  # lost the idle it needed. Scheme overrides it per turn through the turn
-  # context (steer-settle-seconds); 0 turns the recovery off.
-  @settle_grace_ms 180_000
-
-  # How long a turn waits for the connector to say ANYTHING. A connector
-  # that takes the prompt and emits no event at all cannot end its own
-  # turn, so the chat waits at "waiting..." for good. The number is high on
-  # purpose: the direct lane's first event is the first token, and a slow
-  # model must never lose a live turn to this. Scheme overrides it per turn
-  # through the turn context (silent-turn-seconds); 0 turns the recovery off.
-  @silent_grace_ms 180_000
+  @idle_default_ms 600_000
 
   # --- api --------------------------------------------------------------------
 
@@ -203,6 +191,7 @@ defmodule Compos.Core.Agent do
     Roots.get({:agent_lane, slug}) || {:agent, slug}
   end
 
+
   @impl true
   def init(opts) do
     # Backends are linked per session. A subprocess/protocol crash must mark
@@ -223,14 +212,16 @@ defmodule Compos.Core.Agent do
 
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
-    capabilities = backend.capabilities()
+    caps = backend.capabilities()
 
     steering =
       cond do
-        :push_steering in capabilities -> :push
-        :boundary_steering in capabilities -> :boundary
-        true -> :none
+        :push_steering in caps -> "push"
+        :boundary_steering in caps -> "boundary"
+        true -> "none"
       end
+
+    {:ok, m} = scheme("agent-machine-new", [sym(steering), idle_ms(config), :stateless in caps])
 
     {:ok,
      %{
@@ -239,351 +230,61 @@ defmodule Compos.Core.Agent do
        config: config,
        backend: backend,
        handle: handle,
-       status: :starting,
+       m: m,
+       timers: %{},
+       waiters: %{},
        events: [],
        in_flight: false,
-       delivery_timer: nil,
-       context_pending: false,
-       prompt_queue: [],
-       steering_queue: [],
-       pending_steers: %{},
-       pending_steer_order: [],
-       steering_fallbacks: [],
-       pending_turn_end: nil,
-       steering_settle_timer: nil,
-       # A steer moves an ACP turn's settlement off the model result and
-       # onto an idle signal the adapter can lose, so a steered turn can
-       # end with no reply to session/prompt. These two fields are the
-       # recovery: the turn remembers that it was steered, and the timer
-       # runs from the cycle result the adapter settles on.
-       steered_turn: false,
-       settle_timer: nil,
-       settle_grace_ms: @settle_grace_ms,
-       # The other silence: a turn that never produced a first event. The
-       # timer runs from the moment the prompt goes to the connector and
-       # stops at the connector's first word.
-       silent_timer: nil,
-       silent_grace_ms: @silent_grace_ms,
-       # how many terminal backend events belong to turns this side has
-       # already ended (see the cancel above): each one is swallowed once
-       stale_turn_ends: 0,
-       next_steer_id: 1,
-       steering: steering,
-       pending_permission: nil,
-       waiting_permissions: [],
-       pending_question: nil,
-       # which turn a context fetch belongs to (see send_prompt)
-       epoch: 0,
-       # ids for the requests WE raise; an adapter's own requests arrive
-       # carrying theirs
-       next_rpc_id: 1,
-       # the backend's session id (the :session event), which an idle park
-       # and a daemon restart hand back to the next adapter as
-       # "resume-session"; nil until the backend names one
-       resume: nil,
-       # the idle clock: a thread idle this long closes its adapter
-       idle_timer: nil,
-       idle_ms: idle_ms(config)
+       delivery_timer: nil
      }}
   end
 
-  @impl true
-  def handle_call({:prompt, text, display, images}, _from, state) do
-    case state.pending_question do
-      %{id: id} ->
-        answer = display || text
-        {:reply, :answered, resolve_question(state, id, answer)}
-
-      nil ->
-        prompt_call(text, display, images, state)
+  defp idle_ms(config) do
+    case Map.get(config, "idle-seconds") do
+      s when is_integer(s) and s >= 0 -> s * 1000
+      _ -> Application.get_env(:compos_core, :agent_idle_ms, @idle_default_ms)
     end
   end
+
+  @impl true
+  def handle_call(msg, from, state), do: call_in(msg, from, upgrade(state))
 
   # parked (no adapter): a choice made now rides in the config the next
   # adapter starts with, so nothing is lost and nothing is woken for it
-  def handle_call({:set_model, model_id}, _from, %{handle: nil} = state),
+  defp call_in({:set_model, model_id}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "model", model_id)}}
 
-  def handle_call({:set_effort, effort}, _from, %{handle: nil} = state),
+  defp call_in({:set_effort, effort}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "effort", effort)}}
 
-  def handle_call({:set_mode, mode_id}, _from, %{handle: nil} = state),
+  defp call_in({:set_mode, mode_id}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "mode", mode_id)}}
 
-  def handle_call(:cancel, _from, %{handle: nil} = state), do: {:reply, :ok, state}
-
-  def handle_call({:set_model, model_id}, _from, state),
+  defp call_in({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
 
-  def handle_call({:set_effort, effort}, _from, state) do
-    if :reasoning_effort in state.backend.capabilities() do
-      {:reply, state.backend.set_effort(state.handle, effort), state}
-    else
-      {:reply, {:error, :unsupported}, state}
-    end
-  end
+  defp call_in({:set_effort, effort}, _from, state),
+    do: {:reply, if_capable(state, :reasoning_effort, &(&1.set_effort(state.handle, effort))), state}
 
-  def handle_call({:set_mode, mode_id}, _from, state) do
-    if :session_modes in state.backend.capabilities() do
-      {:reply, state.backend.set_mode(state.handle, mode_id), state}
-    else
-      {:reply, {:error, :unsupported}, state}
-    end
-  end
+  defp call_in({:set_mode, mode_id}, _from, state),
+    do: {:reply, if_capable(state, :session_modes, &(&1.set_mode(state.handle, mode_id))), state}
 
-  def handle_call(:take_steering, _from, %{steering_queue: [_ | _] = queue, status: s} = state)
-      when s in [:running, :needs_attention] do
-    state =
-      Enum.reduce(queue, state, fn {text, display, _images}, acc ->
-        enqueue(acc, Backend.plist(type: :"user-msg", text: display || text))
-      end)
-
-    # steering joins a turn already in flight, where only text can land.
-    # An attachment's path rides in that text, so nothing is lost silently.
-    {:reply, for({t, d, _} <- queue, do: {t, d}), %{state | steering_queue: []}}
-  end
-
-  def handle_call(:take_steering, _from, state), do: {:reply, [], state}
-
-  # A turn whose end already arrived takes no steer. The backend is finished
-  # with it, so an accepted steer lands a user message in a closed turn: the
-  # transcript shows it as sent and nothing ever answers it. The message
-  # stays in the queue, and finish_turn's pop_prompt_queue sends it as its
-  # own turn.
-  def handle_call(:steer_next, _from, %{pending_turn_end: event} = state)
-      when not is_nil(event),
-      do: {:reply, {:error, :turn_ending}, state}
-
-  def handle_call(:steer_next, _from, state) do
-    case {state.status, state.steering, state.prompt_queue} do
-      {s, :push, [{text, display, _images} | rest]} when s in [:running, :needs_attention] ->
-        token = state.next_steer_id
-
-        case state.backend.steer(state.handle, token, text, display, state.epoch) do
-          :ok ->
-            pending = Map.put(state.pending_steers, token, {text, display, state.epoch, :pending})
-
-            {:reply, :sent,
-             %{
-               state
-               | prompt_queue: rest,
-                 pending_steers: pending,
-                 pending_steer_order: state.pending_steer_order ++ [token],
-                 next_steer_id: token + 1
-             }}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
-
-      {s, :boundary, [next | rest]} when s in [:running, :needs_attention] ->
-        {:reply, :sent,
-         %{state | prompt_queue: rest, steering_queue: state.steering_queue ++ [next]}}
-
-      {_status, :none, _queue} ->
-        {:reply, {:error, :unsupported}, state}
-
-      {_status, _steering, []} ->
-        {:reply, {:error, :empty}, state}
-
-      _ ->
-        {:reply, {:error, :not_running}, state}
-    end
-  end
-
-  def handle_call({:dequeue, text}, _from, state) do
-    case Enum.split_while(state.prompt_queue, fn {t, d, _} -> (d || t) != text end) do
-      {_, []} -> {:reply, {:error, :not_found}, state}
-      {before, [_ | rest]} -> {:reply, :ok, %{state | prompt_queue: before ++ rest}}
-    end
-  end
-
-  def handle_call({:promote, text}, _from, state) do
-    case Enum.split_while(state.prompt_queue, fn {t, d, _} -> (d || t) != text end) do
-      {_, []} -> {:reply, {:error, :not_found}, state}
-      {before, [hit | rest]} -> {:reply, :ok, %{state | prompt_queue: [hit | before ++ rest]}}
-    end
-  end
-
-  def handle_call(:cancel, _from, state) do
-    # Abort means the whole pending run list. A terminal backend event may
-    # still arrive for the active turn, but it must not start queued work.
-    # Advancing the epoch also discards a context fetch for a cancelled turn.
-    context_pending = state.context_pending
-    deferred_turn_end = state.pending_turn_end
-    state = cancel_steering_settle_timer(state)
-
-    state = %{
-      state
-      | prompt_queue: [],
-        steering_queue: [],
-        pending_steers: %{},
-        pending_steer_order: [],
-        steering_fallbacks: [],
-        pending_turn_end: nil,
-        steering_settle_timer: nil,
-        epoch: state.epoch + 1,
-        context_pending: false
-    }
-
-    state =
-      if state.pending_question,
-        do: resolve_question(state, state.pending_question.id, nil),
-        else: state
-
-    state =
-      cond do
-        deferred_turn_end ->
-          finish_turn(state, deferred_turn_end)
-
-        context_pending ->
-          state
-          |> enqueue(Backend.plist(type: :"turn-end", "stop-reason": "cancelled"))
-          |> set_status(:idle)
-
-        state.status in [:running, :needs_attention] ->
-          # Tell the backend, then end the turn HERE. A cancel that only
-          # asks is a cancel a wedged adapter can ignore -- ACP's
-          # session/cancel is a notification with no reply, so a turn whose
-          # prompt reply never comes would stay :running for good and the
-          # chat would say "streaming" at a model that stopped, with every
-          # later message queued behind it. The user said stop: the turn is
-          # over on this side now, whatever the wire does later.
-          state.backend.cancel(state.handle)
-
-          finish_turn(
-            %{state | stale_turn_ends: state.stale_turn_ends + 1},
-            Backend.plist(type: :"turn-end", "stop-reason": "cancelled")
-          )
-
-        true ->
-          state
-      end
-
-    {:reply, :ok, state}
-  end
-
-  # a backend that runs its own turns asks US. No immediate reply: the
-  # verdict comes when the banner, a deadline, or a close resolves the
-  # slot — the same slot an adapter's own request would occupy.
-  def handle_call({:ask_permission, req}, from, state) do
-    id = state.next_rpc_id
-
-    options = [
-      ["allow", "Allow", "allow_once"],
-      ["always", "Always", "allow_always"],
-      ["deny", "Deny", "reject_once"]
-    ]
-
-    pending = %{
-      rpc_id: id,
-      title: req.title,
-      kind: req.kind,
-      options: for([oid, name, kind] <- options, do: {oid, name, kind}),
-      # WE asked: the verdict goes back to this caller, not out to a backend
-      from: from
-    }
-
-    # a card the editor raised itself may carry its own deadline; nobody
-    # answering it in time is a no
-    if ms = req[:timeout_ms], do: Process.send_after(self(), {:permission_timeout, id}, ms)
-
-    state =
-      %{state | next_rpc_id: id + 1}
-      |> add_permission(pending)
-      |> set_status(:needs_attention)
-      |> enqueue(
-        Backend.plist(
-          type: :permission,
-          "rpc-id": id,
-          title: req.title,
-          kind: req.kind,
-          raw: req.raw,
-          options: options,
-          # the editor asked because its own policy said ask: the card
-          # shows, and no chat policy answers it on the user's behalf
-          editor: true
-        )
-      )
-
-    {:noreply, state}
-  end
-
-  def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
-    # CAS on rpc_id: only the request still pending resolves, and a stale
-    # answer is a silent no-op
-    {:reply, :ok, resolve_permission(state, rpc_id, option_id)}
-  end
-
-  # A question is a tool call, not a permission request. It has its own
-  # pending slot and returns the selected label (or typed answer) to the
-  # blocked tool task.
-  def handle_call({:ask_user, question, answers}, from, state) do
-    cond do
-      state.pending_question ->
-        {:reply, {:error, :question_already_pending}, state}
-
-      true ->
-        id = state.next_rpc_id
-        answers = answers |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == ""))
-
-        pending = %{
-          id: id,
-          question: question,
-          answers: answers,
-          from: from
-        }
-
-        state =
-          %{state | next_rpc_id: id + 1, pending_question: pending}
-          |> set_status(:needs_attention)
-          |> enqueue(
-            Backend.plist(
-              type: :question,
-              id: id,
-              question: question,
-              answers: answers
-            )
-          )
-
-        {:noreply, state}
-    end
-  end
-
-  def handle_call({:respond_question, question_id, answer}, _from, state) do
-    {:reply, :ok, resolve_question(state, question_id, answer)}
-  end
-
-  def handle_call({:permission_deadline, ms}, _from, state) do
-    case state.pending_permission do
-      %{rpc_id: id} ->
-        Process.send_after(self(), {:permission_timeout, id}, ms)
-        {:reply, :ok, state}
-
-      _ ->
-        {:reply, :ok, state}
-    end
-  end
-
-  def handle_call({:append_at_mark, text}, _from, state) do
+  defp call_in({:append_at_mark, text}, _from, state) do
     # The buffer-local 'agent-saved-mark is the one truth for where the
-    # transcript ends. This process held a second copy once, synced over
-    # change events; the copies drifted, and every later insert wrote
-    # transcript text into the input region. The buffer computes the
-    # position and advances the local inside one message.
+    # transcript ends; the buffer computes the position and advances the
+    # local inside one message.
     try do
       {:reply,
        Buffer.insert_at_local(state.buffer_ref, "agent-saved-mark", text,
          source: {:agent, state.slug}
        ), state}
     catch
-      # Rendering is downstream of the backend. Killing the target buffer
-      # must discard a late chunk, not kill the session process with :noproc.
+      # a killed target buffer discards a late chunk, never this process
       :exit, _ -> {:reply, {:error, :no_buffer}, state}
     end
   end
 
-  def handle_call(:mark, _from, state) do
+  defp call_in(:mark, _from, state) do
     mark =
       try do
         Buffer.get_local(state.buffer_ref, "agent-saved-mark") ||
@@ -595,828 +296,267 @@ defmodule Compos.Core.Agent do
     {:reply, mark, state}
   end
 
-  def handle_call(:info, _from, state) do
+  defp call_in(:info, _from, state) do
+    {:ok, info} = scheme("agent-machine-info", [state.m])
+    info = info |> Enum.chunk_every(2) |> Map.new(fn [{:sym, k}, v] -> {String.to_atom(k), v} end)
     {:reply,
      %{
-       slug: state.slug,
-       buffer: Buffer.name(state.buffer_ref),
-       buffer_id: Buffer.id(state.buffer_ref),
-       status: state.status,
-       # idle with its adapter closed: the next prompt reopens the session
-       parked: is_nil(state.handle),
-       session: Map.get(state, :resume),
-       queued:
-         length(state.prompt_queue) + length(state.steering_queue) +
-           map_size(state.pending_steers) + length(state.steering_fallbacks),
-       steering: state.steering != :none,
-       # the turn the backend already ended, still held open behind an
-       # unresolved steer. Every stall in this area lived in this field and
-       # nothing reported it.
-       ending: not is_nil(state.pending_turn_end),
-       # a steered turn whose result landed, counting down to the recovery
-       settling: not is_nil(Map.get(state, :settle_timer)),
-       # a turn the connector has not answered with one event yet
-       silent: not is_nil(Map.get(state, :silent_timer)),
-       steers: length(state.pending_steer_order),
-       permission:
-         case state.pending_permission do
-           %{rpc_id: id, title: title, options: opts} ->
-             %{rpc_id: id, title: title, options: opts}
-
-           nil ->
-             nil
-         end,
-       question:
-         case state.pending_question do
-           %{id: id, question: question, answers: answers} ->
-             %{id: id, question: question, answers: answers}
-
-           nil ->
-             nil
-         end
-     }, state}
+       info
+       | status: elixir(info.status),
+         session: nil?(info.session),
+         permission: shape(info.permission, [:rpc_id, :title, :options]),
+         question: shape(info.question, [:id, :question, :answers])
+     }
+     |> Map.merge(%{slug: state.slug, buffer: Buffer.name(state.buffer_ref), buffer_id: Buffer.id(state.buffer_ref)}),
+     state}
   end
 
-  # parked: the adapter was closed while the thread sat idle. Open a new
-  # one on the old session; the prompt waits in the queue until `ready`.
-  defp prompt_call(text, display, images, %{handle: nil, status: :idle} = state),
-    do: {:reply, :queued, state |> revive_backend() |> queue_prompt(text, display, images)}
+  # the backend's verdict on a push steer decides the reply, so it is
+  # asked inside the same call
+  defp call_in(:steer_next, _from, state) do
+    case step(state, [sym("steer-next")]) do
+      {[{:sym, "steer"}, token, text, display, epoch], state} ->
+        result =
+          case state.backend.steer(state.handle, token, text, nil?(display), epoch) do
+            :ok -> sym("ok")
+            {:error, why} -> [sym("error"), why]
+          end
 
-  defp prompt_call(text, display, images, state) do
-    case state.status do
-      :idle ->
-        {:reply, :sent, send_prompt(state, text, display, images)}
+        {reply, state} = step(state, [sym("steered"), token, result])
+        {:reply, elixir(reply), state}
 
-      s when s in [:starting, :running, :needs_attention] ->
-        {:reply, :queued, queue_prompt(state, text, display, images)}
-
-      :dead ->
-        {:reply, {:error, :dead}, state}
+      {reply, state} ->
+        {:reply, elixir(reply), state}
     end
   end
 
-  # --- backend events ----------------------------------------------------------
+  defp call_in(msg, from, state) do
+    case step(state, machine_msg(msg)) do
+      # a backend that runs its own turns asks US; the verdict comes when
+      # the banner, a deadline or a close resolves the slot
+      {[{:sym, "defer"}, id], state} -> {:noreply, put_in(state.waiters[id], from)}
+      {reply, state} -> {:reply, elixir(reply), state}
+    end
+  end
+
+  defp machine_msg({:prompt, text, display, images}),
+    do: [sym("prompt"), text, display || false, images]
+
+  defp machine_msg(:take_steering), do: [sym("take-steering")]
+  defp machine_msg({:dequeue, text}), do: [sym("dequeue"), text]
+  defp machine_msg({:promote, text}), do: [sym("promote"), text]
+  defp machine_msg(:cancel), do: [sym("cancel")]
+  defp machine_msg({:respond_permission, id, option}), do: [sym("respond-permission"), id, option || false]
+  defp machine_msg({:permission_deadline, ms}), do: [sym("permission-deadline"), ms]
+  defp machine_msg({:respond_question, id, nil}), do: [sym("respond-question"), id, false]
+  defp machine_msg({:respond_question, id, answer}), do: [sym("respond-question"), id, to_string(answer)]
+
+  defp machine_msg({:ask_user, question, answers}),
+    do: [sym("ask-user"), question, answers |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == ""))]
+
+  defp machine_msg({:ask_permission, req}),
+    do: [sym("ask-permission"), sv(req.title), sv(req.kind), sv(req.raw), req[:timeout_ms] || false]
+
+  defp shape(false, _keys), do: nil
+
+  defp shape(values, keys) do
+    m = keys |> Enum.zip(values) |> Map.new()
+    if is_map_key(m, :options), do: %{m | options: Enum.map(m.options, &List.to_tuple/1)}, else: m
+  end
+
+  defp if_capable(state, cap, fun),
+    do: if(cap in state.backend.capabilities(), do: fun.(state.backend), else: {:error, :unsupported})
+
+  # --- messages ---------------------------------------------------------------
 
   @impl true
-  def handle_info({:backend_event, event}, state) do
-    {:noreply, apply_backend_event(state, event)}
-  end
+  def handle_info(msg, state), do: info_in(msg, upgrade(state))
 
-  def handle_info({:EXIT, handle, reason}, %{handle: handle} = state) do
+  defp info_in({:backend_event, event}, state),
+    do: {:noreply, state |> step([sym("backend-event"), event]) |> elem(1)}
+
+  defp info_in({:EXIT, handle, reason}, %{handle: handle} = state) do
     state =
-      state
-      |> then(fn s ->
-        if reason in [:normal, :shutdown],
-          do: s,
-          else:
-            enqueue(
-              s,
-              Backend.plist(type: :error, text: "backend exited: #{Backend.error_text(reason)}")
-            )
-      end)
-      |> apply_backend_event(Backend.plist(type: :dead, exit: Backend.error_text(reason)))
+      if reason in [:normal, :shutdown],
+        do: state,
+        else: enqueue(state, Backend.plist(type: :error, text: "backend exited: #{Backend.error_text(reason)}"))
 
-    {:noreply, state}
+    info_in({:backend_event, Backend.plist(type: :dead, exit: Backend.error_text(reason))}, state)
   end
 
-  # the context for a turn that is still the current one
-  def handle_info({:context, epoch, text, display, images, sent_at, result}, %{epoch: epoch} = state) do
-    state = %{state | context_pending: false}
-
-    case result do
-      {:ok, context} ->
-        context = context |> Map.put(:display, display) |> Map.put(:images, images)
-        state.backend.prompt(state.handle, text, Map.put(context, :sent_at, sent_at))
-
-        state =
-          state
-          |> settle_grace_from(context)
-          |> silent_grace_from(context)
-          |> arm_silent()
-
-        {:noreply, state}
-
-      {:error, why} ->
-        state =
-          state
-          |> enqueue(Backend.plist(type: :error, text: why))
-          |> set_status(:idle)
-          |> pop_prompt_queue()
-
-        {:noreply, state}
-    end
+  # the context comes back stamped with the turn it was fetched for; the
+  # machine drops one for a turn that was cancelled meanwhile
+  defp info_in({:context, epoch, text, display, images, sent_at, {:ok, context}}, state) do
+    context = Map.merge(context, %{display: display, images: images, sent_at: sent_at})
+    msg = [sym("context"), epoch, sym("ok"), context[:steer_settle_seconds] || false, context[:silent_turn_seconds] || false]
+    {_, state} = step(Map.put(state, :turn, {text, context}), msg)
+    {:noreply, Map.delete(state, :turn)}
   end
 
-  # ...and for one that was cancelled while we were fetching it
-  def handle_info({:context, _epoch, _text, _display, _images, _result}, state),
-    do: {:noreply, state}
+  defp info_in({:context, epoch, _text, _display, _images, _sent_at, {:error, why}}, state),
+    do: {:noreply, state |> step([sym("context"), epoch, sym("error"), why]) |> elem(1)}
 
-  # nobody is looking at this chat and nobody answered — deny and say so,
-  # rather than leaving the turn wedged forever
-  def handle_info({:permission_timeout, id}, state) do
-    case Enum.find(permissions(state), &(&1.rpc_id == id)) do
-      %{title: title} ->
-        state =
-          state
-          |> enqueue(Backend.plist(type: :"permission-timeout", title: title))
-          |> resolve_permission(id, nil)
-
-        {:noreply, state}
-
-      _ ->
-        {:noreply, state}
-    end
+  defp info_in({:timer, name, token, msg}, state) do
+    if Map.get(state.timers, name) == token,
+      do: {:noreply, state |> Map.update!(:timers, &Map.delete(&1, name)) |> step(msg) |> elem(1)},
+      else: {:noreply, state}
   end
 
-  def handle_info({:deliver_events, token}, %{delivery_timer: {_timer, token}} = state) do
-    {:noreply, state |> Map.put(:delivery_timer, nil) |> maybe_deliver()}
-  end
+  defp info_in({:step, msg}, state), do: {:noreply, state |> step(msg) |> elem(1)}
 
-  def handle_info({:deliver_events, _stale}, state), do: {:noreply, state}
+  defp info_in({:permission_timeout, id}, state),
+    do: info_in({:step, [sym("permission-timeout"), id]}, state)
 
-  def handle_info(
-        {:steering_settle_timeout, epoch},
-        %{epoch: epoch, pending_turn_end: event} = state
-      )
-      when not is_nil(event) do
-    # The turn is confirmed complete, so an unacknowledged steer can no
-    # longer be trusted as delivered. Put every unresolved entry back in
-    # submission order and let the ordinary queue make progress. Supported
-    # push backends acknowledge consumed steering before terminal completion;
-    # this timeout is recovery for a lost or malformed protocol response.
-    pending =
-      Map.new(state.pending_steers, fn
-        {token, {text, display, steer_epoch, :pending}} ->
-          {token, {text, display, steer_epoch, :fallback}}
+  defp info_in({:deliver_events, token}, %{delivery_timer: {_timer, token}} = state),
+    do: {:noreply, state |> Map.put(:delivery_timer, nil) |> maybe_deliver()}
 
-        entry ->
-          entry
-      end)
-
-    state =
-      %{state | pending_steers: pending, steering_settle_timer: nil}
-      |> drain_settled_steering()
-      |> maybe_finish_deferred_turn()
-
-    {:noreply, state}
-  end
-
-  # a stale-epoch timeout still spent its timer: clear the ref, or the
-  # dead reference blocks re-arming and parks every later turn-end
-  def handle_info({:steering_settle_timeout, _stale_epoch}, state),
-    do: {:noreply, %{state | steering_settle_timer: nil}}
-
-  # The steered turn produced its result and then said nothing, and the
-  # adapter never answered session/prompt. The turn is over: the adapter
-  # settles such a turn on an idle signal, and it lost that idle. End the
-  # turn HERE, tell the adapter so it drops the turn it still holds, and
-  # swallow the reply if one arrives after all.
-  def handle_info({:settle_grace, epoch}, %{epoch: epoch, status: :running} = state) do
-    grace = Map.get(state, :settle_grace_ms, @settle_grace_ms)
-    state = Map.put(state, :settle_timer, nil)
-    state.backend.cancel(state.handle)
-
-    state =
-      state
-      |> enqueue(Backend.plist(type: :"turn-settled", seconds: div(grace, 1000)))
-      |> Map.put(:stale_turn_ends, state.stale_turn_ends + 1)
-      |> finish_turn(Backend.plist(type: :"turn-end", "stop-reason": "end_turn"))
-
-    {:noreply, state}
-  end
-
-  def handle_info({:settle_grace, _stale}, state),
-    do: {:noreply, Map.put(state, :settle_timer, nil)}
-
-  # The connector took the prompt and said nothing at all: no chunk, no
-  # tool, no result, no end. Such a turn never closes itself, so the chat
-  # waits for good. End it HERE and tell the adapter to drop the turn it
-  # still holds. Scheme decides what happens to the session next.
-  def handle_info({:silent_turn, epoch}, %{epoch: epoch, status: :running} = state) do
-    grace = Map.get(state, :silent_grace_ms, @silent_grace_ms)
-    state = Map.put(state, :silent_timer, nil)
-    state.backend.cancel(state.handle)
-
-    state =
-      state
-      |> enqueue(Backend.plist(type: :"turn-silent", seconds: div(grace, 1000)))
-      |> Map.put(:stale_turn_ends, state.stale_turn_ends + 1)
-      |> finish_turn(Backend.plist(type: :"turn-end", "stop-reason": "error"))
-
-    {:noreply, state}
-  end
-
-  def handle_info({:idle_park, ref}, %{idle_timer: ref} = state) do
-    state = %{state | idle_timer: nil}
-    if parkable?(state), do: {:noreply, park(state)}, else: {:noreply, state}
-  end
-
-  def handle_info({:idle_park, _stale}, state), do: {:noreply, state}
-
-  def handle_info({:silent_turn, _stale}, state),
-    do: {:noreply, Map.put(state, :silent_timer, nil)}
-
-  def handle_info(_msg, state), do: {:noreply, state}
+  defp info_in(_msg, state), do: {:noreply, state}
 
   @impl true
-  def handle_cast(:batch_done, state) do
-    state = %{state | in_flight: false}
-    {:noreply, deliver_or_schedule(state)}
-  end
+  def handle_cast(:batch_done, state),
+    do: {:noreply, deliver_or_schedule(%{upgrade(state) | in_flight: false})}
 
   @impl true
   def terminate(_reason, state) do
     # a killed thread must never leave anyone blocked on an answer: not an
     # adapter waiting on the wire, and not a turn task waiting on us
-    resolve_all_permissions(state)
-    if state.pending_question, do: resolve_question(state, state.pending_question.id, nil)
-
+    state = upgrade(state)
+    {_, state} = step(state, [sym("terminate")])
     if state.handle, do: state.backend.close(state.handle)
     :ok
   end
 
-  # One place resolves a pending request, whichever side raised it: reply
-  # to the turn task that is blocked on us, or answer the adapter that
-  # asked. Then clear the slot and go back to running.
-  defp resolve_permission(state, option_id) do
-    answer_permission(state, state.pending_permission, option_id)
+  # --- the machine ------------------------------------------------------------
 
+  # One message through agent-step, then its effects, in order. A machine
+  # that fails keeps the old state: the thread stays up and says why.
+  defp step(state, msg) do
+    case scheme("agent-step", [state.m, msg]) do
+      {:ok, [m, reply, effects]} ->
+        {reply, Enum.reduce(effects, %{state | m: m}, &effect/2)}
+
+      {:error, why} ->
+        Logger.error("agent #{state.slug}: agent-step failed on #{inspect(msg, limit: 5)}: #{why}")
+        {[sym("error"), :machine], state}
+    end
+  end
+
+  # The step is pure: it runs here, in this process, over the shared world,
+  # and never waits on a lane.
+  defp scheme(fun, args) do
+    case Scheme.exec(Session.interp(), fn i ->
+           with {:ok, f, i} <- Scheme.eval_string(i, fun), do: Scheme.call(i, f, args)
+         end) do
+      {:ok, val, _} -> {:ok, val}
+      {:error, why} -> {:error, why}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # each event goes at once, as it always did: the first of a burst is a
+  # batch of its own, and the rest gather while it is in flight
+  defp effect([{:sym, "emit"}, event], state), do: enqueue(state, event)
+
+  defp effect([{:sym, "arm"}, {:sym, name}, ms, msg], state) do
+    token = make_ref()
+    Process.send_after(self(), {:timer, name, token, msg}, ms)
+    put_in(state.timers[name], token)
+  end
+
+  defp effect([{:sym, "disarm"}, {:sym, name}], state),
+    do: %{state | timers: Map.delete(state.timers, name)}
+
+  defp effect([{:sym, "after"}, ms, msg], state) do
+    Process.send_after(self(), {:step, msg}, ms)
     state
-    |> next_permission()
-    |> attention_resolved_status()
   end
 
-  # An answer names its request. The request that waits behind the first
-  # one resolves alone and leaves the first one pending.
-  defp resolve_permission(state, rpc_id, option_id) do
-    case state.pending_permission do
-      %{rpc_id: ^rpc_id} ->
-        resolve_permission(state, option_id)
-
-      _ ->
-        case Enum.split_with(waiting_permissions(state), &(&1.rpc_id == rpc_id)) do
-          {[pending | _], rest} ->
-            answer_permission(state, pending, option_id)
-            Map.put(state, :waiting_permissions, rest)
-
-          {[], _} ->
-            state
-        end
-    end
-  end
-
-  defp resolve_all_permissions(state) do
-    if state.pending_permission,
-      do: state |> resolve_permission(nil) |> resolve_all_permissions(),
-      else: state
-  end
-
-  defp answer_permission(state, pending, option_id) do
-    case pending do
-      %{from: from} when not is_nil(from) ->
-        GenServer.reply(from, verdict_of(pending, option_id))
-
-      pending ->
-        state.backend.respond_permission(state.handle, pending.rpc_id, option_id)
-    end
-  end
-
-  # An adapter asks about parallel tool calls at the same time. The second
-  # request waits behind the first. It never replaces the first: a replaced
-  # request gets no answer, and its tool call waits forever.
-  defp add_permission(state, pending) do
-    if state.pending_permission,
-      do: Map.put(state, :waiting_permissions, waiting_permissions(state) ++ [pending]),
-      else: Map.put(state, :pending_permission, pending)
-  end
-
-  defp next_permission(state) do
-    case waiting_permissions(state) do
-      [next | rest] ->
-        state |> Map.put(:pending_permission, next) |> Map.put(:waiting_permissions, rest)
-
-      [] ->
-        Map.put(state, :pending_permission, nil)
-    end
-  end
-
-  # read with Map.get: a running agent holds the state shape from before
-  # this field existed
-  defp waiting_permissions(state), do: Map.get(state, :waiting_permissions, [])
-
-  defp permissions(state),
-    do: List.wrap(state.pending_permission) ++ waiting_permissions(state)
-
-  defp resolve_question(%{pending_question: %{id: id} = pending} = state, id, answer) do
-    answer = if is_nil(answer), do: nil, else: to_string(answer)
-
-    case pending.from do
-      nil ->
-        if function_exported?(state.backend, :respond_question, 3) do
-          state.backend.respond_question(state.handle, id, answer)
-        end
-
-      from ->
-        GenServer.reply(from, if(answer, do: {:ok, answer}, else: {:error, :cancelled}))
-    end
-
-    state
-    |> Map.put(:pending_question, nil)
-    |> enqueue(
-      Backend.plist(
-        type: :"question-answer",
-        id: id,
-        answer: answer || "cancelled"
-      )
-    )
-    |> attention_resolved_status()
-  end
-
-  defp resolve_question(state, _id, _answer), do: state
-
-  defp attention_resolved_status(state) do
-    if state.pending_permission || state.pending_question,
-      do: set_status(state, :needs_attention),
-      else: set_status(state, :running)
-  end
-
-  # The option's KIND is the vocabulary, not its id: an adapter names its
-  # own ids and ours are only ours, but every ACP option declares a kind.
-  # No option (a cancel, a close, a deadline) is a denial.
-  defp verdict_of(_pending, nil), do: :deny
-
-  defp verdict_of(%{options: options}, option_id) do
-    case List.keyfind(options, option_id, 0) do
-      {_, _, "allow_always"} -> :always
-      {_, _, "allow_once"} -> :allow
-      {_, _, kind} -> if String.starts_with?(to_string(kind), "allow"), do: :allow, else: :deny
-      nil -> :deny
-    end
-  end
-
-  # The status machine reads the event stream. A failed backend turn still
-  # becomes a normal terminal event for Scheme. Without that event, the Agent
-  # goes idle while the chat keeps its active flag and waiting presentation.
-  # Bookkeeping events say nothing about whether the turn still produces.
-  # Every other event does: it is output, so the adapter has not reached the
-  # result a steered turn settles on, and the settle grace disarms.
-  @settle_quiet_events ~w(context usage model-state mode-state status cycle-result
-                          steering-ready steering-disabled steering-accepted
-                          steering-fallback)
-
-  defp apply_backend_event(state, event) do
-    type = Backend.event_type(event)
-
-    state =
-      if is_nil(Map.get(state, :settle_timer)) or type in @settle_quiet_events,
-        do: state,
-        else: cancel_settle_timer(state)
-
-    # Every event counts here, bookkeeping included: the silence watchdog
-    # asks only whether the connector speaks at all.
-    state = cancel_silent_timer(state)
-
-    apply_event(state, event)
-  end
-
-  defp apply_event(state, event) do
-    case Backend.event_type(event) do
-      # the terminal event of a turn this side already ended -- a backend
-      # that answered our cancel after we stopped waiting for it. Ending
-      # again would run every turn-end listener twice, and could close a
-      # turn that is not the one it belongs to.
-      t when t in ["turn-end", "turn-failed"] and state.stale_turn_ends > 0 ->
-        %{state | stale_turn_ends: state.stale_turn_ends - 1}
-
-      # The cycle produced its terminal result. On a steered turn the adapter
-      # holds the reply to session/prompt until an idle signal that may never
-      # come, so start counting from here.
-      "cycle-result" ->
-        arm_settle(state)
-
-      "steering-ready" ->
-        %{state | steering: :push}
-
-      "steering-disabled" ->
-        %{state | steering: :none}
-
-      "steering-accepted" ->
-        steering_accepted(state, event)
-
-      "steering-fallback" ->
-        steering_fallback(state, event)
-
-      "ready" ->
-        state |> set_status(:idle) |> pop_prompt_queue()
-
-      "turn-failed" ->
-        apply_event(
-          state,
-          Backend.plist(type: :"turn-end", "stop-reason": "error")
-        )
-
-      "turn-end" ->
-        # A transport may report completion before its steering RPC reply.
-        # Keep the turn open until every committed steer is accepted or put
-        # back; otherwise a younger queued prompt can overtake or erase it.
-        if state.pending_steer_order == [] do
-          finish_turn(state, event)
-        else
-          # always a FRESH timer, stamped with the current epoch: a ref left
-          # over from a fired-and-ignored timeout would otherwise satisfy the
-          # arming check forever, and every later turn-end would park with
-          # no recovery
-          state = cancel_steering_settle_timer(state)
-          timer = Process.send_after(self(), {:steering_settle_timeout, state.epoch}, 2_000)
-          %{state | pending_turn_end: event, steering_settle_timer: timer}
-        end
-
-      "permission" ->
-        options =
-          for [oid, name, kind] <- Backend.plist_get(event, "options") || [] do
-            {oid, name, kind}
-          end
-
-        pending = %{
-          rpc_id: Backend.plist_get(event, "rpc-id"),
-          title: Backend.plist_get(event, "title"),
-          kind: Backend.plist_get(event, "kind"),
-          options: options
-        }
-
-        state
-        |> add_permission(pending)
-        |> set_status(:needs_attention)
-        |> enqueue(event)
-
-      "question" ->
-        pending = %{
-          id: Backend.plist_get(event, "id"),
-          question: Backend.plist_get(event, "question"),
-          answers: Backend.plist_get(event, "answers") || [],
-          from: nil
-        }
-
-        %{state | pending_question: pending}
-        |> set_status(:needs_attention)
-        |> enqueue(event)
-
-      # the backend named its session: kept for the next adapter (an idle
-      # park, a revive) and forwarded, so the chat can keep it across a
-      # daemon restart
-      "session" ->
-        state
-        |> Map.put(:resume, Backend.plist_get(event, "id"))
-        |> enqueue(event)
-
-      "dead" ->
-        # deliver what's queued; the thread stays registered so the
-        # transcript keeps working (revive reattaches a fresh backend)
-        state
-        |> cancel_idle_timer()
-        |> Map.put(:status, :dead)
-        |> enqueue(event)
-
-      _ ->
-        enqueue(state, event)
-    end
-  end
-
-  # --- lifecycle helpers ------------------------------------------------------
-
-  defp queue_prompt(state, text, display, images),
-    do: %{state | prompt_queue: state.prompt_queue ++ [{text, display, images}]}
-
-  # The adapter injected the text into the running turn, which moves that
-  # turn's settlement off its result (see arm_settle).
-  defp steering_accepted(state, event) do
-    settle_steering(Map.put(state, :steered_turn, true), event, :accepted)
-  end
-
-  defp steering_fallback(state, event) do
-    settle_steering(state, event, :fallback)
-  end
-
-  defp settle_steering(state, event, outcome) do
-    token = Backend.plist_get(event, "token")
-    epoch = Backend.plist_get(event, "epoch")
-
-    state =
-      case Map.fetch(state.pending_steers, token) do
-        {:ok, {text, display, ^epoch, :pending}} when epoch == state.epoch ->
-          %{
-            state
-            | pending_steers:
-                Map.put(state.pending_steers, token, {text, display, epoch, outcome})
-          }
-
-        _ ->
-          state
-      end
-
-    state
-    |> drain_settled_steering()
-    |> maybe_finish_deferred_turn()
-  end
-
-  defp drain_settled_steering(%{pending_steer_order: []} = state), do: state
-
-  defp drain_settled_steering(%{pending_steer_order: [token | rest]} = state) do
-    case Map.get(state.pending_steers, token) do
-      {_text, _display, _epoch, :pending} ->
-        state
-
-      {text, display, _epoch, :accepted} ->
-        %{
-          state
-          | pending_steers: Map.delete(state.pending_steers, token),
-            pending_steer_order: rest
-        }
-        |> enqueue(Backend.plist(type: :"user-msg", text: display || text))
-        |> drain_settled_steering()
-
-      {text, display, _epoch, :fallback} ->
-        %{
-          state
-          | pending_steers: Map.delete(state.pending_steers, token),
-            pending_steer_order: rest,
-            steering_fallbacks: state.steering_fallbacks ++ [{text, display, []}]
-        }
-        |> drain_settled_steering()
-
-      nil ->
-        drain_settled_steering(%{state | pending_steer_order: rest})
-    end
-  end
-
-  defp maybe_finish_deferred_turn(%{pending_steer_order: [], pending_turn_end: event} = state)
-       when not is_nil(event),
-       do: finish_turn(%{state | pending_turn_end: nil}, event)
-
-  defp maybe_finish_deferred_turn(state), do: state
-
-  defp finish_turn(state, event) do
-    # a turn that ends with a request still open (the agent gave up,
-    # the wire died) resolves it cancelled — never a stuck banner
-    state
-    |> cancel_settle_timer()
-    |> cancel_silent_timer()
-    |> Map.put(:steered_turn, false)
-    |> cancel_steering_settle_timer()
-    |> restore_boundary_steering()
-    |> restore_push_fallbacks()
-    |> resolve_all_permissions()
-    |> then(fn s ->
-      if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
-    end)
-    |> enqueue(event)
-    |> set_status(:idle)
-    |> pop_prompt_queue()
-  end
-
-  # A steered turn only. An ordinary ACP turn answers session/prompt at its
-  # result, so it needs no net, and arming one there would put a deadline on
-  # a healthy turn.
-  defp arm_settle(%{steered_turn: true, status: :running} = state) do
-    grace = Map.get(state, :settle_grace_ms, @settle_grace_ms)
-
-    if is_integer(grace) and grace > 0 do
-      state = cancel_settle_timer(state)
-
-      Map.put(
-        state,
-        :settle_timer,
-        Process.send_after(self(), {:settle_grace, state.epoch}, grace)
-      )
-    else
-      state
-    end
-  end
-
-  defp arm_settle(state), do: state
-
-  # Every turn, every connector: the prompt is on the wire and the first
-  # event has not come back yet.
-  defp arm_silent(%{status: :running} = state) do
-    grace = Map.get(state, :silent_grace_ms, @silent_grace_ms)
-
-    if is_integer(grace) and grace > 0 do
-      state = cancel_silent_timer(state)
-
-      Map.put(
-        state,
-        :silent_timer,
-        Process.send_after(self(), {:silent_turn, state.epoch}, grace)
-      )
-    else
-      state
-    end
-  end
-
-  defp arm_silent(state), do: state
-
-  # Scheme says how long the recovery waits, per turn, the way it says the
-  # empty-reply nudge. A turn that names no number keeps the default.
-  defp settle_grace_from(state, context) do
-    case Map.get(context, :steer_settle_seconds) do
-      n when is_integer(n) and n >= 0 -> Map.put(state, :settle_grace_ms, n * 1000)
-      _ -> state
-    end
-  end
-
-  defp silent_grace_from(state, context) do
-    case Map.get(context, :silent_turn_seconds) do
-      n when is_integer(n) and n >= 0 -> Map.put(state, :silent_grace_ms, n * 1000)
-      _ -> state
-    end
-  end
-
-  # Map.get/Map.put, not the struct-update syntax: an Agent started before a
-  # hot reload carries a state map without these keys
-  defp cancel_settle_timer(state) do
-    case Map.get(state, :settle_timer) do
-      nil ->
-        state
-
-      ref ->
-        Process.cancel_timer(ref)
-        Map.put(state, :settle_timer, nil)
-    end
-  end
-
-  defp cancel_silent_timer(state) do
-    case Map.get(state, :silent_timer) do
-      nil ->
-        state
-
-      ref ->
-        Process.cancel_timer(ref)
-        Map.put(state, :silent_timer, nil)
-    end
-  end
-
-  defp cancel_steering_settle_timer(%{steering_settle_timer: nil} = state), do: state
-
-  defp cancel_steering_settle_timer(state) do
-    Process.cancel_timer(state.steering_settle_timer)
-    %{state | steering_settle_timer: nil}
-  end
-
-  defp restore_boundary_steering(%{steering_queue: []} = state), do: state
-
-  defp restore_boundary_steering(state) do
-    %{
-      state
-      | prompt_queue: state.steering_queue ++ state.prompt_queue,
-        steering_queue: []
-    }
-  end
-
-  defp restore_push_fallbacks(%{steering_fallbacks: []} = state), do: state
-
-  defp restore_push_fallbacks(state) do
-    %{
-      state
-      | prompt_queue: state.steering_fallbacks ++ state.prompt_queue,
-        steering_fallbacks: []
-    }
-  end
-
-  defp send_prompt(state, text, display, images) do
-    state =
-      state
-      # echo the user turn into the transcript via the ordered event channel —
-      # queued messages appear exactly when their turn actually starts. The
-      # event carries the DISPLAY text: what the user typed, not the seed
-      # context wrapped around it on the wire.
-      |> enqueue(Backend.plist(type: :"user-msg", text: display || text))
-      # a backend that never answered the last cancel never will: drop the
-      # debt here, or the swallow would eat THIS turn's end instead
-      |> Map.put(:stale_turn_ends, 0)
-      |> cancel_settle_timer()
-      |> cancel_silent_timer()
-      |> Map.put(:steered_turn, false)
-      |> cancel_idle_timer()
-      |> Map.put(:status, :running)
-      |> emit_status(:running)
-
-    # The context a turn runs against is assembled HERE, once, and handed
-    # to the backend — a backend no longer reaches into a global to find
-    # out what conversation it is in.
-    #
-    # It is assembled in a task, and it must be: the fetch calls into the
-    # Scheme session, and this GenServer is often called FROM the session
-    # (agent-prompt!). Fetching it inline would have the session waiting on
-    # us while we wait on the session. It happens at turn start rather than
-    # at send time so a queued message gets a fresh system prompt.
-    # The context comes back THROUGH this process, stamped with the turn
-    # it was fetched for. A cancel while the fetch is in flight ends that
-    # turn and pops the next one; without the stamp the late context would
-    # then start a turn for a message the user already took back.
+  defp effect([{:sym, "fetch-context"}, epoch, text, display, images], state) do
+    # The context a turn runs against is assembled once, in a task: the
+    # fetch calls into the Scheme session, and the session often calls
+    # this process (agent-prompt!). It comes back THROUGH this process,
+    # stamped with its turn, so a cancel in between drops it.
     me = self()
     slug = state.slug
-    epoch = state.epoch + 1
-    display = display || text
-
     sent_at = System.monotonic_time(:millisecond)
 
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
       t0 = System.monotonic_time(:millisecond)
       result = Backend.context(slug, display)
-      ms = System.monotonic_time(:millisecond) - t0
 
       :telemetry.execute(
         [:compos, :chat, :stage],
-        %{duration: ms, queue: max(t0 - sent_at, 0)},
+        %{duration: System.monotonic_time(:millisecond) - t0, queue: max(t0 - sent_at, 0)},
         %{slug: slug, stage: "context", detail: ""}
       )
 
       send(me, {:context, epoch, text, display, images, sent_at, result})
     end)
 
-    %{state | epoch: epoch, context_pending: true}
-  end
-
-  defp pop_prompt_queue(%{prompt_queue: [{next, display, images} | rest], status: :idle} = state),
-    do: send_prompt(%{state | prompt_queue: rest}, next, display, images)
-
-  defp pop_prompt_queue(state), do: state
-
-  defp set_status(%{status: s} = state, s), do: state
-
-  defp set_status(state, status),
-    do: state |> Map.put(:status, status) |> emit_status(status) |> idle_clock(status)
-
-  # --- idle park ----------------------------------------------------------------
-  #
-  # An idle adapter is two OS processes and up to a few hundred MB for a
-  # conversation nobody is having. A thread idle for `idle_ms` closes its
-  # adapter and keeps the session id; the next prompt opens a new adapter
-  # on the same session (ACP session/load), so the agent keeps its memory.
-  # A thread with no session to come back to is never parked: no :session
-  # event yet, or a stateless lane that has no process to close.
-
-  @idle_default_ms 600_000
-
-  defp idle_ms(config) do
-    case Map.get(config, "idle-seconds") do
-      s when is_integer(s) and s >= 0 -> s * 1000
-      _ -> Application.get_env(:compos_core, :agent_idle_ms, @idle_default_ms)
-    end
-  end
-
-  defp idle_clock(state, :idle), do: arm_idle_timer(state)
-  defp idle_clock(state, _status), do: cancel_idle_timer(state)
-
-  defp arm_idle_timer(state) do
-    state = cancel_idle_timer(state)
-    ms = Map.get(state, :idle_ms, 0)
-
-    if is_integer(ms) and ms > 0 and parkable?(state) do
-      ref = make_ref()
-      Process.send_after(self(), {:idle_park, ref}, ms)
-      Map.put(state, :idle_timer, ref)
-    else
-      state
-    end
-  end
-
-  defp cancel_idle_timer(state), do: Map.put(state, :idle_timer, nil)
-
-  defp parkable?(state) do
-    state.status == :idle and is_binary(Map.get(state, :resume)) and not is_nil(state.handle) and
-      state.prompt_queue == [] and state.steering_queue == [] and
-      is_nil(state.pending_permission) and is_nil(state.pending_question) and
-      not state.context_pending and :stateless not in state.backend.capabilities()
-  end
-
-  defp park(state) do
-    handle = state.handle
-    # drop the handle first: the EXIT the close raises must not read as a
-    # dead backend (that clause matches the current handle only)
-    state = %{state | handle: nil}
-    state.backend.close(handle)
     state
   end
 
-  defp revive_backend(%{handle: nil} = state) do
-    config = Map.put(state.config, "resume-session", Map.get(state, :resume))
-    {:ok, handle} = state.backend.start(Map.put(config, "slug", state.slug), self())
-    %{state | handle: handle, config: config} |> set_status(:starting)
+  defp effect([{:sym, "prompt"}], %{turn: {text, context}} = state) do
+    state.backend.prompt(state.handle, text, context)
+    state
   end
 
-  defp revive_backend(state), do: state
+  defp effect([{:sym, "cancel"}], state) do
+    if state.handle, do: state.backend.cancel(state.handle)
+    state
+  end
 
-  defp emit_status(state, status),
-    do: enqueue(state, Backend.plist(type: :status, status: status))
+  # drop the handle first: the EXIT the close raises must not read as a
+  # dead backend (that clause matches the current handle only)
+  defp effect([{:sym, "park"}], state) do
+    state.backend.close(state.handle)
+    %{state | handle: nil}
+  end
+
+  defp effect([{:sym, "revive"}, resume], state) do
+    config = Map.put(state.config, "resume-session", nil?(resume))
+    {:ok, handle} = state.backend.start(Map.put(config, "slug", state.slug), self())
+    %{state | handle: handle, config: config}
+  end
+
+  defp effect([{:sym, "respond-permission"}, id, option], state) do
+    state.backend.respond_permission(state.handle, id, nil?(option))
+    state
+  end
+
+  defp effect([{:sym, "respond-question"}, id, answer], state) do
+    if function_exported?(state.backend, :respond_question, 3),
+      do: state.backend.respond_question(state.handle, id, nil?(answer))
+
+    state
+  end
+
+  defp effect([{:sym, "reply"}, id, value], state) do
+    {from, waiters} = Map.pop(state.waiters, id)
+    if from, do: GenServer.reply(from, elixir(value))
+    %{state | waiters: waiters}
+  end
+
+  defp sym(name), do: {:sym, name}
+
+  defp sv(nil), do: false
+  defp sv(v) when is_atom(v) and not is_boolean(v), do: {:sym, to_string(v)}
+  defp sv(v), do: v
+
+  defp nil?(false), do: nil
+  defp nil?(v), do: v
+
+  # a machine answer as the Elixir caller expects it
+  defp elixir({:sym, s}), do: String.to_atom(s)
+  defp elixir([{:sym, "error"}, why]), do: {:error, elixir(why)}
+  defp elixir([{:sym, "ok"}, value]), do: {:ok, value}
+  defp elixir(list) when is_list(list), do: Enum.map(list, fn [t, d] -> {t, nil?(d)} end)
+  defp elixir(v), do: v
 
   # --- event queue -> scheme ---------------------------------------------------
 
-  defp enqueue(state, event) do
-    state
-    |> Map.update!(:events, &(&1 ++ [event]))
-    |> deliver_or_schedule()
-  end
+  defp enqueue(state, event), do: deliver_or_schedule(%{state | events: state.events ++ [event]})
 
   defp deliver_or_schedule(%{events: []} = state), do: state
   defp deliver_or_schedule(%{in_flight: true} = state), do: state
@@ -1450,8 +590,7 @@ defmodule Compos.Core.Agent do
 
   defp maybe_deliver(state) do
     # the escaped table dies with the Session during a restart; an agent
-    # draining backend events in that window must not crash over it — a
-    # crashed agent leaves its session record orphaned
+    # draining backend events in that window must not crash over it
     handler =
       Compos.Core.LLMSession.callback(state.slug, :handler) ||
         Roots.get({:agent_handler})
@@ -1463,12 +602,17 @@ defmodule Compos.Core.Agent do
 
       handler ->
         {slice, rest} = Enum.split(state.events, @batch_max_events)
-        batch = coalesce(slice)
         slug = state.slug
         me = self()
 
         Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
           try do
+            batch =
+              case scheme("agent-coalesce", [slice]) do
+                {:ok, batch} -> batch
+                {:error, _} -> slice
+              end
+
             # the agent's own lane: rendering serializes with this agent's
             # other Scheme and never queues a keystroke behind it
             Session.apply_callback(handler, [slug, batch], nil, lane(slug))
@@ -1482,20 +626,12 @@ defmodule Compos.Core.Agent do
     end
   end
 
-  # The turn-end fan-out. The batch above belongs to the transcript: it
-  # renders on this agent's own lane and lands the assistant's turn in the
-  # record. This second dispatch is for everybody ELSE — a parent chat
-  # waiting on a subagent, a fleet view — so it fires AFTER that batch has
-  # run, and on the :ui lane, because such a listener reads a FINISHED
-  # transcript and touches buffers that are not this agent's.
-  #
-  # It carries the slug and the stop reason; Scheme decides what counts as
-  # a normal end and what counts as an error.
+  # The turn-end fan-out, for everybody ELSE (a parent chat waiting on a
+  # subagent, a fleet view): after the transcript batch has run, on the
+  # :ui lane. It carries the slug and the stop reason; Scheme decides what
+  # counts as a normal end.
   defp notify_turn_end(slug, batch) do
-    handler =
-      Roots.get({:agent_turn_end})
-
-    if handler do
+    if handler = Roots.get({:agent_turn_end}) do
       for event <- batch, Backend.event_type(event) == "turn-end" do
         stop = Backend.plist_get(event, "stop-reason") || "end_turn"
         Session.apply_callback(handler, [slug, to_string(stop)], nil, :ui)
@@ -1505,17 +641,58 @@ defmodule Compos.Core.Agent do
     :ok
   end
 
-  # adjacent chunks melt into one append
-  defp coalesce([[{:sym, "type"}, {:sym, "chunk"}, {:sym, "text"}, a] | rest]) do
-    case coalesce(rest) do
-      [[{:sym, "type"}, {:sym, "chunk"}, {:sym, "text"}, b] | tail] ->
-        [[{:sym, "type"}, {:sym, "chunk"}, {:sym, "text"}, a <> b] | tail]
+  # --- hot reload ---------------------------------------------------------------
+  # A thread started before agent-step existed holds the old state map.
+  # Remove after the first daemon restart that follows 2026-11-08.
 
-      tail ->
-        [[{:sym, "type"}, {:sym, "chunk"}, {:sym, "text"}, a] | tail]
-    end
+  defp upgrade(%{m: _} = state), do: state
+
+  defp upgrade(old) do
+    entry = fn {t, d, i} -> [t, d || false, i] end
+    perm = fn p -> [p.rpc_id, sv(p.title), sv(p.kind), Enum.map(p.options, &Tuple.to_list/1), not is_nil(p[:from])] end
+    perms = List.wrap(old.pending_permission) ++ Map.get(old, :waiting_permissions, [])
+    q = old.pending_question
+
+    armed =
+      for {key, name} <- [steering_settle_timer: "steer-settle", settle_timer: "settle", silent_timer: "silent", idle_timer: "idle"],
+          Map.get(old, key),
+          do: name
+
+    rows = [
+      status: sym(to_string(old.status)), parked: is_nil(old.handle), resume: Map.get(old, :resume) || false,
+      queue: Enum.map(old.prompt_queue, entry), "steering-queue": Enum.map(old.steering_queue, entry),
+      steers: for({k, {t, d, e, o}} <- old.pending_steers, do: [k, t, d || false, e, sym(to_string(o))]),
+      "steer-order": old.pending_steer_order, fallbacks: Enum.map(old.steering_fallbacks, entry),
+      "turn-end": old.pending_turn_end || false, steered: Map.get(old, :steered_turn, false),
+      "settle-ms": Map.get(old, :settle_grace_ms, 180_000), "silent-ms": Map.get(old, :silent_grace_ms, 180_000),
+      "stale-ends": old.stale_turn_ends, "next-steer": old.next_steer_id, steering: sym(to_string(old.steering)),
+      permission: (old.pending_permission && perm.(old.pending_permission)) || false,
+      waiting: Enum.map(Map.get(old, :waiting_permissions, []), perm),
+      question: (q && [q.id, q.question, q.answers, not is_nil(q.from)]) || false,
+      epoch: old.epoch, "context-pending": old.context_pending, "next-rpc": old.next_rpc_id,
+      "idle-ms": Map.get(old, :idle_ms, 0), stateless: :stateless in old.backend.capabilities(),
+      armed: Enum.map(armed, &sym/1), fx: [], reply: sym("ok")
+    ]
+
+    waiters = for(p <- perms, p[:from], into: %{}, do: {p.rpc_id, p.from})
+    waiters = if q && q.from, do: Map.put(waiters, q.id, q.from), else: waiters
+
+    state =
+      old
+      |> Map.take([:slug, :buffer_ref, :config, :backend, :handle, :events, :delivery_timer])
+      |> Map.merge(%{m: Enum.map(rows, fn {k, v} -> [sym(to_string(k)), v] end), timers: %{}, waiters: waiters, in_flight: false})
+
+    # every timer the old shape held is armed again, from now
+    again = %{
+      "steer-settle" => {2000, [sym("steer-settle"), old.epoch]},
+      "settle" => {Map.get(old, :settle_grace_ms, 180_000), [sym("settle-grace"), old.epoch]},
+      "silent" => {Map.get(old, :silent_grace_ms, 180_000), [sym("silent-turn"), old.epoch]},
+      "idle" => {Map.get(old, :idle_ms, 0), [sym("idle-park")]}
+    }
+
+    Enum.reduce(armed, state, fn name, st ->
+      {ms, msg} = again[name]
+      effect([sym("arm"), sym(name), ms, msg], st)
+    end)
   end
-
-  defp coalesce([e | rest]), do: [e | coalesce(rest)]
-  defp coalesce([]), do: []
 end

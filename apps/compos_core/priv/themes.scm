@@ -1281,6 +1281,136 @@
 }
 ")
 
+(define-theme "dos"
+  (list
+    ;; the CGA sixteen on the blue of a text-mode screen
+    (list 'ts-keyword 'fg "#ffffff" 'weight "700")
+    (list 'ts-function 'fg "#55ffff")
+    (list 'ts-string 'fg "#ffff55")
+    (list 'ts-comment 'fg "#aaaaaa" 'style "italic")
+    (list 'ts-number 'fg "#ff55ff")
+    (list 'ts-constant 'fg "#ff55ff")
+    (list 'ts-type 'fg "#55ffff")
+    (list 'ts-module 'fg "#55ffff")
+    (list 'ts-operator 'fg "#ffffff")
+    (list 'ts-punctuation 'fg "#aaaaaa")
+    (list 'ts-tag 'fg "#ffffff")
+    (list 'ts-attribute 'fg "#ffff55")
+    (list 'ts-variable 'fg "#ffffff")
+    (list 'ts-property 'fg "#55ff55")
+    (list 'ts-escape 'fg "#ff55ff")
+    (list 'default 'bg "#0000aa" 'fg "#ffffff")
+    (list 'window 'bg "#0000aa")
+    (list 'paper 'bg "#0000aa")
+    (list 'window-inactive 'bg "#00008a")
+    (list 'body 'fg "#ffffff")
+    (list 'border-soft 'bg "#aaaaaa")
+    (list 'border 'bg "#ffffff")
+    (list 'modeline 'bg "#aaaaaa" 'fg "#000000")
+    (list 'modeline-active 'bg "#00aaaa" 'fg "#000000")
+    (list 'cursor 'bg "#ffff55")
+    (list 'region 'bg "#00aaaa")
+    (list 'select 'bg "#00aaaa")
+    (list 'hl-line 'bg "#1010c0")
+    (list 'linenum 'fg "#5555ff")
+    (list 'accent 'fg "#55ffff")
+    (list 'link 'fg "#55ffff" 'decoration "underline")
+    (list 'llm-response 'fg "#ffffff")
+    (list 'llm-prompt 'fg "#ffffff")
+    (list 'diff-block 'fg "#ffff55")
+    (list 'diff-block-source 'fg "#aaaaaa")
+    (list 'dim 'fg "#aaaaaa")
+    (list 'faint 'fg "#5555ff")
+    (list 'warn 'fg "#ffff55")
+    (list 'ok 'fg "#55ff55")
+    (list 'alert 'fg "#ff5555")
+    (list 'org-level-1 'fg "#ffffff" 'weight "700")
+    (list 'org-level-2 'fg "#55ffff" 'weight "700")
+    (list 'org-level-3 'fg "#ffff55" 'weight "700")
+    (list 'org-level-4 'fg "#ff55ff" 'weight "700")
+    (list 'group-color-1 'fg "#ff5555")
+    (list 'group-color-2 'fg "#55ffff")
+    (list 'group-color-3 'fg "#55ff55")
+    (list 'group-color-4 'fg "#ff55ff")
+    (list 'group-color-5 'fg "#ffff55")
+    (list 'group-color-6 'fg "#ffffff")
+    (list 'org-todo 'fg "#ff5555" 'weight "700")
+    (list 'org-done 'fg "#aaaaaa" 'decoration "line-through")
+    (list 'org-priority 'fg "#ffff55" 'weight "700")
+    (list 'org-date 'fg "#55ffff")
+    (list 'org-tag 'fg "#aaaaaa")
+    (list 'org-checkbox 'fg "#ffff55" 'weight "700")
+    (list 'org-cookie 'fg "#ffff55")
+    (list 'org-meta 'fg "#aaaaaa")
+    (list 'fold-marker 'fg "#ffff55")
+    (list 'nm-date 'fg "#aaaaaa")
+    (list 'nm-author 'fg "#55ffff")
+    (list 'nm-tags 'fg "#ffff55")
+    (list 'nm-subject 'fg "#ffffff")
+    (list 'nm-marked 'fg "#ff5555")
+    (list 'nm-hdr 'fg "#ffffff")
+    (list 'nm-sep 'fg "#aaaaaa")
+    (list 'diff-file 'fg "#ffffff" 'weight "700")
+    (list 'diff-hunk 'fg "#55ffff")
+    (list 'diff-add 'fg "#55ff55" 'bg "rgba(85, 255, 85, 0.15)")
+    (list 'diff-del 'fg "#ff5555" 'bg "rgba(255, 85, 85, 0.15)")
+    (list 'diff-add-word 'bg "rgba(85, 255, 85, 0.35)")
+    (list 'diff-del-word 'bg "rgba(255, 85, 85, 0.35)")
+    (list 'code-scope 'bg "rgba(255, 255, 255, 0.06)")
+    ;; one fixed-width font for the whole screen
+    (list 'mono 'family "'IBM Plex Mono', Menlo, 'DejaVu Sans Mono', 'Courier New', monospace")
+    (list 'sans 'inherit 'mono)
+    (list 'serif 'inherit 'mono)
+    (list 'chrome 'gap "6px" 'radius "0"
+          'border "3px double #ffffff"
+          'shadow "8px 8px 0 #000000"
+          'shadow-deep "8px 8px 0 #000000")))
+
+(define-theme-skin! "dos" "
+/* the desktop: a fine dither of two blues behind the windows */
+.windows {
+  background-color: #0000aa;
+  background-image: radial-gradient(#3333cc 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+/* a window is a double white rule with a hard black shadow */
+.window, .window.inactive {
+  border: 3px double var(--border-soft-bg);
+  box-shadow: 8px 8px 0 #000000;
+}
+.window.active, .window.active:has(.dash-state-focus),
+.window.active:has(.dash-state-editing) {
+  border: 3px double var(--border-bg);
+  box-shadow: 8px 8px 0 #000000;
+}
+/* the status line: gray bar, black ink; the live window shows cyan */
+.modeline, .window.active .modeline, .buffer-header {
+  background: var(--modeline-bg);
+  color: var(--modeline-fg);
+  border-top: 0; border-bottom: 0;
+  letter-spacing: 0;
+}
+.window.active .modeline, .window.active .buffer-header {
+  background: var(--modeline-active-bg);
+  color: var(--modeline-active-fg);
+}
+.modeline .ml-icon, .modeline .ml-group-item, .modeline .ml-state-modified,
+.modeline .ml-segment, .modeline .ml-strong, .modeline .ml-extra .ml-segment {
+  color: inherit;
+}
+.modeline .ml-dot { background: var(--modeline-fg); }
+.window.active .modeline .ml-dot { background: var(--modeline-active-fg); }
+/* chat: your turn is a gray box, the agent's prose a black box */
+.ag-user {
+  background: #555555; color: #ffffff;
+  border-radius: 14px; padding: 8px 14px;
+}
+.ag-prose {
+  background: #000000; color: #ffffff;
+  border-radius: 14px; padding: 8px 14px;
+}
+")
+
 ;;; --- paperized: the sheet, the grain, and the ink ---------------------------
 ;;; The desk is woven, the pane is a sheet laid on it, and the sheet has a
 ;;; grain that catches the light at the corners. The hand writes in three

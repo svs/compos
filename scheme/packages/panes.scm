@@ -363,22 +363,6 @@
                      layout)))
     (if col (panes--update-pane layout id (lambda (p) (panes--put p 'column #f))) layout)))
 
-(define (panes-split-below layout id)
-  "A new empty pane under pane ID, in ID's column: (LAYOUT NEW-ID). ID
-   and the new pane share ID's height, as C-x 2 halves a window. An
-   unknown ID answers (LAYOUT #f)."
-  (let ((pane (panes-pane layout id)))
-    (if (not pane)
-        (list layout #f)
-        (let* ((col (panes-column-of pane))
-               (half (/ (panes--positive (plist-get pane 'vshare)) 2))
-               (made (panes--fresh layout 'next-pane "p"))
-               (layout (panes--update-pane (cadr made) id
-                         (lambda (p) (panes--put (panes--put p 'column col) 'vshare half))))
-               (new (list 'id (car made) 'column col 'vshare half 'windows '()))
-               (at (+ 1 (panes--index-of id (panes-pane-ids layout)))))
-          (list (tree-insert panes--shape (panes--normal layout) 'root new at) (car made))))))
-
 ;; --- hidden panes --------------------------------------------------------
 ;; A pane can leave the screen with its windows, as a window waits behind
 ;; the front of its pane. A hidden pane is kept apart from the row, under
@@ -1273,8 +1257,6 @@
 (catalog-meta! 'function "panes-move-pane" 'effects '(pure))
 (public! 'panes-columns "(panes-columns LAYOUT) -> ((PANE ...) ...): the panes in columns, left to right, each top to bottom; pure")
 (catalog-meta! 'function "panes-columns" 'effects '(pure))
-(public! 'panes-split-below "(panes-split-below LAYOUT ID) -> (LAYOUT NEW-ID): an empty pane under pane ID in its column, the two halving ID's height; pure")
-(catalog-meta! 'function "panes-split-below" 'effects '(pure))
 (public! 'panes-move-column "(panes-move-column LAYOUT ID STEP) -> LAYOUT: pane ID's column moves STEP columns with all its panes; pure")
 (catalog-meta! 'function "panes-move-column" 'effects '(pure))
 (public! 'panes-swap-panes "(panes-swap-panes LAYOUT A B) -> LAYOUT: panes A and B trade their windows, each keeping its place and size; pure")

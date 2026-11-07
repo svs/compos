@@ -191,16 +191,6 @@
       (check-equal! (apply + (panes-shares w)) 1 "the shares sum to one")
       (check-equal! (panes-layout-shares w #t) (list (/ 1 4) (/ 3 4)) "and those are the widths the screen is given"))))
 
-(deftest 'splitting-a-pane-below-halves-its-height
-  "a split below puts a new empty pane under the pane, in its column, and the two share its height"
-  (lambda ()
-    (let* ((s (panes-split-below (pt-row "a.scm" "*chat*") "p1"))
-           (cols (panes-columns (car s))))
-      (check-equal! (length cols) 2 "still two columns")
-      (check-equal! (map (lambda (p) (plist-get p 'id)) (car cols)) (list "p1" (cadr s)) "the new pane is under the first")
-      (check-equal! (panes-vshares (car cols)) (list (/ 1 2) (/ 1 2)) "they halve the height")
-      (check-equal! (panes-pane-keys (car s) (cadr s)) '() "the new pane is empty"))))
-
 (deftest 'two-panes-swap-windows-and-keep-their-place-and-size
   "a swap trades the windows of two panes; each pane keeps its place and its width"
   (lambda ()

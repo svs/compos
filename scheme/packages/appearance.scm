@@ -282,3 +282,32 @@
 
 (domain! 'unknown)
 (effects! '(unknown))
+
+;;; --- theme-monospace ----------------------------------------------------
+;;; It lives here, not in priv/themes.scm: the kernel loads themes.scm before
+;;; custom.scm, and a defcustom there stopped the boot.
+
+(domain! 'faces)
+(effects! '(write))
+
+;; theme-monospace: any theme draws its sans and serif text in its mono
+;; font. A stylesheet over the theme, so a theme switch keeps it and
+;; turning it off needs no theme reload.
+(define (theme-monospace--css on)
+  (if on
+      ":root:root { --sans-family: var(--mono-family); --serif-family: var(--mono-family); --font-sans: var(--font-mono); --font-serif: var(--font-mono); }"
+      ""))
+
+(define (theme-monospace--refresh! on)
+  (define-style! 'theme-monospace (theme-monospace--css on)))
+
+(defcustom 'theme-monospace #f
+  "Draw all text in the theme's monospace font, whatever the theme."
+  'group 'faces 'type 'boolean 'set theme-monospace--refresh!)
+
+(theme-monospace--refresh! theme-monospace)
+
+(define-command "toggle-theme-monospace" "Draw all text in the theme's monospace font, or stop"
+  (lambda ()
+    (customize-save! 'theme-monospace (not theme-monospace))
+    (message (if theme-monospace "Monospace everywhere" "Theme fonts"))))

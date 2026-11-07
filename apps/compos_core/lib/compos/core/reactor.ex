@@ -7,8 +7,6 @@ defmodule Compos.Core.Reactor do
   ignore agent-sourced edits unless they opt in via `sources: :all`).
 
   Matchers today: `{:contains, string}` | fun(change -> bool) | `:any`.
-  TODO: `{:ts_query, query, lang}` once the tree-sitter NIF lands — match
-  against changed ranges of the incremental parse, not raw text.
 
   Handlers run in supervised Tasks: a crashing handler never takes down the
   reactor or the buffer.
@@ -33,7 +31,7 @@ defmodule Compos.Core.Reactor do
 
   alias Compos.Core.{Buffer, Editor, Events}
 
-  defstruct rules: %{}, by_buffer: %{}, next_id: 1
+  defstruct rules: %{}, by_buffer: %{}, next_id: 1, scope: :idle
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -94,13 +92,8 @@ defmodule Compos.Core.Reactor do
   end
 
   def handle_call({:remove, id}, _from, state) do
-    case state.rules[id] do
-      nil ->
-        {:reply, :ok, state}
-
-      rule ->
-        {:reply, :ok, drop_rule(state, id, rule)}
-    end
+    rule = state.rules[id]
+    {:reply, :ok, if(rule, do: drop_rule(state, id, rule), else: state)}
   end
 
   def handle_call(:rules, _from, state), do: {:reply, Map.values(state.rules), state}
@@ -134,11 +127,7 @@ defmodule Compos.Core.Reactor do
   defp note_failure(state, id, rule, changes, error, name) do
     failures = Map.get(rule, :failures, 0) + 1
 
-    rule =
-      rule
-      |> Map.put(:pending, rule.pending ++ Enum.reverse(changes))
-      |> Map.put(:timer, nil)
-      |> Map.put(:failures, failures)
+    rule = Map.merge(rule, %{pending: rule.pending ++ Enum.reverse(changes), timer: nil, failures: failures})
 
     if failures >= @max_failures do
       Logger.error(
@@ -185,31 +174,9 @@ defmodule Compos.Core.Reactor do
 
   def handle_info({:fire, id}, state) do
     case state.rules[id] do
-      nil ->
-        {:noreply, state}
-
-      %{pending: []} ->
-        {:noreply, state}
-
-      %{in_flight: in_flight} = rule when in_flight != false ->
-        {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
-
-      rule ->
-        cond do
-          # the buffer died with a change still pending (a kill inside the
-          # debounce): its rule ends here. Reading its name would exit, and
-          # that exit took the Reactor down with every rule in the editor.
-          buffer_name(rule.buffer_ref) == nil ->
-            {:noreply, drop_rule(state, id, rule)}
-
-          rule.eager or in_scope?(rule.buffer_ref, screen()) ->
-            fire_rule(state, id, rule)
-
-          true ->
-            # park: keep the redo, drop the timer. The :changed subscription
-            # below re-arms it when the buffer reaches a window.
-            {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
-        end
+      nil -> {:noreply, state}
+      %{pending: [_ | _], in_flight: false} = rule -> fire_rule(state, id, rule)
+      rule -> {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
     end
   end
 
@@ -222,10 +189,21 @@ defmodule Compos.Core.Reactor do
         Process.demonitor(rule.in_flight.monitor, [:flush])
         rule = %{rule | in_flight: false}
 
-        if handler_ok?(result) do
-          {:noreply, put_in(state.rules[id], arm_pending(Map.put(rule, :failures, 0)))}
-        else
-          {:noreply, note_failure(state, id, rule, changes, handler_error(result))}
+        cond do
+          # the buffer died with a change pending (a kill inside the debounce)
+          result == :gone ->
+            {:noreply, drop_rule(state, id, rule)}
+
+          # off screen: keep the redo, unarmed; an editor change re-arms it
+          result == :parked ->
+            parked = %{rule | pending: rule.pending ++ Enum.reverse(changes)}
+            {:noreply, put_in(state.rules[id], parked)}
+
+          handler_ok?(result) ->
+            {:noreply, put_in(state.rules[id], arm_pending(Map.put(rule, :failures, 0)))}
+
+          true ->
+            {:noreply, note_failure(state, id, rule, changes, handler_error(result))}
         end
     end
   end
@@ -245,48 +223,60 @@ defmodule Compos.Core.Reactor do
   end
 
   # the Editor firehose: any editor mutation may have put a parked buffer
-  # on screen. Cheap when nothing is parked; one visibility read otherwise.
+  # on screen. One Task asks which, never the Reactor: a busy Editor answers
+  # in seconds, and every on_change queued behind it. Changes that land while
+  # the Task asks make it ask once more.
   def handle_info({:editor_change, _what}, state) do
-    parked =
-      Enum.filter(state.rules, fn {_id, r} ->
-        r.pending != [] and r.timer == nil and r.in_flight == false
+    if Map.get(state, :scope, :idle) == :idle,
+      do: {:noreply, check_scope(state)},
+      else: {:noreply, Map.put(state, :scope, :again)}
+  end
+
+  def handle_info({:in_scope, ids}, state) do
+    rules =
+      Enum.reduce(ids, state.rules, fn id, rules ->
+        case rules[id] do
+          %{pending: [_ | _], timer: nil, in_flight: false} = r ->
+            Map.put(rules, id, %{r | timer: Process.send_after(self(), {:fire, id}, 0)})
+
+          _ ->
+            rules
+        end
       end)
 
-    case parked do
-      [] ->
-        {:noreply, state}
+    state = %{state | rules: rules}
 
-      parked ->
-        screen = screen()
+    if Map.get(state, :scope) == :again,
+      do: {:noreply, check_scope(state)},
+      else: {:noreply, Map.put(state, :scope, :idle)}
+  end
 
-        rules =
-          Enum.reduce(parked, state.rules, fn {id, rule}, rules ->
-            if in_scope?(rule.buffer_ref, screen) do
-              Map.put(rules, id, %{
-                rule
-                | timer: Process.send_after(self(), {:fire, id}, 0)
-              })
-            else
-              rules
-            end
-          end)
+  defp check_scope(state) do
+    reactor = self()
+    parked =
+      for {id, r} <- state.rules, r.pending != [] and r.timer == nil and r.in_flight == false,
+          do: {id, r.buffer_ref}
 
-        {:noreply, %{state | rules: rules}}
+    task = fn ->
+      screen = screen()
+      send(reactor, {:in_scope, for({id, ref} <- parked, in_scope?(ref, screen), do: id)})
+    end
+
+    case parked != [] and Task.Supervisor.start_child(Compos.Core.TaskSupervisor, task) do
+      {:ok, _} -> Map.put(state, :scope, :running)
+      _ -> Map.put(state, :scope, :idle)
     end
   end
 
   defp fire_rule(state, id, rule) do
     changes = Enum.reverse(rule.pending)
-    handler = rule.handler
     reactor = self()
 
     case Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-           result = run_handler(handler, changes)
-           send(reactor, {:handler_done, id, changes, result})
+           send(reactor, {:handler_done, id, changes, gated_run(rule, changes)})
          end) do
       {:ok, pid} ->
-        monitor = Process.monitor(pid)
-        in_flight = %{monitor: monitor, changes: changes}
+        in_flight = %{monitor: Process.monitor(pid), changes: changes}
         rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
         {:noreply, put_in(state.rules[id], rule)}
 
@@ -296,17 +286,22 @@ defmodule Compos.Core.Reactor do
     end
   end
 
-  defp maybe_accumulate(rule, change) do
-    if source_ok?(rule, change) and matches?(rule.matcher, change) do
-      rule = %{rule | pending: [change | rule.pending]}
+  # The scope gate runs in the handler's Task: its Editor read waits as long
+  # as the Editor is busy, and the Reactor must not. A buffer killed inside
+  # the debounce ends its rule; reading its name would exit.
+  defp gated_run(rule, changes) do
+    cond do
+      buffer_name(rule.buffer_ref) == nil -> :gone
+      rule.eager or in_scope?(rule.buffer_ref, screen()) -> run_handler(rule.handler, changes)
+      true -> :parked
+    end
+  end
 
-      if rule.timer != nil or rule.in_flight != false do
-        rule
-      else
-        arm_pending(rule)
-      end
-    else
-      rule
+  defp maybe_accumulate(rule, change) do
+    cond do
+      not (source_ok?(rule, change) and matches?(rule.matcher, change)) -> rule
+      rule.timer != nil or rule.in_flight != false -> %{rule | pending: [change | rule.pending]}
+      true -> arm_pending(%{rule | pending: [change | rule.pending]})
     end
   end
 
@@ -357,26 +352,22 @@ defmodule Compos.Core.Reactor do
   defp matches?(fun, change) when is_function(fun, 1), do: fun.(change)
 
   # no Editor (a bare test) means nothing is on screen anywhere: fire —
-  # gating exists to spare the screen-less work, not to create it
+  # gating exists to spare the screen-less work, not to create it. An
+  # Editor too busy to answer shows nothing: the rule parks, and the
+  # next editor change asks again
   defp screen do
     if Process.whereis(Editor), do: Editor.visible_buffers(), else: :all
+  catch
+    :exit, _ -> %{visible: [], current: []}
   end
 
   # in scope: on screen, or in the same group as a current buffer
   defp in_scope?(_b, :all), do: true
 
   defp in_scope?(ref, %{visible: visible, current: current}) do
-    case buffer_name(ref) do
-      nil ->
-        false
-
-      name ->
-        name in visible or
-          case group_of(ref) do
-            nil -> false
-            g -> g in Enum.map(current, &group_of/1)
-          end
-    end
+    name = buffer_name(ref)
+    group = name && group_of(ref)
+    name != nil and (name in visible or (group != nil and group in Enum.map(current, &group_of/1)))
   end
 
   # a buffer's name, or nil when its process is gone

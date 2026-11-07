@@ -10,6 +10,7 @@
 
 (require 'setup)
 (require 'components)
+(require 'llm-connectors)
 
 ;;; --- wizard components ---------------------------------------------------------
 
@@ -156,7 +157,7 @@
                         "Compos talks to a model through a connector. "
                         "Pick the one that new chats use. You can change it later in any chat."))
           (component 'ui/actions
-            (list 'actions '(("wizard:rescan" "Scan again" "g")) 'class "wizard-tools")))
+            (list 'actions '(("wizard:rescan" "Scan again" "g") ("wizard:connectors" "Set up and test each" "c")) 'class "wizard-tools")))
     (list (list 'tag "div" 'class "wizard-grid"
                 'children (map setup-wizard--card (setup-inference-scan))))
     (list (component 'wizard/nav
@@ -286,10 +287,7 @@
   (setup-wizard-redraw! buf))
 
 (define (setup-wizard-use! buf name)
-  (customize-save! 'setup-default-connector name)
-  (set! *default-connector* name)
-  (setup--save-default! name)
-  (message (string-append "Setup: new chats use " name))
+  (setup-use-connector! name)
   (setup-wizard-redraw! buf))
 
 ;; The learning space is the onboarding app: the guide chat and its stage.
@@ -515,6 +513,7 @@
     ((string-prefix? "wizard:key:" id)
      (setup-wizard-add-key! buf (substring-bytes id 11 (string-byte-length id))) #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
+    ((equal? id "wizard:connectors") (run-command "llm-connectors") #t)
     ((string-prefix? "wizard:use:" id)
      (setup-wizard-use! buf (substring-bytes id 11 (string-byte-length id))) #t)
     ;; the model the user installs is the one they chose: it goes in the
@@ -626,6 +625,7 @@
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
     ("g" "setup-wizard-rescan")
+    ("c" "llm-connectors")
     ("q" "quit-window")))
 
 (define-style! 'setup-wizard "

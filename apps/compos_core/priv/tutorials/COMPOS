@@ -79,7 +79,7 @@ This lesson sets up the models and the browser extension. Compos uses three kind
 
 > **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
 
-If no reply comes, the slide tells you what is wrong. `M-x setup` chooses another model, and `M-x setup-ai-guide` explains connectors, logins and keys.
+If no reply comes, the slide tells you what is wrong. `M-x llm-connectors` lists every model connector: install it, sign in or add its key, and test that it answers. `M-x setup-ai-guide` explains connectors, logins and keys.
 
 ### Decisions
 

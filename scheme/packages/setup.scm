@@ -26,6 +26,13 @@
                            (list 'connector connector 'model model)
                            (list 'connector connector)))))
 
+(define (setup-use-connector! name)
+  "Make connector NAME the one new chats use, and keep the choice."
+  (customize-save! 'setup-default-connector name)
+  (set! *default-connector* name)
+  (setup--save-default! name)
+  (message (string-append "Setup: new chats use " name)))
+
 (define *setup-buffer* "*setup*")
 
 (define *setup-secret-backends*
@@ -301,10 +308,7 @@
   (let ((unmet (setup--unmet (setup-connector-requirements name))))
     (if (null? unmet)
         (begin
-          (customize-save! 'setup-default-connector name)
-          (set! *default-connector* name)
-          (setup--save-default! name)
-          (message (string-append "Setup: new chats use " name))
+          (setup-use-connector! name)
           (k))
         (let* ((r (car unmet))
                (kind (plist-get r 'kind))
@@ -702,9 +706,10 @@
 (define (setup-agent-install-buffer name)
   (string-append "*setup-install:" name "*"))
 
-(define (setup-install-agent! name)
+(define (setup-install-agent! name &optional show)
   "Install the coding agent NAME in a terminal buffer. Return the buffer, or
-   #f when nothing runs: every program is present, or npm is missing."
+   #f when nothing runs: every program is present, or npm is missing. SHOW
+   puts the buffer on screen; the default is switch-to-buffer!."
   (let ((steps (setup-agent-missing-steps name)))
     (cond
       ((null? steps)
@@ -723,7 +728,7 @@
          ;; a restore must not run the install again: the restored
          ;; buffer starts a plain login shell over the old transcript
          (buffer-set-local! buf 'terminal-command #f)
-         (unless setup-bot-silent-mode (switch-to-buffer! buf))
+         (unless setup-bot-silent-mode ((or show switch-to-buffer!) buf))
          buf)))))
 
 (effects! '(write execute external))
@@ -824,6 +829,7 @@
   "(setup-provider-bootstrap!) — select Gemini Nano as the default connector")
 (public! 'setup-requirements
   "(setup-requirements) — every declared need of every connector and MCP server, as plists: kind, owner, met, and program/install or secret/secrets")
+(public! 'setup-use-connector! "(setup-use-connector! NAME) -- make connector NAME the default for new chats")
 (public! 'setup-satisfy!
   "(setup-satisfy! CONNECTOR K) — ask for the connector's first unmet need, then K; with none left the connector becomes the default")
 (public! 'setup-find-file-other-window!

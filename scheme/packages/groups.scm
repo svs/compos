@@ -4262,8 +4262,11 @@ is forgotten and that group falls back to creation order in the switcher."
             (buffer-set-local! chat 'editor-context-source (list src pos))
             (insert! prompt)
             (run-command "agent-send")))
+        ;; "without leaving the current buffer": a one-window frame had the
+        ;; chat cover SRC, so give the window back its buffer too.
         (when (window-exists? back)
-          (select-window! back)))))))
+          (select-window! back)
+          (window-set-buffer! back src)))))))
 
 ;; the group a joining buffer gets by default: the group the frame
 ;; stands in, else the most recent group in history. The buffer's own

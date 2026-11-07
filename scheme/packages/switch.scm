@@ -1182,7 +1182,16 @@ the next row down. STEP is kept for the callers."
                          (set! woken '()))))
     (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
            (tabs (switch-tab-list rows group))
-           (tab (if (assoc want tabs) want 'group))
+           ;; never open on a tab that has nothing: with no current group the
+           ;; Group tab is empty, so C-x b opened on a blank picker.
+           (tab (let loop ((ks (let ((w (if (assoc want tabs) want 'group)))
+                                (cons w (map car tabs))))
+                            (seen '()))
+                  (cond ((null? ks) 'group)
+                        ((member (car ks) seen) (loop (cdr ks) seen))
+                        ((null? (switch-tab-rows (car ks) rows group home))
+                         (loop (cdr ks) (cons (car ks) seen)))
+                        (else (car ks)))))
            (family (if (assoc 'family tabs)
                        (switch-family-entries (switch-family-tree rows group) candidates display)
                        '()))

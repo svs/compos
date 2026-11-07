@@ -2671,8 +2671,14 @@ defmodule Compos.EditorTest do
     assert buffer_group(chat) == buffer_group(buf)
   end
 
-  test "C-c q founds a group and asks its one chat from the minibuffer", %{buf: buf} do
-    companion = "*chat:#{buf}*"
+  test "C-c q founds a group and asks its group chat from the minibuffer", %{buf: buf} do
+    # A group's chat is named *chat:GROUP:N*; resolve the group's current one.
+    companion = fn ->
+      case Compos.Core.Session.eval(~s{(group-primary-chat "#{buf}")}) do
+        {:ok, quoted} when quoted != "#f" -> String.trim(quoted, "\"")
+        _ -> ""
+      end
+    end
 
     Application.put_env(:compos_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
@@ -2689,7 +2695,10 @@ defmodule Compos.EditorTest do
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :llm_chat_fun)
-      Compos.Core.kill_buffer(companion)
+      case companion.() do
+        "" -> :ok
+        c -> Compos.Core.kill_buffer(c)
+      end
     end)
 
     press(["C-c", "q"])
@@ -2697,9 +2706,16 @@ defmodule Compos.EditorTest do
     type("what is 6*7")
     press(["RET"])
 
-    # the question became a turn in the group's one chat; point stayed put
-    assert eventually(fn -> Buffer.text(companion) =~ "six times seven" end)
-    assert eventually(fn -> Buffer.text(companion) =~ "what is 6*7" end)
+    # the question became a turn in the group's chat; point stayed put
+    assert eventually(fn ->
+             c = companion.()
+             c != "" and Buffer.exists?(c) and Buffer.text(c) =~ "six times seven"
+           end)
+
+    assert eventually(fn ->
+             c = companion.()
+             c != "" and Buffer.exists?(c) and Buffer.text(c) =~ "what is 6*7"
+           end)
     assert Editor.current_buffer() == buf
 
     press(["C-x", "1"])

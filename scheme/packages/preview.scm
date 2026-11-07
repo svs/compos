@@ -466,8 +466,17 @@
 ;; enters its chosen group first, then gives the document that membership.
 ;; A ?line= query lands point on that line, as a buffer link does.
 (define (preview--follow-document! source href group)
-  (let ((buf (visit (preview--file-target source href) group))
-        (line (preview--line-param href)))
+  (let* ((target (preview--file-target source href))
+         (fresh (not (buffer-known? target)))
+         (buf (visit target group))
+         (line (preview--line-param href)))
+    ;; A reader who follows a link from the source keeps reading source:
+    ;; the first-visit preview default gives way to the page they came from.
+    (when (and fresh (buffer-exists? buf)
+               (not (minor-mode-on? source "preview-mode"))
+               (minor-mode-on? buf "preview-mode"))
+      (disable-minor-mode! buf "preview-mode")
+      (preview-tabs-sync! buf #f))
     ;; A reader who follows a link from a rendered page keeps reading
     ;; rendered pages.
     (when (and (buffer-exists? buf)
@@ -609,6 +618,36 @@
             (preview-app-buffers)))
 
 (add-hook! 'after-save-hook 'preview--after-save-hook!)
+
+;;; --- the preview is the default view of a Markdown file -----------------------
+;;; The first visit of a .md file opens the rendered page; C-c C-v shows the
+;;; source. The mode belongs to the user: the default is applied once per
+;;; buffer, so a buffer the user switched to source stays source on the next
+;;; visit, and a restored buffer keeps the modes it was saved with. The
+;;; 'preview-defaulted local is saved with the desktop and records the once.
+;;; An agent's visit is context, not a view, and decides nothing.
+(define (preview--visit-default! buf)
+  (when (and (string? buf)
+             (preview--markdown-file? buf)
+             (not (buffer-local buf 'preview-defaulted))
+             (not (agent-edit-author? (current-edit-author))))
+    (buffer-set-local! buf 'preview-defaulted #t)
+    (when (and (not (minor-mode-on? buf "preview-mode"))
+               (preview-renderer-for buf))
+      (enable-minor-mode! buf "preview-mode")
+      (preview-heal! buf)
+      (preview-tabs-sync! buf #t))))
+
+(define (preview--find-file-hook!) (preview--visit-default! (current-buffer)))
+(add-hook! 'find-file-hook 'preview--find-file-hook!)
+
+;; a restored buffer carries the user's choice; it takes no default
+(define (preview--restore-hook! buf)
+  (when (and (string? buf) (preview--markdown-file? buf))
+    (buffer-set-local! buf 'preview-defaulted #t)))
+(add-hook! 'buffer-restore-hook 'preview--restore-hook!)
+;; buffers open before this loads were already visited
+(for-each preview--restore-hook! (buffer-list))
 
 ;;; --- whitespace-mode ---------------------------------------------------------
 ;;; A rendered page hides the newline the author typed, so a reader cannot

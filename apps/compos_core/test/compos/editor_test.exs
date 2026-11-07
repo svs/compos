@@ -1847,8 +1847,9 @@ defmodule Compos.EditorTest do
     press(["C-x", "C-f"])
     type(path)
     press(["RET"])
-    # a visited Morg file opens in writing-mode with the preview on
-    assert Buffer.get_local(path, "render-mode") == "markdown"
+    # a visited Markdown file opens with the preview on: its rows, not an iframe
+    assert Buffer.get_local(path, "preview-rows") == true
+    refute Buffer.get_local(path, "render-mode")
     assert "preview-mode" in Buffer.get_local(path, "minor-modes")
     {:ok, _} = Compos.Core.Session.eval(~s{(set-mode! "rust-mode")})
     assert Buffer.get_local(path, "ts-lang") == "rust"
@@ -1863,7 +1864,7 @@ defmodule Compos.EditorTest do
     # auto-mode would have said text-mode; the saved state wins
     assert Buffer.get_local(path, "mode-name") == "rust-mode"
     assert Buffer.get_local(path, "ts-lang") == "rust"
-    assert Buffer.get_local(path, "render-mode") == "markdown"
+    assert Buffer.get_local(path, "preview-rows") == true
     assert "preview-mode" in Buffer.get_local(path, "minor-modes")
 
     File.rm!(path)
@@ -4232,8 +4233,9 @@ defmodule Compos.MinibufferEditingTest do
     press(["C-x", "C-f"])
     type(path)
     press(["RET"])
-    # a visited Morg file opens in writing-mode with the preview on
-    assert Buffer.get_local(path, "render-mode") == "markdown"
+    # a visited Markdown file opens with the preview on: its rows, not an iframe
+    assert Buffer.get_local(path, "preview-rows") == true
+    refute Buffer.get_local(path, "render-mode")
 
     Buffer.goto(path, 0)
     press(["C-n"])

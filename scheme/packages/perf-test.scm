@@ -109,7 +109,7 @@
     (let ((saved-ratio fd-warn-ratio)
           (saved-last *fd-last-warn*))
       (set! fd-warn-ratio 0)
-      (set! *fd-last-warn* -1000000000)
+      (set! *fd-last-warn* #f)
       (let* ((before (event-log-seq))
              (fl (fd-check!))
              (es (event-log-read before "compos:fds" 10)))

@@ -61,6 +61,8 @@
                   "a declared read inside a lambda runs")
     (check-false! (eval-read-refusal "(re-find \"a\" \"a\" 0)")
                   "a pure builtin with a catalog stamp runs")
+    (check-false! (eval-read-refusal "(file-exists? \"/tmp\")")
+                  "a read builtin with a catalog stamp runs")
     (check-true! (string? (eval-read-refusal "(map buffer-kill! '(\"x\"))"))
                  "a write passed as a value refuses")
     (check-true! (string? (eval-read-refusal "((lambda (set!) (set! x 1)) 1)"))

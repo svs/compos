@@ -510,7 +510,11 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "The shortest time between two descriptor reports."
   'group 'perf 'type 'number)
 
-(define *fd-last-warn* -1000000000)
+(defcustom 'fd-min-limit 4096
+  "A descriptor limit below this gets a warning at boot. The macOS default of 256 holds only a few agents."
+  'group 'perf 'type 'number)
+
+(define *fd-last-warn* #f)
 
 (define (fd-pressure? count limit)
   "(fd-pressure? COUNT LIMIT) — #t when COUNT descriptors pass fd-warn-ratio of LIMIT"
@@ -525,7 +529,7 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
          (limit (cadr fl))
          (now (monotonic-ms)))
     (when (and (fd-pressure? count limit)
-               (>= (- now *fd-last-warn*) fd-warn-every-ms))
+               (or (not *fd-last-warn*) (>= (- now *fd-last-warn*) fd-warn-every-ms)))
       (set! *fd-last-warn* now)
       (let ((ports (vm-ports 10)))
         (event-publish! "compos:fds" 'high
@@ -543,3 +547,16 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
         (debounce! 'fd-check fd-check-ms fd--tick #f)))))
 
 (debounce! 'fd-check fd-check-ms fd--tick #f)
+
+;; The VM sizes its descriptor table when it starts, so only the launch
+;; can raise the limit: `ulimit -n 65536` in the shell, or
+;; M-x restart-daemon, which raises it before the relaunch.
+(define (fd-limit-check! arg)
+  (let ((limit (cadr (vm-fds))))
+    (when (and (> limit 0) (< limit fd-min-limit))
+      (event-publish! "compos:fds" 'low-limit (list 'limit limit 'min fd-min-limit))
+      (message (string-append "descriptors: the limit is " (number->string limit)
+                              ", and a few agents use it all. Run M-x restart-daemon,"
+                              " or start the daemon after ulimit -n 65536")))))
+
+(debounce! 'fd-limit-check 10000 fd-limit-check! #f)

@@ -87,6 +87,8 @@
       (check-true! (string-suffix? ".scm" path) "an s-expression result is a .scm file")
       (check-true! (string-contains? ref "a list of 200 items") "the reference counts the items")
       (check-equal! (tool-result-read path '(items 2 3)) "(n 1)\n(n 2)" "items count from 1")
+      (check-equal! (tool-result-read path '(match "(n 150)")) "151: (n 150)"
+                    "match searches the items of a one-line list")
       (delete-file! path))))
 
 (deftest 'mcp-proxy-answer-sends-the-reference

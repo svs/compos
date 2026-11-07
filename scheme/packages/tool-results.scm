@@ -325,8 +325,13 @@
                 (cons (car lines)
                       (tool-result--range (cdr lines) (car args) (cadr args)))
                 "\n")))
+           ;; an s-expression result is often one line, so its match
+           ;; searches the items, numbered from 1 as (items FROM TO) counts
            ((equal? kind 'match)
-            (tool-result--matching (string-split text "\n") (car args)))
+            (let ((v (tool-result--sexp text)))
+              (tool-result--matching
+                (if v (map value->string (car v)) (string-split text "\n"))
+                (car args))))
            ((equal? kind 'chars)
             (let* ((n (string-length text))
                    (from (max 0 (min n (car args))))

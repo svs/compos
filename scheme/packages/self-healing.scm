@@ -23,8 +23,8 @@
 
 (defgroup 'self-healing "A chat for every error the daemon logs.")
 
-(defcustom 'self-healing-enabled #t
-  "Start a chat for every new error the daemon logs. Off, the errors stay in the event log only.")
+(defcustom 'self-healing-enabled #f
+  "Start a chat for every new error the daemon logs. Off, the workflow does not run and the errors stay in the event log only. A change takes effect at the next boot or reload of this package.")
 
 (defcustom 'self-healing-group "self-healing"
   "The group the investigating chats start in.")
@@ -121,11 +121,14 @@
 
 (effects! '(write))
 
-(define-workflow! "self-healing"
-  'listen   '("compos:error")
-  'group-by 'self-healing--signature
-  'quiet    (seconds 5)
-  'handle   'self-healing--handle)
+(if self-healing-enabled
+    (define-workflow! "self-healing"
+      'listen   '("compos:error")
+      'group-by 'self-healing--signature
+      'quiet    (seconds 5)
+      'handle   'self-healing--handle)
+    (when (member "self-healing" (workflow-names))
+      (workflow-stop! "self-healing")))
 
 (domain! 'system)
 (effects! '(read))

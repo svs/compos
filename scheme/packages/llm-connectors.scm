@@ -344,7 +344,8 @@
                      (llm-connectors-models name)))))))
 
 (define (llm-connectors--page-columns buf)
-  (list (list "" 18) (list "" #f)))
+  ;; the value wraps, so a long model id or command reads whole in a narrow pane
+  (list (list "" 16 'left 'end) (list "" #f 'left 'wrap)))
 
 (define (llm-connectors--row-key r)
   (cond ((eq? (car r) 'model) (string-append "model:" (cadr r)))
@@ -359,7 +360,8 @@
        (let* ((id (cadr r))
               (default? (equal? id (llm-connectors--default-model name))))
          ;; the result first, as a checklist reads: it fits a narrow pane
-         (list (list (llm-connectors--result-short (llm-connectors-test-result name id))
+         (list (list (let ((t (llm-connectors-test-result name id)))
+                       (if t (llm-connectors--result-short t) "-"))
                      (llm-connectors--test-face name id))
                (list (string-append id
                                     (let ((t (llm-connectors-test-result name id)))
@@ -769,7 +771,17 @@
                      (list "models" 7) (list "last test" 28) (list "about" #f)))
     'cells (lambda (buf name) (llm-connectors--cells buf name))
     ;; narrow: the test result matters more than the description
-    'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 120)
+    'layouts (list (list 'name 'tiny 'max-cols (lambda (buf) 64)
+                         ;; the result first, as a checklist reads, and the name wraps
+                         'columns (lambda (buf) (list (list "last test" 14) (list "connector" #f 'left 'wrap)))
+                         'cells (lambda (buf name)
+                                  (if (llm-connectors--section? name)
+                                      (llm-connectors--cells buf name)
+                                      (let ((cs (llm-connectors--cells buf name))
+                                            (r (llm-connectors-test-result name)))
+                                        (list (list (if r (llm-connectors--result-short r) "-") (llm-connectors--test-face name))
+                                              (nth 0 cs))))))
+                   (list 'name 'narrow 'max-cols (lambda (buf) 120)
                          'columns (lambda (buf)
                                     (list (list "connector" 30) (list "kind" 8)
                                           (list "needs" 14) (list "models" 7) (list "last test" #f)))

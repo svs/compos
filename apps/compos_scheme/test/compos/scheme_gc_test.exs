@@ -81,6 +81,26 @@ defmodule Compos.Scheme.GCTest do
     assert {:ok, [2, 2], _} = Scheme.eval_string(swept, "((car b)) ((car b)) (list ((cadr b)) (t))")
   end
 
+  test "lexical locals keep their own slots and make no atoms" do
+    interp = Scheme.new()
+
+    {:ok, vals, interp} =
+      Scheme.eval_string(interp, """
+      (define (f a) (let ((g (lambda (b) (let ((a (+ a b))) (lambda (c) (list a b c)))))) ((g 10) 100)))
+      (define (h x) (list (let ((y 1)) y) (let* ((z 2) (y (+ z 1))) ((lambda () (list x y z))))))
+      (list (f 1) (h 0))
+      """)
+
+    assert vals == [[11, 10, 100], [1, [0, 3, 2]]]
+
+    fresh = Enum.map_join(1..200, " ", &"zz-local-#{System.unique_integer([:positive])}-#{&1}")
+    atoms = :erlang.system_info(:atom_count)
+    lambda = "((lambda (#{fresh}) (lambda () 0)) #{String.duplicate("1 ", 200)})"
+    {:ok, _, _} = Scheme.eval_string(interp, lambda)
+
+    assert :erlang.system_info(:atom_count) - atoms < 50
+  end
+
   test "a swept frame leaves no binding rows, and a live frame keeps its own" do
     interp = Scheme.new() |> Scheme.flush()
 

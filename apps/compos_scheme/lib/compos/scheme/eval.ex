@@ -174,7 +174,8 @@ defmodule Compos.Scheme.Eval do
 
   defp comp([{:sym, "let"}, bindings | body], sc) do
     {names, forms} = bindings(bindings)
-    {:llet, intern(names), seq(forms, sc), seq(body, extend(sc, names))}
+    inner = extend(sc, names)
+    {:llet, slots(inner, names), seq(forms, sc), seq(body, inner)}
   end
 
   # let*: each binding sees the previous ones — a fresh frame per binding
@@ -188,7 +189,10 @@ defmodule Compos.Scheme.Eval do
 
     {pairs, sc} =
       Enum.zip(names, forms)
-      |> Enum.map_reduce(sc, fn {name, form}, sc -> {{intern(name), compile(form, sc)}, extend(sc, [name])} end)
+      |> Enum.map_reduce(sc, fn {name, form}, sc ->
+        inner = extend(sc, [name])
+        {{slots(inner, name), compile(form, sc)}, inner}
+      end)
 
     {:llet_star, pairs, seq(body, sc)}
   end
@@ -208,12 +212,17 @@ defmodule Compos.Scheme.Eval do
 
   defp bindings(bindings), do: Enum.unzip(Enum.map(bindings, fn [{:sym, n}, form] -> {n, form} end))
   defp seq(forms, sc \\ :dyn), do: Enum.map(forms, &compile(&1, sc))
-  # a local is read by its interned name: a map lookup costs ~2 ns with an
-  # atom key and ~19 ns with a string key (2026-11-08); globals stay strings
-  defp extend(sc, names), do: Enum.reduce(names, sc, &Map.put(&2, &1, String.to_atom(&1)))
-  defp intern(nil), do: nil
-  defp intern(names) when is_list(names), do: Enum.map(names, &String.to_atom/1)
-  defp intern(name), do: String.to_atom(name)
+  # a local is read by its slot, an integer the compile gives each name
+  # it binds: a new name takes the next one, a shadowing name keeps its own.
+  # A map lookup costs ~19 ns with a string key; atoms were as fast as
+  # integers but never leave the atom table, and every name agents eval
+  # would fill it. Globals stay strings.
+  defp extend(sc, names),
+    do: Enum.reduce(names, sc, &if(is_map_key(&2, &1), do: &2, else: Map.put(&2, &1, map_size(&2))))
+
+  defp slots(_sc, nil), do: nil
+  defp slots(sc, names) when is_list(names), do: Enum.map(names, &:erlang.map_get(&1, sc))
+  defp slots(sc, name), do: :erlang.map_get(name, sc)
 
   # A body that defines nothing and assigns none of the locals it sees
   # never changes a local once bound, so a closure may keep its locals by
@@ -227,8 +236,8 @@ defmodule Compos.Scheme.Eval do
     if defines?(body), do: throw(:dynamic)
     names = req ++ opt ++ if(rest, do: [rest], else: [])
     names = if self, do: [self | names], else: names
-    compiled = seq(body, extend(if(sc == :dyn, do: %{}, else: sc), names))
-    {:lcode, compiled, body, {intern(req), intern(opt), intern(rest), intern(self)}}
+    inner = extend(if(sc == :dyn, do: %{}, else: sc), names)
+    {:lcode, seq(body, inner), body, {slots(inner, req), slots(inner, opt), slots(inner, rest), slots(inner, self)}}
   catch
     :dynamic when sc == :dyn -> {:code, seq(body), body}
   end

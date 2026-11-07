@@ -3219,7 +3219,13 @@
         ""
         (string-append
           "[Editor context — what the user is looking at right now, the last focused first:\n" ctx
-          "\nWhen the user says \"this\" they mean the first item above.]\n\n"))))
+          "\n" (editor-context-this-chat exclude)
+          "\nWhen the user says \"this chat\" they mean the one marked this chat."
+          " Any other \"this\" is the first item above.]\n\n"))))
+
+;; the chat the user types in: the context lists leave it out, so name it
+(define (editor-context-this-chat chat)
+  (string-append "- " chat " (this chat, where the user types)"))
 
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))

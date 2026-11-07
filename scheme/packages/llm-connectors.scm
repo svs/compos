@@ -880,6 +880,40 @@
 (add-hook! 'llm-connectors-mode-hook 'llm-connectors--no-line-numbers!)
 (add-hook! 'llm-connectors-detail-mode-hook 'llm-connectors--no-line-numbers!)
 
+;; M-o on a connector's page: a chat that finds why the connector or its
+;; models fail, with what the page knows and the calls that test again
+(define (llm-connectors--debug-brief src)
+  (let* ((name (buffer-local src 'llm-connector))
+         (r (and name (llm-connectors-test-result name)))
+         (failed (filter (lambda (m) (let ((t (llm-connectors-test-result name (car m))))
+                                       (and t (eq? (plist-get t 'status) 'failed))))
+                         (if name (llm-connectors-models name) '())))
+         (line (lambda (label v) (if v (string-append "- " label ": " v "\n") ""))))
+    (if (not name)
+        "Help me set up this model connector."
+        (string-append
+          "Debug the model connector " name " (" (llm-connectors-kind name) "), from its page " src " in M-x llm-connectors.\n\n"
+          (line "state" (llm-connectors-state name))
+          (line "command" (plist-get (connector-config (llm-connectors--connector name)) 'cmd))
+          (let ((p (llm-connectors--provider name)))
+            (string-append (line "provider" p)
+                           (line "address" (and p (llm-base-url p)))
+                           (line "tests with" (and p (llm-connectors--provider-model p)))))
+          (line "last test" (llm-connectors--test-text name))
+          (line "its error" (and r (or (plist-get r 'detail) (plist-get r 'error))))
+          (if (null? failed) ""
+              (string-append "- models that failed:\n"
+                             (apply string-append
+                                    (map (lambda (m) (let ((t (llm-connectors-test-result name (car m))))
+                                                       (string-append "  - " (car m) ": " (or (plist-get t 'detail) (plist-get t 'error) "") "\n")))
+                                         failed))))
+          "\nFind why it does not work and what fixes it: a program, a sign-in, a key, a quota, an address. "
+          "(llm-connectors-test! \"" name "\" K [MODEL]) tests it again and K gets the result; "
+          "(llm-connectors-models \"" name "\") lists its models. "
+          "Tell me the cause first, then the fix. Ask before you change a setting or a key."))))
+
+(mode-chat-opening! "llm-connectors-detail-mode" llm-connectors--debug-brief)
+
 (define-command "llm-connectors" "Set up each model connector and test its connection"
   (lambda ()
     (let ((buf (list-mode-show! "llm-connectors-mode")))

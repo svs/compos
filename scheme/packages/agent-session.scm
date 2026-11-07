@@ -1931,6 +1931,30 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
         (loop (+ n 1) (string-append base "<" (number->string n) ">"))
         name)))
 
+;; A new chat takes no window at its birth: panes gives every buffer that
+;; joins a group a window when the command ends, and leaves a context-only
+;; one out. A chat a person started is listed again once that placement has
+;; run; a chat an agent started stays context-only until a show or . asks.
+(define chat-quiet--listed '())
+
+(define (chat-quiet--list!)
+  ;; post-command-hook, last: the command's chats are in the lists again
+  (unless (null? chat-quiet--listed)
+    (let ((bs chat-quiet--listed))
+      (set! chat-quiet--listed '())
+      (for-each (lambda (b) (when (buffer-known? b) (buffer-promote! b))) bs))))
+
+(define (chat-quiet! buf listed?)
+  "(chat-quiet! BUF LISTED?) - BUF takes no window at its birth; with LISTED? it is in the chat lists once the command ends"
+  (buffer-context-only! buf)
+  (when listed?
+    (set! chat-quiet--listed (cons buf chat-quiet--listed))
+    ;; at the end of the hook every time: after panes has placed the
+    ;; command's new buffers, however the hook was built since
+    (remove-hook! 'post-command-hook 'chat-quiet--list!)
+    (add-hook! 'post-command-hook 'chat-quiet--list! #t))
+  buf)
+
 (define (execute* prompt opts)
   ;; agent-next-slug only names the buffer now; the session slug is the
   ;; chat's durable id, assigned by chat-attach-agent!
@@ -1943,9 +1967,9 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
          ;; read before buffer-create, which makes the new chat current
          (spawner-group (buffer-group (current-buffer))))
     (buffer-create buf)
-    ;; a spawn shows in no window, of any group, until someone asks for it:
-    ;; panes leaves a context-only buffer out, and a show promotes it
-    (buffer-context-only! buf)
+    ;; a spawn shows in no window until someone asks for it; an agent's
+    ;; spawn also stays out of the chat lists until . asks for it
+    (chat-quiet! buf (not (subagent-spawner)))
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins
     ;; over buffer-create's interactive inheritance.

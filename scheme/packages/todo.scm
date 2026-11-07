@@ -1148,7 +1148,7 @@
      "When it is finished, call (chat-finish! 'done RESULT): the chat closes itself. If it cannot finish, call (chat-finish! 'blocked WHY) or (chat-finish! 'needs-user WHAT).\n")))
 
 (define (todo-assign-chat! id group &optional who)
-  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new. A kept chat whose backend is gone, or whose connector is not the group's now, gives way to a new chat. A new chat shows in no window until someone asks for it, and is the calling agent's subagent with notify; return the chat"
+  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new. A kept chat whose backend is gone, or whose connector is not the group's now, gives way to a new chat. A new chat shows in no window until someone asks for it. A chat a person starts is in the chat lists once the command ends; a chat an agent starts (the eval's agent, or WHO agent:SLUG) is its subagent with notify and stays out of the lists until . asks; return the chat"
   (let* ((t (todo--must id))
          (g (or (group-resolve-id group) (group-ensure-record! group)))
          ;; the chat whose eval starts the task, else the agent WHO names
@@ -1177,7 +1177,7 @@
                   held))
            (chat (car got)))
       (when (cadr got)
-        ;; a new chat shows only where someone asks for it (buffer-promote!)
+        ;; a new chat takes no window until someone asks for it
         (buffer-context-only! chat)
         ;; and is the caller's subagent. Recorded after the brief started its
         ;; backend, so the edge names the chat's slug, not its buffer.
@@ -1185,7 +1185,9 @@
       (todo--keep-chat! t chat g)
       ;; A new chat wears the task's title. Named here, after the brief went
       ;; out under the old name; the first-prompt title lands later and
-      ;; leaves a titled chat alone.
+      ;; leaves a titled chat alone. A chat a person started is in the chat
+      ;; lists once the command ends; an agent's stays out until . asks.
+      (let ((named
       (if (and (cadr got) (string? (plist-get t 'title)))
           (let ((sid (chat-stable-id! chat)))
             (if (chat-title chat (plist-get t 'title))
@@ -1196,7 +1198,9 @@
                           (group-buffers g))
                     chat)
                 chat))
-          chat))))
+          chat)))
+        (when (and (cadr got) (not caller)) (chat-quiet! named #t))
+        named))))
 
 ;; the assignee of a chat-held task is the chat's stable id, since the
 ;; chat renames itself after its first answer

@@ -85,3 +85,39 @@
             (let ((third (t--todo-assign id g)))
               (check-false! (equal? third second) "a chat on another connector gives way")
               (for-each (lambda (c) (when (buffer-known? c) (buffer-kill! c))) (list first second third)))))))))
+
+(deftest 'todo-assign-chat-a-person-starts-is-listed-after-the-command
+  "no window at birth; in the chat lists once the command ends"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (with-stub 'subagent-spawner (lambda () #f)
+          (lambda ()
+            (let ((chat (t--todo-assign id g)))
+              (check-true! (buffer-context-only? chat) "out of panes' placement while the command runs")
+              (chat-quiet--list!)
+              (check-false! (buffer-context-only? chat) "listed once the command ends")
+              (check-false! (member chat (map cadr (with-frame-windows (lambda () (window-list-all)))))
+                            "and still in no window")
+              (buffer-kill! chat))))))))
+
+(deftest 'todo-assign-chat-an-agent-starts-stays-out-of-the-lists
+  "an agent's chat, by eval or by WHO, is hidden until . or a show asks for it"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (with-stub 'subagent-record! (lambda (p c) #f)
+          (lambda ()
+            (let ((by-eval (with-stub 'subagent-spawner (lambda () "zz-parent")
+                             (lambda () (t--todo-assign id g)))))
+              (chat-quiet--list!)
+              (check-true! (buffer-context-only? by-eval) "the eval's agent: hidden after the command")
+              (buffer-kill! by-eval))
+            (let ((by-who (with-stubs (list (list 'subagent-spawner (lambda () #f))
+                                            (list 'agent-continue!
+                                                  (lambda (c text) (buffer-set-local! c 'agent-slug (string-append "zz-slug-" c))))
+                                            (list 'agent-status (lambda (s) 'dead)))
+                            (lambda () (todo-assign-chat! id g "agent:zz-parent")))))
+              (chat-quiet--list!)
+              (check-true! (buffer-context-only? by-who) "WHO agent:...: hidden after the command")
+              (buffer-kill! by-who))))))))

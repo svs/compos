@@ -185,3 +185,31 @@
       (check-false! (member made (map cadr (with-frame-windows (lambda () (window-list-all)))))
                     "no window shows it")
       (buffer-kill! made))))
+
+(define (t--exec-spawn spawner)
+  (let ((made #f))
+    (with-stubs (list (list 'subagent-spawner (lambda () spawner))
+                      (list 'subagent-record! (lambda (p c) #f))
+                      (list 'chat-attach-agent!
+                            (lambda (buf c &optional m o)
+                              (set! made buf)
+                              (buffer-set-local! buf 'agent-slug "zz-exec-slug")
+                              "zz-exec-slug")))
+      (lambda () (execute* "" (list 'title "zz exec kind" 'notify #f))))
+    (chat-quiet--list!)
+    made))
+
+(deftest 'execute-star-from-a-person-is-listed-after-the-command
+  "no window, and in the chat lists once the command ends"
+  (lambda ()
+    (let ((made (t--exec-spawn #f)))
+      (check-false! (buffer-context-only? made) "listed")
+      (check-false! (member made (map cadr (with-frame-windows (lambda () (window-list-all))))) "no window")
+      (buffer-kill! made))))
+
+(deftest 'execute-star-from-an-agent-stays-out-of-the-lists
+  "an agent's spawn is hidden until . or a show asks for it"
+  (lambda ()
+    (let ((made (t--exec-spawn "zz-parent")))
+      (check-true! (buffer-context-only? made) "hidden after the command")
+      (buffer-kill! made))))

@@ -1758,12 +1758,11 @@
                          (else (list "none")))))
          (r (keymap--lookup-here seq)))
     (cond ((not (equal? r 'none)) (answer r))
-          ;; ESC after a prefix cancels it, as C-g would: Meta is the Option
-          ;; key here, so ESC need not start a key (ESC-as-Meta is for a
-          ;; terminal, which has none)
+          ;; ESC after a prefix cancels it, as C-g would; ESC that starts a
+          ;; sequence is Meta (ESC f runs M-f)
           ((and (pair? seq) (pair? (cdr seq)) (equal? (car (reverse seq)) "ESC")) (list "command" "keyboard-quit"))
-          ;; a lone unbound ESC still pends as Meta, for a map that wants it
-          ((and (pair? seq) (equal? (car seq) "ESC")) (list "prefix"))
+          ;; a lone unbound ESC pends as Meta for the next key
+          ((and (pair? seq) (null? (cdr seq)) (equal? (car seq) "ESC")) (list "prefix"))
           ((keymap--esc-meta seq) (answer (keymap--lookup-here (keymap--esc-meta seq))))
           (else (keymap--undefined)))))
 

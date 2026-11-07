@@ -6565,6 +6565,8 @@
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
 (public! 're-find "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.")
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
+(public! 'function-source "(function-source F) -- return the lambda source of F; builtins report as opaque.")
+(catalog-meta! 'function "function-source" 'domain 'discovery 'effects '(pure))
 (catalog-meta! 'function "register-context-provider!" 'domain 'chat 'effects '(write))
 
 (category! 'windows)

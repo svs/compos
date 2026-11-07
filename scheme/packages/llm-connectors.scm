@@ -85,6 +85,19 @@
          (status (and r (plist-get r 'status))))
     (cond ((not r) "faint") ((eq? status 'ok) "success") ((eq? status 'failed) "error") (else "dim"))))
 
+;; one sentence on the default connector and its last test, for a page that
+;; sends the reader here: the setup wizard and the tutorial
+(define (llm-connectors-summary)
+  "(llm-connectors-summary) -- a sentence: the connector new chats use, and what its last test said"
+  (let* ((name *default-connector*)
+         (r (llm-connectors-test-result name)))
+    (string-append "New chats use " (llm-connectors--title name) ". "
+                   (cond ((not r) "It is not tested yet.")
+                         ((eq? (plist-get r 'status) 'testing) "Its test is running.")
+                         ((eq? (plist-get r 'status) 'ok)
+                          (string-append "It " (llm-connectors--test-text name) "."))
+                         (else (string-append "Its test " (llm-connectors--test-text name) "."))))))
+
 (define (llm-connectors--default? name) (equal? name *default-connector*))
 
 ;;; --- the list ------------------------------------------------------------------
@@ -202,8 +215,7 @@
 
 (define (llm-connectors-make-default! name)
   "(llm-connectors-make-default! NAME) -- new chats use connector NAME"
-  (setup-use-connector! name)
-  (llm-connectors-refresh!))
+  (setup-use-connector! name))
 
 ;; a terminal beside the list that runs SCRIPT, then stays as a login shell
 (define (llm-connectors--terminal! buf script)
@@ -261,6 +273,8 @@
     (when (and now (eq? (plist-get now 'status) 'testing) (equal? (plist-get now 'token) token))
       (llm-connectors--set-test! name result)
       (llm-connectors-refresh!)
+      ;; the pages that show a test, the wizard's and the tutorial's, draw it
+      (run-hooks 'llm-connectors-tested-hook)
       (message (string-append name ": " (llm-connectors--test-text name)))
       (when k (k result)))))
 
@@ -405,6 +419,8 @@
                 ("d" "default") ("g" "check") ("q" "quit")))
     'keys *llm-connectors-keys*))
 
+(add-hook! 'setup-connector-chosen-hook 'llm-connectors-refresh!)
+
 (define-command "llm-connectors" "Set up each model connector and test its connection"
   (lambda ()
     (let ((buf (list-mode-show! "llm-connectors-mode")))
@@ -413,6 +429,7 @@
 
 (effects! '(read))
 (public! 'llm-connectors-state "(llm-connectors-state NAME) -- what connector NAME needs next: ready, not installed or needs a key")
+(public! 'llm-connectors-summary "(llm-connectors-summary) -- a sentence: the connector new chats use, and what its last test said")
 (public! 'llm-connectors-kind "(llm-connectors-kind NAME) -- agent, API or browser")
 (public! 'llm-connectors-test-result "(llm-connectors-test-result NAME) -- the last test of connector NAME: status, reply, error, ms, at; or #f")
 (effects! '(write external spend))

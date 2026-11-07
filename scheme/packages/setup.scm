@@ -26,12 +26,16 @@
                            (list 'connector connector 'model model)
                            (list 'connector connector)))))
 
-(define (setup-use-connector! name)
-  "Make connector NAME the one new chats use, and keep the choice."
+(define (setup-use-connector! name &optional model)
+  "Make connector NAME, and MODEL when it is given, the one new chats use,
+   and keep the choice. setup-connector-chosen-hook runs after, so a page
+   that shows the choice draws it again."
   (customize-save! 'setup-default-connector name)
   (set! *default-connector* name)
-  (setup--save-default! name)
-  (message (string-append "Setup: new chats use " name)))
+  (when (and model (boundp 'set-llm-model!)) (set-llm-model! model))
+  (setup--save-default! name model)
+  (message (string-append "Setup: new chats use " (or model name)))
+  (run-hooks 'setup-connector-chosen-hook))
 
 (define *setup-buffer* "*setup*")
 
@@ -829,7 +833,7 @@
   "(setup-provider-bootstrap!) — select Gemini Nano as the default connector")
 (public! 'setup-requirements
   "(setup-requirements) — every declared need of every connector and MCP server, as plists: kind, owner, met, and program/install or secret/secrets")
-(public! 'setup-use-connector! "(setup-use-connector! NAME) -- make connector NAME the default for new chats")
+(public! 'setup-use-connector! "(setup-use-connector! NAME [MODEL]) -- make connector NAME the default for new chats; setup-connector-chosen-hook runs after")
 (public! 'setup-satisfy!
   "(setup-satisfy! CONNECTOR K) — ask for the connector's first unmet need, then K; with none left the connector becomes the default")
 (public! 'setup-find-file-other-window!

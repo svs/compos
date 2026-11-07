@@ -853,20 +853,14 @@
   (lambda (buf id)
     (and (equal? buf *tutorial-detail-buffer*)
          (cond
-           ((string-prefix? "wizard:use:" id) (tutorial--use-model! (substring id 11 (string-length id))) #t)
-           ((string-prefix? "wizard:key:" id) (tutorial--add-key! (substring id 11 (string-length id))) #t)
-           ((string-prefix? "wizard:install:" id)
-            (let ((name (substring id 15 (string-length id))))
-              (tutorial--use-model! name)
-              (setup-install-agent! name))
-            #t)
            (else
          (let ((hit (assoc id '(("tutorial:next" "tutorial-next") ("tutorial:back" "tutorial-back")
                                 ("tutorial:next-lesson" "tutorial-next-lesson")
                                 ("tutorial:previous-lesson" "tutorial-previous-lesson")
                                 ("tutorial:index" "tutorial-index") ("tutorial:help" "tutorial-help")
                                 ("tutorial:restart" "tutorial-restart-lesson")
-                                ("tutorial:reset" "tutorial-reset")))))
+                                ("tutorial:reset" "tutorial-reset")
+                                ("tutorial:connectors" "llm-connectors")))))
            (and hit (begin (run-command (cadr hit)) #t))))))))
 
 (define-style! 'tutorial "
@@ -1433,31 +1427,33 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
     (tutorial--setup-ask! (tutorial--setup-brief what)
       (lambda (said)
         (when (equal? *tutorial-current* "set-up")
-          (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x setup to choose another model."))
+          (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x llm-connectors to test the models and choose another."))
           (tutorial--draw-detail!))))))
 
 ;; the model step: the setup wizard chose one already, or the reader does,
-;; on the slide, from the same cards *Setup* shows; the step finishes when a
-;; model is in use
+;; in M-x llm-connectors, which the slide's button opens; the step finishes
+;; when a model is in use
 (tutorial-await! "set-up" "choose the model that new chats use"
   (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
 
 (tutorial-cards! "set-up" "choose the model that new chats use"
   (lambda ()
-    (if (boundp 'setup-inference-scan)
-        (list (tutorial--div "wizard-grid" 'children (map setup-wizard--card (setup-inference-scan))))
+    (if (boundp 'llm-connectors-summary)
+        (list (tutorial--div "wizard-lede" 'text (llm-connectors-summary))
+              (component 'ui/actions
+                (list 'actions '(("tutorial:connectors" "Set up the connectors" "c"))
+                      'class "wizard-buttons")))
         '())))
 
-(define (tutorial--use-model! name)
-  "New chats use the connector NAME; the model step finishes, and the test
-   step runs again for NAME."
-  (customize-save! 'setup-default-connector name)
-  (set! *default-connector* name)
-  (setup--save-default! name)
-  (message (string-append "New chats use " name))
+(define (tutorial--model-chosen!)
+  "A new default connector, chosen anywhere: the model step finishes, and
+   the test step runs again for it."
   (tutorial--retest-model!)
   (tutorial-recheck!)
   (tutorial--draw-detail!))
+
+(add-hook! 'setup-connector-chosen-hook 'tutorial--model-chosen!)
+(add-hook! 'llm-connectors-tested-hook 'tutorial--draw-detail!)
 
 (define (tutorial--retest-model!)
   ;; a passed test proved the old model: it is not done for the new one
@@ -1475,37 +1471,16 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
       (when (equal? *tutorial-current* "set-up") (set! *tutorial-shown* i))
       (tutorial--changed!))))
 
-(define (tutorial--add-key! name)
-  ;; the card's key, asked as *Setup* asks it; the slide redraws when it is in
-  (setup-wizard-add-key! *tutorial-detail-buffer* name
-    (lambda () (tutorial-recheck!) (tutorial--draw-detail!))))
-
-(define (tutorial--test-model! connector k)
-  ;; a fresh chat on CONNECTOR, not the setup chat: that one keeps the
-  ;; connector it was made with, so it would answer for any choice. K gets
-  ;; the reply, or #f when the turn ends without one
-  (let ((slug (ignore-errors
-                (lambda ()
-                  (execute* "This is a test that the model answers. Reply with the one word: ready."
-                            (list 'connector connector 'title "Model test" 'notify #f))))))
-    (if (not slug)
-        (k #f)
-        (subagent-wait (list slug)
-          (lambda (results)
-            (let* ((r (and (pair? results) (car results)))
-                   (s (and r (plist-get r 'text))))
-              (when (and r (buffer-known? (plist-get r 'buffer)))
-                (buffer-kill! (plist-get r 'buffer)))
-              (k (and (string? s) (not (equal? (string-trim s) "")) s))))))))
-
-;; the reply step sends its own test, to the connector the reader chose
+;; the reply step is the connectors app's test, run on the connector the
+;; reader chose; its result shows in M-x llm-connectors too
 (tutorial-probe! "set-up" "test message to the model"
   (lambda (pass fail)
-    (tutorial--test-model! *default-connector*
-      (lambda (said)
-        (if said
+    (llm-connectors-test! *default-connector*
+      (lambda (r)
+        (if (eq? (plist-get r 'status) 'ok)
             (pass)
-            (fail (string-append *default-connector* " gave no reply. Choose another model, or type M-x setup-ai-guide to check its login."))))))
+            (fail (string-append *default-connector* " gave no reply (" (or (plist-get r 'error) "no reply")
+                                 "). Type M-x llm-connectors to sign it in, add its key, or choose another."))))))
   (lambda () (string-append "Waiting for a reply from " *default-connector*)))
 
 (add-hook! 'tutorial-trouble-hook

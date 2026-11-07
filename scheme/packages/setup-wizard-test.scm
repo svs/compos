@@ -34,42 +34,20 @@
     (check-false! (setup--signed-in-by-file? '(signin-files (".zz-none"))) "no file")
     (check-true! (setup--signed-in-by-file? '(signin-files ("."))) "a file that exists")))
 
-(deftest 'a-connector-card-offers-the-button-that-fits
-  "the first unmet requirement picks the button: install, or a key; ready offers use"
-  (lambda ()
-    (let ((old *default-connector*))
-      (set! *default-connector* "zz-other")
-      (check-equal! (map car (setup-wizard--card-actions '("opencode" "acp" #t "ready" #f)))
-                    '("wizard:use:opencode") "a ready connector")
-      (check-equal! (map car (setup-wizard--card-actions
-                               (list "claude-code" "acp" #f "not installed"
-                                     (list 'kind 'program 'install '(("claude" "x")) 'met #f))))
-                    '("wizard:install:claude-code") "an installable agent")
-      (check-equal! (setup-wizard--card-actions
-                      (list "zz-agent" "acp" #f "not installed" (list 'kind 'program 'met #f)))
-                    '() "no install steps, no button")
-      (check-equal! (map car (setup-wizard--card-actions
-                               (list "gemini" "acp" #f "needs a key"
-                                     (list 'kind 'secret 'secret 'gemini-api-key 'met #f))))
-                    '("wizard:key:gemini") "an installed agent with no key")
-      (check-equal! (map car (setup-wizard--card-actions '("api" "hosted" #f "no key" #f)))
-                    '("wizard:key:api") "a hosted model")
-      (set! *default-connector* "opencode")
-      (check-equal! (setup-wizard--card-actions '("opencode" "acp" #t "ready" #f)) '()
-                    "the default needs no button")
-      (set! *default-connector* old))))
 
-(deftest 'use-this-makes-the-connector-the-default
-  "the use button sets the connector that new chats use"
+
+(deftest 'use-connector-makes-the-connector-the-default
+  "setup-use-connector! sets the connector that new chats use and runs the chosen hook"
   (lambda ()
     (let ((old *default-connector*)
           (old-saved setup-default-connector)
-          (buf (setup-wizard! "model")))
-      (check-true! (setup-wizard-click buf "wizard:use:zz-picked") "the click is the wizard's")
+          (seen #f))
+      (add-hook! 'setup-connector-chosen-hook (lambda () (set! seen #t)))
+      (setup-use-connector! "zz-picked")
       (check-equal! *default-connector* "zz-picked" "the default")
+      (check-true! seen "the hook ran")
       (customize-save! 'setup-default-connector old-saved)
-      (set! *default-connector* old)
-      (buffer-kill! buf))))
+      (set! *default-connector* old))))
 
 (deftest 'a-secret-define-replaces-the-old-one
   "writing a key replaces the variable's define and keeps the other lines"
@@ -131,14 +109,7 @@
       (check-true! (member "A command that prints the key" labels) "a command")
       (check-true! (member "Paste the key" labels) "a paste"))))
 
-(deftest 'a-set-key-can-be-changed
-  "the hosted card offers to change a key that is set"
-  (lambda ()
-    (let ((saved *default-connector*))
-      (set! *default-connector* "api")
-      (check-equal! (setup-wizard--card-actions '("api" "hosted" #t "a key" #f))
-                    '(("wizard:key:api" "Change the key")) "the default card")
-      (set! *default-connector* saved))))
+
 
 (deftest 'desktop-clear-leaves-one-window-on-the-home-page
   "a clear leaves one window, and it shows the home page"

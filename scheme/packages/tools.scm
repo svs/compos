@@ -235,7 +235,7 @@
 ;; Uncatalogued builtins that only compute. with-current-buffer is declared
 ;; a write for what its thunk does, and the thunk is checked here.
 (define *eval-read-builtins*
-  '(car cdr cons list append reverse length list-ref cadr cddr caddr
+  '(car cdr cons list append reverse length list-ref cadr cddr caddr cadddr
     map filter remove for-each fold assoc assq member memq sort iota take
     not null? pair? string? symbol? number? procedure? equal? eq?
     + - * / = < > <= >= min max abs

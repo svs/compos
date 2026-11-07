@@ -218,8 +218,9 @@
 
 (define (llm-connectors--row-cells buf name)
   (let ((state (llm-connectors-state name)))
-    (list (list (string-append (llm-connectors--title name) (if (llm-connectors--default? name) " (default)" ""))
-                "llm-connectors-name")
+    (list (if (llm-connectors--default? name)
+              (list (string-append "✓ " (llm-connectors--title name)) "llm-connectors-default")
+              (list (string-append "  " (llm-connectors--title name)) "llm-connectors-name"))
           (list (llm-connectors-kind name) "dim")
           (list state (if (equal? state "ready") "success" "warning"))
           (list (number->string (length (llm-connectors-models name))) "dim")
@@ -360,17 +361,17 @@
        (let* ((id (cadr r))
               (default? (equal? id (llm-connectors--default-model name)))
               (t (llm-connectors-test-result name id)))
-         (list (list (string-append id
+         (list (list (string-append (if default? "✓ " "  ") id
                                     ;; a short id is an alias, and its name says which model it is
                                     (if (or (equal? (caddr r) "") (> (string-length id) 12)) ""
                                         (string-append " · " (caddr r)))
-                                    (if default? " (default)" "")
+                                    (if default? "  default" "")
                                     (if t (string-append "  " (llm-connectors--result-short t)) "")
                                     (if (and t (eq? (plist-get t 'status) 'failed))
                                         (string-append " · " (or (plist-get t 'error) "no reply"))
                                         ""))
-                     (cond (t (llm-connectors--test-face name id))
-                           (default? "llm-connectors-name")
+                     (cond (default? "llm-connectors-default")
+                           (t (llm-connectors--test-face name id))
                            (else #f))))))
       (else
        (let ((id (cadr r)) (value (cadddr r)))
@@ -393,6 +394,9 @@
 (effects! '(write))
 
 (defface! 'llm-connectors-name 'fg "var(--default-fg)" 'weight "600")
+;; the one new chats use: a tick on a green ground, on the list and on the page
+(defface! 'llm-connectors-default 'fg "color-mix(in srgb, #4fa36b 75%, var(--default-fg))"
+  'bg "color-mix(in srgb, #4fa36b 20%, transparent)" 'weight "600")
 
 (define (llm-connectors--recheck!) (llm-connectors--forget!) (llm-connectors-refresh!))
 
@@ -778,9 +782,8 @@
                                   (if (llm-connectors--section? name)
                                       (list (list (cadr name) "list-section-name") "")
                                       (let ((r (llm-connectors-test-result name)))
-                                        (list (list (llm-connectors--title name) "llm-connectors-name")
-                                              (list (string-append (if (llm-connectors--default? name) "default · " "")
-                                                                   (if r (llm-connectors--result-short r) ""))
+                                        (list (nth 0 (llm-connectors--cells buf name))
+                                              (list (if r (llm-connectors--result-short r) "")
                                                     (llm-connectors--test-face name)))))))
                    (list 'name 'narrow 'max-cols (lambda (buf) 120)
                          'columns (lambda (buf)

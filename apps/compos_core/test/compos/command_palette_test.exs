@@ -3,7 +3,9 @@ defmodule Compos.CommandPaletteTest do
 
   alias Compos.Core.{Buffer, Editor, Session}
 
-  defp wait_for(fun, tries \\ 100)
+  # A define-command makes the next apropos rebuild its rows: 3.5 s in a
+  # test VM, more on the first build, so the search waits allow 10 s.
+  defp wait_for(fun, tries \\ 1000)
   defp wait_for(fun, 0), do: assert(fun.())
 
   defp wait_for(fun, tries) do
@@ -39,9 +41,9 @@ defmodule Compos.CommandPaletteTest do
     resting_total = Editor.render_state().minibuffer.total
     type("purple submarine")
 
-    # The old pool remains visible during a burst; only the final query scans
-    # apropos and replaces it.
-    assert Editor.render_state().minibuffer.total == resting_total
+    # The typed words lead at once, so a quick RET never runs a stale row;
+    # the apropos search fills in the rest when it answers.
+    assert hd(Editor.render_state().minibuffer.candidates).label == "purple submarine"
 
     wait_for(fn ->
       mb = Editor.render_state().minibuffer
@@ -60,9 +62,10 @@ defmodule Compos.CommandPaletteTest do
       )
     end)
 
-    mb = Editor.render_state().minibuffer
-    assert Enum.any?(mb.candidates, &(&1.label == "open a file in a split"))
-
+    # RET runs the typed row; a search hit runs only after moving down to it
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    index = Enum.find_index(labels, &(&1 == "open a file in a split"))
+    press(List.duplicate("C-n", index))
     press("RET")
     mb = Editor.render_state().minibuffer
     assert mb.prompt == "File: "
@@ -79,8 +82,9 @@ defmodule Compos.CommandPaletteTest do
     press("s-p")
     type("copper narwhal")
 
+    # the typed row alone already narrows the total; wait for the search
     wait_for(fn ->
-      Editor.render_state().minibuffer.total < length(Session.command_names())
+      Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label == "zz-palette-run"))
     end)
 
     labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)

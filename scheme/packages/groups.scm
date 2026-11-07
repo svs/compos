@@ -1602,7 +1602,18 @@ is forgotten and that group falls back to creation order in the switcher."
         (else
           (let ((bufs (group-default-panes id)))
             (panes-apply! (if (pair? bufs) (panes--default-layout bufs) (panes-blank-layout))))))
+  (group--note-landed!)
   (layout-modeline!))
+
+(define (group--note-landed!)
+  "A landing is a use: the buffers the frame shows after a group switch
+   come to the front of the recent ring, the focused one first. Each
+   window is selected in the frame alone (raw-select-window!), the
+   focused one last, so the model and the focus stay as they are."
+  (let* ((focus (active-window))
+         (others (filter (lambda (w) (not (equal? w focus))) (display--work-windows))))
+    (for-each raw-select-window! (reverse others))
+    (when focus (raw-select-window! focus))))
 
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))

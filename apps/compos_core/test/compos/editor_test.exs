@@ -3513,6 +3513,10 @@ defmodule Compos.EditorTest do
              (buffer-set-local! "#{m2}" 'mode-name "gr-b-mode")
              (buffer-add-group! "#{m1}" "grgrp-#{n}")
              (buffer-add-group! "#{m2}" "grgrp-#{n}")
+             ;; showing members put the frame in their group, where a new
+             ;; buffer would join it: home lives in a group of its own
+             (buffer-add-group! "#{home}" "grhome-#{n}")
+             (switch-to-group! "grhome-#{n}")
              (switch-to-buffer! "#{home}")
              (switch-to-group! "grgrp-#{n}")
              #t)

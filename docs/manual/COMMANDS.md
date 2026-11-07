@@ -625,7 +625,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `minibuffer-cancel` |  | Cancel the minibuffer prompt |
 | `minibuffer-complete` |  | Fold the row or section at hand, else complete the input |
 | `minibuffer-confirm` |  | Accept the selected minibuffer candidate |
-| `minibuffer-confirm-context` |  | Accept the selected candidate as a context (group) switch |
 | `minibuffer-confirm-input` |  | Accept the minibuffer input exactly as typed |
 | `minibuffer-cycle-shape` |  | Show this prompt as the bottom bar, the panel, or the modal |
 | `minibuffer-delete-backward` |  | Delete the character before point, or the highlighted row of an empty prompt that allows it |

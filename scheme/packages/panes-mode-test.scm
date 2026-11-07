@@ -156,3 +156,27 @@
                           (list "zz-pr-a2" c)
                           "the renamed buffer reads back under its new name")))
         (lambda () (pmt-done! (list "zz-pr-a2" a c)))))))
+
+(deftest 'a-group-switch-draws-every-window-and-the-ring-leads-with-them
+  "a switch into a group of two panes shows both windows, keeps the buffer of the group it left out of the layout, and puts the buffers it shows first in the recent ring"
+  (lambda ()
+    (with-fresh-group "zz-panes-land-home"
+      (lambda (gh)
+        (with-fresh-group "zz-panes-land"
+          (lambda (id)
+            (let ((a (pmt-buffer! "zz-pl-a" "zz-a-mode"))
+                  (c (pmt-buffer! "zz-pl-c" "zz-c-mode"))
+                  (home (pmt-buffer! "zz-pl-home" "zz-h-mode")))
+              (unwind-protect
+                (lambda ()
+                  (pmt-two-panes! id a c)
+                  (buffer-add-group! home gh)
+                  (switch-to-group! gh)
+                  (switch-to-buffer! home)
+                  (switch-to-group! id)
+                  (check-equal! (map cadr (window-list)) (list a c) "both windows of the layout are on screen")
+                  (check-false! (member home (panes-buffers (panes-layout))) "the home buffer is not in the layout")
+                  (let ((ring (list-head (buffer-list-mru) 3)))
+                    (check-equal! (car ring) (window-buffer (active-window)) "the focused buffer leads the ring")
+                    (check-true! (and (member a ring) (member c ring) #t) "both landed buffers come first")))
+                (lambda () (pmt-done! (list a c home)))))))))))

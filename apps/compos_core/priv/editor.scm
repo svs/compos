@@ -1765,6 +1765,42 @@
 (public! 'key-binding
   "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys or a string.")
 
+;;; --- the frame's key facts ----------------------------------------------------
+;; The frame keeps what the key loop needs between keys; frame--get and
+;; frame--put! read and write one fact, and #f is unset.
+
+(define (last-command) (or (frame--get 'last-command) ""))
+(public! 'last-command "(last-command) — return the name of the last command that ran.")
+
+(define (this-command) (or (frame--get 'this-command) ""))
+(public! 'this-command "(this-command) — the name of the command now running; \"\" outside a command.")
+
+(define (last-keys) (or (frame--get 'last-keys) '()))
+(public! 'last-keys "(last-keys) — return the key sequence whose keymap lookup ran the current command.")
+
+(define (current-prefix-arg) (frame--get 'prefix-arg))
+(public! 'current-prefix-arg "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f.")
+
+(effects! '(write))
+(define (set-this-command! name) (frame--put! 'this-command name))
+(public! 'set-this-command! "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\".")
+
+(define (set-prefix-arg! arg) (frame--put! 'prefix-arg arg))
+(public! 'set-prefix-arg! "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it.")
+
+(define (capture-key! command) (frame--put! 'key-capture command))
+(public! 'capture-key! "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.")
+
+(define (set-echo! text) (frame--put! 'echo (if (symbol? text) (symbol->string text) text)))
+(public! 'set-echo! "(set-echo! TEXT) — set the echo area's text; an empty string clears it.")
+
+(define (set-pending! seq) (frame--put! 'pending (if (list? seq) seq '())))
+(public! 'set-pending! "(set-pending! SEQ) — set this frame's pending key prefix.")
+
+(define (set-last-keys! seq) (frame--put! 'last-keys (if (list? seq) seq '())))
+(public! 'set-last-keys! "(set-last-keys! SEQ) — record the key sequence whose lookup ran the current command.")
+(effects! '(read))
+
 ;;; --- the key loop -------------------------------------------------------------
 ;; KeyDispatch hands every key event to (key-dispatch! KEY). What a key means
 ;; is here: the routing ladder, prefix accumulation, the prefix argument,

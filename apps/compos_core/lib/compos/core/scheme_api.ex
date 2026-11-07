@@ -2036,7 +2036,7 @@ defmodule Compos.Core.SchemeAPI do
         Buffer.get_local(buf, Opts.plain(k)) || false
       end,
       {"buffer-rows",
-       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, ids, chat-ids, modes, agents (#t: every agent's buffer; with modes, those too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, id, path, mode, title, group (group-id), group-label, modified, read-only, used, agent, chat-id, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
+       "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, ids, chat-ids, modes, agents (#t: every agent's buffer; with modes, those too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, id, path, mode, title, group (group-id), group-label, modified, read-only, agent, chat-id, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
         fn args ->
           spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
 
@@ -2731,13 +2731,6 @@ defmodule Compos.Core.SchemeAPI do
           {_, store} = Compos.Scheme.Eval.apply_fn(cleanup, [], store)
           {value, store}
         end,
-      # describe-key arms this, then reads the sequence back with (last-keys)
-      {"capture-key!",
-       "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms."} =>
-        fn [command] ->
-          Editor.set_key_capture(command)
-          :void
-        end,
       # The languages whose blocks offer the run key in the rendered page.
       # The fence-kind registry pushes the list on every registration, so
       # the page never mirrors the registry by hand.
@@ -2751,33 +2744,21 @@ defmodule Compos.Core.SchemeAPI do
 
           :void
         end,
-      {"last-command", "(last-command) — return the name of the last command that ran."} =>
-        fn [] -> Editor.last_command() end,
-      {"this-command",
-       "(this-command) — the name of the command now running; \"\" outside a command."} =>
-        fn [] -> Editor.this_command() end,
-      {"set-this-command!",
-       "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\"."} =>
-        fn [name] ->
-          Editor.set_this_command(name)
+      # the key loop's frame facts (editor.scm names each one: last-command,
+      # set-echo! and the rest); #f is unset
+      {"frame--get",
+       "(frame--get FIELD) — this frame's FIELD, a symbol: echo, pending, prefix-arg, key-capture, last-command, this-command or last-keys; #f when unset. editor.scm calls this: use last-command and the like."} =>
+        fn [field] -> Editor.frame_get(frame_field(field)) || false end,
+      {"frame--put!",
+       "(frame--put! FIELD VALUE) — set this frame's FIELD, as frame--get names them; #f unsets it. editor.scm calls this: use set-echo! and the like."} =>
+        fn [field, value] ->
+          Editor.frame_put(frame_field(field), value)
           :void
         end,
       {"undo-boundary!",
        "(undo-boundary!) — Emacs undo-boundary: the edits so far are one undo step, the edits after this are the next, even inside one command."} =>
         fn [] ->
           Buffer.undo_boundary(Editor.current_buffer())
-          :void
-        end,
-      {"last-keys",
-       "(last-keys) — return the key sequence whose keymap lookup ran the current command."} =>
-        fn [] -> Editor.last_keys() end,
-      {"current-prefix-arg",
-       "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f."} =>
-        fn [] -> Editor.prefix_arg() || false end,
-      {"set-prefix-arg!",
-       "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it."} =>
-        fn [arg] ->
-          Editor.set_prefix_arg(arg)
           :void
         end,
 
@@ -2824,22 +2805,6 @@ defmodule Compos.Core.SchemeAPI do
                   {[{:sym, "error"}, "command failed: " <> to_string(kind) <> ": " <> inspect(reason, limit: 5)], store}
               end
           end
-        end,
-      {"set-echo!", "(set-echo! TEXT) — set the echo area's text; an empty string clears it."} =>
-        fn [text] ->
-          Editor.set_echo(Opts.string(text))
-          :void
-        end,
-      {"set-pending!", "(set-pending! SEQ) — set this frame's pending key prefix."} =>
-        fn [seq] ->
-          Editor.set_pending(if is_list(seq), do: seq, else: [])
-          :void
-        end,
-      {"set-last-keys!",
-       "(set-last-keys! SEQ) — record the key sequence whose lookup ran the current command."} =>
-        fn [seq] ->
-          Editor.set_last_keys(if is_list(seq), do: seq, else: [])
-          :void
         end,
       {"finish-command!",
        "(finish-command! NAME KEEP-PREFIX) — end NAME: the next command sees it as last-command; KEEP-PREFIX keeps the prefix argument."} =>
@@ -3612,6 +3577,12 @@ defmodule Compos.Core.SchemeAPI do
   defp mb_view_field("legend", v), do: {:legend, v}
   defp mb_view_field("selected", v), do: {:selected, v}
   defp mb_view_field(_, _), do: nil
+
+  @frame_fields Map.new(
+                  ~w(echo pending prefix-arg key-capture last-command this-command last-keys),
+                  &{&1, String.to_atom(String.replace(&1, "-", "_"))}
+                )
+  defp frame_field(field), do: Map.fetch!(@frame_fields, Opts.plain(field))
 
   defp mb_query_rule("segment"), do: :segment
   defp mb_query_rule("none"), do: :none

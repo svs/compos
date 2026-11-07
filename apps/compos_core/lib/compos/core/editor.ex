@@ -41,6 +41,7 @@ defmodule Compos.Core.Editor do
 
   @scratch "*scratch*"
   @main_frame "f-main"
+  @frame_fields [:echo, :pending, :prefix_arg, :key_capture, :last_command, :this_command, :last_keys]
   # what a window is worth in columns before the client has measured one
   @default_cols 100
 
@@ -187,26 +188,25 @@ defmodule Compos.Core.Editor do
   """
   def key_context(fid \\ nil), do: GenServer.call(__MODULE__, {:key_context, fid(fid)})
 
-  def set_pending(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:set_pending, seq, fid(fid)})
-  def set_echo(msg, fid \\ nil), do: GenServer.call(__MODULE__, {:set_echo, msg, fid(fid)})
+  @doc """
+  One fact of the calling frame the key loop keeps: :echo, :pending,
+  :prefix_arg, :key_capture, :last_command, :this_command or :last_keys.
+  nil when unset. Scheme owns what each means (editor.scm).
+  """
+  def frame_get(field, fid \\ nil) when field in @frame_fields,
+    do: GenServer.call(__MODULE__, {:frame_get, field, fid(fid)})
 
-  @doc "The calling frame's raw Emacs prefix argument, or nil."
-  def prefix_arg(fid \\ nil), do: GenServer.call(__MODULE__, {:prefix_arg, fid(fid)})
+  @doc "Set one `frame_get/2` fact; the echo and the pending prefix repaint."
+  def frame_put(field, value, fid \\ nil) when field in @frame_fields,
+    do: GenServer.call(__MODULE__, {:frame_put, field, value, fid(fid)})
 
-  def set_prefix_arg(arg, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_prefix_arg, arg, fid(fid)})
+  def set_pending(seq, fid \\ nil), do: frame_put(:pending, seq, fid)
+  def set_echo(msg, fid \\ nil), do: frame_put(:echo, msg, fid)
+  def set_prefix_arg(arg, fid \\ nil), do: frame_put(:prefix_arg, arg, fid)
 
   @doc "Record the command and clear its one-shot prefix unless KEEP_PREFIX is true."
   def finish_command(name, keep_prefix, fid \\ nil),
     do: GenServer.call(__MODULE__, {:finish_command, name, keep_prefix, fid(fid)})
-
-  @doc """
-  Arm a one-shot key capture: the next complete key sequence runs COMMAND
-  instead of its own binding, and `last_keys/0` reports the sequence. nil
-  disarms. Scheme owns what the capture means (describe-key reads it).
-  """
-  def set_key_capture(command, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_key_capture, command, fid(fid)})
 
   @doc "Set the calling frame's rendered Transient menu, or clear it with nil."
   def set_transient(menu, fid \\ nil),
@@ -349,27 +349,6 @@ defmodule Compos.Core.Editor do
   @doc "Give frame FID its own face map FACES and a SKIN stylesheet; nil FACES gives it the global faces again."
   def set_own_faces(faces, skin, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_own_faces, faces, skin, fid(fid)})
-
-  # Emacs last-command (yank-pop and friends dispatch on it), per frame
-  def set_last_command(name, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_last_command, name, fid(fid)})
-
-  def last_command(fid \\ nil), do: GenServer.call(__MODULE__, {:last_command, fid(fid)})
-
-  # Emacs this-command: the command now running. KeyDispatch sets it as
-  # the command starts; the command may change it, and finish_command
-  # makes it the next last-command.
-  def set_this_command(name, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_this_command, name, fid(fid)})
-
-  def this_command(fid \\ nil), do: GenServer.call(__MODULE__, {:this_command, fid(fid)})
-
-  # the key sequence whose keymap lookup ran the current command — one
-  # command bound to many keys (the switcher's type-to-narrow) reads it
-  def set_last_keys(seq, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_last_keys, seq, fid(fid)})
-
-  def last_keys(fid \\ nil), do: GenServer.call(__MODULE__, {:last_keys, fid(fid)})
 
   # commands that manage their own undo boundaries (Scheme registers them;
   # KeyDispatch skips its automatic break for these — "undo" is one from birth)
@@ -1350,21 +1329,21 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
   end
 
-  def handle_call({:set_pending, seq, fid}, _from, state) do
+  def handle_call({:frame_get, field, fid}, _from, state),
+    do: {:reply, Map.get(frame(state, fid), field), state}
+
+  # false is unset. No render reads the key loop's facts but the echo and
+  # the pending prefix, so only those two mark the frame changed: an armed
+  # key capture must not cost every client a repaint.
+  def handle_call({:frame_put, field, value, fid}, _from, state) do
     f = frame(state, fid)
+    value = if value == false, do: nil, else: value
 
-    if f.pending == seq,
-      do: {:reply, :ok, state},
-      else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
-  end
-
-  def handle_call({:prefix_arg, fid}, _from, state),
-    do: {:reply, Map.get(frame(state, fid), :prefix_arg), state}
-
-  def handle_call({:set_prefix_arg, arg, fid}, _from, state) do
-    f = frame(state, fid)
-    arg = if arg in [nil, false], do: nil, else: arg
-    {:reply, :ok, put_frame(state, Map.put(f, :prefix_arg, arg))}
+    cond do
+      Map.get(f, field) == value -> {:reply, :ok, state}
+      field in [:echo, :pending] -> changed(:ok, put_frame(state, Map.put(f, field, value)), f.id)
+      true -> {:reply, :ok, put_frame(state, Map.put(f, field, value))}
+    end
   end
 
   def handle_call({:finish_command, name, keep_prefix, fid}, _from, state) do
@@ -1385,14 +1364,6 @@ defmodule Compos.Core.Editor do
     {:reply, :ok, put_frame(state, f)}
   end
 
-  # No render depends on the capture flag, so it never marks the frame
-  # changed — an armed capture must not cost every client a repaint.
-  def handle_call({:set_key_capture, command, fid}, _from, state) do
-    f = frame(state, fid)
-    command = if command in [nil, false], do: nil, else: command
-    {:reply, :ok, put_frame(state, Map.put(f, :key_capture, command))}
-  end
-
   def handle_call({:set_transient, menu, fid}, _from, state) do
     f = frame(state, fid)
     menu = if menu in [nil, false], do: nil, else: menu
@@ -1400,14 +1371,6 @@ defmodule Compos.Core.Editor do
     if Map.get(f, :transient) == menu,
       do: {:reply, :ok, state},
       else: changed(:ok, put_frame(state, Map.merge(f, %{transient: menu, pending: []})), f.id)
-  end
-
-  def handle_call({:set_echo, msg, fid}, _from, state) do
-    f = frame(state, fid)
-
-    if f.echo == msg,
-      do: {:reply, :ok, state},
-      else: changed(:ok, put_frame(state, %{f | echo: msg}), f.id)
   end
 
   # the client renders on the frame-change broadcast and takes the text there
@@ -1665,28 +1628,6 @@ defmodule Compos.Core.Editor do
           else: changed(true, put_frame(state, Map.put(f, :win_stacks, Map.put(stacks, win, n))), f.id)
     end
   end
-
-  # the WHOLE history, group marks included: a group switch is an entry
-  # like any buffer visit, so one stream ranks every place you went
-    # the groups by recency, newest first: the marks of the ring, then the
-  # ones it pushed out. Group recency has this one owner.
-      def handle_call({:set_last_command, name, fid}, _from, state),
-    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :last_command, name))}
-
-  def handle_call({:last_command, fid}, _from, state),
-    do: {:reply, Map.get(frame(state, fid), :last_command) || "", state}
-
-  def handle_call({:set_this_command, name, fid}, _from, state),
-    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :this_command, name))}
-
-  def handle_call({:this_command, fid}, _from, state),
-    do: {:reply, Map.get(frame(state, fid), :this_command) || "", state}
-
-  def handle_call({:set_last_keys, seq, fid}, _from, state),
-    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :last_keys, seq))}
-
-  def handle_call({:last_keys, fid}, _from, state),
-    do: {:reply, Map.get(frame(state, fid), :last_keys) || [], state}
 
   def handle_call({:add_undo_exempt, name}, _from, state),
     do: {:reply, :ok, %{state | undo_exempt: MapSet.put(state.undo_exempt, name)}}

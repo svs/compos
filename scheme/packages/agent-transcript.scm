@@ -942,8 +942,7 @@
                                       "Choose an answer or type another reply below.")))))
       ((equal? kind "status")
        (list 'tag "c-summary" 'class "ag-status" 'attrs '(("kind" "status"))
-             'children (list (chat-view--label "SUMMARY")
-                             (list 'tag "c-group" 'class "ag-status-text" 'range (list s e)))))
+             'children (list (list 'tag "c-group" 'class "ag-status-text" 'range (list s e)))))
       ((equal? kind "image")
        (let ((path (nth 3 b)))
          (list 'tag "c-user" 'class "ag-user ag-image"

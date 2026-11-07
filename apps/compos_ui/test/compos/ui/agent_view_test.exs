@@ -111,7 +111,7 @@ defmodule Compos.Ui.AgentViewTest do
     refute has_element?(view, "c-message")
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"
-    assert has_element?(view, ".ag-status .ag-label", "SUMMARY")
+    refute has_element?(view, ".ag-status .ag-label")
     assert has_element?(view, ".ag-status-text", "Profiling the editor repaint path.")
     # markdown became HTML in the prose block; the assertion holds for the
     # page renderer (data-src attributes, byte spans) and for the Earmark

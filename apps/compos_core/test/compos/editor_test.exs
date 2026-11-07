@@ -74,6 +74,7 @@ defmodule Compos.EditorTest do
     {:ok, quoted} = Compos.Core.Session.eval(~s{(group-name "#{id}")})
     if quoted == "#f", do: nil, else: String.trim(quoted, "\"")
   end
+
   # A tiling test's own group, with the frame standing in it: the fill
   # takes the group's buffers and never another group's.
   defp tile_group!(name, bufs) do
@@ -93,7 +94,10 @@ defmodule Compos.EditorTest do
   end
 
   defp tile_group_done!(id) do
-    Compos.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+    Compos.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+    )
+
     Compos.Core.Session.eval("(group-record-delete! \"#{id}\")")
   end
 
@@ -1331,7 +1335,9 @@ defmodule Compos.EditorTest do
     assert {"C-c b", "llm-configure"} in Editor.local_keys(buf)
 
     {:ok, _} =
-      Compos.Core.Session.eval("(begin (set! *llm-bundles* '()) (set-frame-local! 'llm-config-more #f))")
+      Compos.Core.Session.eval(
+        "(begin (set! *llm-bundles* '()) (set-frame-local! 'llm-config-more #f))"
+      )
 
     press(["C-c", "b"])
     assert Editor.current_buffer() == buf
@@ -2718,6 +2724,7 @@ defmodule Compos.EditorTest do
 
     on_exit(fn ->
       Application.delete_env(:compos_core, :llm_chat_fun)
+
       case companion.() do
         "" -> :ok
         c -> Compos.Core.kill_buffer(c)
@@ -2739,6 +2746,7 @@ defmodule Compos.EditorTest do
              c = companion.()
              c != "" and Buffer.exists?(c) and Buffer.text(c) =~ "what is 6*7"
            end)
+
     assert Editor.current_buffer() == buf
 
     press(["C-x", "1"])
@@ -3906,7 +3914,11 @@ defmodule Compos.EditorTest do
       type("two-pane")
       press(["RET"])
 
-      assert window_layout() == [{buf, [0.0, 0.0, 0.667, 1.0]}, {second, [0.667, 0.0, 0.333, 1.0]}]
+      assert window_layout() == [
+               {buf, [0.0, 0.0, 0.667, 1.0]},
+               {second, [0.667, 0.0, 0.333, 1.0]}
+             ]
+
       assert Editor.current_buffer() == buf
 
       for name <- [second, third],
@@ -3916,7 +3928,9 @@ defmodule Compos.EditorTest do
     test "two-pane preset fills a missing companion from recent buffers", %{buf: buf} do
       companion = "two-pane-companion-#{System.unique_integer([:positive])}"
       Compos.Core.create_buffer(companion)
-      _id = tile_group!("zz-tile-companion-#{System.unique_integer([:positive])}", [buf, companion])
+
+      _id =
+        tile_group!("zz-tile-companion-#{System.unique_integer([:positive])}", [buf, companion])
 
       {:ok, _} =
         Compos.Core.Session.eval("""
@@ -3927,7 +3941,10 @@ defmodule Compos.EditorTest do
 
       run("window-layout-two-pane")
 
-      assert window_layout() == [{buf, [0.0, 0.0, 0.667, 1.0]}, {companion, [0.667, 0.0, 0.333, 1.0]}]
+      assert window_layout() == [
+               {buf, [0.0, 0.0, 0.667, 1.0]},
+               {companion, [0.667, 0.0, 0.333, 1.0]}
+             ]
 
       Compos.Core.Session.eval(~s{(buffer-kill! "#{companion}")})
     end
@@ -4002,7 +4019,9 @@ defmodule Compos.EditorTest do
       second = "three-columns-second-#{System.unique_integer([:positive])}"
       third = "three-columns-third-#{System.unique_integer([:positive])}"
       for name <- [second, third], do: Compos.Core.create_buffer(name)
-      _id = tile_group!("zz-tile-three-#{System.unique_integer([:positive])}", [buf, second, third])
+
+      _id =
+        tile_group!("zz-tile-three-#{System.unique_integer([:positive])}", [buf, second, third])
 
       # Creating a buffer does not make it recent: it joins the ring behind
       # everything already selected, *scratch* included. Select each one and
@@ -4055,7 +4074,6 @@ defmodule Compos.EditorTest do
           do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
   end
-
 end
 
 defmodule Compos.MinibufferEditingTest do

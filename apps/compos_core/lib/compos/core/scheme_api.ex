@@ -2768,6 +2768,105 @@ defmodule Compos.Core.SchemeAPI do
           Editor.set_prefix_arg(arg)
           :void
         end,
+
+      # --- the key loop's state doors (key-dispatch! in editor.scm) ----------
+      # The key loop is Scheme. These read and write the one fact a key
+      # needs from the frame; policy is the loop's.
+      {"key-routing",
+       "(key-routing) — the frame's key-routing state as a plist: capture, minibuffer, completion, transient, pending, prefix-arg."} =>
+        fn [] ->
+          s = Editor.snapshot()
+
+          [
+            {:sym, "capture"},
+            Map.get(s, :key_capture) || false,
+            {:sym, "minibuffer"},
+            s.minibuffer != nil,
+            {:sym, "completion"},
+            s.completion != nil,
+            {:sym, "transient"},
+            Map.get(s, :transient) != nil,
+            {:sym, "pending"},
+            Map.get(s, :pending) || [],
+            {:sym, "prefix-arg"},
+            Map.get(s, :prefix_arg) || false
+          ]
+        end,
+      {"key-run-command",
+       "(key-run-command NAME) — run NAME the way a key runs it, in the current store; answer (ok) or (error MSG)."} =>
+        fn [name], store ->
+          group = commands_table()
+
+          case :ets.lookup(group, Opts.plain(name)) do
+            [] ->
+              {[{:sym, "error"}, "undefined command"], store}
+
+            [{_, closure, _}] ->
+              try do
+                {_value, store2} = Compos.Scheme.Eval.apply_fn(closure, [], store)
+                {[{:sym, "ok"}], store2}
+              rescue
+                e -> {[{:sym, "error"}, Exception.message(e)], store}
+              catch
+                kind, reason ->
+                  {[{:sym, "error"}, "command failed: " <> to_string(kind) <> ": " <> inspect(reason, limit: 5)], store}
+              end
+          end
+        end,
+      {"set-echo!", "(set-echo! TEXT) — set the echo area's text; an empty string clears it."} =>
+        fn [text] ->
+          Editor.set_echo(Opts.string(text))
+          :void
+        end,
+      {"set-pending!", "(set-pending! SEQ) — set this frame's pending key prefix."} =>
+        fn [seq] ->
+          Editor.set_pending(if is_list(seq), do: seq, else: [])
+          :void
+        end,
+      {"set-last-keys!",
+       "(set-last-keys! SEQ) — record the key sequence whose lookup ran the current command."} =>
+        fn [seq] ->
+          Editor.set_last_keys(if is_list(seq), do: seq, else: [])
+          :void
+        end,
+      {"finish-command!",
+       "(finish-command! NAME KEEP-PREFIX) — end NAME: the next command sees it as last-command; KEEP-PREFIX keeps the prefix argument."} =>
+        fn [name, keep] ->
+          Editor.finish_command(Opts.plain(name), keep == true)
+          :void
+        end,
+      {"user-acted!", "(user-acted!) — note that a key ended any manual-scroll override."} =>
+        fn [] ->
+          Editor.user_acted()
+          :void
+        end,
+      {"undo-exempt?",
+       "(undo-exempt? COMMAND) — #t when COMMAND is exempt from the automatic undo-chain break."} =>
+        fn [name] -> Editor.undo_exempt?(Opts.plain(name)) end,
+      {"minibuffer-sync-input!",
+       "(minibuffer-sync-input!) — after a minibuffer key, run the prompt's change handler when its input changed."} =>
+        fn [] ->
+          case Editor.minibuffer_sync_input() do
+            {:changed, input} ->
+              case Editor.snapshot().minibuffer do
+                %{on_change: oc} when oc not in [nil, false] ->
+                  Compos.Core.Session.apply_callback(oc, [input])
+                  :void
+
+                _ ->
+                  :void
+              end
+
+            _ ->
+              :void
+          end
+        end,
+      {"key-trace-note!",
+       "(key-trace-note! PHASE NAME) — record one key-trace row while (trace-key) collects."} =>
+        fn [phase, name] ->
+          Compos.Core.KeyDispatch.trace_note(Opts.string(phase), Opts.string(name))
+          :void
+        end,
       {"window-rows",
        "(window-rows [WIN]) — text rows of WIN, or of the active window when WIN is omitted."} =>
         fn

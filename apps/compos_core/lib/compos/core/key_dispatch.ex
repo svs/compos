@@ -1,11 +1,13 @@
 defmodule Compos.Core.KeyDispatch do
   @moduledoc """
-  Key routing. Runs in the *caller's* process (LiveView, test, RPC) — never
-  inside Editor or Session — so command execution can freely call both.
+  Key transport. Runs in the *caller's* process (LiveView, test, RPC) —
+  never inside Editor or Session — so the Scheme key loop it calls can
+  freely use both.
 
-  Policy here is minimal and mechanical: minibuffer input editing, prefix-key
-  accumulation, self-insert fast path. What keys *mean* is Scheme's business
-  (keymap contents + commands all come from editor.scm / init.scm).
+  The loop itself is Scheme: `(key-dispatch! KEY)` in editor.scm routes a
+  key to the capture, the minibuffer, the completion popup, a Transient or
+  the buffer, accumulates the prefix, inserts a printable, and runs the
+  command as a key runs it. What keys *mean* is keymap data.
 
   Key spec strings follow Emacs: `"a"`, `"C-x"`, `"M-x"`, `"C-M-f"`, `"RET"`,
   `"DEL"`, `"TAB"`, `"SPC"`, `"<left>"`.
@@ -13,9 +15,6 @@ defmodule Compos.Core.KeyDispatch do
 
   require Logger
   alias Compos.Core.{Buffer, Editor, Frame, Session}
-
-  @named ~w(RET DEL TAB SPC ESC <delete> <left> <right> <up> <down> <home> <end>)
-  @prefix_commands ~w(universal-argument digit-argument negative-argument)
 
   @doc """
   Dispatch a key for a frame: stamps the frame context so every Editor and
@@ -35,22 +34,22 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   def handle_key(key) do
-    note("key", key)
-    snapshot = Editor.snapshot()
-    %{minibuffer: mb, pending: pending, completion: completion} = snapshot
-    transient = Map.get(snapshot, :transient)
-
-    capture = Map.get(snapshot, :key_capture)
-
-    cond do
-      capture -> capture_key(key, pending, capture)
-      mb -> minibuffer_key(key, mb, pending)
-      completion -> completion_key(key, pending)
-      transient -> transient_key(key, pending)
-      true -> buffer_key(key, pending, Map.get(snapshot, :prefix_arg))
+    case Session.call_named("key-dispatch!", [key], Frame.current(), 30_000, :ui) do
+      {:error, msg} -> Logger.warning("key dispatch failed: " <> inspect(msg))
+      _ -> :ok
     end
 
     :ok
+  catch
+    :exit, {:timeout, _} ->
+      Logger.warning("key dispatch timed out: " <> inspect(key))
+      :ok
+
+    # the lane worker died under the call (a kill, a code purge): drop the
+    # key and keep the client alive
+    :exit, reason ->
+      Logger.warning("key dispatch failed: " <> inspect(key) <> ": " <> inspect(reason, limit: 5))
+      :ok
   end
 
   @doc """
@@ -72,17 +71,11 @@ defmodule Compos.Core.KeyDispatch do
     buffer = Editor.current_buffer()
 
     # The reader's caret says where the edit lands, while the DOM it was
-    # measured against is still the text the server holds. Equal versions
-    # mean the two agree, so the byte is the one the reader is looking at.
-    # A version behind means a patch landed between the measure and the
-    # key, and point is the safer answer — the old rule, kept for the case
-    # it was written for. A routed surface owns its own caret.
-    # DISABLED until the client can prove the CARET is current, not just the
-    # text. A matching version says the DOM holds the server's bytes; it says
-    # nothing about where the caret is. beforeinput preventDefaults, so while
-    # you type the browser never advances the caret: a patch lands, the
-    # version matches, and the caret is still a character behind. Trusting it
-    # then put every keystroke one place back.
+    # measured against is the text the server holds. DISABLED until the
+    # client can prove the CARET is current, not just the text: beforeinput
+    # preventDefaults, so while you type the browser never advances the
+    # caret, and trusting a matching version put every keystroke one place
+    # back.
     _ = {at, v}
     if false, do: Buffer.goto(buffer, at)
 
@@ -135,51 +128,7 @@ defmodule Compos.Core.KeyDispatch do
 
       other ->
         Editor.finish_command("input-intent", false)
-        Editor.set_echo("input-intent: #{inspect(other)}")
-    end
-  end
-
-  # --- completion popup routing ----------------------------------------------
-  # What the popup's keys MEAN is Scheme's business (dup #22): the
-  # " *completion*" keymap in editor.scm binds move/accept/quit, rebindable
-  # like any map. Only the mechanics stay here: an unbound printable keeps
-  # narrowing, SPC and everything else dismiss and act normally.
-
-  @completion_map " *completion*"
-
-  # SPC ends the word, so it ends the completion. It also has to leave by
-  # the ordinary key path: that is the one place that knows "SPC" spells a
-  # space. Falling through to the popup's own self-insert put the three
-  # letters S, P, C into the buffer.
-  defp completion_key("SPC", pending) do
-    Editor.completion_dismiss()
-    buffer_key("SPC", pending)
-  end
-
-  defp completion_key(key, pending) do
-    case completion_lookup(key) do
-      # a printable is bound to self-insert-command in the popup's map:
-      # it inserts and the popup narrows in place
-      {:command, "self-insert-command"} ->
-        self_insert(key)
-        requery_completion()
-
-      {:command, name} ->
-        run(name)
-
-      _ ->
-        # any other key dismisses and acts normally
-        Editor.completion_dismiss()
-        buffer_key(key, pending)
-    end
-  end
-
-  # what KEY means in the popup's own map, asked of Scheme
-  defp completion_lookup(key) do
-    case Session.call_named("keymap-lookup", [@completion_map, [key]], Frame.current(), 5_000, :ui) do
-      {:ok, name} when is_binary(name) -> {:command, name}
-      {:ok, {:sym, "prefix"}} -> :prefix
-      _ -> :none
+        Editor.set_echo("input-intent: " <> inspect(other))
     end
   end
 
@@ -201,293 +150,10 @@ defmodule Compos.Core.KeyDispatch do
     end
   end
 
-  # --- one-shot key capture --------------------------------------------------
-  # Scheme arms the capture (describe-key does). The next COMPLETE key
-  # sequence runs the armed command instead of its own binding, and that
-  # command reads the sequence back with (last-keys). A prefix accumulates
-  # here the way it does everywhere else, so the capture reads "C-x C-f"
-  # as one sequence.
-
-  defp capture_key(key, pending, command) do
-    Editor.user_acted()
-    seq = pending ++ [key]
-
-    case lookup_esc_meta(seq) do
-      :prefix ->
-        Editor.set_pending(seq)
-        Editor.set_echo(Enum.join(seq, " ") <> "-")
-
-      # the capture stays armed: the next key tries again
-      :failed ->
-        Editor.set_pending([])
-        Editor.set_echo(Enum.join(seq, " ") <> ": editor busy, key dropped")
-
-      _ ->
-        Editor.set_pending([])
-        Editor.set_key_capture(nil)
-        Editor.set_last_keys(seq)
-        Editor.set_echo("")
-        run(command)
-    end
-  end
-
-  # --- minibuffer routing ----------------------------------------------------
-  # The minibuffer is a buffer: keys go through the normal keymap machinery.
-  # Its local map (bound in editor.scm) shadows the global one for RET/C-g/
-  # TAB/C-n/C-p/DEL; everything else — motion, kill/yank, undo, M-DEL — is
-  # just the global editing commands acting on the *minibuf* buffer, which
-  # Editor.current_buffer/lookup_key route to while a prompt is active.
-
-    defp minibuffer_key("M-x", _mb, _pending) do
-    # M-x is the command prompt's escape hatch: a second M-x cancels the
-    # active prompt instead of inserting another command prefix.
-    Session.run_command("minibuffer-cancel")
-  end
-
-  defp minibuffer_key(key, mb, pending) do
-    # unresolved chords stay silent here: the echo area is the prompt
-    resolve_and_run(key, pending, fn _seq -> :ok end)
-
-    # any edit to the backing buffer fires the prompt's on_change handler
-    # (isearch, find-file filtering); confirm/cancel closed the prompt, so
-    # sync is a no-op there
-    case Editor.minibuffer_sync_input() do
-      {:changed, input} ->
-        case mb do
-          %{on_change: oc} when oc not in [nil, false] -> Session.apply_callback(oc, [input])
-          _ -> :ok
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
-  # --- buffer routing --------------------------------------------------------
-
-  # Scheme owns the active Transient keymap and resolves the sequence. The
-  # core only maintains the pending chord and invokes the returned command.
-  # Transient's map is the frame's overriding map, locked: the ladder
-  # answers its keys and nothing else, and an unbound key says so
-  defp transient_key(key, pending) do
-    Editor.user_acted()
-    Editor.set_echo("")
-
-    resolve_and_run(
-      key,
-      pending,
-      fn seq -> Editor.set_echo(Enum.join(seq, " ") <> " is not a transient suffix") end,
-      nil,
-      false
-    )
-  end
-
-  defp buffer_key(key, pending), do: buffer_key(key, pending, Editor.prefix_arg())
-
-  defp buffer_key(key, pending, prefix_arg) do
-    # a key ends any manual-scroll override: the view follows point again
-    Editor.user_acted()
-    Editor.set_echo("")
-
-    # after C-u the digits and - come from universal-argument-map, the
-    # frame's overriding map until the next command
-    resolve_and_run(
-      key,
-      pending,
-      fn seq ->
-        Editor.set_prefix_arg(nil)
-        Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
-      end,
-      prefix_arg
-    )
-  end
-
-  # THE lookup ladder (dup #21) — every surface resolves a key the same
-  # way: append it to the pending prefix, look the sequence up, and fall
-  # through. A command runs; a prefix accumulates and echoes; anything
-  # else clears the prefix, self-inserts a printable, and otherwise defers
-  # to UNDEFINED — the one point where the surfaces differ.
-  # INSERT? false (Transient) keeps an unbound printable from inserting.
-  defp resolve_and_run(key, pending, undefined, prefix_arg \\ nil, insert? \\ true) do
-    seq = pending ++ [key]
-
-    case lookup_esc_meta(seq) do
-      # the global map binds every printable to self-insert-command, as
-      # Emacs does; the fast path inserts the key itself, with the count
-      # and the region rule
-      {:command, "self-insert-command"} ->
-        Editor.set_pending([])
-        Editor.set_last_keys(seq)
-        self_insert(if(key == "SPC", do: " ", else: key), prefix_arg)
-
-      {:command, name} ->
-        Editor.set_pending([])
-        # the sequence that ran the command: one command bound to many
-        # keys (the switcher's type-to-narrow) reads it back
-        Editor.set_last_keys(seq)
-        # the prefix echo ("C-c-") must not outlive the sequence: the
-        # command can close the prompt, and the echo bar comes back into
-        # view still showing it
-        if pending != [], do: Editor.set_echo("")
-        run(name)
-
-      :prefix ->
-        Editor.set_pending(seq)
-        Editor.set_echo(Enum.join(seq, " ") <> "-")
-
-      :failed ->
-        Editor.set_pending([])
-        Editor.set_echo(Enum.join(seq, " ") <> ": editor busy, key dropped")
-
-      :none ->
-        Editor.set_pending([])
-
-        # a printable no map binds still inserts, so a mode that unbinds
-        # a letter does not lose the letter
-        cond do
-          insert? and pending == [] and key == "SPC" -> self_insert(" ", prefix_arg)
-          insert? and pending == [] and printable?(key) -> self_insert(key, prefix_arg)
-          true -> undefined.(seq)
-        end
-    end
-  end
-
-  # THE one lookup: keymaps are Scheme data, and key-binding-dispatch
-  # walks the ladder for the frame's buffer, ESC read as Meta when
-  # nothing binds it (Emacs: ESC x runs M-x). This process is the caller
-  # (LiveView, test, RPC), never the Session, so the call is plain.
-  # A lane held past the deadline exits the call; the lane has already
-  # cancelled the job and logged its holder, so the key is dropped here
-  # rather than taking the serial Input process down with it. A failed
-  # lookup is :failed, not :none: an unanswered key must not self-insert.
-  defp lookup_esc_meta(seq) do
-    case Session.call_named("key-binding-dispatch", [seq], Frame.current(), 5_000, :ui) do
-      {:ok, ["command", name]} -> {:command, name}
-      {:ok, ["prefix"]} -> :prefix
-      {:ok, _} -> :none
-      {:error, reason} ->
-        Logger.warning("key lookup failed: #{inspect(reason)}")
-        :failed
-    end
-  catch
-    :exit, {:timeout, _} ->
-      Logger.warning("key lookup timed out: #{Enum.join(seq, " ")}")
-      :failed
-
-    # the lane worker died under the call (a kill, a code purge): drop
-    # the key, as for a timeout, and keep the client alive
-    :exit, reason ->
-      Logger.warning("key lookup failed: #{Enum.join(seq, " ")}: #{inspect(reason, limit: 5)}")
-      :failed
-  end
-
-  # text typed since the popup opened is the popup's query (orderless narrowing)
-
-  defp self_insert(text, prefix_arg \\ nil) do
-    count = prefix_numeric_value(prefix_arg)
-    inserted = if count > 0, do: String.duplicate(text, count), else: ""
-
-    note("self-insert", text)
-
-    # Self insertion bypasses a named Scheme command. Run the same
-    # pre-command policy explicitly before the direct buffer edit.
-    _ = Session.call_named("pre-command!", [])
-    note("pre-command", "pre-command!")
-
-    # A printable key replaces an active region in Emacs. The fast path used
-    # to insert directly into the rope, which made mirrored selections from a
-    # Markdown preview behave differently from delete commands.
-    case Session.call_named("region-text", []) do
-      {:ok, region} when is_binary(region) and byte_size(region) > 0 ->
-        Session.run_command("delete-backward-char")
-
-      _ ->
-        :ok
-    end
-
-    case Buffer.insert(Editor.current_buffer(), inserted) do
-      :ok ->
-        Editor.finish_command("self-insert-command", false)
-
-      {:error, :read_only} ->
-        Editor.finish_command("self-insert-command", false)
-        Editor.set_echo("Buffer is read-only")
-    end
-
-    # Emacs runs post-command-hook after self-insert-command like after
-    # any command: the paren highlight and the preview follow typing too.
-    _ = Session.call_named("post-command!", [])
-    note("after-command", "self-insert-command")
-  end
-
-  defp run(name) do
-    # Scheme owns mode policy before a key-driven command changes the buffer.
-    _ = Session.call_named("pre-command!", [])
-    note("pre-command", "pre-command!")
-
-    # Emacs: any command except undo breaks the undo chain — a subsequent
-    # undo then reverses the undos, which is how redo works. Commands that
-    # manage their own boundaries (evil's dispatchers) register as exempt.
-    buffer = Editor.current_buffer()
-    # one command is one undo step (Emacs): the edits a command makes of
-    # several primitives undo together. Undo itself walks the steps and
-    # must not open one.
-    grouped? = not Editor.undo_exempt?(name) and Buffer.exists?(buffer)
-
-    if grouped? do
-      Buffer.break_undo_chain(buffer)
-      Buffer.undo_group(buffer, true)
-    end
-
-    try do
-      note("command", name)
-      Editor.set_this_command(name)
-
-      case Session.run_command(name) do
-        :ok ->
-          keep_prefix = name in @prefix_commands
-          Editor.finish_command(name, keep_prefix)
-          if keep_prefix, do: show_prefix_arg()
-
-        {:error, msg} ->
-          Editor.finish_command(name, false)
-          # an error, so *Messages* keeps it: an echo alone is gone at the next key
-          Session.message("#{name}: #{msg}", "error")
-      end
-
-      note("after-command", name)
-    after
-      if grouped? and Buffer.exists?(buffer), do: Buffer.undo_group(buffer, false)
-    end
-  end
-
-  defp prefix_numeric_value(nil), do: 1
-  defp prefix_numeric_value([n]) when is_integer(n), do: n
-  defp prefix_numeric_value(n) when is_integer(n), do: n
-  defp prefix_numeric_value({:sym, "-"}), do: -1
-  defp prefix_numeric_value(_), do: 1
-
-  defp show_prefix_arg do
-    text =
-      case Editor.prefix_arg() do
-        [n] -> "C-u #{n}"
-        n when is_integer(n) -> Integer.to_string(n)
-        {:sym, "-"} -> "-"
-        _ -> "C-u"
-      end
-
-    Editor.set_echo(text)
-  end
-
-  defp printable?(key) do
-    key not in @named and not String.starts_with?(key, "C-") and
-      not String.starts_with?(key, "M-") and String.length(key) == 1
-  end
-
   # --- key tracing ------------------------------------------------------------
-  # The mechanism under Scheme's (trace-key): dispatch in this process and
-  # record the editor state at every phase boundary. Scheme owns the
-  # presentation and the derived fields (packages/telemetry.scm).
+  # The mechanism under Scheme's (trace-key): the key loop records one row at
+  # every phase boundary. Scheme owns the presentation and the derived fields
+  # (packages/telemetry.scm).
 
   @trace :key_trace
 
@@ -510,7 +176,8 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   # a row per phase, newest first — only while trace_keys/1 is collecting
-  defp note(phase, name) do
+  @doc "Record one key-trace row while trace_keys/1 collects; Scheme's key loop calls this."
+  def trace_note(phase, name) do
     case Process.get(@trace) do
       rows when is_list(rows) ->
         buf = Editor.current_buffer()

@@ -1764,6 +1764,206 @@
 
 (public! 'key-binding
   "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys or a string.")
+
+;;; --- the key loop -------------------------------------------------------------
+;; KeyDispatch hands every key event to (key-dispatch! KEY). What a key means
+;; is here: the routing ladder, prefix accumulation, the prefix argument,
+;; self-insert, and running a command as a key runs it. Elixir keeps only
+;; the transport.
+
+(define key-loop--named
+  '("RET" "DEL" "TAB" "SPC" "ESC" "<delete>" "<left>" "<right>" "<up>" "<down>" "<home>" "<end>"))
+
+(define key-loop--prefix-commands
+  '("universal-argument" "digit-argument" "negative-argument"))
+
+(define (key-loop--echo text) (set-echo! text))
+
+(define (key-loop--note phase name) (key-trace-note! phase name))
+
+(define (key-loop--printable? key)
+  (and (not (member key key-loop--named))
+       (not (string-prefix? "C-" key))
+       (not (string-prefix? "M-" key))
+       (= (string-length key) 1)))
+
+(define (key-loop--prefix-text)
+  (let ((raw (current-prefix-arg)))
+    (cond ((and (pair? raw) (number? (car raw)))
+           (string-append "C-u " (number->string (car raw))))
+          ((number? raw) (number->string raw))
+          ((equal? raw '-) "-")
+          (else "C-u"))))
+
+(define (key-loop--show-prefix) (key-loop--echo (key-loop--prefix-text)))
+
+(define (key-loop--post-command)
+  (when (boundp 'post-command!) (ignore-errors (lambda () (post-command!)))))
+
+(define (key-loop--pre-command!)
+  (when (boundp 'pre-command!) (ignore-errors (lambda () (pre-command!)))))
+
+(define (key-loop--self-insert text prefix-arg)
+  (let* ((count (prefix-numeric-value prefix-arg))
+         (inserted (if (> count 0) (string-repeat text count) "")))
+    (key-loop--note "self-insert" text)
+    (key-loop--pre-command!)
+    (key-loop--note "pre-command" "pre-command!")
+    ;; a printable key replaces an active region, as in Emacs
+    (let ((region (region-text)))
+      (when (and (string? region) (> (string-length region) 0))
+        (let ((r (key-run-command "delete-backward-char")))
+          (when (equal? (car r) 'ok) (key-loop--post-command)))))
+    (if (ignore-errors (lambda () (insert! inserted)))
+        (finish-command! "self-insert-command" #f)
+        (begin
+          (finish-command! "self-insert-command" #f)
+          (key-loop--echo "Buffer is read-only")))
+    (key-loop--post-command)
+    (key-loop--note "after-command" "self-insert-command")))
+
+(define (key-loop--run name)
+  (key-loop--pre-command!)
+  (key-loop--note "pre-command" "pre-command!")
+  (let* ((buf (current-buffer))
+         (grouped (and (not (undo-exempt? name)) (buffer-exists? buf))))
+    (when grouped
+      (break-undo-chain!)
+      (undo-group! buf #t))
+    ;; one command is one undo step, and a command that changes the buffer
+    ;; at all ends the run of undos that redo reverses
+    (unwind-protect
+      (lambda ()
+        (key-loop--note "command" name)
+        (set-this-command! name)
+        (let ((r (key-run-command name)))
+          (if (equal? (car r) 'ok)
+              (begin
+                (key-loop--post-command)
+                (let ((keep (if (member name key-loop--prefix-commands) #t #f)))
+                  (finish-command! name keep)
+                  (when keep (key-loop--show-prefix))))
+              (begin
+                (finish-command! name #f)
+                (message (string-append name ": " (cadr r)) "error"))))
+        (key-loop--note "after-command" name))
+      (lambda ()
+        (when (and grouped (buffer-exists? buf))
+          (undo-group! buf #f))))))
+
+;; THE lookup ladder: append the key to the pending prefix, look the sequence
+;; up, and fall through. A command runs; a prefix accumulates and echoes; a
+;; printable no map binds still inserts, so a mode that unbinds a letter does
+;; not lose the letter. INSERT? #f (Transient) keeps an unbound printable
+;; from inserting.
+(define (key-loop--resolve-and-run key pending undefined prefix-arg insert?)
+  (let* ((seq (append pending (list key)))
+         (r (key-binding-dispatch seq)))
+    (cond ((equal? r (list "command" "self-insert-command"))
+           (set-pending! '())
+           (set-last-keys! seq)
+           (key-loop--self-insert (if (equal? key "SPC") " " key) prefix-arg))
+          ((equal? (car r) "command")
+           (set-pending! '())
+           (set-last-keys! seq)
+           (when (pair? pending) (key-loop--echo ""))
+           (key-loop--run (cadr r)))
+          ((equal? r (list "prefix"))
+           (set-pending! seq)
+           (key-loop--echo (string-append (string-join seq " ") "-")))
+          (else
+           (set-pending! '())
+           (cond ((and insert? (null? pending) (equal? key "SPC"))
+                  (key-loop--self-insert " " prefix-arg))
+                 ((and insert? (null? pending) (key-loop--printable? key))
+                  (key-loop--self-insert key prefix-arg))
+                 (else (undefined seq)))))))
+
+(define (key-loop--buffer-key key pending)
+  (user-acted!)
+  (key-loop--echo "")
+  (key-loop--resolve-and-run
+    key pending
+    (lambda (seq)
+      (set-prefix-arg! #f)
+      (key-loop--echo (string-append (string-join seq " ") " is undefined")))
+    (current-prefix-arg)
+    #t))
+
+;; Scheme owns the active Transient keymap and resolves the sequence. The
+;; loop keeps the pending chord and invokes the command.
+(define (key-loop--transient-key key pending)
+  (user-acted!)
+  (key-loop--echo "")
+  (key-loop--resolve-and-run
+    key pending
+    (lambda (seq)
+      (key-loop--echo (string-append (string-join seq " ") " is not a transient suffix")))
+    #f
+    #f))
+
+;; The minibuffer is a buffer: keys go through the normal keymap machinery,
+;; and any edit to its backing buffer fires the prompt's change handler.
+(define (key-loop--minibuffer-key key pending)
+  (if (equal? key "M-x")
+      (let ((r (key-run-command "minibuffer-cancel")))
+        (when (equal? (car r) 'ok) (key-loop--post-command)))
+      (begin
+        (key-loop--resolve-and-run key pending (lambda (seq) #t) #f #t)
+        (ignore-errors (lambda () (minibuffer-sync-input!))))))
+
+;; What the popup's keys MEAN is the popup's own map. An unbound printable
+;; keeps narrowing; SPC ends the word, so it ends the completion and leaves
+;; by the ordinary key path.
+(define (key-loop--completion-key key pending)
+  (if (equal? key "SPC")
+      (begin
+        (completion-dismiss!)
+        (key-loop--buffer-key "SPC" pending))
+      (let ((cmd (keymap-lookup " *completion*" (list key))))
+        (cond ((equal? cmd "self-insert-command")
+               (key-loop--self-insert key #f)
+               (completion-requery!))
+              ((string? cmd) (key-loop--run cmd))
+              (else
+               (completion-dismiss!)
+               (key-loop--buffer-key key pending))))))
+
+;; Scheme arms a one-shot key capture (describe-key does). The next complete
+;; sequence runs the armed command instead, and that command reads the
+;; sequence back with (last-keys).
+(define (key-loop--capture-key key pending command)
+  (user-acted!)
+  (let* ((seq (append pending (list key)))
+         (r (key-binding-dispatch seq)))
+    (cond ((equal? r (list "prefix"))
+           (set-pending! seq)
+           (key-loop--echo (string-append (string-join seq " ") "-")))
+          ((equal? r (list "none"))
+           ;; the capture stays armed: the next key tries again
+           (set-pending! '())
+           (key-loop--echo (string-append (string-join seq " ") ": editor busy, key dropped")))
+          (else
+           (set-pending! '())
+           (capture-key! #f)
+           (set-last-keys! seq)
+           (key-loop--echo "")
+           (key-loop--run command)))))
+
+(define (key-dispatch! key)
+  (key-loop--note "key" key)
+  (let* ((state (key-routing))
+         (pending (plist-get state 'pending))
+         (capture (plist-get state 'capture)))
+    (cond (capture (key-loop--capture-key key pending capture))
+          ((plist-get state 'minibuffer) (key-loop--minibuffer-key key pending))
+          ((plist-get state 'completion) (key-loop--completion-key key pending))
+          ((plist-get state 'transient) (key-loop--transient-key key pending))
+          (else (key-loop--buffer-key key pending)))))
+
+(public! 'key-dispatch!
+  "(key-dispatch! KEY) — dispatch one key event: route it to the key capture, the minibuffer, the completion popup, a Transient, or the buffer, then run what the key means")
+
 (define (key-binding seq)
   (let ((r (keymap--lookup-here (keymap--seq seq))))
     (cond ((equal? r 'prefix) 'prefix)

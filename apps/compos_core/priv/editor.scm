@@ -6503,6 +6503,7 @@
 (public! 'substring-bytes "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.")
 (public! 'list? "(list? X) -- #t when X is a list")
 (catalog-meta! 'function "list?" 'domain 'system 'effects '(pure))
+(public! 'format-time "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT.")
 (effects! '(write))
 (public! 'report-errors "(report-errors WHERE THUNK) — THUNK's value; when it raises, #f, and the error goes to *Messages* and the log under WHERE")
 (effects! '(pure))

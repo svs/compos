@@ -593,6 +593,24 @@ defmodule Compos.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
+  # show-keys.scm labels what the page casts; the page draws it as given.
+  test "show-keys-mode casts labelled keys and the pending prefix", %{conn: conn} do
+    {:ok, _} = Compos.Core.Session.eval("(require 'show-keys)")
+    {:ok, _} = Compos.Core.Session.eval("(customize-set! 'show-keys-mode #t)")
+    on_exit(fn -> Compos.Core.Session.eval("(begin (customize-set! 'show-keys-mode #f) (show-keys--clear! #f))") end)
+    {:ok, view, _} = live(conn, "/")
+
+    keys(view, ["C-f"])
+    assert has_element?(view, ".keycast-entry .keycast-keys", "⌃F")
+
+    keys(view, ["C-x"])
+    assert has_element?(view, ".keycast-pending .keycast-keys", "⌃X")
+
+    # a prefix that ends draws no pending label, whatever the chrome holds
+    Compos.Core.Editor.set_pending([])
+    refute has_element?(view, ".keycast-pending")
+  end
+
   # The debounce is what makes a fast chord free. Hiding the panel with CSS
   # after rendering it was not one: the browser still built its rows on the
   # first key of every chord, so C-x b drew the whole C-x panel and threw it

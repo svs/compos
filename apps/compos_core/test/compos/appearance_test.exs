@@ -127,16 +127,16 @@ defmodule Compos.AppearanceTest do
     assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--text-scale-factor:1.2;"
   end
 
-  test "the which-key idle delay is a 'ui face variable the page reads" do
-    delay = fn -> get_in(Editor.desktop_view(), [:faces, "ui", "which-key-delay"]) end
+  test "the which-key idle delay is the chrome value the page arms its timer with" do
+    delay = fn -> get_in(Editor.render_state(), [:chrome, "which-key-delay-ms"]) end
     assert eval!("which-key-idle-delay") == "0.5"
-    assert delay.() == "0.5s"
+    assert delay.() == 500
 
     eval!("(customize-set! 'which-key-idle-delay 1)")
-    assert delay.() == "1s"
+    assert delay.() == 1000
 
     eval!("(customize-set! 'which-key-idle-delay 0.5)")
-    assert delay.() == "0.5s"
+    assert delay.() == 500
   end
 
   test "the application scale is the 'ui face's zoom and a saved setting" do

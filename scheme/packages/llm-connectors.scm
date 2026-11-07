@@ -29,7 +29,15 @@
 
 ;; (NAME PLIST): the last test of each connector. PLIST holds status
 ;; (testing, ok or failed), reply, error, ms and at.
-(define *llm-connectors-tests* '())
+(define llm-connectors--tests-file (string-append (compos-home) "/llm-connector-tests.scm"))
+
+;; the tests kept from before, so a restart keeps each row's last result
+(define (llm-connectors--load-tests)
+  (let* ((src (and (file-exists? llm-connectors--tests-file) (read-file llm-connectors--tests-file)))
+         (forms (and (string? src) (scheme-read src))))
+    (if (and (pair? forms) (list? (car forms))) (car forms) '())))
+
+(define *llm-connectors-tests* (llm-connectors--load-tests))
 
 ;;; A row of the list is a connector's name, or api:PROVIDER for one hosted
 ;;; provider of the api connector: OpenRouter, Anthropic, OpenAI, DeepSeek.
@@ -60,7 +68,8 @@
   "(llm-connectors-providers) -- the hosted providers of the api connector: those with a key setting, and those whose models it lists"
   (let ((seen (append (filter string? (map (lambda (s) (secret-prop s 'provider)) (filter secret-setting? (setup--provider-secrets))))
                       (filter string? (map (lambda (m) (llm-connectors--model-provider (car m)))
-                                           (llm-connectors--connector-models "api"))))))
+                                           (llm-connectors--connector-models "api")))
+                      (if (boundp 'llm-endpoints) (llm-endpoints) '()))))
     (reverse (fold (lambda (acc p) (if (member p acc) acc (cons p acc))) '() seen))))
 
 ;; the model a provider row tests: the one its key names, else its first
@@ -232,8 +241,12 @@
   "(llm-connectors-models NAME) -- every model connector NAME, or provider row api:P, offers, as (ID LABEL)"
   (let ((p (llm-connectors--provider name)))
     (if p
-        (filter (lambda (m) (equal? (llm-connectors--model-provider (car m)) p))
-                (llm-connectors--connector-models "api"))
+        (append
+          (filter (lambda (m) (equal? (llm-connectors--model-provider (car m)) p))
+                  (llm-connectors--connector-models "api"))
+          ;; an endpoint of the user's own serves the models it was added with
+          (map (lambda (id) (list (string-append p ":" id) ""))
+               (if (boundp 'llm-endpoint-models) (llm-endpoint-models p) '())))
         (llm-connectors--connector-models name))))
 
 ;; the model new chats use on row NAME, or #f for its own default
@@ -265,8 +278,15 @@
           (if (plist-get c 'cmd) (list (fact "command" "command" (plist-get c 'cmd))) '())
           (let ((pv (llm-connectors--provider name)))
             (if pv
-                (list (fact "model" "test model"
-                            (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it")))
+                (append
+                  (if (llm-base-url pv)
+                      (list (fact "address" "address"
+                                  (string-append (llm-base-url pv)
+                                                 (let ((sh (llm-provider-shape pv)))
+                                                   (if sh (string-append " · speaks " sh) "")))))
+                      '())
+                  (list (fact "model" "test model"
+                            (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it"))))
                 '()))
           (let ((steps (or (plist-get c 'install) '())))
             (if (null? steps)
@@ -444,12 +464,103 @@
           (setup-ask-secret! (car (llm-connectors--secrets name)) "api" llm-connectors-refresh!)
           (setup-wizard-add-key! #f name llm-connectors-refresh!))))
 
+;; An endpoint of your own: (NAME URL SHAPE (MODEL ...)). URL #f is a
+;; provider the model catalog knows (groq, mistral, ...), at its own address.
+(defcustom 'llm-connectors-endpoints '()
+  "The endpoints you added with a in M-x llm-connectors, as (NAME URL SHAPE (MODEL ...)). URL #f is a provider the model catalog knows, at its own address; else a server that speaks SHAPE, usually openai."
+  'group 'llm 'type 'sexp)
+
+(define (llm-connectors--endpoint name)
+  (assoc name llm-connectors-endpoints))
+
+;; the endpoint's address, its shape and its key setting; the row comes from the key setting
+(define (llm-connectors--declare-endpoint! e)
+  (let ((name (nth 0 e)) (url (nth 1 e)) (shape (nth 2 e)) (models (nth 3 e)))
+    (when url (register-llm-endpoint! name url models shape))
+    (unless (llm-connectors--provider-secret name)
+      (defcustom (string->symbol (string-append name "-api-key")) #f
+        (if url (string-append name ": your own server at " url ".")
+            (string-append name ": its API key."))
+        'type 'secret 'group 'llm 'provider name
+        'env (string-upcase (string-append (string-replace name "-" "_") "_API_KEY"))
+        'model (and (pair? models) (string-append name ":" (car models)))))))
+
+(define (llm-connectors--save-endpoint! e)
+  (customize-save! 'llm-connectors-endpoints
+                   (append (filter (lambda (x) (not (equal? (car x) (car e)))) llm-connectors-endpoints)
+                           (list e)))
+  (llm-connectors--declare-endpoint! e))
+
+;; the model ids an OpenAI-shaped server lists at URL/models; K gets them, or ()
+(define (llm-connectors--fetch-models name url k)
+  (let ((key (llm-key name)))
+    (http-get (string-append (if (string-suffix? "/" url) (substring url 0 (- (string-length url) 1)) url) "/models")
+              (if key (list 'headers (list 'authorization (string-append "Bearer " key))) '())
+              (lambda (r)
+                (let* ((j (or (plist-get r 'json) (json-parse (or (plist-get r 'body) ""))))
+                       (data (and (pair? j) (plist-get j 'data))))
+                  (k (if (list? data)
+                         (filter string? (map (lambda (m) (and (pair? m) (plist-get m 'id))) data))
+                         '())))))))
+
+;; after the key: an own server with no models named lists its own, then the row is tested
+(define (llm-connectors--endpoint-ready! name)
+  (let* ((e (llm-connectors--endpoint name))
+         (url (and e (nth 1 e)))
+         (test (lambda () (llm-connectors-refresh!) (llm-connectors-test! (string-append "api:" name)))))
+    (if (and url (null? (nth 3 e)))
+        (llm-connectors--fetch-models name url
+          (lambda (ids)
+            (if (null? ids)
+                (begin (message (string-append name ": the server listed no models; a on its row again names them"))
+                       (llm-connectors-refresh!))
+                (begin
+                  ;; the row tests its first model when its key names none
+                  (llm-connectors--save-endpoint! (list name url (nth 2 e) ids))
+                  (test)))))
+        (test))))
+
+(define (llm-connectors-add-endpoint! name url &optional models shape)
+  "(llm-connectors-add-endpoint! NAME URL [MODELS] [SHAPE]) -- add endpoint NAME: a server at URL that speaks SHAPE (default openai), or with URL #f a provider the catalog knows; save it, ask for its key, then test it"
+  (let ((e (list name (and url (not (equal? (string-trim url) "")) (string-trim url))
+                 (or shape "openai") (or models '()))))
+    (llm-connectors--save-endpoint! e)
+    (llm-connectors-refresh!)
+    (let ((s (llm-connectors--provider-secret name)))
+      (if s
+          (setup-ask-secret! s "api" (lambda () (llm-connectors--endpoint-ready! name)))
+          (llm-connectors--endpoint-ready! name)))))
+
+(define (llm-connectors-add-endpoint-ask!)
+  (read-string "Endpoint name (a provider such as groq, or a name of your own): "
+    (lambda (name)
+      (let ((name (string-downcase (string-trim (or name "")))))
+        (if (or (equal? name "") (string-contains? name ":"))
+            (message "Endpoint: give a name without a colon")
+            (read-string (string-append "Address of " name " (empty for a known provider; e.g. http://localhost:8000/v1): ")
+              (lambda (url)
+                (let ((url (string-trim (or url ""))))
+                  (if (equal? url "")
+                      (llm-connectors-add-endpoint! name #f)
+                      (read-string "Model ids it serves, separated by spaces (empty asks the server): "
+                        (lambda (ids)
+                          (llm-connectors-add-endpoint! name url
+                            (filter (lambda (s) (not (equal? s ""))) (string-split (or ids "") " "))))))))))))))
+
+(for-each llm-connectors--declare-endpoint! llm-connectors-endpoints)
+
+
 (effects! '(write external spend))
 
 (define (llm-connectors--set-test! key result)
   (set! *llm-connectors-tests*
         (cons (list key result)
-              (filter (lambda (e) (not (equal? (car e) key))) *llm-connectors-tests*))))
+              (filter (lambda (e) (not (equal? (car e) key))) *llm-connectors-tests*)))
+  ;; a running test is not kept: after a restart it would never finish
+  (unless (eq? (plist-get result 'status) 'testing)
+    (write-file! llm-connectors--tests-file
+                 (value->string (filter (lambda (e) (not (eq? (plist-get (cadr e) 'status) 'testing)))
+                                        *llm-connectors-tests*)))))
 
 (define (llm-connectors--finish! key token result k)
   ;; a late reply after the deadline, or a test started again, changes nothing
@@ -589,6 +700,9 @@
 (define-command "llm-connectors-add-key" "Add or change the API key of the connector on this line"
   (lambda () (llm-connectors--on-current llm-connectors-add-key!)))
 
+(define-command "llm-connectors-add-endpoint" "Add a hosted provider or a server of your own, give its key, and test it"
+  (lambda () (llm-connectors-add-endpoint-ask!)))
+
 (effects! '(write external spend))
 
 (define-command "llm-connectors-test" "Test the model on this line, or else the connector, and time the reply"
@@ -617,7 +731,7 @@
            "connector's page beside the list. i installs the agent program, l signs in, "
            "k adds or changes the API key, t sends a test message and times the reply, "
            "T tests every ready connector at once, d makes the connector the default for "
-           "new chats. RET shows the page, g checks again, / narrows, q quits.")
+           "new chats. a adds a hosted provider or a server of your own, asks for its key and tests it. RET shows the page, g checks again, / narrows, q quits.")
     'buffer *llm-connectors-buffer*
     'transient #f
     'rows (lambda (buf) (llm-connectors-rows))
@@ -645,8 +759,8 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("RET" "page") ("i" "install") ("l" "sign in") ("k" "key")
-                ("t" "test") ("T" "test all") ("d" "default") ("g" "check") ("q" "quit")))
-    'keys (append '(("RET" "llm-connectors-show") ("T" "llm-connectors-test-all"))
+                ("t" "test") ("T" "test all") ("d" "default") ("a" "add endpoint") ("g" "check") ("q" "quit")))
+    'keys (append '(("RET" "llm-connectors-show") ("T" "llm-connectors-test-all") ("a" "llm-connectors-add-endpoint"))
                   *llm-connectors-keys*)))
 
 (define-list-mode! "llm-connectors-detail-mode"
@@ -694,4 +808,5 @@
 (public! 'llm-connectors-models "(llm-connectors-models NAME) -- every model connector NAME offers, as (ID LABEL)")
 (effects! '(write execute external))
 (public! 'llm-connectors-install! "(llm-connectors-install! NAME) -- install the agent program of connector NAME in a terminal")
+(public! 'llm-connectors-add-endpoint! "(llm-connectors-add-endpoint! NAME URL [MODELS] [SHAPE]) -- add endpoint NAME, a server at URL or with URL #f a provider the catalog knows; save it, ask its key, test it")
 (public! 'llm-connectors-sign-in! "(llm-connectors-sign-in! NAME) -- run the login command of connector NAME in a terminal")

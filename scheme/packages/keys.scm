@@ -113,6 +113,31 @@
   (let ((e (assoc provider *llm-base-urls*)))
     (if e (cadr e) #f)))
 
+;; A named endpoint is a provider of our own: a server at an address that
+;; speaks the shape of a provider req_llm knows (openai, the usual one).
+;; Its model local:qwen goes out as openai:qwen to the endpoint's address,
+;; with the key registered for local. The real openai is untouched.
+(define *llm-provider-shapes* '())
+(define *llm-endpoint-models* '())
+
+(define (register-llm-endpoint! name url &optional models shape)
+  (let ((p (if (symbol? name) (symbol->string name) name)))
+    (register-llm-base-url! p url)
+    (set! *llm-provider-shapes* (alist-put *llm-provider-shapes* p (or shape "openai")))
+    (set! *llm-endpoint-models* (alist-put *llm-endpoint-models* p (or models '())))
+    p))
+
+;; the provider req_llm sends PROVIDER's requests as, or #f for itself
+(define (llm-provider-shape provider)
+  (let ((e (assoc (if (symbol? provider) (symbol->string provider) provider) *llm-provider-shapes*)))
+    (if e (cadr e) #f)))
+
+(define (llm-endpoints) (map car *llm-provider-shapes*))
+
+(define (llm-endpoint-models provider)
+  (let ((e (assoc provider *llm-endpoint-models*)))
+    (if e (cadr e) '())))
+
 ;; drop VAR from the cache, so the next key-get walks the chain again
 (define (key-forget! var)
   (set! *key-cache*
@@ -289,6 +314,14 @@
   "(llm-key PROVIDER) — the resolved key VALUE for a provider id, or #f when unregistered; pass this to the LLM config")
 (public! 'register-llm-key!
   "(register-llm-key! PROVIDER VALUE) — set the explicit key VALUE for a provider")
+(public! 'register-llm-endpoint!
+  "(register-llm-endpoint! NAME URL [MODELS] [SHAPE]) -- a provider of your own: models NAME:ID go to the server at URL, which speaks SHAPE (default openai), with the key registered for NAME")
+(public! 'llm-provider-shape
+  "(llm-provider-shape PROVIDER) -- the provider req_llm sends PROVIDER's requests as, or #f for itself")
+(public! 'llm-endpoints
+  "(llm-endpoints) -- the names of the endpoints register-llm-endpoint! made")
+(public! 'llm-endpoint-models
+  "(llm-endpoint-models PROVIDER) -- the model ids an endpoint serves")
 (public! 'llm-base-url
   "(llm-base-url PROVIDER) — the address a provider's requests go to, or #f for the provider's own")
 (public! 'register-llm-base-url!

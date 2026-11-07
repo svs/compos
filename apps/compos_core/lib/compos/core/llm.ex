@@ -717,6 +717,8 @@ defmodule Compos.Core.LLM do
   spec, so pricing, token counting and capability detection stay available.
   """
   def req_model_arg(spec) when is_binary(spec) do
+    spec = shaped_spec(spec)
+
     case Compos.Core.ModelCatalog.lookup(spec) do
       {:ok, _} -> spec
       _ -> inline_model(spec)
@@ -724,6 +726,24 @@ defmodule Compos.Core.LLM do
   end
 
   def req_model_arg(spec), do: spec
+
+  # A named endpoint (register-llm-endpoint!) is a provider of the user's own
+  # that speaks a known provider's shape: "local:qwen" goes to req_llm as
+  # "openai:qwen". The key and the address are still asked for by the
+  # endpoint's own name (key_opts, base_url_opts), so the real provider of
+  # that shape is untouched. No shape leaves the spec as it is.
+  defp shaped_spec(spec) do
+    case String.split(spec, ":", parts: 2) do
+      [provider, id] ->
+        case Session.call_named("llm-provider-shape", [provider]) do
+          {:ok, shape} when is_binary(shape) and shape != "" and shape != provider -> shape <> ":" <> id
+          _ -> spec
+        end
+
+      _ ->
+        spec
+    end
+  end
 
   defp inline_model(spec) do
     case String.split(spec, ":", parts: 2) do

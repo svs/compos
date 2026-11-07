@@ -805,7 +805,8 @@
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
 ;;;                                       it renders through the shared ui/keymap
 ;;;                                       component by default
-;;;   'preview  (buf entry)                 what moving the highlight shows
+;;;   'preview  (buf entry)                 what moving the highlight shows, once it rests
+;;;   'immediate #t                         show the preview on every move, no wait
 ;;;   'compact  #t                          merge title and meta; omit rules
 ;;;   'head-blocks (buf) -> (BLOCK ...) or #f  blocks the window's header
 ;;;                      line carries at its tail: ui/tabs
@@ -1664,20 +1665,21 @@
     (list-update-selection! buf)))
 
 (defcustom 'debounce-delay 250
-  "How long the highlight rests on a row before a list whose preview reads the network fetches it, in milliseconds. A held arrow reaches the row you want before one read goes out. 0 fetches on every move."
+  "How long the highlight rests on a row before a list shows that row's page beside it, in milliseconds. A held arrow reaches the row you want before one page is drawn or read. 0 shows the page on every move."
   'group 'list 'type 'number)
 
 (define (list-detail-off? buf) (and (buffer-local buf 'list-detail-off) #t))
 
 (define (list-preview! buf)
  (unless (list-detail-off? buf)
-  ;; A mode whose preview reads the network says 'debounce: its preview
-  ;; waits for the highlight to rest, then shows whatever row is current then.
-  ;; The row it is for is noted, so the selection does not preview it again.
+  ;; Every list's preview waits for the highlight to rest, then shows
+  ;; whatever row is current then: a held arrow draws one page, not one per
+  ;; row. A mode that must show at once says 'immediate. The row it is for
+  ;; is noted, so the selection does not preview it again.
   (let ((e (list-current buf)))
     (buffer-set-local! buf 'list-preview-key (and e (list-key buf e))))
   (let ((f (list-opt buf 'preview))
-        (delay (if (list-opt buf 'debounce) debounce-delay 0)))
+        (delay (if (list-opt buf 'immediate) 0 debounce-delay)))
     (if (and f (> delay 0))
         ;; the timer fires outside the command: carry the frame the
         ;; highlight moved in, or the detail opens in another frame

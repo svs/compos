@@ -219,6 +219,11 @@
 (public! 'permission-signature
   "(permission-signature TITLE KIND RAW) — the verb an Always answer is remembered by")
 
+(effects! '(read))
+(public! 'permission-shell-text
+  "(permission-shell-text TITLE KIND RAW) -- the shell text checked by the deny-list")
+
+(effects! '(write))
 (public! 'permission-always-rules
   "(permission-always-rules BUF) — the verbs this chat answered Always for")
 

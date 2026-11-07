@@ -149,7 +149,9 @@
 ;; Tolerant, the same way the SDK's parse is: a card model that drifts off
 ;; format should degrade to a usable title rather than to nothing. DESC and
 ;; DESCRIPTION are both taken -- the training data uses DESC, but base-model
-;; habits leak the longer spelling through.
+;; habits leak the longer spelling through. chat.scm's turn summary calls it
+;; directly, so it loads this file like the other entry points.
+;;;###autoload
 (define (title--parse raw)
   (let loop ((lines (string-split raw "\n")) (title "") (desc ""))
     (if (null? lines)

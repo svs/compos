@@ -14,6 +14,19 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(map car '())") == []
   end
 
+  test "map and for-each walk several lists side by side up to the shortest" do
+    assert run("(map + '(1 2 3) '(10 20))") == [11, 22]
+    assert run("(map list '(a b) '(1 2) '(x y z))") ==
+             [[{:sym, "a"}, 1, {:sym, "x"}], [{:sym, "b"}, 2, {:sym, "y"}]]
+
+    assert run("(map + '() '(1))") == []
+
+    assert run("""
+           (define acc '())
+           (list (for-each (lambda (a b) (set! acc (cons (+ a b) acc))) '(1 2 3) '(10 20)) acc)
+           """) == [true, [22, 11]]
+  end
+
   test "filter and remove split a list on the predicate's truthiness" do
     assert run("(filter (lambda (x) (> x 1)) '(1 2 3))") == [2, 3]
     assert run("(remove (lambda (x) (> x 1)) '(1 2 3))") == [1]

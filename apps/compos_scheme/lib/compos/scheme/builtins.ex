@@ -453,33 +453,27 @@ defmodule Compos.Scheme.Builtins do
       # store through. The interpreted loops these replace paid one frame
       # and a dozen evals per element, and a catalog walk at load time ran
       # into the millions of frames.
-      {"map", "(map F LST) — return the list of F applied to each element of LST."} => fn [f, l],
-                                                                                          store
-                                                                                          when is_list(
-                                                                                                 l
-                                                                                               ) ->
-        Enum.map_reduce(l, store, fn x, store -> Eval.apply_fn(f, [x], store) end)
-      end,
-      {"for-each", "(for-each F LST) — call F on each element of LST in order; return true."} =>
-        fn [f, l], store when is_list(l) ->
-          store =
-            Enum.reduce(l, store, fn x, store ->
-              {_, store} = Eval.apply_fn(f, [x], store)
-              store
-            end)
+      {"map",
+       "(map F LST ...) — return the list of F applied to each element of LST, or to the elements of the lists side by side up to the shortest."} =>
+        fn
+          [f, l], store when is_list(l) ->
+            Enum.map_reduce(l, store, &Eval.apply_fn(f, [&1], &2))
 
-          {true, store}
+          [f | ls], store when ls != [] ->
+            Enum.map_reduce(Enum.zip_with(ls, & &1), store, &Eval.apply_fn(f, &1, &2))
         end,
-      {"filter", "(filter PRED LST) — return the elements of LST for which PRED is true."} => fn [
-                                                                                                   pred,
-                                                                                                   l
-                                                                                                 ],
-                                                                                                 store
-                                                                                                 when is_list(
-                                                                                                        l
-                                                                                                      ) ->
-        select(pred, l, store, true)
-      end,
+      {"for-each",
+       "(for-each F LST ...) — call F on each element of LST in order, or on the elements of the lists side by side up to the shortest; return true."} =>
+        fn [f | ls], store when ls != [] ->
+          step = &elem(Eval.apply_fn(f, &1, &2), 1)
+
+          case ls do
+            [l] when is_list(l) -> {true, Enum.reduce(l, store, &step.([&1], &2))}
+            _ -> {true, Enum.reduce(Enum.zip_with(ls, & &1), store, step)}
+          end
+        end,
+      {"filter", "(filter PRED LST) — return the elements of LST for which PRED is true."} =>
+        fn [pred, l], store when is_list(l) -> select(pred, l, store, true) end,
       {"remove", "(remove PRED LST) — return the elements of LST for which PRED is false."} =>
         fn [pred, l], store when is_list(l) -> select(pred, l, store, false) end,
       {"fold", "(fold F ACC LST) — reduce LST from the left with (F ACC X), starting from ACC."} =>

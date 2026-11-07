@@ -258,36 +258,110 @@
          (> (chat-record-tokens buf) limit)
          (chat-can-compact? buf))))
 
-;; The summary call is async, and the record can grow while it is in
-;; flight. So the head is identified by COUNT at request time and replaced
-;; only if the record still ends with it: a turn that landed meanwhile
-;; stays put, and a reset that emptied the record cancels the whole thing.
+;;; The summary is already written. Every finished turn lands one status
+;;; line in the record (chat-summary-land!): what the agent did and what
+;;; came of it. The head becomes those lines, oldest first, and a list of
+;;; the tool results the head saved to files (tool-results.scm), so the
+;;; model can read one of them again. No model call, no wait, no cost.
+;;; A head with no status line (an old chat, a connector whose summary
+;;; failed) falls back to one summary call.
+
+;; the status lines of the head, oldest first: every status turn that
+;; lands before the conversation turn N + 1. A turn's status lands after
+;; the turn, so the last head turn's line sits just before the kept window.
+(define (chat-compact-head-status record n)
+  (let loop ((ts (reverse record)) (seen 0) (acc '()))
+    (cond ((null? ts) (reverse acc))
+          ((chat-conversation-turn? (car ts))
+           (if (>= seen n)
+               (reverse acc)
+               (loop (cdr ts) (+ seen 1) acc)))
+          ((equal? (plist-get (car ts) 'role) "status")
+           (let ((txt (string-trim (chat-turn-display (car ts)))))
+             (loop (cdr ts) seen (if (equal? txt "") acc (cons txt acc)))))
+          (else (loop (cdr ts) seen acc)))))
+
+;; "PATH: SIZE" for every tool result in HEAD that a file holds. The
+;; reference starts "[The tool result is N bytes of KIND. It is not in
+;; this message: the editor saved it to PATH. Read ...".
+(define (chat-compact-saved-result ref)
+  (let ((size-at (string-index ref "[The tool result is "))
+        (key "the editor saved it to "))
+    (and (equal? size-at 0)
+         (let ((i (string-index ref key))
+               (j (string-index ref ". It is not")))
+           (and i j
+                (let* ((rest (substring-bytes ref (+ i (string-byte-length key))
+                                              (string-byte-length ref)))
+                       (k (string-index rest ". Read")))
+                  (and k
+                       (string-append
+                         (substring-bytes rest 0 k) ": "
+                         (substring-bytes ref (string-byte-length "[The tool result is ") j)))))))))
+
+(define (chat-compact-head-results head)
+  (fold (lambda (acc t)
+          (fold (lambda (acc b)
+                  (let ((line (and (equal? (car b) "tool-result")
+                                   (string? (nth 2 b))
+                                   (chat-compact-saved-result (nth 2 b)))))
+                    (if line (append acc (list line)) acc)))
+                acc
+                (or (plist-get t 'blocks) '())))
+        '() head))
+
+(define (chat-compact-results-text results)
+  (if (null? results)
+      ""
+      (string-append
+        "\n\nThe tool results of that part are in files. Read a part with "
+        "(tool-result-read PATH SELECTOR):\n"
+        (string-join (map (lambda (r) (string-append "- " r)) results) "\n"))))
+
+;; The fallback summary call is async, and the record can grow while it
+;; is in flight. So the head is identified by COUNT at request time and
+;; replaced only if the record still ends with it: a turn that landed
+;; meanwhile stays put, and a reset that emptied the record cancels it.
+;; Answers done when the status lines did it at once, else pending.
 (define (chat-compact! buf slug)
   (let* ((all (chat-model-record buf))
          (keep (chat-compact-keep-count all))
          (head (chat-drop all keep))
-         (n (length head)))
-    (buffer-set-local! buf 'chat-compacting n)
-    (llm (string-append
-           "Summarize this conversation between a user and the assistant "
-           "inside their editor. Keep every decision, file name, command, "
-           "and open question. Drop the pleasantries. Write notes the "
-           "assistant can act on, not prose about the conversation. No "
-           "preamble.\n\n"
-           (chat-turns-text (reverse head)))
-         (lambda (summary) (chat-compact-apply! buf slug n summary)))))
+         (n (length head))
+         (status (chat-compact-head-status (chat-record buf) n))
+         (results (chat-compact-results-text (reverse (chat-compact-head-results head)))))
+    (if (pair? status)
+        (begin
+          (chat-compact-apply! buf slug n
+            (string-append
+              "[Earlier in this conversation, compacted to the log of what each turn did:]\n\n"
+              (string-join (map (lambda (s) (string-append "- " s)) status) "\n")
+              results))
+          'done)
+        (begin
+          (buffer-set-local! buf 'chat-compacting n)
+          (llm (string-append
+                 "Summarize this conversation between a user and the assistant "
+                 "inside their editor. Keep every decision, file name, command, "
+                 "and open question. Drop the pleasantries. Write notes the "
+                 "assistant can act on, not prose about the conversation. No "
+                 "preamble.\n\n"
+                 (chat-turns-text (reverse head)))
+               (lambda (summary)
+                 (chat-compact-apply! buf slug n
+                   (string-append "[Earlier in this conversation, compacted to notes:]\n\n"
+                                  summary results))))
+          'pending))))
 
-(define (chat-compact-apply! buf slug n summary)
+;; NOTES is the whole text of the turn that takes the head's place
+(define (chat-compact-apply! buf slug n notes)
   (buffer-set-local! buf 'chat-compacting #f)
   (let ((all (chat-record buf)))
     (when (and (buffer-exists? buf) (> (length (chat-model-record buf)) n))
       (buffer-set-local! buf 'chat-wire-turns
         (append (chat-drop-oldest-conversation-turns all n)
                 (list (list 'role "user"
-                            'blocks (list (list "text"
-                              (string-append
-                                "[Earlier in this conversation, compacted to notes:]\n\n"
-                                summary)))))))
+                            'blocks (list (list "text" notes))))))
       ;; say so where the reader can see it. A restored chat can have a
       ;; record and no runtime, and agent-render! is keyed by slug: with
       ;; no slug there is no transcript to write the line into, and the
@@ -314,11 +388,13 @@
                                      (number->string
                                        (chat-compact-keep-count (chat-model-record buf))))))
             (else
-             (let* ((all (chat-record buf))
+             ;; the status lines compact at once and chat-compact-apply!
+             ;; says so; only the summary call leaves something to wait for
+             (let* ((all (chat-model-record buf))
                     (n (- (length all) (chat-compact-keep-count all))))
-               (chat-compact! buf (buffer-local buf 'agent-slug))
-               (message (string-append "compacting " (number->string n)
-                                       " earlier turns…"))))))))
+               (when (equal? (chat-compact! buf (buffer-local buf 'agent-slug)) 'pending)
+                 (message (string-append "compacting " (number->string n)
+                                         " earlier turns...")))))))))
 
 ;;; --- healing the record ----------------------------------------------------------
 ;;; A tool call and its result are one unit on the wire. The provider

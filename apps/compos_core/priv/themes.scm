@@ -1400,13 +1400,9 @@
 }
 .modeline .ml-dot { background: var(--modeline-fg); }
 .window.active .modeline .ml-dot { background: var(--modeline-active-fg); }
-/* chat: your turn is a gray box, the agent's prose a black box */
+/* chat: your turn is a gray box; the agent's prose sits on the blue */
 .ag-user {
   background: #555555; color: #ffffff;
-  border-radius: 14px; padding: 8px 14px;
-}
-.ag-prose {
-  background: #000000; color: #ffffff;
   border-radius: 14px; padding: 8px 14px;
 }
 ")

@@ -1831,3 +1831,5 @@
 
 (catalog-meta! 'function "theme-dark?" 'domain 'faces 'effects '(read))
 (catalog-meta! 'function "face-color" 'domain 'faces 'effects '(read))
+(public! 'theme-names "(theme-names) -> the names of every defined theme, in registry order")
+(catalog-meta! 'function "theme-names" 'domain 'faces 'effects '(read))

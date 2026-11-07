@@ -110,14 +110,13 @@ defmodule Compos.Core.LLM do
   `:on_tool` receives `(id, name, input)` before a dispatch; `:on_tool_done`
   receives `(id, result)` after; `:gate` receives `(name, input)` before a
   dispatch and returns `:allow` or `{:deny, reason}` — the permission
-  chokepoint every direct-lane tool call passes through. `:on_record`
+  chokepoint every direct-lane tool call passes through — or answers an
+  intrinsic tool itself with `{:ok, text}` or `{:error, text}`. `:on_record`
   receives `(role, blocks)` for every message this loop appends to
   `messages` — the caller's conversation of record grows by exactly what
   went on the wire. `:on_round_usage` receives the running usage total
   after each round, so a turn that never returns can still be billed.
   `:model` overrides `model/0`.
-  `:tool_handler` can intercept an intrinsic tool and return `{:ok, text}` or
-  `{:error, text}`. It returns `:dispatch` for the normal Scheme/MCP path.
   `:steer` is a zero-arg fn the loop calls before each next model request.
   After a tool response, its text joins the tool-result message. After a
   normal response, it starts the next request without ending the turn.
@@ -128,7 +127,7 @@ defmodule Compos.Core.LLM do
     opts =
       opts
       |> Map.new()
-      |> Map.put(:tool_effects, tool_effects(specs))
+      |> Map.put(:read_only, read_only_tools(specs))
 
     tool_loop(messages, system, tools, dispatcher, 0, %{}, opts)
   end
@@ -332,13 +331,9 @@ defmodule Compos.Core.LLM do
 
     {result, error?} =
       case gate_call(opts[:gate], call["name"], call["input"]) do
-        :allow ->
-          case intrinsic_tool(opts[:tool_handler], call["name"], call["input"]) do
-            :dispatch -> run_tool(dispatcher, call["name"], call["input"], concurrent?)
-            {:ok, text} -> {to_string(text), false}
-            {:error, text} -> {"error: #{text}", true}
-          end
-
+        :allow -> run_tool(dispatcher, call["name"], call["input"], concurrent?)
+        {:ok, text} -> {to_string(text), false}
+        {:error, text} -> {"error: #{text}", true}
         {:deny, why} ->
           {"permission denied: #{why}", true}
       end
@@ -366,21 +361,20 @@ defmodule Compos.Core.LLM do
     %{type: "tool_result", tool_use_id: call["id"], content: result, is_error: error?}
   end
 
-  defp read_tool?(call, opts) do
-    case Map.get(opts[:tool_effects], call["name"], []) do
-      [level | _] when level in ["pure", "read"] -> true
-      _ -> false
+  defp read_tool?(call, opts), do: call["name"] in opts[:read_only]
+
+  # Which tools may run side by side is Scheme's (llm-read-only-tools).
+  # No answer runs every call in order, which is always safe. It asks on
+  # the loop's own lane, as its tools run: a busy UI never holds a turn.
+  defp read_only_tools([]), do: []
+
+  defp read_only_tools(specs) do
+    case Session.call_named("llm-read-only-tools", [specs], nil, 30_000, {:llm, self()}) do
+      {:ok, names} when is_list(names) -> names
+      _ -> []
     end
-  end
-
-  defp tool_effects(specs) do
-    Map.new(specs, fn
-      [name, _description, _params, effects] ->
-        {plain(name), Enum.map(List.wrap(effects), &plain/1)}
-
-      [name, _description, _params] ->
-        {plain(name), []}
-    end)
+  catch
+    :exit, _ -> []
   end
 
   # The running total, after every round. A turn that is cancelled or that
@@ -403,9 +397,6 @@ defmodule Compos.Core.LLM do
   # no gate configured (a bare (llm-tools ...) call) runs as before
   defp gate_call(nil, _name, _input), do: :allow
   defp gate_call(gate, name, input), do: gate.(name, input)
-
-  defp intrinsic_tool(nil, _name, _input), do: :dispatch
-  defp intrinsic_tool(handler, name, input), do: handler.(name, input)
 
   # An empty content list is not a message any provider accepts, so it is
   # not a record entry either.
@@ -598,20 +589,18 @@ defmodule Compos.Core.LLM do
     end
   end
 
-  # 500 and 529 are the provider saying "not now". req_llm retries transport
-  # errors and 429; it does not retry these, so the user did — by resending
-  # a whole uncached transcript, which is the most expensive gesture in the
-  # editor. Three tries, jittered, then the error stands.
-  @retry_max 3
-
+  # Whether a failed call tries again, and after how long, is Scheme's
+  # (llm-retry-delay in packages/llm-gate.scm). No answer is no retry.
   defp with_retry(fun, attempt \\ 1) do
     case fun.() do
       {:error, e} = err ->
-        if attempt < @retry_max and retryable?(e) do
-          Process.sleep(backoff_ms(attempt))
-          with_retry(fun, attempt + 1)
-        else
-          err
+        case retry_delay(e, attempt) do
+          ms when is_integer(ms) ->
+            Process.sleep(ms)
+            with_retry(fun, attempt + 1)
+
+          _ ->
+            err
         end
 
       ok ->
@@ -658,45 +647,27 @@ defmodule Compos.Core.LLM do
     end
   end
 
-  @retry_statuses [500, 502, 503, 529]
+  defp retry_delay(e, attempt) do
+    base = Application.get_env(:compos_core, :llm_retry_base_ms, 500)
 
-  # req_llm reports the status as an integer on one error struct and as a
-  # string on another, and wraps a provider error inside a request error —
-  # so look at the whole chain rather than one field's declared type
-  defp retryable?(%{status: status}) when status in @retry_statuses, do: true
-
-  defp retryable?(%{status: status}) when is_binary(status) do
-    case Integer.parse(status) do
-      {n, _} -> n in @retry_statuses
-      :error -> false
+    case Session.call_named("llm-retry-delay", [attempt, error_facts(e), base], nil, 30_000, {:llm, self()}) do
+      {:ok, ms} when is_integer(ms) -> ms
+      _ -> nil
     end
+  catch
+    :exit, _ -> nil
   end
 
-  # A Finch HTTP/2 pool takes requests only while its one connection is up.
-  # On a start, and after the server closes the connection, it waits 500 ms
-  # or more before it connects again, and every request in that gap fails at
-  # once: :pool_not_available while the pool is out of the registry,
-  # :disconnected or :read_only when the request reaches it. The first ask
-  # after a quiet spell found that gap.
-  @retry_transport [:pool_not_available, :disconnected, :read_only, :connection_closed, :closed, :deadline]
+  # The failed call as Scheme reads it, (STATUS REASON): req_llm wraps a
+  # provider error inside a request error, so the reason may be another
+  # (STATUS REASON). An atom goes as a symbol, text as text.
+  defp error_facts(%{} = e), do: [fact(Map.get(e, :status)), fact(Map.get(e, :reason))]
+  defp error_facts(_), do: false
 
-  defp retryable?(%{reason: reason}) when reason in @retry_transport, do: true
-
-  # a request error carries the transport failure as text, "http2 error:
-  # :connection_closed", not as the atom: unread, a dead connection failed
-  # every call at once and never reached the retry
-  defp retryable?(%{reason: reason}) when is_binary(reason),
-    do: Enum.any?(@retry_transport, &String.contains?(reason, inspect(&1)))
-
-  defp retryable?(%{reason: reason}) when is_map(reason), do: retryable?(reason)
-  defp retryable?(_), do: false
-
-  # 500ms, then 1s, each plus up to half its own width — two clients hitting
-  # the same overloaded provider must not march in step
-  defp backoff_ms(attempt) do
-    base = Application.get_env(:compos_core, :llm_retry_base_ms, 500) * Integer.pow(2, attempt - 1)
-    base + :rand.uniform(max(div(base, 2), 1))
-  end
+  defp fact(v) when is_integer(v) or is_binary(v), do: v
+  defp fact(v) when is_atom(v), do: {:sym, Atom.to_string(v)}
+  defp fact(%{} = v), do: error_facts(v)
+  defp fact(_), do: false
 
   # Provider routing by model name: "provider:<model>" passes through to that
   # provider; a bare id is Anthropic. The provider set is not enumerated here

@@ -113,6 +113,8 @@ defmodule Compos.Core.SchemeTask do
   @impl true
   def init({ref, closure, args, interp, fid, buffer, root, owner, label}) do
     SchemeHeap.apply_to_self()
+    # vm-processes names a running task by its thunk
+    Process.set_label(label)
     owner_monitor = if is_pid(owner), do: Process.monitor(owner), else: nil
 
     {:ok,

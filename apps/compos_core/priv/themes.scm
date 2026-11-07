@@ -1983,6 +1983,7 @@
 (public! 'frame-theme-apply! "(frame-theme-apply! NAME [FRAME]) — FRAME wears NAME on its own; NAME #f gives it the global theme again")
 (public! 'frame-theme "(frame-theme [FRAME]) -> the theme FRAME wears on its own, or #f")
 (public! 'theme-current "(theme-current) -> the theme on screen in this frame")
+(catalog-meta! 'function 'theme-current 'effects '(read))
 (public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face, attribute by attribute; an attribute the theme names wins. 'inherit names a face or a list of faces; 'priority orders overlapping overlays")
 (public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")

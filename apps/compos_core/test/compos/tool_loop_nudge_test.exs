@@ -41,7 +41,7 @@ defmodule Compos.ToolLoopNudgeTest do
     dispatcher = fn _name, _input -> "done" end
 
     LLM.run_tool_loop([%{role: "user", content: "go"}], "", [], dispatcher,
-      [tool_handler: fn _n, _i -> {:ok, "ok"} end] ++ opts)
+      [gate: fn _n, _i -> {:ok, "ok"} end] ++ opts)
   end
 
   defp asked do

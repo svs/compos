@@ -317,9 +317,16 @@ defmodule Compos.Core.SysMon do
         inspect(name)
 
       _ ->
-        case initial_call(pid, info[:initial_call]) do
-          {m, f, a} -> "#{inspect(m)}.#{f}/#{a}"
-          _ -> "?"
+        # a process that set a label (a Scheme task names its thunk) shows it
+        case :proc_lib.get_label(pid) do
+          label when is_binary(label) ->
+            label
+
+          _ ->
+            case initial_call(pid, info[:initial_call]) do
+              {m, f, a} -> "#{inspect(m)}.#{f}/#{a}"
+              _ -> "?"
+            end
         end
     end
   end

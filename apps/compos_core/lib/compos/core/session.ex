@@ -223,6 +223,9 @@ defmodule Compos.Core.Session do
 
   defp apply_label(_), do: "apply"
 
+  # a task's telemetry and its heap kill name the thunk the same way
+  defp task_label(closure), do: "task" <> String.trim_leading(apply_label(closure), "apply")
+
   @doc """
   Apply a closure that has been waiting on a reply from outside the editor.
 
@@ -1088,7 +1091,7 @@ defmodule Compos.Core.Session do
       {"task-spawn",
        "(task-spawn THUNK) — run a zero-argument Scheme closure concurrently over the shared editor world."} =>
         fn [closure] ->
-          case SchemeTask.start(closure) do
+          case SchemeTask.start(closure, [], label: task_label(closure)) do
             {:ok, ref} -> ref
             {:error, reason} -> raise_scheme("task-spawn: #{reason}")
           end
@@ -2189,7 +2192,7 @@ defmodule Compos.Core.Session do
   end
 
   defp scheme_task_run(closure, callback, timeout) do
-    case SchemeTask.start(closure) do
+    case SchemeTask.start(closure, [], label: task_label(closure)) do
       {:ok, task} ->
         key = {:scheme_task_callback, task.id}
         Roots.put(key, callback)

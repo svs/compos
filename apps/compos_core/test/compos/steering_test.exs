@@ -172,7 +172,7 @@ defmodule Compos.SteeringTest do
                "sys",
                [],
                nil,
-               tool_handler: fn _name, _input -> {:ok, "tool ran"} end,
+               gate: fn _name, _input -> {:ok, "tool ran"} end,
                steer: fn ->
                  if Process.get(:zz_steered) do
                    []

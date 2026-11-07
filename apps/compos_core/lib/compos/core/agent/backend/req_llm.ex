@@ -264,7 +264,6 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
         note_first.("first thought")
         ev.(type: :thought, text: t)
       end,
-      tool_handler: fn name, input -> intrinsic_tool(slug, name, input) end,
       # compos owns permissions on BOTH lanes: the same Scheme policy
       # that answers ACP's requests gates every direct-lane tool call
       gate: fn name, input -> gate(ev, slug, name, input) end,
@@ -303,96 +302,51 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     end
   end
 
-  # The permission gate: ask Scheme's policy, and only when it says "ask"
-  # block the turn on a real request. The thread owns that request — the
-  # rpc id, the pending slot, the CAS, the deadline — so this lane and the
-  # ACP lane resolve one the same way.
+  # The permission gate and the intrinsic ask tool. Scheme decides
+  # (llm-tool-gate, packages/llm-gate.scm); this lane holds the turn while
+  # the user answers, because the thread owns that request — the rpc id,
+  # the pending slot, the deadline — on both lanes alike.
   #
-  # A missing policy fn means no gate: a bare (llm-tools ...) call has
-  # never had one, and must not start wedging.
+  # It fails closed (decided 2026-08-12): a policy that crashes, a gate
+  # that crashes and an answer that is no verdict all deny the call. A
+  # buggy policy stalls agents until it is fixed, and the transcript says
+  # which one to fix. RAW is the text the policy matches against.
   defp gate(ev, slug, name, input) do
-    if name == "ask" do
-      :allow
-    else
-      gated_tool(ev, slug, name, input)
-    end
-  end
+    policy = Compos.Core.LLMSession.callback(slug, :permission) || Roots.get({:agent_permission})
+    raw = name <> " " <> inspect(input)
+    args = [policy || false, slug, name, raw, LLM.json_to_scheme(input)]
 
-  defp gated_tool(ev, slug, name, input) do
-    case permission_verdict(slug, name, input) do
-      :allow ->
-        :allow
-
-      :reject ->
-        {:deny, "denied by policy"}
-
-      {:crash, why} ->
-        # A policy that crashes used to fail OPEN: the tool ran as if it
-        # had never been gated. It fails closed now (decided 2026-08-12).
-        # A buggy policy stalls agents until it is fixed; that is the
-        # intended trade, and the transcript says which policy to fix.
-        Logger.error("permission policy crashed: #{why}")
-        ev.(type: :error, text: "the permission policy crashed — denying: #{why}")
-        {:deny, "the permission policy crashed; fix permit? and retry"}
-
-      {:ask, raw} ->
-        case Compos.Core.Agent.ask_permission(slug, %{title: name, kind: "tool", raw: raw}) do
-          :deny -> {:deny, "denied"}
-          {:error, _} -> {:deny, "the thread went away before this was answered"}
-          _ -> :allow
-        end
+    case Session.call_named("llm-tool-gate", args, nil, 30_000, Compos.Core.Agent.lane(slug)) do
+      {:ok, {:sym, "allow"}} -> :allow
+      {:ok, [{:sym, "deny"}, why]} when is_binary(why) -> {:deny, why}
+      {:ok, [{:sym, "ask-permission"}]} -> ask_permission(slug, name, raw)
+      {:ok, [{:sym, "ask-user"}, q, answers]} -> ask_user(slug, q, answers)
+      {:ok, [{:sym, "error"}, text]} when is_binary(text) -> {:error, text}
+      {:error, why} -> deny(ev, "policy", why, "fix permit? and retry")
+      other -> deny(ev, "gate", "no verdict: #{inspect(other)}", "denied")
     end
   catch
-    _kind, reason ->
-      why = Backend.error_text(reason)
-      Logger.error("permission gate crashed: #{why}")
-      ev.(type: :error, text: "the permission gate crashed — denying: #{why}")
-      {:deny, "the permission gate crashed; denied"}
+    _kind, reason -> deny(ev, "gate", Backend.error_text(reason), "denied")
   end
 
-  defp intrinsic_tool(slug, "ask", %{"question" => question} = input)
-       when is_binary(question) do
-    answers =
-      case Map.get(input, "answers", []) do
-        values when is_list(values) -> Enum.map(values, &to_string/1)
-        _ -> []
-      end
+  defp deny(ev, what, why, advice) do
+    Logger.error("permission #{what} crashed: #{why}")
+    ev.(type: :error, text: "the permission #{what} crashed — denying: #{why}")
+    {:deny, "the permission #{what} crashed; #{advice}"}
+  end
 
+  defp ask_permission(slug, name, raw) do
+    case Compos.Core.Agent.ask_permission(slug, %{title: name, kind: "tool", raw: raw}) do
+      :deny -> {:deny, "denied"}
+      {:error, _} -> {:deny, "the thread went away before this was answered"}
+      _ -> :allow
+    end
+  end
+
+  defp ask_user(slug, question, answers) do
     case Compos.Core.Agent.ask_user(slug, question, answers) do
       {:ok, answer} -> {:ok, answer}
       {:error, reason} -> {:error, Backend.error_text(reason)}
-    end
-  end
-
-  defp intrinsic_tool(_slug, "ask", _input),
-    do: {:error, "ask requires a question and an answers array"}
-
-  defp intrinsic_tool(_slug, _name, _input), do: :dispatch
-
-  defp permission_verdict(slug, name, input) do
-    fun =
-      Compos.Core.LLMSession.callback(slug, :permission) ||
-        Roots.get({:agent_permission})
-
-    case fun do
-      nil ->
-        :allow
-
-      fun ->
-        raw = name <> " " <> inspect(input)
-
-        case Session.call_fn(
-               fun,
-               [slug, name, "tool", raw],
-               nil,
-               Compos.Core.Agent.lane(slug),
-               "permission #{name}"
-             ) do
-          {:ok, {:sym, "ask"}} -> {:ask, raw}
-          {:ok, {:sym, "reject"}} -> :reject
-          {:ok, _} -> :allow
-          {:error, msg} -> {:crash, msg}
-        end
     end
   end
 

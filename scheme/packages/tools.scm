@@ -1722,6 +1722,19 @@
           (run cmd dir resolve)
           (run cmd resolve)))))
 
+;; Every answer a tool call returns leaves through here, base64 for the
+;; socket. A long one goes to a file first (tool-results.scm), and the
+;; agent gets the reference: an ACP backend keeps its own copy of every
+;; answer, so this is the last place a cut can save its context.
+(define (mcp-proxy--answer name author text)
+  (let* ((slug (and (string? author) (string-prefix? "agent:" author)
+                    (substring author 6 (string-length author))))
+         (buf (and slug (agent-buf slug))))
+    (base64-encode
+      (if (boundp (quote tool-result-store))
+          (tool-result-store buf name text)
+          text))))
+
 (define (mcp-proxy--run name args-json author)
   ;; The async lane. An eval-scheme payload whose whole program is
   ;; one shell command must not hold the Session for its runtime —
@@ -1737,7 +1750,7 @@
       ((and token parts)
         (let ((resolve (lambda (out)
                          (eval-resolve! token
-                           (base64-encode (value->string out))))))
+                           (mcp-proxy--answer name author (value->string out))))))
           (mcp-proxy--shell-run! parts author resolve)
           'pending))
       ((and token read-only?)
@@ -1748,14 +1761,14 @@
        (task-run!
          (lambda ()
            (eval-resolve! token
-             (base64-encode (mcp-proxy--sync name args-json author))))
+             (mcp-proxy--answer name author (mcp-proxy--sync name args-json author))))
          (lambda (ok value)
            (unless ok
              (eval-resolve! token
                (base64-encode (string-append "error: " (value->string value)))))))
        'pending)
       (else
-        (base64-encode (mcp-proxy--sync name args-json author))))))
+        (mcp-proxy--answer name author (mcp-proxy--sync name args-json author))))))
 
 ;; Ask, on a lane that has no backend to ask through. This arm did not
 ;; exist: the cond ran allow and refused everything else, so a verdict of
@@ -1874,14 +1887,15 @@
   (let ((parts (and (equal? name "eval-scheme") (mcp-proxy--shell-code args-json))))
     (if parts
         (let ((resolve (lambda (out)
-                         (eval-resolve! token (base64-encode (value->string out))))))
+                         (eval-resolve! token
+                           (mcp-proxy--answer name author (value->string out))))))
           (mcp-proxy--shell-run! parts author resolve))
         (let ((code (mcp-proxy--code args-json))
               (gate? (boundp (quote decide-shell-approve!))))
           (when (and code gate?) (decide-shell-approve! code))
           (let ((out (mcp-proxy--sync name args-json author)))
             (when gate? (decide-shell-approve! #f))
-            (eval-resolve! token (base64-encode out)))))))
+            (eval-resolve! token (mcp-proxy--answer name author out)))))))
 
 (define (mcp-proxy--code args-json)
   (let ((args (json-parse args-json)))

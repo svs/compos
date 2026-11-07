@@ -563,31 +563,6 @@
 ;; from Elixir is one the interpreter's GC collects mid-turn.
 (define *chat-dispatchers* '())
 
-;; The model reads every tool result again on every later turn, so a
-;; long one costs the whole window: three page dumps once made a chat
-;; 1.1M tokens, and the provider refused it. A result past the cap
-;; reaches the model as its head and the name of a hidden buffer that
-;; holds all of it, and the model reads the part it needs from there.
-(defcustom 'chat-tool-result-max-bytes 16000
-  "A tool result longer than this reaches the model as its head and the buffer that holds the rest. 0 sends every result whole."
-  'group 'chat 'type 'integer)
-
-(define (chat-tool-result-clip slug text)
-  (let ((n (string-byte-length text))
-        (cap chat-tool-result-max-bytes))
-    (if (or (<= cap 0) (<= n cap))
-        text
-        (let ((name (string-append " *tool-result:" slug ":"
-                                   (number->string (monotonic-ms)) "*")))
-          (buffer-create name)
-          (buffer-append! name text)
-          (string-append
-            (substring-bytes text 0 cap)
-            "\n\n[cut at " (number->string cap) " of " (number->string n)
-            " bytes. The whole result is in the buffer \"" name
-            "\". Read the part you need with (substring-bytes (buffer-text \""
-            name "\") FROM TO); never read it whole.]")))))
-
 (define (chat-tool-dispatch slug)
   (let ((e (assoc slug *chat-dispatchers*)))
     (if e
@@ -603,8 +578,8 @@
                                         (lambda () (llm-tool-call name args)))
                                       (llm-tool-call name args)))))
                      ;; this lane sends tool results as text, and a long
-                     ;; one as its head and the buffer that holds the rest
-                     (chat-tool-result-clip slug (tool-result-text
+                     ;; one as a reference to the file that holds it
+                     (tool-result-store buf name (tool-result-text
                        (if (and buf (buffer-exists? buf))
                            (with-current-buffer buf
                              (lambda () (with-edit-author author call)))

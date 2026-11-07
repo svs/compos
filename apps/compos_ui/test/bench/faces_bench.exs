@@ -64,22 +64,23 @@ defmodule Compos.Ui.FacesBench do
     frame = for _ <- 1..@n, do: us(fn -> render() end)
 
     # a frame with its own theme, and global faces that move under it
+    # a printed value: the id comes back quoted
     fid = ev!("(make-frame!)")
-    ev!(~s{(set-frame-local-in! "#{fid}" 'isolated #t)})
-    ev!(~s{(frame-theme-apply! "crt" "#{fid}")})
+    ev!(~s{(set-frame-local-in! #{fid} 'isolated #t)})
+    ev!(~s{(frame-theme-apply! "crt" #{fid})})
     ev!(~s{(set-face-attribute! 'modeline 'weight "700" 'fg "#123456")})
     ev!(~s{(set-face-attribute! 'zz-faces-bench 'bg "#654321")})
     ev!(~s{(face-clear! 'dim)})
-    own = for _ <- 1..@n, do: us(fn -> render(fid) end)
+    own = for _ <- 1..@n, do: us(fn -> render(String.trim(fid, ~s{"})) end)
 
     out = System.get_env("FACES_CSS_OUT") || Path.join(System.tmp_dir!(), "faces-bench.css")
 
     File.write!(
       out,
-      "/* global */\n" <> page_css(nil) <> "\n/* frame */\n" <> page_css(fid)
+      "/* global */\n" <> page_css(nil) <> "\n/* frame */\n" <> page_css(String.trim(fid, ~s{"}))
     )
 
-    ev!(~s{(delete-frame! "#{fid}")})
+    ev!(~s{(delete-frame! #{fid})})
     ev!(~s{(theme-apply! "paper-night")})
 
     IO.puts("""

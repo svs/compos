@@ -346,9 +346,9 @@ defmodule Compos.Core.Editor do
   def set_frame_group_style(label, color, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_group_style, label, color, fid(fid)})
 
-  @doc "Lay face OPS and a SKIN stylesheet over the global faces for this frame alone; nil OPS clears them."
-  def set_frame_faces(ops, skin, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_frame_faces, ops, skin, fid(fid)})
+  @doc "Give frame FID its own face map FACES and a SKIN stylesheet; nil FACES gives it the global faces again."
+  def set_own_faces(faces, skin, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_own_faces, faces, skin, fid(fid)})
 
   # Emacs last-command (yank-pop and friends dispatch on it), per frame
   def set_last_command(name, fid \\ nil),
@@ -394,26 +394,23 @@ defmodule Compos.Core.Editor do
   def completion_dismiss(fid \\ nil),
     do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
 
-  # faces: name -> attrs map, merged; frontends map them to CSS vars
-  def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
-  @doc "Forget every attribute of a face. load-theme clears before it applies."
-  def clear_face(name), do: GenServer.call(__MODULE__, {:clear_face, name})
-
-  @doc """
-  Apply OPS to the face table in one change: `{:clear, name}` forgets a
-  face, `{:set, name, attrs}` merges attrs. A theme is hundreds of face
-  writes; one broadcast keeps the page from rendering a half-applied
-  theme, where a cleared default size or zoom moved every window's scroll.
-  """
-  def set_faces(ops), do: GenServer.call(__MODULE__, {:set_faces, ops})
-  @doc "The face table: name -> attrs."
+  # the face and style maps the page renders. Scheme owns the tables
+  # (themes.scm): the merge, the clear, a theme and a frame's own theme.
+  # These doors only set the maps, and a change that changes nothing
+  # renders nothing. Faces carry colors; styles carry structure (grids,
+  # cards, spacing).
+  @doc "Put CHANGES, `[{name, attrs | nil}]` in order, into the global faces, or into frame FID's own faces when FID names a frame that has them; nil drops the face."
+  def put_faces(changes, fid \\ nil), do: GenServer.call(__MODULE__, {:put_faces, changes, fid})
+  @doc "The global faces the page renders: name -> attrs."
   def faces, do: GenServer.call(__MODULE__, :faces)
-
-  # styles: name -> a stylesheet the mode wrote; the page renders them all.
-  # Faces carry colors; styles carry structure (grids, cards, spacing).
-  def set_style(name, css), do: GenServer.call(__MODULE__, {:set_style, name, css})
-  # the stylesheet NAME wears now, or "" for a name nothing registered
-  def style_css(name), do: GenServer.call(__MODULE__, {:style_css, name})
+  @doc "The attrs face NAME renders with, or nil."
+  def face(name), do: GenServer.call(__MODULE__, {:face, name})
+  @doc "Put stylesheet NAME's CSS on the page."
+  def put_style(name, css), do: GenServer.call(__MODULE__, {:put_style, name, css})
+  @doc "The stylesheets the page renders: name -> CSS."
+  def styles, do: GenServer.call(__MODULE__, :styles)
+  @doc "The CSS stylesheet NAME renders, or nil."
+  def style(name), do: GenServer.call(__MODULE__, {:style, name})
 
   # windows
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
@@ -1002,16 +999,15 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  # a frame's own theme: face ops replayed over the global faces when that
-  # frame renders, so a later global change still reaches the faces the
-  # frame's theme leaves alone
-  def handle_call({:set_frame_faces, ops, skin, fid}, _from, state) do
+  # a frame's own theme: the whole face map Scheme made for it, or nil for
+  # the global faces. Scheme sends a later global change on face by face.
+  def handle_call({:set_own_faces, faces, skin, fid}, _from, state) do
     f = frame(state, fid)
 
-    if Map.get(f, :face_ops) == ops and Map.get(f, :skin) == skin do
+    if Map.get(f, :own_faces) == faces and Map.get(f, :skin) == skin do
       {:reply, :ok, state}
     else
-      updated = f |> Map.put(:face_ops, ops) |> Map.put(:skin, skin)
+      updated = f |> Map.put(:own_faces, faces) |> Map.put(:skin, skin)
       changed(:ok, put_frame(state, updated), f.id)
     end
   end
@@ -1764,36 +1760,37 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
   end
 
-  def handle_call({:set_face, name, attrs}, _from, state) do
-    faces = Map.update(state.faces, name, attrs, &Map.merge(&1, attrs))
-    changed(:ok, %{state | faces: faces})
-  end
-
-  def handle_call({:set_faces, ops}, _from, state) do
-    faces =
-      Enum.reduce(ops, state.faces, fn
-        {:clear, name}, faces -> Map.delete(faces, name)
-        {:set, name, attrs}, faces -> Map.update(faces, name, attrs, &Map.merge(&1, attrs))
-      end)
-
-    if faces == state.faces,
-      do: {:reply, :ok, state},
-      else: changed(:ok, %{state | faces: faces})
-  end
-
   def handle_call(:faces, _from, state), do: {:reply, state.faces, state}
+  def handle_call({:face, name}, _from, state), do: {:reply, Map.get(state.faces, name), state}
 
-  def handle_call({:clear_face, name}, _from, state) do
-    if Map.has_key?(state.faces, name),
-      do: changed(:ok, %{state | faces: Map.delete(state.faces, name)}),
-      else: {:reply, :ok, state}
+  def handle_call({:put_faces, changes, nil}, _from, state) do
+    case put_face_changes(state.faces, changes) do
+      :same -> {:reply, :ok, state}
+      faces -> changed(:ok, %{state | faces: faces})
+    end
   end
 
-  def handle_call({:set_style, name, css}, _from, state),
-    do: changed(:ok, %{state | styles: Map.put(state.styles, name, css)})
+  def handle_call({:put_faces, changes, fid}, _from, state) do
+    case state.frames[fid] do
+      %{own_faces: own} = f when is_map(own) ->
+        case put_face_changes(own, changes) do
+          :same -> {:reply, :ok, state}
+          faces -> changed(:ok, put_frame(state, %{f | own_faces: faces}), f.id)
+        end
 
-  def handle_call({:style_css, name}, _from, state),
-    do: {:reply, Map.get(state.styles, name, ""), state}
+      _ ->
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:put_style, name, css}, _from, state) do
+    if Map.get(state.styles, name) == css,
+      do: {:reply, :ok, state},
+      else: changed(:ok, %{state | styles: Map.put(state.styles, name, css)})
+  end
+
+  def handle_call(:styles, _from, state), do: {:reply, state.styles, state}
+  def handle_call({:style, name}, _from, state), do: {:reply, Map.get(state.styles, name), state}
 
   def handle_call({:split, dir, ratio, fid}, _from, state) do
     f = frame(state, fid)
@@ -2142,25 +2139,27 @@ defmodule Compos.Core.Editor do
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
 
-  defp frame_faces(state, f) do
-    case Map.get(f, :face_ops) do
-      nil -> state.faces
-      ops -> apply_face_ops(state.faces, ops)
-    end
-  end
+  defp frame_faces(state, f), do: Map.get(f, :own_faces) || state.faces
 
   defp frame_styles(state, f) do
-    case Map.get(f, :face_ops) do
-      nil -> state.styles
-      _ -> Map.put(state.styles, "theme-skin", Map.get(f, :skin) || "")
-    end
+    if is_map(Map.get(f, :own_faces)),
+      do: Map.put(state.styles, "theme-skin", Map.get(f, :skin) || ""),
+      else: state.styles
   end
 
-  defp apply_face_ops(faces, ops) do
-    Enum.reduce(ops, faces, fn
-      {:clear, name}, faces -> Map.delete(faces, name)
-      {:set, name, attrs}, faces -> Map.update(faces, name, attrs, &Map.merge(&1, attrs))
-    end)
+  # FACES with CHANGES put in order, or :same when no face moved; each
+  # change is compared alone, never the whole map
+  defp put_face_changes(faces, changes) do
+    {out, moved?} =
+      Enum.reduce(changes, {faces, false}, fn
+        {name, nil}, {faces, moved?} ->
+          if Map.has_key?(faces, name), do: {Map.delete(faces, name), true}, else: {faces, moved?}
+
+        {name, attrs}, {faces, moved?} ->
+          if Map.get(faces, name) == attrs, do: {faces, moved?}, else: {Map.put(faces, name, attrs), true}
+      end)
+
+    if moved?, do: out, else: :same
   end
 
   defp leaves(%{type: :leaf} = leaf), do: [leaf]

@@ -9,12 +9,143 @@
 ;;;   modeline-active (bg fg) · cursor (bg) · region (bg) · accent (fg)
 ;;;   dim (fg) · select (bg)
 
+;;; --- the face table ------------------------------------------------------
+;;; Scheme owns what faces and stylesheets mean. A face is a name and a
+;;; plist of attributes: a write merges attributes into the face, a clear
+;;; forgets it, a theme replaces the faces it and the package defaults
+;;; name, and a frame may wear a theme of its own. The editor keeps only
+;;; the maps the page renders, and these functions set them: faces--put!
+;;; for the global faces, frame-faces--set! and faces--put! with a frame
+;;; for a frame's own theme, style--put! for a stylesheet.
+;;;
+;;; The page's maps are the table: faces--get and style--get read them
+;;; back. A copy here would cost a write of the whole table on every face
+;;; change, because a global's value is copied each time it is set.
+
+;; a theme's face changes depend only on the theme, the theme it replaces
+;; and the package defaults; defface! and define-theme move the version
+(define *theme-faces-version* 0)
+(define *theme-faces-cache* '())       ; (((NAME BASE VERSION) CHANGES) ...)
+
+(define (face--name face) (if (symbol? face) (symbol->string face) face))
+(define (face--key key) (if (string? key) (string->symbol key) key))
+
+;; PLIST with symbol keys; a key with no value reads as #t
+(define (face--norm plist)
+  (cond ((null? plist) '())
+        ((null? (cdr plist)) (list (face--key (car plist)) #t))
+        (else (cons (face--key (car plist))
+                    (cons (cadr plist) (face--norm (cddr plist)))))))
+
+;; the attributes of OLD with KVS on top. OLD has symbol keys: the page's
+;; map and a merge give them, and a theme spec goes through face--norm first
+(define (face--merge old kvs)
+  (let loop ((p kvs) (acc (or old '())))
+    (cond ((null? p) acc)
+          ((null? (cdr p)) (plist-put acc (face--key (car p)) #t))
+          (else (loop (cddr p) (plist-put acc (face--key (car p)) (cadr p)))))))
+
+;; the attributes face NAME wears now, or #f
+(define (face--get name) (faces--get name))
+
+;; CHANGES, ((NAME PLIST-or-#f) ...) oldest first, go onto each frame that
+;; wears its own theme, and onto the page as one change
+(define (faces--apply! changes)
+  (if (pair? *frame-faces*) (frame-faces--follow! changes))
+  (faces--put! changes))
+
+(define (set-face-attribute! face &rest kvs)
+  (let ((name (face--name face)))
+    (faces--apply! (list (list name (face--merge (face--get name) kvs))))))
+
+(define (face-clear! face)
+  (let ((name (face--name face)))
+    (if (face--get name) (faces--apply! (list (list name #f))))))
+
+;; OPS: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges; each
+;; op reads the faces as the ops before it left them
+(define (face-batch! ops)
+  (let loop ((ops ops) (changes '()))
+    (if (null? ops)
+        (if (pair? changes) (faces--apply! (reverse changes)))
+        (let* ((op (car ops))
+               (name (face--name (cadr op)))
+               (seen (assoc name changes))
+               (now (if seen (cadr seen) (face--get name))))
+          (loop (cdr ops)
+                (cons (list name (if (eq? (car op) 'clear) #f (face--merge now (cddr op))))
+                      changes))))))
+
+;; the value FACE sets for ATTR, or #f; a symbol reads as its name
+(define (face-attribute face attr)
+  (let* ((plist (face--get (face--name face)))
+         (v (and plist (plist-get plist (face--key attr)))))
+    (if (symbol? v) (symbol->string v) v)))
+
+(define (face-list) (map car (faces--snapshot)))
+
+(define (define-style! name css) (style--put! (face--name name) css))
+
+(define (style-css name) (or (style--get (face--name name)) ""))
+
+;; --- a frame's own faces ---
+;; ((FRAME RULES) ...): the frames that wear their own theme. RULES is
+;; ((NAME CLEARED? SET? PLIST) ...): what the frame's ops do to face NAME,
+;; so a global change reaches the frame face by face.
+(define *frame-faces* '())
+
+(define (frame-faces--rules ops)
+  (fold (lambda (acc op)
+          (let* ((name (face--name (cadr op))) (r (assoc name acc)))
+            (cons (if (eq? (car op) 'clear)
+                      (list name #t #f '())
+                      (list name (and r (cadr r)) #t
+                            (face--merge (and r (list-ref r 3)) (cddr op))))
+                  (if r (alist-delete acc name) acc))))
+        '() ops))
+
+;; the attributes the frame wears for a face whose global ones are GLOBAL
+(define (frame-faces--value rule global)
+  (cond ((not rule) global)
+        ((cadr rule) (and (caddr rule) (list-ref rule 3)))
+        (global (face--merge global (list-ref rule 3)))
+        (else (list-ref rule 3))))
+
+(define (frame-faces--full rules)
+  (let ((live (faces--snapshot)))
+    (append
+      (map (lambda (e) (list (car e) (frame-faces--value (assoc (car e) rules) (cadr e)))) live)
+      (fold (lambda (acc r)
+              (if (assoc (car r) live) acc (cons (list (car r) (frame-faces--value r #f)) acc)))
+            '() rules))))
+
+(define (frame-faces--follow! changes)
+  (for-each
+    (lambda (entry)
+      (let ((rules (cadr entry)))
+        (faces--put! (map (lambda (c) (list (car c) (frame-faces--value (assoc (car c) rules) (cadr c))))
+                          changes)
+                     (car entry))))
+    *frame-faces*))
+
+;; FRAME wears face-batch! OPS over the global faces and the SKIN
+;; stylesheet; OPS #f gives it the global faces again
+(define (frame-faces-set! ops skin &optional frame)
+  (let ((frame (or frame (selected-frame))))
+    (set! *frame-faces* (alist-delete *frame-faces* frame))
+    (if ops
+        (let ((rules (frame-faces--rules ops)))
+          (set! *frame-faces* (cons (list frame rules) *frame-faces*))
+          (frame-faces--set! (frame-faces--full rules) skin frame))
+        (frame-faces--set! #f #f frame))))
+
 (define *themes* '())
 
 ;; A reload re-runs every define-theme in this file. Consing each time
 ;; listed "ascii" five times in the theme prompt, so a name already in the
 ;; registry is replaced where it stands and the order never moves.
 (define (define-theme name faces)
+  (set! *theme-faces-version* (+ *theme-faces-version* 1))
   (set! *themes*
         (if (assoc name *themes*)
             (map (lambda (t) (if (equal? (car t) name) (list name faces) t))
@@ -128,6 +259,7 @@
 ;; the colour of ts-keyword and the package sets its weight, and both
 ;; hold. Only an attribute the theme names for this face is skipped.
 (define (defface! face &rest attrs)
+  (set! *theme-faces-version* (+ *theme-faces-version* 1))
   (set! *face-defaults*
         (cons (cons face attrs)
               (filter (lambda (d) (not (equal? (car d) face))) *face-defaults*)))
@@ -155,6 +287,33 @@
     (map (lambda (d) (cons 'set d)) *face-defaults*)
     (map (lambda (spec) (cons 'set spec)) (cadr t))))
 
+;; theme T over BASE as one change: the faces face-batch! of theme--ops
+;; leaves, without an op at a time. Every face the defaults, BASE or T
+;; name starts empty, the defaults go on, then T on top.
+(define (theme--face-changes t base)
+  (let* ((fresh (fold (lambda (acc spec)
+                        (let* ((name (face--name (car spec))) (had (assoc name acc)))
+                          (cons (list name (if had (face--merge (face--norm (cadr had)) (cdr spec)) (cdr spec)))
+                                acc)))
+                      '() (append *face-defaults* (cadr t))))
+         (gone (fold (lambda (acc spec)
+                       (let ((name (face--name (car spec))))
+                         (if (or (assoc name fresh) (assoc name acc)) acc (cons (list name #f) acc))))
+                     '() (theme-faces base))))
+    (append gone (reverse fresh))))
+
+(define (theme--faces! t base)
+  (let* ((key (list (car t) base *theme-faces-version*))
+         (hit (assoc key *theme-faces-cache*))
+         (changes (if hit (cadr hit) (theme--face-changes t base))))
+    (if (not hit)
+        (set! *theme-faces-cache*
+              (cons (list key changes)
+                    (let keep ((rest *theme-faces-cache*) (n 1))
+                      (if (or (null? rest) (>= n 16)) '()
+                          (cons (car rest) (keep (cdr rest) (+ n 1))))))))
+    (faces--apply! changes)))
+
 (define (theme-apply! name)
   (let ((t (assoc name *themes*)))
     (and t
@@ -164,12 +323,12 @@
            ;; every face either theme or a default names is cleared first,
            ;; then the package defaults apply, then the theme on top.
            ;;
-           ;; The three passes go to the editor as ONE change (face-batch!).
+           ;; The three passes go to the editor as ONE change (theme--faces!).
            ;; Hundreds of single writes each rendered the page, and a
            ;; render between the clear and the defaults showed a default
            ;; face with no size and a 'ui face with no zoom: every window
            ;; reflowed and its scroll moved.
-           (face-batch! (theme--ops t *current-theme*))
+           (theme--faces! t *current-theme*)
            (set! *current-theme* name)
            ;; the skin goes on after the faces, always under one name, so
            ;; the theme you leave takes its stylesheet with it
@@ -178,8 +337,9 @@
            #t))))
 
 ;; --- a frame's own theme -------------------------------------------------
-;; An isolated frame wears its own theme. Its faces are ops the editor
-;; replays over the global faces when that frame renders, so the other
+;; An isolated frame wears its own theme. Its faces are ops over the
+;; global faces: frame-faces-set! makes the frame's face map from them,
+;; and a later global change reaches it face by face, so the other
 ;; frames keep the global theme. The name is a frame local, so it survives
 ;; with the desktop and goes back on when a client attaches.
 
@@ -225,9 +385,12 @@
            #t))))
 
 (define (frame-themes-refresh!)
-  ;; the global faces moved: each frame theme is replayed over the new ones
-  (for-each (lambda (frame) (when (frame-theme frame) (frame-theme--push! frame)))
-            (frame-list)))
+  ;; the global faces moved: each frame theme is replayed over the new ones,
+  ;; and a frame that is gone stops following them
+  (let ((frames (frame-list)))
+    (set! *frame-faces* (filter (lambda (e) (member (car e) frames)) *frame-faces*))
+    (for-each (lambda (frame) (when (frame-theme frame) (frame-theme--push! frame)))
+              frames)))
 
 (define (frame-theme-attach!)
   (when (frame-theme) (frame-theme--push! (selected-frame))))
@@ -1831,5 +1994,16 @@
 
 (catalog-meta! 'function "theme-dark?" 'domain 'faces 'effects '(read))
 (catalog-meta! 'function "face-color" 'domain 'faces 'effects '(read))
+(public! 'set-face-attribute! "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs")
+(public! 'face-batch! "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one")
+(public! 'frame-faces-set! "(frame-faces-set! OPS SKIN [FRAME]) — lay face-batch! OPS and a SKIN stylesheet over the global faces for FRAME alone; OPS #f gives the frame the global faces again")
+(public! 'face-attribute "(face-attribute FACE ATTR) -> the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here")
+(public! 'face-list "(face-list) -> the names of every face the editor holds")
+(public! 'define-style! "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this")
+(public! 'style-css "(style-css NAME) -> the stylesheet NAME wears now, or \"\" when nothing registered one")
+(for-each (lambda (name) (catalog-meta! 'function name 'domain 'faces 'effects '(write)))
+          '("set-face-attribute!" "face-clear!" "face-batch!" "frame-faces-set!" "define-style!"))
+(for-each (lambda (name) (catalog-meta! 'function name 'domain 'faces 'effects '(read)))
+          '("face-attribute" "face-list" "style-css"))
 (public! 'theme-names "(theme-names) -> the names of every defined theme, in registry order")
 (catalog-meta! 'function "theme-names" 'domain 'faces 'effects '(read))

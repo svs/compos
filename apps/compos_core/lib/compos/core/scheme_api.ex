@@ -2316,53 +2316,26 @@ defmodule Compos.Core.SchemeAPI do
               message: "(buffer-search-backward Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got " <> inspect(args)
         end,
 
-      # faces: (set-face-attribute! 'modeline 'bg "#2f3140" 'fg "#fff" ...)
-      {"set-face-attribute!",
-       "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs."} =>
-        fn [face | kvs] ->
-          attrs = Opts.map(kvs)
+      # the face and style maps the page renders. themes.scm owns the
+      # tables and calls these; nothing else should. Modes are trusted
+      # code (they can eval anything), so a stylesheet ships raw.
+      {"faces--put!",
+       "(faces--put! CHANGES [FRAME]) — put CHANGES, ((FACE PLIST-or-#f) ...) in order, into the face map the page renders, or into FRAME's own faces; #f drops the face. themes.scm calls this: use set-face-attribute!."} =>
+        fn
+          [changes] ->
+            Editor.put_faces(face_changes(changes))
+            :void
 
-          Editor.set_face(Opts.plain(face), attrs)
-          :void
+          [changes, frame] when is_binary(frame) ->
+            Editor.put_faces(face_changes(changes), frame)
+            :void
         end,
-      {"face-clear!",
-       "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme."} =>
-        fn [face] ->
-          Editor.clear_face(Opts.plain(face))
-          :void
-        end,
-      {"face-batch!",
-       "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one."} =>
-        fn [ops] ->
-          ops
-          |> Enum.map(fn
-            [{:sym, "clear"}, face] ->
-              {:clear, Opts.plain(face)}
-
-            [{:sym, "set"}, face | kvs] ->
-              {:set, Opts.plain(face),
-               Opts.map(kvs)}
-          end)
-          |> Editor.set_faces()
-
-          :void
-        end,
-      {"frame-faces-set!",
-       "(frame-faces-set! OPS SKIN [FRAME]) — lay face-batch! OPS and a SKIN stylesheet over the global faces for FRAME alone; OPS #f gives the frame the global faces again."} =>
-        fn args ->
-          [ops, skin | rest] = args
-
-          ops =
-            if is_list(ops),
-              do:
-                Enum.map(ops, fn
-                  [{:sym, "clear"}, face] ->
-                    {:clear, Opts.plain(face)}
-
-                  [{:sym, "set"}, face | kvs] ->
-                    {:set, Opts.plain(face),
-                     Opts.map(kvs)}
-                end),
+      {"frame-faces--set!",
+       "(frame-faces--set! FACES SKIN [FRAME]) — FRAME's own face map, ((FACE PLIST-or-#f) ...), and SKIN stylesheet; FACES #f gives it the global faces again. themes.scm calls this: use frame-faces-set!."} =>
+        fn [faces, skin | rest] ->
+          map =
+            if is_list(faces),
+              do: for({name, attrs} <- face_changes(faces), attrs != nil, into: %{}, do: {name, attrs}),
               else: nil
 
           fid =
@@ -2371,20 +2344,32 @@ defmodule Compos.Core.SchemeAPI do
               _ -> nil
             end
 
-          Editor.set_frame_faces(ops, if(is_binary(skin), do: skin, else: nil), fid)
+          Editor.set_own_faces(map, if(is_binary(skin), do: skin, else: nil), fid)
           :void
         end,
-      {"face-attribute",
-       "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here."} =>
-        fn [face, attr] ->
-          case get_in(Editor.faces(), [Opts.plain(face), Opts.plain(attr)]) do
+      {"faces--snapshot",
+       "(faces--snapshot) — the face map the page renders, as ((FACE PLIST) ...). themes.scm reads its table with this: use face-list."} =>
+        fn [] ->
+          for {name, attrs} <- Editor.faces(),
+              do: [name, Enum.flat_map(attrs, fn {k, v} -> [{:sym, k}, v] end)]
+        end,
+      {"style--put!",
+       "(style--put! NAME CSS) — put stylesheet NAME on the page. themes.scm calls this: use define-style!."} =>
+        fn [name, css] ->
+          Editor.put_style(Opts.plain(name), css)
+          :void
+        end,
+      {"faces--get",
+       "(faces--get FACE) — the plist FACE renders with, or #f. themes.scm reads its table with this: use face-attribute."} =>
+        fn [face] ->
+          case Editor.face(Opts.plain(face)) do
             nil -> false
-            v -> v
+            attrs -> Enum.flat_map(attrs, fn {k, v} -> [{:sym, k}, v] end)
           end
         end,
-      {"face-list", "(face-list) — the names of every face the editor holds."} => fn [] ->
-        Map.keys(Editor.faces())
-      end,
+      {"style--get",
+       "(style--get NAME) — the CSS stylesheet NAME renders, or #f. themes.scm reads its table with this: use style-css."} =>
+        fn [name] -> Editor.style(Opts.plain(name)) || false end,
 
       # windows (tiling tree)
       {"split-window!",
@@ -2737,18 +2722,6 @@ defmodule Compos.Core.SchemeAPI do
           Editor.set_key_capture(command)
           :void
         end,
-      # a mode's own stylesheet, rendered into the page beside the face
-      # variables. Modes are trusted code — they can eval anything — so the
-      # CSS ships raw.
-      {"define-style!",
-       "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this."} =>
-        fn [name, css] ->
-          Editor.set_style(Opts.plain(name), css)
-          :void
-        end,
-      {"style-css",
-       "(style-css NAME) — the stylesheet NAME wears now, or \"\" when nothing registered one."} =>
-        fn [name] -> Editor.style_css(Opts.plain(name)) end,
       # The languages whose blocks offer the run key in the rendered page.
       # The fence-kind registry pushes the list on every registration, so
       # the page never mirrors the registry by hand.
@@ -3569,6 +3542,14 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   defp diff_opts(_, acc), do: acc
+
+  # ((FACE PLIST-or-#f) ...) as [{name, attrs | nil}]
+  defp face_changes(changes) do
+    Enum.map(changes, fn
+      [name, false] -> {Opts.plain(name), nil}
+      [name, plist] -> {Opts.plain(name), Opts.map(plist)}
+    end)
+  end
 
   defp dir_atom({:sym, "h"}), do: :h
   defp dir_atom({:sym, "v"}), do: :v

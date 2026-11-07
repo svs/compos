@@ -31,10 +31,10 @@
     (buffer-create buf)
     (buffer-set-local! buf 'chat-wire-turns record)
     (set-symbol-value! 'chat-compact-keep 2)
-    (let ((r (ignore-errors (lambda () (thunk buf)))))
+    (let ((r (ignore-errors (lambda () (thunk buf) 'ran))))
       (set-symbol-value! 'chat-compact-keep old)
-      (kill-buffer! buf)
-      r)))
+      (buffer-kill! buf)
+      (check-equal! r 'ran "the test body ran without an error"))))
 
 (define (t--compacted-text buf)
   (let ((t (find (lambda (t) (string-prefix? "[Earlier" (chat-turn-display t)))

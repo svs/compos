@@ -6972,6 +6972,7 @@
 (public! 'with-current-buffer "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window")
 (effects! '(read))
 (public! 'monotonic-ms "(monotonic-ms) — a monotonic millisecond count, for timing one span")
+(public! 'current-time "(current-time) - the current time in Unix seconds")
 (public! 'task-await "(task-await TASK [MS]) — wait for a Scheme task and answer its value, or raise its error")
 (public! 'task-alive? "(task-alive? TASK) — #t while TASK remains available")
 (effects! '(write execute))

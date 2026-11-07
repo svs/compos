@@ -22,6 +22,9 @@ defmodule Compos.Core.SchemeWarmup do
       Session.eval(
         """
         (begin
+          ;; the catalog snapshot Elixir reads for a reasoning lookup. Built
+          ;; here, once, after the catalog is warm; rebuilt by a catalog install.
+          (when (boundp 'model-rules-build!) (model-rules-build!))
           (apropos--rows-cached)
           (apropos-sync-embeddings!))
         """,

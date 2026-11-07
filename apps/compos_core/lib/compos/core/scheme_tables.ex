@@ -38,7 +38,9 @@ defmodule Compos.Core.SchemeTables do
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @doc "All named tables held by this stable owner."
-  def named_tables, do: reset_tables() ++ [:compos_lane_jobs]
+  # The catalog rule snapshot is data, not Scheme world state: it survives a
+  # Session restart, and Scheme rebuilds it when the catalog loads or changes.
+  def named_tables, do: reset_tables() ++ [:compos_lane_jobs, :compos_model_rules]
 
   @doc "Scheme registry tables emptied and rebuilt when Session starts."
   def reset_tables,

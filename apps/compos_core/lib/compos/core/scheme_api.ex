@@ -563,14 +563,51 @@ defmodule Compos.Core.SchemeAPI do
       {"llm-catalog-info",
        "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path."} =>
         fn [] -> catalog_plist(Compos.Core.ModelCatalog.snapshot_info()) end,
+      {"llm-catalog-entries",
+       "(llm-catalog-entries) — every model the loaded catalog carries, as (SPEC RAW-JSON); RAW-JSON holds its capabilities and extra."} =>
+        fn [] ->
+          # only the models the editor's catalog lookup reaches: those are the
+          # only keys a reasoning lookup can ever read
+          for m <- LLMDB.models(),
+              spec = Atom.to_string(m.provider) <> ":" <> m.id,
+              {:ok, found} <- [Compos.Core.ModelCatalog.lookup(spec)] do
+            key = Atom.to_string(found.provider) <> ":" <> found.id
+            raw = Jason.encode!(%{"capabilities" => found.capabilities || %{}, "extra" => found.extra || %{}})
+            [key, raw]
+          end
+        end,
+      {"model-rules-install!",
+       "(model-rules-install! ANSWERS CAPTURED-AT CAPTURED-SECS) — install the catalog rule answers in the shared snapshot; ANSWERS is ((SPEC ANSWER) ...)."} =>
+        fn [answers, captured_at, captured_secs] ->
+          Compos.Core.SchemeTables.ensure_table(:compos_model_rules)
+          Compos.Core.SchemeTables.reset(:compos_model_rules)
+
+          Enum.each(answers, fn
+            [spec, answer] ->
+              :ets.insert(:compos_model_rules, {to_string(spec), Compos.Core.Plist.to_json(answer)})
+
+            _ ->
+              :ok
+          end)
+
+          captured = if captured_at in [false, nil], do: nil, else: to_string(captured_at)
+          secs = if captured_secs in [false, nil], do: nil, else: captured_secs
+          :ets.insert(:compos_model_rules, {:captured, captured, secs})
+          :void
+        end,
       {"llm-catalog-install!",
        "(llm-catalog-install! CALLBACK) — fetch the newest published model catalog, keep it, and load it. The callback gets one list: ok and then either the catalog info or an error message. It runs off the lane, being a network fetch of several megabytes."} =>
         fn [callback] ->
           async_dispatch(callback, fn ->
-            case Compos.Core.ModelCatalog.refresh() do
-              {:ok, info} -> [true, catalog_plist(info)]
-              {:error, msg} -> [false, to_string(msg)]
-            end
+            result =
+              case Compos.Core.ModelCatalog.refresh() do
+                {:ok, info} -> [true, catalog_plist(info)]
+                {:error, msg} -> [false, to_string(msg)]
+              end
+
+            # the snapshot answers from the catalog that just loaded
+            Compos.Core.Session.call_named("model-rules-build!", [], nil, 120_000, {:system, :model_rules})
+            result
           end)
         end,
       {"telemetry-reattach!",

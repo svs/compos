@@ -501,10 +501,19 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
 
   defp truthy?(value), do: value in [true, "true", true, {:sym, "true"}]
 
+  # The picker rows are Scheme's rule (packages/model-rules.scm). One call per
+  # model list, not one per model: a session that lists a hundred models still
+  # pays a single crossing, and the rule itself lives with the catalog rules.
   defp emit_model_state(state) do
     available =
-      for m <- state.models do
-        Compos.Core.ModelCatalog.picker_entry(m)
+      case Compos.Core.Session.call_named(
+             "model-codex-entries",
+             [Jason.encode!(state.models)],
+             nil,
+             10_000
+           ) do
+        {:ok, rows} when is_list(rows) -> rows
+        _ -> []
       end
 
     emit(state, type: :"model-state", current: state.model || "", available: available)

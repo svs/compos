@@ -128,10 +128,8 @@
 ;; (model-codex-entry MODEL-JSON) -> (ID NAME VALUES DEFAULT), the picker row
 ;; for one model a live Codex backend listed. Its effort list is authoritative
 ;; for that session, so it is read as offered and never invented.
-(define (model-codex-entry model-json)
-  "(model-codex-entry MODEL-JSON) — the picker row (ID NAME EFFORTS DEFAULT) for one model a live backend listed"
-  (let* ((model (json-parse model-json))
-         (efforts (model--uniq
+(define (model-codex-row model)
+  (let* ((efforts (model--uniq
                     (filter (lambda (e) e)
                             (map model--codex-effort
                                  (or (model--get model 'supportedReasoningEfforts) '())))))
@@ -141,6 +139,14 @@
                  ""))
          (name (or (model--string (model--get model 'displayName)) "")))
     (list id name efforts (or default ""))))
+
+(define (model-codex-entry model-json)
+  "(model-codex-entry MODEL-JSON) — the picker row (ID NAME EFFORTS DEFAULT) for one model a live backend listed"
+  (model-codex-row (json-parse model-json)))
+
+(define (model-codex-entries models-json)
+  "(model-codex-entries MODELS-JSON) — the picker rows of every model a live backend listed"
+  (map model-codex-row (json-parse models-json)))
 
 ;;; --- how old a snapshot is ---------------------------------------------------
 
@@ -203,5 +209,29 @@
   "(model-reasoning-normalize RAW-JSON) — the normalized reasoning controls of a catalog entry, or #f; RAW-JSON holds its capabilities and extra")
 (public! 'model-codex-entry
   "(model-codex-entry MODEL-JSON) — the picker row (ID NAME EFFORTS DEFAULT) for one model a live backend listed")
+(public! 'model-codex-entries
+  "(model-codex-entries MODELS-JSON) — the picker rows of every model a live backend listed")
 (public! 'model-stale-days
   "(model-stale-days CAPTURED NOW) — whole days since the ISO-8601 instant CAPTURED, or #f; NOW is unix seconds")
+
+;;; --- the shared snapshot ------------------------------------------------------
+
+;; The lookup Elixir does must not ask Scheme: it reads this snapshot. Scheme
+;; builds it once at boot and again when the catalog changes, so a picker that
+;; names a hundred models pays nothing per row.
+(effects! '(write))
+
+(define (model-rules-build!)
+  "(model-rules-build!) — rebuild the shared catalog snapshot from the loaded catalog; answers the number of models"
+  (with-scheme-lock 'model-rules
+    (lambda ()
+      (let* ((entries (llm-catalog-entries))
+             (answers (map (lambda (e) (list (car e) (model-reasoning-normalize (cadr e)))) entries))
+             (info (llm-catalog-info))
+             (captured (plist-get info 'captured-at))
+             (secs (model--iso-seconds captured)))
+        (model-rules-install! answers (or captured #f) (or secs #f))
+        (length answers)))))
+
+(public! 'model-rules-build!
+  "(model-rules-build!) — rebuild the shared catalog snapshot from the loaded catalog; answers the number of models")

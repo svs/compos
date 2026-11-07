@@ -1720,7 +1720,8 @@
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
   (let* ((g (or (group-resolve-id group) (group-ensure-record! group)))
-         (first? (not (group-primary-chat g)))
+         ;; asleep or archived, the group's chat is still its chat
+         (first? (let ((r (group-record-by-id g))) (not (and r (group-record-primary-chat-id r)))))
          (chat (todo-assign-chat! id g)))
     ;; a group made here has no chat yet: this one becomes its chat pane
     (when first? (group-record-update! g 'primary-chat-id (chat-stable-id! chat)))
@@ -1778,13 +1779,35 @@
   (lambda () (let ((t (todo--detail-task (current-buffer)))) (if t (todo--task-chat! t) (message "The task is gone")))))
 
 ;; a card follows its chat: an event on a chat topic redraws the list
-;; when a window shows it, and marks it dirty when none does
+;; when a window shows it, and marks it dirty when none does. A card shows
+;; only the status, the stop reason and the minute of the chat-status row,
+;; so an event that leaves those the same redraws nothing. Streamed text is
+;; most chat events, and one redraw of a long list costs about 500 ms of :ui.
+(define *todo-chat-sigs* (if (boundp '*todo-chat-sigs*) *todo-chat-sigs* '()))
+
+(define (todo--chat-sig topic)
+  (let ((row (event-view-get 'chat-status topic)))
+    (and row (list (plist-get row 'status) (plist-get row 'stop-reason)
+                   (and (plist-get row 'at) (format-time (plist-get row 'at) "%H:%M"))))))
+
+(define (todo--chat-changed? topic)
+  "#t when the card text of TOPIC's chat changes, and records the new text"
+  (let ((sig (todo--chat-sig topic))
+        (old (assoc topic *todo-chat-sigs*)))
+    (if (and old (equal? (cadr old) sig))
+        #f
+        (begin
+          (set! *todo-chat-sigs*
+                (cons (list topic sig) (filter (lambda (s) (not (equal? (car s) topic))) *todo-chat-sigs*)))
+          #t))))
+
 (define (todo--on-chat-event e)
-  (for-each (lambda (b)
-              (if (window-showing b)
-                  (debounce! (string->symbol (string-append "todo-cards:" b)) 250 (lambda (_) (list-redraw! b)) #f)
-                  (buffer-mark-dirty! b 'todo-cards)))
-            (todo--buffers)))
+  (when (todo--chat-changed? (plist-get e 'topic))
+    (for-each (lambda (b)
+                (if (window-showing b)
+                    (debounce! (string->symbol (string-append "todo-cards:" b)) 250 (lambda (_) (list-redraw! b)) #f)
+                    (buffer-mark-dirty! b 'todo-cards)))
+              (todo--buffers))))
 
 (define (todo--on-refresh! b keys)
   (cond ((memq 'todo-list keys) (list-refresh! b))

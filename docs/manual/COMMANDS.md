@@ -152,7 +152,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-adopt` |  | Make this chat the companion of a chosen buffer |
 | `chat-compact` |  | Summarize this chat's older turns, keeping the recent ones |
 | `chat-companion` | `C-c w` | Toggle between a work buffer and its group chat |
-| `chat-companion-ask` | `C-c RET` | Ask a new group chat about this buffer without leaving it |
+| `chat-companion-ask` | `C-c RET` | Ask the group's chat about this buffer without leaving it |
 | `chat-component-actions` |  | Choose an action of the component M-up/M-down stepped to, else of the newest one |
 | `chat-component-default` |  | Run the default action of the component M-up/M-down stepped to, else of the newest one |
 | `chat-cost` |  | Show what this chat has cost, and its cache hit rate |

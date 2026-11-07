@@ -185,7 +185,7 @@
       (t--gs-kill! chat first))))
 
 (deftest 'a-group-can-own-many-chats-and-one-primary-chat
-  "the second chat is a new buffer, and it becomes the primary one"
+  "the second chat is a new buffer; the group's own chat stays the first"
   (lambda ()
     (let* ((id (group-record-create! "zzgs-chat-owner"))
            (first (group-chat id))
@@ -194,7 +194,8 @@
       (check-equal! (chat-group-id first) id "the first belongs to the group")
       (check-equal! (chat-group-id second) id "and so does the second")
       (check-equal! (buffer-group-role first id) "chat" "a group chat has the chat role")
-      (check-equal! (group-primary-chat id) second "the newest is the primary one")
+      (check-equal! (group-primary-chat id) first "an explicit new chat does not replace the group's chat")
+      (check-equal! (group-chat id) first "every ask resolves the same one chat")
       (check-equal! (length (filter chat-buffer? (group-buffers id))) 2 "the group owns both")
       (t--gs-kill! first second)
       (t--gs-drop! id))))

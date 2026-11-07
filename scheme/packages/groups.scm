@@ -4123,16 +4123,17 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; only, this answered #f and every caller then handed #f to
 ;; switch-to-buffer!.
 (define (group-chat g)
+  ;; the group's one chat: live, else asleep, else archived and read back.
+  ;; A group without one adopts its newest chat, else gets a new one.
   (let* ((id (group-ensure-record! g))
-         (primary (and id (group-primary-chat id)))
-         (chats (and id (filter chat-buffer? (group-buffers-mru id)))))
+         (primary (and id (or (group-primary-chat id) (group-chat--revive id))))
+         (chats (and id (not primary) (filter chat-buffer? (group-buffers-mru id)))))
     (cond (primary
-           (group-chat-init! (group-chat--heal-name! primary id) id))
+           (group-chat--keep! (group-chat-init! (group-chat--heal-name! primary id) id) id))
           ((and chats (pair? chats))
            (let ((buf (car chats)))
              (group-chat-init! buf id)
-             (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
-             buf))
+             (group-chat--keep! buf id)))
           (id
             (let ((buf (group-chat-name id)))
               (unless (buffer-exists? buf)
@@ -4143,11 +4144,33 @@ is forgotten and that group falls back to creation order in the switcher."
               (when (boundp (quote llm-default-bundle-apply!))
                 (llm-default-bundle-apply! buf id))
               (chat-set-group! buf id)
-              (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
+              (group-chat--keep! buf id)
               (when (boundp (quote workspace-chat-inherit!))
                 (workspace-chat-inherit! buf (group-name id)))
               buf))
           (else #f))))
+
+;; the group's chat when no live buffer holds it: a dormant buffer by its
+;; stable id, else the archived conversation, read back from its file
+(define (group-chat--revive id)
+  (let* ((record (group-record-by-id id))
+         (primary (and record (group-record-primary-chat-id record)))
+         (asleep (and primary (buffer-find (list 'chat-ids (list primary))))))
+    (cond ((pair? asleep) (car asleep))
+          ((boundp (quote chat-for)) (chat-for id id))
+          (else #f))))
+
+;; BUF is the group's chat: the record names it, and the group's chat index
+;; keeps its file, so an archive does not lose it
+(define (group-chat--keep! buf id)
+  (let ((record (group-record-by-id id))
+        (sid (chat-stable-id! buf)))
+    (unless (and record (equal? (group-record-primary-chat-id record) sid))
+      (group-record-update! id 'primary-chat-id sid))
+    (unless (or (not (boundp (quote chat-for!)))
+                (equal? (buffer-local buf 'chat-for-key) id))
+      (ignore-errors (lambda () (chat-for! id buf id))))
+    buf))
 
 ;; A new conversation replaces the selected view. Creating a buffer does
 ;; not create panes or rearrange the buffers already on screen.
@@ -4158,17 +4181,21 @@ is forgotten and that group falls back to creation order in the switcher."
       (if (buffer-known? name) (loop (+ n 1)) name))))
 
 (define (group-chat-new! g)
+  ;; an explicit second conversation in the group. It does not replace the
+  ;; group's own chat, the one every ask goes to, unless the group has none.
   (let ((id (group-resolve-id g)))
     (if (not id)
         #f
-        (let ((buf (group-chat-new-name id)))
+        (let ((buf (group-chat-new-name id))
+              (record (group-record-by-id id)))
           (buffer-create buf)
           (group-chat-init! buf id)
           ;; the named default first, so a group's own config overrides it
           (when (boundp (quote llm-default-bundle-apply!))
             (llm-default-bundle-apply! buf id))
           (chat-set-group! buf id)
-          (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
+          (unless (and record (group-record-primary-chat-id record))
+            (group-record-update! id 'primary-chat-id (chat-stable-id! buf)))
           (when (boundp (quote workspace-chat-inherit!))
             (workspace-chat-inherit! buf (group-name id)))
           ;; a group's chats share one window: the chat pane. A new chat
@@ -4250,23 +4277,36 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; ask the group without leaving the current buffer: the minibuffer prompt
 ;; becomes a group-chat turn, point stays put, the reply lands on the right
 (define (group-ask! g)
+  ;; one chat per group: the ask goes to the group's own chat, after what it
+  ;; already said. The chat shows in another window, the focus stays here, and
+  ;; a half-typed input there waits for the user.
   (let ((src (current-buffer)) (pos (point)))
   (minibuffer-read (string-append "Ask " (group-display-name g) ": ") (history-items 'companion-ask)
     (lambda (prompt)
       (history-push! 'companion-ask prompt)
       (let* ((back (active-window))
-             (chat (group-chat-new! g)))
-        ;; a fresh chat each ask; it may cover SRC, the send names it first anyway
-        (with-current-buffer chat
-          (lambda ()
-            (buffer-set-local! chat 'editor-context-source (list src pos))
-            (insert! prompt)
-            (run-command "agent-send")))
-        ;; "without leaving the current buffer": a one-window frame had the
-        ;; chat cover SRC, so give the window back its buffer too.
-        (when (window-exists? back)
-          (select-window! back)
-          (window-set-buffer! back src)))))))
+             (chat (group-chat g))
+             (held (and chat (chat-input-text chat))))
+        (if (not chat)
+            (message "No group for a chat")
+            (begin
+              (chat-clear-input! chat)
+              (with-current-buffer chat
+                (lambda ()
+                  (buffer-set-local! chat 'editor-context-source (list src pos))
+                  (end-of-buffer!)
+                  (insert! prompt)
+                  (run-command "agent-send")
+                  (when (and (string? held) (not (equal? (string-trim held) "")))
+                    (end-of-buffer!)
+                    (insert! held))))
+              (unless (window-showing chat)
+                (let ((other (get-other-window)))
+                  (when (and other (not (equal? other back)))
+                    (window-set-buffer! other chat))))
+              (when (window-exists? back)
+                (unless (equal? (active-window) back) (select-window! back))
+                (unless (equal? (window-buffer back) src) (window-set-buffer! back src))))))))))
 
 ;; the group a joining buffer gets by default: the group the frame
 ;; stands in, else the most recent group in history. The buffer's own
@@ -4986,7 +5026,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 ;; C-c RET in a work buffer: talk to the group chat without leaving it.
 ;; (In a chat buffer it just sends, exactly like RET.)
-(define-command "chat-companion-ask" "Ask a new group chat about this buffer without leaving it"
+(define-command "chat-companion-ask" "Ask the group's chat about this buffer without leaving it"
   (lambda ()
     (let ((cur (current-buffer)))
       (if (chat-buffer? cur)

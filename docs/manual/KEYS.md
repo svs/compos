@@ -48,7 +48,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-c C-a` | `app-preview` | Run the current buffer as an HTML app |
 | `C-c C-r` | `app-reload` | Reload every running app |
 | `C-c C-v` | `preview-mode` | Toggle rendered preview of the current buffer |
-| `C-c RET` | `chat-companion-ask` | Ask a new group chat about this buffer without leaving it |
+| `C-c RET` | `chat-companion-ask` | Ask the group's chat about this buffer without leaving it |
 | `C-c a a` | `agent-goto-attention` | Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked |
 | `C-c a d` | `doppler` | List and manage Doppler secret names |
 | `C-c a m` | `mcp-hub` | List every MCP server: status, tools, presets |

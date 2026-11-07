@@ -403,6 +403,9 @@
 (effects! '(read))
 (public! 'messages-events
   "(messages-events) — return structured editor messages, oldest first")
+(effects! '(read))
+(public! 'messages-snapshot
+  "(messages-snapshot [LIMIT]) — return recent structured editor messages, oldest first")
 (public! 'messages-text
   "(messages-text) — the log as text, one line per message, oldest first; read this, not the paged *Messages* list")
 (effects! '(write display))

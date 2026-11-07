@@ -264,3 +264,12 @@
                     "and the message is still the last column")
       (check-equal! (nth 1 (nth 1 narrow)) "error"
                     "with its level colour intact"))))
+
+(deftest 'the-snapshot-is-catalogued-as-a-read
+  "the read lane may call messages-snapshot, so its public entry declares read"
+  (lambda ()
+    (let ((entry (catalog-entry 'function "messages-snapshot")))
+      (check-equal! (plist-get entry 'effects) '("read")
+                    "the snapshot only reads the log")
+      (check-equal! (plist-get entry 'package) "messages"
+                    "and the messages package declares it"))))

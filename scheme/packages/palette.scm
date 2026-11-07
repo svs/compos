@@ -122,7 +122,7 @@
       (let* ((hist (history-items 'M-x))
              (asks (take (filter (lambda (h) (not (command-fn h))) hist)
                          *command-palette-past-max*))
-             (rows (annotate 'command (history-order 'M-x (command-candidates))))
+             (rows (command-rows))
              (recent (filter (lambda (h) (or (command-fn h) (member h asks))) hist))
              (top (filter (lambda (r) r)
                           (map (lambda (h)

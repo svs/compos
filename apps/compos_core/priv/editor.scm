@@ -266,6 +266,11 @@
 ;; which run-command and the keys reach, and the catalog, which carries
 ;; its doc and its spec. The closure in the table takes the arguments
 ;; command-call passes; with none it collects them from the spec.
+;; Counts changes to the M-x command table; caches of command rows key on it.
+;; A reload keeps the count, so a cache never meets an old number again.
+(define *command-generation*
+  (if (boundp '*command-generation*) *command-generation* 0))
+
 (define (define-command name &rest args)
   (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
          (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
@@ -286,6 +291,7 @@
     (if (> (string-length doc) 0)
         (define-command--raw name doc entry)
         (define-command--raw name entry))
+    (set! *command-generation* (+ *command-generation* 1))
     (catalog-register! 'command name doc
       'use (string-append "(run-command \"" name "\")")
       'spec (or spec #f))
@@ -308,6 +314,7 @@
 
 (define (undefine-command name)
   (undefine-command--raw name)
+  (set! *command-generation* (+ *command-generation* 1))
   (catalog-forget! 'command name)
   name)
 
@@ -5399,6 +5406,18 @@
 ;; command-applicable?, and command-mode-scoping #f turns it off.
 (define *command-modes* '())
 
+;; NAMES less every name in GONE, sorted: one sort, not a member scan per
+;; name. A name in GONE sorts before the same name in NAMES.
+(define (names-less names gone)
+  (let loop ((rows (sort (append (map (lambda (g) (list g 0)) gone)
+                                 (map (lambda (n) (list n 1)) names))))
+             (last #f)
+             (out '()))
+    (cond ((null? rows) (reverse out))
+          ((equal? (cadr (car rows)) 0) (loop (cdr rows) (car (car rows)) out))
+          ((equal? (car (car rows)) last) (loop (cdr rows) last out))
+          (else (loop (cdr rows) last (cons (car (car rows)) out))))))
+
 (define (command--map-commands m)
   (filter string? (map cadr (or (ignore-errors (lambda () (keymap-bindings m))) '()))))
 
@@ -5416,11 +5435,11 @@
       (let* ((maps (or (ignore-errors (lambda () (buffer-keymaps buf))) '()))
              (open (apply append (map command--map-commands
                                       (append (list "global") (global-minor-maps) maps))))
-             (derived (remove (lambda (c) (or (member c open) (assoc c *command-modes*)))
-                              (apply append
-                                     (map command--map-commands
-                                          (filter (lambda (n) (string-suffix? "-mode-map" n))
-                                                  (keymap-names))))))
+             (derived (names-less (apply append
+                                         (map command--map-commands
+                                              (filter (lambda (n) (string-suffix? "-mode-map" n))
+                                                      (keymap-names))))
+                                  (append open (map car *command-modes*))))
              (named (map car (remove (lambda (row)
                                        (any (lambda (m) (command--mode-on? m buf maps)) (cadr row)))
                                      *command-modes*))))
@@ -5438,14 +5457,52 @@
   (let ((out (commands-out-of-scope (current-buffer))))
     (map cadr
          (sort (map (lambda (n) (list (string-length n) n))
-                    (filter (lambda (n) (not (or (command-internal? n) (member n out))))
-                            (command-names)))))))
+                    (filter (lambda (n) (not (command-internal? n)))
+                            (names-less (command-names) out)))))))
+
+;; The annotated M-x rows, (NAME HINT ...) in command-candidates order. A
+;; build walks every command's scope, key and doc, so the rows are kept per
+;; buffer until its keymaps, its mode or the command table change. The key
+;; holds the buffer's own ladder, not *keymap-generation*: that counts every
+;; buffer's keymap facts, and a busy editor moves it many times a minute.
+(define *command-rows-cache* '())
+
+(define (command-rows--key buf)
+  (let ((ro (and (buffer-exists? buf) (buffer-read-only? buf))))
+   (list (keymap--ladder buf ro)
+        (keymap--facts buf)
+        (length (keymap-names))
+        (buffer-local buf 'mode-name)
+        ro
+        *command-generation*
+        (if (boundp '*app-entries*) (length *app-entries*) 0)
+        (if (boundp '*list-modes*) (length *list-modes*) 0)
+        (length (hook-functions 'candidate-face))
+        (and (boundp 'command-mode-scoping) command-mode-scoping))))
+
+(define (command-rows)
+  (let* ((buf (current-buffer))
+         (key (command-rows--key buf))
+         (kept (alist-get *command-rows-cache* buf)))
+    (if (and kept (equal? (car kept) key))
+        (cdr kept)
+        (let ((rows (annotate 'command (command-candidates))))
+          (set! *command-rows-cache*
+            (take (alist-put (alist-delete *command-rows-cache* buf) buf (cons key rows)) 8))
+          rows))))
+
+;; ROWS with the names in history KEY first, newest first, like history-order.
+(define (command-rows-by-history key rows)
+  (let ((hist (filter (lambda (h) (assoc h rows)) (history-items key))))
+    (append (map (lambda (h) (assoc h rows)) hist)
+            (filter (lambda (r) (not (member (car r) hist))) rows))))
 
 (effects! '(write))
 
 (define (command-modes! name modes)
   (set! *command-modes*
         (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*)))
+  (set! *command-generation* (+ *command-generation* 1))
   name)
 
 (public! 'command-modes!
@@ -5470,8 +5527,7 @@
       (set! *mb-history-key* 'M-x)
       (set! *mb-history-pos* -1)
       (minibuffer-read* "M-x "
-        (annotate 'command
-                  (history-order 'M-x (command-candidates)))
+        (command-rows-by-history 'M-x (command-rows))
         (list (list 'confirm
                 (lambda (cmd)
                   (set! *mb-history-key* #f)

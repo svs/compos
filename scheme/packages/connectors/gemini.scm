@@ -14,7 +14,7 @@
   'key-page "https://aistudio.google.com/apikey")
 
 (define-connector! "gemini"
-  '(cmd "gemini --experimental-acp" model-flag "-m "
+  '(cmd "gemini --experimental-acp" model-flag "-m " model-bare #t
     description "Gemini CLI — Google account or Gemini API key"
     ;; the CLI drops _meta, so our prompt sections ride the first turn
     system-in-prompt #t

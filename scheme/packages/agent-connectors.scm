@@ -489,12 +489,15 @@ nonstandard install out of the built-in connector catalog."
             ;; protocol config, not adapter command-line wiring
             (append (list 'model m) conf))
            ((plist-get conf 'model-flag)
-            ;; value must be quoted TOML — codex ignores the bare form
-            (append (list 'model m
-                          'cmd (string-append (plist-get conf 'cmd) " "
-                                              (plist-get conf 'model-flag)
-                                              "\"" m "\""))
-                    conf))
+            ;; codex wants quoted TOML and ignores the bare form; a plain
+            ;; argv flag (gemini -m) declares model-bare, or the quotes
+            ;; become part of the model id
+            (let ((q (if (plist-get conf 'model-bare) "" "\"")))
+              (append (list 'model m
+                            'cmd (string-append (plist-get conf 'cmd) " "
+                                                (plist-get conf 'model-flag)
+                                                q m q))
+                      conf)))
            ((plist-get conf 'env) conf)           ; explicit env wins
            (else (append (list 'model m) conf (agent-model-env m)))))))
 

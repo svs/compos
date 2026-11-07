@@ -216,7 +216,7 @@ defmodule Compos.Core.Session do
   # the slow-job log names the callback by the head of its body, so a slow
   # "apply" says which hook ran, not only that one did
   defp apply_label({:closure, _params, body, _env}) do
-    "apply " <> (body |> Compos.Scheme.Printer.print() |> String.slice(0, 80))
+    "apply " <> (body |> Compos.Scheme.Eval.source() |> Compos.Scheme.Printer.print() |> String.slice(0, 80))
   rescue
     _ -> "apply"
   end

@@ -1,9 +1,13 @@
 defmodule Compos.Scheme.Eval do
   @moduledoc """
-  Tail-recursive evaluator. Runs entirely on BEAM terms; proper tail calls
-  come from the BEAM itself (all tail positions are direct recursive calls).
+  Compiling evaluator. A form compiles once into tagged tuples, which `run`
+  evaluates; proper tail calls come from the BEAM itself (all tail positions
+  are direct recursive calls).
 
-  Closures: `{:closure, {required, optional, rest}, body, env_ref}` — param
+  Closures: `{:closure, {required, optional, rest}, {tag, compiled, source},
+  env_ref}` — the body keeps its source for `function-source`. TAG is
+  `:lcode` when the body makes no closure, so its locals need no store
+  frame, else `:code`. Param
   lists use elisp-style `&optional` / `&rest` markers (flat, no dotted pairs);
   missing optionals bind `#f`, `&rest` binds a (possibly empty) list.
   Builtins: `{:builtin, name, fun}` where fun is `(args -> value)` or
@@ -102,133 +106,266 @@ defmodule Compos.Scheme.Eval do
   defp source_hint(_), do: "a closure with an empty body"
 
   @doc "Evaluate one form. Returns {value, store}."
-  def eval(expr, env, store)
+  def eval(form, env, store), do: run(compile(form, :dyn), env, store)
 
-  def eval({:sym, name}, env, store), do: {Env.lookup(store, env, name), store}
+  @doc "The source forms of a closure body."
+  def source({:code, _compiled, source}), do: source
+  def source({:lcode, _compiled, source}), do: source
+  def source(body), do: body
 
-  def eval(expr, _env, store)
-      when is_number(expr) or is_binary(expr) or is_boolean(expr),
-      do: {expr, store}
-
-  def eval([{:sym, "quote"}, form], _env, store), do: {form, store}
-
-  def eval([{:sym, "if"}, c, t], env, store), do: eval([{:sym, "if"}, c, t, :void], env, store)
-
-  def eval([{:sym, "if"}, c, t, e], env, store) do
-    {cond_val, store} = eval_arg(c, env, store)
-
-    cond do
-      cond_val == false -> if e == :void, do: {:void, store}, else: eval(e, env, store)
-      true -> eval(t, env, store)
-    end
+  # --- compile ----------------------------------------------------------------
+  # The walker this replaces matched each form against every special-form
+  # head, by string, each time the form ran, so a loop body paid the match
+  # on every step. Now a form compiles once, when it is evaluated at top
+  # level or when the lambda around it compiles, and a closure keeps its
+  # compiled body. The tuples are data, not funs: a hot reload of this
+  # module leaves every closure in the store valid.
+  #
+  # The special forms are the walker's, shape for shape: a form whose shape
+  # no special form takes is an application, as before. A form that a
+  # special form refuses compiles to a :fail node that raises the error
+  # when it runs, so a bad form in a branch never taken never raises.
+  defp compile(form, sc \\ :dyn) do
+    comp(form, sc)
+  rescue
+    e -> {:fail, e, __STACKTRACE__}
   end
 
-  def eval([{:sym, "define"}, {:sym, name}, value_form], env, store) do
-    {val, store} = eval_arg(value_form, env, store)
-    {:void, Env.define(store, env, name, val)}
-  end
+  # SC is the scope a form compiles in: :dyn, where every name is looked up
+  # through the store's frames, or a map of the names a lexical closure
+  # binds (see code/2), where a name is a local or a free name at once.
+  defp comp({:sym, _} = sym, :dyn), do: sym
+  defp comp({:sym, name}, sc) when is_map_key(sc, name), do: {:lvar, name}
+  defp comp({:sym, name}, _sc), do: {:gvar, name}
+  defp comp(x, _sc) when is_number(x) or is_binary(x) or is_boolean(x), do: x
+  defp comp([{:sym, "quote"}, form], _sc), do: {:quote, form}
+  defp comp([{:sym, "if"}, c, t], sc), do: {:if, compile(c, sc), compile(t, sc), {:quote, :void}}
+  defp comp([{:sym, "if"}, c, t, e], sc), do: {:if, compile(c, sc), compile(t, sc), compile(e, sc)}
+  defp comp([{:sym, "define"}, {:sym, name}, value], sc), do: {:define, name, compile(value, sc)}
 
   # (define (f a b) body...) sugar
-  def eval([{:sym, "define"}, [{:sym, name} | params] | body], env, store) do
-    eval([{:sym, "define"}, {:sym, name}, [{:sym, "lambda"}, params | body]], env, store)
+  defp comp([{:sym, "define"}, [{:sym, name} | params] | body], sc),
+    do: {:define, name, compile([{:sym, "lambda"}, params | body], sc)}
+
+  defp comp([{:sym, "lambda"}, params | body], _sc) do
+    params = param_names!(params)
+    {:lambda, params, code(params, body)}
   end
 
-  def eval([{:sym, "lambda"}, params | body], env, store) do
-    {{:closure, param_names!(params), body, env}, store}
-  end
-
-  def eval([{:sym, "set!"}, {:sym, name}, value_form], env, store) do
-    {val, store} = eval_arg(value_form, env, store)
-    {:void, Env.set!(store, env, name, val)}
-  end
-
-  def eval([{:sym, "begin"} | body], env, store), do: eval_seq(body, env, store)
+  # a lexical closure never assigns its own locals: those stay in frames
+  defp comp([{:sym, "set!"}, {:sym, name}, _], sc) when is_map_key(sc, name), do: throw(:dynamic)
+  defp comp([{:sym, "set!"}, {:sym, name}, value], :dyn), do: {:set, name, compile(value)}
+  defp comp([{:sym, "set!"}, {:sym, name}, value], sc), do: {:gset, name, compile(value, sc)}
+  defp comp([{:sym, "begin"} | body], sc), do: {:begin, seq(body, sc)}
 
   # named let: (let loop ((i 0)) ... (loop (+ i 1))) — tail-recursive iteration
-  def eval([{:sym, "let"}, {:sym, name}, bindings | body], env, store) do
-    {names, forms} =
-      bindings
-      |> Enum.map(fn [{:sym, n}, form] -> {n, form} end)
-      |> Enum.unzip()
-
-    {vals, store} = eval_args(forms, env, store, [])
-    {frame, store} = Env.new_frame(store, env)
-    closure = {:closure, {names, [], nil}, body, frame}
-    store = Env.define(store, frame, name, closure)
-    apply_fn(closure, vals, store)
+  defp comp([{:sym, "let"}, {:sym, name}, bindings | body], sc) do
+    {names, forms} = bindings(bindings)
+    params = {names, [], nil}
+    {:named_let, name, params, seq(forms, sc), code(params, body)}
   end
 
-  def eval([{:sym, "let"}, bindings | body], env, store) do
-    {vars, store} =
-      Enum.reduce(bindings, {%{}, store}, fn [{:sym, name}, form], {vars, store} ->
-        {val, store} = eval_arg(form, env, store)
-        {Map.put(vars, name, val), store}
-      end)
-
-    {frame, store} = Env.new_frame(store, env, vars)
-    eval_seq(body, frame, store)
+  defp comp([{:sym, "let"}, bindings | body], :dyn) do
+    {names, forms} = bindings(bindings)
+    {:let, names, seq(forms), seq(body)}
   end
 
-  def eval([{:sym, "and"} | args], env, store), do: eval_and(args, env, store)
-  def eval([{:sym, "or"} | args], env, store), do: eval_or(args, env, store)
-
-  def eval([{:sym, "cond"} | clauses], env, store), do: eval_cond(clauses, env, store)
-
-  def eval([{:sym, "when"}, test | body], env, store) do
-    {val, store} = eval_arg(test, env, store)
-    if val == false, do: {:void, store}, else: eval_seq(body, env, store)
-  end
-
-  def eval([{:sym, "unless"}, test | body], env, store) do
-    {val, store} = eval_arg(test, env, store)
-    if val == false, do: eval_seq(body, env, store), else: {:void, store}
+  defp comp([{:sym, "let"}, bindings | body], sc) do
+    {names, forms} = bindings(bindings)
+    {:llet, names, seq(forms, sc), seq(body, extend(sc, names))}
   end
 
   # let*: each binding sees the previous ones — a fresh frame per binding
-  def eval([{:sym, "let*"}, bindings | body], env, store) do
-    {frame, store} =
-      Enum.reduce(bindings, {env, store}, fn [{:sym, name}, form], {env, store} ->
-        {val, store} = eval_arg(form, env, store)
-        Env.new_frame(store, env, %{name => val})
-      end)
-
-    eval_seq(body, frame, store)
+  defp comp([{:sym, "let*"}, bindings | body], :dyn) do
+    {names, forms} = bindings(bindings)
+    {:let_star, Enum.zip(names, seq(forms)), seq(body)}
   end
 
-  # application
-  def eval([op | arg_forms], env, store) do
-    {f, store} = eval_arg(op, env, store)
-    {args, store} = eval_args(arg_forms, env, store, [])
+  defp comp([{:sym, "let*"}, bindings | body], sc) do
+    {names, forms} = bindings(bindings)
+
+    {pairs, sc} =
+      Enum.zip(names, forms)
+      |> Enum.map_reduce(sc, fn {name, form}, sc -> {{name, compile(form, sc)}, extend(sc, [name])} end)
+
+    {:llet_star, pairs, seq(body, sc)}
+  end
+
+  defp comp([{:sym, "and"} | args], sc), do: {:and, seq(args, sc)}
+  defp comp([{:sym, "or"} | args], sc), do: {:or, seq(args, sc)}
+  defp comp([{:sym, "cond"} | clauses], sc), do: {:cond, Enum.map(clauses, &clause(&1, sc))}
+  defp comp([{:sym, "when"}, test | body], sc), do: {:when, compile(test, sc), seq(body, sc)}
+  defp comp([{:sym, "unless"}, test | body], sc), do: {:unless, compile(test, sc), seq(body, sc)}
+  defp comp([op | args], sc), do: {:call, compile(op, sc), seq(args, sc), call_name(op)}
+  defp comp(other, _sc), do: raise(Error, message: "cannot evaluate: #{inspect(other)}")
+
+  defp clause([{:sym, "else"} | body], sc), do: {:else, seq(body, sc)}
+  defp clause([test | body], sc), do: {compile(test, sc), seq(body, sc)}
+  # the walker refused a clause only when cond reached it
+  defp clause(other, _sc), do: {:fail, %Error{message: "bad cond clause: #{inspect(other)}"}, []}
+
+  defp bindings(bindings), do: Enum.unzip(Enum.map(bindings, fn [{:sym, n}, form] -> {n, form} end))
+  defp seq(forms, sc \\ :dyn), do: Enum.map(forms, &compile(&1, sc))
+  defp extend(sc, names), do: Enum.reduce(names, sc, &Map.put(&2, &1, true))
+
+  # A closure body that creates no closure and assigns none of its own
+  # locals can never let its frame escape, so the frame needs no place in
+  # the store: its locals live in a map passed down the evaluation,
+  # {:lex, vars, parent_ref}, and each name is known to be a local or a
+  # free name when the body compiles. Every other body keeps store frames,
+  # which closures capture and set! shares.
+  defp code({req, opt, rest} = _params, body) do
+    if captures?(body) do
+      {:code, seq(body), body}
+    else
+      names = req ++ opt ++ if(rest, do: [rest], else: [])
+      {:lcode, seq(body, extend(%{}, names)), body}
+    end
+  catch
+    :dynamic -> {:code, seq(body), body}
+  end
+
+  defp captures?([{:sym, "quote"} | _]), do: false
+  defp captures?([{:sym, head} | _]) when head in ["lambda", "define"], do: true
+  defp captures?([{:sym, "let"}, {:sym, _} | _]), do: true
+  defp captures?(list) when is_list(list), do: any_captures?(list)
+  defp captures?(_), do: false
+
+  defp any_captures?([form | rest]), do: captures?(form) or any_captures?(rest)
+  defp any_captures?([]), do: false
+  defp any_captures?(_improper), do: true
+
+  defp call_name({:sym, name}), do: name
+  defp call_name(_), do: "(lambda)"
+
+  # --- run --------------------------------------------------------------------
+
+  defp run({:sym, name}, env, store), do: {Env.lookup(store, env, name), store}
+  defp run({:lvar, name}, {:lex, vars, _ref}, store), do: {:erlang.map_get(name, vars), store}
+  defp run({:gvar, name}, {:lex, _vars, ref}, store), do: {Env.lookup(store, ref, name), store}
+
+  defp run({:gset, name, value}, {:lex, _vars, ref} = env, store) do
+    {val, store} = run(value, env, store)
+    {:void, Env.set!(store, ref, name, val)}
+  end
+
+  defp run({:llet, names, inits, body}, {:lex, vars, ref} = env, store) do
+    {vals, store} = run_args(inits, env, store, [])
+    vars = Enum.zip(names, vals) |> Enum.reduce(vars, fn {n, v}, vars -> Map.put(vars, n, v) end)
+    run_seq(body, {:lex, vars, ref}, store)
+  end
+
+  defp run({:llet_star, pairs, body}, env, store) do
+    {env, store} =
+      Enum.reduce(pairs, {env, store}, fn {name, form}, {{:lex, vars, ref} = env, store} ->
+        {val, store} = run(form, env, store)
+        {{:lex, Map.put(vars, name, val), ref}, store}
+      end)
+
+    run_seq(body, env, store)
+  end
+
+  defp run({:call, op, arg_forms, name}, env, store) do
+    {f, store} = run(op, env, store)
+    {args, store} = run_args(arg_forms, env, store, [])
 
     # an armed profiler times the call under the name it was called by;
     # disarmed, this is one persistent_term read and the tail call stays
     case Compos.Scheme.Profile.table() do
-      nil ->
-        apply_fn(f, args, store)
-
-      table ->
-        Compos.Scheme.Profile.call(table, call_name(op), fn -> apply_fn(f, args, store) end)
+      nil -> apply_fn(f, args, store)
+      table -> Compos.Scheme.Profile.call(table, name, fn -> apply_fn(f, args, store) end)
     end
   end
 
-  def eval(other, _env, _store) do
-    raise Error, message: "cannot evaluate: #{inspect(other)}"
+  defp run({:if, c, t, e}, env, store) do
+    case run(c, env, store) do
+      {false, store} -> run(e, env, store)
+      {_, store} -> run(t, env, store)
+    end
   end
 
-  defp call_name({:sym, name}), do: name
-  defp call_name(_), do: "(lambda)"
+  defp run({:quote, form}, _env, store), do: {form, store}
+  defp run({:lambda, params, code}, env, store), do: {{:closure, params, code, env}, store}
+
+  defp run({:define, name, value}, env, store) do
+    {val, store} = run(value, env, store)
+    {:void, Env.define(store, env, name, val)}
+  end
+
+  defp run({:set, name, value}, env, store) do
+    {val, store} = run(value, env, store)
+    {:void, Env.set!(store, env, name, val)}
+  end
+
+  defp run({:begin, body}, env, store), do: run_seq(body, env, store)
+
+  defp run({:named_let, name, params, inits, code}, env, store) do
+    {vals, store} = run_args(inits, env, store, [])
+    {frame, store} = Env.new_frame(store, env)
+    closure = {:closure, params, code, frame}
+    apply_fn(closure, vals, Env.define(store, frame, name, closure))
+  end
+
+  defp run({:let, names, inits, body}, env, store) do
+    {vals, store} = run_args(inits, env, store, [])
+    {frame, store} = Env.new_frame(store, env, Map.new(Enum.zip(names, vals)))
+    run_seq(body, frame, store)
+  end
+
+  defp run({:let_star, bindings, body}, env, store) do
+    {frame, store} =
+      Enum.reduce(bindings, {env, store}, fn {name, form}, {env, store} ->
+        {val, store} = run(form, env, store)
+        Env.new_frame(store, env, %{name => val})
+      end)
+
+    run_seq(body, frame, store)
+  end
+
+  defp run({:and, forms}, env, store), do: run_and(forms, env, store)
+  defp run({:or, forms}, env, store), do: run_or(forms, env, store)
+  defp run({:cond, clauses}, env, store), do: run_cond(clauses, env, store)
+
+  defp run({:when, test, body}, env, store) do
+    case run(test, env, store) do
+      {false, store} -> {:void, store}
+      {_, store} -> run_seq(body, env, store)
+    end
+  end
+
+  defp run({:unless, test, body}, env, store) do
+    case run(test, env, store) do
+      {false, store} -> run_seq(body, env, store)
+      {_, store} -> {:void, store}
+    end
+  end
+
+  defp run({:fail, e, stacktrace}, _env, _store), do: reraise(e, stacktrace)
+
+  # a number, a string or a boolean evaluates to itself
+  defp run(value, _env, store), do: {value, store}
 
   @doc "Apply a Scheme callable to already-evaluated args."
   def apply_fn({:interposed, original, wrapper}, args, store) do
     apply_fn(wrapper, [original, args], store)
   end
 
-  def apply_fn({:closure, {req, opt, rest}, body, closure_env}, args, store) do
-    count_nesting!(body)
+  def apply_fn({:closure, {req, opt, rest}, {:code, body, source}, closure_env}, args, store) do
+    count_nesting!(source)
     vars = bind_params!(req, opt, rest, args)
     {frame, store} = Env.new_frame(store, closure_env, vars)
-    eval_seq(body, frame, store)
+    run_seq(body, frame, store)
   end
+
+  def apply_fn({:closure, {req, opt, rest}, {:lcode, body, source}, closure_env}, args, store) do
+    count_nesting!(source)
+    run_seq(body, {:lex, bind_params!(req, opt, rest, args), closure_env}, store)
+  end
+
+  # A closure made before the compiler, which a live daemon still holds
+  # after it hot-loaded this module, has a source body: compile per call.
+  def apply_fn({:closure, params, body, env}, args, store) when is_list(body),
+    do: apply_fn({:closure, params, code(params, body), env}, args, store)
 
   # A builtin fed bad arguments must surface as a Scheme error, not a raw
   # Elixir exception: raw exceptions crash the hosting GenServer (the whole
@@ -239,7 +376,7 @@ defmodule Compos.Scheme.Eval do
   # The flush covers the eval result and the shared-tier writes. Without
   # this exemption every (car es) over a large list rescans the whole
   # tail, and a catalog walk turns quadratic.
-  @non_retaining Compos.Scheme.Builtins.all() |> Map.keys() |> MapSet.new()
+  @non_retaining Compos.Scheme.Builtins.all() |> Map.new(fn {name, _} -> {name, true} end)
 
   def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1) do
     # a closure handed to a host primitive escapes Scheme (command tables,
@@ -258,7 +395,7 @@ defmodule Compos.Scheme.Eval do
   end
 
   defp promote_primitive_args(name, args, store) do
-    if MapSet.member?(@non_retaining, name) do
+    if is_map_key(@non_retaining, name) do
       store
     else
       if guard = Process.get(:compos_scheme_host_guard), do: guard.(name, args)
@@ -287,54 +424,53 @@ defmodule Compos.Scheme.Eval do
 
   # --- helpers ---------------------------------------------------------------
 
-  # non-tail evaluation of a subexpression
-  defp eval_arg(form, env, store), do: eval(form, env, store)
+  defp run_args([], _env, store, acc), do: {Enum.reverse(acc), store}
 
-  defp eval_args([], _env, store, acc), do: {Enum.reverse(acc), store}
-
-  defp eval_args([form | rest], env, store, acc) do
-    {val, store} = eval_arg(form, env, store)
-    eval_args(rest, env, store, [val | acc])
+  defp run_args([form | rest], env, store, acc) do
+    {val, store} = run(form, env, store)
+    run_args(rest, env, store, [val | acc])
   end
 
   # last form is in tail position
-  defp eval_seq([form], env, store), do: eval(form, env, store)
+  defp run_seq([form], env, store), do: run(form, env, store)
 
-  defp eval_seq([form | rest], env, store) do
-    {_val, store} = eval_arg(form, env, store)
-    eval_seq(rest, env, store)
+  defp run_seq([form | rest], env, store) do
+    {_val, store} = run(form, env, store)
+    run_seq(rest, env, store)
   end
 
-  defp eval_seq([], _env, store), do: {:void, store}
+  defp run_seq([], _env, store), do: {:void, store}
 
-  defp eval_cond([], _env, store), do: {:void, store}
+  defp run_cond([], _env, store), do: {:void, store}
+  defp run_cond([{:else, body} | _rest], env, store), do: run_seq(body, env, store)
+  defp run_cond([{:fail, e, st} | _rest], _env, _store), do: reraise(e, st)
 
-  defp eval_cond([[{:sym, "else"} | body] | _rest], env, store), do: eval_seq(body, env, store)
-
-  defp eval_cond([[test | body] | rest], env, store) do
-    {val, store} = eval_arg(test, env, store)
-
-    cond do
-      val == false -> eval_cond(rest, env, store)
-      body == [] -> {val, store}
-      true -> eval_seq(body, env, store)
+  defp run_cond([{test, body} | rest], env, store) do
+    case run(test, env, store) do
+      {false, store} -> run_cond(rest, env, store)
+      {val, store} when body == [] -> {val, store}
+      {_, store} -> run_seq(body, env, store)
     end
   end
 
-  defp eval_and([], _env, store), do: {true, store}
-  defp eval_and([last], env, store), do: eval(last, env, store)
+  defp run_and([], _env, store), do: {true, store}
+  defp run_and([last], env, store), do: run(last, env, store)
 
-  defp eval_and([form | rest], env, store) do
-    {val, store} = eval_arg(form, env, store)
-    if val == false, do: {false, store}, else: eval_and(rest, env, store)
+  defp run_and([form | rest], env, store) do
+    case run(form, env, store) do
+      {false, store} -> {false, store}
+      {_, store} -> run_and(rest, env, store)
+    end
   end
 
-  defp eval_or([], _env, store), do: {false, store}
-  defp eval_or([last], env, store), do: eval(last, env, store)
+  defp run_or([], _env, store), do: {false, store}
+  defp run_or([last], env, store), do: run(last, env, store)
 
-  defp eval_or([form | rest], env, store) do
-    {val, store} = eval_arg(form, env, store)
-    if val == false, do: eval_or(rest, env, store), else: {val, store}
+  defp run_or([form | rest], env, store) do
+    case run(form, env, store) do
+      {false, store} -> run_or(rest, env, store)
+      found -> found
+    end
   end
 
   defp param_names!(params) do
@@ -372,21 +508,20 @@ defmodule Compos.Scheme.Eval do
   defp rest_name!(other),
     do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
 
+  # required parameters only, the common case: one walk binds them
+  defp bind_params!(req, [], nil, args), do: bind_required(req, args, %{}, req, args)
+
   defp bind_params!(req, opt, rest, args) do
     nreq = length(req)
     nargs = length(args)
     max = if rest, do: nil, else: nreq + length(opt)
 
     cond do
-      nargs < nreq and opt == [] and rest == nil ->
-        raise Error, message: "arity mismatch: expected #{nreq}, got #{nargs}"
-
       nargs < nreq ->
         raise Error, message: "arity mismatch: expected at least #{nreq}, got #{nargs}"
 
       max != nil and nargs > max ->
-        expected = if opt == [], do: "#{nreq}", else: "at most #{max}"
-        raise Error, message: "arity mismatch: expected #{expected}, got #{nargs}"
+        raise Error, message: "arity mismatch: expected at most #{max}, got #{nargs}"
 
       true ->
         {req_args, more} = Enum.split(args, nreq)
@@ -397,4 +532,12 @@ defmodule Compos.Scheme.Eval do
         if rest, do: Map.put(vars, rest, rest_args), else: vars
     end
   end
+
+  defp bind_required([name | names], [arg | args], vars, req, all),
+    do: bind_required(names, args, Map.put(vars, name, arg), req, all)
+
+  defp bind_required([], [], vars, _req, _all), do: vars
+
+  defp bind_required(_, _, _, req, all),
+    do: raise(Error, message: "arity mismatch: expected #{length(req)}, got #{length(all)}")
 end

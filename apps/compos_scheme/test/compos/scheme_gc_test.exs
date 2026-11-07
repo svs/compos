@@ -7,9 +7,12 @@ defmodule Compos.Scheme.GCTest do
     interp = Scheme.new()
     base = Scheme.frame_count(interp)
 
-    # each call allocates a frame nothing captures
+    # each call allocates a store frame: the body makes a closure and drops it
     {:ok, _, interp} =
-      Scheme.eval_string(interp, "(define (burn n) (if (= n 0) 0 (burn (- n 1)))) (burn 500)")
+      Scheme.eval_string(
+        interp,
+        "(define (burn n) (if (= n 0) 0 (begin (lambda () n) (burn (- n 1))))) (burn 500)"
+      )
 
     assert Scheme.frame_count(interp) > base + 400
 
@@ -26,6 +29,28 @@ defmodule Compos.Scheme.GCTest do
 
     {:ok, val, _} = Scheme.eval_string(swept, "(c)")
     assert val == 2
+  end
+
+  # A closure whose body makes no closure binds its locals outside the
+  # store, so a sweep has nothing of it to walk; what it reads from the
+  # frame it closed over must still survive the sweep.
+  test "a lexical closure allocates no store frame and keeps its captured value" do
+    interp = Scheme.new()
+    base = Scheme.frame_count(interp)
+
+    {:ok, _, interp} =
+      Scheme.eval_string(interp, "(define (spin n) (if (= n 0) 0 (spin (- n 1)))) (spin 500)")
+
+    assert Scheme.frame_count(interp) < base + 10
+
+    {:ok, _, interp} =
+      Scheme.eval_string(interp, """
+      (define make-adder (lambda (k) (let ((v k)) (lambda (x) (+ x v)))))
+      (define add5 (make-adder 5))
+      """)
+
+    swept = Scheme.gc(interp, [])
+    assert {:ok, 7, _} = Scheme.eval_string(swept, "(add5 2)")
   end
 
   test "a swept frame leaves no binding rows, and a live frame keeps its own" do
@@ -226,7 +251,7 @@ defmodule Compos.Scheme.GCTest do
           (define make-counter (lambda () (let ((n 0)) (lambda () (set! n (+ n 1)) n))))
           (define c (make-counter))
           (c)
-          (define (burn n) (if (= n 0) 0 (burn (- n 1))))
+          (define (burn n) (if (= n 0) 0 (begin (lambda () n) (burn (- n 1)))))
           (burn 500)
           """)
 

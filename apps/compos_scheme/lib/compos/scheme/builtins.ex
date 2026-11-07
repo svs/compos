@@ -168,7 +168,7 @@ defmodule Compos.Scheme.Builtins do
 
             Compos.Scheme.Printer.print([
               {:sym, "lambda"},
-              Enum.map(params, &{:sym, &1}) | body
+              Enum.map(params, &{:sym, &1}) | Eval.source(body)
             ])
 
           {:builtin, name, _} ->

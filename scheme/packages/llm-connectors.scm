@@ -119,7 +119,8 @@
 (define (llm-connectors-state name)
   "(llm-connectors-state NAME) -- what connector NAME, or provider row api:P, needs next: ready, not installed or needs a key"
   (let ((p (llm-connectors--provider name))
-        (unmet (setup--unmet (setup-connector-requirements (llm-connectors--connector name)))))
+        (unmet (llm-connectors--memo (list 'unmet (llm-connectors--connector name))
+                 (lambda () (setup--unmet (setup-connector-requirements (llm-connectors--connector name)))))))
     (cond (p (let ((s (llm-connectors--provider-secret p)))
                (if (if s (secret-set? s) (pair? (llm-connectors-models name))) "ready" "needs a key")))
           ((null? unmet) "ready")
@@ -234,8 +235,27 @@
 ;;; --- the page of one connector -------------------------------------------------
 
 ;; the models connector NAME offers, as (ID LABEL)
+;; What a row reads from outside (a model list, the programs on PATH) is
+;; kept for a minute: one draw asks each once, not once for each cell. g, a
+;; new key, a new endpoint and a test ask again.
+(define llm-connectors--memo-ms 60000)
+(define *llm-connectors--memo* '())
+
+(define (llm-connectors--memo key thunk)
+  (let ((e (assoc key *llm-connectors--memo*))
+        (now (monotonic-ms)))
+    (if (and e (< (- now (cadr e)) llm-connectors--memo-ms))
+        (caddr e)
+        (let ((v (thunk)))
+          (set! *llm-connectors--memo*
+                (cons (list key now v) (filter (lambda (x) (not (equal? (car x) key))) *llm-connectors--memo*)))
+          v))))
+
+(define (llm-connectors--forget!) (set! *llm-connectors--memo* '()))
+
 (define (llm-connectors--connector-models name)
-  (or (ignore-errors (lambda () (chat-model-options *llm-connectors-buffer* name))) '()))
+  (llm-connectors--memo (list 'models name)
+    (lambda () (or (ignore-errors (lambda () (chat-model-options *llm-connectors-buffer* name))) '()))))
 
 (define (llm-connectors-models name)
   "(llm-connectors-models NAME) -- every model connector NAME, or provider row api:P, offers, as (ID LABEL)"
@@ -372,6 +392,8 @@
 
 (defface! 'llm-connectors-name 'fg "var(--default-fg)" 'weight "600")
 
+(define (llm-connectors--recheck!) (llm-connectors--forget!) (llm-connectors-refresh!))
+
 (define (llm-connectors-refresh!)
   "(llm-connectors-refresh!) -- redraw the connector list and every connector page"
   (when (buffer-exists? *llm-connectors-buffer*) (list-refresh! *llm-connectors-buffer*))
@@ -461,8 +483,8 @@
       (message (string-append name " takes no key"
                               (if (plist-get (connector-config (llm-connectors--connector name)) 'signin) "; l signs in" "")))
       (if (llm-connectors--provider name)
-          (setup-ask-secret! (car (llm-connectors--secrets name)) "api" llm-connectors-refresh!)
-          (setup-wizard-add-key! #f name llm-connectors-refresh!))))
+          (setup-ask-secret! (car (llm-connectors--secrets name)) "api" llm-connectors--recheck!)
+          (setup-wizard-add-key! #f name llm-connectors--recheck!))))
 
 ;; An endpoint of your own: (NAME URL SHAPE (MODEL ...)). URL #f is a
 ;; provider the model catalog knows (groq, mistral, ...), at its own address.
@@ -489,7 +511,8 @@
   (customize-save! 'llm-connectors-endpoints
                    (append (filter (lambda (x) (not (equal? (car x) (car e)))) llm-connectors-endpoints)
                            (list e)))
-  (llm-connectors--declare-endpoint! e))
+  (llm-connectors--declare-endpoint! e)
+  (llm-connectors--forget!))
 
 ;; the model ids an OpenAI-shaped server lists at URL/models; K gets them, or ()
 (define (llm-connectors--fetch-models name url k)
@@ -594,6 +617,8 @@
          (connector (llm-connectors--connector name))
          (elapsed (lambda () (- (monotonic-ms) t0)))
          (fail (lambda (why) (list 'status 'failed 'error why 'ms (elapsed) 'at (current-time)))))
+    ;; a test asks again: an install or a sign-in may have changed the row
+    (llm-connectors--forget!)
     (llm-connectors--set-test! key (list 'status 'testing 'token token 'at (current-time)))
     (llm-connectors-refresh!)
     (let ((slug (ignore-errors
@@ -682,7 +707,7 @@
   (lambda () (llm-connectors--on-current llm-connectors-show-detail!)))
 
 (define-command "llm-connectors-refresh" "Check every connector again and redraw"
-  (lambda () (llm-connectors-refresh!) (message "connectors checked again")))
+  (lambda () (llm-connectors--recheck!) (message "connectors checked again")))
 
 (define-command "llm-connectors-make-default" "Make the model on this line, or else the connector, the one new chats use"
   (lambda ()

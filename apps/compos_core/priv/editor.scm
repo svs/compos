@@ -5284,7 +5284,24 @@
 (define (buffer-kill-repair name)
   (or (run-hook-with-args-until-success 'buffer-kill-repair name) (lambda () #f)))
 
+;; An editor always has somewhere live to land. A kill of the last live
+;; buffer makes *scratch* first, so the windows fall to it; *scratch* that
+;; is itself the last stays. A minibuffer is no place to land: a name with
+;; a leading space does not count.
+(define (scratch--last-kill? name)
+  (and (buffer-exists? name)
+       (null? (filter (lambda (b) (not (or (equal? b name) (string-prefix? " " b))))
+                      (buffer-list)))))
+
 (define (buffer-kill! name)
+  (if (and (equal? name "*scratch*") (scratch--last-kill? name))
+      #t
+      (begin
+        (when (and (scratch--last-kill? name) (not (buffer-exists? "*scratch*")))
+          (raw-buffer-create "*scratch*"))
+        (buffer-kill--now! name))))
+
+(define (buffer-kill--now! name)
   (let* ((repair (buffer-kill-repair name))
          ;; after the model's repair, each window still on NAME goes back to
          ;; its own past (window.scm); the core fills what is left

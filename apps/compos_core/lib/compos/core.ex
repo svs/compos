@@ -7,7 +7,6 @@ defmodule Compos.Core do
 
   @registry Compos.Core.BufferRegistry
   @buffer_sup Compos.Core.BufferSupervisor
-  @scratch "*scratch*"
 
   @doc "The compos home dir (config, keys, desktop). Tests point :home at a tmp dir."
   def home, do: Application.get_env(:compos_core, :home) || Path.expand("~/.compos")
@@ -346,31 +345,9 @@ defmodule Compos.Core do
 
   def kill_buffer(name) do
     case live_pid(name) do
+      # the landing buffer, *scratch*, is Scheme policy (buffer-kill!)
       [{pid, _}] ->
-        # An editor always has somewhere live to land. In particular, a
-        # bulk kill may remove *scratch* early and then remove the final
-        # remaining buffer. release_buffer/1 used to fall back to the dead
-        # scratch name in that case, so the next key reached a :noproc.
-        # Keep the sole scratch process when it is itself last; otherwise
-        # recreate scratch before releasing the last non-scratch buffer.
-        # a minibuffer is no place to land: it does not count as live work
-        last_live? =
-          not Enum.any?(list_buffers(), &(&1 != name and not String.starts_with?(&1, " ")))
-
-        cond do
-          last_live? and name == @scratch ->
-            :ok
-
-          last_live? ->
-            case ensure_buffer(@scratch) do
-              {:ok, @scratch} -> do_kill_buffer(name, pid)
-              {:error, :already_exists} -> do_kill_buffer(name, pid)
-              error -> error
-            end
-
-          true ->
-            do_kill_buffer(name, pid)
-        end
+        do_kill_buffer(name, pid)
 
       [] ->
         if BufferStore.known?(name), do: BufferStore.forget(name), else: {:error, :not_found}

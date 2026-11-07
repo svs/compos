@@ -411,7 +411,8 @@ defmodule Compos.CoreTest do
   end
 
   test "killing every buffer leaves a live scratch buffer" do
-    Enum.each(Core.list_buffers(), &Core.kill_buffer/1)
+    # the landing buffer is Scheme policy, so the kills go through buffer-kill!
+    Enum.each(Core.list_buffers(), &Session.call_named("buffer-kill!", [&1]))
 
     # Async tests can hold live buffers during the sweep, so the sweep
     # cannot prove the global last-kill path. The stable invariants:

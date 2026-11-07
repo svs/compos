@@ -39,7 +39,7 @@ defmodule Compos.Core.SchemeRawNames do
     "define-command--raw" => "define-command",
     "builtin-load" => "load",
     "undefine-command--raw" => "undefine-command",
-    "minibuffer-read*--raw" => "minibuffer-read*",
+    "raw-delete-frame!" => "delete-frame!",
     "raw-buffer-create" => "buffer-create",
     "raw-find-file" => "find-file",
     "raw-write-file!" => "write-file!",

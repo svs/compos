@@ -2542,61 +2542,92 @@ defmodule Compos.Core.SchemeAPI do
       {"frame-of-window", "(frame-of-window WIN) — return the id of the window's frame, or #f."} =>
         fn [id] -> Editor.frame_of_window(id) || false end,
 
-      # minibuffer & keymap — 3-arity: (prompt candidates on-confirm);
-      # 4-arity adds an on-complete fn: input -> (list new-input candidates)
-      {"minibuffer-read",
-       "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer."} =>
-        fn
-          [prompt, candidates, callback] ->
-            Editor.minibuffer_activate(prompt, candidates, callback)
-            :void
-
-          [prompt, candidates, on_complete, callback] ->
-            Editor.minibuffer_activate(prompt, candidates, callback, on_complete)
-            :void
-        end,
-      # full form: handlers is an alist of (list 'confirm f) (list 'change f)
-      # (list 'complete f) (list 'cancel f) (list 'collect f) (list 'initial "text")
-      # (list 'match-hint #t) — the last one widens the filter to the
-      # annotation, so a prompt matches what a candidate MEANS. #t means
-      # the first field; an integer N means the first N fields.
-      {"minibuffer-read*",
-       "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, selected (the label of the row it opens on), style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail."} =>
-        fn [prompt, candidates, handlers] ->
-          map =
-            Map.new(handlers, fn [k, v] ->
-              case Opts.plain(k) do
-                "initial" -> {:input, v}
-                # A dynamic provider has already filtered/ranked its results.
-                "filter" -> {:filter, v}
-                "match-hint" -> {:match_hint, v}
-                # how the input matches a candidate: flex, substring, prefix,
-                # regexp, exact. The prompt chooses; the engine applies.
-                "completion-style" -> {:completion_style, Compos.Core.Candidates.style(v)}
-                # which row RET takes when the person did not arrow: 'first is
-                # the highlighted candidate (vertico), 'prompt is the typed
-                # input. A destination prompt (write-file) asks for 'prompt.
-                "preselect" -> {:preselect, String.to_atom(Opts.plain(v))}
-                # A prompt can reuse a domain list when its filtered result is
-                # collected. Scheme decides the target and receives the rows.
-                "collect" -> {:on_collect, v}
-                # the shape the prompt takes: "modal" (a centered panel over
-                # a scrim, spelled "palette" before it had a name), "popup"
-                # (an overlay on the bottom edge that reflows nothing), or the
-                # minibuffer rows, which every other value asks for
-                "style" -> {:style, v}
-                # the palette's own words: a footer note for the facts rail
-                # and a key legend for the head row, ((KEY LABEL) ...)
-                "note" -> {:note, v}
-                "legend" -> {:legend, v}
-                # the row the prompt opens on: imenu opens on the definition point is in
-                "selected" -> {:selected, v}
-                key -> {String.to_existing_atom("on_" <> key), v}
-              end
-            end)
-
-          Editor.minibuffer_activate_full(prompt, candidates, map)
+      # --- the prompt's render snapshot. minibuffer.scm owns the prompt: its
+      # handlers, its policy and its history. These doors read and write the
+      # one thing the frame keeps, what its render walk draws.
+      {"minibuffer--show!",
+       "(minibuffer--show! PROMPT CANDIDATES VIEW) — open the frame's prompt snapshot. VIEW is ((KEY VALUE) ...): input, completing, query (input, segment or none), match-hint, completion-style, preselect, style, note, legend, selected."} =>
+        fn [prompt, candidates, view] ->
+          Editor.minibuffer_show(prompt, candidates, mb_view(view))
           :void
+        end,
+      {"minibuffer--move!", "(minibuffer--move! DELTA) — move the prompt's selection by DELTA rows."} =>
+        fn [delta] ->
+          Editor.minibuffer_move(trunc(delta))
+          :void
+        end,
+      {"minibuffer--hide!",
+       "(minibuffer--hide!) — close the frame's prompt snapshot; answer (input I selected S prompt-sel B total N), or #f."} =>
+        fn [] ->
+          case Editor.minibuffer_close() do
+            nil ->
+              false
+
+            mb ->
+              [
+                {:sym, "prompt"},
+                mb.prompt,
+                {:sym, "input"},
+                mb.input,
+                {:sym, "selected"},
+                mb.selected || false,
+                {:sym, "prompt-sel"},
+                mb.prompt_sel,
+                {:sym, "total"},
+                mb.total
+              ]
+          end
+        end,
+      {"minibuffer--facts",
+       "(minibuffer--facts) — the open prompt's (input I selected S touched B prompt-sel B), or #f; no candidate list travels."} =>
+        fn [] ->
+          case Editor.minibuffer_facts() do
+            nil ->
+              false
+
+            f ->
+              [
+                {:sym, "input"},
+                f.input,
+                {:sym, "selected"},
+                f.selected || false,
+                {:sym, "touched"},
+                f.touched,
+                {:sym, "prompt-sel"},
+                f.prompt_sel
+              ]
+          end
+        end,
+      {"completion-query!", "(completion-query! TEXT) — narrow the open popup to TEXT; no row left closes it."} =>
+        fn [q] ->
+          Editor.completion_query(q)
+          :void
+        end,
+      {"minibuffer--filtered",
+       "(minibuffer--filtered) — the prompt's rows that survive its input, ((LABEL HINT) ...)."} =>
+        fn [] -> Editor.minibuffer_filtered() || [] end,
+      {"minibuffer--sync!",
+       "(minibuffer--sync!) — take the input back from the prompt buffer; answer it when it changed, else #f."} =>
+        fn [] ->
+          case Editor.minibuffer_sync_input() do
+            {:changed, input} -> input
+            _ -> false
+          end
+        end,
+      {"completion--start", "(completion--start) — where the open popup's text starts, or #f."} =>
+        fn [] ->
+          case Editor.snapshot().completion do
+            %{start: start} -> start
+            _ -> false
+          end
+        end,
+      {"completion--accept!",
+       "(completion--accept!) — close the popup; answer (START TAIL LABEL) of the selection, or #f."} =>
+        fn [] ->
+          case Editor.completion_accept() do
+            {start, tail, label} -> [start, tail, label]
+            nil -> false
+          end
         end,
       {"transient-show!",
        "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it."} =>
@@ -2650,12 +2681,6 @@ defmodule Compos.Core.SchemeAPI do
 
           [name, lock, until] ->
             Editor.set_overriding_map(Opts.plain(name), lock == true, until == true)
-        end,
-      {"completion-requery!",
-       "(completion-requery!) — narrow the popup to the text between its start and point."} =>
-        fn [] ->
-          Compos.Core.KeyDispatch.requery_completion()
-          :void
         end,
       {"ignore-errors", "(ignore-errors THUNK) — THUNK's value, or #f when it raises."} => fn [
                                                                                                 thunk
@@ -2841,24 +2866,6 @@ defmodule Compos.Core.SchemeAPI do
       {"undo-exempt?",
        "(undo-exempt? COMMAND) — #t when COMMAND is exempt from the automatic undo-chain break."} =>
         fn [name] -> Editor.undo_exempt?(Opts.plain(name)) end,
-      {"minibuffer-sync-input!",
-       "(minibuffer-sync-input!) — after a minibuffer key, run the prompt's change handler when its input changed."} =>
-        fn [] ->
-          case Editor.minibuffer_sync_input() do
-            {:changed, input} ->
-              case Editor.snapshot().minibuffer do
-                %{on_change: oc} when oc not in [nil, false] ->
-                  Compos.Core.Session.apply_callback(oc, [input])
-                  :void
-
-                _ ->
-                  :void
-              end
-
-            _ ->
-              :void
-          end
-        end,
       {"key-trace-start!",
        "(key-trace-start!) — begin collecting key-trace rows in this process."} =>
         fn [] ->
@@ -2941,14 +2948,6 @@ defmodule Compos.Core.SchemeAPI do
         fn [delta] ->
           Editor.completion_move(delta)
           :void
-        end,
-      {"completion-accept!",
-       "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f."} =>
-        fn [] ->
-          case Editor.completion_accept() do
-            {start, tail, label} -> [start, Buffer.point(Editor.current_buffer()) + tail, label]
-            nil -> false
-          end
         end,
       # the one matcher every surface narrows with; STYLE as in completion-style
       {"completion-match?",
@@ -3597,6 +3596,30 @@ defmodule Compos.Core.SchemeAPI do
   # ("context" TEXT), ("chips" ((LABEL ACTIVE?) ...)), ("columns" ((TITLE ...) ...)),
   # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)),
   # ("layout" NAME).
+  # a prompt's VIEW alist, as minibuffer.scm composes it, to the frame's map
+  defp mb_view(view) do
+    (view || [])
+    |> Enum.map(fn [k, v] -> mb_view_field(Opts.plain(k), v) end)
+    |> Enum.reject(&is_nil/1)
+    |> Map.new()
+  end
+
+  defp mb_view_field("input", v), do: {:input, v}
+  defp mb_view_field("completing", v), do: {:completing, v == true}
+  defp mb_view_field("query", v), do: {:query, mb_query_rule(Opts.plain(v))}
+  defp mb_view_field("match-hint", v), do: {:match_hint, v}
+  defp mb_view_field("completion-style", v), do: {:completion_style, Compos.Core.Candidates.style(v)}
+  defp mb_view_field("preselect", v), do: {:preselect, if(Opts.plain(v) == "prompt", do: :prompt, else: :first)}
+  defp mb_view_field("style", v), do: {:style, v}
+  defp mb_view_field("note", v), do: {:note, v}
+  defp mb_view_field("legend", v), do: {:legend, v}
+  defp mb_view_field("selected", v), do: {:selected, v}
+  defp mb_view_field(_, _), do: nil
+
+  defp mb_query_rule("segment"), do: :segment
+  defp mb_query_rule("none"), do: :none
+  defp mb_query_rule(_), do: :input
+
   defp transient_menu(title, groups, meta) do
     meta = Map.new(meta, fn [k, v] -> {Opts.plain(k), v} end)
 

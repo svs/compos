@@ -2,9 +2,10 @@
 ;;;
 ;;; Everything a prompt does in Scheme: the rail and the tabs, the three
 ;;; shapes and the dock, candidate preview, completing-read, the one-key
-;;; questions, minibuffer-mode and the history. The core keeps the input,
-;;; the candidate list and the matching (Candidates); this file says what
-;;; the keys mean. editor.scm requires it at its end, so every name the
+;;; questions, minibuffer-mode and the history. This file owns the prompt:
+;;; its handlers, what RET, TAB, DEL and C-n mean, and when its change
+;;; handler runs. The frame keeps only the snapshot its render walk draws:
+;;; the input, the candidate list and the matching (Candidates). editor.scm requires it at its end, so every name the
 ;;; forms below call at load is bound by then.
 
 (domain! 'interaction)
@@ -336,12 +337,86 @@
 ;; so its cancel handler restores what it displaced, instead of the
 ;; outer prompt vanishing with its closures.
 
-(define (minibuffer-active?) (if (minibuffer-state) #t #f))
+;;; --- the prompt record --------------------------------------------------------
+;;; What a prompt does lives here; what it shows lives in the frame. The
+;;; record is the open prompt's handlers, a plist (confirm F cancel F
+;;; complete F change F collect F), kept as a local of the frame's own
+;;; prompt buffer: every frame has one, and a buffer-local keeps its
+;;; closures alive for the collector. The frame's snapshot says whether a
+;;; prompt is open; the record is read only then.
+
+(define (minibuffer-active?) (if (minibuffer--facts) #t #f))
 
 ;; what the prompt holds now, "" without a prompt
 (define (minibuffer-input)
-  (let ((st (minibuffer-state)))
-    (if st (plist-get st 'input) "")))
+  (let ((f (minibuffer--facts)))
+    (if f (plist-get f 'input) "")))
+
+(define (minibuffer--record)
+  (let ((buf (minibuffer-buffer)))
+    (or (and (buffer-exists? buf) (buffer-local buf 'minibuffer-prompt)) '())))
+
+(define (minibuffer--handler key)
+  (let ((h (plist-get (minibuffer--record) key)))
+    (if (procedure? h) h #f)))
+
+;; the handler alist's entry for KEY, the last one when it repeats; #f
+;; when the alist has none, so a present #f is told from an absent key
+(define (minibuffer--opt handlers key)
+  (let loop ((hs handlers) (found #f))
+    (cond ((null? hs) found)
+          ((and (pair? (car hs))
+                (let ((k (car (car hs)))) (equal? (if (symbol? k) (symbol->string k) k) key)))
+           (loop (cdr hs) (car hs)))
+          (else (loop (cdr hs) found)))))
+
+(define (minibuffer--opt-value handlers key)
+  (let ((e (minibuffer--opt handlers key)))
+    (if (and e (pair? (cdr e))) (cadr e) #f)))
+
+;; the frame's VIEW of a prompt: what its render walk draws and how its
+;; list matches. A path prompt (one that completes) matches the segment
+;; after the last "/"; a provider that ranks its own rows matches nothing.
+;; One pass over HANDLERS answers (VIEW . RECORD); a later entry for a key
+;; wins, as it always has.
+(define (minibuffer--split handlers)
+  (let loop ((hs handlers) (input "") (complete #f) (unfiltered #f) (view '())
+             (confirm #f) (cancel #f) (change #f) (collect #f))
+    (if (null? hs)
+        (cons (cons (list 'input input)
+                    (cons (list 'completing (if complete #t #f))
+                          (cons (list 'query (cond (unfiltered 'none) (complete 'segment) (else 'input)))
+                                (reverse view))))
+              (list 'confirm confirm 'cancel cancel 'complete complete 'change change 'collect collect))
+        (let* ((e (car hs))
+               (k (and (pair? e) (pair? (cdr e)) (car e)))
+               (k (if (symbol? k) (symbol->string k) k))
+               (v (and k (cadr e)))
+               (rest (cdr hs)))
+          (cond ((not k) (loop rest input complete unfiltered view confirm cancel change collect))
+                ((equal? k "initial") (loop rest (or v "") complete unfiltered view confirm cancel change collect))
+                ((equal? k "complete") (loop rest input v unfiltered view confirm cancel change collect))
+                ((equal? k "filter") (loop rest input complete (not v) view confirm cancel change collect))
+                ((equal? k "confirm") (loop rest input complete unfiltered view v cancel change collect))
+                ((equal? k "cancel") (loop rest input complete unfiltered view confirm v change collect))
+                ((equal? k "change") (loop rest input complete unfiltered view confirm cancel v collect))
+                ((equal? k "collect") (loop rest input complete unfiltered view confirm cancel change v))
+                ((member k '("match-hint" "completion-style" "preselect" "style" "note" "legend" "selected"))
+                 (loop rest input complete unfiltered (cons (list (string->symbol k) v) view)
+                       confirm cancel change collect))
+                (else (loop rest input complete unfiltered view confirm cancel change collect)))))))
+
+;; close the prompt: the record first, then the snapshot. Answer (RECORD
+;; . FACTS), FACTS as minibuffer--hide! gives them, or #f with no prompt.
+;; The record goes before any handler runs, because a handler may open the
+;; next prompt.
+(define (minibuffer--close!)
+  (let* ((rec (minibuffer--record))
+         (facts (minibuffer--hide!)))
+    (when facts
+      (let ((buf (minibuffer-buffer)))
+        (when (buffer-exists? buf) (buffer-set-local! buf 'minibuffer-prompt #f))))
+    (and facts (cons rec facts))))
 
 (define (minibuffer-read* prompt cands handlers)
   (when (minibuffer-active?)
@@ -351,10 +426,149 @@
   (set! *mb-list-flush* #f)
   ;; a rail belongs to one prompt: the next one starts without it
   (mb-rail-reset!)
-  (let ((r (minibuffer-read*--raw prompt cands handlers)))
+  (let ((split (minibuffer--split handlers)))
+    (minibuffer--show! prompt cands (car split))
     ;; the frame's prompt buffer exists once a prompt has opened in it
-    (minibuffer-mode-ensure!)
+    (let ((buf (minibuffer-mode-ensure!)))
+      (buffer-set-local! buf 'minibuffer-prompt (cdr split))
+      #t)))
+
+;; RET in a path prompt (find-file) means the HIGHLIGHTED candidate
+;; whenever one exists (vertico), resolved through the completion handler.
+;; The typed input wins when nothing matches (that is how a new file is
+;; made), or when the prompt itself holds the selection (a directory input
+;; nobody arrowed away from). M-RET always takes the input as typed.
+(define (minibuffer--confirm-value rec facts)
+  (let ((input (plist-get facts 'input))
+        (selected (plist-get facts 'selected))
+        (complete (plist-get rec 'complete)))
+    (cond ((procedure? complete)
+           (if (and selected (not (plist-get facts 'prompt-sel)))
+               (let ((r (complete input selected)))
+                 (if (and (pair? r) (string? (car r))) (car r) input))
+               input))
+          (else (or selected input)))))
+
+(define (minibuffer-confirm!)
+  (let ((c (minibuffer--close!)))
+    (when c
+      (let ((confirm (plist-get (car c) 'confirm)))
+        (when (procedure? confirm)
+          (confirm (minibuffer--confirm-value (car c) (cdr c))))))))
+
+(define (minibuffer-confirm-input!)
+  (let ((c (minibuffer--close!)))
+    (when c
+      (let ((confirm (plist-get (car c) 'confirm)))
+        (when (procedure? confirm)
+          (confirm (plist-get (cdr c) 'input)))))))
+
+(define (minibuffer-cancel!)
+  (let ((c (minibuffer--close!)))
+    (when c
+      (let ((cancel (plist-get (car c) 'cancel)))
+        (when (procedure? cancel) (cancel)))))
+  (set-echo! "Quit"))
+
+;; close the prompt WITHOUT running any handler, and hand the caller all
+;; the prompt was: the rows that survive the input, and the handlers
+;; themselves. The caller adopts them, so the prompt goes on as a buffer
+;; (embark-collect). The one way out that neither confirms nor cancels.
+(define (minibuffer-detach!)
+  (let* ((rows (minibuffer--filtered))
+         (c (minibuffer--close!)))
+    (and c
+         (let ((rec (car c)) (facts (cdr c))
+               (h (lambda (rec k) (or (plist-get rec k) #f))))
+           (list (list 'prompt (plist-get facts 'prompt))
+                 (list 'input (plist-get facts 'input))
+                 (list 'candidates rows)
+                 (list 'confirm (h rec 'confirm))
+                 (list 'cancel (h rec 'cancel))
+                 (list 'complete (h rec 'complete))
+                 (list 'collect (h rec 'collect)))))))
+
+;; TAB: the prompt's own completion, else the selection into the input
+(define (minibuffer-complete!)
+  (let ((facts (minibuffer--facts)))
+    (when facts
+      (let ((complete (minibuffer--handler 'complete)))
+        (if complete
+            (let* ((selected (and (plist-get facts 'touched) (plist-get facts 'selected)))
+                   (r (complete (plist-get facts 'input) (or selected #f))))
+              (when (and (pair? r) (string? (car r)) (pair? (cdr r)) (list? (cadr r)))
+                (minibuffer-input! (car r))
+                (minibuffer-set-candidates! (cadr r))))
+            (let ((label (plist-get facts 'selected)))
+              (when label (minibuffer-input! label))))))))
+
+;; the prompt holds the selection (a directory input): the first move
+;; down takes it to the first candidate, it does not skip one
+(define (minibuffer--step! delta)
+  (let ((facts (minibuffer--facts)))
+    (when facts
+      (minibuffer--move!
+        (if (and (> delta 0) (plist-get facts 'prompt-sel)) (- delta 1) delta)))))
+
+(define (minibuffer-next!) (minibuffer--step! 1))
+(define (minibuffer-prev!) (minibuffer--step! -1))
+
+;; DEL: in a path prompt at a directory boundary, kill the whole component
+;; (vertico-directory); otherwise one char back at point
+(define (minibuffer-del!)
+  (let* ((buf (minibuffer-buffer))
+         (input (buffer-text buf))
+         (trimmed (re-replace "[^/]+/$" input "")))
+    (if (and (minibuffer--handler 'complete)
+             (not (equal? trimmed input))
+             (string-suffix? "/" input))
+        (minibuffer-input! trimmed)
+        (with-current-buffer buf (lambda () (delete-char! -1))))))
+
+;; a browser prompt does not pass through the key loop, whose edits fire
+;; the change handler; this sets the input and fires it the same way
+(define (minibuffer-change! input)
+  (minibuffer-input! input)
+  (let ((change (and (minibuffer--facts) (minibuffer--handler 'change))))
+    (when change (change input))))
+
+;; after a minibuffer key: the change handler runs when the input changed
+(define (minibuffer-sync-input!)
+  (let ((input (minibuffer--sync!)))
+    (when input
+      (let ((change (minibuffer--handler 'change)))
+        (when change (change input))))))
+
+;; a frame that goes takes its prompt with it, and the prompt's cancel
+;; handler runs, so what the prompt displaced comes back
+(define (delete-frame! &optional id)
+  (let* ((fid (or id (selected-frame)))
+         (cancel (ignore-errors
+                   (lambda ()
+                     (with-selected-frame fid
+                       (lambda () (and (minibuffer--facts) (minibuffer--handler 'cancel)))))))
+         (r (if id (raw-delete-frame! id) (raw-delete-frame!))))
+    (when (and r (procedure? cancel)) (cancel))
     r))
+
+;;; --- the completion popup -------------------------------------------------------
+;;; The frame keeps the popup's rows and where its text starts; what a key
+;;; does to it is here.
+
+;; close the popup; (START END LABEL) of the selection, END as of now
+(define (completion-accept!)
+  (let ((r (completion--accept!)))
+    (and r (list (car r) (+ (point) (cadr r)) (caddr r)))))
+
+;; narrow the popup to the text between its start and point; at or before
+;; the start there is nothing to complete
+(define (completion-requery!)
+  (let ((start (completion--start)))
+    (when start
+      (let ((pt (point)))
+        (if (> pt start)
+            (completion-query! (buffer-substring start pt))
+            (completion-dismiss!))))))
 
 ;; one interaction model: a completion prompt is the BOTTOM bar, like
 ;; Emacs — the candidates sit above the input and the input sits on the
@@ -767,3 +981,18 @@
 (public! 'y-or-n? "(y-or-n? PROMPT K) — one key; K gets #t for y, #f for n or C-g")
 (public! 'yes-or-no? "(yes-or-no? PROMPT K) — the word yes or no; K gets #t or #f")
 (public! 'minibuffer-active? "(minibuffer-active?) — #t while a prompt is up")
+(public! 'minibuffer-read* "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, selected (the label of the row it opens on), style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail.")
+(public! 'minibuffer-input "(minibuffer-input) — what the open prompt holds, \"\" without one")
+(public! 'minibuffer-confirm! "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.")
+(public! 'minibuffer-confirm-input! "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.")
+(public! 'minibuffer-cancel! "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.")
+(public! 'minibuffer-detach! "(minibuffer-detach!) — close the prompt; return its state and closures, or #f.")
+(public! 'minibuffer-complete! "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input.")
+(public! 'minibuffer-next! "(minibuffer-next!) — move the candidate selection down one.")
+(public! 'minibuffer-prev! "(minibuffer-prev!) — move the candidate selection up one.")
+(public! 'minibuffer-del! "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component.")
+(public! 'minibuffer-change! "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.")
+(public! 'minibuffer-sync-input! "(minibuffer-sync-input!) — after a minibuffer key, run the prompt's change handler when its input changed.")
+(public! 'delete-frame! "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.")
+(public! 'completion-accept! "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f.")
+(public! 'completion-requery! "(completion-requery!) — narrow the popup to the text between its start and point.")

@@ -132,24 +132,6 @@ defmodule Compos.Core.KeyDispatch do
     end
   end
 
-  @doc "Narrow the popup to the text between its start and point; Scheme calls this after its own edit."
-  def requery_completion do
-    case Editor.snapshot().completion do
-      %{start: start} ->
-        buf = Editor.current_buffer()
-        point = Buffer.point(buf)
-
-        if point > start do
-          Editor.completion_query(binary_part(Buffer.text(buf), start, point - start))
-        else
-          Editor.completion_dismiss()
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
   # --- key tracing ------------------------------------------------------------
   # The mechanism under Scheme's (trace-key): the key loop records one row at
   # every phase boundary. Scheme owns the presentation and the derived fields

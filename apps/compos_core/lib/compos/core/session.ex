@@ -834,17 +834,12 @@ defmodule Compos.Core.Session do
   end
 
   # every place a live closure can be held outside the store: the commands
-  # table, escaped fun-wrapped handlers, active minibuffer handlers (Editor
-  # state), and buffer-local values
+  # table, escaped fun-wrapped handlers, and buffer-local values. A prompt's
+  # handlers are a local of its frame's prompt buffer (minibuffer.scm).
   defp external_roots do
-    # every frame's prompt, not just one — a live on_confirm in a background
-    # frame must not be collected
-    minibuffers = (Process.whereis(Editor) && Editor.all_minibuffers()) || []
-
     [
       :ets.tab2list(Compos.Core.SchemeAPI.commands_table()),
       Roots.all(),
-      minibuffers,
       Enum.map(Compos.Core.list_buffers(), fn name ->
         if Buffer.exists?(name), do: Buffer.locals(name), else: %{}
       end)
@@ -1956,11 +1951,9 @@ defmodule Compos.Core.Session do
           end
         end,
 
-      # store-aware (an active prompt's on_cancel closure applies in the
-      # CURRENT store); refuses the sole frame
-      {"delete-frame!",
-       "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler."} => fn args,
-                                                                                             store ->
+      # refuses the sole frame. minibuffer.scm wraps it: the frame's open
+      # prompt runs its cancel handler (raw-delete-frame! is this one)
+      {"delete-frame!", "(delete-frame! [ID]) — delete the frame; #f when there is none."} => fn args ->
         fid =
           case args do
             [] -> Frame.current() || Editor.last_active_frame()
@@ -1968,18 +1961,14 @@ defmodule Compos.Core.Session do
           end
 
         case Editor.delete_frame(fid) do
-          {:ok, %{on_cancel: oc}} when oc not in [nil, false] ->
-            {_, store} = Compos.Scheme.Eval.apply_fn(oc, [], store)
-            {true, store}
-
           {:ok, _} ->
-            {true, store}
+            true
 
           {:error, :last_frame} ->
             raise_scheme("delete-frame!: cannot delete the sole frame")
 
           {:error, :no_frame} ->
-            {false, store}
+            false
         end
       end,
 
@@ -2047,24 +2036,6 @@ defmodule Compos.Core.Session do
         Editor.minibuffer_set_input(s(input))
         :void
       end,
-      # Browser prompts do not pass through KeyDispatch, whose normal edit
-      # path fires on_change. Keep the store-aware callback here so a dynamic
-      # candidate provider behaves identically on both input surfaces.
-      {"minibuffer-change!",
-       "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler."} =>
-        fn [input], store ->
-          input = s(input)
-          Editor.minibuffer_set_input(input)
-
-          case Editor.snapshot().minibuffer do
-            %{on_change: oc} when oc not in [nil, false] ->
-              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [input], store)
-              {:void, store}
-
-            _ ->
-              {:void, store}
-          end
-        end,
       # A small, general Scheme-side debounce. The callback stays rooted in
       # Roots until its timer fires; the generation check makes a cancelled
       # timer harmless even if its message was already in this mailbox.
@@ -2135,121 +2106,6 @@ defmodule Compos.Core.Session do
 
           :void
         end,
-      {"minibuffer-confirm!",
-       "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value."} =>
-        fn [], store ->
-          case Editor.minibuffer_close() do
-            %{on_confirm: oc} = mb when oc not in [nil, false] ->
-              {value, store} = mb_confirm_value(mb, store)
-              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [value], store)
-              {:void, store}
-
-            _ ->
-              {:void, store}
-          end
-        end,
-      # M-RET: submit the typed input as-is, ignoring the highlighted
-      # candidate (vertico-exit-input) — creates files whose names fuzzy-
-      # match existing ones
-      {"minibuffer-confirm-input!",
-       "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate."} =>
-        fn [], store ->
-          case Editor.minibuffer_close() do
-            %{on_confirm: oc} = mb when oc not in [nil, false] ->
-              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [mb.input], store)
-              {:void, store}
-
-            _ ->
-              {:void, store}
-          end
-        end,
-      {"minibuffer-cancel!",
-       "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit."} => fn [],
-                                                                                            store ->
-        store =
-          case Editor.minibuffer_close() do
-            %{on_cancel: oc} when oc not in [nil, false] ->
-              {_, store} = Compos.Scheme.Eval.apply_fn(oc, [], store)
-              store
-
-            _ ->
-              store
-          end
-
-        Editor.set_echo("Quit")
-        {:void, store}
-      end,
-      # collect: close the prompt WITHOUT running any handler, and hand the
-      # caller everything the prompt was — the candidates that survive the
-      # current input, and the handler closures themselves. Scheme adopts
-      # them, so the prompt continues as a buffer (embark-collect). This is
-      # the only way out of a prompt that neither confirms nor cancels.
-      {"minibuffer-detach!",
-       "(minibuffer-detach!) — close the prompt; return its state and closures, or #f."} =>
-        fn [] ->
-          case Editor.minibuffer_close() do
-            nil ->
-              false
-
-            mb ->
-              [
-                [{:sym, "prompt"}, mb.prompt],
-                [{:sym, "input"}, mb.input],
-                [
-                  {:sym, "candidates"},
-                  Enum.map(Compos.Core.Candidates.filtered(mb.list), fn c ->
-                    [c.label, c.hint || ""]
-                  end)
-                ],
-                [{:sym, "confirm"}, mb[:on_confirm] || false],
-                [{:sym, "cancel"}, mb[:on_cancel] || false],
-                [{:sym, "complete"}, mb[:on_complete] || false],
-                [{:sym, "collect"}, mb[:on_collect] || false]
-              ]
-          end
-        end,
-      {"minibuffer-complete!",
-       "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input."} =>
-        fn [], store ->
-          mb = Editor.snapshot().minibuffer
-
-          cond do
-            mb == nil ->
-              {:void, store}
-
-            mb.on_complete not in [nil, false] ->
-              selected = (mb.sel_touched && Editor.minibuffer_selected()) || false
-
-              case Compos.Scheme.Eval.apply_fn(mb.on_complete, [mb.input, selected], store) do
-                {[new_input, candidates], store}
-                when is_binary(new_input) and is_list(candidates) ->
-                  Editor.minibuffer_set_input(new_input)
-                  Editor.minibuffer_set_candidates(candidates)
-                  {:void, store}
-
-                {_, store} ->
-                  {:void, store}
-              end
-
-            true ->
-              case Editor.minibuffer_selected() do
-                nil -> :ok
-                label -> Editor.minibuffer_set_input(label)
-              end
-
-              {:void, store}
-          end
-        end,
-      {"minibuffer-next!", "(minibuffer-next!) — move the candidate selection down one."} =>
-        fn [] ->
-          Editor.minibuffer_move_sel(1)
-          :void
-        end,
-      {"minibuffer-prev!", "(minibuffer-prev!) — move the candidate selection up one."} =>
-        fn [] ->
-          Editor.minibuffer_move_sel(-1)
-          :void
-        end,
       # The palette's second list. The prompt keeps the state and sends the
       # whole rail each time, so this holds no cursor of its own: rows in,
       # rows out, and INDEX says which one wears the highlight. A row is
@@ -2285,24 +2141,6 @@ defmodule Compos.Core.Session do
 
           Editor.minibuffer_set_rail(rail)
           :void
-        end,
-      # DEL: in a path prompt at a directory boundary, kill the whole
-      # component (vertico-directory); otherwise one char back at point
-      {"minibuffer-del!",
-       "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component."} =>
-        fn [] ->
-          mb = Editor.snapshot().minibuffer
-          input = Buffer.text(Editor.minibuf_name())
-          trimmed = String.replace(input, ~r{[^/]+/$}, "")
-
-          if (mb && mb.on_complete not in [nil, false]) and trimmed != input and
-               String.ends_with?(input, "/") do
-            Editor.minibuffer_set_input(trimmed)
-          else
-            Buffer.delete_char(Editor.minibuf_name(), -1)
-          end
-
-          :void
         end
     }
     |> Map.merge(Compos.Core.Browser.Prims.entries())
@@ -2315,26 +2153,6 @@ defmodule Compos.Core.Session do
     |> Map.merge(Compos.Core.LLMSession.Prims.entries())
     |> Compos.Core.SchemeRawNames.add()
   end
-
-  # on_complete prompts (find-file): the input is the path being built.
-  # RET means the HIGHLIGHTED candidate whenever one exists (vertico) —
-  # resolve it through the completion closure. The typed input wins only
-  # when nothing matches (that's how new files are created), or when the
-  # input names a directory and the user did not touch the selection —
-  # then RET opens the directory (Editor.prompt_preselected?/1). M-RET
-  # (minibuffer-confirm-input!) always submits the input literally.
-  defp mb_confirm_value(%{on_complete: oc} = mb, store) when oc not in [nil, false] do
-    if mb[:selected] && not Editor.prompt_preselected?(mb) do
-      case Compos.Scheme.Eval.apply_fn(oc, [mb.input, mb[:selected]], store) do
-        {[new_input, _cands], store} when is_binary(new_input) -> {new_input, store}
-        {_, store} -> {mb.input, store}
-      end
-    else
-      {mb.input, store}
-    end
-  end
-
-  defp mb_confirm_value(mb, store), do: {mb[:selected] || mb.input, store}
 
   # debounce coalesces bursts: first pos, all inserted text, total deleted
   @doc "The Reactor's door for an `on-change!` rule: apply CALLBACK to the change args."

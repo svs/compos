@@ -85,7 +85,7 @@ defmodule Compos.Core.Editor do
   def attach_frame(id, opts \\ []),
     do: GenServer.call(__MODULE__, {:attach_frame, id, Keyword.get(opts, :client, :caller)})
 
-  @doc "Returns {:ok, closed_minibuffer | nil} so the caller can fire on_cancel."
+  @doc "Returns {:ok, closed_minibuffer | nil}; minibuffer.scm runs the prompt's cancel handler."
   def delete_frame(id), do: GenServer.call(__MODULE__, {:delete_frame, id})
 
   def frame_list, do: GenServer.call(__MODULE__, :frame_list)
@@ -110,7 +110,7 @@ defmodule Compos.Core.Editor do
   @doc "Bump a frame in the MRU without broadcasting — the top of every input dispatch."
   def touch_frame(id), do: GenServer.call(__MODULE__, {:touch_frame, id})
 
-  @doc "Active minibuffer maps of every frame (Session GC roots live closures)."
+  @doc "The open prompt snapshot of every frame."
   def all_minibuffers, do: GenServer.call(__MODULE__, :all_minibuffers)
 
   @doc "All windows across all frames, frame-MRU order: [{win_id, buffer, frame_id}]."
@@ -278,25 +278,11 @@ defmodule Compos.Core.Editor do
   def set_chrome(key, value), do: GenServer.call(__MODULE__, {:set_chrome, key, value})
 
   # minibuffer
-  def minibuffer_activate(prompt, candidates, on_confirm, on_complete \\ nil) do
-    minibuffer_activate_full(prompt, candidates, %{
-      on_confirm: on_confirm,
-      on_complete: on_complete
-    })
-  end
-
-  @doc "Handlers: %{on_confirm:, on_complete:, on_change:, on_cancel:} (all optional closures)."
-  def minibuffer_activate_full(prompt, candidates, handlers, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_activate, prompt, candidates, handlers, fid(fid)})
-
   def minibuffer_set_input(input, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_input, input, fid(fid)})
 
   def minibuffer_set_candidates(candidates, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_candidates, candidates, fid(fid)})
-
-  def minibuffer_move_sel(delta, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_move_sel, delta, fid(fid)})
 
   @doc """
   Set the palette's right-hand list, or nil to clear it.
@@ -331,6 +317,9 @@ defmodule Compos.Core.Editor do
   @doc "Open the frame's prompt snapshot: PROMPT, CANDIDATES and the VIEW map Scheme composes."
   def minibuffer_show(prompt, candidates, view, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_show, prompt, candidates, view, fid(fid)})
+
+  @doc "The open prompt's input, selection, touched flag and prompt_sel, or nil."
+  def minibuffer_facts(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_facts, fid(fid)})
 
   @doc "Move the selection by DELTA rows, with no policy."
   def minibuffer_move(delta, fid \\ nil),
@@ -744,8 +733,8 @@ defmodule Compos.Core.Editor do
         {:reply, {:error, :last_frame}, state}
 
       true ->
-        # hand the closed prompt back so the caller can fire on_cancel
-        # (this server must never call into Session — deadlock)
+        # hand the closed prompt back; minibuffer.scm has already run its
+        # cancel handler (this server must never call into Session)
         f = state.frames[id]
 
         # async: kill_buffer heals windows through Editor.release_buffer,
@@ -1500,30 +1489,6 @@ defmodule Compos.Core.Editor do
       else: changed(:ok, Map.put(state, :chrome, Map.put(chrome, key, value)))
   end
 
-  def handle_call({:mb_activate, prompt, candidates, handlers, fid}, _from, state) do
-    f = frame(state, fid)
-
-    mb =
-      %{
-        on_confirm: nil,
-        on_complete: nil,
-        on_change: nil,
-        on_cancel: nil,
-        on_collect: nil,
-        input: "",
-        filter: true,
-        match_hint: false,
-        style: nil,
-        completion_style: :flex,
-        preselect: :first
-      }
-      |> Map.merge(handlers)
-      |> Map.put(:prompt, prompt)
-      |> mb_view_of_handlers()
-
-    open_minibuffer(state, f, mb, candidates)
-  end
-
   # Scheme owns the prompt: its handlers, its policy and its history. The
   # frame keeps what the render walk draws, and VIEW is that: input, style,
   # note, legend, whether the prompt completes a path, what the list
@@ -1621,24 +1586,6 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  def handle_call({:mb_move_sel, delta, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        # the prompt holds the selection (a directory input): the first move
-        # down takes it to the first candidate, it does not skip one
-        delta = if prompt_preselected?(mb) and delta > 0, do: delta - 1, else: delta
-
-        changed(
-          :ok,
-          put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}),
-          f.id
-        )
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
   # the selection moves by DELTA rows and nothing else: what a move means
   # in a prompt that holds the selection itself is the prompt's policy
   def handle_call({:mb_move, delta, fid}, _from, state) do
@@ -1667,6 +1614,23 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  # the few facts a prompt command decides on, without the candidate list
+  def handle_call({:mb_facts, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} ->
+        {:reply,
+         %{
+           input: mb.input,
+           selected: Candidates.selected(mb.list),
+           touched: mb.list.touched,
+           prompt_sel: prompt_preselected?(mb)
+         }, state}
+
+      _ ->
+        {:reply, nil, state}
+    end
+  end
+
   def handle_call({:mb_selected, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} -> {:reply, Candidates.selected(mb.list), state}
@@ -1674,7 +1638,7 @@ defmodule Compos.Core.Editor do
     end
   end
 
-  # returns the minibuffer map (handlers + :selected/:total/:sel_touched) or nil
+  # returns the snapshot (+ :selected/:total/:sel_touched/:prompt_sel) or nil
   def handle_call({:mb_close, fid}, _from, state) do
     f = frame(state, fid)
 
@@ -2354,8 +2318,8 @@ defmodule Compos.Core.Editor do
 
   # --- minibuffer helpers (vertico-style: fuzzy filter + selection) ----------
 
-  # what the minibuffer matches on: the whole input, except hierarchical
-  # (on_complete) prompts, which match the segment after the last "/"
+  # what the minibuffer matches on: the whole input, except path prompts
+  # (query :segment), which match the segment after the last "/"
   # A dynamic provider can return an already-ranked result set whose labels
   # need not contain the query (the command palette finds commands by docs and
   # recipes). Ordinary prompts keep the shared candidate matcher.
@@ -2365,20 +2329,6 @@ defmodule Compos.Core.Editor do
     do: input |> String.split("/") |> List.last()
 
   defp mb_query(%{input: input}), do: input
-
-  # the old handler form names the view fields by the handlers it carries
-  defp mb_view_of_handlers(mb) do
-    completing = mb.on_complete not in [nil, false]
-
-    query =
-      cond do
-        mb.filter == false -> :none
-        completing -> :segment
-        true -> :input
-      end
-
-    Map.merge(mb, %{completing: completing, query: query})
-  end
 
   defp open_minibuffer(state, f, mb, candidates) do
     reset_minibuf_buffer(minibuf_of(f), mb.input)
@@ -2403,19 +2353,19 @@ defmodule Compos.Core.Editor do
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 
-  @doc """
-  True when the prompt line itself is the selection, not a candidate row
-  (vertico-preselect 'directory and 'prompt).
+  # True when the prompt line itself is the selection, not a candidate row
+  # (vertico-preselect 'directory and 'prompt).
+  #
 
-  A file prompt whose input ends with "/" names a directory. RET must open
-  that directory, not the first file in it — TAB descends into a directory
-  and leaves its contents listed. A prompt that asks for `preselect:
-  :prompt` (write-file) takes the typed input whatever the list shows: the
-  input names a NEW file, and a fuzzy match on another file must not take
-  the write. C-n/C-p touch the list and take the selection back to the
-  candidates in both cases.
-  """
-  def prompt_preselected?(mb) do
+  # A file prompt whose input ends with "/" names a directory. RET must open
+  # that directory, not the first file in it — TAB descends into a directory
+  # and leaves its contents listed. A prompt that asks for `preselect:
+  # :prompt` (write-file) takes the typed input whatever the list shows: the
+  # input names a NEW file, and a fuzzy match on another file must not take
+  # the write. C-n/C-p touch the list and take the selection back to the
+  # candidates in both cases. minibuffer.scm decides what RET and C-n do
+  # with it; the render marks no row while it holds.
+  defp prompt_preselected?(mb) do
     touched = Map.get(mb, :sel_touched) || (mb[:list] && mb.list.touched) || false
 
     mb[:completing] == true and not touched and

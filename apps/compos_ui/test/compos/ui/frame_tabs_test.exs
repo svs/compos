@@ -117,7 +117,7 @@ defmodule Compos.Ui.FrameTabsTest do
     {:ok, view, _html} = mount!(conn)
     assert has_element?(view, tab(first))
 
-    Editor.minibuffer_activate("Test: ", [], fn _ -> :ok end)
+    Editor.minibuffer_show("Test: ", [], %{})
     assert has_element?(view, ".mb-input-row")
     assert has_element?(view, tab(first)), "the tab rail is furniture, not status"
 

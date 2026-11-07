@@ -121,7 +121,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `switch-to-buffer` |  | Switch buffer: type to narrow, RET visits, C-g shows groups |
 | `switch-toggle-groups` |  | Show groups and projects; again shows buffers |
 | `switch-visit` |  | Visit the selected row; with no match, found a group named the narrowing |
-| `switch-visit-context` |  | Enter the selected buffer's group, or found one from its project |
 | `switch-window-buffer` | `C-x C-t` | Choose another buffer from this window's title |
 | `unbury-buffer` |  | Switch to the last buffer in the buffer list |
 | `widen` | `C-x n w` | Show the complete current buffer |

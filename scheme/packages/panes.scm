@@ -83,28 +83,17 @@
 
 (define (panes--names-of ids)
   "The names of the buffers whose ids are IDS, in order; an id no buffer
-   has stays as it is. The buffer read model maps an id to its name now,
-   live or dormant, and a rename moves the id with the buffer: a model
-   that holds ids shows the renamed buffer. meta.db answers only the ids
-   the read model misses; it is written after the buffer starts, so a
-   buffer made a moment ago is not in it yet."
+   has stays as it is. One owner answers: the buffer registry behind
+   buffer-ref, which holds every buffer's row by id, the live ones as
+   they publish and the dormant ones from their checkpoints at boot. A
+   rename moves the id with the buffer, so a layout of ids shows the
+   renamed buffer."
   (if (null? ids)
       '()
-      (let* ((live (buffer-ids->names ids))
-             (missing (let loop ((i ids) (n live) (acc '()))
-                        (cond ((null? i) (reverse acc))
-                              ((car n) (loop (cdr i) (cdr n) acc))
-                              (else (loop (cdr i) (cdr n) (cons (car i) acc))))))
-             (rows (if (null? missing)
-                       '()
-                       (cadr (buffer-rows (list 'ids missing 'hidden #t 'context-only #t 'fields '(id)))))))
-        (let loop ((i ids) (n live) (acc '()))
-          (if (null? i)
-              (reverse acc)
-              (loop (cdr i) (cdr n)
-                    (cons (or (car n)
-                              (let ((r (find (lambda (r) (equal? (cadr r) (car i))) rows))) (if r (car r) (car i))))
-                          acc)))))))
+      (let loop ((i ids) (n (buffer-ids->names ids)) (acc '()))
+        (if (null? i)
+            (reverse acc)
+            (loop (cdr i) (cdr n) (cons (or (car n) (car i)) acc))))))
 
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has

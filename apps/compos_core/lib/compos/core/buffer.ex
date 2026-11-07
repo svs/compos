@@ -1068,6 +1068,9 @@ defmodule Compos.Core.Buffer do
     # from `start_link`, so a reader can already resolve the name here
     BufferView.track(self(), state.name, state.id)
     BufferView.put(view(state))
+    # a birth is metadata too: without this report meta.db had no row for a
+    # buffer until its first change, so a lookup by id missed a new buffer
+    unless state.discard, do: Events.broadcast_meta(state.name, %{created: true})
     {:ok, state}
   end
 

@@ -3129,6 +3129,9 @@ defmodule Compos.EditorTest do
     id =
       group_id!("""
       (let ((id (group-record-create! "ctgrp-#{n}")))
+        ;; two modes: under mode affinity one mode is one window
+        (buffer-set-local! "#{m1}" 'mode-name "ct-a-mode")
+        (buffer-set-local! "#{m2}" 'mode-name "ct-b-mode")
         (set-frame-local! 'current-group #f)
         (delete-other-windows!)
         (switch-to-buffer! "#{m1}")
@@ -3154,25 +3157,6 @@ defmodule Compos.EditorTest do
     assert Editor.current_buffer() == m2
     assert length(Editor.list_windows()) == 1
     # a plain switch moves no windows, but the standing follows
-    assert Compos.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
-
-    # C-RET is the CONTEXT switch: the group's layout comes up with
-    # point in the picked buffer, and the frame enters the group.
-    # (Drop the snapshot the switcher just took, so the default
-    # arrangement is what comes up.)
-    open_switch_prompt()
-
-    {:ok, _} = Compos.Core.Session.eval(~s{(group-record-update! "#{id}" 'layout #f)})
-
-    type(m1)
-    press(["C-RET"])
-    assert Editor.current_buffer() == m1
-
-    shown =
-      Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
-
-    assert shown == Enum.sort([m1, m2])
-
     assert Compos.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
 
     {:ok, _} =
@@ -3389,47 +3373,6 @@ defmodule Compos.EditorTest do
       )
   end
 
-  test "C-RET on a project buffer materializes the project as a group" do
-    n = System.unique_integer([:positive])
-    root = Path.join(System.tmp_dir!(), "pg-#{n}")
-    File.mkdir_p!(Path.join(root, ".git"))
-    f1 = Path.join(root, "one.txt")
-    f2 = Path.join(root, "two.txt")
-    File.write!(f1, "one")
-    File.write!(f2, "two")
-    on_exit(fn -> File.rm_rf!(root) end)
-
-    {:ok, _} =
-      Compos.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
-             (delete-other-windows!)
-             (visit "#{f1}")
-             (visit "#{f2}")
-             (switch-to-buffer! "*scratch*"))
-      """)
-
-    open_switch_prompt()
-    type("one.txt")
-    press(["C-RET"])
-
-    # the project's open buffers joined a group named by the root, and
-    # the context came up arranged
-    # C-RET founds the group, so look up the ID the root name now holds;
-    # both files must carry that one identity
-    id = group_id!(~s{(group-resolve-id "#{root}")})
-    assert Compos.Core.Session.eval(~s{(buffer-group "#{f1}")}) == {:ok, ~s{"#{id}"}}
-    assert Compos.Core.Session.eval(~s{(buffer-group "#{f2}")}) == {:ok, ~s{"#{id}"}}
-    assert Editor.current_buffer() == f1
-
-    shown = Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
-    assert shown == Enum.sort([f1, f2])
-
-    {:ok, _} =
-      Compos.Core.Session.eval(
-        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
-      )
-  end
-
   test "RET on a name that matches nothing founds a group from the windows", %{buf: buf} do
     n = System.unique_integer([:positive])
 
@@ -3498,15 +3441,23 @@ defmodule Compos.EditorTest do
     assert Editor.current_buffer() == b
   end
 
+  # Mode affinity, not Emacs placement: a buffer opens in the window of
+  # its mode, and only a mode no window shows opens in the window at hand.
+  # So the two sides wear two modes, and a third buffer of the left mode,
+  # opened from the right, lands on the left.
   test "C-x o records the focused window's buffer in the ring" do
     n = System.unique_integer([:positive])
     left = "wo-a-#{n}"
     right = "wo-b-#{n}"
-    for x <- [left, right], do: Compos.Core.create_buffer(x)
+    left2 = "wo-c-#{n}"
+    for x <- [left, right, left2], do: Compos.Core.create_buffer(x)
 
     {:ok, _} =
       Compos.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
+      (begin (buffer-set-local! "#{left}" 'mode-name "wo-left-mode")
+             (buffer-set-local! "#{left2}" 'mode-name "wo-left-mode")
+             (buffer-set-local! "#{right}" 'mode-name "wo-right-mode")
+             (set-frame-local! 'current-group #f)
              (delete-other-windows!)
              (switch-to-buffer! "#{left}")
              (split-window! 'h 0.5)
@@ -3514,6 +3465,10 @@ defmodule Compos.EditorTest do
              (switch-to-buffer! "#{right}")
              (other-window!))
       """)
+
+    # a new mode opens in the window at hand: one window per side
+    assert {:ok, shown} = Compos.Core.Session.eval("(map cadr (window-list))")
+    assert shown == ~s{("#{left}" "#{right}")}
 
     # focusing left last: left leads the ring
     assert {:ok, mru} = Compos.Core.Session.eval("(buffer-list-mru)")
@@ -3523,6 +3478,13 @@ defmodule Compos.EditorTest do
     press(["C-x", "o"])
     assert {:ok, mru} = Compos.Core.Session.eval("(buffer-list-mru)")
     assert mru =~ ~r/\A\("#{right}" "#{left}"/
+
+    # from the right window, a buffer of the left mode opens in the left
+    # window, the window of its mode; the right one keeps its buffer
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{left2}")})
+    assert {:ok, shown} = Compos.Core.Session.eval("(map cadr (window-list))")
+    assert shown == ~s{("#{left2}" "#{right}")}
+
     {:ok, _} = Compos.Core.Session.eval("(delete-other-windows!)")
   end
 
@@ -3539,8 +3501,10 @@ defmodule Compos.EditorTest do
              (delete-other-windows!)
              (switch-to-buffer! "#{m1}")
              (switch-to-buffer! "#{m2}")
-             (buffer-set-local! "#{m1}" 'group "grgrp-#{n}")
-             (buffer-set-local! "#{m2}" 'group "grgrp-#{n}")
+             (buffer-set-local! "#{m1}" 'mode-name "gr-a-mode")
+             (buffer-set-local! "#{m2}" 'mode-name "gr-b-mode")
+             (buffer-add-group! "#{m1}" "grgrp-#{n}")
+             (buffer-add-group! "#{m2}" "grgrp-#{n}")
              (switch-to-buffer! "#{home}")
              (switch-to-group! "grgrp-#{n}")
              #t)

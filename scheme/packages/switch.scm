@@ -2,7 +2,7 @@
 ;;;
 ;;; A modal list buffer with its own keymap. Typing narrows — the filter
 ;;; is the default act, as in every list. Control chords act on rows:
-;;; RET visits, C-RET enters the row's context, C-SPC marks, C-k kills,
+;;; RET visits, C-SPC marks, C-k kills,
 ;;; C-t sets the group, C-o shows groups and projects, TAB locks to a
 ;;; group, C-g and ESC quit. DEL widens the narrowing by one character.
 ;;;
@@ -403,7 +403,7 @@
   (and (pair? view) (equal? (car view) 'locked)))
 
 ;; What a pick means — ONE answer for the modal and the prompt. E is the
-;; row, VIEW the view it came from, CONTEXT? the C-RET verb. CLOSE! takes
+;; row, VIEW the view it came from, CONTEXT? enters the row's group. CLOSE! takes
 ;; the surface down first and takes the buffer to keep awake (#f keeps
 ;; none); the prompt is already down, so it passes a no-op.
 (define (switch-act! e view context? close!)
@@ -473,13 +473,6 @@
               (switch-restore-home! buf)
               (switch-close! buf #f)
               (group-found-from-windows! q))))))
-
-(define-command "switch-visit-context"
-  "Enter the selected buffer's group, or found one from its project"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (e (list-current buf)))
-      (if e (switch-pick! buf e #t) (message "no buffer here")))))
 
 (define-command "switch-mark"
   "Mark the row at point, or unmark a marked one"
@@ -590,7 +583,6 @@
     (map (lambda (ch) (list ch "switch-self-insert")) *switch-printables*)
     (list (list "DEL" "switch-del")
           (list "RET" "switch-visit")
-          (list "C-RET" "switch-visit-context")
           ;; select all: every row the narrowing shows; again unmarks
           (list "C-a" "list-mark-all")
           (list "C-k" "switch-kill")
@@ -601,7 +593,7 @@
           (list "ESC" "switch-quit"))))
 
 (define *switch-footer*
-  (string-append "type to narrow · DEL widen · RET switch · C-RET context · "
+  (string-append "type to narrow · DEL widen · RET switch · "
                  "C-SPC mark · C-a all · C-k kill · C-t add to group · "
                  "C-o groups · TAB lock · C-g quit"))
 
@@ -617,8 +609,7 @@
            "each section in most-recently-used order. The highlight "
            "previews its row "
            "in the window you came from. RET visits the row; with no match, "
-           "RET founds a group named what you typed. C-RET enters the "
-           "row's group or project. SPC marks; C-a marks every shown "
+           "RET founds a group named what you typed. SPC marks; C-a marks every shown "
            "row, and again unmarks them; C-k kills the marked "
            "buffers or the row at point; C-t adds them to another group. "
            "C-o shows groups and "
@@ -702,7 +693,7 @@
 
 ;;; --- the prompt form -------------------------------------------------------------
 ;;; The same rows as a minibuffer prompt, for the surfaces that draw only
-;;; a prompt: a browser page under the chrome extension. RET, C-RET and
+;;; a prompt: a browser page under the chrome extension. RET and
 ;;; C-c C-o mean what they mean in the modal.
 
 ;; a file row carries its root in the 4th slot; the prompt's candidate encoder reads a 4th slot as chips,
@@ -744,8 +735,7 @@
 
 ;; the prompt lists buffers, not group cards: the sectioned rows
 ;; without the containers, and without a heading that then has no rows.
-;; A group is reached by C-RET on one of its buffers, by TAB on its
-;; name, or by C-x G.
+;; A group is reached by C-x g, by TAB on its name, or by C-x G.
 (define (switch-buffer-only-rows rows)
   (let loop ((rs (filter (lambda (e) (not (switch-container? e))) rows))
              (out '()))

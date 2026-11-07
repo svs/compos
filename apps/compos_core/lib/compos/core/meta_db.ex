@@ -191,7 +191,8 @@ defmodule Compos.Core.MetaDb do
   def handle_cast({:groups, groups}, %{groups: groups} = state), do: {:noreply, state}
 
   def handle_cast({:groups, groups}, state) do
-    transaction(state, fn ->
+    result =
+      transaction(state, fn ->
       run(state, "DELETE FROM groups", [])
 
       for [id, label, face, note] <- groups, is_binary(id) do
@@ -200,7 +201,8 @@ defmodule Compos.Core.MetaDb do
       end
     end)
 
-    {:noreply, %{state | groups: groups}}
+    # a refused write keeps the old list, so the same list tries again
+    {:noreply, if(result == :ok, do: %{state | groups: groups}, else: state)}
   end
 
   @impl true
@@ -211,7 +213,7 @@ defmodule Compos.Core.MetaDb do
   end
 
   def handle_call({:annotations, names, pinned, pin_icon}, _from, state) do
-    catch_up(state)
+    state = catch_up(state)
     rows = annotation_rows(state)
     missing = Enum.reject(names, &Map.has_key?(rows, &1))
 
@@ -227,14 +229,14 @@ defmodule Compos.Core.MetaDb do
   end
 
   def handle_call({:candidates, opts, pinned, pin_icon}, _from, state) do
-    catch_up(state)
+    state = catch_up(state)
     {where, args} = where(opts)
     rows = all(state, @annotation_select <> where <> order(opts["sort"]), args)
     {:reply, render(Enum.map(rows, fn [n | r] -> {n, r} end), pinned, pin_icon), state}
   end
 
   def handle_call({:query, opts}, _from, state) do
-    catch_up(state)
+    state = catch_up(state)
     {where, args} = where(opts)
     from = " FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <> where
     [[total]] = all(state, "SELECT count(*)" <> from, args)
@@ -258,8 +260,7 @@ defmodule Compos.Core.MetaDb do
 
   @impl true
   def handle_info({:buffer_meta, name, diff}, state) do
-    write_events(state, drain([{name, diff}]))
-    {:noreply, state}
+    {:noreply, write_events(state, drain([{name, diff}]))}
   end
 
   def handle_info(_, state), do: {:noreply, state}
@@ -281,7 +282,38 @@ defmodule Compos.Core.MetaDb do
     :persistent_term.put({__MODULE__, :schema}, @schema)
   end
 
+  # A batch the file refused (busy) stays pending and goes first in the
+  # next write: the next event or the next read, which catches up before
+  # it answers. No timer retries it. After @busy_tries refusals in a row
+  # the batch is dropped, and the drop is logged as an error with its names.
+  @busy_tries 5
+
   defp write_events(state, events) do
+    batch = Map.get(state, :pending, []) ++ events
+
+    case write_batch(state, batch) do
+      :ok ->
+        state |> Map.put(:pending, []) |> Map.put(:busy, 0)
+
+      {:error, why} ->
+        tries = Map.get(state, :busy, 0) + 1
+
+        if tries >= @busy_tries do
+          names = batch |> Enum.flat_map(fn {n, d} -> names_of(n, d) end) |> Enum.uniq()
+
+          Logger.error(
+            "meta-db: dropped a batch of #{length(names)} rows after #{tries} tries (#{why}): " <>
+              Enum.join(Enum.take(names, 20), ", ")
+          )
+
+          state |> Map.put(:pending, []) |> Map.put(:busy, 0)
+        else
+          state |> Map.put(:pending, batch) |> Map.put(:busy, tries)
+        end
+    end
+  end
+
+  defp write_batch(state, events) do
     transaction(state, fn ->
       # a rename moves the old row, so the buffer keeps its place in the
       # recent order; a row for the new name already there wins
@@ -296,10 +328,11 @@ defmodule Compos.Core.MetaDb do
   # A buffer reports a change before it answers whoever changed it, so a
   # reader that has just changed a buffer finds the report queued here.
   # Every read writes what is queued first, and never answers stale.
+  # A batch still pending from a busy file is written here too.
   defp catch_up(state) do
-    case drain([]) do
-      [] -> :ok
-      events -> write_events(state, events)
+    case {drain([]), Map.get(state, :pending, [])} do
+      {[], []} -> state
+      {events, _} -> write_events(state, events)
     end
   end
 
@@ -562,18 +595,27 @@ defmodule Compos.Core.MetaDb do
   defp flag(v) when v in [nil, false], do: 0
   defp flag(_), do: 1
 
+  # One batch, all or nothing: `:ok`, or `{:error, WHY}` after a rollback.
+  # Another connection on the file (a second VM, a test run beside the
+  # daemon) can hold the write lock; SQLite then waits up to the busy
+  # timeout for it, and a batch that still finds it held answers the error
+  # instead of losing its rows. BEGIN IMMEDIATE takes the lock first, so a
+  # busy file fails before any row is written.
   defp transaction(state, f) do
-    :ok = Sqlite3.execute(state.db, "BEGIN")
-
     try do
+      :ok = Sqlite3.execute(state.db, "PRAGMA busy_timeout = " <> Integer.to_string(busy_timeout_ms()))
+      :ok = Sqlite3.execute(state.db, "BEGIN IMMEDIATE")
       f.()
       :ok = Sqlite3.execute(state.db, "COMMIT")
     rescue
       e ->
         Sqlite3.execute(state.db, "ROLLBACK")
         Logger.warning("meta-db: " <> Exception.message(e))
+        {:error, Exception.message(e)}
     end
   end
+
+  defp busy_timeout_ms, do: Application.get_env(:compos_core, :meta_db_busy_timeout_ms, 1_000)
 
   defp run(state, sql, args) do
     {:ok, stmt} = Sqlite3.prepare(state.db, sql)

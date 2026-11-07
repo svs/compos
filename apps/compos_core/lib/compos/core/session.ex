@@ -787,7 +787,9 @@ defmodule Compos.Core.Session do
         # Keep the generation rooted while waiting for the UI lane. A new
         # keystroke may cancel/replace it after the timer fires but before
         # the lane is free to run this callback.
-        Lane.cast(:ui, fn _from -> exec_debounce(key, generation) end, "debounce")
+        # the label names the key, so a slow callback shows in telemetry by name
+        {:debounce, name} = key
+        Lane.cast(:ui, fn _from -> exec_debounce(key, generation) end, "debounce " <> name)
 
       _ ->
         :ok

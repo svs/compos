@@ -83,8 +83,10 @@
         (let ((a (pmt-buffer! "zz-af-a" "zz-a-mode")))
           (unwind-protect
             (lambda ()
-              (switch-to-buffer-here! a)
+              ;; one window first, then A in it: the other order can keep a
+              ;; window that never showed A
               (delete-other-windows!)
+              (switch-to-buffer-here! a)
               (panes-layout-set! (panes-empty))
               (let ((l (panes--ensure-layout!)))
                 (check-equal! (panes-pane-count l) 1 "the empty model took the frame's window")

@@ -440,3 +440,99 @@
 
 (public! 'app-await "(app-await STARTER &optional SECONDS) — run STARTER with a continuation and answer what it is given; blocks, so call it inside a task")
 (public! 'app-pause "(app-pause MS) — pause inside a task")
+
+;;; --- M-x offers an app by its entry command ------------------------------------
+;;; M-x is for people. It offers an app by its entry command alone; the
+;;; app's other commands and its modes are offered only in the app's own
+;;; buffers. An app is a list mode X-mode, or X-SOMETHING-mode, with a
+;;; command X: X is the entry, every other X-... command is the app's. The
+;;; mode command of any other list mode, or of a -detail-mode page, is
+;;; offered in that mode alone. A
+;;; command a global map binds stays global, and app-entry! names another
+;;; command that opens the app from anywhere. Agents run commands by name,
+;;; so none of this limits them.
+
+(domain! 'commands)
+(effects! '(write))
+
+(define *app-entries* '())
+
+(define (app-entry! name)
+  "(app-entry! NAME) -- M-x offers command NAME everywhere, though its name puts it in an app"
+  (unless (member name *app-entries*) (set! *app-entries* (cons name *app-entries*)))
+  name)
+
+(effects! '(read))
+
+;; (KEY SCOPES): the scopes are worked out again when commands or list
+;; modes come or go
+(define *app--scopes-cache* #f)
+
+(define (app--drop-last-word s)
+  (let ((parts (string-split s "-")))
+    (if (null? (cdr parts)) #f (string-join (reverse (cdr (reverse parts))) "-"))))
+
+;; the entry command of list mode M: X for X-mode, else the longest
+;; X for X-...-mode that is a command; #f when there is none
+(define (app--entry-of m cmds)
+  (and (string-suffix? "-mode" m)
+       (let loop ((base (substring m 0 (- (string-length m) 5))))
+         (cond ((not base) #f)
+               ((member base cmds) base)
+               (else (loop (app--drop-last-word base)))))))
+
+;; every app as (ENTRY MODES COMMANDS): the modes whose name starts with
+;; ENTRY-, and the ENTRY-... commands that are not an entry themselves
+(define (app-command-scopes)
+  "(app-command-scopes) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on"
+  (let* ((cmds (command-names))
+         (lists (if (boundp '*list-modes*) (map (lambda (e) (if (pair? e) (car e) e)) *list-modes*) '()))
+         (key (list (length cmds) (length lists) (length *app-entries*))))
+    (if (and *app--scopes-cache* (equal? (car *app--scopes-cache*) key))
+        (cadr *app--scopes-cache*)
+        (let* ((entries (fold (lambda (acc m)
+                                (let ((e (app--entry-of m cmds)))
+                                  (if (and e (not (member e acc))) (cons e acc) acc)))
+                              '() lists))
+               (modes (mode-names))
+               (scopes (map (lambda (e)
+                              (let ((prefix (string-append e "-")))
+                                (list e
+                                      (filter (lambda (m) (string-prefix? prefix m)) modes)
+                                      (filter (lambda (c) (and (string-prefix? prefix c)
+                                                               (not (member c entries))
+                                                               (not (member c *app-entries*))))
+                                              cmds))))
+                            entries)))
+          ;; a list or a page is entered through its app: its own mode
+          ;; command is offered only in it, even with no entry found
+          (let* ((covered (apply append (map cadr scopes)))
+                 (views (filter (lambda (m) (and (not (member m covered))
+                                                 (or (member m lists) (string-suffix? "-detail-mode" m))))
+                                modes))
+                 (all (append scopes (map (lambda (m) (list m (list m) (list m))) views))))
+            (set! *app--scopes-cache* (list key all))
+            all)))))
+
+(define (app-commands-out-of-scope buf open)
+  "(app-commands-out-of-scope BUF OPEN) -- the app commands M-x leaves out in BUF: those of every app none of whose modes is on there, less the commands in OPEN"
+  (apply append
+         (map (lambda (scope)
+                (if (any (lambda (m) (buffer-derived-mode? buf m)) (cadr scope))
+                    '()
+                    (filter (lambda (c) (not (member c open))) (caddr scope))))
+              (app-command-scopes))))
+
+;; commands that open an app from anywhere, though their names put them in it
+(for-each app-entry!
+  '("notmuch-inbox" "notmuch-search" "notmuch-jump" "notmuch-switch-host" "notmuch-recruiting"
+    "notmuch-svs-io" "notmuch-vidura"
+    "google-search" "google-compose" "google-connect" "google-disconnect" "google-account" "google-operation"
+    "keys-bind"
+    "ibuffer-pretty"))
+
+(effects! '(write))
+(public! 'app-entry! "(app-entry! NAME) -- M-x offers command NAME everywhere, though its name puts it in an app")
+(effects! '(read))
+(public! 'app-command-scopes "(app-command-scopes) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on")
+(public! 'app-commands-out-of-scope "(app-commands-out-of-scope BUF OPEN) -- the app commands M-x leaves out in BUF, less the commands in OPEN")

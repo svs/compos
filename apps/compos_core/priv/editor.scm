@@ -5071,8 +5071,9 @@
 ;; Mode scoping, as Emacs's (interactive nil MODES): a mode's commands are
 ;; offered in its buffers alone. A command names its modes with
 ;; command-modes!; else its modes are the ones whose -mode-map binds it when
-;; no global map does. M-x and the palette ask command-applicable?, and
-;; command-mode-scoping #f turns it off.
+;; no global map does. An app's commands are offered in the app alone, its
+;; entry command everywhere (apps.scm). M-x and the palette ask
+;; command-applicable?, and command-mode-scoping #f turns it off.
 (define *command-modes* '())
 
 (define (command--map-commands m)
@@ -5100,7 +5101,9 @@
              (named (map car (remove (lambda (row)
                                        (any (lambda (m) (command--mode-on? m buf maps)) (cadr row)))
                                      *command-modes*))))
-        (append named derived))))
+        ;; an app's commands are offered in the app alone (apps.scm)
+        (append named derived
+                (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open) '())))))
 
 (define (command-applicable? name &optional buf)
   (not (member name (commands-out-of-scope (or buf (current-buffer))))))

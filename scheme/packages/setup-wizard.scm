@@ -468,7 +468,7 @@
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
-    ((equal? id "wizard:connectors") (run-command "llm-connectors") #t)
+    ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
     (else #f)))
 
 (add-hook! (list 'block-click 'setup-wizard)
@@ -558,6 +558,11 @@
 (define-command "setup-learning-space" "Open the tutorial: practice, a slide that teaches, and the lesson"
   (lambda () (setup-open-learning-space!)))
 
+;; the wizard's own command for c: a mode map that bound llm-connectors
+;; itself would take it out of M-x everywhere else
+(define-command "setup-wizard-connectors" "Set up and test the model connectors"
+  (lambda () (run-command "llm-connectors")))
+
 (define-command "setup-wizard-next" "Go to the next setup step"
   (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) 1))))
 
@@ -567,7 +572,7 @@
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
-    ("c" "llm-connectors")
+    ("c" "setup-wizard-connectors")
     ("q" "quit-window")))
 
 (define-style! 'setup-wizard "

@@ -847,7 +847,12 @@
   '(("n" "tutorial-next") ("RET" "tutorial-next") ("p" "tutorial-back")
     ("N" "tutorial-next-lesson") ("P" "tutorial-previous-lesson")
     ("i" "tutorial-index") ("h" "tutorial-help")
-    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("t" "tutorial-retry") ("q" "tutorial-close")))
+    ("r" "tutorial-restart-lesson") ("R" "tutorial-reset") ("t" "tutorial-retry") ("q" "tutorial-close")
+    ("c" "tutorial-connectors")))
+
+;; the slide's c: set up and test the models in M-x llm-connectors
+(define-command "tutorial-connectors" "Set up and test the model connectors"
+  (lambda () (run-command "llm-connectors")))
 
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
@@ -860,7 +865,7 @@
                                 ("tutorial:index" "tutorial-index") ("tutorial:help" "tutorial-help")
                                 ("tutorial:restart" "tutorial-restart-lesson")
                                 ("tutorial:reset" "tutorial-reset")
-                                ("tutorial:connectors" "llm-connectors")))))
+                                ("tutorial:connectors" "tutorial-connectors")))))
            (and hit (begin (run-command (cadr hit)) #t))))))))
 
 (define-style! 'tutorial "

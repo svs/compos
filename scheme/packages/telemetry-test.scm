@@ -209,3 +209,33 @@
       (check-equal! (length (telemetry--narrow-cells "*unused*" row)) 5 "five cells")
       (check-equal! (nth 2 (telemetry--narrow-cells "*unused*" row)) "key a" "the job is the third")
       (check-equal! (length (telemetry--wide-columns "*unused*")) 8 "eight columns"))))
+
+(deftest 'client-memory-summary-reports-growth-per-frame
+  "the summary gives each frame its first and last heap and the growth per hour"
+  (lambda ()
+    (let* ((s (lambda (owner t heap nodes)
+                (list 'owner owner 'time-ms t 'heap-mb heap 'total-mb #f 'limit-mb #f
+                      'nodes nodes 'iframes 2 'canvases 1)))
+           (rows (client-memory-summary
+                   (list (s "frame a" 0 100 1000)
+                         (s "frame b" 0 50 500)
+                         (s "frame a" 3600000 400 9000)
+                         (s "frame a" 7200000 300 8000))))
+           (a (car rows))
+           (b (cadr rows)))
+      (check-equal! (length rows) 2 "one row per frame")
+      (check-equal! (plist-get a 'owner) "frame a" "the frames keep their first-seen order")
+      (check-equal! (plist-get a 'heap-mb) 300 "the heap is the last sample")
+      (check-equal! (plist-get a 'first-heap-mb) 100 "the first heap is the oldest sample")
+      (check-equal! (plist-get a 'max-heap-mb) 400 "the max is the largest sample")
+      (check-equal! (round (plist-get a 'mb-per-hour)) 100 "200 MB over two hours is 100 MB an hour")
+      (check-equal! (plist-get a 'nodes) 8000 "the nodes are the last sample")
+      (check-equal! (plist-get b 'mb-per-hour) 0 "one sample has no growth"))))
+
+(deftest 'client-memory-summary-reads-a-missing-heap-as-zero
+  "a browser with no JS heap measure gives a heap of zero, not an error"
+  (lambda ()
+    (let ((row (car (client-memory-summary
+                      (list (list 'owner "frame c" 'time-ms 0 'heap-mb #f 'nodes 10
+                                  'iframes 0 'canvases 0))))))
+      (check-equal! (plist-get row 'heap-mb) 0 "a missing heap is zero"))))

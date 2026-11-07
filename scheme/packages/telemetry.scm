@@ -704,3 +704,70 @@
 
 (public! 'trace-key
   "(trace-key KEYS) — dispatch KEYS; return a state row per phase: point, size, mark, input-start")
+
+;;; --- the browser's own size ---------------------------------------------------
+;;; Each browser frame sends a memory sample once a minute (app.js
+;;; Telem.memory), and the collector keeps a day of them per frame. The
+;;; summary gives the first and the last sample of each frame and the
+;;; growth per hour, so a tab that grows is visible before it costs the
+;;; machine. The heap is Chrome's JS heap; the DOM and the iframes are
+;;; outside it, so the node and iframe counts ride along.
+
+(domain! 'diagnostics)
+(effects! '(pure))
+
+(define (client-memory--n v) (if (number? v) v 0))
+
+;; SAMPLES are plists, oldest first, of any number of owners. The answer
+;; is one plist per owner: owner, hours, heap-mb, first-heap-mb,
+;; max-heap-mb, mb-per-hour, nodes, first-nodes, iframes, canvases.
+(define (client-memory-summary samples)
+  (let ((owners (let loop ((rest samples) (seen '()))
+                  (cond ((null? rest) (reverse seen))
+                        ((member (plist-get (car rest) 'owner) seen) (loop (cdr rest) seen))
+                        (else (loop (cdr rest) (cons (plist-get (car rest) 'owner) seen)))))))
+    (map (lambda (owner)
+           (let* ((rows (filter (lambda (s) (equal? (plist-get s 'owner) owner)) samples))
+                  (first (car rows))
+                  (last (list-ref rows (- (length rows) 1)))
+                  (heap (client-memory--n (plist-get last 'heap-mb)))
+                  (heap0 (client-memory--n (plist-get first 'heap-mb)))
+                  (ms (- (plist-get last 'time-ms) (plist-get first 'time-ms)))
+                  (hours (/ ms 3600000.0)))
+             (list 'owner owner
+                   'hours hours
+                   'heap-mb heap
+                   'first-heap-mb heap0
+                   'max-heap-mb (apply max (map (lambda (r) (client-memory--n (plist-get r 'heap-mb))) rows))
+                   'mb-per-hour (if (> hours 0.1) (/ (- heap heap0) hours) 0)
+                   'nodes (client-memory--n (plist-get last 'nodes))
+                   'first-nodes (client-memory--n (plist-get first 'nodes))
+                   'iframes (client-memory--n (plist-get last 'iframes))
+                   'canvases (client-memory--n (plist-get last 'canvases)))))
+         owners)))
+
+(define (client-memory--line row)
+  (string-append
+    (plist-get row 'owner) ": heap "
+    (number->string (plist-get row 'heap-mb)) " MB (was "
+    (number->string (plist-get row 'first-heap-mb)) ", max "
+    (number->string (plist-get row 'max-heap-mb)) ", "
+    (number->string (round (plist-get row 'mb-per-hour))) " MB/h over "
+    (number->string (/ (round (* 10 (plist-get row 'hours))) 10)) " h), nodes "
+    (number->string (plist-get row 'nodes)) " (was "
+    (number->string (plist-get row 'first-nodes)) "), iframes "
+    (number->string (plist-get row 'iframes)) ", canvases "
+    (number->string (plist-get row 'canvases))))
+
+(effects! '(read))
+
+(define-command "client-memory" "Show the memory of each browser frame and its growth per hour"
+  (lambda ()
+    (let ((rows (client-memory-summary (client-memory-samples))))
+      (message
+        (if (pair? rows)
+            (string-join (map client-memory--line rows) "\n")
+            "No browser frame sent a memory sample yet")))))
+
+(public! 'client-memory-summary
+  "(client-memory-summary SAMPLES) — one plist per frame: heap now, first, max, growth per hour, nodes, iframes")

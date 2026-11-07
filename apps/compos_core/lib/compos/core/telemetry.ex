@@ -44,6 +44,8 @@ defmodule Compos.Core.Telemetry do
   ]
   @handler {__MODULE__, :collector}
   @max_events 2_000
+  # one day of browser memory samples per frame, at one a minute
+  @max_memory_samples 1_440
   # rows arrive in bursts; Scheme hears about them at most this often
   @notify_ms 1_000
   @notify_fn "telemetry-arrived!"
@@ -95,10 +97,25 @@ defmodule Compos.Core.Telemetry do
     |> Enum.filter(&is_map/1)
     |> Enum.each(fn row ->
       send(__MODULE__, {:row, browser_row(row, frame)})
+
+      case row do
+        %{"k" => "memory", "mem" => mem} when is_map(mem) ->
+          send(__MODULE__, {:memory, frame_owner(frame), memory_sample(row, mem)})
+
+        _ ->
+          :ok
+      end
     end)
 
     :ok
   end
+
+  @doc """
+  The memory samples of every browser frame: a map of owner to samples,
+  oldest first. Each frame keeps at most 1440 samples, one day at one
+  sample a minute.
+  """
+  def memory, do: GenServer.call(__MODULE__, :memory)
 
   @doc "The trace id of the LiveView event this process is handling, or nil."
   def current_tid do
@@ -190,6 +207,15 @@ defmodule Compos.Core.Telemetry do
     {:reply, events, state}
   end
 
+  def handle_call(:memory, _from, state) do
+    memory =
+      state
+      |> Map.get(:memory, %{})
+      |> Map.new(fn {owner, samples} -> {owner, :queue.to_list(samples)} end)
+
+    {:reply, memory, state}
+  end
+
   def handle_call(:clear, _from, state) do
     {:reply, :ok, %{state | events: :queue.new(), size: 0}}
   end
@@ -205,6 +231,21 @@ defmodule Compos.Core.Telemetry do
   end
 
   def handle_info({:row, row}, state), do: {:noreply, put(state, row)}
+
+  # Map.get and Map.put: a hot swap keeps the state of the running
+  # process, and a state from before this key has none
+  def handle_info({:memory, owner, sample}, state) do
+    memory = Map.get(state, :memory, %{})
+    samples = Map.get(memory, owner, :queue.new())
+    samples = :queue.in(sample, samples)
+
+    samples =
+      if :queue.len(samples) > @max_memory_samples,
+        do: :queue.drop(samples),
+        else: samples
+
+    {:noreply, Map.put(state, :memory, Map.put(memory, owner, samples))}
+  end
 
   # One notice per burst. The Scheme side decides what to do with it
   # (packages/telemetry.scm telemetry-arrived!); this process only says
@@ -452,6 +493,27 @@ defmodule Compos.Core.Telemetry do
   # conversation going up the wire, once per round
   defp finch_detail(:send, %{idle_time: idle}) when is_integer(idle), do: ""
   defp finch_detail(_step, _measurements), do: ""
+
+  # a sample keeps only numbers: the browser sends what it measured, and
+  # a field it could not measure (the heap outside Chrome) is nil
+  defp memory_sample(row, mem) do
+    num = fn key ->
+      case mem[key] do
+        n when is_number(n) -> trunc(n)
+        _ -> nil
+      end
+    end
+
+    %{
+      time_ms: int(row["t"], System.system_time(:millisecond)),
+      heap_mb: num.("heap"),
+      total_mb: num.("total"),
+      limit_mb: num.("limit"),
+      nodes: num.("nodes"),
+      iframes: num.("iframes"),
+      canvases: num.("canvases")
+    }
+  end
 
   defp frame_owner(frame) when is_binary(frame), do: "frame #{frame}"
   defp frame_owner(_), do: "frame"

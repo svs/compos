@@ -540,6 +540,22 @@ defmodule Compos.Core.SchemeAPI do
           [] -> telemetry_events(200)
           [limit] -> telemetry_events(trunc(limit))
         end,
+      {"client-memory-samples",
+       "(client-memory-samples) — the memory samples of every browser frame, oldest first: plists of owner, time-ms, heap-mb, total-mb, limit-mb, nodes, iframes, canvases."} =>
+        fn [] ->
+          for {owner, samples} <- Compos.Core.Telemetry.memory(), s <- samples do
+            [
+              {:sym, "owner"}, owner,
+              {:sym, "time-ms"}, s.time_ms,
+              {:sym, "heap-mb"}, s.heap_mb || false,
+              {:sym, "total-mb"}, s.total_mb || false,
+              {:sym, "limit-mb"}, s.limit_mb || false,
+              {:sym, "nodes"}, s.nodes || false,
+              {:sym, "iframes"}, s.iframes || false,
+              {:sym, "canvases"}, s.canvases || false
+            ]
+          end
+        end,
       {"telemetry-clear!", "(telemetry-clear!) — discard retained telemetry events."} => fn [] ->
         :ok = Compos.Core.Telemetry.clear()
         :void

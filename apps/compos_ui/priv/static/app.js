@@ -821,11 +821,36 @@
       try { this.hook.pushEvent("telemetry", { rows }); } catch (err) {}
     },
     sample() { const b = this.big || ""; this.big = null; return b; },
+    // the page's own size, once a minute: the JS heap (Chrome only),
+    // the DOM nodes, the iframes, and the canvases (a terminal holds
+    // one). The daemon keeps a day of these per frame, so a tab that
+    // grows is visible in M-x client-memory before it costs the machine.
+    memory() {
+      try {
+        const pm = performance.memory || {};
+        const mb = (n) => (typeof n === "number" ? Math.round(n / 1048576) : null);
+        const mem = {
+          heap: mb(pm.usedJSHeapSize), total: mb(pm.totalJSHeapSize),
+          limit: mb(pm.jsHeapSizeLimit),
+          nodes: document.getElementsByTagName("*").length,
+          iframes: document.getElementsByTagName("iframe").length,
+          canvases: document.getElementsByTagName("canvas").length
+        };
+        this.rows.push({
+          k: "memory", l: "memory", ms: 0, wait: 0, tid: null, t: this.epoch(this.now()),
+          d: "heap " + mem.heap + "MB nodes " + mem.nodes + " iframes " + mem.iframes +
+            " canvases " + mem.canvases,
+          mem
+        });
+      } catch (err) {}
+    },
     attach(hook) {
       this.hook = hook;
       if (!this.timer) {
         this.observe();
         this.timer = setInterval(() => this.flush(), 1000);
+        this.memory();
+        this.memTimer = setInterval(() => this.memory(), 60000);
       }
     },
     detach(hook) {

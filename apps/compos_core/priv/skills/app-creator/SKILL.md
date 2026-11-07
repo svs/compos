@@ -290,6 +290,16 @@ Actions that leave the editor — a cart, a send, a purchase — are the user's 
 
 compos beats the website because it has keymaps. A review runs from the listing without leaving it: the listing's keys reach the page beside it, and the page is read by its parts. Build every detail this way.
 
+### A page, not a dump
+
+A detail page that is only `label  value` rows is a debug dump. Users call it naff, and they are right. Build the page from what the thing IS:
+
+- A header: the name, its state as a coloured badge, and one line that says what it is.
+- The action bar, directly under the header (see the next section). A verb the page offers and does not draw is a verb the user does not know about.
+- The thing's own collection as rows the point can sit on: the models of a connector, the requests of a webhook, the messages of a thread. An action on a row acts on that row (`t` tests THIS model), so the page is worth moving through.
+- The facts in named sections (Setup, Keys, Last test), each a few lines, not one long table. A fact that needs an action says the key that does it.
+- Read `docs/COMPONENTS.md` and `(apropos-components "WORDS")` before you draw anything: badges, cards, action bars and key cards exist. Do not draw them again in text.
+
 ### Every button has a key
 
 There is no button without a key, and the key is drawn on it. Draw the bar with `ui/actions`; an action is `(CLICK LABEL KEY [CLASS])`, CLASS its tone (`good`, `bad`). Take the site's own key when it has one, else the first free letter of the label. A button the app cannot press itself still gets its key: it opens the page on the site, and the label says so (`↗`). The same key works from the listing (`app-detail-keys!`).
@@ -320,7 +330,7 @@ Agents read a page the same way: `(buffer-outline BUF)` first, then `(buffer-sec
 `var(--ok-fg)`, `var(--warn-fg)`, `var(--alert-fg)`, `var(--accent-fg)`, `var(--dim-fg)`, `var(--default-fg)`, `var(--hl-line-bg)`, `var(--border-bg)`; tints with `color-mix(in srgb, var(--ok-fg) 16%, transparent)`. Never a hex: it breaks every dark theme.
 ## Entry command
 
-One command named after the app, and it is the only way in:
+One command named after the app, and it is the only way in. When you report the app, tell the user that command (`M-x amazon`) first: an app they cannot open is not built.
 
 ```scheme
 (define-command "amazon" "Open the Amazon app"
@@ -332,7 +342,9 @@ One command named after the app, and it is the only way in:
 
 ## Verify
 
+0. Look at it. Show the listing and one page in a real window and read them as the user will. A wall of `label  value` rows, or a page with no buttons, is not done.
 1. `(boundp 'NAME)` for every new public name, then `(apropos ...)` for its metadata.
+1a. Keys on BOTH buffers. `(keymap-bindings (mode-keymap "amazon-mode"))` and the same for the detail mode hold every verb. Each buffer draws its keys: the listing's keys card comes from `'footer`, and the page draws its action bar with the key on each button. A key that is bound and not drawn does not exist for the user.
 2. Open the app. `(window-list-all)` shows three panes in ONE frame, and `(buffer-group BUF)` is the group you opened it in, for the listing AND every detail.
 3. Move down two rows, then `(buffer-list)`: one detail buffer per visited row, and `(detail-window "*amazon*")` is the same window id throughout.
 4. Drive `` C-` `` through `KeyDispatch.handle_key/1` and confirm it walks those buffers rather than reporting one.

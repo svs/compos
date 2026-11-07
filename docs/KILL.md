@@ -116,9 +116,13 @@ frames.
 
 ## Last-buffer rules
 
-Every editor has a live landing buffer. The core does not kill `*scratch*` when
-it is the final live buffer. Before killing the final non-scratch buffer, the
-core creates `*scratch*` and uses it as the fallback.
+Every editor has a live landing buffer, `*scratch*`. `buffer-kill!` in
+`priv/editor.scm` owns the rule: it does not kill `*scratch*` when it is the
+final live buffer, and before it kills the final non-scratch buffer it makes
+`*scratch*`, so the windows fall to it. A buffer whose name starts with a space
+does not count. `Core.kill_buffer` only kills. The Editor names `*scratch*` as
+its fallback, and `scratch--heal!` makes it again when a window names it and it
+is gone.
 
 Desktop restore must not resurrect a killed buffer. A saved layout that names a
 dead buffer uses the separate restore repair policy.

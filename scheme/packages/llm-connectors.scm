@@ -318,13 +318,18 @@
                              (fact (string-append "install:" (car step)) (car step)
                                    (string-append "missing; i installs it · " (cadr step))))
                            steps))))
-          (let ((ss (llm-connectors--secrets name)))
-            (if (and (null? ss) (not (plist-get c 'signin)))
+          ;; only what is still to do: a reply proves the sign-in, and a key that
+          ;; is set needs nothing (k still changes it)
+          (let* ((ss (filter (lambda (s) (not (secret-set? s))) (llm-connectors--secrets name)))
+                 (signin (and (plist-get c 'signin)
+                              (not (and r (eq? (plist-get r 'status) 'ok)))
+                              (plist-get c 'signin))))
+            (if (and (null? ss) (not signin))
                 '()
                 (append
                   (list (list 'section "Sign in"))
-                  (if (plist-get c 'signin)
-                      (list (fact "signin" "sign in" (string-append (plist-get c 'signin) "; l runs it")))
+                  (if signin
+                      (list (fact "signin" "sign in" (string-append signin "; l runs it")))
                       '())
                   (map (lambda (s)
                          (fact (string-append "key:" (symbol->string s)) "key"

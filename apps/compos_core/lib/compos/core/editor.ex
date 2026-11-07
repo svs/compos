@@ -587,8 +587,7 @@ defmodule Compos.Core.Editor do
 
   @impl true
   def init(_opts) do
-    Compos.Core.create_buffer(@scratch)
-
+    # *scratch* is named, not made: editor.scm makes it at boot
     frame = %{
       id: @main_frame,
       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
@@ -659,7 +658,7 @@ defmodule Compos.Core.Editor do
 
       nil ->
         id = if valid_frame_id?(id), do: id, else: gen_frame_id()
-        buffer = Recent.find_buffer(&Buffer.exists?/1) || live_scratch()
+        buffer = Recent.find_buffer(&Buffer.exists?/1) || @scratch
 
         frame = %{
           id: id,
@@ -1200,7 +1199,7 @@ defmodule Compos.Core.Editor do
         # name the buffer that dies, or the window keeps a dead name
         Enum.find(Compos.Core.list_buffers(), fn b ->
           b != buffer and not String.starts_with?(b, " ")
-        end) || live_scratch()
+        end) || @scratch
 
     float? = float_buffer?(buffer)
 
@@ -2506,14 +2505,6 @@ defmodule Compos.Core.Editor do
   defp find_leaf(%{type: :split, children: children}, id),
     do: Enum.find_value(children, &find_leaf(&1, id))
 
-  # A window must land on a live buffer. When every candidate is dead,
-  # recreate *scratch* — a window that shows a dead name turns the next
-  # keypress into a :noproc crash.
-  defp live_scratch do
-    unless Buffer.exists?(@scratch), do: Compos.Core.create_buffer(@scratch)
-    @scratch
-  end
-
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
 
   defp visible_buffers(%{type: :split, children: children}),
@@ -2641,13 +2632,14 @@ defmodule Compos.Core.Editor do
     {tree, _minted} = build_tree(spec, state.next_win)
     {tree, next_win} = reuse_window_ids(tree, old_panes, taken, state.next_win)
 
-    # A buffer that cannot start leaves its pane to *scratch*: a window
-    # must show a live buffer, and the dormant one keeps its files.
+    # A buffer that cannot start leaves its pane to *scratch*, and the
+    # dormant one keeps its files. Scheme makes *scratch* again if it is
+    # gone (scratch--heal!, editor.scm).
     tree =
       Enum.reduce(leaf_ids_buffers(tree), tree, fn {id, buffer}, tree ->
         case live(buffer) do
           {:error, _reason} ->
-            replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: live_scratch()})
+            replace_leaf(tree, id, %{find_leaf(tree, id) | buffer: @scratch})
 
           _started ->
             Buffer.touch(buffer)

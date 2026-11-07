@@ -23,6 +23,22 @@
   (unless (boundp name) (set-symbol-value! name (symbol-value target)))
   name)
 
+;;; --- the landing buffer -------------------------------------------------------
+;;; A window always shows a live buffer, and *scratch* is the last place to
+;;; land. The core only names it: a new frame, a refill with nothing else
+;;; alive, a layout pane whose buffer cannot start. Making it is policy,
+;;; so it is here: at boot, and on each window change while a window names
+;;; it and it is gone. A *scratch* the user killed and no window shows stays
+;;; dead. raw-buffer-create: the boot runs this before buffer-create exists.
+
+(define (scratch--heal!)
+  (when (and (not (buffer-exists? "*scratch*"))
+             (member "*scratch*" (map cadr (window-list-all))))
+    (raw-buffer-create "*scratch*"))
+  #t)
+
+(scratch--heal!)
+
 ;;; --- package context and the shared catalog ---------------------------------
 ;;; Scheme's callable globals deliberately stay flat.  These two stamps are
 ;;; metadata: the loader changes them while evaluating a file so every public
@@ -3114,6 +3130,7 @@
 ;; so their own modeline is right before they return; this is the answer
 ;; for every other path.
 (define (window-configuration-changed!)
+  (scratch--heal!)
   (window-state-changed!)
   (run-hooks 'window-configuration-change-hook))
 

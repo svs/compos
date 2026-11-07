@@ -915,18 +915,32 @@
     (panes-apply! (panes-set-focus moved pid))
     #t))
 
+(define (panes--fill-candidates layout)
+  "The group's buffers no pane of LAYOUT shows, most recent first. A
+   groupless frame takes its plain buffers, so a system buffer never
+   fills a pane."
+  (let ((shown (panes-buffers layout))
+        (group (frame-group)))
+    (filter (lambda (b)
+              (and (not (member b shown))
+                   (if group
+                       #t
+                       (and (not (string-prefix? "*" b))
+                            (not (buffer-context-only? b))))))
+            (window-fill-buffers))))
+
 (define (panes--split-window! &optional dir)
   "C-x 3, and C-x 2 when DIR is v: an empty pane opens right of the
-   focused pane, or under it in its column, and the next fill buffer
-   shows in it when the fill rule names one. The selection stays.
-   Answers the new pane's frame window, or #f."
+   focused pane, or under it in its column, and takes the group's most
+   recent buffer no pane shows; a pane with none stays blank. The
+   selection stays. Answers the new pane's frame window, or #f."
   (let* ((l (panes--ensure-layout!))
          (me (active-window))
          (k (panes-key-of-handle l me))
          (pid (or (and k (panes-pane-of l k)) (panes--empty-pane-of me) (panes-focus l)))
          (added (if (equal? dir 'v) (panes-split-below l pid) (panes-add-empty-pane l pid)))
-         (action (window-fill-decide (list 'shown (panes-buffers l)) (window-fill-buffers)))
-         (buf (and (equal? (car action) 'show) (cadr action)))
+         (buf (let ((cands (panes--fill-candidates (car added))))
+                (and (pair? cands) (car cands))))
          (after (if buf
                     (car (panes-add-window (car added) (cadr added) buf (panes--buffer-mode buf)))
                     (car added)))
@@ -1001,8 +1015,14 @@
 
 (define (panes-choose-layout! name)
   "NAME, #f for free, becomes the layout of this frame's group, and the
-   frame draws it. Answers NAME."
-  (panes-apply! (panes-set-layout (panes--ensure-layout!) (or name 'free)))
+   frame draws it. New panes take the group's most recent buffers that no
+   pane shows; a pane with none stays blank. Answers NAME."
+  (let* ((named (or name 'free))
+         (set (panes-set-layout (panes--ensure-layout!) named))
+         (filled (if (equal? named 'free)
+                     set
+                     (panes-fill-panes set (panes--fill-candidates set) panes--buffer-mode))))
+    (panes-apply! filled))
   (layout-modeline!)
   name)
 

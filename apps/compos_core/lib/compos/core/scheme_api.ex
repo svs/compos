@@ -727,6 +727,13 @@ defmodule Compos.Core.SchemeAPI do
       {"buffer-ref",
        "(buffer-ref BUF) — return an immutable buffer handle for local reads and writes across renames, or #f if unknown."} =>
         fn [name] -> Buffer.ref(name) || false end,
+      # a holder of ids (the panes model) reads names through this: the
+      # read model maps an id to its name now, live or dormant, across renames
+      {"buffer-ids->names",
+       "(buffer-ids->names IDS) — the name of each buffer id in IDS, in order; #f for an id no buffer has. A rename keeps the id."} =>
+        fn [ids] when is_list(ids) ->
+          Enum.map(ids, fn id -> Compos.Core.BufferView.name_of_id(id) || false end)
+        end,
       # the buffer list names dormant buffers too: they hold a checkpoint
       # and no process. A verb asks this, not exists?, or it refuses to act
       # on the rows it shows.

@@ -6347,6 +6347,7 @@
 (public! 'buffer-list-mru "Buffer names, most recently used first")
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
 (public! 'buffer-ref "(buffer-ref BUF) — immutable handle for buffer-local reads and writes across renames, or #f if unknown")
+(public! 'buffer-ids->names "(buffer-ids->names IDS) — the name of each buffer id, live or dormant, in order; #f for an unknown id. A rename keeps the id")
 (public! 'buffer-known? "(buffer-known? NAME) -> bool: live OR dormant. A list shows dormant buffers, so a verb asks this one")
 (catalog-meta! 'function "buffer-known?" 'domain 'buffers 'effects '(read))
 (effects! '(write))

@@ -171,6 +171,20 @@ defmodule Compos.Core.BufferView do
 
   def fetch(_), do: :error
 
+  @doc """
+  The name of the buffer whose id is ID, live or dormant, or nil. A
+  rename moves the id to the new name, so a holder of ids reads the
+  name of today.
+  """
+  def name_of_id(id) when is_binary(id) do
+    case lookup({:id, id}) do
+      [{_, name}] -> name
+      [] -> nil
+    end
+  end
+
+  def name_of_id(_), do: nil
+
   # A read against a table that does not exist raises. That happens only
   # between this process dying and its supervisor restarting it, and the
   # honest answer in that window is "no row", not a crash in the reader.

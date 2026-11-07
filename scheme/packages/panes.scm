@@ -82,14 +82,26 @@
   (car (panes--ids (list buf))))
 
 (define (panes--names-of ids)
-  "The names of the buffers whose ids are IDS, in order, in one query;
-   an id no buffer has stays as it is. meta.db holds every buffer,
-   dormant ones too, by id: a model window holds a dormant buffer as
-   well, and a rename keeps the id."
+  "The names of the buffers whose ids are IDS, in order; an id no buffer
+   has stays as it is. The buffer read model maps an id to its name now,
+   live or dormant, and a rename moves the id with the buffer: a model
+   that holds ids shows the renamed buffer. meta.db answers only the ids
+   the read model misses; it is written after the buffer starts, so a
+   buffer made a moment ago is not in it yet."
   (if (null? ids)
       '()
-      (let ((rows (cadr (buffer-rows (list 'ids ids 'hidden #t 'context-only #t 'fields '(id))))))
-        (map (lambda (id) (let ((r (find (lambda (r) (equal? (cadr r) id)) rows))) (if r (car r) id))) ids))))
+      (let* ((live (buffer-ids->names ids))
+             (missing (let loop ((i ids) (n live) (acc '()))
+                        (cond ((null? i) (reverse acc))
+                              ((car n) (loop (cdr i) (cdr n) acc))
+                              (else (loop (cdr i) (cdr n) (cons (car i) acc))))))
+             (rows (if (null? missing)
+                       '()
+                       (cadr (buffer-rows (list 'ids missing 'hidden #t 'context-only #t 'fields '(id)))))))
+        (map (lambda (id name)
+               (or name
+                   (let ((r (find (lambda (r) (equal? (cadr r) id)) rows))) (if r (car r) id))))
+             ids live))))
 
 (define (panes--name id)
   "The name of the buffer whose id is ID; ID itself when no buffer has

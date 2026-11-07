@@ -31,10 +31,51 @@
 ;; (testing, ok or failed), reply, error, ms and at.
 (define *llm-connectors-tests* '())
 
-;; a test of the connector alone is keyed by its name; a test of one of
-;; its models by the name and the model
-(define (llm-connectors--test-key name &optional model)
-  (if model (string-append name " " model) name))
+;;; A row of the list is a connector's name, or api:PROVIDER for one hosted
+;;; provider of the api connector: OpenRouter, Anthropic, OpenAI, DeepSeek.
+;;; A provider row is the api connector on that provider's models and key.
+
+(define (llm-connectors--provider row)
+  (and (string? row) (string-prefix? "api:" row) (substring row 4 (string-length row))))
+
+(define (llm-connectors--connector row)
+  (if (llm-connectors--provider row) "api" row))
+
+;; the key setting of PROVIDER, or #f
+(define (llm-connectors--provider-secret p)
+  (find (lambda (s) (equal? (secret-prop s 'provider) p))
+        (filter secret-setting? (setup--provider-secrets))))
+
+;; the provider of a model id of the api connector: its prefix, else the
+;; family its name says
+(define (llm-connectors--model-provider id)
+  (let ((parts (string-split id ":")))
+    (cond ((pair? (cdr parts)) (car parts))
+          ((string-prefix? "claude" id) "anthropic")
+          ((or (string-prefix? "gpt" id) (string-prefix? "o1" id) (string-prefix? "o3" id) (string-prefix? "o4" id)) "openai")
+          ((string-prefix? "deepseek" id) "deepseek")
+          (else #f))))
+
+(define (llm-connectors-providers)
+  "(llm-connectors-providers) -- the hosted providers of the api connector: those with a key setting, and those whose models it lists"
+  (let ((seen (append (filter string? (map (lambda (s) (secret-prop s 'provider)) (filter secret-setting? (setup--provider-secrets))))
+                      (filter string? (map (lambda (m) (llm-connectors--model-provider (car m)))
+                                           (llm-connectors--connector-models "api"))))))
+    (reverse (fold (lambda (acc p) (if (member p acc) acc (cons p acc))) '() seen))))
+
+;; the model a provider row tests: the one its key names, else its first
+(define (llm-connectors--provider-model p)
+  (let ((s (llm-connectors--provider-secret p))
+        (ms (llm-connectors-models (string-append "api:" p))))
+    (or (and s (secret-prop s 'model))
+        (and (pair? ms) (car (car ms))))))
+
+;; a test is keyed by the connector and the model it ran on; a provider
+;; row's own test is the test of its model
+(define (llm-connectors--test-key row &optional model)
+  (let* ((p (llm-connectors--provider row))
+         (m (or model (and p (llm-connectors--provider-model p)))))
+    (if m (string-append (llm-connectors--connector row) " " m) (llm-connectors--connector row))))
 
 (define (llm-connectors--result key)
   (let ((e (assoc key *llm-connectors-tests*))) (and e (cadr e))))
@@ -44,24 +85,46 @@
   (llm-connectors--result (llm-connectors--test-key name model)))
 
 (define (llm-connectors--title name)
-  (or (plist-get (connector-config name) 'title) name))
+  (let ((p (llm-connectors--provider name)))
+    (if p
+        (let ((s (llm-connectors--provider-secret p)))
+          (cond (s (car (string-split (setup-secret-label s) ":")))
+                ((equal? p "deepseek") "DeepSeek")
+                (else (string-append (string-upcase (substring p 0 1)) (substring p 1 (string-length p))))))
+        (or (plist-get (connector-config name) 'title) name))))
+
+(define (llm-connectors--about name)
+  (let ((p (llm-connectors--provider name)))
+    (if p
+        (let ((s (llm-connectors--provider-secret p)))
+          (string-append "hosted API" (if s (string-append " · " (setup-secret-label s)) "")))
+        (connector-description name))))
 
 (define (llm-connectors-kind name)
   "(llm-connectors-kind NAME) -- agent, API or browser"
-  (let ((backend (plist-get (connector-config name) 'backend)))
+  (let ((backend (plist-get (connector-config (llm-connectors--connector name)) 'backend)))
     (cond ((equal? backend "chrome-gemini-nano") "browser")
           ((equal? backend "req-llm") "API")
           (else "agent"))))
 
 (define (llm-connectors-state name)
-  "(llm-connectors-state NAME) -- what connector NAME needs next: ready, not installed or needs a key"
-  (let ((unmet (setup--unmet (setup-connector-requirements name))))
-    (cond ((null? unmet) "ready")
+  "(llm-connectors-state NAME) -- what connector NAME, or provider row api:P, needs next: ready, not installed or needs a key"
+  (let ((p (llm-connectors--provider name))
+        (unmet (setup--unmet (setup-connector-requirements (llm-connectors--connector name)))))
+    (cond (p (let ((s (llm-connectors--provider-secret p)))
+               (if (if s (secret-set? s) (pair? (llm-connectors-models name))) "ready" "needs a key")))
+          ((null? unmet) "ready")
           ((equal? (plist-get (car unmet) 'kind) 'program) "not installed")
           (else "needs a key"))))
 
-;; the secret settings connector NAME declares
+;; the secret settings connector NAME declares; a provider row has its own
 (define (llm-connectors--secrets name)
+  (let ((p (llm-connectors--provider name)))
+    (if p
+        (let ((s (llm-connectors--provider-secret p))) (if s (list s) '()))
+        (llm-connectors--connector-secrets name))))
+
+(define (llm-connectors--connector-secrets name)
   (apply append
          (map (lambda (r) (cond ((plist-get r 'secret) (list (plist-get r 'secret)))
                                 ((plist-get r 'secrets) (plist-get r 'secrets))
@@ -118,11 +181,32 @@
                           (string-append "It " (llm-connectors--test-text name) "."))
                          (else (string-append "Its test " (llm-connectors--test-text name) "."))))))
 
-(define (llm-connectors--default? name) (equal? name *default-connector*))
+(define (llm-connectors--default? name)
+  (and (equal? (llm-connectors--connector name) *default-connector*)
+       (or (not (llm-connectors--provider name)) (llm-connectors--default-model name))
+       #t))
+
+;; the list: the agents, the hosted providers, then the browser, each under
+;; its heading. A heading row is (section TITLE).
+(define (llm-connectors-rows)
+  "(llm-connectors-rows) -- the rows of the list: connector names and api:PROVIDER rows, under (section TITLE) headings"
+  (let* ((names (connector-names))
+         (of (lambda (kind) (filter (lambda (n) (equal? (llm-connectors-kind n) kind)) names)))
+         (group (lambda (title rows) (if (null? rows) '() (cons (list 'section title) rows)))))
+    (append (group "Agents (ACP)" (of "agent"))
+            (group "Hosted APIs" (map (lambda (p) (string-append "api:" p)) (llm-connectors-providers)))
+            (group "In the browser" (of "browser")))))
+
+(define (llm-connectors--section? row) (and (pair? row) (eq? (car row) 'section)))
 
 ;;; --- the list ------------------------------------------------------------------
 
 (define (llm-connectors--cells buf name)
+  (if (llm-connectors--section? name)
+      (list (list (cadr name) "list-section-name") "" "" "" "" "")
+      (llm-connectors--row-cells buf name)))
+
+(define (llm-connectors--row-cells buf name)
   (let ((state (llm-connectors-state name)))
     (list (list (string-append (llm-connectors--title name) (if (llm-connectors--default? name) " (default)" ""))
                 "llm-connectors-name")
@@ -130,38 +214,46 @@
           (list state (if (equal? state "ready") "success" "warning"))
           (list (number->string (length (llm-connectors-models name))) "dim")
           (list (llm-connectors--test-text name) (llm-connectors--test-face name))
-          (list (connector-description name) "dim"))))
+          (list (llm-connectors--about name) "dim"))))
 
 (define (llm-connectors--meta buf)
-  (let ((names (connector-names)))
-    (string-append (number->string (length names)) " connectors · "
+  (let ((names (filter string? (llm-connectors-rows))))
+    (string-append (number->string (length names)) " connectors and providers · "
                    (number->string (length (filter (lambda (n) (equal? (llm-connectors-state n) "ready")) names)))
                    " ready · new chats use " *default-connector*)))
 
 ;;; --- the page of one connector -------------------------------------------------
 
-;; a page row is (ID LABEL VALUE)
 ;; the models connector NAME offers, as (ID LABEL)
-(define (llm-connectors-models name)
-  "(llm-connectors-models NAME) -- every model connector NAME offers, as (ID LABEL)"
+(define (llm-connectors--connector-models name)
   (or (ignore-errors (lambda () (chat-model-options *llm-connectors-buffer* name))) '()))
 
-;; the model new chats use on connector NAME, or #f for its own default
+(define (llm-connectors-models name)
+  "(llm-connectors-models NAME) -- every model connector NAME, or provider row api:P, offers, as (ID LABEL)"
+  (let ((p (llm-connectors--provider name)))
+    (if p
+        (filter (lambda (m) (equal? (llm-connectors--model-provider (car m)) p))
+                (llm-connectors--connector-models "api"))
+        (llm-connectors--connector-models name))))
+
+;; the model new chats use on row NAME, or #f for its own default
 (define (llm-connectors--default-model name)
-  (let ((b (llm-default-bundle-record)))
-    (and (equal? (plist-get b 'connector) name) (plist-get b 'model))))
+  (let* ((b (llm-default-bundle-record))
+         (m (and (equal? (plist-get b 'connector) (llm-connectors--connector name)) (plist-get b 'model)))
+         (p (llm-connectors--provider name)))
+    (if (and p m) (and (equal? (llm-connectors--model-provider m) p) m) m)))
 
 ;; a page row: (section TITLE), (fact ID LABEL VALUE) or (model ID LABEL)
 (define (llm-connectors--page-rows buf)
   (let* ((name (buffer-local buf 'llm-connector))
-         (c (and name (connector-config name)))
+         (c (and name (connector-config (llm-connectors--connector name))))
          (r (and name (llm-connectors-test-result name)))
          (fact (lambda (id label value) (list 'fact id label value))))
     (if (not name)
         '()
         (append
           (list (list 'section "Connector")
-                (fact "about" "about" (connector-description name))
+                (fact "about" "about" (llm-connectors--about name))
                 (fact "kind" "kind" (llm-connectors-kind name))
                 (fact "state" "state" (llm-connectors-state name))
                 (fact "default" "default"
@@ -171,6 +263,11 @@
                                            (if m (string-append " with " m) "")))
                           "no; d makes it the default")))
           (if (plist-get c 'cmd) (list (fact "command" "command" (plist-get c 'cmd))) '())
+          (let ((pv (llm-connectors--provider name)))
+            (if pv
+                (list (fact "model" "test model"
+                            (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it")))
+                '()))
           (let ((steps (or (plist-get c 'install) '())))
             (if (null? steps)
                 '()
@@ -288,11 +385,13 @@
 (define (llm-connectors--on-current fn)
   (let ((name (or (buffer-local (current-buffer) 'llm-connector)
                   (let ((l (llm-connectors--list))) (and (buffer-exists? l) (list-current l))))))
-    (if name (fn name) (message "no connector on this line"))))
+    (if (string? name) (fn name) (message "no connector on this line"))))
 
 (define (llm-connectors-make-default! name &optional model)
-  "(llm-connectors-make-default! NAME [MODEL]) -- new chats use connector NAME, on MODEL when it is given"
-  (setup-use-connector! name model))
+  "(llm-connectors-make-default! NAME [MODEL]) -- new chats use connector NAME, on MODEL when it is given; a provider row api:P uses the api connector on its model"
+  (let ((pv (llm-connectors--provider name)))
+    (setup-use-connector! (llm-connectors--connector name)
+                          (or model (and pv (llm-connectors--provider-model pv))))))
 
 ;; the model of the row at point on a connector page, or #f
 (define (llm-connectors--model-at-point)
@@ -316,15 +415,16 @@
 
 (define (llm-connectors-install! name)
   "(llm-connectors-install! NAME) -- install the agent program of connector NAME in a terminal beside the list"
-  (let ((buf (setup-install-agent! name display-buffer-other-window!)))
+  (let ((buf (and (not (llm-connectors--provider name))
+                  (setup-install-agent! name display-buffer-other-window!))))
     (cond (buf (llm-connectors--join! buf)
                (message (string-append name ": installing; t tests it when the terminal is done")))
-          ((null? (or (plist-get (connector-config name) 'install) '()))
+          ((null? (or (plist-get (connector-config (llm-connectors--connector name)) 'install) '()))
            (message (string-append name " declares no install steps"))))))
 
 (define (llm-connectors-sign-in! name)
   "(llm-connectors-sign-in! NAME) -- run the login command of connector NAME in a terminal beside the list"
-  (let ((signin (plist-get (connector-config name) 'signin)))
+  (let ((signin (plist-get (connector-config (llm-connectors--connector name)) 'signin)))
     (if (not signin)
         (message (string-append name " has no sign-in; k adds its key"))
         (begin
@@ -339,8 +439,10 @@
   "(llm-connectors-add-key! NAME) -- ask for the API key connector NAME declares"
   (if (null? (llm-connectors--secrets name))
       (message (string-append name " takes no key"
-                              (if (plist-get (connector-config name) 'signin) "; l signs in" "")))
-      (setup-wizard-add-key! #f name llm-connectors-refresh!)))
+                              (if (plist-get (connector-config (llm-connectors--connector name)) 'signin) "; l signs in" "")))
+      (if (llm-connectors--provider name)
+          (setup-ask-secret! (car (llm-connectors--secrets name)) "api" llm-connectors-refresh!)
+          (setup-wizard-add-key! #f name llm-connectors-refresh!))))
 
 (effects! '(write external spend))
 
@@ -376,6 +478,9 @@
   (let* ((t0 (monotonic-ms))
          (token t0)
          (key (llm-connectors--test-key name model))
+         (pv (llm-connectors--provider name))
+         (model (or model (and pv (llm-connectors--provider-model pv))))
+         (connector (llm-connectors--connector name))
          (elapsed (lambda () (- (monotonic-ms) t0)))
          (fail (lambda (why) (list 'status 'failed 'error why 'ms (elapsed) 'at (current-time)))))
     (llm-connectors--set-test! key (list 'status 'testing 'token token 'at (current-time)))
@@ -383,7 +488,7 @@
     (let ((slug (ignore-errors
                   (lambda ()
                     (execute* "This is a connection test. Reply with the one word: ready."
-                              (append (list 'connector name
+                              (append (list 'connector connector
                                             'title (string-append "Connector test: " key)
                                             'notify #f)
                                       (if model (list 'model model) '())))))))
@@ -421,7 +526,7 @@
 
 (define (llm-connectors-test-all!)
   "(llm-connectors-test-all!) -- test every connector that is ready, at once"
-  (let ((ready (filter (lambda (n) (equal? (llm-connectors-state n) "ready")) (connector-names))))
+  (let ((ready (filter (lambda (n) (equal? (llm-connectors-state n) "ready")) (filter string? (llm-connectors-rows)))))
     (for-each (lambda (n) (llm-connectors-test! n)) ready)
     (message (string-append "testing " (number->string (length ready)) " connectors"))))
 
@@ -515,9 +620,11 @@
            "new chats. RET shows the page, g checks again, / narrows, q quits.")
     'buffer *llm-connectors-buffer*
     'transient #f
-    'rows (lambda (buf) (connector-names))
-    'key (lambda (buf name) name)
-    'preview (lambda (buf name) (llm-connectors-show-detail! name))
+    'rows (lambda (buf) (llm-connectors-rows))
+    'key (lambda (buf name) (if (llm-connectors--section? name) (string-append "section:" (cadr name)) name))
+    'preview (lambda (buf name) (when (string? name) (llm-connectors-show-detail! name)))
+    'separator? (lambda (buf r) (llm-connectors--section? r))
+    'section? (lambda (buf r) (llm-connectors--section? r))
     'columns (lambda (buf)
                (list (list "connector" 30) (list "kind" 8) (list "needs" 14)
                      (list "models" 7) (list "last test" 28) (list "about" #f)))
@@ -572,12 +679,14 @@
 (define-command "llm-connectors" "Set up each model connector and test its connection"
   (lambda ()
     (let ((buf (list-mode-show! "llm-connectors-mode")))
-      (with-current-buffer buf (lambda () (llm-connectors-show-detail! (list-current buf))))
+      (with-current-buffer buf (lambda () (let ((r (list-current buf))) (when (string? r) (llm-connectors-show-detail! r)))))
       buf)))
 
 (effects! '(read))
 (public! 'llm-connectors-state "(llm-connectors-state NAME) -- what connector NAME needs next: ready, not installed or needs a key")
 (public! 'llm-connectors-summary "(llm-connectors-summary) -- a sentence: the connector new chats use, and what its last test said")
+(public! 'llm-connectors-providers "(llm-connectors-providers) -- the hosted providers of the api connector")
+(public! 'llm-connectors-rows "(llm-connectors-rows) -- the rows of the list: connector names and api:PROVIDER rows, under (section TITLE) headings")
 (public! 'llm-connectors-kind "(llm-connectors-kind NAME) -- agent, API or browser")
 (public! 'llm-connectors-test-result "(llm-connectors-test-result NAME [MODEL]) -- the last test of connector NAME, or of its MODEL: status, reply, error, ms, at; or #f")
 (effects! '(write external spend))

@@ -257,17 +257,29 @@
   (llm-connectors--memo (list 'models name)
     (lambda () (or (ignore-errors (lambda () (chat-model-options *llm-connectors-buffer* name))) '()))))
 
+;; model ids you added to a row with a on its page: ((ROW (ID ...)) ...)
+(defcustom 'llm-connectors-own-models '()
+  "The model ids you added to a connector or provider with a on its page in M-x llm-connectors, as ((ROW (ID ...)) ...). Use this for a model the provider serves that its list does not name yet."
+  'group 'llm 'type 'sexp)
+
+(define (llm-connectors--own-models name)
+  (let ((e (assoc name llm-connectors-own-models)))
+    (if e (cadr e) '())))
+
 (define (llm-connectors-models name)
-  "(llm-connectors-models NAME) -- every model connector NAME, or provider row api:P, offers, as (ID LABEL)"
-  (let ((p (llm-connectors--provider name)))
-    (if p
-        (append
-          (filter (lambda (m) (equal? (llm-connectors--model-provider (car m)) p))
-                  (llm-connectors--connector-models "api"))
-          ;; an endpoint of the user's own serves the models it was added with
-          (map (lambda (id) (list (string-append p ":" id) ""))
-               (if (boundp 'llm-endpoint-models) (llm-endpoint-models p) '())))
-        (llm-connectors--connector-models name))))
+  "(llm-connectors-models NAME) -- every model connector NAME, or provider row api:P, offers, as (ID LABEL); the ids you added come last"
+  (let* ((p (llm-connectors--provider name))
+         (base (if p
+                   (append
+                     (filter (lambda (m) (equal? (llm-connectors--model-provider (car m)) p))
+                             (llm-connectors--connector-models "api"))
+                     ;; an endpoint of the user's own serves the models it was added with
+                     (map (lambda (id) (list (string-append p ":" id) ""))
+                          (if (boundp 'llm-endpoint-models) (llm-endpoint-models p) '())))
+                   (llm-connectors--connector-models name))))
+    (append base
+            (map (lambda (id) (list id "yours"))
+                 (filter (lambda (id) (not (assoc id base))) (llm-connectors--own-models name))))))
 
 ;; the model new chats use on row NAME, or #f for its own default
 (define (llm-connectors--default-model name)
@@ -566,6 +578,29 @@
           (setup-ask-secret! s "api" (lambda () (llm-connectors--endpoint-ready! name)))
           (llm-connectors--endpoint-ready! name)))))
 
+(define (llm-connectors-add-model! name id)
+  "(llm-connectors-add-model! NAME ID) -- add model ID to row NAME, save it, and test it; on a provider row api:P an id without P: gets it"
+  (let* ((p (llm-connectors--provider name))
+         (id (string-trim id))
+         (id (if (and p (not (string-prefix? (string-append p ":") id))) (string-append p ":" id) id)))
+    (customize-save! 'llm-connectors-own-models
+                     (alist-put llm-connectors-own-models name
+                                (append (filter (lambda (x) (not (equal? x id))) (llm-connectors--own-models name))
+                                        (list id))))
+    ;; a new id is checked at once: a wrong name fails here, not in a chat
+    (llm-connectors-test! name #f id)
+    id))
+
+(define (llm-connectors-add-model-ask! name)
+  (read-string (string-append "Model id to add to " (llm-connectors--title name)
+                              (let ((p (llm-connectors--provider name)))
+                                (if p (string-append " (as " p " names it, e.g. vendor/model)") ""))
+                              ": ")
+    (lambda (id)
+      (if (or (not (string? id)) (equal? (string-trim id) ""))
+          (message "no model added")
+          (message (string-append "added " (llm-connectors-add-model! name id) "; testing it"))))))
+
 (define (llm-connectors-add-endpoint-ask!)
   (read-string "Endpoint name (a provider such as groq, or a name of your own): "
     (lambda (name)
@@ -737,6 +772,9 @@
 (define-command "llm-connectors-add-key" "Add or change the API key of the connector on this line"
   (lambda () (llm-connectors--on-current llm-connectors-add-key!)))
 
+(define-command "llm-connectors-add-model" "Add a model id of your own to this connector, and test it"
+  (lambda () (llm-connectors--on-current llm-connectors-add-model-ask!)))
+
 (define-command "llm-connectors-add-endpoint" "Add a hosted provider or a server of your own, give its key, and test it"
   (lambda () (llm-connectors-add-endpoint-ask!)))
 
@@ -816,7 +854,7 @@
            "One model connector: what it needs (its command, the install steps, the sign-in and "
            "the keys), its last test, and under Models every model it offers, each with its own "
            "last test. On a model, t tests that model and d makes it the model new chats use; "
-           "elsewhere they act on the connector. RET shows the whole last test, with the error a failed test gave, in the other window. i installs, l signs in, k adds the key, "
+           "elsewhere they act on the connector. RET shows the whole last test, with the error a failed test gave, in the other window. / searches the models; a adds a model id of your own, saves it and tests it. i installs, l signs in, k adds the key, "
            "/ narrows, g checks again, q quits.")
     'transient #f
     'rows (lambda (buf) (llm-connectors--page-rows buf))
@@ -831,9 +869,9 @@
     'no-marks #t
     'local-filter #t
     'footer (lambda (buf)
-              '(("RET" "result") ("t" "test") ("d" "default") ("i" "install") ("l" "sign in") ("k" "key")
-                ("/" "filter") ("g" "check") ("q" "quit")))
-    'keys (cons '("RET" "llm-connectors-show-test") *llm-connectors-keys*)))
+              '(("RET" "result") ("t" "test") ("d" "default") ("/" "search") ("a" "add model")
+                ("i" "install") ("l" "sign in") ("k" "key") ("g" "check") ("q" "quit")))
+    'keys (append '(("RET" "llm-connectors-show-test") ("a" "llm-connectors-add-model")) *llm-connectors-keys*)))
 
 (add-hook! 'setup-connector-chosen-hook 'llm-connectors-refresh!)
 

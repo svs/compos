@@ -763,8 +763,29 @@
          (reverse (map cadr (sort (map (lambda (t) (list (or (plist-get t 'created) "") t)) ts)))))
         (else ts)))
 
+(define (todo--with-closed-children ts)
+  "TS with the closed sub-tasks of every open task in it, each after its
+  parent's own rows and marked 'todo-under that parent, so a task still in
+  progress keeps showing the parts that are done."
+  (let* ((listed (map (lambda (t) (plist-get t 'id)) ts))
+         (closed (filter (lambda (t) (and (member (plist-get t 'state) *todo-closed*)
+                                          (plist-get t 'parent)
+                                          (not (member (plist-get t 'id) listed))))
+                         (todo-list '(all #t))))
+         (kids (lambda (p) (filter (lambda (c) (equal? (plist-get c 'parent) (plist-get p 'id))) closed)))
+         (below (lambda (self p root)
+                  (apply append (map (lambda (c) (cons (append c (list 'todo-under root)) (self self c root)))
+                                     (kids p))))))
+    (apply append
+      (map (lambda (t)
+             (if (member (plist-get t 'state) *todo-closed*)
+                 (list t)
+                 (cons t (below below t t))))
+           ts))))
+
 (define (todo--rows buf)
-  (list-keep buf (todo--sections buf (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf)))))
+  (list-keep buf (todo--sections buf (todo--with-closed-children
+                                      (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf))))))
 
 ;;; `<` cycles what a section is; a section heading is a row of kind sep
 (define *todo-groupings* '("none" "group" "project" "status"))
@@ -774,8 +795,9 @@
 (define (todo--sep? t) (equal? (plist-get t 'kind) "sep"))
 
 (define (todo--section-of buf t)
-  (let ((g (todo--grouping buf)))
-    (cond ((equal? g "group") (or (group-name (plist-get t 'group)) "no group"))
+  (let ((g (todo--grouping buf)) (under (plist-get t 'todo-under)))
+    (cond (under (todo--section-of buf under))
+          ((equal? g "group") (or (group-name (plist-get t 'group)) "no group"))
           ((equal? g "project") (plist-get t 'project))
           (else (plist-get t 'state)))))
 

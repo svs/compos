@@ -532,7 +532,7 @@ defmodule Compos.EditorTest do
       run("switch-mark")
       run("group-add")
 
-      assert Editor.render_state().minibuffer.prompt =~ "Add buffers to group"
+      assert Editor.render_state().minibuffer.prompt =~ "Put buffers in group"
 
       # the "New group" row founds one, and the next prompt takes its
       # name; a default group may lead the candidates, so name the row
@@ -2549,7 +2549,7 @@ defmodule Compos.EditorTest do
 
     # C-c g founds the group from the code buffer, then the notes join it
     press(["C-c", "g"])
-    assert Editor.snapshot().minibuffer.prompt =~ ~r/^Add buffers to group/
+    assert Editor.snapshot().minibuffer.prompt =~ ~r/^Put buffers in group/
     type(group)
     press(["RET"])
     assert in_group?(buf, group)
@@ -2637,7 +2637,7 @@ defmodule Compos.EditorTest do
 
     # the prompt names the default; a bare RET joins it
     press(["C-c", "g"])
-    assert Editor.snapshot().minibuffer.prompt == "Add buffers to group (default #{g}): "
+    assert Editor.snapshot().minibuffer.prompt == "Put buffers in group (default #{g}): "
     press(["RET"])
     assert group_name(buffer_group(stray)) == g
 

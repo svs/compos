@@ -6370,6 +6370,8 @@
 (public! 'buffer-unwatch-change! "(buffer-unwatch-change! BUF KEY) — stop the change watch KEY on BUF")
 (public! 'buffer-find "(buffer-find [SPEC]) — the buffers SPEC selects, awake and asleep, from meta.db; SPEC is buffer-rows' plist (names, chat-ids, modes, groups, match, sort, ...), and 'awake #t keeps only the awake ones")
 (catalog-meta! 'function "buffer-find" 'effects '(read))
+(public! 'buffer-read-many "(buffer-read-many NAMES FIELDS LOCAL-KEYS) — one metadata snapshot per buffer; rows are (NAME FIELD-VALUES... LOCAL-VALUES...). Missing values are #f. Dormant buffers stay asleep. Fields: path, size, modified, read_only, point, mark, id.")
+(catalog-meta! 'function "buffer-read-many" 'domain 'buffers 'effects '(read))
 (public! 'chat-list "(chat-list [SPEC]) — the chats SPEC selects, awake and asleep: buffer-find in chat-mode; (chat-list '(chat-ids (ID))) finds a chat by its id")
 (catalog-meta! 'function "chat-list" 'effects '(read))
 (catalog-meta! 'function "buffer-unwatch-change!" 'domain 'buffers 'effects '(write))

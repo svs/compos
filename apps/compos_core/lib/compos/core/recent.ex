@@ -55,7 +55,6 @@ defmodule Compos.Core.Recent do
   def bury(buffer) do
     low = :ets.update_counter(@table, :"$low", -1, {:"$low", 0})
     :ets.insert(@table, {buffer, low})
-    Compos.Core.MetaDb.bury(buffer)
     :ok
   rescue
     ArgumentError -> :ok
@@ -87,6 +86,16 @@ defmodule Compos.Core.Recent do
     :ok
   rescue
     ArgumentError -> :ok
+  end
+
+  @doc """
+  The buffer names `buffers/0` puts in order, each with its rank: higher
+  is more recent, a buried one is below 0. A name not here ranks 0.
+  """
+  def ranks do
+    ready()
+    {window, buried} = split_buried(rows())
+    for {b, seq} <- Enum.take(window, @window) ++ buried, is_binary(b), do: {b, seq}
   end
 
   @doc "Every entry, the most recent first, buried ones last."

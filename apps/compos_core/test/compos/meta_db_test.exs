@@ -52,4 +52,25 @@ defmodule Compos.Core.MetaDbTest do
     assert {1, [[^name]]} =
              MetaDb.query(%{"ids" => [id], "hidden" => true, "context-only" => true})
   end
+
+  # The recent order has one owner, Compos.Core.Recent. A move there, with
+  # no word to meta.db, is the order the recent sort answers.
+  test "the recent sort is Recent's order" do
+    MetaDb.ensure_started()
+    n = System.unique_integer([:positive])
+    [a, b] = names = ["zz-mdb-ra-#{n}", "zz-mdb-rb-#{n}"]
+    Enum.each(names, &Compos.Core.create_buffer/1)
+    q = %{"names" => names, "sort" => "recent"}
+
+    Compos.Core.Recent.bump(a)
+    Compos.Core.Recent.bump(b)
+    assert {2, [[^b], [^a]]} = MetaDb.query(q)
+    assert [^b, ^a] = Enum.map(MetaDb.candidates(q, nil, ""), &hd/1)
+
+    Compos.Core.Recent.bump(a)
+    assert {2, [[^a], [^b]]} = MetaDb.query(q)
+
+    Compos.Core.Recent.bury(a)
+    assert {2, [[^b], [^a]]} = MetaDb.query(q)
+  end
 end

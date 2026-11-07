@@ -1883,17 +1883,36 @@
 
 ;; the views as ui/tabs in the window's header line; left and right step,
 ;; a click takes one
+;; The counts read only the tasks, the group and project filters, the user
+;; and the day. Every chat turn redraws the list, and nine views times every
+;; task cost 120 ms of :ui, so one count keeps its answer for the same input.
+(define *todo-tab-counts* #f)
+
+(define (todo--tab-counts buf all)
+  (let* ((fs (filter (lambda (f) (member (car f) '("group" "project"))) (list-filters buf)))
+         (key (list all fs todo-user (todo--today)))
+         (hit *todo-tab-counts*))
+    (if (and hit (equal? (car hit) key))
+        (cadr hit)
+        (let* ((scoped (filter (lambda (t) (null? (remove (lambda (f) (todo--filter buf t f)) fs))) all))
+               (counts (map (lambda (v) (todo--tab-count all scoped v)) *todo-views*)))
+          (set! *todo-tab-counts* (list key counts))
+          counts))))
+
 (define (todo--tab-blocks buf)
   (let* ((all (todo--all))
-         (fs (filter (lambda (f) (member (car f) '("group" "project"))) (list-filters buf)))
-         (scoped (filter (lambda (t) (null? (remove (lambda (f) (todo--filter buf t f)) fs))) all)))
+         (counts (todo--tab-counts buf all))
+         (view (todo--view buf)))
     (list (component 'ui/tabs
             (list 'class "todo-tabs"
-                  'tabs (map (lambda (v)
-                               (list (string-append "todo-tab-" (car v))
-                                     (string-append (car v) " " (number->string (todo--tab-count all scoped v)))
-                                     (equal? (car v) (todo--view buf))))
-                             *todo-views*))))))
+                  'tabs (let loop ((vs *todo-views*) (cs counts) (out '()))
+                          (if (null? vs)
+                              (reverse out)
+                              (loop (cdr vs) (cdr cs)
+                                    (cons (list (string-append "todo-tab-" (car (car vs)))
+                                                (string-append (car (car vs)) " " (number->string (car cs)))
+                                                (equal? (car (car vs)) view))
+                                          out)))))))))
 
 (add-hook! (list 'block-click 'todo-tabs)
   (lambda (buf id)

@@ -41,7 +41,6 @@ defmodule Compos.Core.MetaDb do
     "group-label" => "g.label",
     "modified" => "b.modified",
     "read-only" => "b.read_only",
-    "used" => "b.used",
     "agent" => "b.agent",
     "chat-id" => "b.chat_id",
     "icon" => "b.icon",
@@ -83,15 +82,6 @@ defmodule Compos.Core.MetaDb do
   def put_groups(groups), do: GenServer.cast(__MODULE__, {:groups, groups})
 
   @doc """
-  NAME was used at MS, system milliseconds: the recent order. Uses in the
-  same millisecond keep the order they came in.
-  """
-  def note_used(name, ms), do: GenServer.cast(__MODULE__, {:used, name, ms})
-
-  @doc "NAME goes to the end of the recent order, below the buffers never used."
-  def bury(name), do: GenServer.cast(__MODULE__, {:bury, name})
-
-  @doc """
   The finished annotation of each of NAMES, in order, as `[name, hint,
   face]`: the columns icon, mode, group, project, workspace and path (a
   chat with no path shows its group's note), padded to the widest of each,
@@ -117,7 +107,7 @@ defmodule Compos.Core.MetaDb do
     * `match` - space-separated terms; each is a case-blind substring of
       the name, title, path, mode, group label, project or workspace
     * `hidden`, `context-only` - keep those buffers too
-    * `sort` - `recent` (default: last used first) or `name`
+    * `sort` - `recent` (default: `Compos.Core.Recent`'s order) or `name`
     * `offset`, `limit` - the page
 
   The filter, the sort and the page are SQL, all of them.
@@ -141,7 +131,7 @@ defmodule Compos.Core.MetaDb do
         name TEXT PRIMARY KEY, id TEXT,
         path TEXT, mode TEXT, title TEXT, group_id TEXT,
         modified INTEGER, read_only INTEGER, context_only INTEGER,
-        icon TEXT, project TEXT, workspace TEXT, used INTEGER, agent TEXT,
+        icon TEXT, project TEXT, workspace TEXT, agent TEXT,
         chat_id TEXT);
       CREATE INDEX IF NOT EXISTS buffers_mode ON buffers (mode);
       CREATE INDEX IF NOT EXISTS buffers_group ON buffers (group_id);
@@ -152,7 +142,7 @@ defmodule Compos.Core.MetaDb do
 
     migrate(db)
     Events.subscribe_meta()
-    {:ok, %{db: db, groups: nil, used: 0}, {:continue, :rebuild}}
+    {:ok, %{db: db, groups: nil}, {:continue, :rebuild}}
   end
 
   @impl true
@@ -160,9 +150,7 @@ defmodule Compos.Core.MetaDb do
     names = BufferView.table() |> :ets.select([{{:"$1", :_}, [{:is_binary, :"$1"}], [:"$1"]}])
     known = state |> all("SELECT name FROM buffers", []) |> Enum.map(&hd/1)
     transaction(state, fn -> Enum.each(Enum.uniq(names ++ known), &sync(state, &1)) end)
-    seed_used(state)
-    [[top]] = all(state, "SELECT coalesce(max(used), 0) FROM buffers", [])
-    {:noreply, %{state | used: top}}
+    {:noreply, state}
   rescue
     ArgumentError -> {:noreply, state}
   end
@@ -181,23 +169,6 @@ defmodule Compos.Core.MetaDb do
         ])
       end
     end)
-
-    {:noreply, state}
-  end
-
-  def handle_cast({:used, name, ms}, state) do
-    used = max(ms, state.used + 1)
-    if absent?(state, name), do: sync(state, name)
-    run(state, "UPDATE buffers SET used = ?2 WHERE name = ?1", [name, used])
-    {:noreply, %{state | used: used}}
-  end
-
-  def handle_cast({:bury, name}, state) do
-    run(
-      state,
-      "UPDATE buffers SET used = (SELECT min(0, coalesce(min(used), 0)) - 1 FROM buffers) WHERE name = ?1",
-      [name]
-    )
 
     {:noreply, state}
   end
@@ -247,15 +218,17 @@ defmodule Compos.Core.MetaDb do
 
   def handle_call({:candidates, opts, pinned, pin_icon}, _from, state) do
     state = catch_up(state)
+    join = recent_join(state, opts["sort"])
     {where, args} = where(opts)
-    rows = all(state, @annotation_select <> where <> order(opts["sort"]), args)
+    rows = all(state, @annotation_select <> join <> where <> order(opts["sort"]), args)
     {:reply, render(Enum.map(rows, fn [n | r] -> {n, r} end), pinned, pin_icon), state}
   end
 
   def handle_call({:query, opts}, _from, state) do
     state = catch_up(state)
+    join = recent_join(state, opts["sort"])
     {where, args} = where(opts)
-    from = " FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <> where
+    from = " FROM buffers b LEFT JOIN groups g ON g.id = b.group_id" <> join <> where
     [[total]] = all(state, "SELECT count(*)" <> from, args)
     fields = List.wrap(opts["fields"] || [])
     bucket = opts["bucket"]
@@ -289,13 +262,11 @@ defmodule Compos.Core.MetaDb do
 
   # a file from an older schema gets each column once
   defp migrate(db) do
-    _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN used INTEGER")
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN agent TEXT")
     # the buffer's id is its stable key: a layout names its buffers by id
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN id TEXT")
     # a chat's id never changes; its name and its agent slug can
     _ = Sqlite3.execute(db, "ALTER TABLE buffers ADD COLUMN chat_id TEXT")
-    :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_used ON buffers (used)")
     :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_id ON buffers (id)")
     :ok = Sqlite3.execute(db, "CREATE INDEX IF NOT EXISTS buffers_chat_id ON buffers (chat_id)")
     :persistent_term.put({__MODULE__, :schema}, @schema)
@@ -334,8 +305,8 @@ defmodule Compos.Core.MetaDb do
 
   defp write_batch(state, events) do
     transaction(state, fn ->
-      # a rename moves the old row, so the buffer keeps its place in the
-      # recent order; a row for the new name already there wins
+      # a rename moves the old row, so the buffer keeps what Scheme wrote
+      # of it; a row for the new name already there wins
       for {n, d} <- events, {was, now} <- renames(n, d) do
         run(state, "UPDATE OR IGNORE buffers SET name = ?2 WHERE name = ?1", [was, now])
       end
@@ -448,33 +419,6 @@ defmodule Compos.Core.MetaDb do
       {n, nil, _} -> [n, nil, nil]
       {n, c, face} -> [n, join(trim(c), widths), face]
     end)
-  end
-
-  # The saved history is the editor's recent list (`Editor` starts its
-  # ring from it, and every use touches both), so a start takes the order
-  # from it: newest just below now, so every use from here on ranks above.
-  # A buffer it does not name has no use, and sorts by name below them all.
-  defp seed_used(state) do
-    # the recent order when it runs; at boot it has not started, and the
-    # history is what it will start from
-    history =
-      if Process.whereis(Compos.Core.Recent),
-        do: Compos.Core.Recent.buffers(),
-        else: Compos.Core.BufferStore.history()
-
-    now = System.system_time(:millisecond)
-
-    transaction(state, fn ->
-      run(state, "UPDATE buffers SET used = NULL", [])
-
-      history
-      |> Enum.with_index()
-      |> Enum.each(fn {name, i} ->
-        run(state, "UPDATE buffers SET used = ?2 WHERE name = ?1", [name, now - 1 - i])
-      end)
-    end)
-  catch
-    :exit, _ -> :ok
   end
 
   # the buffer annotator's columns (`marginalia! 'buffer` in editor.scm)
@@ -598,7 +542,7 @@ defmodule Compos.Core.MetaDb do
     by =
       case sort do
         "name" -> "lower(coalesce(b.title, b.name)), b.name"
-        _recent -> "coalesce(b.used, 0) DESC, b.name"
+        _recent -> "coalesce(r.seq, 0) DESC, b.name"
       end
 
     case section do
@@ -606,6 +550,23 @@ defmodule Compos.Core.MetaDb do
       "mode" -> " ORDER BY coalesce(b.mode, ''), " <> by
       _ -> " ORDER BY " <> by
     end
+  end
+
+  # The recent sort ranks by `Compos.Core.Recent`, the one owner of the
+  # order: a temp table takes its ranks before each query, one insert
+  defp recent_join(_state, "name"), do: ""
+
+  defp recent_join(state, _recent) do
+    ranks = Jason.encode!(Enum.map(Compos.Core.Recent.ranks(), &Tuple.to_list/1))
+
+    :ok =
+      Sqlite3.execute(state.db, """
+      CREATE TEMP TABLE IF NOT EXISTS recent (name TEXT PRIMARY KEY, seq INTEGER);
+      DELETE FROM temp.recent;
+      """)
+
+    run(state, "INSERT OR REPLACE INTO temp.recent SELECT value ->> 0, value ->> 1 FROM json_each(?)", [ranks])
+    " LEFT JOIN temp.recent r ON r.name = b.name"
   end
 
   # rows whose last value is the key, as `[KEY | NAMES]` in the order of

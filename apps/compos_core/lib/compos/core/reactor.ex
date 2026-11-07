@@ -240,18 +240,7 @@ defmodule Compos.Core.Reactor do
   end
 
   def handle_info({:in_scope, ids}, state) do
-    rules =
-      Enum.reduce(ids, state.rules, fn id, rules ->
-        case rules[id] do
-          %{pending: [_ | _], timer: nil, in_flight: false} = r ->
-            Map.put(rules, id, %{r | timer: Process.send_after(self(), {:fire, id}, 0)})
-
-          _ ->
-            rules
-        end
-      end)
-
-    state = %{state | rules: rules}
+    Enum.each(ids, &send(self(), {:fire, &1}))
 
     if Map.get(state, :scope) == :again,
       do: {:noreply, check_scope(state)},

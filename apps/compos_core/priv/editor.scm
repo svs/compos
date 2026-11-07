@@ -1809,8 +1809,10 @@
 (define (set-echo! text) (frame--put! 'echo (if (symbol? text) (symbol->string text) text)))
 (public! 'set-echo! "(set-echo! TEXT) — set the echo area's text; an empty string clears it.")
 
-(define (set-pending! seq) (frame--put! 'pending (if (list? seq) seq '())))
-(public! 'set-pending! "(set-pending! SEQ) — set this frame's pending key prefix.")
+(define (set-pending! seq)
+  (frame--put! 'pending (if (list? seq) seq '()))
+  (when (pair? seq) (run-hook-with-args 'pending-keys-hook seq)))
+(public! 'set-pending! "(set-pending! SEQ) — set this frame's pending key prefix; a prefix runs pending-keys-hook with SEQ.")
 
 (define (set-last-keys! seq) (frame--put! 'last-keys (if (list? seq) seq '())))
 (public! 'set-last-keys! "(set-last-keys! SEQ) — record the key sequence whose lookup ran the current command.")
@@ -2109,6 +2111,8 @@
 
 (public! 'which-key-rows
   "(which-key-rows PENDING) — the keys the pending prefix PENDING can still complete to, as (KEY COMMAND MODIFIERS MODIFIER-LABEL) rows, unmodified keys first; none when which-key-off? is true of the buffer")
+(public! 'which-key-groups
+  "(which-key-groups PENDING) — the which-key panel for PENDING as (COUNT GROUPS), each group (LABEL MODIFIERS ((KEY COMMAND) ...)) in panel order; #f when no key completes it")
 (define (which-key-rows pending)
   (let* ((pending (keymap--seq pending))
          (buf (keymap--frame-buffer))
@@ -2130,6 +2134,22 @@
                          (else (loop (cdr is) (cons (car (car is)) seen) (cons (car is) out))))))
          (ordered (map cadr (sort (map (lambda (i) (list (list-ref i 4) i)) unique)))))
     (map (lambda (i) (take i 4)) ordered)))
+
+;; the panel as it draws: the rows in their groups of one modifier set
+(define (which-key-groups pending)
+  "(COUNT GROUPS) for PENDING: the which-key-rows in runs of one modifier set, each group (LABEL MODIFIERS ((KEY COMMAND) ...)); #f when there are none"
+  (let loop ((rows (which-key-rows pending)) (n 0) (out '()))
+    (cond ((null? rows)
+           (and (> n 0)
+                (list n (reverse (map (lambda (g) (list (car g) (cadr g) (reverse (caddr g)))) out)))))
+          ((and (pair? out) (equal? (cadr (car out)) (caddr (car rows))))
+           (let ((g (car out)))
+             (loop (cdr rows) (+ n 1)
+                   (cons (list (car g) (cadr g) (cons (take (car rows) 2) (caddr g))) (cdr out)))))
+          (else
+           (let ((r (car rows)))
+             (loop (cdr rows) (+ n 1)
+                   (cons (list (list-ref r 3) (caddr r) (list (take r 2))) out)))))))
 
 ;;; --- the API packages write keys with -----------------------------------------
 

@@ -602,7 +602,7 @@ defmodule Compos.Ui.EditorLive do
   # every chord, so C-x b rendered the whole C-x panel and threw it away.
   # Holding the render back means a fast chord costs nothing and draws
   # nothing. The delay is Scheme's which-key-idle-delay, which appearance.scm
-  # publishes as the 'ui face's which-key-delay.
+  # publishes as the chrome value which-key-delay-ms.
   defp hold_which_key(%{which_key: nil} = state, socket),
     do: {state, cancel_which_key(socket)}
 
@@ -614,9 +614,8 @@ defmodule Compos.Ui.EditorLive do
       # rows come from Scheme now, not with every key: a fast chord never
       # pays for them (which-key-rows walks the buffer's whole ladder)
       socket.assigns[:wk_shown] ->
-        rows = which_key_rows(pending, socket.assigns[:frame])
         # no rows (a buffer with which-key off) draws no panel
-        {%{state | which_key: if(rows == [], do: nil, else: rows)}, socket}
+        {%{state | which_key: which_key_groups(pending, socket.assigns[:frame])}, socket}
 
       # the delay is idle time, not time since the chord began: while the
       # panel is still held back, every further prefix key restarts it. A
@@ -632,22 +631,17 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # (KEY COMMAND MODIFIERS LABEL) rows from Scheme, as the panel draws them
-  defp which_key_rows(pending, fid) do
-    case Compos.Core.Session.call_named("which-key-rows", [pending], fid, 5_000, :ui) do
-      {:ok, rows} when is_list(rows) ->
-        Enum.map(rows, fn [key, command, modifiers, label] ->
-          %{key: key, command: command, modifiers: modifiers, modifier_label: label}
-        end)
-
-      _ ->
-        []
+  defp which_key_groups(pending, fid) do
+    case Compos.Core.Session.call_named("which-key-groups", [pending], fid, 5_000, :ui) do
+      {:ok, [count, groups]} -> {count, groups}
+      _ -> nil
     end
   end
 
   defp arm_which_key(state, socket, pending) do
     if t = socket.assigns[:wk_timer], do: Process.cancel_timer(t)
     token = socket.assigns[:wk_token] + 1
-    timer = Process.send_after(self(), {:which_key_show, token}, which_key_delay_ms(state))
+    timer = Process.send_after(self(), {:which_key_show, token}, trunc(chrome(state, "which-key-delay-ms", 500)))
     assign(socket, wk_timer: timer, wk_shown: false, wk_pending: pending, wk_token: token)
   end
 
@@ -667,19 +661,6 @@ defmodule Compos.Ui.EditorLive do
       end
 
     assign(socket, wk_timer: nil, wk_shown: false, wk_pending: [], wk_token: token)
-  end
-
-  @which_key_default_ms 500
-
-  defp which_key_delay_ms(state) do
-    with %{} = faces <- state.faces,
-         %{} = ui <- Map.get(faces, "ui"),
-         value when is_binary(value) <- Map.get(ui, "which-key-delay"),
-         {seconds, _} <- Float.parse(value) do
-      seconds |> Kernel.*(1000) |> round() |> max(0)
-    else
-      _ -> @which_key_default_ms
-    end
   end
 
   defp refresh_state(socket) do
@@ -1102,14 +1083,6 @@ defmodule Compos.Ui.EditorLive do
 
   # --- rendering -------------------------------------------------------------
 
-  defp which_key_groups(bindings) do
-    bindings
-    |> Enum.chunk_by(& &1.modifiers)
-    |> Enum.map(fn group ->
-      first = hd(group)
-      {first.modifier_label, first.modifiers, group}
-    end)
-  end
 
   # the disconnected mount is not a client: it attaches no frame and
   # renders a neutral splash — the connected mount replaces it (S14)
@@ -1171,20 +1144,20 @@ defmodule Compos.Ui.EditorLive do
         <c-group class="wk-title">
           <c-text>
             {Enum.join(@state.pending, " ")} —
-            <c-text class="wk-count" data-total={length(@state.which_key)}>
-              {length(@state.which_key)} bindings
+            <c-text class="wk-count" data-total={elem(@state.which_key, 0)}>
+              {elem(@state.which_key, 0)} bindings
             </c-text>
           </c-text>
           <c-text class="wk-filter" aria-live="polite">Hold a modifier · / filters commands</c-text>
         </c-group>
         <c-group class="wk-groups">
-          <%= for {label, modifiers, bindings} <- which_key_groups(@state.which_key) do %>
+          <%= for [label, modifiers, bindings] <- elem(@state.which_key, 1) do %>
             <section class="wk-group" data-modifiers={Enum.join(modifiers, " ")}>
               <h3 class="wk-group-title">{label}<c-text>{length(bindings)}</c-text></h3>
               <c-group class="wk-grid">
-                <c-group :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
-                  <c-action-key class="wk-key">{w.key}</c-action-key>
-                  <c-text class="wk-cmd">{w.command}</c-text>
+                <c-group :for={[key, command] <- bindings} class="wk-item" data-command={String.downcase(command)}>
+                  <c-action-key class="wk-key">{key}</c-action-key>
+                  <c-text class="wk-cmd">{command}</c-text>
                 </c-group>
               </c-group>
             </section>
@@ -1358,24 +1331,11 @@ defmodule Compos.Ui.EditorLive do
           phx-click="frame_tab"
         >{@tabs.more} more</c-tab>
       </c-tabs>
-      <c-text :for={{c, t} <- ring_segments(@state.modeline_extra)} class={c} title="window ring: filled panes on screen, hollow ones waiting">{t}</c-text>
       <c-text class="ml-rule"></c-text>
-      <c-text :if={extra_segments(@state.modeline_extra) not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- extra_segments(@state.modeline_extra)} class={c}>{t}</c-text><% end %></c-text>
+      <c-text :if={@state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
     </c-statusbar>
     """
   end
-
-  # The window ring segment of global-mode-string draws after the group tabs;
-  # the rest of the frame's facts stay at the right end.
-  defp ring_segments(extra) when is_list(extra),
-    do: Enum.filter(extra, fn {c, _} -> String.contains?(c, "ml-ring") end)
-
-  defp ring_segments(_), do: []
-
-  defp extra_segments(extra) when is_list(extra),
-    do: Enum.reject(extra, fn {c, _} -> String.contains?(c, "ml-ring") end)
-
-  defp extra_segments(extra), do: extra
 
   # The echo area is the frame's own bar: the message, what Scheme keeps
   # there (echo-status), a rule, then the keys that matter where you are
@@ -1416,71 +1376,32 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # The keys show-keys-mode casts for people who watch (show-keys.scm):
-  # (KEYS COMMAND COUNT) rows, newest last, then the prefix still pending,
-  # which runs no command yet. show-keys.scm ships the CSS.
+  # (TEXT COUNT) rows Scheme labelled, newest last, then the prefix still
+  # pending, which runs no command yet. show-keys.scm ships the CSS.
   defp frame_keycast(assigns) do
     ~M"""
-    <c-group :if={keycast(@state) != [] || keycast_pending(@state)} class="keycast" aria-hidden="true">
-      <c-group :for={{keys, count} <- keycast(@state)} class="keycast-entry">
+    <c-group :if={chrome(@state, "show-keys") != [] || keycast_pending(@state)} class="keycast" aria-hidden="true">
+      <c-group :for={[keys, count] <- chrome(@state, "show-keys")} class="keycast-entry">
         <c-action-key class="keycast-keys">{keys}</c-action-key>
         <c-text :if={count != ""} class="keycast-count">{count}</c-text>
       </c-group>
       <c-group :if={keycast_pending(@state)} class="keycast-entry keycast-pending">
-        <c-action-key class="keycast-keys">{keycast_label(@state, keycast_pending(@state))}</c-action-key>
+        <c-action-key class="keycast-keys">{keycast_pending(@state)}</c-action-key>
       </c-group>
     </c-group>
     """
   end
 
-  # A row is (KEYS COUNT KIND): KIND "keys" draws KEYS with the labels,
-  # "text" draws typed text as it is.
-  defp keycast(state) do
-    for [keys, count, kind] <- chrome(state, "show-keys"),
-        Enum.all?([keys, count, kind], &is_binary/1),
-        do: {if(kind == "keys", do: keycast_label(state, keys), else: keys), count}
-  end
-
-  # "C-x s-k" as the page shows it, from the show-keys-labels chrome
-  # value: (FROM TO) pairs; a FROM that ends in - is a modifier, the rest
-  # name whole keys. An unnamed letter is upper-cased, <name> loses <>.
-  defp keycast_label(state, keys) do
-    table = for [from, to] <- chrome(state, "show-keys-labels"), do: {from, to}
-    {mods, names} = Enum.split_with(table, fn {from, _} -> String.ends_with?(from, "-") end)
-    names = Map.new(names)
-
-    keys
-    |> String.split(" ", trim: true)
-    |> Enum.map_join(" ", &keycast_chord(&1, mods, names))
-  end
-
-  defp keycast_chord(chord, mods, names) do
-    case Enum.find(mods, fn {from, _} ->
-           String.starts_with?(chord, from) and byte_size(chord) > byte_size(from)
-         end) do
-      {from, to} ->
-        to <> keycast_chord(binary_part(chord, byte_size(from), byte_size(chord) - byte_size(from)), mods, names)
-
-      nil ->
-        cond do
-          Map.has_key?(names, chord) -> names[chord]
-          String.length(chord) == 1 -> String.upcase(chord)
-          true -> chord |> String.trim_leading("<") |> String.trim_trailing(">")
-        end
+  # The label show-keys.scm made for this frame's pending prefix, or nil:
+  # the chrome value is (SEQ LABEL), drawn only while the prefix is still SEQ.
+  defp keycast_pending(%{pending: [_ | _] = pending} = state) do
+    case chrome(state, "show-keys-pending") do
+      [seq, label] -> if seq == Enum.join(pending, " "), do: label
+      _ -> nil
     end
   end
 
-  # The pending prefix as one string, or nil. The chrome value show-keys-on
-  # is "all", "modifiers" (only a prefix that holds a modifier), or absent.
-  defp keycast_pending(state) do
-    pending = Map.get(state, :pending) || []
-    on = chrome(state, "show-keys-on", nil)
-
-    cond do
-      pending == [] or on not in ["all", "modifiers"] -> nil
-      on == "modifiers" and not Enum.any?(pending, &Regex.match?(~r/^[CMsHAS]-/, &1)) -> nil
-      true -> Enum.join(pending, " ")
-    end
-  end
+  defp keycast_pending(_state), do: nil
 
   # The echo area's key hints, as Scheme publishes them (echo-key-hints in
   # appearance.scm): (KEY VERB) pairs. An empty verb draws the key alone.
@@ -1543,11 +1464,8 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
-  defp frame_group_style(%{frame_group_color: color}) when is_binary(color) do
-    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color), do: "--frame-group-color: #{color}", else: nil
-  end
-
-  defp frame_group_style(_state), do: nil
+  defp frame_group_style(state),
+    do: if(c = valid_accent(Map.get(state, :frame_group_color)), do: "--frame-group-color: #{c}")
 
   defp instance_identity do
     %{
@@ -1556,6 +1474,7 @@ defmodule Compos.Ui.EditorLive do
     }
   end
 
+  # a CSS color only as #RRGGBB: anything else never enters a style
   defp valid_accent(color) when is_binary(color) do
     if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color), do: color, else: nil
   end
@@ -1575,12 +1494,8 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp window_style(node) do
-    color = Map.get(node, :group_color)
-
     group_style =
-      if is_binary(color) and Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color),
-        do: "--buffer-group-color: #{color}",
-        else: nil
+      if c = valid_accent(Map.get(node, :group_color)), do: "--buffer-group-color: #{c}"
 
     # the window's buffer count, for the header line to show beside the
     # title (modeline.scm reads it); a lone buffer says nothing

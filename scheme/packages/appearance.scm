@@ -106,18 +106,17 @@
   (if (equal? echo-area-position 'bottom) "10" "-1"))
 
 ;; The which-key panel waits before it shows, so a fast prefix chord
-;; never draws it (Emacs which-key-idle-delay). The delay is a 'ui face
-;; variable; the page reads it as the panel's animation delay.
-(define (which-key-delay-css seconds)
-  (string-append (number->string seconds) "s"))
+;; never draws it (Emacs which-key-idle-delay). The view arms its timer
+;; with the chrome value which-key-delay-ms.
+(define (which-key-delay-publish! seconds)
+  (frame-chrome-set! "which-key-delay-ms" (max 0 (round (* 1000 seconds)))))
 
 (defcustom 'which-key-idle-delay 0.5
   "Seconds a prefix key waits before the which-key panel shows."
   'group 'appearance
-  'set (lambda (seconds)
-         (set-face-attribute! 'ui 'which-key-delay (which-key-delay-css seconds))))
+  'set which-key-delay-publish!)
 
-(set-face-attribute! 'ui 'which-key-delay (which-key-delay-css which-key-idle-delay))
+(which-key-delay-publish! which-key-idle-delay)
 
 ;; Motion is a setting, not a constant. Every duration the page animates
 ;; over reads --chrome-anim, which is the 'chrome face's anim attribute:

@@ -82,12 +82,31 @@
                          show-keys--ring)
                    (max 1 show-keys-count)))))))
 
+(define (show-keys--chord chord)
+  "CHORD as the stack draws it: each modifier and named key by its label"
+  (let ((mod (find (lambda (l)
+                     (and (string-suffix? "-" (car l)) (string-prefix? (car l) chord)
+                          (> (string-length chord) (string-length (car l)))))
+                   show-keys-labels))
+        (named (assoc chord show-keys-labels)))
+    (cond (mod (string-append (cadr mod)
+                 (show-keys--chord (substring chord (string-length (car mod)) (string-length chord)))))
+          (named (cadr named))
+          ((= (string-length chord) 1) (string-upcase chord))
+          ((and (string-prefix? "<" chord) (string-suffix? ">" chord))
+           (substring chord 1 (- (string-length chord) 1)))
+          (else chord))))
+
+(define (show-keys-label keys)
+  "KEYS, a string such as \"C-x s-k\", as the stack draws it"
+  (string-join (map show-keys--chord (filter (lambda (k) (not (equal? k ""))) (string-split keys " "))) " "))
+(public! 'show-keys-label "(show-keys-label KEYS) — the key string KEYS as show-keys-mode draws it, from show-keys-labels")
+
 (define (show-keys--row e)
-  "(KEYS COUNT KIND) as the three strings the page draws; KIND text is typed text"
+  "(TEXT COUNT), the two strings the page draws: labelled keys, or typed text in quotes"
   (let ((keys (car e)) (cmd (cadr e)) (n (caddr e)))
-    (list (if (show-keys--typed? cmd) (string-append "\"" keys "\"") keys)
-          (if (> n 1) (string-append "x" (number->string n)) "")
-          (if (show-keys--typed? cmd) "text" "keys"))))
+    (list (if (show-keys--typed? cmd) (string-append "\"" keys "\"") (show-keys-label keys))
+          (if (> n 1) (string-append "x" (number->string n)) ""))))
 
 
 (define (show-keys-rows)
@@ -97,12 +116,16 @@
 (public! 'show-keys-rows "(show-keys-rows) — the (KEYS COUNT KIND) rows show-keys-mode casts now, oldest first")
 
 (define (show-keys--draw!)
-  ;; show-keys-on lets the page draw a pending prefix, such as C-x, which
-  ;; runs no command and so never reaches the post-command hook
-  (frame-chrome-set! "show-keys-on"
-    (cond ((not show-keys-mode) #f) (show-keys-modifiers-only "modifiers") (else "all")))
-  (frame-chrome-set! "show-keys-labels" show-keys-labels)
+  (unless show-keys-mode (frame-chrome-set! "show-keys-pending" '()))
   (frame-chrome-set! "show-keys" (if show-keys-mode (show-keys-rows) '())))
+
+;; A pending prefix, such as C-x, runs no command and so never reaches the
+;; post-command hook. The page draws LABEL while its frame's pending keys
+;; are still SEQ, so a prefix that ends draws nothing.
+(define (show-keys--pending! seq)
+  (when (and show-keys-mode (or (not show-keys-modifiers-only) (show-keys--modified? seq)))
+    (let ((keys (string-join seq " ")))
+      (frame-chrome-set! "show-keys-pending" (list keys (show-keys-label keys))))))
 
 (define (show-keys--clear! _)
   (set! show-keys--ring '())
@@ -118,6 +141,8 @@
         (debounce! 'show-keys (* 1000 (max 1 show-keys-seconds)) show-keys--clear! #f)))))
 
 (add-hook! 'post-command-hook 'show-keys--post-command! #t)
+(add-hook! 'pending-keys-hook 'show-keys--pending! #t)
+(add-hook! 'pending-keys-hook 'show-keys--pending! #t)
 
 (define-command "show-keys-mode" "Toggle the large keys you press, for screencasts"
   (lambda ()

@@ -308,14 +308,15 @@
                   (list (fact "model" "tests with"
                             (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it"))))
                 '()))
-          (let ((steps (or (plist-get c 'install) '())))
+          ;; only what is still to install: a present program needs no instructions
+          (let ((steps (filter (lambda (step) (not (setup--program-present? (car step))))
+                               (or (plist-get c 'install) '()))))
             (if (null? steps)
                 '()
                 (cons (list 'section "Install")
                       (map (lambda (step)
                              (fact (string-append "install:" (car step)) (car step)
-                                   (string-append (if (setup--program-present? (car step)) "present" "missing; i installs it")
-                                                  " · " (cadr step))))
+                                   (string-append "missing; i installs it · " (cadr step))))
                            steps))))
           (let ((ss (llm-connectors--secrets name)))
             (if (and (null? ss) (not (plist-get c 'signin)))

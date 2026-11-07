@@ -63,6 +63,8 @@
                   "a pure builtin with a catalog stamp runs")
     (check-false! (eval-read-refusal "(file-exists? \"/tmp\")")
                   "a read builtin with a catalog stamp runs")
+    (check-false! (eval-read-refusal "(substring-bytes \"abc\" 0 2)")
+                  "a pure string builtin with a catalog stamp runs")
     (check-true! (string? (eval-read-refusal "(map buffer-kill! '(\"x\"))"))
                  "a write passed as a value refuses")
     (check-true! (string? (eval-read-refusal "((lambda (set!) (set! x 1)) 1)"))

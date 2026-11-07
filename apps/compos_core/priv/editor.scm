@@ -6496,6 +6496,7 @@
 (public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
 (public! 'boundp "(boundp 'NAME) — return #t when the symbol has a global binding.")
 (public! 'expt "(expt BASE POWER) — return BASE to POWER; an integer when both are integers and POWER is not negative.")
+(public! 'substring-bytes "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.")
 (effects! '(write))
 (public! 'report-errors "(report-errors WHERE THUNK) — THUNK's value; when it raises, #f, and the error goes to *Messages* and the log under WHERE")
 (effects! '(pure))

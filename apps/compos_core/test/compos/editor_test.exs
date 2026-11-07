@@ -3811,13 +3811,15 @@ defmodule Compos.EditorTest do
                {other, [0.5, 0.0, 0.5, 1.0]}
              ]
 
-      # a frame is a row of columns: C-x 2 adds a column too, never a row;
-      # with no buffer left to show, the new column stays blank
+      # C-x 2 splits the pane top and bottom inside its column; with no
+      # buffer left to show, the new pane stays blank
       press(["C-x", "2"])
-      layout = window_layout()
 
-      assert Enum.sort(Enum.map(layout, &elem(&1, 0))) == Enum.sort([buf, other, " *pane*"])
-      assert Enum.all?(layout, fn {_, [_x, y, _w, h]} -> y == 0.0 and h == 1.0 end)
+      assert window_layout() == [
+               {buf, [0.0, 0.0, 0.5, 0.5]},
+               {" *pane*", [0.0, 0.5, 0.5, 0.5]},
+               {other, [0.5, 0.0, 0.5, 1.0]}
+             ]
 
       active_before = Editor.snapshot().active
       press(["C-x", "o"])

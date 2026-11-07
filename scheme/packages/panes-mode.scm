@@ -465,16 +465,16 @@
               (panes--store))
     (park layout)))
 
-(define (panes--line-shares layout)
-  "The width of each pane in pane order, normalized to sum 1: the frame
-   is one row. A pane takes its column's width; a column of several
-   panes, from a layout saved before the row, gives each its part of
-   that width by height."
-  (let loop ((cols (panes-columns layout)) (ws (panes-layout-shares layout #t)) (acc '()))
-    (if (or (null? cols) (null? ws))
-        (apply append (reverse acc))
-        (loop (cdr cols) (cdr ws)
-              (cons (let ((w (car ws))) (map (lambda (v) (* w v)) (panes-vshares (car cols)))) acc)))))
+(define (panes--column-items layout items)
+  "ITEMS, one line item for each pane in pane order, as one arrange spec
+   for each column: a column of one pane is its item, a stacked column
+   is a line, top to bottom, of its items at their heights."
+  (let loop ((cols (panes-columns layout)) (items items) (acc '()))
+    (if (null? cols)
+        (reverse acc)
+        (let* ((n (length (car cols))) (mine (list-head items n)))
+          (loop (cdr cols) (list-tail items n)
+                (cons (if (= n 1) (car mine) (list 'v (panes-vshares (car cols)) mine)) acc))))))
 
 (define (panes--draw! layout)
   "The frame drawn as LAYOUT: every top window on screen with its
@@ -505,7 +505,7 @@
                    (made (filter (lambda (h) (not (window-exists? h))) handles)))
               ;; the floating preview is no pane: it stays on screen, first in the
               ;; line, where its split takes no room and it floats over the frame
-              (let ((shares (panes--line-shares layout)) (cols items))
+              (let ((shares (panes-layout-shares layout #t)) (cols (panes--column-items layout items)))
                 (if (and float (not (member float handles)))
                     (window-arrange! (list 'h (cons 0.001 shares) (cons float cols)))
                     (window-arrange! (list 'h shares cols))))
@@ -933,15 +933,15 @@
                 (group-buffers-mru group)))))
 
 (define (panes--split-window! &optional dir)
-  "C-x 3 and C-x 2: an empty pane opens right of the focused pane, and
-   takes the group's most recent buffer no pane shows; a pane with none
-   stays blank. A frame is a row of columns, so DIR does not stack. The
+  "C-x 3, and C-x 2 when DIR is v: an empty pane opens right of the
+   focused pane, or under it in its column, and takes the group's most
+   recent buffer no pane shows; a pane with none stays blank. The
    selection stays. Answers the new pane's frame window, or #f."
   (let* ((l (panes--ensure-layout!))
          (me (active-window))
          (k (panes-key-of-handle l me))
          (pid (or (and k (panes-pane-of l k)) (panes--empty-pane-of me) (panes-focus l)))
-         (added (panes-add-empty-pane l pid))
+         (added (if (equal? dir 'v) (panes-split-below l pid) (panes-add-empty-pane l pid)))
          (buf (let ((cands (panes--fill-candidates (car added))))
                 (and (pair? cands) (car cands))))
          (after (if buf
@@ -1362,11 +1362,18 @@
 (define-command "pane-previous-window" "Bring the previous window of this pane to the front"
   (lambda () (panes--cycle-pane-window! -1)))
 
-(define-command "pane-add" "Add an empty pane beside this one; you stay where you are"
+(define (panes--split-sensibly l)
+  "How pane-add splits the selected window, as Emacs's
+   split-window-sensibly: h, a column beside it, when it is wider than
+   tall and a column fits; else v, a pane under it. A text row is about
+   twice as tall as a column is wide."
+  (if (and (panes-under-capacity? l) (>= (window-cols) (* 2 (window-rows)))) 'h 'v))
+
+(define-command "pane-add" "Add an empty pane beside this one, or under it when it is taller than wide or the row is full; you stay where you are"
   (lambda ()
     (let* ((l (panes--ensure-layout!))
            (pid (or (panes--current-pane l) (panes-focus l)))
-           (added (panes-add-empty-pane l pid)))
+           (added (if (equal? (panes--split-sensibly l) 'v) (panes-split-below l pid) (panes-add-empty-pane l pid))))
       ;; the focus stays on this pane: the draw keeps you here
       (panes-apply! (panes-set-focus (car added) pid)))))
 

@@ -8,13 +8,18 @@ defmodule Compos.KeyTraceTest do
 
   use ExUnit.Case
 
-  alias Compos.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Compos.Core.{Buffer, Editor, Session}
 
   defp field(row, key) do
     case Enum.find_index(row, &(&1 == {:sym, key})) do
       nil -> nil
       i -> Enum.at(row, i + 1)
     end
+  end
+
+  defp trace_keys(keys) do
+    {:ok, rows} = Session.call_named("trace-keys!", [keys])
+    rows
   end
 
   defp row_named(rows, phase), do: Enum.find(rows, &(field(&1, "phase") == phase))
@@ -33,7 +38,7 @@ defmodule Compos.KeyTraceTest do
     p0 = Buffer.point(buf)
     size0 = Buffer.byte_size(buf)
 
-    rows = KeyDispatch.trace_keys(["x"])
+    rows = trace_keys(["x"])
 
     assert field(row_named(rows, "key"), "point") == p0
     assert row_named(rows, "self-insert")
@@ -59,7 +64,7 @@ defmodule Compos.KeyTraceTest do
       """)
 
     size = Buffer.byte_size(buf)
-    rows = KeyDispatch.trace_keys(["a"])
+    rows = trace_keys(["a"])
 
     # the key found point in the hidden transcript
     assert field(row_named(rows, "key"), "point") == 0

@@ -1831,7 +1831,20 @@
 
 (define (key-loop--echo text) (set-echo! text))
 
-(define (key-loop--note phase name) (key-trace-note! phase name))
+;; one key-trace row per phase while trace-keys! collects (a job-local list,
+;; newest first): the buffer, its point and size, and the chat mark locals
+(define (key-loop--note phase name)
+  (let ((rows (job-local 'key-trace)))
+    (when rows
+      (let* ((buf (current-buffer))
+             (alive (buffer-exists? buf)))
+        (job-local-set! 'key-trace
+          (cons (list 'phase phase 'name name 'buffer buf
+                      'point (if alive (buffer-point buf) 0)
+                      'size (if alive (buffer-size buf) 0)
+                      'mark (and alive (buffer-local buf 'agent-saved-mark))
+                      'marker-bytes (and alive (buffer-local buf 'agent-marker-bytes)))
+                rows))))))
 
 (define (key-loop--printable? key)
   (and (not (member key key-loop--named))
@@ -2003,12 +2016,15 @@
            (key-loop--run command)))))
 
 (define (trace-keys! keys)
-  (key-trace-start!)
-  (for-each (lambda (k) (key-dispatch! k))
-            (cond ((string? keys) (list keys))
-                  ((pair? keys) keys)
-                  (else (list keys))))
-  (key-trace-take!))
+  (job-local-set! 'key-trace '(start))
+  (unwind-protect
+    (lambda ()
+      (for-each (lambda (k) (key-dispatch! k))
+                (cond ((string? keys) (list keys))
+                      ((pair? keys) keys)
+                      (else (list keys))))
+      (reverse (filter pair? (job-local 'key-trace))))
+    (lambda () (job-local-set! 'key-trace #f))))
 
 (define (key-dispatch! key)
   (key-loop--note "key" key)

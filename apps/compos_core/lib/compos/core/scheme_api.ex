@@ -2788,25 +2788,6 @@ defmodule Compos.Core.SchemeAPI do
       {"undo-exempt?",
        "(undo-exempt? COMMAND) — #t when COMMAND is exempt from the automatic undo-chain break."} =>
         fn [name] -> Editor.undo_exempt?(Opts.plain(name)) end,
-      {"key-trace-start!",
-       "(key-trace-start!) — begin collecting key-trace rows in this process."} =>
-        fn [] ->
-          Process.put(:key_trace, [])
-          :void
-        end,
-      {"key-trace-take!",
-       "(key-trace-take!) — return the key-trace rows collected in this process, oldest first, and stop collecting."} =>
-        fn [] ->
-          rows = Process.get(:key_trace) || []
-          Process.delete(:key_trace)
-          Enum.reverse(rows)
-        end,
-      {"key-trace-note!",
-       "(key-trace-note! PHASE NAME) — record one key-trace row while (trace-key) collects."} =>
-        fn [phase, name] ->
-          Compos.Core.KeyDispatch.trace_note(Opts.string(phase), Opts.string(name))
-          :void
-        end,
       {"window-rows",
        "(window-rows [WIN]) — text rows of WIN, or of the active window when WIN is omitted."} =>
         fn

@@ -61,7 +61,7 @@ defmodule Compos.Core.KeyDispatch do
   """
   def handle_intent(type, from, to, text), do: handle_intent(type, from, to, text, -1, -1)
 
-  def handle_intent(type, from, to, text, at, v) when is_binary(type) and is_binary(text) do
+  def handle_intent(type, from, to, text, _at, _v) when is_binary(type) and is_binary(text) do
     snapshot = Editor.snapshot()
 
     routed? =
@@ -70,18 +70,11 @@ defmodule Compos.Core.KeyDispatch do
 
     buffer = Editor.current_buffer()
 
-    # The reader's caret says where the edit lands, while the DOM it was
-    # measured against is the text the server holds. DISABLED until the
-    # client can prove the CARET is current, not just the text: beforeinput
-    # preventDefaults, so while you type the browser never advances the
-    # caret, and trusting a matching version put every keystroke one place
-    # back.
-    _ = {at, v}
-    if false, do: Buffer.goto(buffer, at)
-
+    # AT and V (the client's caret and text version) are not trusted: the
+    # client cannot prove its caret is current, since beforeinput
+    # preventDefaults and the browser never advances it while you type.
     point = if Buffer.exists?(buffer), do: Buffer.point(buffer), else: 0
-    # a collapsed intent acts at point: the byte above has already moved
-    # point to the caret whenever the client could prove it was current
+    # a collapsed intent acts at point
     at_point? = from == to
     # a pending prefix (C-c, C-x) waits for its next key. The letter typed
     # over a selection comes as a ranged intent, and it is that key all the
@@ -130,64 +123,5 @@ defmodule Compos.Core.KeyDispatch do
         Editor.finish_command("input-intent", false)
         Editor.set_echo("input-intent: " <> inspect(other))
     end
-  end
-
-  # --- key tracing ------------------------------------------------------------
-  # The mechanism under Scheme's (trace-key): the key loop records one row at
-  # every phase boundary. Scheme owns the presentation and the derived fields
-  # (packages/telemetry.scm).
-
-  @trace :key_trace
-
-  @doc """
-  Dispatch KEYS in the calling process and record one row per phase: the
-  key, the resolved command, the pre-command policy, and the state after
-  the command. Each row is a Scheme plist with the current buffer, point,
-  size, and the chat mark locals, so a reader can see which phase moved
-  point.
-  """
-  def trace_keys(keys) do
-    Process.put(@trace, [])
-
-    try do
-      Enum.each(keys, &handle_key/1)
-      Process.get(@trace) |> Enum.reverse()
-    after
-      Process.delete(@trace)
-    end
-  end
-
-  # a row per phase, newest first — only while trace_keys/1 is collecting
-  @doc "Record one key-trace row while trace_keys/1 collects; Scheme's key loop calls this."
-  def trace_note(phase, name) do
-    case Process.get(@trace) do
-      rows when is_list(rows) ->
-        buf = Editor.current_buffer()
-        alive = Buffer.exists?(buf)
-
-        row = [
-          {:sym, "phase"},
-          phase,
-          {:sym, "name"},
-          name,
-          {:sym, "buffer"},
-          buf,
-          {:sym, "point"},
-          if(alive, do: Buffer.point(buf), else: 0),
-          {:sym, "size"},
-          if(alive, do: Buffer.byte_size(buf), else: 0),
-          {:sym, "mark"},
-          (alive && Buffer.get_local(buf, "agent-saved-mark")) || false,
-          {:sym, "marker-bytes"},
-          (alive && Buffer.get_local(buf, "agent-marker-bytes")) || false
-        ]
-
-        Process.put(@trace, [row | rows])
-
-      _ ->
-        :ok
-    end
-
-    :ok
   end
 end

@@ -169,3 +169,19 @@
         (check-equal! (plist-get (cadr children) 'text) "Tests completed\n6 tests, 0 failures"
                       "the complete output remains available on expansion"))
       (buffer-kill! buf))))
+
+
+(deftest 'execute-star-spawn-shows-in-no-window
+  "a spawned chat is quiet in every frame until someone shows it"
+  (lambda ()
+    (let ((made #f))
+      (with-stubs (list (list 'chat-attach-agent!
+                              (lambda (buf c &optional m o)
+                                (set! made buf)
+                                (buffer-set-local! buf 'agent-slug "zz-exec-slug")
+                                "zz-exec-slug")))
+        (lambda () (execute* "" (list 'title "zz exec spawn" 'notify #f))))
+      (check-true! (buffer-context-only? made) "panes leaves it out until a show promotes it")
+      (check-false! (member made (map cadr (with-frame-windows (lambda () (window-list-all)))))
+                    "no window shows it")
+      (buffer-kill! made))))

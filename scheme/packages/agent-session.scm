@@ -1943,6 +1943,9 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
          ;; read before buffer-create, which makes the new chat current
          (spawner-group (buffer-group (current-buffer))))
     (buffer-create buf)
+    ;; a spawn shows in no window, of any group, until someone asks for it:
+    ;; panes leaves a context-only buffer out, and a show promotes it
+    (buffer-context-only! buf)
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins
     ;; over buffer-create's interactive inheritance.

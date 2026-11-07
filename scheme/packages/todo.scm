@@ -1148,25 +1148,26 @@
      "When it is finished, call (chat-finish! 'done RESULT): the chat closes itself. If it cannot finish, call (chat-finish! 'blocked WHY) or (chat-finish! 'needs-user WHAT).\n")))
 
 (define (todo-assign-chat! id group &optional who)
-  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new; a new chat is the calling chat's subagent with notify; return the chat"
+  "(todo-assign-chat! ID GROUP [WHO]) — hand the task to its chat in GROUP (assign-chat!: its live assignee chat unless that is the caller, else a new one), make that chat the assignee and send it the brief when the chat is new. A kept chat whose backend is gone, or whose connector is not the group's now, gives way to a new chat. A new chat shows in no window until someone asks for it, and is the calling agent's subagent with notify; return the chat"
   (let* ((t (todo--must id))
          (g (or (group-resolve-id group) (group-ensure-record! group)))
-         ;; the chat whose eval starts the task, if any
-         (caller (subagent-spawner))
-         ;; the task's own chat is the one kept for it, read back when it was
-         ;; archived, else its live assignee, never the chat that last logged
-         ;; on it: that one can be the orchestrator, the caller
-         (own (or (todo--kept-chat t g)
+         ;; the chat whose eval starts the task, else the agent WHO names
+         (caller (or (subagent-spawner)
+                     (and (string? who) (string-prefix? "agent:" who)
+                          (substring who 6 (string-length who)))))
+         ;; the task's own chat is the open one kept for it, else its live
+         ;; assignee, never the chat that last logged on it: that one can be
+         ;; the orchestrator, the caller. An archived chat is not read back:
+         ;; its backend is gone, and reading it would show it.
+         (own (or (todo--kept-live t g)
                   (let ((a (plist-get t 'assignee)))
                     (and (string? a) (string-prefix? "chat:" a) (todo--live-chat a)))))
-         (held (and own (not (and caller (equal? (subagent-slug own) caller))) own)))
+         (held (and own (not (and caller (equal? (subagent-slug own) caller)))
+                    (todo--chat-current? own g) own)))
     (let* ((got (assign-chat! #f g
                   (lambda (chat)
-                    ;; a new chat is the caller's subagent: the caller hears
-                    ;; when it stops
-                    (when caller
-                      (subagent-record! caller chat)
-                      (buffer-set-local! chat 'subagent-notify #t))
+                    ;; the caller hears when the new chat stops
+                    (when caller (buffer-set-local! chat 'subagent-notify #t))
                     (todo-update id (list 'assignee (chat-stable-id! chat)
                                           'chats (todo--chats-keeping t (plist-get t 'assignee))
                                           'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
@@ -1175,6 +1176,12 @@
                     (todo--brief (todo-get id) (chat-stable-id! chat)))
                   held))
            (chat (car got)))
+      (when (cadr got)
+        ;; a new chat shows only where someone asks for it (buffer-promote!)
+        (buffer-context-only! chat)
+        ;; and is the caller's subagent. Recorded after the brief started its
+        ;; backend, so the edge names the chat's slug, not its buffer.
+        (when caller (subagent-record! caller chat)))
       (todo--keep-chat! t chat g)
       ;; A new chat wears the task's title. Named here, after the brief went
       ;; out under the old name; the first-prompt title lands later and
@@ -1290,6 +1297,25 @@
   (let ((k (chat-for-key chat g)))
     (when (or (not k) (equal? k (plist-get t 'id)))
       (chat-for! (plist-get t 'id) chat g))))
+
+(define (todo--kept-live t g)
+  ;; the chat kept for the task in G or its home group, only when it is open
+  (let ((id (plist-get t 'id)))
+    (let loop ((gs (list g (todo--home-group t))))
+      (and (pair? gs)
+           (or (let ((p (and (car gs) (alist-get (chat-for--index (car gs)) id))))
+                 (and (string? p) (chat-for--live p)))
+               (loop (cdr gs)))))))
+
+(define (todo--chat-current? chat g)
+  ;; a chat goes on with a task only when its backend still runs and it
+  ;; speaks through the connector the group starts its chats with now
+  (let* ((slug (buffer-local chat 'agent-slug))
+         (b (llm-group-bundle g))
+         (want (or (and b (plist-get b 'connector)) *default-connector*)))
+    (and (string? slug)
+         (not (eq? (agent-status slug) 'dead))
+         (equal? (or (buffer-local chat 'agent-connector) *default-connector*) want))))
 
 (define (todo--revive-chat t)
   ;; the task's chat: live, else the chat kept for it, else its archived

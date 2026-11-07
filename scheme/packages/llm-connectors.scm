@@ -199,9 +199,7 @@
                      (llm-connectors-models name)))))))
 
 (define (llm-connectors--page-columns buf)
-  (if (equal? (car (list-tab-current buf)) "models")
-      (list (list "model" 40) (list "name" 30) (list "last test" #f))
-      (list (list "" 18) (list "" #f))))
+  (list (list "" 18) (list "" #f)))
 
 (define (llm-connectors--row-key r)
   (cond ((eq? (car r) 'model) (string-append "model:" (cadr r)))
@@ -215,9 +213,14 @@
       ((eq? (car r) 'model)
        (let* ((id (cadr r))
               (default? (equal? id (llm-connectors--default-model name))))
-         (list (list id (if default? "llm-connectors-name" "default"))
-               (list (string-append (caddr r) (if default? " (default)" "")) "dim")
-               (list (llm-connectors--test-text name id) (llm-connectors--test-face name id)))))
+         ;; the result first, as a checklist reads: it fits a narrow pane
+         (list (list (llm-connectors--test-text name id) (llm-connectors--test-face name id))
+               (list (string-append id
+                                    ;; a short id is an alias, and its name says which model it is
+                                    (if (or (equal? (caddr r) "") (> (string-length id) 12)) ""
+                                        (string-append " · " (caddr r)))
+                                    (if default? " (default)" ""))
+                     (if default? "llm-connectors-name" "default")))))
       (else
        (let ((id (cadr r)) (value (cadddr r)))
          (list (list (caddr r) "dim")
@@ -475,16 +478,14 @@
 (define-list-mode! "llm-connectors-detail-mode"
   (list
     'doc (string-append
-           "One model connector over two tabs. setup holds what it needs: its command, the install "
-           "steps, the sign-in and the keys, and its last test. models holds every model it offers, "
-           "each with its own last test. On a model, t tests that model and d makes it the model new "
-           "chats use; elsewhere they act on the connector. i installs, l signs in, k adds the key, "
-           "<left> and <right> step the tabs, / narrows the models, g checks again, q quits.")
+           "One model connector: what it needs (its command, the install steps, the sign-in and "
+           "the keys), its last test, and under Models every model it offers, each with its own "
+           "last test. On a model, t tests that model and d makes it the model new chats use; "
+           "elsewhere they act on the connector. i installs, l signs in, k adds the key, "
+           "/ narrows, g checks again, q quits.")
     'transient #f
     'rows (lambda (buf) (llm-connectors--page-rows buf))
     'key (lambda (buf r) (llm-connectors--row-key r))
-    'tabs (list (list "setup" (lambda (buf r) (not (eq? (car r) 'model))))
-                (list "models" (lambda (buf r) (eq? (car r) 'model))))
     'separator? (lambda (buf r) (eq? (car r) 'section))
     'section? (lambda (buf r) (eq? (car r) 'section))
     'columns (lambda (buf) (llm-connectors--page-columns buf))
@@ -496,7 +497,7 @@
     'local-filter #t
     'footer (lambda (buf)
               '(("t" "test") ("d" "default") ("i" "install") ("l" "sign in") ("k" "key")
-                ("<left>/<right>" "tab") ("/" "filter") ("g" "check") ("q" "quit")))
+                ("/" "filter") ("g" "check") ("q" "quit")))
     'keys *llm-connectors-keys*))
 
 (add-hook! 'setup-connector-chosen-hook 'llm-connectors-refresh!)

@@ -472,7 +472,7 @@ defmodule Compos.Scheme.Builtins do
             _ -> {true, Enum.reduce(Enum.zip_with(ls, & &1), store, step)}
           end
         end,
-      {"filter", "(filter PRED LST) — return the elements of LST for which PRED is true."} =>
+      {"filter", "(filter PRED LST) — return the elements of LST for which PRED is not false."} =>
         fn [pred, l], store when is_list(l) -> select(pred, l, store, true) end,
       {"remove", "(remove PRED LST) — return the elements of LST for which PRED is false."} =>
         fn [pred, l], store when is_list(l) -> select(pred, l, store, false) end,

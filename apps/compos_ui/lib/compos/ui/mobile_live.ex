@@ -431,11 +431,11 @@ defmodule Compos.Ui.MobileLive do
   defp str(x), do: to_string(x)
 
   defp find_leaf(%{type: :leaf, id: id} = leaf, id), do: leaf
-  defp find_leaf(%{children: kids}, id), do: Enum.find_value(kids, &find_leaf(&1, id))
+  defp find_leaf(%{type: :split, children: kids}, id), do: Enum.find_value(kids, &find_leaf(&1, id))
   defp find_leaf(_, _), do: nil
 
   defp first_leaf(%{type: :leaf} = leaf), do: leaf
-  defp first_leaf(%{children: [kid | _]}), do: first_leaf(kid)
+  defp first_leaf(%{type: :split, children: [kid | _]}), do: first_leaf(kid)
   defp first_leaf(_), do: nil
 
   defp line_param(params) do

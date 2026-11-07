@@ -272,7 +272,7 @@ defmodule Compos.Core.Desktop do
   # the leaf carries the scroll state, so each window reopens pinned if
   # the reader pinned it, and the window id, so a restart gives every
   # window back under the id the layouts and groups knew it by
-  defp serialize(tree), do: WindowSpec.read(tree)
+  defp serialize(tree), do: WindowSpec.from_tree(tree)
 
   defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
     do: false

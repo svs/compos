@@ -165,10 +165,13 @@
 (define minibuffer-default-shape "minibuffer")
 
 ;;; --- the dock ------------------------------------------------------------
-;;; A dock is a window of the FRAME. split-root! puts it under the frame's
-;;; row of windows, across the whole frame, and the row gives it rows: the
-;;; surface takes rows rather than covering them. This is what makes the
-;;; minibuffer shape a minibuffer and not a panel.
+;;; A dock is a pane of the FRAME. split-root! splits the whole tree, so
+;;; the pane spans the frame and every window above keeps its share of
+;;; what is left: the surface takes rows rather than covering them. This
+;;; is what makes the minibuffer shape a minibuffer and not a panel.
+;;;
+;;; Splitting the selected window instead gives a pane as wide as whatever
+;;; window happened to be selected, which is a sub-pane, not a dock.
 
 (define (window-docked buf)
   (and (buffer-known? buf) (buffer-local buf 'window-dock)))

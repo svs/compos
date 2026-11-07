@@ -49,7 +49,7 @@ defmodule Compos.TestHelpers do
 
   defp find_window(%{type: :leaf, id: id} = leaf, id), do: leaf
   defp find_window(%{type: :leaf}, _id), do: nil
-  defp find_window(%{children: c}, id), do: Enum.find_value(c, &find_window(&1, id))
+  defp find_window(%{type: :split, children: c}, id), do: Enum.find_value(c, &find_window(&1, id))
 
   @doc "Press one key or a list of keys through KeyDispatch, the path the GUI takes."
   def press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)

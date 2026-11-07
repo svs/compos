@@ -645,6 +645,9 @@
 (public! 'nth "(nth N L) — the element of L at 0-based index N; an error past the end")
 (catalog-meta! 'function "nth" 'domain 'system 'effects '(pure))
 
+(public! 'catalog-generation "(catalog-generation) - return the catalog generation counter")
+(catalog-meta! 'function "catalog-generation" 'domain 'discovery 'effects '(read))
+
 ;;; --- editing commands ------------------------------------------------------
 
 ;; (repeat-count N THUNK): THUNK N times; a negative N runs OPPOSITE -N times

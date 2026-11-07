@@ -3894,16 +3894,22 @@ defmodule Compos.EditorTest do
       Compos.Core.create_buffer(other)
       _id = tile_group!("zz-tile-split-#{System.unique_integer([:positive])}", [buf, other])
 
-      # ruling B: a new pane takes the group's most recent buffer no pane
-      # shows, never the same buffer twice; with none left it stays blank
+      # ruling B: a new column takes the group's most recent buffer no pane
+      # shows, never the same buffer twice
       press(["C-x", "3"])
-      press(["C-x", "2"])
 
       assert window_layout() == [
-               {buf, [0.0, 0.0, 0.5, 0.5]},
-               {" *pane*", [0.0, 0.5, 0.5, 0.5]},
+               {buf, [0.0, 0.0, 0.5, 1.0]},
                {other, [0.5, 0.0, 0.5, 1.0]}
              ]
+
+      # a frame is a row of columns: C-x 2 adds a column too, never a row;
+      # with no buffer left to show, the new column stays blank
+      press(["C-x", "2"])
+      layout = window_layout()
+
+      assert Enum.sort(Enum.map(layout, &elem(&1, 0))) == Enum.sort([buf, other, " *pane*"])
+      assert Enum.all?(layout, fn {_, [_x, y, _w, h]} -> y == 0.0 and h == 1.0 end)
 
       active_before = Editor.snapshot().active
       press(["C-x", "o"])
@@ -3912,8 +3918,10 @@ defmodule Compos.EditorTest do
       press(["C-x", "1"])
       assert rects() == [[0.0, 0.0, 1.0, 1.0]]
 
+      # the last pane: C-x 0 sends its window behind the ones waiting
+      # there, and the frame keeps its one window
       press(["C-x", "0"])
-      assert echo() =~ "sole window"
+      assert rects() == [[0.0, 0.0, 1.0, 1.0]]
     end
 
     test "windows can show different buffers", %{buf: buf} do

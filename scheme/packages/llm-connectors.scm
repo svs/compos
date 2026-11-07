@@ -228,9 +228,8 @@
 
 (define (llm-connectors--meta buf)
   (let ((names (filter string? (llm-connectors-rows))))
-    (string-append (number->string (length names)) " connectors and providers · "
-                   (number->string (length (filter (lambda (n) (equal? (llm-connectors-state n) "ready")) names)))
-                   " ready · new chats use " *default-connector*)))
+    (string-append (number->string (length (filter (lambda (n) (equal? (llm-connectors-state n) "ready")) names)))
+                   " of " (number->string (length names)) " ready · default " *default-connector*)))
 
 ;;; --- the page of one connector -------------------------------------------------
 
@@ -305,7 +304,7 @@
                                                  (let ((sh (llm-provider-shape pv)))
                                                    (if sh (string-append " · speaks " sh) "")))))
                       '())
-                  (list (fact "model" "test model"
+                  (list (fact "model" "tests with"
                             (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it"))))
                 '()))
           (let ((steps (or (plist-get c 'install) '())))
@@ -321,7 +320,7 @@
             (if (and (null? ss) (not (plist-get c 'signin)))
                 '()
                 (append
-                  (list (list 'section "Sign in and keys"))
+                  (list (list 'section "Sign in"))
                   (if (plist-get c 'signin)
                       (list (fact "signin" "sign in" (string-append (plist-get c 'signin) "; l runs it")))
                       '())
@@ -345,7 +344,9 @@
 
 (define (llm-connectors--page-columns buf)
   ;; the value wraps, so a long model id or command reads whole in a narrow pane
-  (list (list "" 16 'left 'end) (list "" #f 'left 'wrap)))
+  ;; one column the width of the pane: a fact reads label: value, a model
+  ;; row is its id and its result, and nothing stands empty beside them
+  (list (list "" #f 'left 'wrap))))
 
 (define (llm-connectors--row-key r)
   (cond ((eq? (car r) 'model) (string-append "model:" (cadr r)))
@@ -355,30 +356,30 @@
 (define (llm-connectors--page-cells buf r)
   (let ((name (buffer-local buf 'llm-connector)))
     (cond
-      ((eq? (car r) 'section) (list (list (cadr r) "list-section-name") ""))
+      ((eq? (car r) 'section) (list (list (cadr r) "list-section-name")))
       ((eq? (car r) 'model)
        (let* ((id (cadr r))
-              (default? (equal? id (llm-connectors--default-model name))))
-         ;; the result first, as a checklist reads: it fits a narrow pane
-         (list (list (let ((t (llm-connectors-test-result name id)))
-                       (if t (llm-connectors--result-short t) "-"))
-                     (llm-connectors--test-face name id))
-               (list (string-append id
-                                    (let ((t (llm-connectors-test-result name id)))
-                                      (if (and t (eq? (plist-get t 'status) 'failed))
-                                          (string-append " · " (or (plist-get t 'error) "no reply"))
-                                          ""))
+              (default? (equal? id (llm-connectors--default-model name)))
+              (t (llm-connectors-test-result name id)))
+         (list (list (string-append id
                                     ;; a short id is an alias, and its name says which model it is
                                     (if (or (equal? (caddr r) "") (> (string-length id) 12)) ""
                                         (string-append " · " (caddr r)))
-                                    (if default? " (default)" ""))
-                     (if default? "llm-connectors-name" "default")))))
+                                    (if default? " (default)" "")
+                                    (if t (string-append "  " (llm-connectors--result-short t)) "")
+                                    (if (and t (eq? (plist-get t 'status) 'failed))
+                                        (string-append " · " (or (plist-get t 'error) "no reply"))
+                                        ""))
+                     (cond (t (llm-connectors--test-face name id))
+                           (default? "llm-connectors-name")
+                           (else #f))))))
       (else
        (let ((id (cadr r)) (value (cadddr r)))
-         (list (list (caddr r) "dim")
-               (cond ((equal? id "state") (list value (if (equal? value "ready") "success" "warning")))
-                     ((equal? id "test") (list value (llm-connectors--test-face name)))
-                     (else value))))))))
+         (list (list (string-append (caddr r) ": " value)
+                     (cond ((equal? id "state") (if (equal? value "ready") "success" "warning"))
+                           ((equal? id "test") (llm-connectors--test-face name))
+                           ((string-prefix? "install:" id) (if (string-prefix? "present" value) "success" "warning"))
+                           (else #f)))))))))
 
 (define (llm-connectors--page-meta buf)
   (let ((name (buffer-local buf 'llm-connector)))
@@ -773,14 +774,15 @@
     ;; narrow: the test result matters more than the description
     'layouts (list (list 'name 'tiny 'max-cols (lambda (buf) 64)
                          ;; the result first, as a checklist reads, and the name wraps
-                         'columns (lambda (buf) (list (list "last test" 14) (list "connector" #f 'left 'wrap)))
+                         'columns (lambda (buf) (list (list "connector" 18 'left 'end) (list "last test" #f)))
                          'cells (lambda (buf name)
                                   (if (llm-connectors--section? name)
-                                      (llm-connectors--cells buf name)
-                                      (let ((cs (llm-connectors--cells buf name))
-                                            (r (llm-connectors-test-result name)))
-                                        (list (list (if r (llm-connectors--result-short r) "-") (llm-connectors--test-face name))
-                                              (nth 0 cs))))))
+                                      (list (list (cadr name) "list-section-name") "")
+                                      (let ((r (llm-connectors-test-result name)))
+                                        (list (list (llm-connectors--title name) "llm-connectors-name")
+                                              (list (string-append (if (llm-connectors--default? name) "default · " "")
+                                                                   (if r (llm-connectors--result-short r) ""))
+                                                    (llm-connectors--test-face name)))))))
                    (list 'name 'narrow 'max-cols (lambda (buf) 120)
                          'columns (lambda (buf)
                                     (list (list "connector" 30) (list "kind" 8)
@@ -826,6 +828,11 @@
     'keys (cons '("RET" "llm-connectors-show-test") *llm-connectors-keys*)))
 
 (add-hook! 'setup-connector-chosen-hook 'llm-connectors-refresh!)
+
+;; an app page is not source: no line numbers
+(define (llm-connectors--no-line-numbers!) (buffer-set-local! (current-buffer) 'line-numbers "off"))
+(add-hook! 'llm-connectors-mode-hook 'llm-connectors--no-line-numbers!)
+(add-hook! 'llm-connectors-detail-mode-hook 'llm-connectors--no-line-numbers!)
 
 (define-command "llm-connectors" "Set up each model connector and test its connection"
   (lambda ()

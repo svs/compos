@@ -1256,8 +1256,25 @@
 ;; (candidate-face KEY): the first answer wins, none means no face. The
 ;; candidate renderer carries the face without knowing why that name has
 ;; that color.
-(define (candidate-face-for category name)
-  (run-hook-with-args-until-success 'candidate-face category name))
+(define (candidate-face-for category name &optional fns)
+  (let loop ((fs (or fns (hook-functions 'candidate-face))))
+    (if (null? fs)
+        #f
+        (let* ((p (hook--fn (car fs))) (v (and p (p category name))))
+          (or v (loop (cdr fs)))))))
+
+;; the faces of commands, ((NAME FACE) ...) for each that has one: found
+;; once per command table and face hooks, not once per prompt
+(define *command-faces* #f)
+(define (command-faces fns)
+  (if (and *command-faces*
+           (equal? (car *command-faces*) *command-generation*)
+           (equal? (cadr *command-faces*) fns))
+      (caddr *command-faces*)
+      (let ((faces (filter cadr (map (lambda (n) (list n (candidate-face-for 'command n fns)))
+                                     (command-names)))))
+        (set! *command-faces* (list *command-generation* fns faces))
+        faces)))
 
 ;; the annotator of CATEGORY is the registry table marginalia: one per
 ;; category, and the same category replaces
@@ -1345,14 +1362,21 @@
           (set! *annotate-memo* '())
           (unwind-protect
             (lambda ()
+              ;; the face hooks are read once: hook-functions is a lookup per call
               (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
-                     (ws (marginalia-widths rows)))
+                     (ws (marginalia-widths rows))
+                     (face-fns (hook-functions 'candidate-face))
+                     (cmd-faces (if (and (eq? category 'command) (pair? face-fns))
+                                    (command-faces face-fns)
+                                    '())))
                 (let loop ((ns names) (rs rows) (out '()))
                   (if (null? ns)
                       (reverse out)
                       (let* ((name (car ns))
                              (hint (marginalia-join (marginalia-trim (car rs)) ws))
-                             (face (candidate-face-for category name)))
+                             (face (cond ((not (pair? face-fns)) #f)
+                                         ((eq? category 'command) (alist-get cmd-faces name))
+                                         (else (candidate-face-for category name face-fns)))))
                         (loop (cdr ns) (cdr rs)
                               (cons (if face
                                         (list name hint "candidate" '() face)
@@ -2294,7 +2318,14 @@
                (index (fold (lambda (acc r)
                               (alist-put acc (cadr r) (cons (car r) (or (alist-get acc (cadr r)) '()))))
                             '() rows))
-               (entry (list *keymap-generation* rows index)))
+               ;; the tersest key of each command, found once per index:
+               ;; key-for-command is one native lookup, not a sort per call
+               (best (map (lambda (e)
+                            (list (car e)
+                                  (car (keymap--tersest
+                                         (map (lambda (ks) (string-join ks " ")) (cadr e))))))
+                          index))
+               (entry (list *keymap-generation* rows index best)))
           (set! *keymap-flat* (alist-put *keymap-flat* key entry))
           (cdr entry)))))
 
@@ -2320,8 +2351,7 @@
 (public! 'key-for-command
   "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\".")
 (define (key-for-command command &optional buf)
-  (let ((ks (where-is-internal command (if buf buf #f))))
-    (if (pair? ks) (car ks) "")))
+  (or (alist-get (caddr (keymap--flat (or buf (current-buffer)))) command) ""))
 
 ;; ((KEYS COMMAND) ...) with the keys spelled as one string and a prefix
 ;; keymap as "keymap:NAME"
@@ -5384,7 +5414,10 @@
 ;; does. Two fields, so the docs line up under each other whether or not
 ;; the command above them has a binding.
 (define (command-annotation c)
-  (list (key-for-command c) (command-doc c)))
+  ;; one prompt asks for every command: find the buffer's key table once
+  (let ((keys (annotate-once (list 'command-keys (current-buffer))
+                             (lambda () (caddr (keymap--flat (current-buffer)))))))
+    (list (or (alist-get keys c) "") (command-doc c))))
 
 (marginalia! 'command command-annotation)
 
@@ -5465,11 +5498,15 @@
 ;; buffer until its keymaps, its mode or the command table change. The key
 ;; holds the buffer's own ladder, not *keymap-generation*: that counts every
 ;; buffer's keymap facts, and a busy editor moves it many times a minute.
+;; The ladder is keyed by what its maps hold, not by the buffer's own map
+;; name, so a buffer of the same mode and maps takes the rows already built.
 (define *command-rows-cache* '())
 
 (define (command-rows--key buf)
   (let ((ro (and (buffer-exists? buf) (buffer-read-only? buf))))
-   (list (keymap--ladder buf ro)
+   (list (let ((own (keymap--key buf)))
+          (map (lambda (m) (if (equal? (car m) own) (list 'own (cadr m)) m))
+               (keymap--ladder buf ro)))
         (keymap--facts buf)
         (length (keymap-names))
         (buffer-local buf 'mode-name)
@@ -5483,9 +5520,16 @@
 (define (command-rows)
   (let* ((buf (current-buffer))
          (key (command-rows--key buf))
-         (kept (alist-get *command-rows-cache* buf)))
-    (if (and kept (equal? (car kept) key))
-        (cdr kept)
+         (mine (alist-get *command-rows-cache* buf))
+         (kept (if (and mine (equal? (car mine) key))
+                   mine
+                   (find (lambda (k) (equal? (car k) key)) (map cadr *command-rows-cache*)))))
+    (if kept
+        (begin
+          (unless (eq? kept mine)
+            (set! *command-rows-cache*
+              (take (alist-put (alist-delete *command-rows-cache* buf) buf kept) 8)))
+          (cdr kept))
         (let ((rows (annotate 'command (command-candidates))))
           (set! *command-rows-cache*
             (take (alist-put (alist-delete *command-rows-cache* buf) buf (cons key rows)) 8))

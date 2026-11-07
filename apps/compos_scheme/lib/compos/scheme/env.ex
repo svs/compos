@@ -458,6 +458,7 @@ defmodule Compos.Scheme.Env do
   end
 
   @doc "Deep-scan a term for closures, accumulating their captured frame refs."
+  def closure_refs({:closure, _params, _body, {:lex, vars, ref}}, acc), do: closure_refs(vars, [ref | acc])
   def closure_refs({:closure, _params, _body, ref}, acc), do: [ref | acc]
 
   # Walk a list cell by cell, not with Enum.reduce: a term the host keeps
@@ -525,7 +526,7 @@ defmodule Compos.Scheme.Env do
 
     graph = Enum.reduce(var_refs, graph, fn ref, acc -> Map.put_new(acc, ref, []) end)
     shared = graph |> Map.keys() |> MapSet.new()
-    graph = Enum.reduce(closures, graph, fn {ref, c}, acc -> add.(acc, ref, [c]) end)
+    graph = Enum.reduce(closures, graph, fn {ref, c}, acc -> add.(acc, ref, closure_refs({:closure, nil, nil, c}, [])) end)
     graph = Enum.reduce(compound, graph, fn {ref, val}, acc -> add.(acc, ref, closure_refs(val, [])) end)
 
     # the local tier shadows the shared one

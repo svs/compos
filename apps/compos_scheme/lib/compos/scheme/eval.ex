@@ -5,9 +5,10 @@ defmodule Compos.Scheme.Eval do
   are direct recursive calls).
 
   Closures: `{:closure, {required, optional, rest}, {tag, compiled, source},
-  env_ref}` — the body keeps its source for `function-source`. TAG is
-  `:lcode` when the body makes no closure, so its locals need no store
-  frame, else `:code`. Param
+  env}` — the body keeps its source for `function-source`. TAG is
+  `:lcode` when the body's locals need no store frame (see code/4), else
+  `:code`; ENV is a frame ref, or `{:lex, vars, ref}` for a closure made
+  inside a lexical body. Param
   lists use elisp-style `&optional` / `&rest` markers (flat, no dotted pairs);
   missing optionals bind `#f`, `&rest` binds a (possibly empty) list.
   Builtins: `{:builtin, name, fun}` where fun is `(args -> value)` or
@@ -111,6 +112,7 @@ defmodule Compos.Scheme.Eval do
   @doc "The source forms of a closure body."
   def source({:code, _compiled, source}), do: source
   def source({:lcode, _compiled, source}), do: source
+  def source({:lcode, _compiled, source, _names}), do: source
   def source(body), do: body
 
   # --- compile ----------------------------------------------------------------
@@ -135,7 +137,7 @@ defmodule Compos.Scheme.Eval do
   # through the store's frames, or a map of the names a lexical closure
   # binds (see code/2), where a name is a local or a free name at once.
   defp comp({:sym, _} = sym, :dyn), do: sym
-  defp comp({:sym, name}, sc) when is_map_key(sc, name), do: {:lvar, name}
+  defp comp({:sym, name}, sc) when is_map_key(sc, name), do: {:lvar, :erlang.map_get(name, sc)}
   defp comp({:sym, name}, _sc), do: {:gvar, name}
   defp comp(x, _sc) when is_number(x) or is_binary(x) or is_boolean(x), do: x
   defp comp([{:sym, "quote"}, form], _sc), do: {:quote, form}
@@ -147,9 +149,9 @@ defmodule Compos.Scheme.Eval do
   defp comp([{:sym, "define"}, [{:sym, name} | params] | body], sc),
     do: {:define, name, compile([{:sym, "lambda"}, params | body], sc)}
 
-  defp comp([{:sym, "lambda"}, params | body], _sc) do
+  defp comp([{:sym, "lambda"}, params | body], sc) do
     params = param_names!(params)
-    {:lambda, params, code(params, body)}
+    {:lambda, params, code(params, body, sc)}
   end
 
   # a lexical closure never assigns its own locals: those stay in frames
@@ -162,7 +164,7 @@ defmodule Compos.Scheme.Eval do
   defp comp([{:sym, "let"}, {:sym, name}, bindings | body], sc) do
     {names, forms} = bindings(bindings)
     params = {names, [], nil}
-    {:named_let, name, params, seq(forms, sc), code(params, body)}
+    {:named_let, name, params, seq(forms, sc), code(params, body, sc, name)}
   end
 
   defp comp([{:sym, "let"}, bindings | body], :dyn) do
@@ -172,7 +174,7 @@ defmodule Compos.Scheme.Eval do
 
   defp comp([{:sym, "let"}, bindings | body], sc) do
     {names, forms} = bindings(bindings)
-    {:llet, names, seq(forms, sc), seq(body, extend(sc, names))}
+    {:llet, intern(names), seq(forms, sc), seq(body, extend(sc, names))}
   end
 
   # let*: each binding sees the previous ones — a fresh frame per binding
@@ -186,7 +188,7 @@ defmodule Compos.Scheme.Eval do
 
     {pairs, sc} =
       Enum.zip(names, forms)
-      |> Enum.map_reduce(sc, fn {name, form}, sc -> {{name, compile(form, sc)}, extend(sc, [name])} end)
+      |> Enum.map_reduce(sc, fn {name, form}, sc -> {{intern(name), compile(form, sc)}, extend(sc, [name])} end)
 
     {:llet_star, pairs, seq(body, sc)}
   end
@@ -206,34 +208,39 @@ defmodule Compos.Scheme.Eval do
 
   defp bindings(bindings), do: Enum.unzip(Enum.map(bindings, fn [{:sym, n}, form] -> {n, form} end))
   defp seq(forms, sc \\ :dyn), do: Enum.map(forms, &compile(&1, sc))
-  defp extend(sc, names), do: Enum.reduce(names, sc, &Map.put(&2, &1, true))
+  # a local is read by its interned name: a map lookup costs ~2 ns with an
+  # atom key and ~19 ns with a string key (2026-11-08); globals stay strings
+  defp extend(sc, names), do: Enum.reduce(names, sc, &Map.put(&2, &1, String.to_atom(&1)))
+  defp intern(nil), do: nil
+  defp intern(names) when is_list(names), do: Enum.map(names, &String.to_atom/1)
+  defp intern(name), do: String.to_atom(name)
 
-  # A closure body that creates no closure and assigns none of its own
-  # locals can never let its frame escape, so the frame needs no place in
-  # the store: its locals live in a map passed down the evaluation,
-  # {:lex, vars, parent_ref}, and each name is known to be a local or a
-  # free name when the body compiles. Every other body keeps store frames,
-  # which closures capture and set! shares.
-  defp code({req, opt, rest} = _params, body) do
-    if captures?(body) do
-      {:code, seq(body), body}
-    else
-      names = req ++ opt ++ if(rest, do: [rest], else: [])
-      {:lcode, seq(body, extend(%{}, names)), body}
-    end
+  # A body that defines nothing and assigns none of the locals it sees
+  # never changes a local once bound, so a closure may keep its locals by
+  # value: they live in a map passed down the evaluation, {:lex, vars,
+  # parent_ref}, a lambda inside captures that map, and each name is known
+  # to be a local or a free name when the body compiles. SELF names a named
+  # let, which binds itself at each call instead of in a store frame. Every
+  # other body keeps store frames, which closures capture and set! shares;
+  # inside a lexical body the refusal goes up to the outermost one.
+  defp code({req, opt, rest}, body, sc, self \\ nil) do
+    if defines?(body), do: throw(:dynamic)
+    names = req ++ opt ++ if(rest, do: [rest], else: [])
+    names = if self, do: [self | names], else: names
+    compiled = seq(body, extend(if(sc == :dyn, do: %{}, else: sc), names))
+    {:lcode, compiled, body, {intern(req), intern(opt), intern(rest), intern(self)}}
   catch
-    :dynamic -> {:code, seq(body), body}
+    :dynamic when sc == :dyn -> {:code, seq(body), body}
   end
 
-  defp captures?([{:sym, "quote"} | _]), do: false
-  defp captures?([{:sym, head} | _]) when head in ["lambda", "define"], do: true
-  defp captures?([{:sym, "let"}, {:sym, _} | _]), do: true
-  defp captures?(list) when is_list(list), do: any_captures?(list)
-  defp captures?(_), do: false
+  defp defines?([{:sym, "quote"} | _]), do: false
+  defp defines?([{:sym, "define"} | _]), do: true
+  defp defines?(list) when is_list(list), do: any_defines?(list)
+  defp defines?(_), do: false
 
-  defp any_captures?([form | rest]), do: captures?(form) or any_captures?(rest)
-  defp any_captures?([]), do: false
-  defp any_captures?(_improper), do: true
+  defp any_defines?([form | rest]), do: defines?(form) or any_defines?(rest)
+  defp any_defines?([]), do: false
+  defp any_defines?(_improper), do: true
 
   defp call_name({:sym, name}), do: name
   defp call_name(_), do: "(lambda)"
@@ -299,6 +306,11 @@ defmodule Compos.Scheme.Eval do
 
   defp run({:begin, body}, env, store), do: run_seq(body, env, store)
 
+  defp run({:named_let, _name, params, inits, {:lcode, _, _, _} = code}, env, store) do
+    {vals, store} = run_args(inits, env, store, [])
+    apply_fn({:closure, params, code, env}, vals, store)
+  end
+
   defp run({:named_let, name, params, inits, code}, env, store) do
     {vals, store} = run_args(inits, env, store, [])
     {frame, store} = Env.new_frame(store, env)
@@ -357,15 +369,23 @@ defmodule Compos.Scheme.Eval do
     run_seq(body, frame, store)
   end
 
-  def apply_fn({:closure, {req, opt, rest}, {:lcode, body, source}, closure_env}, args, store) do
+  # slice 1's closure, kept for a live daemon that hot-loads this module
+  def apply_fn({:closure, {req, opt, rest}, {:lcode, body, source}, env}, args, store) do
     count_nesting!(source)
-    run_seq(body, {:lex, bind_params!(req, opt, rest, args), closure_env}, store)
+    run_seq(body, lex(env, bind_params!(req, opt, rest, args)), store)
+  end
+
+  def apply_fn({:closure, _params, {:lcode, body, source, {req, opt, rest, self}}, env} = f, args, store) do
+    count_nesting!(source)
+    vars = bind_params!(req, opt, rest, args)
+    vars = if self == nil or is_map_key(vars, self), do: vars, else: Map.put(vars, self, f)
+    run_seq(body, lex(env, vars), store)
   end
 
   # A closure made before the compiler, which a live daemon still holds
   # after it hot-loaded this module, has a source body: compile per call.
   def apply_fn({:closure, params, body, env}, args, store) when is_list(body),
-    do: apply_fn({:closure, params, code(params, body), env}, args, store)
+    do: apply_fn({:closure, params, code(params, body, :dyn), env}, args, store)
 
   # A builtin fed bad arguments must surface as a Scheme error, not a raw
   # Elixir exception: raw exceptions crash the hosting GenServer (the whole
@@ -423,6 +443,9 @@ defmodule Compos.Scheme.Eval do
   end
 
   # --- helpers ---------------------------------------------------------------
+
+  defp lex({:lex, outer, ref}, vars), do: {:lex, Map.merge(outer, vars), ref}
+  defp lex(ref, vars), do: {:lex, vars, ref}
 
   defp run_args([], _env, store, acc), do: {Enum.reverse(acc), store}
 

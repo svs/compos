@@ -11,7 +11,7 @@ defmodule Compos.Scheme.GCTest do
     {:ok, _, interp} =
       Scheme.eval_string(
         interp,
-        "(define (burn n) (if (= n 0) 0 (begin (lambda () n) (burn (- n 1))))) (burn 500)"
+        "(define (burn n) (if (= n 0) 0 (begin (set! n n) (lambda () n) (burn (- n 1))))) (burn 500)"
       )
 
     assert Scheme.frame_count(interp) > base + 400
@@ -51,6 +51,34 @@ defmodule Compos.Scheme.GCTest do
 
     swept = Scheme.gc(interp, [])
     assert {:ok, 7, _} = Scheme.eval_string(swept, "(add5 2)")
+  end
+
+  test "closures made in a lexical body keep their values; set! still shares one frame" do
+    interp = Scheme.new()
+    base = Scheme.frame_count(interp)
+
+    {:ok, vals, interp} =
+      Scheme.eval_string(interp, """
+      (define (thunks n)
+        (let loop ((i 0) (acc '()))
+          (if (< i n) (loop (+ i 1) (cons (lambda () i) acc)) acc)))
+      (define (sh loop) (let loop ((loop loop)) ((lambda (loop) loop) (+ loop 1))))
+      (cons (sh 4) (map (lambda (f) (f)) (thunks 300)))
+      """)
+
+    assert [5, 299 | _] = vals
+    assert length(vals) == 301
+    assert Scheme.frame_count(interp) < base + 10
+
+    {:ok, _, interp} =
+      Scheme.eval_string(interp, """
+      (define (box) (let ((n 0)) (list (lambda () (set! n (+ n 1))) (lambda () n))))
+      (define b (box))
+      (define t (car (thunks 3)))
+      """)
+
+    swept = Scheme.gc(interp, [])
+    assert {:ok, [2, 2], _} = Scheme.eval_string(swept, "((car b)) ((car b)) (list ((cadr b)) (t))")
   end
 
   test "a swept frame leaves no binding rows, and a live frame keeps its own" do
@@ -251,7 +279,7 @@ defmodule Compos.Scheme.GCTest do
           (define make-counter (lambda () (let ((n 0)) (lambda () (set! n (+ n 1)) n))))
           (define c (make-counter))
           (c)
-          (define (burn n) (if (= n 0) 0 (begin (lambda () n) (burn (- n 1)))))
+          (define (burn n) (if (= n 0) 0 (begin (set! n n) (lambda () n) (burn (- n 1)))))
           (burn 500)
           """)
 

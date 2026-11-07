@@ -2725,9 +2725,14 @@
 ;;; panes-layouts-state does, holds no such variable and needs nothing.
 
 (define *desktop-globals* '())   ; ((KEY GET PUT CLEAR) ...)
+;; Saved values whose key had no owner when the desktop went back: a file
+;; that failed to load at boot. The owner takes its value when it
+;; registers, and a save keeps it, so the file never loses it.
+(define *desktop-pending* '())   ; ((KEY VALUE) ...)
 
 (define (persist-global! key get put)
   (let* ((old (assoc key *desktop-globals*))
+         (pending (assoc key *desktop-pending*))
          (initial (get))
          ;; A package reload re-registers the variable after it changed.
          ;; Keep the first reset closure instead of adopting that live value.
@@ -2736,15 +2741,23 @@
                     (lambda () (put initial)))))
     (set! *desktop-globals*
       (cons (list key get put reset)
-            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))))
+            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))
+    (when pending
+      (set! *desktop-pending* (remove (lambda (e) (equal? (car e) key)) *desktop-pending*))
+      (put (cadr pending)))))
 
 ;; what the desktop writes
 (define (desktop-globals)
-  (map (lambda (e) (list (car e) ((cadr e)))) *desktop-globals*))
+  (append (map (lambda (e) (list (car e) ((cadr e)))) *desktop-globals*)
+          *desktop-pending*))
 
-;; what the desktop hands back. A key nobody claims any more is dropped,
-;; so a desktop file written by an older editor still boots.
+;; what the desktop hands back. A key nobody claims waits in
+;; *desktop-pending* for its owner, and a save keeps it: a package that
+;; failed to load at boot must not cost its saved state. On 2026-11-08 that
+;; drop lost groups-v2 and every group with it.
 (define (desktop-globals! saved)
+  (set! *desktop-pending*
+    (filter (lambda (e) (not (assoc (car e) *desktop-globals*))) saved))
   (for-each
     (lambda (e)
       (let ((hit (assoc (car e) saved)))
@@ -2759,6 +2772,7 @@
     (when e ((car (cdr (cdr e))) value))))
 
 (define (desktop-globals-clear!)
+  (set! *desktop-pending* '())
   (for-each
     (lambda (e) ((car (cdr (cdr (cdr e))))))
     *desktop-globals*))

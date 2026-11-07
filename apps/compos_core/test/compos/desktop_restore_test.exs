@@ -606,6 +606,32 @@ defmodule Compos.DesktopRestoreTest do
     })
   end
 
+  # On 2026-11-08 a boot ran without groups.scm and chat-mode.scm for a
+  # while. Their saved values had no owner when the desktop went back, were
+  # dropped, and the next save wrote the file without them: every group was
+  # lost. A value without an owner now waits for it, and a save keeps it.
+  test "a saved global whose owner registers late is kept and comes back" do
+    reg = ~S{(persist-global! 'dr-late (lambda () *dr-late*) (lambda (v) (set! *dr-late* v)))}
+    unreg = ~S{(set! *desktop-globals* (remove (lambda (e) (equal? (car e) 'dr-late)) *desktop-globals*))}
+
+    eval!(~s{(define *dr-late* "used")})
+    eval!(reg)
+    assert :ok = Desktop.save_now()
+
+    # the owner is not loaded: the restore and a save after it run without it
+    eval!(unreg)
+    eval!(~s{(set! *dr-late* "boot")})
+    assert :ok = Desktop.restore_now()
+    assert :ok = Desktop.save_now()
+    assert eval!("*dr-late*") == ~s{"boot"}
+
+    # the owner loads late and takes the value the file still holds
+    assert :ok = Desktop.restore_now()
+    eval!(reg)
+    assert eval!("*dr-late*") == ~s{"used"}
+    eval!(unreg)
+  end
+
   test "LLM configuration history survives desktop restore" do
     eval!(~s{
       (set! *llm-config-history*

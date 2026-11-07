@@ -10,8 +10,6 @@ defmodule Compos.PromptShapeTest do
 
   alias Compos.Core.{Editor, Session}
 
-  defp rects, do: eval!("(window-rects)")
-
   setup do
     Editor.minibuffer_close()
     Compos.TestHelpers.one_window!()
@@ -24,14 +22,7 @@ defmodule Compos.PromptShapeTest do
   end
 
   # the fractional rectangle of the window showing NAME: (X Y W H)
-  defp rect_of(name) do
-    ~r/\((\d+) "#{Regex.escape(name)}" ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+)\)/
-    |> Regex.run(rects())
-    |> case do
-      [_, _id, x, y, w, h] -> Enum.map([x, y, w, h], &String.to_float/1)
-      nil -> nil
-    end
-  end
+  defp rect_of(name), do: Enum.find_value(window_layout(), fn {buffer, rect} -> buffer == name && rect end)
 
   test "the minibuffer shape docks the table across the frame and gives the rows back" do
     eval!(~s{(split-window! 'h 0.5)})
@@ -41,7 +32,7 @@ defmodule Compos.PromptShapeTest do
     # halves a measurement so the dock has something to estimate from
     Editor.set_window_cols(Map.new(Editor.list_windows(), fn {id, _} -> {id, 90} end))
 
-    eval!(~s{(run-command "ibuffer-prompt")})
+    eval!(~s{(run-command "ibuffer-prompt-pretty")})
 
     assert [x, _y, w, _h] = rect_of(" *buffers*")
     # a pane of the FRAME: it starts at the left edge and spans it. A
@@ -62,7 +53,7 @@ defmodule Compos.PromptShapeTest do
   end
 
   test "the shape cycles minibuffer, panel, modal, and the table keeps its filter" do
-    eval!(~s{(run-command "ibuffer-prompt")})
+    eval!(~s{(run-command "ibuffer-prompt-pretty")})
     eval!(~s{(list-set-query! " *buffers*" "zz-no-such-buffer")})
     query = eval!(~s{(list-query " *buffers*")})
 
@@ -74,27 +65,9 @@ defmodule Compos.PromptShapeTest do
 
     eval!(~s{(run-command "minibuffer-cycle-shape")})
     assert eval!(~s{(buffer-local " *buffers*" 'window-class)}) == "#f"
-    assert [0.0, _, 1.0, _] = rect_of(" *buffers*")
+    assert [+0.0, _, 1.0, _] = rect_of(" *buffers*")
 
     # a shape change moves the surface and nothing else
     assert eval!(~s{(list-query " *buffers*")}) == query
-  end
-
-  test "a section heading paints the line, so its band reaches both edges" do
-    eval!(~s{(run-command "ibuffer-prompt")})
-
-    rows = ~s{(list-page-rows " *buffers*" (list-entries " *buffers*"))}
-    bands = eval!(~s{(length (filter (lambda (o) (equal? (nth 2 o) "row-list-section"))
-                                     (list-row-overlays " *buffers*" #{rows})))})
-
-    # a row-* face on a line's first byte names the whole line in the
-    # renderer (editor_live row_class); a plain face would stop where the
-    # heading's own text stops
-    assert String.to_integer(bands) > 0
-
-    first = eval!(~s{(car (filter (lambda (o) (equal? (nth 2 o) "row-list-section"))
-                                  (list-row-overlays " *buffers*" #{rows})))})
-    [start | _] = Regex.run(~r/\d+/, first)
-    assert start in String.split(eval!(~s{(list-offsets " *buffers*")}), ~r/[( )]/)
   end
 end

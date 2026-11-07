@@ -2542,69 +2542,11 @@ defmodule Compos.Core.SchemeAPI do
         fn [id] -> Editor.frame_of_window(id) || false end,
 
       # --- the prompt's render snapshot. minibuffer.scm owns the prompt: its
-      # handlers, its policy and its history. These doors read and write the
-      # one thing the frame keeps, what its render walk draws.
+      # handlers, its policy and its history. prompt--do reads and writes the
+      # one thing the frame keeps, what its render walk draws, and the popup's.
       {"prompt--do",
        "(prompt--do OP ARG...) — one operation on this frame's prompt or popup. Prompt: show PROMPT CANDIDATES VIEW, hide, facts, filtered, selected, sync, move DELTA, candidates LIST. Popup: start, query TEXT, accept, cmove DELTA. #f when none is open. minibuffer.scm calls this: use minibuffer-selected and the like."} =>
         fn [op | args] -> prompt_do(Opts.plain(op), args) end,
-      {"minibuffer--show!",
-       "(minibuffer--show! PROMPT CANDIDATES VIEW) — open the frame's prompt snapshot. VIEW is ((KEY VALUE) ...): input, completing, query (input, segment or none), match-hint, completion-style, preselect, style, note, legend, selected."} =>
-        fn [prompt, candidates, view] ->
-          Editor.minibuffer_show(prompt, candidates, mb_view(view))
-          :void
-        end,
-      {"minibuffer--move!", "(minibuffer--move! DELTA) — move the prompt's selection by DELTA rows."} =>
-        fn [delta] ->
-          Editor.minibuffer_move(trunc(delta))
-          :void
-        end,
-      {"minibuffer--hide!",
-       "(minibuffer--hide!) — close the frame's prompt snapshot; answer (input I selected S prompt-sel B total N), or #f."} =>
-        fn [] ->
-          case Editor.minibuffer_close() do
-            nil -> false
-            mb -> plist(prompt: mb.prompt, input: mb.input, selected: mb.selected, "prompt-sel": mb.prompt_sel, total: mb.total)
-          end
-        end,
-      {"minibuffer--facts",
-       "(minibuffer--facts) — the open prompt's (input I selected S touched B prompt-sel B), or #f; no candidate list travels."} =>
-        fn [] ->
-          case Editor.minibuffer_facts() do
-            nil -> false
-            f -> plist(input: f.input, selected: f.selected, touched: f.touched, "prompt-sel": f.prompt_sel)
-          end
-        end,
-      {"completion-query!", "(completion-query! TEXT) — narrow the open popup to TEXT; no row left closes it."} =>
-        fn [q] ->
-          Editor.completion_query(q)
-          :void
-        end,
-      {"minibuffer--filtered",
-       "(minibuffer--filtered) — the prompt's rows that survive its input, ((LABEL HINT) ...)."} =>
-        fn [] -> Editor.minibuffer_filtered() || [] end,
-      {"minibuffer--sync!",
-       "(minibuffer--sync!) — take the input back from the prompt buffer; answer it when it changed, else #f."} =>
-        fn [] ->
-          case Editor.minibuffer_sync_input() do
-            {:changed, input} -> input
-            _ -> false
-          end
-        end,
-      {"completion--start", "(completion--start) — where the open popup's text starts, or #f."} =>
-        fn [] ->
-          case Editor.snapshot().completion do
-            %{start: start} -> start
-            _ -> false
-          end
-        end,
-      {"completion--accept!",
-       "(completion--accept!) — close the popup; answer (START TAIL LABEL) of the selection, or #f."} =>
-        fn [] ->
-          case Editor.completion_accept() do
-            {start, tail, label} -> [start, tail, label]
-            nil -> false
-          end
-        end,
       {"transient-show!",
        "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it."} =>
         fn
@@ -2848,11 +2790,6 @@ defmodule Compos.Core.SchemeAPI do
           Editor.completion_show(start, tail, candidates)
           :void
         end,
-      {"completion-move!", "(completion-move! DELTA) — move the popup selection by DELTA rows."} =>
-        fn [delta] ->
-          Editor.completion_move(delta)
-          :void
-        end,
       # the one matcher every surface narrows with; STYLE as in completion-style
       {"completion-match?",
        "(completion-match? LABEL QUERY [STYLE]) — does QUERY match LABEL the way a prompt matches: 'flex (default), 'substring, 'prefix, 'regexp, 'exact."} =>
@@ -2890,11 +2827,6 @@ defmodule Compos.Core.SchemeAPI do
         fn [buf] ->
           ~r/\S+/ |> Regex.scan(Buffer.text(buf)) |> length()
         end,
-      # the highlighted candidate (consult-style preview reads it on move)
-      {"minibuffer-selected",
-       "(minibuffer-selected) — return the highlighted minibuffer candidate."} => fn [] ->
-        Editor.minibuffer_selected()
-      end,
       # escape hatch: current-buffer defaults to the minibuffer's OWN text
       # while one is active, so a preview hook that wants to act on the
       # invoking buffer (e.g. goto-char! for a same-buffer position
@@ -2911,12 +2843,6 @@ defmodule Compos.Core.SchemeAPI do
        "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned."} =>
         fn [name] ->
           Compos.Core.sleep_buffer(name) == :ok
-        end,
-      {"minibuffer-set-candidates!",
-       "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list."} =>
-        fn [candidates] ->
-          Editor.minibuffer_set_candidates(candidates)
-          :void
         end,
       {"set-frame-group-label!",
        "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one."} =>

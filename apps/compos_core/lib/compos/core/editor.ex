@@ -280,41 +280,7 @@ defmodule Compos.Core.Editor do
   def set_chrome(key, value), do: GenServer.call(__MODULE__, {:set_chrome, key, value})
 
   # minibuffer
-  def minibuffer_set_input(input, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_input, input, fid(fid)})
-
-  def minibuffer_set_candidates(candidates, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_candidates, candidates, fid(fid)})
-
-  @doc """
-  Set the palette's right-hand list, or nil to clear it.
-
-  The prompt owns the rail: it writes the rows, which row is on, and
-  whether the rail holds the arrows. Nothing is inferred here.
-  """
-  def minibuffer_set_rail(rail, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_rail, rail, fid(fid)})
-
-  @doc """
-  Set the tabs over the open prompt's list, [%{label:, current:}], or []
-  to remove them. The prompt owns them: it says which tab is on, and the
-  side arrows ask it to move.
-  """
-  def minibuffer_set_tabs(tabs, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_tabs, tabs, fid(fid)})
-
-  @doc """
-  Change the open prompt's style, and so its shape, without closing it.
-
-  The shape is a property of the prompt, not a different prompt: the same
-  input, candidates and selection carry over, and the view re-reads its
-  geometry from the new style.
-  """
-  def minibuffer_set_style(style, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_style, style, fid(fid)})
-
-  @doc "Currently selected candidate label (after fuzzy filter), or nil."
-  def minibuffer_selected(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_selected, fid(fid)})
+  def minibuffer_set_input(input, fid \\ nil), do: prompt_op(:input, [input], fid)
 
   @doc """
   One operation OP with ARGS on the calling frame's prompt: :facts,
@@ -328,21 +294,7 @@ defmodule Compos.Core.Editor do
   def minibuffer_show(prompt, candidates, view, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_show, prompt, candidates, view, fid(fid)})
 
-  @doc "The open prompt's input, selection, touched flag and prompt_sel, or nil."
-  def minibuffer_facts(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_facts, fid(fid)})
-
-  @doc "Move the selection by DELTA rows, with no policy."
-  def minibuffer_move(delta, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_move, delta, fid(fid)})
-
-  @doc "The rows that survive the input, [label, hint] each, or nil."
-  def minibuffer_filtered(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_filtered, fid(fid)})
-
   def minibuffer_close(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_close, fid(fid)})
-
-  @doc "Re-read input from the minibuf buffer. :unchanged | {:changed, input}."
-  def minibuffer_sync_input(fid \\ nil),
-    do: GenServer.call(__MODULE__, {:mb_sync_input, fid(fid)})
 
   @doc "While false, current_buffer ignores an active minibuffer (handler escape hatch)."
   def set_mb_redirect(bool, fid \\ nil),
@@ -369,19 +321,7 @@ defmodule Compos.Core.Editor do
   def completion_show(start, tail, candidates, fid \\ nil),
     do: GenServer.call(__MODULE__, {:completion_show, start, tail, candidates, fid(fid)})
 
-  def completion_move(delta, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:completion_move, delta, fid(fid)})
-
-  @doc "Narrow the open popup by prefix typed since it opened."
-  def completion_query(q, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:completion_query, q, fid(fid)})
-
-  @doc "Accept the selection: returns {start, label} and clears, or nil."
-  def completion_accept(fid \\ nil),
-    do: GenServer.call(__MODULE__, {:completion_accept, fid(fid)})
-
-  def completion_dismiss(fid \\ nil),
-    do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
+  def completion_dismiss(fid \\ nil), do: prompt_op(:dismiss, [], fid)
 
   # the face and style maps the page renders. Scheme owns the tables
   # (themes.scm): the merge, the clear, a theme and a frame's own theme.
@@ -1463,131 +1403,6 @@ defmodule Compos.Core.Editor do
     open_minibuffer(state, f, mb, candidates)
   end
 
-  def handle_call({:mb_input, input, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        reset_minibuf_buffer(minibuf_of(f), input)
-        changed(:ok, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  # pull the input back out of the minibuffer buffer after keys edited it
-  # (self-insert, DEL, yank, undo — anything); requery candidates on change
-  def handle_call({:mb_sync_input, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        input = Buffer.text(minibuf_of(f))
-
-        if input == mb.input,
-          do: {:reply, :unchanged, state},
-          else:
-            changed(
-              {:changed, input},
-              put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}),
-              f.id
-            )
-
-      _ ->
-        {:reply, :unchanged, state}
-    end
-  end
-
-  def handle_call({:mb_candidates, candidates, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
-        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: list}}), f.id)
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  def handle_call({:mb_style, style, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :style, style)}), f.id)
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  def handle_call({:mb_rail, rail, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :rail, rail)}), f.id)
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  def handle_call({:mb_tabs, tabs, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        changed(:ok, put_frame(state, %{f | minibuffer: Map.put(mb, :tabs, tabs)}), f.id)
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  # the selection moves by DELTA rows and nothing else: what a move means
-  # in a prompt that holds the selection itself is the prompt's policy
-  def handle_call({:mb_move, delta, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} = f ->
-        changed(
-          :ok,
-          put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}),
-          f.id
-        )
-
-      _ ->
-        {:reply, {:error, :inactive}, state}
-    end
-  end
-
-  # the rows that survive the input, [label, hint] each: what a collected
-  # prompt hands on
-  def handle_call({:mb_filtered, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} ->
-        {:reply, Enum.map(Candidates.filtered(mb.list), fn c -> [c.label, c.hint || ""] end), state}
-
-      _ ->
-        {:reply, nil, state}
-    end
-  end
-
-  # the few facts a prompt command decides on, without the candidate list
-  def handle_call({:mb_facts, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} ->
-        {:reply,
-         %{
-           input: mb.input,
-           selected: Candidates.selected(mb.list),
-           touched: mb.list.touched,
-           prompt_sel: prompt_preselected?(mb)
-         }, state}
-
-      _ ->
-        {:reply, nil, state}
-    end
-  end
-
-  def handle_call({:mb_selected, fid}, _from, state) do
-    case frame(state, fid) do
-      %{minibuffer: %{} = mb} -> {:reply, Candidates.selected(mb.list), state}
-      _ -> {:reply, nil, state}
-    end
-  end
-
   def handle_call({:prompt_op, op, args, fid}, _from, state) do
     f = frame(state, fid)
 
@@ -1649,56 +1464,6 @@ defmodule Compos.Core.Editor do
         completion = %{start: start, tail: max(tail, 0), list: Candidates.new(candidates)}
         changed(:ok, put_frame(state, %{f | completion: completion}), f.id)
     end
-  end
-
-  def handle_call({:completion_move, delta, fid}, _from, state) do
-    case frame(state, fid) do
-      %{completion: %{} = c} = f ->
-        changed(
-          :ok,
-          put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}),
-          f.id
-        )
-
-      _ ->
-        {:reply, :ok, state}
-    end
-  end
-
-  # narrow the popup in place as the user types — no source re-query
-  def handle_call({:completion_query, q, fid}, _from, state) do
-    case frame(state, fid) do
-      %{completion: %{} = c} = f ->
-        list = Candidates.put_query(c.list, q)
-
-        if Candidates.total(list) == 0,
-          do: changed(:ok, put_frame(state, %{f | completion: nil}), f.id),
-          else: changed(:ok, put_frame(state, %{f | completion: %{c | list: list}}), f.id)
-
-      _ ->
-        {:reply, :ok, state}
-    end
-  end
-
-  def handle_call({:completion_accept, fid}, _from, state) do
-    case frame(state, fid) do
-      %{completion: %{} = c} = f ->
-        reply =
-          case Candidates.selected(c.list) do
-            nil -> nil
-            label -> {c.start, Map.get(c, :tail, 0), label}
-          end
-
-        changed(reply, put_frame(state, %{f | completion: nil}), f.id)
-
-      _ ->
-        {:reply, nil, state}
-    end
-  end
-
-  def handle_call({:completion_dismiss, fid}, _from, state) do
-    f = frame(state, fid)
-    changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
   end
 
   def handle_call(:faces, _from, state), do: {:reply, state.faces, state}
@@ -2348,6 +2113,7 @@ defmodule Compos.Core.Editor do
     {:put, label && [c.start, Map.get(c, :tail, 0), label], %{f | completion: nil}}
   end
 
+  defp on_prompt(:dismiss, [], f), do: {:put, :ok, %{f | completion: nil}}
   defp on_prompt(_op, _args, _f), do: nil
 
   # --- keymaps -----------------------------------------------------------------

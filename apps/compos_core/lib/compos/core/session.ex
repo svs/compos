@@ -2020,16 +2020,13 @@ defmodule Compos.Core.Session do
       {"minibuffer-style!",
        "(minibuffer-style! STYLE) — change the open prompt's style, and so its shape, without closing it: \"modal\", \"panel\", \"minibuffer\", or #f."} =>
         fn [style] ->
-          Editor.minibuffer_set_style(if(style in [false, nil], do: nil, else: s(style)))
+          Editor.prompt_op(:set, [:style, if(style in [false, nil], do: nil, else: s(style))])
           :void
         end,
       {"minibuffer-tabs!",
        "(minibuffer-tabs! TABS) — show tabs over the open prompt's list: ((LABEL CURRENT?) ...), the current one #t; '() removes them."} =>
         fn [tabs] ->
-          Editor.minibuffer_set_tabs(
-            for([label, current] <- tabs || [], do: %{label: s(label), current: current == true})
-          )
-
+          Editor.prompt_op(:set, [:tabs, for([label, current] <- tabs || [], do: %{label: s(label), current: current == true})])
           :void
         end,
       {"minibuffer-input!", "(minibuffer-input! INPUT) — set the minibuffer input text."} => fn [
@@ -2141,7 +2138,7 @@ defmodule Compos.Core.Session do
                 nil
             end
 
-          Editor.minibuffer_set_rail(rail)
+          Editor.prompt_op(:set, [:rail, rail])
           :void
         end
     }

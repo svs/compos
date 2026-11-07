@@ -11,6 +11,7 @@ defmodule Compos.Core.SchemeAPI do
   alias Compos.Core
   alias Compos.Scheme.Prim
   alias Compos.Core.{Buffer, Editor, Git}
+  alias Compos.Core.SchemeOpts, as: Opts
 
   @commands :compos_commands
 
@@ -221,8 +222,8 @@ defmodule Compos.Core.SchemeAPI do
         receive_timeout: http_limit(Map.get(o, "timeout"), limit),
         connect_options: [timeout: http_limit(Map.get(o, "connect-timeout"), 10_000)]
       ]
-      |> http_option(:headers, http_pairs(Map.get(o, "headers")))
-      |> http_option(:params, http_pairs(Map.get(o, "params")))
+      |> http_option(:headers, Opts.pairs(Map.get(o, "headers")))
+      |> http_option(:params, Opts.pairs(Map.get(o, "params")))
       |> http_body(o, json)
 
     case http_perform(req) do
@@ -241,24 +242,6 @@ defmodule Compos.Core.SchemeAPI do
 
   # Scheme writes a header set as a plist, (authorization "Bearer t"), and as
   # a list of pairs when a name is not a symbol: (("X-Trace-Id" "7")).
-  defp http_pairs(map) when is_map(map),
-    do: for({key, value} <- map, do: {to_string(key), http_scalar(value)})
-
-  defp http_pairs(list) when is_list(list) do
-    Enum.flat_map(list, fn
-      [key, value] -> [{to_string(key), http_scalar(value)}]
-      {key, value} -> [{to_string(key), http_scalar(value)}]
-      _ -> []
-    end)
-  end
-
-  defp http_pairs(_), do: []
-
-  defp http_scalar(value) when is_binary(value), do: value
-  defp http_scalar(value) when is_number(value), do: to_string(value)
-  defp http_scalar(value) when is_boolean(value), do: to_string(value)
-  defp http_scalar(value), do: value
-
   # Three ways to say what to send, tried in the order a caller means them:
   # json encodes and sets the content type, form url-encodes, body is the
   # bytes verbatim.
@@ -269,7 +252,7 @@ defmodule Compos.Core.SchemeAPI do
         Keyword.put(req, :json, value)
 
       Map.get(o, "form", false) != false ->
-        Keyword.put(req, :form, http_pairs(Map.get(o, "form")))
+        Keyword.put(req, :form, Opts.pairs(Map.get(o, "form")))
 
       is_binary(Map.get(o, "body")) ->
         Keyword.put(req, :body, Map.get(o, "body"))
@@ -397,11 +380,11 @@ defmodule Compos.Core.SchemeAPI do
         fn [events, positions] ->
           events =
             for e <- events do
-              m = plist_map(e)
+              m = Opts.map(e, & &1)
               %{seq: m["seq"], topic: m["topic"], kind: m["kind"], data: m["data"], at: m["at"] || 0}
             end
 
-          positions = for [name | seq] <- positions, do: {name, pos_seq(seq)}
+          positions = for [name | seq] <- positions, do: {name, Opts.seq(seq)}
           Log.import(events, positions)
         end
     }
@@ -420,7 +403,7 @@ defmodule Compos.Core.SchemeAPI do
       {"workflow-define!",
        "(workflow-define! NAME SPEC) — start or reconfigure the workflow NAME. SPEC is a plist: listen (patterns), quiet-ms, max-wait-ms, batch, max-attempts, backoff-ms, max-backoff-ms, timeout-ms, from."} =>
         fn [name, spec] ->
-          m = plist_map(spec)
+          m = Opts.map(spec, & &1)
 
           opts =
             for {key, field} <- [
@@ -518,19 +501,6 @@ defmodule Compos.Core.SchemeAPI do
     [{:sym, "seq"}, e.seq, {:sym, "topic"}, e.topic, {:sym, "kind"}, e.kind, {:sym, "data"},
      e.data, {:sym, "at"}, e.at]
   end
-
-  defp plist_map(plist) do
-    plist
-    |> Enum.chunk_every(2)
-    |> Map.new(fn
-      [{:sym, k}, v] -> {k, v}
-      [k, v] -> {k, v}
-    end)
-  end
-
-  # an alist pair (name . seq) reads as [name | seq]; (name seq) as [name, seq]
-  defp pos_seq([seq]), do: seq
-  defp pos_seq(seq), do: seq
 
   defp telemetry_primitives do
     %{
@@ -806,21 +776,21 @@ defmodule Compos.Core.SchemeAPI do
       {"buffer-insert-at-local!",
        "(buffer-insert-at-local! BUF LOCAL TEXT) — insert TEXT at the byte position the buffer-local LOCAL names and advance the local, atomically; return the advanced position."} =>
         fn [name, local, text] ->
-          Buffer.insert_at_local(name, plain(local), to_string(text), source: :editor)
+          Buffer.insert_at_local(name, Opts.plain(local), to_string(text), source: :editor)
         end,
       {"buffer-marker-local!",
        "(buffer-marker-local! BUF LOCAL &optional TYPE) — declare LOCAL a marker: the buffer keeps the position current through every edit, as it keeps point. TYPE 'advance (default) moves it with text inserted exactly on it; 'stay does not."} =>
         fn
           [name, local] ->
-            :ok = Buffer.declare_marker_local(name, plain(local))
+            :ok = Buffer.declare_marker_local(name, Opts.plain(local))
             :void
 
           [name, local, type] ->
             :ok =
               Buffer.declare_marker_local(
                 name,
-                plain(local),
-                if(plain(type) == "stay", do: :stay, else: :advance)
+                Opts.plain(local),
+                if(Opts.plain(type) == "stay", do: :stay, else: :advance)
               )
 
             :void
@@ -936,9 +906,9 @@ defmodule Compos.Core.SchemeAPI do
               Buffer.provenance_start(
                 name,
                 source: :editor,
-                author: plain(actor),
-                reason: plain(reason),
-                policy_source: plain(policy_source)
+                author: Opts.plain(actor),
+                reason: Opts.plain(reason),
+                policy_source: Opts.plain(policy_source)
               )
 
             :void
@@ -955,9 +925,9 @@ defmodule Compos.Core.SchemeAPI do
               Buffer.provenance_stop(
                 name,
                 source: :editor,
-                author: plain(actor),
-                reason: plain(reason),
-                policy_source: plain(policy_source)
+                author: Opts.plain(actor),
+                reason: Opts.plain(reason),
+                policy_source: Opts.plain(policy_source)
               )
 
             :void
@@ -974,9 +944,9 @@ defmodule Compos.Core.SchemeAPI do
               Buffer.provenance_discard(
                 name,
                 source: :editor,
-                author: plain(actor),
-                reason: plain(reason),
-                policy_source: plain(policy_source)
+                author: Opts.plain(actor),
+                reason: Opts.plain(reason),
+                policy_source: Opts.plain(policy_source)
               )
 
             :void
@@ -1005,8 +975,8 @@ defmodule Compos.Core.SchemeAPI do
           :ok =
             Buffer.set_overlays(
               name,
-              plain(tag),
-              Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end)
+              Opts.plain(tag),
+              Enum.map(ranges, fn [s, e, f] -> {s, e, Opts.plain(f)} end)
             )
 
           :void
@@ -1019,10 +989,10 @@ defmodule Compos.Core.SchemeAPI do
 
           Buffer.set_overlays_range(
             name,
-            plain(tag),
+            Opts.plain(tag),
             start,
             stop,
-            Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end),
+            Enum.map(ranges, fn [s, e, f] -> {s, e, Opts.plain(f)} end),
             if(is_integer(version), do: version)
           ) == :ok
         end,
@@ -1041,7 +1011,7 @@ defmodule Compos.Core.SchemeAPI do
       {"overlay-clear!",
        "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay."} =>
         fn [name, tag] ->
-          :ok = Buffer.clear_overlays(name, if(plain(tag) == "all", do: :all, else: plain(tag)))
+          :ok = Buffer.clear_overlays(name, if(Opts.plain(tag) == "all", do: :all, else: Opts.plain(tag)))
           :void
         end,
       {"buffer-overlays",
@@ -1051,7 +1021,7 @@ defmodule Compos.Core.SchemeAPI do
             Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
 
           [name, tag] ->
-            Enum.map(Buffer.overlays(name, plain(tag)), fn {s, e, f} -> [s, e, f] end)
+            Enum.map(Buffer.overlays(name, Opts.plain(tag)), fn {s, e, f} -> [s, e, f] end)
         end,
       # folding: ranges is a list of (start end) byte ranges to hide.
       # A buffer has several fold owners, so ranges are tagged and each
@@ -1065,7 +1035,7 @@ defmodule Compos.Core.SchemeAPI do
       {"fold-set!",
        "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags."} =>
         fn [name, tag, ranges] ->
-          :ok = Buffer.set_hidden(name, plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
+          :ok = Buffer.set_hidden(name, Opts.plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
           :void
         end,
       {"fold-get",
@@ -1107,19 +1077,19 @@ defmodule Compos.Core.SchemeAPI do
       {"put-text-property!",
        "(put-text-property! BUF START END PROP VALUE) — give the text START..END the property PROP with VALUE; #f removes it."} =>
         fn [name, start, stop, prop, value] ->
-          :ok = Buffer.put_text_property(name, start, stop, plain(prop), value)
+          :ok = Buffer.put_text_property(name, start, stop, Opts.plain(prop), value)
           :void
         end,
       {"remove-text-properties!",
        "(remove-text-properties! BUF START END PROPS) — take the properties PROPS, a list of names, off START..END."} =>
         fn [name, start, stop, props] ->
-          :ok = Buffer.remove_text_properties(name, start, stop, Enum.map(props, &plain/1))
+          :ok = Buffer.remove_text_properties(name, start, stop, Enum.map(props, &Opts.plain/1))
           :void
         end,
       {"get-text-property",
        "(get-text-property BUF POS PROP) — the value of PROP at POS, or #f."} =>
         fn [name, pos, prop] ->
-          case Buffer.get_text_property(name, pos, plain(prop)) do
+          case Buffer.get_text_property(name, pos, Opts.plain(prop)) do
             nil -> false
             value -> value
           end
@@ -1132,27 +1102,27 @@ defmodule Compos.Core.SchemeAPI do
       {"next-single-property-change",
        "(next-single-property-change BUF POS PROP [LIMIT]) — the first position after POS where PROP changes; #f when it does not, LIMIT when not before LIMIT."} =>
         fn [name, pos, prop | rest] ->
-          Buffer.next_single_property_change(name, pos, plain(prop), limit(rest)) || false
+          Buffer.next_single_property_change(name, pos, Opts.plain(prop), Opts.integer(rest)) || false
         end,
       {"previous-single-property-change",
        "(previous-single-property-change BUF POS PROP [LIMIT]) — the last position before POS where PROP changes; #f when it does not, LIMIT when not after LIMIT."} =>
         fn [name, pos, prop | rest] ->
-          Buffer.previous_single_property_change(name, pos, plain(prop), limit(rest)) || false
+          Buffer.previous_single_property_change(name, pos, Opts.plain(prop), Opts.integer(rest)) || false
         end,
       {"text-property-any",
        "(text-property-any BUF START END PROP VALUE) — the first position in START..END where PROP is VALUE, or #f."} =>
         fn [name, start, stop, prop, value] ->
-          Buffer.text_property_any(name, start, stop, plain(prop), value) || false
+          Buffer.text_property_any(name, start, stop, Opts.plain(prop), value) || false
         end,
       {"text-property-spans",
        "(text-property-spans BUF PROP) — every span of PROP as (START END VALUE), in order."} =>
         fn [name, prop] ->
-          Enum.map(Buffer.text_property_spans(name, plain(prop)), fn {s, e, v} -> [s, e, v] end)
+          Enum.map(Buffer.text_property_spans(name, Opts.plain(prop)), fn {s, e, v} -> [s, e, v] end)
         end,
       {"text-property-default-nonsticky!",
        "(text-property-default-nonsticky! PROP ON) — with ON, text typed at the end of a PROP span takes no PROP; the Emacs variable of that name."} =>
         fn [prop, on] ->
-          :ok = Compos.Core.TextProps.set_default_nonsticky(plain(prop), on not in [false, nil])
+          :ok = Compos.Core.TextProps.set_default_nonsticky(Opts.plain(prop), on not in [false, nil])
           :void
         end,
       {"text-property-default-nonsticky",
@@ -2024,17 +1994,13 @@ defmodule Compos.Core.SchemeAPI do
       # buffer-local variables
       {"buffer-set-local!", "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable."} =>
         fn [buf, k, v] ->
-          Buffer.set_local(buf, plain(k), v)
+          Buffer.set_local(buf, Opts.plain(k), v)
           :void
         end,
       {"buffer-set-locals!",
        "(buffer-set-locals! BUF PLIST) — set several buffer-locals in one change; the frame refreshes once, not once per key."} =>
         fn [buf, plist] when is_list(plist) ->
-          locals =
-            plist
-            |> Enum.chunk_every(2)
-            |> Enum.map(fn [k, v] -> {plain(k), v} end)
-            |> Map.new()
+          locals = Opts.map(plist, & &1)
 
           Buffer.set_locals(buf, locals)
           :void
@@ -2044,20 +2010,14 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                    buf,
                                                                                                    k
                                                                                                  ] ->
-        Buffer.get_local(buf, plain(k)) || false
+        Buffer.get_local(buf, Opts.plain(k)) || false
       end,
       {"buffer-rows",
        "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, ids, chat-ids, modes, agents (#t: every agent's buffer; with modes, those too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, id, path, mode, title, group (group-id), group-label, modified, read-only, used, agent, chat-id, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>
         fn args ->
           spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
 
-          opts =
-            spec
-            |> Enum.chunk_every(2)
-            |> Map.new(fn
-              [k, v] -> {plain(k), rows_opt(v)}
-              [k] -> {plain(k), true}
-            end)
+          opts = Opts.map(spec, &Opts.strings/1)
 
           Compos.Core.MetaDb.ensure_started()
           {total, rows} = Compos.Core.MetaDb.query(opts)
@@ -2082,13 +2042,7 @@ defmodule Compos.Core.SchemeAPI do
         fn [spec, pinned, pin_icon] ->
           Compos.Core.MetaDb.ensure_started()
 
-          opts =
-            (spec || [])
-            |> Enum.chunk_every(2)
-            |> Map.new(fn
-              [k, v] -> {plain(k), rows_opt(v)}
-              [k] -> {plain(k), true}
-            end)
+          opts = Opts.map(spec || [], &Opts.strings/1)
 
           Compos.Core.MetaDb.candidates(opts, pinned, pin_icon)
           |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
@@ -2113,13 +2067,7 @@ defmodule Compos.Core.SchemeAPI do
           Compos.Core.MetaDb.ensure_started()
           spec = with [l] when is_list(l) <- args, do: l, else: (_ -> [])
 
-          opts =
-            spec
-            |> Enum.chunk_every(2)
-            |> Map.new(fn
-              [k, v] -> {plain(k), rows_opt(v)}
-              [k] -> {plain(k), true}
-            end)
+          opts = Opts.map(spec, &Opts.strings/1)
 
           {total, rows} = Compos.Core.MetaDb.query(opts)
           [total, Enum.map(rows, fn row -> Enum.map(row, &(&1 || false)) end)]
@@ -2131,13 +2079,13 @@ defmodule Compos.Core.SchemeAPI do
 
           fields =
             Enum.map(fields, fn field ->
-              name = plain(field)
+              name = Opts.plain(field)
 
               Enum.find(allowed, &(Atom.to_string(&1) == name)) ||
                 raise(ArgumentError, "unsupported buffer field: #{name}")
             end)
 
-          Buffer.read_many(names, fields, Enum.map(keys, &plain/1))
+          Buffer.read_many(names, fields, Enum.map(keys, &Opts.plain/1))
         end,
       # every local at once, so a help page can show a buffer's own state.
       # The name comes back as a symbol, the way the setter takes it.
@@ -2209,7 +2157,7 @@ defmodule Compos.Core.SchemeAPI do
               false
 
             lang ->
-              case Compos.Core.TS.ts_nav(lang, Buffer.text(buf), Buffer.point(buf), plain(op)) do
+              case Compos.Core.TS.ts_nav(lang, Buffer.text(buf), Buffer.point(buf), Opts.plain(op)) do
                 nil -> false
                 pos -> pos
               end
@@ -2223,7 +2171,7 @@ defmodule Compos.Core.SchemeAPI do
           buf = Editor.current_buffer()
           kind = if is_binary(kind), do: kind, else: ""
 
-          case Buffer.ts_node(buf, kind, start, stop, plain(op)) do
+          case Buffer.ts_node(buf, kind, start, stop, Opts.plain(op)) do
             nil -> false
             {kind, s, e} -> [kind, s, e]
           end
@@ -2365,18 +2313,15 @@ defmodule Compos.Core.SchemeAPI do
       {"set-face-attribute!",
        "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs."} =>
         fn [face | kvs] ->
-          attrs =
-            kvs
-            |> Enum.chunk_every(2)
-            |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)
+          attrs = Opts.map(kvs)
 
-          Editor.set_face(plain(face), attrs)
+          Editor.set_face(Opts.plain(face), attrs)
           :void
         end,
       {"face-clear!",
        "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme."} =>
         fn [face] ->
-          Editor.clear_face(plain(face))
+          Editor.clear_face(Opts.plain(face))
           :void
         end,
       {"face-batch!",
@@ -2385,11 +2330,11 @@ defmodule Compos.Core.SchemeAPI do
           ops
           |> Enum.map(fn
             [{:sym, "clear"}, face] ->
-              {:clear, plain(face)}
+              {:clear, Opts.plain(face)}
 
             [{:sym, "set"}, face | kvs] ->
-              {:set, plain(face),
-               kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
+              {:set, Opts.plain(face),
+               Opts.map(kvs)}
           end)
           |> Editor.set_faces()
 
@@ -2405,11 +2350,11 @@ defmodule Compos.Core.SchemeAPI do
               do:
                 Enum.map(ops, fn
                   [{:sym, "clear"}, face] ->
-                    {:clear, plain(face)}
+                    {:clear, Opts.plain(face)}
 
                   [{:sym, "set"}, face | kvs] ->
-                    {:set, plain(face),
-                     kvs |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {plain(k), plain(v)} end)}
+                    {:set, Opts.plain(face),
+                     Opts.map(kvs)}
                 end),
               else: nil
 
@@ -2425,7 +2370,7 @@ defmodule Compos.Core.SchemeAPI do
       {"face-attribute",
        "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here."} =>
         fn [face, attr] ->
-          case get_in(Editor.faces(), [plain(face), plain(attr)]) do
+          case get_in(Editor.faces(), [Opts.plain(face), Opts.plain(attr)]) do
             nil -> false
             v -> v
           end
@@ -2613,7 +2558,7 @@ defmodule Compos.Core.SchemeAPI do
         fn [prompt, candidates, handlers] ->
           map =
             Map.new(handlers, fn [k, v] ->
-              case plain(k) do
+              case Opts.plain(k) do
                 "initial" -> {:input, v}
                 # A dynamic provider has already filtered/ranked its results.
                 "filter" -> {:filter, v}
@@ -2624,7 +2569,7 @@ defmodule Compos.Core.SchemeAPI do
                 # which row RET takes when the person did not arrow: 'first is
                 # the highlighted candidate (vertico), 'prompt is the typed
                 # input. A destination prompt (write-file) asks for 'prompt.
-                "preselect" -> {:preselect, String.to_atom(plain(v))}
+                "preselect" -> {:preselect, String.to_atom(Opts.plain(v))}
                 # A prompt can reuse a domain list when its filtered result is
                 # collected. Scheme decides the target and receives the rows.
                 "collect" -> {:on_collect, v}
@@ -2691,13 +2636,13 @@ defmodule Compos.Core.SchemeAPI do
             Editor.set_overriding_map(nil)
 
           [name] ->
-            Editor.set_overriding_map(plain(name))
+            Editor.set_overriding_map(Opts.plain(name))
 
           [name, lock] ->
-            Editor.set_overriding_map(plain(name), lock == true)
+            Editor.set_overriding_map(Opts.plain(name), lock == true)
 
           [name, lock, until] ->
-            Editor.set_overriding_map(plain(name), lock == true, until == true)
+            Editor.set_overriding_map(Opts.plain(name), lock == true, until == true)
         end,
       {"completion-requery!",
        "(completion-requery!) — narrow the popup to the text between its start and point."} =>
@@ -2766,7 +2711,7 @@ defmodule Compos.Core.SchemeAPI do
         fn [specs] ->
           specs
           |> List.wrap()
-          |> Enum.flat_map(&String.split(plain(&1), " ", trim: true))
+          |> Enum.flat_map(&String.split(Opts.plain(&1), " ", trim: true))
           |> Compos.Core.KeyDispatch.trace_keys()
         end,
       # a mode's own stylesheet, rendered into the page beside the face
@@ -2775,12 +2720,12 @@ defmodule Compos.Core.SchemeAPI do
       {"define-style!",
        "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this."} =>
         fn [name, css] ->
-          Editor.set_style(plain(name), css)
+          Editor.set_style(Opts.plain(name), css)
           :void
         end,
       {"style-css",
        "(style-css NAME) — the stylesheet NAME wears now, or \"\" when nothing registered one."} =>
-        fn [name] -> Editor.style_css(plain(name)) end,
+        fn [name] -> Editor.style_css(Opts.plain(name)) end,
       # The languages whose blocks offer the run key in the rendered page.
       # The fence-kind registry pushes the list on every registration, so
       # the page never mirrors the registry by hand.
@@ -3239,7 +3184,7 @@ defmodule Compos.Core.SchemeAPI do
                                                                                            ref
                                                                                            | rest
                                                                                          ] ->
-        git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
+        git_dispatch(rest, fn -> Git.show(dir, Opts.plain(ref)) end, & &1)
       end
     }
   end
@@ -3256,7 +3201,7 @@ defmodule Compos.Core.SchemeAPI do
         fn [dir | rest] ->
           deep? = rest == [{:sym, "deep"}]
 
-          case Compos.Core.Watch.watch(plain(dir), Compos.Core.Watch, deep: deep?) do
+          case Compos.Core.Watch.watch(Opts.plain(dir), Compos.Core.Watch, deep: deep?) do
             {:ok, root} -> root
             {:error, msg} -> [{:sym, "error"}, msg]
           end
@@ -3264,7 +3209,7 @@ defmodule Compos.Core.SchemeAPI do
       {"unwatch-path!",
        "(unwatch-path! DIR ['deep]) — drop one watch reference, 'deep for a deep one; the subscription stops at zero."} =>
         fn [dir | rest] ->
-          Compos.Core.Watch.unwatch(plain(dir), Compos.Core.Watch, deep: rest == [{:sym, "deep"}])
+          Compos.Core.Watch.unwatch(Opts.plain(dir), Compos.Core.Watch, deep: rest == [{:sym, "deep"}])
           :void
         end,
       {"watched-paths", "(watched-paths) — return the watched roots."} => fn [] ->
@@ -3504,9 +3449,9 @@ defmodule Compos.Core.SchemeAPI do
 
   defp diff_opts([key, value | rest], acc) do
     acc =
-      case plain(key) do
-        "base" -> Keyword.put(acc, :base, opt_string(value))
-        "path" -> Keyword.put(acc, :path, opt_string(value))
+      case Opts.plain(key) do
+        "base" -> Keyword.put(acc, :base, Opts.string(value))
+        "path" -> Keyword.put(acc, :path, Opts.string(value))
         "staged" -> Keyword.put(acc, :staged, value == true)
         _ -> acc
       end
@@ -3515,9 +3460,6 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   defp diff_opts(_, acc), do: acc
-
-  defp opt_string(false), do: nil
-  defp opt_string(value), do: plain(value)
 
   defp dir_atom({:sym, "h"}), do: :h
   defp dir_atom({:sym, "v"}), do: :v
@@ -3533,7 +3475,7 @@ defmodule Compos.Core.SchemeAPI do
 
   # (DIR SHARES (SPEC ...)) is a line; anything else is a line item
   defp arrange_spec([dir, shares, children]) when is_list(children) do
-    case plain(dir) do
+    case Opts.plain(dir) do
       d when d in ["h", "v"] -> {String.to_atom(d), shares, Enum.map(children, &arrange_spec/1)}
       _ -> [dir, shares, children]
     end
@@ -3541,23 +3483,12 @@ defmodule Compos.Core.SchemeAPI do
 
   defp arrange_spec(item), do: item
 
-  defp plain({:sym, s}), do: s
-  defp plain(v), do: v
-
-  # a buffer-rows option: symbols read as their names, in lists too
-  defp rows_opt(v) when is_list(v), do: Enum.map(v, &plain/1)
-  defp rows_opt(v), do: plain(v)
-
-  # the optional LIMIT of a property-change search: an integer, or nothing
-  defp limit([limit | _]) when is_integer(limit), do: limit
-  defp limit(_), do: nil
-
   # The transient menu the frame renders. META rows: ("subtitle" TEXT),
   # ("context" TEXT), ("chips" ((LABEL ACTIVE?) ...)), ("columns" ((TITLE ...) ...)),
   # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)),
   # ("layout" NAME).
   defp transient_menu(title, groups, meta) do
-    meta = Map.new(meta, fn [k, v] -> {plain(k), v} end)
+    meta = Opts.map(meta, & &1)
 
     columns =
       case Map.get(meta, "columns") do
@@ -3589,8 +3520,8 @@ defmodule Compos.Core.SchemeAPI do
                   key: key,
                   description: description,
                   value: value,
-                  kind: plain(kind),
-                  behavior: plain(behavior),
+                  kind: Opts.plain(kind),
+                  behavior: Opts.plain(behavior),
                   selected: selected
                 }
               end)
@@ -3602,7 +3533,7 @@ defmodule Compos.Core.SchemeAPI do
   defp transient_detail([title, rows, note]) do
     %{
       title: title,
-      rows: Enum.map(rows, fn [k, v, tone] -> %{k: k, v: v, tone: plain(tone)} end),
+      rows: Enum.map(rows, fn [k, v, tone] -> %{k: k, v: v, tone: Opts.plain(tone)} end),
       note: note
     }
   end
@@ -3617,7 +3548,7 @@ defmodule Compos.Core.SchemeAPI do
   end
 
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
-  defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
+  defp fold_tag(tag), do: if(Opts.plain(tag) == "all", do: :all, else: Opts.plain(tag))
 
   # A key sequence is a list of keys. Scheme writes one the way a person
   # says it — "C-x b" — and the keymaps hold ["C-x", "b"]. Take either.
@@ -3665,7 +3596,7 @@ defmodule Compos.Core.SchemeAPI do
 
   defp report_error(where, text) do
     require Logger
-    where = where |> plain() |> to_string()
+    where = where |> Opts.plain() |> to_string()
     Logger.warning("report-errors: #{where}: #{text}")
     Compos.Core.Session.message("#{where}: #{text}", "error")
   end

@@ -110,6 +110,13 @@ defmodule Compos.EditorTest do
   end
 
   setup do
+    # A chat gets a runtime on its first send, on the connector its buffer
+    # names or the default. The default is claude-code, whose ACP subprocess
+    # this test environment must not spawn: a test that sent into that chat
+    # waited for a reply that never came, and the subprocess hung the run.
+    # The api connector runs in this process and :llm_chat_fun is its seam,
+    # so every test here rides the stub and no test reaches a real agent.
+    use_api_connector!()
     {:ok, buf: fresh_buffer()}
   end
 
@@ -225,7 +232,8 @@ defmodule Compos.EditorTest do
 
   test "transpose-chars", %{buf: buf} do
     type("ab")
-    press(["C-t"])
+    # by name: C-t is a preference a package may take (telemetry-toggle does)
+    run("transpose-chars")
     assert Buffer.text(buf) == "ba"
   end
 

@@ -1634,8 +1634,22 @@
 ;;; these two. Payloads are base64 both ways — RPC eval returns printed
 ;;; values, and printed-string escaping is not JSON-safe for every byte.
 
-(define (mcp-proxy-tools-json)
-  (base64-encode (tool-specs-json (llm-tool-specs))))
+;; SLUG names the agent's chat; its tool list leaves out the tools that
+;; chat turned off. No slug, or a chat that is gone, gets the whole registry.
+(define (mcp-proxy--chat slug)
+  (and (string? slug) (not (equal? slug "")) (agent-info slug) (agent-buf slug)))
+
+(define (mcp-proxy-tools-json &optional slug)
+  (let ((chat (mcp-proxy--chat slug)))
+    (base64-encode
+      (tool-specs-json
+        (if (and chat (boundp (quote chat-compos-tool-specs)))
+            (chat-compos-tool-specs chat)
+            (llm-tool-specs))))))
+
+(define (mcp-proxy--tool-off? slug name)
+  (let ((chat (mcp-proxy--chat slug)))
+    (and chat (boundp (quote chat-tool-on?)) (not (chat-tool-on? chat name)))))
 
 ;; The third chokepoint. In auto mode the agent stops asking us ANYTHING,
 ;; and every deny-listed verb reaches the world through one of our three
@@ -1898,6 +1912,15 @@
                      (decide-refusal kind)))))))
 
 (define (mcp-proxy-call name args-b64 &optional author)
+  ;; a tool the agent's chat turned off is not there: the tool list left it
+  ;; out, and a call that names it anyway gets this answer
+  (if (mcp-proxy--tool-off? (and author (string-prefix? "agent:" author)
+                                 (substring author 6 (string-length author)))
+                            name)
+      (base64-encode (string-append "error: the tool " name " is turned off in this chat"))
+      (mcp-proxy--call name args-b64 author)))
+
+(define (mcp-proxy--call name args-b64 author)
   (let* ((args-json (base64-decode args-b64))
          (raw (mcp-proxy--call-text name args-json))
          ;; the author names the thread when one is attributed; otherwise

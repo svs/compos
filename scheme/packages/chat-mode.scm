@@ -1927,7 +1927,7 @@
     ;; typed does not match it, and that is what makes a manual rename stick
     chat-derived-name
     agent-connector agent-model agent-effort
-    chat-presets prompt-disabled-parts chat-permission-mode render-mode default-directory
+    chat-presets prompt-disabled-parts tools-disabled chat-permission-mode render-mode default-directory
     ;; the directory the spawner chose; group companions never override it
     chat-directory
     agent-permission-profile window-class header-line
@@ -2262,13 +2262,16 @@
 (define (llm-bundle-permission b) (llm-bundle-get b 'permission #f))
 (define (llm-bundle-agent-mode b) (llm-bundle-get b 'agent-mode #f))
 (define (llm-bundle-prompt-disabled b) (llm-bundle-get b 'prompt-disabled #f))
+;; the compos tools the bundle turns off; #f keeps the chat's own
+(define (llm-bundle-tools-disabled b) (llm-bundle-get b 'tools-disabled #f))
 
 ;; What a bundle SETS, without its name: two bundles that configure the
 ;; same session are one recent choice, however each was reached.
 (define (llm-bundle-setup b)
   (list (llm-bundle-connector b) (llm-bundle-model b) (llm-bundle-effort b)
         (llm-bundle-presets b) (llm-bundle-permission b)
-        (llm-bundle-agent-mode b) (llm-bundle-prompt-disabled b)))
+        (llm-bundle-agent-mode b) (llm-bundle-prompt-disabled b)
+        (llm-bundle-tools-disabled b)))
 
 ;; The whole setup on one line, with every part that is already the default
 ;; left out: a label says what is unusual about this bundle.
@@ -2292,6 +2295,10 @@
       (let ((off (llm-bundle-prompt-disabled b)))
         (if (and off (pair? off))
             (list (string-append (number->string (length off)) " prompt off"))
+            '()))
+      (let ((off (llm-bundle-tools-disabled b)))
+        (if (and off (pair? off))
+            (list (string-append (string-join off " ") " off"))
             '()))
       (let ((s (llm-bundle-get b 'sandbox #f)))
         (if (member s '("on" "off")) (list (string-append "sandbox " s)) '())))
@@ -2406,6 +2413,8 @@
         (or (buffer-local session 'agent-mode) "")
         'prompt-disabled
         (or (buffer-local session 'prompt-disabled-parts) '())
+        'tools-disabled
+        (or (buffer-local session 'tools-disabled) '())
         'sandbox
         (or (buffer-local session 'sandbox) "group")))))
 
@@ -2491,6 +2500,7 @@
          (permission (llm-bundle-permission b))
          (mode (llm-bundle-agent-mode b))
          (prompt-disabled (llm-bundle-prompt-disabled b))
+         (tools-disabled (llm-bundle-tools-disabled b))
          (sandbox (llm-bundle-get b 'sandbox #f)))
     ;; on or off holds for this chat; group hands it back to the group
     (when sandbox
@@ -2502,6 +2512,9 @@
     (when (and (not (equal? prompt-disabled #f))
                (boundp (quote chat-prompt-sections-set!)))
       (chat-prompt-sections-set! session prompt-disabled))
+    (when (and tools-disabled (boundp (quote chat-tools-disabled-set!)))
+      (when (chat-tools-disabled-set! session tools-disabled)
+        (buffer-set-local! session 'chat-mcp-dirty #t)))
     (llm-config-apply! buf (llm-bundle-connector b) (llm-bundle-model b)
                        (llm-bundle-effort b))
     (when (boundp (quote chat-apply-pending-presets!))

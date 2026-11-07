@@ -2615,3 +2615,64 @@ the tabs. C-s searches to any link.")
   'domain 'web
   'effects '(pure)
   'use "(web-register-mime! \"application/epub+zip\" (lambda (file url) (string-append \"pandoc -f epub -t gfm \" file)))")
+
+;;; FETCH TOOL --- a URL as readable text, over plain HTTP. No browser:
+;;; the Chrome reads are their own tools. curl fetches the page, the calm
+;;; reading (site parser or readable) makes markdown, and the full reading
+;;; answers when calm is blank. The thin-page test of browse is left out on
+;;; purpose: a short page is still the page. Other content types take their
+;;; mime reader, so JSON, text and PDF read too.
+
+(domain! 'web)
+(effects! '(read external))
+
+(define (web-fetch--blank? s) (or (not (string? s)) (equal? (string-trim s) "")))
+
+(define (web-fetch-text url k)
+  (web--curl-fetch url
+    (lambda (doc)
+      (cond
+        ((not doc) (k #f))
+        ((pair? (re-find* "html|xml" (or (web--doc-type doc) "")))
+         (let ((file (or (web--doc-file doc) (web--write-body! (web--doc-text doc)))))
+           (shell-command->string (web--calm-command url file)
+             (lambda (md)
+               (if (not (web-fetch--blank? md))
+                   (begin (delete-file! file) (k md))
+                   (shell-command->string (web--full-command file)
+                     (lambda (md2)
+                       (delete-file! file)
+                       (k (if (web-fetch--blank? md2) #f md2)))))))))
+        (else (web--read-mime url "calm" doc
+                (lambda (r) (k (and (pair? r) (cadr r))))))))
+    #f))
+
+(define (web-fetch--page text start len)
+  (let* ((n (string-length text))
+         (s (min (max 0 start) n))
+         (e (min n (+ s (max 1 len)))))
+    (string-append (substring text s e)
+      (if (< e n)
+          (string-append "\n\n[" (number->string (- n e))
+                         " more characters: call fetch again with start_index "
+                         (number->string e) "]")
+          ""))))
+
+(public! 'web-fetch-text
+  "(web-fetch-text URL K) -- K gets URL as markdown over plain HTTP, or #f; no browser")
+
+;; read-only, so the proxy runs it in a task: app-await waits off the lane.
+(define-tool! 'fetch
+  "Fetch a URL over plain HTTP and answer its content as markdown: articles through the calm reading, JSON, text and PDF through their readers. No browser and no login; use the Chrome tools for a page that needs either. Long pages come in parts: pass start_index to read on."
+  (list (list 'url "string" "the URL to fetch")
+        (list 'start_index "integer" "first character to answer, default 0" 'optional)
+        (list 'max_length "integer" "most characters to answer, default 20000" 'optional))
+  (lambda (args)
+    (let* ((url (plist-get args 'url))
+           (text (and (string? url)
+                      (app-await (lambda (k) (web-fetch-text url k))))))
+      (cond ((not (string? url)) "error: url is required")
+            ((not text) (string-append "error: could not fetch " url))
+            (else (web-fetch--page text (or (plist-get args 'start_index) 0)
+                                   (or (plist-get args 'max_length) 20000))))))
+  '(read external))

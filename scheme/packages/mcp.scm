@@ -177,8 +177,8 @@
 (define (chat-extra-tool-specs buf)
   (let ((servers (chat-remote-servers buf)))
     (append
-      (if (and (chat-compos-tools? buf) (boundp (quote llm-tool-specs)))
-          (llm-tool-specs)
+      (if (chat-compos-tools? buf)
+          (chat-compos-tool-specs buf)
           '())
       (if (null? servers)
           '()
@@ -379,6 +379,54 @@
   (if (member name (chat-presets-of buf))
       (chat-preset-off! buf name)
       (chat-preset-on! buf name)))
+;; One compos tool can be off in a chat, as a preset can. The chat keeps the
+;; names it turned off in 'tools-disabled, saved with the chat; a bundle
+;; carries the same list, so a group's setup turns a tool off for the group.
+;; Turning a tool back on widens the surface, so an agent cannot do it.
+(define (chat-tools-disabled buf)
+  (or (buffer-local buf 'tools-disabled) '()))
+
+(define (chat-tools-disabled-set! buf names)
+  (let ((next (map (lambda (n) (if (symbol? n) (symbol->string n) n))
+                   (filter (lambda (n) (or (string? n) (symbol? n))) (or names '())))))
+    (unless (null? (filter (lambda (n) (not (member n next))) (chat-tools-disabled buf)))
+      (mcp-refuse-agent! 'chat-tools-disabled-set!))
+    (if (equal? next (chat-tools-disabled buf))
+        #f
+        (begin (buffer-set-local! buf 'tools-disabled next) #t))))
+
+(define (chat-tool-on? buf name)
+  (not (member name (chat-tools-disabled buf))))
+
+;; the compos tools BUF's model holds: the registry less the ones turned off
+(define (chat-compos-tool-specs buf)
+  (if (boundp (quote llm-tool-specs))
+      (filter (lambda (s) (chat-tool-on? buf (car s))) (llm-tool-specs))
+      '()))
+
+(define (chat-tool-toggle! buf name)
+  (let ((off (chat-tools-disabled buf)))
+    (chat-tools-disabled-set! buf
+      (if (member name off)
+          (remove (lambda (n) (equal? n name)) off)
+          (append off (list name))))
+    (chat-presets-changed! buf (string-append "Tool " name
+                                              (if (chat-tool-on? buf name) " on" " off")))
+    (chat-tool-on? buf name)))
+
+(define (chat-tool-candidates buf)
+  (map (lambda (s) (list (car s) (if (chat-tool-on? buf (car s)) "● on" "○ off")))
+       (if (boundp (quote llm-tool-specs)) (llm-tool-specs) '())))
+
+(define-command "chat-toggle-tool" "Turn one compos tool on or off for this chat"
+  (lambda ()
+    (let ((buf (llm-preset-target)))
+      (if (not buf)
+          (message "No LLM session here — enable llm-mode first")
+          (minibuffer-read "Toggle compos tool: " (chat-tool-candidates buf)
+            (lambda (name)
+              (unless (equal? name "")
+                (chat-tool-toggle! buf name))))))))
 
 (define-command "llm-set-preset" "Enable a tool preset (MCP servers) for this LLM session"
   (lambda ()
@@ -570,6 +618,10 @@
 (public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")
+(public! 'chat-tools-disabled "(chat-tools-disabled BUF) — the compos tool names turned off in BUF")
+(public! 'chat-tools-disabled-set! "(chat-tools-disabled-set! BUF '(NAME ...)) — set the compos tools turned off in BUF; #t when it changed")
+(public! 'chat-tool-toggle! "(chat-tool-toggle! BUF NAME) — turn one compos tool on or off in BUF; #t when it is now on")
+(public! 'chat-compos-tool-specs "(chat-compos-tool-specs BUF) — the compos tool specs BUF's model holds")
 (public! 'mcp-call! "(mcp-call! 'name TOOL ARGS [CB]) — call one tool; ARGS is JSON text or a plist")
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")
 (public! 'mcp-find "(mcp-find \"words|words\" ['name]) — search MCP tools; gives (SERVER TOOL DESC)")

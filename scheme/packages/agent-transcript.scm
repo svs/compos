@@ -37,6 +37,9 @@
               (else (loop (cdr bs)))))))
 
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
+(effects! '(read))
+(public! 'agent-slug-of "(agent-slug-of BUF) -- the agent slug stored in BUF, or #f")
+(effects! '(write))
 
 (define (agent-status slug)
   ;; a runtime whose buffer was killed is dead too: a revive rebuilt the

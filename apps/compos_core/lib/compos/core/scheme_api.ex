@@ -3488,7 +3488,7 @@ defmodule Compos.Core.SchemeAPI do
   # ("detail" (TITLE ((KEY VALUE TONE) ...) NOTE)), ("legend" ((KEY LABEL) ...)),
   # ("layout" NAME).
   defp transient_menu(title, groups, meta) do
-    meta = Opts.map(meta, & &1)
+    meta = Map.new(meta, fn [k, v] -> {Opts.plain(k), v} end)
 
     columns =
       case Map.get(meta, "columns") do

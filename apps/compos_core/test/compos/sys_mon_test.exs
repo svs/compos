@@ -23,6 +23,30 @@ defmodule Compos.Core.SysMonTest do
     assert is_list(get(get(sample, "os"), "disks"))
   end
 
+  test "a sample counts the open descriptors under the limit" do
+    sample = SysMon.sample()
+    fds = get(sample, "fds")
+    limit = get(sample, "fd-limit")
+
+    assert fds > 0
+    assert limit > 0
+    assert fds < limit
+  end
+
+  test "the ports group by name, and an open program counts under its name" do
+    port = Port.open({:spawn, "cat"}, [:binary])
+
+    try do
+      groups = SysMon.ports(100)
+      assert {"cat", n} = List.keyfind(groups, "cat", 0)
+      assert n >= 1
+      counts = Enum.map(groups, &elem(&1, 1))
+      assert counts == Enum.sort(counts, :desc)
+    after
+      Port.close(port)
+    end
+  end
+
   test "the second sample reports rates since the first" do
     SysMon.sample()
     Enum.reduce(1..200_000, 0, &(&1 + &2))

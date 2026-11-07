@@ -138,6 +138,9 @@ defmodule Compos.Core.SysMon do
   # in a test or a release without it. A missing value reads as 0. The
   # calls go through apply: os_mon belongs to compos_ui, so this app
   # cannot name its modules at compile time.
+  @doc "The open descriptors and the limit, as `{count, limit}`. Cheap: no rates move."
+  def fds, do: {fd_count(), fd_limit()}
+
   # The descriptors this OS process holds: macOS lists them in /dev/fd,
   # Linux in /proc/self/fd. The listing opens one descriptor of its own.
   defp fd_count do

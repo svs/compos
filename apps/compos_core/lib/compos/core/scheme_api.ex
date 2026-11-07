@@ -589,6 +589,12 @@ defmodule Compos.Core.SchemeAPI do
       {"vm-sample",
        "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks."} =>
         fn [] -> SysMon.sample() end,
+      {"vm-fds",
+       "(vm-fds) — (COUNT LIMIT): the descriptors the daemon holds, and the most it can hold."} =>
+        fn [] ->
+          {count, limit} = SysMon.fds()
+          [count, limit]
+        end,
       {"vm-ports",
        "(vm-ports [LIMIT]) — the open ports grouped by name, most first: a list of (NAME COUNT). A port is an external program, a socket, or a driver; each holds descriptors."} =>
         fn

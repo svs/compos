@@ -485,3 +485,61 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive")
 (catalog-meta! 'function "vm-process-kill!" 'domain 'diagnostics 'effects '(destroy))
 (effects! '(read))
+
+;;; --- descriptors ---------------------------------------------------------------
+;;; Every external program, socket, and watcher holds descriptors. At the
+;;; limit no port opens: no shell, no git, no agent, and the code loader
+;;; logs `emfile` for each module it cannot read. One check a minute
+;;; compares the count with the limit. Past fd-warn-ratio it publishes
+;;; one event on compos:fds with the port groups that hold the most, at
+;;; most once per fd-warn-every-ms, so the log names the leak after the
+;;; daemon is gone.
+
+(domain! 'diagnostics)
+(effects! '(pure))
+
+(defcustom 'fd-check-ms 60000
+  "Milliseconds between two checks of the daemon's open descriptors. 0 stops the check."
+  'group 'perf 'type 'number)
+
+(defcustom 'fd-warn-ratio 0.5
+  "The share of the descriptor limit at which the check reports the ports that hold the most."
+  'group 'perf 'type 'number)
+
+(defcustom 'fd-warn-every-ms 600000
+  "The shortest time between two descriptor reports."
+  'group 'perf 'type 'number)
+
+(define *fd-last-warn* -1000000000)
+
+(define (fd-pressure? count limit)
+  "(fd-pressure? COUNT LIMIT) — #t when COUNT descriptors pass fd-warn-ratio of LIMIT"
+  (and (number? limit) (> limit 0) (>= count (* fd-warn-ratio limit))))
+
+(effects! '(write))
+
+(define (fd-check!)
+  "(fd-check!) — compare the open descriptors with the limit; past fd-warn-ratio, publish the port groups on compos:fds. Answer (COUNT LIMIT)"
+  (let* ((fl (vm-fds))
+         (count (car fl))
+         (limit (cadr fl))
+         (now (monotonic-ms)))
+    (when (and (fd-pressure? count limit)
+               (>= (- now *fd-last-warn*) fd-warn-every-ms))
+      (set! *fd-last-warn* now)
+      (let ((ports (vm-ports 10)))
+        (event-publish! "compos:fds" 'high
+                        (list 'count count 'limit limit 'ports ports))
+        (message (string-append "descriptors: " (number->string count) " of "
+                                (number->string limit) " open; most: "
+                                (car (car ports)) " x" (number->string (cadr (car ports)))))))
+    fl))
+
+(define (fd--tick arg)
+  (when (> fd-check-ms 0)
+    (run-on-lane! 'fd-check
+      (lambda ()
+        (fd-check!)
+        (debounce! 'fd-check fd-check-ms fd--tick #f)))))
+
+(debounce! 'fd-check fd-check-ms fd--tick #f)

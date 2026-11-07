@@ -92,3 +92,34 @@
         (check-true! (string-prefix? "*perf*" (buffer-text buf)) "the text was rewritten")
         (check-true! (buffer-read-only? buf) "the buffer stays read-only through the write"))
       (buffer-kill! buf))))
+
+(deftest 'fd-pressure-passes-at-the-ratio
+  "the descriptor check reports at fd-warn-ratio of the limit and not below it"
+  (lambda ()
+    (let ((saved fd-warn-ratio))
+      (set! fd-warn-ratio 0.5)
+      (check-true! (fd-pressure? 50 100) "half the limit is pressure")
+      (check-false! (fd-pressure? 49 100) "below half is not")
+      (check-false! (fd-pressure? 10 0) "an unknown limit is never pressure")
+      (set! fd-warn-ratio saved))))
+
+(deftest 'fd-check-publishes-the-port-groups
+  "past the ratio the check publishes the count, the limit, and the port groups"
+  (lambda ()
+    (let ((saved-ratio fd-warn-ratio)
+          (saved-last *fd-last-warn*))
+      (set! fd-warn-ratio 0)
+      (set! *fd-last-warn* -1000000000)
+      (let* ((before (event-log-seq))
+             (fl (fd-check!))
+             (es (event-log-read before "compos:fds" 10)))
+        (check-true! (> (car fl) 0) "the daemon holds descriptors")
+        (check-true! (> (cadr fl) (car fl)) "the limit is above the count")
+        (check-equal! (length es) 1 "one report")
+        (let ((d (plist-get (car es) 'data)))
+          (check-equal! (plist-get d 'limit) (cadr fl) "the report carries the limit")
+          (check-true! (pair? (plist-get d 'ports)) "the report names the port groups"))
+        (check-equal! (length (begin (fd-check!) (event-log-read before "compos:fds" 10))) 1
+                      "a second check inside fd-warn-every-ms publishes nothing"))
+      (set! fd-warn-ratio saved-ratio)
+      (set! *fd-last-warn* saved-last))))

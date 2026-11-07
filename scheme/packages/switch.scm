@@ -406,7 +406,7 @@
 ;; row, VIEW the view it came from, CONTEXT? enters the row's group. CLOSE! takes
 ;; the surface down first and takes the buffer to keep awake (#f keeps
 ;; none); the prompt is already down, so it passes a no-op.
-(define (switch-act! e view context? close!)
+(define (switch-act! e view close!)
   (let ((name (car e)))
     (cond
       ;; the locked view's own card is the DEFAULT: RET keeps the group
@@ -442,21 +442,18 @@
          (visit-in-group path id)))
       ((buffer-known? name)
        (close! name)
-       (if context?
-           (buffer-context-switch! name)
-           (begin
-             ;; the buffer comes to you: a switch opens it in the group you
-             ;; are standing in, and the frame keeps the layout you picked
-             ;; from. The preview already put it in the home window.
-             (switch-to-buffer! name)
-             (group-current-recalculate!)
-             (windows-shown-catchup!))))
+       ;; the buffer comes to you: a switch opens it in the group you
+       ;; are standing in, and the frame keeps the layout you picked
+       ;; from. The preview already put it in the home window.
+       (switch-to-buffer! name)
+       (group-current-recalculate!)
+       (windows-shown-catchup!))
       ((*switch-pick* name)
        (close! #f))
       (else (message "no buffer here")))))
 
-(define (switch-pick! buf e context?)
-  (switch-act! e (buffer-local buf 'switch-view) context?
+(define (switch-pick! buf e)
+  (switch-act! e (buffer-local buf 'switch-view)
                (lambda (keep) (switch-close! buf keep))))
 
 (define-command "switch-visit"
@@ -465,7 +462,7 @@
     (let* ((buf (current-buffer))
            (e (list-current buf))
            (q (list-query buf)))
-      (cond (e (switch-pick! buf e #f))
+      (cond (e (switch-pick! buf e))
             ((equal? q "") (message "no buffer here"))
             (else
               ;; nothing matches: RET founds a group named Q from the

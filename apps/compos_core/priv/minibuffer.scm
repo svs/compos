@@ -113,15 +113,6 @@
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
   (lambda () (if (mb-rail-confirm!) #t (minibuffer-confirm!))))
-;; RET takes the candidate. C-RET takes the same candidate with a
-;; different verb, and the prompt that cares (the buffer switcher)
-;; reads and resets the flag:
-;;   RET    go there, move nothing else
-;;   C-RET  enter the candidate's context, layout and all
-(define *mb-confirm-context* #f)
-(define-command "minibuffer-confirm-context"
-  "Accept the selected candidate as a context (group) switch"
-  (lambda () (set! *mb-confirm-context* #t) (minibuffer-confirm!)))
 (define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
@@ -886,7 +877,6 @@
 (mode-keys! "minibuffer-mode"
   '(("RET" "minibuffer-confirm")
     ("M-RET" "minibuffer-confirm-input")
-    ("C-RET" "minibuffer-confirm-context")
     ("C-g" "minibuffer-cancel")
     ("TAB" "minibuffer-complete")
     ("C-n" "minibuffer-next-candidate")

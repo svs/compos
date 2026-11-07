@@ -3,8 +3,7 @@
 ;;; The switcher's prompt form (ibuffer-prompt) reads the same
 ;;; rows as the modal. Typing is (minibuffer-change! TEXT), and every
 ;;; key it answers to is a command: minibuffer-confirm for RET,
-;;; minibuffer-confirm-context for C-RET, minibuffer-collect for
-;;; C-c C-o, minibuffer-next-candidate for C-n. Nothing here presses a
+;;; minibuffer-collect for C-c C-o, minibuffer-next-candidate for C-n. Nothing here presses a
 ;;; key.
 
 (domain! 'testing)
@@ -671,52 +670,6 @@
     (t--sw-done!)))
 
 ;;; --- the three ways to answer ----------------------------------------------------
-
-(deftest 'context-follows-the-buffer-into-its-group
-  "C-RET: and the buffer is on screen even though the saved layout never showed it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((current (group-record-create! "zzsw-current"))
-          (foreign (group-record-create! "zzsw-foreign")))
-      (buffer-add-group! t--sw-first current)
-      (buffer-add-group! t--sw-second foreign)
-      (buffer-add-group! t--sw-third foreign)
-      ;; the foreign group remembers a layout that does NOT show the third
-      (set-frame-local! 'current-group foreign)
-      (delete-other-windows!)
-      (switch-to-buffer! t--sw-second)
-      (group-layout-save! foreign)
-      (set-frame-local! 'current-group current)
-      (delete-other-windows!)
-      (switch-to-buffer! t--sw-first)
-
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-third)
-      (t--sw-key! "confirm-context")
-
-      (check-equal! (frame-local 'current-group) foreign "the context followed")
-      (check-equal! (current-buffer) t--sw-third "and the buffer is on screen")
-      (check-false! (buffer-in-group? t--sw-third current) "it did not join this group"))
-    (t--sw-done!)))
-
-(deftest 'context-confirm-enters-the-buffers-one-group
-  "C-RET has nothing to guess: the buffer names one group and the frame enters it"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here"))
-          (there (group-record-create! "zzsw-second-choice")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (switch-to-buffer! t--sw-first)
-
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-second)
-      (t--sw-key! "confirm-context")
-
-      (check-false! (minibuffer-state) "no prompt stands between C-RET and the group")
-      (check-equal! (frame-group) there "the buffer's group was entered")
-      (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
-    (t--sw-done!)))
 
 (deftest 'group-switch-uses-mru-when-the-visible-frame-is-homogeneous
   "a frame already inside one group offers the other groups by recency"

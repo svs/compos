@@ -39,7 +39,7 @@ Wherever the editor needs "the group for X", the order is:
 groups of X  ->  project of X  ->  none
 ```
 
-The second step yields a root for narrowing and window fill. It never yields a group to switch to. Can be overridden with C-RET as seen later.
+The second step yields a root for narrowing and window fill. It never yields a group to switch to.
 
 
 
@@ -120,7 +120,7 @@ I want to start from a project or directory
 #### I want that outside buffer in this group
 
 - A plain `RET` already adds it, and the buffer leaves its old group.
-- `C-RET` does the opposite: it goes to the buffer's own group (`buffer-context-switch!`).
+- To go to another group, use `C-x g`.
 - A mistake is one `remove-group-from-buffer` away.
 - **Command:** `switch-to-buffer`, then `RET`.
 
@@ -211,7 +211,7 @@ I want to start from a project or directory
 - One group: the frame switches to it.
 - No group, in a project: the frame enters a group named for the project root. The project's other ungrouped open buffers join it.
 - No group and no project: I name a new group and the buffer seeds it.
-- **Command:** `C-RET` in the switcher (`buffer-context-switch!`).
+- **Command:** `buffer-context-switch!`.
 
 #### I want to change this buffer's group by hand
 
@@ -250,7 +250,7 @@ I want to start from a project or directory
 
 #### I want the current buffer to start a group
 
-- **Command:** `new`, or `C-RET` in the switcher (`buffer-context-switch!`) on an ungrouped buffer.
+- **Command:** `new`, or `buffer-context-switch!` on an ungrouped buffer.
 
 #### I want to enter a group
 
@@ -367,7 +367,7 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
 | `switch` | `group-switch` | `C-x g`; `RET` in the board |
 | `switch-last` | `group-switch-last` | `C-x C-g C-g` |
-| `switch-to-buffer-group` | `buffer-context-switch!` | `C-RET` in the switcher |
+| `switch-to-buffer-group` | `buffer-context-switch!` | none |
 | `new` | `group-new` | `C-x C-g n`; `M-RET` in the group switcher |
 | `dissolve` | `group-dissolve` | `x` in the board |
 | `kill` | `group-kill` | `K` in the board |
@@ -395,7 +395,7 @@ The prompt previews the WHOLE group, never one buffer of it. The preview draws t
 - No selection: the seed is empty.
 - The seed spends its marks. A switcher or ibuffer mark dies with its list, but `buffer-select` writes the mark on the buffer, so `new` clears it the way `add` does. An unspent mark would found the next group too.
 
-`C-RET` in the switcher (`buffer-context-switch!`) on an ungrouped buffer still starts a group with that buffer as the seed.
+`buffer-context-switch!` on an ungrouped buffer still starts a group with that buffer as the seed.
 
 ### Atomic operations
 
@@ -432,7 +432,7 @@ every other buffer
 - The project section follows the current buffer's root. Open a file in another project and the middle section shows that project.
 - With a destination and no project: two sections. With no destination in a project: two sections. With neither: one section.
 
-In the switcher, `RET` shows the buffer and puts it in the current group. `C-RET` goes to the buffer's own group (`buffer-context-switch!`). `C-t` puts the selection in a group. The same verbs apply to every buffer list.
+In the switcher, `RET` shows the buffer and puts it in the current group. `C-x g` enters a group. `C-t` puts the selection in a group. The same verbs apply to every buffer list.
 
 `ibuffer` is a buffer management list. Context-only buffers do not appear until a user visits them. The current group uses the `in this group` heading. Each other group uses its group name. Other groups sort by name. Ungrouped buffers come last. Empty sections omit their headings. A buffer with many memberships appears once. The current group wins, then the first group by name wins. Rows inside each section sort by buffer name. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor.
 
@@ -656,7 +656,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 1. Creation joins with a destination set: file, jump, editor-made buffer, agent-made buffer.
 2. Creation with no destination stays ungrouped.
 3. Showing a live buffer changes no membership: switcher, `find-file`, jump.
-4. `C-RET` semantics in the switcher: go to the buffer's own group.
+4. The switcher has no group entry key: `C-x g` enters a group.
 5. `group-add`, `group-move`, `remove-group-from-buffer` on one buffer, on a selection, on a dired selection, on a path selection.
 6. `new` with a selection seed and with an empty seed; the current buffer is never the seed.
 7. `buffer-context-switch!` with no group (in a project, and not) and with one group.

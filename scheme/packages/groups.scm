@@ -1360,10 +1360,7 @@ is forgotten and that group falls back to creation order in the switcher."
          (work (take docs (min (length docs) (if loud (- capacity 1) capacity)))))
     (cond ((pair? work) (if loud (append work (list chat)) work))
           (chat (list chat))
-          (else
-            (unless (buffer-exists? "*scratch*")
-              (buffer-create "*scratch*"))
-            (list "*scratch*")))))
+          (else '()))))
 
 
 ;; a restored window whose buffer is an empty, unmodified, pathlike
@@ -1597,11 +1594,14 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-layout-enter! id saved)
   ;; the frame shows group ID: its model on this frame, else its layout
   ;; (the record; SAVED is the same), else a default layout of its
-  ;; members. The windows of the group it leaves wait hidden; none dies
+  ;; members, else one blank pane. The windows of the group it leaves wait
+  ;; hidden; none dies
   (window-log-note! "panes enter group" id)
   (cond ((panes-layout) (panes-apply! (panes-validate (panes-layout) buffer-known?)))
         ((panes--seed! id))
-        (else (panes-apply! (panes--default-layout (group-default-panes id)))))
+        (else
+          (let ((bufs (group-default-panes id)))
+            (panes-apply! (if (pair? bufs) (panes--default-layout bufs) (panes-blank-layout))))))
   (layout-modeline!))
 
 (define (switch-to-group! g)

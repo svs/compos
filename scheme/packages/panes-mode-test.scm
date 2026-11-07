@@ -91,6 +91,24 @@
                 (check-equal! (panes-window-buffer l (car (panes-top-windows l))) a "showing that window's buffer")))
             (lambda () (pmt-done! (list a)))))))))
 
+(deftest 'an-empty-group-enters-as-a-blank-pane
+  "a group with no docs and no chat gets one blank pane, never *scratch*"
+  (lambda ()
+    (with-fresh-group "zz-panes-empty-default"
+      (lambda (id)
+        (unwind-protect
+          (lambda ()
+            (set-frame-local! 'current-group id)
+            (panes-layout-forget!)
+            (delete-other-windows!)
+            (group-layout-enter! id)
+            (let ((l (panes-layout)))
+              (check-equal! (panes-pane-count l) 1 "one pane")
+              (check-equal! (length (panes-visible l)) 0 "blank, no buffer")))
+          (lambda ()
+            (set-frame-local! 'current-group #f)
+            (pmt-done! '())))))))
+
 (deftest 'coming-back-to-a-group-never-shows-another-groups-buffer
   "a window of A that comes to show B's buffer leaves A's model without it, so coming back to A never shows B's buffer"
   (lambda ()

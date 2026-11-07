@@ -56,7 +56,19 @@
       (check-equal! (map caddr (panes-visible one)) '("a.scm") "the first pane took the first candidate")
       (check-equal! (map caddr (panes-visible two)) '("a.scm" "b.scm") "the next pane took the next")
       (check-equal! (panes-pane-count three) 3 "the third pane stays")
-      (check-equal! (length (panes-visible three)) 2 "with no candidate it stays blank"))))
+      (check-equal! (length (panes-visible three)) 2 "with no candidate it stays blank")
+      (let* ((base (car (panes-add-pane (panes-empty))))
+             (pid (car (panes-pane-ids base)))
+             (made (car (panes-add-window base pid "a.scm" "scheme-mode")))
+             (k (car (panes-top-windows made)))
+             (stacked (panes-set-buffers made k '("a.scm" "b.scm")))
+             (grown (car (panes-add-pane stacked)))
+             (filled (panes-fill-panes grown '("b.scm") pt-mode)))
+        (check-equal! (panes-window-buffers filled k) '("a.scm") "the moved buffer left the old stack")
+        (check-equal! (panes-window-buffer filled (panes-find filled "b.scm")) "b.scm" "and shows in the new pane")
+        (check-equal! (length (filter (lambda (kk) (member "b.scm" (panes-window-buffers filled kk)))
+                                      (panes-window-keys filled)))
+                      1 "one buffer, one window"))))
 
 (deftest 'a-buffer-opens-in-the-window-of-its-mode
   "another buffer of a mode goes to that mode's window, wherever you are, and that window comes to the front of its pane"

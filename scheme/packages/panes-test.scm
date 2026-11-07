@@ -52,7 +52,7 @@
            (next (car (panes-add-pane one)))
            (two (panes-fill-panes next '("a.scm" "b.scm") pt-mode))
            (last (car (panes-add-pane two)))
-           (three (panes-fill-panes last '("a.scm" "b.scm") pt-mode))))
+           (three (panes-fill-panes last '("a.scm" "b.scm") pt-mode)))
       (check-equal! (map caddr (panes-visible one)) '("a.scm") "the first pane took the first candidate")
       (check-equal! (map caddr (panes-visible two)) '("a.scm" "b.scm") "the next pane took the next")
       (check-equal! (panes-pane-count three) 3 "the third pane stays")

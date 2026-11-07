@@ -74,6 +74,28 @@ defmodule Compos.EditorTest do
     {:ok, quoted} = Compos.Core.Session.eval(~s{(group-name "#{id}")})
     if quoted == "#f", do: nil, else: String.trim(quoted, "\"")
   end
+  # A tiling test's own group, with the frame standing in it: the fill
+  # takes the group's buffers and never another group's.
+  defp tile_group!(name, bufs) do
+    list = bufs |> Enum.map(&inspect/1) |> Enum.join(" ")
+
+    {:ok, quoted} =
+      Compos.Core.Session.eval("""
+      (let ((id (group-record-create! "#{name}")))
+        (for-each (lambda (b) (buffer-add-group! b id)) (list #{list}))
+        (set-frame-local! 'current-group id)
+        id)
+      """)
+
+    id = String.trim(quoted, "\"")
+    on_exit(fn -> tile_group_done!(id) end)
+    id
+  end
+
+  defp tile_group_done!(id) do
+    Compos.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+    Compos.Core.Session.eval("(group-record-delete! \"#{id}\")")
+  end
 
   defp evict(name) do
     :ok = Buffer.checkpoint_now(name)
@@ -3896,6 +3918,7 @@ defmodule Compos.EditorTest do
       # the layout under test
       Compos.Core.create_buffer(other)
       press(["C-x", "3"])
+      _id = tile_group!("zz-tile-win-#{System.unique_integer([:positive])}", [buf, other])
       press(["C-x", "o"])
       open_switch_prompt()
       type(other)
@@ -3955,6 +3978,7 @@ defmodule Compos.EditorTest do
       second = "two-pane-second-#{n}"
       third = "two-pane-third-#{n}"
       for name <- [second, third], do: Compos.Core.create_buffer(name)
+      _id = tile_group!("zz-tile-two-pane-#{n}", [buf, second, third])
 
       {:ok, _} =
         Compos.Core.Session.eval("""
@@ -3983,6 +4007,7 @@ defmodule Compos.EditorTest do
     test "two-pane preset fills a missing companion from recent buffers", %{buf: buf} do
       companion = "two-pane-companion-#{System.unique_integer([:positive])}"
       Compos.Core.create_buffer(companion)
+      _id = tile_group!("zz-tile-companion-#{System.unique_integer([:positive])}", [buf, companion])
 
       {:ok, _} =
         Compos.Core.Session.eval("""
@@ -4002,6 +4027,7 @@ defmodule Compos.EditorTest do
       second = "eat-second-#{System.unique_integer([:positive])}"
       third = "eat-third-#{System.unique_integer([:positive])}"
       for name <- [second, third], do: Compos.Core.create_buffer(name)
+      _id = tile_group!("zz-tile-eat-#{System.unique_integer([:positive])}", [buf, second, third])
 
       # three columns nested to the right: deleting the middle one would
       # hand its space to the right pair. An eat hands it to the eater.
@@ -4066,6 +4092,7 @@ defmodule Compos.EditorTest do
       second = "three-columns-second-#{System.unique_integer([:positive])}"
       third = "three-columns-third-#{System.unique_integer([:positive])}"
       for name <- [second, third], do: Compos.Core.create_buffer(name)
+      _id = tile_group!("zz-tile-three-#{System.unique_integer([:positive])}", [buf, second, third])
 
       # Creating a buffer does not make it recent: it joins the ring behind
       # everything already selected, *scratch* included. Select each one and

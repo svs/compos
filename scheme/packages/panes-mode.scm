@@ -916,18 +916,21 @@
     #t))
 
 (define (panes--fill-candidates layout)
-  "The group's buffers no pane of LAYOUT shows, most recent first. A
-   groupless frame takes its plain buffers, so a system buffer never
-   fills a pane."
-  (let ((shown (panes-buffers layout))
+  "The frame group's buffers that no pane of LAYOUT shows in front, most
+   recent first. With no group there is no candidate: groups never leak."
+  (let ((shown (filter (lambda (b) b)
+                       (map (lambda (p)
+                              (let ((ks (panes-keys p)))
+                                (and (pair? ks) (panes-window-buffer layout (car ks)))))
+                            (panes-panes layout))))
         (group (frame-group)))
-    (filter (lambda (b)
-              (and (not (member b shown))
-                   (if group
-                       #t
-                       (and (not (string-prefix? "*" b))
-                            (not (buffer-context-only? b))))))
-            (window-fill-buffers))))
+    (if (not group)
+        (quote ())
+        (filter (lambda (b)
+                  (and (not (member b shown))
+                       (fill-candidate? b)
+                       (not (buffer-context-only? b))))
+                (group-buffers-mru group)))))
 
 (define (panes--split-window! &optional dir)
   "C-x 3, and C-x 2 when DIR is v: an empty pane opens right of the

@@ -1191,18 +1191,24 @@
 
 (define (panes-fill-panes layout candidates mode-of)
   "LAYOUT with each pane that has no window taking the next buffer of
-   CANDIDATES that no pane shows, in pane order. A pane left without a
-   candidate stays empty, a blank pane. Pure."
+   CANDIDATES that no pane shows, in pane order. A buffer that waits in a
+   window's stack moves out of it, so it lives in one window. A pane left
+   without a candidate stays empty, a blank pane. Pure."
   (fold (lambda (l p)
           (let* ((pid (plist-get p 'id))
                  (pane (panes-pane l pid))
                  (free (and (or (not pane) (null? (panes-keys pane)))
                             (find (lambda (b) (not (member b (panes-buffers l)))) candidates))))
             (if free
-                (car (panes-add-window l pid free (mode-of free)))
+                (let ((moved (panes-remove-buffer l free)))
+                  (car (panes-add-window moved pid free (mode-of free))))
                 l)))
         layout
         (panes-panes layout)))
+
+(define (panes-blank-layout)
+  "LAYOUT: one pane that shows no window, a blank pane. Pure."
+  (car (panes-add-pane (panes-empty))))
 
 (define (panes-layout-from-rows rows mode-of stack-of)
   "LAYOUT: one pane per row of ROWS (WIN BUF WIDTH), left to right, the
@@ -1233,6 +1239,8 @@
 (catalog-meta! 'function "panes-layout-from-rows" 'effects '(pure))
 (public! 'panes-fill-panes "(panes-fill-panes LAYOUT CANDIDATES MODE-OF) -> LAYOUT: each pane with no window takes the next buffer of CANDIDATES that no pane shows; a pane with none stays blank; pure")
 (catalog-meta! 'function "panes-fill-panes" 'effects '(pure))
+(public! 'panes-blank-layout "(panes-blank-layout) -> LAYOUT: one pane that shows no window; pure")
+(catalog-meta! 'function "panes-blank-layout" 'effects '(pure))
 (public! 'panes-remove-buffer "(panes-remove-buffer LAYOUT BUF) -> LAYOUT: BUF leaves its window; the next buffer shows, an emptied window closes and the next window of its pane shows; pure")
 (catalog-meta! 'function "panes-remove-buffer" 'effects '(pure))
 (public! 'panes-split-off "(panes-split-off LAYOUT BUFS FROM) -> (LAYOUT KEY) | #f: BUFS move to a new window of FROM's mode beside FROM; pure")

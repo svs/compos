@@ -59,7 +59,42 @@
   (let ((e (assoc name *list-modes*)))
     (if e (car (cdr e)) '())))
 
-(define (list-mode-of buf) (buffer-local buf 'list-mode))
+;; One draw reads the mode, its options and its profile once. A row reads
+;; them many times, and each buffer-local read costs about 35 us, so a draw
+;; of 150 rows spent over a second there. The memo is job-local: another
+;; lane never sees it, and the draw removes it when it returns.
+;; An entry is (BUF MODE OPTS PROFILE DEPTHS PARENTS).
+(define (list-draw--entry buf)
+  (let ((m (job-local 'list-draw)))
+    (and (pair? m) (assoc buf m))))
+
+(define (list-draw--put! buf entry)
+  (let ((m (job-local 'list-draw)))
+    (job-local-set! 'list-draw
+      (cons entry (filter (lambda (e) (not (equal? (car e) buf))) (if (pair? m) m '()))))))
+
+(define (with-list-draw-memo buf thunk)
+  (if (list-draw--entry buf)
+      (thunk)
+      (let* ((old (job-local 'list-draw))
+             (mode (buffer-local buf 'list-mode))
+             (opts (list-mode-opts mode))
+             (profile (list-active-layout buf)))
+        (list-draw--put! buf (list buf mode opts profile
+                                   (buffer-local buf 'list-row-depths)
+                                   (buffer-local buf 'list-row-parents)))
+        (unwind-protect thunk (lambda () (job-local-set! 'list-draw old))))))
+
+;; the draw writes the depths and the parents after the nest; the memo
+;; follows the write
+(define (list-draw--rows! buf depths parents)
+  (let ((e (list-draw--entry buf)))
+    (when e
+      (list-draw--put! buf (list buf (nth 1 e) (nth 2 e) (nth 3 e) depths parents)))))
+
+(define (list-mode-of buf)
+  (let ((e (list-draw--entry buf)))
+    (if e (nth 1 e) (buffer-local buf 'list-mode))))
 
 (define (list-plist-key? pl key)
   (let loop ((rest pl))
@@ -116,8 +151,9 @@
           profile))))
 
 (define (list-opt buf key)
-  (let* ((opts (list-mode-opts (list-mode-of buf)))
-         (profile (list-active-layout buf)))
+  (let* ((e (list-draw--entry buf))
+         (opts (if e (nth 2 e) (list-mode-opts (list-mode-of buf))))
+         (profile (if e (nth 3 e) (list-active-layout buf))))
     (if (list-plist-key? profile key)
         (plist-get profile key)
         (plist-get opts key))))
@@ -2355,15 +2391,23 @@
 (define (list-nest-indent depth)
   (let loop ((n depth) (s "")) (if (<= n 1) (string-append s "└ ") (loop (- n 1) (string-append s "  ")))))
 
+(define (list-row-depths-of buf)
+  (let ((e (list-draw--entry buf)))
+    (or (if e (nth 4 e) (buffer-local buf 'list-row-depths)) '())))
+
+(define (list-row-parents-of buf)
+  (let ((e (list-draw--entry buf)))
+    (or (if e (nth 5 e) (buffer-local buf 'list-row-parents)) '())))
+
 (define (list-row-depth buf row)
   (let ((d (and (list-opt buf 'parent)
-                (assoc (list-key buf row) (or (buffer-local buf 'list-row-depths) '())))))
+                (assoc (list-key buf row) (list-row-depths-of buf)))))
     (if d (cadr d) 0)))
 
 ;; a row's children: #f for none, else how many a fold hides (0 when open)
 (define (list-row-hidden buf row)
   (let ((p (and (list-opt buf 'parent)
-                (assoc (list-key buf row) (or (buffer-local buf 'list-row-parents) '())))))
+                (assoc (list-key buf row) (list-row-parents-of buf)))))
     (and p (cadr p))))
 
 (define (list-nest-boundary? buf row)
@@ -2558,7 +2602,8 @@
   (let ((f (list-opt buf 'before-draw))) (when f (f buf)))
   (let* ((before (list-current buf))
          (key (and before (list-key buf before))))
-    (with-buffer-display-update buf (lambda () (list-render-content! buf fetch)))
+    (with-buffer-display-update buf
+      (lambda () (with-list-draw-memo buf (lambda () (list-render-content! buf fetch)))))
     ;; Source changes and filtering can move the highlight without an arrow.
     ;; Preview the settled selection, using the same callback as row motion.
     (when (and (buffer-exists? buf)
@@ -2624,6 +2669,7 @@
                   (if (list-opt buf 'parent)
                       (list 'list-row-depths (cadr nested) 'list-row-parents (caddr nested))
                       '())))
+        (when (list-opt buf 'parent) (list-draw--rows! buf (cadr nested) (caddr nested)))
         (let* (;; the header once: its lines and their count are one answer
                (head (list-head-lines buf))
                (stamp-fn (list-opt buf 'stamp))

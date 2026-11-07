@@ -596,6 +596,22 @@ defmodule Compos.Core.SchemeAPI do
       {"vm-sample",
        "(vm-sample) — one plist of VM and host counters: scheduler utilization, memory, rates since the previous sample, os_mon load, memory and disks."} =>
         fn [] -> SysMon.sample() end,
+      # one value per running job: a lane job, a task and an eval each run
+      # in their own process, so two lanes never see the other's value
+      {"job-local",
+       "(job-local KEY) — the value job-local-set! gave KEY in this job, or #f; another lane never sees it."} =>
+        fn [key] -> Process.get({:compos_job_local, key}, false) end,
+      {"job-local-set!",
+       "(job-local-set! KEY VALUE) — keep VALUE under KEY for this job only; #f removes it. Return VALUE."} =>
+        fn
+          [key, false] ->
+            Process.delete({:compos_job_local, key})
+            false
+
+          [key, value] ->
+            Process.put({:compos_job_local, key}, value)
+            value
+        end,
       {"vm-fds",
        "(vm-fds) — (COUNT LIMIT): the descriptors the daemon holds, and the most it can hold."} =>
         fn [] ->

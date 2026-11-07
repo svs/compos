@@ -127,7 +127,12 @@ defmodule Compos.Core.Reactor do
   defp note_failure(state, id, rule, changes, error, name) do
     failures = Map.get(rule, :failures, 0) + 1
 
-    rule = Map.merge(rule, %{pending: rule.pending ++ Enum.reverse(changes), timer: nil, failures: failures})
+    rule =
+      Map.merge(rule, %{
+        pending: rule.pending ++ Enum.reverse(changes),
+        timer: nil,
+        failures: failures
+      })
 
     if failures >= @max_failures do
       Logger.error(
@@ -137,7 +142,9 @@ defmodule Compos.Core.Reactor do
 
       drop_rule(state, id, rule)
     else
-      Logger.error("reactor rule #{id} on #{name} failed (#{failures}/#{@max_failures}): #{error}")
+      Logger.error(
+        "reactor rule #{id} on #{name} failed (#{failures}/#{@max_failures}): #{error}"
+      )
 
       put_in(state.rules[id], rule)
     end
@@ -253,8 +260,10 @@ defmodule Compos.Core.Reactor do
 
   defp check_scope(state) do
     reactor = self()
+
     parked =
-      for {id, r} <- state.rules, r.pending != [] and r.timer == nil and r.in_flight == false,
+      for {id, r} <- state.rules,
+          r.pending != [] and r.timer == nil and r.in_flight == false,
           do: {id, r.buffer_ref}
 
     task = fn ->
@@ -367,7 +376,9 @@ defmodule Compos.Core.Reactor do
   defp in_scope?(ref, %{visible: visible, current: current}) do
     name = buffer_name(ref)
     group = name && group_of(ref)
-    name != nil and (name in visible or (group != nil and group in Enum.map(current, &group_of/1)))
+
+    name != nil and
+      (name in visible or (group != nil and group in Enum.map(current, &group_of/1)))
   end
 
   # a buffer's name, or nil when its process is gone

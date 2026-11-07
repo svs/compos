@@ -98,14 +98,16 @@
       (lambda (id)
         (unwind-protect
           (lambda ()
+            (advice-add! 'group-default-panes 'around 'zz-empty-default
+              (lambda (next g) (if (equal? (group-resolve-id g) id) '() (next g))))
             (set-frame-local! 'current-group id)
             (panes-layout-forget!)
-            (delete-other-windows!)
             (group-layout-enter! id #f)
             (let ((l (panes-layout)))
               (check-equal! (panes-pane-count l) 1 "one pane")
               (check-equal! (length (panes-visible l)) 0 "blank, no buffer")))
           (lambda ()
+            (advice-remove! 'group-default-panes 'zz-empty-default)
             (set-frame-local! 'current-group #f)
             (pmt-done! '())))))))
 

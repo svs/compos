@@ -1191,22 +1191,22 @@
 
 (define (panes-fill-panes layout candidates mode-of)
   "LAYOUT with each pane that has no window taking the next buffer of
-   CANDIDATES, in pane order. CANDIDATES are the buffers no pane shows in
-   front, most recent first; a buffer that waits in a window's stack moves
-   out of it, so it lives in one window. A pane left without a candidate
-   stays empty, a blank pane. Pure."
-  (let loop ((panes (panes-panes layout)) (l layout) (rest candidates))
+   CANDIDATES that no pane shows in front, in pane order. A buffer that
+   waits in a window's stack moves out of it, so it lives in one window.
+   A pane left without a candidate stays empty, a blank pane. Pure."
+  (let loop ((panes (panes-panes layout)) (l layout))
     (if (null? panes)
         l
         (let* ((pid (plist-get (car panes) 'id))
                (pane (panes-pane l pid))
+               (shown (map (lambda (k) (panes-window-buffer l k)) (panes-top-windows l)))
                (free (and (or (not pane) (null? (panes-keys pane)))
-                          (and (pair? rest) (car rest)))))
+                          (find (lambda (b) (not (member b shown))) candidates))))
           (if free
               (let* ((moved (panes-drop-buffer l free))
                      (made (panes-add-window moved pid free (mode-of free))))
-                (loop (cdr panes) (car made) (cdr rest)))
-              (loop (cdr panes) l rest))))))
+                (loop (cdr panes) (car made)))
+              (loop (cdr panes) l))))))
 
 (define (panes-blank-layout)
   "LAYOUT: one pane that shows no window, a blank pane. Pure."

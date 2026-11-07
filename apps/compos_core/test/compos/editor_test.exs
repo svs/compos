@@ -4047,11 +4047,12 @@ defmodule Compos.EditorTest do
       run("window-eat")
 
       rects = Map.new(Editor.window_rects(), fn [_id, b, x, _y, w, _h] -> {b, {x, w}} end)
+      # the column next to the eater goes; the far column keeps its own edge,
+      # and the two that remain are one contiguous row of columns
       assert rects |> Map.keys() |> Enum.sort() == Enum.sort([buf, third])
       assert_in_delta elem(rects[buf], 0), 0.0, 0.001
-      assert_in_delta elem(rects[buf], 1), 0.7, 0.001
-      assert_in_delta elem(rects[third], 0), 0.7, 0.001
-      assert_in_delta elem(rects[third], 1), 0.3, 0.001
+      assert_in_delta elem(rects[third], 0), elem(rects[buf], 1), 0.001
+      assert_in_delta elem(rects[buf], 1) + elem(rects[third], 1), 1.0, 0.001
 
       for name <- [second, third], do: Compos.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end

@@ -80,7 +80,8 @@
     (ibp-open-plain!)
     (check-false! (float-open?) "no popup")
     (check-false! (buffer-known? " *buffers*") "no table")
-    (check-equal! (plist-get (minibuffer-state) 'prompt) "Switch to: " "the prompt line is open")
+    (check-contains! (plist-get (minibuffer-state) 'prompt) "default *zz-ibp-b*"
+                     "the prompt names the buffer an empty RET takes")
     (check-equal! (ibp-my-candidates) '("*zz-ibp-b*" "*zz-ibp-c*" "*zz-ibp-a*")
                   "the window's history first, the buffer you are on last")
     (check-false! (member "zz-ibp-one" (ibp-candidates)) "a group name is not a candidate")

@@ -58,4 +58,27 @@ defmodule Compos.RecentTest do
 
     assert Enum.sort(Recent.order()) == Enum.sort(names)
   end
+
+  test "a switch leads the recent order" do
+    n = System.unique_integer([:positive])
+    a = "zz-switch-a-#{n}"
+    b = "zz-switch-b-#{n}"
+    on_exit(fn -> for x <- [a, b], do: Compos.Core.kill_buffer(x) end)
+
+    Compos.TestHelpers.one_window!()
+    {:ok, _} = Compos.Core.create_buffer(a)
+    {:ok, _} = Compos.Core.create_buffer(b)
+
+    # switch-to-buffer! is the visit door: BUF leads the order, also
+    # when the panel model already showed it and no window moved
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{a}")})
+    assert hd(Recent.buffers()) == a
+
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{b}")})
+    assert hd(Recent.buffers()) == b
+
+    # the history the switcher reads holds it too, above the older switch
+    buffer_rows = Enum.filter(Recent.all(), &match?(["buffer", _], &1))
+    assert Enum.take(buffer_rows, 2) == [["buffer", b], ["buffer", a]]
+  end
 end

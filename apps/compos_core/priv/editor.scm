@@ -2908,13 +2908,15 @@
   (when (and (not (buffer-context?)) (boundp 'buffer-join-here!))
     (buffer-join-here! buf))
   (cond ((buffer-context?) (switch-to-buffer-here! buf))
-        ;; The window model places it (panes-mode.scm). A visit is a use:
-        ;; BUF leads the recent order, also when the model already showed it
-        ;; and the draw moved no window. The draw is the only other door
-        ;; that records a use, and it records only a window it changed.
+        ;; The window model places it (panes-mode.scm). The visit records the
+        ;; use on the window that landed it: BUF leads the recent order, as
+        ;; switch-to-buffer! promised before the order had its own store, also
+        ;; when the draw moved no window. The raw door changes no model and
+        ;; selects nothing; the draw records a window it changed by itself.
         ((boundp 'panes-visit!)
          (let ((win (panes-visit! buf)))
-           (when (and win (boundp 'window-set-buffer!)) (window-set-buffer! win buf))
+           (when (and win (window-exists? win) (boundp 'raw-window-set-buffer!))
+             (raw-window-set-buffer! win buf #t))
            buf))
         ;; at boot, before the model loads, the selected window shows it
         (else

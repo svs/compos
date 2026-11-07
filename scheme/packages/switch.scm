@@ -1167,6 +1167,12 @@ the next row down. STEP is kept for the callers."
          (rows (filter (lambda (r) (ibuffer-workspace-path? (cadr r)))
                        (switch-prompt-rows here (active-window))))
          (names (map car rows))
+         ;; Emacs names the buffer an empty RET takes: the window's history
+         ;; leads the rows, so its first row is that default
+         (dflt (switch-first-choice rows here))
+         (label (if dflt
+                    (string-append "Switch to (default " dflt "): ")
+                    "Switch to: "))
          (candidates (switch-bare-candidates names))
          (display (if ibuffer-info
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
@@ -1214,7 +1220,7 @@ the next row down. STEP is kept for the callers."
                            (when target (ibuffer-pick! target (lambda () #f))
                                         (group-current-recalculate!))
                            (sleep-woken! target)))))
-      (minibuffer-read-preview "Switch to: " (tab-display tab)
+      (minibuffer-read-preview label (tab-display tab)
         (lambda (label)
           (let* ((entry (assoc label choices)) (target (and entry (cadr entry))))
             (if (and target (buffer-known? target) (window-exists? home))

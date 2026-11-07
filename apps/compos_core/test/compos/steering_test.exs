@@ -23,13 +23,13 @@ defmodule Compos.SteeringTest do
         eval!("""
         (execute* "#{prompt}" '(permission-mode ask backend "stub" script
           (((type chunk text "working…")
-            (type permission rpc-id 3 title "Write x" kind "edit"
+            (type permission rpc-id 3 title "Run x" kind "execute"
                   options (("opt-allow" "Allow" "allow_once")))))))
         """),
         "\""
       )
 
-    {slug, "*chat:#{slug}*"}
+    {slug, Agent.info(slug).buffer}
   end
 
   defp eventually(fun, tries \\ 80) do
@@ -253,7 +253,7 @@ defmodule Compos.SteeringTest do
     slug =
       String.trim(eval!(~s{(execute* "" '(connector "api" permission-mode auto))}), "\"")
 
-    buf = "*chat:#{slug}*"
+    buf = Agent.info(slug).buffer
 
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
     assert Agent.prompt(slug, "start the work") == :sent

@@ -51,6 +51,15 @@ defmodule Compos.TestHelpers do
   defp find_window(%{type: :leaf}, _id), do: nil
   defp find_window(%{type: :split, children: c}, id), do: Enum.find_value(c, &find_window(&1, id))
 
+  @doc "The agent slug of chat buffer BUF: the chat's stable id (chat-...), not the aN of its name."
+  def slug_of(buf), do: Compos.Core.Buffer.get_local(buf, "agent-slug")
+
+  @doc "Evaluate an (execute* ...) form; answer the new chat's {slug, buffer}. A buffer name is not stable across tests."
+  def spawn_chat!(code) do
+    slug = code |> eval!() |> String.trim("\"")
+    {slug, Compos.Core.Agent.info(slug).buffer}
+  end
+
   @doc "Press one key or a list of keys through KeyDispatch, the path the GUI takes."
   def press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 

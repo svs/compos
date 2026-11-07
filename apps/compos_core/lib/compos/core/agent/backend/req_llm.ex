@@ -313,7 +313,8 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   # which one to fix. RAW is the text the policy matches against.
   defp gate(ev, slug, name, input) do
     policy = Compos.Core.LLMSession.callback(slug, :permission) || Roots.get({:agent_permission})
-    raw = name <> " " <> inspect(input)
+    # JSON, as the ACP lane sends it: the policy reads an eval payload's code from it
+    raw = if is_binary(input), do: input, else: Jason.encode!(input)
     args = [policy || false, slug, name, raw, LLM.json_to_scheme(input)]
 
     case Session.call_named("llm-tool-gate", args, nil, 30_000, Compos.Core.Agent.lane(slug)) do

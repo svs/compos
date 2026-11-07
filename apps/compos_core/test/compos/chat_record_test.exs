@@ -89,7 +89,7 @@ defmodule Compos.ChatRecordTest do
 
     assert_receive {:request, _round1}, 2_000
     assert_receive {:request, round2}, 2_000
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # turn 1 ended having sent: the user message, the assistant's tool call,
     # the tool result
@@ -100,7 +100,7 @@ defmodule Compos.ChatRecordTest do
     press(["RET"])
 
     assert_receive {:request, round3}, 2_000
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # THE invariant: everything turn 1 sent is the head of turn 2's
     # request, unchanged. Not "equivalent" — identical terms, which is what
@@ -123,7 +123,7 @@ defmodule Compos.ChatRecordTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(buf) =~ "42." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     turns = Buffer.get_local(buf, "chat-wire-turns") |> Enum.reverse()
 
@@ -163,7 +163,7 @@ defmodule Compos.ChatRecordTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(buf) =~ "42." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     before = shape(Buffer.get_local(buf, "chat-wire-turns"))
 

@@ -48,23 +48,21 @@ defmodule Compos.BackendStubTest do
   end
 
   test "stub backend: chunks + tool card + permission round-trip, no wire" do
-    {:ok, _} =
-      Session.eval("""
+    {slug, buf} =
+      spawn_chat!("""
       (execute* "go" '(permission-mode ask backend "stub" script
         (((type chunk text "Hello ")
           (type chunk text "world.\\n")
           (type tool-call id "tc1" title "Read foo.ex" kind "read" status "pending")
           (type tool-update id "tc1" status "completed" text "defmodule Foo\\n")
-          (type permission rpc-id 7 title "Write foo.ex" kind "edit"
+          (type permission rpc-id 7 title "Run make" kind "execute"
                 options (("opt-allow" "Allow" "allow_once")
                          ("opt-reject" "Reject" "reject_once")))
           (type chunk text "Done.")))))
       """)
 
-    buf = "*chat:a1*"
-
     # the scripted turn plays into the buffer, pausing at the permission
-    assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Write foo.ex" end)
+    assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Run make" end)
     refute_received :transport_opened
 
     text = Buffer.text(buf)
@@ -73,7 +71,7 @@ defmodule Compos.BackendStubTest do
     body = :binary.match(text, "defmodule Foo") |> elem(0)
     assert hello < tool and tool < body
 
-    assert %{status: :needs_attention, permission: perm} = Agent.info("a1")
+    assert %{status: :needs_attention, permission: perm} = Agent.info(slug)
     assert perm.rpc_id == 7
     assert [{"opt-allow", "Allow", "allow_once"} | _] = perm.options
 
@@ -87,7 +85,7 @@ defmodule Compos.BackendStubTest do
 
     # the paused script resumes, finishes the turn, thread goes idle
     assert eventually(fn -> Buffer.text(buf) =~ "Done." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
 
     # answered -> banner leaves the rich view; tool body folded away
     assert eventually(fn ->
@@ -101,8 +99,8 @@ defmodule Compos.BackendStubTest do
   end
 
   test "prose after a completed tool stays outside its fold; the waiting overlay dies with its line" do
-    {:ok, _} =
-      Session.eval("""
+    {slug, buf} =
+      spawn_chat!("""
       (execute* "go" '(backend "stub" script
         (((type user-msg text "go")
           (type tool-call id "tc1" title "Read foo.ex" kind "read" status "pending")
@@ -110,9 +108,8 @@ defmodule Compos.BackendStubTest do
           (type chunk text "The answer is 42.\\n")))))
       """)
 
-    buf = "*chat:a1*"
     assert eventually(fn -> Buffer.text(buf) =~ "The answer is 42." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
 
     text = Buffer.text(buf)
     body = :binary.match(text, "defmodule Foo") |> elem(0)
@@ -132,7 +129,8 @@ defmodule Compos.BackendStubTest do
     refute Enum.any?(ovs, fn [s, e | _] -> s <= answer and answer < e end)
   end
 
-  defp eventually(fun, tries \\ 40) do
+  # 5 s: the first test of a run shares the VM with the boot warmup
+  defp eventually(fun, tries \\ 100) do
     cond do
       fun.() -> true
       tries == 0 -> false

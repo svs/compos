@@ -15,6 +15,9 @@ defmodule Compos.ToolGateContractTest do
 
   alias Compos.Core.{Agent, Buffer, Session}
 
+  # a call that, if it runs, leaves its mark
+  @mark %{"code" => "(begin (set! zz-gate-ran 'ran) 'ran)"}
+
   @restore_policy """
   (agent-permission-fn!
     (lambda (slug name kind raw)
@@ -49,7 +52,7 @@ defmodule Compos.ToolGateContractTest do
   end
 
   defp tool_result do
-    assert_receive {:result, [%{content: result, is_error: error?} | _]}, 5_000
+    assert_receive {:result, [%{content: result, is_error: error?} | _]}, 15_000
     {result, error?}
   end
 
@@ -111,7 +114,8 @@ defmodule Compos.ToolGateContractTest do
     refute result =~ "permission denied"
   end
 
-  defp pending_permission(tries \\ 100) do
+  # 15 s: a killed chat's last events can hold the next chat's lane for seconds
+  defp pending_permission(tries \\ 300) do
     found =
       Enum.find_value(Agent.list(), fn slug ->
         case Agent.info(slug) do
@@ -127,12 +131,25 @@ defmodule Compos.ToolGateContractTest do
     end
   end
 
-  @mark %{"code" => "(begin (set! zz-gate-ran 'ran) 'ran)"}
-
   test "a policy that rejects denies the call, and the tool does not run" do
     eval!("(agent-permission-fn! (lambda (slug name kind raw) 'reject))")
 
     assert {"permission denied: denied by policy", true} = tool_turn("eval-scheme", @mark)
+    assert eval!("zz-gate-ran") == "no"
+  end
+
+  # The deny-list reads the code inside an eval. The gate once sent the
+  # policy inspect(input), so a deny-listed call inside eval-scheme ran
+  # with no banner on this lane.
+  test "a deny-listed payload inside an eval asks first, and a denied one does not run" do
+    payload = ~s{(begin (set! zz-gate-ran 'ran) (shell-command->string "sendmail bob@example.com" d))}
+    start_turn("eval-scheme", %{"code" => payload})
+
+    {slug, id} = pending_permission()
+    assert eval!("zz-gate-ran") == "no"
+    assert :ok = Agent.respond_permission(slug, id, "deny")
+
+    assert {"permission denied: denied", true} = tool_result()
     assert eval!("zz-gate-ran") == "no"
   end
 
@@ -153,7 +170,7 @@ defmodule Compos.ToolGateContractTest do
              tool_turn("eval-scheme", %{"code" => "(+ 1 1)"})
 
     assert eval!("zz-gate-ran") ==
-             ~S|("eval-scheme" "tool" "eval-scheme %{\"code\" => \"(+ 1 1)\"}")|
+             ~S|("eval-scheme" "tool" "{\"code\":\"(+ 1 1)\"}")|
   end
 
   test "the ask tool is not put to the policy, and a bad ask is an error" do

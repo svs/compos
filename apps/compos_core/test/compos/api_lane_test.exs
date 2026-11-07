@@ -79,7 +79,7 @@ defmodule Compos.ApiLaneTest do
     buf = "*chat:a1*"
 
     assert eventually(fn -> Buffer.text(buf) =~ "All set." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     text = Buffer.text(buf)
     # the user turn, the tool card, its body, then the streamed prose
@@ -179,7 +179,7 @@ defmodule Compos.ApiLaneTest do
     type("second message")
     press(["RET"])
     refute_receive {:sent, _, _}, 200
-    assert %{queued: 1} = Agent.info("a1")
+    assert %{queued: 1} = Agent.info(slug_of("*chat:a1*"))
     assert Buffer.get_local(buf, "chat-queued") == ["second message"]
     refute Buffer.text(buf) =~ "second message"
 
@@ -196,7 +196,7 @@ defmodule Compos.ApiLaneTest do
     # waiting for the (still-blocked) wire
     focus(buf)
     press(["C-RET"])
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
   end
 
   test "ask blocks the tool loop, returns an arbitrary user answer, and resumes" do
@@ -250,17 +250,17 @@ defmodule Compos.ApiLaneTest do
     assert eventually(fn ->
              match?(
                %{status: :needs_attention, question: %{answers: [_, _, _, _]}},
-               Agent.info("a1")
+               Agent.info(slug_of("*chat:a1*"))
              )
            end)
 
-    %{question: %{id: id}} = Agent.info("a1")
-    assert :ok = Agent.respond_question("a1", id, "No")
+    %{question: %{id: id}} = Agent.info(slug_of("*chat:a1*"))
+    assert :ok = Agent.respond_question(slug_of("*chat:a1*"), id, "No")
 
     assert_receive {:ask_resumed, messages}, 2_000
     assert inspect(messages) =~ "No"
     assert eventually(fn -> Buffer.text("*chat:a1*") =~ "I will stay here." end)
-    assert eventually(fn -> match?(%{status: :idle, question: nil}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle, question: nil}, Agent.info(slug_of("*chat:a1*"))) end)
   end
 
   test "C-g aborts the turn in flight, and quits the usual way when idle" do
@@ -290,10 +290,10 @@ defmodule Compos.ApiLaneTest do
     type("a long question")
     press(["RET"])
     assert_receive {:sent, _, _task}, 2_000
-    assert eventually(fn -> match?(%{status: :running}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :running}, Agent.info(slug_of("*chat:a1*"))) end)
 
     press(["C-g"])
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # the thinking marker went with it
     refute Buffer.text(buf) =~ "thinking"
@@ -301,7 +301,7 @@ defmodule Compos.ApiLaneTest do
     # nothing running: C-g is keyboard-quit again, and the thread lives on
     focus(buf)
     press(["C-g"])
-    assert %{status: :idle} = Agent.info("a1")
+    assert %{status: :idle} = Agent.info(slug_of("*chat:a1*"))
   end
 
   defp eventually(fun, tries \\ 40) do

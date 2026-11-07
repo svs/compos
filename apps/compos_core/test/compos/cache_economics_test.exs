@@ -254,7 +254,7 @@ defmodule Compos.CacheEconomicsTest do
 
     focus(buf)
     press(["C-RET"])
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # the round that DID complete is billed: cancelling is not a refund
     assert eventually(fn -> File.exists?(ledger) end)
@@ -265,7 +265,7 @@ defmodule Compos.CacheEconomicsTest do
     assert row["input"] == 400
     assert row["cache_read"] == 900
     # ...and the row names the chat that spent it
-    assert row["slug"] == "a1"
+    assert row["slug"] == slug_of("*chat:a1*")
 
     # the chat's own totals agree with the ledger
     assert eventually(fn ->

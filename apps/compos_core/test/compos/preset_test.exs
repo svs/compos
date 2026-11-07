@@ -52,7 +52,7 @@ defmodule Compos.PresetTest do
     inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
     assert_receive {:frame, %{"method" => "session/new", "id" => nid, "params" => np}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-1"}})
-    {"a1", "*chat:a1*", agent, np}
+    {slug_of("*chat:a1*"), "*chat:a1*", agent, np}
   end
 
   defp servers(params), do: Enum.map(params["mcpServers"] || [], & &1["name"])
@@ -386,10 +386,10 @@ defmodule Compos.PresetTest do
 
     # the spawn config alone is not enough: agent-revive! reads the
     # buffer-local, so a thread that only carried it in opts came back bare
-    buf = Enum.find(Compos.Core.list_buffers(), &(Buffer.get_local(&1, "agent-slug") == "a1"))
+    buf = "*chat:a1*"
     assert Buffer.get_local(buf, "chat-presets") == [{:sym, "zz-spawnpack"}]
 
-    {:ok, _} = Session.eval(~s[(begin (agent-kill! "a1") (agent-revive! "a1"))])
+    {:ok, _} = Session.eval(~s[(begin (agent-kill! "#{slug_of("*chat:a1*")}") (agent-revive! "#{slug_of("*chat:a1*")}"))])
     assert_receive {:transport_open, agent2}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid2}}, 1_000
     inject(agent2, %{"jsonrpc" => "2.0", "id" => iid2, "result" => %{}})
@@ -411,7 +411,7 @@ defmodule Compos.PresetTest do
     inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
     assert_receive {:frame, %{"method" => "session/new", "params" => np}}, 1_000
 
-    buf = Enum.find(Compos.Core.list_buffers(), &(Buffer.get_local(&1, "agent-slug") == "a1"))
+    buf = "*chat:a1*"
 
     {:ok, _} =
       Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-tool-surface"))])

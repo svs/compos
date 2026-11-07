@@ -60,19 +60,19 @@ defmodule Compos.PermissionTest do
 
       # every request answered by policy, invisibly: no banner ever rendered
       assert eventually(fn -> Buffer.text(buf) =~ "twenty done" end)
-      assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+      assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
       refute Buffer.text(buf) =~ "needs permission"
 
       refute (Buffer.get_local(buf, "agent-blocks") || [])
              |> Enum.any?(&match?([_, _, "permission" | _], &1))
 
       # ...and the stub was really answered 20 times, with the allow option
-      assert %{queued: 0} = Agent.info("a1")
+      assert %{queued: 0} = Agent.info(slug_of("*chat:a1*"))
 
       # now a deny-listed act on the SAME chat: this one stops
-      {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "clean up")])
+      {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug_of("*chat:a1*")}" "clean up")])
       assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Send mail to the team" end)
-      assert %{status: :needs_attention} = Agent.info("a1")
+      assert %{status: :needs_attention} = Agent.info(slug_of("*chat:a1*"))
     end
   end
 
@@ -114,7 +114,8 @@ defmodule Compos.PermissionTest do
       assert eventually(fn -> Buffer.text(buf) =~ "finished" end)
       # an ordinary tool ran with no banner at all
       refute Buffer.text(buf) =~ "needs permission"
-      assert Buffer.text(buf) =~ "▸ tool · eval-scheme"
+      # an eval card is titled by its first form
+      assert Buffer.text(buf) =~ "▸ tool · +: 1 1"
     end
 
     test "a deny-listed tool call banners on the direct lane and answers through the same keys" do
@@ -151,7 +152,7 @@ defmodule Compos.PermissionTest do
 
       # the SAME banner, the SAME block kind, the SAME keys as the ACP lane
       assert eventually(fn -> Buffer.text(buf) =~ "needs permission: eval-scheme" end)
-      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a1")) end)
+      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a1*"))) end)
 
       assert (Buffer.get_local(buf, "agent-blocks") || [])
              |> Enum.any?(&match?([_, _, "permission" | _], &1))
@@ -162,7 +163,7 @@ defmodule Compos.PermissionTest do
       # denied -> the tool never ran, the model was told, the turn finished
       assert eventually(fn -> Buffer.text(buf) =~ "permission denied" end)
       assert eventually(fn -> Buffer.text(buf) =~ "tool said:" end)
-      assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+      assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
     end
   end
 
@@ -171,16 +172,16 @@ defmodule Compos.PermissionTest do
       {:ok, _} =
         Session.eval("""
         (execute* "go" '(permission-mode ask backend "stub" script
-          (((type permission rpc-id 5 title "Write x" kind "edit"
+          (((type permission rpc-id 5 title "Run x" kind "execute"
                   options (("ok" "Allow" "allow_once")))
             (type chunk text "after")))))
         """)
 
-      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a1")) end)
+      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a1*"))) end)
 
       # answering twice: the second is silently ignored, not an error
-      assert :ok = Agent.respond_permission("a1", 5, "ok")
-      assert :ok = Agent.respond_permission("a1", 5, "ok")
+      assert :ok = Agent.respond_permission(slug_of("*chat:a1*"), 5, "ok")
+      assert :ok = Agent.respond_permission(slug_of("*chat:a1*"), 5, "ok")
       assert eventually(fn -> Buffer.text("*chat:a1*") =~ "after" end)
 
       # a fresh request, then kill the thread: the backend is answered
@@ -188,13 +189,13 @@ defmodule Compos.PermissionTest do
       {:ok, _} =
         Session.eval("""
         (execute* "go" '(permission-mode ask backend "stub" script
-          (((type permission rpc-id 9 title "Write y" kind "edit"
+          (((type permission rpc-id 9 title "Run y" kind "execute"
                   options (("ok" "Allow" "allow_once")))))))
         """)
 
-      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a2")) end)
-      assert :ok = Agent.kill("a2")
-      assert eventually(fn -> not Agent.running?("a2") end)
+      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a2*"))) end)
+      assert :ok = Agent.kill(slug_of("*chat:a2*"))
+      assert eventually(fn -> not Agent.running?(slug_of("*chat:a2*")) end)
     end
 
     test "an unwatched chat's banner auto-denies on its deadline" do
@@ -204,7 +205,7 @@ defmodule Compos.PermissionTest do
       {:ok, _} =
         Session.eval("""
         (execute* "" '(permission-mode ask backend "stub" script
-          (((type permission rpc-id 3 title "Write z" kind "edit"
+          (((type permission rpc-id 3 title "Run z" kind "execute"
                   options (("ok" "Allow" "allow_once")))
             (type chunk text "moved on")))))
         """)
@@ -217,12 +218,12 @@ defmodule Compos.PermissionTest do
       Compos.TestHelpers.one_window!()
       {:ok, _} = Session.eval(~s[(switch-to-buffer! "*scratch*")])
 
-      {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "go")])
-      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a1")) end)
+      {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug_of("*chat:a1*")}" "go")])
+      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a1*"))) end)
 
       # ...so it denies itself and the turn continues
       assert eventually(fn -> Buffer.text(buf) =~ "timed out" end, 60)
-      assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end, 60)
+      assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end, 60)
     end
   end
 
@@ -308,7 +309,7 @@ defmodule Compos.PermissionTest do
       {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
       buf = "*chat:a1*"
       focus(buf)
-      Session.eval(~s{(agent-prompt! "a1" "run the tool")})
+      Session.eval(~s{(agent-prompt! "#{slug_of("*chat:a1*")}" "run the tool")})
 
       assert_receive {:result, [%{content: result} | _]}, 3_000
 
@@ -320,7 +321,8 @@ defmodule Compos.PermissionTest do
     end
   end
 
-  defp eventually(fun, tries \\ 40) do
+  # 5 s: the first test of a run shares the VM with the boot warmup
+  defp eventually(fun, tries \\ 100) do
     cond do
       fun.() -> true
       tries == 0 -> false

@@ -165,7 +165,7 @@ defmodule Compos.Core.Events do
 
   # A Scheme symbol is {:sym, name}; a list that starts with one is a list.
   def scheme([{k, _} | _] = kw) when is_atom(k) and k != :sym,
-    do: Enum.flat_map(kw, fn {k, v} -> [scheme(k), scheme(v)] end)
+    do: if(Keyword.keyword?(kw), do: Enum.flat_map(kw, fn {k, v} -> [scheme(k), scheme(v)] end), else: Enum.map(kw, &scheme/1))
 
   def scheme(l) when is_list(l), do: Enum.map(l, &scheme/1)
   def scheme(t) when is_tuple(t), do: t |> Tuple.to_list() |> scheme()

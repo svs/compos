@@ -397,7 +397,7 @@ defmodule Compos.ChatResetTest do
       assert_receive {:transport_open, _}, 1_000
       live = "*chat:a1*"
       eval!(~s[(begin (switch-to-buffer! "#{live}") (set-mode! "chat-mode") #t)])
-      assert Compos.Core.Buffer.get_local(live, "agent-slug") == "a1"
+      assert "chat-" <> _ = Compos.Core.Buffer.get_local(live, "agent-slug")
     end
 
     test "the three lists are disjoint and cover every local reset touches" do

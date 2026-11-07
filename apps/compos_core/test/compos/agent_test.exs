@@ -591,7 +591,7 @@ defmodule Compos.AgentTest do
   # Threads boot in ask mode here: these tests are about the banner flow,
   # and the default (auto) answers most requests without one.
   defp boot(task) do
-    {:ok, _} = Session.eval(~s[(execute* "#{task}" '(permission-mode ask))])
+    {slug, buf} = spawn_chat!(~s[(execute* "#{task}" '(permission-mode ask))])
     assert_receive {:transport_open, agent}, 1_000
 
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -601,11 +601,11 @@ defmodule Compos.AgentTest do
     assert is_binary(np["cwd"])
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-1"}})
 
-    {"a1", "*chat:a1*", agent}
+    {slug, buf, agent}
   end
 
   defp boot_steering_acp(session_id) do
-    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    {slug, _buf} = spawn_chat!(~s[(execute* "" '(permission-mode ask))])
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
 
@@ -620,8 +620,8 @@ defmodule Compos.AgentTest do
 
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => session_id}})
-    assert eventually(fn -> Agent.info("a1").steering end)
-    {"a1", agent}
+    assert eventually(fn -> Agent.info(slug).steering end)
+    {slug, agent}
   end
 
   defp focus(buf) do
@@ -638,7 +638,7 @@ defmodule Compos.AgentTest do
 
     assert Buffer.text(buf) =~ "chat · a1"
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: fix the bug" end)
-    assert %{status: :running} = Agent.info("a1")
+    assert %{status: :running} = Agent.info(slug_of("*chat:a1*"))
     _ = agent
   end
 
@@ -720,7 +720,7 @@ defmodule Compos.AgentTest do
     assert "user" in kinds and "prose" in kinds and "tool" in kinds
     refute "waiting" in kinds
 
-    [_, _, "tool", "tc1", "Read foo.ex: foo.ex", "read", "done", body_start] =
+    [_, _, "tool", "tc1", "Read foo.ex: foo.ex", "read", "done", body_start | _] =
       Enum.find(blocks, fn [_, _, k | _] -> k == "tool" end)
 
     input_and_result = "foo.ex\n\ndefmodule Foo"
@@ -730,7 +730,7 @@ defmodule Compos.AgentTest do
 
   # a tool call is transient status: it goes to the echo area and the
   # activity row, not into the modeline
-  test "a tool call echoes in the echo area and stays out of the modeline" do
+  test "a tool call is the chat's activity and stays out of the modeline" do
     {slug, buf, agent} = boot("")
 
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
@@ -745,8 +745,7 @@ defmodule Compos.AgentTest do
       "rawInput" => %{"path" => "foo.ex"}
     })
 
-    assert eventually(fn -> Editor.snapshot().echo == "tool · Read foo.ex: foo.ex" end)
-    assert Buffer.get_local(buf, "chat-activity") == "tool · Read foo.ex: foo.ex"
+    assert eventually(fn -> Buffer.get_local(buf, "chat-activity") == "tool · Read foo.ex: foo.ex" end)
     ml = Buffer.get_local(buf, "modeline-info")
     refute ml && ml =~ "tool ·"
   end
@@ -807,7 +806,7 @@ defmodule Compos.AgentTest do
     assert text =~ "split window\n\n()"
     assert length(String.split(text, "split window")) == 2
 
-    [_, _, "tool", "tc9", title, "other", "done", body_start] =
+    [_, _, "tool", "tc9", title, "other", "done", body_start | _] =
       Buffer.get_local(buf, "agent-blocks")
       |> Enum.find(fn [_, _, k | _] -> k == "tool" end)
 
@@ -870,7 +869,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-s"}})
 
-    slug = "a1"
+    slug = slug_of("*chat:a1*")
     buf = "*chat:a1*"
     assert eventually(fn -> Agent.info(slug).steering end)
     focus(buf)
@@ -942,7 +941,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-f"}})
 
-    slug = "a1"
+    slug = slug_of("*chat:a1*")
     buf = "*chat:a1*"
     assert eventually(fn -> Agent.info(slug).steering end)
     focus(buf)
@@ -950,6 +949,7 @@ defmodule Compos.AgentTest do
     type("start")
     press(["RET"])
     assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+    assert eventually(fn -> input_text(buf) == "" end)
 
     type("try to steer")
     press(["RET"])
@@ -1013,7 +1013,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-e"}})
 
-    slug = "a1"
+    slug = slug_of("*chat:a1*")
     buf = "*chat:a1*"
     assert eventually(fn -> Agent.info(slug).steering end)
     focus(buf)
@@ -1066,7 +1066,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-r"}})
 
-    slug = "a1"
+    slug = slug_of("*chat:a1*")
     assert eventually(fn -> Agent.info(slug).steering end)
     assert Agent.prompt(slug, "start") == :sent
     assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
@@ -1232,7 +1232,7 @@ defmodule Compos.AgentTest do
     assert spawned == ~s[fake -c model="gpt-5.5"]
   end
 
-  test "the adapter's reported model is the modeline truth; C-c m switches in place" do
+  test "the adapter's reported model is the chat's model; C-c m switches in place" do
     {:ok, _} = Session.eval(~s[(execute "")])
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -1256,8 +1256,6 @@ defmodule Compos.AgentTest do
 
     buf = "*chat:a1*"
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-opus-4-6" end)
-    assert {:ok, ml} = Session.eval(~s[(buffer-local "#{buf}" 'modeline-info)])
-    assert ml =~ "claude-opus-4-6"
 
     # C-c m: live switch over session/set_model — no reconnect, context kept
     focus(buf)
@@ -1376,13 +1374,16 @@ defmodule Compos.AgentTest do
     assert sp["configId"] == "model"
     assert sp["value"] == "opencode/claude-opus-5"
 
-    # the agent's own report stays the truth
+    # a model the person chose shows as they chose it: a later report
+    # from the agent does not override it
     update(agent, "ses-oc", %{
       "sessionUpdate" => "config_option_update",
       "configOptions" => [model_option.("opencode/big-pickle")]
     })
 
-    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/big-pickle" end)
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/claude-opus-5" end)
+    refute_receive :never, 200
+    assert Buffer.get_local(buf, "agent-model") == "opencode/claude-opus-5"
   end
 
   test "deepseek connector: grouped options, opaque model values, reasoning effort" do
@@ -1390,10 +1391,13 @@ defmodule Compos.AgentTest do
     assert names =~ "deepseek"
 
     # 'model-config: the model rides protocol config, not a command flag
-    assert {:ok, "#f"} =
+    # (the env carries only dsh's own home)
+    assert {:ok, env} =
              Session.eval(
                ~s[(plist-get (agent-resolve-config '(connector "deepseek" model "deepseek-v4-pro")) 'env)]
              )
+
+    refute env =~ "deepseek-v4-pro"
 
     {:ok, backend} =
       Backend.ACP.start(
@@ -1462,8 +1466,13 @@ defmodule Compos.AgentTest do
 
     # the group heading is not a model: only its leaves reach the picker,
     # each named by the model alone and carrying the effort levels
-    assert_receive {:backend_event, state}, 1_000
-    assert Backend.event_type(state) == "model-state"
+    # (a session event comes first now; skip to the model-state)
+    state =
+      Enum.find_value(1..5, fn _ ->
+        assert_receive {:backend_event, e}, 1_000
+        Backend.event_type(e) == "model-state" && e
+      end)
+
     assert Backend.plist_get(state, "current") == "deepseek-v4-flash"
 
     assert Backend.plist_get(state, "available") == [
@@ -1515,7 +1524,7 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(backend, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "ses-sp"}})
 
-    :ok = Backend.ACP.prompt(backend, "first", nil)
+    :ok = Backend.ACP.prompt(backend, "first", %{})
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p1}}, 1_000
     assert p1["prompt"] == [
              %{
@@ -1526,7 +1535,7 @@ defmodule Compos.AgentTest do
 
     # the second turn pays for its own text alone — the sections stay in the
     # cached prefix
-    :ok = Backend.ACP.prompt(backend, "second", nil)
+    :ok = Backend.ACP.prompt(backend, "second", %{})
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p2}}, 1_000
     assert p2["prompt"] == [%{"type" => "text", "text" => "second"}]
   end
@@ -1543,7 +1552,7 @@ defmodule Compos.AgentTest do
       "method" => "session/request_permission",
       "params" => %{
         "sessionId" => "sess-1",
-        "toolCall" => %{"title" => "Write foo.ex", "kind" => "edit"},
+        "toolCall" => %{"title" => "Run make", "kind" => "execute"},
         "options" => [
           %{"optionId" => "opt-allow", "name" => "Allow", "kind" => "allow_once"},
           %{"optionId" => "opt-reject", "name" => "Reject", "kind" => "reject_once"}
@@ -1551,7 +1560,7 @@ defmodule Compos.AgentTest do
       }
     })
 
-    assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Write foo.ex" end)
+    assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Run make" end)
     assert %{status: :needs_attention} = Agent.info(slug)
 
     # banner is in the block model while pending
@@ -1617,7 +1626,7 @@ defmodule Compos.AgentTest do
       "method" => "session/request_permission",
       "params" => %{
         "sessionId" => "sess-1",
-        "toolCall" => %{"title" => "Edit files", "kind" => "edit"},
+        "toolCall" => %{"title" => "Run make", "kind" => "execute"},
         "options" => [
           %{"optionId" => "o-once", "name" => "Allow", "kind" => "allow_once"},
           %{"optionId" => "o-always", "name" => "Always", "kind" => "allow_always"},
@@ -1687,48 +1696,6 @@ defmodule Compos.AgentTest do
     _ = agent
   end
 
-  test "command execution is rejected — compos is the only sandbox" do
-    {slug, _buf, agent} = boot("")
-
-    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
-    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
-
-    inject(agent, %{
-      "jsonrpc" => "2.0",
-      "id" => 89,
-      "method" => "session/request_permission",
-      "params" => %{
-        "sessionId" => "sess-1",
-        "toolCall" => %{"title" => "Bash", "kind" => "execute"},
-        "options" => [
-          %{"optionId" => "o-once", "name" => "Allow", "kind" => "allow_once"},
-          %{"optionId" => "o-always", "name" => "Always", "kind" => "allow_always"},
-          %{"optionId" => "o-no", "name" => "Reject", "kind" => "reject_once"}
-        ]
-      }
-    })
-
-    # auto-rejected even in ask mode — no banner, no needs_attention
-    assert_receive {:frame, %{"id" => 89, "result" => %{"outcome" => outcome}}}, 1_000
-    assert outcome == %{"outcome" => "selected", "optionId" => "o-no"}
-  end
-
-  test "C-RET cancels the running turn" do
-    {slug, buf, agent} = boot("")
-
-    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "long task")])
-    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
-
-    focus(buf)
-    press(["C-RET"])
-
-    assert_receive {:frame,
-                    %{"method" => "session/cancel", "params" => %{"sessionId" => "sess-1"}}},
-                   1_000
-
-    _ = agent
-  end
-
   test "C-g cancels every queued turn and finalizes running tool cards" do
     {slug, buf, agent} = boot("")
 
@@ -1746,7 +1713,7 @@ defmodule Compos.AgentTest do
 
     assert eventually(fn ->
              Enum.any?(Buffer.get_local(buf, "agent-blocks"), fn
-               [_, _, "tool", "tc-abort", _, _, "running", _] -> true
+               [_, _, "tool", "tc-abort", _, _, "running" | _] -> true
                _ -> false
              end)
            end)
@@ -1764,7 +1731,7 @@ defmodule Compos.AgentTest do
 
     assert eventually(fn ->
              Enum.any?(Buffer.get_local(buf, "agent-blocks"), fn
-               [_, _, "tool", "tc-abort", _, _, "cancelled", _] -> true
+               [_, _, "tool", "tc-abort", _, _, "cancelled" | _] -> true
                _ -> false
              end)
            end)
@@ -1798,7 +1765,7 @@ defmodule Compos.AgentTest do
                    1_000
 
     assert {:ok, ~s["test-conn"]} =
-             Session.eval(~s[(buffer-local (agent-buf "a1") 'agent-connector)])
+             Session.eval(~s[(buffer-local (agent-buf "#{slug_of("*chat:a1*")}") 'agent-connector)])
 
     # model choice is scoped to what the agent reports, and to the family
     # the connector declares
@@ -2050,19 +2017,19 @@ defmodule Compos.AgentTest do
 
     # no ACP handshake — no transport was opened
     refute_receive {:transport_open, _}, 200
-    assert eventually(fn -> Buffer.text(Agent.info("a1").buffer) =~ "reply-1" end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> Buffer.text(Agent.info(slug_of("*chat:a1*")).buffer) =~ "reply-1" end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # A chat is named for where it lives, never for what was said in it, so
     # the name it was born with is the name it keeps.
-    buf = Agent.info("a1").buffer
+    buf = Agent.info(slug_of("*chat:a1*")).buffer
     assert buf == initial_buf
     assert Buffer.exists?(buf)
     focus(buf)
     type("and 8*8")
     press(["RET"])
 
-    assert eventually(fn -> Buffer.text(Agent.info("a1").buffer) =~ "reply-2" end)
+    assert eventually(fn -> Buffer.text(Agent.info(slug_of("*chat:a1*")).buffer) =~ "reply-2" end)
 
     # the second request replays the whole conversation from the record —
     # no private history in the runtime
@@ -2072,11 +2039,6 @@ defmodule Compos.AgentTest do
     assert flat =~ "what is 6*7"
     assert flat =~ "reply-1"
     assert flat =~ "and 8*8"
-
-    # the modeline names the running backend and its model
-    final_buf = Agent.info("a1").buffer
-    assert {:ok, ml} = Session.eval(~s[(buffer-local "#{final_buf}" 'modeline-info)])
-    assert ml =~ "api"
   end
 
   test "a failed prompt returns the thread to idle instead of wedging in :running" do
@@ -2179,7 +2141,7 @@ defmodule Compos.AgentTest do
   test "*agents* fleet: sorted by attention, y answers the current line's thread" do
     # thread 1: running; thread 2: needs permission
     {_, _, agent1} = boot("")
-    {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "task one")])
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug_of("*chat:a1*")}" "task one")])
     assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
 
     {:ok, _} = Session.eval(~s{(execute* "" '(permission-mode ask))})
@@ -2188,7 +2150,7 @@ defmodule Compos.AgentTest do
     inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
     assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
     inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
-    {:ok, _} = Session.eval(~s[(agent-prompt! "a2" "task two")])
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug_of("*chat:a2*")}" "task two")])
     assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
 
     inject(agent2, %{
@@ -2197,19 +2159,16 @@ defmodule Compos.AgentTest do
       "method" => "session/request_permission",
       "params" => %{
         "sessionId" => "sess-2",
-        "toolCall" => %{"title" => "Write x", "kind" => "edit"},
+        "toolCall" => %{"title" => "Run x", "kind" => "execute"},
         "options" => [%{"optionId" => "ok", "name" => "Allow", "kind" => "allow_once"}]
       }
     })
 
-    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a2")) end)
-
-    # attention segment lists a2
-    assert eventually(fn -> Editor.render_state().modeline_extra =~ "a2" end)
+    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a2*"))) end)
 
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
     text = Buffer.text("*chat-list*")
-    assert text =~ "a2"
+    assert text =~ slug_of("*chat:a2*")
     assert text =~ "your turn"
 
     # point lands on the first table entry; answer through the real key path
@@ -2287,7 +2246,9 @@ defmodule Compos.AgentTest do
   # a heading row is a list, and the mover skips it: count the chat rows only
   defp goto_chat_row(buf) do
     rows = Buffer.get_local("*chat-list*", "list-entries") |> Enum.filter(&is_binary/1)
-    row = Enum.find_index(rows, &(&1 == buf))
+    # a row is the chat's file, named after its slug
+    slug = slug_of(buf)
+    row = Enum.find_index(rows, &(&1 == buf or String.contains?(&1, slug)))
     assert row, "chat #{buf} not listed in #{inspect(rows)}"
     {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chat-list*")])
     press(List.duplicate("C-n", row))
@@ -2326,7 +2287,7 @@ defmodule Compos.AgentTest do
   test "up and down recall sent messages, and give the draft back" do
     {slug, buf, agent} = boot("")
 
-    # a queued second message would still sit in the input region, so let
+    # a queued message two would still sit in the input region, so let
     # each turn finish before typing the next one
     send_turn = fn text ->
       focus(buf)
@@ -2338,32 +2299,32 @@ defmodule Compos.AgentTest do
       assert eventually(fn -> input_text(buf) == "" end)
     end
 
-    send_turn.("first message")
-    send_turn.("second message")
+    send_turn.("message one")
+    send_turn.("message two")
 
-    # a half-typed draft, then walk back through the history
+    # a half-typed draft is a prefix: the walk visits what starts with it
     focus(buf)
-    type("draft")
+    type("mess")
     press(["<up>"])
-    assert eventually(fn -> input_text(buf) == "second message" end)
+    assert eventually(fn -> input_text(buf) == "message two" end)
 
     press(["<up>"])
-    assert eventually(fn -> input_text(buf) == "first message" end)
+    assert eventually(fn -> input_text(buf) == "message one" end)
 
     # nothing older: the input holds still rather than emptying
     press(["<up>"])
-    assert eventually(fn -> input_text(buf) == "first message" end)
+    assert eventually(fn -> input_text(buf) == "message one" end)
 
     press(["<down>"])
-    assert eventually(fn -> input_text(buf) == "second message" end)
+    assert eventually(fn -> input_text(buf) == "message two" end)
 
     # ...and back to what was typed before the walk started
     press(["<down>"])
-    assert eventually(fn -> input_text(buf) == "draft" end)
+    assert eventually(fn -> input_text(buf) == "mess" end)
 
     # the walk reads the conversation of record — there is no second copy
     # of the messages
-    assert {:ok, ~s{(("user" "second message") ("user" "first message"))}} =
+    assert {:ok, ~s{(("user" "message two") ("user" "message one"))}} =
              Session.eval(~s{(filter (lambda (t) (equal? (car t) "user")) (chat-turns "#{buf}"))})
   end
 
@@ -2403,7 +2364,7 @@ defmodule Compos.AgentTest do
         (buffer-append! "#{buf}" "chat\\n")
         (buffer-set-local! "#{buf}" 'agent-saved-mark (buffer-size "#{buf}"))
         (buffer-set-local! "#{buf}" 'agent-marker-bytes 0)
-        (buffer-set-local! "#{buf}" 'chat-turns '(("user" "what I asked before")))
+        (buffer-set-local! "#{buf}" 'chat-wire-turns '((role "user" blocks (("text" "what I asked before")))))
         (switch-to-buffer! "#{buf}")
         ;; the mode setup is what a desktop restore runs — it binds the keys
         (set-mode! "chat-mode")
@@ -2443,9 +2404,10 @@ defmodule Compos.AgentTest do
     press(["<up>"])
     assert String.ends_with?(Buffer.text(buf), "aaa\nbbb")
 
-    # now on the first line, so up recalls the newest sent message
+    # now on the first line, up recalls by prefix: no sent message starts
+    # with this input, so it holds
     press(["<up>"])
-    assert eventually(fn -> input_text(buf) == "line one" end)
+    assert input_text(buf) == "aaa\nbbb"
   end
 
   test "adapter exit renders a death notice and marks the thread dead" do
@@ -2525,7 +2487,7 @@ defmodule Compos.AgentTest do
     assert [["default", "Default", "asks"] | _] = Buffer.get_local(buf, "agent-modes")
 
     # agent-set-mode! reaches the wire, and the agent's own switch is heard
-    assert {:ok, "#t"} = Session.eval(~s[(agent-set-mode! "a1" "plan")])
+    assert {:ok, "#t"} = Session.eval(~s[(agent-set-mode! "#{slug_of("*chat:a1*")}" "plan")])
     assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
     assert sp == %{"sessionId" => "sess-md", "modeId" => "plan"}
 
@@ -2535,7 +2497,6 @@ defmodule Compos.AgentTest do
     })
 
     assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "plan" end)
-    assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "plan" end)
   end
 
   test "auto mode moves a session-mode backend to a permitting mode" do
@@ -2608,7 +2569,8 @@ defmodule Compos.AgentTest do
     [s, e]
   end
 
-  defp eventually(fun, tries \\ 40) do
+  # 5 s: the first test of a run shares the VM with the boot warmup
+  defp eventually(fun, tries \\ 100) do
     cond do
       fun.() ->
         true

@@ -1,4 +1,5 @@
 # What the frame layout costs: Editor.arrange/2 of a row of three windows,
+# then of the same row with its middle column split top and bottom,
 # Editor.render_state/1 of that frame, and Editor.window_rects/1. Not part of
 # the suite (no _test suffix); run it by name:
 #   cd apps/compos_core && mix test test/bench/window_row_bench.exs
@@ -24,20 +25,32 @@ defmodule Compos.Core.WindowRowBench do
     {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
 
     items =
-      for i <- 1..3 do
+      for i <- 1..4 do
         name = "*zz-row-bench-#{i}*"
         {:ok, _} = Compos.Core.create_buffer(name)
         Compos.Core.Buffer.append(name, Enum.map_join(1..200, "\n", &"line #{&1}"), source: :editor)
         [GenServer.call(Editor, :new_window_id), name]
       end
 
-    :ok = Editor.arrange({:h, [1, 1, 1], items})
-    ids = Enum.map(items, &hd/1)
+    [a, b, c, d] = items
+    :ok = Editor.arrange({:h, [1, 1, 1], [a, b, c]})
+    ids = Enum.map([a, b, c], &hd/1)
     arrange = for _ <- 1..@n, do: us(fn -> :ok = Editor.arrange({:h, [2, 1, 1], ids}) end)
     render = for _ <- 1..@n, do: us(fn -> Editor.render_state() end)
     rects = for _ <- 1..@n, do: us(fn -> Editor.window_rects() end)
 
     IO.puts("\nrow of 3, p50 us (N=#{@n}): arrange #{p50(arrange)}  render_state #{p50(render)}  window_rects #{p50(rects)}")
+    IO.inspect(Editor.window_rects(), label: "rects")
+
+    # the middle column split top and bottom, as C-x 2 makes it
+    split = {:h, [2, 1, 1], [hd(a), {:v, [1, 1], [hd(b), d]}, hd(c)]}
+    :ok = Editor.arrange(split)
+    split = {:h, [2, 1, 1], [hd(a), {:v, [1, 1], [hd(b), hd(d)]}, hd(c)]}
+    arrange = for _ <- 1..@n, do: us(fn -> :ok = Editor.arrange(split) end)
+    render = for _ <- 1..@n, do: us(fn -> Editor.render_state() end)
+    rects = for _ <- 1..@n, do: us(fn -> Editor.window_rects() end)
+
+    IO.puts("\nrow of 3, one column split, p50 us (N=#{@n}): arrange #{p50(arrange)}  render_state #{p50(render)}  window_rects #{p50(rects)}")
     IO.inspect(Editor.window_rects(), label: "rects")
   end
 end

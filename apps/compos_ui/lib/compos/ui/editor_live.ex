@@ -1685,10 +1685,11 @@ defmodule Compos.Ui.EditorLive do
 
   defp motion_panes(_), do: nil
 
-  # the row's signature: each window that does not float, with its share
+  # the row's signature: each window that does not float, with its share;
+  # a stacked column in brackets
   defp motion_shape(%{children: children}) do
     {shapes, panes} = children |> Enum.reject(&motion_float?/1) |> Enum.map(&motion_shape/1) |> Enum.unzip()
-    {Enum.join(shapes, ","), Enum.concat(panes)}
+    {"(" <> Enum.join(shapes, ",") <> ")", Enum.concat(panes)}
   end
 
   defp motion_shape(%{type: :leaf} = node) do
@@ -1722,6 +1723,18 @@ defmodule Compos.Ui.EditorLive do
       </c-group>
       <c-group :for={d <- @docks} class="split-child" style={"flex: #{d.share} 1 0%"}>
         <.tree node={d} active={@active} completion={@completion} />
+      </c-group>
+    </c-split>
+    """
+  end
+
+  # a column of the row split top and bottom (C-x 2): its windows stacked,
+  # each by its share of the column's height
+  defp tree(%{node: %{type: :col}} = assigns) do
+    ~M"""
+    <c-split class="split v">
+      <c-group :for={c <- @node.children} class="split-child" style={"flex: #{Map.get(c, :vshare, 1)} 1 0%"}>
+        <.tree node={c} active={@active} completion={@completion} />
       </c-group>
     </c-split>
     """

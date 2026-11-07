@@ -14,9 +14,11 @@ defmodule Compos.Core.Editor do
   across all frames, so a bare window id always names one window.
 
   Windows: a frame is one row of leaves, `%{type: :leaf, id, buffer, top,
-  manual, share, dock}`, left to right. `share` is a leaf's part of the
-  row's width; a `dock` leaf spans the frame under the row, and its share
-  is its part of the height.
+  manual, share, dock, col, vshare}`, left to right. `share` is a leaf's
+  part of the row's width; neighbours with one `col` key are a column,
+  stacked top to bottom, each with its `vshare` of the height (C-x 2); a
+  `dock` leaf spans the frame under the row, and its share is its part of
+  the height.
   TODO: per-window points, window resizing.
 
   Calls that take a frame accept nil, resolved server-side to the
@@ -342,9 +344,9 @@ defmodule Compos.Core.Editor do
   def style(name), do: GenServer.call(__MODULE__, {:style, name})
 
   # windows
-  @doc "A window right of the selected one, on its buffer, with 1 - RATIO of the selected one's share. A frame is a row: DIR does not stack."
+  @doc "A window on the selected one's buffer: DIR :v under it in its column, with 1 - RATIO of its height; :h a column right of its column, with 1 - RATIO of its width."
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:split, ratio, fid(fid)})
+    do: GenServer.call(__MODULE__, {:split, dir, ratio, fid(fid)})
 
   @doc """
   A dock under the frame's row, and its window id. It spans the frame and
@@ -1498,14 +1500,11 @@ defmodule Compos.Core.Editor do
   def handle_call(:styles, _from, state), do: {:reply, state.styles, state}
   def handle_call({:style, name}, _from, state), do: {:reply, Map.get(state.styles, name), state}
 
-  # the selected window keeps its share, so a float split off it (a card,
-  # a shaped prompt), which takes no width on screen, narrows nothing
-  def handle_call({:split, ratio, fid}, _from, state) do
+  def handle_call({:split, dir, ratio, fid}, _from, state) do
     f = frame(state, fid)
     old = find_leaf(f.tree, f.active)
-    share = share(old) * (1 - ratio)
-    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false, share: share}
-    tree = Enum.flat_map(row(f.tree), &if(&1.id == f.active, do: [&1, new_leaf], else: [&1]))
+    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
+    tree = split_row(row(f.tree), old, new_leaf, dir, ratio)
 
     # the new window starts at the old one's point and diverges from here
     # (Emacs split-window)
@@ -1857,9 +1856,35 @@ defmodule Compos.Core.Editor do
 
   defp share(leaf), do: Map.get(leaf, :share, 1)
 
-  # one window is its leaf, more are a row
+  # A column of the row is its neighbouring leaves with one col key, top to
+  # bottom, each with its vshare of the column's height (C-x 2). A leaf
+  # without a key is a column alone.
+  defp col(leaf), do: Map.get(leaf, :col) || leaf.id
+  defp vshare(leaf), do: Map.get(leaf, :vshare, 1)
+  defp columns(leaves), do: Enum.chunk_by(leaves, &col/1)
+
+  # C-x 2 puts NEW under OLD in its column, the two parting OLD's height;
+  # C-x 3 puts NEW right of OLD's column. OLD keeps its share, so a float
+  # split off it (a card, a shaped prompt), which takes no width on
+  # screen, narrows nothing.
+  defp split_row(leaves, old, new, :v, ratio) do
+    {c, v} = {col(old), vshare(old)}
+    new = Map.merge(new, %{share: share(old), col: c, vshare: v * (1 - ratio)})
+    Enum.flat_map(leaves, &if(&1.id == old.id, do: [Map.merge(&1, %{col: c, vshare: v * ratio}), new], else: [&1]))
+  end
+
+  defp split_row(leaves, old, new, :h, ratio) do
+    {before, rest} = Enum.split_while(leaves, &(col(&1) != col(old)))
+    {mine, later} = Enum.split_while(rest, &(col(&1) == col(old)))
+    before ++ mine ++ [Map.put(new, :share, share(old) * (1 - ratio)) | later]
+  end
+
+  # one window is its leaf, more are a row; a stacked column is a :col of
+  # its leaves, top to bottom, with the column's share
   defp payload([leaf]), do: leaf
-  defp payload(leaves), do: %{type: :row, children: leaves}
+
+  defp payload(leaves),
+    do: %{type: :row, children: for([first | more] = c <- columns(leaves), do: if(more == [], do: first, else: %{type: :col, share: share(first), children: c}))}
 
   defp drop_point(%{buffer: b, id: id}) do
     if Buffer.exists?(b), do: wp_safely(fn -> Buffer.drop_win_point(b, id) end)
@@ -1910,12 +1935,29 @@ defmodule Compos.Core.Editor do
   defp arrange_items({_dir, _shares, children}), do: Enum.flat_map(children, &arrange_items/1)
   defp arrange_items(item), do: [item]
 
-  defp arrange_row({_dir, shares, _children}, leaves) when length(shares) == length(leaves) do
+  # a child of the row is a column: an item, or {v, shares, items}, a stack
+  # top to bottom that shares one col key and the column's width
+  defp arrange_row({_dir, shares, children}, leaves) when length(shares) == length(children) do
     total = Enum.sum(shares)
-    Enum.zip_with(leaves, shares, &Map.put(&1, :share, &2 / total))
+
+    {row, _} =
+      Enum.zip(children, shares)
+      |> Enum.flat_map_reduce(leaves, fn {child, s}, leaves ->
+        {mine, rest} = Enum.split(leaves, length(arrange_items(child)))
+        {stack(mine, child, s / total), rest}
+      end)
+
+    row
   end
 
-  defp arrange_row(_spec, leaves), do: Enum.map(leaves, &Map.put(&1, :share, 1 / length(leaves)))
+  defp arrange_row(_spec, leaves), do: Enum.flat_map(leaves, &stack([&1], nil, 1 / length(leaves)))
+
+  defp stack([leaf], _child, share), do: [Map.merge(leaf, %{share: share, col: nil, vshare: 1})]
+
+  defp stack([first | _] = mine, child, share) do
+    vs = with {_, vs, _} when length(vs) == length(mine) <- child, do: vs, else: (_ -> Enum.map(mine, fn _ -> 1 end))
+    Enum.zip_with(mine, vs, &Map.merge(&1, %{share: share, col: first.id, vshare: &2 / Enum.sum(vs)}))
+  end
 
   # A window with no buffer offers `false` here; it names no place, so it
   # never enters the recent order (Compos.Core.Recent).
@@ -2145,7 +2187,9 @@ defmodule Compos.Core.Editor do
           manual: Map.get(leaf, :manual, false),
           ctop: Map.get(leaf, :ctop, 0),
           share: share(leaf),
-          dock: Map.get(leaf, :dock, false)
+          dock: Map.get(leaf, :dock, false),
+          col: Map.get(leaf, :col),
+          vshare: vshare(leaf)
         }
       end
     )
@@ -2358,7 +2402,7 @@ defmodule Compos.Core.Editor do
   # layout restore.
   defp build_row(spec) do
     for s <- Compos.Core.WindowSpec.leaves(spec) do
-      leaf = Map.take(s, [:buffer, :top, :manual, :ctop, :share, :dock])
+      leaf = Map.take(s, [:buffer, :top, :manual, :ctop, :share, :dock, :col, :vshare])
       put_want(Map.merge(leaf, %{type: :leaf, id: nil}), s.id)
     end
   end
@@ -2500,10 +2544,19 @@ defmodule Compos.Core.Editor do
   # screen. The row parts the width by share; a dock spans the width under
   # it, with its share of the height.
   defp leaf_rects(tree) do
-    {docks, cols} = Enum.split_with(row(tree), &Map.get(&1, :dock))
+    {docks, leaves} = Enum.split_with(row(tree), &Map.get(&1, :dock))
     low = docks |> Enum.map(&share/1) |> Enum.sum()
-    total = cols |> Enum.map(&share/1) |> Enum.sum()
-    {top, _} = Enum.map_reduce(cols, 0.0, &{[&1.id, &1.buffer, &2, 0.0, share(&1) / total, 1.0 - low], &2 + share(&1) / total})
+    cols = columns(leaves)
+    total = cols |> Enum.map(&share(hd(&1))) |> Enum.sum()
+
+    {top, _} =
+      Enum.flat_map_reduce(cols, 0.0, fn [first | _] = col, x ->
+        w = share(first) / total
+        h = fn l -> (1.0 - low) * vshare(l) / Enum.sum(Enum.map(col, &vshare/1)) end
+        {rects, _} = Enum.map_reduce(col, 0.0, &{[&1.id, &1.buffer, x, &2, w, h.(&1)], &2 + h.(&1)})
+        {rects, x + w}
+      end)
+
     {under, _} = Enum.map_reduce(docks, 1.0 - low, &{[&1.id, &1.buffer, 0.0, &2, 1.0, share(&1)], &2 + share(&1)})
     top ++ under
   end
@@ -2677,6 +2730,8 @@ defmodule Compos.Core.Editor do
       # its part of the row's width; a dock's, of the frame's height
       share: share(leaf),
       dock: Map.get(leaf, :dock, false),
+      col: Map.get(leaf, :col),
+      vshare: vshare(leaf),
       # the file this buffer visits, nil for the rest. /raw URLs and the
       # modeline read these two; the client renders no UI for them yet.
       path: snap.path,
@@ -2935,12 +2990,21 @@ defmodule Compos.Core.Editor do
   defp rows_for(tree, id, rows) do
     leaves = row(tree)
     docks = for %{dock: true} = d <- leaves, into: %{}, do: {d.id, max(round(rows * share(d)), 3)}
+    base = if docks == %{}, do: rows, else: max(rows - Enum.sum(Map.values(docks)), 3)
 
     cond do
       Map.has_key?(docks, id) -> docks[id]
-      not Enum.any?(leaves, &(&1.id == id)) -> nil
-      docks == %{} -> rows
-      true -> max(rows - Enum.sum(Map.values(docks)), 3)
+      col = Enum.find(columns(leaves), &Enum.any?(&1, fn l -> l.id == id end)) -> stack_rows(col, id, base)
+      true -> nil
     end
+  end
+
+  # a stacked column parts its rows by height, the rounding carried down
+  defp stack_rows([_], _id, rows), do: rows
+
+  defp stack_rows(col, id, rows) do
+    at = fn ls -> round(rows * Enum.sum(Enum.map(ls, &vshare/1)) / Enum.sum(Enum.map(col, &vshare/1))) end
+    {before, [leaf | _]} = Enum.split_while(col, &(&1.id != id))
+    max(at.(before ++ [leaf]) - at.(before), 3)
   end
 end

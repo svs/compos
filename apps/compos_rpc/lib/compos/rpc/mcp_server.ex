@@ -82,12 +82,29 @@ defmodule Compos.Rpc.McpServer do
       {:ok, slug, rest} ->
         conn = self()
         spawn_link(fn -> read_input(sock, conn, rest) end)
-        st = %{sock: sock, slug: clean_slug(slug), effects: %{}}
+        {slug, surface} = first_line(slug)
+        st = %{sock: sock, slug: slug, surface: surface, effects: %{}}
         schedule(st, 0, [], false)
         :gen_tcp.close(sock)
 
       _ ->
         :gen_tcp.close(sock)
+    end
+  end
+
+  # the first line is SLUG, or SLUG TAB SURFACE: the shim names a server the
+  # editor serves besides compos (fetch) when COMPOS_MCP_SURFACE is set
+  defp first_line(line) do
+    case String.split(line, "\t", parts: 2) do
+      [slug, surface] -> {clean_slug(slug), clean_surface(surface)}
+      [slug] -> {clean_slug(slug), nil}
+    end
+  end
+
+  defp clean_surface(text) do
+    case String.replace(text, ~r/[^A-Za-z0-9_.-]/, "") do
+      "" -> nil
+      surface -> surface
     end
   end
 
@@ -208,14 +225,20 @@ defmodule Compos.Rpc.McpServer do
     reply(st, id, %{
       protocolVersion: params["protocolVersion"] || "2025-06-18",
       capabilities: %{tools: %{}},
-      serverInfo: %{name: "compos", version: "0.1.0"}
+      serverInfo: %{name: Map.get(st, :surface) || "compos", version: "0.1.0"}
     })
 
     st
   end
 
   defp handle(st, %{"method" => "tools/list", "id" => id}) do
-    case eval("(mcp-proxy-tools-json)", @write_timeout) do
+    code =
+      case Map.get(st, :surface) do
+        nil -> "(mcp-proxy-tools-json)"
+        surface -> ~s{(mcp-proxy-tools-json "#{surface}")}
+      end
+
+    case eval(code, @write_timeout) do
       {:ok, b64} ->
         tools = b64 |> unprint() |> Base.decode64!() |> Jason.decode!()
         reply(st, id, %{tools: tools})

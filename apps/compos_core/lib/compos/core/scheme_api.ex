@@ -361,6 +361,20 @@ defmodule Compos.Core.SchemeAPI do
   # emit! and once!. Inside a workflow's batch, emit! and once! collect in
   # the lane process instead of writing, and the batch commits them with
   # its new position in one transaction.
+  # the workflow spec keys Scheme may pass, named here so the atoms exist
+  # whatever else is loaded (String.to_existing_atom failed after a restart)
+  @workflow_fields %{
+    "listen" => :listen,
+    "quiet-ms" => :quiet_ms,
+    "max-wait-ms" => :max_wait_ms,
+    "batch" => :batch,
+    "max-attempts" => :max_attempts,
+    "backoff-ms" => :backoff_ms,
+    "max-backoff-ms" => :max_backoff_ms,
+    "timeout-ms" => :timeout_ms,
+    "from" => :from
+  }
+
   defp workflow_primitives do
     alias Compos.Core.{Workflow, Workflows}
     alias Compos.Core.Events.Log
@@ -371,9 +385,10 @@ defmodule Compos.Core.SchemeAPI do
         fn [name, spec] ->
           # workflows.scm picks the fields and makes them whole numbers
           opts =
-            Map.new(Opts.map(spec, & &1), fn {key, value} ->
-              {key |> String.replace("-", "_") |> String.to_existing_atom(), value}
-            end)
+            for {key, value} <- Opts.map(spec, & &1),
+                field = @workflow_fields[key],
+                into: %{},
+                do: {field, value}
 
           case Workflows.define(Map.merge(opts, %{name: name, listen: opts[:listen] || []})) do
             :ok -> true

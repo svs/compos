@@ -63,9 +63,14 @@ defmodule Compos.Core.MetaDb do
   """
   def ensure_started do
     cond do
-      !Process.whereis(__MODULE__) -> Supervisor.start_child(Compos.Core.Supervisor, __MODULE__)
-      :persistent_term.get({__MODULE__, :schema}, 0) < @schema -> GenServer.call(__MODULE__, :migrate)
-      true -> :ok
+      !Process.whereis(__MODULE__) ->
+        Supervisor.start_child(Compos.Core.Supervisor, __MODULE__)
+
+      :persistent_term.get({__MODULE__, :schema}, 0) < @schema ->
+        GenServer.call(__MODULE__, :migrate)
+
+      true ->
+        :ok
     end
 
     :ok
@@ -168,8 +173,12 @@ defmodule Compos.Core.MetaDb do
       for [name, icon, project, workspace] <- rows do
         if absent?(state, name), do: sync(state, name)
 
-        run(state, "UPDATE buffers SET icon = ?2, project = ?3, workspace = ?4 WHERE name = ?1",
-          [name, str(icon), str(project), str(workspace)])
+        run(state, "UPDATE buffers SET icon = ?2, project = ?3, workspace = ?4 WHERE name = ?1", [
+          name,
+          str(icon),
+          str(project),
+          str(workspace)
+        ])
       end
     end)
 
@@ -184,7 +193,12 @@ defmodule Compos.Core.MetaDb do
   end
 
   def handle_cast({:bury, name}, state) do
-    run(state, "UPDATE buffers SET used = (SELECT min(0, coalesce(min(used), 0)) - 1 FROM buffers) WHERE name = ?1", [name])
+    run(
+      state,
+      "UPDATE buffers SET used = (SELECT min(0, coalesce(min(used), 0)) - 1 FROM buffers) WHERE name = ?1",
+      [name]
+    )
+
     {:noreply, state}
   end
 
@@ -193,13 +207,16 @@ defmodule Compos.Core.MetaDb do
   def handle_cast({:groups, groups}, state) do
     result =
       transaction(state, fn ->
-      run(state, "DELETE FROM groups", [])
+        run(state, "DELETE FROM groups", [])
 
-      for [id, label, face, note] <- groups, is_binary(id) do
-        run(state, "INSERT OR REPLACE INTO groups (id, label, face, note) VALUES (?1, ?2, ?3, ?4)",
-          [id, str(label), str(face), str(note)])
-      end
-    end)
+        for [id, label, face, note] <- groups, is_binary(id) do
+          run(
+            state,
+            "INSERT OR REPLACE INTO groups (id, label, face, note) VALUES (?1, ?2, ?3, ?4)",
+            [id, str(label), str(face), str(note)]
+          )
+        end
+      end)
 
     # a refused write keeps the old list, so the same list tries again
     {:noreply, if(result == :ok, do: %{state | groups: groups}, else: state)}
@@ -245,7 +262,9 @@ defmodule Compos.Core.MetaDb do
     cols = Enum.map(fields ++ List.wrap(bucket || []), &Map.get(@columns, &1, "NULL"))
 
     sql =
-      "SELECT " <> Enum.join(["b.name" | cols], ", ") <> from <>
+      "SELECT " <>
+        Enum.join(["b.name" | cols], ", ") <>
+        from <>
         order(opts["sort"], opts["group-by"]) <> " LIMIT ? OFFSET ?"
 
     rows = all(state, sql, args ++ [opts["limit"] || -1, opts["offset"] || 0])
@@ -321,7 +340,10 @@ defmodule Compos.Core.MetaDb do
         run(state, "UPDATE OR IGNORE buffers SET name = ?2 WHERE name = ?1", [was, now])
       end
 
-      events |> Enum.flat_map(fn {n, d} -> names_of(n, d) end) |> Enum.uniq() |> Enum.each(&sync(state, &1))
+      events
+      |> Enum.flat_map(fn {n, d} -> names_of(n, d) end)
+      |> Enum.uniq()
+      |> Enum.each(&sync(state, &1))
     end)
   end
 
@@ -347,7 +369,6 @@ defmodule Compos.Core.MetaDb do
 
   # a rename names both rows
 
-
   defp names_of(name, %{was: was}) when is_binary(was), do: [name, was]
   defp names_of(name, _), do: [name]
 
@@ -359,14 +380,18 @@ defmodule Compos.Core.MetaDb do
   defp sync(state, name) do
     case facts(name) do
       {:ok, facts} ->
-        run(state, """
-        INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only, agent, id, chat_id)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-        ON CONFLICT (name) DO UPDATE SET id = excluded.id, path = excluded.path, mode = excluded.mode,
-          title = excluded.title, group_id = excluded.group_id, modified = excluded.modified,
-          read_only = excluded.read_only, context_only = excluded.context_only,
-          agent = excluded.agent, chat_id = excluded.chat_id
-        """, facts)
+        run(
+          state,
+          """
+          INSERT INTO buffers (name, path, mode, title, group_id, modified, read_only, context_only, agent, id, chat_id)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+          ON CONFLICT (name) DO UPDATE SET id = excluded.id, path = excluded.path, mode = excluded.mode,
+            title = excluded.title, group_id = excluded.group_id, modified = excluded.modified,
+            read_only = excluded.read_only, context_only = excluded.context_only,
+            agent = excluded.agent, chat_id = excluded.chat_id
+          """,
+          facts
+        )
 
       :error ->
         run(state, "DELETE FROM buffers WHERE name = ?1", [name])
@@ -379,8 +404,19 @@ defmodule Compos.Core.MetaDb do
     case BufferView.project(name, [:path, :modified, :read_only, :id], keys) do
       {:ok, [path, modified, ro, id, mode, gid, title, chat_title, ctx, agent, chat_id]} ->
         {:ok,
-         [name, str(path), str(mode), title_of(name, title, chat_title), str(gid),
-          flag(modified), flag(ro), flag(ctx), str(agent), str(id), str(chat_id)]}
+         [
+           name,
+           str(path),
+           str(mode),
+           title_of(name, title, chat_title),
+           str(gid),
+           flag(modified),
+           flag(ro),
+           flag(ctx),
+           str(agent),
+           str(id),
+           str(chat_id)
+         ]}
 
       _ ->
         :error
@@ -476,7 +512,8 @@ defmodule Compos.Core.MetaDb do
     end)
   end
 
-  defp trim(fields), do: fields |> Enum.reverse() |> Enum.drop_while(&(&1 == "")) |> Enum.reverse()
+  defp trim(fields),
+    do: fields |> Enum.reverse() |> Enum.drop_while(&(&1 == "")) |> Enum.reverse()
 
   defp join(fields, widths) do
     last = length(fields) - 1
@@ -603,7 +640,12 @@ defmodule Compos.Core.MetaDb do
   # busy file fails before any row is written.
   defp transaction(state, f) do
     try do
-      :ok = Sqlite3.execute(state.db, "PRAGMA busy_timeout = " <> Integer.to_string(busy_timeout_ms()))
+      :ok =
+        Sqlite3.execute(
+          state.db,
+          "PRAGMA busy_timeout = " <> Integer.to_string(busy_timeout_ms())
+        )
+
       :ok = Sqlite3.execute(state.db, "BEGIN IMMEDIATE")
       f.()
       :ok = Sqlite3.execute(state.db, "COMMIT")

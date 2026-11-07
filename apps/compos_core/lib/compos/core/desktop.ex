@@ -498,8 +498,8 @@ defmodule Compos.Core.Desktop do
   # So rebuild all of them, not only the ones a window shows, or a buffer
   # nobody is looking at comes back half-built and stays that way.
   #
-  # An open prompt goes first. Its on_confirm and on_change are closures in
-  # the dead environment, which Compos.Core.SchemeTables drops thirty
+  # An open prompt goes first. Its handlers (minibuffer.scm's record on the
+  # prompt buffer) are closures in the dead environment, which Compos.Core.SchemeTables drops thirty
   # seconds later: pressing RET on that prompt then raises. A boot has no
   # prompt open, so neither does a restart.
   #

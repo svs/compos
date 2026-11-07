@@ -2482,8 +2482,8 @@ defmodule Compos.Core.SchemeAPI do
         end,
 
       # frames: one per attached client; window primitives above act on the
-      # selected frame implicitly. delete-frame! lives in Session (it must
-      # fire an active prompt's on_cancel in the current store).
+      # selected frame implicitly. delete-frame! lives in Session;
+      # minibuffer.scm wraps it to run the open prompt's cancel handler.
       {"frame-list", "(frame-list) — return frame ids in most-recently-used order."} => fn [] ->
         Editor.frame_list()
       end,

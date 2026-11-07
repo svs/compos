@@ -52,6 +52,32 @@ defmodule Compos.MinibufferBench do
     ev!("(minibuffer-cancel!)")
     [open, keys, requery] = [Enum.drop(open, 10), Enum.drop(List.flatten(keys), 20), Enum.drop(requery, 10)]
 
+    # the open's parts, each its own eval as a key's would be (cold reads)
+    parts =
+      for {name, code} <- [
+            show: ~S{(minibuffer--show! "Bench: " zz-mb-bench-rows '())},
+            active: "(minibuffer-active?)",
+            rail: "(mb-rail-reset!)",
+            ensure: "(minibuffer-mode-ensure!)",
+            split: ~S{(minibuffer--split (list (list 'confirm car)))},
+            local: ~S{(buffer-set-local! (minibuffer-buffer) 'minibuffer-prompt (list 'confirm car))},
+            noop: "#t"
+          ],
+          into: %{} do
+        xs =
+          for _ <- 1..40 do
+            t0 = System.monotonic_time(:microsecond)
+            ev!(code)
+            t = System.monotonic_time(:microsecond) - t0
+            if name == :show, do: ev!("(minibuffer--hide!)")
+            t
+          end
+
+        {name, stats(Enum.drop(xs, 5)).p50}
+      end
+
+    IO.puts("BENCH open parts p50 us " <> inspect(parts))
+
     IO.puts("""
     BENCH rows=#{@rows} open #{inspect(stats(open))}
     BENCH rows=#{@rows} key #{inspect(stats(keys))}

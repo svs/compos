@@ -2351,14 +2351,12 @@ defmodule Compos.Core.SchemeAPI do
             Editor.split(dir_atom(dir), ratio / 1)
             :void
         end,
-      # a dock is a pane of the FRAME, not of a window: it spans the frame
-      # and the windows above it shrink by its share
+      # a dock spans the frame under its row of windows, which gives it rows
       {"split-root!",
-       "(split-root! DIR [RATIO FIRST?]) — split the FRAME 'h or 'v at RATIO, the first pane's share; the new window spans the frame and every other window shrinks. FIRST? puts the new window first: on the left, or on top. Returns the new window."} =>
+       "(split-root! DIR [RATIO]) — a dock window under the frame's row of windows, across the frame, with 1 - RATIO of its height; DIR is 'v. Returns the new window."} =>
         fn
-          [dir] -> Editor.split_root(dir_atom(dir))
-          [dir, ratio] -> Editor.split_root(dir_atom(dir), ratio / 1)
-          [dir, ratio, first?] -> Editor.split_root(dir_atom(dir), ratio / 1, nil, first? == true)
+          [_dir] -> Editor.dock()
+          [_dir, ratio | _] -> Editor.dock(ratio / 1)
         end,
       {"delete-window-id!", "(delete-window-id! WIN) — delete window WIN; return #t on success."} =>
         fn [id] -> Editor.delete_window_by_id(id) == :ok end,
@@ -3539,50 +3537,24 @@ defmodule Compos.Core.SchemeAPI do
   defp shell_async_limit,
     do: Application.get_env(:compos_core, :shell_async_timeout_ms, 600_000)
 
+  @entry_keys ~w(name type bytes mtime size date perms error)a
+
   defp directory_entry(dir, base) do
     path = Path.join(dir, base)
 
-    case File.lstat(path, time: :posix) do
-      {:ok, stat} ->
-        name = if stat.type == :directory, do: base <> "/", else: base
+    entry =
+      case File.lstat(path, time: :posix) do
+        {:ok, s} ->
+          name = if s.type == :directory, do: base <> "/", else: base
+          %{name: name, type: Atom.to_string(s.type), bytes: s.size, mtime: s.mtime,
+            size: format_size(s.size), date: format_mtime(s.mtime), perms: format_mode(s)}
 
-        [
-          {:sym, "name"},
-          name,
-          {:sym, "type"},
-          Atom.to_string(stat.type),
-          {:sym, "bytes"},
-          stat.size,
-          {:sym, "mtime"},
-          stat.mtime,
-          {:sym, "size"},
-          format_size(stat.size),
-          {:sym, "date"},
-          format_mtime(stat.mtime),
-          {:sym, "perms"},
-          format_mode(stat)
-        ]
+        {:error, reason} ->
+          %{name: base, type: "missing", bytes: 0, mtime: 0, size: "?", date: "?",
+            perms: "??????????", error: file_error(reason, path)}
+      end
 
-      {:error, reason} ->
-        [
-          {:sym, "name"},
-          base,
-          {:sym, "type"},
-          "missing",
-          {:sym, "bytes"},
-          0,
-          {:sym, "mtime"},
-          0,
-          {:sym, "size"},
-          "?",
-          {:sym, "date"},
-          "?",
-          {:sym, "perms"},
-          "??????????",
-          {:sym, "error"},
-          file_error(reason, path)
-        ]
-    end
+    Opts.plist(entry, Enum.filter(@entry_keys, &Map.has_key?(entry, &1)))
   end
 
   defp file_error(reason, path) do

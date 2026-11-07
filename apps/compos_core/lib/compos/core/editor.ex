@@ -316,6 +316,14 @@ defmodule Compos.Core.Editor do
   @doc "Currently selected candidate label (after fuzzy filter), or nil."
   def minibuffer_selected(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_selected, fid(fid)})
 
+  @doc """
+  One operation OP with ARGS on the calling frame's prompt: :facts,
+  :filtered, :selected, :sync, :move DELTA, :input TEXT, :candidates
+  LIST, :set KEY VALUE (KEY :style, :rail or :tabs); or on its popup:
+  :start, :query TEXT, :accept, :cmove DELTA. nil when none is open.
+  """
+  def prompt_op(op, args \\ [], fid \\ nil), do: GenServer.call(__MODULE__, {:prompt_op, op, args, fid(fid)})
+
   @doc "Open the frame's prompt snapshot: PROMPT, CANDIDATES and the VIEW map Scheme composes."
   def minibuffer_show(prompt, candidates, view, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_show, prompt, candidates, view, fid(fid)})
@@ -1580,6 +1588,15 @@ defmodule Compos.Core.Editor do
     end
   end
 
+  def handle_call({:prompt_op, op, args, fid}, _from, state) do
+    f = frame(state, fid)
+
+    case on_prompt(op, args, f) do
+      {:put, reply, f2} -> changed(reply, put_frame(state, f2), f.id)
+      reply -> {:reply, reply, state}
+    end
+  end
+
   # returns the snapshot (+ :selected/:total/:sel_touched/:prompt_sel) or nil
   def handle_call({:mb_close, fid}, _from, state) do
     f = frame(state, fid)
@@ -2276,6 +2293,62 @@ defmodule Compos.Core.Editor do
   end
 
   defp minibuf_of(%{id: fid}), do: " *minibuf-" <> fid <> "*"
+
+  # one operation on the frame's prompt or popup (prompt_op/3). An op that
+  # changes the frame answers {:put, REPLY, FRAME}; one that only reads
+  # answers its reply. nil when nothing of that kind is open.
+  defp on_prompt(:facts, [], %{minibuffer: %{} = mb}),
+    do: %{input: mb.input, selected: Candidates.selected(mb.list), touched: mb.list.touched, prompt_sel: prompt_preselected?(mb)}
+
+  defp on_prompt(:filtered, [], %{minibuffer: %{} = mb}),
+    do: Enum.map(Candidates.filtered(mb.list), fn c -> [c.label, c.hint || ""] end)
+
+  defp on_prompt(:selected, [], %{minibuffer: %{} = mb}), do: Candidates.selected(mb.list)
+
+  # the selection moves by DELTA rows and nothing else: what a move means
+  # in a prompt that holds the selection itself is the prompt's policy
+  defp on_prompt(:move, [delta], %{minibuffer: %{} = mb} = f),
+    do: {:put, :ok, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, trunc(delta))}}}
+
+  # the input back out of the prompt buffer after keys edited it; nil when unchanged
+  defp on_prompt(:sync, [], %{minibuffer: %{} = mb} = f) do
+    input = Buffer.text(minibuf_of(f))
+    if input != mb.input, do: {:put, input, %{f | minibuffer: put_mb_input(mb, input)}}
+  end
+
+  defp on_prompt(:input, [input], %{minibuffer: %{} = mb} = f) do
+    reset_minibuf_buffer(minibuf_of(f), input)
+    {:put, :ok, %{f | minibuffer: put_mb_input(mb, input)}}
+  end
+
+  defp on_prompt(:candidates, [items], %{minibuffer: %{} = mb} = f) do
+    list = mb.list |> Candidates.put_items(items) |> Candidates.put_query(mb_query(mb))
+    {:put, :ok, %{f | minibuffer: %{mb | list: list}}}
+  end
+
+  # the prompt owns its style (its shape), its rail and its tabs; the same
+  # input, rows and selection carry over, and nothing is inferred here
+  defp on_prompt(:set, [key, value], %{minibuffer: %{} = mb} = f) when key in [:style, :rail, :tabs],
+    do: {:put, :ok, %{f | minibuffer: Map.put(mb, key, value)}}
+
+  defp on_prompt(:start, [], %{completion: %{start: start}}), do: start
+
+  defp on_prompt(:cmove, [delta], %{completion: %{} = c} = f),
+    do: {:put, :ok, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}}
+
+  # narrow the popup in place as the user types; no row left closes it
+  defp on_prompt(:query, [q], %{completion: %{} = c} = f) do
+    list = Candidates.put_query(c.list, q)
+    {:put, :ok, %{f | completion: if(Candidates.total(list) == 0, do: nil, else: %{c | list: list})}}
+  end
+
+  # close the popup; [START, TAIL, LABEL] of the selection, or nil
+  defp on_prompt(:accept, [], %{completion: %{} = c} = f) do
+    label = Candidates.selected(c.list)
+    {:put, label && [c.start, Map.get(c, :tail, 0), label], %{f | completion: nil}}
+  end
+
+  defp on_prompt(_op, _args, _f), do: nil
 
   # --- keymaps -----------------------------------------------------------------
   # A keymap is a name, its own bindings, and a parent. A buffer's own map

@@ -2544,6 +2544,9 @@ defmodule Compos.Core.SchemeAPI do
       # --- the prompt's render snapshot. minibuffer.scm owns the prompt: its
       # handlers, its policy and its history. These doors read and write the
       # one thing the frame keeps, what its render walk draws.
+      {"prompt--do",
+       "(prompt--do OP ARG...) — one operation on this frame's prompt or popup. Prompt: show PROMPT CANDIDATES VIEW, hide, facts, filtered, selected, sync, move DELTA, candidates LIST. Popup: start, query TEXT, accept, cmove DELTA. #f when none is open. minibuffer.scm calls this: use minibuffer-selected and the like."} =>
+        fn [op | args] -> prompt_do(Opts.plain(op), args) end,
       {"minibuffer--show!",
        "(minibuffer--show! PROMPT CANDIDATES VIEW) — open the frame's prompt snapshot. VIEW is ((KEY VALUE) ...): input, completing, query (input, segment or none), match-hint, completion-style, preselect, style, note, legend, selected."} =>
         fn [prompt, candidates, view] ->
@@ -3511,6 +3514,29 @@ defmodule Compos.Core.SchemeAPI do
     |> Enum.map(fn [k, v] -> mb_view_field(Opts.plain(k), v) end)
     |> Enum.reject(&is_nil/1)
     |> Map.new()
+  end
+
+  # VIEW keys as minibuffer.scm writes them (show); hide and facts answer
+  # a plist; the rest pass Editor.prompt_op/3 through, nil as #f
+  defp prompt_do("show", [prompt, candidates, view]) do
+    Editor.minibuffer_show(prompt, candidates, mb_view(view))
+    :void
+  end
+
+  defp prompt_do("hide", []) do
+    case Editor.minibuffer_close() do
+      nil -> false
+      mb -> plist(prompt: mb.prompt, input: mb.input, selected: mb.selected, "prompt-sel": mb.prompt_sel, total: mb.total)
+    end
+  end
+
+  defp prompt_do(op, args) do
+    case Editor.prompt_op(String.to_existing_atom(op), args) do
+      %{} = f -> plist(input: f.input, selected: f.selected, touched: f.touched, "prompt-sel": f.prompt_sel)
+      :ok -> :void
+      nil -> false
+      reply -> reply
+    end
   end
 
   defp mb_view_field("input", v), do: {:input, v}

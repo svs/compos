@@ -11,6 +11,31 @@
 (domain! 'interaction)
 (effects! '(unknown))
 
+;;; --- the frame's prompt and popup snapshot -----------------------------------
+;;; The frame keeps only what its render walk draws; prompt--do reads and
+;;; writes it, one operation at a time, and #f is none open.
+
+(effects! '(read))
+(define (minibuffer--facts) (prompt--do 'facts))
+(define (minibuffer--filtered) (or (prompt--do 'filtered) '()))
+(define (completion--start) (prompt--do 'start))
+(define (minibuffer-selected) (prompt--do 'selected))
+(public! 'minibuffer-selected "(minibuffer-selected) — return the highlighted minibuffer candidate, or #f.")
+
+(effects! '(write))
+(define (minibuffer--show! prompt cands view) (prompt--do 'show prompt cands view))
+(define (minibuffer--hide!) (prompt--do 'hide))
+(define (minibuffer--sync!) (prompt--do 'sync))
+(define (minibuffer--move! delta) (prompt--do 'move delta))
+(define (completion--accept!) (prompt--do 'accept))
+(define (minibuffer-set-candidates! cands) (prompt--do 'candidates cands))
+(public! 'minibuffer-set-candidates! "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.")
+(define (completion-query! text) (prompt--do 'query text))
+(public! 'completion-query! "(completion-query! TEXT) — narrow the open popup to TEXT; no row left closes it.")
+(define (completion-move! delta) (prompt--do 'cmove delta))
+(public! 'completion-move! "(completion-move! DELTA) — move the popup selection by DELTA rows.")
+(effects! '(unknown))
+
 ;;; --- minibuffer --------------------------------------------------------------
 ;;; The minibuffer is a real buffer (" *minibuf*"): point motion, kill/yank,
 ;;; undo and M-DEL all work in prompts for free via the global keymap. Only

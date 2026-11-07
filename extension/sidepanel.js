@@ -49,7 +49,8 @@ async function show() {
   if (!r.result?.buffer) return say(`compos answered without a chat: ${JSON.stringify(r.result)}`);
 
   const base = r.result.url || `http://localhost:${r.result.port}/`;
-  const src = `${base}b/${encodeURIComponent(r.result.buffer)}`;
+  // the panel is too narrow for the group's layout: its frame keeps one window
+  const src = `${base}b/${encodeURIComponent(r.result.buffer)}?layout=single`;
   if (src !== shown) {
     console.log("site chat", src);
     frame.src = src;

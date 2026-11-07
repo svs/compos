@@ -279,7 +279,10 @@
 ;; the tab asking "is a prompt up?" — after a chord, or on reconnect
 (define (chrome--mb-state) (chrome--with-mb '()))
 
-(define *site-chat-group* "*browse*")
+(defcustom 'site-chat-group "*browse*"
+  "Group the site chat of a browser tab opens in, the chat the extension's
+   side panel shows. A chat made before a change stays in its group."
+  'group 'web 'type 'string)
 
 ;; One chat per browser tab, all in the *browse* group. The tab keeps its
 ;; chat wherever it goes; a new tab starts a new one. The name only starts
@@ -317,7 +320,7 @@
           (else (loop (cdr bs))))))
 
 (define (site-chat host &optional tab url)
-  (let* ((id (group-ensure-record! *site-chat-group*))
+  (let* ((id (group-ensure-record! site-chat-group))
          (name (or (and tab (chrome--site-chat-find id tab))
                    (chrome--site-chat-name host tab))))
     (unless (buffer-known? name)

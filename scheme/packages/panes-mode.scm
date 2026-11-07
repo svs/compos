@@ -66,9 +66,30 @@
                      (panes--put layout 'layout
                        (or (and (string? g) (group-setting g 'layout)) window-layout-default)))))
     (set-frame-local! 'panes-layouts (alist-put (panes--store) (or g 'none) layout))
-    ;; the newest layout of a group, whichever frame made it, is its record's
-    (when (and (string? g) (group-resolve-id g)) (group-layout-set! g layout))
+    ;; the newest layout of a group, whichever frame made it, is its record's;
+    ;; a frame that keeps its own layout leaves the record alone
+    (when (and (string? g) (group-resolve-id g) (not (panes-frame-layout)))
+      (group-layout-set! g layout))
     layout))
+
+(define (panes-frame-layout)
+  "The layout this frame keeps whatever its group's is, or #f. A side
+   panel keeps single: it shows one window."
+  (frame-local 'panes-frame-layout))
+
+(define (panes--frame-kept layout)
+  "LAYOUT in this frame's own layout, when the frame keeps one."
+  (let ((name (panes-frame-layout)))
+    (if (and name (not (equal? (panes-layout-name layout) name)))
+        (panes-set-layout layout name)
+        layout)))
+
+(define (panes-frame-layout-set! name)
+  "This frame keeps layout NAME whatever its group's is; #f gives it its
+   group's again. The group's record does not change. Answers NAME."
+  (set-frame-local! 'panes-frame-layout name)
+  (panes-apply! (panes--ensure-layout!))
+  name)
 
 (define (panes--seed g)
   "The layout group G takes on a frame that has none: G's layout
@@ -476,7 +497,7 @@
    layout with the handles the draw took or made. Nothing is recorded:
    panes-apply! stores the model anyway, also when the draw did not
    arrange."
-  (let* ((layout (panes--blanks (panes--claim-empty-windows layout)))
+  (let* ((layout (panes--blanks (panes--claim-empty-windows (panes--frame-kept layout))))
          (tops (panes-top-windows layout))
          (items (panes--pane-handles layout))
          (handles (map (lambda (i) (if (pair? i) (car i) i)) items))
@@ -1367,6 +1388,8 @@
 (public! 'panes-layout "(panes-layout) -> the window model of this frame's group, or #f")
 (catalog-meta! 'function "panes-layout" 'effects '(read))
 (public! 'panes-apply! "(panes-apply! LAYOUT) -> lay the frame out as LAYOUT and keep it as this group's model")
+(public! 'panes-frame-layout "(panes-frame-layout) -> the layout this frame keeps whatever its group's is, or #f")
+(public! 'panes-frame-layout-set! "(panes-frame-layout-set! NAME) -> this frame keeps layout NAME, #f its group's; the group's record does not change")
 (public! 'panes-waiting-windows "(panes-waiting-windows) -> (KEY BUFFER) for each window of this frame's layout that waits off the screen")
 (catalog-meta! 'function "panes-waiting-windows" 'effects '(read))
 (public! 'panes-adopt "(panes-adopt) -> this frame as a layout: one pane per window on screen")

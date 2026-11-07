@@ -37,6 +37,15 @@ defmodule Compos.Ui.EditorLive do
       # frame displays — the group it stands in, for one.
       Input.run(fid, fn -> Compos.Core.Session.call_named("frame-attached!", []) end)
 
+      # ?layout=single: this frame keeps one window whatever its group's
+      # layout holds, as the extension's side panel does. Before the link,
+      # so the buffer opens into that one window.
+      if params["layout"] == "single" do
+        Input.run(fid, fn ->
+          Compos.Core.Session.eval("(panes-frame-layout-set! 'single)")
+        end)
+      end
+
       # a buffer link (/b/NAME?line=N) shows that buffer in this frame.
       # What "show" means — an open buffer, a file to visit, a line to go
       # to — is Scheme's open-buffer-link!, not this view's.

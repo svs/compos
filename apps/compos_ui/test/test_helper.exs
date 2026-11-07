@@ -6,6 +6,9 @@ case Application.get_env(:compos_core, :home) do
   _ -> :ok
 end
 
+# This run's home, socket and desktop file go when the VM exits.
+if Code.ensure_loaded?(Compos.TestRun), do: Compos.TestRun.clean_at_exit()
+
 defmodule Compos.Ui.PreviewMarkup do
   @moduledoc """
   A preview page without its source bookkeeping. Every element names its

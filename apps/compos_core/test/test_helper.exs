@@ -37,6 +37,11 @@ end
 
 Compos.TestTmp.sweep()
 
+# Each run owns its home, socket and desktop file (config/config.exs). Clear
+# what dead runs left, and remove this run's files when it exits.
+Compos.TestRun.sweep_dead()
+Compos.TestRun.clean_at_exit()
+
 # A tree-sitter grammar is a compiled artifact, not a fixture, so a test
 # that needs one is excluded where it is missing rather than passing on an
 # empty answer. The run then says "excluded", which a silent skip never

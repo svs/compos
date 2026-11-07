@@ -106,13 +106,28 @@ if config_env() == :dev and System.get_env("COMPOS_VERIFY") do
 end
 
 if config_env() == :test do
-  # per-checkout suffix: concurrent test runs from different worktrees must
-  # not share sockets or fixture files, or evals land in the other VM.
-  # MIX_TEST_PARTITION joins the suffix, so each partition of
-  # `mix test --partitions N` gets its own home, socket, and desktop file.
+  # The suffix has three parts, so two test runs never share a home, a
+  # socket or a desktop file; if they do, evals land in the other VM and
+  # SQLite answers :busy.
+  #
+  # - the checkout: runs from different worktrees differ.
+  # - MIX_TEST_PARTITION: each partition of `mix test --partitions N`
+  #   differs.
+  # - the run: the OS pid of the VM that first read this file, so two runs
+  #   started at once from one checkout differ. COMPOS_TEST_RUN carries it
+  #   to a second read in the same VM and to a child process, which then
+  #   share the run's home. The test helpers remove the run's files on exit.
+  run =
+    System.get_env("COMPOS_TEST_RUN") ||
+      (fn ->
+         pid = System.pid()
+         System.put_env("COMPOS_TEST_RUN", pid)
+         pid
+       end).()
+
   suffix =
     Integer.to_string(:erlang.phash2(Path.expand(".")), 36) <>
-      (System.get_env("MIX_TEST_PARTITION") || "")
+      (System.get_env("MIX_TEST_PARTITION") || "") <> "-r" <> run
 
   config :compos_rpc, socket_path: "/tmp/compos-rpc-test-#{suffix}.sock"
 

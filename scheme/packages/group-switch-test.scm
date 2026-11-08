@@ -824,8 +824,8 @@
                       "no member of the group is a fact")))
     (t--sw-done!)))
 
-(deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
-  "the new-group row founds the typed name, also when the name matches a group"
+(deftest 'switch-to-group-founds-an-empty-group
+  "the new-group row founds the typed name, also when the name matches a group, and carries nothing over"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-moved-source")))
@@ -844,8 +844,8 @@
 
       (let ((moved (group-resolve-id "zzsw-moved")))
         (check-true! (and moved (not (equal? moved source))) "a new group was founded")
-        (check-true! (buffer-in-group? t--sw-first moved) "the destination was added")
-        (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
+        (check-false! (buffer-in-group? t--sw-first moved) "the current buffer does not go along")
+        (check-true! (buffer-in-group? t--sw-first source) "it stays in its group")
         (check-equal! (frame-group) moved "the new group was entered")))
     (t--sw-done!)))
 

@@ -122,11 +122,11 @@ A **group** holds one task: its buffers, its chats, and the arrangement of its w
 
 `C-x g` lists the groups, the most recent first. The group you are in is the first row, and the group you came from is the second. Type the name of a group that is not there, and `RET` makes it.
 
-What a new group starts with depends on the buffer you are in. From a chat, it starts empty, with a new chat of its own. From any other buffer, that buffer goes with you into the new group: a quick way to give a file or a page a task of its own.
+A new group starts empty, with a chat of its own. It takes no buffers and no windows from the group you were in.
 
 When you go to another group, the tutorial goes off the screen. To come back, type `C-x g`, press the down arrow once, and press `RET`.
 
-> **Try it.** Move the focus to one of your chats. Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat. Then come back: type `C-x g`, press the down arrow, and press `RET`.
+> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat. Then come back: type `C-x g`, press the down arrow, and press `RET`.
 
 A buffer is in one group. To give a buffer to another task, move it.
 

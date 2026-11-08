@@ -2324,14 +2324,9 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-work-buffer? buf))
 
 (define (group-switch-new-action)
-  (let ((buf (current-buffer))
-        (current (frame-group)))
-    (cond ((not (group-seed-buffer? buf))
-           (list "Start an empty group" #f #f))
-          ((and current (buffer-in-group? buf current))
-           (list "Move this buffer into a new group" buf current))
-          (else
-            (list "Start a new group with this buffer" buf #f)))))
+  ;; a new group carries nothing over: no buffer, no windows. It starts
+  ;; empty, with a chat of its own; C-x C-g m moves a buffer into it
+  (list "Start an empty group" #f #f))
 
 ;; The members of every group in one pass: ((ID BUF ...) ...). Members
 ;; come in MRU order, and the buffers never visited this session trail,
@@ -4404,11 +4399,9 @@ is forgotten and that group falls back to creation order in the switcher."
     (let ((selected (group-command-selected-buffers)))
       (group-read-new-name "New group: "
         (lambda (name)
-          (if (null? selected)
-              (group-create-and-enter! name '() #f)
-              ;; a marked set is an arrangement: the windows as they
-              ;; stand become the group's first layout
-              (group-create-and-enter! name selected (panes-layout))))))))
+          ;; the marked buffers join it, but the windows as they stand
+          ;; stay here: a new group carries no windows over
+          (group-create-and-enter! name selected #f))))))
 
 ;; The "visible" verb: the windows as they stand are the seed, with no
 ;; marking. A group picked from the list takes the visible work buffers, and

@@ -15,6 +15,10 @@
       (lambda ()
         (check-equal! (car (group-switch-new-action)) "Start an empty group"
                       "from a listing the new group starts empty")))
+    (with-current-buffer "*zz-work*"
+      (lambda ()
+        (check-equal! (group-switch-new-action) (list "Start an empty group" #f #f)
+                      "from a work buffer too: a new group carries nothing over")))
     (buffer-kill! "*zz-transient-listing*")
     (buffer-kill! "*zz-work*")))
 

@@ -1401,6 +1401,8 @@
          ((eval (buffer-local buf 'imenu-index-function)) buf))
         ;; a buffer with anchors is indexed by them
         ((pair? (anchor-list buf)) (anchor-imenu-rows buf))
+        ;; a list is indexed by its rows, one entry each
+        ((pair? (list-offsets buf)) (list-imenu-rows buf))
         ;; the lines are BUF's: line-number-at-pos counts in the current buffer
         ((buffer-derived-mode? buf "morg-mode")
          (with-current-buffer buf

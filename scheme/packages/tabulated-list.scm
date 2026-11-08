@@ -1540,6 +1540,22 @@
 
 (define (list-offsets buf) (or (buffer-local buf 'list-offsets) '()))
 
+(define (list-imenu-rows buf)
+  ;; one imenu row per drawn entry: the first two cells name it, the rest
+  ;; are its doc, in full where the drawn line cuts them
+  (let ((offs (list-offsets buf)) (es (list-entries buf)))
+    (with-current-buffer buf
+      (lambda ()
+        (let loop ((os offs) (es es) (acc '()))
+          (if (or (null? os) (null? es))
+              (reverse acc)
+              (let* ((cells (filter (lambda (s) (and (string? s) (not (equal? (string-trim s) ""))))
+                                    (map list-cell-text (car (list-row-cells buf (car es))))))
+                     (name (string-join (if (> (length cells) 2) (list (car cells) (cadr cells)) cells) "  "))
+                     (doc (if (> (length cells) 2) (string-join (cddr cells) " · ") "")))
+                (loop (cdr os) (cdr es)
+                      (cons (list (line-number-at-pos (car os)) "entry" name doc) acc)))))))))
+
 ;; the header count comes off the buffer, not out of a fresh header: the
 ;; header names the row count, and asking it to count rows that a refresh
 ;; is halfway through replacing reads the rows that went

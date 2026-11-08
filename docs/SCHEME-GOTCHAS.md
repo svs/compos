@@ -22,7 +22,7 @@ Builtin behaviours in the compos Scheme that a reader would guess wrong. Each on
 
 ## Procedures and lists
 
-- Dotted formals do not exist. `(define (f a . rest) ...)` parses `.` and `rest` as two positional parameters. Pass an explicit list.
+- Dotted pairs are improper BEAM lists: `'(a . b)` is `[a | b]`. Dotted formals `(define (f a . rest) ...)` mean `&rest`. `list?` is false for a dotted pair; `length`, `map` and other list calls raise on one.
 - `map`, `for-each`, and `fold` take one list; `fold` is `(F ACC X)`. Zip the lists first.
 - These do not exist: `even?`, `list?`, `catch`, `random`, `cadddr`, `list->string`, `string->list`, `char-alphabetic?`, `revert-buffer!`. `when` and `unless` are syntax and are not `boundp`. Use `(cadr (cddr r))` for the fourth element. `(ignore-errors (lambda () ...))` returns `#f` on a raise.
 

@@ -43,6 +43,20 @@ defmodule Compos.SchemeTest do
     assert run("(fold + 0 '(1 2 3 4))") == 10
   end
 
+  test "dotted pairs read, print, and bind rest formals" do
+    assert run("'(1 . 2)") == [1 | 2]
+    assert run("'(1 2 . 3)") == [1, 2 | 3]
+    assert run("'(1 . (2 3))") == [1, 2, 3]
+    assert run("(list (car (cons 1 2)) (cdr (cons 1 2)) (pair? (cons 1 2)) (list? (cons 1 2)))") == [1, 2, true, false]
+    assert run("(assoc 'b '((a . 1) (b . 2)))") == [{:sym, "b"} | 2]
+    assert run("(last-pair '(1 2 . 3))") == [2 | 3]
+    assert Compos.Scheme.Printer.print(run("'(a b . c)")) == "(a b . c)"
+    assert run("(define (f a . r) (list a r)) (f 1 2 3)") == [1, [2, 3]]
+    assert run("((lambda r r) 1 2)") == [1, 2]
+    assert {:error, _} = Scheme.eval_string(Scheme.new(), "'(. a)")
+    assert {:error, _} = Scheme.eval_string(Scheme.new(), "'(a . b c)")
+  end
+
   test "prelude: list accessors, list?, any and every" do
     assert run("(list (cadddr '(1 2 3 4 5)) (cdddr '(1 2 3 4 5)) (caar '((1 2) 3)) (cdar '((1 2) 3)))") == [4, [4, 5], 1, [2]]
     assert run("(list (list? '()) (list? '(1 2)) (list? \"x\") (list? 3))") == [true, true, false, false]

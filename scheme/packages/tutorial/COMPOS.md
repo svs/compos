@@ -12,11 +12,11 @@
 
 ### Ask the help chat
 
-> **Try it.** The easiest way to get help is in the help chat. Type `C-c h` and ask your question or request.
+> The easiest way to get help is in the help chat. Type `C-c h` and ask your question or request.
 
 ### Open the help menu
 
-> **Try it.** Additionally, `C-h` opens a help menu. Type `C-h` and wait: it lists every help key.
+> Additionally, `C-h` opens a help menu. Type `C-h` and wait: it lists every help key.
 
 ## Window navigation
 
@@ -30,15 +30,15 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 | `s-<right>` | Move the focus to the window on the right |
 | `C-x o` | Move the focus to the next window |
 
-> **Try it.** Type `s-<right>` to move the focus one window to the right.
+> Type `s-<right>` to move the focus one window to the right.
 
 ### Move the focus back
 
-> **Try it.** Then type `s-<left>` to come back.
+> Then type `s-<left>` to come back.
 
 ### Go to the next window
 
-> **Try it.** Type `C-x o` to move the focus to the next window.
+> Type `C-x o` to move the focus to the next window.
 
 ### Type in the practice page
 
@@ -55,11 +55,11 @@ When you type a character in a buffer that you can edit, the window goes into ed
 
 The window keys of this lesson work only in focus. In editing, `s-<right>` moves the caret to the end of the line, and `S-<right>` selects text. So when a window key does not work, type `ESC` and try again.
 
-> **Try it.** Move the focus to the practice page and type a word.
+> Move the focus to the practice page and type a word.
 
 ### Stop editing
 
-> **Try it.** Type `ESC` or `C-g` to stop editing. Keep the focus on the practice page.
+> Type `ESC` or `C-g` to stop editing. Keep the focus on the practice page.
 
 ### Swap two panes
 
@@ -72,25 +72,25 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 | `s-S-<right>` | Swap this pane with the pane on the right |
 | `s-S-<left>` | Swap this pane with the pane on the left |
 
-> **Try it.** Move the focus to the practice page. If you are editing there, type `ESC`. Then type `s-S-<right>` to swap it with the slide.
+> Move the focus to the practice page. If you are editing there, type `ESC`. Then type `s-S-<right>` to swap it with the slide.
 
 ### Swap them back
 
-> **Try it.** Type `s-S-<left>` to swap them back.
+> Type `s-S-<left>` to swap them back.
 
 ### Move a window to the next pane
 
-> **Try it.** With the focus on the practice page, and not editing, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it.
+> With the focus on the practice page, and not editing, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it.
 
 ### Move it back
 
-> **Try it.** Type `S-<left>`, the key of `window-previous-pane`, to move it back.
+> Type `S-<left>`, the key of `window-previous-pane`, to move it back.
 
 ### Try the layouts
 
 **Layouts.** A layout is the arrangement of the panes of a group: one window, two panes, equal columns, or as many panes as you open. `C-x l` shows each layout while you move through the list. `RET` keeps the one you are on, and `ESC` puts back the layout you had.
 
-> **Try it.** Type `C-x l` and move through the list with the arrow keys. Watch the screen change. Type `ESC` to keep the layout you have.
+> Type `C-x l` and move through the list with the arrow keys. Watch the screen change. Type `ESC` to keep the layout you have.
 
 ### Show another buffer
 
@@ -101,13 +101,13 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 | `C-x b` | Show another buffer in this window |
 | `C-x C-b` | List every buffer in ibuffer |
 
-> **Try it.** In the practice page, type `C-x b`, choose `*tutorial*` and press `RET`.
+> In the practice page, type `C-x b`, choose `*tutorial*` and press `RET`.
 
 ### List the buffers
 
 `C-x C-b` opens **ibuffer**: a list of every buffer, one line each, in sections by group. `RET` goes to the buffer on the line, and `q` closes the list.
 
-> **Try it.** Type `C-x C-b` and find the practice page in the list. Then type `q` to close the list.
+> Type `C-x C-b` and find the practice page in the list. Then type `q` to close the list.
 
 ## Chat
 
@@ -123,21 +123,21 @@ A **chat** is a buffer where you talk to an agent. The agent works in Compos wit
 | `s-M-[` | Bring the previous window of this pane to the front |
 | `s-M-]` | Bring the next window of this pane to the front |
 
-> **Try it.** Type `C-c n` to start a chat.
+> Type `C-c n` to start a chat.
 
 ### Send a message
 
-> **Try it.** Type a message in the chat and press `RET` to send it.
+> Type a message in the chat and press `RET` to send it.
 
 ### Start another chat
 
-> **Try it.** Type `C-c n` again to start another chat.
+> Type `C-c n` again to start another chat.
 
 ### Read about chat mode
 
 Every buffer has a **major mode**. The mode tells what kind of buffer it is, and which keys work in it. Your two chats are in chat-mode. The practice page is in tutorial-practice-mode. `C-h m` describes the mode of the buffer you are in.
 
-> **Try it.** In the chat, type `C-h m` and read what chat-mode does. Type `q` to close the help.
+> In the chat, type `C-h m` and read what chat-mode does. Type `q` to close the help.
 
 ### Show your other chat
 
@@ -145,17 +145,17 @@ A window remembers the buffers it showed, the most recent first, as an app switc
 
 To go further back, hold Cmd and type `[` again for each step. While you hold Cmd, `]` walks the other way. Let go of Cmd on the buffer you want.
 
-> **Try it.** In the chat, type `s-[` to show your other chat, and type it again to come back.
+> In the chat, type `s-[` to show your other chat, and type it again to come back.
 
 ### Bring the next window to the front
 
 A pane can hold more than one window, one behind the other. `s-M-[` and `s-M-]` bring the windows of the pane to the front, one after the other.
 
-> **Try it.** Type `s-M-]` to bring the next window of this pane to the front.
+> Type `s-M-]` to bring the next window of this pane to the front.
 
 ### Go back
 
-> **Try it.** Then type `s-M-[` to go back.
+> Then type `s-M-[` to go back.
 
 ## Groups
 
@@ -174,25 +174,25 @@ A new group starts empty, with a chat of its own. It takes no buffers and no win
 
 When you go to another group, the tutorial goes off the screen. To come back, type `C-x g`, press the down arrow once, and press `RET`.
 
-> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat.
+> Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat.
 
 ### Come back from the new group
 
-> **Try it.** Then come back: type `C-x g`, press the down arrow, and press `RET`.
+> Then come back: type `C-x g`, press the down arrow, and press `RET`.
 
 ### Move a chat to another group
 
 A buffer is in one group. To give a buffer to another task, move it.
 
-> **Try it.** Move the focus to one of your chats. Type `C-x C-g m` and choose "practice". The chat leaves this group.
+> Move the focus to one of your chats. Type `C-x C-g m` and choose "practice". The chat leaves this group.
 
 ### See the chat there
 
-> **Try it.** Type `C-x g` and go to "practice" to see the chat there.
+> Type `C-x g` and go to "practice" to see the chat there.
 
 ### Come back here
 
-> **Try it.** Then type `C-x g` again, press the down arrow, and press `RET` to come back.
+> Then type `C-x g` again, press the down arrow, and press `RET` to come back.
 
 ## LLM config
 
@@ -208,17 +208,17 @@ The setup wizard chose the model that new chats use. You can change that choice 
 
 **The default.** In the connectors list, put point on a connector or a model and type `d`. New chats then start with it. In the `C-c b` menu, `M-d` makes the config of the menu the default.
 
-> **Try it.** Type `M-x llm-connectors` and read the list. Type `q` to close it.
+> Type `M-x llm-connectors` and read the list. Type `q` to close it.
 
 ### Open the chat menu
 
 **Per group.** A group can start its chats with a different model. For example, a group for code can use a strong model, and a group for mail a cheap one. In the `C-c b` menu, `M-g` makes the config of the menu the default of this group. `M-x group-llm` chooses a saved preset for the group, and "(global default)" puts the group back on the default.
 
-> **Try it.** Move the focus to a chat and type `C-c b`. Look at the menu, then press `ESC` to close it.
+> Move the focus to a chat and type `C-c b`. Look at the menu, then press `ESC` to close it.
 
 ### Read the group presets
 
-> **Try it.** Type `M-x group-llm` and read the presets. Press `ESC` to keep the group as it is.
+> Type `M-x group-llm` and read the presets. Press `ESC` to keep the group as it is.
 
 # Kept lessons
 
@@ -253,7 +253,7 @@ You do not need to learn everything at once. Three commands make a wrong guess e
 
 The boxes marked **Try it** are directions for you to do now. For example:
 
-> **Try it.** Type `M-x` to open the command prompt. Then type `ESC` or `C-g` to close it and return here.
+> Type `M-x` to open the command prompt. Then type `ESC` or `C-g` to close it and return here.
 
 ---
 
@@ -303,17 +303,17 @@ You never need to remember a key. Compos explains itself while it runs, and a ch
 | `M-o` | Ask the chat of the page you are on |
 | `C-h ?` | List every help command |
 
-> **Try it.** Type `s-p` and type what you want to do, for example "split the window". Read what it offers. Then type `ESC` to close it.
+> Type `s-p` and type what you want to do, for example "split the window". Read what it offers. Then type `ESC` to close it.
 
-> **Try it.** Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
+> Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
 
-> **Try it.** Type `C-h k M-<down>` and read what that key does. Type `q` to close the help.
+> Type `C-h k M-<down>` and read what that key does. Type `q` to close the help.
 
-> **Try it.** Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
+> Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
 
 When no command fits your question, ask a chat. `M-o` opens the chat of the page you are on, and that chat can read the page.
 
-> **Try it.** Type `M-o` and ask "What can I do on this slide?". Read the answer. Then click the slide to come back.
+> Type `M-o` and ask "What can I do on this slide?". Read the answer. Then click the slide to come back.
 
 ## Windows and focus
 
@@ -329,13 +329,13 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 
 `s-` means the Command key on a Mac, and the Super key on other computers. So `s-<right>` is Command and the right arrow.
 
-> **Try it.** Type `s-<right>` to move the focus one window to the right. Then type `s-<left>` to come back.
+> Type `s-<right>` to move the focus one window to the right. Then type `s-<left>` to come back.
 
-> **Try it.** Type `C-x o` to move the focus to the next window.
+> Type `C-x o` to move the focus to the next window.
 
 You can read a window and not go to it. `M-<down>` scrolls the other window, and the focus stays where it is. Use it to read the lesson while you stay on the slide. In the lesson itself, `M-<down>` jumps to the next heading instead, so come back to the slide first.
 
-> **Try it.** The focus is on the lesson now. Type `s-<left>` to come back to the slide. Then type `M-<down>` to scroll the lesson while you stay here, and `M-<up>` to scroll it back.
+> The focus is on the lesson now. Type `s-<left>` to come back to the slide. Then type `M-<down>` to scroll the lesson while you stay here, and `M-<up>` to scroll it back.
 
 ## Typing and the focus
 
@@ -350,21 +350,21 @@ A window with an editable buffer in it remains in `focus` mode until you type in
 
 When you stop editing, the arrow keys move the focus again.
 
-> **Try it.** Move the focus to the practice page and type a word.
+> Move the focus to the practice page and type a word.
 
-> **Try it.** Type `ESC` or `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
+> Type `ESC` or `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
 
 ## Searching and replacing
 
 To search forward, type `C-s`. To search backward, type `C-r`. Each character you type makes the match more specific at once. Search is a movement command; it does not make you fill a form before you see a result.
 
-> **Try it.** Type `C-s`, then type "search", and watch point move as the match becomes specific. Type `C-s` again for the next match. Type `ESC` or `C-g` to stop.
+> Type `C-s`, then type "search", and watch point move as the match becomes specific. Type `C-s` again for the next match. Type `ESC` or `C-g` to stop.
 
 While you search, `RET` accepts the match. `ESC` or `C-g` quits and returns to where the search started, where that makes sense.
 
 `M-%` runs `query-replace`. It asks for the old text and the new text, then visits each match, so you choose which ones to change.
 
-> **Try it.** Put point at the start of the practice line below. Type `M-%`, replace "colour" with "color", and answer `y` for the match. Type `C-/` afterward if you want the original text back.
+> Put point at the start of the practice line below. Type `M-%`, replace "colour" with "color", and answer `y` for the match. Type `C-/` afterward if you want the original text back.
 
 This practice line uses the word colour once.
 
@@ -391,7 +391,7 @@ Angle brackets name a key on the keyboard: `<down>`, `<up>`, `<left>` and `<righ
 
 If a prefix, a prompt or a search waits for input you do not want to give, press `ESC`. It cancels whatever waits. `C-g` does the same, except after `C-x`, where `C-x C-g` starts the group commands.
 
-> **Try it.** Hold CONTROL and press `x`, then release both keys. Compos is now waiting for the next key, and shows the keys that can follow. Press `ESC` to cancel.
+> Hold CONTROL and press `x`, then release both keys. Compos is now waiting for the next key, and shows the keys that can follow. Press `ESC` to cancel.
 
 You started a prefix command and cancelled it.
 
@@ -401,13 +401,13 @@ Every action in Compos is a named command. A key binding, a menu, a Scheme progr
 
 `M-x` asks for a command by name. The list gets shorter as you type. Beside each name, the margin shows two things: the key that runs the command, and one line on what it does. So using names teaches you the keys.
 
-> **Try it.** In the practice page, type `M-x`, then type `previous`. Read the margin beside `previous-buffer`: its key, `C-x <left>`, and "Switch to the previously used buffer". Press `RET` to run it. The page shows the buffer you used before.
+> In the practice page, type `M-x`, then type `previous`. Read the margin beside `previous-buffer`: its key, `C-x <left>`, and "Switch to the previously used buffer". Press `RET` to run it. The page shows the buffer you used before.
 
-> **Try it.** Type `C-x <right>` to come back to the practice page. You did not need `M-x` this time: the margin told you the key.
+> Type `C-x <right>` to come back to the practice page. You did not need `M-x` this time: the margin told you the key.
 
 You never need to know a command before you use it. Type the words you would use to describe what you want.
 
-> **Try it.** Type `M-x`, then type `new chat`. Read the margin beside **chat-new**: it starts a new chat buffer, and the margin shows its key. Press `ESC` to leave the command picker. A later lesson starts a chat.
+> Type `M-x`, then type `new chat`. Read the margin beside **chat-new**: it starts a new chat buffer, and the margin shows its key. Press `ESC` to leave the command picker. A later lesson starts a chat.
 
 Agents use this same list. An agent does not guess which rectangle is a button. It finds and runs the named commands you use.
 
@@ -426,7 +426,7 @@ A **file** is data on disk. A **buffer** is a named place where the editor holds
 
 This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
 
-> **Try it.** Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
+> Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
 
 Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
 
@@ -445,11 +445,11 @@ Compos can show more than one window at a time. A window shows a buffer. Splitti
 | `C-x 0` | Close the selected window |
 | `C-x 1` | Close every other window |
 
-> **Try it.** In the practice page, type `C-x 3` to split it into two windows side by side. Both show the practice page.
+> In the practice page, type `C-x 3` to split it into two windows side by side. Both show the practice page.
 
-> **Try it.** Type `C-x o` to move to the other window. Move point in it with the arrow keys. Each window keeps its own point, even though both show the same text.
+> Type `C-x o` to move to the other window. Move point in it with the arrow keys. Each window keeps its own point, even though both show the same text.
 
-> **Try it.** Type `C-x 0` to close the window you are in. The practice page is one window again, and the slide and the lesson stay.
+> Type `C-x 0` to close the window you are in. The practice page is one window again, and the slide and the lesson stay.
 
 One small command shows the whole idea:
 
@@ -459,7 +459,7 @@ One small command shows the whole idea:
 | `M-<down>` | The same |
 | `M-<up>` | Scroll the other window backward |
 
-> **Try it.** Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
+> Stay in this window and type `C-M-v` a few times. Watch the other view move while your point and your focus stay here. Then type `M-<up>` once.
 
 You did not leave your work to read the reference. You brought the reference beside the work and controlled it. This is the promise from the start of the tutorial: **the context comes to you**. The same command can scroll a help page, a file beside the work, the messages buffer or any other useful neighbour.
 
@@ -478,9 +478,9 @@ A **group** remembers a task: its buffers, its companion chat, and the window ar
 
 The tutorial is a group too: its practice page, slide and lesson stay together in it.
 
-> **Try it.** Type `C-x g` to look at the group switcher. The group you are in is marked. Press `ESC` to stay here.
+> Type `C-x g` to look at the group switcher. The group you are in is marked. Press `ESC` to stay here.
 
-> **Try it.** Type `C-x C-g b` to list the buffers of this group. The practice page, the slide and the lesson are in it. Typing narrows this list, so press `ESC` to close it.
+> Type `C-x C-g b` to list the buffers of this group. The practice page, the slide and the lesson are in it. Typing narrows this list, so press `ESC` to close it.
 
 To start a new task in a group of its own, type `M-x group-new`. Do not do it now: the tutorial stays in this group, and a new group opens without it. If you leave, `C-x C-g C-g` brings you back.
 
@@ -521,25 +521,25 @@ A **connector** is how Compos reaches an agent or model. The connector picker sh
 
 ACP is the Agent Client Protocol. It lets Compos start an external coding agent as a process and exchange structured messages, tools and permissions with it. Codex now uses its app-server protocol instead. The older `codex-acp` connector is deprecated and is not shown in the picker.
 
-> **Try it.** Type `M-x chat-new` to start a chat.
+> Type `M-x chat-new` to start a chat.
 
-> **Try it.** In the chat, type `C-c b`. A menu opens over the screen with this chat's connector, model and tools. Look at it, then press `ESC` to close it.
+> In the chat, type `C-c b`. A menu opens over the screen with this chat's connector, model and tools. Look at it, then press `ESC` to close it.
 
-> **Try it.** Type a message in the chat and press `RET` to send it.
+> Type a message in the chat and press `RET` to send it.
 
 To give one chat another model, open that menu again: `b` chooses the connector and `m` the model, and `ESC` gives the setup to the chat. If a chat answers 401, the connector needs its login: `M-x setup-ai-guide` explains how.
 
 Most buffers have a chat of their own. `M-o` opens it beside the buffer, and starts one when there is none. The chat reads the buffer it belongs to, so you never paste the text into it.
 
-> **Try it.** In the practice page, type `M-o`. Ask the chat: "What is this page about?"
+> In the practice page, type `M-o`. Ask the chat: "What is this page about?"
 
 A group has a chat too, which sees every buffer in the group. `C-c w` goes to it from any buffer, and back again.
 
-> **Try it.** Type `C-c w` to go to the group's chat. Type `C-c w` again to come back.
+> Type `C-c w` to go to the group's chat. Type `C-c w` again to come back.
 
 Agents also write extensions. Ask for one and watch it appear as a command:
 
-> **Try it.** Type `M-o` and ask: "Define a Scheme command named tutorial-agent-hello that prints a greeting." When it answers, type `M-x tutorial-agent-hello`.
+> Type `M-o` and ask: "Define a Scheme command named tutorial-agent-hello that prints a greeting." When it answers, type `M-x tutorial-agent-hello`.
 
 The agent wrote the definition with the same Scheme evaluator the editor itself runs. The context is concrete: it is there in the buffer.
 
@@ -547,9 +547,9 @@ The agent wrote the definition with the same Scheme evaluator the editor itself 
 
 `M-x customize` lists every setting: fonts, colours, keys and behaviour. A setting that you change stays after a restart. `M-x load-theme` changes the colours of the whole editor.
 
-> **Try it.** Type `M-x load-theme` and look at the themes. Type `ESC` or `C-g` to keep the theme you have.
+> Type `M-x load-theme` and look at the themes. Type `ESC` or `C-g` to keep the theme you have.
 
-> **Try it.** Type `M-x customize` and look at the groups of settings. Type `q` to close it.
+> Type `M-x customize` and look at the groups of settings. Type `q` to close it.
 
 ## Editing and undo
 
@@ -562,13 +562,13 @@ Typing inserts text at point.
 | `M-d` | Kill the next word |
 | `C-k` | Kill from point to the end of the line |
 
-> **Try it.** Put point at the end of the line below and type your name.
+> Put point at the end of the line below and type your name.
 
 My name is:
 
 To undo the last change, type `C-/`. `C-x u` does the same. Type `C-/` again to undo one change more. After any command other than undo, the next undo goes forward again. So undo after a break is redo.
 
-> **Try it.** Type three words at the end of the practice line below. Delete a few characters. Type `C-/` until the line is as it was.
+> Type three words at the end of the practice line below. Delete a few characters. Type `C-/` until the line is as it was.
 
 Practice line:
 
@@ -578,11 +578,11 @@ Every command is one undo step. Typing joins into groups, and commands such as n
 
 Most Compos commands accept a count. To give one, type `C-u` and then the digits, before you type the command. With a META key there is a shorter way: hold META and type the digits.
 
-> **Try it.** Type `C-u 5 <down>`. Point moves down five lines. Type `M-3 <up>` to move back three lines.
+> Type `C-u 5 <down>`. Point moves down five lines. Type `M-3 <up>` to move back three lines.
 
 A command uses the count in different ways. Movement, deletion, killing, scrolling and undo repeat. A command that takes no count may read `C-u` as a request for another version of itself.
 
-> **Try it.** Type `C-u 5 C-v` to scroll five lines. Then type `C-u 5 M-v` to scroll back.
+> Type `C-u 5 C-v` to scroll five lines. Then type `C-u 5 M-v` to scroll back.
 
 You do not need prefix arguments often. The point is that **commands compose**: a small set of movements and edits expresses large actions.
 
@@ -594,7 +594,7 @@ Behaviour is not fixed to a set of application types. It composes from named map
 
 When you type a key, Compos looks for it in this order: temporary maps, the thing at point, minor modes, the buffer and its major mode, read-only behaviour, then global bindings. Context can change a familiar key without throwing away the common interface.
 
-> **Try it.** Type `C-h B`. The keymap browser shows every binding in force here, which map supplied it, and whether another binding shadows it. Type `f` and a word, such as "tutorial" or "scroll", to filter the list. Type `q` to leave.
+> Type `C-h B`. The keymap browser shows every binding in force here, which map supplied it, and whether another binding shadows it. Type `f` and a word, such as "tutorial" or "scroll", to filter the list. Type `q` to leave.
 
 So a list, a source file, a chat and a browser page can differ where they should, and stay consistent where they can.
 
@@ -613,19 +613,19 @@ Compos applications share one list interface:
 
 A list mode adds its own actions, such as `RET` to visit a row and `q` to quit. A list mode can also give a shared key a different action. The up and down arrows always move by rows.
 
-> **Try it.** Type `M-x ibuffer`. This list manages buffers. Move through the rows with the up and down arrows. In ibuffer, `p` turns the row preview on and off. Type `f` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
+> Type `M-x ibuffer`. This list manages buffers. Move through the rows with the up and down arrows. In ibuffer, `p` turns the row preview on and off. Type `f` and part of a buffer name, press `RET` to accept the filter, then press Backslash to widen the list again.
 
 Every buffer opens normally, in a window, as your own. A list such as dired opens the file at point in another window with `RET`, while your selection stays in the list. A list of buffers shows the row at point as a **preview**: a card that floats over the frame and follows the highlight. `q` dismisses the card. `M-<down>` and `M-<up>` scroll the other window without taking your focus.
 
 This is `scroll-other-window` made into a pattern: look at nearby context without losing the work that led you there.
 
-> **Try it.** Type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
+> Type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
 
 ## Browsing the web
 
 `M-x browse` opens a URL, or a search, as readable Markdown in a browse buffer. The page on the web stays the source of truth, and preview mode gives it a graphical reading surface.
 
-> **Try it.** Type `M-x browse` and enter `https://example.com`. When the page appears, try `TAB`, `n` and `p` to move among links. Type `q` to return to the tutorial.
+> Type `M-x browse` and enter `https://example.com`. When the page appears, try `TAB`, `n` and `p` to move among links. Type `q` to return to the tutorial.
 
 In browse mode:
 
@@ -683,7 +683,7 @@ Compos is not only a fixed editor. It is a live Scheme environment. Loading a fi
 | `M-:` | Evaluate one Scheme expression |
 | `C-x C-e` | Evaluate the expression before point, in a Scheme buffer |
 
-> **Try it.** Type `M-:`, enter the expression below, and press `RET`.
+> Type `M-:`, enter the expression below, and press `RET`.
 
 ```scheme
 (message "Hello from the live Scheme environment")
@@ -693,13 +693,13 @@ The message appears at once. No build, restart, bundler or plugin host was neede
 
 You can make a command the same way.
 
-> **Try it.** Type `M-:`, enter the following expression as one line, and press `RET`.
+> Type `M-:`, enter the following expression as one line, and press `RET`.
 
 ```scheme
 (define-command "tutorial-hello" "Say hello from the tutorial" (lambda () (message "The running editor has a new command")))
 ```
 
-> **Try it.** Now type `M-x tutorial-hello`.
+> Now type `M-x tutorial-hello`.
 
 The definition lasts until you restart, unless you put it in `~/.compos/init.scm` or in a project's `compos.scm`. A buffer holds data, and the daemon brings data back from its checkpoints. A definition is part of the running program, and the program starts again from your init files. So try a change live first, then keep it when it proves useful. An agent can make the same small extension for you.
 

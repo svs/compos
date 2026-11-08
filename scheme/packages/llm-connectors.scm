@@ -184,15 +184,19 @@
   "(llm-connectors-summary) -- a sentence: the connector new chats use, and what its last test said"
   (let* ((name *default-connector*)
          (r (llm-connectors-test-result name)))
+    (if (and (boundp 'setup-chosen-connector) (not (setup-chosen-connector)))
+        "No model is chosen for new chats yet."
     (string-append "New chats use " (llm-connectors--title name) ". "
                    (cond ((not r) "It is not tested yet.")
                          ((eq? (plist-get r 'status) 'testing) "Its test is running.")
                          ((eq? (plist-get r 'status) 'ok)
                           (string-append "It " (llm-connectors--test-text name) "."))
-                         (else (string-append "Its test " (llm-connectors--test-text name) "."))))))
+                         (else (string-append "Its test " (llm-connectors--test-text name) ".")))))))
 
 (define (llm-connectors--default? name)
   (and (equal? (llm-connectors--connector name) *default-connector*)
+       ;; the built-in fallback is not a choice: nothing is marked before one
+       (or (not (boundp 'setup-chosen-connector)) (setup-chosen-connector))
        (or (not (llm-connectors--provider name)) (llm-connectors--default-model name))
        #t))
 

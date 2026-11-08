@@ -26,6 +26,17 @@
                            (list 'connector connector 'model model)
                            (list 'connector connector)))))
 
+(define (setup-chosen-connector)
+  "The connector the user chose for new chats, or #f before any choice: the
+   setup choice, else the connector of a saved llm-default-bundle. The
+   built-in *default-connector* is only a fallback that keeps chats working;
+   it is never shown as a choice."
+  (cond ((not (equal? setup-default-connector "")) setup-default-connector)
+        ((and (boundp 'llm-bundle-resolve) (boundp 'llm-default-bundle))
+         (let ((b (llm-bundle-resolve llm-default-bundle)))
+           (and b (plist-get b 'connector))))
+        (else #f)))
+
 (define (setup-use-connector! name &optional model)
   "Make connector NAME, and MODEL when it is given, the one new chats use,
    and keep the choice. setup-connector-chosen-hook runs after, so a page
@@ -853,9 +864,8 @@
    unavailable default."
   (let ((available (setup-inference-available)))
     (cond
-      ((and (not (equal? setup-default-connector ""))
-            (member setup-default-connector available))
-       (set! *default-connector* setup-default-connector))
+      ((and (setup-chosen-connector) (member (setup-chosen-connector) available))
+       (set! *default-connector* (setup-chosen-connector)))
       ((member *default-connector* available) *default-connector*)
       ((pair? available) (set! *default-connector* (car available)))
       (else #f))))

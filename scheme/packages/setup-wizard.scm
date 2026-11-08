@@ -115,7 +115,7 @@
          (kind (list-ref row 1))
          (ready? (list-ref row 2))
          (next (and (> (length row) 4) (list-ref row 4)))
-         (default? (equal? name *default-connector*))
+         (default? (equal? name (setup-chosen-connector)))
          (key (string-append "wizard:key:" name))
          (use (if (and ready? (not default?))
                   (list (list (string-append "wizard:use:" name) "Use this"))
@@ -134,7 +134,7 @@
 (define (setup-wizard--card row)
   (let* ((name (list-ref row 0))
          (ready? (list-ref row 2))
-         (default? (equal? name *default-connector*)))
+         (default? (equal? name (setup-chosen-connector))))
     (component 'wizard/choice
       (list 'title (or (plist-get (connector-config name) 'title) name)
             'detail (string-append (connector-description name) " · " (list-ref row 3))
@@ -278,14 +278,23 @@
       (when (apropos-embedding-backend) (setup-wizard-embed-use! buf b)))))
 
 (define (setup-wizard-go! buf step)
-  ;; Next keeps the model in use when the user chose none: the card that
-  ;; was picked for them shows no Use button, and the choice must last
-  (when (and (not (equal? step "model"))
-             (equal? setup-default-connector "")
-             (member *default-connector* (setup-inference-available)))
-    (setup-wizard-use! buf *default-connector*))
-  (buffer-set-local! buf 'setup-wizard-step step)
-  (setup-wizard-redraw! buf))
+  ;; Next without a choice asks which model new chats use: nothing is
+  ;; chosen for the user, and Choose later goes on with no choice saved
+  (let ((go (lambda ()
+              (buffer-set-local! buf 'setup-wizard-step step)
+              (setup-wizard-redraw! buf)))
+        (later "Choose later"))
+    (if (and (equal? (setup-wizard-step buf) "model")
+             (not (equal? step "model"))
+             (not (setup-chosen-connector))
+             (pair? (setup-inference-available)))
+        (minibuffer-read "No model is chosen. New chats use: "
+                         (append (setup-inference-available) (list later))
+          (lambda (v)
+            (let ((v (string-trim v)))
+              (when (member v (setup-inference-available)) (setup-wizard-use! buf v))
+              (go))))
+        (go))))
 
 (define (setup-wizard-use! buf name)
   (setup-use-connector! name)
@@ -568,9 +577,8 @@
 ;; Setup is done when the user chose a connector, and this machine can
 ;; still run it. A connector that a reinstall removed opens setup again.
 (define (setup-complete?)
-  (and (not (equal? setup-default-connector ""))
-       (member setup-default-connector (setup-inference-available))
-       #t))
+  (let ((chosen (setup-chosen-connector)))
+    (and chosen (member chosen (setup-inference-available)) #t)))
 
 (define (setup-welcome-here!)
   (let ((buf *setup-buffer*))
@@ -596,6 +604,10 @@
 ;; they are the user's, and the wizard offers to change them.
 (define (setup-reset!)
   (customize-save! 'setup-default-connector "")
+  ;; the plain config setup saved with the choice goes too; a named preset
+  ;; is the user's own and stays
+  (when (and (boundp 'llm-default-bundle) (pair? llm-default-bundle))
+    (customize-save! 'llm-default-bundle ""))
   (when (file-exists? (setup-welcome-marker-path))
     (delete-file-path! (setup-welcome-marker-path) #t))
   (setup-apply-default-connector!)

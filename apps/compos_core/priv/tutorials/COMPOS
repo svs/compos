@@ -88,8 +88,8 @@ A **chat** is a buffer where you talk to an agent. The agent works in Compos wit
 | Key | What it does |
 | --- | --- |
 | `C-c n` | Start a new chat |
-| `s-[` | Show the previous buffer of this mode in this window |
-| `s-]` | Show the next buffer of this mode in this window |
+| `s-[` | Show the buffer of this mode you used last, in this window |
+| `s-]` | While you hold Cmd, walk the other way |
 | `s-M-[` | Bring the previous window of this pane to the front |
 | `s-M-]` | Bring the next window of this pane to the front |
 
@@ -103,9 +103,11 @@ Every buffer has a **major mode**. The mode tells what kind of buffer it is, and
 
 > **Try it.** In the chat, type `C-h m` and read what chat-mode does. Type `q` to close the help.
 
-A window remembers the buffers it showed. `s-[` and `s-]` go through the ones of the same mode as the buffer in front. In a chat, they go through your chats, and other buffers do not get in the way.
+A window remembers the buffers it showed, the most recent first, as an app switcher does. `s-[` shows the one of the same mode that you used last. In a chat, it shows your other chat, and other buffers do not get in the way. Type `s-[` again and you are back, so two chats are one key apart.
 
-> **Try it.** In the chat, type `s-[` to show the other chat. Then type `s-]` to come back.
+To go further back, hold Cmd and type `[` again for each step. While you hold Cmd, `]` walks the other way. Let go of Cmd on the buffer you want.
+
+> **Try it.** In the chat, type `s-[` to show your other chat, and type it again to come back.
 
 A pane can hold more than one window, one behind the other. `s-M-[` and `s-M-]` bring the windows of the pane to the front, one after the other.
 

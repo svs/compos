@@ -6732,14 +6732,39 @@
 
 ;; Search policy. The buffer stores text; what counts as a match is decided
 ;; here. FOLD #t makes case not count: the query becomes an escaped regexp
+;; that knows Unicode. Backward answers the last match that starts before
+;; FROM, with the matches counted left to right without overlap, the way a
+;; forward scan meets them.
+;;
+;; Both scan a window and widen it by 4 when it holds no answer, so a large
+;; buffer costs what the window costs: each regexp call checks its whole
+;; subject, and backward used to list every match in the buffer.
+(define (search--check who q from)
+  (unless (and (string? q) (integer? from))
+    (error (string-append "(" who " Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got")
+           q from)))
+
+(define (search--last-before matches from)
+  (let loop ((ms matches) (best #f))
+    (if (or (null? ms) (>= (caar ms) from)) best (loop (cdr ms) (car ms)))))
+
+(define search--window 65536)
+
+;; A folded query matches the same text in either case, but the regexp
+;; engine scans a 5 MB buffer for seconds when the first letter is an ASCII
+;; capital, and in milliseconds when it is small. UTF-8 never holds the
+;; bytes A-Z inside a longer character.
+(define (search--ascii-downcase s)
+  (bytes->string (map (lambda (b) (if (and (>= b 65) (<= b 90)) (+ b 32) b)) (string-bytes s))))
+
 (define (buffer-search q from &optional fold)
   (search--check "buffer-search" q from)
   (let* ((text (buffer-text (current-buffer)))
          (size (string-byte-length text)))
     (cond ((>= from size) #f)
-          ;; a window from FROM, widened when it holds no match: the
-          ;; regexp checks its whole subject on each call
           ((eq? fold #t)
+           ;; a folded character can take up to 4 bytes, so a match that
+           ;; starts ROOM before the window end is whole
            (let ((pat (regexp-quote (search--ascii-downcase q)))
                  (room (* 4 (string-byte-length q))))
              (let loop ((w search--window))
@@ -6751,12 +6776,6 @@
                        (else (loop (* w 4))))))))
           (else (let ((s (string-index text q from)))
                   (and s (list s (+ s (string-byte-length q)))))))))
-;; FROM, with the matches counted left to right without overlap, the way a
-;; forward scan meets them.
-(define (search--check who q from)
-  (unless (and (string? q) (integer? from))
-    (error (string-append "(" who " Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got")
-           q from)))
 
 (define (buffer-search-backward q from &optional fold)
   (search--check "buffer-search-backward" q from)
@@ -6765,12 +6784,11 @@
          (pat (regexp-quote (if fold? (search--ascii-downcase q) q)))
          (flags (if fold? "iu" ""))
          (size (string-byte-length text))
-         ;; the scan stops where a match would have to start at FROM or
-         ;; later; a folded character can take up to 4 bytes
+         ;; the scan stops where a match would have to start at FROM or later
          (scope (max 0 (min size (+ from -1 (* (if fold? 4 1) (string-byte-length q))))))
-         ;; a window starts at a line start, where the scan from 0 is free
-         ;; too, so it counts the same matches without overlap; a query
-         ;; with a newline scans from 0
+         ;; a window starts at a line start, where a scan from 0 meets no
+         ;; match in progress, so it counts the same matches; a query with
+         ;; a newline scans from 0
          (lines? (not (string-contains? q "\n"))))
     (define (scan start)
       (let ((m (search--last-before (re-find* pat (substring-bytes text start scope) flags)
@@ -6781,24 +6799,6 @@
            (let* ((nl (and lines? (< w scope) (string-index text "\n" (- scope w))))
                   (start (if (and nl (< (+ nl 1) scope)) (+ nl 1) 0)))
              (or (scan start) (and (> start 0) (loop (* w 4)))))))))
-
-(define (buffer-search q from &optional fold)
-  (search--check "buffer-search" q from)
-  (let ((text (buffer-text (current-buffer))))
-    (cond ((>= from (string-byte-length text)) #f)
-          ((eq? fold #t) (re-find (regexp-quote q) text from "iu"))
-          (else (let ((s (string-index text q from)))
-                  (and s (list s (+ s (string-byte-length q)))))))))
-
-(define (buffer-search-backward q from &optional fold)
-  (search--check "buffer-search-backward" q from)
-  (let ((text (buffer-text (current-buffer))))
-    (if (eq? fold #t)
-        (search--last-before (re-find* (regexp-quote q) text "iu") from)
-        ;; the scan stops where a match would have to start at FROM or later
-        (let ((scope (max 0 (min (string-byte-length text) (+ from -1 (string-byte-length q))))))
-          (and (> scope 0)
-               (search--last-before (re-find* (regexp-quote q) (substring-bytes text 0 scope) "") from))))))
 
 (domain! 'unknown)
 (effects! '(unknown))

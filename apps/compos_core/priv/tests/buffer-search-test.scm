@@ -63,3 +63,19 @@
                 (buffer-search "zz" 0))))
       '(#f #f (1 6) #f (8 11) (1 4) #f)
       "edges, Unicode case, and regexp characters taken literally")))
+
+(deftest 'buffer-search-on-a-buffer-larger-than-its-window
+  "a large buffer gives the same answers as a small one"
+  (lambda ()
+    ;; T is where the last line starts, after 240 KB of filler lines
+    (let* ((filler (string-repeat "lorem ipsum\n" 20000))
+           (t (+ 7 (string-byte-length filler))))
+      (check-equal!
+        (t--bsearch (string-append "Needle\n" filler "aa aaa NEEDLE")
+          (lambda ()
+            (list (buffer-search "NEEDLE" 1 #t)
+                  (buffer-search-backward "needle" (+ t 7) #t)
+                  (buffer-search-backward "LOREM" t #t)
+                  (buffer-search-backward "aa" (+ t 13)))))
+        (list (list (+ t 7) (+ t 13)) '(0 6) (list (- t 12) (- t 7)) (list (+ t 3) (+ t 5)))
+        "far matches forward and backward, folded, without overlap"))))

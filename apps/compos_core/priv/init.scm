@@ -157,6 +157,8 @@
 ;; a chat for every error the daemon logs; its workflow listens to
 ;; compos:error, so it follows workflows
 (require 'self-healing)
+;; C-c h: one help chat for all of compos, that teaches as it works
+(require 'help-chat)
 (require 'events-demo)
 (require 'events-list)
 (require 'watchers)

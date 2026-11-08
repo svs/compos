@@ -151,21 +151,26 @@
           (else (loop (cdr ls) (cons (car ls) acc) out)))))
 
 (define (tutorial--quotes lines)
-  ;; each quote of a lesson is a slide: (HEADING TEXT), HEADING the ###
-  ;; heading above it or #f. Quote lines in a row are one quote. A quote
-  ;; that starts with Try it is a thing to do; any other is a thing to read
-  (let loop ((ls lines) (h #f) (q #f) (out '()))
-    (let ((flush (lambda () (if q (cons (list h (string-trim q)) out) out))))
+  ;; each section of a lesson is a slide: (HEADING TEXT), HEADING its ###
+  ;; heading or #f before the first one. TEXT is the section's quotes, one
+  ;; paragraph each; quote lines in a row are one paragraph. A leading
+  ;; **Try it.** is dropped
+  (let loop ((ls lines) (h #f) (q #f) (paras '()) (out '()))
+    (let* ((paras (if q (cons (string-trim q) paras) paras))
+           (flush (lambda () (if (pair? paras)
+                                 (cons (list h (string-join (reverse paras) "\n\n")) out)
+                                 out))))
       (cond ((null? ls) (reverse (flush)))
             ((string-prefix? ">" (car ls))
              (let* ((s (string-trim (substring-bytes (car ls) 1 (string-byte-length (car ls)))))
                     (s (if (string-prefix? "**Try it.**" s)
                            (string-trim (substring-bytes s 11 (string-byte-length s)))
                            s)))
-               (loop (cdr ls) h (if q (string-append q " " s) s) out)))
+               ;; the paragraph so far goes back, not into PARAS, while it grows
+               (loop (cdr ls) h (if q (string-append q " " s) s) (if q (cdr paras) paras) out)))
             ((string-prefix? "### " (car ls))
-             (loop (cdr ls) (string-trim (substring-bytes (car ls) 4 (string-byte-length (car ls)))) #f (flush)))
-            (else (loop (cdr ls) h #f (flush)))))))
+             (loop (cdr ls) (string-trim (substring-bytes (car ls) 4 (string-byte-length (car ls)))) #f '() (flush)))
+            (else (loop (cdr ls) h #f paras out))))))
 
 (define (tutorial--lesson title lines n at)
   ;; AT is the byte where the lesson's ## heading starts in the master
@@ -817,7 +822,9 @@
                 (if step
                     (filter pair? (list (let ((h (list-ref (plist-get l 'heads) (caddr step))))
                                           (if h (tutorial--div "tutorial-title" 'text h) '()))
-                          (tutorial--div "tutorial-say" 'children (tutorial--say (car step)))
+                          (tutorial--div "tutorial-say" 'children
+                            (map (lambda (p) (tutorial--div "tutorial-para" 'children (tutorial--say p)))
+                                 (string-split (car step) "\n\n")))
                           (let* ((here (list slug i))
                                  (p (tutorial--probe-of slug (car step))))
                             (cond ((and p (not done?) (equal? *tutorial-probing* here))
@@ -945,6 +952,7 @@
 .tutorial-dot-done { background: var(--dim-fg); border-color: var(--dim-fg); }
 .tutorial-dot-here { background: var(--accent-fg); border-color: var(--accent-fg); }
 .tutorial-title { font-size: 18px; font-weight: var(--fw-semi); margin-bottom: 10px; }
+.tutorial-para + .tutorial-para { margin-top: .7em; }
 .tutorial-say { font-size: 26px; line-height: 1.45; margin-bottom: 18px; }
 /* a key is a keycap: the editor's key element in a box, one cap a key. The
    cap keeps the main text colour: --accent steps down in an inactive window,

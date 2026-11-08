@@ -26,7 +26,6 @@ You never need to remember a key. Compos explains itself while it runs, and a ch
 
 | Key | What it does |
 | --- | --- |
-| `s-p` | Find a command: say what you want to do |
 | `M-?` | Explain what is here: this buffer, its mode, its keys, the name at point |
 | `C-h k` | Describe the next key you type |
 | `C-h h` | Read how to do a common task |
@@ -35,13 +34,9 @@ You never need to remember a key. Compos explains itself while it runs, and a ch
 | `M-o` | Ask the chat of the page you are on |
 | `C-h ?` | List every help command |
 
-Beside each command, the minibuffer shows the key that runs it. So when you find a command by its words, you also learn its key, and next time you can type the key.
-
-> **Try it.** Type `s-p` and type what you want to do, for example "split the window". Read the commands it offers, and the key beside each one. Then type `ESC` to close it.
-
 > **Try it.** Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
 
-> **Try it.** Type `C-h k s-p` and read what that key does. Type `q` to close the help.
+> **Try it.** Type `C-h k M-o` and read what that key does. Type `q` to close the help.
 
 > **Try it.** Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
 

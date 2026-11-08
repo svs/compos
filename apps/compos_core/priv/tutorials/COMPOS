@@ -1,15 +1,5 @@
 # Compos Tutorial
 
-## Choose a model
-
-Compos works with a chat model. It writes replies in chats, and does work as an agent. First, choose the model that new chats use. The lessons that come after can then use it. A lesson that needs no model works without it, so you can also come back here later.
-
-> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Test** sends it a short message, **Use this** comes when it replied, **Install** when its program is missing, and **Add a key** when it needs one.
-
-> **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
-
-If no reply comes, the slide tells you what is wrong. Choose another card, or type `M-x llm-connectors` to test each connector and see its details. `M-x setup-ai-guide` explains connectors, logins and keys.
-
 ## Welcome
 
 Welcome. This tutorial teaches Compos by doing: you read it, and you edit it as you go.
@@ -49,37 +39,36 @@ The sections, in order.
 
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `ESC` or `C-g` to cancel the search and return to where you started.
 
-1. Choose a model
-2. Welcome
-3. Set up
-4. Windows and focus
-5. Typing and the focus
-6. Selecting, copying and pasting
-7. Searching and replacing
-8. Key notation
-9. Named commands
-10. Help
-11. Files and buffers
-12. Windows
-13. Groups
-14. Agents
-15. Settings
-16. Editing and undo
-17. Prefix arguments
-18. Modes and keymaps
-19. Lists and previews
-20. Browsing the web
-21. Why Compos
-22. Persistence
-23. The editor is malleable
-24. Scheme and the BEAM
-25. Where to go next
+1. Welcome
+2. Set up
+3. Windows and focus
+4. Typing and the focus
+5. Selecting, copying and pasting
+6. Searching and replacing
+7. Key notation
+8. Named commands
+9. Help
+10. Files and buffers
+11. Windows
+12. Groups
+13. Agents
+14. Settings
+15. Editing and undo
+16. Prefix arguments
+17. Modes and keymaps
+18. Lists and previews
+19. Browsing the web
+20. Why Compos
+21. Persistence
+22. The editor is malleable
+23. Scheme and the BEAM
+24. Where to go next
 
 ---
 
 ## Set up
 
-This lesson sets up the decision models and the browser extension. The first lesson chose the chat model. Compos uses two more kinds of model, for small decisions. A lesson that needs neither works without this setup, so you can also come back here later.
+This lesson sets up the decision models and the browser extension. The setup wizard chose the chat model. Compos uses two more kinds of model, for small decisions. A lesson that needs neither works without this setup, so you can also come back here later.
 
 | Model | What it does | Where it runs |
 | --- | --- | --- |
@@ -317,7 +306,7 @@ A buffer can belong to several useful contexts without being trapped in one appl
 
 ## Agents
 
-The Choose a model lesson chose the model that new chats use, and tested that it answers.
+The setup wizard chose the model that new chats use, and tested that it answers.
 
 In most programs, a chat sidebar and an application share a screen but stay separate systems. The assistant sees summaries and a few narrow actions, while the application keeps the real state somewhere else.
 

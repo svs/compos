@@ -1081,13 +1081,16 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (list 'h (/ 1 3) 'self *tutorial-detail-buffer* *tutorial-lesson-buffer*))
 
 (define (tutorial-open!)
-  "Open the tutorial: practice, slide and lesson, at the step the reader is on."
+  "Open the tutorial: practice, slide and lesson, at the step the reader is on.
+   The practice pane has the focus: the reader types there first."
   (tutorial--load!)
   (let ((panes (tutorial--panes!)))
     (tutorial--go! (or (tutorial--lesson-now) (tutorial--first-open)))
     (set! *tutorial-open* #t)
     (set! *tutorial-frame* (selected-frame))
     (tutorial--arrange! *tutorial-buffer*)
+    (let ((w (window-showing *tutorial-buffer*)))
+      (when (and w (not (equal? w (active-window)))) (select-window! w)))
     *tutorial-buffer*))
 
 ;;; the layout: the tutorial keeps its panes
@@ -1374,12 +1377,12 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 
-;; Behind the setup lessons, Choose a model and Set up, a chat troubleshoots.
+;; Behind the setup lesson, Set up, a chat troubleshoots.
 ;; It is the slide's own chat, attached as every page's chat is: M-o on the
 ;; slide opens it. A step that fails, or h on the slide, goes to it; its
 ;; answer comes to the slide.
 (define *tutorial-setup-chat* #f)
-(define *tutorial-setup-lessons* '("choose-a-model" "set-up"))
+(define *tutorial-setup-lessons* '("set-up"))
 
 (define (tutorial--setup-lesson? slug)
   (and (member slug *tutorial-setup-lessons*) #t))
@@ -1417,57 +1420,6 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
           (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x llm-connectors to test the models and choose another."))
           (tutorial--draw-detail!))))))
 
-;; the model step: the setup wizard chose one already, or the reader does,
-;; on the slide, from the same model cards the wizard's first step shows;
-;; the step finishes when a model is in use
-(tutorial-await! "choose-a-model" "choose the model that new chats use"
-  (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
-
-(tutorial-cards! "choose-a-model" "choose the model that new chats use"
-  (lambda ()
-    (if (boundp 'setup-model-cards) (setup-model-cards) '())))
-
-(define (tutorial--model-chosen!)
-  "A new default connector, chosen anywhere: the model step finishes, and
-   the test step runs again for it."
-  (tutorial--retest-model!)
-  (tutorial-recheck!)
-  (tutorial--draw-detail!))
-
-(add-hook! 'setup-connector-chosen-hook 'tutorial--model-chosen!)
-(add-hook! 'llm-connectors-tested-hook 'tutorial--draw-detail!)
-
-(define (tutorial--retest-model!)
-  ;; a passed test proved the old model: it is not done for the new one
-  (let* ((l (tutorial-lesson "choose-a-model"))
-         (i (and l (let find ((ss (tutorial--steps l)) (i 0))
-                      (cond ((null? ss) #f)
-                            ((string-contains? (car (car ss)) "test message") i)
-                            (else (find (cdr ss) (+ i 1))))))))
-    (when i
-      (set! *tutorial-done*
-            (alist-put *tutorial-done* "choose-a-model"
-                       (filter (lambda (j) (not (= j i))) (tutorial--done-steps "choose-a-model"))))
-      (set! *tutorial-probing* #f)
-      (set! *tutorial-probe-failed* #f)
-      (when (equal? *tutorial-current* "choose-a-model") (set! *tutorial-shown* i))
-      (tutorial--changed!))))
-
-;; the reply step is the connectors app's test, run on the connector the
-;; reader chose; its result shows in M-x llm-connectors too
-(tutorial-probe! "choose-a-model" "test message to the model"
-  (lambda (pass fail)
-    ;; the card tested the model before Use this: a passed test counts
-    (if (eq? (plist-get (or (llm-connectors-test-result *default-connector*) '()) 'status) 'ok)
-        (pass)
-    (llm-connectors-test! *default-connector*
-      (lambda (r)
-        (if (eq? (plist-get r 'status) 'ok)
-            (pass)
-            (fail (string-append *default-connector* " gave no reply (" (or (plist-get r 'error) "no reply")
-                                 "). Type M-x llm-connectors to sign it in, add its key, or choose another.")))))))
-  (lambda () (string-append "Waiting for a reply from " *default-connector*)))
-
 (add-hook! 'tutorial-trouble-hook
   (lambda (slug why) (tutorial--setup-help! slug (string-append "This step failed: " why))))
 
@@ -1476,7 +1428,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (let* ((l (tutorial--lesson-now))
          (steps (if l (tutorial--steps l) '())))
     (if (not (and l (tutorial--setup-lesson? (plist-get l 'slug))))
-        (message "The setup chat helps with the Choose a model and Set up lessons")
+        (message "The setup chat helps with the Set up lesson")
         (tutorial--setup-help! (plist-get l 'slug)
           (string-append "The reader asks for help with this step: "
                          (if (< *tutorial-shown* (length steps))

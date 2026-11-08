@@ -1490,7 +1490,11 @@ body.unfocused .window.active .cursor {
 
 .echo-area {
   order: var(--ui-echo-order, -1);
-  display: flex; align-items: center; flex-wrap: wrap;
+  display: flex; align-items: center; flex-wrap: nowrap;
+  /* One row, always: a message of more lines draws upward over the
+     windows, as which-key does, and no window loses height. */
+  height: calc(1lh + var(--bar-py) + 5px + 1px);
+  position: relative; z-index: 45;
   gap: var(--s4) var(--s9);
   padding: var(--bar-py) var(--row-px) 5px;
   flex: none; min-width: 0;
@@ -1506,6 +1510,9 @@ body.unfocused .window.active .cursor {
   color: var(--text-strong); white-space: pre;
   min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
   text-transform: none; letter-spacing: 0;
+  /* the bottom line sits in the row; the lines above it hang over
+     the windows on the echo ground */
+  align-self: flex-end; background: var(--surface-sunken);
 }
 .ml-frame-path {
   min-width: 0; max-width: 62vw; flex: 0 1 auto;

@@ -1000,8 +1000,13 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
         (unless (buffer-derived-mode? buf "morg-mode")
           (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
         (buffer-set-local! buf 'morg-narrow-anchor #f)))
-    (buffer-watch-change! buf 'tutorial-master
-      (lambda (pos inserted deleted source) (tutorial--edited!)))))
+    ;; eager: the slide follows an edit even while the pane is hidden
+    (unless (buffer-local buf 'tutorial-master-watch)
+      (desktop-skip! buf 'tutorial-master-watch)
+      (buffer-set-local! buf 'tutorial-master-watch
+        (on-change! buf (lambda (pos inserted deleted source)
+                          (unless (equal? source "locals") (tutorial--edited!)))
+                    'eager)))))
 
 (define (tutorial--edited!)
   ;; an edit of the lesson pane: the slide and the steps it watches follow

@@ -2117,6 +2117,14 @@
         };
         window.addEventListener("keydown", this.tabWalkH, true);
         window.addEventListener("keyup", this.tabWalkH, true);
+        // the release of the last modifier ends a cycle of a pane's
+        // windows: the chat card over the window goes (window-flash.scm)
+        this.flashEndH = (e) => {
+          if (!MODS.includes(e.key)) return;
+          if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) return;
+          if (document.querySelector(".window-flash")) this.pushEvent("window_flash_end", {});
+        };
+        window.addEventListener("keyup", this.flashEndH, true);
         this.whichKeyHeld = new Set();
         this.whichKeyQuery = "";
         this.whichKeyFiltering = false;
@@ -3689,6 +3697,7 @@
         window.removeEventListener("keyup", this.keyupH);
         window.removeEventListener("keydown", this.tabWalkH, true);
         window.removeEventListener("keyup", this.tabWalkH, true);
+        window.removeEventListener("keyup", this.flashEndH, true);
         clearTimeout(this.tabWalkT);
         window.removeEventListener("resize", this.resizeH);
         window.removeEventListener("wheel", this.wheelH);

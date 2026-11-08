@@ -200,6 +200,15 @@ defmodule Compos.Ui.EditorLive do
   # one handler for every click that runs a command: a transcript button
   # sends a command name, the modeline-info segment sends its buffer.
   # The Scheme gate ui-command! holds the whitelist — no policy here.
+  # the release of the modifiers takes the chat card off a cycled window
+  def handle_event("window_flash_end", _params, socket) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("run-command", ["window-flash-end"])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # the release of the modifiers ends a walk of the group tabs
   def handle_event("group_tab_walk_end", _params, socket) do
     Input.run(socket.assigns.frame, fn ->

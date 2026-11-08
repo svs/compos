@@ -50,7 +50,8 @@
 
 ;; The card says where a chat stands while you cycle to it. Once you stay,
 ;; the first other command takes it away: a key typed in the chat, C-g, or
-;; the end of a walk. Only another step of the cycle keeps it.
+;; the end of a walk. Only another step of the cycle keeps it. Letting go
+;; of the modifier also ends it: the client sends window-flash-end.
 (define window-flash--cycle-commands
   '("pane-next-window" "pane-previous-window"
     "window-next-mode-buffer" "window-previous-mode-buffer"
@@ -62,6 +63,10 @@
     (set! window-flash--buf #f)))
 
 (add-hook! 'post-command-hook 'window-flash--settled!)
+
+(define-command "window-flash-end" "Take the chat card off the window: the modifier of the cycle came up"
+  (lambda () (window-flash--clear! window-flash--buf) (set! window-flash--buf #f)))
+(catalog-meta! 'command "window-flash-end" 'domain 'windows 'effects '(write display))
 
 (public! 'window-flash-card "(window-flash-card BUF) -> (TITLE SUMMARY STATE) a window flashes for the chat BUF, or #f")
 (catalog-meta! 'function "window-flash-card" 'effects '(read))

@@ -208,3 +208,22 @@
           (check-equal! (handheld-scrub! 2) 2 "line two is reachable")
           (check-equal! (point) 4 "and point is at its start")
           (check-equal! (handheld-scrub! 99) 4 "a line past the end clamps to the last line"))))))
+
+(deftest 'the-sheets-narrow-on-every-word
+  "a query keeps the rows whose title or line below holds each of its words"
+  (lambda ()
+    (handheld-test-scene
+      (lambda ()
+        (buffer-create "zz-handheld-search")
+        (let ((names (lambda (q)
+                       (apply append (map (lambda (s) (map car (cadr s))) (handheld-buffers #f q))))))
+          (check-true! (member "zz-handheld-search" (names "SEARCH zz-handheld"))
+                       "every word is in the title, in any case")
+          (check-false! (member "zz-handheld-search" (names "zz-handheld nowhere-word"))
+                        "one missing word drops the row")
+          (check-true! (null? (filter (lambda (s) (null? (cadr s))) (handheld-buffers #f "zz")))
+                       "a section with no row left goes"))
+        (let ((labels (map cadr (handheld-groups "zz-handheld-second"))))
+          (check-true! (and (pair? labels)
+                            (null? (filter (lambda (l) (not (string-contains? l "zz-handheld-second"))) labels)))
+                       "the groups narrow the same way"))))))

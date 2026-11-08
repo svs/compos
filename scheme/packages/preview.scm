@@ -202,6 +202,61 @@
           (else #f))))
 (public! 'preview-heal! "(preview-heal! BUF) — make BUF's drawn rows agree with its preview-mode")
 
+;; The csv files a rendered Markdown page reads: the :tangle target of each
+;; csv fence, as a full path. The client stats them in its preview key, so a
+;; changed file draws again. A change to the text keeps the list, not a draw.
+(define (preview--fence-tangle info)
+  (let loop ((ws (filter (lambda (w) (not (equal? w "")))
+                         (string-split (string-replace info "\t" " ") " "))))
+    (cond ((or (null? ws) (null? (cdr ws))) #f)
+          ((equal? (car ws) ":tangle") (cadr ws))
+          (else (loop (cdr ws))))))
+
+(define (preview--csv-file buf target)
+  (cond ((or (string-prefix? "/" target) (string-prefix? "~" target))
+         (expand-path target))
+        ((buffer-path buf)
+         (expand-path (string-append (car (path-split (buffer-path buf))) target)))
+        (else
+         (expand-path (string-append (or (buffer-local buf 'default-directory) ".")
+                                     "/" target)))))
+
+(define (preview-csv-files buf)
+  (if (not (string-contains? (buffer-text buf) "csv"))
+      '()
+      (filter (lambda (path) path)
+       (map
+        (lambda (block)
+          (let* ((info (caddr block))
+                 (words (string-split (string-trim info) " ")))
+            (and (pair? words)
+                 (equal? (string-downcase (car (string-split (car words) "\t"))) "csv")
+                 (let ((target (preview--fence-tangle info)))
+                   (and target (preview--csv-file buf target))))))
+        (block-list buf)))))
+
+(define *preview-csv-hooks* '())
+
+(define (preview--csv-sync! buf)
+  (buffer-set-local! buf 'preview-csv-files (preview-csv-files buf)))
+
+(define (preview--csv-on! buf)
+  (preview--csv-off! buf)
+  (preview--csv-sync! buf)
+  (set! *preview-csv-hooks*
+    (alist-put *preview-csv-hooks* buf
+      (on-change! buf
+        (lambda (pos inserted deleted source)
+          (unless (equal? source "locals") (preview--csv-sync! buf)))
+        'eager))))
+
+(define (preview--csv-off! buf)
+  (let ((old (assoc buf *preview-csv-hooks*)))
+    (when old
+      (remove-on-change! (cadr old))
+      (set! *preview-csv-hooks*
+        (remove (lambda (entry) (equal? (car entry) buf)) *preview-csv-hooks*)))))
+
 (define (preview-mode--apply! buf)
   (let ((renderer (preview-renderer-for buf)))
     (if renderer
@@ -213,6 +268,7 @@
                 ;; a browse tab showing the page itself keeps the page
                 (unless (equal? (buffer-local buf 'render-mode) "web")
                   (buffer-set-local! buf 'render-mode renderer))))
+          (if (equal? renderer "markdown") (preview--csv-on! buf) (preview--csv-off! buf))
           (preview-tabs-sync! buf #t))
         ;; A renamed or restored buffer can lose its renderer. Remove the
         ;; stale mode entry instead of leaving an enabled mode that draws
@@ -225,6 +281,8 @@
 
 (define (preview-mode--teardown! buf)
   (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
+  (preview--csv-off! buf)
+  (buffer-set-local! buf 'preview-csv-files #f)
   (buffer-set-local! buf 'render-mode #f)
   (preview-tabs-sync! buf #f))
 

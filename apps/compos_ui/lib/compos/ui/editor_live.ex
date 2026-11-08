@@ -972,7 +972,7 @@ defmodule Compos.Ui.EditorLive do
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
        leaf.hidden_lines, :erlang.phash2(leaf.overlays), Compos.Ui.Oembed.generation(),
        Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
-       csv_preview_file_key(leaf.buffer, leaf.text, rm)}
+       csv_preview_file_key(leaf.buffer, rm)}
 
     {html, cache} =
       case cache[{:preview, leaf.id}] do
@@ -1067,40 +1067,16 @@ defmodule Compos.Ui.EditorLive do
   end
 
 
-  defp csv_preview_file_key(_buffer, _text, rm) when rm != "markdown", do: nil
+  # preview.scm keeps the csv files a Markdown page reads; a changed file
+  # changes the key, so the page draws again.
+  defp csv_preview_file_key(_buffer, rm) when rm != "markdown", do: nil
 
-  defp csv_preview_file_key(buffer, text, "markdown") do
-    text
-    |> csv_tangle_targets()
-    |> Enum.map(fn target ->
-      path = csv_preview_path(buffer, target)
-
+  defp csv_preview_file_key(buffer, "markdown") do
+    for path <- Compos.Core.Buffer.get_local(buffer, "preview-csv-files") || [] do
       case File.stat(path) do
         {:ok, stat} -> {path, stat.size, stat.mtime}
         _ -> {path, nil}
       end
-    end)
-  end
-
-  # The :tangle target of every csv fence. The Markdown grammar finds the
-  # fences, so a fence line quoted inside another block is not one. The key
-  # runs on every draw, so a text with no "csv" in it is not parsed.
-  defp csv_tangle_targets(text) do
-    if :binary.match(text, "csv") == :nomatch do
-      []
-    else
-      "markdown"
-      |> Compos.Core.TS.ts_query_nif(text, "(info_string) @info")
-      |> Enum.map(fn {_, s, e} -> binary_part(text, s, e - s) end)
-      |> Enum.filter(
-        &(&1 |> String.split() |> List.first() |> to_string() |> String.downcase() == "csv")
-      )
-      |> Enum.flat_map(fn info ->
-        case Regex.run(~r/:tangle[ \t]+(\S+)/, info) do
-          [_, target] -> [target]
-          _ -> []
-        end
-      end)
     end
   end
 

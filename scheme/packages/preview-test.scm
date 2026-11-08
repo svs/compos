@@ -329,3 +329,22 @@
           (check-true! (equal? (buffer-local buf 'preview-rows) #t)
                        "and preview-mode draws the rows in place")))
       (buffer-kill! buf))))
+
+(deftest 'a-markdown-page-knows-the-csv-files-it-reads
+  "preview-mode keeps the :tangle path of each csv fence, so the client can see a changed file"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-preview-csv*" "```csv :tangle data.csv\na,b\n```\n")))
+      (buffer-set-local! buf 'default-directory "/tmp/zz-csv")
+      (buffer-set-local! buf 'preview-renderer "markdown")
+      (enable-minor-mode! buf "preview-mode")
+      (check-equal! (buffer-local buf 'preview-csv-files) '("/tmp/zz-csv/data.csv")
+                    "the fence's file, beside the page")
+      (buffer-insert! buf (buffer-size buf)
+        "```CSV :tangle /tmp/b.csv :lines 2\n1\n```\n```sh :tangle c.csv\n```\n")
+      ;; the change hook runs after this test's turn; ask the list itself
+      (check-equal! (preview-csv-files buf)
+                    '("/tmp/zz-csv/data.csv" "/tmp/b.csv")
+                    "a new csv fence counts and other languages do not")
+      (disable-minor-mode! buf "preview-mode")
+      (check-equal! (buffer-local buf 'preview-csv-files) #f "the page is gone, so is the list")
+      (buffer-kill! buf))))

@@ -23,10 +23,11 @@
 ;;; --- the groups --------------------------------------------------------------
 ;;; Each row is (ID LABEL CURRENT?), most recent first.
 
-(define (handheld-groups)
-  (let ((here (frame-group)))
-    (map (lambda (id) (list id (group-display-name id) (equal? id here)))
-         (group-ids-mru))))
+(define (handheld-groups &optional q)
+  (let ((here (frame-group)) (terms (handheld-terms (or q ""))))
+    (filter (lambda (row) (handheld-terms-match? terms (string-downcase (cadr row))))
+            (map (lambda (id) (list id (group-display-name id) (equal? id here)))
+                 (group-ids-mru)))))
 
 ;;; --- the buffers ----------------------------------------------------------------
 ;;; Two sections, most recent first: the frame group's buffers, then every
@@ -47,16 +48,23 @@
         (string-append mode " · " (group-display-name g))
         mode)))
 
-;; ((SECTION ROWS) ...)
-(define (handheld-buffers &optional cur)
+;; ((SECTION ROWS) ...); Q narrows the rows: each of its words must be in
+;; the row's title or its line below
+(define (handheld-buffers &optional cur q)
   (let* ((g (frame-group))
+         (terms (handheld-terms (or q "")))
+         (keep (lambda (rows)
+                 (filter (lambda (r)
+                           (handheld-terms-match? terms
+                             (string-downcase (string-append (cadr r) " " (caddr r)))))
+                         rows)))
          (here (if g (handheld-buffer-rows (list 'groups (list g)) cur (lambda (r) (or (nth 3 r) ""))) '()))
          (names (map car here))
          (rest (filter (lambda (row) (not (member (car row) names)))
                        (handheld-buffer-rows '() cur handheld-buffer-sub))))
     (filter (lambda (s) (pair? (car (cdr s))))
-            (list (list (if g (group-display-name g) "buffers") here)
-                  (list "everything else" rest)))))
+            (list (list (if g (group-display-name g) "buffers") (keep here))
+                  (list "everything else" (keep rest))))))
 
 ;;; --- the commands ------------------------------------------------------------
 ;;; A command row is (NAME DOC). The sheet opens on two sections: the
@@ -152,11 +160,38 @@
                     (loop (cdr names) (cons (list (handheld-search-rank name q terms here) (string-length name) name) hits))
                     (loop (cdr names) hits))))))))
 
-;; What the header shows for BUF: (GROUP-LABEL CHAT?)
+;; The words the handheld shows, by key: the composer's placeholder, each
+;; sheet's title, filter hint and empty line, and the prompt sheet's hint
+;; for each prompt style.
+(define (handheld-copy label chat?)
+  (list (list "placeholder" (if (or chat? (equal? label ""))
+                                  "Message the chat"
+                                  (string-append "Ask the " label " chat")))
+        (list "narrow" "Type to narrow")
+        (list "buffers-title" (if (equal? label "") "Buffers" (string-append "Buffers · " label)))
+        (list "groups-title" "Groups")
+        (list "commands-title" "Commands")
+        (list "buffers-hint" "Filter buffers")
+        (list "groups-hint" "Filter groups")
+        (list "commands-hint" "Search every command")
+        (list "commands-empty" "Type to search every command")
+        (list "empty" "Nothing here yet")
+        (list "matchless" "Nothing matches")
+        (list "kicker" "prompt")
+        (list "prompt-question" "y answers yes · n answers no · C-g quits")
+        (list "prompt-filter" "type to narrow · empty removes it · RET keeps it")
+        (list "prompt-completing" "Tap a row to take it, or type to narrow.")
+        (list "prompt" "Type in the field below and press RET.")))
+
+;; The render modes that draw their own page, so they get no scroll rail
+(define *handheld-railless* '("blocks" "html" "markdown" "file" "app" "terminal"))
+
+;; What the header shows for BUF: (GROUP-LABEL CHAT? COPY RAILLESS-MODES)
 (define (handheld-view buf)
-  (let ((g (frame-group)))
-    (list (if g (group-display-name g) "")
-          (and (chat-buffer? buf) #t))))
+  (let* ((g (frame-group))
+         (label (if g (group-display-name g) ""))
+         (chat? (and buf (chat-buffer? buf) #t)))
+    (list label chat? (handheld-copy label chat?) *handheld-railless*)))
 
 (effects! '(write))
 

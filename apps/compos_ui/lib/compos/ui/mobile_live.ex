@@ -18,7 +18,7 @@ defmodule Compos.Ui.MobileLive do
   alias Compos.Core.{Editor, Events, Input, Session}
   alias Compos.Ui.EditorLive
 
-  @empty_view %{group: "", chat: false}
+  @empty_view %{group: "", chat: false, copy: %{}, railless: []}
 
   # the sheets the bar opens, in the bar's order after the chat
   @sheets ["buffers", "groups", "commands"]
@@ -100,20 +100,17 @@ defmodule Compos.Ui.MobileLive do
 
   # RET in the sheet's filter takes the first row it leaves
   def handle_event("sheet_filter", %{"key" => "Enter", "value" => q}, socket) when is_binary(q) do
-    socket = assign(socket, filter: q)
-    socket = if socket.assigns.sheet == "commands", do: load_sheet(socket), else: socket
+    socket = socket |> assign(filter: q) |> load_sheet()
 
-    case socket.assigns.sheet_rows |> shown_sections(socket.assigns.sheet, q) |> Enum.flat_map(& &1.rows) do
+    case Enum.flat_map(socket.assigns.sheet_rows, & &1.rows) do
       [r | _] -> handle_event("pick", %{"kind" => r.kind, "id" => r.id}, socket)
       [] -> {:noreply, refresh(socket)}
     end
   end
 
-  # the sheet's filter: groups and buffers narrow here, commands ask Scheme
+  # the sheet's filter: Scheme narrows the rows
   def handle_event("sheet_filter", %{"value" => q}, socket) when is_binary(q) do
-    socket = assign(socket, filter: q)
-    socket = if socket.assigns.sheet == "commands", do: load_sheet(socket), else: socket
-    {:noreply, refresh(socket)}
+    {:noreply, socket |> assign(filter: q) |> load_sheet() |> refresh()}
   end
 
   # a tap on a row of a sheet
@@ -341,11 +338,12 @@ defmodule Compos.Ui.MobileLive do
     end
   end
 
-  defp fetch_view(_socket, nil), do: @empty_view
-
   defp fetch_view(socket, buf) do
-    case call(socket, "handheld-view", [buf]) do
-      {:ok, [group, chat]} -> %{group: str(group), chat: chat == true}
+    case call(socket, "handheld-view", [buf || false]) do
+      {:ok, [group, chat, copy, railless]} ->
+        %{group: str(group), chat: chat == true, railless: Enum.map(list(railless), &str/1),
+          copy: Map.new(list(copy), fn [k, v] -> {str(k), str(v)} end)}
+
       _ -> @empty_view
     end
   rescue
@@ -363,17 +361,17 @@ defmodule Compos.Ui.MobileLive do
     _ -> assign(socket, sheet_rows: [])
   end
 
-  defp fetch_sheet(socket, "groups", _buf, _q) do
+  defp fetch_sheet(socket, "groups", _buf, q) do
     rows =
-      for [id, label, cur] <- ok_list(call(socket, "handheld-groups", [])) do
+      for [id, label, cur] <- ok_list(call(socket, "handheld-groups", [q])) do
         %{kind: "group", id: str(id), label: str(label), sub: "", current: cur == true}
       end
 
     [%{title: "", rows: rows}]
   end
 
-  defp fetch_sheet(socket, "buffers", buf, _q) do
-    for [title, rows] <- ok_list(call(socket, "handheld-buffers", [buf || false])) do
+  defp fetch_sheet(socket, "buffers", buf, q) do
+    for [title, rows] <- ok_list(call(socket, "handheld-buffers", [buf || false, q])) do
       rows =
         for [name, label, sub, cur] <- list(rows) do
           %{kind: "buffer", id: str(name), label: str(label), sub: str(sub), current: cur == true}
@@ -400,23 +398,6 @@ defmodule Compos.Ui.MobileLive do
       %{kind: "command", id: str(name), label: str(name), sub: str(doc), current: false}
     end
   end
-
-  # groups and buffers narrow on the client's side of the call: every
-  # word of the filter must be in the row's label or its line below
-  defp shown_sections(sections, sheet, q) when sheet in ["groups", "buffers"] do
-    terms = q |> String.downcase() |> String.split(" ", trim: true)
-
-    if terms == [] do
-      sections
-    else
-      for s <- sections do
-        hay = fn r -> String.downcase(r.label <> " " <> r.sub) end
-        %{s | rows: Enum.filter(s.rows, fn r -> Enum.all?(terms, &String.contains?(hay.(r), &1)) end)}
-      end
-    end
-  end
-
-  defp shown_sections(sections, _sheet, _q), do: sections
 
   defp ok_list({:ok, x}) when is_list(x), do: x
   defp ok_list(_), do: []
@@ -464,7 +445,7 @@ defmodule Compos.Ui.MobileLive do
       <.head leaf={@leaf} view={@view} />
 
       <c-group class="hh-body">
-        <c-group :if={rail?(@leaf)} class="hh-rail" data-rail="1">
+        <c-group :if={rail?(@leaf, @view)} class="hh-rail" data-rail="1">
           <c-group class="hh-rail-mark" style={"top: #{rail_top(@leaf)}%"}></c-group>
         </c-group>
         <.content leaf={@leaf} />
@@ -500,9 +481,9 @@ defmodule Compos.Ui.MobileLive do
         </c-group>
       </c-group>
 
-      <.pick_sheet :if={@sheet} sheet={@sheet} sections={shown_sections(@sheet_rows, @sheet, @filter)} filter={@filter} view={@view} />
+      <.pick_sheet :if={@sheet} sheet={@sheet} sections={@sheet_rows} filter={@filter} view={@view} />
 
-      <.sheet :if={@state.minibuffer || (@state.transient && @state.transient[:groups])} state={@state} />
+      <.sheet :if={@state.minibuffer || (@state.transient && @state.transient[:groups])} state={@state} view={@view} />
     </c-frame>
     """
   end
@@ -590,7 +571,7 @@ defmodule Compos.Ui.MobileLive do
       <c-group class="hh-sheet-scrim" phx-click="sheet_close"></c-group>
       <c-group class="hh-sheet hh-pick" role="dialog" aria-modal="true" data-sheet={@sheet}>
         <c-group class="hh-sheet-head">
-          <c-text class="hh-kicker">{sheet_title(@sheet, @view)}</c-text>
+          <c-text class="hh-kicker">{copy(@view, @sheet <> "-title")}</c-text>
           <c-text class="hh-spacer"></c-text>
           <c-text class="hh-sheet-quit" phx-click="sheet_close">Close</c-text>
         </c-group>
@@ -604,7 +585,7 @@ defmodule Compos.Ui.MobileLive do
             autocapitalize="off"
             spellcheck="false"
             enterkeyhint="go"
-            placeholder={filter_hint(@sheet)}
+            placeholder={copy(@view, @sheet <> "-hint")}
             value={@filter}
             phx-keyup="sheet_filter"
             phx-debounce="120"
@@ -621,25 +602,19 @@ defmodule Compos.Ui.MobileLive do
               <c-text :if={r.current} class="hh-row-here">here</c-text>
             </c-group>
           <% end %>
-          <c-group :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@sheet, @filter)}</c-group>
+          <c-group :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@view, @sheet, @filter)}</c-group>
         </c-group>
       </c-group>
     </c-group>
     """
   end
 
-  defp sheet_title("buffers", %{group: g}) when g != "", do: "Buffers · " <> g
-  defp sheet_title("buffers", _view), do: "Buffers"
-  defp sheet_title("groups", _view), do: "Groups"
-  defp sheet_title("commands", _view), do: "Commands"
+  # the words come from handheld.scm, by key
+  defp copy(view, key), do: Map.get(view.copy, key, "")
 
-  defp filter_hint("buffers"), do: "Filter buffers"
-  defp filter_hint("groups"), do: "Filter groups"
-  defp filter_hint("commands"), do: "Search every command"
-
-  defp empty_word("commands", ""), do: "Type to search every command"
-  defp empty_word(_sheet, ""), do: "Nothing here yet"
-  defp empty_word(_sheet, _q), do: "Nothing matches"
+  defp empty_word(view, "commands", ""), do: copy(view, "commands-empty")
+  defp empty_word(view, _sheet, ""), do: copy(view, "empty")
+  defp empty_word(view, _sheet, _q), do: copy(view, "matchless")
 
   defp sheet(%{state: %{minibuffer: mb}} = assigns) when is_map(mb) do
     assigns = assign(assigns, mb: mb, split: mb_split(mb))
@@ -649,12 +624,12 @@ defmodule Compos.Ui.MobileLive do
       <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
       <c-group class="hh-sheet" role="dialog" aria-modal="true">
         <c-group class="hh-sheet-head">
-          <c-text class="hh-kicker">{sheet_kicker(@state)}</c-text>
+          <c-text class="hh-kicker">{sheet_kicker(@state, @view)}</c-text>
           <c-text class="hh-spacer"></c-text>
           <c-text class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-text>
         </c-group>
         <c-group class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-group>
-        <c-group class="hh-sheet-hint">{sheet_hint(@mb)}</c-group>
+        <c-group class="hh-sheet-hint">{sheet_hint(@mb, @view)}</c-group>
         <c-group class="hh-sheet-input">
           <c-text class="hh-prompt">›</c-text>
           <c-text class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-text>
@@ -748,8 +723,8 @@ defmodule Compos.Ui.MobileLive do
 
   # ── small helpers ──────────────────────────────────────────────────
 
-  defp rail?(nil), do: false
-  defp rail?(leaf), do: leaf.render_mode not in ["blocks", "html", "markdown", "file", "app", "terminal"]
+  defp rail?(nil, _view), do: false
+  defp rail?(leaf, view), do: leaf.render_mode not in view.railless
 
   defp ml_name(nil), do: ""
   defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
@@ -772,10 +747,8 @@ defmodule Compos.Ui.MobileLive do
     if total <= 1, do: 0, else: round((line - 1) / (total - 1) * 100)
   end
 
-  defp placeholder(_view, %{minibuffer: mb}) when is_map(mb), do: "Type to narrow"
-  defp placeholder(%{chat: true}, _state), do: "Message the chat"
-  defp placeholder(%{group: g}, _state) when g != "", do: "Ask the " <> g <> " chat"
-  defp placeholder(_view, _state), do: "Message the chat"
+  defp placeholder(view, %{minibuffer: mb}) when is_map(mb), do: copy(view, "narrow")
+  defp placeholder(view, _state), do: copy(view, "placeholder")
 
   defp hh_root_class(leaf) do
     case Map.get(leaf, :blk_root) do
@@ -789,14 +762,13 @@ defmodule Compos.Ui.MobileLive do
 
   defp echo_error?(_), do: false
 
-  defp sheet_kicker(%{pending: [_ | _] = pending}), do: Enum.join(pending, " ")
-  defp sheet_kicker(%{minibuffer: %{style: style}}) when is_binary(style), do: style
-  defp sheet_kicker(_), do: "prompt"
+  defp sheet_kicker(%{pending: [_ | _] = pending}, _view), do: Enum.join(pending, " ")
+  defp sheet_kicker(%{minibuffer: %{style: style}}, _view) when is_binary(style), do: style
+  defp sheet_kicker(_, view), do: copy(view, "kicker")
 
-  defp sheet_hint(%{style: "question"}), do: "y answers yes · n answers no · C-g quits"
-  defp sheet_hint(%{style: "filter"}), do: "type to narrow · empty removes it · RET keeps it"
-  defp sheet_hint(%{completing: true}), do: "Tap a row to take it, or type to narrow."
-  defp sheet_hint(_), do: "Type in the field below and press RET."
+  defp sheet_hint(%{style: s}, view) when s in ["question", "filter"], do: copy(view, "prompt-" <> s)
+  defp sheet_hint(%{completing: true}, view), do: copy(view, "prompt-completing")
+  defp sheet_hint(_, view), do: copy(view, "prompt")
 
   defp count_text(%{total: total, sel: sel}) when is_integer(total) and total > 0 do
     "#{min((sel || 0) + 1, total)}/#{total}"

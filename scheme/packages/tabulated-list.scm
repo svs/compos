@@ -3162,6 +3162,10 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (public! 'list-mode-opts
   "(list-mode-opts NAME) — the options list mode NAME was defined with, as a plist; () when NAME is no list mode"
   'ui)
+
+(public! 'list-opt
+  "(list-opt BUF KEY) — the option KEY of the list in BUF: the active layout profile's value when it holds KEY, else the list mode's"
+  'ui)
 (effects! '(write))
 (public! 'list-define-filter!
   "(list-define-filter! MODE PREFIX FIELD [DOC]) — teach any list mode a filter: in its / filter, a word PREFIXtext keeps the rows whose FIELD (buf entry) -> text has text, e.g. (list-define-filter! \"todo-mode\" \"by:\" (lambda (b e) (plist-get e 'by)) \"filed by\")"

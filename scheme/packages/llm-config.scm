@@ -174,6 +174,7 @@
     (set-frame-local! 'llm-config-filter "")
     (set-frame-local! 'llm-config-new #f)
     (set-frame-local! 'llm-config-left #t)
+    (set-frame-local! 'llm-config-cursor (and match (llm-bundle-name match)))
     (set-frame-local! 'llm-config-follow '())))
 
 ;; the box shows NAME's config (#f: the chat's own), its draft if it has one
@@ -1168,6 +1169,10 @@
 ;; the cursor hook: a source row shows its config on the right
 (define (llm-config--on-select _buf item)
   (set-frame-local! 'llm-config-left (llm-config--source-row? item))
+  (set-frame-local! 'llm-config-cursor
+    (cond ((plist-get item 'bundle) (llm-bundle-name (plist-get item 'bundle)))
+          ((plist-get item 'live-row) #f)
+          (else #f)))
   (cond ((plist-get item 'bundle) (llm-config--show! (llm-bundle-name (plist-get item 'bundle))))
         ((plist-get item 'live-row) (llm-config--show! #f))
         (else #f)))
@@ -1254,7 +1259,10 @@
              (lambda () (llm-config--enter! name))
              'transient 'stay 'bundle b
              'flags-fn (lambda (_scope) (llm-config--shown-flag name))
-             'value-fn (lambda (_scope) (if (llm-config--selected? name) "✓ → configure" ""))
+             'value-fn (lambda (_scope)
+               (string-append
+                 (if (llm-config--selected? name) "✓ " "")
+                 (if (equal? (frame-local 'llm-config-cursor) name) "⏎" "")))
              'active-fn (lambda (_scope) (llm-config--selected? name)))))
        (filter (lambda (b) (llm-config--matches? (or (llm-bundle-name b) "")))
                (llm-config--by-name *llm-bundles*))))
@@ -1266,7 +1274,7 @@
     (lambda () (llm-config--enter! #f))
     'transient 'stay 'live-row #t
     'flags-fn (lambda (_scope) (llm-config--shown-flag #f))
-    'value-fn (lambda (_scope) (if (llm-config--selected? #f) "✓ → configure" ""))
+    'value-fn (lambda (_scope) (let ((cv (frame-local 'llm-config-cursor))) (string-append (if (llm-config--selected? #f) "✓ " "") (if (eq? cv #f) "⏎" ""))))
     'active-fn (lambda (_scope) (llm-config--selected? #f))))
 
 (define (llm-config--more-row)

@@ -47,7 +47,7 @@
   'group 'webhooks 'type 'boolean
   ;; custom.scm loads after this package, so the saved value arrives here
   'set (lambda (on)
-         (cond ((and on (not (webhooks-running?))) (report-errors "webhooks: start the server" (lambda () (webhooks-start!))))
+         (cond ((and on (not (webhooks-running?))) (webhooks--start-later!))
                ((and (not on) (webhooks-running?)) (webhooks-stop!)))))
 
 ;; the registry table webhook: NAME -> the endpoint plist: name path methods token peers handler
@@ -220,6 +220,13 @@
                                (lambda (request) (webhooks--handle request)))))))
   (webhooks--tunnel-start!)
   (plist-get *webhooks-server* 'url))
+
+;; The package and custom.scm load inside the Session's boot, and a task
+;; cannot start there: the Session would call itself. The lane runs the
+;; start once the boot ends.
+(define (webhooks--start-later!)
+  (run-on-lane! "webhooks-start"
+    (lambda () (report-errors "webhooks: start the server" (lambda () (webhooks-start!))))))
 
 (define (webhooks--tunnel-start!)
   (let ((token (secret-value 'webhooks-tunnel-token)))
@@ -767,5 +774,4 @@
 
 (webhooks--define-saved!)
 
-(when webhooks-enabled
-  (report-errors "webhooks: start the server" (lambda () (webhooks-start!))))
+(when webhooks-enabled (webhooks--start-later!))

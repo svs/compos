@@ -5596,13 +5596,73 @@
 ;; the names M-x offers, as vertico sorts them: the shortest first, then
 ;; A-Z; history-order puts the recent ones before them all. A command of a
 ;; mode this buffer is not in is left out.
+(define *command-tiers* (list -1 '()))  ;; (KEY ((NAME TIER) ...)), sorted by NAME
+
+(define (command--app-packages)
+  "The packages that ship as apps: the files of scheme/apps, and of a
+   release's apps directory."
+  (let ((root (compos-project-dir)))
+    (let loop ((dirs (append (if root (list (string-append root "/scheme/apps")) '())
+                             (list (string-append (compos-priv-dir) "/apps"))))
+               (acc '()))
+      (if (null? dirs)
+          acc
+          (let ((es (ignore-errors (lambda () (directory-entries (car dirs))))))
+            (loop (cdr dirs)
+                  (append acc
+                          (if (and (pair? es) (not (symbol? (car es))))
+                              (filter (lambda (n) n)
+                                      (map (lambda (en)
+                                             (let* ((n (plist-get en 'name)) (k (string-length n)))
+                                               (cond ((and (> k 1) (equal? (substring n (- k 1) k) "/")) (substring n 0 (- k 1)))
+                                                     ((and (> k 4) (equal? (substring n (- k 4) k) ".scm")
+                                                           (not (and (> k 9) (equal? (substring n (- k 9) k) "-test.scm"))))
+                                                      (substring n 0 (- k 4)))
+                                                     (else #f))))
+                                           es))
+                              '()))))))))
+
+(define (command--tiers names)
+  "Each command's tier for M-x, as ((NAME TIER) ...) sorted by NAME: 0 the
+   editor's own (namespace core), 1 a package's, 2 an app's. Built once for
+   each set of commands."
+  (if (= (car *command-tiers*) (length names))
+      (cadr *command-tiers*)
+      (let* ((apps (command--app-packages))
+             (rows (map (lambda (e)
+                          (list (plist-get e 'name)
+                                (cond ((equal? (plist-get e 'namespace) "core") 0)
+                                      ((member (plist-get e 'package) apps) 2)
+                                      (else 1))))
+                        (filter (lambda (e) (equal? (plist-get e 'kind) "command"))
+                                (if (boundp 'catalog) (catalog) '()))))
+             (sorted (sort rows)))
+        (set! *command-tiers* (list (length names) sorted))
+        sorted)))
+
+(define (command--name<? a b)
+  ;; sort's own order, so the walk below agrees with it
+  (and (not (equal? a b)) (equal? (car (sort (list a b))) a)))
+
+(define (command--with-tiers names tiers)
+  ;; NAMES sorted, TIERS sorted by name: one walk gives each name its tier;
+  ;; a command the catalog does not know is a package's
+  (let loop ((ns names) (ts tiers) (acc '()))
+    (cond ((null? ns) acc)
+          ((or (null? ts) (command--name<? (car ns) (car (car ts))))
+           (loop (cdr ns) ts (cons (list 1 (string-length (car ns)) (car ns)) acc)))
+          ((equal? (car ns) (car (car ts)))
+           (loop (cdr ns) (cdr ts) (cons (list (cadr (car ts)) (string-length (car ns)) (car ns)) acc)))
+          (else (loop ns (cdr ts) acc)))))
+
 (define (command-candidates)
+  ;; the editor's own commands first, then the packages', then the apps';
+  ;; the shorter name first within each
   (let* ((names (command-names))
-         (out (commands-out-of-scope (current-buffer) names)))
-    (map cadr
-         (sort (map (lambda (n) (list (string-length n) n))
-                    (filter (lambda (n) (not (command-internal? n)))
-                            (names-less names out)))))))
+         (out (commands-out-of-scope (current-buffer) names))
+         (shown (sort (filter (lambda (n) (not (command-internal? n)))
+                              (names-less names out)))))
+    (map caddr (sort (command--with-tiers shown (command--tiers names))))))
 
 ;; The annotated M-x rows, (NAME HINT ...) in command-candidates order. A
 ;; build walks every command's scope, key and doc, so the rows are kept per

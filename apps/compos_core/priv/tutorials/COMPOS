@@ -4,7 +4,7 @@
 
 Compos works with a chat model. It writes replies in chats, and does work as an agent. First, choose the model that new chats use. The lessons that come after can then use it. A lesson that needs no model works without it, so you can also come back here later.
 
-> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Use this** when it is ready, **Install** when its program is missing, or **Add a key** when it needs one.
+> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Test** sends it a short message, **Use this** comes when it replied, **Install** when its program is missing, and **Add a key** when it needs one.
 
 > **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
 

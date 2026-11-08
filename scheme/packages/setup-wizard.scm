@@ -111,20 +111,26 @@
 ;; DETAIL NEXT), NEXT the first unmet requirement (setup.scm). The hosted
 ;; card always offers its key: a set key can be replaced.
 (define (setup-wizard--card-actions row)
+  ;; one button at a time: a ready model is tested first, and Use this comes
+  ;; once it replied; a running test shows none; the chosen card needs a
+  ;; button only when its test did not pass
   (let* ((name (list-ref row 0))
          (kind (list-ref row 1))
          (ready? (list-ref row 2))
          (next (and (> (length row) 4) (list-ref row 4)))
          (default? (equal? name (setup-chosen-connector)))
+         (r (and ready? (llm-connectors-test-result name)))
+         (status (and r (plist-get r 'status)))
          (key (string-append "wizard:key:" name))
-         (use (if (and ready? (not default?))
-                  (list (list (string-append "wizard:use:" name) "Use this"))
-                  '())))
+         (test (list (string-append "wizard:test:" name) (if r "Test again" "Test")))
+         (step (cond ((eq? status 'testing) '())
+                     ((and (eq? status 'ok) default?) '())
+                     ((eq? status 'ok) (list (list (string-append "wizard:use:" name) "Use this")))
+                     (else (list test)))))
     (cond
       ((equal? kind "hosted")
-       (append use (list (list key (if ready? "Change the key" "Add a key")))))
-      (default? '())
-      (ready? use)
+       (append (if ready? step '()) (list (list key (if ready? "Change the key" "Add a key")))))
+      (ready? step)
       ((not next) '())
       ((memq (plist-get next 'kind) '(secret one-secret)) (list (list key "Add a key")))
       ((pair? (plist-get next 'install))
@@ -148,12 +154,7 @@
             'badge (cond (default? "default") (ready? "ready") (else "needs setup"))
             'tone (cond (default? "accent") (ready? "good") (else "plain"))
             'selected? default?
-            'actions (append (setup-wizard--card-actions row)
-                             (if (and default? ready?
-                                      (not (and tested (eq? (plist-get tested 'status) 'testing))))
-                                 (list (list (string-append "wizard:test:" name)
-                                             (if tested "Test again" "Test")))
-                                 '()))))))
+            'actions (setup-wizard--card-actions row)))))
 
 (define (setup-model-cards)
   "The model cards of the setup wizard's first step, as blocks: one card for
@@ -530,15 +531,16 @@
    wizard:install:NAME or wizard:key:NAME. ON-KEY runs when a key is in.
    wizard:test:NAME tests NAME. Answers #t when ID is a card button."
   (cond
-    ;; the wizard tests the model it chose; the tutorial's own reply step does
+    ;; Use this comes after a passed test, so it only chooses
     ((string-prefix? "wizard:use:" id)
      (let ((name (substring-bytes id 11 (string-byte-length id))))
-       (if (equal? buf *setup-wizard-buffer*)
-           (setup-wizard-use! buf name)
-           (setup-use-connector! name)))
+       (setup-use-connector! name)
+       (when (equal? buf *setup-wizard-buffer*) (setup-wizard-redraw! buf)))
      #t)
     ((string-prefix? "wizard:test:" id)
-     (llm-connectors-test! (substring-bytes id 12 (string-byte-length id))) #t)
+     (llm-connectors-test! (substring-bytes id 12 (string-byte-length id)))
+     (when (equal? buf *setup-wizard-buffer*) (setup-wizard-redraw! buf))
+     #t)
     ;; the model the user installs is the one they chose; the install
     ;; terminal opens in the other column, so the wizard or the tutorial
     ;; slide stays on screen and the user can leave the shell

@@ -855,7 +855,8 @@
     (and (equal? buf *tutorial-detail-buffer*)
          (cond
            ;; the model cards on the Set up slide: a key added there redraws it
-           ((setup-model-card-click! buf id (lambda () (tutorial-recheck!) (tutorial--draw-detail!))) #t)
+           ((setup-model-card-click! buf id (lambda () (tutorial-recheck!) (tutorial--draw-detail!)))
+            (tutorial--draw-detail!) #t)
            (else
          (let ((hit (assoc id '(("tutorial:next" "tutorial-next") ("tutorial:back" "tutorial-back")
                                 ("tutorial:next-lesson" "tutorial-next-lesson")
@@ -1456,12 +1457,15 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 ;; reader chose; its result shows in M-x llm-connectors too
 (tutorial-probe! "choose-a-model" "test message to the model"
   (lambda (pass fail)
+    ;; the card tested the model before Use this: a passed test counts
+    (if (eq? (plist-get (or (llm-connectors-test-result *default-connector*) '()) 'status) 'ok)
+        (pass)
     (llm-connectors-test! *default-connector*
       (lambda (r)
         (if (eq? (plist-get r 'status) 'ok)
             (pass)
             (fail (string-append *default-connector* " gave no reply (" (or (plist-get r 'error) "no reply")
-                                 "). Type M-x llm-connectors to sign it in, add its key, or choose another."))))))
+                                 "). Type M-x llm-connectors to sign it in, add its key, or choose another.")))))))
   (lambda () (string-append "Waiting for a reply from " *default-connector*)))
 
 (add-hook! 'tutorial-trouble-hook

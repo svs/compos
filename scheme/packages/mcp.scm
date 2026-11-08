@@ -6,6 +6,12 @@
 ;;; mcp__<server>__<tool> and dispatch in Elixir — never through the
 ;;; session — so a slow web fetch can't block a keystroke.
 ;;;
+;;; Servers are user config: their mcp-register! forms live in
+;;; ~/.compos/ai-config.scm. A chat may write that file to configure a
+;;; server, but it cannot load one: mcp-register!, mcp-connect! and
+;;; define-preset! refuse an agent caller. The user loads the config and
+;;; starts the server (C-c a m, mcp-hub).
+;;;
 ;;; (mcp-register! 'name SPEC) declares a server without connecting:
 ;;;   stdio: (list 'command "npx" 'args (list "-y" "pkg") 'env (list 'K "v"))
 ;;;   http:  (list 'url "https://host/mcp" 'headers (list 'authorization "..."))
@@ -571,7 +577,7 @@
   (lambda () (run-command "mcp-hub")))
 
 (category! 'mcp)
-(public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")
+(public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http). User only: a chat configures a server by writing this form into ~/.compos/ai-config.scm")
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
 (public! 'preset-prompt! "(preset-prompt! 'name TEXT) — set a preset's prompt: a section every chat holding the preset gets")
 (public! 'preset-prompt-parts "(preset-prompt-parts PRESETS) — the prompt sections PRESETS bring, as (NAME TEXT)")

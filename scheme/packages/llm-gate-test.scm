@@ -1,4 +1,4 @@
-;;; llm-gate-test.scm --- the direct lane's gate, concurrency and retry rules.
+;;; llm-gate-test.scm --- the direct lane's gate, concurrency, retry and request rules.
 ;;;
 ;;; The gate is a security boundary: each refusal the Elixir gate made has a
 ;;; check here. Elixir adds one more: no verdict at all is a denial
@@ -109,6 +109,32 @@
             (list '(#f ("502" #f)) #t)
             (list '(#f #f) #f)
             (list #f #f)))))
+
+(deftest 'llm-gate-request-plan-follows-the-provider
+  "a bare id is anthropic; the key, address, shape and cache follow the provider"
+  (lambda ()
+    (with-stubs
+      (list (list '*llm-keys* '(("anthropic" "sk-a") ("openrouter" "sk-o") ("local" "sk-l")))
+            (list '*llm-base-urls* '(("local" "http://127.0.0.1:8127/v1")))
+            (list '*llm-provider-shapes* '(("local" "openai")))
+            (list 'secret-for-provider (lambda (p) #f))
+            (list 'llm-cache-ttl "5m"))
+      (lambda ()
+        (check-equal! (llm-request-plan "claude-sonnet-5")
+                      '(spec "anthropic:claude-sonnet-5" wire "anthropic:claude-sonnet-5" key "sk-a"
+                        base-url #f cache options ttl "5m")
+                      "a bare id is anthropic, cached by request options")
+        (check-equal! (plist-get (llm-request-plan "openrouter:anthropic/claude-sonnet-5") 'cache)
+                      'marks "an anthropic model through openrouter is cached by marks")
+        (check-equal! (plist-get (llm-request-plan "openrouter:openai/gpt-5.5") 'cache)
+                      #f "another openrouter model is not cached")
+        (let ((p (llm-request-plan "local:qwen")))
+          (check-equal! (map (lambda (k) (plist-get p k)) '(spec wire key base-url cache))
+                        '("local:qwen" "openai:qwen" "sk-l" "http://127.0.0.1:8127/v1" #f)
+                        "an endpoint speaks its shape with its own key and address"))
+        (check-equal! (llm-request-plan "deepseek:deepseek-chat")
+                      '(spec "deepseek:deepseek-chat" error "no api key provided for deepseek")
+                      "no key is an error")))))
 
 (deftest 'llm-gate-retry-delay-backs-off-three-tries
   "BASE then twice BASE, each with up to half its width of jitter; no third retry"

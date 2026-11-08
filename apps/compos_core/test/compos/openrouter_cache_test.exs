@@ -1,5 +1,8 @@
 defmodule Compos.OpenRouterCacheTest do
-  @moduledoc "OpenRouter caches an Anthropic model at cache_control marks on the content."
+  @moduledoc """
+  OpenRouter caches an Anthropic model at cache_control marks on the content.
+  Which model gets marks is Scheme's (llm-request-plan, llm-gate-test.scm).
+  """
   use ExUnit.Case, async: true
 
   alias Compos.Core.LLM
@@ -18,13 +21,15 @@ defmodule Compos.OpenRouterCacheTest do
         do: {m.role, p.text}
   end
 
-  test "an anthropic model through openrouter marks the system prompt and the newest message" do
-    marked = LLM.openrouter_cache_marks(ctx(), "openrouter:anthropic/claude-sonnet-5")
+  @marks %{"cache" => {:sym, "marks"}, "ttl" => "1h"}
+
+  test "a marks plan marks the system prompt and the newest message" do
+    marked = LLM.cache_marks(ctx(), @marks)
     assert marks(marked) == [{:system, "SYS"}, {:user, "again"}]
   end
 
   test "the marks reach the request openrouter sends" do
-    marked = LLM.openrouter_cache_marks(ctx(), "openrouter:anthropic/claude-sonnet-5")
+    marked = LLM.cache_marks(ctx(), @marks)
     {:ok, model} = ReqLLM.model("openrouter:anthropic/claude-sonnet-5")
     {:ok, req} = ReqLLM.Providers.OpenRouter.prepare_request(:chat, model, marked, api_key: "x")
     body = ReqLLM.Providers.OpenRouter.build_body(req)
@@ -32,8 +37,8 @@ defmodule Compos.OpenRouterCacheTest do
     assert length(String.split(json, "cache_control")) == 3
   end
 
-  test "another model gets no marks" do
-    assert marks(LLM.openrouter_cache_marks(ctx(), "openrouter:openai/gpt-5.5")) == []
-    assert marks(LLM.openrouter_cache_marks(ctx(), "anthropic:claude-sonnet-5")) == []
+  test "a plan without marks leaves the context alone" do
+    assert marks(LLM.cache_marks(ctx(), %{"cache" => false, "ttl" => "1h"})) == []
+    assert marks(LLM.cache_marks(ctx(), %{"cache" => {:sym, "options"}, "ttl" => "1h"})) == []
   end
 end

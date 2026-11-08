@@ -1282,13 +1282,6 @@ defmodule Compos.Core.Session do
         Compos.Core.LLM.set_model(m)
         :void
       end,
-      # how long the provider holds a cached prefix ("5m", "1h") — the
-      # defcustom llm-cache-ttl sets it
-      {"set-llm-cache-ttl!",
-       "(set-llm-cache-ttl! TTL) — set how long the provider holds a cached prefix."} => fn [ttl] ->
-        Compos.Core.LLM.set_cache_ttl(to_string(ttl))
-        :void
-      end,
       # what a backend can do, by its resolved 'backend name — Scheme asks
       # this instead of asking which connector it is looking at
       {"backend-capabilities",

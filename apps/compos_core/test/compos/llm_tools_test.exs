@@ -450,16 +450,6 @@ defmodule Compos.LLMToolsTest do
   describe "the req_llm wire" do
     alias Compos.Core.LLM
 
-    test "provider routing: a bare model id is anthropic, prefixes pass through" do
-      assert LLM.req_model_spec("claude-sonnet-5") == "anthropic:claude-sonnet-5"
-      assert LLM.req_model_spec("openai:gpt-5.6-luna") == "openai:gpt-5.6-luna"
-
-      assert LLM.req_model_spec("openrouter:anthropic/claude-sonnet-5") ==
-               "openrouter:anthropic/claude-sonnet-5"
-
-      assert LLM.req_model_spec("deepseek:deepseek-chat") == "deepseek:deepseek-chat"
-    end
-
     test "an unregistered provider fails with a clear no-key error" do
       Session.eval(~s{(set! *llm-keys* '())})
       on_exit(fn -> Session.eval(~s{(set! *llm-keys* '())}) end)

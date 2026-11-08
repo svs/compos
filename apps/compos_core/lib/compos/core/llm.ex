@@ -12,10 +12,9 @@ defmodule Compos.Core.LLM do
   `:llm_request_fun` / `:llm_chat_fun` app-env seams stub the wire for tests
   exactly as before.
 
-  Model routing (`model/0` strings): `"openai:<m>"` / `"openrouter:<m>"` /
-  `"deepseek:<m>"` route to those providers; a bare id is Anthropic. A
-  provider key comes from Scheme: this module asks `key-get` for a name,
-  and packages/keys.scm decides which source answers.
+  Model routing (`model/0` strings), the key, the address and the prompt
+  cache are Scheme's: `llm-request-plan` (packages/llm-gate.scm) answers
+  them for each call, and this module carries the plan to the wire.
 
   Tool use (gptel-style, native): `complete_tools/6` runs the tool_use loop.
   Tool definitions and handlers live in the Scheme registry
@@ -526,12 +525,10 @@ defmodule Compos.Core.LLM do
   # when the caller passed :on_chunk; the response then carries "streamed"
   # so the loop doesn't re-emit the text.
   defp default_chat(%{messages: messages, system: system, tools: tools} = req) do
-    model = req[:model] || model()
-    spec = req_model_spec(model)
-
-    with {:ok, key_opts_list} <- key_opts(spec) do
-      ctx = messages |> to_req_context(system) |> openrouter_cache_marks(spec)
-      opts = key_opts_list ++ req_opts(spec, tools)
+    with {:ok, plan} <- request_plan(req[:model] || model()) do
+      spec = plan["spec"]
+      ctx = messages |> to_req_context(system) |> cache_marks(plan)
+      opts = req_opts(plan, tools)
 
       opts =
         if req[:reasoning_effort],
@@ -542,7 +539,7 @@ defmodule Compos.Core.LLM do
         # only the call that STARTS the stream retries: once a delta has
         # reached the renderer, a second attempt would print the reply twice
         http0 = System.monotonic_time(:millisecond)
-        opened = with_retry(fn -> ReqLLM.stream_text(req_model_arg(spec), ctx, opts) end)
+        opened = with_retry(fn -> ReqLLM.stream_text(req_model_arg(plan["wire"]), ctx, opts) end)
 
         if slug = req[:slug] do
           :telemetry.execute(
@@ -580,7 +577,7 @@ defmodule Compos.Core.LLM do
         end
       else
         case with_retry(fn ->
-               with_deadline(fn -> ReqLLM.generate_text(req_model_arg(spec), ctx, opts) end)
+               with_deadline(fn -> ReqLLM.generate_text(req_model_arg(plan["wire"]), ctx, opts) end)
              end) do
           {:ok, resp} -> {:ok, from_req_response(resp, spec)}
           {:error, e} -> {:error, err_msg(e)}
@@ -669,11 +666,19 @@ defmodule Compos.Core.LLM do
   defp fact(%{} = v), do: error_facts(v)
   defp fact(_), do: false
 
-  # Provider routing by model name: "provider:<model>" passes through to that
-  # provider; a bare id is Anthropic. The provider set is not enumerated here
-  # — req_llm owns the providers, Scheme owns the keys.
-  def req_model_spec(model) do
-    if String.contains?(model, ":"), do: model, else: "anthropic:" <> model
+  # What one call sends, and to whom, is Scheme's (llm-request-plan in
+  # packages/llm-gate.scm): the provider spec, the shape req_llm speaks,
+  # the key, the address and the prompt cache, in one lane call. A plan
+  # with an error fails the call before it sends anything.
+  defp request_plan(model) do
+    case Session.call_named("llm-request-plan", [model]) do
+      {:ok, plist} when is_list(plist) ->
+        plan = for [{:sym, k}, v] <- Enum.chunk_every(plist, 2), into: %{}, do: {k, v}
+        if is_binary(plan["error"]), do: {:error, plan["error"]}, else: {:ok, plan}
+
+      other ->
+        {:error, "no request plan for #{model}: #{inspect(other)}"}
+    end
   end
 
   @doc """
@@ -688,8 +693,6 @@ defmodule Compos.Core.LLM do
   spec, so pricing, token counting and capability detection stay available.
   """
   def req_model_arg(spec) when is_binary(spec) do
-    spec = shaped_spec(spec)
-
     case Compos.Core.ModelCatalog.lookup(spec) do
       {:ok, _} -> spec
       _ -> inline_model(spec)
@@ -697,24 +700,6 @@ defmodule Compos.Core.LLM do
   end
 
   def req_model_arg(spec), do: spec
-
-  # A named endpoint (register-llm-endpoint!) is a provider of the user's own
-  # that speaks a known provider's shape: "local:qwen" goes to req_llm as
-  # "openai:qwen". The key and the address are still asked for by the
-  # endpoint's own name (key_opts, base_url_opts), so the real provider of
-  # that shape is untouched. No shape leaves the spec as it is.
-  defp shaped_spec(spec) do
-    case String.split(spec, ":", parts: 2) do
-      [provider, id] ->
-        case Session.call_named("llm-provider-shape", [provider]) do
-          {:ok, shape} when is_binary(shape) and shape != "" and shape != provider -> shape <> ":" <> id
-          _ -> spec
-        end
-
-      _ ->
-        spec
-    end
-  end
 
   defp inline_model(spec) do
     case String.split(spec, ":", parts: 2) do
@@ -735,40 +720,14 @@ defmodule Compos.Core.LLM do
 
   defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
 
-  # Hand the resolved key VALUE to req_llm as a per-request :api_key option.
-  # Elixir asks Scheme for the value BY PROVIDER ((llm-key "deepseek")); the
-  # provider -> key association is explicit Scheme config, so there is no
-  # provider -> secret-name convention anywhere in Elixir. Scheme is the one
-  # resolution point. No key anywhere is an error, not a silent env fallback.
-  defp key_opts(spec) do
-    provider = provider_of(spec)
+  # the plan's key, and its address when that is not the provider's own
+  # cloud: no address leaves req_llm's own default in place
+  defp req_opts(plan, tools) do
+    spec = plan["spec"]
 
-    key =
-      case Session.call_named("llm-key", [provider]) do
-        {:ok, k} when is_binary(k) and k != "" -> k
-        _ -> nil
-      end
-
-    case key do
-      k when is_binary(k) and k != "" -> {:ok, [api_key: k]}
-      _ -> {:error, "no api key provided for #{provider}"}
-    end
-  end
-
-  # Where a provider answers, when that is not the provider's own cloud. A
-  # self-hosted OpenAI-compatible server is the same provider shape at a
-  # different address, so the address is Scheme config beside the key — the
-  # same one resolution point, asked the same way. No answer leaves req_llm's
-  # own default in place, which is what every hosted provider wants.
-  defp base_url_opts(spec) do
-    case Session.call_named("llm-base-url", [provider_of(spec)]) do
-      {:ok, url} when is_binary(url) and url != "" -> [base_url: url]
-      _ -> []
-    end
-  end
-
-  defp req_opts(spec, tools) do
-    base = [receive_timeout: 180_000, max_tokens: max_tokens(spec)] ++ base_url_opts(spec)
+    base =
+      [api_key: plan["key"], receive_timeout: 180_000, max_tokens: max_tokens(spec)] ++
+        if(is_binary(plan["base-url"]), do: [base_url: plan["base-url"]], else: [])
 
     tools_opt =
       if tools == [], do: [], else: [tools: Enum.map(tools, &to_req_tool/1)]
@@ -780,12 +739,12 @@ defmodule Compos.Core.LLM do
     # messages in one sitting: the default five minutes expires while the
     # user reads the reply, and the next turn pays the write again.
     cache_opt =
-      if anthropic_cached?(spec),
+      if plan["cache"] == {:sym, "options"},
         do: [
           provider_options: [
             anthropic_prompt_cache: true,
             anthropic_cache_messages: true,
-            anthropic_prompt_cache_ttl: cache_ttl()
+            anthropic_prompt_cache_ttl: plan["ttl"]
           ]
         ],
         else: []
@@ -800,26 +759,6 @@ defmodule Compos.Core.LLM do
       _k, _a, b -> b
     end)
   end
-
-  # The anthropic_* cache options belong to req_llm's Anthropic provider.
-  # Its OpenRouter provider validates its options and refuses them, so an
-  # openrouter:anthropic/* chat failed before it sent anything. OpenRouter
-  # caches Anthropic models through cache_control marks on the content,
-  # which this request does not set yet.
-  defp anthropic_cached?(spec) do
-    case String.split(spec, ":", parts: 2) do
-      ["anthropic", _] -> true
-      _ -> false
-    end
-  end
-
-  @doc """
-  How long the provider holds a cached prefix. Scheme owns the policy
-  (defcustom `llm-cache-ttl`); this is where the value lands.
-  """
-  def set_cache_ttl(ttl) when is_binary(ttl), do: :persistent_term.put(:compos_llm_cache_ttl, ttl)
-
-  defp cache_ttl, do: :persistent_term.get(:compos_llm_cache_ttl, "1h")
 
   # The model's own output limit, from the models.dev catalog. A flat 4096
   # truncated long replies on models that allow far more, and a length stop
@@ -848,29 +787,20 @@ defmodule Compos.Core.LLM do
   # and the newest message, so the transcript a tool round resends bills
   # at the cache-read rate. The TTL is the same one the direct lane asks.
   @doc false
-  def openrouter_cache_marks(%ReqLLM.Context{messages: messages} = ctx, spec) do
-    if openrouter_anthropic?(spec) do
-      mark = %{type: "ephemeral", ttl: cache_ttl()}
+  def cache_marks(%ReqLLM.Context{} = ctx, %{"cache" => {:sym, "marks"}, "ttl" => ttl}) do
+    mark = %{type: "ephemeral", ttl: ttl}
 
-      messages =
-        messages
-        |> mark_first(fn m -> m.role == :system end, mark)
-        |> Enum.reverse()
-        |> mark_first(fn m -> m.role != :system end, mark)
-        |> Enum.reverse()
+    messages =
+      ctx.messages
+      |> mark_first(fn m -> m.role == :system end, mark)
+      |> Enum.reverse()
+      |> mark_first(fn m -> m.role != :system end, mark)
+      |> Enum.reverse()
 
-      %{ctx | messages: messages}
-    else
-      ctx
-    end
+    %{ctx | messages: messages}
   end
 
-  defp openrouter_anthropic?(spec) do
-    case String.split(spec, ":", parts: 2) do
-      ["openrouter", model] -> String.starts_with?(model, "anthropic/")
-      _ -> false
-    end
-  end
+  def cache_marks(ctx, _plan), do: ctx
 
   # Mark the last text part of the first message that PRED holds for.
   defp mark_first(messages, pred, mark) do
@@ -1055,18 +985,16 @@ defmodule Compos.Core.LLM do
 
   # the plain one-shot completion (the (llm ...) primitive)
   defp default_request(prompt, requested_model) do
-    spec = req_model_spec(requested_model)
-
-    with {:ok, key_opts_list} <- key_opts(spec) do
-      opts = key_opts_list ++ req_opts(spec, [])
+    with {:ok, plan} <- request_plan(requested_model) do
+      opts = req_opts(plan, [])
 
       case with_retry(fn ->
-             with_deadline(fn -> ReqLLM.generate_text(req_model_arg(spec), prompt, opts) end)
+             with_deadline(fn -> ReqLLM.generate_text(req_model_arg(plan["wire"]), prompt, opts) end)
            end) do
         {:ok, resp} ->
           Compos.Core.LLMUsage.record(
             requested_model,
-            usage_strings(ReqLLM.Response.usage(resp), spec)
+            usage_strings(ReqLLM.Response.usage(resp), plan["spec"])
           )
 
           {:ok, ReqLLM.Response.text(resp) || ""}

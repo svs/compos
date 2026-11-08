@@ -8,6 +8,8 @@
 ;;;                        intrinsic ask tool.
 ;;;   llm-read-only-tools  which tools of a turn may run side by side.
 ;;;   llm-retry-delay      whether a failed model call tries again, and when.
+;;;   llm-request-plan     what one model call sends, and to whom: the
+;;;                        provider, the key, the address, the prompt cache.
 ;;;
 ;;; The gate fails closed. Elixir denies the call when this file gives no
 ;;; verdict: a policy that raises, a gate that raises, an answer it does not
@@ -130,6 +132,50 @@
        (let ((b (* base (expt 2 (- attempt 1)))))
          (+ b 1 (random (max (quotient b 2) 1))))))
 
+;; --- the request plan ------------------------------------------------------
+
+;; the key may come from the secret store
+(effects! '(read external))
+
+;; Anthropic caches a prompt prefix. Its own API takes request options for
+;; it. req_llm's OpenRouter provider refuses those options, so an Anthropic
+;; model through OpenRouter is cached by cache_control marks on the content.
+;; Every other provider gets neither.
+(define (llm-gate--cache provider id)
+  (cond ((equal? provider "anthropic") 'options)
+        ((and (equal? provider "openrouter") (string-prefix? "anthropic/" id)) 'marks)
+        (else #f)))
+
+(define (llm-gate--text v) (and (string? v) (not (equal? v "")) v))
+
+;; MODEL is "provider:id", or a bare id, which is Anthropic's. The plan is
+;; what llm.ex sends for one call, as a plist:
+;;   spec      provider:id, the name the catalog and the ledger read
+;;   wire      the name req_llm speaks. An endpoint registered with a shape
+;;             (register-llm-endpoint!) goes as that shape: "local:qwen" as
+;;             "openai:qwen". Its key and address stay its own.
+;;   key       the key value, by provider (llm-key). No key is an error,
+;;             not a fallback to the environment.
+;;   base-url  the address (llm-base-url), or #f for the provider's own cloud
+;;   cache     options, marks or #f (llm-gate--cache)
+;;   ttl       how long the provider holds the cached prefix (llm-cache-ttl)
+;;   error     the text the call fails with, before it sends anything
+(define (llm-request-plan model)
+  (let* ((spec (if (string-contains? model ":") model (string-append "anthropic:" model)))
+         (provider (car (string-split spec ":")))
+         (id (substring spec (+ (string-length provider) 1) (string-length spec)))
+         (shape (llm-gate--text (llm-provider-shape provider)))
+         (key (llm-gate--text (llm-key provider)))
+         (ttl (if (boundp 'llm-cache-ttl) llm-cache-ttl "1h")))
+    (if key
+        (list 'spec spec
+              'wire (if (and shape (not (equal? shape provider))) (string-append shape ":" id) spec)
+              'key key
+              'base-url (llm-gate--text (llm-base-url provider))
+              'cache (llm-gate--cache provider id)
+              'ttl (if (string? ttl) ttl (value->string ttl)))
+        (list 'spec spec 'error (string-append "no api key provided for " provider)))))
+
 (public! 'llm-tool-gate
   "(llm-tool-gate POLICY SLUG NAME RAW INPUT) — the direct lane's verdict on one tool call: allow, (deny REASON), (ask-permission), (ask-user QUESTION ANSWERS) or (error TEXT)")
 (public! 'llm-read-only-tools
@@ -138,3 +184,5 @@
   "(llm-retryable? E) — #t when the failed model call E, as (STATUS REASON), is worth another try")
 (public! 'llm-retry-delay
   "(llm-retry-delay ATTEMPT E BASE) — milliseconds before the next try of a failed model call, or #f")
+(public! 'llm-request-plan
+  "(llm-request-plan MODEL) — what one model call sends: (spec S wire W key K base-url U cache C ttl T), or (spec S error TEXT)")

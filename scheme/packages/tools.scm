@@ -2068,10 +2068,7 @@
 ;; cheaper choice for a chat answered in bursts.
 (defcustom 'llm-cache-ttl "1h"
   "How long the provider holds this chat's cached prompt prefix: \"5m\" or \"1h\"."
-  'group 'chat 'type 'string
-  'set (lambda (v) (set-llm-cache-ttl! v)))
-
-(set-llm-cache-ttl! llm-cache-ttl)
+  'group 'chat 'type 'string)
 
 ;; Compaction: the head of a long record becomes one summary and the
 ;; recent turns stay verbatim. You ask for it — M-x chat-compact — and the

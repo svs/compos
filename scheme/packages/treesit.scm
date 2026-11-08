@@ -118,6 +118,10 @@
 (define-derived-mode "sh-mode" "prog-mode" (ts-mode "bash"))
 (define-derived-mode "go-mode" "prog-mode" (ts-mode "go"))
 (define-derived-mode "c-mode" "prog-mode" (ts-mode "c"))
+(mode-doc! "python-mode" "Edit Python source. The tree-sitter python grammar gives the faces and the outline.")
+(mode-doc! "sh-mode" "Edit shell scripts. The tree-sitter bash grammar gives the faces and the outline.")
+(mode-doc! "go-mode" "Edit Go source. The tree-sitter go grammar gives the faces and the outline.")
+(mode-doc! "c-mode" "Edit C source and headers. The tree-sitter c grammar gives the faces and the outline.")
 (set! *auto-mode-alist*
   (append (remove (lambda (entry) (member (car entry) '(".py" ".sh" ".bash" ".go" ".c" ".h")))
                   *auto-mode-alist*)

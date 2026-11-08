@@ -151,6 +151,7 @@
 
 (define-mode "pane-overview-mode"
   (lambda () #t))
+(mode-doc! "pane-overview-mode" "Every window of a pane at a glance: one tile for each window, with its buffer, its mode and its text. Click a tile to go to that window.")
 
 (define-command "pane-overview"
   "Show every window of this pane as a tile in the pane; pick one to bring it to the front"

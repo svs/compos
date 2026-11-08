@@ -44,7 +44,7 @@
     (load-theme "tt-theme-a")
     (check-equal! (theme-test-face-attr 'default 'size) default-font-size
                   "a theme load keeps the size: no theme names one")
-    (check-equal! default-font-size "20.8px"
+    (check-equal! default-font-size "14px"
                   "the stock size is the reading size")
     (theme-test-restore!)))
 

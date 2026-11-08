@@ -61,8 +61,9 @@ defmodule Compos.Ui.TranscriptAnchorTest do
         blocks.find((b) => b.top <= y && y < b.bottom) || null
     };
 
-    const self = { scroller: scroller };
-    #{String.replace(last_visible_source(), "this.scroller", "self.scroller")}
+    // the ui zoom is 1: a rect and a scrollTop count the same px
+    const self = { scroller: scroller, scale: () => 1 };
+    #{last_visible_source() |> String.replace("this.scroller", "self.scroller") |> String.replace("this.scale", "self.scale")}
 
     const found = lastVisible();
     process.stdout.write(JSON.stringify({ found: found, measurements: measurements }));

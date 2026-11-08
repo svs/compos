@@ -1182,6 +1182,7 @@
 
 (define-mode "wdired-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #f)))
+(mode-doc! "wdired-mode" "Edit the file names of a dired buffer as text. C-c C-c renames the files, C-c C-k cancels.")
 
 (mode-keys! "wdired-mode"
   '(("C-c C-c" "wdired-finish-edit") ("C-x C-s" "wdired-finish-edit")

@@ -428,6 +428,7 @@
       (content-scale--apply! buf (content-scale-level buf)))))
 
 (define-mode "content-scale-view-mode" (lambda () #t))
+(mode-doc! "content-scale-view-mode" "Read a buffer at one level of detail of its content scale. The page is made again when the level changes.")
 
 (define-key "content-scale-view-mode-map" "RET" "content-scale-visit")
 (define-key "content-scale-view-mode-map" "g" "content-scale-refresh")

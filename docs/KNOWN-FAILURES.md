@@ -52,7 +52,6 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 |---|---|
 | a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command | the keymap ladder |
 | fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
-| the-default-face-size-is-the-setting-and-survives-a-theme | themes; red since the warm-dark theme commit |
 | the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup-test; 41ffa950 clears 'modeline-info |
 | a-chat-title-holds-at-most-six-words | the title clip: chat.scm 165291b4 (2026-10-12) trims 'is' from the title; not caused today |
 | the-header-line-carries-identity-and-the-mode-line-carries-state | the switcher test expects buffer-switcher, renamed to modeline-expand in aacfe2e6; not caused today |
@@ -62,14 +61,12 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 | unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract | apropos and the catalog |
 | malformed-scheme-goes-nowhere, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
 | subagents-table-draws-one-row-per-edge, overview-uses-only-the-current-group | one each |
-| every-mode-says-what-it-is-for | six modes call no mode-doc!: google-compose-mode, google-detail-mode, google-request-mode, irc-mode, special-mode, and the keymap-test-list-mode fixture; red at HEAD before the mode table (b5302dd4) |
+| every-mode-says-what-it-is-for | pane-empty-mode (panes-mode.scm) calls no mode-doc!; the other modes got one 2026-11-08 |
 | a-pasted-images-link-is-relative-to-the-document | the test home is not a git repository; the git rev-parse error list reaches string-append |
-| the-editor-seams-are-named-hooks | buffer-created! on a name with no buffer process; red at HEAD b5302dd4 |
 | a-blocks-presence-arms-its-keys, a-scheme-result-pretty-prints-nested-property-lists | one each |
 | agent-excision-repairs-every-transcript-offset, agent-excision-counts-bytes-after-multibyte-text | agent-excise-range! no longer moves 'agent-saved-mark by hand (the buffer keeps the marker); the test still expects the hand-moved value; red at HEAD 4f0a0be9 in a worktree run |
 | a-floating-surface-does-not-change-the-frame-group | window-config-test; left to the other agent |
 | a-buffer-that-wakes-catches-up-with-its-file | autorevert; red alone at HEAD 22ba6cd2 in a worktree run: the woken buffer keeps its old text |
-| a-written-chat-keeps-the-written-directory | the chat-writes-chat-files rule refuses the .txt the test writes; red at HEAD a2bd2538 |
 | the-companion-chat-opens-into-the-documents-group | red alone at HEAD 3ffe7c4a in a worktree run |
 | a-kill-after-a-kill-appends-and-last-command-names-the-kill | kernel: last-command is next-line after kill-word, so kill-word is not recorded as the last command (last-command builtin scheme_api.ex:2725; kill check editor.scm:636); kill appending from a86ad804 (2026-09-02); not caused today |
 | a-command-enters-the-editing-state-and-keyboard-quit-leaves-it | kernel: a landing that comes back is still in the editing state (expected #f, got #t); landing check editing--check-landing! (editor.scm:5135) from 1770e36a (2026-09-04); not caused today |

@@ -776,6 +776,7 @@
       ;; a page is drawn from components; the blocks are rebuilt, never saved
       (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
       (buffer-set-local! buf 'render-mode "blocks"))))
+(mode-doc! "site-app-detail-mode" "A page of a site app, drawn from components and read from the live site. The page is read-only.")
 
 (define (site-app-real xs) (filter pair? (or xs '())))
 
@@ -2771,17 +2772,20 @@
     (let ((major (plist-get spec 'detail-mode)))
       (when major
         (define-mode major (lambda () (buffer-set-read-only! (current-buffer) #t)))
+        (mode-doc! major (string-append title " page, read from the live site. The page is read-only."))
         (mode-parent! major "site-app-detail-mode")))
     (for-each (lambda (page)
                 (let ((mode (plist-get page 'detail-mode))
                       (kind (plist-get page 'detail-kind)))
                   (when mode
                     (define-mode mode (lambda () (buffer-set-read-only! (current-buffer) #t)))
+                    (mode-doc! mode (section-doc page))
                     (mode-parent! mode "site-app-detail-mode"))
                   ;; the page's kind derives from the app's detail mode: an approval
                   ;; page is an ATS page is a site-app page, most specific last
                   (when kind
-                    (define-derived-mode kind (site-app-detail-mode-name spec page) (lambda () #t)))))
+                    (define-derived-mode kind (site-app-detail-mode-name spec page) (lambda () #t))
+                    (mode-doc! kind (section-doc page)))))
               pages)
     ;; one major mode for every index of the app, so they share a pane and a map;
     ;; each section is a minor mode on it that holds the section's own keys

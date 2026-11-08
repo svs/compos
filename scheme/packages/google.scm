@@ -486,6 +486,7 @@
     (pop-to-buffer buf) buf))
 (define-mode "google-detail-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #t)))
+(mode-doc! "google-detail-mode" "Read one Google result: its text first, then its API data as JSON.")
 (mode-keys! "google-detail-mode" '(("x" "google-operation") ("c" "google-compose") ("q" "quit-window")))
 
 (define (google--item-path service id parent)
@@ -600,6 +601,7 @@
 (define-mode "google-request-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #f)
     (desktop-skip! (current-buffer) 'google-submitting)))
+(mode-doc! "google-request-mode" "Edit a Google API request as JSON. C-c C-c submits it.")
 (mode-keys! "google-request-mode" '(("C-c C-c" "google-submit") ("C-c C-k" "quit-window")))
 (define-command "google-operation" "Choose a Google API operation and prepare an editable request"
   (lambda ()
@@ -657,6 +659,7 @@
             (with-current-buffer buf (lambda () (set-mode! "google-compose-mode")))
             (pop-to-buffer buf))))))
 (define-mode "google-compose-mode" (lambda () (buffer-set-read-only! (current-buffer) #f)))
+(mode-doc! "google-compose-mode" "Write a mail draft for a Google account: the To and Subject lines, then the body.")
 (mode-keys! "google-compose-mode" '(("C-c C-d" "google-save-mail-draft") ("C-c C-c" "google-send-mail")))
 (define (google--compose-operation send?)
   (let* ((buf (current-buffer)) (lines (string-split (buffer-text buf) "\n"))

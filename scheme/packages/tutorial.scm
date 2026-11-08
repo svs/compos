@@ -832,6 +832,7 @@
   (lambda ()
     (buffer-set-read-only! (current-buffer) #t)
     (tutorial--draw-detail!)))
+(mode-doc! "tutorial-detail-mode" "One lesson of the tutorial. The page is read-only.")
 
 ;; ESC and C-g on the slide leave nothing: the slide is where the lesson
 ;; is. A quit clears a help note and stays. Without this, keyboard-quit ran
@@ -1020,6 +1021,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
       (buffer-set-local! buf 'tutorial-lesson (plist-get l 'slug)))))
 
 (define-derived-mode "tutorial-practice-mode" "text-mode" (lambda () #t))
+(mode-doc! "tutorial-practice-mode" "The practice page of a tutorial lesson: edit it as you like. C-c C-n goes to the next lesson, C-c C-p back, C-c C-l to the lessons.")
 
 (mode-keys! "tutorial-practice-mode"
   '(("C-c C-n" "tutorial-next") ("C-c C-p" "tutorial-back")

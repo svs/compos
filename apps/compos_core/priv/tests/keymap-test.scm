@@ -122,6 +122,7 @@
 
 (define-list-mode! "keymap-test-list-mode"
   (list 'buffer "*keymap-test-list*"
+        'doc "A test fixture: a list with reserved keys."
         'rows (lambda (buf) (list "one" "two"))
         'render (lambda (buf e) e)
         'regroup (lambda (buf) (keymap-test-fire! 'group))

@@ -120,10 +120,13 @@
 (deftest 'the-editor-seams-are-named-hooks
   "the buffer seams and fs-change run through add-hook! now"
   (lambda ()
+    ;; the seam runs on a buffer that exists: it stamps 'created-at on it
+    (buffer-create "*hook-test-x*")
     (add-hook! 'buffer-created-hook 'hook-test-one-arg)
     (hook-test-reset!)
     (buffer-created! "*hook-test-x*")
     (remove-hook! 'buffer-created-hook 'hook-test-one-arg)
+    (buffer-kill! "*hook-test-x*")
     (check-true! (pair? *hook-test-log*) "buffer-created! ran the hook")))
 
 (deftest 'a-keyed-hook-holds-one-function-per-key

@@ -1757,11 +1757,14 @@
         if (!s.isConnected) return;
         if (s.clientHeight === 0) {
           if (this.ro || typeof ResizeObserver === "undefined") return;
+          // A hidden window has no height, and the settle ran out
+          // while it waited. The layout is a new load: settle again,
+          // so the growth that follows it is followed too.
           this.ro = new ResizeObserver(() => {
             if (this.scroller.clientHeight === 0) return;
             this.ro.disconnect();
             this.ro = null;
-            this.place();
+            this.settle();
           });
           this.ro.observe(s);
           return;
@@ -1809,6 +1812,7 @@
       // and nothing here moves the view again.
       settle() {
         this.observe();
+        if (this.raf) cancelAnimationFrame(this.raf);
         let last = -1;
         let still = 0;
         const t0 = Date.now();

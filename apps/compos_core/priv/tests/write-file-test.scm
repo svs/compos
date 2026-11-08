@@ -71,7 +71,7 @@
   (lambda ()
     (let* ((d (t--wf-fresh-dir "chat"))
            (buf "*zz-wf-chat*")
-           (p (string-append d "/zz-wf-chat.txt")))
+           (p (string-append d "/zz-wf-chat.chat")))
       (test-buffer! buf "plain chat text\n")
       (buffer-set-local! buf 'agent-slug "zz-wf")
       (with-current-buffer buf

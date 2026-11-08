@@ -459,6 +459,7 @@
       ;; a restored transcript gets its colours back from the locals
       (irc-repaint! buf)
       (irc-modeline! buf))))
+(mode-doc! "irc-mode" "An IRC server or channel: the messages, and a line at the end where you type yours.")
 
 (mode-keys! "irc-mode"
   '(("RET" "irc-send")

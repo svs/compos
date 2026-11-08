@@ -28,7 +28,7 @@
 ;; BUFFER the one the notice is about or #f, EVENT the notice itself; survives a reload
 (define *notifications-shown* (if (boundp '*notifications-shown*) *notifications-shown* '()))
 
-;; the open notices: what still needs the user, as (SEQ . BUFFER), newest
+;; the open notices: what still needs the user, as (SEQ BUFFER), newest
 ;; first. The bell counts them and M-x notifications lists them. A notice
 ;; closes when it is dealt with: its BUFFER resolves (notifications-resolve!),
 ;; you go to it, or you mark it done (notifications-done!)
@@ -91,7 +91,7 @@ first, so a notice that waits for you is not pushed off by status updates"
   "what the notices about BUF asked is done or seen: take them off the screen and out of the bell's count"
   (for-each (lambda (n) (when (and (> (length n) 4) (equal? (nth 4 n) buf)) (notifications-dismiss! (car n))))
             *notifications-shown*)
-  (let ((left (filter (lambda (u) (not (equal? (cdr u) buf))) *notifications-open*)))
+  (let ((left (filter (lambda (u) (not (equal? (cadr u) buf))) *notifications-open*)))
     (unless (= (length left) (length *notifications-open*))
       (set! *notifications-open* left)
       (notifications--open-changed!))))
@@ -132,7 +132,7 @@ first, so a notice that waits for you is not pushed off by status updates"
 (define (notifications--saw e)
   "a notice reached the log: show it, unless it is old, as when a restart replays the log"
   (when (< (- (current-time) (plist-get e 'at)) notifications-seconds)
-    (set! *notifications-open* (cons (cons (plist-get e 'seq) (notifications--data e 'buffer)) *notifications-open*))
+    (set! *notifications-open* (cons (list (plist-get e 'seq) (notifications--data e 'buffer)) *notifications-open*))
     (notifications--open-changed!)
     (notifications--show! e)))
 

@@ -6958,6 +6958,7 @@
 (public! 'string-byte-length "(string-byte-length S) -- return the length of S in bytes.")
 (public! 'substring-bytes "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.")
 (public! 'list? "(list? X) -- #t when X is a list")
+(public! 'last-pair "(last-pair LST) -- return the last pair of the non-empty list LST.")
 (catalog-meta! 'function "list?" 'domain 'system 'effects '(pure))
 (public! 'format-time "(format-time SECS FMT) — format SECS as local time with the strftime pattern FMT.")
 (public! 'apply "(apply F ARGS) — call F with the elements of the list ARGS as arguments.")

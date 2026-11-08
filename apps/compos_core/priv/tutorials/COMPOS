@@ -40,12 +40,12 @@ The sections, in order.
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `ESC` or `C-g` to cancel the search and return to where you started.
 
 1. Welcome
-2. Windows and focus
-3. Typing and the focus
-4. Searching and replacing
-5. Key notation
-6. Named commands
-7. Help
+2. Help
+3. Windows and focus
+4. Typing and the focus
+5. Searching and replacing
+6. Key notation
+7. Named commands
 8. Files and buffers
 9. Windows
 10. Groups
@@ -63,6 +63,33 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 22. Where to go next
 
 ---
+
+## Help
+
+You never need to remember a key. Compos explains itself while it runs, and a chat answers the rest. Come back here whenever you are stuck.
+
+| Key | What it does |
+| --- | --- |
+| `s-p` | Find a command: say what you want to do |
+| `M-?` | Explain what is here: this buffer, its mode, its keys, the name at point |
+| `C-h k` | Describe the next key you type |
+| `C-h h` | Read how to do a common task |
+| `C-h m` | Describe the current mode and its keys |
+| `C-h a` | Search commands and functions by words |
+| `M-o` | Ask the chat of the page you are on |
+| `C-h ?` | List every help command |
+
+> **Try it.** Type `s-p` and type what you want to do, for example "split the window". Read what it offers. Then type `ESC` to close it.
+
+> **Try it.** Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
+
+> **Try it.** Type `C-h k M-<down>` and read what that key does. Type `q` to close the help.
+
+> **Try it.** Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
+
+When no command fits your question, ask a chat. `M-o` opens the chat of the page you are on, and that chat can read the page.
+
+> **Try it.** Type `M-o` and ask "What can I do on this slide?". Read the answer. Then click the slide to come back.
 
 ## Windows and focus
 
@@ -159,28 +186,6 @@ You never need to know a command before you use it. Type the words you would use
 > **Try it.** Type `M-x`, then type `new chat`. Read the margin beside **chat-new**: it starts a new chat buffer, and the margin shows its key. Press `ESC` to leave the command picker. A later lesson starts a chat.
 
 Agents use this same list. An agent does not guess which rectangle is a button. It finds and runs the named commands you use.
-
-## Help
-
-Compos documents itself while it runs. All the help commands start with `C-h`.
-
-| Key | What it does |
-| --- | --- |
-| `C-h k` | Describe the next key you type |
-| `C-h m` | Describe the current major mode and its keys |
-| `C-h b` | List the bindings active here |
-| `C-h B` | Open the keymap browser, which you can edit |
-| `C-h a` | Search commands and functions by words |
-| `M-?` | Explain the current context, or the name at point |
-| `C-h t` | Open or resume this tutorial |
-
-> **Try it.** Type `C-h k C-M-v` and read about **scroll-other-window**. Type `q` to dismiss the help page.
-
-> **Try it.** Type `C-h m` in the practice page. Notice the mode, the maps in force, and the commands they add. Type `q` when you finish.
-
-`M-x apropos` searches everything that is defined. A public definition carries a domain, its effects, a signature and documentation, so people and agents can both find it.
-
-> **Try it.** Type `M-x apropos`, search for "other window", and read the results. Type `q` to return to the tutorial.
 
 ## Files and buffers
 

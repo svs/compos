@@ -77,10 +77,21 @@
                                          r))))))
              rows)))))
 
+(define (app-registry--page-mode? m lists)
+  (or (string-suffix? "-detail-mode" m) (not (member m lists))))
+
+(define (app-registry--app? r lists)
+  ;; an app is a listing with a page per row, opened by one command: a list
+  ;; alone, such as ibuffer, is not one
+  (and (plist-get r 'entry)
+       (find (lambda (m) (app-registry--page-mode? m lists)) (plist-get r 'modes))))
+
 (define (app-registry-apps)
   "(app-registry-apps) -- every app as a plist: name entry modes commands package section file source doc"
-  (map cdr (sort (map (lambda (r) (cons (string-downcase (plist-get r 'name)) r))
-                      (app-registry--fold (map app-registry--row (app-command-scopes)))))))
+  (let ((lists (if (boundp '*list-modes*) (map (lambda (e) (if (pair? e) (car e) e)) *list-modes*) '())))
+    (map cdr (sort (map (lambda (r) (cons (string-downcase (plist-get r 'name)) r))
+                        (filter (lambda (r) (app-registry--app? r lists))
+                                (app-registry--fold (map app-registry--row (app-command-scopes)))))))))
 
 (define (app-registry--open-buffers row)
   (let ((modes (plist-get row 'modes)))

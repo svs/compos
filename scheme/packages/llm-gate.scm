@@ -7,6 +7,8 @@
 ;;;                        chokepoint of the direct lane, and it answers the
 ;;;                        intrinsic ask tool.
 ;;;   llm-read-only-tools  which tools of a turn may run side by side.
+;;;   llm-loop-plan        the rules of one turn's tool loop: those tools, how
+;;;                        many run at once and for how long, the round cap.
 ;;;   llm-retry-delay      whether a failed model call tries again, and when.
 ;;;   llm-request-plan     what one model call sends, and to whom: the
 ;;;                        provider, the key, the address, the prompt cache.
@@ -78,6 +80,23 @@
                 (if (member level '("pure" "read"))
                     (cons (llm-gate--name (car s)) acc)
                     acc))))))
+
+;; How many rounds one turn may run. A coding turn reads, edits and checks
+;; its work, and each step is a round: 25 stopped real work in the middle
+;; of a task.
+(define llm-loop-max-rounds 200)
+
+;; How many read-only tools of one round run at once, and how long each may
+;; take before its result is an error.
+(define llm-loop-read-concurrency 4)
+(define llm-loop-tool-timeout-ms 35000)
+
+;; The rules llm.ex runs one turn's tool loop by, asked once per turn.
+(define (llm-loop-plan specs)
+  (list 'read-only (llm-read-only-tools specs)
+        'max-rounds llm-loop-max-rounds
+        'concurrency llm-loop-read-concurrency
+        'tool-timeout-ms llm-loop-tool-timeout-ms))
 
 ;; --- retry -------------------------------------------------------------------
 
@@ -159,6 +178,9 @@
 ;;   base-url  the address (llm-base-url), or #f for the provider's own cloud
 ;;   cache     options, marks or #f (llm-gate--cache)
 ;;   ttl       how long the provider holds the cached prefix (llm-cache-ttl)
+;;   cached-inside-input  #t when the provider counts cached tokens inside
+;;             its input count, as OpenAI and every provider of its shape do,
+;;             OpenRouter included. Anthropic counts them beside it.
 ;;   error     the text the call fails with, before it sends anything
 (define (llm-request-plan model)
   (let* ((spec (if (string-contains? model ":") model (string-append "anthropic:" model)))
@@ -173,7 +195,8 @@
               'key key
               'base-url (llm-gate--text (llm-base-url provider))
               'cache (llm-gate--cache provider id)
-              'ttl (if (string? ttl) ttl (value->string ttl)))
+              'ttl (if (string? ttl) ttl (value->string ttl))
+              'cached-inside-input (not (equal? provider "anthropic")))
         (list 'spec spec 'error (string-append "no api key provided for " provider)))))
 
 (public! 'llm-tool-gate
@@ -184,5 +207,7 @@
   "(llm-retryable? E) — #t when the failed model call E, as (STATUS REASON), is worth another try")
 (public! 'llm-retry-delay
   "(llm-retry-delay ATTEMPT E BASE) — milliseconds before the next try of a failed model call, or #f")
+(public! 'llm-loop-plan
+  "(llm-loop-plan SPECS) — the rules of one turn's tool loop: (read-only NAMES max-rounds N concurrency N tool-timeout-ms MS)")
 (public! 'llm-request-plan
-  "(llm-request-plan MODEL) — what one model call sends: (spec S wire W key K base-url U cache C ttl T), or (spec S error TEXT)")
+  "(llm-request-plan MODEL) — what one model call sends: (spec S wire W key K base-url U cache C ttl T cached-inside-input B), or (spec S error TEXT)")

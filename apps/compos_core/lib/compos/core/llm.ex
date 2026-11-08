@@ -25,11 +25,6 @@ defmodule Compos.Core.LLM do
 
   alias Compos.Core.Session
 
-  # How many tool rounds one turn may run. A coding turn reads, edits and
-  # checks its work, and each step is a round: 25 stopped real work in the
-  # middle of a task.
-  @max_tool_rounds 200
-
   @doc "Synchronous request — for callers managing their own tasks."
   def request(prompt), do: run_request(prompt, model())
 
@@ -126,7 +121,7 @@ defmodule Compos.Core.LLM do
     opts =
       opts
       |> Map.new()
-      |> Map.put(:read_only, read_only_tools(specs))
+      |> Map.merge(loop_plan(specs))
 
     tool_loop(messages, system, tools, dispatcher, 0, %{}, opts)
   end
@@ -186,9 +181,9 @@ defmodule Compos.Core.LLM do
     if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
   end
 
-  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage, _opts)
-       when rounds >= @max_tool_rounds,
-       do: {:error, "tool loop exceeded #{@max_tool_rounds} rounds"}
+  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage, opts)
+       when rounds >= :erlang.map_get(:max_rounds, opts),
+       do: {:error, "tool loop exceeded #{opts.max_rounds} rounds"}
 
   defp tool_loop(messages, system, tools, dispatcher, rounds, usage, opts) do
     req =
@@ -298,14 +293,12 @@ defmodule Compos.Core.LLM do
     if length(calls) > 1 and Enum.all?(calls, &read_tool?(&1, opts)) do
       Enum.each(calls, &tool_started(&1, opts))
 
-      max_concurrency = Application.get_env(:compos_core, :scheme_read_concurrency, 4)
-
       calls
       |> Task.async_stream(
         &tool_result(&1, dispatcher, opts, true, false),
-        max_concurrency: max(1, max_concurrency),
+        max_concurrency: max(1, opts.concurrency),
         ordered: true,
-        timeout: 35_000,
+        timeout: opts.tool_timeout_ms,
         on_timeout: :kill_task
       )
       |> Enum.zip(calls)
@@ -362,18 +355,18 @@ defmodule Compos.Core.LLM do
 
   defp read_tool?(call, opts), do: call["name"] in opts[:read_only]
 
-  # Which tools may run side by side is Scheme's (llm-read-only-tools).
-  # No answer runs every call in order, which is always safe. It asks on
-  # the loop's own lane, as its tools run: a busy UI never holds a turn.
-  defp read_only_tools([]), do: []
+  # The rules of one turn's loop are Scheme's (llm-loop-plan): which tools
+  # may run side by side, how many at once and for how long, and how many
+  # rounds a turn may run. It asks on the loop's own lane, as its tools run:
+  # a busy UI never holds a turn. No answer runs every call in order, which
+  # is always safe, under the cap the plan had before it moved.
+  defp loop_plan(specs) do
+    {:ok, plist} = Session.call_named("llm-loop-plan", [specs], nil, 30_000, {:llm, self()})
 
-  defp read_only_tools(specs) do
-    case Session.call_named("llm-read-only-tools", [specs], nil, 30_000, {:llm, self()}) do
-      {:ok, names} when is_list(names) -> names
-      _ -> []
-    end
+    for [{:sym, k}, v] <- Enum.chunk_every(plist, 2), into: %{},
+        do: {k |> String.replace("-", "_") |> String.to_existing_atom(), v}
   catch
-    :exit, _ -> []
+    _, _ -> %{read_only: [], max_rounds: 200}
   end
 
   # The running total, after every round. A turn that is cancelled or that
@@ -568,7 +561,7 @@ defmodule Compos.Core.LLM do
               end)
 
             case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
-              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
+              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, plan), "streamed", true)}
               {:error, e} -> {:error, err_msg(e)}
             end
 
@@ -579,7 +572,7 @@ defmodule Compos.Core.LLM do
         case with_retry(fn ->
                with_deadline(fn -> ReqLLM.generate_text(req_model_arg(plan["wire"]), ctx, opts) end)
              end) do
-          {:ok, resp} -> {:ok, from_req_response(resp, spec)}
+          {:ok, resp} -> {:ok, from_req_response(resp, plan)}
           {:error, e} -> {:error, err_msg(e)}
         end
       end
@@ -717,8 +710,6 @@ defmodule Compos.Core.LLM do
         spec
     end
   end
-
-  defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
 
   # the plan's key, and its address when that is not the provider's own
   # cloud: no address leaves req_llm's own default in place
@@ -885,7 +876,7 @@ defmodule Compos.Core.LLM do
   defp to_req_msg(%{role: "assistant", content: text}), do: [ReqLLM.Context.assistant(text)]
 
   # ReqLLM.Response -> the loop's Anthropic shape
-  defp from_req_response(resp, spec) do
+  defp from_req_response(resp, plan) do
     text = ReqLLM.Response.text(resp) || ""
     calls = ReqLLM.Response.tool_calls(resp) || []
 
@@ -907,7 +898,7 @@ defmodule Compos.Core.LLM do
     %{
       "stop_reason" => stop_reason(resp, calls),
       "content" => blocks,
-      "usage" => usage_strings(ReqLLM.Response.usage(resp), spec)
+      "usage" => usage_strings(ReqLLM.Response.usage(resp), plan)
     }
   end
 
@@ -939,17 +930,17 @@ defmodule Compos.Core.LLM do
   # remains the accurate figure; the fallback in LLMUsage prices these
   # normalized counts, and now it agrees.
   @doc """
-  req_llm usage + a model spec -> the ledger's field names, with
+  req_llm usage + the request plan -> the ledger's field names, with
   `"input_tokens"` normalized to fresh input. Public because it is the
   seam the ledger's arithmetic depends on, and the `:llm_chat_fun` test
   stub bypasses the wire that calls it.
   """
-  def usage_strings(usage, spec) when is_map(usage) do
+  def usage_strings(usage, plan) when is_map(usage) do
     input = Map.get(usage, :input_tokens, 0)
     cached = Map.get(usage, :cached_tokens, 0)
 
     %{
-      "input_tokens" => if(cached_inside_input?(spec), do: max(input - cached, 0), else: input),
+      "input_tokens" => if(plan["cached-inside-input"] == true, do: max(input - cached, 0), else: input),
       "output_tokens" => Map.get(usage, :output_tokens, 0),
       "cache_read_input_tokens" => cached,
       "cache_creation_input_tokens" => Map.get(usage, :cache_creation_tokens, 0)
@@ -958,11 +949,6 @@ defmodule Compos.Core.LLM do
   end
 
   def usage_strings(_, _), do: %{}
-
-  # Anthropic's own API is the exception: it counts cached tokens beside
-  # the input, not inside it. openrouter speaks the OpenAI usage shape
-  # whatever model sits behind it.
-  defp cached_inside_input?(spec), do: provider_of(spec) != "anthropic"
 
   defp numeric(n) when is_number(n), do: n
   defp numeric(_), do: nil
@@ -994,7 +980,7 @@ defmodule Compos.Core.LLM do
         {:ok, resp} ->
           Compos.Core.LLMUsage.record(
             requested_model,
-            usage_strings(ReqLLM.Response.usage(resp), plan["spec"])
+            usage_strings(ReqLLM.Response.usage(resp), plan)
           )
 
           {:ok, ReqLLM.Response.text(resp) || ""}

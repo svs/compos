@@ -122,12 +122,14 @@
       (lambda ()
         (check-equal! (llm-request-plan "claude-sonnet-5")
                       '(spec "anthropic:claude-sonnet-5" wire "anthropic:claude-sonnet-5" key "sk-a"
-                        base-url #f cache options ttl "5m")
+                        base-url #f cache options ttl "5m" cached-inside-input #f)
                       "a bare id is anthropic, cached by request options")
         (check-equal! (plist-get (llm-request-plan "openrouter:anthropic/claude-sonnet-5") 'cache)
                       'marks "an anthropic model through openrouter is cached by marks")
         (check-equal! (plist-get (llm-request-plan "openrouter:openai/gpt-5.5") 'cache)
                       #f "another openrouter model is not cached")
+        (check-equal! (plist-get (llm-request-plan "openrouter:anthropic/claude-sonnet-5") 'cached-inside-input)
+                      #t "openrouter counts cached tokens inside the input, whatever model is behind it")
         (let ((p (llm-request-plan "local:qwen")))
           (check-equal! (map (lambda (k) (plist-get p k)) '(spec wire key base-url cache))
                         '("local:qwen" "openai:qwen" "sk-l" "http://127.0.0.1:8127/v1" #f)
@@ -135,6 +137,13 @@
         (check-equal! (llm-request-plan "deepseek:deepseek-chat")
                       '(spec "deepseek:deepseek-chat" error "no api key provided for deepseek")
                       "no key is an error")))))
+
+(deftest 'llm-gate-loop-plan-carries-the-turn-rules
+  "the loop plan names the read-only tools and the caps of one turn"
+  (lambda ()
+    (check-equal! (llm-loop-plan (list (list 'buffer-text "d" '() '(read)) (list 'buffer-append! "d" '() '(write))))
+                  '(read-only ("buffer-text") max-rounds 200 concurrency 4 tool-timeout-ms 35000)
+                  "the rules as llm.ex reads them")))
 
 (deftest 'llm-gate-retry-delay-backs-off-three-tries
   "BASE then twice BASE, each with up to half its width of jitter; no third retry"

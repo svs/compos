@@ -134,6 +134,8 @@ defmodule Compos.Core.LSP.Conn do
             {String.to_charlist(k), String.to_charlist(to_string(v))}
           end
 
+        with {:error, text} <- Compos.Core.SpawnDir.check(state.root, "lsp #{exe}"), do: raise(text)
+
         port =
           Port.open({:spawn_executable, exe}, [
             :binary,

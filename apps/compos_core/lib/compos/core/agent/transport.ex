@@ -48,7 +48,9 @@ defmodule Compos.Core.Agent.Transport.Port do
       [:binary, :exit_status, args: args] ++
         case Keyword.get(opts, :cd) do
           nil -> []
-          cwd -> [cd: to_charlist(cwd)]
+          cwd ->
+            with {:error, text} <- Compos.Core.SpawnDir.check(cwd, "agent #{exe}"), do: raise(text)
+            [cd: to_charlist(cwd)]
         end ++
         # the daemon is often launched from inside a Claude Code shell;
         # claude-code-acp refuses to nest when it inherits CLAUDECODE

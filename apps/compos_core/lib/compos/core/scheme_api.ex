@@ -1440,8 +1440,8 @@ defmodule Compos.Core.SchemeAPI do
         end,
       {"start-process!",
        "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success."} =>
-        fn [buffer, cmd] ->
-          case Compos.Core.Terminal.start(buffer, cmd, raw: false) do
+        fn [buffer, cmd, env] ->
+          case Compos.Core.Terminal.start(buffer, cmd, raw: false, env: pty_env(env)) do
             {:ok, _} -> true
             {:error, {:already_started, _}} -> true
             _ -> false
@@ -1449,8 +1449,8 @@ defmodule Compos.Core.SchemeAPI do
         end,
       {"start-terminal!",
        "(start-terminal! BUF CMD) — start a raw PTY whose bounded plain transcript stays in BUF; return #t on success."} =>
-        fn [buffer, cmd] ->
-          case Compos.Core.Terminal.start(buffer, cmd) do
+        fn [buffer, cmd, env] ->
+          case Compos.Core.Terminal.start(buffer, cmd, env: pty_env(env)) do
             {:ok, _} -> true
             {:error, {:already_started, _}} -> true
             _ -> false
@@ -3461,6 +3461,13 @@ defmodule Compos.Core.SchemeAPI do
   # and in the inline form the caller is the Session — forever. Run through
   # a port, kill the OS process at the limit, and return what it wrote.
   defp shell_to_string(cmd, dir, limit \\ nil) do
+    case Compos.Core.SpawnDir.check(dir, "shell-command->string") do
+      :ok -> shell_to_string_in(cmd, dir, limit)
+      {:error, text} -> text
+    end
+  end
+
+  defp shell_to_string_in(cmd, dir, limit) do
     limit = limit || shell_inline_limit()
 
     port =
@@ -3549,6 +3556,8 @@ defmodule Compos.Core.SchemeAPI do
 
   defp shell_async_limit,
     do: Application.get_env(:compos_core, :shell_async_timeout_ms, 600_000)
+
+  defp pty_env(env), do: Enum.map(env, fn [k, v] -> {k, v} end)
 
   @entry_keys ~w(name type bytes mtime mode error)a
 

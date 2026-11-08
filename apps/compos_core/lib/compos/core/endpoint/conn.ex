@@ -124,6 +124,9 @@ defmodule Compos.Core.Endpoint.Conn do
             {String.to_charlist(k), String.to_charlist(to_string(v))}
           end
 
+        with {:error, text} <- Compos.Core.SpawnDir.check(spec["cd"], "endpoint #{exe}"),
+             do: raise(text)
+
         opts =
           [:binary, :exit_status, args: spec["args"] || [], env: env] ++
             if(spec["cd"], do: [cd: spec["cd"]], else: []) ++

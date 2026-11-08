@@ -1378,9 +1378,6 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 ;; a chat sends with RET, which runs agent-send
 (tutorial-step-event! "chat" "press `RET` to send it" "agent-send")
 
-;; the prefix step finishes when the prefix is cancelled
-(tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
-
 ;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!: a
 ;; step can listen for them with tutorial-step-event!
 (advice-add! 'clipboard-copy 'after 'tutorial-hears-copy
@@ -1390,8 +1387,20 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 ;; typing a word puts the practice page in the editing state: that is the
 ;; step, and the reader is in the practice page, where n types an n
-(tutorial-await! "focus-and-editing" "type a word"
+(tutorial-await! "window-navigation" "type a word"
   (lambda () (and (buffer-known? *tutorial-buffer*) (editing-state? *tutorial-buffer*))))
+
+;; and leaving the editing state again, after that word, is the next step
+(tutorial-await! "window-navigation" "to stop editing"
+  (lambda ()
+    (let* ((l (tutorial-lesson "window-navigation"))
+           (steps (if l (tutorial--steps l) '()))
+           (word (let loop ((ss steps) (i 0))
+                   (cond ((null? ss) #f)
+                         ((string-contains? (car (car ss)) "type a word") i)
+                         (else (loop (cdr ss) (+ i 1)))))))
+      (and word (tutorial-step-done? "window-navigation" word)
+           (buffer-known? *tutorial-buffer*) (not (editing-state? *tutorial-buffer*))))))
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 

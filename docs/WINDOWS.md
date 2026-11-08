@@ -96,8 +96,8 @@ buffers to fill a pane.
 
 ## Where next
 
-- `C-h t` opens the tutorial. Its "Window navigation", "Moving windows
-  and layouts" and "Buffers" lessons let you practise the keys above.
+- `C-h t` opens the tutorial. Its "Window navigation" lesson lets you
+  practise the keys above.
 - [How do I ...?](manual/HOW-DO-I.md) gives short recipes for buffers,
   windows and groups.
 - [The window specification](WINDOWS-SPEC.md) gives the exact rules and

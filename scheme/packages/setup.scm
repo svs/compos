@@ -755,6 +755,13 @@
 (define (setup--steps-need-npm? steps)
   (and (find (lambda (step) (string-prefix? "npm " (cadr step))) steps) #t))
 
+;; the line an install terminal prints when it finished: it sets the
+;; terminal variable compos-setup (OSC 1337 SetUserVar), and the setup wizard,
+;; which listens on terminal-var-hook, looks again. The time makes each
+;; value new: the terminal sends a variable only when it changed
+(define setup--done-signal
+  "printf '\\033]1337;SetUserVar=compos-setup=%s\\007' \"$(printf \"installed %s\" \"$(date +%s)\" | base64)\"")
+
 (define (setup-agent-install-script name steps)
   "The shell text that runs STEPS for agent NAME, then leaves a login shell.
    The shell stays so that the user can read the output and sign in."
@@ -768,6 +775,7 @@
       (if (setup--steps-need-npm? steps)
           " && export PATH=\"$(npm prefix -g)/bin:$PATH\""
           "")
+      " && " setup--done-signal
       " && printf '\\n%s installed. Run `%s` once to sign in, then M-x setup.\\n' "
       "'" name "' '" signin "'"
       "; exec \"${SHELL:-/bin/sh}\" -l")))

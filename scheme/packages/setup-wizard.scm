@@ -281,7 +281,8 @@
     (buffer-set-local! buf 'mode-name "term-mode")
     (buffer-set-local! buf 'terminal-command
       (string-append (laya-install-command)
-                     " && printf '\\nlaya installed. Press g in the setup to check again.\\n'"
+                     " && " setup--done-signal
+                     " && printf '\\nlaya installed.\\n'"
                      "; exec \"${SHELL:-/bin/sh}\" -l"))
     (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
     ;; a restore must not run the install again
@@ -446,8 +447,24 @@
 ;; a choice or a test made elsewhere shows on the model step at once
 (define (setup-wizard-redraw-open!)
   (when (buffer-exists? *setup-wizard-buffer*) (setup-wizard-redraw! *setup-wizard-buffer*)))
-(add-hook! 'setup-connector-chosen-hook 'setup-wizard-redraw-open!)
-(add-hook! 'llm-connectors-tested-hook 'setup-wizard-redraw-open!)
+;; Each card names the events that change it, and the wizard listens to all
+;; of them for its whole life, open or not: a card that is not on screen
+;; costs nothing, and one that is follows the world without a g.
+(define *setup-wizard-card-events*
+  '(("model cards" setup-connector-chosen-hook)
+    ("model cards" llm-connectors-tested-hook)
+    ("browser extension" browser-attached-hook)
+    ;; an install terminal says it finished (setup--done-signal)
+    ("install buttons" terminal-var-hook)))
+
+(define (setup-wizard--heard &rest args)
+  ;; a terminal sets many variables; only the install's own one counts
+  (when (or (null? args) (not (string? (car args)))
+            (and (pair? (cdr args)) (equal? (cadr args) "compos-setup")))
+    (when (boundp 'laya-rescan!) (laya-rescan!))
+    (setup-wizard-redraw-open!)))
+
+(for-each (lambda (e) (add-hook! (cadr e) 'setup-wizard--heard)) *setup-wizard-card-events*)
 
 ;; The learning space is the onboarding app: the guide chat and its stage.
 (define (setup-open-learning-space!)

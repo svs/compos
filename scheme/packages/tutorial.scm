@@ -1003,7 +1003,6 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
       (let ((text (read-file path)))
         (unless text (error "The Compos tutorial master is missing"))
         (tutorial--fill! buf text "morg-mode")
-        (when (minor-mode-on? buf "preview-mode") (disable-minor-mode! buf "preview-mode"))
         ;; the bytes just read, so the save only binds the pane to the file;
         ;; the pane never read the file itself, and the write guard asks that
         (allow-one-write! path)
@@ -1011,6 +1010,8 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
         (unless (buffer-derived-mode? buf "morg-mode")
           (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
         (buffer-set-local! buf 'morg-narrow-anchor #f)))
+    ;; the reader sees the lesson as a page, in preview
+    (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
     ;; eager: the slide follows an edit even while the pane is hidden
     (unless (buffer-local buf 'tutorial-master-watch)
       (desktop-skip! buf 'tutorial-master-watch)

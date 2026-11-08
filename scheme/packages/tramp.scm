@@ -90,6 +90,49 @@
           'date (caddr st)
           'perms (car st))))
 
+;; The kernel lists a local directory with the raw mode bits; the ls
+;; columns, perms, size and date, are made here. Size and date read in
+;; whole tenths and in UTC, the way dired always showed them.
+(define file-mode-triples '("---" "--x" "-w-" "-wx" "r--" "r-x" "rw-" "rwx"))
+
+(define (file-mode-string type mode)
+  (let ((digit (lambda (shift) (list-ref file-mode-triples (remainder (quotient mode shift) 8)))))
+    (string-append (cond ((equal? type "directory") "d") ((equal? type "symlink") "l")
+                         ((equal? type "regular") "-") ((equal? type "device") "b")
+                         (else "?"))
+                   (digit 64) (digit 8) (digit 1))))
+
+(define (file-size-string n)
+  (let ((tenths (lambda (unit suffix)
+                  (let ((t (quotient (+ (* n 10) (quotient unit 2)) unit)))
+                    (string-append (number->string (quotient t 10)) "."
+                                   (number->string (remainder t 10)) suffix)))))
+    (cond ((>= n 1048576) (tenths 1048576 "M"))
+          ((>= n 1024) (tenths 1024 "k"))
+          (else (number->string n)))))
+
+(define (file-date-string secs)
+  (let* ((sod (modulo secs 86400))
+         (z (+ (quotient (- secs sod) 86400) 719468))
+         (doe (modulo z 146097))
+         (yoe (quotient (- (+ doe (quotient doe 36524)) (quotient doe 1460) (quotient doe 146096)) 365))
+         (doy (- doe (- (+ (* 365 yoe) (quotient yoe 4)) (quotient yoe 100))))
+         (mp (quotient (+ (* 5 doy) 2) 153))
+         (two (lambda (n) (string-append (if (< n 10) "0" "") (number->string n)))))
+    (string-append (list-ref '("Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec" "Jan" "Feb") mp)
+                   " " (string-pad-left (number->string (+ 1 (- doy (quotient (+ (* 153 mp) 2) 5)))) 2)
+                   " " (two (quotient sod 3600)) ":" (two (quotient (modulo sod 3600) 60)))))
+
+(define (local-entry-info e)
+  (let ((err (plist-get e 'error)))
+    (append (list 'name (plist-get e 'name) 'type (plist-get e 'type)
+                  'bytes (plist-get e 'bytes) 'mtime (plist-get e 'mtime))
+            (if err
+                (list 'size "?" 'date "?" 'perms "??????????" 'error err)
+                (list 'size (file-size-string (plist-get e 'bytes))
+                      'date (file-date-string (plist-get e 'mtime))
+                      'perms (file-mode-string (plist-get e 'type) (plist-get e 'mode)))))))
+
 (define (directory-entries dir)
   (if (remote-path? dir)
       (let ((entries (remote-ls! dir))
@@ -97,7 +140,8 @@
         (if failure
             (list 'error (cadr failure))
             (map remote-entry-info entries)))
-      (local-directory-entries dir)))
+      (let ((r (local-directory-entries dir)))
+        (if (and (pair? r) (symbol? (car r))) r (map local-entry-info r)))))
 
 (define (file-stat p0)
   (if (remote-path? p0)
@@ -107,7 +151,11 @@
           (let ((e (or (assoc base entries)
                        (assoc (string-append base "/") entries))))
             (if e (cadr e) (list "----------" "?" "?")))))
-      (local-file-stat p0)))
+      (let ((s (local-file-stat p0)))
+        (if s
+            (list (file-mode-string (car s) (cadddr s)) (file-size-string (cadr s))
+                  (file-date-string (caddr s)))
+            (list "----------" "?" "?")))))
 
 (define (delete-file! p)
   (if (remote-path? p)

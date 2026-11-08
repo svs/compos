@@ -1278,16 +1278,11 @@ defmodule Compos.Core.SchemeAPI do
       {"file-realpath",
        "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal."} =>
         fn [p] -> realpath(Path.expand(p)) end,
-      # (file-stat path) -> (perms size date) strings, dired-style
-      {"file-stat", "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style."} => fn [
-                                                                                                   p
-                                                                                                 ] ->
+      # The raw stat; tramp.scm makes the dired columns, as for directory-entries.
+      {"file-stat", "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style."} => fn [p] ->
         case File.stat(Path.expand(p), time: :posix) do
-          {:ok, stat} ->
-            [format_mode(stat), format_size(stat.size), format_mtime(stat.mtime)]
-
-          {:error, _} ->
-            ["----------", "?", "?"]
+          {:ok, s} -> [Atom.to_string(s.type), s.size, s.mtime, s.mode]
+          {:error, _} -> false
         end
       end,
       # a sortable mtime (posix seconds), 0 when the file is gone — file-stat
@@ -3537,7 +3532,7 @@ defmodule Compos.Core.SchemeAPI do
   defp shell_async_limit,
     do: Application.get_env(:compos_core, :shell_async_timeout_ms, 600_000)
 
-  @entry_keys ~w(name type bytes mtime size date perms error)a
+  @entry_keys ~w(name type bytes mtime mode error)a
 
   defp directory_entry(dir, base) do
     path = Path.join(dir, base)
@@ -3546,12 +3541,10 @@ defmodule Compos.Core.SchemeAPI do
       case File.lstat(path, time: :posix) do
         {:ok, s} ->
           name = if s.type == :directory, do: base <> "/", else: base
-          %{name: name, type: Atom.to_string(s.type), bytes: s.size, mtime: s.mtime,
-            size: format_size(s.size), date: format_mtime(s.mtime), perms: format_mode(s)}
+          %{name: name, type: Atom.to_string(s.type), bytes: s.size, mtime: s.mtime, mode: s.mode}
 
         {:error, reason} ->
-          %{name: base, type: "missing", bytes: 0, mtime: 0, size: "?", date: "?",
-            perms: "??????????", error: file_error(reason, path)}
+          %{name: base, type: "missing", bytes: 0, mtime: 0, error: file_error(reason, path)}
       end
 
     Opts.plist(entry, Enum.filter(@entry_keys, &Map.has_key?(entry, &1)))
@@ -3615,39 +3608,6 @@ defmodule Compos.Core.SchemeAPI do
       {:ok, target} -> resolve_link(Path.expand(target, Path.dirname(path)), hops - 1)
       _ -> path
     end
-  end
-
-  defp format_mode(stat) do
-    type =
-      case stat.type do
-        :directory -> "d"
-        :symlink -> "l"
-        :regular -> "-"
-        :device -> "b"
-        _ -> "?"
-      end
-
-    bits =
-      [0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001]
-      |> Enum.zip(~w(r w x r w x r w x))
-      |> Enum.map_join(fn {bit, ch} ->
-        if Bitwise.band(stat.mode, bit) != 0, do: ch, else: "-"
-      end)
-
-    type <> bits
-  end
-
-  defp format_size(size) when size >= 1_048_576, do: "#{Float.round(size / 1_048_576, 1)}M"
-  defp format_size(size) when size >= 1024, do: "#{Float.round(size / 1024, 1)}k"
-  defp format_size(size), do: "#{size}"
-
-  defp format_mtime(posix) do
-    dt = DateTime.from_unix!(posix)
-    month = Enum.at(~w(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec), dt.month - 1)
-    day = String.pad_leading("#{dt.day}", 2)
-    hh = String.pad_leading("#{dt.hour}", 2, "0")
-    mm = String.pad_leading("#{dt.minute}", 2, "0")
-    "#{month} #{day} #{hh}:#{mm}"
   end
 
   defp region_bounds do

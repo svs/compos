@@ -150,24 +150,33 @@
              (loop (cdr ls) '() (cons (string-trim (string-join rest "\n")) out))))
           (else (loop (cdr ls) (cons (car ls) acc) out)))))
 
+(define (tutorial--quotes lines)
+  ;; each quote of a lesson is a slide: (HEADING TEXT), HEADING the ###
+  ;; heading above it or #f. Quote lines in a row are one quote. A quote
+  ;; that starts with Try it is a thing to do; any other is a thing to read
+  (let loop ((ls lines) (h #f) (q #f) (out '()))
+    (let ((flush (lambda () (if q (cons (list h (string-trim q)) out) out))))
+      (cond ((null? ls) (reverse (flush)))
+            ((string-prefix? ">" (car ls))
+             (let* ((s (string-trim (substring-bytes (car ls) 1 (string-byte-length (car ls)))))
+                    (s (if (string-prefix? "**Try it.**" s)
+                           (string-trim (substring-bytes s 11 (string-byte-length s)))
+                           s)))
+               (loop (cdr ls) h (if q (string-append q " " s) s) out)))
+            ((string-prefix? "### " (car ls))
+             (loop (cdr ls) (string-trim (substring-bytes (car ls) 4 (string-byte-length (car ls)))) #f (flush)))
+            (else (loop (cdr ls) h #f (flush)))))))
+
 (define (tutorial--lesson title lines n at)
   ;; AT is the byte where the lesson's ## heading starts in the master
-  (let ((lines (filter (lambda (l) (not (equal? l "---"))) (reverse lines))))
+  (let* ((lines (filter (lambda (l) (not (equal? l "---"))) (reverse lines)))
+         (quotes (tutorial--quotes lines)))
     (list 'slug (string-downcase (re-replace-all "[^A-Za-z0-9]+" title "-"))
           'n n 'title title 'at at
           'body (string-trim (string-join lines "\n"))
           'readings (tutorial--readings lines)
-          ;; a step's heading is the ### heading above its Try it, or #f
-          'heads (let loop ((ls lines) (h #f) (out '()))
-                   (cond ((null? ls) (reverse out))
-                         ((string-prefix? "### " (car ls))
-                          (loop (cdr ls) (string-trim (substring-bytes (car ls) 4 (string-byte-length (car ls)))) out))
-                         ((string-prefix? *tutorial-try* (car ls)) (loop (cdr ls) h (cons h out)))
-                         (else (loop (cdr ls) h out))))
-          'tries (map (lambda (l)
-                        (string-trim (substring-bytes l (string-byte-length *tutorial-try*)
-                                                      (string-byte-length l))))
-                      (filter (lambda (l) (string-prefix? *tutorial-try* l)) lines)))))
+          'heads (map car quotes)
+          'tries (map cadr quotes))))
 
 (define (tutorial--parse text)
   ;; one lesson per ## section of the master, numbered from 1 in order;

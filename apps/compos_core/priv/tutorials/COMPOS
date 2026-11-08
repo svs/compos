@@ -1,5 +1,17 @@
 # Compos Tutorial
 
+## Choose a model
+
+Compos works with a chat model. It writes replies in chats, and does work as an agent. First, choose the model that new chats use. The lessons that come after can then use it. A lesson that needs no model works without it, so you can also come back here later.
+
+> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Use this** when it is ready, **Install** when its program is missing, or **Add a key** when it needs one.
+
+> **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
+
+If no reply comes, the slide tells you what is wrong. Choose another card, or type `M-x llm-connectors` to test each connector and see its details. `M-x setup-ai-guide` explains connectors, logins and keys.
+
+## Welcome
+
 Welcome. This tutorial teaches Compos by doing: you read it, and you edit it as you go.
 
 This is your personal copy of the tutorial. Later we tell you to change it. Do not worry if you change it before we say so. That is called "editing", and editing is what Compos is for.
@@ -37,49 +49,42 @@ The sections, in order.
 
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `ESC` or `C-g` to cancel the search and return to where you started.
 
-1. Set up
-2. Windows and focus
-3. Typing and the focus
-4. Selecting, copying and pasting
-5. Searching and replacing
-6. Key notation
-7. Named commands
-8. Help
-9. Files and buffers
-10. Windows
-11. Groups
-12. Agents
-13. Settings
-14. Editing and undo
-15. Prefix arguments
-16. Modes and keymaps
-17. Lists and previews
-18. Browsing the web
-19. Why Compos
-20. Persistence
-21. The editor is malleable
-22. Scheme and the BEAM
-23. Where to go next
+1. Choose a model
+2. Welcome
+3. Set up
+4. Windows and focus
+5. Typing and the focus
+6. Selecting, copying and pasting
+7. Searching and replacing
+8. Key notation
+9. Named commands
+10. Help
+11. Files and buffers
+12. Windows
+13. Groups
+14. Agents
+15. Settings
+16. Editing and undo
+17. Prefix arguments
+18. Modes and keymaps
+19. Lists and previews
+20. Browsing the web
+21. Why Compos
+22. Persistence
+23. The editor is malleable
+24. Scheme and the BEAM
+25. Where to go next
 
 ---
 
 ## Set up
 
-This lesson sets up the models and the browser extension. Compos uses three kinds of model. Set them up first, and the later lessons can use them. A lesson that needs no model works without this setup, so you can also come back here later.
+This lesson sets up the decision models and the browser extension. The first lesson chose the chat model. Compos uses two more kinds of model, for small decisions. A lesson that needs neither works without this setup, so you can also come back here later.
 
 | Model | What it does | Where it runs |
 | --- | --- | --- |
-| A chat model | Writes replies in chats, and does work as an agent. | A connector, such as Claude Code, Codex or a direct API. |
 | JEV | Classifies text fast and at a low cost: urgency, a team, the group of a buffer. | The TypeSafe System One API. |
 | laya | Answers typed questions about a passage: a choice, a score, or a yes or no, with a confidence. | This machine, in a local daemon. |
-
-### A chat model
-
-> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Use this** when it is ready, **Install** when its program is missing, or **Add a key** when it needs one.
-
-> **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
-
-If no reply comes, the slide tells you what is wrong. Choose another card, or type `M-x llm-connectors` to test each connector and see its details. `M-x setup-ai-guide` explains connectors, logins and keys.
 
 ### Decisions
 
@@ -312,7 +317,7 @@ A buffer can belong to several useful contexts without being trapped in one appl
 
 ## Agents
 
-The Set up lesson chose the model that new chats use, and tested that it answers.
+The Choose a model lesson chose the model that new chats use, and tested that it answers.
 
 In most programs, a chat sidebar and an application share a screen but stay separate systems. The assistant sees summaries and a few narrow actions, while the application keeps the real state somewhere else.
 

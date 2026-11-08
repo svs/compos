@@ -159,24 +159,19 @@
                       (filter (lambda (l) (string-prefix? *tutorial-try* l)) lines)))))
 
 (define (tutorial--parse text)
-  ;; one lesson per ## section of the master; Contents is the master's own
-  ;; map, and the welcome above it is a lesson of its own, number 0, so the
-  ;; numbers stay those of Contents
-  (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (pre '()) (out '()))
+  ;; one lesson per ## section of the master, numbered from 1 in order;
+  ;; Contents is the master's own map, not a lesson, and its numbers are these
+  (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (out '()))
     (let ((flush (lambda ()
                    (if (and title (not (equal? title "Contents")))
                        (cons (tutorial--lesson title acc (+ 1 (length out))) out)
                        out))))
-      (cond ((null? lines)
-             (let ((ls (reverse (flush))))
-               (if (null? pre) ls (cons (tutorial--lesson "Welcome" pre 0) ls))))
+      (cond ((null? lines) (reverse (flush)))
             ((string-prefix? "## " (car lines))
              (loop (cdr lines)
                    (string-trim (substring-bytes (car lines) 3 (string-byte-length (car lines))))
-                   '() (if title pre acc) (flush)))
-            ((and (not title) (string-prefix? "# " (car lines)))
-             (loop (cdr lines) title acc pre out))
-            (else (loop (cdr lines) title (cons (car lines) acc) pre out))))))
+                   '() (flush)))
+            (else (loop (cdr lines) title (cons (car lines) acc) out))))))
 
 (define (tutorial-lessons)
   "The lessons of the bundled master, in order: plists of slug, n, title, body and tries."
@@ -791,7 +786,7 @@
 (define (tutorial--slide-keys)
   (append '(("n" "next") ("p" "back") ("N" "next lesson") ("P" "previous lesson")
             ("i" "lessons"))
-          (if (equal? *tutorial-current* "set-up") '(("h" "help")) '())
+          (if (tutorial--setup-lesson? *tutorial-current*) '(("h" "help")) '())
           (let* ((l (tutorial--lesson-now))
                  (steps (if l (tutorial--steps l) '())))
             (if (and l (< *tutorial-shown* (length steps))
@@ -1401,17 +1396,22 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 
-;; Behind the Set up lesson, a chat troubleshoots. It is the slide's own
-;; chat, attached as every page's chat is: M-o on the slide opens it. A step
-;; that fails, or h on the slide, goes to it; its answer comes to the slide.
+;; Behind the setup lessons, Choose a model and Set up, a chat troubleshoots.
+;; It is the slide's own chat, attached as every page's chat is: M-o on the
+;; slide opens it. A step that fails, or h on the slide, goes to it; its
+;; answer comes to the slide.
 (define *tutorial-setup-chat* #f)
+(define *tutorial-setup-lessons* '("choose-a-model" "set-up"))
+
+(define (tutorial--setup-lesson? slug)
+  (and (member slug *tutorial-setup-lessons*) #t))
 
 (mode-chat-title! "tutorial-detail-mode" "Tutorial setup")
 
 (define (tutorial--setup-brief what)
   (string-append
-    "You are the setup chat behind the Compos tutorial. The reader is on the Set up lesson: "
-    "a chat model, JEV, laya and the browser extension. " what " "
+    "You are the setup chat behind the Compos tutorial. The reader is on a setup lesson: "
+    "the chat model, or JEV, laya and the browser extension. " what " "
     "Find the cause with the editor tools. Fix what you can without asking: settings, daemons, "
     "paths. Then reply in at most three short sentences for the reader: what was wrong, what you "
     "did, and what the reader must do now. Do not ask questions."))
@@ -1430,22 +1430,22 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
                 (k (and (string? s) (not (equal? (string-trim s) "")) s)))))))))
 
 (define (tutorial--setup-help! slug what)
-  (when (equal? slug "set-up")
+  (when (tutorial--setup-lesson? slug)
     (set! *tutorial-help* "The setup chat is looking into it...")
     (tutorial--draw-detail!)
     (tutorial--setup-ask! (tutorial--setup-brief what)
       (lambda (said)
-        (when (equal? *tutorial-current* "set-up")
+        (when (equal? *tutorial-current* slug)
           (set! *tutorial-help* (or said "The setup chat gave no answer. Type M-x llm-connectors to test the models and choose another."))
           (tutorial--draw-detail!))))))
 
 ;; the model step: the setup wizard chose one already, or the reader does,
 ;; on the slide, from the same model cards the wizard's first step shows;
 ;; the step finishes when a model is in use
-(tutorial-await! "set-up" "choose the model that new chats use"
+(tutorial-await! "choose-a-model" "choose the model that new chats use"
   (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
 
-(tutorial-cards! "set-up" "choose the model that new chats use"
+(tutorial-cards! "choose-a-model" "choose the model that new chats use"
   (lambda ()
     (if (boundp 'setup-model-cards) (setup-model-cards) '())))
 
@@ -1461,23 +1461,23 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (define (tutorial--retest-model!)
   ;; a passed test proved the old model: it is not done for the new one
-  (let* ((l (tutorial-lesson "set-up"))
+  (let* ((l (tutorial-lesson "choose-a-model"))
          (i (and l (let find ((ss (tutorial--steps l)) (i 0))
                       (cond ((null? ss) #f)
                             ((string-contains? (car (car ss)) "test message") i)
                             (else (find (cdr ss) (+ i 1))))))))
     (when i
       (set! *tutorial-done*
-            (alist-put *tutorial-done* "set-up"
-                       (filter (lambda (j) (not (= j i))) (tutorial--done-steps "set-up"))))
+            (alist-put *tutorial-done* "choose-a-model"
+                       (filter (lambda (j) (not (= j i))) (tutorial--done-steps "choose-a-model"))))
       (set! *tutorial-probing* #f)
       (set! *tutorial-probe-failed* #f)
-      (when (equal? *tutorial-current* "set-up") (set! *tutorial-shown* i))
+      (when (equal? *tutorial-current* "choose-a-model") (set! *tutorial-shown* i))
       (tutorial--changed!))))
 
 ;; the reply step is the connectors app's test, run on the connector the
 ;; reader chose; its result shows in M-x llm-connectors too
-(tutorial-probe! "set-up" "test message to the model"
+(tutorial-probe! "choose-a-model" "test message to the model"
   (lambda (pass fail)
     (llm-connectors-test! *default-connector*
       (lambda (r)
@@ -1494,9 +1494,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   "Ask the setup chat about the step on the slide."
   (let* ((l (tutorial--lesson-now))
          (steps (if l (tutorial--steps l) '())))
-    (if (not (and l (equal? (plist-get l 'slug) "set-up")))
-        (message "The setup chat helps with the Set up lesson")
-        (tutorial--setup-help! "set-up"
+    (if (not (and l (tutorial--setup-lesson? (plist-get l 'slug))))
+        (message "The setup chat helps with the Choose a model and Set up lessons")
+        (tutorial--setup-help! (plist-get l 'slug)
           (string-append "The reader asks for help with this step: "
                          (if (< *tutorial-shown* (length steps))
                              (car (list-ref steps *tutorial-shown*))

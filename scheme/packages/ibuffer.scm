@@ -1080,10 +1080,16 @@
   '((last 4 right end)))
 
 (define *ibuffer-compact-fields*
-  '((size 6 right end) (mode 10 left end) (last 4 right end)))
+  '((size 6 right end) (mode 10 left end) (cost 6 right end) (last 4 right end)))
 
 (define *ibuffer-wide-fields*
-  '((size 7 right end) (mode 14 left end) (group 16 left end) (last 4 right end)))
+  '((size 7 right end) (mode 14 left end) (group 16 left end)
+    (cost 6 right end) (turn 10 right end) (last 4 right end)))
+
+;; Fields that only some rows can fill: what a chat cost, and what its
+;; last turn read. A view shows them only when it names them in its
+;; 'show-fields option, so the buffer list carries no column of dashes.
+(define *ibuffer-opt-in-fields* '(cost turn))
 
 ;; The width a field declares is the width it needs at least. A window
 ;; with room to spare gives each field the width its longest cell asks
@@ -1123,7 +1129,9 @@
     (not (or (and (equal? tag 'mode) (equal? g 'mode))
              (and (equal? tag 'group) (equal? g 'group))
              ;; a view leaves out the fields that say nothing about its rows
-             (memq tag (or (list-opt buf 'hide-fields) '()))))))
+             (memq tag (or (list-opt buf 'hide-fields) '()))
+             (and (memq tag *ibuffer-opt-in-fields*)
+                  (not (memq tag (or (list-opt buf 'show-fields) '()))))))))
 
 (define *ibuffer-fields-memo* '())
 
@@ -1153,6 +1161,9 @@
         (let ((v (cond ((equal? tag 'size) (ibuffer-size-label b))
                        ((equal? tag 'mode) (ibuffer-row-label b))
                        ((equal? tag 'group) (ibuffer-row-group-label b))
+                       ;; an opt-in field is the kind's own, or empty
+                       ((memq tag *ibuffer-opt-in-fields*)
+                        (ibuffer-ask b tag (lambda (b) "")))
                        (else (ibuffer-row-last b)))))
           (set! *ibuffer-cell-memo* (cons (list key v) *ibuffer-cell-memo*))
           v))))
@@ -2573,6 +2584,7 @@
             ((equal? (car f) 'size) (if chat? "chat-tokens" "buffer-size"))
             ((equal? (car f) 'mode) (if chat? "chat-state" "buffer-mode"))
             ((equal? (car f) 'group) "buffer-group")
+            ((memq (car f) *ibuffer-opt-in-fields*) "chat-tokens")
             (else "buffer-activity"))) (ibuffer-fields buf all))))))
 
 (define *ibuffer-opts*

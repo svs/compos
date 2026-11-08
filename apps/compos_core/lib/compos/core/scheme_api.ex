@@ -500,6 +500,18 @@ defmodule Compos.Core.SchemeAPI do
       {"llm-catalog-info",
        "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path."} =>
         fn [] -> catalog_plist(Compos.Core.ModelCatalog.snapshot_info()) end,
+      {"llm-price",
+       "(llm-price MODEL) — the catalog price of MODEL in dollars per million tokens: (input I output O cache-read R cache-write W), or #f when the catalog has none."} =>
+        fn [model] ->
+          case Compos.Core.ModelCatalog.price(to_string(model)) do
+            nil ->
+              false
+
+            p ->
+              [{:sym, "input"}, p.input || 0, {:sym, "output"}, p.output || 0,
+               {:sym, "cache-read"}, p.cache_read, {:sym, "cache-write"}, p.cache_write]
+          end
+        end,
       {"llm-catalog-entries",
        "(llm-catalog-entries) — every model the loaded catalog carries, as (SPEC RAW-JSON); RAW-JSON holds its capabilities and extra."} =>
         fn [] ->

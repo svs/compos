@@ -270,6 +270,16 @@
 ;; whole title stands; only the narrow candidate line clips.
 (define (chats-title b) (chat-prompt-full-label b))
 
+(define (chats-cost-label b)
+  (let ((s (chat-spend b)))
+    (if s
+        (string-append (if (cadr s) "~" "") (chat-usd-short (car s)))
+        "")))
+
+(define (chats-turn-label b)
+  (let ((n (chat-turn-tokens b)))
+    (if n (string-append (chat-tokens-short n) "/turn") "")))
+
 ;; a chat needing a reply wears its alert glyph in the name itself, so it
 ;; survives even a narrow table that drops the dot and label columns
 (define (chats-alert-name b)
@@ -303,6 +313,10 @@
         ;; by name, never by value: a reload redefines the function and a
         ;; kind registered with the old one keeps calling it
         'size (lambda (b) (chats-filesize b))
+        ;; what the chat cost (~ marks a catalog estimate), and what its
+        ;; last turn read: the two numbers a smaller context brings down
+        'cost (lambda (b) (chats-cost-label b))
+        'turn (lambda (b) (chats-turn-label b))
         ;; a chat found by a word in its text says which word, in place of
         ;; the state: you searched for the words, not for the state
         'label (lambda (b)
@@ -1107,6 +1121,7 @@
         'noun "chat"
         ;; a chat's transcript size is not what you pick a chat by
         'hide-fields '(size)
+        'show-fields '(cost turn)
         'facets chats-facets
         'filter chats-filter
         'section-note (lambda (buf members) (chats-live-note members))

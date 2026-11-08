@@ -619,13 +619,66 @@
     (and (number? (plist-get ctx 'used)) ctx)))
 
 ;; the share of billed input that came from the cache, as a percentage
-;; string, or #f when nothing was billed yet
+;; string, or #f when nothing was billed yet. A cache write is input the
+;; cache did not serve: the provider read it fresh and stored it. An ACP
+;; backend reports writes apart from input, and a rate without them read
+;; 99.998% on a chat that missed 0.8% of its input.
 (define (chat-hit-rate total)
   (let ((read (or (plist-get total 'cache-read) 0))
-        (fresh (or (plist-get total 'input) 0)))
+        (fresh (+ (or (plist-get total 'input) 0)
+                  (or (plist-get total 'cache-write) 0))))
     (if (= (+ read fresh) 0)
         #f
         (format-percent read (+ read fresh)))))
+
+;;; An ACP backend reports tokens and no dollars, so its chats read
+;;; "unpriced". The catalog knows the model's price, and the totals are
+;;; here, so the cost is an estimate from the two. The catalog lists the
+;;; write price of the 5-minute cache: a chat on the 1-hour cache cost more.
+
+;; "claude-opus-5-5[1m]" names a context variant of one model, one price
+(define (chat-model-catalog-name m)
+  (let ((i (string-index m "[")))
+    (if i (substring-bytes m 0 i) m)))
+
+;; dollars for a usage plist on MODEL, or #f when the catalog has no price
+(define (chat-usage-price model u)
+  (let ((p (and (string? model) (not (equal? model ""))
+                (boundp 'llm-price)
+                (llm-price (chat-model-catalog-name model)))))
+    (and p
+         (/ (+ (* (or (plist-get u 'input) 0) (plist-get p 'input))
+               (* (or (plist-get u 'output) 0) (plist-get p 'output))
+               (* (or (plist-get u 'cache-read) 0) (plist-get p 'cache-read))
+               (* (or (plist-get u 'cache-write) 0) (plist-get p 'cache-write)))
+            1000000))))
+
+;; (DOLLARS ESTIMATE?): what the backend billed, else the catalog estimate
+;; over the totals, else #f. Only the chat's own model is priced: the
+;; editor's default model is not what an ACP chat ran on.
+(define (chat-spend buf)
+  (let ((billed (buffer-local buf 'chat-cost)))
+    (if (number? billed)
+        (list billed #f)
+        (let ((est (chat-usage-price (buffer-local buf 'agent-model)
+                                     (chat-usage-total buf))))
+          (and est (> est 0) (list est #t))))))
+
+;; tokens the model read in the last turn: fresh input, cache reads and
+;; cache writes, over every request of the turn. It grows with the context
+;; times the tool calls, and it is what a smaller context saves.
+(define (chat-turn-tokens buf)
+  (let ((u (chat-last-usage buf)))
+    (and u
+         (let ((n (+ (or (plist-get u 'input) 0) (or (plist-get u 'cache-read) 0)
+                     (or (plist-get u 'cache-write) 0))))
+           (and (> n 0) n)))))
+
+;; "$0.42", "$3.7", "$231": a column, so short before exact
+(define (chat-usd-short x)
+  (string-append "$"
+    (number->string
+      (if (>= x 10) (round x) (/ (round (* x 100)) 100)))))
 
 ;;; --- the direct lane's turn context ---------------------------------------------
 ;;; Backend.ReqLLM pulls this fresh at every turn start: the transcript

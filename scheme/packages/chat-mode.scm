@@ -2785,7 +2785,9 @@
 (define-command "chat-cost" "Show what this chat has cost, and its cache hit rate"
   (lambda ()
     (let* ((buf (current-buffer))
-           (c (buffer-local buf 'chat-cost))
+           ;; billed by the backend, or estimated from the catalog
+           (s (chat-spend buf))
+           (c (and s (car s)))
            (u (chat-last-usage buf))
            (ctx (chat-context-tokens buf))
            (total (chat-usage-total buf))
@@ -2794,7 +2796,9 @@
           (message "No usage reported in this chat yet")
           (message
             (string-append
-              "This chat: " (if c (format-usd c) "unpriced")
+              "This chat: " (if c
+                                  (string-append (if (cadr s) "about " "") (format-usd c))
+                                  "unpriced")
               ;; what it occupies right now, which is the number a reader
               ;; asks for when a conversation feels long
               (if ctx

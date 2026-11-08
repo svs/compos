@@ -20,8 +20,8 @@
       (check-equal! (chat-usage-total buf)
                     '(input 110 output 25 cache-read 1900 cache-write 50)
                     "two turns, added")
-      (check-equal! (chat-hit-rate (chat-usage-total buf)) "94%"
-                    "and the share of input the cache served")
+      (check-equal! (chat-hit-rate (chat-usage-total buf)) "92%"
+                    "the share of input the cache served; a write is a miss")
       (buffer-kill! buf))))
 
 (deftest 'what-a-chat-occupies-is-a-snapshot-not-a-sum

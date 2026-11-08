@@ -300,7 +300,10 @@
       (check-true! (wait-until (lambda () (keymap-test-fired? 'two)) 3000 20)
                    "and pressing the key ran it")
       (disable-minor-mode! buf "zz-keymap-test-minor")
-      (check-equal! (buffer-minor-maps buf) '() "off takes the map away")
+      ;; the key press ran a command, so the editing state's maps are in
+      ;; force too; off takes only this mode's map away
+      (check-equal! (member *keymap-test-minor-map* (buffer-minor-maps buf)) #f
+                    "off takes the map away")
       (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-one"
                     "and the buffer's own binding answers again")
       (buffer-kill! buf))))

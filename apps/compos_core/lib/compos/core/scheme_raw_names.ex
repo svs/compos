@@ -56,6 +56,8 @@ defmodule Compos.Core.SchemeRawNames do
     "local-rename-file!" => "rename-file!",
     "local-copy-file!" => "copy-file!",
     "local-trash-file!" => "trash-file!",
+    "local-start-process!" => "start-process!",
+    "local-start-terminal!" => "start-terminal!",
     "local-set-file-mode!" => "set-file-mode!",
     "local-touch-file!" => "touch-file!",
     "local-make-symlink!" => "make-symlink!",

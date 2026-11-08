@@ -33,7 +33,9 @@ defmodule Compos.Core.Terminal do
   def start(buffer, command, opts \\ []) do
     DynamicSupervisor.start_child(
       Compos.Core.TerminalSupervisor,
-      {__MODULE__, buffer: buffer, command: command, raw: Keyword.get(opts, :raw, true)}
+      {__MODULE__,
+       buffer: buffer, command: command, raw: Keyword.get(opts, :raw, true),
+       env: Keyword.get(opts, :env, [])}
     )
   end
 
@@ -41,11 +43,12 @@ defmodule Compos.Core.Terminal do
     buffer = Keyword.fetch!(opts, :buffer)
     command = Keyword.fetch!(opts, :command)
     raw = Keyword.get(opts, :raw, true)
+    env = Keyword.get(opts, :env, [])
 
-    # the command and the kind ride as the registry value: a restart needs
-    # them, and the GenServer state is not reachable once the process is gone
+    # the command, the kind and the env ride as the registry value: a restart
+    # needs them, and the GenServer state is not reachable once the process is gone
     GenServer.start_link(__MODULE__, opts,
-      name: {:via, Registry, {@registry, buffer, {command, raw}}}
+      name: {:via, Registry, {@registry, buffer, {command, raw, env}}}
     )
   end
 
@@ -53,14 +56,14 @@ defmodule Compos.Core.Terminal do
 
   @doc "Every running buffer process as {buffer, command}, sorted by buffer."
   def list do
-    Registry.select(@registry, [{{:"$1", :_, {:"$2", :_}}, [], [{{:"$1", :"$2"}}]}])
+    Registry.select(@registry, [{{:"$1", :_, {:"$2", :_, :_}}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.sort()
   end
 
   @doc "Kill the buffer's process and run the same command again."
   def restart(buffer) do
     case Registry.lookup(@registry, buffer) do
-      [{pid, {command, raw}}] ->
+      [{pid, {command, raw, env}}] ->
         ref = Process.monitor(pid)
         GenServer.stop(pid, :normal)
 
@@ -73,7 +76,7 @@ defmodule Compos.Core.Terminal do
         # the registry drops the name a moment after the process dies;
         # starting into a still-registered name returns already_started
         await_unregistered(buffer, 100)
-        start(buffer, command, raw: raw)
+        start(buffer, command, raw: raw, env: env)
 
       [] ->
         {:error, :no_terminal}
@@ -199,7 +202,8 @@ defmodule Compos.Core.Terminal do
         :exit_status,
         :stderr_to_stdout,
         args: script_args(wrapper),
-        env: pty_env(raw)
+        # Scheme names the env: (NAME VALUE), a false VALUE unsets NAME
+        env: for({k, v} <- Keyword.get(opts, :env, []), do: {~c"#{k}", v && ~c"#{v}"})
       ])
 
     {:ok,
@@ -626,29 +630,6 @@ defmodule Compos.Core.Terminal do
     do: ["-q", "-e", "-c", "exec /bin/sh -c " <> sh_quote(wrapper), "/dev/null"]
 
   defp sh_quote(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
-
-  defp pty_env(true) do
-    [
-      {~c"TERM", ~c"xterm-256color"},
-      {~c"COLORTERM", ~c"truecolor"},
-      {~c"NO_COLOR", false},
-      {~c"CLICOLOR", ~c"1"},
-      {~c"PROMPT_EOL_MARK", ~c""}
-    ] ++ host_terminal_unset()
-  end
-
-  defp pty_env(false),
-    do:
-      [{~c"TERM", ~c"dumb"}, {~c"PS1", ~c"$ "}, {~c"PROMPT_EOL_MARK", ~c""}] ++
-        host_terminal_unset()
-
-  # The daemon can start inside tmux or screen. The PTY is the editor's
-  # terminal, not the host's: a child that sees TMUX wraps its escape
-  # sequences for tmux, and the browser terminal draws them as text.
-  defp host_terminal_unset do
-    for name <- ~w(TMUX TMUX_PANE TMUX_PLUGIN_MANAGER_PATH STY TERM_PROGRAM TERM_PROGRAM_VERSION),
-        do: {String.to_charlist(name), false}
-  end
 
   # CSI/OSC sequences and stray carriage returns from a comint pty.
   # " +\r" is the partial-line padding (zsh PROMPT_SP): drop the padding

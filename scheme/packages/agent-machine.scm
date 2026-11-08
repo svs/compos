@@ -593,15 +593,64 @@
           'permission (if p (list (car p) (cadr p) (cadddr p)) #f)
           'question (if q (list (car q) (cadr q) (caddr q)) #f))))
 
-;; adjacent chunks melt into one append
+;; adjacent chunks melt into one append; a Codex tool item gets its card fields
 (define (agent-coalesce events)
   "EVENTS with each run of adjacent text chunks joined into one"
   (reverse
    (am-fold (lambda (acc e)
               (if (and (pair? acc) (am-chunk? e) (am-chunk? (car acc)))
                   (cons (list 'type 'chunk 'text (string-append (cadddr (car acc)) (cadddr e))) (cdr acc))
-                  (cons e acc)))
+                  (cons (am-codex-item e) acc)))
             '() events)))
+
+(define (am-str v dflt) (if (string? v) v dflt))
+
+;; Codex sends a tool item raw (codex_app_server.ex); its card's title, kind
+;; and bare tool name are made here, as an ACP adapter names its own. A name
+;; only where the title IS the tool name: command and file items already
+;; title with their argument.
+(define (codex-item-fields item-json)
+  "(codex-item-fields ITEM-JSON) - a Codex tool item's card fields: (title T kind K [name N])"
+  (let* ((item (or (ignore-errors (lambda () (json-parse item-json))) '()))
+         (type (am-str (plist-get item 'type) ""))
+         (tool (plist-get item 'tool))
+         (mcp (string-append (am-str (plist-get item 'server) "mcp") "/" (am-str tool "tool")))
+         (paths (filter (lambda (p) (not (equal? p "")))
+                        (map (lambda (c) (am-str (plist-get c 'path) ""))
+                             (or (plist-get item 'changes) '()))))
+         (title (cond ((equal? type "commandExecution") (am-str (plist-get item 'command) "command"))
+                      ((equal? type "fileChange")
+                       (if (null? paths) "Edit files" (string-append "Edit " (string-join paths ", "))))
+                      ((equal? type "mcpToolCall") mcp)
+                      ((equal? type "dynamicToolCall") (am-str tool "tool"))
+                      ((equal? type "webSearch") (string-append "Search: " (am-str (plist-get item 'query) "")))
+                      ((equal? type "imageView") (string-append "View " (am-str (plist-get item 'path) "image")))
+                      ((equal? type "collabAgentToolCall") (am-str tool "agent"))
+                      (else "tool")))
+         (kind (cond ((equal? type "commandExecution") "execute")
+                     ((equal? type "fileChange") "edit")
+                     ((equal? type "mcpToolCall") "mcp")
+                     ((equal? type "webSearch") "search")
+                     (else type)))
+         (name (cond ((equal? type "mcpToolCall") mcp)
+                     ((member type '("dynamicToolCall" "collabAgentToolCall")) tool)
+                     (else #f))))
+    (append (list 'title title 'kind kind) (if (string? name) (list 'name name) '()))))
+
+;; a tool-call takes every field; a tool-update only the name that
+;; agent-tool-refine! retitles from
+(define (am-codex-item e)
+  (let ((item (and (list? e) (plist-get e 'item))))
+    (if (not (string? item))
+        e
+        (let ((f (codex-item-fields item))
+              (rest (let loop ((ps e) (acc '()))
+                      (cond ((or (null? ps) (null? (cdr ps))) (reverse acc))
+                            ((eq? (car ps) 'item) (loop (cddr ps) acc))
+                            (else (loop (cddr ps) (cons (cadr ps) (cons (car ps) acc))))))))
+          (cond ((eq? (plist-get e 'type) 'tool-call) (append rest f))
+                ((plist-get f 'name) (append rest (list 'name (plist-get f 'name))))
+                (else rest))))))
 
 (define (am-chunk? e)
   (and (list? e) (= (length e) 4) (eq? (car e) 'type) (eq? (cadr e) 'chunk)
@@ -611,3 +660,4 @@
 (public! 'agent-machine-new "(agent-machine-new STEERING IDLE-MS STATELESS) - a new thread's state")
 (public! 'agent-machine-info "(agent-machine-info STATE) - the thread's state as a plist")
 (public! 'agent-coalesce "(agent-coalesce EVENTS) - adjacent text chunks joined into one")
+(public! 'codex-item-fields "(codex-item-fields ITEM-JSON) - a Codex tool item's card fields: (title T kind K [name N])")

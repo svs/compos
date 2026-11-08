@@ -364,8 +364,16 @@ defmodule Compos.AgentTest do
       }
     })
 
+    # the item rides raw; agent-coalesce gives the card its name and kind
+    card = fn e ->
+      {:ok, [c]} = Session.call_named("agent-coalesce", [[e]])
+      c
+    end
+
     assert_receive {:backend_event, call}, 1_000
+    call = card.(call)
     assert Backend.event_type(call) == "tool-call"
+    assert Backend.plist_get(call, "title") == "compos/eval-scheme"
     assert Backend.plist_get(call, "name") == "compos/eval-scheme"
     assert Backend.plist_get(call, "input") == ~s|{"code":"(buffer-list)"}|
     assert Backend.plist_get(call, "kind") == "mcp"
@@ -386,6 +394,7 @@ defmodule Compos.AgentTest do
     })
 
     assert_receive {:backend_event, update}, 1_000
+    update = card.(update)
     assert Backend.event_type(update) == "tool-update"
     assert Backend.plist_get(update, "name") == "compos/eval-scheme"
     assert Backend.plist_get(update, "input") == ~s|{"code":"(buffer-list)"}|
@@ -1511,9 +1520,17 @@ defmodule Compos.AgentTest do
     assert conf =~ "HAS-SYSTEM"
     assert conf =~ "NO-META"
 
+    # agent-resolve-config puts the tags around the sections, once
+    {:ok, tagged} = Session.eval(~s{(agent-config-wrap-system '(system "Edit through the buffers."))})
+    assert tagged =~ ~s{<system>\\nEdit through the buffers.\\n</system>\\n\\n}
+
     {:ok, backend} =
       Backend.ACP.start(
-        %{"cmd" => "fake", "cwd" => File.cwd!(), "system" => "Edit through the buffers."},
+        %{
+          "cmd" => "fake",
+          "cwd" => File.cwd!(),
+          "system" => "<system>\nEdit through the buffers.\n</system>\n\n"
+        },
         self()
       )
 

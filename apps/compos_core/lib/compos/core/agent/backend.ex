@@ -251,6 +251,22 @@ defmodule Compos.Core.Agent.Backend do
   end
 
   @doc """
+  Call the Scheme function FUN with ARGS over the shared world, on no lane:
+  a backend serves its thread, and a lane can be waiting on that thread.
+  """
+  def scheme(fun, args) do
+    Compos.Scheme.exec(Compos.Core.Session.interp(), fn i ->
+      with {:ok, f, i} <- Compos.Scheme.eval_string(i, fun), do: Compos.Scheme.call(i, f, args)
+    end)
+    |> case do
+      {:ok, val, _} -> {:ok, val}
+      {:error, why} -> {:error, why}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @doc """
   Stamp tool durations onto the event stream. A backend passes every
   outgoing event through here with its `tool_started` map: a `tool-call`
   records its start time, and the `tool-update` that ends the call

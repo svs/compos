@@ -400,8 +400,7 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
       "ephemeral" => not truthy?(Map.get(config, "persist-thread"))
     }
     |> put_if("model", model)
-    |> put_if("approvalPolicy", approval_policy(Map.get(config, "permission-mode")))
-    |> put_if("developerInstructions", developer_instructions(config, model, context))
+    |> thread_fields(config, model, context)
     |> put_if("config", codex_config(config))
   end
 
@@ -411,43 +410,23 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
       "cwd" => Map.get(config, "cwd", File.cwd!())
     }
     |> put_if("model", model)
-    |> put_if("approvalPolicy", approval_policy(Map.get(config, "permission-mode")))
-    |> put_if("developerInstructions", developer_instructions(config, model, context))
+    |> thread_fields(config, model, context)
     |> put_if("config", codex_config(config))
   end
 
-  defp approval_policy(mode) when mode in ["auto", :auto, {:sym, "auto"}], do: "never"
-  defp approval_policy(_), do: "on-request"
+  # agent-connectors.scm writes the approval policy and the one instruction
+  # text a thread starts with: the ACP lane's sections, the chat's system
+  # text and the runtime model id (codex-thread-fields)
+  defp thread_fields(params, config, model, context) do
+    mode = string_value(Map.get(config, "permission-mode"))
+    system = Map.get(context, :system) || Map.get(context, "system")
 
-  # agent.scm assembles the common primer and preset note under the same
-  # meta.systemPrompt.append field used by claude-code-acp. Preserve that
-  # single instruction source when the transport is native Codex.
-  defp developer_instructions(config, model, context) do
-    base =
-      config
-      |> Map.get("meta")
-      |> case do
-        nil -> nil
-        meta -> meta |> Compos.Core.Plist.to_json() |> get_in(["systemPrompt", "append"])
-      end
-      |> string_value()
+    case Backend.scheme("codex-thread-fields", [Map.get(config, "meta"), system, model, mode]) do
+      {:ok, [policy, text]} ->
+        params |> Map.put("approvalPolicy", policy) |> put_if("developerInstructions", text || nil)
 
-    system = string_value(Map.get(context, :system) || Map.get(context, "system"))
-
-    identity =
-      if model do
-        "Your exact runtime model ID is #{inspect(model)}. When asked which model you are, " <>
-          "report that exact ID; do not replace it with a generic Codex or GPT family name."
-      end
-
-    [base, system, identity]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&(String.trim(&1) == ""))
-    |> Enum.uniq()
-    |> Enum.join("\n\n")
-    |> case do
-      "" -> nil
-      instructions -> instructions
+      _ ->
+        params
     end
   end
 
@@ -519,6 +498,9 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
     emit(state, type: :"model-state", current: state.model || "", available: available)
   end
 
+  # what a tool card's title, name and kind are made from; never the output
+  @item_fields ~w(type command changes server tool query path)
+
   defp item_started(state, %{"type" => type} = item)
        when type in [
               "commandExecution",
@@ -532,12 +514,10 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
     emit(state,
       type: :"tool-call",
       id: Map.get(item, "id", ""),
-      title: item_title(item),
-      # MCP-style calls carry their arguments on the item; Scheme's
-      # agent-tool-title appends the argument that matters to the name
-      name: item_tool_name(item),
+      # agent-coalesce reads the title, name and kind from the item's own
+      # fields (codex-item-fields), as an ACP adapter names them itself
+      item: json_text(Map.take(item, @item_fields)),
       input: item_input(item),
-      kind: item_kind(item),
       status: Map.get(item, "status", "pending")
     )
   end
@@ -560,7 +540,7 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
       status: completed_status(item),
       # arguments that were absent at item/started ride here, and
       # agent-tool-refine! retitles the card from them
-      name: item_tool_name(item),
+      item: json_text(Map.take(item, @item_fields)),
       input: item_input(item),
       text: completed_text(item)
     )
@@ -577,37 +557,6 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
     )
   end
 
-  defp item_title(%{"type" => "commandExecution"} = item), do: Map.get(item, "command", "command")
-
-  defp item_title(%{"type" => "fileChange"} = item) do
-    paths = for c <- Map.get(item, "changes", []), do: Map.get(c, "path", "")
-
-    case Enum.reject(paths, &(&1 == "")) do
-      [] -> "Edit files"
-      names -> "Edit " <> Enum.join(names, ", ")
-    end
-  end
-
-  defp item_title(%{"type" => "mcpToolCall"} = item),
-    do: "#{Map.get(item, "server", "mcp")}/#{Map.get(item, "tool", "tool")}"
-
-  defp item_title(%{"type" => "dynamicToolCall"} = item), do: Map.get(item, "tool", "tool")
-  defp item_title(%{"type" => "webSearch"} = item), do: "Search: #{Map.get(item, "query", "")}"
-  defp item_title(%{"type" => "imageView"} = item), do: "View #{Map.get(item, "path", "image")}"
-  defp item_title(%{"type" => "collabAgentToolCall"} = item), do: Map.get(item, "tool", "agent")
-  defp item_title(_), do: "tool"
-
-  # a bare tool name for the calls whose title IS the tool name; command
-  # and file items already title with their argument
-  defp item_tool_name(%{"type" => "mcpToolCall"} = item),
-    do: "#{Map.get(item, "server", "mcp")}/#{Map.get(item, "tool", "tool")}"
-
-  defp item_tool_name(%{"type" => type} = item)
-       when type in ["dynamicToolCall", "collabAgentToolCall"],
-       do: Map.get(item, "tool")
-
-  defp item_tool_name(_), do: nil
-
   defp item_input(%{"type" => type} = item)
        when type in ["mcpToolCall", "dynamicToolCall", "collabAgentToolCall"] do
     case Map.get(item, "arguments") do
@@ -617,12 +566,6 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
   end
 
   defp item_input(_), do: nil
-
-  defp item_kind(%{"type" => "commandExecution"}), do: "execute"
-  defp item_kind(%{"type" => "fileChange"}), do: "edit"
-  defp item_kind(%{"type" => "mcpToolCall"}), do: "mcp"
-  defp item_kind(%{"type" => "webSearch"}), do: "search"
-  defp item_kind(%{"type" => type}), do: type
 
   defp completed_status(%{"status" => status}) when status in ["failed", "declined", "error"],
     do: "failed"

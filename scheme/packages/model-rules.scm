@@ -148,6 +148,33 @@
   "(model-codex-entries MODELS-JSON) — the picker rows of every model a live backend listed"
   (map model-codex-row (json-parse models-json)))
 
+;;; --- ACP model option values ---------------------------------------------
+
+;; A model option value is opaque on the wire. dsh spells it as a JSON
+;; ["provider", "model"] pair, which no menu and no modeline can show, so
+;; name the model; acp.ex keeps the wire string for the write back. Two
+;; providers that serve the same model name keep their whole paths.
+(define (model--acp-parts wire)
+  (let ((v (and (string? wire) (ignore-errors (lambda () (json-parse wire))))))
+    (and (pair? v) (null? (filter (lambda (x) (not (string? x))) v)) v)))
+
+(define (model--acp-id wire)
+  (let ((parts (model--acp-parts wire))) (if parts (last parts) wire)))
+
+(define (model-acp-ids wires current)
+  "(model-acp-ids WIRES CURRENT) — (CURRENT-ID ID...): the model name of each ACP option value"
+  (let* ((short (map model--acp-id wires))
+         (ids (map (lambda (w id)
+                     (if (> (length (filter (lambda (x) (equal? x id)) short)) 1)
+                         (let ((p (model--acp-parts w))) (if p (string-join p "/") w))
+                         id))
+                   wires short))
+         (hit (let loop ((ws wires) (is ids))
+                (cond ((null? ws) #f)
+                      ((equal? (car ws) current) (car is))
+                      (else (loop (cdr ws) (cdr is)))))))
+    (cons (or hit (model--acp-id current)) ids)))
+
 ;;; --- how old a snapshot is ---------------------------------------------------
 
 ;; days since 1970-01-01 for a proleptic Gregorian civil date (Hinnant's
@@ -211,6 +238,8 @@
   "(model-codex-entry MODEL-JSON) — the picker row (ID NAME EFFORTS DEFAULT) for one model a live backend listed")
 (public! 'model-codex-entries
   "(model-codex-entries MODELS-JSON) — the picker rows of every model a live backend listed")
+(public! 'model-acp-ids
+  "(model-acp-ids WIRES CURRENT) — (CURRENT-ID ID...): the model name of each ACP option value")
 (public! 'model-stale-days
   "(model-stale-days CAPTURED NOW) — whole days since the ISO-8601 instant CAPTURED, or #f; NOW is unix seconds")
 

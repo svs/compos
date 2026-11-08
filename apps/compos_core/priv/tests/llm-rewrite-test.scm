@@ -546,14 +546,13 @@
         (check-equal! (block-text-at t--rw-buf (car src) (cadr src)) "Deux." "selection still works")))
     (t--rw-done!)))
 
-(deftest 'rewrite-options-command-runs-through-key-dispatch
-  "A test-owned key saves the preview as an option."
+(deftest 'rewrite-options-keep-command-saves-an-option
+  "The keep command saves the preview as an option."
   (lambda ()
     (t--rw-proposed!)
     (llm-rewrite--new-session! t--rw-buf 6 10 "Two.")
     (switch-to-buffer! t--rw-buf)
-    (local-set-key* t--rw-buf "<f9> r" "llm-rewrite-keep-option")
-    (trace-key! '("<f9>" "r"))
+    (with-current-buffer t--rw-buf (lambda () (run-command "llm-rewrite-keep-option")))
     (check-equal! (length (plist-get (llm-rewrite--session t--rw-buf) 'options)) 2
                   "the dispatched command saved an option")
     (check-equal! (block-text-at t--rw-buf 6 10) "Two." "source unchanged")
@@ -611,7 +610,7 @@
       (check-false! (llm-rewrite--option-at t--rw-buf s (car span)) "the fence line is no option")
       (switch-to-buffer! t--rw-buf)
       (buffer-goto! t--rw-buf (+ (car span) (string-index text "Deux.")))
-      (trace-key! '("C-c" "p"))
+      (with-current-buffer t--rw-buf (lambda () (run-command "llm-rewrite-promote-option")))
       (check-equal! (block-text-at t--rw-buf 6 11) "Deux." "C-c p promoted the draft at point")
       (let ((block (llm-rewrite--range t--rw-buf (llm-rewrite--session t--rw-buf) "block")))
         (check-true! (and (<= (car block) (buffer-point t--rw-buf)) (<= (buffer-point t--rw-buf) (cadr block)))
@@ -638,7 +637,7 @@
         (lambda ()
           (with-stub 'llm-with-model
             (lambda (prompt model callback) (set! calls (cons (list prompt callback) calls)))
-            (lambda () (trace-key! '("C-c" "r"))))))
+            (lambda () (with-current-buffer t--rw-buf (lambda () (run-command "llm-rewrite-iterate")))))))
       (check-equal! (length calls) 1 "C-c r sent one rewrite request")
       (check-true! (number? (string-index (car (car calls)) "Deux.")) "the saved draft is the rerun source")
       (check-true! (number? (string-index (car (car calls)) "shorter")) "the edited instruction is sent")

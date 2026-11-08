@@ -3048,6 +3048,14 @@
            (and (assoc label (list-tabs-of buf))
                 (begin (list-tab-go! buf label) #t))))))
 
+;; A click on a row opens it: the row's own RET, as a key would run it.
+;; A click above the rows (the head, the tabs) only keeps the moved point.
+(define (list-mouse-open buf)
+  (when (and (list-mode-of buf) (list-index buf) (list-current buf))
+    (let ((cmd (key-binding "RET")))
+      (when cmd (call-interactively cmd)))))
+(add-hook! 'mouse-click-hook 'list-mouse-open)
+
 ;; a list with 'tabs gets its rows kept by the tab and the tab row drawn
 ;; over its own head blocks
 (define (list-mode-with-tabs opts)

@@ -274,6 +274,29 @@ defmodule Compos.Ui.EditorLive do
 
   # a block page scrolled the part point is in out of view: point follows to
   # the first part still on screen, and focus stays where it is
+  # a click on a corner notice: notifications.scm takes it away and goes
+  # where it points
+  def handle_event("notice_click", %{"seq" => seq}, socket) when is_binary(seq) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("notifications-click!", [seq])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # a plain single click, sent after the event that put point: what it
+  # means is the buffer's (mouse-click-hook; a list opens the row)
+  def handle_event("mouse_click", %{"win" => win}, socket) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Compos.Core.Editor.set_active(id)
+        Compos.Core.Session.call_named("mouse-clicked!", [])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("block_point", %{"win" => win, "line" => line}, socket) when is_integer(line) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
@@ -1355,12 +1378,12 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # The notices that pass in the corner, newest on top, as Scheme publishes
-  # them (notifications.scm): (SEQ SOURCE TITLE BODY). They take no focus
-  # and no click; M-x notifications keeps the history.
+  # them (notifications.scm): (SEQ SOURCE TITLE BODY). They take no focus;
+  # a click goes where the notice points. M-x notifications keeps the history.
   defp frame_notices(assigns) do
     ~M"""
     <c-group :if={notices(@state) != []} class="notices" role="status" aria-live="polite">
-      <c-group :for={{seq, source, title, body} <- notices(@state)} id={"notice-" <> seq} class="notice">
+      <c-group :for={{seq, source, title, body} <- notices(@state)} id={"notice-" <> seq} class="notice" phx-click="notice_click" phx-value-seq={seq}>
         <c-text class="notice-source">{source}</c-text>
         <c-text class="notice-title">{title}</c-text>
         <c-text :if={body != ""} class="notice-body">{body}</c-text>

@@ -3,7 +3,10 @@
 ;;; (notify! SOURCE TITLE [BODY] [PROPS]) puts a notice in the event log
 ;;; under notify:SOURCE, so the log is the history. A new notice shows in a
 ;;; small stack in the corner of every frame and leaves after
-;;; notifications-seconds. It takes no focus and no key.
+;;; notifications-seconds. It takes no focus and no key. A click on it
+;;; goes where it points (notifications-visit!) and takes it away.
+;;; A notice with (sticky #t) stays until you act on it: a click, or a visit
+;;; to its buffer. Agent attention is sticky; status updates pass.
 ;;; This is only the pipe: each mode subscribes to its own events and
 ;;; decides what makes a notice.
 
@@ -21,8 +24,8 @@
 
 (define *notifications-buffer* "*notifications*")
 
-;; the notices on screen, newest first, as (SEQ SOURCE TITLE BODY BUFFER),
-;; BUFFER the one the notice is about or #f; survives a reload
+;; the notices on screen, newest first, as (SEQ SOURCE TITLE BODY BUFFER EVENT),
+;; BUFFER the one the notice is about or #f, EVENT the notice itself; survives a reload
 (define *notifications-shown* (if (boundp '*notifications-shown*) *notifications-shown* '()))
 
 (effects! '(pure))
@@ -38,31 +41,47 @@
   (map (lambda (n) (list (number->string (car n)) (nth 1 n) (nth 2 n) (nth 3 n)))
        *notifications-shown*))
 
+(define (notifications--sticky? n)
+  (and (> (length n) 5) (notifications--data (nth 5 n) 'sticky) #t))
+
+(define (notifications--trim shown)
+  "SHOWN cut to notifications-max-shown: the oldest passing notice leaves
+first, so a notice that waits for you is not pushed off by status updates"
+  (if (<= (length shown) notifications-max-shown)
+      shown
+      (let* ((old (reverse shown))
+             (drop (or (find (lambda (n) (not (notifications--sticky? n))) old)
+                       (car old))))
+        (notifications--trim (filter (lambda (n) (not (eq? n drop))) shown)))))
+
 (effects! '(write display))
 
 (define (notifications--publish!)
   (frame-chrome-set! "notifications" (notifications--chrome)))
+
+(define (notifications--show! e)
+  (let ((seq (plist-get e 'seq))
+        (sticky? (notifications--data e 'sticky)))
+    (set! *notifications-shown*
+          (notifications--trim
+            (cons (list seq (notifications--source e)
+                        (or (notifications--data e 'title) "")
+                        (or (notifications--data e 'body) "")
+                        (or (notifications--data e 'buffer) #f)
+                        e)
+                  *notifications-shown*)))
+    (notifications--publish!)
+    (unless sticky?
+      (debounce! (string->symbol (string-append "notify-" (number->string seq)))
+                 (* 1000 notifications-seconds)
+                 (lambda (s) (notifications-dismiss! s))
+                 seq))))
 
 (define (notifications-dismiss! seq)
   "take the notice SEQ off the screen; it stays in the history"
   (set! *notifications-shown*
         (filter (lambda (n) (not (equal? (car n) seq))) *notifications-shown*))
   (notifications--publish!))
-
-(define (notifications--show! e)
-  (let ((seq (plist-get e 'seq)))
-    (set! *notifications-shown*
-          (take (cons (list seq (notifications--source e)
-                            (or (notifications--data e 'title) "")
-                            (or (notifications--data e 'body) "")
-                            (or (notifications--data e 'buffer) #f))
-                      *notifications-shown*)
-                (min notifications-max-shown (+ 1 (length *notifications-shown*)))))
-    (notifications--publish!)
-    (debounce! (string->symbol (string-append "notify-" (number->string seq)))
-               (* 1000 notifications-seconds)
-               (lambda (s) (notifications-dismiss! s))
-               seq)))
 
 ;; a notice about a buffer has done its job once you are in that buffer:
 ;; its 'buffer prop names it
@@ -84,11 +103,35 @@
 (effects! '(write))
 
 (define (notify! source title &optional body props)
-  "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it for a short time. PROPS is a plist kept with it, such as (topic \"whatsapp:9198...\"); (buffer BUF) takes the notice off the screen when you go to BUF. Return its seq"
+  "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it for a short time. PROPS is a plist kept with it, such as (topic \"whatsapp:9198...\"); (buffer BUF) takes the notice off the screen when you go to BUF, and a click goes there; (jid J) opens that WhatsApp chat, (command NAME) runs it; (sticky #t) keeps it on screen until you act on it. Return its seq"
   (event-publish! (string-append "notify:" source) 'notice
                   (append (list 'title title 'body (or body "")) (or props '()))))
 
 (event-subscribe! "notifications" "notify:*" 'notifications--saw)
+
+(effects! '(write display))
+
+(define (notifications-visit! e)
+  "go where the notice E points: its buffer, its WhatsApp chat, its mailbox,
+or its command; #t when it went somewhere"
+  (let ((buf (notifications--data e 'buffer))
+        (jid (notifications--data e 'jid))
+        (cmd (notifications--data e 'command)))
+    (cond ((and (string? buf) (buffer-known? buf))
+           (switch-to-buffer-in-group! buf) #t)
+          ((and (string? jid) (boundp 'whatsapp--open-chat!))
+           (whatsapp--open-chat! (list 'jid jid 'name (or (notifications--data e 'title) jid)) #t) #t)
+          ((and (equal? (notifications--source e) "mail") (boundp 'mail-open!))
+           (mail-open! (notifications--data e 'mailbox)) #t)
+          ((string? cmd) (run-command cmd) #t)
+          (else (message "This notice points nowhere") #f))))
+
+(define (notifications-click! seq)
+  "a click on the notice SEQ in the corner: take it away and go where it points"
+  (let* ((s (if (string? seq) (string->number seq) seq))
+         (n (find (lambda (n) (equal? (car n) s)) *notifications-shown*)))
+    (notifications-dismiss! s)
+    (when (and n (> (length n) 5)) (notifications-visit! (nth 5 n)))))
 
 ;;; M-x notifications: the history
 
@@ -109,7 +152,7 @@
   (list
     'doc (string-append
            "The notices, newest first. Each one passed in the corner for a few seconds. "
-           "/ narrows the rows drawn. The list follows new notices while it is on screen. "
+           "RET or a click goes where the notice points. / narrows the rows drawn. The list follows new notices while it is on screen. "
            "g redraws, and q quits.")
     'buffer *notifications-buffer*
     'transient #f
@@ -123,8 +166,8 @@
     'title (lambda (buf) "Notifications")
     'total (lambda (buf) (length (list-entries buf)))
     'noun "notice"
-    'footer (lambda (buf) '(("/" "filter") ("g" "redraw") ("q" "quit")))
-    'keys '(("g" "notifications-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("RET" "go") ("/" "filter") ("g" "redraw") ("q" "quit")))
+    'keys '(("RET" "notifications-visit") ("g" "notifications-refresh") ("q" "quit-window"))))
 
 (define-command "notifications" "Show the notices that passed, newest first"
   (lambda ()
@@ -139,7 +182,16 @@
 (define-command "notifications-clear" "Take every notice off the screen"
   (lambda () (set! *notifications-shown* '()) (notifications--publish!)))
 
+(define-command "notifications-visit" "Go where the notice at point points"
+  (lambda ()
+    (let ((e (list-current *notifications-buffer*)))
+      (if e
+          (begin (notifications-dismiss! (plist-get e 'seq)) (notifications-visit! e))
+          (message "No notice on this line")))))
+
 (domain! 'interaction)
 (effects! '(write display))
 (public! 'notify! "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it in the corner for notifications-seconds")
 (public! 'notifications-dismiss! "(notifications-dismiss! SEQ) -- take the notice SEQ off the screen; it stays in the history")
+(public! 'notifications-visit! "(notifications-visit! NOTICE) -- go where NOTICE points: its buffer, WhatsApp chat, mailbox or command")
+(public! 'notifications-click! "(notifications-click! SEQ) -- what a click on the notice SEQ in the corner does: take it away and go where it points")

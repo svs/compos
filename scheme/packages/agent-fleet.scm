@@ -930,7 +930,7 @@
                (string-append (if (eq? status 'blocked) "Blocked: " "Needs you: ")
                               (chats-title buf))
                why
-               (list 'buffer buf)))))
+               (list 'buffer buf 'sticky #t)))))
 (add-hook! 'chat-status-hook 'agents-goal-notify!)
 
 (define (agents-goal-restate! buf status why)

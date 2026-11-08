@@ -735,6 +735,7 @@
                  (cond (text (first-line text))
                        (media (string-append "[" media "]"))
                        (else ""))
-                 (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq)))))))
+                 (list 'topic (plist-get e 'topic) 'event (plist-get e 'seq)
+                       'jid (plist-get d 'chat)))))))
 
 (event-subscribe! "whatsapp-notify" "whatsapp:*" 'whatsapp-notify--saw)

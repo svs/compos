@@ -6203,6 +6203,13 @@
   (select-window! id)
   (chat-snap-to-input!))
 
+;; A plain single click, after it put point. What a click means is the
+;; buffer's business: a list opens the row (tabulated-list.scm), and a
+;; buffer with no answer only keeps the moved point.
+(define (mouse-clicked!)
+  "a plain click put point in the current buffer; run mouse-click-hook with it"
+  (run-hook-with-args 'mouse-click-hook (current-buffer)))
+
 ;;; --- Input intents ---------------------------------------------------------
 ;;; The browser's own text pipeline (input methods, dead keys, dictation,
 ;;; autocorrect, spellcheck, native selection) reports what the user meant

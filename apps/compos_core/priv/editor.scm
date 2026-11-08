@@ -7163,6 +7163,7 @@
 (catalog-meta! 'function "compos-priv-dir" 'domain 'files 'effects '(pure))
 (public! 'file-exists? "(file-exists? PATH) — return #t if PATH exists." 'files)
 (public! 'file-size "(file-size PATH) — return the file's size in bytes, or 0 if it is gone or remote." 'files)
+(public! 'expand-path "(expand-path PATH) — expand PATH to an absolute path, against the home and working directories." 'files)
 (effects! '(write))
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")

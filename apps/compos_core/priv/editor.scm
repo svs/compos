@@ -7075,6 +7075,7 @@
 (public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")
 (public! 'local-variable-p "(local-variable-p NAME [BUF]) — #t when the buffer holds its own value")
 (public! 'variable-value "(variable-value NAME) — the current buffer's own value, else the default")
+(catalog-meta! 'function "variable-value" 'domain 'customize 'effects '(read))
 (public! 'variable-set! "(variable-set! NAME VALUE) — locally for a defvar-local, else globally")
 (public! 'push-mark! "(push-mark! [POS] [NOMSG]) — the old mark goes on the ring, the mark is set at POS or point")
 (public! 'pop-to-mark! "(pop-to-mark!) — point goes to the mark, the ring turns, no region stays")

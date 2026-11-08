@@ -6820,6 +6820,8 @@
 (public! 'focus-key "(focus-key BUF) — the key that returns BUF from the editing state to focus")
 (public! 'editing-state-maps-off! "(editing-state-maps-off! MODE MAPS) — MODE's buffers refuse those maps in the editing state; chat-mode refuses editing-caret-map and cua-mode-map, so the Cmd- and Shift-arrows stay the window motion in a chat")
 (public! 'editing-quit! "(editing-quit!) — mark the running command as a quit: after it the buffer is in the movement state; keyboard-quit calls this, and a command that aborts something calls it too")
+(public! 'editing-neutral-command? "(editing-neutral-command? CMD) — #t when CMD is a Shift-chord selection command that leaves the editing state as it found it")
+(catalog-meta! 'function "editing-neutral-command?" 'domain 'windows 'effects '(read))
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")
 (public! 'define-derived-mode "(define-derived-mode NAME PARENT SETUP) — NAME is PARENT with SETUP on top: PARENT's setup, keymap and hook come first")
 (public! 'major-mode-set! "(major-mode-set! NAME) — enter the major mode NAME and say so; the M-x form of a mode")

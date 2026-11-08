@@ -73,7 +73,11 @@ first, so a notice that waits for you is not pushed off by status updates"
 (define (notifications--open-changed!)
   "the open notices changed: the bell and the list follow"
   (notifications--publish-unread!)
-  (when (buffer-exists? *notifications-buffer*) (list-refresh! *notifications-buffer*)))
+  (for-each list-refresh! (notifications--lists)))
+
+(define (notifications--lists)
+  "every notifications list, one per group"
+  (filter (lambda (n) (equal? (buffer-local n 'mode-name) "notifications-mode")) (buffer-list)))
 
 (define (notifications-done! seq)
   "the notice SEQ is dealt with: off the screen, out of the bell and the list"
@@ -222,21 +226,21 @@ or its command; #t when it went somewhere"
 
 (define-command "notifications-visit" "Go where the notice at point points"
   (lambda ()
-    (let ((e (list-current *notifications-buffer*)))
+    (let ((e (list-current (current-buffer))))
       (if e
           (begin (notifications-done! (plist-get e 'seq)) (notifications-visit! e))
           (message "No notice on this line")))))
 
 (define-command "notifications-done" "Mark the notice at point done: it leaves the list and the bell"
   (lambda ()
-    (let ((e (list-current *notifications-buffer*)))
+    (let ((e (list-current (current-buffer))))
       (if e (notifications-done! (plist-get e 'seq)) (message "No notice on this line")))))
 
 (define-command "notifications-toggle-all" "Show every notice that passed, or only the open ones"
   (lambda ()
-    (buffer-set-local! *notifications-buffer* 'notifications-all
-                       (not (buffer-local *notifications-buffer* 'notifications-all)))
-    (list-refresh! *notifications-buffer*)))
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'notifications-all (not (buffer-local buf 'notifications-all)))
+      (list-refresh! buf))))
 
 (domain! 'interaction)
 (effects! '(write display))

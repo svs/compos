@@ -1392,11 +1392,12 @@
         (watch-path! (buffer-local buf 'diff-root) 'deep))
       (diff-refresh buf))))
 
-;; C-g and ESC clear a selection; with none, the plain quit (q)
+;; C-g and ESC clear a selection; with none, the plain quit (q). An unset
+;; selection follows point, so it is a selection too: only 'none is none.
 (mode-quit! "diff-mode"
   (lambda (buf)
     (let ((s (buffer-local buf 'diff-selection)))
-      (and s (not (equal? s 'none))
+      (and (not (equal? s 'none))
            (begin (run-command "diff-clear-selection") #t)))))
 
 (mode-keys! "diff-mode"

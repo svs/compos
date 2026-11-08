@@ -1117,29 +1117,6 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
     (lambda () (apply-layout! work (mode-layout "tutorial-practice-mode")))
     (lambda () (set! *tutorial-arranging* #f))))
 
-(define (tutorial--keep-layout!)
-  (when (and *tutorial-open* (not *tutorial-arranging*) (not (minibuffer-active?))
-             (equal? (selected-frame) *tutorial-frame*)
-             (equal? (frame-group) (buffer-group *tutorial-detail-buffer*)))
-    (unless (and (buffer-exists? *tutorial-detail-buffer*) (buffer-exists? *tutorial-lesson-buffer*)
-                 (buffer-exists? *tutorial-buffer*))
-      ;; a pane was killed: make it again, drawn as it was
-      (tutorial--panes!)
-      (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-lesson #f)
-      (tutorial--changed!))
-    (unless (and (window-showing *tutorial-detail-buffer*) (window-showing *tutorial-lesson-buffer*))
-      (tutorial--arrange! (tutorial--work-buffer)))))
-
-;; checked a moment after the command, in its frame: inside the command the
-;; frame it changed is not drawn yet, and a layout applied there is lost
-(define (tutorial--keep-layout-soon!)
-  (when (and *tutorial-open* (not *tutorial-arranging*) (equal? (selected-frame) *tutorial-frame*))
-    (debounce! 'tutorial-layout 60
-      (lambda (frame) (with-selected-frame frame tutorial--keep-layout!))
-      (selected-frame))))
-
-(add-hook! 'post-command-hook 'tutorial--keep-layout-soon!)
-
 (define (tutorial-close!)
   "Close the tutorial: the slide and the lesson leave the screen, and the layout is the reader's again."
   (set! *tutorial-open* #f)

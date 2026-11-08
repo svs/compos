@@ -1047,9 +1047,10 @@
 ;; icon, one gap after each column, and every field's own width
 (define (ibuffer-name-room buf fields)
   (let ((gap (string-length *list-gap*)))
-    (- (list-view-width buf) 2 1 1
-       (fold (lambda (n c) (+ n (list-col-width c))) 0 fields)
-       (* gap (+ 2 (length fields))))))
+    ;; the room list-drop-columns grants: what list-columns-need counts for
+    ;; the mark, the dot and the fields, less the name's own gap
+    (- (list-view-width buf) gap
+       (list-columns-need (append (list (list "" 1) (list "" 1)) fields)))))
 
 (define (ibuffer-name-width buf fields)
   (max 12 (min (ibuffer-name-room buf fields) (ibuffer-name-fit buf))))
@@ -1183,7 +1184,9 @@
 (define (ibuffer-cells-clear!) (set! *ibuffer-cell-memo* '()))
 
 (define (ibuffer-columns-for buf all)
-  (let* ((key (list buf (length all)))
+  ;; the width is in the key: a resize redraws from the cached rows, and
+  ;; columns laid out for the old width drop the name column
+  (let* ((key (list buf (length all) (list-view-width buf)))
          (hit (assoc key *ibuffer-columns-memo*)))
     (if hit
         (cadr hit)

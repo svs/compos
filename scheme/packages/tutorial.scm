@@ -296,7 +296,10 @@
     (if hit
         (cadr hit)
         (let* ((maps (if (buffer-known? *tutorial-buffer*)
-                         (buffer-keymaps *tutorial-buffer*)
+                         ;; as in focus, where the lessons type the window
+                         ;; keys: editing binds s-<right> to end-of-line
+                         (filter (lambda (m) (not (string-prefix? "editing-" m)))
+                                 (buffer-keymaps *tutorial-buffer*))
                          (list "global")))
                ;; a step is (TEXT COMMANDS READING): READING is the part of
                ;; the lesson its Try it belongs to
@@ -1373,7 +1376,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 
 ;; a chat sends with RET, which runs agent-send
-(tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
+(tutorial-step-event! "chat" "press `RET` to send it" "agent-send")
 
 ;; the prefix step finishes when the prefix is cancelled
 (tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
@@ -1387,7 +1390,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 ;; typing a word puts the practice page in the editing state: that is the
 ;; step, and the reader is in the practice page, where n types an n
-(tutorial-await! "typing-and-the-focus" "type a word"
+(tutorial-await! "focus-and-editing" "type a word"
   (lambda () (and (buffer-known? *tutorial-buffer*) (editing-state? *tutorial-buffer*))))
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))

@@ -46,11 +46,55 @@
     ("macOS Keychain" "security" "security unlock-keychain")
     ("Linux Secret Service" "secret-tool" "secret-tool search service compos")))
 
-(define (setup--program-present? program)
+(define *setup--npm-bin* 'unknown)
+
+(define (setup--npm-bin)
+  "The directory where `npm install -g` puts programs, or #f without npm.
+   npm answers for every node version manager alike; asked once a session,
+   and only when a program is not on PATH."
+  (when (eq? *setup--npm-bin* 'unknown)
+    (let ((prefix (string-trim (shell-command->string "npm prefix -g 2>/dev/null"))))
+      (set! *setup--npm-bin*
+            (if (equal? prefix "") #f (string-append prefix "/bin")))))
+  *setup--npm-bin*)
+
+(define (setup--npm-program program)
+  "The full path of PROGRAM in npm's global bin, or #f when it is not there."
+  (let ((bin (setup--npm-bin)))
+    (and bin (file-exists? (string-append bin "/" program))
+         (string-append bin "/" program))))
+
+(define (setup--on-path? program)
   ;; `command -v` works on macOS and Linux. Do not expose command output.
   (not (equal? (string-trim
                  (shell-command->string
                    (string-append "command -v " program " 2>/dev/null"))) "")))
+
+(define (setup--program-present? program)
+  "#t when PROGRAM is on PATH, or npm installed it where PATH does not look."
+  (or (setup--on-path? program)
+      (and (setup--npm-program program) #t)))
+
+(define (setup--adopt-npm-command! name)
+  "When the program of connector NAME is not on PATH but npm installed it,
+   save its full path as the connector's command, so a chat can start it.
+   A saved path whose program is gone, after a node upgrade, is dropped."
+  (let ((others (filter (lambda (o) (not (equal? (car o) name)))
+                        agent-connector-command-overrides))
+        (saved (assoc name agent-connector-command-overrides)))
+    (when (and saved (string? (cadr saved))
+               (let ((p (setup--cmd-program (cadr saved))))
+                 (and p (equal? (substring p 0 1) "/") (not (file-exists? p)))))
+      (customize-save! 'agent-connector-command-overrides others))
+    (let* ((cmd (plist-get (connector-config name) 'cmd))
+           (program (and (string? cmd) (setup--cmd-program cmd)))
+           (full (and program (not (equal? (substring program 0 1) "/"))
+                      (not (setup--on-path? program))
+                      (setup--npm-program program))))
+      (when full
+        (customize-save! 'agent-connector-command-overrides
+                         (cons (list name (string-append full (substring cmd (string-length program) (string-length cmd))))
+                               others))))))
 
 (define *setup-secret-probes*
   ;; Readiness, not just installation. Every probe is local, non-interactive,
@@ -235,7 +279,10 @@
        (list (list 'kind 'one-secret 'owner name 'met (setup--any-llm-key?)
                    'secrets (setup--provider-secrets))))
       (else
-       (let ((signed-in (setup--signed-in-by-file? config)))
+       (setup--adopt-npm-command! name)
+       (let* ((config (connector-config name))
+              (cmd (plist-get config 'cmd))
+              (signed-in (setup--signed-in-by-file? config)))
          (cons (list 'kind 'program 'owner name 'met (setup--cmd-available? cmd)
                      'program (setup--cmd-label cmd) 'install (plist-get config 'install))
                (map (lambda (s)
@@ -705,8 +752,10 @@
       (string-join (map cadr steps) " && ")
       ;; a version manager serves node through shims; a new global
       ;; program has none until a rehash, and the shell cannot find it
+      ;; npm says where it put the program, whatever manages node; the
+      ;; shell after the install finds it there even when PATH does not
       (if (setup--steps-need-npm? steps)
-          " && { command -v asdf >/dev/null 2>&1 && asdf reshim nodejs; command -v nodenv >/dev/null 2>&1 && nodenv rehash; true; }"
+          " && export PATH=\"$(npm prefix -g)/bin:$PATH\""
           "")
       " && printf '\\n%s installed. Run `%s` once to sign in, then M-x setup.\\n' "
       "'" name "' '" signin "'"

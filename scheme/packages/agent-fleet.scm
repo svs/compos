@@ -923,15 +923,15 @@
 ;; A chat that comes to need the person says so once, unless a window
 ;; shows it already.
 (define (agents-goal-notify! buf status why)
-  (unless (eq? status (buffer-local buf 'chat-goal-noted))
-    (buffer-set-local! buf 'chat-goal-noted status)
-    ;; the chat no longer waits for the user: its notice has nothing left to ask
-    (unless (memq status '(needs-you blocked)) (notifications-resolve! buf))
-    (when (and (memq status '(needs-you blocked)) (not (window-showing buf)))
-      (notify! "chat"
-               (string-append (if (eq? status 'blocked) "Blocked: " "Needs you: ")
-                              (chats-title buf))
-               why
+  "a notice only when a question waits for the user in the chat: the turn is over and the agent asked"
+  (let ((waits? (and (eq? status 'needs-you) (not (buffer-local buf 'chat-turn-active)))))
+    ;; no question waits any more: its notice has nothing left to ask
+    (unless waits?
+      (buffer-set-local! buf 'chat-goal-noted #f)
+      (notifications-resolve! buf))
+    (when (and waits? (not (buffer-local buf 'chat-goal-noted)) (not (window-showing buf)))
+      (buffer-set-local! buf 'chat-goal-noted status)
+      (notify! "chat" (string-append "Needs you: " (chats-title buf)) why
                (list 'buffer buf 'sticky #t)))))
 (add-hook! 'chat-status-hook 'agents-goal-notify!)
 

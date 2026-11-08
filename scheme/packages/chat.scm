@@ -1501,8 +1501,10 @@
     "  working: the goal is not met and the agent goes on by itself.\n"
     "  success: the goal is met; the agent finished it or answered it.\n"
     "  blocked: the agent cannot go on: an error or a failure it cannot fix.\n"
-    "  needs-you: the agent waits on the person: a question, a choice, an"
-    " approval, a draft to review.\n"
+    "  needs-you: the agent's last message asks the person a question, or for"
+    " a choice, an approval or a review, and it stops until the person"
+    " answers. Work it finished and only reports is success, even when it"
+    " offers more.\n"
     "  idle: the chat has no goal yet, only talk.\n"
     "Plain text only: no markdown, no emoji. Write in the passage's language."
     "\n\nGOAL:\n" (if (and (string? goal) (not (equal? goal ""))) goal "(unknown)")

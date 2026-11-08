@@ -1,7 +1,7 @@
 ;;; window-flash.scm --- a chat says where it stands as it comes to the
 ;;; front. Cycling a pane (pane-next-window, pane-previous-window) to a chat
-;;; flashes a card over its window for a moment: the chat's title, its last
-;;; summary and its state. The card goes once you stay on the chat. Other
+;;; flashes a card over its window while you cycle: the chat's title, its last
+;;; summary and its state. The card goes once you land on the chat. Other
 ;;; buffers flash nothing.
 
 (require 'panes-mode)
@@ -24,7 +24,8 @@
 
 (effects! '(write))
 
-(define window-flash-ms 15000)
+;; A pause this long after the last step of a cycle means you landed.
+(define window-flash-ms 1200)
 (define window-flash--nonce 0)
 (define window-flash--buf #f)
 
@@ -34,7 +35,7 @@
 (define (window-flash! win buf)
   "Flash the chat BUF's card over window WIN, which shows it; #f for a
    buffer that is not a chat. The card stays for window-flash-ms after
-   the last flash and fades at its end; the next flash replaces it."
+   the last step, the pause that means you landed, and fades at its end; the next flash replaces it."
   (unless (equal? window-flash--buf buf) (window-flash--clear! window-flash--buf))
   (set! window-flash--buf #f)
   (let ((card (window-flash-card buf)))
@@ -69,7 +70,7 @@
 
 (define-style! 'window-flash "
 .window-flash { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center;
-  pointer-events: none; container-type: size; animation: window-flash .12s ease-out, window-flash-out .6s ease-in 14.4s forwards; }
+  pointer-events: none; container-type: size; animation: window-flash .12s ease-out, window-flash-out .25s ease-in .95s forwards; }
 .window-flash-card { display: flex; flex-direction: column; align-items: center; gap: .5em;
   max-width: 82%; max-height: 80%; overflow: hidden; padding: .9em 1.3em; border-radius: 12px;
   background: color-mix(in srgb, var(--window-bg, #fdfcf8) 88%, transparent);

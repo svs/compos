@@ -265,13 +265,14 @@
               'text (string-append
                       "Compos makes small decisions with a decision model: is a mail urgent, "
                       "which group a buffer belongs to, which command fits a request. "
-                      "It asks the first model that is ready, in this order. Test asks one a question, and Use this puts it first."))
+                      "Test asks a model a question, and Use this makes it the one decisions ask first."))
         (component 'ui/actions
           (list 'actions '(("wizard:rescan" "Scan again" "g"))
                 'class "wizard-tools"))
         (list 'tag "div" 'class "wizard-grid"
-              'children (map setup-wizard--decide-card
-                             (filter (lambda (b) (memq b '(jev laya haiku))) decide-backends)))
+              ;; a fixed order: Use this changes which one is in use, never
+              ;; where a card stands
+              'children (map setup-wizard--decide-card '(jev laya haiku)))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
                 'next (list "wizard:next" "Next: browser extension →")))))

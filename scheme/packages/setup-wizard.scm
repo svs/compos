@@ -216,18 +216,14 @@
 
 ;; the decision model: decide asks the first backend that is ready
 (define (setup-wizard--decide-ready? b)
-  (cond ((eq? b 'jev) (decide-jev-ready?))
-        ((eq? b 'laya) (laya-available?))
+  (cond ((eq? b 'laya) (laya-available?))
         ((eq? b 'haiku) (and (llm-key "anthropic") #t))
         (else #f)))
 
 (define (setup-wizard--decide-card b)
   (let* ((ready? (setup-wizard--decide-ready? b))
          (live? (and ready? (eq? (decide--first-live) b)))
-         (spec (cond ((eq? b 'jev)
-                      (list "JEV" "Classifies text fast and at a low cost, through the TypeSafe API"
-                            (if ready? "key found" "needs TYPESAFE_API_KEY") '()))
-                     ((eq? b 'laya)
+         (spec (cond ((eq? b 'laya)
                       (list "laya" "Answers on this machine, in a local daemon"
                             (cond ((laya-running?) "running")
                                   (ready? "installed, not started")
@@ -259,8 +255,7 @@
                   'class "wizard-tools"))
           (list 'tag "div" 'class "wizard-grid"
                 'children (map setup-wizard--decide-card
-                               (filter (lambda (b) (or (not (eq? b 'jev)) (boundp 'jev-api-key)))
-                                       decide-backends)))
+                               (filter (lambda (b) (memq b '(laya haiku))) decide-backends)))
           (list 'tag "div" 'class "wizard-lede" 'text (or test ""))
           (component 'wizard/nav
             (list 'back (list "wizard:back" "← Back")

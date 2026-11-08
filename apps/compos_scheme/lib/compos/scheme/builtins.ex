@@ -600,22 +600,20 @@ defmodule Compos.Scheme.Builtins do
         end
       end,
       {"re-find",
-       "(re-find PAT S START) — return [START END] byte offsets of the first match, or false."} =>
-        fn [pat, s, start] ->
-          case Regex.run(re!(pat), s, return: :index, offset: start) do
+       "(re-find PAT S START [FLAGS]) — return [START END] byte offsets of the first match, or false. FLAGS, such as \"iu\", compile PAT for this call only."} =>
+        fn [pat, s, start | flags] ->
+          case Regex.run(re!(pat, flags), s, return: :index, offset: start) do
             nil -> false
             [{ms, len} | _] -> [ms, ms + len]
           end
         end,
       {"re-find*",
-       "(re-find* PAT S) — return [START END] byte offsets for every match of PAT in S."} => fn [
-                                                                                                  pat,
-                                                                                                  s
-                                                                                                ] ->
-        re!(pat)
-        |> Regex.scan(s, return: :index)
-        |> Enum.map(fn [{ms, len} | _] -> [ms, ms + len] end)
-      end,
+       "(re-find* PAT S [FLAGS]) — return [START END] byte offsets for every match of PAT in S. FLAGS as in re-find."} =>
+        fn [pat, s | flags] ->
+          re!(pat, flags)
+          |> Regex.scan(s, return: :index)
+          |> Enum.map(fn [{ms, len} | _] -> [ms, ms + len] end)
+        end,
       {"re-groups",
        "(re-groups PAT S START) — return [START END] byte pairs per group; false for unmatched groups."} =>
         fn [pat, s, start] ->
@@ -727,6 +725,20 @@ defmodule Compos.Scheme.Builtins do
 
       re ->
         re
+    end
+  end
+
+  # A pattern with FLAGS is the user's own, such as a search query: it is
+  # compiled for the call and never cached, so typing cannot grow the table.
+  defp re!(pat, []), do: re!(pat)
+
+  defp re!(pat, [flags]) when is_binary(flags) do
+    case Regex.compile(pat, flags) do
+      {:ok, re} ->
+        re
+
+      {:error, {msg, at}} ->
+        raise Eval.Error, message: "bad regex #{inspect(pat)}: #{msg} at #{at}"
     end
   end
 

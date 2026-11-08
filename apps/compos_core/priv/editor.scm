@@ -6680,6 +6680,44 @@
 (catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
 (catalog-meta! 'command "write-file" 'domain 'files 'effects '(write))
 
+(domain! 'editing)
+(effects! '(read))
+
+;; Search policy. The buffer stores text; what counts as a match is decided
+;; here. FOLD #t makes case not count: the query becomes an escaped regexp
+;; that knows Unicode. Backward answers the last match that starts before
+;; FROM, with the matches counted left to right without overlap, the way a
+;; forward scan meets them.
+(define (search--check who q from)
+  (unless (and (string? q) (integer? from))
+    (error (string-append "(" who " Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got")
+           q from)))
+
+(define (search--last-before matches from)
+  (let loop ((ms matches) (best #f))
+    (if (or (null? ms) (>= (caar ms) from)) best (loop (cdr ms) (car ms)))))
+
+(define (buffer-search q from &optional fold)
+  (search--check "buffer-search" q from)
+  (let ((text (buffer-text (current-buffer))))
+    (cond ((>= from (string-byte-length text)) #f)
+          ((eq? fold #t) (re-find (regexp-quote q) text from "iu"))
+          (else (let ((s (string-index text q from)))
+                  (and s (list s (+ s (string-byte-length q)))))))))
+
+(define (buffer-search-backward q from &optional fold)
+  (search--check "buffer-search-backward" q from)
+  (let ((text (buffer-text (current-buffer))))
+    (if (eq? fold #t)
+        (search--last-before (re-find* (regexp-quote q) text "iu") from)
+        ;; the scan stops where a match would have to start at FROM or later
+        (let ((scope (max 0 (min (string-byte-length text) (+ from -1 (string-byte-length q))))))
+          (and (> scope 0)
+               (search--last-before (re-find* (regexp-quote q) (substring-bytes text 0 scope) "") from))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 (category! 'editing)
 (public! 'point "Point as a byte offset")
 (public! 'buffer-point "(buffer-point NAME) — a named buffer's point as a byte offset")
@@ -6702,6 +6740,8 @@
 (public! 'symbol-at-point-in "(symbol-at-point-in CHARS) — the name around point over the alphabet CHARS, or #f")
 (public! 'end-of-buffer! "Move point to the end")
 (public! 'beginning-of-buffer! "Move point to the start")
+(public! 'buffer-search "(buffer-search Q FROM [FOLD]) — search forward from byte FROM; return (START END) or #f. FOLD true ignores case.")
+(public! 'buffer-search-backward "(buffer-search-backward Q FROM [FOLD]) — search backward from byte FROM; return (START END) or #f. FOLD true ignores case.")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write display)))
   '("goto-char!" "set-mb-redirect!" "insert!" "delete-char!" "set-mark!"
@@ -6709,13 +6749,14 @@
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(read)))
   '("point" "buffer-point" "editor-context" "line-start-position" "region-text"
-    "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"))
+    "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"
+    "buffer-search" "buffer-search-backward"))
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
 (public! 'html-escape "(html-escape S) — S with & < > \" and ' as HTML entities" 'data)
 (catalog-meta! 'function "html-escape" 'domain 'data 'effects '(pure))
 (public! 'llm-catalog-info "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path" 'llm)
 (catalog-meta! 'function "llm-catalog-info" 'domain 'llm 'effects '(read))
-(public! 're-find "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.")
+(public! 're-find "(re-find PAT S START [FLAGS]) — return [START END] byte offsets of the first match, or false. FLAGS, such as \"iu\", compile PAT for this call only.")
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
 (public! 'regexp-quote "(regexp-quote TEXT) — TEXT with every regexp character escaped.")
 (catalog-meta! 'function "regexp-quote" 'domain 'data 'effects '(pure))

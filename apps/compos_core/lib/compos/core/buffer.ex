@@ -550,13 +550,6 @@ defmodule Compos.Core.Buffer do
   def forward_word(name), do: GenServer.call(via(name), {:motion, :forward_word})
   def backward_word(name), do: GenServer.call(via(name), {:motion, :backward_word})
 
-  @doc """
-  Search for `q` from byte offset. Returns {start, stop} byte range or nil.
-  With `fold` true, case does not count.
-  """
-  def search(name, q, from, dir \\ :forward, fold \\ false),
-    do: GenServer.call(via(name), {:search, q, from, dir, fold})
-
   @doc "Insert at point, advancing point."
   def insert(name, text, opts \\ []),
     do: GenServer.call(via(name), {:insert, text, source(opts), author(opts)})
@@ -1718,67 +1711,6 @@ defmodule Compos.Core.Buffer do
 
   defp on_call({:set_mark, pos}, _from, state),
     do: {:reply, :ok, state |> Map.put(:mark, clamp(pos, state)) |> checkpoint_later()}
-
-  defp on_call({:search, q, from, dir, true}, _from, state) do
-    {text, state} = fetch_text(state)
-    re = Regex.compile!(Regex.escape(q), "iu")
-
-    result =
-      case dir do
-        :forward ->
-          case from < Kernel.byte_size(text) && Regex.run(re, text, offset: from, return: :index) do
-            [{s, l} | _] -> {s, s + l}
-            _ -> nil
-          end
-
-        :backward ->
-          # the last match that starts before `from`
-          re
-          |> Regex.scan(text, return: :index)
-          |> Enum.map(&hd/1)
-          |> Enum.filter(fn {s, _} -> s < from end)
-          |> List.last()
-          |> case do
-            {s, l} -> {s, s + l}
-            nil -> nil
-          end
-      end
-
-    {:reply, result, state}
-  end
-
-  defp on_call({:search, q, from, dir, _fold}, _from, state) do
-    {text, state} = fetch_text(state)
-
-    result =
-      case dir do
-        :forward ->
-          scope_len = Kernel.byte_size(text) - from
-
-          case scope_len > 0 && :binary.match(text, q, scope: {from, scope_len}) do
-            {s, l} -> {s, s + l}
-            _ -> nil
-          end
-
-        :backward ->
-          # scope so the scan stops at `from` (matches must start before it)
-          scope_len =
-            (from - 1 + Kernel.byte_size(q))
-            |> min(Kernel.byte_size(text))
-            |> max(0)
-
-          case scope_len > 0 && :binary.matches(text, q, scope: {0, scope_len}) do
-            [_ | _] = matches ->
-              {s, l} = List.last(matches)
-              {s, s + l}
-
-            _ ->
-              nil
-          end
-      end
-
-    {:reply, result, state}
-  end
 
   defp on_call({:insert, text, src, author}, _from, state) do
     # do_insert's point adjustment already advances point past the insertion

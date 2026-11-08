@@ -2283,34 +2283,6 @@ defmodule Compos.Core.SchemeAPI do
           end
         end,
 
-      # search: returns (start end) byte range or #f
-      {"buffer-search",
-       "(buffer-search Q FROM [FOLD]) — search forward from byte FROM; return (START END) or #f. FOLD true ignores case."} =>
-        fn
-          [q, from | fold] when is_binary(q) and is_integer(from) and length(fold) <= 1 ->
-            case Buffer.search(Editor.current_buffer(), q, from, :forward, fold == [true]) do
-              {s, e} -> [s, e]
-              nil -> false
-            end
-
-          args ->
-            raise Compos.Scheme.Eval.Error,
-              message: "(buffer-search Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got " <> inspect(args)
-        end,
-      {"buffer-search-backward",
-       "(buffer-search-backward Q FROM [FOLD]) — search backward from byte FROM; return (START END) or #f. FOLD true ignores case."} =>
-        fn
-          [q, from | fold] when is_binary(q) and is_integer(from) and length(fold) <= 1 ->
-            case Buffer.search(Editor.current_buffer(), q, from, :backward, fold == [true]) do
-              {s, e} -> [s, e]
-              nil -> false
-            end
-
-          args ->
-            raise Compos.Scheme.Eval.Error,
-              message: "(buffer-search-backward Q FROM) searches the current buffer: Q is a string, FROM a byte offset; got " <> inspect(args)
-        end,
-
       # the face and style maps the page renders. themes.scm owns the
       # tables and calls these; nothing else should. Modes are trusted
       # code (they can eval anything), so a stylesheet ships raw.

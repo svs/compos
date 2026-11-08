@@ -1368,11 +1368,11 @@ defmodule Compos.Ui.EditorLive do
       </c-tabs>
       <c-text class="ml-rule"></c-text>
       <c-text :if={@state.modeline_extra not in ["", []]} class="ml-extra"><%= if is_binary(@state.modeline_extra) do %><c-text class="ml-attention">{@state.modeline_extra}</c-text><% else %><c-text :for={{c, t} <- @state.modeline_extra} class={c}>{t}</c-text><% end %></c-text>
-      <c-button
-        class={"ml-bell \#{if chrome(@state, "notifications-unread", "") != "", do: "ml-bell-unread"}"}
+      <c-action
+        class={"ml-bell #{if chrome(@state, "notifications-unread", "") != "", do: "ml-bell-unread"}"}
         title="notifications (M-x notifications)"
         phx-click="notifications_bell"
-      ><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-4.5 4.5v3L2 11.5v.5h12v-.5L12.5 9V6A4.5 4.5 0 0 0 8 1.5zM6.5 13a1.5 1.5 0 0 0 3 0z" fill="currentColor"/></svg><c-text :if={chrome(@state, "notifications-unread", "") != ""} class="ml-bell-count">{chrome(@state, "notifications-unread", "")}</c-text></c-button>
+      ><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-4.5 4.5v3L2 11.5v.5h12v-.5L12.5 9V6A4.5 4.5 0 0 0 8 1.5zM6.5 13a1.5 1.5 0 0 0 3 0z" fill="currentColor"/></svg><c-text :if={chrome(@state, "notifications-unread", "") != ""} class="ml-bell-count">{chrome(@state, "notifications-unread", "")}</c-text></c-action>
     </c-statusbar>
     """
   end

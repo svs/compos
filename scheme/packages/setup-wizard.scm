@@ -134,14 +134,25 @@
 (define (setup-wizard--card row)
   (let* ((name (list-ref row 0))
          (ready? (list-ref row 2))
-         (default? (equal? name (setup-chosen-connector))))
+         (default? (equal? name (setup-chosen-connector)))
+         ;; the reply test shows on the card: the check is on this page
+         (tested (and ready? (llm-connectors-test-result name)))
+         (said (and tested (llm-connectors--test-text name)))
+         (said (and said (if (> (string-length said) 90)
+                             (string-append (substring said 0 90) "…")
+                             said))))
     (component 'wizard/choice
       (list 'title (or (plist-get (connector-config name) 'title) name)
-            'detail (string-append (connector-description name) " · " (list-ref row 3))
+            'detail (string-append (connector-description name) " · " (list-ref row 3)
+                                   (if said (string-append " · " said) ""))
             'badge (cond (default? "default") (ready? "ready") (else "needs setup"))
             'tone (cond (default? "accent") (ready? "good") (else "plain"))
             'selected? default?
-            'actions (setup-wizard--card-actions row)))))
+            'actions (append (setup-wizard--card-actions row)
+                             (if (and default? ready?)
+                                 (list (list (string-append "wizard:test:" name)
+                                             (if tested "Test again" "Test")))
+                                 '()))))))
 
 (define (setup-model-cards)
   "The model cards of the setup wizard's first step, as blocks: one card for
@@ -297,7 +308,9 @@
         (go))))
 
 (define (setup-wizard-use! buf name)
+  ;; a chosen model is tested at once; its card shows the reply
   (setup-use-connector! name)
+  (llm-connectors-test! name)
   (setup-wizard-redraw! buf))
 
 ;; a choice or a test made elsewhere shows on the model step at once
@@ -514,10 +527,17 @@
 (define (setup-model-card-click! buf id &optional on-key)
   "Run the model-card button ID clicked in BUF: wizard:use:NAME,
    wizard:install:NAME or wizard:key:NAME. ON-KEY runs when a key is in.
-   Answers #t when ID is a card button."
+   wizard:test:NAME tests NAME. Answers #t when ID is a card button."
   (cond
+    ;; the wizard tests the model it chose; the tutorial's own reply step does
     ((string-prefix? "wizard:use:" id)
-     (setup-use-connector! (substring-bytes id 11 (string-byte-length id))) #t)
+     (let ((name (substring-bytes id 11 (string-byte-length id))))
+       (if (equal? buf *setup-wizard-buffer*)
+           (setup-wizard-use! buf name)
+           (setup-use-connector! name)))
+     #t)
+    ((string-prefix? "wizard:test:" id)
+     (llm-connectors-test! (substring-bytes id 12 (string-byte-length id))) #t)
     ;; the model the user installs is the one they chose; the install
     ;; terminal opens in the other column, so the wizard or the tutorial
     ;; slide stays on screen and the user can leave the shell
@@ -686,7 +706,8 @@
 .wizard c-action:hover { border-color: var(--accent-fg, #26356b); color: var(--accent-fg, #26356b); }
 .wizard-buttons c-action, .wizard-next c-action { background: var(--accent-fg, #26356b); color: var(--default-bg, #fff);
   border-color: var(--accent-fg, #26356b); }
-.wizard-buttons c-action:hover, .wizard-next c-action:hover { opacity: .88; color: var(--default-bg, #fff); }
+.wizard-buttons c-action:hover, .wizard-next c-action:hover { opacity: .88; background: var(--accent-fg, #26356b);
+  border-color: var(--accent-fg, #26356b); color: var(--default-bg, #fff); }
 .wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 34px;
   padding-top: 18px; border-top: 1px solid var(--border-bg, #cbc4b1); }
 .wizard-next c-action { font-size: 15px; padding: 11px 20px; }

@@ -2262,6 +2262,21 @@
 (define (llm-bundle-permission b) (llm-bundle-get b 'permission #f))
 (define (llm-bundle-agent-mode b) (llm-bundle-get b 'agent-mode #f))
 (define (llm-bundle-prompt-disabled b) (llm-bundle-get b 'prompt-disabled #f))
+;; The accessors only read the bundle plist; the connector also reads its global default.
+(domain! 'chat)
+(effects! '(pure))
+(public! 'llm-bundle-get "(llm-bundle-get BUNDLE KEY FALLBACK) - KEY of a bundle plist, else FALLBACK")
+(public! 'llm-bundle-name "(llm-bundle-name B) - the name of bundle B, or #f")
+(public! 'llm-bundle-key "(llm-bundle-key B) - the key of bundle B, or #f")
+(public! 'llm-bundle-model "(llm-bundle-model B) - the model of bundle B")
+(public! 'llm-bundle-effort "(llm-bundle-effort B) - the effort of bundle B")
+(public! 'llm-bundle-presets "(llm-bundle-presets B) - the presets of bundle B, #f when it recorded none")
+(public! 'llm-bundle-permission "(llm-bundle-permission B) - the permission of bundle B, or #f")
+(public! 'llm-bundle-agent-mode "(llm-bundle-agent-mode B) - the agent mode of bundle B, or #f")
+(public! 'llm-bundle-prompt-disabled "(llm-bundle-prompt-disabled B) - the prompts bundle B turns off, or #f")
+(effects! '(read))
+(public! 'llm-bundle-connector "(llm-bundle-connector B) - the connector of bundle B, else the default connector")
+(effects! '(unknown))
 
 ;; What a bundle SETS, without its name: two bundles that configure the
 ;; same session are one recent choice, however each was reached.

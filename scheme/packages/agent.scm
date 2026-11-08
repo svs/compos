@@ -463,7 +463,11 @@
        (agent-block-drop-kind! buf "permission")
        (agent-block-drop-kind! buf "question")
        (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
-         (agent-block-push! buf start (agent-mark slug) "meta" '())))
+         (agent-block-push! buf start (agent-mark slug) "meta" '()))
+       ;; a dead agent never ends its turn: whoever waits on it (a connector
+       ;; test, subagent-wait) hears now and reads the error, not at a deadline
+       (when (boundp 'subagent-waiters-note!)
+         (subagent-waiters-note! slug)))
 
       ;; The runtime says what it is NOW, and the view believes it. This is
       ;; the only place that needs to: set_status emits on every change, so a

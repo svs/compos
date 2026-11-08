@@ -149,7 +149,8 @@
             'tone (cond (default? "accent") (ready? "good") (else "plain"))
             'selected? default?
             'actions (append (setup-wizard--card-actions row)
-                             (if (and default? ready?)
+                             (if (and default? ready?
+                                      (not (and tested (eq? (plist-get tested 'status) 'testing))))
                                  (list (list (string-append "wizard:test:" name)
                                              (if tested "Test again" "Test")))
                                  '()))))))

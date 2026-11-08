@@ -1254,7 +1254,7 @@
              (lambda () (llm-config--enter! name))
              'transient 'stay 'bundle b
              'flags-fn (lambda (_scope) (llm-config--shown-flag name))
-             'value-fn (lambda (_scope) (if (llm-config--selected? name) "selected" ""))
+             'value-fn (lambda (_scope) (if (llm-config--selected? name) "✓ → configure" ""))
              'active-fn (lambda (_scope) (llm-config--selected? name)))))
        (filter (lambda (b) (llm-config--matches? (or (llm-bundle-name b) "")))
                (llm-config--by-name *llm-bundles*))))
@@ -1266,7 +1266,7 @@
     (lambda () (llm-config--enter! #f))
     'transient 'stay 'live-row #t
     'flags-fn (lambda (_scope) (llm-config--shown-flag #f))
-    'value-fn (lambda (_scope) (if (llm-config--selected? #f) "selected" ""))
+    'value-fn (lambda (_scope) (if (llm-config--selected? #f) "✓ → configure" ""))
     'active-fn (lambda (_scope) (llm-config--selected? #f))))
 
 (define (llm-config--more-row)
@@ -1314,16 +1314,19 @@
     (if (equal? f "") "Presets" (string-append "Presets · " f))))
 
 (define (llm-config--preset-actions)
-  (list
-    (transient-suffix "M-u" "Save" "llm-config-save-into" 'transient 'stay 'preset-action #t
-      'flags-fn (lambda (_scope) "action-button"))
-    (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay 'preset-action #t
-      'flags-fn (lambda (_scope) "action-button"))
-    (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay 'preset-action #t
-      'flags-fn (lambda (_scope) "action-button"))
-    ;; ESC as a button: the chat takes the selected config, no preset is saved
-    (transient-suffix "ESC" "Use without saving" "transient-quit-one" 'preset-action #t
-      'flags-fn (lambda (_scope) "action-button"))))
+  (append
+    (list
+      (transient-suffix "M-u" "Save" "llm-config-save-into" 'transient 'stay 'preset-action #t
+        'flags-fn (lambda (_scope) "action-button"))
+      (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay 'preset-action #t
+        'flags-fn (lambda (_scope) "action-button"))
+      (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay 'preset-action #t
+        'flags-fn (lambda (_scope) "action-button")))
+    (if (pair? (llm-config--drift))
+        (list
+          (transient-suffix "ESC" "Use without saving" "transient-quit-one" 'preset-action #t
+            'flags-fn (lambda (_scope) "action-button")))
+        '())))
 
 (define (llm-config--groups _buf)
   (append

@@ -799,7 +799,7 @@
                                                                  (else "")))))
                              (iota n))))
                 (if step
-                    (list (tutorial--div "tutorial-say" 'children (tutorial--say (car step)))
+                    (filter pair? (list (tutorial--div "tutorial-say" 'children (tutorial--say (car step)))
                           (let* ((here (list slug i))
                                  (p (tutorial--probe-of slug (car step))))
                             (cond ((and p (not done?) (equal? *tutorial-probing* here))
@@ -810,6 +810,9 @@
                                      'text "That did not work. Press t to try again."))
                                   (p (tutorial--div (if done? "tutorial-state tutorial-press tutorial-done" "tutorial-state")
                                        'children (tutorial--say (if done? (tutorial--done-text l i) "Press `t` to run the check."))))
+                                  ((and (not done?) (not (tutorial--cards-of slug (car step)))
+                                        (or (pair? (cadr step)) (tutorial--await-of slug (car step))))
+                                   '())
                                   (else
                           (tutorial--div (cond (done? "tutorial-state tutorial-press tutorial-done")
                                                ((not (or (pair? (cadr step)) (tutorial--await-of slug (car step)) (tutorial--cards-of slug (car step))))
@@ -818,9 +821,7 @@
                             'children (tutorial--say (cond (done? (tutorial--done-text l i))
                                         ((tutorial--cards-of slug (car step))
                                          "Choose one below. The slide moves on when you do.")
-                                        ((or (pair? (cadr step)) (tutorial--await-of slug (car step)))
-                                         "Do it in the practice pane. The slide moves on when you do.")
-                                        (else "When you have done it, press `n` here, or `C-c C-n` in the practice page."))))))))
+                                        (else "When you have done it, press `n` here, or `C-c C-n` in the practice page.")))))))))
                     (list (tutorial--div "tutorial-say"
                             'children (tutorial--say
                                     (if (= n 0)

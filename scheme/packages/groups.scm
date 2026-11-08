@@ -5034,6 +5034,23 @@ is forgotten and that group falls back to creation order in the switcher."
             ((chat-buffer? cur) (run-command "chat-adopt"))
             (else (group-chat-show! (group-ensure! cur)))))))
 
+;; The chat window you used last, other than the selected one: the focus
+;; moves there and nothing else changes, no buffer, no pane, no layout.
+(define (chat-window-last)
+  (let* ((me (active-window))
+         (shown (filter (lambda (r) (and (not (equal? (car r) me)) (chat-buffer? (cadr r))))
+                        (window-list))))
+    (let loop ((chats (last-chats)))
+      (cond ((null? shown) #f)
+            ((null? chats) (car (car shown)))
+            (else (let ((hit (find (lambda (r) (equal? (cadr r) (car chats))) shown)))
+                    (if hit (car hit) (loop (cdr chats)))))))))
+
+(define-command "chat-window-select" "Select the chat window you used last"
+  (lambda ()
+    (let ((w (chat-window-last)))
+      (if w (select-window! w) (message "No other chat window on screen")))))
+
 ;; C-c RET in a work buffer: talk to the group chat without leaving it.
 ;; (In a chat buffer it just sends, exactly like RET.)
 (define-command "chat-companion-ask" "Ask the group's chat about this buffer without leaving it"

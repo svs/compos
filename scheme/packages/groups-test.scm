@@ -384,3 +384,24 @@
           (let ((g (buffer-group a)))
             (buffer-kill! chat)
             (t--drop! g)))))))
+
+(deftest 'chat-window-select-moves-only-the-focus
+  "chat-window-select selects the chat window used last; no buffer, pane or window changes"
+  (lambda ()
+    (let* ((a "*zz-cws-a*")
+           (_ (test-buffer! a "a"))
+           (g (group-ensure! a))
+           (one (group-chat g))
+           (two (group-chat-new! g)))
+      (panes-tile! 'columns (list a one two))
+      ;; one is the chat used last
+      (select-window! (window-showing two))
+      (select-window! (window-showing one))
+      (select-window! (window-showing a))
+      (let ((before (window-list)))
+        (run-command "chat-window-select")
+        (check-equal! (window-buffer (active-window)) one "the chat used last has the focus")
+        (check-equal! (window-list) before "no buffer, pane or window changed"))
+      (buffer-kill! one)
+      (buffer-kill! two)
+      (t--drop! g))))

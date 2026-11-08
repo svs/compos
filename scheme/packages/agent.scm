@@ -512,9 +512,12 @@
       ;; needs you, and the list settles once the burst stops
       (agents-note-event! slug)
       ;; a session that answered a whole turn with silence is not fit for
-      ;; the next one. Restart it HERE, after the batch: a reconnect stops
-      ;; the runtime, and an event still waiting behind it would be lost.
-      (agent-reconnect-if-suspect! slug)))
+      ;; the next one. Restart it after the batch, as a job of its own on
+      ;; this lane: the restart is slow, and the turn end must not wait for
+      ;; it. The thread it stops still sends the events it holds.
+      (when (buffer-local (agent-buf slug) 'chat-connector-suspect)
+        (task-run! (lambda () #t)
+          (lambda (ok? v) (agent-reconnect-if-suspect! slug))))))
 
 ;; the restart a silent turn asks for. It runs after the batch, never
 ;; inside it, and it is the same door C-RET twice opens.

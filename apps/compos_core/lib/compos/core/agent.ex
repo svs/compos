@@ -247,29 +247,27 @@ defmodule Compos.Core.Agent do
   end
 
   @impl true
-  def handle_call(msg, from, state), do: call_in(msg, from, upgrade(state))
-
   # parked (no adapter): a choice made now rides in the config the next
   # adapter starts with, so nothing is lost and nothing is woken for it
-  defp call_in({:set_model, model_id}, _from, %{handle: nil} = state),
+  def handle_call({:set_model, model_id}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "model", model_id)}}
 
-  defp call_in({:set_effort, effort}, _from, %{handle: nil} = state),
+  def handle_call({:set_effort, effort}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "effort", effort)}}
 
-  defp call_in({:set_mode, mode_id}, _from, %{handle: nil} = state),
+  def handle_call({:set_mode, mode_id}, _from, %{handle: nil} = state),
     do: {:reply, :ok, %{state | config: Map.put(state.config, "mode", mode_id)}}
 
-  defp call_in({:set_model, model_id}, _from, state),
+  def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
 
-  defp call_in({:set_effort, effort}, _from, state),
+  def handle_call({:set_effort, effort}, _from, state),
     do: {:reply, if_capable(state, :reasoning_effort, &(&1.set_effort(state.handle, effort))), state}
 
-  defp call_in({:set_mode, mode_id}, _from, state),
+  def handle_call({:set_mode, mode_id}, _from, state),
     do: {:reply, if_capable(state, :session_modes, &(&1.set_mode(state.handle, mode_id))), state}
 
-  defp call_in({:append_at_mark, text}, _from, state) do
+  def handle_call({:append_at_mark, text}, _from, state) do
     # The buffer-local 'agent-saved-mark is the one truth for where the
     # transcript ends; the buffer computes the position and advances the
     # local inside one message.
@@ -284,7 +282,7 @@ defmodule Compos.Core.Agent do
     end
   end
 
-  defp call_in(:mark, _from, state) do
+  def handle_call(:mark, _from, state) do
     mark =
       try do
         Buffer.get_local(state.buffer_ref, "agent-saved-mark") ||
@@ -296,7 +294,7 @@ defmodule Compos.Core.Agent do
     {:reply, mark, state}
   end
 
-  defp call_in(:info, _from, state) do
+  def handle_call(:info, _from, state) do
     {:ok, info} = scheme("agent-machine-info", [state.m])
     info = info |> Enum.chunk_every(2) |> Map.new(fn [{:sym, k}, v] -> {String.to_atom(k), v} end)
     {:reply,
@@ -313,7 +311,7 @@ defmodule Compos.Core.Agent do
 
   # the backend's verdict on a push steer decides the reply, so it is
   # asked inside the same call
-  defp call_in(:steer_next, _from, state) do
+  def handle_call(:steer_next, _from, state) do
     case step(state, [sym("steer-next")]) do
       {[{:sym, "steer"}, token, text, display, epoch], state} ->
         result =
@@ -330,7 +328,7 @@ defmodule Compos.Core.Agent do
     end
   end
 
-  defp call_in(msg, from, state) do
+  def handle_call(msg, from, state) do
     case step(state, machine_msg(msg)) do
       # a backend that runs its own turns asks US; the verdict comes when
       # the banner, a deadline or a close resolves the slot
@@ -370,60 +368,59 @@ defmodule Compos.Core.Agent do
   # --- messages ---------------------------------------------------------------
 
   @impl true
-  def handle_info(msg, state), do: info_in(msg, upgrade(state))
-
-  defp info_in({:backend_event, event}, state),
+  def handle_info({:backend_event, event}, state),
     do: {:noreply, state |> step([sym("backend-event"), event]) |> elem(1)}
 
-  defp info_in({:EXIT, handle, reason}, %{handle: handle} = state) do
+  def handle_info({:EXIT, handle, reason}, %{handle: handle} = state) do
     state =
       if reason in [:normal, :shutdown],
         do: state,
         else: enqueue(state, Backend.plist(type: :error, text: "backend exited: #{Backend.error_text(reason)}"))
 
-    info_in({:backend_event, Backend.plist(type: :dead, exit: Backend.error_text(reason))}, state)
+    handle_info({:backend_event, Backend.plist(type: :dead, exit: Backend.error_text(reason))}, state)
   end
 
   # the context comes back stamped with the turn it was fetched for; the
   # machine drops one for a turn that was cancelled meanwhile
-  defp info_in({:context, epoch, text, display, images, sent_at, {:ok, context}}, state) do
+  def handle_info({:context, epoch, text, display, images, sent_at, {:ok, context}}, state) do
     context = Map.merge(context, %{display: display, images: images, sent_at: sent_at})
     msg = [sym("context"), epoch, sym("ok"), context[:steer_settle_seconds] || false, context[:silent_turn_seconds] || false]
     {_, state} = step(Map.put(state, :turn, {text, context}), msg)
     {:noreply, Map.delete(state, :turn)}
   end
 
-  defp info_in({:context, epoch, _text, _display, _images, _sent_at, {:error, why}}, state),
+  def handle_info({:context, epoch, _text, _display, _images, _sent_at, {:error, why}}, state),
     do: {:noreply, state |> step([sym("context"), epoch, sym("error"), why]) |> elem(1)}
 
-  defp info_in({:timer, name, token, msg}, state) do
+  def handle_info({:timer, name, token, msg}, state) do
     if Map.get(state.timers, name) == token,
       do: {:noreply, state |> Map.update!(:timers, &Map.delete(&1, name)) |> step(msg) |> elem(1)},
       else: {:noreply, state}
   end
 
-  defp info_in({:step, msg}, state), do: {:noreply, state |> step(msg) |> elem(1)}
+  def handle_info({:step, msg}, state), do: {:noreply, state |> step(msg) |> elem(1)}
 
-  defp info_in({:permission_timeout, id}, state),
-    do: info_in({:step, [sym("permission-timeout"), id]}, state)
+  def handle_info({:permission_timeout, id}, state),
+    do: handle_info({:step, [sym("permission-timeout"), id]}, state)
 
-  defp info_in({:deliver_events, token}, %{delivery_timer: {_timer, token}} = state),
+  def handle_info({:deliver_events, token}, %{delivery_timer: {_timer, token}} = state),
     do: {:noreply, state |> Map.put(:delivery_timer, nil) |> maybe_deliver()}
 
-  defp info_in(_msg, state), do: {:noreply, state}
+  def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_cast(:batch_done, state),
-    do: {:noreply, deliver_or_schedule(%{upgrade(state) | in_flight: false})}
+    do: {:noreply, deliver_or_schedule(%{state | in_flight: false})}
 
   @impl true
   def terminate(_reason, state) do
     # a killed thread must never leave anyone blocked on an answer: not an
     # adapter waiting on the wire, and not a turn task waiting on us
-    state = upgrade(state)
     {_, state} = step(state, [sym("terminate")])
     if state.handle, do: state.backend.close(state.handle)
-    :ok
+    # nor an event: one still queued behind a batch in flight (a turn end,
+    # when a reconnect stops this thread) goes out in a last batch
+    flush(state)
   end
 
   # --- the machine ------------------------------------------------------------
@@ -589,41 +586,51 @@ defmodule Compos.Core.Agent do
   defp maybe_deliver(%{in_flight: true} = state), do: state
 
   defp maybe_deliver(state) do
-    # the escaped table dies with the Session during a restart; an agent
-    # draining backend events in that window must not crash over it
-    handler =
-      Compos.Core.LLMSession.callback(state.slug, :handler) ||
-        Roots.get({:agent_handler})
-
-    case handler do
+    case handler(state.slug) do
+      # no handler registered (yet) — hold events until one appears
       nil ->
-        # no handler registered (yet) — hold events until one appears
         state
 
       handler ->
         {slice, rest} = Enum.split(state.events, @batch_max_events)
-        slug = state.slug
         me = self()
-
-        Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-          try do
-            batch =
-              case scheme("agent-coalesce", [slice]) do
-                {:ok, batch} -> batch
-                {:error, _} -> slice
-              end
-
-            # the agent's own lane: rendering serializes with this agent's
-            # other Scheme and never queues a keystroke behind it
-            Session.apply_callback(handler, [slug, batch], nil, lane(slug))
-            notify_turn_end(slug, batch)
-          after
-            GenServer.cast(me, :batch_done)
-          end
-        end)
-
+        deliver(handler, state.slug, [slice], fn -> GenServer.cast(me, :batch_done) end)
         %{state | events: rest, in_flight: true}
     end
+  end
+
+  defp flush(%{events: []}), do: :ok
+
+  defp flush(state) do
+    if handler = handler(state.slug),
+      do: deliver(handler, state.slug, Enum.chunk_every(state.events, @batch_max_events), fn -> :ok end)
+
+    :ok
+  end
+
+  # the escaped table dies with the Session during a restart; an agent
+  # draining backend events in that window must not crash over it
+  defp handler(slug), do: Compos.Core.LLMSession.callback(slug, :handler) || Roots.get({:agent_handler})
+
+  defp deliver(handler, slug, slices, done) do
+    Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+      try do
+        for slice <- slices do
+          batch =
+            case scheme("agent-coalesce", [slice]) do
+              {:ok, batch} -> batch
+              {:error, _} -> slice
+            end
+
+          # the agent's own lane: rendering serializes with this agent's
+          # other Scheme and never queues a keystroke behind it
+          Session.apply_callback(handler, [slug, batch], nil, lane(slug))
+          notify_turn_end(slug, batch)
+        end
+      after
+        done.()
+      end
+    end)
   end
 
   # The turn-end fan-out, for everybody ELSE (a parent chat waiting on a
@@ -639,60 +646,5 @@ defmodule Compos.Core.Agent do
     end
 
     :ok
-  end
-
-  # --- hot reload ---------------------------------------------------------------
-  # A thread started before agent-step existed holds the old state map.
-  # Remove after the first daemon restart that follows 2026-11-08.
-
-  defp upgrade(%{m: _} = state), do: state
-
-  defp upgrade(old) do
-    entry = fn {t, d, i} -> [t, d || false, i] end
-    perm = fn p -> [p.rpc_id, sv(p.title), sv(p.kind), Enum.map(p.options, &Tuple.to_list/1), not is_nil(p[:from])] end
-    perms = List.wrap(old.pending_permission) ++ Map.get(old, :waiting_permissions, [])
-    q = old.pending_question
-
-    armed =
-      for {key, name} <- [steering_settle_timer: "steer-settle", settle_timer: "settle", silent_timer: "silent", idle_timer: "idle"],
-          Map.get(old, key),
-          do: name
-
-    rows = [
-      status: sym(to_string(old.status)), parked: is_nil(old.handle), resume: Map.get(old, :resume) || false,
-      queue: Enum.map(old.prompt_queue, entry), "steering-queue": Enum.map(old.steering_queue, entry),
-      steers: for({k, {t, d, e, o}} <- old.pending_steers, do: [k, t, d || false, e, sym(to_string(o))]),
-      "steer-order": old.pending_steer_order, fallbacks: Enum.map(old.steering_fallbacks, entry),
-      "turn-end": old.pending_turn_end || false, steered: Map.get(old, :steered_turn, false),
-      "settle-ms": Map.get(old, :settle_grace_ms, 180_000), "silent-ms": Map.get(old, :silent_grace_ms, 180_000),
-      "stale-ends": old.stale_turn_ends, "next-steer": old.next_steer_id, steering: sym(to_string(old.steering)),
-      permission: (old.pending_permission && perm.(old.pending_permission)) || false,
-      waiting: Enum.map(Map.get(old, :waiting_permissions, []), perm),
-      question: (q && [q.id, q.question, q.answers, not is_nil(q.from)]) || false,
-      epoch: old.epoch, "context-pending": old.context_pending, "next-rpc": old.next_rpc_id,
-      "idle-ms": Map.get(old, :idle_ms, 0), stateless: :stateless in old.backend.capabilities(),
-      armed: Enum.map(armed, &sym/1), fx: [], reply: sym("ok")
-    ]
-
-    waiters = for(p <- perms, p[:from], into: %{}, do: {p.rpc_id, p.from})
-    waiters = if q && q.from, do: Map.put(waiters, q.id, q.from), else: waiters
-
-    state =
-      old
-      |> Map.take([:slug, :buffer_ref, :config, :backend, :handle, :events, :delivery_timer])
-      |> Map.merge(%{m: Enum.map(rows, fn {k, v} -> [sym(to_string(k)), v] end), timers: %{}, waiters: waiters, in_flight: false})
-
-    # every timer the old shape held is armed again, from now
-    again = %{
-      "steer-settle" => {2000, [sym("steer-settle"), old.epoch]},
-      "settle" => {Map.get(old, :settle_grace_ms, 180_000), [sym("settle-grace"), old.epoch]},
-      "silent" => {Map.get(old, :silent_grace_ms, 180_000), [sym("silent-turn"), old.epoch]},
-      "idle" => {Map.get(old, :idle_ms, 0), [sym("idle-park")]}
-    }
-
-    Enum.reduce(armed, state, fn name, st ->
-      {ms, msg} = again[name]
-      effect([sym("arm"), sym(name), ms, msg], st)
-    end)
   end
 end

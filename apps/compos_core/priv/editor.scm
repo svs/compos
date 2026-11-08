@@ -4306,6 +4306,20 @@
       (set-symbol-value! var (cons value cur)))
     (symbol-value var)))
 
+;; The user's config, in load order: saved customizations load last so
+;; they win over init. Boot calls (boot-user-config!) once, after the
+;; bundled init.scm. A file that is not there is skipped; a file that
+;; fails is reported in *Messages* and costs only itself. Everything
+;; defined after it is the user's, and the origin says so.
+(define user-config-files '("ai-config.scm" "init.scm" "custom.scm"))
+
+(define (boot-user-config!)
+  (for-each (lambda (file)
+              (when (file-exists? (string-append (compos-config-dir) "/" file))
+                (builtin-load file)))
+            user-config-files)
+  (origin! 'user))
+
 ;; the file (load NAME) reads, or #f. NAME may omit ".scm".
 (define (locate-library name)
   (if (or (string-prefix? "/" name) (string-prefix? "~" name))

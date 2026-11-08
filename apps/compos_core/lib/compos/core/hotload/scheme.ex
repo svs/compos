@@ -212,7 +212,18 @@ defmodule Compos.Core.Hotload.Scheme do
   defp config_source_paths do
     home = Session.canonical(Compos.Core.config_dir())
 
-    Enum.map(Session.user_config_files(), &Path.join(home, &1)) ++
+    Enum.map(user_config_files(), &Path.join(home, &1)) ++
       Path.wildcard(Path.join([home, "packages", "**/*.scm"]))
+  end
+
+  # the list is Scheme's, user-config-files in editor.scm
+  defp user_config_files do
+    with true <- Session.ready?(),
+         %{store: store, global: global} <- Session.interp(),
+         {:ok, files} when is_list(files) <- Compos.Scheme.Env.fetch(store, global, "user-config-files") do
+      files
+    else
+      _ -> []
+    end
   end
 end

@@ -84,14 +84,8 @@ defmodule Compos.Core.Session do
 
   @bootstrap_files ~w(editor.scm themes.scm init.scm)
 
-  # user config, in load order: saved customizations load last so they win
-  @user_config_files ~w(ai-config.scm init.scm custom.scm)
-
   @doc "The bootstrap files, in load order."
   def bootstrap_files, do: @bootstrap_files
-
-  @doc "The user config files, in load order."
-  def user_config_files, do: @user_config_files
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -884,10 +878,17 @@ defmodule Compos.Core.Session do
     # Everything defined after boot — the REPL, a chat's eval-scheme, a
     # runtime define — is the user's, not ours, and the origin says which
     # is which.
-    # init.scm above owns the complete bundled package order. User config runs
-    # only after that boot manifest has finished and explicitly loads any user
-    # packages it wants from ~/.compos/packages.
-    interp |> load_user_init() |> stamp_origin_user()
+    # init.scm above owns the complete bundled package order. Then the user's
+    # config: which files, their order and the origin stamp are Scheme
+    # policy, boot-user-config! in editor.scm.
+    case safe_eval_string(interp, "(boot-user-config!)", "user config") do
+      {:ok, _, interp} ->
+        interp
+
+      {:error, msg} ->
+        record_boot_error!("user config", msg)
+        interp
+    end
   end
 
   @doc """
@@ -922,29 +923,6 @@ defmodule Compos.Core.Session do
       Path.type(path) == :absolute -> Path.expand(path)
       true -> Path.join(Compos.Core.config_dir(), path) |> Path.expand()
     end
-  end
-
-  # After the explicit bundled priv/init.scm boot manifest: user config is
-  # <home>/ai-config.scm, init.scm, then custom.scm (saved
-  # customizations load last so they win over init) — errors log loudly
-  # but never brick boot. (load "...") works from inside either. Tests set
-  # :home to a tmp dir so the user's real init.scm stays out of them.
-  defp load_user_init(interp) do
-    Enum.reduce(@user_config_files, interp, fn file, interp ->
-      path = Path.join(Compos.Core.config_dir(), file)
-
-      with true <- File.exists?(path),
-           {:ok, _, interp2} <- safe_eval_string(interp, File.read!(path), file) do
-        interp2
-      else
-        false ->
-          interp
-
-        {:error, msg} ->
-          record_boot_error!(file, msg)
-          interp
-      end
-    end)
   end
 
   # Scheme.eval_string answers {:error, msg} for a Scheme error. A
@@ -1015,13 +993,6 @@ defmodule Compos.Core.Session do
 
   defp provide_feature(interp, feature) do
     case Scheme.eval_string(interp, "(provide '#{feature})") do
-      {:ok, _, interp2} -> interp2
-      {:error, _} -> interp
-    end
-  end
-
-  defp stamp_origin_user(interp) do
-    case Scheme.eval_string(interp, "(origin! 'user)") do
       {:ok, _, interp2} -> interp2
       {:error, _} -> interp
     end

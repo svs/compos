@@ -482,7 +482,11 @@ body {
 .buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
 .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 /* the keys card gives way to the buffer in a narrow window */
-@container (max-width: 520px) { .buffer-footer:has(.c-keys-bar) { display: none; } }
+/* a narrow window keeps its keys: the card wraps, with tighter gaps */
+@container (max-width: 520px) {
+  .buffer-footer .keys-line { gap: var(--s2) var(--s6); }
+  .buffer-footer .keys-more { padding-left: 0; border-left: 0; }
+}
 .buffer-footer .keys-line {
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--s3) var(--s9); min-width: 0;

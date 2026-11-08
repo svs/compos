@@ -9,7 +9,7 @@
   "app": {
     "windows": [
       {
-        "title": "compos.el",
+        "title": "compos",
         "url": "splash.html",
         "width": 1280,
         "height": 860,

@@ -5,7 +5,7 @@ defmodule Compos.Ui.Layouts do
   def root(assigns) do
     assigns =
       assigns
-      |> assign_new(:page_title, fn -> "compos.el" end)
+      |> assign_new(:page_title, fn -> "compos" end)
       # the stylesheet and the script are static files (priv/static); the
       # boot id in their URLs makes a new boot load them again
       |> assign(:boot_id, :persistent_term.get(:compos_boot_id, "dev"))

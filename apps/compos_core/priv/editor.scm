@@ -7148,6 +7148,7 @@
 (public! 'watch-path! "(watch-path! DIR ['deep]) -> the watched root; refcounted, so two watchers of one directory share one subscription. A plain watch sees the direct children of DIR; 'deep sees the whole tree, for a repository")
 (public! 'unwatch-path! "(unwatch-path! DIR ['deep]) — drop one reference, 'deep for a deep one; the subscription stops at zero")
 (public! 'watched-paths "The watched roots")
+(catalog-meta! 'function "watched-paths" 'domain 'files 'effects '(read))
 
 ;; folds
 ;; Tagged, because a buffer has several fold owners. Each owner replaces

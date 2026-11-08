@@ -43,20 +43,7 @@
 ;; Registration by name replaces the old entry, so a package reload does
 ;; not stack duplicates.
 (define (fence-kind--put! name plist)
-  (registry-register! 'fence-kind name plist)
-  (fence-kind--push-run-langs!))
-
-;; The rendered page offers the run key by language. The registry owns
-;; that list, so every write pushes it to the renderer.
-(define (fence-kind--push-run-langs!)
-  (preview-run-langs!
-    (fold (lambda (acc e)
-            (if (and (fence-kind--value (cadr e) 'run #f)
-                     (not (equal? (fence-kind--value (cadr e) 'runnable 'yes) #f)))
-                (cons (car e) acc)
-                acc))
-          '()
-          (registry-list 'fence-kind))))
+  (registry-register! 'fence-kind name plist))
 
 (define (fence-kind name)
   (registry-lookup 'fence-kind (string-downcase name)))
@@ -121,6 +108,44 @@
 
 (define (fence-kind-run lang)
   (fence-kind-get lang 'run #f))
+
+;;; --- the head on the rendered page -------------------------------------------
+
+(effects! '(read))
+
+;; The head of a fenced block on the rendered page: the language, and the
+;; keys that act on the block. It draws no source, so it is chrome, and no
+;; caret lands in it. morg-babel runs a block by its language alone, so
+;; the run key needs no argument; a key that does nothing is not offered.
+;; ARGS is the info string after the language. The Markdown renderer asks
+;; once per fence and puts the answer in the page as it is.
+(define (fence-kind-page-head lang args)
+  (let ((target (fence-kind--tangle-target args)))
+    (string-append
+      "<div class=\"code-block-head\" data-chrome=\"1\"><span class=\"code-lang\">"
+      (html-escape lang)
+      "</span>"
+      (if (and (fence-kind-run lang) (fence-kind-runnable? lang))
+          "<span class=\"code-action\"><kbd>C-c C-c</kbd> run</span>"
+          "")
+      (if target
+          (string-append
+            "<span class=\"code-action\"><kbd>C-c C-x</kbd> tangle &rarr; <code>"
+            (html-escape target)
+            "</code></span>")
+          "")
+      "</div>")))
+
+(effects! '(pure))
+
+;; The file a block tangles to, from its arguments: the word after
+;; :tangle. The word no means the block stays where it is.
+(define (fence-kind--tangle-target args)
+  (let ((at (re-find "(?i):tangle[ \t]+[^ \t]+" args 0)))
+    (and at
+         (let* ((word (cadr (re-find "[ \t]+" args (car at))))
+                (target (substring-bytes args word (cadr at))))
+           (and (not (equal? (string-downcase target) "no")) target)))))
 
 ;; The block-level spans every painter shares: tree-sitter spans for a body
 ;; with a language, and the header face of a kind that declares one.

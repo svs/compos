@@ -111,8 +111,8 @@ rows. It does not run.
   same two functions for the preview rows.
 - `run-block.scm` (`morg-babel-execute`) asks `fence-kind-runnable?` and
   `fence-kind-run` to dispatch `C-c C-c`.
-- The rendered page (`markdown/html.ex`) offers the run key by the list the
-  registry pushes through `preview-run-langs!` on every registration.
+- The rendered page (`markdown/html.ex`) asks `fence-kind-page-head` for a
+  block's head: its language, the run key, and the tangle key.
 - `llm-mode--blocks` in `scheme/packages/chat-mode.scm` derives its reply-landing blocks from
   `morg-scan`, the one fence-aware line scanner.
 

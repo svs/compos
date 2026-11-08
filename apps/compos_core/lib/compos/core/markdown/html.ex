@@ -15,6 +15,8 @@ defmodule Compos.Core.Markdown.Html do
   """
 
   alias Compos.Core.{Markdown, TS}
+  alias Compos.Core.Session
+  alias Compos.Scheme
   alias Compos.Scheme.Text
 
   @csv_preview_lines 5
@@ -79,6 +81,8 @@ defmodule Compos.Core.Markdown.Html do
     # The code-block head (language, run and tangle keys) is chrome for a
     # document the reader edits. A read-only page can decline it.
     Process.put(:compos_md_chrome, opts[:chrome] != false)
+    Process.put(:compos_md_heads, %{})
+    Process.put(:compos_md_heads, %{})
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = tree |> autolinks(text) |> nodes(text, 0, marks)
@@ -873,63 +877,42 @@ defmodule Compos.Core.Markdown.Html do
     end
   end
 
-  # The head names the language and the keys that act on the block. It
-  # draws no source, so it is marked as chrome and carries no byte a caret
-  # can land on.
+  # The head names the language and the keys that act on the block. The
+  # fence-kind registry knows which keys a block offers, so Scheme draws
+  # it: `fence-kind-page-head`. A page whose Scheme is not up draws none.
   defp code_head("", _args), do: []
 
+  # One call for each different head in a page: a call costs a millisecond,
+  # and a long document repeats the same few fences.
   defp code_head(lang, args) do
-    if Process.get(:compos_md_chrome, true),
-      do: code_head_chrome(lang, args),
-      else: []
+    heads = Process.get(:compos_md_heads, %{})
+
+    case heads do
+      %{{^lang, ^args} => head} ->
+        head
+
+      _ ->
+        head = scheme_head(lang, args)
+        Process.put(:compos_md_heads, Map.put(heads, {lang, args}, head))
+        head
+    end
   end
 
-  defp code_head_chrome(lang, args) do
-    [
-      ~s(<div class="code-block-head" data-chrome="1">),
-      ~s(<span class="code-lang">),
-      escape(lang),
-      "</span>",
-      code_actions(lang, args),
-      "</div>"
-    ]
-  end
-
-  # morg-babel runs a block by its language alone, so the key is offered by
-  # language alone. It asks for no argument, and a block that carries none
-  # still runs.
-  defp code_actions(lang, args), do: [run_action(lang), tangle_action(args)]
-
-  # The languages that run: the fence-kind registry decides, and pushes the
-  # list through `preview-run-langs!` on every registration. An empty term
-  # means no registry has spoken, and no block offers a dead key.
-  defp run_action(lang) do
-    if String.downcase(lang) in :persistent_term.get({__MODULE__, :run_langs}, []) do
-      ~s(<span class="code-action"><kbd>C-c C-c</kbd> run</span>)
+  defp scheme_head(lang, args) do
+    with true <- Process.get(:compos_md_chrome, true),
+         {:ok, html, _} when is_binary(html) <-
+           Scheme.exec(Session.interp(), fn i ->
+             with {:ok, f, i} <- Scheme.eval_string(i, "fence-kind-page-head"),
+                  do: Scheme.call(i, f, [lang, args])
+           end) do
+      html
     else
-      []
+      _ -> []
     end
-  end
-
-  defp tangle_action(args) do
-    case tangle_target(args) do
-      nil ->
-        []
-
-      target ->
-        [
-          ~s(<span class="code-action"><kbd>C-c C-x</kbd> tangle &rarr; <code>),
-          escape(target),
-          "</code></span>"
-        ]
-    end
-  end
-
-  defp tangle_target(args) do
-    case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, args, capture: :all_but_first) do
-      [target] -> if(String.downcase(target) == "no", do: nil, else: target)
-      _ -> nil
-    end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 
   defp generic_node(node, text, marks) do

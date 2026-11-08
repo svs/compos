@@ -4244,19 +4244,12 @@ is forgotten and that group falls back to creation order in the switcher."
       (shown (select-window! shown))
       (pane (select-window! pane) (switch-to-buffer-here! buf))
       (else
-        ;; The chat joins the frame beside the panes already on it. A
-        ;; collapse to one window and a split in two is only right for a
-        ;; frame that shows one thing: a three-pane scene -- a mail index
-        ;; and its preview -- lost the preview every time its chat opened,
-        ;; and the group then had two buffers to tile instead of three.
-        ;;
-        ;; The frame's chosen layout is the frame's to keep: a C-x l pick
-        ;; survives a pane opening, so the chat arranges by that name and
-        ;; the width decides only for a frame that never chose.
-        (panes-tile-default! (append (panes-shown-buffers) (list buf)))
-        (let ((chat-window (window-showing buf)))
-          (when chat-window (select-window! chat-window)))
-        (switch-to-buffer! buf))))
+        ;; The chat goes to the other window. The layout is the user's:
+        ;; no re-tile, no layout change, no pane hidden. get-other-window
+        ;; splits a frame under its capacity, else it reuses the window
+        ;; seen least recently.
+        (select-window! (get-other-window))
+        (switch-to-buffer-here! buf))))
   (set-mode! "chat-mode")
   (end-of-buffer!)
   buf)

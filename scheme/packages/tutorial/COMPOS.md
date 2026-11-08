@@ -1,26 +1,11 @@
 # Compos Tutorial
 
-## Setup
+## Introduction
 
-### Open the setup wizard
+### Foo
+Compos is heavily inspired by emacs and if you're an emacs user you should feel right at home. This tutorial will introduce you to basic navigation and helpful foundational concepts.
 
-This tutorial teaches Compos by doing: you read a lesson, and you try each step as you go. The practice page is yours to edit.
-
-Keys are written like this:
-
-| Key | What it means |
-| --- | --- |
-| `C-<chr>` | Hold CONTROL while you type `<chr>`. |
-| `M-<chr>` | Hold META (ALT or Option) while you type `<chr>`. |
-| `s-<chr>` | Hold Command on a Mac, or Super on other computers, while you type `<chr>`. |
-| `S-<chr>` | Hold Shift while you type `<chr>`. |
-| `C-x o` | A space means "then". Type `C-x`, release the keys, then type `o`. |
-
-`ESC` cancels a command or a prompt that waits. `C-h t` opens this tutorial again at the step you are on.
-
-The setup wizard prepares Compos before you start. It chooses the model that new chats use, the search model, and the decision model. It also connects the browser extension. A card that is ready has a mark, and a card that is not ready has a button to fix it.
-
-> **Try it.** Type `M-x setup` to open the setup wizard. Check that each card is ready. Then type `C-h t` to come back here.
+> You got this. I got you.
 
 ## Getting help
 

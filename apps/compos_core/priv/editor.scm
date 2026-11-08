@@ -6704,6 +6704,8 @@
   '("point" "buffer-point" "editor-context" "line-start-position" "region-text"
     "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"))
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
+(public! 'html-escape "(html-escape S) — S with & < > \" and ' as HTML entities" 'data)
+(catalog-meta! 'function "html-escape" 'domain 'data 'effects '(pure))
 (public! 're-find "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.")
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
 (public! 'function-source "(function-source F) -- return the lambda source of F; builtins report as opaque.")

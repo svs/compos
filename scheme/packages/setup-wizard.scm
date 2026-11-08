@@ -774,7 +774,7 @@
     (setup--document-set! buf (setup-welcome-document))
     (buffer-set-local! buf 'help-title "Welcome to Compos")
     (switch-to-buffer! buf)
-    (set-mode! "help-mode")
+    (with-current-buffer buf (lambda () (set-mode! "help-mode")))
     (unless (minor-mode-on? buf "preview-mode")
       (enable-minor-mode! buf "preview-mode"))
     buf))

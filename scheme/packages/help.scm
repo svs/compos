@@ -82,7 +82,9 @@
     ;; select the popup the display rule opened, the way ibuffer does
     (let ((w (window-showing-other *help-buffer* from)))
       (if w (select-window! w) (switch-to-buffer! *help-buffer*)))
-    (set-mode! "help-mode")
+    ;; the help buffer by name: from an agent's eval nothing is displayed,
+    ;; and the current buffer is still the caller's (a chat, a file)
+    (with-current-buffer *help-buffer* (lambda () (set-mode! "help-mode")))
     ;; Opening a new help page starts in its reading view. Later runtime
     ;; reapplies preserve this mode membership exactly as the user left it.
     (unless (minor-mode-on? *help-buffer* "preview-mode")

@@ -6717,6 +6717,8 @@
 (catalog-meta! 'function "llm-catalog-info" 'domain 'llm 'effects '(read))
 (public! 're-find "(re-find PAT S START) — return [START END] byte offsets of the first match, or false.")
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
+(public! 'regexp-quote "(regexp-quote TEXT) — TEXT with every regexp character escaped.")
+(catalog-meta! 'function "regexp-quote" 'domain 'data 'effects '(pure))
 (public! 'function-source "(function-source F) -- return the lambda source of F; builtins report as opaque.")
 (catalog-meta! 'function "function-source" 'domain 'discovery 'effects '(pure))
 (catalog-meta! 'function "register-context-provider!" 'domain 'chat 'effects '(write))

@@ -6954,6 +6954,7 @@
 (public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
 (public! 'boundp "(boundp 'NAME) — return #t when the symbol has a global binding.")
 (public! 'expt "(expt BASE POWER) — return BASE to POWER; an integer when both are integers and POWER is not negative.")
+(public! 'round "(round N) — return the nearest integer to N; a half rounds away from zero.")
 (public! 'string-byte-length "(string-byte-length S) -- return the length of S in bytes.")
 (public! 'substring-bytes "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.")
 (public! 'list? "(list? X) -- #t when X is a list")

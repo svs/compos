@@ -483,9 +483,9 @@
 
 ;; every app as (ENTRY MODES COMMANDS): the modes whose name starts with
 ;; ENTRY-, and the ENTRY-... commands that are not an entry themselves
-(define (app-command-scopes)
-  "(app-command-scopes) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on"
-  (let* ((cmds (command-names))
+(define (app-command-scopes &optional names)
+  "(app-command-scopes [NAMES]) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on. NAMES is (command-names) when the caller has it already"
+  (let* ((cmds (or names (command-names)))
          (lists (if (boundp '*list-modes*) (map (lambda (e) (if (pair? e) (car e) e)) *list-modes*) '()))
          (key (list (length cmds) (length lists) (length *app-entries*))))
     (if (and *app--scopes-cache* (equal? (car *app--scopes-cache*) key))
@@ -514,14 +514,17 @@
             (set! *app--scopes-cache* (list key all))
             all)))))
 
-(define (app-commands-out-of-scope buf open)
-  "(app-commands-out-of-scope BUF OPEN) -- the app commands M-x leaves out in BUF: those of every app none of whose modes is on there, less the commands in OPEN"
-  (apply append
-         (map (lambda (scope)
-                (if (any (lambda (m) (buffer-derived-mode? buf m)) (cadr scope))
-                    '()
-                    (filter (lambda (c) (not (member c open))) (caddr scope))))
-              (app-command-scopes))))
+(define (app-commands-out-of-scope buf open &optional names)
+  "(app-commands-out-of-scope BUF OPEN [NAMES]) -- the app commands M-x leaves out in BUF: those of every app none of whose modes is on there, less the commands in OPEN"
+  ;; the mode chain of BUF is walked once, not once for each app mode
+  (let ((chain (let loop ((m (buffer-local buf 'mode-name)) (seen '()))
+                 (if (or (not m) (member m seen)) seen (loop (mode-parent m) (cons m seen))))))
+    (apply append
+           (map (lambda (scope)
+                  (if (any (lambda (m) (member m chain)) (cadr scope))
+                      '()
+                      (filter (lambda (c) (not (member c open))) (caddr scope))))
+                (app-command-scopes names)))))
 
 ;; commands that open an app from anywhere, though their names put them in it
 (for-each app-entry!
@@ -534,5 +537,5 @@
 (effects! '(write))
 (public! 'app-entry! "(app-entry! NAME) -- M-x offers command NAME everywhere, though its name puts it in an app")
 (effects! '(read))
-(public! 'app-command-scopes "(app-command-scopes) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on")
-(public! 'app-commands-out-of-scope "(app-commands-out-of-scope BUF OPEN) -- the app commands M-x leaves out in BUF, less the commands in OPEN")
+(public! 'app-command-scopes "(app-command-scopes [NAMES]) -- every app as (ENTRY MODES COMMANDS): M-x offers COMMANDS only where one of MODES is on")
+(public! 'app-commands-out-of-scope "(app-commands-out-of-scope BUF OPEN [NAMES]) -- the app commands M-x leaves out in BUF, less the commands in OPEN")

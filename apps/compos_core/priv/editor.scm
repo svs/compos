@@ -5499,23 +5499,34 @@
         (member (string-append m "-map") maps))))
 
 ;; the commands that do not apply in BUF
-(define (commands-out-of-scope buf)
+(define *command--mode-map-commands* #f)
+
+(define (command--mode-map-commands)
+  "the commands bound in some -mode-map, kept until a keymap changes"
+  (let ((key (list *keymap-generation* (length (keymap-names)))))
+    (if (and *command--mode-map-commands* (equal? (car *command--mode-map-commands*) key))
+        (cadr *command--mode-map-commands*)
+        (let ((cmds (apply append
+                           (map command--map-commands
+                                (filter (lambda (n) (string-suffix? "-mode-map" n))
+                                        (keymap-names))))))
+          (set! *command--mode-map-commands* (list key cmds))
+          cmds))))
+
+(define (commands-out-of-scope buf &optional names)
   (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
       '()
       (let* ((maps (or (ignore-errors (lambda () (buffer-keymaps buf))) '()))
              (open (apply append (map command--map-commands
                                       (append (list "global") (global-minor-maps) maps))))
-             (derived (names-less (apply append
-                                         (map command--map-commands
-                                              (filter (lambda (n) (string-suffix? "-mode-map" n))
-                                                      (keymap-names))))
+             (derived (names-less (command--mode-map-commands)
                                   (append open (map car *command-modes*))))
              (named (map car (remove (lambda (row)
                                        (any (lambda (m) (command--mode-on? m buf maps)) (cadr row)))
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
         (append named derived
-                (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open) '())))))
+                (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open names) '())))))
 
 (define (command-applicable? name &optional buf)
   (not (member name (commands-out-of-scope (or buf (current-buffer))))))
@@ -5524,11 +5535,12 @@
 ;; A-Z; history-order puts the recent ones before them all. A command of a
 ;; mode this buffer is not in is left out.
 (define (command-candidates)
-  (let ((out (commands-out-of-scope (current-buffer))))
+  (let* ((names (command-names))
+         (out (commands-out-of-scope (current-buffer) names)))
     (map cadr
          (sort (map (lambda (n) (list (string-length n) n))
                     (filter (lambda (n) (not (command-internal? n)))
-                            (names-less (command-names) out)))))))
+                            (names-less names out)))))))
 
 ;; The annotated M-x rows, (NAME HINT ...) in command-candidates order. A
 ;; build walks every command's scope, key and doc, so the rows are kept per

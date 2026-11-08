@@ -72,6 +72,10 @@
 ;;   kind 'directive — info is (name value)
 ;;   kind 'close / 'text — info is #f
 (define (morg-kind e) (caddr e))
+(effects! '(pure))
+(public! 'morg-kind
+  "(morg-kind ENTRY) — the kind of a morg-scan entry: heading, open, code, close, directive or text")
+(effects! '(read))
 (define (morg-info e) (car (cdr (cdr (cdr e)))))
 
 ;; The scan, from the grammar. Tree-sitter parses the document — it

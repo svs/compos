@@ -2901,6 +2901,9 @@
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
+;; C-c c goes to the companion, C-c C to the chat window you used last
+(global-set-key "C-c c" "chat-companion")
+(global-set-key "C-c C" "chat-window-select")
 
 (global-set-key "C-c RET" "chat-companion-ask")
 

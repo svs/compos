@@ -812,6 +812,22 @@
       (kill-push! text))
   text)
 
+;; kill-line policy: from point to the line end; at the line end, the
+;; newline alone. The buffer only deletes the bytes.
+(define (kill-line!)
+  (let* ((buf (current-buffer))
+         (text (buffer-text buf))
+         (p (point))
+         (size (string-byte-length text))
+         (eol (or (string-index text "\n" p) size))
+         (len (if (and (= p eol) (< eol size)) 1 (- eol p))))
+    (when (buffer-read-only? buf) (error "Buffer is read-only"))
+    (if (= len 0)
+        ""
+        (let ((killed (substring-bytes text p (+ p len))))
+          (delete-range! p len)
+          killed))))
+
 ;; the Emacs names
 (define (kill-new text) (kill-push! text))
 (define-command "kill-line" "Kill text from point to end of line" (interactive 'p)
@@ -6732,6 +6748,8 @@
 (public! 'line-start-position "(line-start-position LINE) — 1-based line's start byte offset, O(log n)")
 (public! 'insert! "(insert! TEXT) at point")
 (public! 'delete-char! "(delete-char! N) — negative deletes backward")
+(public! 'delete-range! "(delete-range! POS LEN) — delete LEN bytes at byte POS as the user; errors if read-only")
+(public! 'kill-line! "(kill-line!) — delete from point to the line end, or the newline; return the text.")
 (public! 'region-text "Text between mark and point (\"\" when no mark)")
 (public! 'set-mark! "(set-mark! BYTE-POS or #f)")
 (public! 'buffer-substring "(buffer-substring START END) of the current buffer")
@@ -6744,7 +6762,7 @@
 (public! 'buffer-search-backward "(buffer-search-backward Q FROM [FOLD]) — search backward from byte FROM; return (START END) or #f. FOLD true ignores case.")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write display)))
-  '("goto-char!" "set-mb-redirect!" "insert!" "delete-char!" "set-mark!"
+  '("goto-char!" "set-mb-redirect!" "insert!" "delete-char!" "delete-range!" "kill-line!" "set-mark!"
     "end-of-buffer!" "beginning-of-buffer!"))
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(read)))

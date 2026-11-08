@@ -601,10 +601,6 @@ defmodule Compos.Core.Buffer do
   def delete_char(name, n \\ 1, opts \\ []),
     do: GenServer.call(via(name), {:delete_char, n, source(opts), author(opts)})
 
-  @doc "Delete point..end-of-line (or the newline if at eol). Returns killed text."
-  def kill_line(name, opts \\ []),
-    do: GenServer.call(via(name), {:kill_line, source(opts), author(opts)})
-
   @doc """
   Attribution spans for the current text, as `{start, end, author}`, sorted.
 
@@ -1681,7 +1677,6 @@ defmodule Compos.Core.Buffer do
   defp on_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   defp on_call({:replace_range, _, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   defp on_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  defp on_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
 
   defp on_call({:line_of, pos}, _from, state) do
     {:reply, Rope.byte_to_line(state.rope, clamp(pos, state)) + 1, state}
@@ -1817,21 +1812,6 @@ defmodule Compos.Core.Buffer do
     deleted = binary_part(text, pos, len)
     state = do_delete(state, pos, len, src, author)
     {:reply, {:ok, deleted}, state |> Map.put(:point, pos) |> touch_state() |> checkpoint_later()}
-  end
-
-  defp on_call({:kill_line, src, author}, _from, state) do
-    {text, state} = fetch_text(state)
-    {_bol, eol} = Text.line_bounds(text, state.point)
-    len = if state.point == eol and eol < Kernel.byte_size(text), do: 1, else: eol - state.point
-
-    if len == 0 do
-      {:reply, {:ok, ""}, state}
-    else
-      killed = binary_part(text, state.point, len)
-
-      {:reply, {:ok, killed},
-       state |> do_delete(state.point, len, src, author) |> touch_state() |> checkpoint_later()}
-    end
   end
 
   defp on_call(:authors, _from, state),

@@ -1852,12 +1852,13 @@ defmodule Compos.Core.SchemeAPI do
             {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
           end
         end,
-      {"kill-line!",
-       "(kill-line!) — delete from point to the line end, or the newline; return the text."} =>
-        fn [] ->
-          case Buffer.kill_line(Editor.current_buffer()) do
-            {:ok, killed} -> killed
+      {"delete-range!",
+       "(delete-range! POS LEN) — delete LEN bytes at byte POS as the user; errors if the buffer is read-only."} =>
+        fn [pos, len] ->
+          case Buffer.delete_range(Editor.current_buffer(), pos, len) do
+            :ok -> :void
             {:error, :read_only} -> raise Compos.Scheme.Eval.Error, message: "Buffer is read-only"
+            {:error, :out_of_bounds} -> raise Compos.Scheme.Eval.Error, message: "delete-range!: the range is outside the buffer"
           end
         end,
       {"undo!", "(undo!) — undo one step in the current buffer; return #t on success."} =>

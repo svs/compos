@@ -2050,6 +2050,9 @@
 (public! 'tool-servers "(tool-servers) — the servers the editor serves besides compos")
 (public! 'llm-tool-specs "(llm-tool-specs [SERVER]) — the tool specs SERVER serves; compos by default")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")
+(public! 'llm-tool-call "(llm-tool-call NAME ARGS) — run the registered tool NAME with the plist ARGS, after tool-call-hook; the tool's answer")
+;; it runs any tool's handler, so it can do what the strongest tool does
+(catalog-meta! 'function "llm-tool-call" 'effects '(destroy external execute spend display))
 
 ;; chat integration: chat-send routes through llm-with-tools when this is on
 (defcustom 'chat-use-tools #t

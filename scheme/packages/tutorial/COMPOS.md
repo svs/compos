@@ -2,8 +2,9 @@
 
 ## Introduction
 
-### Foo
-Compos is heavily inspired by emacs and if you're an emacs user you should feel right at home. This tutorial will introduce you to basic navigation and helpful foundational concepts.
+> Compos is heavily inspired by emacs and if you're an emacs user you should feel right at home. 
+
+> This tutorial will introduce you to basic navigation and helpful foundational concepts.
 
 > You got this. I got you.
 

@@ -1047,6 +1047,8 @@
   (buffer-set-local! name 'diff-layout-cache #f)
   (buffer-set-local! name 'diff-card-cache '())
   (buffer-append! name (if (string? text) text "could not read that revision\n"))
+  ;; read-only with its text: a reader that sees the text never sees it writable
+  (buffer-set-read-only! name #t)
   (pop-to-buffer name)
   ;; name it: an agent's pop-to-buffer displays nothing, and a bare set-mode!
   ;; would then land the diff mode on whatever buffer the caller stood in

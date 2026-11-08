@@ -382,7 +382,9 @@
 (public! 'llm-tool-buffer "(llm-tool-buffer) — the chat whose agent makes the current call, by the edit author; #f for a person")
 (catalog-meta! 'function "llm-tool-buffer" 'domain 'chat 'effects '(read))
 (public! 'describe-function "(describe-function 'NAME) — the Scheme source of a function or M-x command; a builtin gives its one-line doc")
+(public! 'global-names "(global-names) — every globally bound name, sorted; a builtin")
 (catalog-meta! 'function "describe-function" 'domain 'discovery 'effects '(read))
+(catalog-meta! 'function "global-names" 'domain 'discovery 'effects '(read))
 ;; reads the catalog's stamps; ON-UNSTAMPED is the caller's own effect
 (public! 'eval-read-refusal "(eval-read-refusal CODE [ON-UNSTAMPED]) — #f when CODE only reads, else why eval-scheme-read refuses it")
 (catalog-meta! 'function "eval-read-refusal" 'domain 'discovery 'effects '(read))

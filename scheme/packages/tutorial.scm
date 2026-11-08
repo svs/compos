@@ -375,8 +375,8 @@
 
 (define (tutorial--arm!)
   ;; every step of the lesson listens for the whole tutorial, done or not:
-  ;; a step runs when the reader does it, also again, also ahead of the
-  ;; slide. A command partway through a step keeps its place
+  ;; a step runs when the reader does it, also again. Ahead of the slide only
+  ;; the next step hears. A command partway through a step keeps its place
   (set! *tutorial-armed* #t)
   (let* ((l (tutorial--lesson-now))
          (slug (and l (plist-get l 'slug)))
@@ -472,10 +472,15 @@
   ;; hears it. A step that has all it waits for is done, and listens afresh
   (when (string? cmd)
     (let* ((l (tutorial--lesson-now))
-           (steps (if l (tutorial--steps l) '())))
+           (steps (if l (tutorial--steps l) '()))
+           ;; where the slide was when the key came: a step this key finishes
+           ;; moves it, and must not let a later step hear the same key
+           (shown *tutorial-shown*))
       (set! *tutorial-listening*
             (map (lambda (w)
-                   (if (not (member cmd (caddr w)))
+                   ;; a step far ahead of the slide does not hear it: steps share
+                   ;; keys, and the slide must not jump over the ones between
+                   (if (or (not (member cmd (caddr w))) (> (cadr w) (+ shown 1)))
                        w
                        (let ((left (filter (lambda (c) (not (equal? c cmd))) (caddr w))))
                          (cond ((null? left)
@@ -608,7 +613,8 @@
             (let ((a (tutorial--await-of slug (car (car ss)))))
               ;; a done step waits again only on the slide: the world that
               ;; finished it is still there, and must not finish it over and over
-              (when (and a (or (not (tutorial-step-done? slug i)) (= i *tutorial-shown*))
+              (when (and a (<= i (+ *tutorial-shown* 1))
+                         (or (not (tutorial-step-done? slug i)) (= i *tutorial-shown*))
                          (ignore-errors (caddr a)))
                 (tutorial-step-done! slug i)))
             (loop (cdr ss) (+ i 1))))))))

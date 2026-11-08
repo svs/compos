@@ -83,9 +83,9 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 
 > **Try it.** Type `C-x o` to move the focus to the next window.
 
-You can read a window and not go to it. `M-<down>` scrolls the other window, and the focus stays where it is. Use it to read the lesson while you stay on the slide.
+You can read a window and not go to it. `M-<down>` scrolls the other window, and the focus stays where it is. Use it to read the lesson while you stay on the slide. In the lesson itself, `M-<down>` jumps to the next heading instead, so come back to the slide first.
 
-> **Try it.** Type `M-<down>` to scroll the lesson while you stay here. Then type `M-<up>` to scroll it back.
+> **Try it.** The focus is on the lesson now. Type `s-<left>` to come back to the slide. Then type `M-<down>` to scroll the lesson while you stay here, and `M-<up>` to scroll it back.
 
 ## Typing and the focus
 

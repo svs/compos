@@ -461,10 +461,12 @@
                 (list "role" "img") (list "class" "chart"))
           (reverse out))))
 
+;;;###autoload
 (define (chart-svg spec) (chart--xml (chart--tree spec #f)))
 
 ;; The chart as a block for a page: the SVG lives in the page itself, so its
 ;; colors are the theme's and change with it.
+;;;###autoload
 (define (chart-block spec) (chart--block (chart--tree spec #t)))
 
 ;;; Files and showing
@@ -500,6 +502,7 @@
 (effects! '(write display))
 
 ;; Write the chart and show it in the other window. The focus stays.
+;;;###autoload
 (define (chart-show! spec &optional path)
   (let ((path (chart-save! spec (if path path (chart-path spec))))
         (group (buffer-group (current-buffer))))

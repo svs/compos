@@ -1523,6 +1523,12 @@
   "(write-file! PATH TEXT) — write TEXT to PATH, replacing the file, and create its parent directories; answer #t. It writes the disk only: a buffer open on PATH keeps its old text, so to change a file someone has open, edit its buffer.")
 (catalog-meta! 'function "write-file!" 'domain 'files 'category 'files 'effects '(write))
 
+;; scheme-read is a builtin: it parses a string into data and touches nothing.
+(effects! '(pure))
+(public! 'scheme-read
+  "(scheme-read STR) — read STR as Scheme data; return the list of top-level forms, or #f when STR does not parse.")
+(effects! '(unknown))
+
 ;; A tool can answer with MCP content blocks instead of text:
 ;; (tool-content ((type "image" mimeType "image/png" data B64) ...)).
 ;; The MCP proxy sends the blocks as they are. A lane that takes text

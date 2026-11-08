@@ -1378,9 +1378,8 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 ;; the prefix step finishes when the prefix is cancelled
 (tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
 
-;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!
-(tutorial-step-event! "selecting-copying-and-pasting" "Copy them with Cmd-C" "clipboard-copy")
-(tutorial-step-event! "selecting-copying-and-pasting" "paste with Cmd-V" "clipboard-paste")
+;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!: a
+;; step can listen for them with tutorial-step-event!
 (advice-add! 'clipboard-copy 'after 'tutorial-hears-copy
   (lambda (&rest args) (tutorial--saw! "clipboard-copy")))
 (advice-add! 'clipboard-paste! 'after 'tutorial-hears-paste

@@ -42,26 +42,25 @@ To jump to a section, type `C-s` and search for its heading, including the two h
 1. Welcome
 2. Windows and focus
 3. Typing and the focus
-4. Selecting, copying and pasting
-5. Searching and replacing
-6. Key notation
-7. Named commands
-8. Help
-9. Files and buffers
-10. Windows
-11. Groups
-12. Agents
-13. Settings
-14. Editing and undo
-15. Prefix arguments
-16. Modes and keymaps
-17. Lists and previews
-18. Browsing the web
-19. Why Compos
-20. Persistence
-21. The editor is malleable
-22. Scheme and the BEAM
-23. Where to go next
+4. Searching and replacing
+5. Key notation
+6. Named commands
+7. Help
+8. Files and buffers
+9. Windows
+10. Groups
+11. Agents
+12. Settings
+13. Editing and undo
+14. Prefix arguments
+15. Modes and keymaps
+16. Lists and previews
+17. Browsing the web
+18. Why Compos
+19. Persistence
+20. The editor is malleable
+21. Scheme and the BEAM
+22. Where to go next
 
 ---
 
@@ -103,18 +102,6 @@ When you stop editing, the arrow keys move the focus again.
 > **Try it.** Move the focus to the practice page and type a word.
 
 > **Try it.** Type `ESC` or `C-g` to stop editing. Then type `s-<right>` to go back to the slide.
-
-## Selecting, copying and pasting
-
-Hold Shift and move to select text. Shift and the right arrow selects one more character. Shift and the down arrow selects one more line. Cmd-A (`s-a`) selects everything.
-
-The system keys copy and paste: Cmd-C and Cmd-V on a Mac, Ctrl-C and Ctrl-V on other computers.
-
-> **Try it.** In the practice page, hold Shift and press the right arrow a few times to select some words. Copy them with Cmd-C.
-
-> **Try it.** Move to the end of a line and paste with Cmd-V.
-
-`C-w` and `C-y` do the same in the Emacs way.
 
 ## Searching and replacing
 

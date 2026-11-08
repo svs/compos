@@ -50,8 +50,7 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 
 | Test | Note |
 |---|---|
-| a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command, a-list-mode-answers-to-its-own-map-under-list-mode-map | the keymap ladder |
-| list-group-and-sort-keys-run-the-declared-cycles | the keymap ladder; the list mode's reserved group key still answers list-filter; red at 10609f4f before the buffer-kill! keymap fix (same text in km-head.log, before the keymap port) |
+| a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command | the keymap ladder |
 | fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
 | the-default-face-size-is-the-setting-and-survives-a-theme, a-dark-theme-shows-the-row-under-point | themes; red since the warm-dark theme commit |
 | the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup-test; 41ffa950 clears 'modeline-info |

@@ -59,7 +59,7 @@ Four keys are bound on your map AFTER your own, so a mode that declares one sile
 | `>` | `list-cycle-sorting` | your optional resort callback |
 | `SPC` | your `'mark-command`, else `list-mark` | |
 
-Nine more are inherited from `list-mode-map` and ARE yours to shadow: `f` also filters, `\\` pops the filter, `?` describes the mode, `n`/`p` walk, `m` marks, `u`/`U`/`*` unmark and mark-all, `x` executes the marks, `g` reverts. Most apps shadow `g` with their own refetch. That is fine.
+Nine more are inherited from `list-mode-map` and ARE yours to shadow: `f` also filters, `\\` pops the filter, `?` grows the keys card into the whole keymap, `n`/`p` walk, `m` marks, `u`/`U`/`*` unmark and mark-all, `x` executes the marks, `g` reverts. Most apps shadow `g` with their own refetch. That is fine.
 
 Give your own verbs the letters none of these use. A server-side filter is not the same thing as `/` — `/` narrows the rows already drawn, so put "read a different query" on its own key (`t` for a tab, `s` for a scope) and say so in `'doc`.
 

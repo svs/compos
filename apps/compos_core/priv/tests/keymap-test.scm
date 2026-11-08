@@ -127,7 +127,7 @@
         'regroup (lambda (buf) (keymap-test-fire! 'group))
         'resort (lambda (buf) (keymap-test-fire! 'sort))
         ;; Reserved list grammar wins even over a stale local declaration.
-        'keys '(("/" "keymap-test-dummy-one")
+        'keys '(("<" "keymap-test-dummy-one")
                 ("<f9> a" "keymap-test-dummy-two"))))
 
 (deftest 'a-list-opened-by-list-mode-show-answers-its-mode-keys
@@ -148,16 +148,16 @@
     (global-unset-key "<f9> a")))
 
 (deftest 'list-group-and-sort-keys-run-the-declared-cycles
-  "slash groups and greater-than sorts through the real key dispatcher"
+  "less-than groups and greater-than sorts through the real key dispatcher"
   (lambda ()
     (delete-other-windows!)
     (list-mode-show! "keymap-test-list-mode")
-    (check-equal! (key-binding "/") "list-cycle-grouping"
+    (check-equal! (key-binding "<") "list-cycle-grouping"
                   "the reserved group key replaced the mode's stale binding")
     (check-equal! (key-binding ">") "list-cycle-sorting" "the reserved sort key")
-    (keymap-test-press! (list "/"))
+    (keymap-test-press! (list "<"))
     (check-true! (wait-until (lambda () (keymap-test-fired? 'group)) 3000 20)
-                 "slash ran the declared grouping cycle")
+                 "< ran the declared grouping cycle")
     (keymap-test-press! (list ">"))
     (check-true! (wait-until (lambda () (keymap-test-fired? 'sort)) 3000 20)
                  "> ran the declared sorting cycle")

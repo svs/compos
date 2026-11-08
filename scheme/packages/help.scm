@@ -607,6 +607,8 @@
 (public! 'help-doc!
   "(help-doc! TITLE MARKDOWN) — open MARKDOWN as a rendered, read-only page in *Help*")
 (public! 'mode-doc! "(mode-doc! MODE DOC) — what a mode is for; describe-mode prints it")
+(public! 'mode-doc "(mode-doc MODE) — the doc mode-doc! gave MODE, or #f")
+(catalog-meta! 'function "mode-doc" 'domain 'help 'effects '(read))
 (public! 'local-keys "(local-keys BUF) — ((KEYS COMMAND) ...) for BUF's own bindings")
 (public! 'apropos-page "(apropos-page \"words\") — the apropos hits as a rendered *Help* page")
 (catalog-meta! 'function "apropos-page" 'domain 'discovery 'effects '(read external spend))

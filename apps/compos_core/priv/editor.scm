@@ -6915,6 +6915,7 @@
          "(buffer-line-at-point NAME) — (LINE TEXT) at the named buffer's point")
 (catalog-meta! 'function "buffer-line-at-point" 'domain 'editing 'effects '(read))
 (public! 'json-parse "(json-parse STR) — JSON to Scheme: objects become plists with symbol keys, null becomes #f; #f on bad input")
+(public! 'json-encode "(json-encode V [PRETTY]) — Scheme value to a JSON string: a plist becomes an object; a truthy PRETTY indents")
 (public! 'register-context-provider! "(register-context-provider! MODE FN) — FN buf -> description of what the user is looking at, or #f; chat/agent sends prepend it")
 (public! 'editor-context "(editor-context EXCLUDE-BUF [SKIP]) — one line per visible buffer: name, mode, line at point and what its provider adds, the last focused first; \"\" if none")
 (public! 'goto-char! "(goto-char! BYTE-POS)")
@@ -6944,6 +6945,7 @@
     "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"
     "buffer-search" "buffer-search-backward"))
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
+(catalog-meta! 'function "json-encode" 'domain 'data 'effects '(pure))
 (effects! '(pure))
 (public! 'html-escape "(html-escape S) — S with & < > \" and ' as HTML entities" 'data)
 (catalog-meta! 'function "html-escape" 'domain 'data 'effects '(pure))

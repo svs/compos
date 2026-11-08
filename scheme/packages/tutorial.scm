@@ -115,6 +115,7 @@
 (define *tutorial-current* #f)     ;; the lesson on the slide
 (define *tutorial-shown* 0)        ;; the step on the slide
 (define *tutorial-steps* '())      ;; ((SLUG ((TEXT (COMMAND ...)) ...)) ...)
+(define *tutorial-listening* '()) ;; ((SLUG STEP (COMMAND ...)) ...): every step of the lesson, listening
 (define *tutorial-watch* #f)       ;; (SLUG STEP (COMMAND ...)): the commands still to run
 (define *tutorial-help* #f)        ;; what went wrong with the step on the slide, or #f
 (define *tutorial-loaded* #f)
@@ -370,19 +371,26 @@
 
 ;;; watching the reader
 
+(define *tutorial-just-done* #f)
+
 (define (tutorial--arm!)
+  ;; every step of the lesson listens for the whole tutorial, done or not:
+  ;; a step runs when the reader does it, also again, also ahead of the
+  ;; slide. A command partway through a step keeps its place
   (set! *tutorial-armed* #t)
   (let* ((l (tutorial--lesson-now))
-         (steps (if l (tutorial--steps l) '()))
-         ;; a done step on the slide still hears the next one: a reader who
-         ;; goes on before pressing n is not ignored
-         (i (let next ((i *tutorial-shown*))
-              (if (and l (< i (length steps)) (tutorial-step-done? (plist-get l 'slug) i))
-                  (next (+ i 1))
-                  i))))
+         (slug (and l (plist-get l 'slug)))
+         (steps (if l (tutorial--steps l) '())))
+    (unless (and l (pair? *tutorial-listening*) (equal? (car (car *tutorial-listening*)) slug))
+      (set! *tutorial-listening*
+            (let loop ((ss steps) (i 0) (acc '()))
+              (if (null? ss)
+                  (reverse acc)
+                  (loop (cdr ss) (+ i 1) (cons (list slug i (cadr (car ss))) acc))))))
+    ;; the step on the slide: its check runs, and the slide says what is left
     (set! *tutorial-watch*
-          (and l (< i (length steps))
-               (list (plist-get l 'slug) i (cadr (list-ref steps i)))))
+          (and l (< *tutorial-shown* (length steps))
+               (list-ref *tutorial-listening* *tutorial-shown*)))
     (tutorial-recheck!)
     (tutorial--probe!)))
 
@@ -460,15 +468,26 @@
 (add-hook! 'point-motion-hook 'tutorial--point-moved)
 
 (define (tutorial--saw! cmd)
-  ;; CMD ran, or a caret motion reads as it: the step on the slide hears it
-  (let ((w *tutorial-watch*))
-    (when w
-        (when (and (string? cmd) (member cmd (caddr w)))
-          (let ((left (filter (lambda (c) (not (equal? c cmd))) (caddr w))))
-            (set! *tutorial-watch* (list (car w) (cadr w) left))
-            (if (null? left)
-                (tutorial--prove! (car w) (cadr w))
-                (message (string-append "Good. Still to do: " (string-join left ", ")))))))))
+  ;; CMD ran, or a caret motion reads as it: every step that waits for it
+  ;; hears it. A step that has all it waits for is done, and listens afresh
+  (when (string? cmd)
+    (let* ((l (tutorial--lesson-now))
+           (steps (if l (tutorial--steps l) '())))
+      (set! *tutorial-listening*
+            (map (lambda (w)
+                   (if (not (member cmd (caddr w)))
+                       w
+                       (let ((left (filter (lambda (c) (not (equal? c cmd))) (caddr w))))
+                         (cond ((null? left)
+                                (tutorial--prove! (car w) (cadr w))
+                                (list (car w) (cadr w) (cadr (list-ref steps (cadr w)))))
+                               (else
+                                (when (equal? (cadr w) *tutorial-shown*)
+                                  (message (string-append "Good. Still to do: " (string-join left ", "))))
+                                (list (car w) (cadr w) left))))))
+                 *tutorial-listening*))
+      (when (and *tutorial-watch* (< *tutorial-shown* (length *tutorial-listening*)))
+        (set! *tutorial-watch* (list-ref *tutorial-listening* *tutorial-shown*))))))
 
 (add-hook! 'post-command-hook 'tutorial--after-command)
 
@@ -580,35 +599,49 @@
   (unless *tutorial-probing* (tutorial--draw-detail!)))
 
 (define (tutorial-recheck!)
-  "Finish the step on the slide when the thing it waits for is there."
-  (let* ((w *tutorial-watch*)
-         (l (and w (tutorial-lesson (car w)))))
+  "Finish every step of the lesson whose awaited thing is there."
+  (let* ((l (tutorial--lesson-now)))
     (when l
-      (let ((a (tutorial--await-of (car w) (car (list-ref (tutorial--steps l) (cadr w))))))
-        (when (and a (ignore-errors (caddr a)))
-          (tutorial-step-done! (car w) (cadr w)))))))
+      (let ((slug (plist-get l 'slug)))
+        (let loop ((ss (tutorial--steps l)) (i 0))
+          (when (pair? ss)
+            (let ((a (tutorial--await-of slug (car (car ss)))))
+              ;; a done step waits again only on the slide: the world that
+              ;; finished it is still there, and must not finish it over and over
+              (when (and a (or (not (tutorial-step-done? slug i)) (= i *tutorial-shown*))
+                         (ignore-errors (caddr a)))
+                (tutorial-step-done! slug i)))
+            (loop (cdr ss) (+ i 1))))))))
 
 (define (tutorial-step-done! slug i)
   "Mark step I of lesson SLUG done. On the slide, the slide stays and says
    that n goes on: you choose when to move. Anywhere else n is not at hand,
-   so the slide goes on to the next step by itself."
+   so the slide goes on to the next step by itself. A done step the reader
+   repeats is done again, and says so."
   (let ((l (tutorial-lesson slug)))
-    (when (and l (not (tutorial-step-done? slug i)))
-      (tutorial--mark! slug i)
-      (let* ((here? (equal? slug *tutorial-current*))
+    (when l
+      (let* ((again? (tutorial-step-done? slug i))
+             (here? (equal? slug *tutorial-current*))
              (auto? (and here?
                          (not (equal? (window-buffer (active-window)) *tutorial-detail-buffer*))
                          (< (+ i 1) (tutorial--step-count l)))))
-        ;; a step done ahead of the slide brings the slide to it
-        (when (and here? (> i *tutorial-shown*))
-          (set! *tutorial-shown* i))
-        (when auto? (set! *tutorial-shown* (+ i 1)))
-        (set! *tutorial-help* #f)
-        (tutorial--changed!)
-        (message (cond (auto? "Done")
-                       ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")
-                       ((tutorial--nth (+ (plist-get l 'n) 1)) "Lesson done. Press n for the next lesson")
-                       (else "You finished the tutorial")))))))
+        ;; a done step repeated off the slide stays done, quietly; on the
+        ;; slide it says so, once
+        (unless (and again? (or (not (= i *tutorial-shown*))
+                                (equal? *tutorial-just-done* (list slug i))))
+          (tutorial--mark! slug i)
+          (set! *tutorial-just-done* (list slug i))
+          ;; a step done ahead of the slide brings the slide to it
+          (when (and here? (> i *tutorial-shown*))
+            (set! *tutorial-shown* i))
+          (when auto? (set! *tutorial-shown* (+ i 1)))
+          (set! *tutorial-help* #f)
+          (tutorial--changed!)
+          (message (cond (auto? (if again? "Done again" "Done"))
+                         (again? "Done again. Press n for the next step")
+                         ((not (tutorial-lesson-done? l)) "Done. Press n for the next step")
+                         ((tutorial--nth (+ (plist-get l 'n) 1)) "Lesson done. Press n for the next lesson")
+                         (else "You finished the tutorial"))))))))
 
 ;;; keys as people know them
 
@@ -1063,6 +1096,10 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (when (buffer-known? *tutorial-index-buffer*) (list-refresh! *tutorial-index-buffer*)))
 
 (define (tutorial--go! l)
+  ;; a lesson opened again listens afresh, even where it is done
+  (set! *tutorial-just-done* #f)
+  (set! *tutorial-listening* '())
+  (set! *tutorial-probe-failed* #f)
   (set! *tutorial-current* (plist-get l 'slug))
   (set! *tutorial-shown* (or (tutorial--next-step l) 0))
   (set! *tutorial-help* #f)
@@ -1155,6 +1192,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
     (cond ((not l) (tutorial-open!))
           (else
             (when (and (< i n) (tutorial--manual? l i)) (tutorial--mark! (plist-get l 'slug) i))
+            (set! *tutorial-just-done* #f)
             (if (< (+ i 1) n)
                 (begin (set! *tutorial-shown* (+ i 1))
                        (set! *tutorial-help* #f)
@@ -1162,6 +1200,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
                 (tutorial--move! 1))))))
 
 (define (tutorial-back!)
+  ;; the step gone back to is a repeat: it listens again
+  (set! *tutorial-just-done* #f)
+  (set! *tutorial-probe-failed* #f)
   (cond ((> *tutorial-shown* 0)
          (set! *tutorial-shown* (- *tutorial-shown* 1))
          (set! *tutorial-help* #f)

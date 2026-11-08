@@ -117,14 +117,15 @@ A **group** holds one task: its buffers, its chats, and the arrangement of its w
 
 | Key | What it does |
 | --- | --- |
-| `C-x C-g n` | Make a new group and go to it |
-| `C-x g` | Switch to another group |
+| `C-x g` | Switch to a group, or make a new one |
 | `C-x C-g C-g` | Go back to the group you were in before |
 | `C-x C-g m` | Move this buffer to another group |
 
 When you go to another group, the tutorial goes off the screen. `C-x C-g C-g` brings it back. Remember that key before you start.
 
-> **Try it.** Type `C-x C-g n` to make a new group. Type a name, for example "practice", and press `RET`. Compos goes to the new group, which is empty.
+`C-x g` lists the groups. Type the name of a group that is not there, and `RET` makes it.
+
+> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, which is empty.
 
 > **Try it.** Type `C-x C-g C-g` to come back to the tutorial.
 

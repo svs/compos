@@ -1082,14 +1082,15 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (define (tutorial-open!)
   "Open the tutorial: practice, slide and lesson, at the step the reader is on.
-   The practice pane has the focus: the reader types there first."
+   The slide has the focus: a new reader does not know buffers yet, and the
+   slide says what to do and takes its keys."
   (tutorial--load!)
   (let ((panes (tutorial--panes!)))
     (tutorial--go! (or (tutorial--lesson-now) (tutorial--first-open)))
     (set! *tutorial-open* #t)
     (set! *tutorial-frame* (selected-frame))
     (tutorial--arrange! *tutorial-buffer*)
-    (let ((w (window-showing *tutorial-buffer*)))
+    (let ((w (window-showing *tutorial-detail-buffer*)))
       (when (and w (not (equal? w (active-window)))) (select-window! w)))
     *tutorial-buffer*))
 

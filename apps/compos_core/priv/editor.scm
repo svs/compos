@@ -5964,6 +5964,8 @@
 (public! 'interactive "(interactive CODE ...) — a command's argument spec: 'p numeric prefix, 'P raw prefix, 'r region start and end, 'b buffer, 'd point, 'm mark, \"sPrompt: \" a string, \"nPrompt: \" a number, \"fPrompt: \" a file")
 (public! 'command-call "(command-call NAME ARG ...) — run a command's function with explicit arguments")
 (public! 'command-function "(command-function NAME) — the function behind a command, or #f")
+(public! 'command-fn "(command-fn NAME) — the command's closure, or #f")
+(catalog-meta! 'function "command-fn" 'effects '(read))
 (public! 'call-interactively "(call-interactively NAME) — run NAME as a key would, collecting its arguments from the spec")
 (public! 'kill-text! "(kill-text! TEXT [BEFORE?]) — TEXT onto the kill ring: appended to the newest entry after a kill command, else as a new entry")
 (public! 'kill-new "(kill-new TEXT) — a new kill-ring entry")

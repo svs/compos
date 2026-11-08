@@ -703,6 +703,11 @@
   (let ((signin (plist-get (setup--agent-install name) 'signin)))
     (string-append
       (string-join (map cadr steps) " && ")
+      ;; a version manager serves node through shims; a new global
+      ;; program has none until a rehash, and the shell cannot find it
+      (if (setup--steps-need-npm? steps)
+          " && { command -v asdf >/dev/null 2>&1 && asdf reshim nodejs; command -v nodenv >/dev/null 2>&1 && nodenv rehash; true; }"
+          "")
       " && printf '\\n%s installed. Run `%s` once to sign in, then M-x setup.\\n' "
       "'" name "' '" signin "'"
       "; exec \"${SHELL:-/bin/sh}\" -l")))

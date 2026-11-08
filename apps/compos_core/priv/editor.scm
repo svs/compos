@@ -6956,6 +6956,8 @@
 (catalog-meta! 'function "llm-catalog-info" 'domain 'llm 'effects '(read))
 (public! 're-find "(re-find PAT S START [FLAGS]) — return [START END] byte offsets of the first match, or false. FLAGS, such as \"iu\", compile PAT for this call only.")
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
+(public! 're-find* "(re-find* PAT S [FLAGS]) — return [START END] byte offsets for every match of PAT in S. FLAGS as in re-find.")
+(catalog-meta! 'function "re-find*" 'domain 'data 'effects '(pure))
 (public! 'string-replace "(string-replace S FROM TO) — S with every FROM replaced by TO; a non-string S is \"\".")
 (catalog-meta! 'function "string-replace" 'domain 'data 'effects '(pure))
 (public! 'regexp-quote "(regexp-quote TEXT) — TEXT with every regexp character escaped.")

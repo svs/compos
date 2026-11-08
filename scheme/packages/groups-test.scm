@@ -352,3 +352,35 @@
 
 ;; Two windows on one chat looked like a window that would not close.
 
+
+(deftest 'chat-companion-never-adds-a-pane
+  "C-c w with the chat off screen keeps every pane and window and the layout; the chat takes another window, or the only one"
+  (lambda ()
+    (let ((a "*zz-cw-a*") (b "*zz-cw-b*") (c "*zz-cw-c*"))
+      (test-buffer! a "a")
+      (test-buffer! b "b")
+      (test-buffer! c "c")
+      (panes-tile! 'columns (list a b c))
+      (panes-choose-layout! 'free)
+      (select-window! (window-showing b))
+      (let ((panes (length (panes-pane-ids (panes-layout))))
+            (windows (length (window-list)))
+            (layout (panes-current-layout)))
+        (check-equal! (list panes windows) '(3 3) "three panes before")
+        (run-command "chat-companion")
+        (let ((chat (current-buffer)))
+          (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the chat has the focus")
+          (check-equal! (list (length (panes-pane-ids (panes-layout))) (length (window-list)))
+                        (list panes windows) "no pane and no window added")
+          (check-equal! (panes-current-layout) layout "the layout stays")
+          (check-true! (window-showing b) "the window you were in keeps its buffer")
+          ;; one window: the chat shows in it
+          (delete-other-windows!)
+          (switch-to-buffer! a)
+          (run-command "chat-companion")
+          (check-equal! (list (length (panes-pane-ids (panes-layout))) (length (window-list)))
+                        '(1 1) "one window stays one")
+          (check-equal! (current-buffer) chat "and it shows the chat")
+          (let ((g (buffer-group a)))
+            (buffer-kill! chat)
+            (t--drop! g)))))))

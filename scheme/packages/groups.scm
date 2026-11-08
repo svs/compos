@@ -4244,12 +4244,18 @@ is forgotten and that group falls back to creation order in the switcher."
       (shown (select-window! shown))
       (pane (select-window! pane) (switch-to-buffer-here! buf))
       (else
-        ;; The chat goes to the other window. The layout is the user's:
-        ;; no re-tile, no layout change, no pane hidden. get-other-window
-        ;; splits a frame under its capacity, else it reuses the window
-        ;; seen least recently.
-        (select-window! (get-other-window))
-        (switch-to-buffer-here! buf))))
+        ;; The layout is the user's: C-c w never adds or removes a pane or
+        ;; a window and never re-tiles. The chat takes the other window
+        ;; used most recently; its old buffer stays in that window's
+        ;; stack. With one window, the chat shows in it.
+        (let* ((me (active-window))
+               (others (filter (lambda (r) (not (equal? (car r) me))) (window-list))))
+          (define (seen r) (or (buffer-last-seen (cadr r)) 0))
+          (when (pair? others)
+            (select-window!
+              (car (fold (lambda (best r) (if (> (seen r) (seen best)) r best))
+                         (car others) (cdr others)))))
+          (switch-to-buffer-here! buf)))))
   (set-mode! "chat-mode")
   (end-of-buffer!)
   buf)

@@ -1455,8 +1455,8 @@ body.unfocused .window.active .cursor {
    and it wraps rather than clipping: a message is the one thing
    in the frame that must be read whole. */
 /* Notices pass in the top right corner, newest on top, and leave on
-   their own. They take no click and no focus: the page under them
-   stays live. M-x notifications keeps the history. */
+   their own. They take no focus: the page under them stays live. A
+   click on one goes where it points. M-x notifications keeps the history. */
 .notices {
   position: fixed; top: 12px; right: 12px; z-index: 60;
   display: flex; flex-direction: column; gap: 6px;
@@ -1473,7 +1473,9 @@ body.unfocused .window.active .cursor {
   font: var(--fw-reg) var(--fs-ui) / var(--lh-ui) var(--font-sans);
   opacity: 0.94;
   animation: notice-in 160ms ease-out;
+  pointer-events: auto; cursor: pointer;
 }
+.notice:hover { opacity: 1; }
 .notice-source {
   grid-row: span 2; align-self: start;
   font-size: .72em; letter-spacing: 0.08em; text-transform: uppercase;

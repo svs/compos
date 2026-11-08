@@ -3052,8 +3052,9 @@
 ;; A click above the rows (the head, the tabs) only keeps the moved point.
 (define (list-mouse-open buf)
   (when (and (list-mode-of buf) (list-index buf) (list-current buf))
-    (let ((cmd (key-binding "RET")))
-      (when cmd (call-interactively cmd)))))
+    (let* ((own (assoc "RET" (or (list-opt buf 'keys) '())))
+           (cmd (if own (cadr own) (key-binding "RET"))))
+      (when (string? cmd) (call-interactively cmd)))))
 (add-hook! 'mouse-click-hook 'list-mouse-open)
 
 ;; a list with 'tabs gets its rows kept by the tab and the tab row drawn

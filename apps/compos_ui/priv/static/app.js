@@ -2981,7 +2981,11 @@
           const editable = winEl.querySelector(".buf[contenteditable]");
           if (editable && sel && sel.rangeCount && editable.contains(sel.focusNode)) {
             if (!winEl.classList.contains("active")) this.pushEvent("mouse", { win });
-            if (this.sendSelection(editable)) return;
+            if (this.sendSelection(editable)) {
+              // a plain single click, after point: the buffer decides what it means
+              if (e.detail <= 1 && sel.isCollapsed) this.pushEvent("mouse_click", { win });
+              return;
+            }
           }
           if (sel && !sel.isCollapsed &&
               winEl.contains(sel.anchorNode) && winEl.contains(sel.focusNode)) {
@@ -3001,6 +3005,7 @@
             if (r) pos = posIn(r.startContainer, r.startOffset);
           }
           this.pushEvent("mouse", pos ? { win, line: pos.line, col: pos.col } : { win });
+          if (pos && e.detail <= 1) this.pushEvent("mouse_click", { win });
         };
         window.addEventListener("mouseup", this.mouseH);
 

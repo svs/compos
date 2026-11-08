@@ -149,8 +149,11 @@
               (hl (theme-test-face-attr 'hl-line 'bg))
               (sel (theme-test-face-attr 'select 'bg))
               (reg (theme-test-face-attr 'region 'bg)))
-          (check-true! (> (theme-test-distance win hl) 75)
-                       (string-append theme ": the row under point is visible on the window"))
+          ;; paper-night keeps the design's own faint hl-line (624b8b4f5);
+          ;; svs ruled 2026-11-08 that the design wins over this rule
+          (unless (equal? theme "paper-night")
+            (check-true! (> (theme-test-distance win hl) 75)
+                         (string-append theme ": the row under point is visible on the window")))
           (check-true! (> (theme-test-distance hl sel) 30)
                        (string-append theme ": a search match is not the row under point"))
           (check-true! (> (theme-test-distance hl reg) 30)

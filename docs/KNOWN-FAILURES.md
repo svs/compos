@@ -52,7 +52,7 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 |---|---|
 | a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command | the keymap ladder |
 | fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
-| the-default-face-size-is-the-setting-and-survives-a-theme, a-dark-theme-shows-the-row-under-point | themes; red since the warm-dark theme commit |
+| the-default-face-size-is-the-setting-and-survives-a-theme | themes; red since the warm-dark theme commit |
 | the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup-test; 41ffa950 clears 'modeline-info |
 | a-chat-title-holds-at-most-six-words | the title clip: chat.scm 165291b4 (2026-10-12) trims 'is' from the title; not caused today |
 | the-header-line-carries-identity-and-the-mode-line-carries-state | the switcher test expects buffer-switcher, renamed to modeline-expand in aacfe2e6; not caused today |

@@ -48,3 +48,35 @@
     (let ((buf (test-buffer! t--usage-buf "")))
       (check-false! (chat-context-tokens buf) "nothing reported yet")
       (buffer-kill! buf))))
+
+(deftest 'a-chat-shows-billed-dollars-and-tokens-per-turn
+  "chat-spend answers billed dollars as they are; chat-turn-tokens adds the last turn's reads"
+  (lambda ()
+    (let ((buf (test-buffer! t--usage-buf "")))
+      (chat-usage-note! buf '(input 10 output 5 cache-read 600000 cache-write 4000 cost 1.25))
+      (check-equal! (chat-spend buf) '(1.25 #f) "a billed cost is not an estimate")
+      (check-equal! (chats-cost-label buf) "$1.25" "the list shows what was billed")
+      (check-equal! (chat-turn-tokens buf) 604010 "fresh input, cache reads and cache writes")
+      (check-equal! (chats-turn-label buf) "604k/turn" "the list shows the turn's reads")
+      (buffer-kill! buf))))
+
+(deftest 'an-estimate-stays-out-of-the-chat-list
+  "a catalog estimate is for chat-cost; the list leaves the cost cell empty"
+  (lambda ()
+    (let ((buf (test-buffer! t--usage-buf "")))
+      (chat-usage-note! buf '(input 10 output 5 cache-read 600000 cache-write 4000))
+      (buffer-set-local! buf 'agent-model "no-such-model[1m]")
+      (check-equal! (chat-model-catalog-name "claude-opus-5-5[1m]") "claude-opus-5-5"
+                    "a context variant prices as its model")
+      (check-false! (chat-spend buf) "a model the catalog does not price has no spend")
+      (check-equal! (chats-cost-label buf) "" "and no cost cell")
+      (buffer-kill! buf))))
+
+(deftest 'cost-and-turn-are-opt-in-ibuffer-fields
+  "a buffer table shows the cost and turn fields only when its view names them"
+  (lambda ()
+    (let ((buf (test-buffer! t--usage-buf "")))
+      (check-false! (ibuffer-field-live? buf 'cost) "a view that does not name cost hides it")
+      (check-false! (ibuffer-field-live? buf 'turn) "and turn")
+      (check-true! (ibuffer-field-live? buf 'last) "other fields stay")
+      (buffer-kill! buf))))

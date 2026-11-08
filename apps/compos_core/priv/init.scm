@@ -100,6 +100,8 @@
 ;; decide-config! to name the backend chain, so this loads before the user
 ;; config runs, and the permission policy asks its shell gate
 (require 'decide)
+;; TypeSafe JEV, the first decision backend; the setup wizard takes its key
+(require 'jev)
 (require 'diff-mode)
 (require 'doppler)
 (require 'endpoint)

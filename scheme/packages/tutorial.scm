@@ -985,6 +985,56 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (buffer-mark-saved! buf))
 
 
+;; imenu in the master: its headings, and each Try it line as a step
+(define (tutorial--imenu-rows buf)
+  (let ((n (string-length *tutorial-try*)))
+    (let loop ((ls (string-split (buffer-text buf) "\n")) (k 1) (out '()))
+      (if (null? ls)
+          (reverse out)
+          (let ((s (car ls)))
+            (loop (cdr ls) (+ k 1)
+                  (cond ((string-prefix? "#" s) (cons (list k "heading" s "") out))
+                        ((string-prefix? *tutorial-try* s)
+                         (cons (list k "step" (string-trim (substring s n (string-length s))) "") out))
+                        (else out))))))))
+
+;; the steps view of the master: only its headings and its Try it lines
+;; stay; every other line folds away, and so does all of Kept lessons
+(define (tutorial--rest-ranges buf)
+  (let loop ((ls (string-split (buffer-text buf) "\n")) (pos 0) (prev-eol #f)
+             (from #f) (to #f) (kept? #f) (out '()))
+    (if (null? ls)
+        (reverse (if from (cons (list from to) out) out))
+        (let* ((s (car ls))
+               (eol (+ pos (string-byte-length s)))
+               (kept-heading? (string-prefix? "# Kept lessons" s))
+               (shown? (or kept-heading?
+                           (and (not kept?)
+                                (or (string-prefix? "#" s) (string-prefix? *tutorial-try* s))))))
+          (if shown?
+              (loop (cdr ls) (+ eol 1) eol #f #f (or kept? kept-heading?)
+                    (if from (cons (list from to) out) out))
+              (loop (cdr ls) (+ eol 1) prev-eol (or from prev-eol pos) eol kept? out))))))
+
+(define (tutorial-steps-view!)
+  (let ((buf (current-buffer)))
+    (unless (equal? (buffer-path buf) (training-document-path))
+      (error "This is not the tutorial master"))
+    (if (buffer-local buf 'tutorial-steps-view)
+        (begin (fold-set! buf 'tutorial-steps '())
+               (buffer-set-local! buf 'tutorial-steps-view #f)
+               (message "All of the lesson text"))
+        (begin (fold-set! buf 'tutorial-steps
+                          (filter (lambda (r) (< (car r) (cadr r))) (tutorial--rest-ranges buf)))
+               (buffer-set-local! buf 'tutorial-steps-view #t)
+               (message "Only the headings and the steps")))))
+
+(define (tutorial--master-imenu!)
+  (let ((path (buffer-path (current-buffer))))
+    (when (and path (equal? path (training-document-path)))
+      (buffer-set-local! (current-buffer) 'imenu-index-function 'tutorial--imenu-rows))))
+(add-hook! 'find-file-hook 'tutorial--master-imenu!)
+
 (define (tutorial--visit-master! buf)
   ;; the lesson pane visits the master in morg-mode: the user is its author,
   ;; types in it and saves it with C-x C-s. The slide is its preview
@@ -1001,6 +1051,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
         (unless (buffer-derived-mode? buf "morg-mode")
           (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
         (buffer-set-local! buf 'morg-narrow-anchor #f)))
+    (buffer-set-local! buf 'imenu-index-function 'tutorial--imenu-rows)
     ;; eager: the slide follows an edit even while the pane is hidden
     (unless (buffer-local buf 'tutorial-master-watch)
       (desktop-skip! buf 'tutorial-master-watch)
@@ -1327,6 +1378,9 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (define-command "tutorial-close" "Close the tutorial; C-h t opens it again where you were"
   (lambda () (tutorial-close!)))
+
+(define-command "tutorial-steps-view" "In the tutorial master, fold away all but the headings and the Try it steps, or show it all again"
+  (lambda () (tutorial-steps-view!)))
 
 (define-command "tutorial-next" "Go to the next step of the tutorial"
   (lambda () (tutorial-next!)))

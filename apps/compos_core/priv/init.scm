@@ -59,6 +59,8 @@
 (require 'custom)
 ;; the settings of the windows: bound before any package reads one
 (require 'window-settings)
+;; a long tool result goes to a file: the proxy in tools and chat use it
+(require 'tool-results)
 (require 'tools)
 ;; the catalog's pure rules: reasoning controls, live effort rows, staleness
 (require 'model-rules)
@@ -201,6 +203,8 @@
 (require 'skills)
 (require 'prompts)
 (require 'llm-config)
+;; the direct model lane's tool gate and retry rule: llm.ex asks them by name
+(require 'llm-gate)
 ;; the Do prompt reads the whole command catalog: it loads after the apps
 (require 'do)
 ;; the agents' shell commands in the sandbox: it reads the chat's llm-config

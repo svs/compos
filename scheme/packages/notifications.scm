@@ -1,4 +1,4 @@
-;;; notifications.scm --- passing notices, and M-x notifications for the history.
+;;; notifications.scm --- passing notices, and M-x notifications for the ones that need you.
 ;;;
 ;;; (notify! SOURCE TITLE [BODY] [PROPS]) puts a notice in the event log
 ;;; under notify:SOURCE, so the log is the history. A new notice shows in a
@@ -28,11 +28,12 @@
 ;; BUFFER the one the notice is about or #f, EVENT the notice itself; survives a reload
 (define *notifications-shown* (if (boundp '*notifications-shown*) *notifications-shown* '()))
 
-;; the notices still waiting for the user, as (SEQ . BUFFER), newest first;
-;; the bell in the top bar shows how many. Opening M-x notifications reads
-;; them all; a notice whose BUFFER resolves (notifications-resolve!) leaves
-(define *notifications-unread*
-  (if (and (boundp '*notifications-unread*) (list? *notifications-unread*)) *notifications-unread* '()))
+;; the open notices: what still needs the user, as (SEQ . BUFFER), newest
+;; first. The bell counts them and M-x notifications lists them. A notice
+;; closes when it is dealt with: its BUFFER resolves (notifications-resolve!),
+;; you go to it, or you mark it done (notifications-done!)
+(define *notifications-open*
+  (if (and (boundp '*notifications-open*) (list? *notifications-open*)) *notifications-open* '()))
 
 (effects! '(pure))
 
@@ -67,21 +68,29 @@ first, so a notice that waits for you is not pushed off by status updates"
 
 (define (notifications--publish-unread!)
   (frame-chrome-set! "notifications-unread"
-                     (if (pair? *notifications-unread*) (number->string (length *notifications-unread*)) "")))
+                     (if (pair? *notifications-open*) (number->string (length *notifications-open*)) "")))
 
-(define (notifications--read-all!)
-  "the user opened the notices: the bell shows none unread"
-  (set! *notifications-unread* '())
-  (notifications--publish-unread!))
+(define (notifications--open-changed!)
+  "the open notices changed: the bell and the list follow"
+  (notifications--publish-unread!)
+  (when (buffer-exists? *notifications-buffer*) (list-refresh! *notifications-buffer*)))
+
+(define (notifications-done! seq)
+  "the notice SEQ is dealt with: off the screen, out of the bell and the list"
+  (let ((s (if (string? seq) (string->number seq) seq)))
+    (notifications-dismiss! s)
+    (when (assoc s *notifications-open*)
+      (set! *notifications-open* (filter (lambda (u) (not (equal? (car u) s))) *notifications-open*))
+      (notifications--open-changed!))))
 
 (define (notifications-resolve! buf)
   "what the notices about BUF asked is done or seen: take them off the screen and out of the bell's count"
   (for-each (lambda (n) (when (and (> (length n) 4) (equal? (nth 4 n) buf)) (notifications-dismiss! (car n))))
             *notifications-shown*)
-  (let ((left (filter (lambda (u) (not (equal? (cdr u) buf))) *notifications-unread*)))
-    (unless (= (length left) (length *notifications-unread*))
-      (set! *notifications-unread* left)
-      (notifications--publish-unread!))))
+  (let ((left (filter (lambda (u) (not (equal? (cdr u) buf))) *notifications-open*)))
+    (unless (= (length left) (length *notifications-open*))
+      (set! *notifications-open* left)
+      (notifications--open-changed!))))
 
 (define (notifications--show! e)
   (let ((seq (plist-get e 'seq))
@@ -110,7 +119,7 @@ first, so a notice that waits for you is not pushed off by status updates"
 ;; a notice about a buffer has done its job once you are in that buffer:
 ;; its 'buffer prop names it
 (define (notifications--dismiss-here!)
-  (when (or (pair? *notifications-shown*) (pair? *notifications-unread*))
+  (when (or (pair? *notifications-shown*) (pair? *notifications-open*))
     (let ((here (window-buffer (active-window))))
       (when here (notifications-resolve! here)))))
 
@@ -119,8 +128,8 @@ first, so a notice that waits for you is not pushed off by status updates"
 (define (notifications--saw e)
   "a notice reached the log: show it, unless it is old, as when a restart replays the log"
   (when (< (- (current-time) (plist-get e 'at)) notifications-seconds)
-    (set! *notifications-unread* (cons (cons (plist-get e 'seq) (notifications--data e 'buffer)) *notifications-unread*))
-    (notifications--publish-unread!)
+    (set! *notifications-open* (cons (cons (plist-get e 'seq) (notifications--data e 'buffer)) *notifications-open*))
+    (notifications--open-changed!)
     (notifications--show! e)))
 
 (effects! '(write))
@@ -153,7 +162,7 @@ or its command; #t when it went somewhere"
   "a click on the notice SEQ in the corner: take it away and go where it points"
   (let* ((s (if (string? seq) (string->number seq) seq))
          (n (find (lambda (n) (equal? (car n) s)) *notifications-shown*)))
-    (notifications-dismiss! s)
+    (notifications-done! s)
     (when (and n (> (length n) 5)) (notifications-visit! (nth 5 n)))))
 
 ;;; M-x notifications: the history
@@ -161,7 +170,11 @@ or its command; #t when it went somewhere"
 (effects! '(read))
 
 (define (notifications--rows buf)
-  (event-log-newest "notify:*" notifications-history-limit))
+  "the open notices; with 'notifications-all on, the whole history"
+  (let ((es (event-log-newest "notify:*" notifications-history-limit)))
+    (if (buffer-local buf 'notifications-all)
+        es
+        (filter (lambda (e) (assoc (plist-get e 'seq) *notifications-open*)) es))))
 
 (define (notifications--cells buf e)
   (list (ibuffer-age-label (- (current-time) (plist-get e 'at)))
@@ -174,9 +187,10 @@ or its command; #t when it went somewhere"
 (define-list-mode! "notifications-mode"
   (list
     'doc (string-append
-           "The notices, newest first. Each one passed in the corner for a few seconds. "
-           "RET or a click goes where the notice points. / narrows the rows drawn. The list follows new notices while it is on screen. "
-           "g redraws, and q quits.")
+           "The notices that need you, newest first. A notice leaves when it is dealt with: "
+           "the chat no longer waits on you, you go where it points, or you mark it done. "
+           "RET or a click goes there, d marks it done, a shows every notice that passed or only the open ones. "
+           "/ narrows the rows drawn. g redraws, and q quits.")
     'buffer *notifications-buffer*
     'transient #f
     'rows notifications--rows
@@ -186,18 +200,18 @@ or its command; #t when it went somewhere"
     'no-marks #t
     'columns (lambda (buf) (list (list "age" 5) (list "from" 10) (list "title" 28) (list "notice" #f)))
     'cells notifications--cells
-    'title (lambda (buf) "Notifications")
+    'title (lambda (buf) (if (buffer-local buf 'notifications-all) "Notifications: all" "Notifications"))
     'total (lambda (buf) (length (list-entries buf)))
     'noun "notice"
-    'footer (lambda (buf) '(("RET" "go") ("/" "filter") ("g" "redraw") ("q" "quit")))
-    'keys '(("RET" "notifications-visit") ("g" "notifications-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("RET" "go") ("d" "done") ("a" "all/open") ("/" "filter") ("g" "redraw") ("q" "quit")))
+    'keys '(("RET" "notifications-visit") ("d" "notifications-done") ("a" "notifications-toggle-all")
+            ("g" "notifications-refresh") ("q" "quit-window"))))
 
-(define-command "notifications" "Show the notices that passed, newest first"
+(define-command "notifications" "Show the notices that need you, newest first"
   (lambda ()
     (buffer-create *notifications-buffer*)
     (unless (buffer-local *notifications-buffer* 'group)
       (buffer-set-local! *notifications-buffer* 'group (frame-group)))
-    (notifications--read-all!)
     (list-mode-show! "notifications-mode")))
 
 (define-command "notifications-refresh" "Redraw the notices"
@@ -210,13 +224,25 @@ or its command; #t when it went somewhere"
   (lambda ()
     (let ((e (list-current *notifications-buffer*)))
       (if e
-          (begin (notifications-dismiss! (plist-get e 'seq)) (notifications-visit! e))
+          (begin (notifications-done! (plist-get e 'seq)) (notifications-visit! e))
           (message "No notice on this line")))))
+
+(define-command "notifications-done" "Mark the notice at point done: it leaves the list and the bell"
+  (lambda ()
+    (let ((e (list-current *notifications-buffer*)))
+      (if e (notifications-done! (plist-get e 'seq)) (message "No notice on this line")))))
+
+(define-command "notifications-toggle-all" "Show every notice that passed, or only the open ones"
+  (lambda ()
+    (buffer-set-local! *notifications-buffer* 'notifications-all
+                       (not (buffer-local *notifications-buffer* 'notifications-all)))
+    (list-refresh! *notifications-buffer*)))
 
 (domain! 'interaction)
 (effects! '(write display))
 (public! 'notify! "(notify! SOURCE TITLE [BODY] [PROPS]) -- record a notice under notify:SOURCE and show it in the corner for notifications-seconds")
 (public! 'notifications-dismiss! "(notifications-dismiss! SEQ) -- take the notice SEQ off the screen; it stays in the history")
+(public! 'notifications-done! "(notifications-done! SEQ) -- the notice SEQ is dealt with: off the screen, out of the bell and the list")
 (public! 'notifications-resolve! "(notifications-resolve! BUF) -- the notices about BUF are done or seen: off the screen and out of the bell's count")
 (public! 'notifications-visit! "(notifications-visit! NOTICE) -- go where NOTICE points: its buffer, WhatsApp chat, mailbox or command")
 (public! 'notifications-click! "(notifications-click! SEQ) -- what a click on the notice SEQ in the corner does: take it away and go where it points")

@@ -37,9 +37,6 @@
               (else (loop (cdr bs)))))))
 
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
-(effects! '(read))
-(public! 'agent-slug-of "(agent-slug-of BUF) -- the agent slug stored in BUF, or #f")
-(effects! '(write))
 
 (define (agent-status slug)
   ;; a runtime whose buffer was killed is dead too: a revive rebuilt the
@@ -942,7 +939,8 @@
                                       "Choose an answer or type another reply below.")))))
       ((equal? kind "status")
        (list 'tag "c-summary" 'class "ag-status" 'attrs '(("kind" "status"))
-             'children (list (list 'tag "c-group" 'class "ag-status-text" 'range (list s e)))))
+             'children (list (chat-view--label "SUMMARY")
+                             (list 'tag "c-group" 'class "ag-status-text" 'range (list s e)))))
       ((equal? kind "image")
        (let ((path (nth 3 b)))
          (list 'tag "c-user" 'class "ag-user ag-image"
@@ -1044,7 +1042,7 @@
   (let* ((at (nth 1 part)) (name (nth 3 part)) (body (nth 4 part))
          (props (chat-component--props body))
          (problems (chat-component--problems name props))
-         (drawn (and (null? problems) (report-errors "chat component: draw" (lambda () (component name props))))))
+         (drawn (and (null? problems) (ignore-errors (lambda () (component name props))))))
     (if (and (pair? drawn) (not (equal? (car drawn) 'error)))
         (list 'tag "c-group" 'class "ag-component"
               'attrs (list (list "kind" "component") (list "component" name))
@@ -1271,7 +1269,7 @@
     (list (list 'tag "c-prompt" 'class "ag-inputrow"
                 'children (list (chat-view--label "YOU")
                                 (list 'tag "c-input" 'class "ag-input" 'input #t
-                                      'hint "RET sends · C-RET sends next · C-g cancels"))))))
+                                      'hint "RET sends · C-RET sends next, or interrupts when empty"))))))
 
 (effects! '(write))
 
@@ -1539,9 +1537,10 @@
 (define-style! 'chat-view-history "
 .ag-scroll.ag-away::after {
   content: 'history · M-> back to the bottom';
-  position: sticky; bottom: 8px; display: block; width: fit-content; margin: 0 auto;
-  padding: 2px 10px; border: 1px solid var(--border-bg); border-radius: 10px;
-  background: var(--window-bg); color: var(--dim-fg); font: 12px var(--font-sans);
+  position: sticky; bottom: 10px; display: block; width: fit-content; margin: 0 auto;
+  padding: 4px 14px; border: 1px solid var(--accent-fg); border-radius: 12px;
+  background: var(--accent-fg); color: var(--window-bg); font: 600 13px var(--font-sans);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .45);
   pointer-events: none;
 }
 ")

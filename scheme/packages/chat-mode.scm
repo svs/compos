@@ -892,6 +892,8 @@
   "(mode-chat-setup! MODE PROC) — PROC (CHAT SOURCE) sets up a chat made for a buffer in MODE")
 (public! 'chat-take-modes!
   "(chat-take-modes! CHAT SOURCE) — CHAT knows SOURCE and takes its modes' chat parts; answers those modes")
+(effects! '(read))
+(public! 'chat-key "(chat-key SRC) — the key SRC's chat is kept under: the most specific of its modes' chat keys, else SRC")
 
 (effects! '(unknown))
 

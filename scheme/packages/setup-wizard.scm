@@ -509,11 +509,13 @@
   (cond
     ((string-prefix? "wizard:use:" id)
      (setup-use-connector! (substring-bytes id 11 (string-byte-length id))) #t)
-    ;; the model the user installs is the one they chose
+    ;; the model the user installs is the one they chose; the install
+    ;; terminal opens in the other column, so the wizard or the tutorial
+    ;; slide stays on screen and the user can leave the shell
     ((string-prefix? "wizard:install:" id)
      (let ((name (substring-bytes id 15 (string-byte-length id))))
        (setup-use-connector! name)
-       (setup-install-agent! name))
+       (setup-install-agent! name display-buffer-other-window!))
      #t)
     ((string-prefix? "wizard:key:" id)
      (setup-wizard-add-key! buf (substring-bytes id 11 (string-byte-length id)) on-key) #t)

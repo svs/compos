@@ -1744,6 +1744,16 @@
           });
         });
         this.mo.observe(this.el, { childList: true, subtree: true, characterData: true });
+        // The list can lose height from below with no scroll and no
+        // patch: the activity row and the input row slide in and out
+        // under it as a turn starts and ends. Its scrollTop stays, so
+        // the tail drops out of view. At the tail, keep the tail.
+        if (typeof ResizeObserver !== "undefined") {
+          this.size = new ResizeObserver(() => {
+            if (this.stick && this.scroller.clientHeight > 0) this.place();
+          });
+          this.size.observe(this.el);
+        }
         this.mark();
         this.settle();
       },
@@ -1897,6 +1907,7 @@
         if (this.raf) cancelAnimationFrame(this.raf);
         if (this.grow) cancelAnimationFrame(this.grow);
         if (this.mo) { this.mo.disconnect(); this.mo = null; }
+        if (this.size) { this.size.disconnect(); this.size = null; }
         if (this.ro) { this.ro.disconnect(); this.ro = null; }
       }
     },

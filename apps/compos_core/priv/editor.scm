@@ -6958,6 +6958,8 @@
 (catalog-meta! 'function "re-find" 'domain 'data 'effects '(pure))
 (public! 're-find* "(re-find* PAT S [FLAGS]) — return [START END] byte offsets for every match of PAT in S. FLAGS as in re-find.")
 (catalog-meta! 'function "re-find*" 'domain 'data 'effects '(pure))
+(public! 're-match? "(re-match? PAT S) — return true if the regex PAT matches S.")
+(catalog-meta! 'function "re-match?" 'domain 'data 'effects '(pure))
 (public! 'string-replace "(string-replace S FROM TO) — S with every FROM replaced by TO; a non-string S is \"\".")
 (catalog-meta! 'function "string-replace" 'domain 'data 'effects '(pure))
 (public! 'regexp-quote "(regexp-quote TEXT) — TEXT with every regexp character escaped.")

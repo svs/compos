@@ -6853,8 +6853,10 @@
     "buffer-substring" "line-text" "symbol-at-point" "symbol-at-point-in"
     "buffer-search" "buffer-search-backward"))
 (catalog-meta! 'function "json-parse" 'domain 'data 'effects '(pure))
+(effects! '(pure))
 (public! 'html-escape "(html-escape S) — S with & < > \" and ' as HTML entities" 'data)
 (catalog-meta! 'function "html-escape" 'domain 'data 'effects '(pure))
+(effects! '(unknown))
 (public! 'llm-catalog-info "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path" 'llm)
 (catalog-meta! 'function "llm-catalog-info" 'domain 'llm 'effects '(read))
 (public! 're-find "(re-find PAT S START [FLAGS]) — return [START END] byte offsets of the first match, or false. FLAGS, such as \"iu\", compile PAT for this call only.")

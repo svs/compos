@@ -135,13 +135,16 @@
   // document start and end, native, because a server round trip
   // for them read as lag.
   // ESC or C-g returns it to the movement state. A modifier alone,
-  // a plain Cmd-arrow and a plain Shift-arrow change nothing: they are
-  // the window motion itself, or the shift before a chord.
+  // a Cmd-arrow, a Cmd-Shift-arrow and a plain Shift-arrow change
+  // nothing: they are the window and pane motion itself, or the shift
+  // before a chord. In the editing state the Cmd-arrows, shifted or not,
+  // stay the platform's caret moves and selections.
   function editingAfterKey(e, editing) {
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return editing;
     if (e.key === "Escape") return false;
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === "g") return false;
-    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey &&
+    // Cmd-Shift-arrows too: they move the panes, s-S-<arrow>
+    if (e.metaKey && !e.ctrlKey && !e.altKey &&
         NAMED[e.key] && e.key.startsWith("Arrow")) return editing;
     if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
         e.key.startsWith("Arrow")) return editing;

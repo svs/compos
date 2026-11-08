@@ -927,15 +927,14 @@
 ;; An unknown role, or one left empty, falls back to the session model: the
 ;; table is a preference and never a requirement.
 (define (llm-model-for role)
-  ;; This dialect has no dotted pairs: it reads (coding . "claude-opus-5") as
-  ;; the three-element list (coding . "claude-opus-5") with a bare `.` symbol
-  ;; in the middle. assq still finds the row, but (cdr row) is then (. "id")
-  ;; and not the string -- so the preset silently lost to the session model for
-  ;; every role, and the table had never once been read. Taking the first
-  ;; string in the row reads both that shape and a plain (ROLE "id") list.
+  ;; A row is the pair (ROLE . "id") or the list (ROLE "id"); a table saved
+  ;; before the reader knew dotted pairs holds a bare `.` symbol too, so the
+  ;; first string in the row is the id.
   (let* ((row (assq role llm-model-presets))
-         (ss (and row (filter (lambda (x) (string? x)) (cdr row))))
-         (id (and (pair? ss) (car ss))))
+         (tail (and row (cdr row)))
+         (id (cond ((string? tail) tail)
+                   ((list? tail) (let ((ss (filter string? tail))) (and (pair? ss) (car ss))))
+                   (else #f))))
     (if (and (string? id) (> (string-length id) 0)) id (llm-model))))
 
 (public! 'llm-models!

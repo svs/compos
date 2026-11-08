@@ -114,23 +114,19 @@ defmodule Compos.Scheme.Builtins do
       {"sort", "(sort LST) — return LST sorted in ascending term order."} => fn [l] ->
         Enum.sort(l)
       end,
-      # lists are BEAM lists, so there is no dotted pair; a reload hook that
-      # wrote (cons KEY VAL) failed with a bare FunctionClauseError
-      {"cons", "(cons H T) — prepend H to the list T; T must be a list."} => fn
-        [h, t] when is_list(t) ->
-          [h | t]
-
-        [_, t] ->
-          raise Eval.Error,
-            message:
-              "cons: the tail must be a list, not #{Printer.print(t)}; there are no dotted pairs, use (list H T)"
+      # lists are BEAM lists; a dotted pair (H . T) is the improper list [H | T]
+      {"cons", "(cons H T) — prepend H to the list T; a T that is not a list makes the dotted pair (H . T)."} => fn
+        [h, t] -> [h | t]
       end,
       {"car", "(car LST) — return the first element of LST."} => fn [[h | _]] -> h end,
       {"cdr", "(cdr LST) — return LST without its first element."} => fn [[_ | t]] -> t end,
       {"list", "(list X ...) — return a list of the arguments."} => fn args -> args end,
       {"null?", "(null? X) — return true if X is the empty list."} => fn [x] -> x == [] end,
-      {"pair?", "(pair? X) — return true if X is a non-empty list."} => fn [x] ->
-        is_list(x) and x != []
+      {"list?", "(list? X) — return true if X is a proper list; a dotted pair is not one."} => fn [x] ->
+        is_list(x) and not List.improper?(x)
+      end,
+      {"pair?", "(pair? X) — return true if X is a non-empty list or a dotted pair."} => fn [x] ->
+        match?([_ | _], x)
       end,
       {"length", "(length LST) — return the number of elements in LST."} => fn [l] ->
         length(l)
@@ -541,6 +537,7 @@ defmodule Compos.Scheme.Builtins do
                                                                                                ) ->
         case Enum.find(al, &match?([^key | _], &1)) do
           [_, v | _] -> v
+          [_ | v] when v != [] and not is_list(v) -> v
           _ -> false
         end
       end,

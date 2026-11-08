@@ -245,16 +245,22 @@
     number->string string->number value->string plist-get json-parse
     split-lines first-line with-current-buffer list-tail list-head))
 
+(define (eval-read--items x)
+  "the elements of the form X, a dotted tail last: (a b . c) gives (a b c)"
+  (cond ((pair? x) (cons (car x) (eval-read--items (cdr x))))
+        ((null? x) '())
+        (else (list x))))
+
 (define (eval-read--names x)
   "every symbol in the read payload X, quoted data left out"
   (cond ((symbol? x) (list x))
         ((not (pair? x)) '())
         ((equal? (car x) 'quote) '())
-        (else (apply append (map eval-read--names x)))))
+        (else (apply append (map eval-read--names (eval-read--items x))))))
 
 (define (eval-read--params p)
   (cond ((symbol? p) (list p))
-        ((pair? p) (filter symbol? p))
+        ((pair? p) (filter symbol? (eval-read--items p)))
         (else '())))
 
 (define (eval-read--binders x)
@@ -263,7 +269,7 @@
         ((equal? (car x) 'quote) '())
         ((and (equal? (car x) 'lambda) (pair? (cdr x)))
          (append (eval-read--params (cadr x))
-                 (apply append (map eval-read--binders (cddr x)))))
+                 (apply append (map eval-read--binders (eval-read--items (cddr x))))))
         ((and (member (car x) '(let let*)) (pair? (cdr x)))
          (let* ((named (symbol? (cadr x)))
                 (bindings (if named (and (pair? (cddr x)) (caddr x)) (cadr x))))
@@ -271,8 +277,8 @@
                    (if (pair? bindings)
                        (map (lambda (b) (if (pair? b) (car b) b)) bindings)
                        '())
-                   (apply append (map eval-read--binders (cdr x))))))
-        (else (apply append (map eval-read--binders x)))))
+                   (apply append (map eval-read--binders (eval-read--items (cdr x)))))))
+        (else (apply append (map eval-read--binders (eval-read--items x))))))
 
 (define (eval-read--effects names)
   "(NAME EFFECTS) for each of NAMES the catalog declares, in one pass"
@@ -1802,7 +1808,7 @@
   (cond ((not (pair? x)) '())
         ((equal? (car x) 'quote) '())
         (else (append (if (symbol? (car x)) (list (symbol->string (car x))) '())
-                      (apply append (map mcp-proxy--calls x))))))
+                      (apply append (map mcp-proxy--calls (eval-read--items x)))))))
 
 (define (mcp-proxy--call-text name args-json)
   (let* ((raw (string-append name " " args-json))

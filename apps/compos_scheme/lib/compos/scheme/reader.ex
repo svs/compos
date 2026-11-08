@@ -7,7 +7,7 @@ defmodule Compos.Scheme.Reader do
     * numbers  -> integer | float
     * strings  -> binary
     * booleans -> `true` | `false`  (#t / #f)
-    * lists    -> Elixir lists
+    * lists    -> Elixir lists; a dotted pair (a . b) is the improper list [a | b]
   """
 
   defmodule Error do
@@ -111,6 +111,18 @@ defmodule Compos.Scheme.Reader do
 
   defp read_list([:rparen | rest], acc), do: {Enum.reverse(acc), rest}
   defp read_list([], _), do: raise(Error, message: "unterminated list")
+
+  # (a b . c) is the improper list [a, b | c]; (a . (b)) is (a b)
+  defp read_list([{:atom, "."} | _], []), do: raise(Error, message: "a dot needs an element before it")
+
+  defp read_list([{:atom, "."} | tokens], acc) do
+    {tail, rest} = read_expr(tokens)
+
+    case rest do
+      [:rparen | rest] -> {:lists.reverse(acc, tail), rest}
+      _ -> raise(Error, message: "a dot takes exactly one element after it")
+    end
+  end
 
   defp read_list(tokens, acc) do
     {form, rest} = read_expr(tokens)

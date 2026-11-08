@@ -9,7 +9,7 @@ defmodule Compos.Scheme.Eval do
   `:lcode` when the body's locals need no store frame (see code/4), else
   `:code`; ENV is a frame ref, or `{:lex, vars, ref}` for a closure made
   inside a lexical body. Param
-  lists use elisp-style `&optional` / `&rest` markers (flat, no dotted pairs);
+  lists use elisp-style `&optional` / `&rest` markers, or R7RS `(a . rest)`;
   missing optionals bind `#f`, `&rest` binds a (possibly empty) list.
   Builtins: `{:builtin, name, fun}` where fun is `(args -> value)` or
             `(args, store -> {value, store})` for store-aware primitives.
@@ -507,12 +507,19 @@ defmodule Compos.Scheme.Eval do
 
   defp param_names!(params) do
     params
+    |> dotted_params()
     |> Enum.map(fn
       {:sym, name} -> name
       other -> raise Error, message: "bad parameter: #{inspect(other)}"
     end)
     |> parse_params!([], :req)
   end
+
+  # R7RS rest formals: (a b . r) and a bare symbol r are (a b &rest r)
+  # and (&rest r); the reader gives them as an improper list and a symbol
+  defp dotted_params({:sym, _} = rest), do: [{:sym, "&rest"}, rest]
+  defp dotted_params([p | more]), do: [p | dotted_params(more)]
+  defp dotted_params(params), do: params
 
   # flat elisp-style param list -> {required, optional, rest-name-or-nil}
   defp parse_params!([], req, :req), do: {Enum.reverse(req), [], nil}

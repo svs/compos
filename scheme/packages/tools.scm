@@ -1527,7 +1527,7 @@
 (effects! '(pure))
 (public! 'scheme-read
   "(scheme-read STR) — read STR as Scheme data; return the list of top-level forms, or #f when STR does not parse.")
-(effects! '(unknown))
+(effects! '(read external spend))
 
 ;; A tool can answer with MCP content blocks instead of text:
 ;; (tool-content ((type "image" mimeType "image/png" data B64) ...)).

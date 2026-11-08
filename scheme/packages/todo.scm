@@ -1995,12 +1995,8 @@
   (list
     'buffer *todo-buffer*
     'special #f
-    ;; moving shows the row's page beside the list once the highlight rests;
-    ;; the page's chat-follow? brings its chat
-    'preview (lambda (buf t)
-                (unless (todo--sep? t)
-                  (todo-show-detail! (plist-get t 'id))))
-    'debounce #t
+    ;; moving changes nothing beside the list; RET (todo-show) opens the
+    ;; row's page, and the page's chat-follow? brings its chat
     'head-blocks todo--tab-blocks
     'title (lambda (buf) (string-append "Todos   " (todo--view buf) " · by " (todo--sort-by buf)))
     'title-spans (lambda (buf)

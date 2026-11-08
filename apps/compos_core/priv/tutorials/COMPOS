@@ -45,6 +45,10 @@ Beside each command, the minibuffer shows the key that runs it. So when you find
 
 > **Try it.** Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
 
+**Apropos** searches everything that Compos defines: commands, functions, settings and modes. Each result says what it does, and a command also shows its key. Use it when you know a word, but not the name.
+
+> **Try it.** Type `C-h a`, search for "other window", and read the results. Type `q` to close the list.
+
 When no command answers your question, ask a chat. `M-o` opens the chat of the page you are on, and that chat can read the page.
 
 > **Try it.** Type `M-o` and ask "What can I do on this slide?". Read the answer. Then click the slide to come back.

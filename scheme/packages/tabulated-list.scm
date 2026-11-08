@@ -2307,7 +2307,11 @@
              (fields (list-opt buf 'composml-fields))
              (key-of (list-ctx-key ctx)))
         (list-set-locals! (or destination buf)
-          (list 'render-text-root (root buf)
+          ;; rows-click: a click on a row opens it (list-mouse-open), and
+          ;; the page shows a pointer over the rows
+          (list 'render-text-root (let ((r (root buf)))
+                                    (plist-put r 'attrs (cons (list "rows-click" "true")
+                                                              (or (plist-get r 'attrs) '()))))
                 'render-records
                 (let loop ((rs rows) (offsets (list-offsets buf)) (ps prepared) (out '()))
                   (if (or (null? rs) (null? offsets)) (reverse out)

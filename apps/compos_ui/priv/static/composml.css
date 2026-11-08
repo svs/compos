@@ -14,6 +14,8 @@
 }
 .semantic-item.selected { background: var(--hl-line-bg, rgba(128,128,128,.12)); }
 .semantic-item[marked="true"] { background: var(--select-bg, #e6e3db); color: var(--select-fg, inherit); }
+/* a click on a list row opens it (tabulated-list.scm list-mouse-open) */
+.buf[rows-click] .line, .semantic-list > .semantic-item { cursor: pointer; }
 .semantic-item[unread="true"] { border-left-color: var(--list-unread-fg, currentColor); }
 .semantic-item[unread="true"] > [field="primary"] { font-weight: 700; }
 .semantic-item[marked="true"] { border-left-color: var(--list-marked-fg, var(--accent-fg, #a03020)); }

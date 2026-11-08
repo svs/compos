@@ -2423,7 +2423,7 @@ defmodule Compos.Ui.EditorLive do
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
                   dominant-baseline shape-rendering title colspan rowspan src alt
-                  author call verbosity aria-label aria-hidden)
+                  author call verbosity aria-label aria-hidden rows-click)
 
   defp semantic_line(%{fields: []} = assigns) do
     ~M"""

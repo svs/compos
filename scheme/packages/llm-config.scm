@@ -333,9 +333,8 @@
                       (llm-config--pick-preset-loop! name store))))
             (list 'cancel (lambda () #f))
             (list 'style "palette")
-            (list 'legend '(("RET" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
+            (list 'legend '(("RET SPC" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
             (list 'note "RET turns a preset on or off and keeps the list open; C-g when done. The chat gets them when the menu closes."))
-      (list (list 'space-confirms #t))
       (if preselect (list (list 'selected preselect)) '()))))
 
 (define-command "llm-config-pick-preset" "Choose MCP servers and tool presets"

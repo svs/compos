@@ -3159,6 +3159,9 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (public! 'list-mode-filters
   "(list-mode-filters MODE) — the prefix filters a list mode understands, as (PREFIX FIELD DOC)"
   'ui)
+(public! 'list-mode-opts
+  "(list-mode-opts NAME) — the options list mode NAME was defined with, as a plist; () when NAME is no list mode"
+  'ui)
 (effects! '(write))
 (public! 'list-define-filter!
   "(list-define-filter! MODE PREFIX FIELD [DOC]) — teach any list mode a filter: in its / filter, a word PREFIXtext keeps the rows whose FIELD (buf entry) -> text has text, e.g. (list-define-filter! \"todo-mode\" \"by:\" (lambda (b e) (plist-get e 'by)) \"filed by\")"

@@ -298,7 +298,8 @@
                   (list 'cancel (lambda () #f))
                   (list 'style "palette")
                   (list 'legend '(("RET" "toggle") ("C-g" "done"))))
-            (if preselect (list (list 'selected preselect)) '()))))))
+            (list (list 'space-confirms #t))
+      (if preselect (list (list 'selected preselect)) '()))))))
 
 (define (llm-presets--edit-field! buf key)
   (let ((store (llm-presets--store buf))

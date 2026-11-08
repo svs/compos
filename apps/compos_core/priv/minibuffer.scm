@@ -447,7 +447,16 @@
     ;; the frame's prompt buffer exists once a prompt has opened in it
     (let ((buf (minibuffer-mode-ensure!)))
       (buffer-set-local! buf 'minibuffer-prompt (cdr split))
+      ;; (space-confirms #t): SPC picks the row like RET, for toggle lists
+      (buffer-set-local! buf 'minibuffer-space-confirms
+        (let ((e (assq 'space-confirms handlers))) (and e (cadr e) #t)))
       #t)))
+
+(define-command "minibuffer-space" "Pick the row in a list that takes SPC, else type a space"
+  (lambda ()
+    (if (buffer-local (minibuffer-mode-ensure!) 'minibuffer-space-confirms)
+        (run-command "minibuffer-confirm")
+        (run-command "self-insert-command"))))
 
 ;; RET in a path prompt (find-file) means the HIGHLIGHTED candidate
 ;; whenever one exists (vertico), resolved through the completion handler.
@@ -901,6 +910,7 @@
 
 (mode-keys! "minibuffer-mode"
   '(("RET" "minibuffer-confirm")
+    ("SPC" "minibuffer-space")
     ("M-RET" "minibuffer-confirm-input")
     ("C-g" "minibuffer-cancel")
     ("TAB" "minibuffer-complete")

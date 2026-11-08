@@ -335,6 +335,7 @@
             (list 'style "palette")
             (list 'legend '(("RET" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
             (list 'note "RET turns a preset on or off and keeps the list open; C-g when done. The chat gets them when the menu closes."))
+      (list (list 'space-confirms #t))
       (if preselect (list (list 'selected preselect)) '()))))
 
 (define-command "llm-config-pick-preset" "Choose MCP servers and tool presets"
@@ -1320,6 +1321,9 @@
     (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay 'preset-action #t
       'flags-fn (lambda (_scope) "action-button"))
     (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay 'preset-action #t
+      'flags-fn (lambda (_scope) "action-button"))
+    ;; ESC as a button: the chat takes the selected config, no preset is saved
+    (transient-suffix "ESC" "Use without saving" "transient-quit-one" 'preset-action #t
       'flags-fn (lambda (_scope) "action-button"))))
 
 (define (llm-config--groups _buf)

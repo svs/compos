@@ -63,6 +63,7 @@
 
 (category! 'packages)
 (public! 'package-install! "(package-install! SPEC) — fetch a .scm (github user/repo[/path] or url) into <compos-home>/packages and load it")
+(effects! '(read))
 (public! 'package-list "Names of installed user packages")
 
 ;;; --- reloading one file into the live session --------------------------------

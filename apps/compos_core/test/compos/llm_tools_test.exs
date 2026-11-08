@@ -54,7 +54,7 @@ defmodule Compos.LLMToolsTest do
       # Focused repository readers avoid wrapping safe reads in the
       # deliberately conservative eval-scheme tool.
       for t <-
-            ~w(eval-scheme apropos apropos-categories describe-function read-file code-outline code-read act ask spotify) do
+            ~w(eval-scheme eval-scheme-read apropos apropos-categories describe-function read-file code-outline code-read act ask draw spotify) do
         assert specs =~ t
       end
 
@@ -64,7 +64,7 @@ defmodule Compos.LLMToolsTest do
           ~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))}
         )
 
-      assert count == "10"
+      assert count == "13"
       # apropos reads the catalog, and its semantic pass embeds the query
       # through an external service, so the stamp names external and spend.
       # agent-permissions.scm allows the tool anyway: discovery must not ask.
@@ -105,9 +105,9 @@ defmodule Compos.LLMToolsTest do
       out = eval!(~s{(llm-tool-call "apropos" (list 'query "buffer zzzzquux"))})
       refute out =~ "buffer-append!"
 
-      # a near-miss on a name still lands, marked as such
+      # a near-miss on a name still lands on the real name
       out = eval!(~s{(llm-tool-call "apropos" (list 'query "buffer-apend!"))})
-      assert out =~ "closest name"
+      assert out =~ "buffer-append!"
 
       # internals stay out of the default scope, reachable via scope "all"
       out = eval!(~s{(llm-tool-call "apropos" (list 'query "agent-block-push"))})
@@ -138,7 +138,7 @@ defmodule Compos.LLMToolsTest do
       # a userland function: full lambda source, body included
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-thread-context"))})
       assert out =~ "lambda"
-      assert out =~ "chat-record"
+      assert out =~ "chat-model-record"
 
       # an M-x command (lives in the ETS registry, not the global env)
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "agent-send"))})
@@ -165,6 +165,9 @@ defmodule Compos.LLMToolsTest do
       eval!(~s{(buffer-create "*zz-tool-target*")})
       eval!(~s{(define zz-tool-target-name "*zz-tool-target*")})
       eval!(~s{(switch-to-buffer! "*zz-tool-here*")})
+      # an eval retargets only its logical buffer, so the window shows
+      # whatever it showed: the tool must leave it exactly so
+      shown = Editor.current_buffer()
 
       out =
         eval!(
@@ -173,7 +176,7 @@ defmodule Compos.LLMToolsTest do
 
       assert out =~ "*zz-tool-target*"
       assert Buffer.get_local("*zz-tool-target*", "zz-tool-touched") == true
-      assert Editor.current_buffer() == "*zz-tool-here*"
+      assert Editor.current_buffer() == shown
     end
 
     test "the tool reads live buffer text" do

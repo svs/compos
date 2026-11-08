@@ -84,7 +84,7 @@ defmodule Compos.ApiLaneTest do
     text = Buffer.text(buf)
     # the user turn, the tool card, its body, then the streamed prose
     you = :binary.match(text, "what is 20+22") |> elem(0)
-    card = :binary.match(text, "▸ tool · eval-scheme") |> elem(0)
+    card = :binary.match(text, "▸ tool · +") |> elem(0)
     body = :binary.match(text, "42") |> elem(0)
     done = :binary.match(text, "All set.") |> elem(0)
     assert you < card and card < body and body < done
@@ -94,10 +94,10 @@ defmodule Compos.ApiLaneTest do
     flat = inspect(msgs)
     assert flat =~ "42"
 
-    # the card says what it DID without being opened: the tool's name and
-    # the first line of the argument that matters. Formatting is Scheme's
-    # (packages/agent.scm) — the backend sends the call and the result raw.
-    assert text =~ "▸ tool · eval-scheme: (+ 20 22)"
+    # the card says what it DID without being opened: an eval names the
+    # head of its form and its arguments. Formatting is Scheme's
+    # (agent-tool-title) — the backend sends the call and the result raw.
+    assert text =~ "▸ tool · +: 20 22"
 
     # an adapter that has only a title keeps its title
     assert {:ok, ~s{"Read foo.ex"}} =
@@ -138,11 +138,9 @@ defmodule Compos.ApiLaneTest do
     usage = Enum.at(record, Enum.find_index(record, &(&1 == {:sym, "last"})) + 1)
     assert Enum.at(usage, Enum.find_index(usage, &(&1 == {:sym, "input"})) + 1) == 150
     assert Enum.at(usage, Enum.find_index(usage, &(&1 == {:sym, "output"})) + 1) == 30
-
-    assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "api" end)
   end
 
-  test "RET mid-turn queues and pops on turn end; C-RET cancels" do
+  test "RET mid-turn queues and pops on turn end; C-g cancels" do
     me = self()
 
     stub_chat(fn req ->
@@ -192,10 +190,10 @@ defmodule Compos.ApiLaneTest do
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: second message\n" end)
     assert eventually(fn -> Buffer.get_local(buf, "chat-queued") in [nil, false, []] end)
 
-    # C-RET cancels the running turn: the thread returns to idle without
-    # waiting for the (still-blocked) wire
+    # C-g cancels the running turn: the thread returns to idle without
+    # waiting for the (still-blocked) wire. C-RET is chat-send-next now.
     focus(buf)
-    press(["C-RET"])
+    press(["C-g"])
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
   end
 

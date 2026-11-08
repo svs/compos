@@ -74,7 +74,7 @@ defmodule Compos.PresetTest do
     # buffer-local preset entry.
     assert Buffer.get_local(buf, "chat-presets") in [nil, false, []]
     assert "eval-scheme" in (Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1))
-    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+    assert eval!("(chat-tools-stale? \"" <> buf <> "\")") == "#f"
   end
 
   test "ACP-backed llm-mode mounts the buffer presets as MCP servers" do
@@ -90,7 +90,8 @@ defmodule Compos.PresetTest do
         (buffer-set-local! "#{buf}" 'chat-presets '(compos))
         (insert! "read the companion"))])
 
-    press("M-o")
+    # C-RET sends the buffer in llm-mode (M-o opens its companion chat now)
+    press("C-RET")
 
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -520,7 +521,7 @@ defmodule Compos.PresetTest do
     names = Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1)
     assert "eval-scheme" in names
     assert "apropos" in names
-    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+    assert eval!("(chat-tools-stale? \"" <> buf <> "\")") == "#f"
   end
 
   defp eventually(fun, tries \\ 40) do

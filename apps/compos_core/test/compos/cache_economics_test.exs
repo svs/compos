@@ -59,6 +59,8 @@ defmodule Compos.CacheEconomicsTest do
   test "editing a watched buffer does not move the system prompt" do
     me = self()
     stub_chat(fn req -> send(me, {:req, req}) && reply("ok") end)
+    # first, so a failure below cannot leave the next test without tools
+    on_exit(fn -> Session.eval("(set! chat-use-tools #t)") end)
 
     # a companion chat over one document, tools OFF: the branch that used
     # to inline the whole buffer into the system prompt
@@ -74,7 +76,10 @@ defmodule Compos.CacheEconomicsTest do
         (current-buffer))])
       |> String.trim(~s{"})
 
-    assert String.starts_with?(chat, "*chat")
+    # a group's chat may be revived from its log, named by its path
+    assert eval!("(chat-buffer? \"" <> chat <> "\")") == "#t"
+    # the stubbed wire is the api lane; the default connector is an ACP one
+    eval!("(buffer-set-local! \"" <> chat <> "\" 'agent-connector \"api\")")
 
     focus(chat)
     type("read it")
@@ -90,8 +95,6 @@ defmodule Compos.CacheEconomicsTest do
     type("now read it again")
     press(["RET"])
     assert_receive {:req, second}, 2_000
-
-    on_exit(fn -> Session.eval("(set! chat-use-tools #t)") end)
 
     # THE invariant: the cached prefix did not move
     assert first.system == second.system
@@ -109,6 +112,7 @@ defmodule Compos.CacheEconomicsTest do
   test "switching between two group buffers does not move the system prompt" do
     me = self()
     stub_chat(fn req -> send(me, {:req, req}) && reply("ok") end)
+    on_exit(fn -> Session.eval("(set! chat-use-tools #t)") end)
 
     # a group of TWO documents, tools OFF: the branch that enumerates the
     # members into the system prompt. group-docs orders them by MRU, so a
@@ -127,8 +131,10 @@ defmodule Compos.CacheEconomicsTest do
         (current-buffer))])
       |> String.trim(~s{"})
 
-    assert String.starts_with?(chat, "*chat")
-    on_exit(fn -> Session.eval("(set! chat-use-tools #t)") end)
+    # a group's chat may be revived from its log, named by its path
+    assert eval!("(chat-buffer? \"" <> chat <> "\")") == "#t"
+    # the stubbed wire is the api lane; the default connector is an ACP one
+    eval!("(buffer-set-local! \"" <> chat <> "\" 'agent-connector \"api\")")
 
     # turn 1 with *doc-a* most recently used
     order1 = eval!(~s[(begin (switch-to-buffer! "*doc-a*") (group-docs "*doc-a*"))])
@@ -189,13 +195,13 @@ defmodule Compos.CacheEconomicsTest do
     assert length(second.tools) == frozen
     refute Enum.any?(second.tools, &(&1.name == "a-late-arrival"))
 
-    # ...and the modeline says the editor has moved on
-    assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "tools stale" end)
+    # ...and the chat knows the editor has moved on
+    assert eventually(fn -> eval!("(chat-tools-stale? \"" <> buf <> "\")") == "#t" end)
 
     # adopting the new set is the user's call, and it costs one cache miss
     focus(buf)
     eval!(~s{(run-command "chat-refresh-tools")})
-    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+    assert eval!("(chat-tools-stale? \"" <> buf <> "\")") == "#f"
 
     focus(buf)
     type("third")
@@ -252,8 +258,9 @@ defmodule Compos.CacheEconomicsTest do
 
     assert_receive {:holding, _task}, 2_000
 
+    # C-g cancels the turn (C-RET is chat-send-next now)
     focus(buf)
-    press(["C-RET"])
+    press(["C-g"])
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
     # the round that DID complete is billed: cancelling is not a refund

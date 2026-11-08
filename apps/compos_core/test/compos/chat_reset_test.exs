@@ -30,7 +30,7 @@ defmodule Compos.ChatResetTest do
     assert eval!(~s{(agent-blocks "#{name}")}) == "()"
   end
 
-  test "a rich group chat resets to its meta card, keeping the group" do
+  test "a rich group chat resets to an empty surface, keeping the group" do
     eval!(~s{(begin
       (switch-to-buffer! (group-chat "resetg"))
       (set-mode! "chat-mode")
@@ -40,14 +40,12 @@ defmodule Compos.ChatResetTest do
 
     eval!(~s{(run-command "chat-reset")})
 
-    text = eval!(~s{(buffer-text (current-buffer))})
-    assert text =~ "companion · resetg"
-    refute text =~ "old transcript junk"
+    # a group chat has no meta card: the surface starts empty
+    assert eval!(~s{(buffer-text (current-buffer))}) == ~s{""}
     assert eval!(~s{(chat-turns (current-buffer))}) == "()"
     assert eval!(~s{(group-name (buffer-group (current-buffer)))}) == ~s{"resetg"}
-    # rich again: a fresh mark exists and the input marker is in place
+    # rich again: a fresh mark exists
     assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
-    assert text =~ "you: "
   end
 
   test "a legacy plain chat resets onto the one rich surface" do
@@ -60,18 +58,21 @@ defmodule Compos.ChatResetTest do
 
     eval!(~s{(run-command "chat-reset")})
 
-    text = eval!(~s{(buffer-text "*plain-reset*")})
-    assert text =~ "companion ·"
-    assert text =~ "you: "
-    refute text =~ "stale conversation"
+    # the one rich surface starts empty: no meta card, no input marker
+    assert eval!(~s{(buffer-text "*plain-reset*")}) == ~s{""}
     assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
   end
 
   test "a saved .chat file revives as a live conversation" do
     dir = Path.join(System.tmp_dir!(), "chat-revive-#{System.unique_integer([:positive])}")
-    on_exit(fn -> File.rm_rf!(dir) end)
-    File.mkdir_p!(dir)
     path = Path.join(dir, "old-talk.chat")
+    # the buffer goes with its folder: a later test must not start in it
+    on_exit(fn ->
+      Compos.Core.kill_buffer(path)
+      File.rm_rf!(dir)
+    end)
+
+    File.mkdir_p!(dir)
     File.write!(path, "### You\nremember the plan?\n### Assistant\nYes: ship mail.\n### You\n")
 
     eval!(~s{(visit "#{path}")})
@@ -142,7 +143,7 @@ defmodule Compos.ChatResetTest do
       #t)})
     eval!(~s{(run-command "chat-reset")})
     assert eval!(~s{(buffer-local (current-buffer) 'agent-seed-context)}) == "#f"
-    assert eval!(~s{(buffer-text (current-buffer))}) =~ "companion · acp-reset"
+    assert eval!(~s{(buffer-text (current-buffer))}) == ~s{""}
   end
 
   test "seed context carries the conversation, never the meta-card chrome" do
@@ -195,9 +196,8 @@ defmodule Compos.ChatResetTest do
     # a fresh session spawned on the connector, model pinned and shown
     assert_receive {:transport_open, _}, 1_000
     assert_receive {:transport_cmd, cmd}, 1_000
-    assert cmd =~ "claude-code-acp"
+    assert cmd =~ "claude-agent-acp"
     assert eval!(~s{(buffer-local (current-buffer) 'agent-model)}) == ~s{"claude-opus-5"}
-    assert eval!(~s{(buffer-local (current-buffer) 'modeline-info)}) =~ "claude-opus-5"
   end
 
   test "a stale cross-connector model is dropped on revive" do
@@ -220,9 +220,7 @@ defmodule Compos.ChatResetTest do
 
     assert_receive {:transport_open, _}, 1_000
     assert eval!(~s{(buffer-local (current-buffer) 'agent-model)}) == "#f"
-    modeline = eval!(~s{(buffer-local (current-buffer) 'modeline-info)})
-    assert modeline =~ "claude-code"
-    refute modeline =~ "gpt-5.6-luna"
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-connector)}) == ~s{"claude-code"}
   end
 
   test "switching backends never rebinds keys: RET is agent-send on every lane" do
@@ -235,17 +233,8 @@ defmodule Compos.ChatResetTest do
 
     assert Compos.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
 
-    eval!(~s{(run-command "chat-set-backend")})
-    Compos.Core.KeyDispatch.handle_key("b")
-    Enum.each(String.graphemes("api"), &Compos.Core.KeyDispatch.handle_key/1)
-    Compos.Core.KeyDispatch.handle_key("RET")
-    Compos.Core.KeyDispatch.handle_key("m")
-    Enum.each(String.graphemes("openai:gpt-5.6-luna"), &Compos.Core.KeyDispatch.handle_key/1)
-    Compos.Core.KeyDispatch.handle_key("RET")
-    Compos.Core.KeyDispatch.handle_key("e")
-    Enum.each(String.graphemes("high"), &Compos.Core.KeyDispatch.handle_key/1)
-    Compos.Core.KeyDispatch.handle_key("RET")
-    Compos.Core.KeyDispatch.handle_key("C-g")
+    # the llm-configure menu ends in chat-switch!; its keys are its own tests
+    eval!(~s{(chat-switch! (current-buffer) "api" "openai:gpt-5.6-luna" "high")})
 
     # the api lane is a connector like any other: same slug machinery,
     # same keys — the ec8cba3 bug class is structurally gone
@@ -284,7 +273,7 @@ defmodule Compos.ChatResetTest do
                "#{k} survived the reset: #{inspect(Compos.Core.Buffer.get_local(buf, k))}"
       end
 
-      # ...blocks hold nothing but the freshly rebuilt meta card: no user
+      # ...blocks hold nothing but a meta card, if any: no user
       # turn, no prose, no tool card, and above all no stale banner
       kinds =
         (Compos.Core.Buffer.get_local(buf, "agent-blocks") || [])
@@ -300,9 +289,9 @@ defmodule Compos.ChatResetTest do
                "#{k} survived the reset: #{inspect(Compos.Core.Buffer.get_local(buf, k))}"
       end
 
-      # ...the surface is rebuilt, and RET still sends
+      # ...the surface is rebuilt empty: no meta card, no input marker
       assert Compos.Core.Buffer.get_local(buf, "agent-saved-mark")
-      assert Compos.Core.Buffer.text(buf) =~ "you: "
+      assert Compos.Core.Buffer.text(buf) == ""
       assert Compos.Core.Buffer.hidden(buf) == []
     end
 

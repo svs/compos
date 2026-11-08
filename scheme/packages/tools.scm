@@ -862,7 +862,9 @@
 (define (apropos--schedule-embedding-sync!)
   (set! *apropos--embedding-sync-pending* #t)
   (debounce! "apropos-embedding-sync" 250
-    (lambda (ignored) (apropos--start-embedding-sync!)) #f)
+    ;; the rows too, key or not: else the first apropos after a
+    ;; define-command rebuilds them on the caller's lane, seconds long
+    (lambda (ignored) (apropos-warm!) (apropos--start-embedding-sync!)) #f)
   #t)
 
 ;; catalog-register! calls this after the entry is complete. A reload batches
@@ -1297,11 +1299,17 @@
 ;; The task, not a flag: a task that dies leaves a flag set, and nothing
 ;; ever rebuilt again.
 (define *apropos--warming* #f)
+(define *apropos--warm-again* #f)
 
 (define (apropos-warm!)
-  (unless (and *apropos--warming* (task-alive? *apropos--warming*))
-    (set! *apropos--warming*
-          (task-spawn (lambda () (report-errors "apropos-warm" (lambda () (apropos--rows-cached))))))))
+  (if (and *apropos--warming* (task-alive? *apropos--warming*))
+      ;; the catalog moved under the build: go again when it ends
+      (set! *apropos--warm-again* #t)
+      (begin
+        (set! *apropos--warm-again* #f)
+        (set! *apropos--warming*
+              (task-run! (lambda () (report-errors "apropos-warm" (lambda () (apropos--rows-cached))))
+                         (lambda (ok value) (when *apropos--warm-again* (apropos-warm!))))))))
 
 (define (apropos--rows-stale-ok)
   (cond ((and *apropos--rows-cache* (equal? (catalog-generation) *apropos--rows-gen*))
@@ -1722,19 +1730,6 @@
           (run cmd dir resolve)
           (run cmd resolve)))))
 
-;; Every answer a tool call returns leaves through here, base64 for the
-;; socket. A long one goes to a file first (tool-results.scm), and the
-;; agent gets the reference: an ACP backend keeps its own copy of every
-;; answer, so this is the last place a cut can save its context.
-(define (mcp-proxy--answer name author text)
-  (let* ((slug (and (string? author) (string-prefix? "agent:" author)
-                    (substring author 6 (string-length author))))
-         (buf (and slug (agent-buf slug))))
-    (base64-encode
-      (if (boundp (quote tool-result-store))
-          (tool-result-store buf name text)
-          text))))
-
 (define (mcp-proxy--run name args-json author)
   ;; The async lane. An eval-scheme payload whose whole program is
   ;; one shell command must not hold the Session for its runtime —
@@ -1750,7 +1745,7 @@
       ((and token parts)
         (let ((resolve (lambda (out)
                          (eval-resolve! token
-                           (mcp-proxy--answer name author (value->string out))))))
+                           (base64-encode (value->string out))))))
           (mcp-proxy--shell-run! parts author resolve)
           'pending))
       ((and token read-only?)
@@ -1761,14 +1756,14 @@
        (task-run!
          (lambda ()
            (eval-resolve! token
-             (mcp-proxy--answer name author (mcp-proxy--sync name args-json author))))
+             (base64-encode (mcp-proxy--sync name args-json author))))
          (lambda (ok value)
            (unless ok
              (eval-resolve! token
                (base64-encode (string-append "error: " (value->string value)))))))
        'pending)
       (else
-        (mcp-proxy--answer name author (mcp-proxy--sync name args-json author))))))
+        (base64-encode (mcp-proxy--sync name args-json author))))))
 
 ;; Ask, on a lane that has no backend to ask through. This arm did not
 ;; exist: the cond ran allow and refused everything else, so a verdict of
@@ -1887,15 +1882,14 @@
   (let ((parts (and (equal? name "eval-scheme") (mcp-proxy--shell-code args-json))))
     (if parts
         (let ((resolve (lambda (out)
-                         (eval-resolve! token
-                           (mcp-proxy--answer name author (value->string out))))))
+                         (eval-resolve! token (base64-encode (value->string out))))))
           (mcp-proxy--shell-run! parts author resolve))
         (let ((code (mcp-proxy--code args-json))
               (gate? (boundp (quote decide-shell-approve!))))
           (when (and code gate?) (decide-shell-approve! code))
           (let ((out (mcp-proxy--sync name args-json author)))
             (when gate? (decide-shell-approve! #f))
-            (eval-resolve! token (mcp-proxy--answer name author out)))))))
+            (eval-resolve! token (base64-encode out)))))))
 
 (define (mcp-proxy--code args-json)
   (let ((args (json-parse args-json)))

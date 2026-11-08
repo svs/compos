@@ -213,6 +213,30 @@
                   "(apropos QUERY &rest FILTERS)"
                   "the public signature is unchanged")))
 
+(deftest 'a-catalog-change-warms-apropos-rows-off-the-lane
+  "after define-command the next apropos reads warm rows, not a rebuild on the caller"
+  (lambda ()
+    ;; the debounce fires on :ui, which this test lane holds; between a
+    ;; define-command and the next Cmd-p that lane is free. Keep the last
+    ;; call, as a debounce does, and fire it once the burst is over
+    (let ((due #f))
+      (with-stubs (list (list 'debounce! (lambda (key ms callback arg) (set! due (lambda () (callback arg)))))
+                        (list '*reloading?* #f))
+        (lambda ()
+          (define-command "zz-warm-after-define" "A command the warm-up must see" (lambda () #t))))
+      (due))
+    (let ((gen (catalog-generation)))
+      ;; wait-until's predicate reads this lane's own store, blind to the task
+      (check-true! (and *apropos--warming* (task-await *apropos--warming* 20000) #t)
+                   "a warm-up runs in the background")
+      (check-equal! *apropos--rows-gen* gen "and builds the rows for the new catalog")
+      (let* ((t0 (monotonic-ms))
+             (hits (apropos "zz-warm-after-define" 'kind "command"))
+             (ms (- (monotonic-ms) t0)))
+        (check-true! (pair? hits) "the new command is found")
+        (check-true! (< ms 1000) (string-append "and found without a rebuild, not " (number->string ms) " ms"))))
+    (test-forget-catalog! "command" "zz-warm-after-define")))
+
 (deftest 'doc-text-is-searched-not-only-names
   "the phrase is in the doc of a function whose name does not hold it"
   (lambda ()

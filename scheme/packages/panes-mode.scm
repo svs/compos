@@ -320,6 +320,7 @@
 
 (define-mode "pane-empty-mode"
   (lambda () (panes--empty-render!)))
+(mode-doc! "pane-empty-mode" "An empty pane. Move a window in with b or RET, open a file with f, restore with r, or remove the pane with k.")
 
 (define-command "pane-take-window" "Move a window of this group into this pane"
   (lambda ()

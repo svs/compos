@@ -61,7 +61,6 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 | unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract | apropos and the catalog |
 | malformed-scheme-goes-nowhere, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
 | subagents-table-draws-one-row-per-edge, overview-uses-only-the-current-group | one each |
-| every-mode-says-what-it-is-for | pane-empty-mode (panes-mode.scm) calls no mode-doc!; the other modes got one 2026-11-08 |
 | a-pasted-images-link-is-relative-to-the-document | the test home is not a git repository; the git rev-parse error list reaches string-append |
 | a-blocks-presence-arms-its-keys, a-scheme-result-pretty-prints-nested-property-lists | one each |
 | agent-excision-repairs-every-transcript-offset, agent-excision-counts-bytes-after-multibyte-text | agent-excise-range! no longer moves 'agent-saved-mark by hand (the buffer keeps the marker); the test still expects the hand-moved value; red at HEAD 4f0a0be9 in a worktree run |

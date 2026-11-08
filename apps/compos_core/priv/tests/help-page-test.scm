@@ -16,10 +16,10 @@
     (apropos-page "zz-apr")
     (let ((text (buffer-text "*Help*")))
       (check-contains! text "## Commands" "the kind heading")
-      ;; the owner/effects trailer closes the row; the package that owns a
-      ;; runtime define depends on load order, so match only its shape
-      (check-contains! text "- **`zz-apr`** — First line. Second \\| line. *("
-                       "one row, the pipe escaped"))
+      ;; a command row ends with its doc: only the Scheme kinds carry the
+      ;; owner/effects trailer (1f84c519b)
+      (check-contains! text "- **`zz-apr`** — First line. Second \\| line.\n"
+                       "one row, the pipe escaped, no trailer"))
     (when (buffer-known? "*Help*") (buffer-kill! "*Help*"))
     (test-forget-catalog! "command" "zz-apr")))
 

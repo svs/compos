@@ -58,11 +58,15 @@
 (deftest 'buffer-request-refresh-coalesces-visible-work-and-rechecks-visibility
   "A visible burst schedules once; hiding before dispatch defers the reload."
   (lambda ()
+    ;; under panes a switch places a buffer in a window of its own, so the
+    ;; old buffer can stay on screen; the test says what is shown instead
     (let ((buf (buffer-create " *reactive-refresh-visible*"))
-          (before (current-buffer)) (schedule debounce!) (callback #f) (jobs 0) (seen '()))
+          (windows window-list-all) (shown #f)
+          (schedule debounce!) (callback #f) (jobs 0) (seen '()))
       (unwind-protect
         (lambda ()
-          (switch-to-buffer! buf)
+          (set! window-list-all (lambda () (if shown (list (list "zz-w" buf "zz-f")) '())))
+          (set! shown #t)
           (set! debounce! (lambda (key ms fn arg)
                            (check-equal! ms 500 "refreshes use a 500 ms tick")
                            (set! jobs (+ jobs 1))
@@ -71,13 +75,13 @@
           (buffer-request-refresh! buf 'view (lambda () (set! seen (cons 'new seen))))
           (check-equal! jobs 1 "a burst schedules once without postponing its callback")
           (check-equal! seen '() "source notifications do not render synchronously")
-          (switch-to-buffer! before)
+          (set! shown #f)
           (callback)
           (check-equal! seen '() "dispatch rechecks visibility")
-          (switch-to-buffer! buf)
+          (set! shown #t)
           (buffer-refresh-visible!)
           (check-equal! seen '(new) "show consumes the latest reload once"))
         (lambda ()
           (set! debounce! schedule)
-          (switch-to-buffer! before)
+          (set! window-list-all windows)
           (buffer-kill! buf))))))

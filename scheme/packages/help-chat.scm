@@ -20,6 +20,8 @@
    "how to do a thing in the editor. Teach while you work.\n\n"
    "- When the user asks for a task, do it. Then tell how to do it without you: "
    "the command name and its key from `(key-for-command NAME)`, or `M-x NAME` when it has no key.\n"
+   "- In commentary and final replies, show both the key and command name when you mention an editor action. "
+   "Use `C-c b` (`llm-configure`), for example. Check the live binding; use `M-x NAME` if none exists.\n"
    "- When you run Scheme for the user, show the one short expression that did the work, "
    "so the user learns the API. Do not show the discovery calls.\n"
    "- Teach one idea at a time. Keep each reply short. When there is a related next step, "
@@ -45,6 +47,24 @@
   (find (lambda (b) (equal? (buffer-local b 'chat-for-key) help-chat-key)) (buffer-list)))
 
 (effects! '(write))
+
+(define (help-chat-mode--setup! buf)
+  (prompt-part-set! buf "help-chat" help-chat-prompt))
+
+(define (help-chat-mode--teardown! buf)
+  (prompt-part-remove! buf "help-chat"))
+
+(register-minor-mode! "help-chat-mode"
+  help-chat-mode--setup! help-chat-mode--teardown!)
+
+(define-command "help-chat-mode" "Toggle the help chat's teaching prompt"
+  (lambda ()
+    (if (chat-buffer? (current-buffer))
+        (toggle-minor-mode! "help-chat-mode")
+        (message "not a chat buffer"))))
+
+(mode-doc! "help-chat-mode"
+  "Teach editor actions with their current keys and command names. Adds the help-chat prompt while enabled.")
 
 (define (help-chat--create g)
   (unless (buffer-known? help-chat-buffer-name)
@@ -82,7 +102,7 @@
                    (chat-for help-chat-key)
                    (and group (help-chat--create group)))))
     (when (and chat group) (help-chat--move! chat group))
-    (when chat (prompt-part-set! chat "help-chat" help-chat-prompt))
+    (when chat (enable-minor-mode! chat "help-chat-mode"))
     chat))
 
 (effects! '(write display))
@@ -113,5 +133,10 @@
 (public! 'help-chat-origin "(help-chat-origin) -- the group and buffer the user pressed C-c h in")
 (effects! '(write))
 (public! 'help-chat-ensure! "(help-chat-ensure! [GROUP]) -- the help chat, moved into GROUP; made there when it has none")
+
+;; Migrate the existing help chat from its directly installed prompt.
+(let ((chat (help-chat--live)))
+  (when (and chat (assoc "help-chat" (prompt-buffer-parts chat)))
+    (enable-minor-mode! chat "help-chat-mode")))
 
 (provide 'help-chat)

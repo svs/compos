@@ -95,3 +95,31 @@
                   "and the exit applies its draft")
     (for-each (lambda (k) (set-frame-local! k #f))
               '(llm-config-source llm-config-selected llm-config-box llm-config-drafts))))
+
+(deftest 'llm-config-shows-save-actions-with-the-config
+  "the config column exposes save, save as preset, and make default"
+  (lambda ()
+    (let* ((actions (cdr (assoc "Save config" (llm-config--groups #f))))
+           (commands (map (lambda (item) (plist-get item 'command)) actions)))
+      (check-true! (member "Save config" (cadr (llm-config--columns #f)))
+                   "save actions belong to the config column")
+      (check-equal! commands
+                    '("llm-config-save-into" "llm-config-save-bundle" "llm-config-save-default")
+                    "the three buttons invoke the existing save commands")
+      (check-equal! (map (lambda (item) (plist-get item 'description)) actions)
+                    '("Save" "Save as preset..." "Make default...")
+                    "the button labels state their actions")
+      (for-each
+        (lambda (item)
+          (check-equal! (plist-get item 'kind) 'suffix "the button invokes a command")
+          (check-equal! (plist-get item 'transient) 'stay "the action keeps its draft context"))
+        actions))))
+
+(deftest 'llm-config-save-default-asks-for-scope
+  "make default asks for the group or all of Compos before saving"
+  (lambda ()
+    (run-command "llm-config-save-default")
+    (let ((state (minibuffer-state)))
+      (check-equal! (plist-get state 'prompt) "Make default for: " "the prompt names its purpose")
+      (check-equal! (plist-get state 'total) 2 "the prompt has two scopes"))
+    (minibuffer-cancel!)))

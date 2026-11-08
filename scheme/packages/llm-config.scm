@@ -817,7 +817,7 @@
   (lambda ()
     (let* ((name (llm-config--source-name))
            (old (and (string? name) (llm-bundle-named name))))
-      (cond ((not old) (message "this chat is no preset — S saves it under a name"))
+      (cond ((not old) (llm-config--save-as!))
             ((null? (llm-config--drift)) (message (string-append name " has no unsaved changes")))
             (else
               (set-frame-local! 'llm-config-follow
@@ -1039,11 +1039,24 @@
   (let ((d (llm-config--default-setup)))
     (and d (llm-config--same? (llm-config--fill b (llm-config--live)) d))))
 
-(define-command "llm-config-save-default" "Make the box's config the default for new chats"
+(define-command "llm-config-save-default" "Choose whether this config is the group or Compos default"
   (lambda ()
-    (llm-default-save! (llm-config--box))
-    (llm-config--refresh!)
-    (message "new chats start with this config")))
+    (let ((config (llm-config--box))
+          (group (group-resolve-id
+                   (or (llm-config--group (transient-scope)) (frame-group)))))
+      (completing-read "Make default for: " '("This group" "Whole Compos")
+        (lambda (scope)
+          (cond
+            ((equal? scope "This group")
+             (if group
+                 (begin (group-llm! config group)
+                        (message (string-append (group-name group) ": new chats use this config")))
+                 (message "no group here")))
+            ((equal? scope "Whole Compos")
+             (llm-default-save! config)
+             (message "Compos default saved; group defaults take priority")))
+          (llm-config--refresh!))
+        'require-match #t 'default "This group"))))
 
 (define-command "llm-config-save-group-default" "Make the box's config the default for this group's new chats"
   (lambda ()
@@ -1289,6 +1302,12 @@
   (let ((f (llm-config--filter)))
     (if (equal? f "") "Presets" (string-append "Presets · " f))))
 
+(define (llm-config--preset-actions)
+  (list
+    (transient-suffix "M-u" "Save" "llm-config-save-into" 'transient 'stay)
+    (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay)
+    (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay)))
+
 (define (llm-config--groups _buf)
   (append
     (list (cons (llm-config--presets-title)
@@ -1297,11 +1316,13 @@
                         '()
                         (list (llm-config--live-item)))
                     (llm-config--preset-items))))
-    (list (cons (llm-config--config-title) (llm-config--box-items)))
+    (list (cons (llm-config--config-title) (llm-config--box-items))
+          (cons "Save config" (llm-config--preset-actions)))
     (if (llm-config--more?) (list (cons "More" (llm-config--more-items))) '())))
 
 (define (llm-config--columns _buf)
-  (list (list (llm-config--presets-title)) (list (llm-config--config-title) "More")))
+  (list (list (llm-config--presets-title))
+        (list (llm-config--config-title) "Save config" "More")))
 
 ;; The keys that are no row. In the preset column the printable keys type
 ;; into the filter, so the actions there take Meta; in the config column
@@ -1346,31 +1367,14 @@
                        " · ESC gives it to the chat"))))
 
 (define (llm-config--legend _buf)
-  (let* ((name (llm-config--source-name))
-         (drift? (pair? (llm-config--drift)))
-         (sel (llm-config--selected-name))
-         (default-key (if (llm-config--default? (llm-config--box))
-                          '()
-                          (list (list "M-d" "default for new chats")))))
-    (append
-      (if (llm-config--on-left?)
-          (append
-            (list (list "type" "filter") (list "↑↓" "move") (list "RET" "select + edit")
-                  (list "M-b m e p" "set a field") (list "→" "edit config"))
-            (if (and name drift?) (list (list "M-u" (string-append "update " name))) '())
-            (list (list "M-s" "save as…") (list "M-n" "new preset"))
-            (if name (list (list "M-k" "delete…")) '())
-            default-key)
-          (append
-            (list (list "←" "back to presets"))
-            (if (and name drift?) (list (list "s" (string-append "update " name))) '())
-            (list (list "S" "save as…"))
-            (if drift? (list (list "u" "undo changes")) '())
-            default-key))
-      (list (list "M-o" "manage presets…"))
-      (list (list "ESC C-g" (string-append "apply " (or sel "this chat")
-                                           (if (llm-config--dirty? sel) "*" "")
-                                           " + close"))))))
+  (if (llm-config--on-left?)
+      (list (list "<right>" "Press Right to edit config")
+            (list "ESC C-g" "apply and close"))
+      (list (list "<left>" "back to presets")
+            (list "s" "save")
+            (list "S" "save as preset...")
+            (list "M-d" "make default...")
+            (list "ESC C-g" "apply and close"))))
 
 ;; Every option looks its function up by name at each call, so a hot
 ;; reload of one function reaches the open menu without this form changing.

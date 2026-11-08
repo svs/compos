@@ -243,8 +243,10 @@
                       (list "laya" "Answers on this machine, in a local daemon"
                             (cond ((laya-running?) "running")
                                   (ready? "installed, starts on the first question")
-                                  (else "needs Apple silicon and a Python with laya-mlx"))
-                            '())))))
+                                  ((not (laya--python)) "needs Python 3.10 or newer")
+                                  (else "not installed: pip install laya"))
+                            (if (and (not ready?) (laya--python))
+                                '(("wizard:laya-install" "Install")) '()))))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
             'detail (string-append (list-ref spec 1) " · " (if tested (caddr tested) (list-ref spec 2)))
@@ -270,6 +272,22 @@
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
                 'next (list "wizard:next" "Next: browser extension →")))))
+
+(define (setup-wizard-install-laya!)
+  "Install laya with pip in a terminal in the other column; Scan again then
+   finds it."
+  (let ((buf "*install:laya*"))
+    (buffer-create buf)
+    (buffer-set-local! buf 'mode-name "term-mode")
+    (buffer-set-local! buf 'terminal-command
+      (string-append (laya-install-command)
+                     " && printf '\\nlaya installed. Press g in the setup to check again.\\n'"
+                     "; exec \"${SHELL:-/bin/sh}\" -l"))
+    (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
+    ;; a restore must not run the install again
+    (buffer-set-local! buf 'terminal-command #f)
+    (display-buffer-other-window! buf)
+    buf))
 
 (define *setup-wizard-decide-results* '())
 
@@ -671,6 +689,7 @@
      (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
+    ((equal? id "wizard:laya-install") (setup-wizard-install-laya!) #t)
     ((string-prefix? "wizard:decide-use:" id)
      (let ((d (string->symbol (substring-bytes id 18 (string-byte-length id)))))
        (customize-save! 'decide-backends (cons d (filter (lambda (x) (not (eq? x d))) decide-backends)))
@@ -691,7 +710,7 @@
      #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
-    ((equal? id "wizard:rescan") (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
+    ((equal? id "wizard:rescan") (laya-rescan!) (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
     (else (setup-model-card-click! buf id))))
 
 (add-hook! (list 'block-click 'setup-wizard)
@@ -796,7 +815,7 @@
   (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) -1))))
 
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
-  (lambda () (setup-wizard-redraw! (current-buffer))))
+  (lambda () (laya-rescan!) (setup-wizard-redraw! (current-buffer))))
 
 (define-command "setup-wizard-decide-test" "Ask the decision model in use a test question"
   (lambda () (setup-wizard-decide-test! (current-buffer))))

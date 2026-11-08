@@ -18,7 +18,9 @@ bad request must not cost the loaded weights.
 
 The models are the laya-mlx checkpoints this machine already holds. The
 huggingface cache and LAYA_MODEL_DIRS are that registry, and this daemon
-keeps no list of its own.
+keeps no list of its own. Without laya-mlx (Linux, Intel Macs), the laya
+package from PyPI serves instead: it runs on PyTorch and loads its model by
+Hub name, HUB_MODEL unless LAYA_MODEL names another.
 """
 
 import json
@@ -29,6 +31,14 @@ from pathlib import Path
 # the files every laya checkpoint holds; a directory without them is
 # some other model, and this daemon cannot run it
 MARKERS = ('rl_agent_config.json', 'model.safetensors')
+
+# the model the PyTorch laya loads when this machine holds no checkpoint
+HUB_MODEL = 'convaiinnovations/laya'
+
+
+def has_mlx():
+    import importlib.util
+    return importlib.util.find_spec('laya_mlx') is not None
 
 
 # The log file stays open for the life of the daemon. Opening it inside
@@ -145,12 +155,16 @@ class Daemon:
     def load(self, name):
         if name in self.agents:
             return self.agents[name]
-        import laya_mlx
-
         where = self.paths.get(name)
-        if where is None:
+        if has_mlx() and where is not None:
+            import laya_mlx
+            agent = laya_mlx.load(str(where), dtype=os.environ.get('LAYA_DTYPE', 'float16'))
+        elif has_mlx():
             raise FileNotFoundError('no checkpoint named %s on this machine' % name)
-        agent = laya_mlx.load(str(where), dtype=os.environ.get('LAYA_DTYPE', 'float16'))
+        else:
+            # PyTorch laya: a Hub name, downloaded once into the hub cache
+            import laya
+            agent = laya.load(name)
         self.agents[name] = agent
         log('laya-daemon: loaded %s' % name)
         return agent
@@ -168,9 +182,11 @@ class Daemon:
         want = os.environ.get('LAYA_MODEL')
         if want:
             return want
-        for name in sorted(self.paths):
-            return name
-        return None
+        if has_mlx():
+            for name in sorted(self.paths):
+                return name
+            return None
+        return HUB_MODEL
 
 
 def handle(daemon, req):

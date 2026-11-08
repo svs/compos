@@ -24,7 +24,8 @@
 (defgroup 'laya "Laya: the on-device decision model, and the daemon that holds it.")
 
 (defcustom 'laya-python (expand-path "~/.asdf/installs/python/3.12.0/bin/python3")
-  "The python that holds the laya-mlx package." 'group 'laya)
+  "The python that holds the laya package, or laya-mlx on Apple silicon.
+When this file is missing, python3 on PATH answers." 'group 'laya)
 
 (defcustom 'laya-model-roots (list (string-append (compos-home) "/models"))
   "Where this machine keeps laya checkpoints, besides the huggingface cache."
@@ -44,8 +45,44 @@
 ;; 'serves "models" is how the model list finds this daemon: it reads the
 ;; endpoint registry and shows every daemon that answers for models, so
 ;; nobody has to name this one twice.
+(define *laya--python* 'unknown)
+(define *laya--installed* 'unknown)
+
+(define (laya--python)
+  "The python laya runs in: laya-python, else python3 on PATH, else #f.
+   PATH is asked once a session; laya-rescan! asks again."
+  (cond ((file-exists? laya-python) laya-python)
+        ((not (eq? *laya--python* 'unknown)) *laya--python*)
+        (else
+         (let ((p (string-trim (shell-command->string "command -v python3 2>/dev/null"))))
+           (set! *laya--python* (if (equal? p "") #f p))
+           *laya--python*))))
+
+(define (laya-installed?)
+  "#t when that python holds laya, or laya-mlx. Asked once a session, without
+   importing either: an import of torch costs seconds."
+  (when (eq? *laya--installed* 'unknown)
+    (let ((py (laya--python)))
+      (set! *laya--installed*
+            (and py
+                 (equal? "yes"
+                         (string-trim
+                           (shell-command->string
+                             (string-append "'" py "' -c \"import importlib.util as u; "
+                                            "print('yes' if u.find_spec('laya_mlx') or u.find_spec('laya') else 'no')\" 2>/dev/null"))))))))
+  *laya--installed*)
+
+(define (laya-rescan!)
+  "Forget what laya-installed? found, so the next ask looks again."
+  (set! *laya--python* 'unknown)
+  (set! *laya--installed* 'unknown))
+
+(define (laya-install-command)
+  "The shell command that installs laya into its python."
+  (string-append "'" (or (laya--python) "python3") "' -m pip install laya"))
+
 (define (laya-spec)
-  (list 'command laya-python
+  (list 'command (or (laya--python) laya-python)
         'args (list (laya-script))
         'framing "line"
         'serves "models"
@@ -62,7 +99,7 @@
 ;; whether this machine can run laya at all: the python that holds the
 ;; package, and the daemon beside this file
 (define (laya-available?)
-  (and (file-exists? laya-python) (file-exists? (laya-script)) #t))
+  (and (laya--python) (file-exists? (laya-script)) (laya-installed?) #t))
 
 ;; The spec is built again here, so a person who customizes laya-python
 ;; gets that python on the next start and not the one this file loaded with.
@@ -130,6 +167,8 @@
 
 (public! 'laya-running?
   "(laya-running?) - #t when the laya daemon holds its pipe open")
+(public! 'laya-installed? "(laya-installed?) - #t when laya's python holds laya or laya-mlx")
+(public! 'laya-install-command "(laya-install-command) - the pip command that installs laya")
 (public! 'laya-available?
   "(laya-available?) - #t when this machine has the python and the daemon laya needs")
 (public! 'laya-models
@@ -137,6 +176,7 @@
 
 (effects! '(write external execute))
 
+(public! 'laya-rescan! "(laya-rescan!) - look again for laya's python and package")
 (public! 'laya-start!
   "(laya-start!) - start the laya daemon, or keep the one that runs")
 (public! 'laya-stop!

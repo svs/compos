@@ -1461,6 +1461,8 @@
 (catalog-meta! 'function "name-text" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "name-icon!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "buffer-name-segments" 'domain 'interaction 'effects '(read))
+(public! 'chat-buffer? "(chat-buffer? BUF) — #t when BUF is in chat-mode")
+(catalog-meta! 'function "chat-buffer?" 'domain 'chat 'effects '(read))
 
 (domain! 'unknown)
 (effects! '(unknown))

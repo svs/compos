@@ -1386,21 +1386,26 @@
           (unwind-protect
             (lambda ()
               ;; the face hooks are read once: hook-functions is a lookup per call
-              (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
-                     (ws (marginalia-widths rows))
+              ;; the stock command annotator has a one-pass path
+              (let* ((hints (if (and (eq? category 'command) (boundp 'command-hints)
+                                     (eq? f command-annotation))
+                                (command-hints names)
+                                (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
+                                       (ws (marginalia-widths rows)))
+                                  (map (lambda (r) (marginalia-join (marginalia-trim r) ws)) rows))))
                      (face-fns (hook-functions 'candidate-face))
                      (cmd-faces (if (and (eq? category 'command) (pair? face-fns))
                                     (command-faces face-fns names)
                                     '())))
-                (let loop ((ns names) (rs rows) (out '()))
+                (let loop ((ns names) (hs hints) (out '()))
                   (if (null? ns)
                       (reverse out)
                       (let* ((name (car ns))
-                             (hint (marginalia-join (marginalia-trim (car rs)) ws))
+                             (hint (car hs))
                              (face (cond ((not (pair? face-fns)) #f)
                                          ((eq? category 'command) (alist-get cmd-faces name))
                                          (else (candidate-face-for category name face-fns)))))
-                        (loop (cdr ns) (cdr rs)
+                        (loop (cdr ns) (cdr hs)
                               (cons (if face
                                         (list name hint "candidate" '() face)
                                         (list name hint))
@@ -5455,6 +5460,20 @@
   (let ((keys (annotate-once (list 'command-keys (current-buffer))
                              (lambda () (caddr (keymap--flat (current-buffer)))))))
     (list (or (alist-get keys c) "") (command-doc c))))
+
+(define (command-hints names)
+  "the M-x hint of each of NAMES, as annotate joins command-annotation: the key padded to the widest key, then the doc"
+  ;; one pass, no memo and no generic widths: the first M-x of a mode pays this
+  (let* ((keys (caddr (keymap--flat (current-buffer))))
+         (ks (map (lambda (c) (or (alist-get keys c) "")) names))
+         (w (fold (lambda (m k) (max m (string-length k))) 0 ks)))
+    (let loop ((ns names) (ks ks) (out '()))
+      (if (null? ns)
+          (reverse out)
+          (let ((d (command-doc (car ns))) (k (car ks)))
+            (loop (cdr ns) (cdr ks)
+                  (cons (if (equal? d "") k (string-append (string-pad-right k w) "  " d))
+                        out)))))))
 
 (marginalia! 'command command-annotation)
 

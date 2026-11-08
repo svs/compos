@@ -1744,16 +1744,6 @@
           });
         });
         this.mo.observe(this.el, { childList: true, subtree: true, characterData: true });
-        // The list can lose height from below with no scroll and no
-        // patch: the activity row and the input row slide in and out
-        // under it as a turn starts and ends. Its scrollTop stays, so
-        // the tail drops out of view. At the tail, keep the tail.
-        if (typeof ResizeObserver !== "undefined") {
-          this.size = new ResizeObserver(() => {
-            if (this.stick && this.scroller.clientHeight > 0) this.place();
-          });
-          this.size.observe(this.el);
-        }
         this.mark();
         this.settle();
       },
@@ -1795,6 +1785,18 @@
         s.scrollTop = want;
         requestAnimationFrame(() => { this.placing = false; });
       },
+      // The list can lose height from below with no scroll and no
+      // patch: the activity row and the input row slide in and out
+      // under it as a turn starts and ends, and the echo area can
+      // grow. Its scrollTop stays, so the tail drops out of view. At
+      // the tail, keep the tail; away from it, move nothing.
+      observe() {
+        if (this.size || typeof ResizeObserver === "undefined") return;
+        this.size = new ResizeObserver(() => {
+          if (this.stick && this.scroller.clientHeight > 0) this.place();
+        });
+        this.size.observe(this.el);
+      },
       // away from the tail the list says so (ag-away): the page draws
       // the history pill from it. A patch rewrites the class, so every
       // update marks it again.
@@ -1806,6 +1808,7 @@
       // reader's first gesture ends it early: their input wins,
       // and nothing here moves the view again.
       settle() {
+        this.observe();
         let last = -1;
         let still = 0;
         const t0 = Date.now();

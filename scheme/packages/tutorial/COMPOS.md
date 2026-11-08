@@ -2,22 +2,15 @@
 
 ## Introduction
 
-> Compos is heavily inspired by emacs and if you're an emacs user you should feel right at home. 
+> Compos is heavily inspired by emacs and if you're an emacs user you should feel right at home. If you're not don't worry, it's not complicated.
+
+> There's a learning curve, but it's well worth it.
 
 > This tutorial will introduce you to basic navigation and helpful foundational concepts.
 
-> You got this. I got you.
+>
 
-## Getting help
-
-### Ask the help chat
-
-> The easiest way to get help is in the help chat. Type `C-c h` and ask your question or request.
-
-### Open the help menu
-
-> Additionally, `C-h` opens a help menu. Type `C-h` and wait: it lists every help key.
-
+##
 ## Window navigation
 
 ### Move the focus right
@@ -336,6 +329,16 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 You can read a window and not go to it. `M-<down>` scrolls the other window, and the focus stays where it is. Use it to read the lesson while you stay on the slide. In the lesson itself, `M-<down>` jumps to the next heading instead, so come back to the slide first.
 
 > The focus is on the lesson now. Type `s-<left>` to come back to the slide. Then type `M-<down>` to scroll the lesson while you stay here, and `M-<up>` to scroll it back.
+
+## Getting help
+
+>Ask the help chat
+
+> The easiest way to get help is in the help chat. Type C-c h and ask your question or request.
+
+Open the help menu
+
+Additionally, C-h opens a help menu. Type C-h and wait: it lists every help key.
 
 ## Typing and the focus
 

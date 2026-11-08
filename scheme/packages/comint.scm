@@ -16,6 +16,35 @@
 ;; The login flag works for zsh, bash, and fish. Override this in init.scm.
 (define *terminal-command* "exec \"${SHELL:-/bin/zsh}\" -l")
 
+;;; --- the environment of the PTY itself --------------------------------------
+;;; Each is ((NAME VALUE) ...); a #f VALUE unsets NAME. A terminal speaks
+;;; full color; a comint shell is a dumb line terminal with a plain prompt.
+
+(defcustom 'terminal-environment
+  '(("TERM" "xterm-256color") ("COLORTERM" "truecolor") ("NO_COLOR" #f)
+    ("CLICOLOR" "1") ("PROMPT_EOL_MARK" ""))
+  "The environment a terminal's PTY starts with, as (NAME VALUE); #f unsets NAME.")
+
+(defcustom 'comint-environment
+  '(("TERM" "dumb") ("PS1" "$ ") ("PROMPT_EOL_MARK" ""))
+  "The environment a comint process starts with, as (NAME VALUE); #f unsets NAME.")
+
+;; The daemon can start inside tmux or screen. The PTY is the editor's
+;; terminal, not the host's: a child that sees TMUX wraps its escape
+;; sequences for tmux, and the browser terminal draws them as text.
+(defcustom 'terminal-host-variables
+  '("TMUX" "TMUX_PANE" "TMUX_PLUGIN_MANAGER_PATH" "STY" "TERM_PROGRAM" "TERM_PROGRAM_VERSION")
+  "Variables of the host terminal that no PTY child sees.")
+
+(define (pty-environment env)
+  (append env (map (lambda (name) (list name #f)) terminal-host-variables)))
+
+(define (start-process! buf cmd)
+  (local-start-process! buf cmd (pty-environment comint-environment)))
+
+(define (start-terminal! buf cmd)
+  (local-start-terminal! buf cmd (pty-environment terminal-environment)))
+
 ;;; --- the environment of a terminal's shell ----------------------------------
 ;;; Each function in term-environment-functions takes the terminal buffer
 ;;; and answers ((NAME VALUE) ...). The shell exports them before it starts,

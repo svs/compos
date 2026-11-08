@@ -6,7 +6,8 @@ defmodule Compos.TerminalTest do
 
   defp start_terminal!(command) do
     name = "*terminal-test-#{System.unique_integer([:positive])}*"
-    {:ok, _} = Terminal.start(name, command)
+    # through Scheme: comint.scm names the PTY's environment
+    {:ok, "#t"} = Session.eval("(start-terminal! #{inspect(name)} #{inspect(command)})")
 
     on_exit(fn ->
       if Terminal.running?(name), do: Terminal.kill(name)
@@ -121,8 +122,8 @@ defmodule Compos.TerminalTest do
   test "a comint process runs dumb, strips escapes, moves its mark, and restarts as comint" do
     name = "*terminal-comint-#{System.unique_integer([:positive])}*"
 
-    {:ok, _} =
-      Terminal.start(name, "printf 'TERM=%s \\033[31mred\\033[0m\\n' \"$TERM\"; cat", raw: false)
+    command = "printf 'TERM=%s \\033[31mred\\033[0m\\n' \"$TERM\"; cat"
+    {:ok, "#t"} = Session.eval("(start-process! #{inspect(name)} #{inspect(command)})")
 
     on_exit(fn ->
       if Terminal.running?(name), do: Terminal.kill(name)

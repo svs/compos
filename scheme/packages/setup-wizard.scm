@@ -143,16 +143,17 @@
          (default? (equal? name (setup-chosen-connector)))
          ;; the reply test shows on the card: the check is on this page
          (tested (and ready? (llm-connectors-test-result name)))
+         (failed? (and tested (eq? (plist-get tested 'status) 'failed)))
          (said (and tested (llm-connectors--test-text name)))
          (said (and said (if (> (string-length said) 90)
                              (string-append (substring said 0 90) "…")
                              said))))
     (component 'wizard/choice
       (list 'title (or (plist-get (connector-config name) 'title) name)
-            'detail (string-append (connector-description name) " · " (list-ref row 3)
-                                   (if said (string-append " · " said) ""))
-            'badge (cond (default? "default") (ready? "ready") (else "needs setup"))
-            'tone (cond (default? "accent") (ready? "good") (else "plain"))
+            ;; a tested card says what the test said, not that it is ready
+            'detail (string-append (connector-description name) " · " (or said (list-ref row 3)))
+            'badge (cond (default? "default") (failed? "no reply") (ready? "ready") (else "needs setup"))
+            'tone (cond (default? "accent") (failed? "bad") (ready? "good") (else "plain"))
             'selected? default?
             'actions (setup-wizard--card-actions row)))))
 
@@ -703,6 +704,7 @@
 .wizard-tone-good { color: #2f7d4f; }
 .wizard-tone-accent { color: var(--accent-fg, #26356b); }
 .wizard-tone-plain { color: var(--dim-fg, #8a857a); }
+.wizard-tone-bad { color: var(--error-fg, #b3412f); }
 .wizard .c-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .wizard c-action { cursor: pointer; font-family: var(--font-mono); font-size: 13px; padding: 7px 14px;
   border: 1px solid var(--border-bg, #cbc4b1); user-select: none; }

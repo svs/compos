@@ -1293,14 +1293,17 @@ defmodule Compos.Ui.EditorLive do
                 <c-group :for={column <- transient_columns(@state.transient)} class="transient-column">
                   <section :for={group <- Enum.filter(@state.transient.groups, &(&1.title in column))} class="transient-group">
                     <c-group class="transient-group-title">{group.title}</c-group>
-                    <c-group
+                    <.dynamic_tag
                       :for={item <- group.items}
+                      tag_name={if "action-button" in String.split(item.behavior), do: "button", else: "c-group"}
+                      phx-click={if "action-button" in String.split(item.behavior), do: "key"}
+                      phx-value-k={item.key}
                       class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
                     >
                       <c-action-key class="transient-key">{item.key}</c-action-key>
                       <c-text class="transient-description">{item.description}</c-text>
                       <c-text :if={item.value != ""} class="transient-value">{item.value}</c-text>
-                    </c-group>
+                    </.dynamic_tag>
                   </section>
                 </c-group>
               </c-group>

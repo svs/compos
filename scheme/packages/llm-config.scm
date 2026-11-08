@@ -1116,6 +1116,16 @@
 }
 ")
 
+(define-style! 'llm-config-actions "
+.transient-group:has(.action-button) { display: flex; flex-wrap: wrap; gap: 0.5em; }
+.transient-group:has(.action-button) > :not(.action-button) { flex: 0 0 100%; }
+.transient-group > button.transient-item.action-button {
+  flex: 0 1 auto; width: auto; margin-top: 0.75em; padding: 0.5em 0.75em;
+  border: 1px solid currentColor; border-radius: 0.35em;
+  font: inherit; color: inherit; background: transparent; cursor: pointer;
+}
+")
+
 (define (llm-config--field-row key label field command &rest properties)
   (append
     (transient-infix (llm-config--row-key key) label command
@@ -1135,7 +1145,8 @@
 (define (llm-config--source-row? item)
   (and item (or (plist-get item 'bundle) (plist-get item 'live-row)) #t))
 
-(define (llm-config--on-left?) (llm-config--source-row? (llm-config--selected-item)))
+(define (llm-config--on-left?)
+  (llm-config--source-row? (llm-config--selected-item)))
 
 ;; move the cursor to the first row PRED accepts; the cursor hook runs
 (define (llm-config--select-row! pred)
@@ -1304,9 +1315,12 @@
 
 (define (llm-config--preset-actions)
   (list
-    (transient-suffix "M-u" "Save" "llm-config-save-into" 'transient 'stay)
-    (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay)
-    (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay)))
+    (transient-suffix "M-u" "Save" "llm-config-save-into" 'transient 'stay 'preset-action #t
+      'flags-fn (lambda (_scope) "action-button"))
+    (transient-suffix "M-s" "Save as preset..." "llm-config-save-bundle" 'transient 'stay 'preset-action #t
+      'flags-fn (lambda (_scope) "action-button"))
+    (transient-suffix "M-d" "Make default..." "llm-config-save-default" 'transient 'stay 'preset-action #t
+      'flags-fn (lambda (_scope) "action-button"))))
 
 (define (llm-config--groups _buf)
   (append
@@ -1316,13 +1330,13 @@
                         '()
                         (list (llm-config--live-item)))
                     (llm-config--preset-items))))
-    (list (cons (llm-config--config-title) (llm-config--box-items))
-          (cons "Save config" (llm-config--preset-actions)))
+    (list (cons (llm-config--config-title)
+                (append (llm-config--box-items) (llm-config--preset-actions))))
     (if (llm-config--more?) (list (cons "More" (llm-config--more-items))) '())))
 
 (define (llm-config--columns _buf)
   (list (list (llm-config--presets-title))
-        (list (llm-config--config-title) "Save config" "More")))
+        (list (llm-config--config-title) "More")))
 
 ;; The keys that are no row. In the preset column the printable keys type
 ;; into the filter, so the actions there take Meta; in the config column

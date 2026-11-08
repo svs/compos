@@ -96,24 +96,24 @@
     (for-each (lambda (k) (set-frame-local! k #f))
               '(llm-config-source llm-config-selected llm-config-box llm-config-drafts))))
 
-(deftest 'llm-config-shows-save-actions-with-the-config
-  "the config column exposes save, save as preset, and make default"
+(deftest 'llm-config-shows-save-actions-in-the-preset-config-section
+  "the large config section contains the three save buttons"
   (lambda ()
-    (let* ((actions (cdr (assoc "Save config" (llm-config--groups #f))))
-           (commands (map (lambda (item) (plist-get item 'command)) actions)))
-      (check-true! (member "Save config" (cadr (llm-config--columns #f)))
-                   "save actions belong to the config column")
-      (check-equal! commands
+    (let* ((groups (llm-config--groups #f))
+           (config-section (assoc (llm-config--config-title) groups))
+           (actions (filter (lambda (item) (plist-get item 'preset-action))
+                            (cdr config-section))))
+      (check-equal! (filter (lambda (item) (plist-get item 'preset-action))
+                            (cdr (car groups)))
+                    '() "the preset list has no save buttons")
+      (check-equal! (map (lambda (item) (plist-get item 'command)) actions)
                     '("llm-config-save-into" "llm-config-save-bundle" "llm-config-save-default")
-                    "the three buttons invoke the existing save commands")
+                    "the config section has all three save commands")
       (check-equal! (map (lambda (item) (plist-get item 'description)) actions)
                     '("Save" "Save as preset..." "Make default...")
                     "the button labels state their actions")
-      (for-each
-        (lambda (item)
-          (check-equal! (plist-get item 'kind) 'suffix "the button invokes a command")
-          (check-equal! (plist-get item 'transient) 'stay "the action keeps its draft context"))
-        actions))))
+      (check-equal! (assoc "Save config" groups) #f
+                    "the buttons share the large config section"))))
 
 (deftest 'llm-config-save-default-asks-for-scope
   "make default asks for the group or all of Compos before saving"

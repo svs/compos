@@ -22,31 +22,9 @@ The setup wizard prepares Compos before you start. It chooses the model that new
 
 ## Getting help
 
-You never need to remember a key. Compos explains itself while it runs, and a chat answers the rest. Come back to this lesson when you are stuck.
+> **Try it.** The easiest way to get help is in the help chat. Type `C-c h` and ask your question or request.
 
-| Key | What it does |
-| --- | --- |
-| `M-?` | Explain what is here: this buffer, its mode, its keys, the name at point |
-| `C-h k` | Describe the next key you type |
-| `C-h h` | Read how to do a common task |
-| `C-h m` | Describe the mode of this buffer and its keys |
-| `C-h a` | Search commands and functions by words |
-| `M-o` | Ask the chat of the page you are on |
-| `C-h ?` | List every help command |
-
-> **Try it.** Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
-
-> **Try it.** Type `C-h k M-o` and read what that key does. Type `q` to close the help.
-
-> **Try it.** Type `C-h h` and choose a task to read how to do it. Type `q` when you finish.
-
-**Apropos** searches everything that Compos defines: commands, functions, settings and modes. Each result says what it does, and a command also shows its key. Use it when you know a word, but not the name.
-
-> **Try it.** Type `C-h a`, search for "other window", and read the results. Type `q` to close the list.
-
-When no command answers your question, ask a chat. `M-o` opens the chat of the page you are on, and that chat can read the page.
-
-> **Try it.** Type `M-o` and ask "What can I do on this slide?". Read the answer. Then click the slide to come back.
+> **Try it.** Additionally, `C-h` opens a help menu. Type `C-h` and wait: it lists every help key.
 
 ## Window navigation
 

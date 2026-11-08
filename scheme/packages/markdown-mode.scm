@@ -158,14 +158,32 @@
 
 ;; a bullet or a quote marker steps back and the row takes the shape; an
 ;; ordered item keeps its number, which is content
+(define (md--indent-depth line)
+  ;; the nesting of a list item, read off the indent before its marker: two
+  ;; columns a level, a tab four columns, at most five levels
+  (let* ((m (re-groups "^[ \t]*" line 0))
+         (indent (if m (substring-bytes line 0 (cadr (car m))) "")))
+    (min 5 (quotient (string-length (string-replace indent "\t" "    ")) 2))))
+
 (define (md--block-marker start line len caps)
+  ;; a bullet or a number: the indent before it steps back with the
+  ;; marker, and the row takes the item's depth, so a nested item indents
+  ;; as the page does and the caret meets one hidden run, not two
   (let ((m (md--line-marker caps))
         (le (+ start len)))
     (cond
       ((not m) '())
-      ((equal? (car m) "bullet")
-       (list (list (cadr m) (caddr m) "md-marker") (list start le "row-li")))
-      ((equal? (car m) "ordered") (list (list start le "row-oli")))
+      ((member (car m) '("bullet" "ordered"))
+       (let* ((depth (md--indent-depth line))
+              (rows (cons (list start le (if (equal? (car m) "bullet") "row-li" "row-oli"))
+                          (if (> depth 0)
+                              (list (list start le (string-append "row-depth-" (number->string depth))))
+                              '()))))
+         (cond ((equal? (car m) "bullet")
+                (cons (list start (caddr m) "md-marker") rows))
+               ((> (cadr m) start)
+                (cons (list start (cadr m) "md-marker") rows))
+               (else rows))))
       (else
        (list (list (cadr m) (min (caddr m) le) "md-marker") (list start le "row-quote"))))))
 

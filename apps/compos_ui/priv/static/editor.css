@@ -659,6 +659,12 @@ body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: bloc
   text-align: center; color: var(--dim-fg, #8a857a);
 }
 .line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
+/* a nested item: its indent steps back with the marker, the row indents */
+.line.row-depth-1 .line-content { padding-left: 2.8em; }
+.line.row-depth-2 .line-content { padding-left: 4.2em; }
+.line.row-depth-3 .line-content { padding-left: 5.6em; }
+.line.row-depth-4 .line-content { padding-left: 7em; }
+.line.row-depth-5 .line-content { padding-left: 8.4em; }
 /* A folded fenced block is a sliver: a thin rule where the block is, its
    fence text (and any keys on it) out of sight. Point on the line opens
    the sliver back to a small dim line, so you can read what is folded. */

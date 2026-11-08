@@ -418,6 +418,9 @@ defmodule Compos.Scheme.Builtins do
         fn [s, n] -> String.pad_leading(s, n) end,
       {"string-pad-right", "(string-pad-right S N) — pad S with trailing spaces to N characters."} =>
         fn [s, n] -> String.pad_trailing(s, n) end,
+      {"string-columns",
+       "(string-columns ROWS SEP) — each of ROWS, a list of strings, as one line: a field pads with spaces to the widest of its column over ROWS, counted in code points, and SEP joins the fields. A row's trailing empty fields go; its last field has no padding."} =>
+        fn [rows, sep] -> columns(rows, sep) end,
       {"substring",
        "(substring S FROM TO) — return the character range FROM..TO of S, not bytes."} => fn [
                                                                                                s,
@@ -678,6 +681,23 @@ defmodule Compos.Scheme.Builtins do
 
   # compiled-regex cache: org refontification runs the same handful of
   # patterns on every change, so compile each pattern exactly once
+  defp columns(rows, sep) do
+    cps = &length(String.to_charlist(&1))
+    widths = Enum.reduce(rows, [], &widest(Enum.map(&1, cps), &2))
+
+    Enum.map(rows, fn row ->
+      {front, last} =
+        row |> Enum.reverse() |> Enum.drop_while(&(&1 == "")) |> Enum.reverse() |> Enum.split(-1)
+
+      pad = Enum.zip_with(front, widths, &(&1 <> String.duplicate(" ", max(&2 - cps.(&1), 0))))
+      Enum.join(pad ++ last, sep)
+    end)
+  end
+
+  defp widest([a | as], [b | bs]), do: [max(a, b) | widest(as, bs)]
+  defp widest(as, []), do: as
+  defp widest([], bs), do: bs
+
   defp bytes_range(s, from, to) do
     if from < 0 or to < from or to > byte_size(s) do
       raise Eval.Error, message: "string-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"

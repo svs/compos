@@ -2028,21 +2028,21 @@ defmodule Compos.Core.SchemeAPI do
           :void
         end,
       {"meta-db-annotations",
-       "(meta-db-annotations NAMES PINNED PIN-ICON) — ((NAME HINT FACE) ...) in the order of NAMES, read from meta.db in one query: the buffer annotator's columns, padded. HINT is #f for a buffer with no labels yet; FACE is #f for a buffer in no group. PINNED is the frame's pinned group id, which PIN-ICON follows."} =>
-        fn [names, pinned, pin_icon] ->
+       "(meta-db-annotations NAMES) — ((NAME ICON MODE GROUP LABEL FACE NOTE PROJECT WORKSPACE PATH) ...) in the order of NAMES, read from meta.db in one query: what the buffer annotator's columns read. ICON is #f for a buffer with no labels yet; a buffer meta.db does not hold is (NAME)."} =>
+        fn [names] ->
           Compos.Core.MetaDb.ensure_started()
 
-          Compos.Core.MetaDb.annotations(names, pinned, pin_icon)
+          Compos.Core.MetaDb.annotations(names)
           |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
         end,
       {"meta-db-candidates",
-       "(meta-db-candidates SPEC PINNED PIN-ICON) — a buffer prompt's whole candidate list from meta.db in one query: ((NAME HINT FACE) ...) for the rows SPEC selects (meta-query's filters and sort; recent by default), in that order. HINT is #f for a buffer with no labels yet."} =>
-        fn [spec, pinned, pin_icon] ->
+       "(meta-db-candidates SPEC) — a buffer prompt's whole candidate list from meta.db in one query: meta-db-annotations' rows for the rows SPEC selects (meta-query's filters and sort; recent by default), in that order."} =>
+        fn [spec] ->
           Compos.Core.MetaDb.ensure_started()
 
           opts = Opts.map(spec || [], &Opts.strings/1)
 
-          Compos.Core.MetaDb.candidates(opts, pinned, pin_icon)
+          Compos.Core.MetaDb.candidates(opts)
           |> Enum.map(fn row -> Enum.map(row, &(&1 || false)) end)
         end,
       {"meta-db-labels!",

@@ -5258,23 +5258,53 @@
 ;; the buffer annotator's rows, from meta.db; a buffer with no labels yet
 ;; gets them now, once
 (define (buffer-annotations-db names)
-  (meta-db-rows
-    (lambda (pinned icon) (meta-db-annotations names pinned icon))))
+  (meta-db-rows (lambda () (meta-db-annotations names))))
 
-;; ASK answers ((NAME HINT FACE) ...); a buffer with no labels yet gets
-;; them now, once, and ASK runs again
+;; the columns of a meta.db row (meta-db-annotations), as `marginalia!
+;; 'buffer` writes them; PINNED is the group the frame pins
+(define (meta-db-columns r pinned)
+  (apply (lambda (name icon mode gid label face note project workspace path)
+           (list icon
+                 (or mode "Fundamental")
+                 (cond ((not (and (string? gid) (string? label))) "ungrouped")
+                       ((and (equal? gid pinned) (not (equal? label "")))
+                        (string-append label " " *group-pin-icon*))
+                       (else label))
+                 (or project "")
+                 (or workspace "")
+                 (cond ((string? path) path)
+                       ((and (equal? mode "chat-mode") (string? gid) (string? note)) note)
+                       (else ""))))
+         r))
+
+;; a buffer in a group wears the group's colour; a group gone, none
+(define (meta-db-face r)
+  (and (string? (list-ref r 3)) (string? (list-ref r 4)) (or (list-ref r 5) "accent")))
+
+;; a row with no labels yet: no icon, or no row at all
+(define (meta-db-bare? r) (not (and (pair? (cdr r)) (cadr r))))
+
+;; ASK answers meta.db rows; a buffer with no labels yet gets them now,
+;; once, and ASK runs again. Each hint is padded to the widest of each
+;; column over the whole set.
 (define (meta-db-rows ask)
   (meta-db-groups-sync!)
-  (let* ((pinned (or (group-pinned-in (selected-frame)) #f))
-         (rows (ask pinned *group-pin-icon*))
-         (bare (map car (filter (lambda (r) (not (cadr r))) rows)))
-         (rows (if (null? bare)
-                   rows
-                   (begin (buffer-meta-label! bare) (ask pinned *group-pin-icon*)))))
-    (map (lambda (r)
-           (let ((hint (or (cadr r) "")) (face (caddr r)))
-             (if face (list (car r) hint "candidate" '() face) (list (car r) hint))))
-         rows)))
+  (let* ((rows (ask))
+         (bare (map car (filter meta-db-bare? rows)))
+         (rows (if (null? bare) rows (begin (buffer-meta-label! bare) (ask))))
+         (pinned (or (group-pinned-in (selected-frame)) #f))
+         (labelled (filter (lambda (r) (not (meta-db-bare? r))) rows))
+         (hints (string-columns (map (lambda (r) (meta-db-columns r pinned)) labelled) "  ")))
+    (let loop ((rs rows) (ls labelled) (hs hints) (out '()))
+      (cond ((null? rs) (reverse out))
+            ((and (pair? ls) (eq? (car rs) (car ls)))
+             (let ((face (meta-db-face (car rs))))
+               (loop (cdr rs) (cdr ls) (cdr hs)
+                     (cons (if face
+                               (list (caar rs) (car hs) "candidate" '() face)
+                               (list (caar rs) (car hs)))
+                           out))))
+            (else (loop (cdr rs) ls hs (cons (list (caar rs) "") out)))))))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
 ;; marginalia annotator supplies the rest, MRU-ordered — the recency
@@ -5283,14 +5313,13 @@
 ;; Internals (space-prefixed) stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
   (meta-db-rows
-    (lambda (pinned icon) (meta-db-candidates '() pinned icon))))
+    (lambda () (meta-db-candidates '()))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
 (define (buffer-candidates)
   (meta-db-rows
-    (lambda (pinned icon)
-      (meta-db-candidates (list 'exclude-names (list (current-buffer))) pinned icon))))
+    (lambda () (meta-db-candidates (list 'exclude-names (list (current-buffer)))))))
 
 ;; the buffer prompt's extension seam (dup #6). The command calls this
 ;; at prompt open with the base candidates; it returns (pool standing

@@ -65,7 +65,7 @@ defmodule Compos.Core.MetaDbTest do
     Compos.Core.Recent.bump(a)
     Compos.Core.Recent.bump(b)
     assert {2, [[^b], [^a]]} = MetaDb.query(q)
-    assert [^b, ^a] = Enum.map(MetaDb.candidates(q, nil, ""), &hd/1)
+    assert [^b, ^a] = Enum.map(MetaDb.candidates(q), &hd/1)
 
     Compos.Core.Recent.bump(a)
     assert {2, [[^a], [^b]]} = MetaDb.query(q)

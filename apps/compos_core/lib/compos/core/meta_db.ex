@@ -82,22 +82,18 @@ defmodule Compos.Core.MetaDb do
   def put_groups(groups), do: GenServer.cast(__MODULE__, {:groups, groups})
 
   @doc """
-  The finished annotation of each of NAMES, in order, as `[name, hint,
-  face]`: the columns icon, mode, group, project, workspace and path (a
-  chat with no path shows its group's note), padded to the widest of each,
-  the way `marginalia-join` writes them. HINT is nil for a buffer with no
-  labels yet. PINNED is the group the frame pins, which PIN-ICON follows.
+  What the buffer annotator reads of each of NAMES, in order, as `[name,
+  icon, mode, group, label, face, note, project, workspace, path]`; the
+  columns are Scheme's. ICON is nil for a buffer with no labels yet.
   """
-  def annotations(names, pinned, pin_icon),
-    do: GenServer.call(__MODULE__, {:annotations, names, pinned, pin_icon})
+  def annotations(names), do: GenServer.call(__MODULE__, {:annotations, names})
 
   @doc """
-  `annotations/3` for the rows OPTS selects (`query/1`'s filters and
+  `annotations/1` for the rows OPTS selects (`query/1`'s filters and
   sort), in the database's order: a buffer prompt's whole candidate list
   from one query.
   """
-  def candidates(opts, pinned, pin_icon),
-    do: GenServer.call(__MODULE__, {:candidates, opts, pinned, pin_icon})
+  def candidates(opts), do: GenServer.call(__MODULE__, {:candidates, opts})
 
   @doc """
   `{TOTAL, ROWS}` for OPTS, a map with string keys:
@@ -200,7 +196,7 @@ defmodule Compos.Core.MetaDb do
     {:reply, :ok, state}
   end
 
-  def handle_call({:annotations, names, pinned, pin_icon}, _from, state) do
+  def handle_call({:annotations, names}, _from, state) do
     state = catch_up(state)
     rows = annotation_rows(state)
     missing = Enum.reject(names, &Map.has_key?(rows, &1))
@@ -213,15 +209,14 @@ defmodule Compos.Core.MetaDb do
         annotation_rows(state)
       end
 
-    {:reply, render(Enum.map(names, &{&1, rows[&1]}), pinned, pin_icon), state}
+    {:reply, Enum.map(names, &[&1 | rows[&1] || []]), state}
   end
 
-  def handle_call({:candidates, opts, pinned, pin_icon}, _from, state) do
+  def handle_call({:candidates, opts}, _from, state) do
     state = catch_up(state)
     join = recent_join(state, opts["sort"])
     {where, args} = where(opts)
-    rows = all(state, @annotation_select <> join <> where <> order(opts["sort"]), args)
-    {:reply, render(Enum.map(rows, fn [n | r] -> {n, r} end), pinned, pin_icon), state}
+    {:reply, all(state, @annotation_select <> join <> where <> order(opts["sort"]), args), state}
   end
 
   def handle_call({:query, opts}, _from, state) do
@@ -403,76 +398,6 @@ defmodule Compos.Core.MetaDb do
   defp annotation_rows(state) do
     state |> all(@annotation_select, []) |> Map.new(fn [n | r] -> {n, r} end)
   end
-
-  # PAIRS is `[{name, row | nil}]` in the order to answer; a row with no
-  # labels yet answers a nil hint
-  defp render(pairs, pinned, pin_icon) do
-    cols =
-      Enum.map(pairs, fn
-        {n, [icon | _] = r} when is_binary(icon) -> {n, columns(r, pinned, pin_icon), face(r)}
-        {n, _} -> {n, nil, nil}
-      end)
-
-    widths = widths(for {_, c, _} <- cols, c, do: c)
-
-    Enum.map(cols, fn
-      {n, nil, _} -> [n, nil, nil]
-      {n, c, face} -> [n, join(trim(c), widths), face]
-    end)
-  end
-
-  # the buffer annotator's columns (`marginalia! 'buffer` in editor.scm)
-  defp columns([icon, mode, gid, label, _face, note, project, workspace, path], pinned, pin_icon) do
-    group =
-      cond do
-        not is_binary(gid) or not is_binary(label) -> "ungrouped"
-        gid == pinned and label != "" -> label <> " " <> pin_icon
-        true -> label
-      end
-
-    last =
-      cond do
-        is_binary(path) -> path
-        mode == "chat-mode" and is_binary(gid) and is_binary(note) -> note
-        true -> ""
-      end
-
-    [icon, mode || "Fundamental", group, project || "", workspace || "", last]
-  end
-
-  # a buffer in a group wears the group's colour; a group gone, none
-  defp face([_icon, _mode, gid, label, face | _]) when is_binary(gid) and is_binary(label),
-    do: face || "accent"
-
-  defp face(_), do: nil
-
-  defp widths(rows) do
-    Enum.reduce(rows, [], fn r, ws ->
-      lens = Enum.map(r, &cps/1)
-      n = max(length(lens), length(ws))
-
-      for i <- 0..(n - 1)//1,
-          do: max(Enum.at(lens, i, 0), Enum.at(ws, i, 0))
-    end)
-  end
-
-  defp trim(fields),
-    do: fields |> Enum.reverse() |> Enum.drop_while(&(&1 == "")) |> Enum.reverse()
-
-  defp join(fields, widths) do
-    last = length(fields) - 1
-
-    fields
-    |> Enum.with_index()
-    |> Enum.map(fn
-      {f, ^last} -> f
-      {f, i} -> f <> String.duplicate(" ", max(Enum.at(widths, i, 0) - cps(f), 0))
-    end)
-    |> Enum.join("  ")
-  end
-
-  # Scheme counts a string in code points
-  defp cps(s), do: length(String.to_charlist(s))
 
   defp where(opts) do
     {clauses, args} =

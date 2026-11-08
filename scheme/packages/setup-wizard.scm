@@ -101,7 +101,8 @@
 (define *setup-wizard-buffer* "*Setup*")
 
 (define *setup-wizard-steps*
-  '(("model" "Choose a model") ("search" "Set up embeddings") ("learn" "Start learning")))
+  '(("model" "Choose a model") ("search" "Set up embeddings")
+    ("decide" "Decision model") ("browser" "Browser extension") ("learn" "Start learning")))
 
 (define (setup-wizard-step buf)
   (or (buffer-local buf 'setup-wizard-step) "model"))
@@ -211,7 +212,97 @@
               'children (map setup-wizard--embed-card apropos-embedding-backends))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:next" "Next: start learning →")))))
+                'next (list "wizard:next" "Next: decision model →")))))
+
+;; the decision model: decide asks the first backend that is ready
+(define (setup-wizard--decide-ready? b)
+  (cond ((eq? b 'jev) (decide-jev-ready?))
+        ((eq? b 'laya) (laya-available?))
+        ((eq? b 'haiku) (and (llm-key "anthropic") #t))
+        (else #f)))
+
+(define (setup-wizard--decide-card b)
+  (let* ((ready? (setup-wizard--decide-ready? b))
+         (live? (and ready? (eq? (decide--first-live) b)))
+         (spec (cond ((eq? b 'jev)
+                      (list "JEV" "Classifies text fast and at a low cost, through the TypeSafe API"
+                            (if ready? "key found" "needs TYPESAFE_API_KEY") '()))
+                     ((eq? b 'laya)
+                      (list "laya" "Answers on this machine, in a local daemon"
+                            (cond ((laya-running?) "running")
+                                  (ready? "installed, not started")
+                                  (else "needs Apple silicon and a Python with laya-mlx"))
+                            (if (and ready? (not (laya-running?)))
+                                '(("wizard:laya-start" "Start")) '())))
+                     (else
+                      (list "Claude Haiku" "A small hosted model, through your Anthropic key"
+                            (if ready? "key found" "needs an Anthropic key")
+                            (if ready? '() '(("wizard:decide-key:anthropic" "Add a key"))))))))
+    (component 'wizard/choice
+      (list 'title (list-ref spec 0)
+            'detail (string-append (list-ref spec 1) " · " (list-ref spec 2))
+            'badge (cond (live? "in use") (ready? "ready") (else "needs setup"))
+            'tone (cond (live? "accent") (ready? "good") (else "plain"))
+            'selected? live?
+            'actions (list-ref spec 3)))))
+
+(define (setup-wizard--decide-blocks buf)
+  (let ((test (buffer-local buf 'setup-wizard-decide-test)))
+    (list (list 'tag "div" 'class "wizard-title" 'text "Decision model")
+          (list 'tag "div" 'class "wizard-lede"
+                'text (string-append
+                        "Compos makes small decisions with a decision model: is a mail urgent, "
+                        "which group a buffer belongs to, which command fits a request. "
+                        "It asks the first model that is ready, in this order."))
+          (component 'ui/actions
+            (list 'actions '(("wizard:decide-test" "Test" "t") ("wizard:rescan" "Scan again" "g"))
+                  'class "wizard-tools"))
+          (list 'tag "div" 'class "wizard-grid"
+                'children (map setup-wizard--decide-card
+                               (filter (lambda (b) (or (not (eq? b 'jev)) (boundp 'jev-api-key)))
+                                       decide-backends)))
+          (list 'tag "div" 'class "wizard-lede" 'text (or test ""))
+          (component 'wizard/nav
+            (list 'back (list "wizard:back" "← Back")
+                  'next (list "wizard:next" "Next: browser extension →"))))))
+
+(define (setup-wizard-decide-test! buf)
+  (buffer-set-local! buf 'setup-wizard-decide-test "Asking a test question…")
+  (setup-wizard-redraw! buf)
+  (decide-async "The payment server is down and customers cannot pay."
+    (list 'urgent (decide-noul "Is this message urgent?"))
+    (lambda (r)
+      (let ((usage (plist-get r 'usage)))
+        (buffer-set-local! buf 'setup-wizard-decide-test
+          (if (pair? (plist-get r 'answers))
+              (string-append (format "~a" (caddr usage)) " answered in "
+                             (number->string (cadddr usage)) " ms.")
+              "No decision model answered. Set one up above, then test again."))
+        (when (buffer-exists? buf) (setup-wizard-redraw! buf))))
+    'timeout 5))
+
+;; the browser extension: Compos in the user's own Chrome
+(define (setup-wizard--browser-blocks)
+  (let ((on? (browser-connected?)))
+    (list (list 'tag "div" 'class "wizard-title" 'text "Browser extension")
+          (list 'tag "div" 'class "wizard-lede"
+                'text (string-append
+                        "The extension connects Compos to your Chrome tabs. With it, M-x and C-x work "
+                        "in any page, and Compos can read a tab, type into it, and open pages "
+                        "in your own browser with your logins."))
+          (component 'wizard/choice
+            (list 'title "Chrome extension"
+                  'detail (if on? "connected to this editor"
+                              (string-append "1. Open chrome://extensions in Chrome. "
+                                             "2. Turn on Developer mode, at the top right. "
+                                             "3. Click Load unpacked, and choose the extension folder of the Compos checkout."))
+                  'badge (if on? "connected" "not connected")
+                  'tone (if on? "good" "plain")
+                  'selected? on?
+                  'actions (if on? '() '(("wizard:rescan" "Check again")))))
+          (component 'wizard/nav
+            (list 'back (list "wizard:back" "← Back")
+                  'next (list "wizard:next" "Next: start learning →"))))))
 
 ;; The step DELTA places from BUF's step, held to the first and the last.
 (define (setup-wizard--step-after buf delta)
@@ -251,6 +342,8 @@
                   (list (component 'wizard/steps
                           (list 'steps *setup-wizard-steps* 'current step)))
                   (cond ((equal? step "learn") (setup-wizard--learn-blocks))
+                        ((equal? step "browser") (setup-wizard--browser-blocks))
+                        ((equal? step "decide") (setup-wizard--decide-blocks buf))
                         ((equal? step "search") (setup-wizard--search-blocks))
                         (else (setup-wizard--model-blocks))))))))
 
@@ -268,7 +361,7 @@
       (setup-wizard-redraw! buf))))
 
 (mode-doc! "setup-wizard-mode"
-  "First-run setup in three steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three starts the guide: a chat that teaches Compos beside a stage window.")
+  "First-run setup in five steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three sets up the decision model that decide asks: start laya or add a key, and t tests it. Step four connects the Chrome extension. Step five starts the tutorial.")
 
 ;;; --- actions -------------------------------------------------------------------
 
@@ -562,6 +655,12 @@
      (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
+    ((equal? id "wizard:decide-test") (setup-wizard-decide-test! buf) #t)
+    ((equal? id "wizard:laya-start") (laya-start!) (setup-wizard-redraw! buf) #t)
+    ((string-prefix? "wizard:decide-key:" id)
+     (setup-ask-secret! (secret-for-provider (substring-bytes id 18 (string-byte-length id))) #f
+                        (lambda () (setup-wizard-redraw-open!)))
+     #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
     ((equal? id "wizard:rescan") (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
@@ -671,11 +770,15 @@
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
   (lambda () (setup-wizard-redraw! (current-buffer))))
 
+(define-command "setup-wizard-decide-test" "Ask the decision model a test question"
+  (lambda () (setup-wizard-decide-test! (current-buffer))))
+
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
     ("g" "setup-wizard-rescan")
     ("c" "setup-wizard-connectors")
+    ("t" "setup-wizard-decide-test")
     ("q" "quit-window")))
 
 (define-style! 'setup-wizard "

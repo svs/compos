@@ -2797,7 +2797,12 @@
           (message
             (string-append
               "This chat: " (if c
-                                  (string-append (if (cadr s) "about " "") (format-usd c))
+                                  (if (cadr s)
+                                      ;; a subscription bills by its limits,
+                                      ;; not by tokens: say what this is
+                                      (string-append "about " (format-usd c)
+                                                     " at API prices (a subscription bills by its limits)")
+                                      (format-usd c))
                                   "unpriced")
               ;; what it occupies right now, which is the number a reader
               ;; asks for when a conversation feels long

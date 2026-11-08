@@ -272,9 +272,7 @@
 
 (define (chats-cost-label b)
   (let ((s (chat-spend b)))
-    (if s
-        (string-append (if (cadr s) "~" "") (chat-usd-short (car s)))
-        "")))
+    (if (and s (not (cadr s))) (chat-usd-short (car s)) "")))
 
 (define (chats-turn-label b)
   (let ((n (chat-turn-tokens b)))
@@ -313,8 +311,9 @@
         ;; by name, never by value: a reload redefines the function and a
         ;; kind registered with the old one keeps calling it
         'size (lambda (b) (chats-filesize b))
-        ;; what the chat cost (~ marks a catalog estimate), and what its
-        ;; last turn read: the two numbers a smaller context brings down
+        ;; what the backend billed, and what the last turn read. An ACP
+        ;; chat on a subscription bills no dollars, so the list shows no
+        ;; estimate: its tokens per turn are the number that counts
         'cost (lambda (b) (chats-cost-label b))
         'turn (lambda (b) (chats-turn-label b))
         ;; a chat found by a word in its text says which word, in place of

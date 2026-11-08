@@ -106,20 +106,63 @@
 (define (setup-wizard-step buf)
   (or (buffer-local buf 'setup-wizard-step) "model"))
 
-;; The model step sends the reader to M-x llm-connectors, where each
-;; connector is installed, signed in, given its key, tested and chosen.
+;; The model cards: one card for each connector, with one button that
+;; uses it, installs it, or asks for its key. ROW is (NAME KIND READY?
+;; DETAIL NEXT), NEXT the first unmet requirement (setup.scm). The hosted
+;; card always offers its key: a set key can be replaced.
+(define (setup-wizard--card-actions row)
+  (let* ((name (list-ref row 0))
+         (kind (list-ref row 1))
+         (ready? (list-ref row 2))
+         (next (and (> (length row) 4) (list-ref row 4)))
+         (default? (equal? name *default-connector*))
+         (key (string-append "wizard:key:" name))
+         (use (if (and ready? (not default?))
+                  (list (list (string-append "wizard:use:" name) "Use this"))
+                  '())))
+    (cond
+      ((equal? kind "hosted")
+       (append use (list (list key (if ready? "Change the key" "Add a key")))))
+      (default? '())
+      (ready? use)
+      ((not next) '())
+      ((memq (plist-get next 'kind) '(secret one-secret)) (list (list key "Add a key")))
+      ((pair? (plist-get next 'install))
+       (list (list (string-append "wizard:install:" name) "Install")))
+      (else '()))))
+
+(define (setup-wizard--card row)
+  (let* ((name (list-ref row 0))
+         (ready? (list-ref row 2))
+         (default? (equal? name *default-connector*)))
+    (component 'wizard/choice
+      (list 'title (or (plist-get (connector-config name) 'title) name)
+            'detail (string-append (connector-description name) " · " (list-ref row 3))
+            'badge (cond (default? "default") (ready? "ready") (else "needs setup"))
+            'tone (cond (default? "accent") (ready? "good") (else "plain"))
+            'selected? default?
+            'actions (setup-wizard--card-actions row)))))
+
+(define (setup-model-cards)
+  "The model cards of the setup wizard's first step, as blocks: one card for
+   each connector this machine knows, with the button that uses, installs or
+   adds a key for it. The tutorial's Set up slide shows the same cards."
+  (list (list 'tag "div" 'class "wizard-grid"
+              'children (map setup-wizard--card (setup-inference-scan)))))
+
 (define (setup-wizard--model-blocks)
-  (list (list 'tag "div" 'class "wizard-title" 'text "Choose a model")
-        (list 'tag "div" 'class "wizard-lede"
-              'text (string-append
-                      "Compos talks to a model through a connector. The connectors list shows "
-                      "each one: install it, sign in or add its key, test that it answers, and "
-                      "press d on the one that new chats use."))
-        (list 'tag "div" 'class "wizard-lede" 'text (llm-connectors-summary))
-        (component 'ui/actions
-          (list 'actions '(("wizard:connectors" "Set up the connectors" "c")) 'class "wizard-buttons"))
-        (component 'wizard/nav
-          (list 'next (list "wizard:next" "Next: search by meaning →")))))
+  (append
+    (list (list 'tag "div" 'class "wizard-title" 'text "Choose a model")
+          (list 'tag "div" 'class "wizard-lede"
+                'text (string-append
+                        "Compos talks to a model through a connector. "
+                        "Pick the one that new chats use. You can change it later in any chat."))
+          (component 'ui/actions
+            (list 'actions '(("wizard:rescan" "Scan again" "g") ("wizard:connectors" "All connectors" "c"))
+                  'class "wizard-tools")))
+    (setup-model-cards)
+    (list (component 'wizard/nav
+            (list 'next (list "wizard:next" "Next: search by meaning →"))))))
 
 ;; The search step: one card for each backend of apropos-embedding-backends.
 ;; The backend in use is the first one that has a key.
@@ -459,6 +502,23 @@
                  (setup-ask-secret! s connector done)
                  (message "Setup: no key added")))))))))
 
+(define (setup-model-card-click! buf id &optional on-key)
+  "Run the model-card button ID clicked in BUF: wizard:use:NAME,
+   wizard:install:NAME or wizard:key:NAME. ON-KEY runs when a key is in.
+   Answers #t when ID is a card button."
+  (cond
+    ((string-prefix? "wizard:use:" id)
+     (setup-use-connector! (substring-bytes id 11 (string-byte-length id))) #t)
+    ;; the model the user installs is the one they chose
+    ((string-prefix? "wizard:install:" id)
+     (let ((name (substring-bytes id 15 (string-byte-length id))))
+       (setup-use-connector! name)
+       (setup-install-agent! name))
+     #t)
+    ((string-prefix? "wizard:key:" id)
+     (setup-wizard-add-key! buf (substring-bytes id 11 (string-byte-length id)) on-key) #t)
+    (else #f)))
+
 (define (setup-wizard-click buf id)
   (cond
     ((equal? id "wizard:next") (setup-wizard-go! buf (setup-wizard--step-after buf 1)) #t)
@@ -469,7 +529,8 @@
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
-    (else #f)))
+    ((equal? id "wizard:rescan") (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
+    (else (setup-model-card-click! buf id))))
 
 (add-hook! (list 'block-click 'setup-wizard)
   (lambda (buf id)
@@ -569,9 +630,13 @@
 (define-command "setup-wizard-back" "Go to the previous setup step"
   (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) -1))))
 
+(define-command "setup-wizard-rescan" "Scan this machine for models again"
+  (lambda () (setup-wizard-redraw! (current-buffer))))
+
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
+    ("g" "setup-wizard-rescan")
     ("c" "setup-wizard-connectors")
     ("q" "quit-window")))
 

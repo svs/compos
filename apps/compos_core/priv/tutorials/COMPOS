@@ -75,11 +75,11 @@ This lesson sets up the models and the browser extension. Compos uses three kind
 
 ### A chat model
 
-> **Try it.** On the slide, click **Set up the connectors**. In the list, press `t` to test a model, and `d` on one that replied to make it the model that new chats use.
+> **Try it.** On the slide, choose the model that new chats use. Each card is one connector, and has one button: **Use this** when it is ready, **Install** when its program is missing, or **Add a key** when it needs one.
 
 > **Try it.** Compos sends a short test message to the model you chose. This box fills when the reply comes back.
 
-If no reply comes, the slide tells you what is wrong. `M-x llm-connectors` lists every model connector: install it, sign in or add its key, and test that it answers. `M-x setup-ai-guide` explains connectors, logins and keys.
+If no reply comes, the slide tells you what is wrong. Choose another card, or type `M-x llm-connectors` to test each connector and see its details. `M-x setup-ai-guide` explains connectors, logins and keys.
 
 ### Decisions
 

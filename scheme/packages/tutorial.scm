@@ -859,6 +859,8 @@
   (lambda (buf id)
     (and (equal? buf *tutorial-detail-buffer*)
          (cond
+           ;; the model cards on the Set up slide: a key added there redraws it
+           ((setup-model-card-click! buf id (lambda () (tutorial-recheck!) (tutorial--draw-detail!))) #t)
            (else
          (let ((hit (assoc id '(("tutorial:next" "tutorial-next") ("tutorial:back" "tutorial-back")
                                 ("tutorial:next-lesson" "tutorial-next-lesson")
@@ -1438,19 +1440,14 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
           (tutorial--draw-detail!))))))
 
 ;; the model step: the setup wizard chose one already, or the reader does,
-;; in M-x llm-connectors, which the slide's button opens; the step finishes
-;; when a model is in use
+;; on the slide, from the same model cards the wizard's first step shows;
+;; the step finishes when a model is in use
 (tutorial-await! "set-up" "choose the model that new chats use"
   (lambda () (and (boundp 'setup-complete?) (setup-complete?))))
 
 (tutorial-cards! "set-up" "choose the model that new chats use"
   (lambda ()
-    (if (boundp 'llm-connectors-summary)
-        (list (tutorial--div "wizard-lede" 'text (llm-connectors-summary))
-              (component 'ui/actions
-                (list 'actions '(("tutorial:connectors" "Set up the connectors" "c"))
-                      'class "wizard-buttons")))
-        '())))
+    (if (boundp 'setup-model-cards) (setup-model-cards) '())))
 
 (define (tutorial--model-chosen!)
   "A new default connector, chosen anywhere: the model step finishes, and

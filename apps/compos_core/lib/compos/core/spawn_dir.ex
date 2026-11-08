@@ -12,6 +12,23 @@ defmodule Compos.Core.SpawnDir do
   require Logger
 
   @doc """
+  `nil` when DIR is nil or a directory. Otherwise the text that names WHERE
+  and the path. It writes nothing: a caller that gives the error back to its
+  own caller, as a Scheme primitive does, uses this and not `check/2`.
+  """
+  def problem(nil, _where), do: nil
+
+  def problem(dir, where) do
+    path = to_string(dir)
+
+    cond do
+      File.dir?(path) -> nil
+      File.regular?(path) -> where <> ": cannot start a process in " <> path <> ": it is a file, not a directory"
+      true -> where <> ": cannot start a process in " <> path <> ": it is not a directory"
+    end
+  end
+
+  @doc """
   `:ok` when DIR is nil or a directory. Otherwise `{:error, text}`, and the
   text goes to *Messages* and to the log with WHERE, the caller's name.
   """

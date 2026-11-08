@@ -1376,6 +1376,10 @@ defmodule Compos.Core.SchemeAPI do
                 {dir, [cb]} -> {Path.expand(dir), cb}
               end
 
+            # a DIR that is not a directory is the caller's error: it comes
+            # back here, at the call, before any Task starts
+            spawn_dir!(dir)
+
             if callback do
               async_dispatch(callback, fn -> shell_to_string(cmd, dir, shell_async_limit()) end)
             else
@@ -3461,9 +3465,16 @@ defmodule Compos.Core.SchemeAPI do
   # and in the inline form the caller is the Session — forever. Run through
   # a port, kill the OS process at the limit, and return what it wrote.
   defp shell_to_string(cmd, dir, limit \\ nil) do
-    case Compos.Core.SpawnDir.check(dir, "shell-command->string") do
-      :ok -> shell_to_string_in(cmd, dir, limit)
-      {:error, text} -> text
+    spawn_dir!(dir)
+    shell_to_string_in(cmd, dir, limit)
+  end
+
+  # The caller gets the error as a Scheme error, and *Messages* does not:
+  # a bad DIR is the mistake of the code that called, so it is told.
+  defp spawn_dir!(dir) do
+    case Compos.Core.SpawnDir.problem(dir, "shell-command->string") do
+      nil -> :ok
+      text -> raise Compos.Scheme.Eval.Error, message: text
     end
   end
 

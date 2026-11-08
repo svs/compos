@@ -295,19 +295,16 @@
 
 ;; the preset palette, with the glyphs following the box, not the chat
 (define (llm-config--preset-candidates &optional store)
-  ;; presets (servers bundled with their prompt) above the bare MCP servers,
-  ;; each under its own separator
+  ;; the whole flat list: tool presets and MCP servers, one after another
   (let* ((loaded (llm-config--with-compos (llm-config--get store 'presets)))
          (names (map car *chat-presets*))
          (servers (filter (lambda (srv) (not (member (car srv) names))) *mcp-registry*)))
     (append
-      (list (list "Presets" "" "separator"))
       (map (lambda (e)
              (list (symbol->string (car e))
                    (string-append (if (member (car e) loaded) "● " "○ ")
                                   (plist-get (car (cdr e)) 'description))))
            *chat-presets*)
-      (if (null? servers) '() (list (list "MCP servers" "" "separator")))
       (map (lambda (srv)
              (list (symbol->string (car srv))
                    (string-append (if (member (car srv) loaded) "● " "○ ") "server")))
@@ -338,9 +335,9 @@
             (list 'style "palette")
             (list 'legend '(("RET" "toggle") ("C-n C-p" "select") ("TAB" "complete") ("C-g" "done")))
             (list 'note "RET turns a preset on or off and keeps the list open; C-g when done. The chat gets them when the menu closes."))
-      (if preselect (list (list 'preselect preselect)) '()))))
+      (if preselect (list (list 'selected preselect)) '()))))
 
-(define-command "llm-config-pick-preset" "Turn tool presets on or off in the box"
+(define-command "llm-config-pick-preset" "Choose MCP servers and tool presets"
   (lambda ()
     (if (not (boundp (quote chat-preset-candidates)))
         (message "No MCP presets — packages/mcp.scm is not loaded")
@@ -772,7 +769,7 @@
                         acc)))))))
       (list
         (list "Change"
-          (transient-infix "p" "Presets" "llm-config-pick-preset"
+          (transient-infix "p" "mcps and tools" "llm-config-pick-preset"
             (lambda (scope)
               (if (llm-config--boxed?)
                   (llm-config--field-text 'presets (llm-config--box))
@@ -1009,6 +1006,9 @@
           ((and (string? b) (not (member b (map llm-bundle-name *llm-bundles*))))
            (error (string-append "group-llm!: no preset " b "; presets: "
                                  (string-join (map llm-bundle-name *llm-bundles*) ", "))))
+          ;; an empty config would hide the global default behind nothing
+          ((and b (not (string? b)) (not (pair? b)))
+           (error "group-llm!: the config is empty; pick a preset with M-x group-llm"))
           (else (and (group-config-set! id 'llm b) id)))))
 
 (public! 'group-llm!
@@ -1283,7 +1283,7 @@
     (llm-config--field-row "b" "backend" 'connector "llm-config-pick-backend")
     (llm-config--field-row "m" "model" 'model "llm-config-pick-model")
     (llm-config--field-row "e" "effort" 'effort "llm-config-pick-effort")
-    (llm-config--field-row "p" "tools" 'presets "llm-config-pick-preset")
+    (llm-config--field-row "p" "mcps and tools" 'presets "llm-config-pick-preset")
     (llm-config--more-row)))
 
 (define (llm-config--more-items)

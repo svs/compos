@@ -1415,6 +1415,21 @@ body.unfocused .window.active .cursor {
   display: block; flex: 1 1 auto; min-width: 8px;
   height: var(--hair); background: var(--edge-soft);
 }
+
+/* the notification bell at the right end of the top bar; the count shows the
+   notices that came since M-x notifications was last opened */
+.ml-bell {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  flex: none; padding: 0 var(--s2);
+  color: var(--text-faint); background: transparent; border: 0;
+  cursor: pointer;
+}
+.ml-bell:hover { color: var(--text-strong); }
+.ml-bell-unread { color: var(--accent); }
+.ml-bell-count {
+  font-family: var(--font-mono); font-size: var(--fs-meta);
+  font-weight: 600; line-height: 1;
+}
 .ml-divider {
   display: block; flex: 0 0 auto;
   width: var(--hair); height: 13px; background: var(--edge);

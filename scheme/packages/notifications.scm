@@ -28,6 +28,10 @@
 ;; BUFFER the one the notice is about or #f, EVENT the notice itself; survives a reload
 (define *notifications-shown* (if (boundp '*notifications-shown*) *notifications-shown* '()))
 
+;; how many notices came since the user last opened M-x notifications;
+;; the bell in the top bar shows it
+(define *notifications-unread* (if (boundp '*notifications-unread*) *notifications-unread* 0))
+
 (effects! '(pure))
 
 (define (notifications--data e k) (plist-get (plist-get e 'data) k))
@@ -58,6 +62,15 @@ first, so a notice that waits for you is not pushed off by status updates"
 
 (define (notifications--publish!)
   (frame-chrome-set! "notifications" (notifications--chrome)))
+
+(define (notifications--publish-unread!)
+  (frame-chrome-set! "notifications-unread"
+                     (if (> *notifications-unread* 0) (number->string *notifications-unread*) "")))
+
+(define (notifications--read-all!)
+  "the user opened the notices: the bell shows none unread"
+  (set! *notifications-unread* 0)
+  (notifications--publish-unread!))
 
 (define (notifications--show! e)
   (let ((seq (plist-get e 'seq))
@@ -98,6 +111,8 @@ first, so a notice that waits for you is not pushed off by status updates"
 (define (notifications--saw e)
   "a notice reached the log: show it, unless it is old, as when a restart replays the log"
   (when (< (- (current-time) (plist-get e 'at)) notifications-seconds)
+    (set! *notifications-unread* (+ 1 *notifications-unread*))
+    (notifications--publish-unread!)
     (notifications--show! e)))
 
 (effects! '(write))
@@ -174,6 +189,7 @@ or its command; #t when it went somewhere"
     (buffer-create *notifications-buffer*)
     (unless (buffer-local *notifications-buffer* 'group)
       (buffer-set-local! *notifications-buffer* 'group (frame-group)))
+    (notifications--read-all!)
     (list-mode-show! "notifications-mode")))
 
 (define-command "notifications-refresh" "Redraw the notices"

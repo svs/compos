@@ -1110,6 +1110,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (public! 'ats-case-ids "(ats-case-ids APPROVAL-ID) — the approval, application, candidate and job ids of an open approval page")
 (public! 'ats-case-candidate-id "(ats-case-candidate-id APPROVAL-ID) — the candidate id of an open approval page")
 (public! 'ats-case-job-id "(ats-case-job-id APPROVAL-ID) — the job id of an open approval page")
+(public! 'ats-case-text "(ats-case-text ID) — the text of an open ATS page, or #f")
+(public! 'ats-approval-text "(ats-approval-text APPROVAL-ID) — the text of an open approval page, or #f")
 
 (domain! 'web)
 (effects! '(write external))

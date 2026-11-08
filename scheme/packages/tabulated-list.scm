@@ -873,6 +873,8 @@
   ;; A dormant list's saved text and semantic ranges share its last width.
   (or (and (not (buffer-exists? buf)) (buffer-local buf 'list-width))
       (max 40 (- (buffer-cols buf) 1))))
+(public! 'list-view-width "(list-view-width BUF) — the columns list BUF draws in; a dormant list answers its last width" 'ui)
+(catalog-meta! 'function "list-view-width" 'effects '(read))
 
 ;; A row never wraps for want of width: when the columns do not fit, the
 ;; lowest-ranked one hides, then the next, until the rest fit. A column's

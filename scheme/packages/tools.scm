@@ -1309,7 +1309,9 @@
         (set! *apropos--warm-again* #f)
         (set! *apropos--warming*
               (task-run! (lambda () (report-errors "apropos-warm" (lambda () (apropos--rows-cached))))
-                         (lambda (ok value) (when *apropos--warm-again* (apropos-warm!))))))))
+                         (lambda (ok value)
+                           (set! *apropos--warming* #f)
+                           (when *apropos--warm-again* (apropos-warm!))))))))
 
 (define (apropos--rows-stale-ok)
   (cond ((and *apropos--rows-cache* (equal? (catalog-generation) *apropos--rows-gen*))

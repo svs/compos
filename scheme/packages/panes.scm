@@ -1293,3 +1293,5 @@
 (catalog-meta! 'function "panes-set-focus" 'effects '(pure))
 (public! 'panes-focus-window "(panes-focus-window LAYOUT KEY) -> LAYOUT: KEY to the front of its pane, and its pane takes the focus; pure")
 (catalog-meta! 'function "panes-focus-window" 'effects '(pure))
+(public! 'panes-pane-ids "(panes-pane-ids LAYOUT) -> (ID ...): the ids of LAYOUT's panes, left to right; pure")
+(catalog-meta! 'function "panes-pane-ids" 'effects '(pure))

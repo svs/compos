@@ -1,6 +1,8 @@
 ;;; tutorial.scm --- the learn-by-doing tutorial: C-h t.
 ;;;
-;;; The master is bundled (priv/tutorials/COMPOS) and never changes. C-h t
+;;; The master is the package's own tutorial/COMPOS.md. The lesson pane
+;;; visits it in morg-mode, narrowed to the lesson: an edit there changes
+;;; the bundled tutorial, and the slide redraws from the live text. C-h t
 ;;; opens it as an app: one row per lesson, each lesson a page the reader
 ;;; edits while reading it, and its Try it boxes the steps of a wizard.
 ;;; The single TUTORIAL buffer below stays for onboarding.scm and
@@ -12,8 +14,8 @@
 (define *training-tutorial-buffer* "TUTORIAL")
 
 (define (training-document-path)
-  "Return the bundled, immutable tutorial master."
-  (string-append (compos-priv-dir) "/tutorials/COMPOS"))
+  "Return the tutorial master, tutorial/COMPOS.md of the tutorial package."
+  (locate-library "tutorial/COMPOS.md"))
 
 (define (training-state-dir)
   (string-append (compos-home) "/tutorial"))
@@ -148,10 +150,11 @@
              (loop (cdr ls) '() (cons (string-trim (string-join rest "\n")) out))))
           (else (loop (cdr ls) (cons (car ls) acc) out)))))
 
-(define (tutorial--lesson title lines n)
+(define (tutorial--lesson title lines n at)
+  ;; AT is the byte where the lesson's ## heading starts in the master
   (let ((lines (filter (lambda (l) (not (equal? l "---"))) (reverse lines))))
     (list 'slug (string-downcase (re-replace-all "[^A-Za-z0-9]+" title "-"))
-          'n n 'title title
+          'n n 'title title 'at at
           'body (string-trim (string-join lines "\n"))
           'readings (tutorial--readings lines)
           'tries (map (lambda (l)
@@ -163,34 +166,44 @@
   ;; one lesson per ## section of the master, numbered from 1 in order;
   ;; Contents is the master's own map, not a lesson, and its numbers are these.
   ;; A # heading after the first ends the lessons: what follows is kept for
-  ;; later, and the index and the slides do not show it
-  (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (out '()))
+  ;; later, and the index and the slides do not show it. POS is the byte
+  ;; where the line starts, AT the one of the lesson's heading
+  (let loop ((lines (string-split text "\n")) (pos 0) (title #f) (at 0) (acc '()) (out '()))
     (let ((flush (lambda ()
                    (if (and title (not (equal? title "Contents")))
-                       (cons (tutorial--lesson title acc (+ 1 (length out))) out)
-                       out))))
+                       (cons (tutorial--lesson title acc (+ 1 (length out)) at) out)
+                       out)))
+          (next (lambda () (+ pos (string-byte-length (car lines)) 1))))
       (cond ((null? lines) (reverse (flush)))
             ((and (string-prefix? "# " (car lines)) (or title (pair? out)))
              (reverse (flush)))
             ((string-prefix? "## " (car lines))
-             (loop (cdr lines)
+             (loop (cdr lines) (next)
                    (string-trim (substring-bytes (car lines) 3 (string-byte-length (car lines))))
-                   '() (flush)))
-            (else (loop (cdr lines) title (cons (car lines) acc) out))))))
+                   pos '() (flush)))
+            (else (loop (cdr lines) (next) title at (cons (car lines) acc) out))))))
+
+(define (tutorial--lesson-visits?)
+  ;; #t while the lesson pane visits the master
+  (and (buffer-known? *tutorial-lesson-buffer*)
+       (equal? (buffer-path *tutorial-lesson-buffer*) (training-document-path))))
 
 (define (tutorial-lessons)
-  "The lessons of the bundled master, in order: plists of slug, n, title, body and tries."
-  ;; an edit of the master shows at once: a new mtime parses it again, and
-  ;; the steps and the lesson pane follow
-  (let ((mtime (file-mtime (training-document-path))))
-    (unless (and *tutorial-lessons* (equal? mtime *tutorial-lessons-mtime*))
-      (let ((text (read-file (training-document-path))))
-        (unless text (error "The bundled Compos tutorial is missing"))
+  "The lessons of the master, in order: plists of slug, n, title, at, body and tries."
+  ;; while the lesson pane visits the master, its live text is the master:
+  ;; each edit parses it again, and the steps and the slide follow. Else the
+  ;; file is, and a new mtime parses it again
+  (let* ((buf *tutorial-lesson-buffer*)
+         (live (tutorial--lesson-visits?))
+         (key (if live
+                  (list 'buffer (buffer-version buf))
+                  (list 'file (file-mtime (training-document-path))))))
+    (unless (and *tutorial-lessons* (equal? key *tutorial-lessons-mtime*))
+      (let ((text (if live (buffer-text buf) (read-file (training-document-path)))))
+        (unless text (error "The Compos tutorial master is missing"))
         (set! *tutorial-lessons* (tutorial--parse text))
-        (set! *tutorial-lessons-mtime* mtime)
-        (set! *tutorial-steps* '())
-        (when (buffer-known? *tutorial-lesson-buffer*)
-          (buffer-set-local! *tutorial-lesson-buffer* 'tutorial-lesson #f))))
+        (set! *tutorial-lessons-mtime* key)
+        (set! *tutorial-steps* '())))
     *tutorial-lessons*))
 
 (define (tutorial-lesson slug)
@@ -707,28 +720,6 @@
         (string-join (map (lambda (t) (or (tutorial--key-label t) t)) tokens) " ")
         span)))
 
-(define (tutorial--keycaps text)
-  "TEXT for the lesson pane: each key a `KEY`{:.key} span, which morg draws
-   as a keycap; a name beside a key stays plain code."
-  (let loop ((parts (string-split text "`")) (code? #f) (out '()))
-    (if (null? parts)
-        (string-join (reverse out) "")
-        (loop (cdr parts) (not code?)
-              (cons (if (not code?)
-                        (car parts)
-                        (let ((tokens (string-split (car parts) " ")))
-                          (if (tutorial--key-label (car tokens))
-                              (string-join
-                                (map (lambda (t)
-                                       (let ((cap (tutorial--key-label t)))
-                                         (if cap
-                                             (string-append "`" cap "`{:.key}")
-                                             (string-append "`" t "`"))))
-                                     tokens)
-                                " ")
-                              (string-append "`" (car parts) "`"))))
-                    out)))))
-
 (define (tutorial--symbolize text)
   "TEXT with every `key` in it written as the keyboard's symbols."
   (let loop ((parts (string-split text "`")) (code? #f) (out '()))
@@ -992,67 +983,49 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (let ((w (window-showing buf))) (when w (window-set-point! w 0)))
   (buffer-mark-saved! buf))
 
-(define (tutorial--reading-index l)
-  ;; the reading of the step on the slide; past the last step, the last one
-  (let* ((steps (tutorial--steps l))
-         (rs (plist-get l 'readings))
-         (i *tutorial-shown*))
-    ;; a box right after a box has no reading of its own: the one before
-    ;; it still stands
-    (let back ((k (cond ((< i (length steps)) (caddr (list-ref steps i)))
-                        (else (- (length rs) 1)))))
-      (if (and (> k 0) (equal? (string-trim (list-ref rs k)) ""))
-          (back (- k 1))
-          k))))
 
-(define *tutorial-doc* #f)   ;; (LESSONS TEXT STARTS): the whole tutorial to read
+(define (tutorial--visit-master! buf)
+  ;; the lesson pane visits the master in morg-mode: the user is its author,
+  ;; types in it and saves it with C-x C-s. The slide is its preview
+  (let ((path (training-document-path)))
+    (unless (equal? (buffer-path buf) path)
+      (let ((text (read-file path)))
+        (unless text (error "The Compos tutorial master is missing"))
+        (tutorial--fill! buf text "morg-mode")
+        (when (minor-mode-on? buf "preview-mode") (disable-minor-mode! buf "preview-mode"))
+        ;; the bytes just read, so the save only binds the pane to the file;
+        ;; the pane never read the file itself, and the write guard asks that
+        (allow-one-write! path)
+        (with-current-buffer buf (lambda () (buffer-save! path)))
+        (unless (buffer-derived-mode? buf "morg-mode")
+          (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
+        (buffer-set-local! buf 'morg-narrow-anchor #f)))
+    (buffer-watch-change! buf 'tutorial-master
+      (lambda (pos inserted deleted source) (tutorial--edited!)))))
 
-(define (tutorial--doc)
-  ;; every lesson, one after the other, so the lesson pane always has more to
-  ;; read ahead. STARTS is ((SLUG K) BYTE): where reading K of a lesson begins.
-  (let ((ls (tutorial-lessons)))
-    (unless (and *tutorial-doc* (eq? (car *tutorial-doc*) ls))
-      (let loop ((ls2 ls) (text "") (starts '()))
-        (if (null? ls2)
-            (set! *tutorial-doc* (list ls text (reverse starts)))
-            (let* ((l (car ls2))
-                   (head (string-append (if (equal? text "") "" "\n\n")
-                                        "# " (number->string (plist-get l 'n)) ". " (plist-get l 'title) "\n\n"))
-                   (top (string-byte-length text)))
-              (let rloop ((rs (map tutorial--keycaps (plist-get l 'readings))) (k 0)
-                          (acc (string-append text head)) (st starts))
-                (if (null? rs)
-                    (loop (cdr ls2) acc st)
-                    (rloop (cdr rs) (+ k 1)
-                           (string-append acc (if (= k 0) "" "\n\n") (car rs))
-                           (cons (list (list (plist-get l 'slug) k)
-                                       (if (= k 0) top (+ (string-byte-length acc) 2)))
-                                 st))))))))
-    *tutorial-doc*))
+(define (tutorial--edited!)
+  ;; an edit of the lesson pane: the slide and the steps it watches follow
+  ;; the live text. The lesson is the one the pane is narrowed to, so a new
+  ;; title keeps it
+  (when (tutorial--lesson-visits?)
+    (let* ((at (morg-narrow-anchor *tutorial-lesson-buffer*))
+           (l (and at (find (lambda (l) (= (plist-get l 'at) at)) (tutorial-lessons)))))
+      (when l (set! *tutorial-current* (plist-get l 'slug)))
+      (tutorial--arm!)
+      (tutorial--draw-detail!))))
 
 (define (tutorial--draw-lesson! l)
-  ;; the lesson pane is for reading: rendered, not for typing in. It holds the
-  ;; whole tutorial, and each step turns it to the part the step belongs to.
-  (let* ((buf *tutorial-lesson-buffer*)
-         (doc (tutorial--doc))
-         (k (tutorial--reading-index l))
-         (key (list (plist-get l 'slug) k)))
-    (unless (equal? (buffer-local buf 'tutorial-lesson) "all")
-      (tutorial--fill! buf (string-append (cadr doc) "\n") "morg-mode")
-      (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
-      (preview-heal! buf)
-      (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'tutorial-lesson "all")
-      (buffer-set-local! buf 'tutorial-reading #f))
-    (unless (equal? (buffer-local buf 'tutorial-reading) key)
-      (buffer-set-local! buf 'tutorial-reading key)
-      ;; the lesson's window turns to the step's part; a reader who stands
-      ;; in the lesson keeps their own place
-      (let ((w (window-showing buf))
-            (hit (assoc key (caddr doc))))
-        (when (and w hit (not (equal? w (active-window))))
-          (window-set-point! w (cadr hit))
-          (buffer-windows-follow-point! buf))))))
+  ;; the lesson pane shows the lesson's section of the master; a reader who
+  ;; stands in it keeps their own place
+  (let ((buf *tutorial-lesson-buffer*))
+    (tutorial--visit-master! buf)
+    (let ((at (plist-get l 'at)))
+      (unless (equal? (morg-narrow-anchor buf) at)
+        (buffer-set-local! buf 'morg-narrow-anchor at)
+        (morg-apply-narrow! buf)
+        (let ((w (window-showing buf)))
+          (when (and w (not (equal? w (active-window))))
+            (window-set-point! w at)))))))
 
 (define (tutorial--practice-text l)
   ;; the lesson's prose, to move in and change; tables, Try it boxes and
@@ -1489,7 +1462,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (category! 'learning)
 (public! 'training-document-path
-  "(training-document-path) — the bundled immutable tutorial master")
+  "(training-document-path) — the tutorial master, tutorial/COMPOS.md beside tutorial.scm")
 (public! 'training-state-path
   "(training-state-path) — the reader's saved tutorial content and point")
 (public! 'tutorial-lessons

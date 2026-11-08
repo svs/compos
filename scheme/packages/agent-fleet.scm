@@ -925,6 +925,8 @@
 (define (agents-goal-notify! buf status why)
   (unless (eq? status (buffer-local buf 'chat-goal-noted))
     (buffer-set-local! buf 'chat-goal-noted status)
+    ;; the chat no longer waits for the user: its notice has nothing left to ask
+    (unless (memq status '(needs-you blocked)) (notifications-resolve! buf))
     (when (and (memq status '(needs-you blocked)) (not (window-showing buf)))
       (notify! "chat"
                (string-append (if (eq? status 'blocked) "Blocked: " "Needs you: ")

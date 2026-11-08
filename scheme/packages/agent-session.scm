@@ -877,7 +877,9 @@
         (begin
           (report-errors "chat-finish: save the .chat file" (lambda () (chat-log-save! buf)))
           (agents-archive! buf)
-          (notify! "chat" (string-append "Done: " title) summary (list 'buffer buf))
+          ;; done asks nothing of the user: an echo, not a notice
+          (notifications-resolve! buf)
+          (message (string-append "Done: " title))
           'closed)
         (let ((why (string-join
                     (append (cond ((not outcome) '("the agent did not say it is done"))
@@ -890,7 +892,7 @@
               (begin
                 (buffer-set-local! buf 'chat-reaped #t)
                 (message (string-append "Kept: " title ": " why)))
-              (notify! "chat" (string-append "Kept: " title) why (list 'buffer buf)))
+              (message (string-append "Kept: " title ": " why)))
           'kept))))
 
 (define (chat-finish-turn-end! slug stop-reason ok?)
@@ -1024,7 +1026,8 @@
       (let ((title (chats-title buf)))
         (report-errors "chat-auto-close: save the .chat file" (lambda () (chat-log-save! buf)))
         (agents-archive! buf)
-        (notify! "chat" (string-append "Done: " title) why (list 'buffer buf))))))
+        (notifications-resolve! buf)
+        (message (string-append "Done: " title))))))
 
 (add-hook! 'chat-status-hook 'chat-auto-close--status!)
 

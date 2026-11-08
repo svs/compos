@@ -36,7 +36,16 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 
 `C-x o` goes through all the windows in a circle. Use it when you do not know where a window is.
 
-**Focus and editing.** A window is in one of two states. In focus, your keys act on the windows. When you type a character in a buffer that you can edit, the window goes into editing, and your keys type text. `ESC` or `C-g` stops editing, and then the arrow keys move the focus again.
+**Focus and editing.** A window is in one of two states:
+
+| State | What your keys do |
+| --- | --- |
+| Focus | They move the focus and the windows. |
+| Editing | They type text, move the caret and select text. |
+
+When you type a character in a buffer that you can edit, the window goes into editing. `ESC` or `C-g` stops editing, and the window goes back to focus.
+
+The window keys of this lesson work only in focus. In editing, `s-<right>` moves the caret to the end of the line, and `S-<right>` selects text. So when a window key does not work, type `ESC` and try again.
 
 > **Try it.** Move the focus to the practice page and type a word.
 
@@ -51,9 +60,9 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 | `s-S-<right>` | Swap this pane with the pane on the right |
 | `s-S-<left>` | Swap this pane with the pane on the left |
 
-> **Try it.** With the focus on the practice page, type `s-S-<right>` to swap it with the slide. Type `s-S-<left>` to swap them back.
+> **Try it.** Move the focus to the practice page. If you are editing there, type `ESC`. Then type `s-S-<right>` to swap it with the slide. Type `s-S-<left>` to swap them back.
 
-> **Try it.** With the focus on the practice page, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it. Type `S-<left>`, the key of `window-previous-pane`, to move it back.
+> **Try it.** With the focus on the practice page, and not editing, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it. Type `S-<left>`, the key of `window-previous-pane`, to move it back.
 
 **Layouts.** A layout is the arrangement of the panes of a group: one window, two panes, equal columns, or as many panes as you open. `C-x l` shows each layout while you move through the list. `RET` keeps the one you are on, and `ESC` puts back the layout you had.
 

@@ -421,6 +421,10 @@
   (unless *tutorial-armed* (tutorial--load!) (tutorial--arm!))
   (let ((cmd (tutorial--ran)))
     (tutorial--saw! cmd)
+    ;; a character typed in the practice page: the type-a-word step, also
+    ;; when the page was in editing before
+    (when (and (equal? cmd "self-insert-command") (equal? (current-buffer) *tutorial-buffer*))
+      (tutorial--saw! "practice-typed"))
     ;; a quit that ends a key sequence cancelled a prefix: C-x ESC
     (when (equal? cmd "keyboard-quit")
       (let ((keys (ignore-errors (lambda () (last-keys)))))
@@ -1393,24 +1397,17 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (advice-add! 'clipboard-paste! 'after 'tutorial-hears-paste
   (lambda (&rest args) (tutorial--saw! "clipboard-paste")))
 
-;; typing a word puts the practice page in the editing state: that is the
-;; step, and the reader is in the practice page, where n types an n
-(tutorial-await! "window-navigation" "type a word"
-  (lambda () (and (buffer-known? *tutorial-buffer*) (editing-state? *tutorial-buffer*))))
+;; the focus and editing steps hear what the reader does, not the state: a
+;; practice page that was in editing before must not pass the type-a-word
+;; step on its own, nor one in focus the stop-editing step
+(tutorial-step-event! "window-navigation" "type a word" "practice-typed")
+(tutorial-step-event! "window-navigation" "to stop editing" "editing-stopped")
 
-;; and leaving the editing state again, after that word, is the next step
-(tutorial-await! "window-navigation" "to stop editing"
-  (lambda ()
-    (let* ((l (tutorial-lesson "window-navigation"))
-           (steps (if l (tutorial--steps l) '()))
-           (word (let loop ((ss steps) (i 0))
-                   (cond ((null? ss) #f)
-                         ((string-contains? (car (car ss)) "type a word") i)
-                         (else (loop (cdr ss) (+ i 1)))))))
-      (and word (tutorial-step-done? "window-navigation" word)
-           (buffer-known? *tutorial-buffer*) (not (editing-state? *tutorial-buffer*))))))
+(define (tutorial--hear-editing! buf)
+  (when (equal? buf *tutorial-buffer*)
+    (tutorial--saw! (if (editing-state? buf) "practice-typed" "editing-stopped"))))
 
-(add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
+(add-hook! 'editing-state-hook 'tutorial--hear-editing!)
 
 ;; Behind a setup lesson a chat troubleshoots. The setup wizard does the
 ;; setup now, so no lesson is one; the machinery stays for a lesson that needs it.

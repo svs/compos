@@ -18,9 +18,10 @@ bad request must not cost the loaded weights.
 
 The models are the laya-mlx checkpoints this machine already holds. The
 huggingface cache and LAYA_MODEL_DIRS are that registry, and this daemon
-keeps no list of its own. Without laya-mlx (Linux, Intel Macs), the laya
-package from PyPI serves instead: it runs on PyTorch and loads its model by
-Hub name, HUB_MODEL unless LAYA_MODEL names another.
+keeps no list of its own. A request that names no model gets HUB_MODEL,
+the upstream laya, unless LAYA_MODEL names another: laya-mlx loads it on
+Apple silicon, and without laya-mlx (Linux, Intel Macs) the laya package
+from PyPI loads it on PyTorch.
 """
 
 import json
@@ -160,7 +161,9 @@ class Daemon:
             import laya_mlx
             agent = laya_mlx.load(str(where), dtype=os.environ.get('LAYA_DTYPE', 'float16'))
         elif has_mlx():
-            raise FileNotFoundError('no checkpoint named %s on this machine' % name)
+            # laya-mlx 0.6 and newer load the upstream model by Hub name
+            import laya_mlx
+            agent = laya_mlx.load(name)
         else:
             # PyTorch laya: a Hub name, downloaded once into the hub cache
             import laya
@@ -182,10 +185,8 @@ class Daemon:
         want = os.environ.get('LAYA_MODEL')
         if want:
             return want
-        if has_mlx():
-            for name in sorted(self.paths):
-                return name
-            return None
+        # the upstream model, current and calibrated; a local conversion
+        # only when LAYA_MODEL names it
         return HUB_MODEL
 
 

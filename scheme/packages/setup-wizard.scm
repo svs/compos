@@ -101,7 +101,7 @@
 (define *setup-wizard-buffer* "*Setup*")
 
 (define *setup-wizard-steps*
-  '(("model" "Choose a model") ("search" "Search by meaning") ("learn" "Start learning")))
+  '(("model" "Choose a model") ("search" "Set up embeddings") ("learn" "Start learning")))
 
 (define (setup-wizard-step buf)
   (or (buffer-local buf 'setup-wizard-step) "model"))
@@ -176,7 +176,7 @@
                   'class "wizard-tools")))
     (setup-model-cards)
     (list (component 'wizard/nav
-            (list 'next (list "wizard:next" "Next: search by meaning →"))))))
+            (list 'next (list "wizard:next" "Next: set up embeddings →"))))))
 
 ;; The search step: one card for each backend of apropos-embedding-backends.
 ;; The backend in use is the first one that has a key.
@@ -201,7 +201,7 @@
                                    (if ready? "Change the key" "Add a key"))))))))
 
 (define (setup-wizard--search-blocks)
-  (list (list 'tag "div" 'class "wizard-title" 'text "Search by meaning")
+  (list (list 'tag "div" 'class "wizard-title" 'text "Set up embeddings")
         (list 'tag "div" 'class "wizard-lede"
               'text (string-append
                       "Compos finds commands and functions for you and for its agents. "
@@ -280,7 +280,7 @@
   (customize-save! 'apropos-embedding-backends
                    (cons b (filter (lambda (x) (not (eq? x b))) apropos-embedding-backends)))
   (apropos-sync-embeddings!)
-  (message (string-append "Setup: search by meaning uses "
+  (message (string-append "Setup: embeddings use "
                           (list-ref (assq b *apropos-embedding-backend-specs*) 1)))
   (when (buffer-exists? buf) (setup-wizard-redraw! buf)))
 

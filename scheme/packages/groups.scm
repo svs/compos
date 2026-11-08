@@ -1655,6 +1655,9 @@ is forgotten and that group falls back to creation order in the switcher."
           (else
             (when current (set-frame-local! 'current-group #f))
             #f))))
+(public! 'frame-group "(frame-group) — the id of the group the selected frame stands in, or #f; a stale id heals to its live one")
+;; reads the frame's group; the only write heals a stale id in place
+(catalog-meta! 'function "frame-group" 'domain 'buffers 'effects '(read))
 
 (define (group-context-group buf)
   ;; the group a pane shows: a chat's own, a work buffer's one group, or #f

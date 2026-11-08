@@ -153,6 +153,8 @@
              (agent-apply-folds! buf))))))
 
 (define (agent-blocks buf) (or (buffer-local buf 'agent-blocks) '()))
+(public! 'agent-blocks "(agent-blocks BUF) — the transcript blocks of chat BUF, newest first, as (START END KIND META...)")
+(catalog-meta! 'function "agent-blocks" 'effects '(read))
 
 (define (agent-block-push! buf start end kind meta)
   (buffer-set-local! buf 'agent-blocks

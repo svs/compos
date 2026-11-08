@@ -42,6 +42,8 @@
                                     " && echo FETCH-OK"))))
           (if (string-contains? out "FETCH-OK")
               (begin
+                ;; the registry files a package with a source under package, not user
+                (cache-put! 'package-source (car (string-split name ".scm")) url)
                 (load path)
                 (message (string-append name " installed and loaded; add (load \"packages/"
                                         name "\") to ~/.compos/init.scm")))

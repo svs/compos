@@ -160,6 +160,7 @@
 (require 'events-demo)
 (require 'events-list)
 (require 'watchers)
+(require 'app-registry)
 (require 'notifications)
 (require 'jj)
 (require 'keys)

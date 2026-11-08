@@ -2849,9 +2849,10 @@ defmodule Compos.Core.SchemeAPI do
       end,
       {"trash-file!",
        "(trash-file! PATH) — move one file or directory to the user trash; return its new path."} =>
-        fn [p] ->
+        fn [p, dir] ->
+          # tramp.scm names the trash folder: the trash-directory setting
           path = Path.expand(p)
-          trash = user_trash_dir()
+          trash = Path.expand(dir)
           :ok = File.mkdir_p(trash)
           target = unused_path(Path.join(trash, Path.basename(path)))
 
@@ -2864,6 +2865,8 @@ defmodule Compos.Core.SchemeAPI do
                 message: "trash failed: #{reason} (#{path} -> #{target})"
           end
         end,
+      {"system-type", "(system-type) — the host system as Emacs names it: darwin or gnu/linux."} =>
+        fn [] -> if :os.type() == {:unix, :darwin}, do: "darwin", else: "gnu/linux" end,
       {"copy-file!",
        "(copy-file! SOURCE DESTINATION) — copy one file or directory without overwriting; return DESTINATION."} =>
         fn [source, destination] ->
@@ -3560,28 +3563,6 @@ defmodule Compos.Core.SchemeAPI do
       {:ok, _} -> true
       {:error, :enoent} -> false
       {:error, _} -> true
-    end
-  end
-
-  defp user_trash_dir do
-    case Application.get_env(:compos_core, :trash_dir) do
-      nil ->
-        home = System.user_home!()
-
-        case :os.type() do
-          {:unix, :darwin} ->
-            Path.join(home, ".Trash")
-
-          _ ->
-            Path.join([
-              System.get_env("XDG_DATA_HOME") || Path.join(home, ".local/share"),
-              "Trash",
-              "files"
-            ])
-        end
-
-      dir ->
-        Path.expand(dir)
     end
   end
 

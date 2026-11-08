@@ -642,10 +642,10 @@ defmodule Compos.EditorTest do
       File.mkdir_p!(Path.join(root, "subdir"))
       File.write!(Path.join(root, "alpha.txt"), "A")
       File.write!(Path.join(root, "beta.txt"), "B")
-      Application.put_env(:compos_core, :trash_dir, trash)
+      {:ok, _} = Compos.Core.Session.eval(~s{(set! trash-directory "#{trash}")})
 
       on_exit(fn ->
-        Application.delete_env(:compos_core, :trash_dir)
+        Compos.Core.Session.eval("(set! trash-directory #f)")
         File.rm_rf!(root)
         File.rm_rf!(trash)
       end)

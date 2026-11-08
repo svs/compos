@@ -225,7 +225,16 @@
             "base=$(basename -- " q "); target=\"$trash/$base\"; n=1; "
             "while [ -e \"$target\" ]; do target=\"$trash/$base.$n\"; n=$((n+1)); done; "
             "mv -- " q " \"$target\"")))
-      (local-trash-file! p)))
+      (local-trash-file! p (trash-directory-path))))
+
+(defcustom 'trash-directory #f
+  "The folder trashed files go to. #f is the system trash: ~/.Trash on macOS, the XDG trash elsewhere.")
+
+(define (trash-directory-path)
+  (cond (trash-directory (expand-path trash-directory))
+        ((equal? (system-type) "darwin") (expand-path "~/.Trash"))
+        (else (string-append (or (getenv "XDG_DATA_HOME") (expand-path "~/.local/share"))
+                             "/Trash/files"))))
 
 (define (set-file-mode! p mode)
   (if (remote-path? p)

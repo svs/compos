@@ -228,7 +228,11 @@
          (live? (and ready? (eq? (decide--first-live) b)))
          (tested (setup-wizard--decide-result b))
          (failed? (and tested (eq? (cadr tested) 'failed)))
-         (test (if ready? (list (list (string-append "wizard:decide-test:" (symbol->string b)) "Test")) '()))
+         (test (append
+                 (if ready? (list (list (string-append "wizard:decide-test:" (symbol->string b)) "Test")) '())
+                 ;; Use this puts it first: decide asks it before the others
+                 (if (and ready? (not live?))
+                     (list (list (string-append "wizard:decide-use:" (symbol->string b)) "Use this")) '())))
          (spec (cond ((eq? b 'jev)
                       (list "JEV" "Classifies text fast and at a low cost, through the TypeSafe API"
                             (cond (ready? "key found")
@@ -261,7 +265,7 @@
               'text (string-append
                       "Compos makes small decisions with a decision model: is a mail urgent, "
                       "which group a buffer belongs to, which command fits a request. "
-                      "It asks the first model that is ready, in this order. Test asks one a question."))
+                      "It asks the first model that is ready, in this order. Test asks one a question, and Use this puts it first."))
         (component 'ui/actions
           (list 'actions '(("wizard:rescan" "Scan again" "g"))
                 'class "wizard-tools"))
@@ -672,6 +676,12 @@
      (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
+    ((string-prefix? "wizard:decide-use:" id)
+     (let ((d (string->symbol (substring-bytes id 18 (string-byte-length id)))))
+       (customize-save! 'decide-backends (cons d (filter (lambda (x) (not (eq? x d))) decide-backends)))
+       (message (string-append "Setup: decisions use " (symbol->string d) " first"))
+       (setup-wizard-redraw! buf))
+     #t)
     ((string-prefix? "wizard:decide-test:" id)
      (setup-wizard-decide-test! buf (string->symbol (substring-bytes id 19 (string-byte-length id)))) #t)
     ;; a key that is in is tested at once, as a chosen connector is

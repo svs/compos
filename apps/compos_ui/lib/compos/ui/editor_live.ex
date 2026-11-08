@@ -1157,7 +1157,11 @@ defmodule Compos.Ui.EditorLive do
       <.frame_echo state={@state} />
       <.frame_notices state={@state} />
       <.frame_keycast state={@state} />
-      <c-windows class="windows" role="main" data-slide={assigns[:slide]}
+      <%!-- The id keys the windows for the patch: a notice, the keycast or
+           any bar that comes and goes before them is inserted beside
+           them, and never rebuilds them, which put every scroller back at
+           its top. --%>
+      <c-windows id="windows" class="windows" role="main" data-slide={assigns[:slide]}
         data-panes={motion_panes(@state)} data-pending={Enum.join(@state.pending, " ")}>
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </c-windows>
@@ -1382,7 +1386,11 @@ defmodule Compos.Ui.EditorLive do
   # a click goes where the notice points. M-x notifications keeps the history.
   defp frame_notices(assigns) do
     ~M"""
-    <c-group :if={notices(@state) != []} class="notices" role="status" aria-live="polite">
+    <%!-- Always drawn, empty when no notice shows: a box that comes and
+         goes before the windows makes the patch move them, and a moved
+         window loses every scroll in it. --%>
+    <c-group id="notices" class="notices" role="status" aria-live="polite"
+      style={if notices(@state) == [], do: "display: none"}>
       <c-group :for={{seq, source, title, body} <- notices(@state)} id={"notice-" <> seq} class="notice" phx-click="notice_click" phx-value-seq={seq}>
         <c-text class="notice-source">{source}</c-text>
         <c-text class="notice-title">{title}</c-text>
@@ -1403,7 +1411,9 @@ defmodule Compos.Ui.EditorLive do
   # pending, which runs no command yet. show-keys.scm ships the CSS.
   defp frame_keycast(assigns) do
     ~M"""
-    <c-group :if={chrome(@state, "show-keys") != [] || keycast_pending(@state)} class="keycast" aria-hidden="true">
+    <%!-- Always drawn, hidden when empty, for the reason the notices are. --%>
+    <c-group id="keycast" class="keycast" aria-hidden="true"
+      style={if chrome(@state, "show-keys") == [] and !keycast_pending(@state), do: "display: none"}>
       <c-group :for={[keys, count] <- chrome(@state, "show-keys")} class="keycast-entry">
         <c-action-key class="keycast-keys">{keys}</c-action-key>
         <c-text :if={count != ""} class="keycast-count">{count}</c-text>

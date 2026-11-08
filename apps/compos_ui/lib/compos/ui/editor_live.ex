@@ -2212,82 +2212,6 @@ defmodule Compos.Ui.EditorLive do
   # The transcript is markdown; the page renderer draws it (core).
   defp prose_html(md), do: Compos.Core.Markdown.Html.prose(md, local_url: &LocalImage.url/1)
 
-  # A folded call still says what it returned. New calls separate input and
-  # output with a blank line. Older calls contain only their result.
-  defp tool_preview(body) do
-    candidate =
-      case String.split(String.trim(body), ~r/\n\s*\n/, parts: 2) do
-        [_input, output] when output != "" -> output
-        [detail | _] -> detail
-        _ -> ""
-      end
-
-    candidate
-    |> tool_result_text()
-    |> String.split("\n", parts: 2)
-    |> List.first()
-    |> to_string()
-    |> String.replace(~r/\s+/, " ")
-    |> String.slice(0, 140)
-  end
-
-  # Keep the canonical transcript unchanged. The rich view unwraps only the
-  # final MCP result envelope and leaves the tool input before it intact.
-  defp tool_display_body(body) do
-    parts = String.split(body, "\n\n")
-    result = List.last(parts) || ""
-    readable = tool_result_text(result)
-
-    if readable == result do
-      body
-    else
-      parts
-      |> List.replace_at(-1, readable)
-      |> Enum.join("\n\n")
-    end
-  end
-
-  defp tool_result_text(text) do
-    case Jason.decode(String.trim(text)) do
-      {:ok, %{"content" => content} = result} when is_list(content) ->
-        case Enum.find_value(content, fn
-               %{"text" => value} when is_binary(value) and value != "" -> value
-               _ -> nil
-             end) do
-          nil -> Jason.encode!(result, pretty: true)
-          value -> pretty_json(value)
-        end
-
-      {:ok, value} ->
-        Jason.encode!(value, pretty: true)
-
-      _ ->
-        text
-    end
-  end
-
-  # A tool body whose last part is a JSON object or array: {HEAD, JSON}.
-  # The JSON draws in the json grammar's faces.
-  defp json_tail(body) do
-    parts = String.split(body, "\n\n")
-    json = List.last(parts) || ""
-
-    case Jason.decode(json) do
-      {:ok, value} when is_map(value) or is_list(value) ->
-        {binary_part(body, 0, byte_size(body) - byte_size(json)), json}
-
-      _ ->
-        nil
-    end
-  end
-
-  defp pretty_json(text) do
-    case Jason.decode(String.trim(text)) do
-      {:ok, value} -> Jason.encode!(value, pretty: true)
-      _ -> text
-    end
-  end
-
   # The one renderer for block trees. Structure only: tags, classes, segs,
   # click ids and the point mark all come from the mode. The mark: a block
   # with a mark class and a line range gets that class while point's line is
@@ -2748,28 +2672,10 @@ defmodule Compos.Ui.EditorLive do
   defp block_file(view), do: view
 
   # The formats a range draws in. "text" trims the bytes; "markdown" is
-  # prose HTML; the two "mcp-result" formats unwrap a tool result envelope,
-  # whole or as its first line.
+  # prose HTML; "html" is markup the mode made, e.g. a chat card's result.
   defp range_content(t, "markdown"), do: {:html, t |> prose_html() |> wrap_tables()}
   defp range_content(t, "raw"), do: {:text, t}
-
-  defp range_content(t, "mcp-result") do
-    body = t |> String.trim_trailing() |> tool_display_body()
-
-    case json_tail(body) do
-      nil ->
-        {:text, body}
-
-      {head, json} ->
-        {:html,
-         Compos.Core.Markdown.Html.html_escape(head) <>
-           Compos.Core.Markdown.Html.highlight("json", json)}
-    end
-  end
-
-  defp range_content(t, "mcp-result-line"),
-    do: {:text, t |> String.trim_trailing() |> tool_display_body() |> tool_preview()}
-
+  defp range_content(t, "html"), do: {:html, t}
   defp range_content(t, _), do: {:text, String.trim(t)}
 
   # The caret input: the window's text from START to the end, split at

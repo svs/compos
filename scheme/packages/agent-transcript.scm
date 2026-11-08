@@ -831,9 +831,66 @@
 (define (chat-view--button class click label)
   (list 'tag "button" 'class class 'click click 'text label))
 
+;; --- tool results -------------------------------------------------------------
+;; A card shows its result readable; the transcript keeps the bytes. An MCP
+;; result envelope unwraps to its first text, and JSON indents the way a
+;; parse and encode gives it: a small object sorts its keys.
+
+(define (chat-view--envelope-text item)
+  (let ((v (and (pair? item) (symbol? (car item)) (plist-get item 'text))))
+    (and (string? v) (not (equal? v "")) v)))
+
+(define (chat-view--envelope-first items)
+  (cond ((not (list? items)) #f)
+        ((null? items) #f)
+        ((chat-view--envelope-text (car items)) (chat-view--envelope-text (car items)))
+        (else (chat-view--envelope-first (cdr items)))))
+
+;; TEXT readable: an envelope's first text, JSON indented, else TEXT
+(define (chat-view-tool-result-text text)
+  (let* ((s (string-trim text))
+         (v (and (string-prefix? "{" s) (json-parse s)))
+         (found (and (pair? v) (symbol? (car v)) (chat-view--envelope-first (plist-get v 'content)))))
+    (if found
+        (or (json-format (string-trim found) #t) found)
+        (or (json-format s #t) text))))
+
+;; BODY with its last part, the result, readable; the input before it stays
+(define (chat-view-tool-display-body body)
+  (let* ((parts (string-split body "\n\n"))
+         (n (length parts))
+         (result (list-ref parts (- n 1)))
+         (readable (chat-view-tool-result-text result)))
+    (if (equal? readable result)
+        body
+        (string-join (append (take parts (- n 1)) (list readable)) "\n\n"))))
+
+;; the line a closed card shows: the first line of what the call returned.
+;; A call with input has its output after the first blank line.
+(define (chat-view-tool-preview body)
+  (let* ((s (string-trim body))
+         (m (re-find "\\n\\s*\\n" s 0))
+         (part (if m (substring-bytes s (cadr m) (string-byte-length s)) s))
+         (line (car (string-split (chat-view-tool-result-text part) "\n")))
+         (flat (re-replace-all "\\s+" line " ")))
+    (if (> (string-length flat) 140) (substring flat 0 140) flat)))
+
+;; the open card's body: SHOWN, with a JSON tail in the json grammar's colours
+(define (chat-view--tool-body shown)
+  (let* ((parts (string-split shown "\n\n"))
+         (json (list-ref parts (- (length parts) 1)))
+         (v (json-parse json)))
+    (if (or (pair? v) (null? v))
+        (list 'content (string-append
+                         (html-escape (substring-bytes shown 0 (- (string-byte-length shown)
+                                                                  (string-byte-length json))))
+                         (highlight-html "json" json))
+              'format "html")
+        (list 'content shown 'format "raw"))))
+
 ;; the tool card: a controlled disclosure. The summary names the call; the
-;; body is the call's own bytes, drawn with the tool result unwrapped.
-(define (chat-view--tool buf b open-cards)
+;; body is the call's own bytes, drawn with the tool result readable.
+(define (chat-view--tool-card buf b open-cards)
   (let* ((e (nth 1 b)) (id (nth 3 b)) (title (or (nth 4 b) "")) (verb (nth 5 b))
          (status (or (nth 6 b) "")) (bs (nth 7 b))
          (duration (chat-view-duration-label (and (> (length b) 8) (nth 8 b))))
@@ -841,7 +898,9 @@
          (split (string-index title ": "))
          (name (if split (substring-bytes title 0 split) title))
          (arg (if split (substring-bytes title (+ split 2) (string-byte-length title)) ""))
-         (body (string-trim (chat-view--slice buf bs e)))
+         (raw (chat-view--slice buf bs e))
+         (body (string-trim raw))
+         (shown (lambda () (chat-view-tool-display-body (re-replace-all "\\s+\\z" raw ""))))
          (tokens (chat-view-token-label (+ (string-byte-length title) (string-byte-length body))))
          (verb-shown (and (string? verb) (not (member verb '("" "tool" "mcp" "other"))))))
     (list 'tag "c-toolcall"
@@ -874,7 +933,8 @@
                                                               (list (chat-view--text "c-arguments" "ag-arg" arg))))))
                                             (if open '()
                                                 (list (list 'tag "c-text" 'class "ag-preview"
-                                                            'range (list bs e) 'format "mcp-result-line"))))))
+                                                            'range (list bs e) 'format "raw"
+                                                            'content (chat-view-tool-preview (shown))))))))
                               (if (equal? status "done") '()
                                   (list (list 'tag "c-status" 'class (string-append "ag-tstatus " status)
                                               'attrs (list (list "state" status)) 'text status)))
@@ -885,8 +945,16 @@
                     ;; tool result was 116k nodes behind a one-line summary
                     (if (or (not open) (equal? body "")) '()
                         (list (list 'tag "c-result"
-                                    'children (list (list 'tag "pre" 'class "ag-body"
-                                                          'range (list bs e) 'format "mcp-result")))))))))))
+                                    'children (list (append (list 'tag "pre" 'class "ag-body" 'range (list bs e))
+                                                                (chat-view--tool-body (shown)))))))))))))
+
+;; a card waits for the window to shape it: a long chat holds more cards
+;; than it draws, and shaping parses each result's JSON
+(define (chat-view--tool buf b open-cards) (list 'tag "c-toolcall" 'lazy b))
+
+(define (chat-view--drawn buf v open-cards)
+  (let ((b (and (pair? v) (plist-get v 'lazy))))
+    (if b (chat-view--tool-card buf b open-cards) v)))
 
 ;; the view of one transcript block, or #f for a block the rich view does
 ;; not draw (the waiting line: the activity row says it)
@@ -1320,13 +1388,17 @@
       (unless (and m (equal? (nth 3 m) sig)
                    (buffer-local buf 'render-blocks))
         (let* ((views (chat-view--views buf raw open m))
-               (win (chat-view--window buf raw views)))
+               (win (chat-view--window buf raw views))
+               ;; the drawn cards shaped; the memo keeps them, so a sync
+               ;; shapes only a card it has not drawn before
+               (drawn (map (lambda (v) (chat-view--drawn buf v open)) (car win)))
+               (views (append drawn (list-tail views (length drawn)))))
           (chat-view--memo-set! buf (list raw open views sig))
           (buffer-set-locals! buf
             (list 'render-root '(tag "c-buffer" class "agent-view")
                   'render-input "agent-saved-mark"
                   'render-blocks (chat-view-tree buf (chat-view--mark-selected
-                                                   (reverse (filter (lambda (v) v) (car win)))
+                                                   (reverse (filter (lambda (v) v) drawn))
                                                    (let ((nav (buffer-local buf 'chat-view-nav)))
                                                      (and (integer? nav) (- nav (cadr win)))))
                                                  verbosity queued activity (cadr win)))))))))

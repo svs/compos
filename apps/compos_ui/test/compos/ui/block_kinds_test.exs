@@ -39,7 +39,7 @@ defmodule Compos.Ui.BlockKindsTest do
           pl(tag: "details", class: "k-card", open: false,
             children: [
               pl(tag: "summary", click: "card:1", attrs: [["aria-label", "toggle"]], text: "card"),
-              pl(tag: "pre", class: "k-body", range: [bs, e], format: "mcp-result")
+              pl(tag: "pre", class: "k-body", range: [bs, e], content: "p95 9.4ms", format: "raw")
             ]),
           pl(tag: "c-info", class: "k-empty", range: [s, s])
         ]),

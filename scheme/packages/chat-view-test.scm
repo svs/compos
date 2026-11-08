@@ -274,3 +274,22 @@
       (check-equal! (plist-get (cadr (plist-get view 'children)) 'text) brief "the whole brief inside")
       (check-equal! (plist-get (chat-view-block "*zz-unused*" (list 0 10 "user" "hello") '()) 'tag)
                     "c-user" "a typed message stays YOU"))))
+
+(deftest 'chat-view-tool-result-reads-as-the-card-shows-it
+  "a tool result unwraps its MCP envelope and indents its JSON; the transcript keeps the bytes"
+  (lambda ()
+    (let ((env "{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"b\\\":1,\\\"a\\\":null}\"}]}")
+          (sorted "{\n  \"a\": null,\n  \"b\": 1\n}"))
+      (check-equal! (chat-view-tool-result-text env) sorted "the envelope's text, keys sorted, null kept")
+      (check-equal! (chat-view-tool-result-text "plain words") "plain words" "text stays")
+      (check-equal! (chat-view-tool-display-body (string-append "path: a\n\n" env))
+                    (string-append "path: a\n\n" sorted) "the input stays")
+      (check-equal! (chat-view-tool-preview "path: a\n\nfirst   line\nsecond") "first line"
+                    "the preview is the output's first line")
+      (check-equal! (string-length (chat-view-tool-preview (string-join (map (lambda (i) "x") (iota 200)) "")))
+                    140 "140 characters at most")
+      (check-equal! (chat-view--tool-body "in <b>\n\n{\"a\":1}")
+                    (list 'content (string-append "in &lt;b&gt;\n\n" (highlight-html "json" "{\"a\":1}")) 'format "html")
+                    "a JSON tail draws in the json colours")
+      (check-equal! (chat-view--tool-body "just text") '(content "just text" format "raw")
+                    "other text draws as it is"))))

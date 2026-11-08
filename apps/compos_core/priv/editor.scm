@@ -7027,6 +7027,8 @@
 (public! 'permanent-local! "(permanent-local! NAME) — kill-all-local-variables! keeps the local NAME")
 (public! 'define-globalized-minor-mode! "(define-globalized-minor-mode! GLOBAL LOCAL ELIGIBLE? [DOC]) — the command GLOBAL turns LOCAL on in every buffer ELIGIBLE? accepts, now and as buffers appear")
 (public! 'globalized-minor-mode-on? "(globalized-minor-mode-on? GLOBAL) — #t while the globalized mode is on")
+(public! 'minor-mode-on? "(minor-mode-on? BUF NAME) — #t while the minor mode NAME is on in BUF")
+(catalog-meta! 'function "minor-mode-on?" 'domain 'buffers 'effects '(read))
 (public! 'auto-mode-for-buffer "(auto-mode-for-buffer BUF [NAME]) — the mode BUF would open in: magic-mode-alist, then the interpreter line, then the name")
 (public! 'define-prefix-command "(define-prefix-command NAME) — a keymap a prefix key leads to")
 (public! 'bind-prefix! "(bind-prefix! MAP KEYS NAME) — in MAP (\"global\" for the global map), KEYS leads to the keymap NAME")

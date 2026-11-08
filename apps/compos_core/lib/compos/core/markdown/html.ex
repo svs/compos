@@ -19,8 +19,6 @@ defmodule Compos.Core.Markdown.Html do
   alias Compos.Scheme
   alias Compos.Scheme.Text
 
-  @csv_preview_lines 5
-
   # llm-mode answer overlays ride the parse as private-use sentinels
   @llm_start "\uE002"
   @llm_end "\uE003"
@@ -81,8 +79,7 @@ defmodule Compos.Core.Markdown.Html do
     # The code-block head (language, run and tangle keys) is chrome for a
     # document the reader edits. A read-only page can decline it.
     Process.put(:compos_md_chrome, opts[:chrome] != false)
-    Process.put(:compos_md_heads, %{})
-    Process.put(:compos_md_heads, %{})
+    Process.put(:compos_md_asked, %{})
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = tree |> autolinks(text) |> nodes(text, 0, marks)
@@ -408,7 +405,7 @@ defmodule Compos.Core.Markdown.Html do
     {content, marks} =
       cond do
         String.downcase(lang) == "result-csv" ->
-          csv_preview(node, text, marks, csv_preview_lines(args), nil)
+          csv_preview(node, text, marks, ask("fence-kind-preview-lines", [args]) || 0, nil)
 
         folded_code?(node, text) ->
           {marks_only(node, marks), drop_marks(node, marks)}
@@ -513,13 +510,13 @@ defmodule Compos.Core.Markdown.Html do
        ) do
     url = binary_part(text, link.start, link.stop - link.start)
     whole = String.trim(binary_part(text, inline.start, inline.stop - inline.start))
-    if whole == url and (image_url?(url) or tweet_url?(url)), do: {url, link}
+    if whole == url and ask("markdown-url-kind", [url]) in ["image", "tweet"], do: {url, link}
   end
 
   defp lone_url(_node, _text), do: nil
 
   defp url_paragraph(node, {url, link}, text, marks) do
-    if image_url?(url) do
+    if ask("markdown-url-kind", [url]) == "image" do
       {open, close} = box("p", node)
 
       {[
@@ -565,23 +562,6 @@ defmodule Compos.Core.Markdown.Html do
       do: {[body, marks_only(node, marks)], drop_marks(node, marks)},
       else: generic_node(node, text, marks)
   end
-
-  @image_exts ~w(.png .jpg .jpeg .gif .webp .svg .avif .bmp)
-  # the share sheet appends ?s=20 and friends; a query or fragment after
-  # the status id still names the same post
-  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
-
-  defp image_url?(url) do
-    case URI.parse(url) do
-      %URI{scheme: s, path: p} when s in ["http", "https"] and is_binary(p) ->
-        (p |> Path.extname() |> String.downcase()) in @image_exts
-
-      _ ->
-        false
-    end
-  end
-
-  defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
 
   # A bare URL is a node the inline grammar does not make, so the walk adds
   # it: a `bare_url` over the bytes of each URL that stands in the text
@@ -839,19 +819,6 @@ defmodule Compos.Core.Markdown.Html do
     {[~s(<tr data-src="#{start}-#{stop}">), cells, "</tr>"], marks}
   end
 
-  defp csv_preview_lines(args) do
-    case Regex.run(~r/:(?:lines|preview)[ \t]+([0-9]+)/i, args, capture: :all_but_first) do
-      [count] ->
-        case Integer.parse(count) do
-          {value, ""} when value > 0 -> value
-          _ -> @csv_preview_lines
-        end
-
-      _ ->
-        @csv_preview_lines
-    end
-  end
-
   defp csv_row(line), do: csv_row(line, "", [], false)
   defp csv_row(<<>>, field, fields, _quoted), do: Enum.reverse([field | fields])
 
@@ -882,37 +849,41 @@ defmodule Compos.Core.Markdown.Html do
   # it: `fence-kind-page-head`. A page whose Scheme is not up draws none.
   defp code_head("", _args), do: []
 
-  # One call for each different head in a page: a call costs a millisecond,
-  # and a long document repeats the same few fences.
   defp code_head(lang, args) do
-    heads = Process.get(:compos_md_heads, %{})
+    with true <- Process.get(:compos_md_chrome, true),
+         html when is_binary(html) <- ask("fence-kind-page-head", [lang, args]),
+         do: html,
+         else: (_ -> [])
+  end
 
-    case heads do
-      %{{^lang, ^args} => head} ->
-        head
+  # A policy question for Scheme, asked once per page for each different
+  # question: a call costs about a millisecond, and a long page repeats the
+  # same few fences. A page whose Scheme is not up gets nil.
+  defp ask(fun, args) do
+    asked = Process.get(:compos_md_asked, %{})
+
+    case asked do
+      %{{^fun, ^args} => answer} ->
+        answer
 
       _ ->
-        head = scheme_head(lang, args)
-        Process.put(:compos_md_heads, Map.put(heads, {lang, args}, head))
-        head
+        answer = scheme(fun, args)
+        Process.put(:compos_md_asked, Map.put(asked, {fun, args}, answer))
+        answer
     end
   end
 
-  defp scheme_head(lang, args) do
-    with true <- Process.get(:compos_md_chrome, true),
-         {:ok, html, _} when is_binary(html) <-
-           Scheme.exec(Session.interp(), fn i ->
-             with {:ok, f, i} <- Scheme.eval_string(i, "fence-kind-page-head"),
-                  do: Scheme.call(i, f, [lang, args])
-           end) do
-      html
-    else
-      _ -> []
+  defp scheme(fun, args) do
+    case Scheme.exec(Session.interp(), fn i ->
+           with {:ok, f, i} <- Scheme.eval_string(i, fun), do: Scheme.call(i, f, args)
+         end) do
+      {:ok, answer, _} -> answer
+      _ -> nil
     end
   rescue
-    _ -> []
+    _ -> nil
   catch
-    :exit, _ -> []
+    :exit, _ -> nil
   end
 
   defp generic_node(node, text, marks) do

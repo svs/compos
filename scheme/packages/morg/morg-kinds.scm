@@ -138,6 +138,14 @@
 
 (effects! '(pure))
 
+;; How many lines of a CSV block the page previews: :lines N or :preview N
+;; in the arguments, else five.
+(define (fence-kind-preview-lines args)
+  (let* ((at (re-find "(?i):(?:lines|preview)[ \t]+[0-9]+" args 0))
+         (n (and at (string->number
+                      (substring-bytes args (car (re-find "[0-9]+" args (car at))) (cadr at))))))
+    (if (and n (> n 0)) n 5)))
+
 ;; The file a block tangles to, from its arguments: the word after
 ;; :tangle. The word no means the block stays where it is.
 (define (fence-kind--tangle-target args)

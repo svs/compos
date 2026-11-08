@@ -580,3 +580,22 @@
 (public! 'markdown-paint-on! "(markdown-paint-on! BUF) — draw BUF's Markdown in place (preview-mode's painter)")
 (public! 'markdown-paint-off! "(markdown-paint-off! BUF) — take the in-place drawing off BUF")
 (public! 'markdown-refontify! "(markdown-refontify! BUF) — repaint the Markdown faces of BUF")
+
+;;; --- what a bare URL draws as on the page ------------------------------------
+
+(effects! '(pure))
+
+;; A paragraph that is one URL and nothing else was pasted to be seen, not
+;; read: a picture draws as the picture, and an X post as its card. Any
+;; other URL stays a link. The share sheet appends ?s=20 and friends; a
+;; query or a fragment after the status id still names the same post.
+(define (markdown-url-kind url)
+  (cond ((re-find "(?i)\\Ahttps?://[^/?#]*/[^?#]*[^/?#]\\.(png|jpe?g|gif|webp|svg|avif|bmp)(?:[?#]|\\z)" url 0)
+         "image")
+        ((re-find "\\Ahttps?://(?:mobile\\.)?(?:twitter|x)\\.com/[^/]+/status(?:es)?/\\d+(?:[?#]\\S*)?\\z" url 0)
+         "tweet")
+        (else #f)))
+
+(effects! '(write))
+
+(public! 'markdown-url-kind "(markdown-url-kind URL) — image or tweet when a paragraph of URL alone draws as a picture or a post card, else #f")

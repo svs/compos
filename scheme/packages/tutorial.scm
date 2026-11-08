@@ -161,13 +161,17 @@
 
 (define (tutorial--parse text)
   ;; one lesson per ## section of the master, numbered from 1 in order;
-  ;; Contents is the master's own map, not a lesson, and its numbers are these
+  ;; Contents is the master's own map, not a lesson, and its numbers are these.
+  ;; A # heading after the first ends the lessons: what follows is kept for
+  ;; later, and the index and the slides do not show it
   (let loop ((lines (string-split text "\n")) (title #f) (acc '()) (out '()))
     (let ((flush (lambda ()
                    (if (and title (not (equal? title "Contents")))
                        (cons (tutorial--lesson title acc (+ 1 (length out))) out)
                        out))))
       (cond ((null? lines) (reverse (flush)))
+            ((and (string-prefix? "# " (car lines)) (or title (pair? out)))
+             (reverse (flush)))
             ((string-prefix? "## " (car lines))
              (loop (cdr lines)
                    (string-trim (substring-bytes (car lines) 3 (string-byte-length (car lines))))
@@ -1377,6 +1381,10 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 ;; a chat sends with RET, which runs agent-send
 (tutorial-step-event! "chat" "press `RET` to send it" "agent-send")
+(tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
+
+;; the prefix step of the kept Key notation lesson finishes when the prefix is cancelled
+(tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")
 
 ;; Cmd-C and Cmd-V reach Scheme as clipboard-copy and clipboard-paste!: a
 ;; step can listen for them with tutorial-step-event!

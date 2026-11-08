@@ -38,6 +38,10 @@
 (defcustom 'todo-directories '("~/.compos/**/todos.md")
   "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
 
+(defcustom 'todo-skip-directories
+  '("node_modules" "_build" "deps" "target" "venv" "dead" "worktree-daemons" "chrome-profile" "grammars")
+  "Folders a `**` in todo-directories never goes into, by name: build output, archives and the editor's own data, which hold many files and no todos. Folders whose name starts with a dot are skipped too.")
+
 (defcustom 'todo-user "svs"
   "The name a change is logged under when the caller names nobody.")
 
@@ -125,7 +129,9 @@
   (let walk ((dir "/") (segs (cdr (string-split (expand-path pattern) "/"))))
     (let ((names (lambda () (let ((l (and (file-directory? dir) (list-dir dir)))) (if (pair? l) l '()))))
           (subdirs (lambda (ns) (map (lambda (n) (substring-bytes n 0 (- (string-byte-length n) 1)))
-                                     (filter (lambda (n) (and (string-suffix? "/" n) (not (string-prefix? "." n)))) ns)))))
+                                     (filter (lambda (n) (and (string-suffix? "/" n) (not (string-prefix? "." n))
+                                                              (not (member (substring-bytes n 0 (- (string-byte-length n) 1)) todo-skip-directories))))
+                                             ns)))))
       (cond ((null? segs) (if (and (file-exists? dir) (not (file-directory? dir))) (list dir) '()))
             ((equal? (car segs) "**")
              (fold (lambda (acc d) (append acc (walk (todo--join dir d) segs)))

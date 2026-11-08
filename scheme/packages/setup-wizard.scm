@@ -218,7 +218,6 @@
 (define (setup-wizard--decide-ready? b)
   (cond ((eq? b 'jev) (decide-jev-ready?))
         ((eq? b 'laya) (laya-available?))
-        ((eq? b 'haiku) (and (llm-key "anthropic") #t))
         (else #f)))
 
 (define (setup-wizard--decide-card b)
@@ -240,17 +239,12 @@
                                   (else "no key"))
                             (list (list "wizard:decide-key:typesafe-api-key"
                                         (if ready? "Change the key" "Add a key")))))
-                     ((eq? b 'laya)
+                     (else
                       (list "laya" "Answers on this machine, in a local daemon"
                             (cond ((laya-running?) "running")
                                   (ready? "installed, starts on the first question")
                                   (else "needs Apple silicon and a Python with laya-mlx"))
-                            '()))
-                     (else
-                      (list "Claude Haiku" "A small hosted model, through your Anthropic key"
-                            (if ready? "key found" "needs an Anthropic key")
-                            (list (list "wizard:decide-key:anthropic-api-key"
-                                        (if ready? "Change the key" "Add a key"))))))))
+                            '())))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
             'detail (string-append (list-ref spec 1) " · " (if tested (caddr tested) (list-ref spec 2)))
@@ -272,7 +266,7 @@
         (list 'tag "div" 'class "wizard-grid"
               ;; a fixed order: Use this changes which one is in use, never
               ;; where a card stands
-              'children (map setup-wizard--decide-card '(jev laya haiku)))
+              'children (map setup-wizard--decide-card '(jev laya)))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
                 'next (list "wizard:next" "Next: browser extension →")))))
@@ -688,7 +682,7 @@
     ;; a key that is in is tested at once, as a chosen connector is
     ((string-prefix? "wizard:decide-key:" id)
      (let* ((s (string->symbol (substring-bytes id 18 (string-byte-length id))))
-            (b (if (eq? s 'typesafe-api-key) 'jev 'haiku)))
+            (b 'jev))
        (setup-ask-secret! s #f
          (lambda ()
            (if (setup-wizard--decide-ready? b)

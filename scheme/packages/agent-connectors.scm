@@ -427,8 +427,38 @@ nonstandard install out of the built-in connector catalog."
         live)))
 
 (define (agent-config-with-system-parts conf)
-  (fold (lambda (out part) (agent-config-append-system out (car (cdr part))))
-        conf (agent-system-prompt-parts conf)))
+  (agent-config-wrap-system
+    (fold (lambda (out part) (agent-config-append-system out (car (cdr part))))
+          conf (agent-system-prompt-parts conf))))
+
+;; a 'system-in-prompt adapter reads the sections at the head of the first
+;; user message (acp.ex prepends them once). The tags are the boundary:
+;; without them the model reads our sections and the user's first words as
+;; one question.
+(define (agent-config-wrap-system conf)
+  (let ((s (plist-get conf 'system)))
+    (if (and (string? s) (not (equal? s "")))
+        (plist-put conf 'system (string-append "<system>\n" s "\n</system>\n\n"))
+        conf)))
+
+;; A Codex thread starts with one instruction text (codex_app_server.ex):
+;; the sections the ACP lane sends as _meta.systemPrompt.append, the chat's
+;; system text and the runtime model id, each once; and the approval policy.
+(define (codex-thread-fields meta system model mode)
+  "(codex-thread-fields META SYSTEM MODEL MODE) - (APPROVAL-POLICY INSTRUCTIONS-OR-#f) for a Codex thread"
+  (let* ((sp (and (list? meta) (plist-get meta 'systemPrompt)))
+         (base (and (list? sp) (plist-get sp 'append)))
+         (identity (and (string? model)
+                        (string-append "Your exact runtime model ID is " (json-encode model)
+                                       ". When asked which model you are, "
+                                       "report that exact ID; do not replace it with a generic Codex or GPT family name.")))
+         (parts (fold (lambda (acc s)
+                        (if (and (string? s) (not (equal? (string-trim s) "")) (not (member s acc)))
+                            (append acc (list s))
+                            acc))
+                      '() (list base system identity))))
+    (list (if (equal? mode "auto") "never" "on-request")
+          (if (null? parts) #f (string-join parts "\n\n")))))
 
 (domain! 'chat)
 
@@ -438,6 +468,11 @@ nonstandard install out of the built-in connector catalog."
   "(agent-live-system-prompt-parts CONF) — current ACP prompt sections before the conversation freeze")
 (public! 'agent-live-system-prompt-source-parts
   "(agent-live-system-prompt-source-parts CONF) — unfiltered ACP prompt fragments")
+
+(effects! '(pure))
+
+(public! 'codex-thread-fields
+  "(codex-thread-fields META SYSTEM MODEL MODE) - (APPROVAL-POLICY INSTRUCTIONS-OR-#f) for a Codex thread")
 
 (effects! '(write))
 

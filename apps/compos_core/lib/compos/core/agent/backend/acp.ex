@@ -190,6 +190,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # drops protocol metadata (dsh) declares 'system-in-prompt, and its
   # sections lead the session's first user message: the head of the prefix
   # the provider caches, so the second turn pays for the new text alone.
+  # agent-resolve-config puts the tags around them (agent-config-wrap-system).
   # ACP carries an image as content, not as a path: the bytes go base64 in
   # their own prompt block. A file we cannot read is skipped rather than
   # failing the turn — the message text names the path either way.
@@ -203,15 +204,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp with_system_preamble(%{system_sent: true} = state, text), do: {state, text}
 
   defp with_system_preamble(state, text) do
-    case Map.get(state.config, "system") do
-      system when is_binary(system) and system != "" ->
-        # the tags are the boundary: without them the model reads our
-        # sections and the user's first words as one question
-        {%{state | system_sent: true}, "<system>\n" <> system <> "\n</system>\n\n" <> text}
-
-      _ ->
-        {%{state | system_sent: true}, text}
-    end
+    system = Map.get(state.config, "system")
+    {%{state | system_sent: true}, if(is_binary(system), do: system <> text, else: text)}
   end
 
   # --- incoming bytes (real port or fake transport) ---------------------------
@@ -711,11 +705,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp ingest_model_option(state, %{"currentValue" => cur} = opt) do
     leaves = option_leaves(Map.get(opt, "options"))
     wires = for o <- leaves, do: Map.get(o, "value")
-    ids = model_ids(wires)
+
+    # a wire value is opaque; Scheme names each model (model-acp-ids)
+    [current | ids] =
+      case Backend.scheme("model-acp-ids", [wires, cur]) do
+        {:ok, [_ | _] = named} -> named
+        _ -> [cur | wires]
+      end
+
     wire_by_id = Map.new(Enum.zip(ids, wires))
     names = for o <- leaves, do: Map.get(o, "name", "")
-
-    current = Enum.find(ids, fn id -> Map.get(wire_by_id, id) == cur end) || model_id(cur)
 
     %{state | config_model: current, config_model_wire: wire_by_id}
     |> emit(
@@ -745,41 +744,6 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp ingest_mode_option(state, _), do: state
-
-  # A model option value is opaque on the wire. dsh spells it as a JSON
-  # ["provider", "model"] pair, which no menu and no modeline can show, so
-  # name the model and keep the wire string for the write back. Two
-  # providers that serve the same model name keep their whole paths.
-  defp model_ids(wires) do
-    ids = Enum.map(wires, &model_id/1)
-    ambiguous = ids -- Enum.uniq(ids)
-
-    for {wire, id} <- Enum.zip(wires, ids),
-        do: if(id in ambiguous, do: model_path(wire), else: id)
-  end
-
-  defp model_id(wire) do
-    case model_parts(wire) do
-      [_ | _] = parts -> List.last(parts)
-      _ -> wire
-    end
-  end
-
-  defp model_path(wire) do
-    case model_parts(wire) do
-      [_ | _] = parts -> Enum.join(parts, "/")
-      _ -> wire
-    end
-  end
-
-  defp model_parts(wire) when is_binary(wire) do
-    case Jason.decode(wire) do
-      {:ok, [_ | _] = parts} -> if Enum.all?(parts, &is_binary/1), do: parts, else: nil
-      _ -> nil
-    end
-  end
-
-  defp model_parts(_), do: nil
 
   defp set_config_option(state, "model", value),
     do: write_config_option(state, "model", Map.get(state.config_model_wire, value, value))

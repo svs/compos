@@ -745,12 +745,18 @@
                    (else (has? hay w))))
            (string-split input " ")))))
 
-(define *todo-sorts* '("status" "urgency" "deadline" "created"))
+(define *todo-sorts* '("status" "urgency" "deadline" "created" "active"))
+
+(define (todo--last-active t)
+  "The time of T's newest log line, else its creation time, as YYYY-MM-DD HH:MM."
+  (car (reverse (sort (cons (or (plist-get t 'created) "")
+                            (map (lambda (line) (if (>= (string-length line) 16) (substring line 0 16) ""))
+                                 (or (plist-get t 'log) '())))))))
 
 (define (todo--sort-by buf) (list-sort buf "status"))
 
 (define (todo--resort ts by)
-  "urgency: time-sensitive first, then status. deadline: soonest first, undated last. created: newest first. status: todo-list's own order."
+  "urgency: time-sensitive first, then status. deadline: soonest first, undated last. created: newest first. active: last touched first. status: todo-list's own order."
   (cond ((equal? by "urgency")
          (append (filter (lambda (t) (plist-get t 'urgent)) ts)
                  (filter (lambda (t) (not (plist-get t 'urgent))) ts)))
@@ -761,6 +767,8 @@
                               ts))))
         ((equal? by "created")
          (reverse (map cadr (sort (map (lambda (t) (list (or (plist-get t 'created) "") t)) ts)))))
+        ((equal? by "active")
+         (reverse (map cadr (sort (map (lambda (t) (list (todo--last-active t) t)) ts)))))
         (else ts)))
 
 (define (todo--rows buf)
@@ -1970,7 +1978,7 @@
 (define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
   (lambda () (todo--refresh-all!) (todo--rescan!)))
 
-(define-command "todo-next-sort" "Cycle the order: status, urgency, deadline, created"
+(define-command "todo-next-sort" "Cycle the order: status, urgency, deadline, created, active"
   (lambda ()
     (let* ((buf (todo--list-buffer))
            (next (list-sort-step! buf *todo-sorts* 1 "status")))

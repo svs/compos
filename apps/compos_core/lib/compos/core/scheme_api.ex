@@ -1416,12 +1416,19 @@ defmodule Compos.Core.SchemeAPI do
       # null or object key order, so this narrow mechanism keeps the source
       # values intact while Scheme decides when a buffer uses it.
       {"json-format",
-       "(json-format STR) — indent valid JSON without changing its values or object key order; return #f on invalid input."} =>
-        fn [text] ->
-          case Jason.decode(text) do
-            {:ok, _value} -> Jason.Formatter.pretty_print(text) <> "\n"
-            {:error, _reason} -> false
-          end
+       "(json-format STR [SORTED]) — indent valid JSON without changing its values or object key order; return #f on invalid input. SORTED re-encodes the parsed value: a small object sorts its keys, and no newline ends it."} =>
+        fn
+          [text] ->
+            case Jason.decode(text) do
+              {:ok, _value} -> Jason.Formatter.pretty_print(text) <> "\n"
+              {:error, _reason} -> false
+            end
+
+          [text, _sorted] ->
+            case Jason.decode(text) do
+              {:ok, value} -> Jason.encode!(value, pretty: true)
+              {:error, _reason} -> false
+            end
         end,
       {"write-file!",
        "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t."} =>
@@ -2262,6 +2269,12 @@ defmodule Compos.Core.SchemeAPI do
           else
             []
           end
+        end,
+
+      {"highlight-html",
+       "(highlight-html LANG TEXT) — TEXT as escaped HTML with LANG's f-ts-* spans; the escaped text alone when LANG has no grammar."} =>
+        fn [lang, text] when is_binary(lang) and is_binary(text) ->
+          Compos.Core.Markdown.Html.highlight(lang, text)
         end,
 
       # A diff side is a list of lines, drawn one row each. The lines

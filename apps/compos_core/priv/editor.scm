@@ -6885,6 +6885,8 @@
 (effects! '(pure))
 (public! 'html-escape "(html-escape S) — S with & < > \" and ' as HTML entities" 'data)
 (catalog-meta! 'function "html-escape" 'domain 'data 'effects '(pure))
+(public! 'highlight-html "(highlight-html LANG TEXT) — TEXT as escaped HTML with LANG's f-ts-* spans" 'syntax)
+(catalog-meta! 'function "highlight-html" 'domain 'syntax 'effects '(pure))
 (effects! '(unknown))
 (public! 'llm-catalog-info "(llm-catalog-info) — the loaded model catalog: snapshot-id, captured-at, models, providers, stale-days, path" 'llm)
 (catalog-meta! 'function "llm-catalog-info" 'domain 'llm 'effects '(read))

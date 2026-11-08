@@ -43,7 +43,7 @@
 
 (effects! '(pure))
 (public! 'json-format
-  "(json-format STR) — indent valid JSON without changing values or object key order; return #f on invalid input")
+  "(json-format STR [SORTED]) — indent valid JSON without changing values or object key order; return #f on invalid input. SORTED re-encodes the parsed value: a small object sorts its keys")
 (catalog-meta! 'function "json-format" 'domain 'files 'effects '(pure))
 
 (effects! '(write display))

@@ -173,6 +173,11 @@
         (le (+ start len)))
     (cond
       ((not m) '())
+      ;; an item with no text yet is still being typed: it draws as its
+      ;; source, or the whole row hides and the caret falls to the line above
+      ((and (member (car m) '("bullet" "ordered"))
+            (md--blank-from? line (- (caddr m) start)))
+       '())
       ((member (car m) '("bullet" "ordered"))
        (let* ((depth (md--indent-depth line))
               (rows (cons (list start le (if (equal? (car m) "bullet") "row-li" "row-oli"))

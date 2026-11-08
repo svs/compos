@@ -86,9 +86,9 @@
   (let ((id (plist-get l 'id)) (who (agent-listen--who e)))
     (string-append
       "[event] What you were listening for arrived: "
-      (if (agent-listen--blank? (plist-get l 'note)) (plist-get l 'topic) (plist-get l 'note))
+      (if (agent-listen--blank? (plist-get l 'note)) (event-job-topic-bare (plist-get l 'topic)) (plist-get l 'note))
       (if (agent-listen--blank? (plist-get l 'task)) "" (string-append " (task " (plist-get l 'task) ")"))
-      "\n" (plist-get e 'topic) " " (format "~a" (plist-get e 'kind))
+      "\n" (event-job-topic-bare (plist-get e 'topic)) " " (format "~a" (plist-get e 'kind))
       (if who (string-append " from " who) "")
       "\n\n" (event-text e) "\n\n"
       (if (plist-get l 'keep)
@@ -272,7 +272,7 @@
     (unless chat
       (error "agent-listen!: run it from a chat, or name one with 'chat"))
     (let* ((id (string-append "l" (number->string (current-time)) "-" (number->string (random 10000))))
-           (topic (if at (string-append "time:" id) (plist-get spec 'topic)))
+           (topic (if at (string-append "time:" id) (event-job-topic (plist-get spec 'topic) chat)))
            (kind (plist-get spec 'kind))
            (l (list 'id id 'chat chat 'topic topic
                     'kind (and kind (format "~a" kind))

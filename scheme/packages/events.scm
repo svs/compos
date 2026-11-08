@@ -57,6 +57,29 @@
 
 (effects! '(read))
 
+(define (event-job-topic topic &optional chat-id)
+  "(event-job-topic TOPIC [CHAT-ID]) — a job: TOPIC made private to a chat, so two chats that both pick job:tests do not wake each other: job:NAME becomes job:SECS-N:NAME for CHAT-ID, or for the chat that is the current buffer. Any other topic, a topic outside a chat, and a topic that already has its chat stay as they are"
+  (let ((cid (or chat-id (buffer-local (current-buffer) 'chat-id))))
+    (if (and (string? topic) (string-prefix? "job:" topic)
+             (string? cid) (string-prefix? "chat:" cid)
+             (not (event-job-topic-chat topic)))
+        (let ((p (string-split cid ":")))
+          (string-append "job:" (cadr p) "-" (caddr p) ":" (substring topic 4 (string-length topic))))
+        topic)))
+
+(define (event-job-topic-chat topic)
+  "(event-job-topic-chat TOPIC) — the SECS-N chat key of a private job: TOPIC, or #f"
+  (and (string? topic) (string-prefix? "job:" topic)
+       (let ((p (string-split topic ":")))
+         (and (>= (length p) 3)
+              (let ((k (string-split (cadr p) "-")))
+                (and (= (length k) 2) (string->number (car k)) (string->number (cadr k)) (cadr p)))))))
+
+(define (event-job-topic-bare topic)
+  "(event-job-topic-bare TOPIC) — a private job: TOPIC without its chat key, as the agent named it"
+  (let ((k (event-job-topic-chat topic)))
+    (if k (string-append "job:" (substring topic (+ 5 (string-length k)) (string-length topic))) topic)))
+
 (define (event-log &optional pattern limit)
   "(event-log [PATTERN] [LIMIT]) — the events whose topic PATTERN matches, newest first; LIMIT defaults to 200"
   (event-log-newest (or pattern #f) (or limit 200)))
@@ -142,8 +165,8 @@
   (events--pump!))
 
 (define (event-publish! topic kind &optional data)
-  "(event-publish! TOPIC KIND [DATA]) — append an event to the log, fold it into the views and hand it to every subscriber whose pattern matches TOPIC; return its seq"
-  (let ((seq (event-log-append! topic kind data)))
+  "(event-publish! TOPIC KIND [DATA]) — append an event to the log (a job: TOPIC is private to the chat that publishes it, see event-job-topic), fold it into the views and hand it to every subscriber whose pattern matches TOPIC; return its seq"
+  (let ((seq (event-log-append! (event-job-topic topic) kind data)))
     (events--pump!)
     seq))
 

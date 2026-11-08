@@ -222,23 +222,26 @@
         (else #f)))
 
 (define (setup-wizard--decide-card b)
+  ;; like a connector card: Test asks this backend alone, and the card shows
+  ;; what it answered
   (let* ((ready? (setup-wizard--decide-ready? b))
          (live? (and ready? (eq? (decide--first-live) b)))
+         (tested (setup-wizard--decide-result b))
+         (failed? (and tested (eq? (cadr tested) 'failed)))
+         (test (if ready? (list (list (string-append "wizard:decide-test:" (symbol->string b)) "Test")) '()))
          (spec (cond ((eq? b 'jev)
                       (list "JEV" "Classifies text fast and at a low cost, through the TypeSafe API"
                             (cond (ready? "key found")
                                   ((not (boundp 'jev-api-key)) "the JEV package is not installed")
-                                  ((secret-set? 'typesafe-api-key) "key found")
                                   (else "no key"))
                             (list (list "wizard:decide-key:typesafe-api-key"
-                                        (if (secret-set? 'typesafe-api-key) "Change the key" "Add a key")))))
+                                        (if ready? "Change the key" "Add a key")))))
                      ((eq? b 'laya)
                       (list "laya" "Answers on this machine, in a local daemon"
                             (cond ((laya-running?) "running")
-                                  (ready? "installed, not started")
+                                  (ready? "installed, starts on the first question")
                                   (else "needs Apple silicon and a Python with laya-mlx"))
-                            (if (and ready? (not (laya-running?)))
-                                '(("wizard:laya-start" "Start")) '())))
+                            '()))
                      (else
                       (list "Claude Haiku" "A small hosted model, through your Anthropic key"
                             (if ready? "key found" "needs an Anthropic key")
@@ -246,45 +249,54 @@
                                         (if ready? "Change the key" "Add a key"))))))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
-            'detail (string-append (list-ref spec 1) " · " (list-ref spec 2))
-            'badge (cond (live? "in use") (ready? "ready") (else "needs setup"))
-            'tone (cond (live? "accent") (ready? "good") (else "plain"))
+            'detail (string-append (list-ref spec 1) " · " (if tested (caddr tested) (list-ref spec 2)))
+            'badge (cond (failed? "no reply") (live? "in use") (ready? "ready") (else "needs setup"))
+            'tone (cond (failed? "bad") (live? "accent") (ready? "good") (else "plain"))
             'selected? live?
-            'actions (list-ref spec 3)))))
+            'actions (append test (list-ref spec 3))))))
 
 (define (setup-wizard--decide-blocks buf)
-  (let ((test (buffer-local buf 'setup-wizard-decide-test)))
-    (list (list 'tag "div" 'class "wizard-title" 'text "Decision model")
-          (list 'tag "div" 'class "wizard-lede"
-                'text (string-append
-                        "Compos makes small decisions with a decision model: is a mail urgent, "
-                        "which group a buffer belongs to, which command fits a request. "
-                        "It asks the first model that is ready, in this order."))
-          (component 'ui/actions
-            (list 'actions '(("wizard:decide-test" "Test" "t") ("wizard:rescan" "Scan again" "g"))
-                  'class "wizard-tools"))
-          (list 'tag "div" 'class "wizard-grid"
-                'children (map setup-wizard--decide-card
-                               (filter (lambda (b) (memq b '(jev laya haiku))) decide-backends)))
-          (list 'tag "div" 'class "wizard-lede" 'text (or test ""))
-          (component 'wizard/nav
-            (list 'back (list "wizard:back" "← Back")
-                  'next (list "wizard:next" "Next: browser extension →"))))))
+  (list (list 'tag "div" 'class "wizard-title" 'text "Decision model")
+        (list 'tag "div" 'class "wizard-lede"
+              'text (string-append
+                      "Compos makes small decisions with a decision model: is a mail urgent, "
+                      "which group a buffer belongs to, which command fits a request. "
+                      "It asks the first model that is ready, in this order. Test asks one a question."))
+        (component 'ui/actions
+          (list 'actions '(("wizard:rescan" "Scan again" "g"))
+                'class "wizard-tools"))
+        (list 'tag "div" 'class "wizard-grid"
+              'children (map setup-wizard--decide-card
+                             (filter (lambda (b) (memq b '(jev laya haiku))) decide-backends)))
+        (component 'wizard/nav
+          (list 'back (list "wizard:back" "← Back")
+                'next (list "wizard:next" "Next: browser extension →")))))
 
-(define (setup-wizard-decide-test! buf)
-  (buffer-set-local! buf 'setup-wizard-decide-test "Asking a test question…")
-  (setup-wizard-redraw! buf)
-  (decide-async "The payment server is down and customers cannot pay."
-    (list 'urgent (decide-noul "Is this message urgent?"))
-    (lambda (r)
-      (let ((usage (plist-get r 'usage)))
-        (buffer-set-local! buf 'setup-wizard-decide-test
+(define *setup-wizard-decide-results* '())
+
+(define (setup-wizard--decide-result b)
+  "The last test of backend B as (B STATUS TEXT), STATUS pending, ok or failed; or #f."
+  (assq b *setup-wizard-decide-results*))
+
+(define (setup-wizard--decide-note! b status text)
+  (set! *setup-wizard-decide-results*
+        (cons (list b status text)
+              (filter (lambda (r) (not (eq? (car r) b))) *setup-wizard-decide-results*)))
+  (setup-wizard-redraw-open!))
+
+(define (setup-wizard-decide-test! buf &optional backend)
+  "Ask BACKEND, or the one decide uses, a test question; its card shows the answer."
+  (let ((b (or backend (decide--first-live))))
+    (setup-wizard--decide-note! b 'pending "asking a test question…")
+    (decide-async "The payment server is down and customers cannot pay."
+      (list 'urgent (decide-noul "Is this message urgent?"))
+      (lambda (r)
+        (let ((usage (plist-get r 'usage)))
           (if (pair? (plist-get r 'answers))
-              (string-append (format "~a" (caddr usage)) " answered in "
-                             (number->string (cadddr usage)) " ms.")
-              "No decision model answered. Set one up above, then test again."))
-        (when (buffer-exists? buf) (setup-wizard-redraw! buf))))
-    'timeout 5))
+              (setup-wizard--decide-note! b 'ok
+                (string-append "answered in " (number->string (cadddr usage)) " ms"))
+              (setup-wizard--decide-note! b 'failed "no answer; check the key, then test again"))))
+      'backend b 'timeout 10)))
 
 ;; the browser extension: Compos in the user's own Chrome
 (define (setup-wizard--browser-blocks)
@@ -660,11 +672,17 @@
      (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
-    ((equal? id "wizard:decide-test") (setup-wizard-decide-test! buf) #t)
-    ((equal? id "wizard:laya-start") (laya-start!) (setup-wizard-redraw! buf) #t)
+    ((string-prefix? "wizard:decide-test:" id)
+     (setup-wizard-decide-test! buf (string->symbol (substring-bytes id 19 (string-byte-length id)))) #t)
+    ;; a key that is in is tested at once, as a chosen connector is
     ((string-prefix? "wizard:decide-key:" id)
-     (setup-ask-secret! (string->symbol (substring-bytes id 18 (string-byte-length id))) #f
-                        (lambda () (setup-wizard-redraw-open!)))
+     (let* ((s (string->symbol (substring-bytes id 18 (string-byte-length id))))
+            (b (if (eq? s 'typesafe-api-key) 'jev 'haiku)))
+       (setup-ask-secret! s #f
+         (lambda ()
+           (if (setup-wizard--decide-ready? b)
+               (setup-wizard-decide-test! buf b)
+               (setup-wizard-redraw-open!)))))
      #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
@@ -775,7 +793,7 @@
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
   (lambda () (setup-wizard-redraw! (current-buffer))))
 
-(define-command "setup-wizard-decide-test" "Ask the decision model a test question"
+(define-command "setup-wizard-decide-test" "Ask the decision model in use a test question"
   (lambda () (setup-wizard-decide-test! (current-buffer))))
 
 (mode-keys! "setup-wizard-mode"

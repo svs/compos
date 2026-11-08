@@ -16,6 +16,10 @@
   "Backends 'decide' tries in priority order. Set in ai-config.scm."
   'group 'decide)
 
+(defcustom 'typesafe-api-key #f
+  "TypeSafe: the key JEV classifies with."
+  'type 'secret 'group 'decide 'env "TYPESAFE_API_KEY")
+
 (defcustom 'decide-default
   '((fast   . jev)
     (coding . "claude-sonnet-4-20250514"))

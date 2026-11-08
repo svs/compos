@@ -227,9 +227,11 @@
          (spec (cond ((eq? b 'jev)
                       (list "JEV" "Classifies text fast and at a low cost, through the TypeSafe API"
                             (cond (ready? "key found")
-                                  ((boundp 'jev-api-key) "needs TYPESAFE_API_KEY")
-                                  (else "the JEV package is not installed"))
-                            '()))
+                                  ((not (boundp 'jev-api-key)) "the JEV package is not installed")
+                                  ((secret-set? 'typesafe-api-key) "key found")
+                                  (else "no key"))
+                            (list (list "wizard:decide-key:typesafe-api-key"
+                                        (if (secret-set? 'typesafe-api-key) "Change the key" "Add a key")))))
                      ((eq? b 'laya)
                       (list "laya" "Answers on this machine, in a local daemon"
                             (cond ((laya-running?) "running")
@@ -240,7 +242,8 @@
                      (else
                       (list "Claude Haiku" "A small hosted model, through your Anthropic key"
                             (if ready? "key found" "needs an Anthropic key")
-                            (if ready? '() '(("wizard:decide-key:anthropic" "Add a key"))))))))
+                            (list (list "wizard:decide-key:anthropic-api-key"
+                                        (if ready? "Change the key" "Add a key"))))))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
             'detail (string-append (list-ref spec 1) " · " (list-ref spec 2))
@@ -660,7 +663,7 @@
     ((equal? id "wizard:decide-test") (setup-wizard-decide-test! buf) #t)
     ((equal? id "wizard:laya-start") (laya-start!) (setup-wizard-redraw! buf) #t)
     ((string-prefix? "wizard:decide-key:" id)
-     (setup-ask-secret! (secret-for-provider (substring-bytes id 18 (string-byte-length id))) #f
+     (setup-ask-secret! (string->symbol (substring-bytes id 18 (string-byte-length id))) #f
                         (lambda () (setup-wizard-redraw-open!)))
      #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)

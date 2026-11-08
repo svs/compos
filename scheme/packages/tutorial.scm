@@ -416,6 +416,8 @@
 
 (define *tutorial-armed* #f)   ;; the watch was set since this editor started
 
+(define *tutorial-last-group* #f)   ;; the frame's group after the last command
+
 (define (tutorial--after-command)
   ;; after a restart or a reload the first command arms the watch again
   (unless *tutorial-armed* (tutorial--load!) (tutorial--arm!))
@@ -425,6 +427,13 @@
     ;; when the page was in editing before
     (when (and (equal? cmd "self-insert-command") (equal? (current-buffer) *tutorial-buffer*))
       (tutorial--saw! "practice-typed"))
+    ;; the frame came back to the tutorial's group: the come-back steps of
+    ;; Groups. C-x g opens the prompt, and its RET makes the switch
+    (let ((g (ignore-errors frame-group)))
+      (when (and g (not (equal? g *tutorial-last-group*)))
+        (set! *tutorial-last-group* g)
+        (when (and (buffer-known? *tutorial-buffer*) (equal? g (buffer-group *tutorial-buffer*)))
+          (tutorial--saw! "tutorial-group-entered"))))
     ;; a quit that ends a key sequence cancelled a prefix: C-x ESC
     (when (equal? cmd "keyboard-quit")
       (let ((keys (ignore-errors (lambda () (last-keys)))))
@@ -1385,6 +1394,10 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 ;; a chat sends with RET, which runs agent-send
 (tutorial-step-event! "chat" "press `RET` to send it" "agent-send")
+;; C-x g both leaves and comes back: a come-back step also waits until the
+;; frame is in the tutorial's group again, so the leaving key does not end it
+(tutorial-step-event! "groups" "Then come back" "tutorial-group-entered")
+(tutorial-step-event! "groups" "to come back" "tutorial-group-entered")
 (tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
 
 ;; the prefix step of the kept Key notation lesson finishes when the prefix is cancelled

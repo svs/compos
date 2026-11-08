@@ -117,23 +117,20 @@ A **group** holds one task: its buffers, its chats, and the arrangement of its w
 
 | Key | What it does |
 | --- | --- |
-| `C-x g` | Switch to a group, or make a new one |
-| `C-x C-g C-g` | Go back to the group you were in before |
+| `C-x g` | Switch to a group, go back to one, or make a new one |
 | `C-x C-g m` | Move this buffer to another group |
 
-When you go to another group, the tutorial goes off the screen. `C-x C-g C-g` brings it back. Remember that key before you start.
+`C-x g` lists the groups, the most recent first. The group you are in is the first row, and the group you came from is the second. Type the name of a group that is not there, and `RET` makes it.
 
-`C-x g` lists the groups. Type the name of a group that is not there, and `RET` makes it.
+When you go to another group, the tutorial goes off the screen. To come back, type `C-x g`, press the down arrow once, and press `RET`.
 
-> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, which is empty.
-
-> **Try it.** Type `C-x C-g C-g` to come back to the tutorial.
-
-> **Try it.** Type `C-x g` to open the group switcher. The group you are in is marked. Choose "practice" and press `RET`. Then type `C-x C-g C-g` to come back again.
+> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, which is empty. Then come back: type `C-x g`, press the down arrow, and press `RET`.
 
 A buffer is in one group. To give a buffer to another task, move it.
 
-> **Try it.** Move the focus to one of your chats. Type `C-x C-g m` and choose "practice". The chat leaves this group. Type `C-x g` and go to "practice" to see the chat there. Then type `C-x C-g C-g` to come back.
+> **Try it.** Move the focus to one of your chats. Type `C-x C-g m` and choose "practice". The chat leaves this group.
+
+> **Try it.** Type `C-x g` and go to "practice" to see the chat there. Then type `C-x g` again, press the down arrow, and press `RET` to come back.
 
 ## LLM config
 

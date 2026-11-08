@@ -35,7 +35,9 @@ You never need to remember a key. Compos explains itself while it runs, and a ch
 | `M-o` | Ask the chat of the page you are on |
 | `C-h ?` | List every help command |
 
-> **Try it.** Type `s-p` and type what you want to do, for example "split the window". Read what it offers. Then type `ESC` to close it.
+Beside each command, the minibuffer shows the key that runs it. So when you find a command by its words, you also learn its key, and next time you can type the key.
+
+> **Try it.** Type `s-p` and type what you want to do, for example "split the window". Read the commands it offers, and the key beside each one. Then type `ESC` to close it.
 
 > **Try it.** Type `M-?` to see what this slide is and which keys work here. Type `q` to close the help.
 

@@ -2,6 +2,8 @@
 
 ## Setup
 
+### Open the setup wizard
+
 This tutorial teaches Compos by doing: you read a lesson, and you try each step as you go. The practice page is yours to edit.
 
 Keys are written like this:
@@ -22,11 +24,17 @@ The setup wizard prepares Compos before you start. It chooses the model that new
 
 ## Getting help
 
+### Ask the help chat
+
 > **Try it.** The easiest way to get help is in the help chat. Type `C-c h` and ask your question or request.
+
+### Open the help menu
 
 > **Try it.** Additionally, `C-h` opens a help menu. Type `C-h` and wait: it lists every help key.
 
 ## Window navigation
+
+### Move the focus right
 
 The screen has windows, and a window shows a buffer. Now you see three: the practice page, this slide, and the lesson. The **focus** is the window that your keys go to. Its title is marked.
 
@@ -36,9 +44,17 @@ The screen has windows, and a window shows a buffer. Now you see three: the prac
 | `s-<right>` | Move the focus to the window on the right |
 | `C-x o` | Move the focus to the next window |
 
-> **Try it.** Type `s-<right>` to move the focus one window to the right. Then type `s-<left>` to come back.
+> **Try it.** Type `s-<right>` to move the focus one window to the right.
+
+### Move the focus back
+
+> **Try it.** Then type `s-<left>` to come back.
+
+### Go to the next window
 
 > **Try it.** Type `C-x o` to move the focus to the next window.
+
+### Type in the practice page
 
 `C-x o` goes through all the windows in a circle. Use it when you do not know where a window is.
 
@@ -55,7 +71,11 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 
 > **Try it.** Move the focus to the practice page and type a word.
 
+### Stop editing
+
 > **Try it.** Type `ESC` or `C-g` to stop editing. Keep the focus on the practice page.
+
+### Swap two panes
 
 **Moving windows and panes.** The screen is in **panes**: its columns and rows. A pane can hold more than one window, one behind the other. You can move a window into another pane, or swap two panes.
 
@@ -66,13 +86,27 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 | `s-S-<right>` | Swap this pane with the pane on the right |
 | `s-S-<left>` | Swap this pane with the pane on the left |
 
-> **Try it.** Move the focus to the practice page. If you are editing there, type `ESC`. Then type `s-S-<right>` to swap it with the slide. Type `s-S-<left>` to swap them back.
+> **Try it.** Move the focus to the practice page. If you are editing there, type `ESC`. Then type `s-S-<right>` to swap it with the slide.
 
-> **Try it.** With the focus on the practice page, and not editing, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it. Type `S-<left>`, the key of `window-previous-pane`, to move it back.
+### Swap them back
+
+> **Try it.** Type `s-S-<left>` to swap them back.
+
+### Move a window to the next pane
+
+> **Try it.** With the focus on the practice page, and not editing, type `S-<right>`, the key of `window-next-pane`. The practice page goes in front of the slide, and hides it.
+
+### Move it back
+
+> **Try it.** Type `S-<left>`, the key of `window-previous-pane`, to move it back.
+
+### Try the layouts
 
 **Layouts.** A layout is the arrangement of the panes of a group: one window, two panes, equal columns, or as many panes as you open. `C-x l` shows each layout while you move through the list. `RET` keeps the one you are on, and `ESC` puts back the layout you had.
 
 > **Try it.** Type `C-x l` and move through the list with the arrow keys. Watch the screen change. Type `ESC` to keep the layout you have.
+
+### Show another buffer
 
 **Buffers.** A window shows a buffer, and you can change which buffer it shows. The buffer that leaves the window stays open.
 
@@ -83,11 +117,15 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 
 > **Try it.** In the practice page, type `C-x b`, choose `*tutorial*` and press `RET`.
 
+### List the buffers
+
 `C-x C-b` opens **ibuffer**: a list of every buffer, one line each, in sections by group. `RET` goes to the buffer on the line, and `q` closes the list.
 
 > **Try it.** Type `C-x C-b` and find the practice page in the list. Then type `q` to close the list.
 
 ## Chat
+
+### Start a chat
 
 A **chat** is a buffer where you talk to an agent. The agent works in Compos with the same commands as you. Your provider may charge for requests.
 
@@ -101,13 +139,21 @@ A **chat** is a buffer where you talk to an agent. The agent works in Compos wit
 
 > **Try it.** Type `C-c n` to start a chat.
 
+### Send a message
+
 > **Try it.** Type a message in the chat and press `RET` to send it.
 
+### Start another chat
+
 > **Try it.** Type `C-c n` again to start another chat.
+
+### Read about chat mode
 
 Every buffer has a **major mode**. The mode tells what kind of buffer it is, and which keys work in it. Your two chats are in chat-mode. The practice page is in tutorial-practice-mode. `C-h m` describes the mode of the buffer you are in.
 
 > **Try it.** In the chat, type `C-h m` and read what chat-mode does. Type `q` to close the help.
+
+### Show your other chat
 
 A window remembers the buffers it showed, the most recent first, as an app switcher does. `s-[` shows the one of the same mode that you used last. In a chat, it shows your other chat, and other buffers do not get in the way. Type `s-[` again and you are back, so two chats are one key apart.
 
@@ -115,11 +161,19 @@ To go further back, hold Cmd and type `[` again for each step. While you hold Cm
 
 > **Try it.** In the chat, type `s-[` to show your other chat, and type it again to come back.
 
+### Bring the next window to the front
+
 A pane can hold more than one window, one behind the other. `s-M-[` and `s-M-]` bring the windows of the pane to the front, one after the other.
 
-> **Try it.** Type `s-M-]` to bring the next window of this pane to the front. Then type `s-M-[` to go back.
+> **Try it.** Type `s-M-]` to bring the next window of this pane to the front.
+
+### Go back
+
+> **Try it.** Then type `s-M-[` to go back.
 
 ## Groups
+
+### Make a group
 
 A **group** holds one task: its buffers, its chats, and the arrangement of its windows. When you switch to a group, Compos puts all of that back. The tutorial is a group too.
 
@@ -134,15 +188,29 @@ A new group starts empty, with a chat of its own. It takes no buffers and no win
 
 When you go to another group, the tutorial goes off the screen. To come back, type `C-x g`, press the down arrow once, and press `RET`.
 
-> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat. Then come back: type `C-x g`, press the down arrow, and press `RET`.
+> **Try it.** Type `C-x g`, type a new name, for example "practice", and press `RET`. Compos goes to the new group, with a new chat.
+
+### Come back from the new group
+
+> **Try it.** Then come back: type `C-x g`, press the down arrow, and press `RET`.
+
+### Move a chat to another group
 
 A buffer is in one group. To give a buffer to another task, move it.
 
 > **Try it.** Move the focus to one of your chats. Type `C-x C-g m` and choose "practice". The chat leaves this group.
 
-> **Try it.** Type `C-x g` and go to "practice" to see the chat there. Then type `C-x g` again, press the down arrow, and press `RET` to come back.
+### See the chat there
+
+> **Try it.** Type `C-x g` and go to "practice" to see the chat there.
+
+### Come back here
+
+> **Try it.** Then type `C-x g` again, press the down arrow, and press `RET` to come back.
 
 ## LLM config
+
+### List the connectors
 
 The setup wizard chose the model that new chats use. You can change that choice for all new chats, or for the new chats of one group. A chat that is open keeps its own model.
 
@@ -156,9 +224,13 @@ The setup wizard chose the model that new chats use. You can change that choice 
 
 > **Try it.** Type `M-x llm-connectors` and read the list. Type `q` to close it.
 
+### Open the chat menu
+
 **Per group.** A group can start its chats with a different model. For example, a group for code can use a strong model, and a group for mail a cheap one. In the `C-c b` menu, `M-g` makes the config of the menu the default of this group. `M-x group-llm` chooses a saved preset for the group, and "(global default)" puts the group back on the default.
 
 > **Try it.** Move the focus to a chat and type `C-c b`. Look at the menu, then press `ESC` to close it.
+
+### Read the group presets
 
 > **Try it.** Type `M-x group-llm` and read the presets. Press `ESC` to keep the group as it is.
 

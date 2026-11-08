@@ -545,6 +545,11 @@ nonstandard install out of the built-in connector catalog."
                   acc
                   (cons (car (car cs)) acc))))))
 
+(effects! '(read))
+(public! 'connector-names
+  "(connector-names) — the names of the connectors that are not hidden")
+(effects! '(write))
+
 (define (connector-description name)
   (let ((config (connector-config name)))
     (or (plist-get config 'description)

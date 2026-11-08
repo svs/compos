@@ -1248,6 +1248,11 @@
     ("C-x n w" "morg-widen")
     ("M-." "definition-show")))
 
+;; RET continues a list item or closes a fence, so the browser must not
+;; predict a bare newline for it: the caret would land on the wrong line
+(with-eval-after-load 'predict
+  (lambda () (predict-skip! "morg-mode" '("RET"))))
+
 (register-context-provider! "morg-mode"
   (lambda (buf)
     (let* ((anchor (morg-narrow-anchor buf))

@@ -354,7 +354,7 @@
               'text (string-append
                       "The tutorial teaches you Compos one small step at a time. A slide "
                       "says what to do, you do it, and the slide goes on by itself. "
-                      "It starts with the rest of the setup, then buffers, windows and editing."))
+                      "It starts with windows and buffers, then editing."))
         (list 'tag "div" 'class "wizard-columns"
               'children
               (map (lambda (c)

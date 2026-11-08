@@ -40,62 +40,30 @@ The sections, in order.
 To jump to a section, type `C-s` and search for its heading, including the two hash marks. For example, search for "## Agents", then press `RET` to keep point there. Type `C-r` instead when the heading is above you. Type `ESC` or `C-g` to cancel the search and return to where you started.
 
 1. Welcome
-2. Set up
-3. Windows and focus
-4. Typing and the focus
-5. Selecting, copying and pasting
-6. Searching and replacing
-7. Key notation
-8. Named commands
-9. Help
-10. Files and buffers
-11. Windows
-12. Groups
-13. Agents
-14. Settings
-15. Editing and undo
-16. Prefix arguments
-17. Modes and keymaps
-18. Lists and previews
-19. Browsing the web
-20. Why Compos
-21. Persistence
-22. The editor is malleable
-23. Scheme and the BEAM
-24. Where to go next
+2. Windows and focus
+3. Typing and the focus
+4. Selecting, copying and pasting
+5. Searching and replacing
+6. Key notation
+7. Named commands
+8. Help
+9. Files and buffers
+10. Windows
+11. Groups
+12. Agents
+13. Settings
+14. Editing and undo
+15. Prefix arguments
+16. Modes and keymaps
+17. Lists and previews
+18. Browsing the web
+19. Why Compos
+20. Persistence
+21. The editor is malleable
+22. Scheme and the BEAM
+23. Where to go next
 
 ---
-
-## Set up
-
-This lesson sets up the decision models and the browser extension. The setup wizard chose the chat model. Compos uses two more kinds of model, for small decisions. A lesson that needs neither works without this setup, so you can also come back here later.
-
-| Model | What it does | Where it runs |
-| --- | --- | --- |
-| JEV | Classifies text fast and at a low cost: urgency, a team, the group of a buffer. | The TypeSafe System One API. |
-| laya | Answers typed questions about a passage: a choice, a score, or a yes or no, with a confidence. | This machine, in a local daemon. |
-
-### Decisions
-
-Compos makes small decisions with a decision model: is a mail urgent, which group does a buffer belong to, which command fits a request. **decide** asks the first model that is ready. It asks JEV when a TypeSafe key is set, and laya, on this machine, when it is not.
-
-JEV needs a TypeSafe API key in the `TYPESAFE_API_KEY` environment variable. `JEV_API_KEY` also works. laya needs Apple silicon and a Python that has the `laya-mlx` package. The setting `laya-python` names that Python, and `M-x laya-server` starts its daemon.
-
-> **Try it.** Compos asks **decide** a test question. This box fills when an answer comes back, and the slide says which model answered.
-
-### The browser extension
-
-The extension connects Compos to your Chrome tabs. With it, `M-x` and `C-x` work in any page, and Compos can read a tab, type into it, and open pages in your own browser with your logins. The extension is in the `extension` folder of the Compos checkout.
-
-1. Open `chrome://extensions` in Chrome.
-2. Turn on **Developer mode**, at the top right.
-3. Click **Load unpacked**, and choose the `extension` folder.
-
-The extension finds the daemon on port 4004 by itself. Its **Options** page shows what it is connected to.
-
-> **Try it.** Load the extension with the steps above. This box fills by itself when the extension connects to Compos.
-
-Then type `M-x list-tabs` to see your open Chrome tabs in Compos.
 
 ## Windows and focus
 

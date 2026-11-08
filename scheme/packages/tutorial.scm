@@ -854,7 +854,7 @@
   (lambda (buf id)
     (and (equal? buf *tutorial-detail-buffer*)
          (cond
-           ;; the model cards on the Set up slide: a key added there redraws it
+           ;; model cards on a slide: a key added there redraws it
            ((setup-model-card-click! buf id (lambda () (tutorial-recheck!) (tutorial--draw-detail!)))
             (tutorial--draw-detail!) #t)
            (else
@@ -1324,38 +1324,6 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (define-command "tutorial-refresh" "Redraw the list of lessons"
   (lambda () (list-refresh! *tutorial-index-buffer*)))
 
-;; decide answers the test question with JEV when its key is set, else laya
-(tutorial-probe! "set-up" "asks **decide** a test question"
-  (lambda (pass fail)
-    (if (not (boundp 'decide-async))
-        (fail "decide is not loaded in this editor")
-        (decide-async "The payment server is down and customers cannot pay."
-          (list 'urgent (decide-noul "Is this message urgent?"))
-          (lambda (r)
-            (let ((usage (plist-get r 'usage)))
-              (if (pair? (plist-get r 'answers))
-                  (begin
-                    (pass)
-                    (message (string-append "decide answered with "
-                                            (format "~a" (caddr usage)) " in "
-                                            (number->string (cadddr usage)) " ms")))
-                  (fail (string-append "No decision model answered. Set TYPESAFE_API_KEY for JEV, "
-                                       "or set up laya and type M-x laya-server.")))))
-          ;; an answer comes in well under a second; five seconds is a hang
-          'timeout 5)))
-  (lambda ()
-    (string-append "Asking "
-                   (if (and (boundp 'decide--first-live) (ignore-errors decide--first-live))
-                       (format "~a" (decide--first-live))
-                       "decide")
-                   " a test question")))
-
-;; the extension step finishes itself: at once when the extension is
-;; already there, else when it attaches
-(tutorial-await! "set-up" "extension connects"
-  (lambda () (and (boundp 'browser-connected?) (browser-connected?))))
-
-(add-hook! 'browser-attached-hook 'tutorial-recheck!)
 
 ;; a chat sends with RET, which runs agent-send
 (tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
@@ -1378,12 +1346,13 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (add-hook! 'editing-state-hook (lambda (buf) (when (equal? buf *tutorial-buffer*) (tutorial-recheck!))))
 
-;; Behind the setup lesson, Set up, a chat troubleshoots.
+;; Behind a setup lesson a chat troubleshoots. The setup wizard does the
+;; setup now, so no lesson is one; the machinery stays for a lesson that needs it.
 ;; It is the slide's own chat, attached as every page's chat is: M-o on the
 ;; slide opens it. A step that fails, or h on the slide, goes to it; its
 ;; answer comes to the slide.
 (define *tutorial-setup-chat* #f)
-(define *tutorial-setup-lessons* '("set-up"))
+(define *tutorial-setup-lessons* '())
 
 (define (tutorial--setup-lesson? slug)
   (and (member slug *tutorial-setup-lessons*) #t))
@@ -1429,7 +1398,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   (let* ((l (tutorial--lesson-now))
          (steps (if l (tutorial--steps l) '())))
     (if (not (and l (tutorial--setup-lesson? (plist-get l 'slug))))
-        (message "The setup chat helps with the Set up lesson")
+        (message "The setup wizard sets up the models: M-x setup")
         (tutorial--setup-help! (plist-get l 'slug)
           (string-append "The reader asks for help with this step: "
                          (if (< *tutorial-shown* (length steps))

@@ -1075,6 +1075,8 @@
   (cond ((null? lst) #f)
         ((pred (car lst)) (car lst))
         (else (find pred (cdr lst)))))
+(public! 'find "(find PRED LST) — the first element of LST that PRED holds for, or #f")
+(catalog-meta! 'function "find" 'domain 'system 'effects '(pure))
 
 ;; A whole number from 0 up to N, not N. A generator seeded from the clock:
 ;; enough to pick a file or a row at random, not for secrets. The editor had
@@ -2436,6 +2438,7 @@
 ;;; keeps it.
 
 (define (mode-entry name) (or (registry-lookup 'mode name) '()))
+(public! 'mode-get "(mode-get NAME KEY) — the mode's own fact KEY, such as 'doc or 'parent, or #f.")
 (define (mode-get name key) (and name (plist-get (mode-entry name) key)))
 
 ;; the mode's own fact, or the nearest ancestor's. The walk carries what

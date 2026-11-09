@@ -255,6 +255,8 @@
   ;; the short words a key wears in the empty pane; a command not here shows its doc
   '(("pane-take-window" "Move a window here")
     ("find-file" "Open a file")
+    ("todo" "Go to todos")
+    ("chat-new" "New chat")
     ("pane-remove" "Remove this pane")
     ("pane-restore" "Bring back a hidden pane")))
 
@@ -320,7 +322,7 @@
 
 (define-mode "pane-empty-mode"
   (lambda () (panes--empty-render!)))
-(mode-doc! "pane-empty-mode" "An empty pane. Move a window in with b or RET, open a file with f, restore with r, or remove the pane with k.")
+(mode-doc! "pane-empty-mode" "An empty pane. Move a window in with b or RET, open a file with f, go to the todos with t, start a new chat with c, restore with r, or remove the pane with k.")
 
 (define-command "pane-take-window" "Move a window of this group into this pane"
   (lambda ()
@@ -362,7 +364,8 @@
 
 (mode-keys! "pane-empty-mode"
   '(("b" "pane-take-window") ("RET" "pane-take-window")
-    ("f" "find-file") ("k" "pane-remove") ("r" "pane-restore")))
+    ("f" "find-file") ("t" "todo") ("c" "chat-new")
+    ("k" "pane-remove") ("r" "pane-restore")))
 
 (define (panes--empty-buffer!)
   "Makes the blank buffer in pane-empty-mode, unless it is there in that

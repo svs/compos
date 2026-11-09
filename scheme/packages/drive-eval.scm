@@ -614,6 +614,9 @@
   "(drive-eval [MODELS CASES REPS PROMPTS]) -- answers a run id; give each case, a real chat task, to a fresh chat on each model REPS times, drive-eval-parallel at once, and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set, 'all both; PROMPTS original, reworded (two held-out rewordings) or all, default drive-eval-prompts; the table and the haiku-driver/opus gap go to *drive-eval*, the event drive-eval done says the score")
 (public! 'drive-eval-cancel!
   "(drive-eval-cancel! [ID]) -- stop drive-eval run ID, or the one run going, between runs: the runs going now end, no new one starts, and drive-eval done says ID cancelled; each run's table is in ~/.compos/drive-eval/ID.txt")
+(public! 'drive-eval-run-file
+  "(drive-eval-run-file ID) -- the path of run ID's table, ~/.compos/drive-eval/ID.txt; builds the path only")
+(catalog-meta! 'function "drive-eval-run-file" 'domain 'chat 'effects '(pure))
 
 ;;; Friction: the tool calls of a run that did no work, and why.
 ;;; A passing run can still lose rounds to the harness; the score hides it.

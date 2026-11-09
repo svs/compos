@@ -432,20 +432,29 @@
 
 (command-palette--everyday-words!)
 
-;; Words no command does go to a chat: the chat of the buffer you were in,
-;; the one M-o opens, or the chat itself when you asked from one. It shows,
-;; and the words are its next prompt.
+;; Words no command does go to a chat: a new chat in the group of the buffer
+;; you were in, shown at once, or the chat itself when you asked from one.
+;; The words are its next prompt.
 (define (command-palette-ask-chat! text)
-  (let ((origin (command-palette--origin)))
+  (let* ((origin (command-palette--origin))
+         (send! (lambda (chat)
+                  ;; your words, as you typed them: a prompt, not a wake
+                  (agent-prompt! (or (agent-slug-of chat) (chat-ensure-runtime! chat)) text))))
     (set! *command-palette--request* #f)
     (if (chat-buffer? origin)
-        (agent-continue! origin text)
-        ;; a chat the palette starts runs on Driver API
-        (let ((chat (llm-companion-open! origin (llm-palette-bundle))))
-          (agent-continue! chat text)))))
+        (send! origin)
+        ;; For now a new chat of its own, shown at once, as C-c n makes one:
+        ;; the buffer's M-o chat is a hidden one that answers into the
+        ;; document, so the words seemed to vanish. It runs on Driver API.
+        (let* ((g (or (buffer-group origin) (frame-group)))
+               (chat (and g (group-chat-new! g))))
+          (if (not chat)
+              (message "No group for a chat")
+              (begin (llm-bundle-apply! chat (llm-palette-bundle))
+                     (send! chat)))))))
 
 (public! 'command-palette-ask-chat!
-  "(command-palette-ask-chat! TEXT) -- send TEXT to the chat of the buffer the palette was opened from, and show it")
+  "(command-palette-ask-chat! TEXT) -- send TEXT to a new chat in the group of the buffer the palette was opened from, shown at once; from a chat, to that chat")
 
 (domain! 'interaction)
 (effects! '(write execute))

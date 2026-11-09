@@ -306,6 +306,8 @@
   "(prompt-buffer-parts BUF) — named prompt fragments that modes added to one buffer")
 (public! 'prompt-files
   "(prompt-files) — every prompt file as (NAME PATH): one section each, from prompts-directories")
+(public! 'prompt-file-text
+  "(prompt-file-text FILE) — the trimmed text of the prompt file FILE, or \"\" when there is none")
 (public! 'compos-shared-prompt-parts
   "(compos-shared-prompt-parts) — named standing guidance shared by direct and ACP agents")
 (public! 'compos-direct-prompt-parts

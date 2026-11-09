@@ -233,6 +233,9 @@
         ((equal? code 'b) (k (current-buffer)))
         ((equal? code 'd) (k (point)))
         ((equal? code 'm) (k (or (mark) (point))))
+        ;; a procedure collects the arguments itself, as Emacs's
+        ;; (interactive (list ...)): it hands K the list of them
+        ((procedure? code) (code k))
         ((string? code)
          (let ((kind (substring code 0 1))
                (prompt (substring code 1 (string-length code))))
@@ -252,7 +255,7 @@
       (interactive--arg (car codes)
         (lambda (v)
           (interactive--collect (cdr codes)
-                                (if (equal? (car codes) 'r)
+                                (if (or (equal? (car codes) 'r) (procedure? (car codes)))
                                     (append (reverse v) acc)
                                     (cons v acc))
                                 fn)))))
@@ -295,7 +298,7 @@
 ;; the function a command's name calls: the arguments given go first,
 ;; the ones left out take their code's default, and never prompt
 (define (command--callable name spec fn)
-  (if (not spec)
+  (if (or (not spec) (null? (cdr spec)) (pair? (filter procedure? (cdr spec))))
       fn
       (lambda (&rest args)
         (let fill ((codes (cdr spec)) (given args) (acc '()))
@@ -313,16 +316,24 @@
                          (error (string-append name ": missing argument for "
                                                (if (string? (car codes)) (car codes) "spec"))))))))))))
 
-(define (command--bind! name callable entry)
+(define (command--bind! name callable entry fn)
+  ;; A name binds when it is free, when it holds this command's last
+  ;; callable, or when it already holds the command's own function: the
+  ;; function then is the command, one name and one thing. The row
+  ;; remembers that function, so undefine-command gives the name back.
   (let* ((sym (string->symbol name))
-         (row (assoc name *command-functions*)))
+         (row (assoc name *command-functions*))
+         (adopted (if (and row (eq? (symbol-value sym) (cadr row)))
+                      (and (pair? (cdddr row)) (cadddr row))
+                      (and (boundp sym) (eq? (symbol-value sym) fn) fn))))
     (if (and (procedure? callable)
              (or (not (boundp sym))
+                 (eq? (symbol-value sym) fn)
                  (and row (eq? (symbol-value sym) (cadr row)))))
         (begin
           (set-symbol-value! sym callable)
           (set! *command-functions*
-                (cons (list name callable entry)
+                (cons (list name callable entry adopted)
                       (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
           #t)
         #f)))
@@ -343,10 +354,21 @@
 (define (define-command name &rest args)
   (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
          (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
-         (spec (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
-         (fn (if spec (cadr rest) (car rest)))
-         (opts (if spec (cddr rest) (cdr rest)))
+         (spec0 (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
+         (fn0 (if spec0 (cadr rest) (car rest)))
+         ;; a command defined again on the name's own callable keeps the
+         ;; function it was made from, so a reload does not wrap it twice
+         (fn (let ((row (assoc name *command-functions*)))
+               (if (and row (eq? fn0 (cadr row)) (pair? (cdddr row)) (cadddr row))
+                   (cadddr row)
+                   fn0)))
+         (opts (if spec0 (cddr rest) (cdr rest)))
          (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
+         ;; 'show PROC: run from M-x, the command hands the function's
+         ;; answer to PROC, the echo a code caller does not want
+         (show (let ((m (memq 'show opts))) (and m (pair? (cdr m)) (cadr m))))
+         (spec (or spec0 (and show '(interactive))))
+         (interactive-fn (if show (lambda (&rest args) (show (apply fn args))) fn))
          ;; A command with no spec is its own function: run-command calls
          ;; it with no arguments and describe-function shows its body. A
          ;; command with a spec is wrapped: run-command's empty call
@@ -356,7 +378,7 @@
                     (lambda (&rest args)
                       (cond ((and (pair? args) (equal? (car args) 'direct))
                              (apply fn (cdr args)))
-                            ((null? args) (call-interactively--spec spec fn))
+                            ((null? args) (call-interactively--spec spec interactive-fn))
                             (else (apply fn args))))
                     fn)))
     (if (> (string-length doc) 0)
@@ -366,10 +388,10 @@
       (set! *command-modes*
             (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
     (set! *command-generation* (+ *command-generation* 1))
-    (let ((bound (command--bind! name (command--callable name spec fn) entry)))
+    (let ((bound (command--bind! name (command--callable name spec fn) entry fn)))
       (catalog-register! 'command name doc
         'use (string-append "(run-command \"" name "\")")
-        'spec (or spec #f)
+        'spec (and spec (map (lambda (c) (if (procedure? c) 'list c)) spec))
         'call (and bound (string-append "(" name ")"))))
     name))
 
@@ -397,7 +419,10 @@
   (let ((row (assoc name *command-functions*))
         (sym (string->symbol name)))
     (when (and row (boundp sym) (eq? (symbol-value sym) (cadr row)))
-      (unbind-global! sym))
+      (let ((adopted (and (pair? (cdddr row)) (cadddr row))))
+        (if adopted
+            (set-symbol-value! sym adopted)
+            (unbind-global! sym))))
     (set! *command-functions*
           (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
   name)

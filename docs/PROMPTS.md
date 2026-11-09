@@ -131,7 +131,10 @@ holds the tool preset `driver`, whose prompt is `priv/presets/driver.md`, so
 only Driver chats get that text as `preset:driver`. Its `prompt-disabled`
 list turns off the full primer (every default file, `catalog`, `recipes`,
 `skills`, `code`, `code-agent`). A saved preset of the same name is the
-user's edit and wins; a builtin the saved list lacks comes back.
+user's edit and wins; a builtin the saved list lacks comes back, and a saved
+builtin takes the keys it lacks. A preset's `env` (Driver:
+`ENABLE_TOOL_SEARCH=false`, so its few tools load up front) becomes the
+chat's `agent-env`, which the adapter process gets on the next session start.
 `agent-driver-bundle` names the preset an agent's spawn starts on, and
 `(execute* PROMPT '(bundle NAME ...))` picks one for a single spawn.
 

@@ -958,6 +958,7 @@
 ;;; llm-bundle-apply! here would attach the connector at once, and every new
 ;;; chat would start a process before the user had typed anything.
 (define (llm-default--seed! buf b)
+  (buffer-set-local! buf 'agent-env (llm-bundle-get b 'env #f))
   (buffer-set-local! buf 'agent-connector (llm-bundle-connector b))
   (let ((m (llm-bundle-model b)))
     (buffer-set-local! buf 'agent-model (if (equal? m "default") #f m)))

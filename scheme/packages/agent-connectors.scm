@@ -84,7 +84,9 @@ nonstandard install out of the built-in connector catalog."
 (define-connector! "opencode"
   '(cmd "opencode acp"
     description "OpenCode — multi-provider ACP agent"
-    model-config #t))
+    model-config #t
+    ;; opencode drops _meta.systemPrompt: our sections ride the first turn
+    system-in-prompt #t))
 
 ;; OpenCode Go is a subscription provider inside OpenCode, apart from the
 ;; pay-as-you-go `opencode/` models. Its own row lets Setup choose it: the
@@ -96,6 +98,8 @@ nonstandard install out of the built-in connector catalog."
     description "OpenCode Go — the Go subscription's models through OpenCode"
     model-config #t
     model "opencode-go/deepseek-v4.1-flash"
+    ;; opencode drops _meta.systemPrompt: our sections ride the first turn
+    system-in-prompt #t
     accepts "^opencode-go/"
     signin "opencode auth login"))
 
@@ -518,8 +522,20 @@ nonstandard install out of the built-in connector catalog."
   (let ((env (plist-get conf 'env)))
     (if env (append (list 'env (agent-env-resolve env)) conf) conf)))
 
+;; the chat's own adapter environment ('agent-env, from its preset) joins
+;; the connector's: a name the connector or the model env sets wins
+(define (agent-config-buffer-env conf opts)
+  (let* ((buf (plist-get opts 'buffer))
+         (extra (and (string? buf) (buffer-exists? buf) (buffer-local buf 'agent-env))))
+    (if (pair? extra)
+        (let ((env (or (plist-get conf 'env) '())))
+          (append (list 'env (append env (filter (lambda (p) (not (assoc (car p) env))) extra)))
+                  conf))
+        conf)))
+
 (define (agent-resolve-config* opts)
   (agent-config-env-resolve
+   (agent-config-buffer-env
    (let* ((cname (or (plist-get opts 'connector) *default-connector*))
           ;; A thread works where its buffer works. The ACP and Codex lanes are
           ;; told their cwd once, at session/new, and until now nobody told them
@@ -547,7 +563,8 @@ nonstandard install out of the built-in connector catalog."
                                                 q m q))
                       conf)))
            ((plist-get conf 'env) conf)           ; explicit env wins
-           (else (append (list 'model m) conf (agent-model-env m)))))))
+           (else (append (list 'model m) conf (agent-model-env m)))))
+   opts)))
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))

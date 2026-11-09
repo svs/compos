@@ -76,14 +76,34 @@
 ;; so the refusal reaches the model as an ordinary tool result and the
 ;; turn carries on. The permission policy gates whether a call may run at
 ;; all; this gates what a call that is allowed to run may contain.
+;; the argument names ARGS gives that the tool does not take. A model that
+;; calls a tool before it reads the schema guesses a name (query for code),
+;; and the handler then runs on nothing: the reader crashes, or apropos
+;; answers the whole catalog.
+(define (llm-tool--stray-keys params args)
+  (let ((known (map car params)))
+    (let loop ((a (if (list? args) args '())) (out '()))
+      (if (or (null? a) (null? (cdr a)))
+          (reverse out)
+          (loop (cddr a)
+                (if (and (symbol? (car a)) (not (memq (car a) known)))
+                    (cons (car a) out)
+                    out))))))
+
 (define (llm-tool-call name args)
   (let ((veto (run-hook-with-args-until-success 'tool-call-hook name args)))
     (if veto
         (if (string? veto) veto (value->string veto))
-        (let ((t (assoc (string->symbol name) *llm-tools*)))
-          (if t
-              ((plist-get (cadr t) 'handler) args)
-              (string-append "no such tool: " name))))))
+        (let* ((t (assoc (string->symbol name) *llm-tools*))
+               (params (and t (or (plist-get (cadr t) 'params) '())))
+               (stray (if t (llm-tool--stray-keys params args) '())))
+          (cond ((not t) (string-append "no such tool: " name))
+                ((and (pair? stray) (pair? params))
+                 (string-append "error: " name " takes "
+                                (string-join (map (lambda (p) (symbol->string (car p))) params) ", ")
+                                ", not " (string-join (map symbol->string stray) ", ")
+                                ". Send the call again with those argument names."))
+                (else ((plist-get (cadr t) 'handler) args)))))))
 
 (define (llm-tool-read-only? name)
   (let* ((tool (assoc (string->symbol name) *llm-tools*))

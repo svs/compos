@@ -1933,7 +1933,7 @@
     ;; typed does not match it, and that is what makes a manual rename stick
     chat-derived-name
     agent-connector agent-model agent-effort
-    chat-presets prompt-disabled-parts chat-permission-mode render-mode default-directory
+    chat-presets prompt-disabled-parts agent-env chat-permission-mode render-mode default-directory
     ;; the directory the spawner chose; group companions never override it
     chat-directory
     agent-permission-profile window-class header-line
@@ -2400,13 +2400,26 @@
 (define *llm-builtin-bundles*
   (list (list 'name "Driver" 'connector "claude-code" 'model "haiku"
               'presets '(compos driver)
+              ;; its few tools load up front: a tool search costs a round
+              'env '(("ENABLE_TOOL_SEARCH" "false"))
               'prompt-disabled '("identity" "quiet-editor" "scope" "chat-context"
                                  "scheme" "discovery" "reading" "repository"
                                  "browser" "components" "catalog" "recipes"
                                  "skills" "code" "code-agent"))))
 
 (define (llm-bundles-with-builtins bundles)
-  (append bundles
+  ;; a saved builtin keeps the user's values and takes the keys it lacks
+  (define (fill b)
+    (let ((base (find (lambda (x) (equal? (llm-bundle-name x) (llm-bundle-name b)))
+                      *llm-builtin-bundles*)))
+      (if (not base)
+          b
+          (let loop ((ps base) (out b))
+            (if (or (null? ps) (null? (cdr ps)))
+                out
+                (loop (cddr ps)
+                      (if (memq (car ps) out) out (append out (list (car ps) (cadr ps))))))))))
+  (append (map fill bundles)
           (filter (lambda (b)
                     (not (member (llm-bundle-name b) (map llm-bundle-name bundles))))
                   *llm-builtin-bundles*)))
@@ -2534,6 +2547,8 @@
          (mode (llm-bundle-agent-mode b))
          (prompt-disabled (llm-bundle-prompt-disabled b))
          (sandbox (llm-bundle-get b 'sandbox #f)))
+    ;; the preset's adapter environment; the next session start reads it
+    (buffer-set-local! session 'agent-env (llm-bundle-get b 'env #f))
     ;; on or off holds for this chat; group hands it back to the group
     (when sandbox
       (buffer-set-local! session 'sandbox (if (member sandbox '("on" "off")) sandbox #f)))

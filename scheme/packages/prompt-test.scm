@@ -228,6 +228,11 @@
       (check-equal! (map car (prompt-parts-enabled buf parts))
                     '("preset:driver" "todo")
                     "the driver keeps its section and the task parts")
+      (buffer-set-local! buf 'agent-env (llm-bundle-get d 'env #f))
+      (check-contains! (value->string (plist-get (agent-resolve-config* (list 'connector "claude-code" 'buffer buf 'model "haiku")) 'env))
+                       "ENABLE_TOOL_SEARCH" "the Driver's tools load up front")
+      (check-contains! (value->string (plist-get (agent-resolve-config* (list 'connector "claude-code" 'buffer buf 'model "haiku")) 'env))
+                       "ANTHROPIC_MODEL" "and the model env stays")
       (t--prompt-cleanup buf))))
 
 (deftest 'a-direct-chat-keeps-its-first-prompt-until-refresh

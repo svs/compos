@@ -751,6 +751,9 @@ defmodule Compos.Core.SchemeAPI do
                                                                                               ] ->
         Buffer.modified?(name)
       end,
+      {"buffer-saved-version",
+       "(buffer-saved-version BUF) — the version at BUF's last save; the edits in buffer-edit-log after it are unsaved."} =>
+        fn [name] -> Buffer.saved_version(name) end,
       {"buffer-persistent?",
        "(buffer-persistent? BUF) — return #t if the buffer writes a checkpoint and comes back at the next boot."} =>
         fn [name] -> Buffer.persistent?(name) end,
@@ -2019,7 +2022,19 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                    buf,
                                                                                                    k
                                                                                                  ] ->
-        Buffer.get_local(buf, Opts.plain(k)) || false
+        cond do
+          # a symbol or a number is never a buffer name: the call put KEY first
+          not is_binary(buf) ->
+            raise Compos.Scheme.Eval.Error,
+              message: "buffer-local: BUF comes first: (buffer-local BUF KEY); got #{inspect(buf)} as BUF"
+
+          is_binary(k) and not Buffer.exists?(buf) and Buffer.exists?(k) ->
+            raise Compos.Scheme.Eval.Error,
+              message: "buffer-local: the arguments are swapped: #{inspect(k)} is the buffer; call (buffer-local #{inspect(k)} '#{buf})"
+
+          true ->
+            Buffer.get_local(buf, Opts.plain(k)) || false
+        end
       end,
       {"buffer-rows",
        "(buffer-rows [SPEC]) — (TOTAL ROWS): the rows of a buffer listing, live and dormant, from one SQL query on meta.db, which never answers older than a change already made. SPEC is a plist: names, ids, chat-ids, modes, agents (#t: every agent's buffer; with modes, those too), exclude-modes, exclude-names, groups, dirs, hidden, context-only, match (terms over the name, title, path, mode, group label, project and workspace), sort (recent name), group-by (group mode), bucket (group mode: rows come as (KEY NAME ...)), offset, limit, fields. A field is a column: name, id, path, mode, title, group (group-id), group-label, modified, read-only, agent, chat-id, icon, project, workspace; any other is #f. A row is (NAME FIELD-VALUES...)."} =>

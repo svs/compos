@@ -496,6 +496,12 @@
         (check-equal! (plist-get hit 'effects) '("pure")
                       "and it states its effects")))))
 
+(deftest 'the-history-reads-are-stamped-write
+  "mru-list and mru-groups start the history store when a hot reload left none, so a read-only eval may not call them"
+  (lambda ()
+    (check-equal! (plist-get (catalog-entry 'function "mru-list") 'effects) '("write") "mru-list")
+    (check-equal! (plist-get (catalog-entry 'function "mru-groups") 'effects) '("write") "mru-groups")))
+
 (deftest 'every-primitive-carries-an-effects-stamp
   "eval-scheme-read takes or refuses a name by its stamp; a primitive without one refuses an ordinary read"
   (lambda ()

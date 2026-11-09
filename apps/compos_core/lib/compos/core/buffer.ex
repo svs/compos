@@ -289,6 +289,8 @@ defmodule Compos.Core.Buffer do
   def version(name), do: viewed(name, :version, :version, 0)
   def path(name), do: viewed(name, :path, :path, nil)
   def modified?(name), do: viewed(name, :modified, :modified?, false)
+  # the version the file last agreed with: edits after it are unsaved
+  def saved_version(name), do: viewed(name, :saved_version, :saved_version, 0)
   def point(name), do: viewed(name, :point, :point, nil)
 
   @doc """
@@ -1483,6 +1485,8 @@ defmodule Compos.Core.Buffer do
 
   defp on_call(:modified?, _from, state),
     do: {:reply, state.version != state.saved_version, state}
+
+  defp on_call(:saved_version, _from, state), do: {:reply, state.saved_version, state}
 
   # a jump (a click, goto-char) ends a run of line motions: the next C-n
   # takes its column from where point now stands (Emacs: last-command)

@@ -143,14 +143,59 @@
 
 (define (shell-command->string cmd &rest more)
   "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return at once; CALLBACK gets the output. An agent's command must pass decide-shell-policy, judged on CMD itself, and runs in its chat's sandbox when the sandbox is on."
-  (let* ((chat (agent-sandbox--author-chat))
-         (no (and chat (string? cmd) (boundp 'decide-shell-command-verdict)
+  (let* ((author (current-edit-author))
+         (chat (agent-sandbox--author-chat))
+         (no (and (string? author) (string-prefix? "agent:" author) (string? cmd)
+                  (boundp 'decide-shell-command-verdict)
                   (decide-shell-command-verdict cmd))))
     (when no (error no))
     (apply %shell-command->string-builtin
            (cons (if chat (agent-sandbox-wrap cmd chat) cmd) more))))
 
 (effects! '(write))
+
+(effects! '(read))
+
+;; An agent's save writes the whole buffer, so it writes every unsaved
+;; edit in it: another agent's half-done change to themes.scm once broke
+;; every boot that way. The edit log names each edit's author; the edits
+;; newer than the last save are the unsaved ones.
+(define (agent-sandbox--who author)
+  (cond ((equal? author "user") "the user")
+        ((equal? author "editor") "a command the user ran")
+        (else author)))
+
+(define (unsaved-foreign-authors buf &optional me)
+  "(unsaved-foreign-authors BUF [ME]) — who, other than ME (else the caller's edit author), made the edits in BUF since its last save; () when none or when the editor cannot tell"
+  (let ((me (or me (current-edit-author))))
+    (if (not (and (boundp 'buffer-saved-version) (buffer-known? buf) (buffer-modified? buf)))
+        '()
+        (let ((saved (buffer-saved-version buf)))
+          (let loop ((log (buffer-edit-log buf)) (out '()))
+            (if (or (null? log) (<= (car (car log)) saved))
+                (reverse out)
+                (let ((a (cadr (car log))))
+                  (loop (cdr log)
+                        (if (or (not (string? a)) (equal? a me) (equal? a "disk") (member a out))
+                            out
+                            (cons a out))))))))))
+
+(define (agent-sandbox--foreign-save-reason path source)
+  (string-append "the buffer holds unsaved edits by "
+                 (string-join (map agent-sandbox--who (unsaved-foreign-authors source)) ", ")
+                 "; saving would write them. Ask them to save or revert first"))
+
+(effects! '(write))
+
+;; Confirmable: the user can let one such save through (allow-one-write!).
+(defwrite-rule! 'agent-saves-only-its-own-edits
+  agent-sandbox--foreign-save-reason #t
+  (lambda (path source)
+    (let ((me (current-edit-author)))
+      (and source
+           (string? me)
+           (string-prefix? "agent:" me)
+           (pair? (unsaved-foreign-authors source me))))))
 
 (define (group-sandbox-set! g value)
   "(group-sandbox-set! G VALUE) — the sandbox for the chats of group G: on, off, or #f to follow agent-sandbox"

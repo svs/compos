@@ -4393,6 +4393,7 @@
 ;; raw-write-file! and raw-buffer-save! are the primitives under the doors
 ;; below; Compos.Core.SchemeRawNames registers them.
 
+;; REASON is a string, or a procedure of (PATH SOURCE) that answers one.
 ;; CONFIRMABLE? says whether a human answering a question can set this rule
 ;; aside. A rule about clobbering is confirmable, because overwriting a file
 ;; on purpose is a real gesture. A rule about where a kind of file may live
@@ -4417,8 +4418,9 @@
           ((and permitted? (write-rule-confirmable? (car rules)))
            (loop (cdr rules)))
           (((write-rule-pred (car rules)) path source)
-           (string-append (write-rule-reason (car rules))
-                          " [" (symbol->string (write-rule-name (car rules))) "]"))
+           (let ((reason (write-rule-reason (car rules))))
+             (string-append (if (procedure? reason) (reason path source) reason)
+                            " [" (symbol->string (write-rule-name (car rules))) "]")))
           (else (loop (cdr rules))))))
 
 ;; Let the next write to PATH set the confirmable rules aside. Only a human
@@ -7560,6 +7562,8 @@
   '(run-command))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
   '(read-string read-file-name))
+;; mru-groups and mru-list start the history store when a hot reload left
+;; none (Recent.ready), so their first call writes.
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(add-paste-hook! remove-paste-hook! bind-prefix! buffer-at-point-map!
     buffer-clear-dirty! buffer-mark-dirty! buffer-refresh-pending!
@@ -7573,7 +7577,7 @@
     kill-local-variable! local-remap! local-remap*! local-set-key
     major-mode-set! marginalia! minor-mode-keymap! minor-mode-keys!
     mode-focus-key! mode-keys! mode-link-syntax! mode-parent! mode-quit!
-    mode-setup! overlay-clear! overlay-set! overriding-map!
+    mode-setup! mru-groups mru-list overlay-clear! overlay-set! overriding-map!
     permanent-local! pop-to-mark! preview-goto! preview-select! push-mark!
     register-actions! register-target-provider! registry-forget!
     registry-register! run-hook-with-args run-hook-with-args-until-failure
@@ -7632,7 +7636,7 @@
     buffer-updates-since buffer-version buffer-version-token buffer-words
     line-number-at-pos mark region-beginning region-end kill-nth
     kill-ring-size kill-top meta-db-annotations meta-db-candidates
-    meta-query mru-groups mru-list process-list process-mark
+    meta-query process-list process-mark
     process-running? terminal-foreground terminal-status terminal-tty
     undo-exempt?))
 (domain! 'files)

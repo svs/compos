@@ -1945,7 +1945,11 @@
 (define (todo--detail-tab-set! buf name)
   (buffer-set-local! buf 'todo-tab name)
   (todo--detail-render! buf)
-  (buffer-goto-line! buf 1))
+  ;; Children opens on its first row, so RET opens it at once
+  (let ((rows (map car (or (buffer-local-value 'todo-child-lines buf) '()))))
+    (buffer-goto-line! buf (if (and (equal? name "children") (pair? rows)) (apply min rows) 1)))
+  ;; the part point stands in is the lit one
+  (anchor-sync! buf))
 
 (define (todo--detail-tab-step! buf step)
   (let* ((names (map car *todo-detail-tabs*))

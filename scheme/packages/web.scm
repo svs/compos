@@ -20,6 +20,7 @@
 ;;; real renderer.
 
 (require 'format)
+(require 'content-cache)
 
 (domain! 'web)
 (effects! '(read external))
@@ -249,7 +250,7 @@
 ;; and the top of the home stays short.
 (define *web--fetch-slots* 64)
 
-(define (web--fetch-dir) (string-append (compos-home) "/tmp/browse-fetch"))
+(define (web--fetch-dir) (string-append (compos-temp-dir) "/browse-fetch"))
 
 (define (web--body-file! extension)
   (set! *web--read-seq* (+ *web--read-seq* 1))
@@ -387,7 +388,7 @@
 ;; browse owns. The same URL lands on the same path, so reading a page
 ;; twice leaves one file behind and not a pile.
 (define (web--keep-file! file url extension)
-  (let* ((dir (string-append (compos-home) "/browse-files"))
+  (let* ((dir (cache-path 'browse-files ""))
          (name (web--download-name url))
          (suffix (string-append "." extension))
          (path (string-append dir "/"
@@ -489,7 +490,7 @@
   (let* ((file (web--body-file! "body"))
          (u (sh-quote url))
          (f (sh-quote file))
-         (dir (sh-quote (string-append (compos-home) "/web-etags")))
+         (dir (sh-quote (cache-path 'web-etags "")))
          (ua (sh-quote
                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")))
     (shell-command->string
@@ -2647,7 +2648,7 @@ the tabs. C-s searches to any link.")
     "A fetch answers a DOCUMENT (TYPE TEXT FILE): text bodies travel as text, and bytes land in a file. "
     "Markup reads through readable and pandoc; every other type takes a reader from *web--mime-readers*. "
     "A reader is (TYPE READER) where READER takes (FILE URL) and answers a shell command that writes markdown to stdout. "
-    "A type in *web--mime-files* is not read at all: the body is saved under ~/.compos/browse-files and its own mode shows it, which is how a PDF opens in pdf-reader-mode. "
+    "A type in *web--mime-files* is not read at all: the body is saved under ~/.cache/compos/browse-files and its own mode shows it, which is how a PDF opens in pdf-reader-mode. "
     "Bundled readers: csv and tsv through pandoc, JSON as a fenced block, images as one markdown image, the rest of text/* as it is, and pdftotext for a PDF where no viewer claims the type. "
     "A type with no reader shows its name and size, and d saves it. "
     "Never pass bytes through a string: a PDF decoded as text loses every byte that is not UTF-8.")

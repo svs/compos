@@ -247,7 +247,8 @@
 ;; from what was read last time; the site is read again behind it. It is
 ;; kept on disk, so a restart starts warm too.
 
-(define *amazon-cache-file* (string-append (compos-home) "/amazon-cache.json"))
+(require 'content-cache)
+(define (amazon--cache-file) (cache-path 'amazon "cache.json"))
 (define *amazon-searches* '())
 (define *amazon-details* '())
 
@@ -258,13 +259,14 @@
     (cons (list key val) (if (> (length rest) (- cap 1)) (list-head rest (- cap 1)) rest))))
 
 (define (amazon--cache-save! ignored)
-  (write-file! *amazon-cache-file*
+  (write-file! (amazon--cache-file)
     (json-encode (list 'searches *amazon-searches* 'details *amazon-details*))))
 
 (define (amazon--cache-touch!) (debounce! 'amazon-cache 2000 amazon--cache-save! #f))
 
 (define (amazon--cache-load!)
-  (let ((text (and (file-exists? *amazon-cache-file*) (read-file *amazon-cache-file*))))
+  (let* ((file (amazon--cache-file))
+         (text (and (file-exists? file) (read-file file))))
     (when (and (string? text) (> (string-length text) 2))
       (let ((data (json-parse text)))
         (when (pair? data)
@@ -1459,13 +1461,13 @@
 (domain! 'web)
 (effects! '(read write external))
 
-(define *amazon-image-dir* (string-append (compos-home) "/amazon-images/"))
+(define (amazon--image-dir) (string-append (cache-path 'amazon-images "") "/"))
 (define *amazon-image-wanted* '())
 
 (define (amazon--image-file url)
   ;; the photo's copy on disk, or "" while it is read; asking starts the read
   (if (and (string? url) (> (string-length url) 0))
-      (let ((path (string-append *amazon-image-dir* (content-hash url) ".jpg")))
+      (let ((path (string-append (amazon--image-dir) (content-hash url) ".jpg")))
         (if (file-exists? path)
             path
             (begin (amazon--image-fetch! url path) "")))
@@ -1474,7 +1476,7 @@
 (define (amazon--image-fetch! url path)
   (unless (member url *amazon-image-wanted*)
     (set! *amazon-image-wanted* (cons url *amazon-image-wanted*))
-    (task-run! (lambda () (make-directory! *amazon-image-dir*) (http-download! url path))
+    (task-run! (lambda () (http-download! url path))
       (lambda (ok arrived?)
         (set! *amazon-image-wanted* (filter (lambda (u) (not (equal? u url))) *amazon-image-wanted*))
         ;; a page of photos lands together, so it redraws once

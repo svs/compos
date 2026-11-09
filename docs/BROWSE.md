@@ -34,7 +34,7 @@ The buffer process keeps a stable identity during in-place navigation. Its visib
 
 The HTML pipeline tries the editor's browser fetch first. If that returns nothing, it falls back to `curl`.
 
-The curl fallback follows redirects, has a 20-second timeout, and stores one ETag per URL under `$COMPOS_HOME/web-etags`. A revalidation sends the saved ETag. An unchanged response has no body, so the in-memory page remains authoritative.
+The curl fallback follows redirects, has a 20-second timeout, and stores one ETag per URL under `~/.cache/compos/web-etags` (`compos-cache-dir`). A revalidation sends the saved ETag. An unchanged response has no body, so the in-memory page remains authoritative.
 
 A hard refresh adds a private cache-busting query parameter to the request without changing the canonical `browse-url`.
 

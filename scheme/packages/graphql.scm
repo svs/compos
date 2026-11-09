@@ -94,7 +94,7 @@
 ;; and a counter, so two requests in the same second do not collide.
 (define (graphql--tmp-path suffix)
   (set! *graphql--seq* (+ *graphql--seq* 1))
-  (let ((dir (string-append (compos-home) "/tmp")))
+  (let ((dir (compos-temp-dir)))
     (make-directory! dir)
     (string-append dir "/graphql-" (number->string (current-time))
                    "-" (number->string *graphql--seq*) suffix)))

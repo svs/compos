@@ -101,7 +101,7 @@
 
 (define (sentry--tmp-path)
   (set! *sentry--seq* (+ *sentry--seq* 1))
-  (let ((dir (string-append (compos-home) "/tmp")))
+  (let ((dir (compos-temp-dir)))
     (make-directory! dir)
     (string-append dir "/sentry-" (number->string (current-time)) "-"
                    (number->string *sentry--seq*) ".conf")))

@@ -332,7 +332,7 @@
 ;; the same reading the site registry would have run: the stylesheet, then
 ;; pandoc. Only the waiting above is ours.
 (define (linkedin--inbox-markdown html)
-  (let ((file (string-append (compos-home) "/linkedin-inbox.html"))
+  (let ((file (compos-temp-file "linkedin-inbox.html"))
         (sheet (locate-library "web/parsers/linkedin-inbox.xsl")))
     (write-file! file html)
     (shell-command->string

@@ -5,6 +5,7 @@
 
 ;; the index and its page share the hand keys and / over their tab bars
 (require 'tab-bars)
+(require 'content-cache)
 
 (domain! 'web)
 (effects! '(read))
@@ -730,7 +731,7 @@
   (site-app--cache-set! app store (filter (lambda (e) (not (equal? (car e) key))) (site-app-cache-entries app store))))
 
 (define (site-app-cache-file app)
-  (string-append (compos-home) "/" (symbol->string app) "-cache.json"))
+  (cache-path app "cache.json"))
 
 (define *site-app-cache-loaded* '())   ; the apps whose file has been read
 

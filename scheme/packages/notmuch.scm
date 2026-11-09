@@ -295,7 +295,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (if (> (string-length s) n) (substring s 0 n) s)))
 
 (define (nm--html->text html)
-  (let ((tmp (string-append (expand-path "~") "/.compos/mail-part.html")))
+  (let ((tmp (compos-temp-file "mail-part.html")))
     (write-file! tmp html)
     (shell-command->string
       (string-append notmuch-html-renderer " < " (sh-quote tmp)))))

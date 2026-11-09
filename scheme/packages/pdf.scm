@@ -32,6 +32,8 @@
               " 2>/dev/null | awk '/^Pages:/ {print $2; exit}'"))))
       0)))
 
+(require 'content-cache)
+
 (define (pdf--path-key path)
   (string-trim
     (shell-command->string
@@ -41,8 +43,7 @@
 
 (define (pdf--cache-dir path)
   (let ((stamp (number->string (file-mtime path))))
-    (string-append (compos-home) "/pdf-cache/"
-                   (pdf--path-key (string-append path ":" stamp)))))
+    (cache-path 'pdf (pdf--path-key (string-append path ":" stamp)))))
 
 (define (pdf--clear-render-cache-real path)
   ;; Stable working-copy paths can change more than once per second. Clear the

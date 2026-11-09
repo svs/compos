@@ -862,7 +862,7 @@
                       (lambda (found) (set! answer found)))
       (check-true! (wait-until (lambda () (and answer #t)) 5000 20) "the reading answered")
       (check-equal! (nth 0 answer) "file" "the answer is a file, not a reading")
-      (check-equal! (nth 1 answer) (string-append (compos-home) "/browse-files/report.pdf")
+      (check-equal! (nth 1 answer) (string-append (compos-cache-dir) "/browse-files/report.pdf")
                     "kept under the name the URL gave it")
       (check-equal! (read-file (nth 1 answer)) "%PDF-1.4\n" "with its bytes")
       (delete-file! (nth 1 answer)))))
@@ -871,8 +871,8 @@
   "a PDF is not a reading: the file buffer replaces the browse tab"
   (lambda ()
     (run-command "delete-other-windows")
-    (let ((path (string-append (compos-home) "/browse-files/zz-web-viewer.pdf")))
-      (make-directory! (string-append (compos-home) "/browse-files"))
+    (let ((path (string-append (compos-cache-dir) "/browse-files/zz-web-viewer.pdf")))
+      (make-directory! (string-append (compos-cache-dir) "/browse-files"))
       (write-file! path "%PDF-1.4\n")
       (t--web-with-fetch
         ;; the real pipeline always answers on a callback, and the tab is

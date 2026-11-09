@@ -4889,7 +4889,8 @@
 (defvar '*scheme-write-roots* '())
 
 (define (scheme-write-roots)
-  (append load-path (list (compos-home)) *scheme-write-roots*))
+  (append load-path (list (compos-home) (compos-cache-dir) (compos-temp-dir))
+          *scheme-write-roots*))
 
 (effects! '(pure))
 
@@ -5318,13 +5319,24 @@
                                    (string-append user "/.cache"))
                                "/compos")))))
 
-;; REL under the cache folder, its parent folder made; a REL that ends in /
-;; is a folder and is made too.
-(define (compos-cache-file rel)
-  (let* ((path (string-append (compos-cache-dir) "/" rel))
-         (dir (car (path-split path))))
+;; Files one call writes and then forgets (a page body, a mail part, a curl
+;; config) go to the system temp folder, which the OS clears by itself.
+(define (compos-temp-dir)
+  (let ((user (getenv "HOME"))
+        (home (compos-home)))
+    (if (equal? home (string-append (or user "") "/.compos"))
+        (let ((tmp (or (getenv "TMPDIR") "/tmp")))
+          (string-append (if (string-suffix? "/" tmp)
+                             (substring tmp 0 (- (string-length tmp) 1))
+                             tmp)
+                         "/compos"))
+        (string-append home "/tmp"))))
+
+;; NAME in the temp folder, the folder made.
+(define (compos-temp-file name)
+  (let ((dir (compos-temp-dir)))
     (unless (file-directory? dir) (make-directory! dir))
-    path))
+    (string-append dir "/" name)))
 
 ;;; --- visiting a file --------------------------------------------------------
 ;;; visit is the one door: a path becomes a buffer, joins a group, and a
@@ -7324,8 +7336,9 @@
 (catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
-(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete")
-(public! 'compos-cache-file "(compos-cache-file REL) — the path of REL in the cache folder, its parent folder made")
+(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete. Write in it through cache-path or cache-put!")
+(public! 'compos-temp-dir "(compos-temp-dir) — the folder for files one call writes and forgets: $TMPDIR/compos, which the OS clears")
+(public! 'compos-temp-file "(compos-temp-file NAME) — the path of NAME in the temp folder, the folder made")
 ;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"
@@ -7333,7 +7346,8 @@
 (catalog-meta! 'function "message" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
 (catalog-meta! 'function "compos-cache-dir" 'domain 'files 'effects '(read))
-(catalog-meta! 'function "compos-cache-file" 'domain 'files 'effects '(write))
+(catalog-meta! 'function "compos-temp-dir" 'domain 'files 'effects '(read))
+(catalog-meta! 'function "compos-temp-file" 'domain 'files 'effects '(write))
 
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]) — register an M-x command; DOC shows in M-x; 'modes offers it only in buffers of those modes, as Emacs's (interactive nil MODE ...)")

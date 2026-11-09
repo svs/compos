@@ -27,7 +27,7 @@
   'group 'content-cache 'type 'number)
 
 (defcustom 'content-cache-root ""
-  "Where the disk sink keeps its files; empty means <compos-home>/cache."
+  "Where the cache keeps its files, one folder per namespace; empty means the compos cache folder, ~/.cache/compos."
   'group 'content-cache 'type 'string)
 
 (define *content-cache-sinks* '())
@@ -142,7 +142,7 @@
 
 (define (content-cache-dir)
   (if (equal? content-cache-root "")
-      (string-append (compos-home) "/cache")
+      (compos-cache-dir)
       content-cache-root))
 
 (define (cache--disk-path ns key)
@@ -154,10 +154,78 @@
   (list 'get (lambda (ns key)
                (let ((p (cache--disk-path ns key)))
                  (and (file-exists? p) (read-file p))))
-        'put (lambda (ns key value) (raw-write-file! (cache--disk-path ns key) value))
+        'put (lambda (ns key value)
+               (raw-write-file! (cache--disk-path ns key) value)
+               (cache--sweep-soon! ns))
         'del (lambda (ns key)
                (let ((p (cache--disk-path ns key)))
                  (when (file-exists? p) (delete-file! p))))))
+
+;;; --- files ------------------------------------------------------------------
+;;; A namespace also keeps files that a tool reads by path: a rendered page,
+;;; an image, an etag. cache-path names one in the namespace's folder. Each
+;;; namespace has a size cap; the sweep drops its oldest entries past it. An
+;;; entry is one name at the top of the folder, a file or a whole folder, so a
+;;; folder of rendered pages goes or stays as one.
+
+(defcustom 'content-cache-max-mb 500
+  "The most megabytes one cache namespace keeps on disk. Past it, the sweep deletes the oldest entries."
+  'group 'content-cache 'type 'integer)
+
+(define *content-cache-swept* '())
+
+(define (cache--ns-dir ns)
+  (string-append (content-cache-dir) "/" (if (symbol? ns) (symbol->string ns) ns)))
+
+(define (cache-path ns name)
+  (let* ((root (cache--ns-dir ns))
+         (path (if (equal? name "") root (string-append root "/" name)))
+         (dir (if (equal? name "") root (car (path-split path)))))
+    (unless (file-directory? dir) (make-directory! dir))
+    (cache--sweep-soon! ns)
+    path))
+
+(define (cache--name e)
+  (if (string-suffix? "/" e) (substring e 0 (- (string-length e) 1)) e))
+
+(define (cache--delete! path)
+  (when (file-directory? path)
+    (for-each (lambda (e) (cache--delete! (string-append path "/" (cache--name e)))) (list-dir path)))
+  (delete-file! path))
+
+(define (cache--entry-size path)
+  (if (file-directory? path)
+      (apply + (map (lambda (e) (cache--entry-size (string-append path "/" (cache--name e))))
+                    (list-dir path)))
+      (file-size path)))
+
+(define (cache--entries ns)
+  (let ((dir (cache--ns-dir ns)))
+    (if (file-directory? dir)
+        (map (lambda (e)
+               (let ((p (string-append dir "/" (cache--name e))))
+                 (list (file-mtime p) p (cache--entry-size p))))
+             (list-dir dir))
+        '())))
+
+(define (cache-sweep! ns)
+  (let ((cap (* content-cache-max-mb 1024 1024)))
+    (let loop ((es (reverse (sort (cache--entries ns)))) (total 0) (dropped 0))
+      (cond ((null? es) dropped)
+            ((> (+ total (caddr (car es))) cap)
+             (for-each (lambda (e) (ignore-errors (lambda () (cache--delete! (cadr e))))) es)
+             (+ dropped (length es)))
+            (else (loop (cdr es) (+ total (caddr (car es))) dropped))))))
+
+;; a sweep at most once an hour for each namespace, in a task, started by a
+;; write: the cache trims itself while it is used and costs nothing when idle
+(define (cache--sweep-soon! ns)
+  (let ((last (assoc ns *content-cache-swept*))
+        (now (current-time)))
+    (when (or (not last) (> (- now (cadr last)) 3600))
+      (set! *content-cache-swept*
+            (cons (list ns now) (filter (lambda (s) (not (equal? (car s) ns))) *content-cache-swept*)))
+      (task-spawn (lambda () (cache-sweep! ns))))))
 
 (effects! '(pure))
 (public! 'content-key
@@ -168,10 +236,14 @@
 (public! 'cache-chain "(cache-chain NS) — the sink names NS reads through, fastest first")
 (public! 'cache-sinks "(cache-sinks) — every defined sink name")
 (public! 'cache-pending? "(cache-pending? NS KEY) — #t while a cache-fetch is producing KEY")
-(public! 'content-cache-dir "(content-cache-dir) — the directory the disk sink writes under")
+(public! 'content-cache-dir "(content-cache-dir) — the cache folder, one folder per namespace")
 (effects! '(write))
 (public! 'cache-put! "(cache-put! NS KEY VALUE) — store the string VALUE in every sink of NS's chain")
 (public! 'cache-del! "(cache-del! NS KEY) — drop KEY from every sink of NS's chain")
+(public! 'cache-path "(cache-path NS NAME) — the path of the file NAME that NS keeps in the cache folder, its folder made; NAME \"\" is the folder itself")
+(effects! '(destroy))
+(public! 'cache-sweep! "(cache-sweep! NS) — delete NS's oldest entries until it fits content-cache-max-mb; how many went")
+(effects! '(write))
 (public! 'cache-fetch
   "(cache-fetch NS KEY PRODUCE K) — K gets the cached value now, or once (PRODUCE k) makes it; concurrent asks for one KEY share one PRODUCE; the value on a hit, else #f")
 (public! 'cache-sink-define!

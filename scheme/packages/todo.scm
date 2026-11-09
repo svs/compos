@@ -1998,7 +1998,7 @@
       (move "doing" "todo-detail-start" doing-label "s")
       (move "done" "todo-detail-done" "Done" "d" "good")
       (move "waiting" "todo-detail-wait" "Wait" "W")
-      (move "cancelled" "todo-detail-cancel" "Cancel" "X" "bad")
+      (move "cancelled" "todo-detail-cancel" "Cancel" "x" "bad")
       (move "inbox" "todo-detail-inbox" (if (equal? state "todo") "Unaccept" "To inbox") "i")
       (list (list "todo-detail-agent" "Agent" "M-o")
             (list "todo-detail-goto-chat" "Chat" "w")
@@ -2190,6 +2190,53 @@
   (lambda () (todo--detail-set! 'state "inbox"))
   'modes '(todo-detail-mode))
 
+(define (todo--detail-with buf f)
+  ;; F on the page's task, or on Children the sub-task at point; then redraw
+  (let ((t (todo--detail-target buf)))
+    (if t
+        (begin (f t) (todo--detail-render! buf))
+        (message "No sub-task at point"))))
+
+(define (todo--detail-ask! prompt k)
+  (let ((buf (current-buffer)))
+    (if (todo--detail-target buf)
+        (read-string prompt
+          (lambda (s) (todo--detail-with buf (lambda (t) (todo-update (plist-get t 'id) (list k s 'by todo-user))))))
+        (message "No sub-task at point"))))
+
+(define-command "todo-detail-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w; on Children, the sub-task at point"
+  (lambda () (todo--detail-ask! "Deadline: " 'deadline))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-add-note" "Add a note to the task; on Children, the sub-task at point"
+  (lambda () (todo--detail-ask! "Note: " 'note))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-set-project" "Move the task to another project; a new name makes a new project. On Children, the sub-task at point"
+  (lambda ()
+    (let* ((buf (current-buffer)) (t (todo--detail-target buf)))
+      (if t
+          (completing-read "Project: " (todo-projects)
+            (lambda (s) (todo--detail-with buf (lambda (t) (todo-update (plist-get t 'id) (list 'project s 'by todo-user)))))
+            'default (or (plist-get t 'project) ""))
+          (message "No sub-task at point"))))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-cycle-priority" "Cycle the task's priority: A, B, C, none; on Children, the sub-task at point"
+  (lambda ()
+    (todo--detail-with (current-buffer)
+      (lambda (t)
+        (let ((p (plist-get t 'priority)))
+          (todo-update (plist-get t 'id)
+                       (list 'priority (cond ((not p) "A") ((equal? p "A") "B") ((equal? p "B") "C") (else #f)) 'by todo-user))))))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-toggle-urgent" "Mark the task time-sensitive, or not; on Children, the sub-task at point"
+  (lambda ()
+    (todo--detail-with (current-buffer)
+      (lambda (t) (todo-update (plist-get t 'id) (list 'urgent (not (plist-get t 'urgent)) 'by todo-user)))))
+  'modes '(todo-detail-mode))
+
 (define (todo--detail-setup!)
   ;; left and right step the tabs; anchor-mode's map sits in front of ours
   (local-remap! "anchor-right" "todo-detail-tab-next")
@@ -2224,7 +2271,12 @@
     ("+" "todo-detail-new-subtask")
     ("t" "todo-detail-accept")
     ("d" "todo-detail-done")
-    ("X" "todo-detail-cancel")
+    ("x" "todo-detail-cancel")
+    ("D" "todo-detail-set-deadline")
+    ("P" "todo-detail-set-project")
+    ("N" "todo-detail-add-note")
+    ("!" "todo-detail-cycle-priority")
+    ("T" "todo-detail-toggle-urgent")
     ("W" "todo-detail-wait")
     ("s" "todo-detail-start")
     ("i" "todo-detail-inbox")
@@ -2236,7 +2288,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `X` cancels and `W` parks the task; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"

@@ -581,6 +581,7 @@
 
 (define (todo--change k old new)
   (cond ((equal? k 'notes) "notes edited")
+        ((equal? k 'status) "status updated")
         ((equal? k 'state) (string-append "state " (todo--show old) " -> " (todo--show new)))
         (else (string-append (symbol->string k) " " (todo--show new)))))
 
@@ -1790,14 +1791,23 @@
       (list (component 'ui/keys-bar
               (list 'main '(("a" "agent") ("e" "file") ("g" "refresh") ("q" "quit"))))))
     (buffer-set-read-only! buf #t)
-    buf))
+    (if t (todo--detail-retitle! buf t) buf)))
+
+;; the page wears its task's title; when a buffer already has that name, such
+;; as the task's own chat, it adds " · todo". Answers the name it has now.
+(define (todo--detail-retitle! buf t)
+  (let ((title (string-trim (or (plist-get t 'title) ""))))
+    (cond ((or (equal? title "") (equal? buf title) (equal? buf (string-append title " · todo"))) buf)
+          ((rename-buffer! buf title) title)
+          ((rename-buffer! buf (string-append title " · todo")) (string-append title " · todo"))
+          (else buf))))
 
 (define (todo-show-detail! id)
   (let ((buf (todo--group-buffer "todo-detail-mode" *todo-detail-buffer* (todo--detail-group))))
     (buffer-set-local! buf 'todo-id id)
-    (todo--detail-render! buf)
-    (display-buffer-detail! buf (todo--list-buffer))
-    buf))
+    (let ((buf (todo--detail-render! buf)))
+      (display-buffer-detail! buf (todo--list-buffer))
+      buf)))
 ;; highlighting a row also brings up its chat, where chats live, without
 ;; taking focus: the pane already showing a chat, else a spare window, else
 ;; a split under the task's page
@@ -2227,7 +2237,7 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 - File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.
 - Kick off: when the user asks for a todo, file it and start an agent on it in the same turn with `(todo-assign-chat! ID GROUP WHO)`, GROUP being the todo's group. It starts the chat on the group's own backend and sends it the brief. Do not stop at filing, and do not ask whether to start it. When your own chat is clean, that is, the todo request is its first task, do not start a new chat: file the todo with 'assignee `(chat-stable-id! CHAT)` and 'state \"doing\", CHAT being your chat buffer, and work it in this chat.
 - Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress. RESULT and SUMMARY become the task's status and go to its parent's log by themselves. They are the handover: what is done, where, the numbers, and what is left, complete without the chat. Work after review goes in with `todo-review` again and a new summary, not as a log line.
-- The task is the record, never the chat, a side file or a memory; whoever takes it next reads only the task. It has three parts. Notes are the brief: what to do, why, and the rules; add a finding the work must keep with `(todo-update ID (list 'note TEXT 'by WHO))`. Status is where it stands, what is done and what is left; replace it with `(todo-update ID (list 'status TEXT 'by WHO))` whenever that changes. The log is the history; `todo-log` adds to it.
+- The task is the record, never the chat, a side file or a memory; whoever takes it next reads only the task. It has three parts. Notes are the brief: what to do, why, and the rules; add a finding the work must keep with `(todo-update ID (list 'note TEXT 'by WHO))`. Status is where it stands; replace it with `(todo-update ID (list 'status TEXT 'by WHO))` whenever that changes. Write it for the user first: two parts, `Done:` and `Left:`, each a few short lines in plain words that say what works now and what remains (`Left: nothing` when nothing does). Give the numbers that matter and name the main file or function the next worker needs; leave ids, raw output and step-by-step history to the log. The log is the history; `todo-log` adds to it.
 - A chat that coordinates a parent task keeps the parent's status current: when a sub-task goes to review or done, say what it changed for the goal.
 - Handover: `(todo-handover! ID WHO)` archives the chat working the task, starts a new chat in the task's group with the task as its brief, and makes it the assignee. Bring the status up to date first: the task is all the new chat gets. A chat that hands over its own task is archived when its turn ends.
 - Waiting on someone: after `todo-wait`, call `(agent-listen! '(topic \"whatsapp:PHONE\" kind received task ID) NOTE)`. The event comes to you as a message; decide whether it answers, then carry on or listen again. `mail:ACCOUNT` topics need `match` with the sender.

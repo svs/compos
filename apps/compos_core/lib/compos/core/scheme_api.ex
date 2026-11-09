@@ -1656,6 +1656,15 @@ defmodule Compos.Core.SchemeAPI do
       # ~/.compos in real life, a tmp dir in tests — config and user packages
       {"compos-home", "(compos-home) — return the compos home directory path (~/.compos)."} =>
         fn [] -> Compos.Core.home() end,
+      {"compos-cache-dir",
+       "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete. Write in it through cache-path or cache-put!"} =>
+        fn [] -> Compos.Core.cache_dir() end,
+      {"compos-cache-dir-set!",
+       "(compos-cache-dir-set! DIR) — keep every cache in DIR from now on, Scheme and Elixir alike; #f goes back to the default. Call it in init.scm"} =>
+        fn [dir] ->
+          Application.put_env(:compos_core, :cache_dir, if(is_binary(dir), do: Path.expand(dir)))
+          Compos.Core.cache_dir()
+        end,
       {"compos-priv-dir",
        "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir)."} =>
         fn [] -> Application.app_dir(:compos_core, "priv") end,

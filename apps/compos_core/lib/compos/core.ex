@@ -21,6 +21,30 @@ defmodule Compos.Core do
     do: Application.get_env(:compos_core, :config_dir) || home()
 
   @doc """
+  Where compos keeps files it can make again, apart from the user's state
+  (Emacs no-littering). The :cache_dir app env wins; init.scm sets it with
+  compos-cache-dir-set!. Then COMPOS_CACHE_DIR. A daemon with a home of its
+  own (a test, a worktree daemon) keeps its cache in that home. Else
+  $XDG_CACHE_HOME/compos, or ~/.cache/compos.
+  """
+  def cache_dir do
+    cond do
+      dir = Application.get_env(:compos_core, :cache_dir) -> dir
+      dir = env_dir("COMPOS_CACHE_DIR") -> dir
+      home() != Path.expand("~/.compos") -> Path.join(home(), "cache")
+      true -> Path.join(env_dir("XDG_CACHE_HOME") || Path.expand("~/.cache"), "compos")
+    end
+  end
+
+  defp env_dir(name) do
+    case System.get_env(name) do
+      nil -> nil
+      "" -> nil
+      dir -> Path.expand(dir)
+    end
+  end
+
+  @doc """
   The checkout this daemon runs from, or nil in a release.
 
   Mix links `_build/<env>/lib/compos_core/priv` to the checkout's

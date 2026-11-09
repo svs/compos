@@ -5303,22 +5303,6 @@
                                          (string-length path))))
           (else path))))
 
-;; Files compos can make again (fetched pages, etags, rendered PDFs, images)
-;; live apart from the user's state, as Emacs' no-littering puts them: one
-;; cache folder that is always safe to delete. COMPOS_CACHE_DIR names it;
-;; a daemon with its own home (a test, a worktree daemon) keeps its cache in
-;; that home; else it is $XDG_CACHE_HOME/compos, or ~/.cache/compos.
-(define (compos-cache-dir)
-  (let ((env (getenv "COMPOS_CACHE_DIR"))
-        (user (getenv "HOME"))
-        (home (compos-home)))
-    (cond (env env)
-          ((not (equal? home (string-append (or user "") "/.compos")))
-           (string-append home "/cache"))
-          (else (string-append (or (getenv "XDG_CACHE_HOME")
-                                   (string-append user "/.cache"))
-                               "/compos")))))
-
 ;; Files one call writes and then forgets (a page body, a mail part, a curl
 ;; config) go to the system temp folder, which the OS clears by itself.
 (define (compos-temp-dir)
@@ -7342,7 +7326,6 @@
 (catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
-(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete. Write in it through cache-path or cache-put!")
 (public! 'compos-temp-dir "(compos-temp-dir) — the folder for files one call writes and forgets: $TMPDIR/compos, which the OS clears")
 (public! 'compos-temp-file "(compos-temp-file NAME) — the path of NAME in the temp folder, the folder made")
 ;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
@@ -7352,6 +7335,7 @@
 (catalog-meta! 'function "message" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
 (catalog-meta! 'function "compos-cache-dir" 'domain 'files 'effects '(read))
+(catalog-meta! 'function "compos-cache-dir-set!" 'domain 'files 'effects '(write))
 (catalog-meta! 'function "compos-temp-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-temp-file" 'domain 'files 'effects '(write))
 

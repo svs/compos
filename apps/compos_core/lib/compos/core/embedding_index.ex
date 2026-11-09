@@ -100,7 +100,7 @@ defmodule Compos.Core.EmbeddingIndex do
   def sync(_, _, _), do: {:error, :invalid_arguments}
 
   @doc "Return the persistent embedding cache path."
-  def cache_path, do: Path.join([Compos.Core.home(), "cache", "apropos-embeddings.etf"])
+  def cache_path, do: Path.join(Compos.Core.cache_dir(), "apropos-embeddings.etf")
 
   @doc false
   def forget_memory(path \\ cache_path()) do

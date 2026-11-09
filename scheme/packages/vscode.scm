@@ -46,27 +46,22 @@
     ("s-5" "vscode-focus-window-5") ("s-6" "vscode-focus-window-6")
     ("s-7" "vscode-focus-window-7") ("s-8" "vscode-focus-window-8")
     ("s-9" "vscode-focus-window-9")
-    ("s-k s-<left>" "focus-left") ("s-k s-<right>" "focus-right")
-    ("s-k s-<up>" "focus-up") ("s-k s-<down>" "focus-down")
     ;; split, close and move windows
     ("s-\\" "split-window-right")
-    ("s-k s-\\" "split-window-below")
     ("s-w" "vscode-close-buffer")
-    ("s-k s-w" "delete-window")
     ("C-s-<left>" "window-previous-pane")
     ("C-s-<right>" "window-next-pane")
-    ("s-k <left>" "pane-move-left") ("s-k <right>" "pane-move-right")
-    ("s-k <up>" "pane-move-up") ("s-k <down>" "pane-move-down")
-    ;; Keyboard Shortcuts
-    ("s-k s-s" "keys")
-    ;; Cmd-K is the leader: which-key lists what follows it
-    ("s-k l" "window-layout")
-    ("s-k b" "ibuffer")
-    ("s-k c" "ichat")))
+    ;; Cmd-K opens M-x, as the Cmd-K bar of a web app does: the tutorial
+    ;; commands come first while nothing is typed
+    ("s-k" "execute-extended-command")))
 
 (define-keymap! "vscode-mode-map")
 ;; Shift with a letter arrives as the capital: s-P, never s-S-p
-(for-each (lambda (k) (keymap-unset! "vscode-mode-map" k)) '("s-S-p" "s-S-f" "s-S-e"))
+(for-each (lambda (k) (keymap-unset! "vscode-mode-map" k))
+          '("s-S-p" "s-S-f" "s-S-e" "C-<tab>"
+            ;; Cmd-K was a prefix before it opened M-x
+            "s-k s-<left>" "s-k s-<right>" "s-k s-<up>" "s-k s-<down>" "s-k s-\\" "s-k s-w"
+            "s-k <left>" "s-k <right>" "s-k <up>" "s-k <down>" "s-k s-s" "s-k l" "s-k b" "s-k c"))
 (for-each (lambda (k) (define-key "vscode-mode-map" (car k) (cadr k))) vscode--keys)
 
 (define (vscode--others)
@@ -116,7 +111,7 @@
     (message (if vscode-mode "VSCode keys on" "VSCode keys off"))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-Shift-P or F1 opens the command palette. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, Cmd-1 to Cmd-9 go to a window by its place, and Cmd-K Cmd-arrow goes to the window in that direction. Cmd-\\ splits to the side and Cmd-K Cmd-\\ below. Cmd-W closes the buffer and Cmd-K Cmd-W the window. Ctrl-Cmd-Left/Right move this window to the pane beside it, and Cmd-K arrow moves the pane. Cmd-K Cmd-S lists the keys. Cmd-K is the leader: press it and wait to see what follows, such as L for layouts, B for buffers and C for chats. M-x vscode-mode turns it on or off, and the choice lasts.")
+  "The VSCode keys, in every buffer. Cmd-K opens M-x, with the tutorial commands first. Cmd-Shift-P or F1 opens the command palette. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts.")
 
 (vscode--apply! vscode-mode)
 

@@ -2391,29 +2391,58 @@
             (list 'tag "span" 'class class 'segs (list-face-segs text face))
             (list 'tag "span" 'class class 'text text)))))
 
+(define (list-grid-template cols)
+  ;; the visible columns on their widths; the last takes what is left
+  (let ((n (length cols)))
+    (string-append "grid-template-columns:"
+      (string-join (let loop ((ks cols) (i 1) (out '()))
+                     (if (null? ks) (reverse out)
+                         (loop (cdr ks) (+ i 1)
+                               (cons (if (= i n) "minmax(0,1fr)"
+                                         (string-append (number->string (list-col-width (car ks))) "ch"))
+                                     out))))
+                   " "))))
+
 (define (list-grid-row buf row)
   (let* ((cols (car (list-column-lines buf)))
          (cells (let ((cs (list-row-cells buf row))) (if (pair? cs) (car cs) '())))
          (shown (let loop ((ks cols) (cs cells) (out '()))
                   (if (or (null? ks) (null? cs)) (reverse out)
                       (loop (cdr ks) (cdr cs)
-                            (if (list-col-hidden? (car ks)) out (cons (cons (car ks) (car cs)) out))))))
-         (n (length shown)))
+                            (if (list-col-hidden? (car ks)) out (cons (cons (car ks) (car cs)) out)))))))
     (list 'tag "div" 'class "lg-row"
-          'attrs (list (list "style"
-                             (string-append "grid-template-columns:"
-                               (string-join (let loop ((ps shown) (i 1) (out '()))
-                                              (if (null? ps) (reverse out)
-                                                  (loop (cdr ps) (+ i 1)
-                                                        (cons (if (= i n) "minmax(0,1fr)"
-                                                                  (string-append (number->string (list-col-width (car (car ps)))) "ch"))
-                                                              out))))
-                                            " "))))
+          'attrs (list (list "style" (list-grid-template (map car shown))))
           'children (map (lambda (p) (list-grid-cell buf (car p) (cdr p) row)) shown))))
+
+;; The grid's head: the title with the narrowing chip at the right, the
+;; mode's meta and panel lines, and the column labels on the rows' grid.
+;; Nothing in it wraps; a line too long for the window is cut.
+(define (list-grid-head buf head)
+  (if (list-opt buf 'header)
+      (map (lambda (ln) (list 'tag "div" 'class "lg-head-line" 'text (car ln))) head)
+      (let* ((cols (filter (lambda (c) (not (list-col-hidden? c))) (car (list-column-lines buf))))
+             (chip (list-chip buf))
+             (meta (car (list-meta-line buf)))
+             (line (lambda (cls text) (list 'tag "div" 'class cls 'text text))))
+        (append
+          (map (lambda (ln) (line "lg-head-line" (car ln))) (list-panel-lines buf))
+          (list (list 'tag "div" 'class "lg-head-title"
+                      'children (append (list (list 'tag "span" 'text (list-say buf 'title)))
+                                        (if (equal? chip "") '()
+                                            (list (list 'tag "span" 'class "f-warn" 'text chip))))))
+          (if (equal? meta "") '() (list (line "lg-head-line f-dim" meta)))
+          (list (list 'tag "div" 'class "lg-row lg-head"
+                      'attrs (list (list "style" (list-grid-template cols)))
+                      'children (map (lambda (c) (list 'tag "span" 'class "lg-cell" 'text (car c))) cols)))))))
 
 (define-style! 'list-grid "
 .lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
 .lg-row > .lg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lg-head { color: var(--dim-fg); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-bg); }
+.lg-head-title { display: flex; justify-content: space-between; gap: 2ch; padding: 6px 0 2px; font-family: var(--font-sans); font-weight: 600; white-space: pre; overflow: hidden; }
+.lg-head-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lg-head-title > span + span { flex: none; font-weight: 400; }
+.lg-head-line { font-family: var(--font-sans); font-size: 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .lg-title { font-weight: 600; color: var(--default-fg); }
 .lg-dim, .lg-date { color: var(--dim-fg); }
 .lg-number, .lg-date { font-variant-numeric: tabular-nums; }
@@ -2502,9 +2531,9 @@
                         ;; its own head -- tabs as tabs, a title as a title --
                         ;; answers 'composml-head with blocks instead.
                         'children (let ((f (list-opt buf 'composml-head)))
-                                    (if f
-                                        (f buf head)
-                                        (map (lambda (ln) (list 'tag "pre" 'text (car ln))) head))))
+                                    (cond (f (f buf head))
+                                          ((and (not (list-opt buf 'composml)) (list-grid? buf)) (list-grid-head buf head))
+                                          (else (map (lambda (ln) (list 'tag "pre" 'text (car ln))) head)))))
                   (list 'tag collection 'class "semantic-list"
                         'attrs '(("role" "list"))
                         'children

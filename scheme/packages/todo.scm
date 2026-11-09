@@ -625,14 +625,14 @@
 
 ;; What a log, done, wait or review call answers: the task's state after
 ;; the write and the last log line, not the whole task with its notes.
-(define (todo--brief t)
+(define (todo--answer t)
   (list 'id (plist-get t 'id) 'state (plist-get t 'state)
         'assignee (plist-get t 'assignee)
         'log (let ((l (plist-get t 'log))) (if (pair? l) (car (reverse l)) #f))))
 
 (define (todo-log id text &optional who)
   "(todo-log ID TEXT [WHO]) — add a line to the task's log"
-  (todo--brief (todo-update id (list 'log text 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'log text 'by (or who todo-user)))))
 
 (define (todo-triage id &optional props)
   "(todo-triage ID [PROPS]) — accept an inbox task: state todo, plus any PROPS"
@@ -649,7 +649,7 @@
 
 (define (todo-done id &optional result who)
   "(todo-done ID [RESULT] [WHO]) — close the task as done; RESULT goes to the log"
-  (todo--brief (todo-update id (list 'state "done" 'log result 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'state "done" 'log result 'by (or who todo-user)))))
 
 (define (todo-cancel id &optional reason who)
   "(todo-cancel ID [REASON] [WHO]) — close the task as cancelled"
@@ -657,11 +657,11 @@
 
 (define (todo-wait id reason &optional who)
   "(todo-wait ID REASON [WHO]) — park the task: waiting on someone or something"
-  (todo--brief (todo-update id (list 'state "waiting" 'log reason 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'state "waiting" 'log reason 'by (or who todo-user)))))
 
 (define (todo-review id summary &optional who)
   "(todo-review ID SUMMARY [WHO]) — hand the task to a human to approve, e.g. a draft before it is sent"
-  (todo--brief (todo-update id (list 'state "review" 'log summary 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'state "review" 'log summary 'by (or who todo-user)))))
 
 (define (todo-approve id &optional text who)
   "(todo-approve ID [TEXT] [WHO]) — approve a task in review: back to todo for its assignee, logged as approved"

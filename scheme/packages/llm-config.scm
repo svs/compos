@@ -159,9 +159,29 @@
 
 ;;; The name the dashboard line shows. It follows the buffer's own setup, not
 ;;; the menu's box, so a chat that drifted off its bundle names no preset.
+(define llm-config--name-cache '())
+
 (define (llm-config-preset-name buf)
-  (let ((b (llm-config--matching-bundle buf)))
-    (and b (llm-bundle-name b))))
+  ;; the dashboard asks on every edit; matching walks every bundle, so
+  ;; the answer is kept per buffer under the setup it was made from.
+  ;; A new setup, a new chosen preset or a new bundle list misses.
+  ;; The table lives in Scheme: a buffer-local write is a process call.
+  (let* ((key (list (llm-config-combination buf)
+                    (buffer-local-value 'llm-preset buf)))
+         (hit (assoc buf llm-config--name-cache)))
+    (if (and hit
+             (eq? (cadr hit) *llm-bundles*)
+             (equal? (caddr hit) key))
+        (cadddr hit)
+        (let* ((b (llm-config--matching-bundle buf))
+               (name (and b (llm-bundle-name b)))
+               (rest (let loop ((es llm-config--name-cache) (n 0) (acc '()))
+                       (cond ((or (null? es) (= n 63)) (reverse acc))
+                             ((equal? (caar es) buf) (loop (cdr es) n acc))
+                             (else (loop (cdr es) (+ n 1) (cons (car es) acc)))))))
+          (set! llm-config--name-cache
+                (cons (list buf *llm-bundles* key name) rest))
+          name))))
 
 (define (llm-config--setup! buf)
   (let* ((live (llm-config--current buf))

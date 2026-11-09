@@ -2007,16 +2007,13 @@
   (lambda () (todo--ask-at! "Note: " 'note))
   'modes '(todo-mode))
 
-(define-command "todo-capture" "File a new task"
+(define-command "todo-new" "File a new task"
   (lambda ()
     (read-string "Task: "
       (lambda (s)
         (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
           (todo--refresh-all!)
           (message (string-append "Filed " id)))))))
-
-(define-command "todo-new" "File a new task, from anywhere; the same as todo-capture"
-  (lambda () (run-command "todo-capture")))
 
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway
@@ -2229,7 +2226,7 @@
             ("N" "todo-add-note")
             ("!" "todo-cycle-priority")
             ("T" "todo-toggle-urgent")
-            ("c" "todo-capture")
+            ("c" "todo-new")
             ("v" "todo-next-view")
             ("<right>" "todo-next-view")
             ("<left>" "todo-prev-view")

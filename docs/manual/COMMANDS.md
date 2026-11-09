@@ -1624,7 +1624,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `todo-assign` |  | Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane, the chat it already has when it has one; C-u asks for the group |
 | `todo-attach-chat` |  | Attach another open chat to the task at point, beside the one it is assigned to |
 | `todo-attach-this-chat` |  | Attach the chat you are in to an open task |
-| `todo-capture` |  | File a new task |
+| `todo-new` |  | File a new task |
 | `todo-cycle-priority` |  | Cycle the task's priority: A, B, C, none |
 | `todo-detail-agent` |  | Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live |
 | `todo-detail-attach-chat` |  | Attach another open chat to this task, beside the one it is assigned to |

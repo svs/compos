@@ -32,6 +32,9 @@
 ;;;
 ;;; OFFSET RULE: byte offsets only (string-byte-length, substring-bytes).
 
+;; the chat hook and the boot sweep below set a prompt part
+(require 'prompts)
+
 (domain! 'writing)
 (effects! '(read))
 

@@ -1354,8 +1354,13 @@
           (if v v (default-value name))))))
 
 (define (setq-local! name value)
-  (buffer-set-local! (current-buffer) name value)
-  value)
+  ;; the answer says the buffer now holds its own value, and the default
+  ;; beside it: when the two are equal, the value alone cannot show that
+  ;; the setting stayed in this buffer
+  (let ((before (default-value name)))
+    (buffer-set-local! (current-buffer) name value)
+    (list 'own value 'default (default-value name)
+          'global (if (equal? before (default-value name)) 'unchanged 'changed))))
 
 (define (kill-local-variable! name &optional buf)
   (buffer-set-local! (or buf (current-buffer)) name #f)
@@ -1366,7 +1371,7 @@
 
 (define (variable-set! name value)
   (if (automatically-local? name)
-      (setq-local! name value)
+      (begin (setq-local! name value) value)
       (set-default! name value)))
 
 ;;; --- folds --------------------------------------------------------------------
@@ -7278,7 +7283,7 @@
 (public! 'set-default! "(set-default! NAME VALUE) — the global value")
 (public! 'buffer-local-value "(buffer-local-value NAME [BUF]) — BUF's own value, else the default")
 (catalog-meta! 'function "buffer-local-value" 'effects '(read))
-(public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value")
+(public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value; answers (own VALUE default D global unchanged)")
 (public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")
 (public! 'local-variable-p "(local-variable-p NAME [BUF]) — #t when the buffer holds its own value")
 (catalog-meta! 'function "local-variable-p" 'effects '(read))

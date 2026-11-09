@@ -672,9 +672,22 @@
                 "https://openrouter.ai/api/v1/embeddings" "openai/text-embedding-3-small")
     (openai "OpenAI" "openai"
             "https://api.openai.com/v1/embeddings" "text-embedding-3-small")
-    ;; a local Ollama server: no provider, so it needs no key
+    ;; a local Ollama server: no provider, so it needs no key. Qwen3
+    ;; embeds a query best with an instruction before it, and a document
+    ;; with none; the sixth field is that query instruction.
     (ollama "Ollama (local)" #f
-            "http://localhost:11434/v1/embeddings" "qwen3-embedding:0.6b")))
+            "http://localhost:11434/v1/embeddings" "qwen3-embedding:0.6b"
+            "Given a request to a text editor, find the editor command or function that does it")))
+
+;; QUERY as the backend in use embeds it: with its instruction, when the
+;; backend has one.
+(define (apropos--embedding-query query)
+  (let* ((b (apropos-embedding-backend))
+         (spec (and b (assq (car b) *apropos-embedding-backend-specs*)))
+         (instruct (and spec (> (length spec) 5) (list-ref spec 5))))
+    (if instruct
+        (string-append "Instruct: " instruct "\nQuery: " query)
+        query)))
 
 ;; The key of backend SPEC: a local backend has no provider and answers
 ;; "local"; any other answers its provider's key, or #f.
@@ -919,7 +932,20 @@
 ;; Keep query embedding behind one seam. Tests replace it without a network
 ;; call, and the production path remains the cached embedding primitive.
 (define *apropos--embedding-search* embedding-search)
-(define *apropos--embedding-sync* embedding-sync!)
+(define *apropos--embedding-sync*
+  ;; Hand the texts over 128 at a time. The index posts up to 256 in one
+  ;; request, and a local Ollama answers that request but the sync of it
+  ;; fails; 200 and fewer sync. The answer is the count embedded, or #f
+  ;; when a part failed.
+  (lambda (texts key)
+    (let loop ((rest texts) (total 0))
+      (if (null? rest)
+          total
+          (let* ((n (min 128 (length rest)))
+                 (got (embedding-sync! (list-head rest n) key)))
+            (if (number? got)
+                (loop (list-tail rest n) (+ total got))
+                #f))))))
 
 ;; Catalog declarations arrive one form at a time. Keep that registration
 ;; path local and cheap, then reconcile the durable vector index once after
@@ -1029,9 +1055,10 @@
 (define (apropos-sync-embeddings!)
   (apropos--schedule-embedding-sync!))
 
-(define (apropos--semantic-hits query rows filters &optional wait?)
-  (let ((key (apropos--embedding-key)))
-    (if (or (not key) (equal? key "") (equal? (string-trim query) ""))
+(define (apropos--semantic-hits query0 rows filters &optional wait?)
+  (let ((key (apropos--embedding-key))
+        (query (apropos--embedding-query query0)))
+    (if (or (not key) (equal? key "") (equal? (string-trim query0) ""))
         '()
         (let* ((both (apropos--sources-cached rows))
                (sources (car both))

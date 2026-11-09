@@ -118,7 +118,9 @@ defmodule Compos.PresetTest do
                    1_000
 
     assert turn["threadId"] == "writing-thread"
-    assert turn["input"] == [%{"type" => "text", "text" => "read the companion"}]
+    # the first turn opens with the chat context block, then the user text
+    assert [%{"type" => "text", "text" => sent}] = turn["input"]
+    assert String.ends_with?(sent, "read the companion")
     inject(agent, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-1"}}})
 
     inject(agent, %{

@@ -887,6 +887,8 @@ when a message has no text/plain part." 'group 'notmuch)
   (let* ((buf *notmuch-search-buffer*)
          (existed? (buffer-exists? buf)))
     (when profile
+      (let ((box (filter (lambda (m) (equal? (cadr m) profile)) notmuch-mailboxes)))
+        (unless (null? box) (set! notmuch-host (car (car box)))))
       (set! notmuch-profile profile)
       (set! *nm-db-paths* '())
       (for-each (lambda (b)

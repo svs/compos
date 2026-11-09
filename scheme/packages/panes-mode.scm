@@ -945,7 +945,10 @@
          (me (active-window))
          (k (panes-key-of-handle l me))
          (pid (or (and k (panes-pane-of l k)) (panes--empty-pane-of me) (panes-focus l)))
-         (added (if (equal? dir 'v) (panes-split-below l pid) (panes-add-empty-pane l pid)))
+         (raw (if (equal? dir 'v) (panes-split-below l pid) (panes-add-empty-pane l pid)))
+         ;; the new pane knows the pane it split from, so unsplit can undo it
+         (added (list (panes--update-pane (car raw) (cadr raw) (lambda (p) (panes--put p 'from pid)))
+                      (cadr raw)))
          (buf (let ((cands (panes--fill-candidates (car added))))
                 (and (pair? cands) (car cands))))
          (after (if buf
@@ -954,6 +957,63 @@
          (drawn (panes-apply! (panes-set-focus after pid)))
          (ks (panes-pane-keys drawn (cadr added))))
     (if (pair? ks) (panes-handle drawn (car ks)) (panes--empty-handle (cadr added)))))
+
+(define (panes--pane-number id)
+  (or (and (string? id) (> (string-length id) 1) (string->number (substring id 1 (string-length id)))) 0))
+
+(define (panes--column-neighbour l pid)
+  "the pane after PID in its column, else the one before it, or #f"
+  (let* ((col (find (lambda (c) (member pid (map (lambda (p) (plist-get p 'id)) c))) (panes-columns l)))
+         (ids (if col (map (lambda (p) (plist-get p 'id)) col) '()))
+         (after (member pid ids))
+         (before (member pid (reverse ids))))
+    (cond ((and after (pair? (cdr after))) (cadr after))
+          ((and before (pair? (cdr before))) (cadr before))
+          (else #f))))
+
+(define (panes-unsplit l pid)
+  "(GONE KEEP): the last split of pane PID. GONE is the newest pane split
+   off PID, else PID itself when it was split off a pane that is still
+   there, else PID's neighbour in its column. #f when there is none."
+  (let* ((ids (panes-pane-ids l))
+         (from (lambda (p) (plist-get (panes-pane l p) 'from)))
+         (kids (filter (lambda (p) (equal? (from p) pid)) ids))
+         (newest (and (pair? kids)
+                      (fold (lambda (best p) (if (> (panes--pane-number p) (panes--pane-number best)) p best))
+                            (car kids) kids)))
+         (parent (and (from pid) (member (from pid) ids) (from pid)))
+         (next (and (not newest) (not parent) (panes--column-neighbour l pid))))
+    (cond (newest (list newest pid))
+          (parent (list pid parent))
+          (next (list next pid))
+          (else #f))))
+
+(define (panes--unsplit!)
+  "unsplit: the last split of the focused pane goes. The windows of the
+   pane that goes wait behind the windows of the pane that stays, so no
+   buffer closes, and the pane that stays takes the focus."
+  (let* ((l (panes--ensure-layout!))
+         (pid (panes--current-pane l))
+         (pair (and pid (panes-unsplit l pid))))
+    (and pair
+         (let* ((gone (car pair))
+                (keep (cadr pair))
+                (moved (fold (lambda (l key) (panes-move-window l key keep (length (panes-pane-keys l keep))))
+                             l (panes-pane-keys l gone)))
+                ;; the panes split off the one that goes now come from the one that stays
+                (adopted (fold (lambda (l p)
+                                 (if (equal? (plist-get (panes-pane l p) 'from) gone)
+                                     (panes--update-pane l p (lambda (x) (panes--put x 'from keep)))
+                                     l))
+                               moved (panes-pane-ids moved))))
+           (panes-apply! (panes-set-focus (panes-remove-pane (panes-set-focus adopted keep) gone) keep))
+           #t))))
+
+(define-command "unsplit" "Undo the last split of this pane; its windows wait behind this pane's windows"
+  (lambda () (if (not (panes--unsplit!)) (message "No split to undo here"))))
+(catalog-meta! 'command "unsplit" 'domain 'windows 'effects '(write display))
+(public! 'panes-unsplit "(panes-unsplit LAYOUT PANE) -> (GONE KEEP): the pane the last split of PANE made, and the pane that stays; #f when PANE has no split")
+(catalog-meta! 'function "panes-unsplit" 'effects '(pure))
 
 (define (panes--panes-tile! algorithm buffers)
   "C-x l and every caller of panes-tile!: a layout is a capacity and

@@ -2357,6 +2357,22 @@
 (define (list-own-composml buf)
   (or (list-opt buf 'composml) (and (list-grid? buf) list-grid-row)))
 
+;; a face is the class the text view gives it: f-NAME, the face's own CSS
+(define (list-face-class face) (and (string? face) (not (equal? face "")) (string-append "f-" face)))
+
+;; a cell whose face is its own spans, (OFFSET LENGTH FACE) in bytes, draws
+;; as segs, so its pills keep their colours in the grid too
+(define (list-face-segs text spans)
+  (let loop ((ss (sort spans)) (at 0) (out '()))
+    (let ((n (string-byte-length text)))
+      (if (null? ss)
+          (reverse (if (< at n) (cons (list "" (substring-bytes text at n)) out) out))
+          (let* ((s (car ss)) (a (max at (car s))) (e (min n (+ (car s) (cadr s)))))
+            (if (>= a e) (loop (cdr ss) at out)
+                (loop (cdr ss) e
+                      (cons (list (or (list-face-class (nth 2 s)) "") (substring-bytes text a e))
+                            (if (< at a) (cons (list "" (substring-bytes text at a)) out) out)))))))))
+
 (define (list-grid-cell buf c cell row)
   (let* ((text (or (list-cell-text cell) ""))
          (face (list-cell-face cell))
@@ -2365,13 +2381,15 @@
          (names (filter (lambda (n) n) (cond ((not s) '()) ((pair? s) s) (else (list s)))))
          (kind (and (pair? names) (list-style-name (car names))))
          (class (string-join (append (list "lg-cell")
-                                     (if (string? face) (list (string-append "c-" face)) '())
+                                     (if (string? face) (list (list-face-class face)) '())
                                      (if kind (list (string-append "lg-" kind)) '()))
                              " ")))
     (if (and (equal? kind "badge") (not (equal? text "")))
         (list 'tag "span" 'class class
               'segs (list (list (string-join (cons "c-badge lg-pill" (map list-style-name (cdr names))) " ") text)))
-        (list 'tag "span" 'class class 'text text))))
+        (if (pair? face)
+            (list 'tag "span" 'class class 'segs (list-face-segs text face))
+            (list 'tag "span" 'class class 'text text)))))
 
 (define (list-grid-row buf row)
   (let* ((cols (car (list-column-lines buf)))

@@ -115,7 +115,7 @@
                      "buffer-text is" "eval-scheme says the same")))
 
 (deftest 'the-read-eval-refuses-a-procedure-it-cannot-see
-  "apply, map and a call head take a global name or a lambda; a computed procedure is refused"
+  "a procedure is a global name, a lambda, or a local bound to one; a procedure from a call result or data is refused"
   (lambda ()
     (for-each (lambda (code)
                 (check-contains! (eval-read-refusal code) "cannot see which procedure" code))
@@ -129,6 +129,8 @@
                 "(map (lambda (x) (car x)) '((1)))"
                 "(vector-map char->integer (string->list \"ab\"))"
                 "(let loop ((i 0)) (if (< i 3) (loop (+ i 1)) i))"
+                "(let ((get (lambda (k) (plist-get '(a 1) k)))) (get 'a))"
+                "(let* ((f car) (g f)) (g '(1)))"
                 "(list #\\newline (char=? #\\a #\\a))"))))
 
 (deftest 'apropos-without-vectors-still-finds-a-sentence

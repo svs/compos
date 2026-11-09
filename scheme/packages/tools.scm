@@ -463,20 +463,47 @@
                  x
                  (walk (eval-read--items x))))))))
 
-(define (eval-read--named-lets x)
-  "the names of every named let in the read payload X"
+(define (eval-read--let-bindings x)
+  "(NAME VALUE) for every let and let* binding in the read payload X"
   (cond ((not (pair? x)) '())
         ((equal? (car x) 'quote) '())
-        (else (append (if (and (member (car x) '(let let*)) (pair? (cdr x)) (symbol? (cadr x)))
-                          (list (cadr x))
-                          '())
-                      (apply append (map eval-read--named-lets (eval-read--items x)))))))
+        (else
+         (append
+           (if (and (member (car x) '(let let*)) (pair? (cdr x)))
+               (let* ((named (symbol? (cadr x)))
+                      (bindings (if named (and (pair? (cddr x)) (caddr x)) (cadr x))))
+                 (map (lambda (b) (list (car b) (if (pair? (cdr b)) (cadr b) #f)))
+                      (filter (lambda (b) (and (pair? b) (symbol? (car b))))
+                              (if (pair? bindings) bindings '()))))
+               '())
+           (apply append (map eval-read--let-bindings (eval-read--items x)))))))
+
+(define (eval-read--lambda-params x)
+  "every lambda parameter in the read payload X"
+  (cond ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        (else
+         (append
+           (if (and (equal? (car x) 'lambda) (pair? (cdr x))) (eval-read--params (cadr x)) '())
+           (apply append (map eval-read--lambda-params (eval-read--items x)))))))
+
+;; A local may be called when the gate sees what it holds: a lambda written
+;; here (its body is walked like any code) or a name the gate allows. A
+;; parameter, or a local bound to a call result or data, may hold anything.
+;; A named let's name is a lambda written here. The scan is flat: a name
+;; bound both ways anywhere counts as unsafe.
+(define (eval-read--unsafe-locals forms)
+  (let ((binds (eval-read--let-bindings forms))
+        (params (eval-read--lambda-params forms)))
+    (let loop ((unsafe params))
+      (let ((next (append params
+                          (map car (filter (lambda (b) (not (eval-read--callee-ok? (cadr b) unsafe)))
+                                           binds)))))
+        (if (= (length next) (length unsafe)) unsafe (loop next))))))
 
 (define (eval-read--first-computed forms locals)
-  (let ((named (eval-read--named-lets forms)))
-    (any (lambda (f)
-           (eval-read--computed-call f (remove (lambda (s) (member s named)) locals)))
-         forms)))
+  (let ((unsafe (eval-read--unsafe-locals forms)))
+    (any (lambda (f) (eval-read--computed-call f unsafe)) forms)))
 
 (define (eval-read-refusal code &optional on-unstamped)
   "#f when CODE only reads, else why not; ON-UNSTAMPED gets a name the catalog has no effects for and answers a task id"

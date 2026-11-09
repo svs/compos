@@ -120,43 +120,70 @@
       (list (plist-get row 'name) (app-registry--first-line (plist-get row 'doc)))))
 
 ;; the page, and its anchors as (NAME START END) over character offsets
+;; the page: (TEXT BLOCKS). Every part is one line of TEXT and an anchor
+;; on it, so the arrows walk the page part by part.
 (define (app-registry--page row)
-  (let* ((parts '()) (anchors '()) (at 0)
-         (add! (lambda (s) (set! parts (cons s parts)) (set! at (+ at (string-length s)))))
-         (part! (lambda (name thunk)
-                  (let ((start at)) (thunk) (set! anchors (cons (list name start at) anchors)))))
+  (let* ((lines '())
+         (line! (lambda (text) (set! lines (cons text lines)) (length lines)))
+         (stop (lambda (blk name first last) (append blk (list 'anchor-name name 'lines (list first last)))))
+         ;; a row is (TEXT BLOCK): TEXT is its line, the name and what it does
+         (dim-row (lambda (name about)
+                    (cons (if (equal? about "") name (string-append name "  " about))
+                          (component 'ui/row (list 'segs (list (list "" name) (list "c-dim" (if (equal? about "") "" (string-append "  " about)))))))))
+         (part (lambda (title name rows)
+                 ;; a titled group: its heading is a line, and each row one more
+                 (let* ((first (line! title))
+                        (body (let loop ((rs rows) (i 1) (acc '()))
+                                (if (null? rs) (reverse acc)
+                                    (loop (cdr rs) (+ i 1)
+                                          (cons (let ((n (line! (car (car rs))))) (stop (cdr (car rs)) (string-append name " " (number->string i)) n n)) acc))))))
+                   (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
+         (count (lambda (title xs) (string-append title "  ·  " (number->string (length xs)))))
+         (name (plist-get row 'name))
+         (section (plist-get row 'section))
          (entry (plist-get row 'entry))
          (file (plist-get row 'file))
-         (open (app-registry--open-buffers row)))
-    (part! "header"
-      (lambda ()
-        (add! (string-append (plist-get row 'name) "  -  " (plist-get row 'section) "\n"))
-        (add! (string-append (if (equal? (plist-get row 'doc) "") "No description." (plist-get row 'doc)) "\n\n"))
-        (add! (if entry (string-append "Open     M-x " entry "   (o)\n") "Open     no entry command: it opens from inside another app\n"))
-        (add! (string-append "Package  " (or (plist-get row 'package) "unknown") "\n"))
-        (when file (add! (string-append "Source   " file "   (v)\n")))
-        (when (plist-get row 'source) (add! (string-append "From     " (plist-get row 'source) "\n")))))
-    (part! "Modes"
-      (lambda ()
-        (add! "\nModes\n")
-        (for-each (lambda (m)
-                    (let ((e (app-registry--meta 'mode m)))
-                      (add! (string-append "  " m "  " (app-registry--first-line (and e (plist-get e 'doc))) "\n"))))
-                  (plist-get row 'modes))))
-    (when (pair? (plist-get row 'commands))
-      (part! "Commands"
-        (lambda ()
-          (add! "\nCommands\n")
-          (for-each (lambda (c)
-                      (let ((e (app-registry--meta 'command c)))
-                        (add! (string-append "  " c "  " (app-registry--first-line (and e (plist-get e 'doc))) "\n"))))
-                    (plist-get row 'commands)))))
-    (part! "Open buffers"
-      (lambda ()
-        (add! "\nOpen buffers\n")
-        (if (null? open) (add! "  none\n") (for-each (lambda (b) (add! (string-append "  " b "\n"))) open))))
-    (add! "\n----\nend\n")
-    (list (apply string-append (reverse parts)) (reverse anchors))))
+         (doc (plist-get row 'doc))
+         (modes (plist-get row 'modes))
+         (cmds (filter (lambda (c) (not (member c modes))) (plist-get row 'commands)))
+         (open (app-registry--open-buffers row))
+         (doc-of (lambda (kind n) (let ((e (app-registry--meta kind n))) (app-registry--first-line (and e (plist-get e 'doc))))))
+         (head (let ((n (line! name)))
+                 (stop (component 'ui/title (list 'text name 'badge section
+                                                  'tone (cond ((equal? section "user") "info") ((equal? section "package") "good") (else ""))))
+                       "Title" n n)))
+         (meta (component 'ui/meta
+                 (list 'segs (list (list "" (or (plist-get row 'package) "no package"))
+                                   '("c-sep" "  ·  ") (list "" (string-append (number->string (length modes)) " modes"))
+                                   '("c-sep" "  ·  ") (list "" (string-append (number->string (length cmds)) " commands"))
+                                   '("c-sep" "  ·  ") (list (if (null? open) "c-dim" "c-ok")
+                                                             (if (null? open) "not open" (string-append (number->string (length open)) " open")))))))
+         (actions (component 'ui/actions
+                    (list 'actions (append (if entry (list (list "app-registry-open" "Open app" "o" "good")) '())
+                                           (if file (list (list "app-registry-source" "Source" "v")) '())
+                                           (list (list "app-registry-refresh" "Refresh" "g"))))))
+         (about (let ((n (line! "About")))
+                  (stop (component 'ui/group
+                          (list 'title "About"
+                                'body (list (list 'tag "c-group" 'class "c-prose c-lines"
+                                                  'text (if (equal? doc "") "No description." doc)))))
+                        "About" n n)))
+         (details (let ((n (line! "Details")))
+                    (stop (component 'ui/group
+                            (list 'title "Details"
+                                  'body (list (component 'ui/kv
+                                                (list 'pairs (filter pair?
+                                                               (list (list "Opens with" (if entry (string-append "M-x " entry) "another app"))
+                                                                     (list "Package" (or (plist-get row 'package) "unknown"))
+                                                                     (and file (list "Source" file))
+                                                                     (and (plist-get row 'source) (list "Installed from" (plist-get row 'source))))))))))
+                          "Details" n n)))
+         (mode-part (part (count "Modes" modes) "Mode" (map (lambda (m) (dim-row m (doc-of 'mode m))) modes)))
+         (open-part (if (null? open) '() (list (part (count "Open buffers" open) "Buffer" (map (lambda (b) (dim-row b "")) open)))))
+         (cmd-part (if (null? cmds) '() (list (part (count "Commands" cmds) "Command" (map (lambda (c) (dim-row c (doc-of 'command c))) cmds))))))
+    (list (string-join (reverse lines) "\n")
+          (list (component 'ui/page
+                  (list 'body (append (list head meta actions about details mode-part) open-part cmd-part)))))))
 
 (effects! '(write display))
 
@@ -180,11 +207,21 @@
         (buffer-create buf)
         (let ((g (buffer-group list-buf))) (when g (buffer-move-to-group! buf g)))
         (with-current-buffer buf (lambda () (set-mode! "app-registry-detail-mode")))
-        (enable-minor-mode! buf "anchor-mode"))
+        (desktop-skip! buf 'render-blocks)
+        (desktop-skip! buf 'footer-line-blocks))
       (buffer-set-local! buf 'app-registry-app row)
       (buffer-set-local! buf 'app-registry-list list-buf)
+      (buffer-set-read-only! buf #f)
       (buffer-set-text! buf (car page) #t)
-      (anchor-set! buf (cadr page))
+      (buffer-set-local! buf 'render-mode "blocks")
+      (buffer-set-local! buf 'render-blocks (cadr page))
+      (anchor-set-blocks! buf (car page) (cadr page))
+      (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
+      (anchor-sync! buf)
+      (buffer-set-local! buf 'footer-line-blocks
+        (list (component 'ui/keys-bar
+                (list 'main '(("o" "open app") ("v" "source") ("g" "refresh") ("q" "quit"))))))
+      (buffer-set-read-only! buf #t)
       (display-buffer-detail! buf list-buf))))
 
 (define (app-registry-open! row)

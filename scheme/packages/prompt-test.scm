@@ -25,7 +25,7 @@
       (check-equal! (map car direct)
                     '("identity" "quiet-editor" "scope" "chat-context"
                       "scheme" "discovery" "reading" "repository"
-                      "browser" "catalog" "recipes")
+                      "browser" "catalog")
                     "the checked-in fragment order is explicit")
       (for-each
         (lambda (part)

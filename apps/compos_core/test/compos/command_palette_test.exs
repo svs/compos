@@ -51,28 +51,6 @@ defmodule Compos.CommandPaletteTest do
     end)
   end
 
-  test "Cmd-p finds recipes and asks for their declared inputs" do
-    press("s-p")
-    type("open file split")
-
-    wait_for(fn ->
-      Enum.any?(
-        Editor.render_state().minibuffer.candidates,
-        &(&1.label == "open a file in a split")
-      )
-    end)
-
-    # RET runs the typed row; a search hit runs only after moving down to it
-    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
-    index = Enum.find_index(labels, &(&1 == "open a file in a split"))
-    press(List.duplicate("C-n", index))
-    press("RET")
-    mb = Editor.render_state().minibuffer
-    assert mb.prompt == "File: "
-    assert mb.input == ""
-    refute mb.input =~ "/abs/path"
-  end
-
   test "choosing a command runs it and contributes to M-x history" do
     {:ok, _} =
       Session.eval(
@@ -187,20 +165,6 @@ defmodule Compos.CommandPaletteTest do
       expected = if @action == "cancel", do: "()", else: ~s{("new")}
       assert eval.("*zz-queued-debounce*") == {:ok, expected}
     end
-  end
-
-  test "recipe inputs are quoted as data, never evaluated as source" do
-    {:ok, _} =
-      Session.eval(
-        ~s{(command-palette--run-recipe (assoc "show a message in the echo area" *recipes*))}
-      )
-
-    assert Editor.render_state().minibuffer.prompt == "Message: "
-    payload = ~s{x") (buffer-create "*recipe-injected*") ("}
-    Editor.minibuffer_set_input(payload)
-    press("RET")
-
-    refute Buffer.exists?("*recipe-injected*")
   end
 
   test "a pending palette refresh cannot overwrite a later prompt" do

@@ -2023,8 +2023,9 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                    k
                                                                                                  ] ->
         cond do
-          # a symbol or a number is never a buffer name: the call put KEY first
-          not is_binary(buf) ->
+          # a symbol or a number is never a buffer: the call put KEY first.
+          # A name and a Buffer.Ref both name a buffer.
+          not (is_binary(buf) or is_struct(buf, Buffer.Ref)) ->
             raise Compos.Scheme.Eval.Error,
               message: "buffer-local: BUF comes first: (buffer-local BUF KEY); got #{inspect(buf)} as BUF"
 
